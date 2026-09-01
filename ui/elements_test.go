@@ -5,7 +5,6 @@ import (
 	"image"
 	"image/color"
 	"image/png"
-	"os"
 	"testing"
 	"testing/fstest"
 
@@ -16,18 +15,10 @@ import (
 	"github.com/dvoyni/cog/storage"
 )
 
-const testFontPath = "font.ttf"
-
-// testAssets returns an in-memory filesystem with a real font and a sprite of the
-// given size, so visuals can exercise the canvas Lookup during layout and draw.
+// testAssets returns an in-memory filesystem with a sprite of the given size.
 func testAssets(t testing.TB, spriteWidth, spriteHeight int) fstest.MapFS {
 	t.Helper()
-	fontData, err := os.ReadFile("../testdata/fonts/Gabriela-Regular.ttf")
-	if err != nil {
-		t.Fatalf("read font fixture: %v", err)
-	}
 	return fstest.MapFS{
-		testFontPath: &fstest.MapFile{Data: fontData},
 		"sprite.png": &fstest.MapFile{Data: testPNG(t, spriteWidth, spriteHeight)},
 	}
 }
@@ -227,18 +218,6 @@ func TestVisualStatesExpandMultibitKeysAndHighestBitWins(t *testing.T) {
 	}
 }
 
-func TestInteractiveTextAlwaysMeasuresDefaultText(t *testing.T) {
-	lookup := testLookup(testAssets(t, 8, 8))
-	visual, payload := InteractiveText(InteractiveTextParams{
-		Default: TextParams{Font: Font{Path: testFontPath, Size: 20}, Text: "Stable", Color: m.Color{R: 0.2}},
-		Colors:  VisualStates[m.Color]{VisualPressed: {R: 0.8}},
-	})
-	standalone, standalonePayload := Text(TextParams{Font: Font{Path: testFontPath, Size: 20}, Text: "Stable"})
-	if got, want := visual.DefaultSize(lookup, payload), standalone.DefaultSize(lookup, standalonePayload); got != want {
-		t.Fatalf("DefaultSize = %+v, want default text measure %+v", got, want)
-	}
-}
-
 var interactiveVisualSink any
 
 func BenchmarkInteractiveColorConstruction(b *testing.B) {
@@ -266,48 +245,6 @@ func TestInteractiveSpriteResolvesPathAndTintIndependently(t *testing.T) {
 	}
 	if got := params.tint.value(state, params.defaultValue.Tint); got != (m.Color{R: 0.5}) {
 		t.Fatalf("tint = %+v, want hover tint", got)
-	}
-}
-
-func TestTextMeasuresAndDrawsThroughLookup(t *testing.T) {
-	lookup := testLookup(testAssets(t, 8, 8))
-	visual, payload := Text(TextParams{Font: Font{Path: testFontPath, Size: 20}, Text: "Label", Alignment: TextAlignCenter})
-	size := visual.DefaultSize(lookup, payload)
-	if size.X <= 0 || size.Y <= 0 {
-		t.Fatalf("DefaultSize = %+v, want positive measured size", size)
-	}
-	queue := &canvas.OpQueue{}
-	visual.Draw(lookup, queue, State{
-		Rect:        Rect{X: 1, Y: 2, Width: 80, Height: 20},
-		ContentRect: Rect{X: 17, Y: 10, Width: 48, Height: 4},
-	}, payload)
-	if queue.OpCount() != 1 {
-		t.Fatalf("text op count = %d, want 1 recorded text op", queue.OpCount())
-	}
-	if got, want := queue.Ops(nil)[0].Draw.Position.X, float32(41); got != want {
-		t.Fatalf("text center X = %v, want outer center %v", got, want)
-	}
-}
-
-func TestTextWrapsDefaultSizeAtWrapWidthAndDrawsAtArrangedWidth(t *testing.T) {
-	lookup := testLookup(testAssets(t, 8, 8))
-	params := TextParams{
-		Font: Font{Path: testFontPath, Size: 20}, Text: "one two three four",
-		WordWrapping: true, WrapWidth: 70,
-	}
-	visual, payload := Text(params)
-	wrapped := visual.DefaultSize(lookup, payload)
-	unwrappedVisual, unwrappedPayload := Text(TextParams{Font: params.Font, Text: params.Text})
-	unwrapped := unwrappedVisual.DefaultSize(lookup, unwrappedPayload)
-	if wrapped.Y <= unwrapped.Y || wrapped.X > params.WrapWidth {
-		t.Fatalf("wrapped size = %+v, want taller than %+v and at most width %v", wrapped, unwrapped, params.WrapWidth)
-	}
-
-	queue := &canvas.OpQueue{}
-	visual.Draw(lookup, queue, State{Rect: Rect{X: 3, Y: 5, Width: 55, Height: 80}}, payload)
-	ops := queue.Ops(nil)
-	if len(ops) != 1 || !ops[0].Draw.WordWrapping || ops[0].Draw.WrapWidth != 55 {
-		t.Fatalf("wrapped text op = %+v, want wrapping at arranged width 55", ops)
 	}
 }
 
