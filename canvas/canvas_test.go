@@ -176,6 +176,12 @@ type lookupProbeCmd kernel.Command[lookupProbeReq, lookupProbeResp]
 type lookupProbeReq struct{ run func(LookupAccess) }
 type lookupProbeResp struct{}
 
+// readFileProbeCmd reads a path from storage.ReadFS under its read lock,
+// standing in for production code that reads the resource directly.
+type readFileProbeCmd kernel.Command[readFileProbeReq, readFileProbeResp]
+type readFileProbeReq struct{ Name string }
+type readFileProbeResp struct{ Data []byte }
+
 func (p recordCanvasPlugin) Name() kernel.PluginName { return "canvas-test-recorder" }
 
 // Name is the canvas plugin's, not this fixture's: the recorder is a separate
@@ -202,6 +208,15 @@ func (p recordCanvasPlugin) Register(registrar *kernel.Registrar, _ any) error {
 			}, func(k kernel.Kernel, req lookupProbeReq) (lookupProbeResp, error) {
 				req.run(NewLookupAccess(k, lookup.Get(), filesystem.Get()))
 				return lookupProbeResp{}, nil
+			}
+	})
+	registrar.HandleCommand[readFileProbeCmd](func() (kernel.Lock, kernel.Execute[readFileProbeReq, readFileProbeResp]) {
+		var filesystem kernel.Read[storage.ReadFS]
+		return func(access kernel.ResourceAccess) {
+				filesystem = access.GetRead[storage.ReadFS]()
+			}, func(_ kernel.Kernel, req readFileProbeReq) (readFileProbeResp, error) {
+				data, err := fs.ReadFile(filesystem.Get(), req.Name)
+				return readFileProbeResp{Data: data}, err
 			}
 	})
 	return nil
@@ -264,7 +279,7 @@ func TestPluginMountsBuiltInShaders(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read embedded shader %q: %v", path, err)
 		}
-		got, _ := k.ExecuteCommand[storage.ReadFileCmd](storage.ReadFileRequest{Name: path})
+		got, _ := k.ExecuteCommand[readFileProbeCmd](readFileProbeReq{Name: path})
 		if !bytes.Equal(got.Data, want) {
 			t.Fatalf("mounted shader %q differs from embedded source", path)
 		}

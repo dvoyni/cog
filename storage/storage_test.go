@@ -1,15 +1,12 @@
 package storage
 
 import (
-	"context"
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 	"testing/fstest"
-
-	"github.com/dvoyni/cog/kernel"
 )
 
 func TestReadFSPriorityAndFallback(t *testing.T) {
@@ -106,75 +103,6 @@ func TestDiskFSOperationsAndTraversal(t *testing.T) {
 	if err := writeFS.WriteFile("../escape", nil, 0o600); !errors.Is(err, fs.ErrInvalid) {
 		t.Fatalf("traversal error = %v, want fs.ErrInvalid", err)
 	}
-}
-
-func TestCommandsExposeAndOperateOnResources(t *testing.T) {
-	writeFS, err := OpenDiskFS(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	config := DefaultConfig("test").
-		WithReadFS("assets", 10, fstest.MapFS{"asset.txt": &fstest.MapFile{Data: []byte("asset")}}).
-		WithWriteFS(writeFS)
-	engine := kernel.New(map[kernel.PluginName]any{Name: config}).
-		Handler(func(err error) bool {
-			t.Errorf("unexpected kernel error: %v", err)
-			return false
-		}).
-		WithPlugins(New())
-	k := engine.Executioner()
-
-	read, err := k.ExecuteCommand[ReadFileCmd](ReadFileRequest{Name: "asset.txt"})
-	if err != nil || string(read.Data) != "asset" {
-		t.Fatalf("ReadFileCmd = %q, %v; want asset, nil", read.Data, err)
-	}
-	var callbackData []byte
-	_, err = k.ExecuteCommand[GetReadFSCmd](GetReadFSRequest{Use: func(filesystem fs.FS) error {
-		var err error
-		callbackData, err = fs.ReadFile(filesystem, "asset.txt")
-		return err
-	}})
-	if err != nil || string(callbackData) != "asset" {
-		t.Fatalf("GetReadFSCmd = %q, %v; want asset, nil", callbackData, err)
-	}
-	wantCallbackErr := errors.New("callback failed")
-	_, err = k.ExecuteCommand[GetReadFSCmd](GetReadFSRequest{Use: func(fs.FS) error {
-		return wantCallbackErr
-	}})
-	if !errors.Is(err, wantCallbackErr) {
-		t.Fatalf("callback error = %v, want %v", err, wantCallbackErr)
-	}
-	_, err = k.ExecuteCommand[GetReadFSCmd](GetReadFSRequest{})
-	var invalidCallback ErrInvalidReadFSCallback
-	if !errors.As(err, &invalidCallback) {
-		t.Fatalf("nil callback error = %v, want ErrInvalidReadFSCallback", err)
-	}
-	_, err = k.ExecuteCommand[WriteFileCmd](WriteFileRequest{Name: "save.json", Data: []byte("save"), Perm: 0o600})
-	if err != nil {
-		t.Fatal(err)
-	}
-	saved, err := k.ExecuteCommand[ReadFileCmd](ReadFileRequest{Name: "save.json"})
-	if err != nil || string(saved.Data) != "save" {
-		t.Fatalf("saved data = %q, %v; want save, nil", saved.Data, err)
-	}
-	// The permanent filesystem is mounted at the highest priority, so a written
-	// file is what reads back even when a read-only mount has the same name.
-	_, err = k.ExecuteCommand[WriteFileCmd](WriteFileRequest{Name: "asset.txt", Data: []byte("overridden"), Perm: 0o600})
-	if err != nil {
-		t.Fatal(err)
-	}
-	overridden, err := k.ExecuteCommand[ReadFileCmd](ReadFileRequest{Name: "asset.txt"})
-	if err != nil || string(overridden.Data) != "overridden" {
-		t.Fatalf("overridden asset = %q, %v; want overridden, nil", overridden.Data, err)
-	}
-	_, err = k.ExecuteCommand[ReadFileCmd](ReadFileRequest{Name: "missing"})
-	if !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("missing error = %v, want fs.ErrNotExist", err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	engine.Run(ctx)
 }
 
 func assertReadFile(t *testing.T, filesystem fs.FS, name, want string) {

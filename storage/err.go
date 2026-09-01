@@ -29,10 +29,3 @@ func (e ErrInvalidAppId) Error() string {
 type ErrInvalidWriteFS struct{}
 
 func (ErrInvalidWriteFS) Error() string { return "storage: invalid nil write filesystem" }
-
-// ErrInvalidReadFSCallback reports a GetReadFSCmd request without a callback.
-type ErrInvalidReadFSCallback struct{}
-
-func (ErrInvalidReadFSCallback) Error() string {
-	return "storage: invalid nil read filesystem callback"
-}

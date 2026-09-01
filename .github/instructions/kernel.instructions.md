@@ -151,11 +151,11 @@ A handler dispatches a command only through a dispatcher it declared in its
 `Lock`:
 
 ```go
-var readFile func(kernel.Kernel, storage.ReadFileRequest) (storage.ReadFileResponse, error)
+var setDesiredViewport func(kernel.Kernel, app.SetDesiredViewportRequest) (app.SetDesiredViewportResponse, error)
 return func(access kernel.ResourceAccess) {
-		readFile = access.Uses[storage.ReadFileCmd]()
-	}, func(k kernel.Kernel, _ app.UpdateEvent) error {
-		_, err := readFile(k, storage.ReadFileRequest{Name: "lang.json"})
+		setDesiredViewport = access.Uses[app.SetDesiredViewportCmd]()
+	}, func(k kernel.Kernel, _ app.WindowSizeChangeEvent) error {
+		_, err := setDesiredViewport(k, app.SetDesiredViewportRequest{Width: 100, Height: 100})
 		return err
 	}
 ```
