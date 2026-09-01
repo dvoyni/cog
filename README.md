@@ -4,7 +4,43 @@ Cog is a small typed plugin engine for Go. Plugins communicate through events,
 commands, and locked resources; the kernel owns registration, scheduling, and
 error handling.
 
-The module requires Go 1.27 because the kernel uses generic methods.
+## Why Cog
+
+- **Safe parallelism by construction.** Ready event subscribers and independent
+    tasks run concurrently whenever their resource access does not conflict.
+    Handlers declare access by binding typed read and write handles; the
+    scheduler acquires the resulting lock set atomically and prevents races over
+    engine-managed state.
+- **No lock bookkeeping to keep in sync.** The same binding that gives a handler
+    access to a resource declares its lock. When one command uses another, Cog
+    computes the transitive resource set at composition time, so callers stay
+    decoupled from the callee's implementation details.
+- **A small, highly decoupled microkernel.** Plugins depend on typed commands,
+    events, and resources rather than concrete plugin implementations. Features
+    can be added, removed, or replaced at the composition root without a central
+    application object accumulating subsystem knowledge.
+- **Declarative scenes without asset plumbing.** Build each frame from UI element
+    values and canvas draw declarations that reference images and fonts by path.
+    Canvas loads and caches assets lazily, packs sprites and glyphs into atlases,
+    and manages their GPU resources; explicit unloading remains available when
+    an application needs tighter residency control.
+- **Invalid architectures fail before startup.** Cog validates plugin
+    dependencies, unique ownership, required resources, command usage, and event
+    ordering while composing the engine instead of discovering structural
+    mistakes during play.
+- **Deterministic lifecycle and event ordering.** Explicit dependencies govern
+    startup and shutdown, while event subscribers can declare ordering only
+    where it matters and remain parallel everywhere else.
+- **Typed contracts without generated glue.** Exact Go types identify commands,
+    events, and resources, preserving compile-time request and response types
+    across plugin boundaries.
+- **Low-allocation frame loops.** Handler factories run once during registration,
+    synchronous command dispatch avoids per-call allocations, warmed UI
+    processing is allocation-free, and canvas queues retain their backing
+    storage between frames.
+- **One operational boundary.** Context propagation, asynchronous errors,
+    cancellation, and orderly shutdown converge in the kernel, and the finalized
+    plugin and contract graph is available for runtime introspection.
 
 ## Packages
 
