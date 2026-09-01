@@ -57,7 +57,7 @@ func TestWithReadDiskFSUsesPathAsMountId(t *testing.T) {
 		WithReadDiskFS(MountId(directory)).
 		WithWriteFS(writeFS)
 
-	readFS, _, err := resolveConfig(config)
+	readFS, _, _, err := resolveConfig(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,6 +102,91 @@ func TestDiskFSOperationsAndTraversal(t *testing.T) {
 	}
 	if err := writeFS.WriteFile("../escape", nil, 0o600); !errors.Is(err, fs.ErrInvalid) {
 		t.Fatalf("traversal error = %v, want fs.ErrInvalid", err)
+	}
+}
+
+func TestValueStoreLoadDefaultsAndFlush(t *testing.T) {
+	packaged := fstest.MapFS{
+		"config.json": &fstest.MapFile{Data: []byte(`{"volume":0.5,"name":"packaged"}`)},
+	}
+	writeFS, err := OpenDiskFS(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	readFS := newReadFS([]ReadMount{
+		{Id: "packaged", Priority: 1, FS: packaged},
+		{Id: PermanentMount, Priority: 10, FS: writeFS},
+	})
+
+	store, err := (Values{path: DefaultValuesPath}).load(readFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	volume := 1.0
+	if err := GetValue("volume", 1.0, &volume).apply(store.entries["volume"]); err != nil {
+		t.Fatal(err)
+	}
+	if volume != 0.5 {
+		t.Fatalf("volume = %v, want 0.5", volume)
+	}
+
+	missing := 7
+	if err := GetValue("missing", 7, &missing).apply(nil); err != nil {
+		t.Fatal(err)
+	}
+	if missing != 7 || len(store.entries) != 2 {
+		t.Fatalf("missing key = %v with %d entries, want default and no insertion", missing, len(store.entries))
+	}
+
+	raw, err := SetValue("volume", 0.25, false).marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.entries["volume"] = raw
+	store.dirty = true
+	store, err = store.flush(writeFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.dirty {
+		t.Fatal("store still dirty after flush")
+	}
+	if _, err := fs.Stat(writeFS, DefaultValuesPath+".tmp"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("temporary file survived flush: %v", err)
+	}
+
+	reloaded, err := (Values{path: DefaultValuesPath}).load(readFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(reloaded.entries["volume"]) != "0.25" {
+		t.Fatalf("reloaded volume = %s, want 0.25", reloaded.entries["volume"])
+	}
+	if string(reloaded.entries["name"]) != `"packaged"` {
+		t.Fatalf("reloaded name = %s, want packaged value preserved", reloaded.entries["name"])
+	}
+}
+
+func TestValueStoreMissingAndCorruptFiles(t *testing.T) {
+	empty, err := (Values{path: DefaultValuesPath}).load(newReadFS(nil))
+	if err != nil {
+		t.Fatalf("missing values file error = %v, want nil", err)
+	}
+	if empty.entries == nil || len(empty.entries) != 0 {
+		t.Fatalf("entries = %v, want empty non-nil map", empty.entries)
+	}
+
+	corrupt := newReadFS([]ReadMount{{Id: "corrupt", FS: fstest.MapFS{
+		"config.json": &fstest.MapFile{Data: []byte("{not json")},
+	}}})
+	store, err := (Values{path: DefaultValuesPath}).load(corrupt)
+	var invalid ErrInvalidValuesFile
+	if !errors.As(err, &invalid) {
+		t.Fatalf("corrupt values file error = %v, want ErrInvalidValuesFile", err)
+	}
+	if store.entries != nil {
+		t.Fatal("corrupt values file was cached")
 	}
 }
 

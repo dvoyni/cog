@@ -24,3 +24,9 @@ func NewReadFS(id MountId, filesystem fs.FS) ReadFS {
 // resource lock, using write access for mutations; do not retain the resource
 // after the handler returns.
 type WriteFS = writeFS
+
+// Values is the key-value store backing the value commands. It caches the
+// values file after the first read, so every later operation is in memory until
+// a flush. Access it only while a handler holds its declared resource lock;
+// because a read also populates the cache, handlers declare write access.
+type Values = valueStore

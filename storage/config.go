@@ -14,6 +14,8 @@ const (
 	PermanentMount MountId = "permanent"
 	// DefaultReadPriority is used by WithReadDiskFS.
 	DefaultReadPriority = 0
+	// DefaultValuesPath is the key-value file used when Config.ValuesPath is empty.
+	DefaultValuesPath = "config.json"
 )
 
 // Config configures storage's read mounts and permanent filesystem.
@@ -21,6 +23,9 @@ type Config struct {
 	AppId      string
 	ReadMounts []ReadMount
 	WriteFS    WriteFS
+	// ValuesPath is the JSON object read through ReadFS and flushed to WriteFS
+	// by the value commands. Empty means DefaultValuesPath.
+	ValuesPath string
 }
 
 // DefaultConfig returns storage configuration for appId. An empty appId uses
@@ -52,5 +57,11 @@ func (c Config) WithReadDiskFS(path MountId) Config {
 // WithWriteFS replaces the permanent filesystem.
 func (c Config) WithWriteFS(filesystem WriteFS) Config {
 	c.WriteFS = filesystem
+	return c
+}
+
+// WithValuesPath replaces the file backing the value commands.
+func (c Config) WithValuesPath(path string) Config {
+	c.ValuesPath = path
 	return c
 }

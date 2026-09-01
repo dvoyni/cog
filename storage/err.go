@@ -29,3 +29,43 @@ func (e ErrInvalidAppId) Error() string {
 type ErrInvalidWriteFS struct{}
 
 func (ErrInvalidWriteFS) Error() string { return "storage: invalid nil write filesystem" }
+
+// ErrInvalidValuesPath reports a values file path that is not an fs.ValidPath.
+type ErrInvalidValuesPath struct{ Path string }
+
+func (e ErrInvalidValuesPath) Error() string {
+	return fmt.Sprintf("storage: invalid values path %q", e.Path)
+}
+
+// ErrInvalidKey reports an empty value key.
+type ErrInvalidKey struct{}
+
+func (ErrInvalidKey) Error() string { return "storage: invalid empty value key" }
+
+// ErrInvalidValueRequest reports a value request that did not come from
+// GetValue or SetValue.
+type ErrInvalidValueRequest struct{ Key string }
+
+func (e ErrInvalidValueRequest) Error() string {
+	return fmt.Sprintf("storage: uninitialized value request for key %q", e.Key)
+}
+
+// ErrInvalidOutValue reports a nil destination pointer passed to GetValue.
+type ErrInvalidOutValue struct{ Key string }
+
+func (e ErrInvalidOutValue) Error() string {
+	return fmt.Sprintf("storage: nil out value for key %q", e.Key)
+}
+
+// ErrInvalidValuesFile reports a values file that is not a JSON object. The
+// file is left untouched so unreadable data is never overwritten.
+type ErrInvalidValuesFile struct {
+	Path string
+	Err  error
+}
+
+func (e ErrInvalidValuesFile) Error() string {
+	return fmt.Sprintf("storage: parse values file %q: %v", e.Path, e.Err)
+}
+
+func (e ErrInvalidValuesFile) Unwrap() error { return e.Err }
