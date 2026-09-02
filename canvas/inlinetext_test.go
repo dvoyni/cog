@@ -3,6 +3,10 @@ package canvas
 import (
 	"math"
 	"testing"
+	"testing/fstest"
+
+	"github.com/dvoyni/cog/storage"
+	"golang.org/x/image/font/gofont/goregular"
 )
 
 func TestWrapInlineTextWrapsWordsAndCollapsesWhitespace(t *testing.T) {
@@ -81,4 +85,40 @@ func assertInlineLines(t *testing.T, lines [][]inlineSegment, want ...string) {
 			t.Fatalf("line %d = %q, want %q", index, got, want[index])
 		}
 	}
+}
+
+// Layout measures text with the face at its logical size while drawing rasterizes
+// at the device size, and hinted advances do not agree between the two. Wrapping
+// must follow the layout metrics, or a line arranged to exactly fit its measured
+// width drops its last word onto a line the element was never sized for.
+func TestWrapMeasureFollowsLayoutMetrics(t *testing.T) {
+	const path = "font.ttf"
+	const size = 18
+	filesystem := storage.NewFileSystem("test", fstest.MapFS{path: &fstest.MapFile{Data: goregular.TTF}})
+	fonts := newFontStore()
+	logical := fonts.face(filesystem, path, size)
+	raster := fonts.face(filesystem, path, size*2)
+	if logical == nil || raster == nil {
+		t.Fatal("test font could not be loaded")
+	}
+
+	const text = "a line that exactly fills its measured width"
+	lines := parseInlineText(text)
+	arranged := measureLine(logical, text)
+	rasterized := func(segments []inlineSegment) float32 {
+		var width float32
+		for _, segment := range segments {
+			width += measureLine(raster, segment.text) * 0.5
+		}
+		return width
+	}
+	if rasterized(lines[0]) <= arranged {
+		t.Skip("test text no longer exercises rasterization drift for this font")
+	}
+	if got := wrapInlineText(lines, arranged, rasterized); len(got) != 2 {
+		t.Fatalf("rasterized wrapping produced %d lines, want the 2 the drift causes", len(got))
+	}
+
+	wrap := (&Plugin{}).wrapMeasure(nil, nil, filesystem, fonts, path, size, rasterized)
+	assertInlineLines(t, wrapInlineText(lines, arranged, wrap), text)
 }

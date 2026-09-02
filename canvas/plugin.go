@@ -601,7 +601,8 @@ func (p *Plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *atlas, 
 	}
 	lines := parseInlineText(op.text)
 	if op.draw.WordWrapping && validWrapWidth(op.draw.WrapWidth) {
-		lines = wrapInlineText(lines, op.draw.WrapWidth, measure)
+		wrap := p.wrapMeasure(spriteAtlas, resources, filesystem, fonts, op.fontPath, op.draw.Size, measure)
+		lines = wrapInlineText(lines, op.draw.WrapWidth, wrap)
 	}
 	y := op.draw.Position.Y
 	for _, line := range lines {
@@ -635,6 +636,35 @@ func (p *Plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *atlas, 
 			x += p.glyphLineWidth(fontAtlas, op.fontPath, px, face, segment.text, resources) * toLogical
 		}
 		y += lineHeight
+	}
+}
+
+// wrapMeasure returns the line-width function that decides where drawn text
+// breaks. Glyph advances are hinted at the rasterization size, so measuring
+// there and scaling back to logical pixels drifts from LookupAccess measurement,
+// which uses the face at the logical size. Layout sized the element from that
+// measurement, so a line that exactly fills its measured width would otherwise
+// spill its last word onto a line the element has no room for. Wrapping with the
+// logical face keeps the drawn breaks identical to the measured ones; when that
+// face is unavailable the rasterized measurement stands in.
+func (p *Plugin) wrapMeasure(spriteAtlas *atlas, resources *gfx.ResourceQueue, filesystem storage.FileSystem, fonts *fontStore, fontPath string, size float32, fallback func([]inlineSegment) float32) func([]inlineSegment) float32 {
+	px := max(1, int(math.Round(float64(size))))
+	face := fonts.face(filesystem, fontPath, px)
+	if face == nil {
+		return fallback
+	}
+	scale := size / float32(px)
+	capHeight := float32(face.face.Metrics().CapHeight) / 64 * scale
+	return func(line []inlineSegment) float32 {
+		var width float32
+		for _, segment := range line {
+			if segment.icon {
+				width += p.iconWidth(spriteAtlas, segment.text, capHeight, filesystem, resources)
+				continue
+			}
+			width += measureLine(face, segment.text) * scale
+		}
+		return width
 	}
 }
 
