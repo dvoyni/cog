@@ -5,13 +5,13 @@ import (
 )
 
 func registerCommands(registrar *kernel.Registrar) {
-	registrar.HandleCommand[SetMountCmd](setMount)
-	registrar.HandleCommand[RemoveMountCmd](removeMount)
-	registrar.HandleCommand[SetPermanentFSCmd](setPermanentFS)
-	registrar.HandleCommand[AccessValuesCmd](accessValues)
+	registrar.HandleCommand[SetMountCmd](setMountCmdImpl)
+	registrar.HandleCommand[RemoveMountCmd](removeMountCmdImpl)
+	registrar.HandleCommand[SetPermanentFSCmd](setPermanentFSCmdImpl)
+	registrar.HandleCommand[AccessValuesCmd](accessValuesCmdImpl)
 }
 
-func setMount() (kernel.Lock, kernel.Execute[SetMountRequest, SetMountResponse]) {
+func setMountCmdImpl() (kernel.Lock, kernel.Execute[SetMountRequest, SetMountResponse]) {
 	var filesystem kernel.Write[FileSystem]
 	return func(access kernel.ResourceAccess) {
 			filesystem = access.GetWrite[FileSystem]()
@@ -27,7 +27,7 @@ func setMount() (kernel.Lock, kernel.Execute[SetMountRequest, SetMountResponse])
 		}
 }
 
-func removeMount() (kernel.Lock, kernel.Execute[RemoveMountRequest, RemoveMountResponse]) {
+func removeMountCmdImpl() (kernel.Lock, kernel.Execute[RemoveMountRequest, RemoveMountResponse]) {
 	var filesystem kernel.Write[FileSystem]
 	return func(access kernel.ResourceAccess) {
 			filesystem = access.GetWrite[FileSystem]()
@@ -44,7 +44,7 @@ func removeMount() (kernel.Lock, kernel.Execute[RemoveMountRequest, RemoveMountR
 		}
 }
 
-func setPermanentFS() (kernel.Lock, kernel.Execute[SetPermanentFSRequest, SetPermanentFSResponse]) {
+func setPermanentFSCmdImpl() (kernel.Lock, kernel.Execute[SetPermanentFSRequest, SetPermanentFSResponse]) {
 	var filesystem kernel.Write[FileSystem]
 	return func(access kernel.ResourceAccess) {
 			filesystem = access.GetWrite[FileSystem]()
@@ -57,10 +57,10 @@ func setPermanentFS() (kernel.Lock, kernel.Execute[SetPermanentFSRequest, SetPer
 		}
 }
 
-// accessValues takes one write lock on FileSystem for every operation, reads
+// accessValuesCmdImpl takes one write lock on FileSystem for every operation, reads
 // included: a read populates the value cache, and the same handle both reads
 // the values file through the overlay and, via WriteAccess, flushes it back.
-func accessValues() (kernel.Lock, kernel.Execute[AccessValuesRequest, AccessValuesResponse]) {
+func accessValuesCmdImpl() (kernel.Lock, kernel.Execute[AccessValuesRequest, AccessValuesResponse]) {
 	var filesystem kernel.Write[FileSystem]
 	var values kernel.Write[Values]
 	return func(access kernel.ResourceAccess) {

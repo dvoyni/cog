@@ -25,25 +25,9 @@ func (p *Plugin) Dependencies() []kernel.PluginName { return nil }
 // Register registers the input contract with the kernel.
 func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.InitResource(newState())
-	registrar.HandleCommand[ApplyCmd](applyChanges)
+	registrar.HandleCommand[ApplyCmd](applyCmdImpl)
 	registrar.Subscribe[UpdateEventHandler](handleUpdateEvent).First()
 	return nil
-}
-
-// applyChanges folds a batch of input changes into the State (under its write
-// lock) and publishes the discrete event for each change.
-func applyChanges() (kernel.Lock, kernel.Execute[ApplyRequest, ApplyResponse]) {
-	var state kernel.Write[*State]
-	return func(access kernel.ResourceAccess) {
-			state = access.GetWrite[*State]()
-		}, func(k kernel.Kernel, request ApplyRequest) (ApplyResponse, error) {
-			s := state.Get()
-			for _, c := range request.Changes {
-				s.apply(c)
-				publish(k, c)
-			}
-			return ApplyResponse{}, nil
-		}
 }
 
 // handleUpdateEvent rolls the per-tick edges at the start of each simulation tick.

@@ -83,12 +83,14 @@ plugin has initialized it.
 
 ## Commands
 
-A command's identity is a distinct defined type built from `Command`:
+A command's identity is a distinct defined type built from `Command`. The type is
+the declaration and carries the name; its handler is private and takes the same
+name with an `Impl` suffix:
 
 ```go
 type LoadCmd kernel.Command[LoadRequest, LoadResponse]
 
-func load() (kernel.Lock, kernel.Execute[LoadRequest, LoadResponse]) {
+func loadCmdImpl() (kernel.Lock, kernel.Execute[LoadRequest, LoadResponse]) {
     var config kernel.Read[Config]
     var cache  kernel.Write[*Cache]
     return func(access kernel.ResourceAccess) {
@@ -101,12 +103,17 @@ func load() (kernel.Lock, kernel.Execute[LoadRequest, LoadResponse]) {
         }
 }
 
-registrar.HandleCommand[LoadCmd](load)
+registrar.HandleCommand[LoadCmd](loadCmdImpl)
 ```
 
 `Registrar.HandleCommand` registers one owned handler per command type;
 duplicates fail composition. It returns nothing — a command has no configurable
 surface.
+
+A command is declared as the triple `LoadCmd` / `LoadRequest` / `LoadResponse`,
+with both payload types named even when empty. Declarations belong in the
+package's `commands.go` and handlers in `commandsimpl.go`; see
+`.github/instructions/kernel.instructions.md` for the full convention.
 
 ### Dispatching
 

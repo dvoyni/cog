@@ -9,8 +9,9 @@ import (
 	"github.com/dvoyni/cog/kernel"
 )
 
-type probeResp struct{ Pressed, Just bool }
-type probeCmd kernel.Command[struct{}, probeResp]
+type probeCmd kernel.Command[probeRequest, probeResponse]
+type probeRequest struct{}
+type probeResponse struct{ Pressed, Just bool }
 
 type probePlugin struct{ keyc chan<- KeyEvent }
 
@@ -21,15 +22,7 @@ func (probePlugin) Name() kernel.PluginName { return "test" }
 // Name is the input plugin's, not this fixture's: the probe locks input.State.
 func (probePlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 func (p probePlugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.HandleCommand[probeCmd](func() (kernel.Lock, kernel.Execute[struct{}, probeResp]) {
-		var state kernel.Read[*State]
-		return func(access kernel.ResourceAccess) {
-				state = access.GetRead[*State]()
-			}, func(kernel.Kernel, struct{}) (probeResp, error) {
-				s := state.Get()
-				return probeResp{Pressed: s.Pressed(KeyA), Just: s.JustPressed(KeyA)}, nil
-			}
-	})
+	registrar.HandleCommand[probeCmd](probeCmdImpl)
 	registrar.Subscribe[testKeyEventHandler](func() (kernel.Lock, kernel.Observe[KeyEvent]) {
 		return nil, func(_ kernel.Kernel, event KeyEvent) error {
 			p.keyc <- event
@@ -37,6 +30,16 @@ func (p probePlugin) Register(registrar *kernel.Registrar, _ any) error {
 		}
 	})
 	return nil
+}
+
+func probeCmdImpl() (kernel.Lock, kernel.Execute[probeRequest, probeResponse]) {
+	var state kernel.Read[*State]
+	return func(access kernel.ResourceAccess) {
+			state = access.GetRead[*State]()
+		}, func(kernel.Kernel, probeRequest) (probeResponse, error) {
+			s := state.Get()
+			return probeResponse{Pressed: s.Pressed(KeyA), Just: s.JustPressed(KeyA)}, nil
+		}
 }
 
 // End-to-end: Apply folds a key press into State and publishes KeyEvent; an
@@ -78,9 +81,9 @@ func TestInputPluginApplyPollAndEvent(t *testing.T) {
 	}
 }
 
-func probe(t *testing.T, k kernel.Executioner) probeResp {
+func probe(t *testing.T, k kernel.Executioner) probeResponse {
 	t.Helper()
-	response, err := k.ExecuteCommand[probeCmd](struct{}{})
+	response, err := k.ExecuteCommand[probeCmd](probeRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}

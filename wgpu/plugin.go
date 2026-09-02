@@ -96,15 +96,8 @@ func (p *Plugin) Register(registrar *kernel.Registrar, config any) error {
 	// Bridge gogpu input events into the input contract.
 	p.wireInput()
 
-	registrar.HandleCommand[app.QuitCmd](p.quit)
+	registrar.HandleCommand[app.QuitCmd](p.quitCmdImpl)
 	return nil
-}
-
-func (p *Plugin) quit() (kernel.Lock, kernel.Execute[app.QuitRequest, app.QuitResponse]) {
-	return nil, func(kernel.Kernel, app.QuitRequest) (app.QuitResponse, error) {
-		p.gpu.Quit()
-		return app.QuitResponse{}, nil
-	}
 }
 
 // Run owns the calling (main) thread: it wires the gogpu callbacks to k, starts a

@@ -172,15 +172,15 @@ type recordCanvasHandler kernel.Subscription[app.UpdateEvent]
 // lookupProbeCmd runs a callback inside a handler that holds the Lookup and
 // filesystem locks, giving tests a valid scoped LookupAccess to exercise the
 // public query and unload API the way real callers do.
-type lookupProbeCmd kernel.Command[lookupProbeReq, lookupProbeResp]
-type lookupProbeReq struct{ run func(LookupAccess) }
-type lookupProbeResp struct{}
+type lookupProbeCmd kernel.Command[lookupProbeRequest, lookupProbeResponse]
+type lookupProbeRequest struct{ run func(LookupAccess) }
+type lookupProbeResponse struct{}
 
 // readFileProbeCmd reads a path from storage.FileSystem under its read lock,
 // standing in for production code that reads the resource directly.
-type readFileProbeCmd kernel.Command[readFileProbeReq, readFileProbeResp]
-type readFileProbeReq struct{ Name string }
-type readFileProbeResp struct{ Data []byte }
+type readFileProbeCmd kernel.Command[readFileProbeRequest, readFileProbeResponse]
+type readFileProbeRequest struct{ Name string }
+type readFileProbeResponse struct{ Data []byte }
 
 func (p recordCanvasPlugin) Name() kernel.PluginName { return "canvas-test-recorder" }
 
@@ -199,32 +199,36 @@ func (p recordCanvasPlugin) Register(registrar *kernel.Registrar, _ any) error {
 				return nil
 			}
 	})
-	registrar.HandleCommand[lookupProbeCmd](func() (kernel.Lock, kernel.Execute[lookupProbeReq, lookupProbeResp]) {
-		var lookup kernel.Write[*Lookup]
-		var filesystem kernel.Read[storage.FileSystem]
-		return func(access kernel.ResourceAccess) {
-				lookup = access.GetWrite[*Lookup]()
-				filesystem = access.GetRead[storage.FileSystem]()
-			}, func(k kernel.Kernel, req lookupProbeReq) (lookupProbeResp, error) {
-				req.run(NewLookupAccess(k, lookup.Get(), filesystem.Get()))
-				return lookupProbeResp{}, nil
-			}
-	})
-	registrar.HandleCommand[readFileProbeCmd](func() (kernel.Lock, kernel.Execute[readFileProbeReq, readFileProbeResp]) {
-		var filesystem kernel.Read[storage.FileSystem]
-		return func(access kernel.ResourceAccess) {
-				filesystem = access.GetRead[storage.FileSystem]()
-			}, func(_ kernel.Kernel, req readFileProbeReq) (readFileProbeResp, error) {
-				data, err := fs.ReadFile(filesystem.Get(), req.Name)
-				return readFileProbeResp{Data: data}, err
-			}
-	})
+	registrar.HandleCommand[lookupProbeCmd](lookupProbeCmdImpl)
+	registrar.HandleCommand[readFileProbeCmd](readFileProbeCmdImpl)
 	return nil
+}
+
+func lookupProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupProbeRequest, lookupProbeResponse]) {
+	var lookup kernel.Write[*Lookup]
+	var filesystem kernel.Read[storage.FileSystem]
+	return func(access kernel.ResourceAccess) {
+			lookup = access.GetWrite[*Lookup]()
+			filesystem = access.GetRead[storage.FileSystem]()
+		}, func(k kernel.Kernel, req lookupProbeRequest) (lookupProbeResponse, error) {
+			req.run(NewLookupAccess(k, lookup.Get(), filesystem.Get()))
+			return lookupProbeResponse{}, nil
+		}
+}
+
+func readFileProbeCmdImpl() (kernel.Lock, kernel.Execute[readFileProbeRequest, readFileProbeResponse]) {
+	var filesystem kernel.Read[storage.FileSystem]
+	return func(access kernel.ResourceAccess) {
+			filesystem = access.GetRead[storage.FileSystem]()
+		}, func(_ kernel.Kernel, req readFileProbeRequest) (readFileProbeResponse, error) {
+			data, err := fs.ReadFile(filesystem.Get(), req.Name)
+			return readFileProbeResponse{Data: data}, err
+		}
 }
 
 // probeLookup executes fn with a scoped LookupAccess inside a canvas handler.
 func probeLookup(k kernel.Executioner, fn func(LookupAccess)) {
-	k.ExecuteCommand[lookupProbeCmd](lookupProbeReq{run: fn})
+	k.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{run: fn})
 }
 func testKernel(t testing.TB, filesystem fs.FS, config Config, record func(*OpQueue)) (kernel.Executioner, *Plugin, *testBackend) {
 	return testKernelHandler(t, filesystem, config, record, func(err error) bool {
@@ -279,7 +283,7 @@ func TestPluginMountsBuiltInShaders(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read embedded shader %q: %v", path, err)
 		}
-		got, _ := k.ExecuteCommand[readFileProbeCmd](readFileProbeReq{Name: path})
+		got, _ := k.ExecuteCommand[readFileProbeCmd](readFileProbeRequest{Name: path})
 		if !bytes.Equal(got.Data, want) {
 			t.Fatalf("mounted shader %q differs from embedded source", path)
 		}

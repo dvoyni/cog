@@ -44,15 +44,26 @@ func benchEngine(b *testing.B, register func(*Registrar) error) *Engine {
 }
 
 func registerBenchCmd(r *Registrar) {
-	r.HandleCommand[benchCmd](func() (Lock, Execute[benchRequest, benchResponse]) {
-		var counter Write[benchCounter]
-		return func(access ResourceAccess) {
-				counter = access.GetWrite[benchCounter]()
-			}, func(_ Kernel, request benchRequest) (benchResponse, error) {
-				counter.Set(counter.Get() + 1)
-				return benchResponse{sum: request.a + request.b + request.c}, nil
-			}
-	})
+	r.HandleCommand[benchCmd](benchCmdImpl)
+}
+
+func benchCmdImpl() (Lock, Execute[benchRequest, benchResponse]) {
+	var counter Write[benchCounter]
+	return func(access ResourceAccess) {
+			counter = access.GetWrite[benchCounter]()
+		}, func(_ Kernel, request benchRequest) (benchResponse, error) {
+			counter.Set(counter.Get() + 1)
+			return benchResponse{sum: request.a + request.b + request.c}, nil
+		}
+}
+
+func benchOuterCmdImpl() (Lock, Execute[benchRequest, benchResponse]) {
+	var inner func(Kernel, benchRequest) (benchResponse, error)
+	return func(access ResourceAccess) {
+			inner = access.Uses[benchCmd]()
+		}, func(k Kernel, request benchRequest) (benchResponse, error) {
+			return inner(k, request)
+		}
 }
 
 // BenchmarkExecuteCommand measures one synchronous command dispatch holding a
@@ -81,14 +92,7 @@ func BenchmarkUsesNestedDispatch(b *testing.B) {
 	engine := benchEngine(b, func(r *Registrar) error {
 		r.InitResource(benchCounter(0))
 		registerBenchCmd(r)
-		r.HandleCommand[benchOuterCmd](func() (Lock, Execute[benchRequest, benchResponse]) {
-			var inner func(Kernel, benchRequest) (benchResponse, error)
-			return func(access ResourceAccess) {
-					inner = access.Uses[benchCmd]()
-				}, func(k Kernel, request benchRequest) (benchResponse, error) {
-					return inner(k, request)
-				}
-		})
+		r.HandleCommand[benchOuterCmd](benchOuterCmdImpl)
 		return nil
 	})
 	k := engine.Executioner()

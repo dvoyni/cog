@@ -54,6 +54,14 @@ type Observe[TEvent any] func(kernel Kernel, event TEvent) error
 // defining a type from it, and that defined type is the command's identity:
 //
 //	type LoadCmd kernel.Command[LoadRequest, LoadResponse]
+//	type LoadRequest struct{ ... }
+//	type LoadResponse struct{ ... }
+//
+// The declaration carries the name; the factory that implements it is always
+// private and named for the command with an Impl suffix, so the two never
+// collide even when the command itself is package-private:
+//
+//	func loadCmdImpl() (kernel.Lock, kernel.Execute[LoadRequest, LoadResponse])
 type Command[TRequest any, TResponse any] = func() (Lock, Execute[TRequest, TResponse])
 
 // Subscription is the shape of a subscription factory, named the same way:

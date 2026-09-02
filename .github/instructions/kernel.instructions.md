@@ -19,7 +19,7 @@ closures are cached and reused for every invocation.
 ```go
 type LoadCmd kernel.Command[LoadRequest, LoadResponse]
 
-func load() (kernel.Lock, kernel.Execute[LoadRequest, LoadResponse]) {
+func loadCmdImpl() (kernel.Lock, kernel.Execute[LoadRequest, LoadResponse]) {
 	var store kernel.Read[DataStore]
 	var cache kernel.Write[*Cache]
 	return func(access kernel.ResourceAccess) {
@@ -37,6 +37,46 @@ Declare identity types from the generic aliases, never by spelling the signature
 type LoadCmd kernel.Command[LoadRequest, LoadResponse]
 type UpdateEventHandler kernel.Subscription[app.UpdateEvent]
 ```
+
+### Naming A Command
+
+A command is three declarations plus one handler, and the names are mechanical:
+
+```go
+type LoadCmd kernel.Command[LoadRequest, LoadResponse]
+type LoadRequest struct{ Name string }
+type LoadResponse struct{ Data []byte }
+
+func loadCmdImpl() (kernel.Lock, kernel.Execute[LoadRequest, LoadResponse])
+```
+
+- The **command type** carries the name and ends in `Cmd`. It is the contract
+  other plugins dispatch, so export it unless nothing outside the package does.
+- **Request and response** repeat the command's name without `Cmd` and spell
+  `Request` and `Response` in full — never `Req`/`Resp`. Declare both even when
+  empty, rather than putting a bare `struct{}` in the type parameters: a named
+  empty response stays nameable at the call site and can grow a field later
+  without touching every handler.
+- The **handler is always private** and is the command type's name plus `Impl`.
+  The suffix is what lets a package-private command such as `initializeCmd` have
+  a handler that does not collide with it.
+
+Register handlers by name; never inline the factory into `HandleCommand`:
+
+```go
+registrar.HandleCommand[LoadCmd](loadCmdImpl)
+```
+
+Give the package a `registerCommands` function that does its own registering, as
+`storage` does from its `Register`. When the owning plugin lives in a different
+package, export it as `RegisterCommands(registrar *kernel.Registrar)` for that
+plugin to call, as `campaign` and `shared` do. Either way the handler stays
+private: a plugin naming another package's handler leaks the implementation into
+the caller.
+
+A test fixture that registers a different body per test case is the one place an
+inline factory is right — there is no single implementation to name. A fixture
+command with one body follows the rule like any other.
 
 ### The Factory Closure Is Shared
 
@@ -199,7 +239,7 @@ filenames consistently:
 
 - `contract.go`: package documentation and shared public value types.
 - `commands.go`: command, request, and response declarations only.
-- `commandsimpl.go`: command registration and handlers when they are substantial.
+- `commandsimpl.go`: command registration and every command handler.
 - `events.go`: event declarations.
 - `resources.go`: documented public aliases to private resource types.
 - `resourcesimpl.go`: private resource types, methods, and helpers.
@@ -217,13 +257,22 @@ they declare no `Plugin`. A contract-only package has no private implementation 
 hide, so `resources.go` declares the public resource type directly instead of
 aliasing one; say so in the doc comment, since the owning plugin lives elsewhere.
 
-Small plugins may keep handlers in `plugin.go`; split files by ownership, not by
-an arbitrary size threshold. A package whose private resources are substantial may
-give each its own implementation file named for the resource, as `gfx` does with
-`opqueue.go` and `resourcequeue.go`, instead of one `resourcesimpl.go`. Public
-resource names should normally alias private implementations, as in
-`type FileSystem = fileSystem`, so other plugins can declare locks without reaching into
-the implementation.
+Command handlers always live in `commandsimpl.go`, however small the package, so
+`commands.go` stays a readable list of the contract and never mixes declaration
+with implementation. Subscription handlers may stay in `plugin.go` while the
+wiring is compact; split those by ownership, not by an arbitrary size threshold.
+
+The two files are independent, so a package takes only the ones it needs. A
+contract-only package such as `app` declares commands other plugins implement and
+has `commands.go` alone; a driver such as `wgpu`, which implements `app.QuitCmd`
+but declares no command of its own, has `commandsimpl.go` alone.
+
+A package whose private resources are substantial may give each its own
+implementation file named for the resource, as `gfx` does with `opqueue.go` and
+`resourcequeue.go`, instead of one `resourcesimpl.go`. Public resource names
+should normally alias private implementations, as in
+`type FileSystem = fileSystem`, so other plugins can declare locks without
+reaching into the implementation.
 
 Declare in `Dependencies` every plugin whose contracts you use. This is enforced:
 composition fails with `ErrUndeclaredDependency` if a handler locks a resource

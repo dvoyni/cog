@@ -7,8 +7,8 @@ import (
 	"github.com/dvoyni/cog/kernel"
 )
 
-// presentCmd swaps the recorded OpQueue into the ready slot (latest-wins).
-func (p *Plugin) presentCmd() (kernel.Lock, kernel.Execute[PresentRequest, PresentResponse]) {
+// presentCmdImpl swaps the recorded OpQueue into the ready slot (latest-wins).
+func (p *Plugin) presentCmdImpl() (kernel.Lock, kernel.Execute[PresentRequest, PresentResponse]) {
 	var write kernel.Write[*OpQueue]
 	var ready kernel.Write[*readyList]
 	return func(access kernel.ResourceAccess) {
@@ -20,8 +20,8 @@ func (p *Plugin) presentCmd() (kernel.Lock, kernel.Execute[PresentRequest, Prese
 		}
 }
 
-// acquireCmd advances the internal read queue, reporting whether it moved.
-func (p *Plugin) acquireCmd() (kernel.Lock, kernel.Execute[AcquireRequest, AcquireResponse]) {
+// acquireCmdImpl advances the internal read queue, reporting whether it moved.
+func (p *Plugin) acquireCmdImpl() (kernel.Lock, kernel.Execute[AcquireRequest, AcquireResponse]) {
 	var read kernel.Write[*readList]
 	var ready kernel.Write[*readyList]
 	return func(access kernel.ResourceAccess) {
@@ -32,8 +32,8 @@ func (p *Plugin) acquireCmd() (kernel.Lock, kernel.Execute[AcquireRequest, Acqui
 		}
 }
 
-// setBackendCmd installs the Backend the plugin renders through.
-func (p *Plugin) setBackendCmd() (kernel.Lock, kernel.Execute[SetBackendRequest, SetBackendResponse]) {
+// setBackendCmdImpl installs the Backend the plugin renders through.
+func (p *Plugin) setBackendCmdImpl() (kernel.Lock, kernel.Execute[SetBackendRequest, SetBackendResponse]) {
 	var write kernel.Write[*OpQueue]
 	var read kernel.Write[*readList]
 	var ready kernel.Write[*readyList]
@@ -52,7 +52,7 @@ func (p *Plugin) setBackendCmd() (kernel.Lock, kernel.Execute[SetBackendRequest,
 		}
 }
 
-func (p *Plugin) releaseCachedResourceCmd() (kernel.Lock, kernel.Execute[ReleaseCachedResourceRequest, ReleaseCachedResourceResponse]) {
+func (p *Plugin) releaseCachedResourceCmdImpl() (kernel.Lock, kernel.Execute[ReleaseCachedResourceRequest, ReleaseCachedResourceResponse]) {
 	var resources kernel.Write[*ResourceQueue]
 	return func(access kernel.ResourceAccess) {
 			resources = access.GetWrite[*ResourceQueue]()
@@ -62,7 +62,7 @@ func (p *Plugin) releaseCachedResourceCmd() (kernel.Lock, kernel.Execute[Release
 		}
 }
 
-func (p *Plugin) freeCachedResourcesCmd() (kernel.Lock, kernel.Execute[FreeCachedResourcesRequest, FreeCachedResourcesResponse]) {
+func (p *Plugin) freeCachedResourcesCmdImpl() (kernel.Lock, kernel.Execute[FreeCachedResourcesRequest, FreeCachedResourcesResponse]) {
 	var resources kernel.Write[*ResourceQueue]
 	return func(access kernel.ResourceAccess) {
 			resources = access.GetWrite[*ResourceQueue]()
@@ -72,7 +72,7 @@ func (p *Plugin) freeCachedResourcesCmd() (kernel.Lock, kernel.Execute[FreeCache
 		}
 }
 
-func setViewportCmd() (kernel.Lock, kernel.Execute[app.SetViewportRequest, app.SetViewportResponse]) {
+func setViewportCmdImpl() (kernel.Lock, kernel.Execute[app.SetViewportRequest, app.SetViewportResponse]) {
 	var preference kernel.Read[*desiredViewport]
 	var current kernel.Write[*app.Viewport]
 	return func(access kernel.ResourceAccess) {
@@ -87,7 +87,7 @@ func setViewportCmd() (kernel.Lock, kernel.Execute[app.SetViewportRequest, app.S
 		}
 }
 
-func setDesiredViewportCmd() (kernel.Lock, kernel.Execute[app.SetDesiredViewportRequest, app.SetDesiredViewportResponse]) {
+func setDesiredViewportCmdImpl() (kernel.Lock, kernel.Execute[app.SetDesiredViewportRequest, app.SetDesiredViewportResponse]) {
 	var stored kernel.Write[*desiredViewport]
 	var current kernel.Write[*app.Viewport]
 	return func(access kernel.ResourceAccess) {

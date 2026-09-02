@@ -126,25 +126,29 @@ func (testPlugin) Name() kernel.PluginName { return "gfxtest" }
 // Name is the gfx plugin's, not this fixture's: the fixture locks gfx resources.
 func (testPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 func (testPlugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.HandleCommand[recordCmd](func() (kernel.Lock, kernel.Execute[recordReq, struct{}]) {
-		var queue kernel.Write[*OpQueue]
-		return func(access kernel.ResourceAccess) {
-				queue = access.GetWrite[*OpQueue]()
-			}, func(_ kernel.Kernel, req recordReq) (struct{}, error) {
-				req.fn(queue.Get())
-				return struct{}{}, nil
-			}
-	})
-	registrar.HandleCommand[recordResourcesCmd](func() (kernel.Lock, kernel.Execute[recordResourcesReq, struct{}]) {
-		var queue kernel.Write[*ResourceQueue]
-		return func(access kernel.ResourceAccess) {
-				queue = access.GetWrite[*ResourceQueue]()
-			}, func(_ kernel.Kernel, req recordResourcesReq) (struct{}, error) {
-				req.fn(queue.Get())
-				return struct{}{}, nil
-			}
-	})
+	registrar.HandleCommand[recordCmd](recordCmdImpl)
+	registrar.HandleCommand[recordResourcesCmd](recordResourcesCmdImpl)
 	return nil
+}
+
+func recordCmdImpl() (kernel.Lock, kernel.Execute[recordRequest, recordResponse]) {
+	var queue kernel.Write[*OpQueue]
+	return func(access kernel.ResourceAccess) {
+			queue = access.GetWrite[*OpQueue]()
+		}, func(_ kernel.Kernel, req recordRequest) (recordResponse, error) {
+			req.fn(queue.Get())
+			return recordResponse{}, nil
+		}
+}
+
+func recordResourcesCmdImpl() (kernel.Lock, kernel.Execute[recordResourcesRequest, recordResourcesResponse]) {
+	var queue kernel.Write[*ResourceQueue]
+	return func(access kernel.ResourceAccess) {
+			queue = access.GetWrite[*ResourceQueue]()
+		}, func(_ kernel.Kernel, req recordResourcesRequest) (recordResourcesResponse, error) {
+			req.fn(queue.Get())
+			return recordResourcesResponse{}, nil
+		}
 }
 func newTestKernel(t *testing.T, p *Plugin) kernel.Executioner {
 	return newTestKernelWithFS(t, p, fstest.MapFS{})
@@ -1293,17 +1297,19 @@ func TestBufferWithBytesReuploadsEveryFrame(t *testing.T) {
 func recordList(t *testing.T, k kernel.Executioner) *OpQueue {
 	t.Helper()
 	var captured *OpQueue
-	k.ExecuteCommand[recordCmd](recordReq{fn: func(l *OpQueue) { captured = l }})
+	k.ExecuteCommand[recordCmd](recordRequest{fn: func(l *OpQueue) { captured = l }})
 	return captured
 }
 
-type recordReq struct{ fn func(*OpQueue) }
-type recordCmd kernel.Command[recordReq, struct{}]
+type recordCmd kernel.Command[recordRequest, recordResponse]
+type recordRequest struct{ fn func(*OpQueue) }
+type recordResponse struct{}
 
 func withResourceQueue(t *testing.T, k kernel.Executioner, use func(*ResourceQueue)) {
 	t.Helper()
-	k.ExecuteCommand[recordResourcesCmd](recordResourcesReq{fn: use})
+	k.ExecuteCommand[recordResourcesCmd](recordResourcesRequest{fn: use})
 }
 
-type recordResourcesReq struct{ fn func(*ResourceQueue) }
-type recordResourcesCmd kernel.Command[recordResourcesReq, struct{}]
+type recordResourcesCmd kernel.Command[recordResourcesRequest, recordResourcesResponse]
+type recordResourcesRequest struct{ fn func(*ResourceQueue) }
+type recordResourcesResponse struct{}
