@@ -42,7 +42,7 @@ func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var viewportResource kernel.Read[*app.Viewport]
 	var queueResource kernel.Write[*canvas.OpQueue]
 	var lookupResource kernel.Write[*canvas.Lookup]
-	var filesystem kernel.Read[storage.ReadFS]
+	var filesystem kernel.Read[storage.FileSystem]
 	return func(access kernel.ResourceAccess) {
 			frameResource = access.GetWrite[*Frame]()
 			interactionsResource = access.GetWrite[*Interactions]()
@@ -51,7 +51,7 @@ func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			viewportResource = access.GetRead[*app.Viewport]()
 			queueResource = access.GetWrite[*canvas.OpQueue]()
 			lookupResource = access.GetWrite[*canvas.Lookup]()
-			filesystem = access.GetRead[storage.ReadFS]()
+			filesystem = access.GetRead[storage.FileSystem]()
 		}, func(k kernel.Kernel, _ app.UpdateEvent) error {
 			frame := frameResource.Get()
 			interactions := interactionsResource.Get()

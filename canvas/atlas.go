@@ -189,7 +189,7 @@ func (a *atlas) releaseAll(resources *gfx.ResourceQueue) {
 
 // resolveStandalone decodes an image into a full-image texture kept outside the
 // atlas, caching it by path. Tiled sprites sample it with repeat addressing.
-func (a *atlas) resolveStandalone(path string, filesystem storage.ReadFS, resources *gfx.ResourceQueue) (standaloneEntry, bool) {
+func (a *atlas) resolveStandalone(path string, filesystem storage.FileSystem, resources *gfx.ResourceQueue) (standaloneEntry, bool) {
 	if path == "" {
 		return standaloneEntry{}, false
 	}
@@ -213,7 +213,7 @@ func (a *atlas) resolveStandalone(path string, filesystem storage.ReadFS, resour
 	return entry, true
 }
 
-func (a *atlas) resolveSprite(path string, filesystem storage.ReadFS, resources *gfx.ResourceQueue) (atlasEntry, bool) {
+func (a *atlas) resolveSprite(path string, filesystem storage.FileSystem, resources *gfx.ResourceQueue) (atlasEntry, bool) {
 	key := path
 	if key == "" {
 		key = whiteAtlasKey
@@ -331,7 +331,7 @@ func (a *atlas) place(width, height int, resources *gfx.ResourceQueue) (arrayInd
 	return index, 0, x, y, true
 }
 
-func decodeResourceImage(filesystem storage.ReadFS, path string) (width, height int, pixels []byte, ok bool) {
+func decodeResourceImage(filesystem storage.FileSystem, path string) (width, height int, pixels []byte, ok bool) {
 	file, err := filesystem.Open(path)
 	if err != nil {
 		return 0, 0, nil, false

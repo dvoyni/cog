@@ -9,8 +9,9 @@ import (
 const (
 	// ExecutableMount is the default lowest-priority read mount.
 	ExecutableMount MountId = "executable"
-	// PermanentMount is the default highest-priority read mount, backed by the
-	// permanent WriteFS so written data reads back through the same overlay.
+	// PermanentMount is the highest-priority read mount, backed by the permanent
+	// filesystem so written data reads back through the same overlay. It is
+	// reserved: storage derives it, and configuring or mounting it is an error.
 	PermanentMount MountId = "permanent"
 	// DefaultReadPriority is used by WithReadDiskFS.
 	DefaultReadPriority = 0
@@ -20,11 +21,11 @@ const (
 
 // Config configures storage's read mounts and permanent filesystem.
 type Config struct {
-	AppId      string
-	ReadMounts []ReadMount
-	WriteFS    WriteFS
-	// ValuesPath is the JSON object read through ReadFS and flushed to WriteFS
-	// by the value commands. Empty means DefaultValuesPath.
+	AppId       string
+	ReadMounts  []ReadMount
+	PermanentFS PermanentFS
+	// ValuesPath is the JSON object read through FileSystem and flushed to the
+	// permanent filesystem by the value commands. Empty means DefaultValuesPath.
 	ValuesPath string
 }
 
@@ -35,7 +36,8 @@ func DefaultConfig(appId string) Config {
 }
 
 // WithReadFS adds or replaces a read mount. The returned Config owns its mount
-// slice and does not mutate c.
+// slice and does not mutate c. PermanentMount is reserved; the plugin rejects a
+// Config that mounts it.
 func (c Config) WithReadFS(id MountId, priority int, filesystem fs.FS) Config {
 	c.ReadMounts = slices.Clone(c.ReadMounts)
 	for i := range c.ReadMounts {
@@ -54,9 +56,9 @@ func (c Config) WithReadDiskFS(path MountId) Config {
 	return c.WithReadFS(path, DefaultReadPriority, os.DirFS(string(path)))
 }
 
-// WithWriteFS replaces the permanent filesystem.
-func (c Config) WithWriteFS(filesystem WriteFS) Config {
-	c.WriteFS = filesystem
+// WithPermanentFS replaces the permanent filesystem.
+func (c Config) WithPermanentFS(filesystem PermanentFS) Config {
+	c.PermanentFS = filesystem
 	return c
 }
 

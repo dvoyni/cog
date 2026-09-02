@@ -39,7 +39,7 @@ shaders. Register `storage` before `canvas`. A typical order is `storage`,
   scoped `LookupAccess`.
 
 Gameplay normally writes only `*OpQueue`. Sizing, measurement, and unloading go
-through `*Lookup` (plus `storage.ReadFS`) via a `LookupAccess`; the flush handler
+through `*Lookup` (plus `storage.FileSystem`) via a `LookupAccess`; the flush handler
 also writes `*Lookup` to resolve lazy sprites and apply deferred unloads.
 
 ## Drawing API
@@ -117,7 +117,7 @@ scope, callers acquire a handler-scoped facade instead:
 la := canvas.NewLookupAccess(kernel, lookup, filesystem)
 ```
 
-Bind `access.GetWrite[*canvas.Lookup]()` and `access.GetRead[storage.ReadFS]()`
+Bind `access.GetWrite[*canvas.Lookup]()` and `access.GetRead[storage.FileSystem]()`
 in the handler's `Lock`, then use:
 
 | Method | Result | Notes |
@@ -141,7 +141,7 @@ pages are freed only by the whole-glyph-atlas resize invalidation.
 ## Event Subscribed
 
 `UpdateEventHandler` subscribes to `app.UpdateEvent`. It writes the canvas
-`*OpQueue` and `*Lookup`, reads `gfx.Viewport` and `storage.ReadFS`, and writes
+`*OpQueue` and `*Lookup`, reads `gfx.Viewport` and `storage.FileSystem`, and writes
 `gfx.OpQueue` and `gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
 `gfx.UpdateEventHandler`, so gameplay records first, canvas emits graphics
 draws second, and gfx presents last.

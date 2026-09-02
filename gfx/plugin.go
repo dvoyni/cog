@@ -112,12 +112,12 @@ func (p *Plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 	var read kernel.Write[*readList]
 	var ready kernel.Write[*readyList]
 	var resources kernel.Write[*ResourceQueue]
-	var filesystem kernel.Read[storage.ReadFS]
+	var filesystem kernel.Read[storage.FileSystem]
 	return func(access kernel.ResourceAccess) {
 			read = access.GetWrite[*readList]()
 			ready = access.GetWrite[*readyList]()
 			resources = access.GetWrite[*ResourceQueue]()
-			filesystem = access.GetRead[storage.ReadFS]()
+			filesystem = access.GetRead[storage.FileSystem]()
 		}, func(k kernel.Kernel, _ app.RenderEvent) error {
 			acquire(read, ready)
 			list := read.Get()

@@ -20,7 +20,7 @@ func ShaderWithText(text string) ShaderDescr {
 	return ShaderDescr{source: ShaderSourceText, textOrPath: text}
 }
 
-// ShaderWithResource describes a shader loaded from storage.ReadFS.
+// ShaderWithResource describes a shader loaded from storage.FileSystem.
 func ShaderWithResource(path string) ShaderDescr {
 	return ShaderDescr{source: ShaderSourceResource, textOrPath: path}
 }

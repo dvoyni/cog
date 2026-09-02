@@ -246,12 +246,12 @@ func BenchmarkTranslateSteadyState(b *testing.B) {
 			ColorParam("tint", m.Color{R: 0.5, A: 1}),
 		)
 	}
-	translator.translate(&queue, nil, backend, storage.ReadFS{})
+	translator.translate(&queue, nil, backend, storage.FileSystem{})
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		translator.translate(&queue, nil, backend, storage.ReadFS{})
+		translator.translate(&queue, nil, backend, storage.FileSystem{})
 	}
 }
 

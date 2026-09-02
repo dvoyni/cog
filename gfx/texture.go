@@ -34,7 +34,7 @@ const (
 	TextureSourceBaked
 )
 
-// TextureWithResource describes a texture loaded from storage.ReadFS.
+// TextureWithResource describes a texture loaded from storage.FileSystem.
 func TextureWithResource(path string) TextureDescr {
 	return TextureDescr{source: TextureSourceResource, path: path}
 }

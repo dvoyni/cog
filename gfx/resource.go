@@ -10,7 +10,7 @@ import (
 	"github.com/dvoyni/cog/storage"
 )
 
-func loadTextureResource(filesystem storage.ReadFS, name string) (width, height int, pixels []byte, ok bool) {
+func loadTextureResource(filesystem storage.FileSystem, name string) (width, height int, pixels []byte, ok bool) {
 	file, err := filesystem.Open(name)
 	if err != nil {
 		return 0, 0, nil, false
@@ -27,7 +27,7 @@ func loadTextureResource(filesystem storage.ReadFS, name string) (width, height 
 	return rgba.Bounds().Dx(), rgba.Bounds().Dy(), rgba.Pix, true
 }
 
-func loadShaderResource(filesystem storage.ReadFS, name string) (code []byte, ok bool) {
+func loadShaderResource(filesystem storage.FileSystem, name string) (code []byte, ok bool) {
 	file, err := filesystem.Open(name)
 	if err != nil {
 		return nil, false

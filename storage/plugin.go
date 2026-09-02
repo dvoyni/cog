@@ -3,7 +3,6 @@ package storage
 import (
 	"fmt"
 	"io/fs"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +13,7 @@ import (
 // Name is the storage plugin name and configuration key.
 const Name kernel.PluginName = "storage"
 
-// Plugin registers ReadFS and WriteFS resources and storage commands.
+// Plugin registers the FileSystem and Values resources and storage commands.
 type Plugin struct{}
 
 // New creates a storage plugin.
@@ -37,22 +36,24 @@ func (p *Plugin) Register(registrar *kernel.Registrar, config any) error {
 		}
 	}
 
-	readFS, writeFS, values, err := resolveConfig(cfg)
+	filesystem, values, err := resolveConfig(cfg)
 	if err != nil {
 		return err
 	}
-	registrar.InitResource(readFS)
-	registrar.InitResource(writeFS)
+	registrar.InitResource(filesystem)
 	registrar.InitResource(values)
 	registerCommands(registrar)
 	return nil
 }
 
-func resolveConfig(config Config) (ReadFS, WriteFS, Values, error) {
+func resolveConfig(config Config) (FileSystem, Values, error) {
 	mounts := make([]ReadMount, 0, len(config.ReadMounts)+1)
 	for _, mount := range config.ReadMounts {
 		if mount.Id == "" || mount.FS == nil {
-			return ReadFS{}, nil, Values{}, ErrInvalidMount{Id: mount.Id}
+			return FileSystem{}, Values{}, ErrInvalidMount{Id: mount.Id}
+		}
+		if mount.Id == PermanentMount {
+			return FileSystem{}, Values{}, ErrReservedMount{Id: mount.Id}
 		}
 		mounts = append(mounts, mount)
 	}
@@ -60,7 +61,7 @@ func resolveConfig(config Config) (ReadFS, WriteFS, Values, error) {
 	if !hasMount(mounts, ExecutableMount) {
 		mount, available, err := defaultReadMount()
 		if err != nil {
-			return ReadFS{}, nil, Values{}, err
+			return FileSystem{}, Values{}, err
 		}
 		if available {
 			mounts = append(mounts, mount)
@@ -72,33 +73,30 @@ func resolveConfig(config Config) (ReadFS, WriteFS, Values, error) {
 		valuesPath = DefaultValuesPath
 	}
 	if !fs.ValidPath(valuesPath) || valuesPath == "." {
-		return ReadFS{}, nil, Values{}, ErrInvalidValuesPath{Path: valuesPath}
+		return FileSystem{}, Values{}, ErrInvalidValuesPath{Path: valuesPath}
 	}
 
-	writeFS := config.WriteFS
-	if writeFS == nil {
+	permanent := config.PermanentFS
+	if permanent == nil {
 		appId := config.AppId
 		if appId == "" {
 			executable, err := os.Executable()
 			if err != nil {
-				return ReadFS{}, nil, Values{}, fmt.Errorf("storage: resolve app id: %w", err)
+				return FileSystem{}, Values{}, fmt.Errorf("storage: resolve app id: %w", err)
 			}
 			appId = strings.TrimSuffix(filepath.Base(executable), filepath.Ext(executable))
 		}
 		if appId == "." || appId == ".." || filepath.Base(appId) != appId || filepath.VolumeName(appId) != "" {
-			return ReadFS{}, nil, Values{}, ErrInvalidAppId{AppId: appId}
+			return FileSystem{}, Values{}, ErrInvalidAppId{AppId: appId}
 		}
 		var err error
-		writeFS, err = defaultWriteFS(appId)
+		permanent, err = defaultPermanentFS(appId)
 		if err != nil {
-			return ReadFS{}, nil, Values{}, err
+			return FileSystem{}, Values{}, err
 		}
 	}
 
-	if !hasMount(mounts, PermanentMount) {
-		mounts = append(mounts, ReadMount{Id: PermanentMount, Priority: math.MaxInt, FS: writeFS})
-	}
-	return newReadFS(mounts), writeFS, Values{path: valuesPath}, nil
+	return newFileSystem(mounts, permanent), Values{path: valuesPath}, nil
 }
 
 func hasMount(mounts []ReadMount, id MountId) bool {
@@ -110,4 +108,4 @@ func hasMount(mounts []ReadMount, id MountId) bool {
 	return false
 }
 
-var _ fs.FS = readFS{}
+var _ fs.FS = fileSystem{}

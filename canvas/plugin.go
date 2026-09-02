@@ -58,7 +58,7 @@ func (p *Plugin) Register(registrar *kernel.Registrar, value any) error {
 // has registered and before the host loop, so the shaders are in place for the
 // first frame without depending on a driver publishing an event.
 func (p *Plugin) Start(k kernel.Executioner) error {
-	_, err := k.ExecuteCommand[storage.SetReadFSCmd](storage.SetReadFSRequest{Mount: storage.ReadMount{
+	_, err := k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{Mount: storage.ReadMount{
 		Id: shaderMountID, Priority: math.MaxInt, FS: shaderFS,
 	}})
 	return err
@@ -69,14 +69,14 @@ func (p *Plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var gfxQueue kernel.Write[*gfx.OpQueue]
 	var gfxResourceQueue kernel.Write[*gfx.ResourceQueue]
 	var viewport kernel.Read[*app.Viewport]
-	var filesystem kernel.Read[storage.ReadFS]
+	var filesystem kernel.Read[storage.FileSystem]
 	var lookupResource kernel.Write[*Lookup]
 	return func(access kernel.ResourceAccess) {
 			writeQueue = access.GetWrite[*OpQueue]()
 			gfxQueue = access.GetWrite[*gfx.OpQueue]()
 			gfxResourceQueue = access.GetWrite[*gfx.ResourceQueue]()
 			viewport = access.GetRead[*app.Viewport]()
-			filesystem = access.GetRead[storage.ReadFS]()
+			filesystem = access.GetRead[storage.FileSystem]()
 			lookupResource = access.GetWrite[*Lookup]()
 		}, func(kernel.Kernel, app.UpdateEvent) error {
 			return p.flushFrame(writeQueue.Get(), gfxQueue.Get(), gfxResourceQueue.Get(),
@@ -86,7 +86,7 @@ func (p *Plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 
 func (p *Plugin) flushFrame(
 	write *OpQueue, gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue,
-	view *app.Viewport, filesystem storage.ReadFS, lookup *Lookup,
+	view *app.Viewport, filesystem storage.FileSystem, lookup *Lookup,
 ) error {
 	spriteAtlas := lookup.sprites
 	fontAtlas := lookup.fonts
@@ -230,7 +230,7 @@ func clearFontFaces(fonts *fontStore) {
 	clear(fonts.fonts)
 }
 
-func (p *Plugin) drawSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *gfx.ResourceQueue, filesystem storage.ReadFS, view *app.Viewport, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *spriteOp) {
+func (p *Plugin) drawSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *gfx.ResourceQueue, filesystem storage.FileSystem, view *app.Viewport, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *spriteOp) {
 	t := op.transform
 	if t.TileX || t.TileY {
 		if op.path == "" {
@@ -320,7 +320,7 @@ func splitNineSliceAxis(length, leading, trailing float32) [4]float32 {
 // drawTiledSprite renders a sprite that repeats on one or both axes. It samples a
 // standalone repeat texture through the textured-triangle path, so it ignores the
 // sprite material and Frame; Scale controls logical tile size and tint becomes vertex color.
-func (p *Plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *gfx.ResourceQueue, filesystem storage.ReadFS, view *app.Viewport, t SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *spriteOp) {
+func (p *Plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *gfx.ResourceQueue, filesystem storage.FileSystem, view *app.Viewport, t SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *spriteOp) {
 	entry, ok := atlas.resolveStandalone(op.path, filesystem, gfxResources)
 	if !ok {
 		return
@@ -517,7 +517,7 @@ func paramColorOr(params []gfx.ParameterDescr, name string, def m.Color) m.Color
 	return def
 }
 
-func (p *Plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, atlas *atlas, resources *gfx.ResourceQueue, filesystem storage.ReadFS, view *app.Viewport, fonts *fontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *textOp) {
+func (p *Plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, atlas *atlas, resources *gfx.ResourceQueue, filesystem storage.FileSystem, view *app.Viewport, fonts *fontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *textOp) {
 	if op.draw.Size <= 0 || op.text == "" || op.fontPath == "" {
 		return
 	}
@@ -574,7 +574,7 @@ func (p *Plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, atlas *atlas, resources *gf
 }
 
 // drawText expands inline icons and wraps lines before drawing glyph runs.
-func (p *Plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *atlas, resources *gfx.ResourceQueue, filesystem storage.ReadFS, view *app.Viewport, fonts *fontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *textOp) {
+func (p *Plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *atlas, resources *gfx.ResourceQueue, filesystem storage.FileSystem, view *app.Viewport, fonts *fontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *textOp) {
 	if op.draw.Size <= 0 || op.text == "" || op.fontPath == "" {
 		return
 	}
@@ -639,7 +639,7 @@ func (p *Plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *atlas, 
 }
 
 // iconWidth resolves an inline icon and returns its cap-height-scaled width.
-func (p *Plugin) iconWidth(spriteAtlas *atlas, path string, capHeight float32, filesystem storage.ReadFS, resources *gfx.ResourceQueue) float32 {
+func (p *Plugin) iconWidth(spriteAtlas *atlas, path string, capHeight float32, filesystem storage.FileSystem, resources *gfx.ResourceQueue) float32 {
 	entry, ok := spriteAtlas.resolveSprite(normalizeResourcePath(path), filesystem, resources)
 	if !ok {
 		return 0

@@ -27,7 +27,7 @@ func defaultReadMount() (ReadMount, bool, error) {
 	}, true, nil
 }
 
-func defaultWriteFS(appId string) (WriteFS, error) {
+func defaultPermanentFS(appId string) (PermanentFS, error) {
 	path, err := permanentDir(appId)
 	if err != nil {
 		return nil, err
@@ -62,7 +62,7 @@ func permanentDir(appId string) (string, error) {
 
 // OpenDiskFS creates path if needed and returns a confined writable filesystem
 // rooted there. Names accepted by its methods use fs.ValidPath form.
-func OpenDiskFS(path string) (WriteFS, error) {
+func OpenDiskFS(path string) (PermanentFS, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("storage: resolve permanent directory %q: %w", path, err)
@@ -146,4 +146,4 @@ func (d diskFS) withRoot(operation func(*os.Root) error) error {
 	return closeErr
 }
 
-var _ WriteFS = diskFS{}
+var _ PermanentFS = diskFS{}

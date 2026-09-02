@@ -51,7 +51,7 @@ func newTranslator() *translator {
 // by the latest frame. The returned ops (and their payloads) are valid until
 // the next translate call. It returns the first error encountered; valid draws
 // are still translated.
-func (t *translator) translate(queue *OpQueue, persistent []op, backend Backend, filesystem storage.ReadFS) (*GpuQueue, error) {
+func (t *translator) translate(queue *OpQueue, persistent []op, backend Backend, filesystem storage.FileSystem) (*GpuQueue, error) {
 	t.ops.Reset()
 
 	need := len(queue.ops) * uniformMax
@@ -160,7 +160,7 @@ func (t *translator) translate(queue *OpQueue, persistent []op, backend Backend,
 // emitResources binds each reflected texture/sampler resource, matching its name
 // to a material parameter (defaulting to the white texture / a clamp+linear
 // sampler when unset), so every binding the shader declares is provided.
-func (t *translator) emitResources(backend Backend, filesystem storage.ReadFS, drawParams, materialParams []ParameterDescr, plan *parameterPlan) {
+func (t *translator) emitResources(backend Backend, filesystem storage.FileSystem, drawParams, materialParams []ParameterDescr, plan *parameterPlan) {
 	// One sampler shared across textures (common case): the first sampler resource.
 	sampID := SamplerID(0)
 	if plan.samplerBinding >= 0 {
@@ -189,7 +189,7 @@ func (t *translator) emitResources(backend Backend, filesystem storage.ReadFS, d
 	}
 }
 
-func (t *translator) ensureTexture(backend Backend, filesystem storage.ReadFS, descr TextureDescr) TextureID {
+func (t *translator) ensureTexture(backend Backend, filesystem storage.FileSystem, descr TextureDescr) TextureID {
 	if descr.source == TextureSourceBaked {
 		return descr.id
 	}
@@ -210,7 +210,7 @@ func (t *translator) ensureTexture(backend Backend, filesystem storage.ReadFS, d
 	return id
 }
 
-func (t *translator) ensureShader(backend Backend, filesystem storage.ReadFS, descr ShaderDescr) (ShaderID, error) {
+func (t *translator) ensureShader(backend Backend, filesystem storage.FileSystem, descr ShaderDescr) (ShaderID, error) {
 	if id, ok := t.shaders[descr]; ok {
 		return id, nil
 	}
@@ -277,7 +277,7 @@ func (t *translator) freeCachedResources(backend Backend) {
 }
 
 // shaderCode resolves inline source directly or reads a resource from storage.
-func (t *translator) shaderCode(filesystem storage.ReadFS, descr ShaderDescr) ([]byte, error) {
+func (t *translator) shaderCode(filesystem storage.FileSystem, descr ShaderDescr) ([]byte, error) {
 	if descr.source == ShaderSourceResource {
 		if code, ok := loadShaderResource(filesystem, descr.textOrPath); ok {
 			return code, nil

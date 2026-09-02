@@ -69,7 +69,7 @@ not subscribe to this event itself.
 - `UpdateEventHandler` handles `app.UpdateEvent`, writes `*OpQueue` plus the
   ready queue, and runs `Last()` to present the completed frame queue.
 - `RenderEventHandler` handles `app.RenderEvent`, writes the read queue, ready
-  queue, and `*ResourceQueue`, reads `storage.ReadFS`, then translates and
+  queue, and `*ResourceQueue`, reads `storage.FileSystem`, then translates and
   executes the latest queue on the driver's render thread.
 
 ## Viewport

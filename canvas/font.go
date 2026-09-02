@@ -41,7 +41,7 @@ type canvasGlyph struct {
 	visible bool
 }
 
-func (s *fontStore) face(filesystem storage.ReadFS, path string, px int) *canvasFont {
+func (s *fontStore) face(filesystem storage.FileSystem, path string, px int) *canvasFont {
 	key := fontKey{path: path, px: px}
 	if cached, ok := s.fonts[key]; ok {
 		return cached

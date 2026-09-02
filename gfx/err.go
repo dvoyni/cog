@@ -3,7 +3,7 @@ package gfx
 import "fmt"
 
 // ErrShaderNotFound is reported to the kernel when a draw's shader source is
-// unavailable from storage.ReadFS.
+// unavailable from storage.FileSystem.
 type ErrShaderNotFound struct{ Name string }
 
 func (e ErrShaderNotFound) Error() string {

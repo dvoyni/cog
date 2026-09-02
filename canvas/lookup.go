@@ -108,17 +108,17 @@ func (l *Lookup) invalidateFontsOnResize(resources *gfx.ResourceQueue, view *app
 // LookupAccess is a handler-scoped facade over a Lookup. It carries the kernel
 // (for error reporting) and the read filesystem needed to lazily load sprites and
 // fonts, without ever retaining them past the handler's lock scope. Acquire a
-// *Lookup write dependency plus storage.ReadFS in a handler, build a LookupAccess
+// *Lookup write dependency plus storage.FileSystem in a handler, build a LookupAccess
 // with NewLookupAccess, and pass it to consumers for the duration of that handler.
 type LookupAccess struct {
 	kernel kernel.Kernel
 	lookup *Lookup
-	fs     storage.ReadFS
+	fs     storage.FileSystem
 }
 
 // NewLookupAccess builds a scoped facade. Call it inside a handler that holds the
-// *Lookup write lock and the storage.ReadFS read lock; never store the result.
-func NewLookupAccess(k kernel.Kernel, lookup *Lookup, filesystem storage.ReadFS) LookupAccess {
+// *Lookup write lock and the storage.FileSystem read lock; never store the result.
+func NewLookupAccess(k kernel.Kernel, lookup *Lookup, filesystem storage.FileSystem) LookupAccess {
 	return LookupAccess{kernel: k, lookup: lookup, fs: filesystem}
 }
 
@@ -321,7 +321,7 @@ func measureLine(face *canvasFont, text string) float32 {
 
 // decodeImageHeader reads only an image's header to get its pixel size, avoiding a
 // full decode or any GPU upload.
-func decodeImageHeader(filesystem storage.ReadFS, path string) (width, height int, ok bool) {
+func decodeImageHeader(filesystem storage.FileSystem, path string) (width, height int, ok bool) {
 	file, err := filesystem.Open(path)
 	if err != nil {
 		return 0, 0, false

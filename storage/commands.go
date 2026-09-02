@@ -6,24 +6,29 @@ import (
 	"github.com/dvoyni/cog/kernel"
 )
 
-// SetReadFSCmd adds or replaces one mount in the ReadFS resource. Mounts are
+// SetMountCmd adds or replaces one mount in the FileSystem overlay. Mounts are
 // replaced by id; changing a mount's priority also updates its search order.
-type SetReadFSCmd kernel.Command[SetReadFSRequest, SetReadFSResponse]
-type SetReadFSRequest struct{ Mount ReadMount }
-type SetReadFSResponse struct{}
+// PermanentMount is reserved to SetPermanentFSCmd.
+type SetMountCmd kernel.Command[SetMountRequest, SetMountResponse]
+type SetMountRequest struct{ Mount ReadMount }
+type SetMountResponse struct{}
 
-// RemoveReadFSCmd removes one mount from the ReadFS resource by id.
-type RemoveReadFSCmd kernel.Command[RemoveReadFSRequest, RemoveReadFSResponse]
-type RemoveReadFSRequest struct{ Id MountId }
-type RemoveReadFSResponse struct{ Removed bool }
+// RemoveMountCmd removes one mount from the FileSystem overlay by id.
+// PermanentMount cannot be removed: it is derived from the permanent
+// filesystem, and dropping it would leave written data unreadable.
+type RemoveMountCmd kernel.Command[RemoveMountRequest, RemoveMountResponse]
+type RemoveMountRequest struct{ Id MountId }
+type RemoveMountResponse struct{ Removed bool }
 
-// SetWriteFSCmd replaces the permanent WriteFS resource.
-type SetWriteFSCmd kernel.Command[SetWriteFSRequest, SetWriteFSResponse]
-type SetWriteFSRequest struct{ FS WriteFS }
-type SetWriteFSResponse struct{}
+// SetPermanentFSCmd replaces the permanent filesystem. It swaps the write
+// target and the PermanentMount overlay entry in one step, so reads never fall
+// through to the filesystem that was just replaced.
+type SetPermanentFSCmd kernel.Command[SetPermanentFSRequest, SetPermanentFSResponse]
+type SetPermanentFSRequest struct{ FS PermanentFS }
+type SetPermanentFSResponse struct{}
 
 // GetValueCmd reads one value from the key-value store, loading the values file
-// through ReadFS on first use. A missing key leaves the caller's default in
+// through FileSystem on first use. A missing key leaves the caller's default in
 // place and stores nothing.
 type GetValueCmd kernel.Command[GetValueRequest, GetValueResponse]
 
@@ -85,8 +90,8 @@ type DeleteValueRequest struct {
 }
 type DeleteValueResponse struct{ Existed bool }
 
-// FlushValuesCmd writes pending value changes to WriteFS. It does nothing when
-// no value changed since the last flush.
+// FlushValuesCmd writes pending value changes to the permanent filesystem. It
+// does nothing when no value changed since the last flush.
 type FlushValuesCmd kernel.Command[FlushValuesRequest, FlushValuesResponse]
 type FlushValuesRequest struct{}
 type FlushValuesResponse struct{}

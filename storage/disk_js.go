@@ -22,7 +22,7 @@ func defaultReadMount() (ReadMount, bool, error) {
 	return ReadMount{}, false, nil
 }
 
-func defaultWriteFS(appId string) (WriteFS, error) {
+func defaultPermanentFS(appId string) (PermanentFS, error) {
 	localStorage := js.Global().Get("localStorage")
 	if localStorage.IsUndefined() || localStorage.IsNull() {
 		return nil, errors.New("storage: browser localStorage is unavailable")
@@ -31,8 +31,8 @@ func defaultWriteFS(appId string) (WriteFS, error) {
 }
 
 // OpenDiskFS is unavailable in a browser; use the default localStorage backend
-// or provide a WriteFS through Config.WithWriteFS.
-func OpenDiskFS(path string) (WriteFS, error) {
+// or provide a PermanentFS through Config.WithPermanentFS.
+func OpenDiskFS(path string) (PermanentFS, error) {
 	return nil, fmt.Errorf("storage: disk filesystem %q is unavailable in a browser", path)
 }
 
@@ -299,5 +299,5 @@ func (e webDirEntry) IsDir() bool                { return e.info.IsDir() }
 func (e webDirEntry) Type() fs.FileMode          { return e.info.Mode().Type() }
 func (e webDirEntry) Info() (fs.FileInfo, error) { return e.info, nil }
 
-var _ WriteFS = (*webFS)(nil)
+var _ PermanentFS = (*webFS)(nil)
 var _ fs.ReadDirFile = (*webOpenDir)(nil)

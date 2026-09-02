@@ -111,7 +111,7 @@ Instead: copy immutable data out, do the whole operation inside the handler, or
 use a lock-scoped callback command:
 
 ```go
-getReadFS(k, storage.GetReadFSRequest{Use: func(filesystem fs.FS) error {
+useFileSystem(k, UseFileSystemRequest{Use: func(filesystem fs.FS) error {
 	// Open, use, and close files before this callback returns.
 	return nil
 }})
@@ -222,7 +222,7 @@ an arbitrary size threshold. A package whose private resources are substantial m
 give each its own implementation file named for the resource, as `gfx` does with
 `opqueue.go` and `resourcequeue.go`, instead of one `resourcesimpl.go`. Public
 resource names should normally alias private implementations, as in
-`type ReadFS = readFS`, so other plugins can declare locks without reaching into
+`type FileSystem = fileSystem`, so other plugins can declare locks without reaching into
 the implementation.
 
 Declare in `Dependencies` every plugin whose contracts you use. This is enforced:

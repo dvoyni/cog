@@ -25,10 +25,32 @@ func (e ErrInvalidAppId) Error() string {
 	return fmt.Sprintf("storage: invalid app id %q", e.AppId)
 }
 
-// ErrInvalidWriteFS reports an attempt to install a nil permanent filesystem.
-type ErrInvalidWriteFS struct{}
+// ErrInvalidPermanentFS reports an attempt to install a nil permanent filesystem.
+type ErrInvalidPermanentFS struct{}
 
-func (ErrInvalidWriteFS) Error() string { return "storage: invalid nil write filesystem" }
+func (ErrInvalidPermanentFS) Error() string { return "storage: invalid nil permanent filesystem" }
+
+// ErrReservedMount reports an attempt to mount or unmount a reserved mount id.
+// PermanentMount is derived from the permanent filesystem, so mounting it by
+// hand could leave reads and writes pointing at different filesystems.
+type ErrReservedMount struct{ Id MountId }
+
+func (e ErrReservedMount) Error() string {
+	return fmt.Sprintf("storage: read mount %q is reserved to the permanent filesystem", e.Id)
+}
+
+// ErrNoWriteAccess reports a WriteFS with no permanent filesystem behind it,
+// which happens when the handle passed to WriteAccess never had its write lock
+// declared. It is a programming error, reported rather than panicked so the
+// failing operation is named.
+type ErrNoWriteAccess struct {
+	Op   string
+	Path string
+}
+
+func (e ErrNoWriteAccess) Error() string {
+	return fmt.Sprintf("storage: %s %q without write access to the permanent filesystem", e.Op, e.Path)
+}
 
 // ErrInvalidValuesPath reports a values file path that is not an fs.ValidPath.
 type ErrInvalidValuesPath struct{ Path string }

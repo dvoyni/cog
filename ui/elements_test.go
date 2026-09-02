@@ -25,7 +25,7 @@ func testAssets(t testing.TB, spriteWidth, spriteHeight int) fstest.MapFS {
 
 // testLookup builds a LookupAccess backed by an in-memory Lookup over files.
 func testLookup(files fstest.MapFS) canvas.LookupAccess {
-	return canvas.NewLookupAccess(kernel.Kernel{}, canvas.NewLookup(canvas.DefaultConfig()), storage.NewReadFS("test", files))
+	return canvas.NewLookupAccess(kernel.Kernel{}, canvas.NewLookup(canvas.DefaultConfig()), storage.NewFileSystem("test", files))
 }
 
 func testPNG(t testing.TB, width, height int) []byte {
