@@ -126,27 +126,28 @@ func TestValueStoreLoadDefaultsAndFlush(t *testing.T) {
 	}
 
 	volume := 1.0
-	if err := GetValue("volume", 1.0, &volume).apply(store.entries["volume"]); err != nil {
-		t.Fatal(err)
-	}
-	if volume != 0.5 {
-		t.Fatalf("volume = %v, want 0.5", volume)
-	}
-
-	missing := 7
-	if err := GetValue("missing", 7, &missing).apply(nil); err != nil {
-		t.Fatal(err)
-	}
-	if missing != 7 || len(store.entries) != 2 {
-		t.Fatalf("missing key = %v with %d entries, want default and no insertion", missing, len(store.entries))
-	}
-
-	raw, err := SetValue("volume", 0.25, false).marshal()
+	store, response, err := GetValue("volume", 1.0, &volume).op.apply(store, filesystem)
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.entries["volume"] = raw
-	store.dirty = true
+	if volume != 0.5 || !response.Found {
+		t.Fatalf("volume = %v (found %v), want 0.5 found", volume, response.Found)
+	}
+
+	missing := 7
+	store, response, err = GetValue("missing", 7, &missing).op.apply(store, filesystem)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing != 7 || response.Found || len(store.entries) != 2 {
+		t.Fatalf("missing key = %v (found %v) with %d entries, want default and no insertion",
+			missing, response.Found, len(store.entries))
+	}
+
+	store, _, err = SetValue("volume", 0.25, false).op.apply(store, filesystem)
+	if err != nil {
+		t.Fatal(err)
+	}
 	store, err = store.flush(write)
 	if err != nil {
 		t.Fatal(err)
@@ -301,9 +302,9 @@ func TestWriteAccessRequiresBoundHandle(t *testing.T) {
 	}
 }
 
-// TestValueRoundTripThroughOneWriteLock is the point of the merge: SetValueCmd
-// reads the values file and flushes it back while holding a single lock, and a
-// later read observes the write through the same overlay.
+// TestValueRoundTripThroughOneWriteLock is the point of the merge: one
+// AccessValuesCmd reads the values file and flushes it back while holding a
+// single lock, and a later read observes the write through the same overlay.
 func TestValueRoundTripThroughOneWriteLock(t *testing.T) {
 	permanent, err := OpenDiskFS(t.TempDir())
 	if err != nil {
@@ -311,11 +312,11 @@ func TestValueRoundTripThroughOneWriteLock(t *testing.T) {
 	}
 	k := testKernel(t, DefaultConfig("test").WithPermanentFS(permanent))
 
-	if _, err := k.ExecuteCommand[SetValueCmd](SetValue("volume", 0.25, false)); err != nil {
+	if _, err := k.ExecuteCommand[AccessValuesCmd](SetValue("volume", 0.25, false)); err != nil {
 		t.Fatal(err)
 	}
 	volume := 1.0
-	response, err := k.ExecuteCommand[GetValueCmd](GetValue("volume", 1.0, &volume))
+	response, err := k.ExecuteCommand[AccessValuesCmd](GetValue("volume", 1.0, &volume))
 	if err != nil {
 		t.Fatal(err)
 	}

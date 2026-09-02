@@ -111,10 +111,15 @@ resource access.
 | `SetMountCmd` | `SetMountRequest{Mount}` / `SetMountResponse` | write `FileSystem` | Adds or replaces a mount by `MountId`. Rejects `PermanentMount`. |
 | `RemoveMountCmd` | `RemoveMountRequest{Id}` / `RemoveMountResponse{Removed}` | write `FileSystem` | Removes a mount and reports whether it existed. Rejects `PermanentMount`. |
 | `SetPermanentFSCmd` | `SetPermanentFSRequest{FS}` / `SetPermanentFSResponse` | write `FileSystem` | Replaces the permanent filesystem and its overlay mount in one step. |
-| `GetValueCmd` | `GetValue(key, default, out)` / `GetValueResponse{Found}` | read `FileSystem`, write `Values` | Reads one value, loading the values file on first use. |
-| `SetValueCmd` | `SetValue(key, value, skipFlush)` / `SetValueResponse` | write `FileSystem`, write `Values` | Stores one value, flushing unless batched. |
-| `DeleteValueCmd` | `DeleteValueRequest{Key, SkipFlush}` / `DeleteValueResponse{Existed}` | write `FileSystem`, write `Values` | Removes one key, flushing unless batched. |
-| `FlushValuesCmd` | `FlushValuesRequest{}` / `FlushValuesResponse` | write `FileSystem`, write `Values` | Writes pending value changes; a no-op when nothing changed. |
+| `AccessValuesCmd` | `GetValue(key, default, out)` / `AccessValuesResponse{Found}` | write `FileSystem`, write `Values` | Reads one value, loading the values file on first use. |
+| `AccessValuesCmd` | `SetValue(key, value, skipFlush)` / `AccessValuesResponse{Found}` | write `FileSystem`, write `Values` | Stores one value, flushing unless batched; `Found` reports a replacement. |
+| `AccessValuesCmd` | `DeleteValue(key, skipFlush)` / `AccessValuesResponse{Found}` | write `FileSystem`, write `Values` | Removes one key, flushing unless batched; `Found` reports it existed. |
+| `AccessValuesCmd` | `FlushValues()` / `AccessValuesResponse{}` | write `FileSystem`, write `Values` | Writes pending value changes; a no-op when nothing changed. |
+
+`AccessValuesCmd` is one command over a closed union of store operations, built
+only by the four constructors above. Every operation may load the values file
+and write it back, so they share one command and one pair of locks rather than
+splitting a single store into four entry points.
 
 ## Errors
 
@@ -127,7 +132,7 @@ resource access.
   was never declared.
 - `ErrInvalidValuesPath{Path}`: the values file path is not an `fs.ValidPath`.
 - `ErrInvalidValuesFile{Path, Err}`: the values file is not a JSON object.
-- `ErrInvalidKey`, `ErrInvalidValueRequest{Key}`, `ErrInvalidOutValue{Key}`:
+- `ErrInvalidKey`, `ErrInvalidValueRequest`, `ErrInvalidOutValue{Key}`:
   malformed value requests.
 
 Each exported error type implements `Error() string`.

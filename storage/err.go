@@ -64,12 +64,13 @@ type ErrInvalidKey struct{}
 
 func (ErrInvalidKey) Error() string { return "storage: invalid empty value key" }
 
-// ErrInvalidValueRequest reports a value request that did not come from
-// GetValue or SetValue.
-type ErrInvalidValueRequest struct{ Key string }
+// ErrInvalidValueRequest reports a zero AccessValuesRequest, which names no
+// operation because it did not come from GetValue, SetValue, DeleteValue or
+// FlushValues.
+type ErrInvalidValueRequest struct{}
 
-func (e ErrInvalidValueRequest) Error() string {
-	return fmt.Sprintf("storage: uninitialized value request for key %q", e.Key)
+func (ErrInvalidValueRequest) Error() string {
+	return "storage: value request names no operation"
 }
 
 // ErrInvalidOutValue reports a nil destination pointer passed to GetValue.

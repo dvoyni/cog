@@ -8,10 +8,7 @@ func registerCommands(registrar *kernel.Registrar) {
 	registrar.HandleCommand[SetMountCmd](setMount)
 	registrar.HandleCommand[RemoveMountCmd](removeMount)
 	registrar.HandleCommand[SetPermanentFSCmd](setPermanentFS)
-	registrar.HandleCommand[GetValueCmd](getValue)
-	registrar.HandleCommand[SetValueCmd](setValue)
-	registrar.HandleCommand[DeleteValueCmd](deleteValue)
-	registrar.HandleCommand[FlushValuesCmd](flushValues)
+	registrar.HandleCommand[AccessValuesCmd](accessValues)
 }
 
 func setMount() (kernel.Lock, kernel.Execute[SetMountRequest, SetMountResponse]) {
@@ -60,105 +57,32 @@ func setPermanentFS() (kernel.Lock, kernel.Execute[SetPermanentFSRequest, SetPer
 		}
 }
 
-func getValue() (kernel.Lock, kernel.Execute[GetValueRequest, GetValueResponse]) {
-	var filesystem kernel.Read[FileSystem]
-	var values kernel.Write[Values]
-	return func(access kernel.ResourceAccess) {
-			filesystem = access.GetRead[FileSystem]()
-			values = access.GetWrite[Values]()
-		}, func(_ kernel.Kernel, request GetValueRequest) (GetValueResponse, error) {
-			if request.key == "" {
-				return GetValueResponse{}, ErrInvalidKey{}
-			}
-			if request.apply == nil {
-				return GetValueResponse{}, ErrInvalidValueRequest{Key: request.key}
-			}
-			store, err := values.Get().load(filesystem.Get())
-			if err != nil {
-				return GetValueResponse{}, err
-			}
-			values.Set(store)
-			raw, found := store.entries[request.key]
-			if !found {
-				raw = nil
-			}
-			if err := request.apply(raw); err != nil {
-				return GetValueResponse{}, err
-			}
-			return GetValueResponse{Found: found}, nil
-		}
-}
-
-// setValue takes one write lock: the same handle reads the values file through
-// the overlay and, via WriteAccess, flushes it back.
-func setValue() (kernel.Lock, kernel.Execute[SetValueRequest, SetValueResponse]) {
+// accessValues takes one write lock on FileSystem for every operation, reads
+// included: a read populates the value cache, and the same handle both reads
+// the values file through the overlay and, via WriteAccess, flushes it back.
+func accessValues() (kernel.Lock, kernel.Execute[AccessValuesRequest, AccessValuesResponse]) {
 	var filesystem kernel.Write[FileSystem]
 	var values kernel.Write[Values]
 	return func(access kernel.ResourceAccess) {
 			filesystem = access.GetWrite[FileSystem]()
 			values = access.GetWrite[Values]()
-		}, func(_ kernel.Kernel, request SetValueRequest) (SetValueResponse, error) {
-			if request.key == "" {
-				return SetValueResponse{}, ErrInvalidKey{}
+		}, func(_ kernel.Kernel, request AccessValuesRequest) (AccessValuesResponse, error) {
+			if request.op == nil {
+				return AccessValuesResponse{}, ErrInvalidValueRequest{}
 			}
-			if request.marshal == nil {
-				return SetValueResponse{}, ErrInvalidValueRequest{Key: request.key}
+			if err := request.op.validate(); err != nil {
+				return AccessValuesResponse{}, err
 			}
-			raw, err := request.marshal()
-			if err != nil {
-				return SetValueResponse{}, err
-			}
-			// Loading first keeps keys we have never read from being dropped by the flush.
-			store, err := values.Get().load(filesystem.Get())
-			if err != nil {
-				return SetValueResponse{}, err
-			}
-			store.entries[request.key] = raw
-			store.dirty = true
-			if !request.skipFlush {
+			store, response, err := request.op.apply(values.Get(), filesystem.Get())
+			if err == nil && request.op.flushes() {
 				store, err = store.flush(WriteAccess(filesystem))
 			}
+			// Cached even on failure: apply returns whatever it managed to load, and
+			// a failed flush leaves changes pending for the next one.
 			values.Set(store)
-			return SetValueResponse{}, err
-		}
-}
-
-func deleteValue() (kernel.Lock, kernel.Execute[DeleteValueRequest, DeleteValueResponse]) {
-	var filesystem kernel.Write[FileSystem]
-	var values kernel.Write[Values]
-	return func(access kernel.ResourceAccess) {
-			filesystem = access.GetWrite[FileSystem]()
-			values = access.GetWrite[Values]()
-		}, func(_ kernel.Kernel, request DeleteValueRequest) (DeleteValueResponse, error) {
-			if request.Key == "" {
-				return DeleteValueResponse{}, ErrInvalidKey{}
-			}
-			store, err := values.Get().load(filesystem.Get())
 			if err != nil {
-				return DeleteValueResponse{}, err
+				return AccessValuesResponse{}, err
 			}
-			_, existed := store.entries[request.Key]
-			if existed {
-				delete(store.entries, request.Key)
-				store.dirty = true
-			}
-			if !request.SkipFlush {
-				store, err = store.flush(WriteAccess(filesystem))
-			}
-			values.Set(store)
-			return DeleteValueResponse{Existed: existed}, err
-		}
-}
-
-func flushValues() (kernel.Lock, kernel.Execute[FlushValuesRequest, FlushValuesResponse]) {
-	var filesystem kernel.Write[FileSystem]
-	var values kernel.Write[Values]
-	return func(access kernel.ResourceAccess) {
-			filesystem = access.GetWrite[FileSystem]()
-			values = access.GetWrite[Values]()
-		}, func(_ kernel.Kernel, _ FlushValuesRequest) (FlushValuesResponse, error) {
-			store, err := values.Get().flush(WriteAccess(filesystem))
-			values.Set(store)
-			return FlushValuesResponse{}, err
+			return response, nil
 		}
 }
