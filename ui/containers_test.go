@@ -31,3 +31,16 @@ func TestContainerConstructorsSelectLayout(t *testing.T) {
 		})
 	}
 }
+
+// A wrapper that stands in for its anchor must measure to the anchor alone, or
+// an element that appears only on hover would resize its own anchor and move it
+// out from under the pointer.
+func TestWithFloatingMeasuresToAnchorOnly(t *testing.T) {
+	measured := ui.Measure(
+		ui.WithFloating(ui.NewElement().Width(30).Height(20), ui.NewElement().Width(200).Height(80)),
+		m.Vec2{X: 500, Y: 500},
+	)
+	if measured != (m.Vec2{X: 30, Y: 20}) {
+		t.Fatalf("measured = %+v, want the anchor's size {X:30 Y:20}", measured)
+	}
+}

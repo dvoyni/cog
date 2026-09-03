@@ -121,6 +121,7 @@ type Element struct {
 	ignoreLayout                                 bool
 	ignoreClip                                   bool
 	ignoreHitTest                                bool
+	stayOnScreen                                 bool
 	preserveAspectRatio                          bool
 	addState, removeState                        VisualState
 

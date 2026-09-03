@@ -263,6 +263,21 @@ func (element Element) IgnoreHitTest() Element {
 	return element
 }
 
+// StayOnScreen slides the element back inside the viewport once it has been
+// positioned, without ever resizing it. An element larger than the viewport on
+// an axis keeps its start edge and overflows the far one, so it stays anchored
+// instead of oscillating.
+//
+// It implies IgnoreLayout. The clamp is only meaningful when nothing else
+// computes this element's place: shifting a flow child would silently overlap
+// its siblings, so the flag turns the element absolute rather than quietly
+// doing nothing.
+func (element Element) StayOnScreen() Element {
+	element.stayOnScreen = true
+	element.ignoreLayout = true
+	return element
+}
+
 // PreserveAspectRatio keeps a visual's intrinsic ratio when layout fixes only
 // one axis. Image elements enable this automatically.
 func (element Element) PreserveAspectRatio() Element {

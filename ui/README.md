@@ -153,9 +153,18 @@ offset placement using the element's own dimensions. `Fill()` sets all four
 relative edges to zero.
 
 `IgnoreLayout()` removes a child from flow or grid measurement and arrangement,
-allowing edge modifiers to position it independently. It does not disable
+allowing edge modifiers to position it independently. Those edges resolve
+against the parent's rect rather than its content box, so the parent's padding
+does not inset them, whatever layout the parent uses. It does not disable
 clipping. `Overlay` is the usual container when several normal children should
 occupy the same area.
+
+`StayOnScreen()` slides an element back inside the viewport once it has been
+positioned, without resizing it. An element larger than the viewport on an axis
+keeps its start edge and overflows the far one. It implies `IgnoreLayout()`:
+the clamp is only meaningful when nothing else computes the element's place, so
+rather than doing nothing on a flow child it makes the child absolute. The
+clamp runs before descendants are arranged, so they move with it.
 
 Each element inherits its parent's child clip, which is the intersection of the
 parent's rect and inherited clip. `IgnoreClip()` resets the element's inherited
@@ -275,3 +284,73 @@ button 5 as `4`. Hover interactions use button `-1`. Input edge positions use
 the pointer's current tick position; when down and up are both present, down is
 processed first. Press captures an ID for that button, release emits `Up`, and a
 release over the same ID also emits `Click`.
+## Tooltips And Floating Elements
+
+`WithFloating(anchor, floating)` pairs an element with something that hangs off
+it — a tooltip, a dropdown, a badge. The anchor stands in for the pair in the
+surrounding layout: the wrapper measures to the anchor alone, so wrapping an
+element changes nothing around it. Size and position the result rather than the
+anchor, whose own edges are overwritten so that it fills the wrapper.
+
+The floating element is taken out of layout and out of its anchor's clip. Hit
+testing is left to the caller. A tooltip needs `IgnoreHitTest()`, or it becomes
+the topmost target over its own anchor and takes the hover that keeps it alive;
+a menu wants to stay clickable. `IgnoreHitTest()` is consulted only for elements
+without an `ID`, so nothing inside a tooltip may carry one.
+
+`HoverTracker` answers which element the pointer is over. Feed it the frame's
+`Interactions` and the frame delta once per tick, then ask it about an ID while
+building the UI. `Dwell` is how long the pointer must rest before it reports;
+once one element has been reported, moving straight to another reports that one
+immediately, and leaving every element starts the wait over. The zero value
+reports immediately.
+
+A tooltip is those two parts, a placement, and `StayOnScreen()`:
+
+```go
+// Dwell is a policy, not per-frame data: set it once.
+tracker := ui.HoverTracker{Dwell: 0.4}
+
+// Once per tick, before building the UI.
+tracker.Update(interactions, delta)
+
+func tooltip(body ui.Element) ui.Element {
+    return ui.Overlay(panel(body)).
+        IgnoreHitTest().
+        TopRel(1).LeftRel(0.5).PivotLeftRel(0.5).
+        StayOnScreen().
+        Layer(500)
+}
+
+button := iconButton(id)
+if tracker.Hovered(id) {
+    button = ui.WithFloating(button, tooltip(describe(id)))
+}
+```
+
+`TopRel(1)` puts the tooltip's top at the anchor's bottom and the pivot centres
+it on the anchor; `StayOnScreen()` slides it back inside the viewport near an
+edge, without resizing it.
+
+Give a wrapped text column a `MinWidth` equal to its `WrapWidth`. Text measures
+to its longest line, and wrapping fills each line right up to the limit, so a
+column left to measure itself comes out exactly as wide as its widest line. That
+line then sits exactly on the clip edge, and whatever ink its last glyph carries
+past its advance width is shaved off — a couple of pixels missing from the right
+of the longest line only, on every tooltip. A minimum width breaks the
+circularity by fixing the box independently of what the text measured.
+
+It also makes measurement and drawing agree. A label measures itself by wrapping
+at `TextParams.WrapWidth`, but draws by wrapping at the width layout actually
+gave it, so the two describe the same lines only when the box matches the wrap
+width. Layout never derives a wrap width, so wrapping text has to be handed one;
+relative caps are no help, as the measure pass resolves relative sizes against a
+zero basis.
+
+`Layer` is an offset from the root's base layer, so choose one that clears the
+tooltip's neighbours without jumping a dialog drawn above them all.
+
+Because a frame is declared afresh each tick, a tooltip exists only on the
+frames its anchor is hovered — there is nothing to hide and no visibility flag
+to keep. Note that a disabled element is not a hit target at all, so it never
+reports as hovered and cannot carry a tooltip.

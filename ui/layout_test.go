@@ -819,6 +819,145 @@ func integerName(value int) string {
 	return "10k"
 }
 
+func TestStayOnScreenClampsOverflowBackInsideViewport(t *testing.T) {
+	tests := []struct {
+		name    string
+		element Element
+		want    Rect
+	}{
+		{name: "past left edge", element: NewElement().Left(-30), want: Rect{X: 0, Y: 0, Width: 40, Height: 20}},
+		{name: "past right edge", element: NewElement().Left(90), want: Rect{X: 60, Y: 0, Width: 40, Height: 20}},
+		{name: "past bottom edge", element: NewElement().Top(95), want: Rect{X: 0, Y: 30, Width: 40, Height: 20}},
+		{name: "already inside", element: NewElement().Left(10).Top(10), want: Rect{X: 10, Y: 10, Width: 40, Height: 20}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			visual := &recordingVisual{defaultSize: m.Vec2{X: 40, Y: 20}}
+			root := test.element.StayOnScreen().Visual(visual, nil)
+
+			var context processor
+			context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 100, Height: 50}}, nil)
+
+			assertRect(t, visual.states[0].Rect, test.want)
+		})
+	}
+}
+
+func TestStayOnScreenPinsStartEdgeWhenLargerThanViewport(t *testing.T) {
+	visual := &recordingVisual{}
+	root := NewElement().Left(30).Top(10).Width(160).Height(80).StayOnScreen().Visual(visual, nil)
+
+	var context processor
+	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 100, Height: 50}}, nil)
+
+	assertRect(t, visual.states[0].Rect, Rect{X: 0, Y: 0, Width: 160, Height: 80})
+}
+
+func TestStayOnScreenShiftsDescendantsWithIt(t *testing.T) {
+	parentVisual := &recordingVisual{}
+	childVisual := &recordingVisual{defaultSize: m.Vec2{X: 10, Y: 10}}
+	child := NewElement().Left(5).Top(5).Visual(childVisual, nil)
+	root := NewElement().Left(-30).Width(40).Height(20).StayOnScreen().
+		Visual(parentVisual, nil).Children(child)
+
+	var context processor
+	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 100, Height: 50}}, nil)
+
+	assertRect(t, parentVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 40, Height: 20})
+	assertRect(t, childVisual.states[0].Rect, Rect{X: 5, Y: 5, Width: 10, Height: 10})
+}
+
+// A clamped element is arranged from its parent's rect rather than taking a
+// slot in the parent's flow, so the column neither grows for it nor pushes it
+// below its sibling. Without the implied IgnoreLayout it would land at y=10,
+// already inside the viewport, and the clamp would never run.
+func TestStayOnScreenImpliesIgnoreLayout(t *testing.T) {
+	flowVisual := &recordingVisual{defaultSize: m.Vec2{X: 20, Y: 10}}
+	pinnedVisual := &recordingVisual{defaultSize: m.Vec2{X: 20, Y: 10}}
+	root := Vertical(
+		NewElement().Visual(flowVisual, nil),
+		NewElement().Top(-40).StayOnScreen().Visual(pinnedVisual, nil),
+	)
+
+	var context processor
+	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 100, Height: 50}}, nil)
+
+	assertRect(t, flowVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 20, Height: 10})
+	assertRect(t, pinnedVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 20, Height: 10})
+}
+
+// A wrapper that stands in for a child in the surrounding layout only works if
+// wrapping changes nothing about the wrapper's size. Pixel edges keep the child
+// in its parent's measurement; relative edges are resolved from the parent, so
+// counting them would be circular and the parent collapses instead.
+func TestOverlayMeasuresToChildPinnedWithPixelEdgesOnly(t *testing.T) {
+	pinnedVisual := &recordingVisual{defaultSize: m.Vec2{X: 40, Y: 20}}
+	relativeVisual := &recordingVisual{defaultSize: m.Vec2{X: 40, Y: 20}}
+	root := Horizontal(
+		Overlay(NewElement().Left(0).Right(0).Top(0).Bottom(0).Visual(pinnedVisual, nil)),
+		Overlay(NewElement().Fill().Visual(relativeVisual, nil)),
+	)
+
+	var context processor
+	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 100}}, nil)
+
+	assertRect(t, pinnedVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 40, Height: 20})
+	if len(relativeVisual.states) != 0 {
+		t.Fatalf("relatively sized child was drawn at %+v, want a collapsed parent", relativeVisual.states[0].Rect)
+	}
+}
+
+// A child that ignores layout ignores the parent's padding with it, so its
+// edges resolve against the parent's rect. Flow and grid parents used to inset
+// them by the padding while a LayoutNone parent did not, which made the same
+// declaration mean two different things depending on its parent.
+func TestIgnoreLayoutChildResolvesAgainstPaddedParentRect(t *testing.T) {
+	tests := []struct {
+		name string
+		root func(children ...Element) Element
+	}{
+		{name: "flow parent", root: Vertical},
+		{name: "grid parent", root: Grid},
+		{name: "overlay parent", root: Overlay},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pinnedVisual := &recordingVisual{defaultSize: m.Vec2{X: 10, Y: 10}}
+			root := test.root(
+				NewElement().Visual(&recordingVisual{defaultSize: m.Vec2{X: 40, Y: 20}}, nil),
+				NewElement().Left(0).Top(0).IgnoreLayout().Visual(pinnedVisual, nil),
+			).Padding(8).Left(0).Top(0)
+
+			var context processor
+			context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 100}}, nil)
+
+			assertRect(t, pinnedVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 10, Height: 10})
+		})
+	}
+}
+
+// The anchor fills the wrapper, so a row that stretches the pair stretches the
+// anchor with it, while the floating element hangs outside the anchor's rect
+// and escapes its clip instead of being cut away.
+func TestWithFloatingStretchesAnchorAndUnclipsFloating(t *testing.T) {
+	anchorVisual := &recordingVisual{defaultSize: m.Vec2{X: 30, Y: 10}}
+	floatingVisual := &recordingVisual{defaultSize: m.Vec2{X: 60, Y: 40}}
+	root := Horizontal(
+		WithFloating(
+			NewElement().Visual(anchorVisual, nil),
+			NewElement().TopRel(1).Visual(floatingVisual, nil),
+		),
+	).ChildrenAlignment(AlignStretch).Width(100).Height(50).Left(0).Top(0)
+
+	var context processor
+	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 200}}, nil)
+
+	assertRect(t, anchorVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 30, Height: 50})
+	assertRect(t, floatingVisual.states[0].Rect, Rect{X: 0, Y: 50, Width: 60, Height: 40})
+}
+
 func assertRect(t *testing.T, got, want Rect) {
 	t.Helper()
 	if got != want {

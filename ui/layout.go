@@ -367,6 +367,9 @@ func (context *processor) arrange(screen Rect) {
 		if node.parent < 0 {
 			context.arrangeAbsolute(nodeIndex, screen)
 		}
+		if node.element.stayOnScreen {
+			node.rect = clampToBounds(node.rect, screen)
+		}
 		context.arrangeChildren(nodeIndex)
 	}
 }
@@ -429,7 +432,10 @@ func (context *processor) arrangeFlow(nodeIndex int, horizontal bool) {
 			continue
 		}
 		if childNode.element.ignoreLayout {
-			context.arrangeAbsolute(child, content)
+			// Against the parent's rect, not its content box: a child that ignores
+			// layout ignores the parent's padding too, so the same declaration means
+			// the same thing under a column as it does under an Overlay.
+			context.arrangeAbsolute(child, node.rect)
 			continue
 		}
 		size := arrangedSize(childNode.element, content)
@@ -597,7 +603,10 @@ func (context *processor) arrangeGrid(nodeIndex int) {
 			continue
 		}
 		if childNode.element.ignoreLayout {
-			context.arrangeAbsolute(child, content)
+			// Against the parent's rect, not its content box: a child that ignores
+			// layout ignores the parent's padding too, so the same declaration means
+			// the same thing under a column as it does under an Overlay.
+			context.arrangeAbsolute(child, node.rect)
 			continue
 		}
 		size := childNode.element.intermediate.measured
@@ -1204,6 +1213,23 @@ func mainLimits(element *Element, horizontal bool, basis float32) (float32, floa
 		maximumValue = minimumValue
 	}
 	return minimumValue, maximumValue
+}
+
+// clampToBounds slides rect back inside bounds without resizing it. A rect
+// larger than bounds on an axis keeps its start edge and overflows the far
+// one, so an oversized element stays anchored instead of jittering between two
+// impossible fits.
+func clampToBounds(rect, bounds Rect) Rect {
+	rect.X = clampAxis(rect.X, rect.Width, bounds.X, bounds.Width)
+	rect.Y = clampAxis(rect.Y, rect.Height, bounds.Y, bounds.Height)
+	return rect
+}
+
+func clampAxis(start, length, boundsStart, boundsLength float32) float32 {
+	if length >= boundsLength {
+		return boundsStart
+	}
+	return min(max(start, boundsStart), boundsStart+boundsLength-length)
 }
 
 func intersect(left, right Rect) Rect {
