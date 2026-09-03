@@ -50,6 +50,8 @@ error handling.
     implementation.
 - [`input`](input/README.md): input state, discrete events, and the driver-facing
     apply command.
+- [`anim`](anim/README.md): timelines of eased value tracks and one-tick cues,
+    advanced every fixed step.
 - [`storage`](storage/README.md): layered read filesystems and one permanent
     writable filesystem.
 - [`m`](m): immutable vectors, rectangles, colors, matrices, quaternions,
