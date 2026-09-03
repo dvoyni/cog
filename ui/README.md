@@ -287,18 +287,23 @@ release over the same ID also emits `Click`.
 ## Tooltips And Floating Elements
 
 `WithFloating(anchor, floating)` pairs an element with something that hangs off
-it — a tooltip, a dropdown, a badge. The anchor stands in for the pair in the
-surrounding layout: the wrapper measures to the anchor alone, so wrapping an
-element changes nothing around it. Size and position the result rather than the
-anchor, whose own edges are overwritten so that it fills the wrapper.
+it — a tooltip, a dropdown, a badge. The floating element is added to the anchor
+rather than the two being wrapped together, so the result *is* the anchor and
+takes the anchor's place in the surrounding layout unchanged. Wrapping the pair
+would quietly resize it: a wrapper carries none of the anchor's own dealings
+with its parent, and has no visual and so no aspect ratio, so art authored at
+512px would stay 512 wide the moment it grew a tooltip.
 
-The floating element is taken out of layout and out of its anchor's clip. Hit
+The floating element is taken out of layout, out of its anchor's clip, and out
+of its anchor's visual state, so a tooltip on a hovered button is not itself
+painted in the button's hover tint. Add that state back with `State` if you want
+it. Hit
 testing is left to the caller. A tooltip needs `IgnoreHitTest()`, or it becomes
 the topmost target over its own anchor and takes the hover that keeps it alive;
 a menu wants to stay clickable. `IgnoreHitTest()` is consulted only for elements
 without an `ID`, so nothing inside a tooltip may carry one.
 
-`HoverTracker` answers which element the pointer is over. Feed it the frame's
+`HoverTracker` answers what the pointer is resting on. Feed it the frame's
 `Interactions` and the frame delta once per tick, then ask it about an ID while
 building the UI. `Dwell` is how long the pointer must rest before it reports;
 once one element has been reported, moving straight to another reports that one
@@ -331,6 +336,38 @@ if tracker.Hovered(id) {
 `TopRel(1)` puts the tooltip's top at the anchor's bottom and the pivot centres
 it on the anchor; `StayOnScreen()` slides it back inside the viewport near an
 edge, without resizing it.
+
+### Tooltips For Things Layout Never Drew
+
+Not everything under the pointer is an element. A scene draws its own sprites
+and hit-tests them itself, and layout sees only whatever screen-filling element
+catches that scene's clicks — which it cannot tell apart from a button. Hand the
+tracker the result of your own hit test instead:
+
+```go
+// Once per tick, from your own hit test. "" the moment the pointer leaves, and
+// while a window covers what it was over: a fallback skips hit testing, so
+// nothing else takes it away.
+tracker.SetFallbackTooltip(hoveredSpriteText, pointer)
+
+// While building the UI. There is no anchor, so place it at the point instead,
+// as a root element, whose coordinates are the screen's.
+if text, at := tracker.FallbackTooltip(); text != "" {
+    frame.Add(hudLayer, tooltip(label(text)).Left(at.X+16).Top(at.Y+16))
+}
+```
+
+The text is the tooltip and doubles as the target's identity, so replacing it
+restarts the dwell exactly as moving between elements does. A fallback outranks
+any element, and `Hovered` reports false for every ID while one is set. Crossing
+between an element and a fallback restarts the dwell rather than counting as
+moving between two tooltips: the click catcher is under the pointer the whole
+time it crosses the scene, and letting that count would spare every sprite its
+wait. For the same reason a fallback's dwell advances only while the position
+holds still from one frame to the next — a sprite has no edges to hold the
+pointer inside, and a fallback's identity is only as fine as the caller made it.
+The position itself is not gated by the dwell, so a tooltip already up follows
+the pointer.
 
 Give a wrapped text column a `MinWidth` equal to its `WrapWidth`. Text measures
 to its longest line, and wrapping fills each line right up to the limit, so a
