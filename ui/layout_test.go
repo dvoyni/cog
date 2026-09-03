@@ -958,6 +958,74 @@ func TestWithFloatingStretchesAnchorAndUnclipsFloating(t *testing.T) {
 	assertRect(t, floatingVisual.states[0].Rect, Rect{X: 0, Y: 50, Width: 60, Height: 40})
 }
 
+// Wrapping the pair would stand an element with no art of its own between the
+// anchor and the row, and with no art it has no aspect ratio to shrink by: the
+// anchor would measure at its authored 512 and shove its neighbour down the row
+// the moment it grew a tooltip.
+func TestWithFloatingKeepsAnchorAspectRatioInFlow(t *testing.T) {
+	plainVisual := &recordingVisual{defaultSize: m.Vec2{X: 512, Y: 512}}
+	anchorVisual := &recordingVisual{defaultSize: m.Vec2{X: 512, Y: 512}}
+	root := Horizontal(
+		NewElement().Visual(plainVisual, nil).PreserveAspectRatio(),
+		WithFloating(
+			NewElement().Visual(anchorVisual, nil).PreserveAspectRatio(),
+			NewElement().TopRel(1).Visual(&recordingVisual{defaultSize: m.Vec2{X: 300, Y: 100}}, nil),
+		),
+	).ChildrenAlignment(AlignStretch).Width(500).Height(40).Left(0).Top(0)
+
+	var context processor
+	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 600, Height: 600}}, nil)
+
+	assertRect(t, plainVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 40, Height: 40})
+	assertRect(t, anchorVisual.states[0].Rect, Rect{X: 40, Y: 0, Width: 40, Height: 40})
+}
+
+// The anchor need not be a leaf: a floating element ignores layout, and every
+// layout arranges such a child against the parent's rect instead of flowing it
+// in, so a row used as an anchor spaces its own children as if it were not there.
+func TestWithFloatingUnderAFlowAnchorStaysOutOfTheFlow(t *testing.T) {
+	firstVisual := &recordingVisual{defaultSize: m.Vec2{X: 20, Y: 10}}
+	secondVisual := &recordingVisual{defaultSize: m.Vec2{X: 20, Y: 10}}
+	floatingVisual := &recordingVisual{defaultSize: m.Vec2{X: 60, Y: 40}}
+	root := WithFloating(
+		Horizontal(
+			NewElement().Visual(firstVisual, nil),
+			NewElement().Visual(secondVisual, nil),
+		).Gap(4),
+		NewElement().TopRel(1).Visual(floatingVisual, nil),
+	).Left(0).Top(0)
+
+	var context processor
+	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 200}}, nil)
+
+	assertRect(t, firstVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 20, Height: 10})
+	assertRect(t, secondVisual.states[0].Rect, Rect{X: 24, Y: 0, Width: 20, Height: 10})
+	assertRect(t, floatingVisual.states[0].Rect, Rect{X: 0, Y: 10, Width: 60, Height: 40})
+}
+
+// Children inherit their parent's visual state, and the anchor is now the
+// floating element's parent. Floating content is a surface of its own, so a
+// tooltip on a hovered button must not be painted in the button's hover tint for
+// as long as it is up.
+func TestWithFloatingDoesNotInheritTheAnchorsState(t *testing.T) {
+	anchorVisual := &recordingVisual{defaultSize: m.Vec2{X: 20, Y: 20}}
+	floatingVisual := &recordingVisual{defaultSize: m.Vec2{X: 30, Y: 10}}
+	root := WithFloating(
+		NewElement().State(VisualHovered|VisualActive, 0).Visual(anchorVisual, nil),
+		NewElement().TopRel(1).Visual(floatingVisual, nil),
+	).Left(0).Top(0)
+
+	var context processor
+	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 200}}, nil)
+
+	if !anchorVisual.states[0].Has(VisualHovered | VisualActive) {
+		t.Fatalf("anchor state = %v, want the state it was given", anchorVisual.states[0].VisualState)
+	}
+	if got := floatingVisual.states[0].VisualState; got != 0 {
+		t.Fatalf("floating state = %v, want none of the anchor's", got)
+	}
+}
+
 func assertRect(t *testing.T, got, want Rect) {
 	t.Helper()
 	if got != want {

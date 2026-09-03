@@ -21,25 +21,35 @@ func Grid(children ...Element) Element {
 }
 
 // WithFloating pairs an anchor with an element that hangs off it — a tooltip, a
-// dropdown, a badge. The anchor stands in for the pair in the surrounding
-// layout, so size and position the result rather than the anchor; the anchor's
-// own edges are overwritten, which would clobber one that positions itself.
+// dropdown, a badge. The floating element is added to the anchor rather than the
+// two being wrapped together, so the result *is* the anchor and takes the
+// anchor's place in the surrounding layout unchanged.
 //
-// The wrapper measures to the anchor alone, so wrapping an element changes
-// nothing about the layout around it. Two details make that work, and both are
-// easy to get wrong. The anchor is pinned with pixel edges rather than Fill:
-// Fill sets relative edges, and a LayoutNone parent contributes zero for a
-// child sized relative to itself, so the wrapper would collapse to nothing. And
-// the floating element ignores layout, which keeps it out of the wrapper's
+// Wrapping the pair is the obvious implementation and quietly resizes the
+// anchor. A wrapper measures to the anchor's measured size, which is not the
+// size the anchor would have taken: the wrapper carries none of the anchor's own
+// dealings with its parent — its stretch, its alignment, its edges — and, worst
+// of the lot, it has no visual and so no aspect ratio. Art authored at 512px
+// measures at 512px and counts on its ratio to shrink it once layout fixes its
+// height, so under a wrapper it stays 512 wide and shoves its neighbours across
+// the row the moment it grows a tooltip.
+//
+// The floating element ignores layout. That keeps it out of the anchor's
 // measurement — otherwise an element that appears on hover would resize its own
-// anchor, moving it out from under the pointer.
+// anchor, moving it out from under the pointer — and every layout arranges such
+// a child against the anchor's rect instead of flowing it in among the anchor's
+// real children, so the anchor can be a row or a grid and not just a leaf. It
+// ignores clip so it can hang outside that rect, and it is cut loose from the
+// anchor's interaction state: children inherit that state, and floating content
+// is a surface of its own, so without this a tooltip on a hovered button would
+// sit there painted in the button's hover tint. A caller wanting the anchor's
+// state back can add it with State.
 //
 // Hit testing is left to the caller. A tooltip wants IgnoreHitTest, so that it
 // cannot take the hover keeping it alive; a menu wants to stay clickable.
 func WithFloating(anchor, floating Element) Element {
-	return Overlay(
-		anchor.Left(0).Right(0).Top(0).Bottom(0),
-		floating.IgnoreLayout().IgnoreClip(),
+	return anchor.Children(
+		floating.IgnoreLayout().IgnoreClip().State(0, visualInteractionStates),
 	)
 }
 

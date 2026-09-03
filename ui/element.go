@@ -72,6 +72,11 @@ const (
 
 const VisualUserDefinedBase VisualState = 1 << 4
 
+// visualInteractionStates is every state layout derives for itself, from the
+// pointer or from a control being switched off, as opposed to the states an
+// application defines for itself above VisualUserDefinedBase.
+const visualInteractionStates = VisualDisabled | VisualActive | VisualHovered | VisualPressed
+
 func (state VisualState) Has(mask VisualState) bool {
 	return state&mask == mask
 }
