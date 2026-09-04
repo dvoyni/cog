@@ -132,7 +132,12 @@ size appropriate to its context.
 `PreserveAspectRatio` derives an unset axis when layout fixes the other axis.
 `Image` and `InteractiveImage` enable it automatically. In a flow container, a
 definite stretched cross axis can therefore determine an image's main axis from
-its intrinsic ratio. Setting both axes makes both dimensions definite; use
+its intrinsic ratio. A relative cross size does the same: it is the one place
+where measurement resolves a relative size rather than reading it as zero,
+against the row's own cross where the row has one and against the cross its
+other children settle where it has not, so that the row reserves the main axis
+such a child will take instead of arranging wider than it measured and clipping
+its own content. Setting both axes makes both dimensions definite; use
 `SpriteContain` or `SpriteCover` when the art should preserve its ratio inside
 those bounds instead of using the default stretch fit.
 

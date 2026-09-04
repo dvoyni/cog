@@ -266,6 +266,7 @@ func (context *processor) measureContent(nodeIndex int) m.Vec2 {
 	element := node.element
 	switch element.layout {
 	case LayoutHorizontal, LayoutVertical:
+		horizontal := element.layout == LayoutHorizontal
 		var main, cross float32
 		count := 0
 		for child := node.firstChild; child >= 0; child = context.nodes[child].nextSibling {
@@ -274,7 +275,7 @@ func (context *processor) measureContent(nodeIndex int) m.Vec2 {
 				continue
 			}
 			size := childNode.element.intermediate.measured
-			if element.layout == LayoutHorizontal {
+			if horizontal {
 				main += size.X
 				cross = max(cross, size.Y)
 			} else {
@@ -286,7 +287,8 @@ func (context *processor) measureContent(nodeIndex int) m.Vec2 {
 		if count > 1 {
 			main += intrinsicSignedSize(element.gap) * float32(count-1)
 		}
-		if element.layout == LayoutHorizontal {
+		main += context.mainFromCross(nodeIndex, crossBasis(element, cross, horizontal), horizontal)
+		if horizontal {
 			return m.Vec2{X: main, Y: cross}
 		}
 		return m.Vec2{X: cross, Y: main}
@@ -356,6 +358,63 @@ func (context *processor) measureContent(nodeIndex int) m.Vec2 {
 
 func relativeEdges(start, end opt[size]) bool {
 	return start.set && start.v.relative && end.set && end.v.relative
+}
+
+// crossBasis is what a child's relative cross size measures against: the row's
+// own cross where it has one, and otherwise the cross its other children have
+// just settled, which is the cross the row will be arranged to.
+func crossBasis(element *Element, contentCross float32, horizontal bool) float32 {
+	dimension := element.width
+	padding := intrinsicSize(element.paddingLeft) + intrinsicSize(element.paddingRight)
+	if horizontal {
+		dimension = element.height
+		padding = intrinsicSize(element.paddingTop) + intrinsicSize(element.paddingBottom)
+	}
+	if explicit, ok := absoluteSize(dimension); ok {
+		return max(explicit-padding, 0)
+	}
+	return contentCross
+}
+
+// mainFromCross reserves the main axis of children that take their cross from
+// the row and their main from their ratio. Such a child measures as zero on
+// both axes — a relative size has no basis until the row is arranged, and a
+// ratio applied to zero is zero — so the row measures short of what it then
+// arranges, by the whole main axis of every child sized that way. The row is
+// then too narrow for what it lays out, and the tail of it is pushed outside
+// the box and clipped. Resolving those children against the cross the rest of
+// the row has settled costs one more pass over the children and reserves what
+// each of them will take.
+func (context *processor) mainFromCross(nodeIndex int, cross float32, horizontal bool) float32 {
+	if cross <= 0 {
+		return 0
+	}
+	node := &context.nodes[nodeIndex]
+	var reserved float32
+	for child := node.firstChild; child >= 0; child = context.nodes[child].nextSibling {
+		childNode := &context.nodes[child]
+		childElement := childNode.element
+		if !childNode.active || childElement.ignoreLayout || childElement.intermediate.aspectRatio <= 0 {
+			continue
+		}
+		if !isRelative(crossDimension(childElement, horizontal)) || mainSizeSet(childElement, horizontal) {
+			continue
+		}
+		// The call arrange will make, against a containing rect known on the
+		// cross axis alone: a relative main size still resolves against a zero
+		// basis, as it does everywhere else in the measure pass.
+		containing := Rect{Width: cross}
+		if horizontal {
+			containing = Rect{Height: cross}
+		}
+		size := arrangedSize(childElement, containing)
+		main, measured := size.Y, childElement.intermediate.measured.Y
+		if horizontal {
+			main, measured = size.X, childElement.intermediate.measured.X
+		}
+		reserved += max(main-measured, 0)
+	}
+	return reserved
 }
 
 func (context *processor) arrange(screen Rect) {
@@ -1172,10 +1231,18 @@ func elementContentRect(element *Element, outer Rect) Rect {
 }
 
 func crossSizeSet(element *Element, horizontal bool) bool {
+	return crossDimension(element, horizontal).set
+}
+
+func crossDimension(element *Element, horizontal bool) opt[size] {
 	if horizontal {
-		return element.height.set
+		return element.height
 	}
-	return element.width.set
+	return element.width
+}
+
+func isRelative(value opt[size]) bool {
+	return value.set && value.v.relative
 }
 
 func mainSizeSet(element *Element, horizontal bool) bool {

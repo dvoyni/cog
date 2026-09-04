@@ -171,6 +171,60 @@ func TestProcessDefiniteStretchRespectsExplicitMainAxis(t *testing.T) {
 	assertRect(t, visual.states[0].Rect, Rect{Width: 25, Height: 30})
 }
 
+// A child that takes its cross axis from the row measures as zero on both axes,
+// and so its ratio gives it no main axis either. Left at that the row measures
+// to its other children alone and then arranges wider than it measured, pushing
+// the last of its content past its own edge to be clipped there.
+func TestProcessRowReservesWidthForRelativeHeightAspectChild(t *testing.T) {
+	rowVisual := &recordingVisual{}
+	iconVisual := &recordingVisual{defaultSize: m.Vec2{X: 40, Y: 20}}
+	textVisual := &recordingVisual{defaultSize: m.Vec2{X: 300, Y: 23}}
+	root := Horizontal(
+		NewElement().Visual(iconVisual, nil).PreserveAspectRatio().HeightRel(1),
+		NewElement().Visual(textVisual, nil),
+	).Gap(8).Visual(rowVisual, nil)
+
+	var context processor
+	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 800, Height: 600}}, nil)
+
+	assertRect(t, rowVisual.states[0].Rect, Rect{Width: 354, Height: 23})
+	assertRect(t, iconVisual.states[0].Rect, Rect{Width: 46, Height: 23})
+	assertRect(t, textVisual.states[0].Rect, Rect{X: 54, Width: 300, Height: 23})
+}
+
+func TestProcessColumnReservesHeightForRelativeWidthAspectChild(t *testing.T) {
+	columnVisual := &recordingVisual{}
+	iconVisual := &recordingVisual{defaultSize: m.Vec2{X: 20, Y: 40}}
+	textVisual := &recordingVisual{defaultSize: m.Vec2{X: 23, Y: 300}}
+	root := Vertical(
+		NewElement().Visual(iconVisual, nil).PreserveAspectRatio().WidthRel(1),
+		NewElement().Visual(textVisual, nil),
+	).Gap(8).Visual(columnVisual, nil)
+
+	var context processor
+	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 800, Height: 600}}, nil)
+
+	assertRect(t, columnVisual.states[0].Rect, Rect{Width: 23, Height: 354})
+	assertRect(t, iconVisual.states[0].Rect, Rect{Width: 23, Height: 46})
+	assertRect(t, textVisual.states[0].Rect, Rect{Y: 54, Width: 23, Height: 300})
+}
+
+// Where the row has a cross axis of its own, that is what the child resolves
+// against, padding taken off it as arrangement will take it off.
+func TestProcessRelativeCrossChildMeasuresAgainstOwnRowHeight(t *testing.T) {
+	rowVisual := &recordingVisual{}
+	iconVisual := &recordingVisual{defaultSize: m.Vec2{X: 40, Y: 20}}
+	root := Horizontal(
+		NewElement().Visual(iconVisual, nil).PreserveAspectRatio().HeightRel(1),
+	).Height(50).Padding(5, 4).Visual(rowVisual, nil)
+
+	var context processor
+	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 800, Height: 600}}, nil)
+
+	assertRect(t, rowVisual.states[0].Rect, Rect{Width: 88, Height: 50})
+	assertRect(t, iconVisual.states[0].Rect, Rect{X: 4, Y: 5, Width: 80, Height: 40})
+}
+
 func TestLayoutNoneFillUsesContentUnlessChildIgnoresLayout(t *testing.T) {
 	contentVisual := &recordingVisual{}
 	parentVisual := &recordingVisual{}
