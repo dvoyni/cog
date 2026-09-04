@@ -9,7 +9,8 @@ advances every timeline by the fixed step, so nothing else needs to tick.
 
 `contract.go` holds the package documentation, `Params`, and `State`;
 `easing.go` the easing curves; `sequence.go` the `Sequence` interface and
-`Lerp`; `resources.go` the alias for the one resource; `timelines.go` its
+`Lerp`; `flipbook.go` the frame-list sequence; `resources.go` the alias for
+the one resource; `timelines.go` its
 implementation; `timeline.go` the `Timeline` type and its generic timeline
 methods; `plugin.go` the plugin and its tick subscription.
 
@@ -128,6 +129,20 @@ reader.
 
 `Params` is declarative: `anim.Over(d)` with `WithEasing`, `WithLoop`,
 `WithImmediate`, or a literal `anim.Params{Duration: d, Easing: e, Loop: true}`.
+
+`Flipbook[T]` is a sequence of frames rather than a mix: it holds each frame
+of `Frames` for an equal slice of the track, so the track's value is the frame
+to draw. `FPS` is the rate the frames were authored at, and `Params()` returns
+the track that plays them all once at it.
+
+```go
+type FlagWaveSeq struct{ anim.Flipbook[Sprite] }
+
+book := anim.Flipbook[Sprite]{Frames: flagFrames, FPS: 30}
+tl.Add(flagKey{}, FlagWaveSeq{book}, book.Params().WithLoop().WithImmediate())
+
+frame := tl.Value[FlagWaveSeq](flagKey{}, flagFrames[0])
+```
 
 Easings: `Linear`, `EaseCubicIn`, `EaseCubicOut`, `EaseCubicInOut`, and the
 combinators `Hold(fraction, easing)` (stay at 0, then ease over the rest) and
