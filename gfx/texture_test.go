@@ -8,9 +8,9 @@ import (
 	"github.com/dvoyni/cog/m"
 )
 
-func TestFormatScreenResolvesToSrgb(t *testing.T) {
-	if got := FormatScreen.Resolve(); got != FormatRGBA8Srgb {
-		t.Errorf("FormatScreen.Resolve() = %v, want FormatRGBA8Srgb", got)
+func TestFormatScreenResolvesToTheFrameBufferFormat(t *testing.T) {
+	if got := FormatScreen.Resolve(); got != FrameBufferFormat {
+		t.Errorf("FormatScreen.Resolve() = %v, want the frame buffer's %v", got, FrameBufferFormat)
 	}
 	for _, format := range []TextureFormat{FormatRGBA8, FormatRGBA8Srgb, FormatDepth32F} {
 		if got := format.Resolve(); got != format {

@@ -41,13 +41,15 @@ type fakeBackend struct {
 	freedPipelines []PipelineID
 	lastPipelines  []PipelineDesc
 
-	lastOps    []gpuOp
-	lastPasses []GpuPassDesc
-	passDraws  []int
-	views      [][3]int
-	draws      []drawCall
-	execCount  int
-	layout     *ShaderLayout
+	lastOps      []gpuOp
+	lastPasses   []GpuPassDesc
+	passDraws    []int
+	views        [][3]int
+	draws        []drawCall
+	execCount    int
+	layout       *ShaderLayout
+	presents     int
+	presentAfter int
 }
 
 func (b *fakeBackend) id() uint32 { b.nextID++; return b.nextID }
@@ -134,6 +136,13 @@ func (b *fakeBackend) BeginPass(desc GpuPassDesc) RenderPass {
 }
 
 func (b *fakeBackend) EndPass(RenderPass) {}
+
+// Present records the implicit present pass and how many declared passes had
+// already run, so a test can assert both that it ran and that it ran last.
+func (b *fakeBackend) Present() {
+	b.presents++
+	b.presentAfter = len(b.lastPasses)
+}
 
 func (b *fakeBackend) SetPipeline(PipelineID)                 {}
 func (b *fakeBackend) SetParams([]byte)                       {}
@@ -347,6 +356,7 @@ func (benchmarkGpuSink) ReleaseTexture(TextureID)               {}
 
 func (benchmarkGpuSink) BeginPass(GpuPassDesc) RenderPass { return benchmarkGpuSink{} }
 func (benchmarkGpuSink) EndPass(RenderPass)               {}
+func (benchmarkGpuSink) Present()                         {}
 
 func BenchmarkGpuQueueReplaySteadyState(b *testing.B) {
 	var queue GpuQueue

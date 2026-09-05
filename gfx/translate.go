@@ -147,6 +147,7 @@ func (t *translator) translatePasses(queue *OpQueue, backend Backend, filesystem
 	if t.strayDraws > 0 && *firstErr == nil {
 		*firstErr = ErrDrawWithoutPass{Count: t.strayDraws}
 	}
+	presents := false
 	for i := 0; i < len(t.passOrder); {
 		head := queue.passes[t.passOrder[i]].desc
 		tail, draws := head, t.passDrawCount(t.passOrder[i])
@@ -163,6 +164,7 @@ func (t *translator) translatePasses(queue *OpQueue, backend Backend, filesystem
 			i = last + 1
 			continue
 		}
+		presents = presents || head.Target.IsScreen()
 		t.ops.BeginPass(t.gpuPassDesc(backend, head, tail))
 		for j := i; j <= last; j++ {
 			pass := &queue.passes[t.passOrder[j]]
@@ -172,6 +174,13 @@ func (t *translator) translatePasses(queue *OpQueue, backend Backend, filesystem
 		}
 		t.ops.EndPass()
 		i = last + 1
+	}
+	// The present pass exists only to show the frame buffer, so it is emitted
+	// exactly when the frame buffer was used - which is also when the backend
+	// allocated it. A frame that rendered only into its own textures leaves the
+	// screen alone rather than blitting a buffer nothing wrote to.
+	if presents {
+		t.ops.Present()
 	}
 }
 

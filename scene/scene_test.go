@@ -20,6 +20,7 @@ type testBackend struct {
 	nextBuffer  gfx.BufferID
 	nextID      uint32
 	passes      []gfx.GpuPassDesc
+	presents    int
 }
 
 func (b *testBackend) NewTexture() gfx.TextureID { b.nextTexture++; return b.nextTexture }
@@ -58,6 +59,7 @@ func (b *testBackend) BeginPass(desc gfx.GpuPassDesc) gfx.RenderPass {
 	return b
 }
 func (b *testBackend) EndPass(gfx.RenderPass)                                               {}
+func (b *testBackend) Present()                                                             { b.presents++ }
 func (b *testBackend) BakeBuffer(gfx.BufferID, gfx.BufferKind, int, []byte)                 {}
 func (b *testBackend) BakeTexture(gfx.TextureID, int, int, gfx.TextureFormat, []byte, bool) {}
 func (b *testBackend) AllocateTexture(gfx.TextureID, gfx.TextureDesc)                       {}

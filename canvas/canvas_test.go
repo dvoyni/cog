@@ -48,6 +48,7 @@ type testBackend struct {
 	releasedBuffers  []gfx.BufferID
 	buffers          []bufferBake
 	samplers         []gfx.SamplerDesc
+	presents         int
 	capture          bool
 }
 
@@ -146,6 +147,7 @@ func (b *testBackend) BeginPass(desc gfx.GpuPassDesc) gfx.RenderPass {
 	return b
 }
 func (b *testBackend) EndPass(gfx.RenderPass) {}
+func (b *testBackend) Present()               { b.presents++ }
 func (b *testBackend) BakeBuffer(_ gfx.BufferID, kind gfx.BufferKind, _ int, data []byte) {
 	if b.capture {
 		b.buffers = append(b.buffers, bufferBake{kind: kind, data: append([]byte(nil), data...)})

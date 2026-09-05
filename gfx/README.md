@@ -35,9 +35,8 @@ own slice of a shared instance arena without plumbing an offset of its own.
 
 A recorder declares a pass with `q.Pass(PassDescr{...})`, which also selects it:
 every op recorded afterwards belongs to it, and `q.SetPass(ref)` re-selects one
-declared earlier in the frame. A recorder that declares none gets an implicit
-default pass over the whole screen with automatic depth, which is what `Clear`
-and `ClearDepth` then apply to.
+declared earlier in the frame. There is no implicit default pass: a draw
+recorded outside every pass is dropped and reported as `ErrDrawWithoutPass`.
 
 `PassDescr` carries `Order`, a `Target` (`ScreenTarget()`,
 `TextureTarget(tex, mip, layer)`, or `NoTarget()`), a `Depth` (`DepthAuto()`,
@@ -74,6 +73,28 @@ and `ClearDepth` then apply to.
 Methods accepting `copyData` snapshot bytes when true. When false, the caller
 must keep the source unchanged until the render thread consumes the operation.
 Explicit resources returned by `Bake*` are caller-owned and must be released.
+
+## The frame buffer and the present pass
+
+`ScreenTarget()` does not mean the swapchain. It means a frame-sized colour
+buffer in `gfx.FrameBufferFormat` that the backend allocates on first use, and
+gfx appends one implicit full-screen **present pass** after every declared pass
+to put it on the surface. A frame that renders only into its own textures never
+allocates the buffer and never presents.
+
+The engine has no choice about owning that buffer: gogpu hardcodes
+`BGRA8Unorm` for the surface and exposes no view formats, and
+`bgra8unorm-srgb` is not a legal canvas-context format on the web, so a
+hardware sRGB swapchain is unreachable. The cost is one frame-sized texture
+(~8 MiB at 1080p) and one full-screen pass, which is also where
+post-processing hangs later.
+
+`FrameBufferFormat` is `FormatRGBA8` today, and the present pass passes the
+buffer through unchanged. Recorders still write gamma-encoded values, so that
+pair is the one combination that leaves the frame bit-for-bit what it was
+before the frame buffer existed; the present pass reads the same constant to
+decide whether it applies the sRGB OETF, so flipping the constant flips both
+halves of the decision together.
 
 ## Commands Implemented
 
@@ -184,7 +205,7 @@ independently by name, so a material's textures can sample differently.
 
 `Backend` is implemented by a system driver. It reserves logical texture and
 buffer IDs, creates and frees samplers/shaders/pipelines, reflects
-`ShaderLayout`, reports the current screen framebuffer, and executes a
+`ShaderLayout`, reports the surface it presents to, and executes a
 translated queue. Its methods are:
 
 ```go
@@ -213,7 +234,7 @@ no uniform block at all packs its records from the same source of truth. A
 shader declaring two uniform blocks is an error rather than a silent overwrite.
 Enums include
 `TextureFormat` (`FormatRGBA8`, `FormatRGBA8Srgb`, `FormatDepth32F`, and the
-`FormatScreen` sentinel that `Resolve()` turns into `FormatRGBA8Srgb`),
+`FormatScreen` sentinel that `Resolve()` turns into `FrameBufferFormat`),
 `BufferKind` (`BufferVertex`, `BufferIndex`, `BufferUniform`, `BufferStorage`),
 and `TextureViewDimension` (`TextureView2D`, `TextureView2DArray`).
 
@@ -228,12 +249,14 @@ Opaque handles are based on `ResourceID`: `TextureID`, `BufferID`, `SamplerID`,
 `GpuQueue` records through `BakeBuffer`, `BakeTexture`, `AllocateTexture`,
 `UpdateTexture`, `BeginPass`, `EndPass`, `SetPipeline`, `SetParams`,
 `SetTexture`, `SetSampler`, `SetVertexBuffer`, `SetIndexBuffer`, `SetBuffer`,
-`Draw`, `ReleaseBuffer`, and `ReleaseTexture`. `ReplayBakes(GpuBakeSink)`,
+`Draw`, `Present`, `ReleaseBuffer`, and `ReleaseTexture`. `ReplayBakes(GpuBakeSink)`,
 `ReplayPasses(GpuPassSink)`, and `ReplayReleases(GpuReleaseSink)` send each
 phase to a backend; `Reset` reuses the queue. Bakes are hoisted ahead of every
 pass, so a pass can read anything the frame uploaded. The sink interfaces define
 the backend-facing replay contracts, and `BeginPass` returns the `RenderPass`
-its commands go to, so the backend owns encoder and pass lifetime.
+its commands go to, so the backend owns encoder and pass lifetime. `Present`
+takes no arguments: the frame buffer, the full-screen triangle, the transfer
+function and the surface format are all the backend's.
 
 `BufferSourceBytes`, `BufferSourceBaked`, `ShaderSourceText`,
 `ShaderSourceResource`, `TextureSourceResource`, `TextureSourceBytes`, and

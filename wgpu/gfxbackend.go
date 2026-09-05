@@ -79,6 +79,22 @@ type gfxBackend struct {
 	screenW    int
 	screenH    int
 
+	// frame is the frame buffer every screen pass renders into, allocated at
+	// the surface's size on first use and dropped when the surface resizes.
+	// present is the pipeline that puts it on the surface, built once, and
+	// presentBind names the current buffer to it. The module and both layouts
+	// are held for the same reason a shader's are: a pipeline reads its layout
+	// back when a bind group is set, so releasing them is a use-after-free.
+	frame              *gfxbTexture
+	frameW             int
+	frameH             int
+	present            *wgpu.RenderPipeline
+	presentModule      *wgpu.ShaderModule
+	presentGroupLayout *wgpu.BindGroupLayout
+	presentPipeLayout  *wgpu.PipelineLayout
+	presentBind        *wgpu.BindGroup
+	presentFailed      bool
+
 	prevCmd *wgpu.CommandBuffer
 }
 
@@ -592,7 +608,10 @@ func (b *gfxBackend) NewPipeline(desc cgfx.PipelineDesc) (cgfx.PipelineID, error
 		DepthStencil: depth,
 		Fragment: &wgpu.FragmentState{
 			Module: module, EntryPoint: "fs_main",
-			Targets: []gputypes.ColorTargetState{{Format: b.colorTargetFormat(desc.ColorFormat), WriteMask: gputypes.ColorWriteMaskAll, Blend: blend}},
+			// FormatScreen resolves to the frame buffer's format, not the
+			// surface's: a screen pass renders into the frame buffer, and the
+			// present pipeline is the only one built for the surface.
+			Targets: []gputypes.ColorTargetState{{Format: textureFormat(desc.ColorFormat), WriteMask: gputypes.ColorWriteMaskAll, Blend: blend}},
 		},
 	})
 	if err != nil {
@@ -641,8 +660,10 @@ func (b *gfxBackend) FreePipeline(id cgfx.PipelineID) {
 func (b *gfxBackend) setScreen(view *wgpu.TextureView, w, h int) {
 	if w != b.screenW || h != b.screenH {
 		// The shared depth textures are keyed by size, and nothing renders at
-		// the old one any more.
+		// the old one any more; the frame buffer is frame-sized, so it goes
+		// with them and the next screen pass allocates one that fits.
 		b.releaseDepths()
+		b.releaseFrameBuffer()
 	}
 	b.screenView, b.screenW, b.screenH = view, w, h
 }

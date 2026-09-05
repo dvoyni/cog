@@ -120,7 +120,14 @@ func (b *gfxBackend) EndPass(pass cgfx.RenderPass) {
 // passColour resolves a pass's colour attachment and the size it renders at.
 func (b *gfxBackend) passColour(desc cgfx.GpuPassDesc) (*wgpu.TextureView, int, int) {
 	if desc.Screen {
-		return b.screenView, b.screenW, b.screenH
+		// A screen pass renders into the frame buffer, never into the surface:
+		// only the present pass touches that. This is also where the buffer is
+		// allocated, so first use is what pays for it.
+		frame := b.frameBuffer()
+		if frame == nil {
+			return nil, 0, 0
+		}
+		return frame.view, b.frameW, b.frameH
 	}
 	if view, ok := b.viewID[desc.Target]; ok {
 		return view.view, view.width, view.height

@@ -41,23 +41,40 @@ const (
 	// values: normal, metallic-roughness and occlusion maps.
 	FormatRGBA8 TextureFormat = iota
 	// FormatRGBA8Srgb is the same layout holding gamma-encoded values the
-	// hardware decodes on read: base colour, emissive, the canvas atlas and
-	// the frame buffer.
+	// hardware decodes on read: base colour, emissive and the canvas atlas.
 	FormatRGBA8Srgb
 	// FormatDepth32F is the one depth format, renderable and sampleable. There
 	// is no stencil aspect anywhere in the engine.
 	FormatDepth32F
 	// FormatScreen is the sentinel for "whatever the frame buffer is", so a
 	// pipeline can be keyed before the frame buffer exists. It resolves to
-	// FormatRGBA8Srgb.
+	// FrameBufferFormat.
 	FormatScreen
 )
+
+// FrameBufferFormat is what every ScreenTarget pass renders into: the frame
+// buffer gfx owns, which the implicit present pass then puts on the swapchain.
+// The swapchain itself is unreachable as an sRGB surface - gogpu hardcodes
+// BGRA8Unorm and exposes no view formats, and bgra8unorm-srgb is not a legal
+// canvas-context format on the web - so the engine has to own this buffer to
+// have any say over the colour space at all.
+//
+// It is deliberately a plain unorm buffer today. Recorders still write
+// gamma-encoded values, and this format plus a pass-through present is the one
+// combination that leaves the frame bit-for-bit what it was before the frame
+// buffer existed: an sRGB buffer would encode those values a second time on
+// write, and cancelling that in the present shader only re-quantises them.
+// Flipping this constant to FormatRGBA8Srgb is what turns the engine linear.
+// The present pass reads this same constant to decide whether it applies the
+// sRGB OETF, so the buffer's colour space and the transfer function that puts
+// it on screen stay one decision rather than two that can disagree.
+const FrameBufferFormat = FormatRGBA8
 
 // Resolve replaces the FormatScreen sentinel with the concrete frame-buffer
 // format and returns every other format unchanged.
 func (f TextureFormat) Resolve() TextureFormat {
 	if f == FormatScreen {
-		return FormatRGBA8Srgb
+		return FrameBufferFormat
 	}
 	return f
 }
@@ -327,9 +344,11 @@ type Backend interface {
 	NewPipeline(PipelineDesc) (PipelineID, error)
 	FreePipeline(id PipelineID)
 
-	// ScreenFramebuffer returns the current frame's screen render target and its
-	// physical size. It is valid only while a frame is being rendered (the driver
-	// makes the surface current before triggering the render).
+	// ScreenFramebuffer returns the surface the present pass draws into and its
+	// physical size, which is also the size the frame buffer is allocated at. It
+	// is not what ScreenTarget resolves to - that is the frame buffer - and it is
+	// valid only while a frame is being rendered (the driver makes the surface
+	// current before triggering the render).
 	ScreenFramebuffer() (view TextureViewID, width, height int)
 
 	// TextureView returns a renderable view of one mip level of one layer of a

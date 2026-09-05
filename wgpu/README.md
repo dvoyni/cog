@@ -79,5 +79,15 @@ opaque IDs to native WebGPU textures and buffers, reflects WGSL bindings, caches
 pipelines/samplers/bind groups, maintains depth targets, performs queued bakes
 and releases, and submits each translated `gfx.GpuQueue` to the current surface.
 
+A pass whose target is `gfx.ScreenTarget()` does not render into the surface.
+It renders into a frame-sized frame buffer the backend allocates on first use
+in `gfx.FrameBufferFormat` and drops whenever the surface resizes; the frame's
+implicit present pass then draws a full-screen triangle that samples it into
+the surface. The present pipeline is the only one built for the surface's own
+format — every other pipeline is built for the frame buffer's — because a
+hardware sRGB swapchain is unreachable: gogpu hardcodes `BGRA8Unorm` and
+exposes no view formats, and `bgra8unorm-srgb` is not a legal canvas-context
+format on the web.
+
 Desktop and WebAssembly platform differences are hidden behind build-tagged
 files; the public API is identical.

@@ -19,16 +19,6 @@ func textureFormat(format cgfx.TextureFormat) gputypes.TextureFormat {
 	}
 }
 
-// colorTargetFormat is the format a pipeline's colour attachment really has.
-// FormatScreen is the sentinel for "whatever the screen target is", and today
-// that target is the swapchain itself.
-func (b *gfxBackend) colorTargetFormat(format cgfx.TextureFormat) gputypes.TextureFormat {
-	if format == cgfx.FormatScreen {
-		return b.surfaceFormat
-	}
-	return textureFormat(format)
-}
-
 // bytesPerTexel is the row stride per texel of a format, which every upload
 // derives its BytesPerRow from.
 func bytesPerTexel(format cgfx.TextureFormat) int {

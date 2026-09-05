@@ -152,6 +152,59 @@ func TestPassWithoutDrawsRunsOnlyWhenAnAttachmentLoads(t *testing.T) {
 	}
 }
 
+func TestScreenPassesAreFollowedByOnePresentPass(t *testing.T) {
+	backend, _ := passFrame(t, func(q *OpQueue) {
+		q.Pass(PassDescr{Order: 0, Target: ScreenTarget(), Depth: DepthAuto(), Load: LoadClear, Label: "first"})
+		drawInto(q)
+		q.Pass(PassDescr{Order: 1, Target: ScreenTarget(), Depth: DepthAuto(), DepthLoad: LoadClear, Label: "second"})
+		drawInto(q)
+	})
+	if backend.presents != 1 {
+		t.Fatalf("present passes = %d, want exactly 1 however many screen passes there were", backend.presents)
+	}
+	// The present pass reads what the frame wrote, so it can only run last.
+	if backend.presentAfter != len(backend.lastPasses) {
+		t.Errorf("present ran after %d of %d passes, want last", backend.presentAfter, len(backend.lastPasses))
+	}
+}
+
+func TestAFrameThatNeverTouchesTheScreenDoesNotPresent(t *testing.T) {
+	p := New()
+	k := newTestKernel(t, p)
+	backend := &fakeBackend{}
+	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
+
+	var target TextureDescr
+	withResourceQueue(t, k, func(resources *ResourceQueue) {
+		target = resources.AllocateTexture(64, 64, 1, FormatRGBA8Srgb)
+	})
+	w := recordRaw(t, k)
+	w.Pass(PassDescr{Target: TextureTarget(target, 0, 0), Depth: DepthNone(), Load: LoadClear, Label: "offscreen"})
+	w.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
+	k.PublishEvent(app.RenderEvent{}).Wait()
+
+	if len(backend.lastPasses) != 1 {
+		t.Fatalf("passes = %d, want the one texture pass", len(backend.lastPasses))
+	}
+	// Nothing rendered into the frame buffer, so there is nothing to show and
+	// blitting it over the screen would only wipe the last frame out.
+	if backend.presents != 0 {
+		t.Errorf("present passes = %d, want none: no pass named the screen", backend.presents)
+	}
+}
+
+func TestAScreenPassThatIsDroppedDoesNotPresent(t *testing.T) {
+	backend, _ := passFrame(t, func(q *OpQueue) {
+		// Nothing to draw and nothing to load: the pass is not encoded, so the
+		// frame buffer is never allocated and there is nothing to present.
+		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Label: "empty"})
+	})
+	if len(backend.lastPasses) != 0 || backend.presents != 0 {
+		t.Errorf("passes = %d, presents = %d, want neither", len(backend.lastPasses), backend.presents)
+	}
+}
+
 func TestDrawSamplingItsOwnAttachmentIsRejected(t *testing.T) {
 	p := New()
 	var reported []error

@@ -15,7 +15,7 @@ func TestTextureFormatMapsEveryGfxFormat(t *testing.T) {
 		{cgfx.FormatRGBA8, gputypes.TextureFormatRGBA8Unorm},
 		{cgfx.FormatRGBA8Srgb, gputypes.TextureFormatRGBA8UnormSrgb},
 		{cgfx.FormatDepth32F, gputypes.TextureFormatDepth32Float},
-		{cgfx.FormatScreen, gputypes.TextureFormatRGBA8UnormSrgb},
+		{cgfx.FormatScreen, textureFormat(cgfx.FrameBufferFormat)},
 	}
 	for _, c := range cases {
 		if got := textureFormat(c.format); got != c.want {

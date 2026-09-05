@@ -33,8 +33,8 @@ type GpuQueue struct {
 }
 
 // GpuPassDesc is one render pass for the backend to encode. Screen selects the
-// frame's screen attachment, which only the backend can resolve; Target names
-// any other colour attachment, and zero means none.
+// frame buffer, which only the backend can resolve because it is sized from the
+// surface; Target names any other colour attachment, and zero means none.
 type GpuPassDesc struct {
 	Screen     bool
 	Target     TextureViewID
@@ -50,8 +50,11 @@ type GpuPassDesc struct {
 }
 
 // gpuPass is a pass descriptor and the half-open range of render commands in it.
+// present marks the frame's implicit present pass instead, which carries no
+// descriptor and no commands: everything about it is the backend's.
 type gpuPass struct {
 	desc       GpuPassDesc
+	present    bool
 	start, end int
 }
 
@@ -60,6 +63,11 @@ type gpuPass struct {
 type GpuPassSink interface {
 	BeginPass(GpuPassDesc) RenderPass
 	EndPass(RenderPass)
+	// Present puts the frame buffer on the swapchain. It takes no arguments
+	// because every piece of it - the buffer, the full-screen triangle, the
+	// transfer function and the swapchain's own format - belongs to the
+	// backend; gfx only decides that the frame has something to show.
+	Present()
 }
 
 // GpuBakeSink receives resource uploads before render-pass encoding.
@@ -103,6 +111,12 @@ func (q *GpuQueue) Reset() {
 // BeginPass opens a pass; every render command until EndPass belongs to it.
 func (q *GpuQueue) BeginPass(desc GpuPassDesc) {
 	q.passes = append(q.passes, gpuPass{desc: desc, start: len(q.render), end: len(q.render)})
+}
+
+// Present appends the frame's implicit present pass, which runs after every
+// declared pass because it reads what they wrote.
+func (q *GpuQueue) Present() {
+	q.passes = append(q.passes, gpuPass{present: true, start: len(q.render), end: len(q.render)})
 }
 
 // EndPass closes the pass BeginPass opened.
@@ -247,6 +261,10 @@ func (q *GpuQueue) ReplayBakes(sink GpuBakeSink) {
 func (q *GpuQueue) ReplayPasses(sink GpuPassSink) {
 	for i := range q.passes {
 		pass := &q.passes[i]
+		if pass.present {
+			sink.Present()
+			continue
+		}
 		rp := sink.BeginPass(pass.desc)
 		if rp != nil {
 			q.replayRange(rp, pass.start, pass.end)
