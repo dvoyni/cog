@@ -26,6 +26,8 @@ type testBackend struct {
 	// per arena become assertable.
 	draws    []drawCall
 	bindings []bufferBinding
+	textures []textureBinding
+	samplers []samplerBinding
 	bakes    int
 }
 
@@ -43,6 +45,18 @@ type bufferBinding struct {
 	offset, size   int
 }
 
+// textureBinding and samplerBinding are the material-group resources one draw
+// bound, which is what makes "all five slots, always" assertable with no GPU.
+type textureBinding struct {
+	group, binding int
+	texture        gfx.TextureID
+}
+
+type samplerBinding struct {
+	group, binding int
+	sampler        gfx.SamplerID
+}
+
 // testShaderLayout is what reflection reports for the bundled scene shader. The
 // real source is reflected and asserted in the wgpu package, the only tree with
 // a WGSL front end; here it stands in so that scene's bindings reach the
@@ -51,7 +65,52 @@ var testShaderLayout = gfx.ShaderLayout{Resources: []gfx.ShaderResource{
 	{Name: "sceneFrame", StorageBuffer: true, Group: 0, Binding: 0},
 	{Name: "sceneInstances", StorageBuffer: true, Group: 0, Binding: 1},
 	{Name: "scenePbrMaterial", StorageBuffer: true, Group: 1, Binding: 0},
+	{Name: "baseColorTexture", Group: 1, Binding: 1},
+	{Name: "baseColorSampler", Sampler: true, Group: 1, Binding: 2},
+	{Name: "metallicRoughnessTexture", Group: 1, Binding: 3},
+	{Name: "metallicRoughnessSampler", Sampler: true, Group: 1, Binding: 4},
+	{Name: "normalTexture", Group: 1, Binding: 5},
+	{Name: "normalSampler", Sampler: true, Group: 1, Binding: 6},
+	{Name: "occlusionTexture", Group: 1, Binding: 7},
+	{Name: "occlusionSampler", Sampler: true, Group: 1, Binding: 8},
+	{Name: "emissiveTexture", Group: 1, Binding: 9},
+	{Name: "emissiveSampler", Sampler: true, Group: 1, Binding: 10},
 }}
+
+// texturesBoundTo reports the texture bound to one reflected binding on each
+// draw, in the order the frame bound them. A slot nobody bound reports nothing,
+// which is the failure that takes the whole frame's command buffer down.
+func (b *testBackend) texturesBoundTo(name string) []gfx.TextureID {
+	group, binding := bindingOf(name)
+	var found []gfx.TextureID
+	for _, bound := range b.textures {
+		if bound.group == group && bound.binding == binding {
+			found = append(found, bound.texture)
+		}
+	}
+	return found
+}
+
+// samplersBoundTo reports the sampler bound to one reflected binding per draw.
+func (b *testBackend) samplersBoundTo(name string) []gfx.SamplerID {
+	group, binding := bindingOf(name)
+	var found []gfx.SamplerID
+	for _, bound := range b.samplers {
+		if bound.group == group && bound.binding == binding {
+			found = append(found, bound.sampler)
+		}
+	}
+	return found
+}
+
+func bindingOf(name string) (group, binding int) {
+	for _, resource := range testShaderLayout.Resources {
+		if resource.Name == name {
+			return resource.Group, resource.Binding
+		}
+	}
+	return -1, -1
+}
 
 // buffersBoundTo reports every range bound to one reflected binding, in the
 // order the frame bound them.
@@ -114,10 +173,15 @@ func (b *testBackend) AllocateTexture(gfx.TextureID, gfx.TextureDesc)           
 func (b *testBackend) UpdateTexture(gfx.TextureID, int, gfx.Region, []byte)                 {}
 func (b *testBackend) SetPipeline(gfx.PipelineID)                                           {}
 func (b *testBackend) SetParams([]byte)                                                     {}
-func (b *testBackend) SetTexture(gfx.TextureID, int, int)                                   {}
-func (b *testBackend) SetSampler(gfx.SamplerID, int, int)                                   {}
-func (b *testBackend) SetVertexBuffer(gfx.BufferID, int)                                    {}
-func (b *testBackend) SetIndexBuffer(gfx.BufferID, int)                                     {}
+func (b *testBackend) SetTexture(texture gfx.TextureID, group, binding int) {
+	b.textures = append(b.textures, textureBinding{group: group, binding: binding, texture: texture})
+}
+
+func (b *testBackend) SetSampler(sampler gfx.SamplerID, group, binding int) {
+	b.samplers = append(b.samplers, samplerBinding{group: group, binding: binding, sampler: sampler})
+}
+func (b *testBackend) SetVertexBuffer(gfx.BufferID, int) {}
+func (b *testBackend) SetIndexBuffer(gfx.BufferID, int)  {}
 func (b *testBackend) SetBuffer(group, binding int, buffer gfx.BufferID, offset, size int) {
 	b.bindings = append(b.bindings, bufferBinding{
 		group: group, binding: binding, buffer: buffer, offset: offset, size: size,

@@ -74,3 +74,27 @@ type ErrCameraProjectionDegenerate struct {
 func (e ErrCameraProjectionDegenerate) Error() string {
 	return fmt.Sprintf("scene: camera %d has no projection: %s", e.Camera, e.Reason)
 }
+
+// ErrMaterialTagAlreadyServed reports a Material with two entries for one pass
+// tag. The first entry wins and the second is dropped, matching the
+// duplicate-CameraID ruling: a repeat means two intentions for one pass and one
+// of them is about to be surprised. The check runs when the frame interns the
+// material, not per draw.
+type ErrMaterialTagAlreadyServed struct{ Tag PassTag }
+
+func (e ErrMaterialTagAlreadyServed) Error() string {
+	return fmt.Sprintf("scene: a material has two entries for the %q pass tag; the first wins", e.Tag)
+}
+
+// ErrTextureUVSetUnsupported reports a material slot naming a TEXCOORD set past
+// the two scene carries. The slot falls back to set 0 rather than being
+// dropped, and says so: silently ignoring texCoord: 1 would be a wrong picture
+// on a core glTF feature with nothing anywhere to explain it.
+type ErrTextureUVSetUnsupported struct {
+	Slot     string
+	TexCoord int
+}
+
+func (e ErrTextureUVSetUnsupported) Error() string {
+	return fmt.Sprintf("scene: %s names TEXCOORD_%d; scene carries two UV sets, so it falls back to TEXCOORD_0", e.Slot, e.TexCoord)
+}

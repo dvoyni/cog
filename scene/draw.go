@@ -7,36 +7,13 @@ import (
 	"github.com/dvoyni/cog/m"
 )
 
-// bundledMaterialID is the dense id of the bundled material. Ids are per
-// (material, tag), because the sort key must distinguish the pipelines actually
-// bound in a pass; the bundled material serves the forward tag and nothing else
-// yet, so it needs exactly one.
-const bundledMaterialID uint32 = 1
-
-// bundledMaterial is what every draw that names no material of its own uses.
-// It carries no parameters: everything it reads is a range of a per-frame
-// arena, injected per draw through the ordinary name matcher, so the plan cache
-// sees an identical parameter shape on every draw and hits every time.
-//
-// The scene-prefixed parameter name space is reserved for engine-supplied
-// bindings, mirroring canvas's canvasTexture and canvasSampler. There is no
-// separate system-bindings channel to keep in sync: sceneFrame, sceneInstances
-// and scenePbrMaterial are injected as ordinary per-draw parameters and the
-// existing matcher binds them exactly like a material texture. A caller
-// material that names a scene* parameter is an app bug; gfx does not police it,
-// and the material simply loses.
-var bundledMaterial = gfx.MaterialWithState(
-	gfx.ShaderWithResource(sceneShaderPath),
-	gfx.StateOpaque3D,
-)
-
 // The sizes of the records scene binds ranges of. They are the Go structs'
 // sizes because the Go structs are what scene writes; the WGSL side of the same
 // contract is asserted where the shader is reflected.
 var (
 	instanceSize       = int(unsafe.Sizeof(sceneInstance{}))
 	frameBlockSize     = int(unsafe.Sizeof(sceneFrameBlock{}))
-	materialRecordSize = int(unsafe.Sizeof(sceneMaterialRecord{}))
+	materialRecordSize = int(unsafe.Sizeof(scenePbrRecord{}))
 )
 
 // pendingPass is one pass the flush has decided but not yet emitted, and
@@ -56,7 +33,12 @@ type pendingPass struct {
 }
 
 type pendingDraw struct {
-	mesh           gfx.MeshDescr
+	mesh gfx.MeshDescr
+	// material is the gfx material the draw's resolved tag entry named. It is
+	// carried per draw rather than looked up again at emit time because
+	// resolution is a pass-relative answer: the same scene material serves a
+	// different gfx material in a shadow pass.
+	material       *gfx.MaterialDescr
 	materialOffset int
 	firstInstance  int
 	instances      int
@@ -96,7 +78,7 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 		pass := &b.passes[i]
 		gfxWrite.Pass(pass.descr)
 		for _, draw := range b.draws[pass.firstDraw : pass.firstDraw+pass.drawCount] {
-			gfxWrite.DrawInstancedFrom(draw.mesh, bundledMaterial, draw.firstInstance, draw.instances,
+			gfxWrite.DrawInstancedFrom(draw.mesh, *draw.material, draw.firstInstance, draw.instances,
 				gfx.BufferRangeParam("sceneFrame", frames, pass.frameOffset, frameBlockSize),
 				gfx.BufferRangeParam("sceneInstances", instances, pass.instanceOffset, pass.instanceBytes),
 				gfx.BufferRangeParam("scenePbrMaterial", materials, draw.materialOffset, materialRecordSize),
@@ -121,19 +103,26 @@ func (b *frameBuild) beginPass(descr gfx.PassDescr, block sceneFrameBlock) *pend
 // addDraw packs one instance and its material record into the pass being
 // accumulated. firstInstance is relative to the pass's own slice, which is what
 // lets the draw read its instance with no offset plumbing of its own.
-func (b *frameBuild) addDraw(pass *pendingPass, mesh meshRecord, id uint32, world m.Mat4, color m.Color) {
+//
+// One record per batch, no dedupe: two meshes sharing a material produce two
+// byte-identical records, and collapsing them would cost a hash of every record
+// every frame to save an upload nobody has measured.
+func (b *frameBuild) addDraw(
+	pass *pendingPass, mesh meshRecord, id uint32, entry materialEntry,
+	world m.Mat4, record scenePbrRecord,
+) {
 	first := (len(b.instances.bytes()) - pass.instanceOffset) / instanceSize
 	instance := packInstance(world)
 	b.instances.appendElement(&instance)
-	record := sceneMaterialRecord{BaseColorFactor: m.Vec4{X: color.R, Y: color.G, Z: color.B, W: color.A}}
 	b.draws = append(b.draws, pendingDraw{
 		mesh:           mesh.descr(),
+		material:       entry.descr,
 		materialOffset: b.materials.appendRecord(&record),
 		firstInstance:  first,
 		instances:      1,
 	})
 	b.batches = append(b.batches, BatchView{
-		MeshID: id, MaterialID: bundledMaterialID,
+		MeshID: id, MaterialID: entry.materialID,
 		FirstInstance: first, InstanceCount: 1,
 	})
 }

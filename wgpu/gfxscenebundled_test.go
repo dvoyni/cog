@@ -57,8 +57,29 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 				want.name, got.Group, got.Binding, want.group, want.binding)
 		}
 	}
-	if len(layout.Resources) != 3 {
-		t.Fatalf("the scene shader declares %d bindings, want the 3 asserted above: %+v",
+	// Five slots, each a texture and its own sampler, all in the per-material
+	// group. Scene binds every one of them on every draw, with a white texel
+	// and a flat normal where the material names no texture.
+	for _, slot := range []string{
+		"baseColor", "metallicRoughness", "normal", "occlusion", "emissive",
+	} {
+		texture, ok := resources[slot+"Texture"]
+		if !ok {
+			t.Fatalf("%sTexture is not reflected; an unreflected binding is an unbound one", slot)
+		}
+		if texture.Sampler || texture.StorageBuffer || texture.Group != 1 {
+			t.Errorf("%sTexture is %+v, want a group 1 texture", slot, texture)
+		}
+		sampler, ok := resources[slot+"Sampler"]
+		if !ok {
+			t.Fatalf("%sSampler is not reflected; five slots means five samplers", slot)
+		}
+		if !sampler.Sampler || sampler.Comparison || sampler.Group != 1 {
+			t.Errorf("%sSampler is %+v, want a group 1 filtering sampler", slot, sampler)
+		}
+	}
+	if len(layout.Resources) != 13 {
+		t.Fatalf("the scene shader declares %d bindings, want the 13 asserted above: %+v",
 			len(layout.Resources), layout.Resources)
 	}
 }
@@ -82,8 +103,21 @@ func TestBundledSceneShaderRecordsMatchTheirPackedOffsets(t *testing.T) {
 	for binding, want := range map[string]map[string]int{
 		"sceneFrame": {
 			"view": 0, "projection": 64, "viewProjection": 128, "cameraPosition": 192,
+			"sunDirection": 208, "sunColor": 224, "ambientSky": 240, "ambientGround": 256,
 		},
-		"scenePbrMaterial": {"baseColorFactor": 0},
+		// The per-slot metadata is flat named members rather than an array,
+		// because array members are not name-addressable through
+		// OverrideParams - and animating baseColorTransform per frame is UV
+		// scrolling, which the array form forecloses permanently.
+		"scenePbrMaterial": {
+			"baseColorFactor": 0, "emissiveFactor": 16,
+			"baseColorTransform": 32, "metallicRoughnessTransform": 48,
+			"normalTransform": 64, "occlusionTransform": 80, "emissiveTransform": 96,
+			"baseColorRotation": 112, "metallicRoughnessRotation": 116,
+			"normalRotation": 120, "occlusionRotation": 124, "emissiveRotation": 128,
+			"metallicFactor": 132, "roughnessFactor": 136, "normalScale": 140,
+			"occlusionStrength": 144, "alphaCutoff": 148, "uvSets": 152,
+		},
 	} {
 		for member, offset := range want {
 			if got, ok := offsets[binding][member]; !ok || got != offset {

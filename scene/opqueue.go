@@ -145,6 +145,26 @@ type drawRecord struct {
 	layers    LayerMask
 	transform Transform
 	color     m.Color
+	// material is the scene material the draw named, or nil for the bundled
+	// PBR. Every debug shape leaves it nil, which is what makes a draw literal
+	// that omits the field untouched by the field existing.
+	material Material
+	// interned is that material's index in the frame's material table, filled
+	// by the flush before any pass walks the draws.
+	interned int32
+}
+
+// pbrRecord builds the bundled PBR record one recorded draw binds.
+//
+// A debug shape is paint, not metal: it takes glTF's defaults except for
+// metallic, because glTF defaults to a fully metallic surface and a metal has
+// no diffuse at all - a debug box would render as a dark mirror of an
+// environment that does not exist, which is the opposite of visible.
+func (r drawRecord) pbrRecord() scenePbrRecord {
+	record := defaultPbrRecord()
+	record.MetallicFactor = 0
+	record.BaseColorFactor = m.Vec4{X: r.color.R, Y: r.color.G, Z: r.color.B, W: r.color.A}
+	return record
 }
 
 // Box records a unit cube at transform. It is the scene twin of canvas's

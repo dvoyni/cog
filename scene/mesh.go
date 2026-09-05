@@ -110,6 +110,10 @@ func (l *Lookup) mesh(ref MeshRef) (meshRecord, bool) {
 // one place that already knows the backend is ready.
 type bakeFunc func(data []byte) gfx.BufferDescr
 
+// bakeTextureFunc uploads one texture's texels and returns the durable
+// descriptor for them, the texture twin of bakeFunc.
+type bakeTextureFunc func(width, height int, format gfx.TextureFormat, pixels []byte) gfx.TextureDescr
+
 // bakeMesh registers durable geometry and returns its ref.
 func (l *Lookup) bakeMesh(
 	vertices, indices []byte, indexCount, vertexCount int,

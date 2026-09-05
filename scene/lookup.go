@@ -1,6 +1,7 @@
 package scene
 
 import (
+	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/storage"
 )
@@ -19,6 +20,11 @@ type Lookup struct {
 	meshes []meshRecord
 	// unitBox is scene's own cube, baked on first use.
 	unitBox MeshRef
+	// bundled is the bundled PBR material, built on first use around the two
+	// default textures. It is not a package-level value because those textures
+	// are baked resources: the backend may not be Ready() at startup, and a
+	// texture baked then would either panic or silently not exist.
+	bundled Material
 }
 
 func newLookup(config Config) *Lookup { return &Lookup{config: config} }
@@ -47,3 +53,23 @@ func NewLookupAccess(k kernel.Kernel, lookup *Lookup, filesystem storage.FileSys
 
 // Valid reports whether the facade is backed by a live Lookup.
 func (la LookupAccess) Valid() bool { return la.lookup != nil }
+
+// ensureBundled builds the bundled PBR the first time something draws, baking
+// the two 1x1 default textures it binds into every absent slot, and returns the
+// same material forever after.
+//
+// 1x1 rather than larger because uploads carry no row-alignment rule and for a
+// constant texel every mip level is identical, so there is nothing to generate.
+// Both are linear-format: 1.0 is a fixed point of the sRGB transfer curve, so
+// the white texel reads 1.0 through an sRGB slot and a linear one alike, and
+// the flat normal is not a picture at all.
+func (l *Lookup) ensureBundled(bake bakeTextureFunc) Material {
+	if l.bundled != nil {
+		return l.bundled
+	}
+	l.bundled = bundledPbr(pbrDefaults{
+		white:      bake(1, 1, gfx.FormatRGBA8, []byte{0xff, 0xff, 0xff, 0xff}),
+		flatNormal: bake(1, 1, gfx.FormatRGBA8, []byte{0x80, 0x80, 0xff, 0xff}),
+	})
+	return l.bundled
+}

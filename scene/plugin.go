@@ -34,6 +34,10 @@ type Plugin struct {
 	// build is the frame under construction. It lives on the plugin so its
 	// arenas keep their backing across frames.
 	build frameBuild
+	// materials interns the frame's pass tags and caller materials. Tags
+	// outlive a frame because the tag set belongs to the passes an app
+	// declares; the materials in it do not.
+	materials materialTable
 }
 
 // passLabel keys the synthesised debug label of one camera's pass. Labels are
@@ -124,6 +128,17 @@ func (p *Plugin) flushFrame(
 	// write-locks, which is why the Lookup never holds a gfx handle of its own:
 	// a mesh baked and drawn in the same update uploads in that same frame.
 	bake := func(data []byte) gfx.BufferDescr { return gfxResources.BakeBuffer(data, true) }
+	bakeTexture := func(width, height int, format gfx.TextureFormat, pixels []byte) gfx.TextureDescr {
+		return gfxResources.BakeTexture(width, height, format, pixels, true, false)
+	}
+	report := func(err error) { k.ReportError(err) }
+	p.materials.reset(lookup.ensureBundled(bakeTexture))
+	// Materials intern once per frame, before any pass walks the draws, so a
+	// draw's per-pass cost is one array read rather than a map probe per pass.
+	draws := write.flushDraws()
+	for i := range draws {
+		draws[i].interned = p.materials.intern(report, draws[i].material)
+	}
 	for i := range cameras {
 		p.flushCamera(k, write, lookup, bake, view, cameras[i])
 	}
@@ -176,29 +191,38 @@ func (p *Plugin) flushPass(
 	}
 	order := gfx.Order(camera.id) + pass.Order
 	viewProjection := projectionMatrix.Mul(viewMatrix)
-	pending := p.build.beginPass(p.passDescr(camera.id, pass, order), sceneFrameBlock{
+	pending := p.build.beginPass(p.passDescr(camera.id, pass, order), packFrameLighting(sceneFrameBlock{
 		View:           viewMatrix,
 		Projection:     projectionMatrix,
 		ViewProjection: viewProjection,
 		CameraPosition: cameraPosition(camera.descr.Transform),
-	})
+	}, camera.descr))
 	result := PassView{
 		CameraID: camera.id,
 		Order:    order,
 		Tag:      pass.tag(),
 		Frustum:  m.FrustumFromMat4(viewProjection),
 	}
+	// The tag interns once per pass, so no draw in it ever compares a string.
+	tag := p.materials.internTag(pass.tag())
 	for _, record := range write.flushDraws() {
 		if !record.layers.drawnBy(camera.descr.CullMask) {
 			continue
 		}
 		result.Recorded++
+		// A material with no entry for this pass's tag skips it. Tag
+		// participation is purely a material property: a draw gets no say in
+		// which passes it appears in.
+		entry, serves := p.materials.entry(record.interned, tag)
+		if !serves {
+			continue
+		}
 		ref := lookup.ensureUnitBox(bake)
 		mesh, ok := lookup.mesh(ref)
 		if !ok {
 			continue
 		}
-		p.build.addDraw(pending, mesh, ref.ID(), record.transform.Mat4(), record.color)
+		p.build.addDraw(pending, mesh, ref.ID(), entry, record.transform.Mat4(), record.pbrRecord())
 		result.Instances++
 	}
 	p.build.endPass(pending)
