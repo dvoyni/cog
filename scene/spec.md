@@ -62,10 +62,15 @@ only configurable number in the plugin; see
 
 Scene reads storage buffers from the **vertex stage**, which WebGPU guarantees
 only on a **core** adapter — compatibility mode defaults
-`maxStorageBuffersInVertexStage` to 0. cog never requests
-`featureLevel: "compatibility"`, so a compat-only device already fails
-`requestAdapter()` and gets no WebGPU at all rather than a degraded scene. This
-is consistent with the map's no-fallback rule, but the failure is total
+`maxStorageBuffersInVertexStage` to 0. The binding cog runs on **cannot express
+compatibility mode at all**: `RequestAdapterOptions` carries `PowerPreference`,
+`ForceFallbackAdapter` and `CompatibleSurface` and nothing else, and the browser
+path forwards at most `powerPreference` and `forceFallbackAdapter`. Omitting
+`featureLevel` means core, so a compat-only device already fails
+`requestAdapter()` and gets no WebGPU at all rather than a degraded scene. Stated
+this way deliberately: this is not a choice cog makes and could later unmake — it
+is a capability the binding does not have. The result is consistent with the
+map's no-fallback rule, but the failure is total
 ([wgpu backend capabilities inventory](https://github.com/dvoyni/cog/issues/4),
 [GPU skinning and morph techniques survey](https://github.com/dvoyni/cog/issues/6)).
 
@@ -874,8 +879,8 @@ Two rejected alternatives, both worth recording because each looks cheaper:
   degenerate single-joint skins have no inverse bind to premultiply; and the
   unpremultiplied buffer literally contains bone world transforms, which is what
   the fogged bone-socket work needs. `inverseBind` is instead a small per-skin
-  `array<mat4x3>` — one entry per joint, not per joint-frame — applied *after*
-  the cross-play blend. Cost is one extra 48 B fetch and one 4×3 concat per
+  array — one entry per joint, not per joint-frame — applied *after* the
+  cross-play blend. Cost is one extra 48 B fetch and one 4×3 concat per
   *influence*, from an array small enough to stay L1-resident.
 - **A 32 B record** with scalar scale packed into translation's `w` would cut
   pose memory and per-vertex loads by a third — the single largest cost in this
@@ -886,11 +891,30 @@ Two rejected alternatives, both worth recording because each looks cheaper:
 
 **Normals and tangents use a precomputed normal matrix, never a shader inverse.**
 Because the inverse bind can be non-orthonormal, so can the composed skinning
-matrix. Load computes `transpose(inverse(inverseBind))` per joint into a second
-per-skin `array<mat3x3>`. The shader transforms the normal by the blended TRS
-rotation (orthonormal, so direct), then by that matrix, then renormalises; the
-tangent takes the same path plus Gram-Schmidt against the skinned normal, and its
-`w` handedness flips from the inverse bind's determinant sign, also precomputed.
+matrix. Load computes `transpose(inverse(inverseBind))` per joint. The shader
+transforms the normal by the blended TRS rotation (orthonormal, so direct), then
+by that matrix, then renormalises; the tangent takes the same path plus
+Gram-Schmidt against the skinned normal, and its `w` handedness flips from the
+inverse bind's determinant sign, also precomputed.
+
+**The inverse bind and the normal matrix share one buffer.** They are both per
+skin, both indexed by the same joint index, and both fetched on every influence,
+so they interleave into a single `sceneSkinJoints` record: 64 B for the inverse
+bind plus 48 B for the normal matrix, **112 B per joint**, exactly 7 × 16 with no
+tail padding. One address computation instead of two, and both halves land
+adjacent for all four influences.
+
+Declared as **explicit `vec4` columns, not `mat4x3` and `mat3x3`**. WGSL pads
+every matrix column to 16 bytes, so the record already carries 28 bytes that
+matrix syntax cannot address — and the precomputed handedness sign needs
+somewhere to live. Explicit columns make that padding addressable and give it a
+free home.
+
+Two buffers was the original shape; they were merged to recover a storage-buffer
+slot, which cost nothing because nothing about the *semantics* moved — poses stay
+unpremultiplied, the inverse bind still applies after the blend, the normal
+matrix is still precomputed rather than inverted in the shader
+([scene: the storage-buffer budget is eight of eight, not six](https://github.com/dvoyni/cog/issues/58)).
 
 **Sample rate is 60 Hz, global**, from `Config.PoseSampleRate`; linear
 interpolation, clip duration rounded up to whole frames. No per-clip override:
@@ -1850,24 +1874,49 @@ mirroring canvas's `canvasTexture`/`canvasSampler`. A material parameter named
 | `sceneAnim` | 0 | `array<vec4<f32>>` arena, indexed by `sceneInstance.animOffset` |
 | `scenePbrMaterial` | 1 | the bundled PBR record, a bound range |
 | `scenePoses` | 2 | baked 48 B pose records |
-| `sceneInverseBinds` | 2 | per-skin `array<mat4x3>` |
-| `sceneNormalMatrices` | 2 | per-skin `array<mat3x3>` |
+| `sceneSkinJoints` | 2 | per-skin, per-joint 112 B record: inverse bind and normal matrix interleaved |
 | `sceneMorphDeltas` | 2 | per-model morph delta records |
 
 Plus the PBR's five textures and five samplers in group 1
 (see [Bundled PBR material](#bundled-pbr-material)).
 
-**Gap — storage-buffer budget.** Those are **eight** storage buffers. Every
-reflected binding is emitted with visibility `Vertex|Fragment` unconditionally,
-because reflection walks module globals without consulting entry points, so a
-buffer only the vertex stage reads still consumes a fragment-stage slot — which
-means eight in **each** stage, against the browser core-adapter floor of 8. That
-is legal and leaves **zero** headroom, where the closed tickets record the count
-as six with two spare: that figure counted `scenePoses` and `sceneMorphDeltas`
-but not the separate per-skin inverse-bind and normal-matrix arrays. Filed as
-[scene: the storage-buffer budget is eight of eight, not six](https://github.com/dvoyni/cog/issues/58);
-nothing here changes until it is resolved, but an implementation must not add a
-ninth.
+**The storage-buffer budget is seven of eight, and the eighth is reserved.**
+Every reflected binding is emitted with visibility `Vertex|Fragment`
+unconditionally, because reflection walks module globals without consulting entry
+points, so a buffer only the vertex stage reads still consumes a fragment-stage
+slot — which means the count above is seven in **each** stage, against the
+browser core-adapter floor of 8.
+
+It was eight. Interleaving the two per-skin arrays into one `sceneSkinJoints`
+buffer recovered the slot at no gfx cost, because they share a joint index and
+are fetched together per influence
+([scene: the storage-buffer budget is eight of eight, not six](https://github.com/dvoyni/cog/issues/58),
+correcting the "six with two spare" figure the closed tickets record).
+
+Three rules follow, and they are contract rather than guidance:
+
+- **No scene shader may declare an eighth storage buffer.** The spare exists so
+  the engine can grow once, not to be spent.
+- **A caller-supplied material may declare none of its own.** It may freely use
+  the bindings scene binds on every draw — those are scene's and already counted
+  — which is what the `procedural` demo does.
+- **The debug check compares against `gfx.DefaultLimits`, never against the
+  device's reported limits**, and covers every shader gfx reflects, not just
+  scene's own. A desktop adapter reports hardware limits (200 storage buffers is
+  ordinary), so checking the real device passes a build that cannot run in a
+  browser. The device's limits belong in the *message*, not the comparison: name
+  the declared count, the device's limit and the web floor, so the diagnostic
+  says which platform breaks.
+
+Exceeding this is not a degraded frame. `CreateBindGroup` fails the entry-count
+rule, the error is swallowed, `encoder.Finish()`'s error is dropped, and **the
+whole frame's command buffer vanishes silently** — on the web only.
+
+Moving `sceneFrame` to a uniform block is the named next lever if an eighth is
+ever needed, and is filed rather than built
+([scene: move sceneFrame to a uniform block](https://github.com/dvoyni/cog/issues/100)):
+gfx's uniform path is per-draw only, capped at 256 bytes with silent truncation,
+with no range binding reachable for a uniform-typed binding.
 
 ### The `sceneAnim` block
 
@@ -2290,7 +2339,16 @@ Housekeeping:
 - **Drop `BufferDesc.Dynamic`** — dead code, never read, a pure function of
   `Kind`.
 - `TextureDesc` grows a **renderable bit**.
-- Add `gfx.DefaultLimits` for the debug-build web-limits check.
+- Add `gfx.DefaultLimits` — a hardcoded table of the **browser spec floor** — for
+  the debug-build web-limits check. It is the comparison target precisely because
+  the device's own limits are not: a desktop adapter reports hardware limits, so
+  checking against them passes a build that cannot run in a browser. The check
+  covers **every** shader gfx reflects, not only scene's, and reports the
+  declared count, the device's limit (available today through the backend's
+  existing device handle) and the web floor, naming the offending shader. Note
+  the browser's limit extraction leaves `maxBindGroupsPlusVertexBuffers`,
+  `maxInterStageShaderVariables`, `maxPushConstantSize` and
+  `maxNonSamplerBindings` at zero, so a field-by-field comparison must skip them.
 
 ### `wgpu`
 
@@ -2807,6 +2865,8 @@ under [Scene follow-ups](https://github.com/dvoyni/cog/issues/29).
 | Automatic collapse of consecutive equal draws | shape fully known (canvas's `keyMatches` run-loop over the sorted array), and **output-identical** because the sort ships in v1 | [49](https://github.com/dvoyni/cog/issues/49) |
 | Golden-image acceptance and the first CI workflow | engine surface, not plugin spec; the assertion half needs none of it | [54](https://github.com/dvoyni/cog/issues/54) |
 | Text AA midpoint shift for linear blending | only if linear-blended text reads wrong | [36](https://github.com/dvoyni/cog/issues/36) |
+| Moving `sceneFrame` to a uniform block | the better long-term shape and the named next lever for an eighth storage-buffer slot, but gfx's uniform path is per-draw only, capped at 256 with silent truncation, with no range binding and a `BufferUniform` usage never produced anywhere — a gfx feature, not a budget fix | [100](https://github.com/dvoyni/cog/issues/100) |
+| A uniform block over 256 bytes silently truncating | scene declares no uniform block at all, so it is immune; reachable only through canvas's uniform path | [101](https://github.com/dvoyni/cog/issues/101) |
 
 ### Known-unspecified, with triggers
 
