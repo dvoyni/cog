@@ -133,8 +133,7 @@ func (p *Plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 			if err != nil {
 				k.ReportError(err)
 			}
-			target, _, _ := list.backend.ScreenFramebuffer()
-			list.backend.Execute(target, ops)
+			list.backend.Execute(ops)
 			queue.reset()
 			return nil
 		}

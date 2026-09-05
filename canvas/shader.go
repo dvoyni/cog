@@ -11,10 +11,16 @@ import (
 
 var defaultMaterial = gfx.MaterialWithState(
 	gfx.ShaderWithResource(spriteShaderPath),
-	gfx.MaterialState{Blend: gfx.BlendAlpha, DepthTest: false},
+	gfx.StateOverlay2D,
 	gfx.ColorParam("tint", m.Color{R: 1, G: 1, B: 1, A: 1}),
 	gfx.ColorParam("keyColor", m.Color{R: 0.5, G: 0.5, B: 0.5, A: 1}),
 )
+
+// canvasSampler is the sampler a 2D draw wants: one filter for magnification,
+// minification and mip selection alike, since canvas never generates mipmaps.
+func canvasSampler(u, v gfx.AddressMode, filter gfx.FilterMode) gfx.SamplerDesc {
+	return gfx.SamplerDesc{AddressU: u, AddressV: v, Mag: filter, Min: filter, Mip: filter}
+}
 
 // TextureSlot and SamplerSlot are the reserved Canvas shader parameter names for
 // the texture and sampler a draw samples. Bind them through a material or through
@@ -30,8 +36,8 @@ const (
 // temporary texture on every draw.
 var defaultTrianglesMaterial = gfx.MaterialWithState(
 	gfx.ShaderWithResource(trianglesShaderPath),
-	gfx.MaterialState{Blend: gfx.BlendAlpha, DepthTest: false},
-	gfx.SamplerParam(SamplerSlot, gfx.AddressClamp, gfx.FilterLinear),
+	gfx.StateOverlay2D,
+	gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{}),
 	gfx.ColorParam("keyColor", m.Color{R: 0.5, G: 0.5, B: 0.5, A: 1}),
 )
 
@@ -40,7 +46,7 @@ var defaultTrianglesMaterial = gfx.MaterialWithState(
 // sampler, and shared uniforms are bound per draw.
 var defaultSpriteBatchMaterial = gfx.MaterialWithState(
 	gfx.ShaderWithResource(spriteBatchShaderPath),
-	gfx.MaterialState{Blend: gfx.BlendAlpha, DepthTest: false},
+	gfx.StateOverlay2D,
 )
 
 // SpriteInstance is one per-instance record the spritebatch shader reads from its

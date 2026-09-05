@@ -5,7 +5,11 @@ import (
 	"github.com/dvoyni/cog/m"
 )
 
-type Layer int32
+// Layer orders canvas drawing, and is a gfx pass order: canvas declares one
+// pass per non-empty layer at that order, so anything else recording into the
+// same frame - a scene camera, say - interleaves by taking an order between two
+// layer values, with no canvas API for it at all.
+type Layer = gfx.Order
 
 type Vertex struct {
 	Position m.Vec2

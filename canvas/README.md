@@ -47,7 +47,9 @@ also writes `*Lookup` to resolve lazy sprites and apply deferred unloads.
 Bind `access.GetWrite[*canvas.OpQueue]()` in the recording subscription's `Lock`
 and call:
 
-- `Clear(m.Color)` and `ClearDepth(float32)` to set attachment clear values.
+- `Clear(Layer, m.Color)` to fill the screen at one layer, before anything that
+  layer draws. It is positioned rather than frame-global so that whatever
+  renders below canvas - a scene camera at a lower order - survives it.
 - `SetLayerTransform(Layer, m.Rect, AspectMode)` to map layer world coordinates
   into the logical viewport.
 - `SetClip(m.Rect)` and `RemoveClip()` to control the clip captured by subsequent
@@ -61,7 +63,10 @@ and call:
 - `Reset()` to discard recorded frame state and `OpCount()` to inspect the
   number of recorded draw operations.
 
-`Layer` controls ascending draw order. `m.Rect` and `m.Vec2` use `float32` logical
+`Layer` controls ascending draw order and is a `gfx.Order`: canvas declares one
+gfx pass per non-empty layer at that order, and a contiguous run of them
+collapses back into a single GPU pass. Another recorder interleaves with canvas
+by taking an order between two layer values. `m.Rect` and `m.Vec2` use `float32` logical
 coordinates. `AspectMode` is `AspectInscribe`, `AspectOverlap`, or
 `AspectStretch`.
 

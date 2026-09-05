@@ -43,12 +43,19 @@ type plannedResource struct {
 	param   parameterRef
 }
 
+// plannedSampler is one reflected sampler binding and the parameter that fills
+// it. A shader may declare several, each named separately.
+type plannedSampler struct {
+	group   int
+	binding int
+	param   parameterRef
+}
+
 type parameterPlan struct {
-	uniformSize    int
-	uniforms       []plannedUniform
-	samplerBinding int
-	sampler        parameterRef
-	resources      []plannedResource
+	uniformSize int
+	uniforms    []plannedUniform
+	samplers    []plannedSampler
+	resources   []plannedResource
 }
 
 type parameterPlanBucketKey struct {
@@ -74,10 +81,7 @@ func (t *translator) prepareParameterPlan(shader ShaderID, layout ShaderLayout, 
 	entry := cachedParameterPlan{
 		materialNames: parameterNames(material),
 		drawNames:     parameterNames(draw),
-		plan: parameterPlan{
-			uniformSize:    layout.UniformSize,
-			samplerBinding: -1,
-		},
+		plan:          parameterPlan{uniformSize: layout.UniformSize},
 	}
 	entry.plan.uniforms = make([]plannedUniform, len(layout.Uniforms))
 	for i := range layout.Uniforms {
@@ -91,10 +95,10 @@ func (t *translator) prepareParameterPlan(shader ShaderID, layout ShaderLayout, 
 	for i := range layout.Resources {
 		resource := &layout.Resources[i]
 		if resource.Sampler {
-			if entry.plan.samplerBinding < 0 {
-				entry.plan.samplerBinding = resource.Binding
-				entry.plan.sampler = parameterRefFor(resource.Name, material, draw)
-			}
+			entry.plan.samplers = append(entry.plan.samplers, plannedSampler{
+				group: resource.Group, binding: resource.Binding,
+				param: parameterRefFor(resource.Name, material, draw),
+			})
 			continue
 		}
 		kind := plannedTexture

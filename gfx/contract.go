@@ -30,24 +30,48 @@ type (
 	TextureViewID ResourceID
 )
 
-// TextureFormat enumerates the pixel formats the renderer can create.
+// TextureFormat enumerates the pixel formats the renderer can create. The
+// engine is linear, so the format is what says whether the bytes in a texture
+// are light or a gamma-encoded picker value, and callers name it rather than
+// inherit a default that is wrong half the time.
 type TextureFormat uint8
 
 const (
-	// FormatRGBA8 is 8-bit-per-channel straight-alpha RGBA.
+	// FormatRGBA8 is 8-bit-per-channel straight-alpha RGBA holding linear
+	// values: normal, metallic-roughness and occlusion maps.
 	FormatRGBA8 TextureFormat = iota
+	// FormatRGBA8Srgb is the same layout holding gamma-encoded values the
+	// hardware decodes on read: base colour, emissive, the canvas atlas and
+	// the frame buffer.
+	FormatRGBA8Srgb
+	// FormatDepth32F is the one depth format, renderable and sampleable. There
+	// is no stencil aspect anywhere in the engine.
+	FormatDepth32F
+	// FormatScreen is the sentinel for "whatever the frame buffer is", so a
+	// pipeline can be keyed before the frame buffer exists. It resolves to
+	// FormatRGBA8Srgb.
+	FormatScreen
 )
 
-// AddressMode is a per-axis bitmask selecting how texture coordinates outside
-// [0,1] are sampled: clamp by default, or repeat independently on the U and V
-// axes. AddressRepeat repeats both axes.
+// Resolve replaces the FormatScreen sentinel with the concrete frame-buffer
+// format and returns every other format unchanged.
+func (f TextureFormat) Resolve() TextureFormat {
+	if f == FormatScreen {
+		return FormatRGBA8Srgb
+	}
+	return f
+}
+
+// AddressMode selects how texture coordinates outside [0,1] are sampled on one
+// axis. It is an enum rather than a bitmask because mirroring is a third mode,
+// not a combination of the other two, and a flag that reads as a combination is
+// a flag that gets silently reinterpreted.
 type AddressMode uint8
 
 const (
-	AddressClamp   AddressMode = 0
-	AddressRepeatX AddressMode = 1 << 0
-	AddressRepeatY AddressMode = 1 << 1
-	AddressRepeat  AddressMode = AddressRepeatX | AddressRepeatY
+	AddressClamp AddressMode = iota
+	AddressRepeat
+	AddressMirror
 )
 
 // FilterMode selects texture minification/magnification filtering.
@@ -91,16 +115,53 @@ const (
 	BlendMultiply
 )
 
+// CompareFunc is a depth or sampler comparison. The zero value passes
+// everything, which is the WebGPU default and what a draw that ignores depth
+// wants. Depth is conventional: near maps to 0, far to 1, so CompareLess keeps
+// the nearer fragment.
+type CompareFunc uint8
+
+const (
+	CompareAlways CompareFunc = iota
+	CompareNever
+	CompareLess
+	CompareLessEqual
+	CompareGreater
+	CompareGreaterEqual
+	CompareEqual
+	CompareNotEqual
+)
+
+// CullMode selects which faces a pipeline discards.
+type CullMode uint8
+
+const (
+	CullNone CullMode = iota
+	CullFront
+	CullBack
+)
+
+// FrontFace selects the winding that counts as the front face. glTF requires
+// the reversed winding on nodes whose transform has a negative determinant.
+type FrontFace uint8
+
+const (
+	FrontCCW FrontFace = iota
+	FrontCW
+)
+
 // Region is a rectangular sub-area of a texture in texels.
 type Region struct{ X, Y, Width, Height int }
 
 // TextureDesc describes a texture to create. Layers <= 1 creates a regular 2D
-// texture; larger values create a 2D-array texture.
+// texture; larger values create a 2D-array texture. Renderable asks for a
+// texture a render pass can draw into as well as sample.
 type TextureDesc struct {
 	Width, Height int
 	Layers        int
 	Format        TextureFormat
 	Mipmaps       bool
+	Renderable    bool
 	Label         string
 }
 
@@ -112,11 +173,24 @@ const (
 	TextureView2DArray
 )
 
-// SamplerDesc describes a sampler to create.
+// SamplerDesc describes a sampler to create. Its zero value clamps both axes
+// and filters linearly at every step, and it stays comparable so the translator
+// can dedup identical samplers - a glTF material with five textures whose
+// samplers happen to match costs one GPU object.
 type SamplerDesc struct {
-	Address AddressMode
-	Filter  FilterMode
-	Label   string
+	AddressU, AddressV AddressMode
+	// Mag, Min and Mip are separate because glTF specifies magnification,
+	// minification and mip selection independently. Zero is FilterLinear.
+	Mag, Min, Mip FilterMode
+	// Anisotropy is the maximum anisotropic sample count. 0 and 1 both mean
+	// off, and it is clamped to 16. WebGPU requires all three filters linear
+	// whenever it is above 1.
+	Anisotropy uint8
+	// Comparison makes this a comparison sampler, which a shadow map needs and
+	// which cannot be the same object as a colour sampler.
+	Comparison bool
+	Compare    CompareFunc
+	Label      string
 }
 
 // ShaderDesc describes a shader module to create from opaque, backend-specific
@@ -146,24 +220,67 @@ type UniformMember struct {
 	Offset int
 }
 
+// StorageMember is one top-level member of a reflected storage struct. Stride
+// and Count are set for an array member - `lights: array<SceneLight, 16>` - and
+// zero otherwise.
+type StorageMember struct {
+	Name   string
+	Offset int
+	Stride int
+	Count  int
+}
+
+// Limits is the subset of the WebGPU limits gfx checks shaders against.
+type Limits struct {
+	MaxBindGroups                   int
+	MaxStorageBuffersPerShaderStage int
+	MaxStorageBufferBindingSize     int
+	MaxUniformBufferBindingSize     int
+	MaxBufferSize                   int
+}
+
+// DefaultLimits is the WebGPU spec floor every browser guarantees. It is the
+// comparison target on purpose: a desktop adapter reports its hardware limits,
+// where 200 storage buffers is ordinary, so checking a shader against the
+// device it happens to run on passes builds that cannot run in a browser.
+var DefaultLimits = Limits{
+	MaxBindGroups:                   4,
+	MaxStorageBuffersPerShaderStage: 8,
+	MaxStorageBufferBindingSize:     128 << 20,
+	MaxUniformBufferBindingSize:     64 << 10,
+	MaxBufferSize:                   256 << 20,
+}
+
+// StorageAlignment is the offset alignment a storage binding requires. A record
+// a draw binds a range of therefore pads up to a multiple of it - a pad, not a
+// cap on what a record may hold.
+const StorageAlignment = 256
+
 // ShaderResource is a reflected texture, sampler, or storage-buffer binding.
 type ShaderResource struct {
 	Name           string
 	Sampler        bool
 	StorageBuffer  bool
 	WritableBuffer bool
-	TextureView    TextureViewDimension
-	Group          int
-	Binding        int
+	// Depth marks a depth texture and Comparison a comparison sampler: WebGPU
+	// types those bindings differently from a colour texture and its filtering
+	// sampler, and binding one where the other is declared is an error.
+	Depth       bool
+	Comparison  bool
+	TextureView TextureViewDimension
+	Group       int
+	Binding     int
+	// Members is the reflected layout of a storage struct's top-level members,
+	// which is how a recorder that declares no uniform block at all - scene -
+	// packs its records.
+	Members []StorageMember
 }
 
-// BufferDesc describes a GPU buffer to create. Dynamic marks a buffer whose
-// contents the renderer rewrites every frame.
+// BufferDesc describes a GPU buffer to create.
 type BufferDesc struct {
-	Kind    BufferKind
-	Size    int
-	Dynamic bool
-	Label   string
+	Kind  BufferKind
+	Size  int
+	Label string
 }
 
 // VertexAttribute is one attribute of the interleaved vertex buffer supplied to a
@@ -178,13 +295,14 @@ type VertexAttribute struct {
 // derived by the backend from the shader's reflection; the vertex layout is
 // supplied by the mesh via Stride and Attributes.
 type PipelineDesc struct {
-	Shader     ShaderID
-	Topology   PrimitiveTopology
-	Blend      BlendMode
-	DepthTest  bool
-	Stride     int
-	Attributes []VertexAttribute
-	Label      string
+	Shader      ShaderID
+	Topology    PrimitiveTopology
+	State       MaterialState
+	ColorFormat TextureFormat
+	DepthFormat TextureFormat
+	Stride      int
+	Attributes  []VertexAttribute
+	Label       string
 }
 
 // Backend is the low-level realization interface: a vendor-neutral, "wgpu-shaped"
@@ -214,9 +332,18 @@ type Backend interface {
 	// makes the surface current before triggering the render).
 	ScreenFramebuffer() (view TextureViewID, width, height int)
 
-	// Execute replays one already-translated queue into target: it performs bake
-	// operations, begins a render pass using the queue's independent color/depth
-	// clear masks, applies render ops in order, submits, then performs releases.
-	// queue is owned by the caller and valid only for the duration of the call.
-	Execute(target TextureViewID, queue *GpuQueue)
+	// TextureView returns a renderable view of one mip level of one layer of a
+	// baked texture, cached per (texture, mip, layer).
+	TextureView(texture TextureID, mip, layer int) TextureViewID
+
+	// Limits reports the device's own limits. gfx checks shaders against
+	// DefaultLimits, the web floor, and never against these: they are here to
+	// say, in the report, what the device this build ran on allowed.
+	Limits() Limits
+
+	// Execute replays one already-translated queue: it performs bake operations,
+	// encodes each pass in turn with its own attachments and load/store ops,
+	// submits once, then performs releases. queue is owned by the caller and
+	// valid only for the duration of the call.
+	Execute(queue *GpuQueue)
 }

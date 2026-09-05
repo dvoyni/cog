@@ -14,16 +14,27 @@ type TextureDescr struct {
 	id            TextureID
 }
 
-// textureKey identifies a cached resource texture by path.
-type textureKey string
+// textureKey identifies a cached resource texture by path and format. The
+// format is part of the key because the same image is legitimately loaded as
+// sRGB in one material and linear in another.
+type textureKey struct {
+	path   string
+	format TextureFormat
+}
 
-func textureKeyOf(texture TextureDescr) textureKey { return textureKey(texture.path) }
+func textureKeyOf(texture TextureDescr) textureKey {
+	return textureKey{path: texture.path, format: texture.format}
+}
 
 // ID returns the baked texture identifier, or 0 when the descriptor is not baked.
 func (t TextureDescr) ID() TextureID { return t.id }
 
 // Path returns the resource path for a TextureWithResource descriptor (empty otherwise).
 func (t TextureDescr) Path() string { return t.path }
+
+// Size returns the texture's dimensions in texels. A texture loaded from a
+// resource path reports zero until it is baked, since only the file knows.
+func (t TextureDescr) Size() (width, height int) { return t.width, t.height }
 
 // textureSource selects how a TextureDescr is resolved.
 type textureSource int
@@ -35,8 +46,11 @@ const (
 )
 
 // TextureWithResource describes a texture loaded from storage.FileSystem.
-func TextureWithResource(path string) TextureDescr {
-	return TextureDescr{source: TextureSourceResource, path: path}
+// format says what the decoded bytes mean: a photographic or authored image is
+// FormatRGBA8Srgb, while data maps such as normals or metallic-roughness are
+// FormatRGBA8.
+func TextureWithResource(path string, format TextureFormat) TextureDescr {
+	return TextureDescr{source: TextureSourceResource, path: path, format: format}
 }
 
 // TextureWithBytes describes a texture from inline pixel bytes. copyData

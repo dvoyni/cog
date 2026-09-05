@@ -9,6 +9,7 @@ const (
 	gpuSetPipeline gpuOpKind = iota
 	gpuSetParams
 	gpuSetBakedTexture
+	gpuSetSampler
 	gpuSetVertexBuffer
 	gpuSetIndexBuffer
 	gpuSetBakedBuffer
@@ -22,22 +23,44 @@ const (
 )
 
 // GpuQueue owns a translated command sequence. Commands are constructed as
-// local values and appended once.
+// local values and appended once. Bakes are hoisted ahead of every pass; render
+// commands belong to the pass that was open when they were recorded.
 type GpuQueue struct {
-	bakes      []gpuOp
-	render     []gpuOp
-	releases   []gpuOp
-	clearColor m.Color
-	clearDepth float32
-	clearMask  clearMask
+	bakes    []gpuOp
+	render   []gpuOp
+	releases []gpuOp
+	passes   []gpuPass
 }
 
-type clearMask uint8
+// GpuPassDesc is one render pass for the backend to encode. Screen selects the
+// frame's screen attachment, which only the backend can resolve; Target names
+// any other colour attachment, and zero means none.
+type GpuPassDesc struct {
+	Screen     bool
+	Target     TextureViewID
+	Depth      TextureViewID
+	DepthAuto  bool
+	Load       LoadOp
+	Clear      m.Color
+	Store      StoreOp
+	DepthLoad  LoadOp
+	DepthClear float32
+	DepthStore StoreOp
+	Label      string
+}
 
-const (
-	clearColorBit clearMask = 1 << iota
-	clearDepthBit
-)
+// gpuPass is a pass descriptor and the half-open range of render commands in it.
+type gpuPass struct {
+	desc       GpuPassDesc
+	start, end int
+}
+
+// GpuPassSink receives the frame's passes. BeginPass returns the RenderPass its
+// commands go to, so the backend owns encoder and pass lifetime entirely.
+type GpuPassSink interface {
+	BeginPass(GpuPassDesc) RenderPass
+	EndPass(RenderPass)
+}
 
 // GpuBakeSink receives resource uploads before render-pass encoding.
 type GpuBakeSink interface {
@@ -51,11 +74,12 @@ type GpuBakeSink interface {
 type RenderPass interface {
 	SetPipeline(PipelineID)
 	SetParams([]byte)
-	SetTexture(TextureID, SamplerID, int, int, int)
+	SetTexture(TextureID, int, int)
+	SetSampler(SamplerID, int, int)
 	SetVertexBuffer(BufferID, int)
 	SetIndexBuffer(BufferID, int)
 	SetBuffer(int, int, BufferID, int, int)
-	Draw(first, count, instances int, indexed bool)
+	Draw(first, count, instances, firstInstance int, indexed bool)
 }
 
 // GpuReleaseSink receives resource releases after submission.
@@ -72,21 +96,20 @@ func (q *GpuQueue) Reset() {
 	q.bakes = q.bakes[:0]
 	q.render = q.render[:0]
 	q.releases = q.releases[:0]
-	q.clearMask = 0
+	clear(q.passes)
+	q.passes = q.passes[:0]
 }
 
-// Clear sets the frame's color-attachment clear value. The last call wins; no
-// call leaves the color attachment in load mode.
-func (q *GpuQueue) Clear(color m.Color) {
-	q.clearColor = color
-	q.clearMask |= clearColorBit
+// BeginPass opens a pass; every render command until EndPass belongs to it.
+func (q *GpuQueue) BeginPass(desc GpuPassDesc) {
+	q.passes = append(q.passes, gpuPass{desc: desc, start: len(q.render), end: len(q.render)})
 }
 
-// ClearDepth sets the frame's depth-attachment clear value. The last call wins;
-// no call leaves the depth attachment in load mode.
-func (q *GpuQueue) ClearDepth(depth float32) {
-	q.clearDepth = depth
-	q.clearMask |= clearDepthBit
+// EndPass closes the pass BeginPass opened.
+func (q *GpuQueue) EndPass() {
+	if len(q.passes) > 0 {
+		q.passes[len(q.passes)-1].end = len(q.render)
+	}
 }
 
 func (q *GpuQueue) SetPipeline(pipeline PipelineID) {
@@ -99,10 +122,21 @@ func (q *GpuQueue) SetParams(params []byte) {
 	q.render = append(q.render, o)
 }
 
-func (q *GpuQueue) SetTexture(texture TextureID, sampler SamplerID, group, textureBinding, samplerBinding int) {
+func (q *GpuQueue) SetTexture(texture TextureID, group, binding int) {
 	o := gpuOp{
-		kind: gpuSetBakedTexture, res0: ResourceID(texture), res1: ResourceID(sampler),
-		arg0: int32(group), arg1: int32(textureBinding), arg2: int32(samplerBinding),
+		kind: gpuSetBakedTexture, res0: ResourceID(texture),
+		arg0: int32(group), arg1: int32(binding),
+	}
+	q.render = append(q.render, o)
+}
+
+// SetSampler binds one sampler by its own group and binding. Samplers bind
+// independently of textures because a material's textures may legitimately want
+// different ones - a tiling ground beside a clamped decal.
+func (q *GpuQueue) SetSampler(sampler SamplerID, group, binding int) {
+	o := gpuOp{
+		kind: gpuSetSampler, res0: ResourceID(sampler),
+		arg0: int32(group), arg1: int32(binding),
 	}
 	q.render = append(q.render, o)
 }
@@ -125,11 +159,14 @@ func (q *GpuQueue) SetBuffer(group, binding int, buffer BufferID, offset, size i
 	q.render = append(q.render, o)
 }
 
-func (q *GpuQueue) Draw(first, count, instances int, indexed bool) {
+func (q *GpuQueue) Draw(first, count, instances, firstInstance int, indexed bool) {
 	if instances < 1 {
 		instances = 1
 	}
-	o := gpuOp{kind: gpuDraw, arg0: int32(first), arg1: int32(count), arg3: int32(instances)}
+	o := gpuOp{
+		kind: gpuDraw, arg0: int32(first), arg1: int32(count),
+		arg3: int32(instances), arg4: int32(firstInstance),
+	}
 	if indexed {
 		o.arg2 = 1
 	}
@@ -160,10 +197,14 @@ func (q *GpuQueue) BakeTexture(id TextureID, width, height int, format TextureFo
 }
 
 func (q *GpuQueue) AllocateTexture(id TextureID, desc TextureDesc) {
-	q.bakes = append(q.bakes, gpuOp{
+	o := gpuOp{
 		kind: gpuAllocateTexture, res0: ResourceID(id),
 		arg0: int32(desc.Width), arg1: int32(desc.Height), arg2: int32(desc.Layers), arg3: int32(desc.Format),
-	})
+	}
+	if desc.Renderable {
+		o.arg4 = 1
+	}
+	q.bakes = append(q.bakes, o)
 }
 
 func (q *GpuQueue) UpdateTexture(id TextureID, layer int, region Region, pixels []byte) {
@@ -179,21 +220,6 @@ func (q *GpuQueue) ReleaseTexture(id TextureID) {
 	q.releases = append(q.releases, o)
 }
 
-// ClearColor returns the frame's color-attachment clear value.
-func (q *GpuQueue) ClearColor() m.Color {
-	return q.clearColor
-}
-
-// ClearDepthValue returns the frame's depth-attachment clear value.
-func (q *GpuQueue) ClearDepthValue() float32 {
-	return q.clearDepth
-}
-
-// Clears reports which attachments have explicit clear values this frame.
-func (q *GpuQueue) Clears() (color, depth bool) {
-	return q.clearMask&clearColorBit != 0, q.clearMask&clearDepthBit != 0
-}
-
 // ReplayBakes sends every resource upload to sink.
 func (q *GpuQueue) ReplayBakes(sink GpuBakeSink) {
 	for i := range q.bakes {
@@ -206,6 +232,7 @@ func (q *GpuQueue) ReplayBakes(sink GpuBakeSink) {
 		case gpuAllocateTexture:
 			sink.AllocateTexture(TextureID(o.res0), TextureDesc{
 				Width: int(o.arg0), Height: int(o.arg1), Layers: int(o.arg2), Format: TextureFormat(o.arg3),
+				Renderable: o.arg4 != 0,
 			})
 		case gpuUpdateTexture:
 			sink.UpdateTexture(TextureID(o.res0), int(o.arg0), Region{
@@ -215,9 +242,22 @@ func (q *GpuQueue) ReplayBakes(sink GpuBakeSink) {
 	}
 }
 
-// ReplayRenderPass sends render commands to sink in recording order.
-func (q *GpuQueue) ReplayRenderPass(sink RenderPass) {
-	for i := range q.render {
+// ReplayPasses sends every pass to sink in order, each bracketed by BeginPass
+// and EndPass, with its own render commands in recording order.
+func (q *GpuQueue) ReplayPasses(sink GpuPassSink) {
+	for i := range q.passes {
+		pass := &q.passes[i]
+		rp := sink.BeginPass(pass.desc)
+		if rp != nil {
+			q.replayRange(rp, pass.start, pass.end)
+		}
+		sink.EndPass(rp)
+	}
+}
+
+// replayRange sends one pass's slice of render commands to its RenderPass.
+func (q *GpuQueue) replayRange(sink RenderPass, start, end int) {
+	for i := start; i < end && i < len(q.render); i++ {
 		o := &q.render[i]
 		switch o.kind {
 		case gpuSetPipeline:
@@ -225,7 +265,9 @@ func (q *GpuQueue) ReplayRenderPass(sink RenderPass) {
 		case gpuSetParams:
 			sink.SetParams(o.params)
 		case gpuSetBakedTexture:
-			sink.SetTexture(TextureID(o.res0), SamplerID(o.res1), int(o.arg0), int(o.arg1), int(o.arg2))
+			sink.SetTexture(TextureID(o.res0), int(o.arg0), int(o.arg1))
+		case gpuSetSampler:
+			sink.SetSampler(SamplerID(o.res0), int(o.arg0), int(o.arg1))
 		case gpuSetVertexBuffer:
 			sink.SetVertexBuffer(BufferID(o.res0), int(o.arg0))
 		case gpuSetIndexBuffer:
@@ -233,7 +275,7 @@ func (q *GpuQueue) ReplayRenderPass(sink RenderPass) {
 		case gpuSetBakedBuffer:
 			sink.SetBuffer(int(o.arg2), int(o.arg3), BufferID(o.res0), int(o.arg0), int(o.arg1))
 		case gpuDraw:
-			sink.Draw(int(o.arg0), int(o.arg1), int(o.arg3), o.arg2 != 0)
+			sink.Draw(int(o.arg0), int(o.arg1), int(o.arg3), int(o.arg4), o.arg2 != 0)
 		}
 	}
 }

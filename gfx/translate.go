@@ -1,8 +1,10 @@
 package gfx
 
 import (
+	"cmp"
 	"encoding/binary"
 	"math"
+	"slices"
 
 	"github.com/dvoyni/cog/m"
 
@@ -12,13 +14,17 @@ import (
 // uniformMax caps a per-draw shader-parameter block.
 const uniformMax = 256
 
-// pipelineKey identifies a cached pipeline by shader identity and render state.
+// pipelineKey identifies a cached pipeline by shader identity, render state and
+// the formats of the attachments it renders into. MaterialState is embedded
+// whole so that adding a state field cannot silently return a pipeline built
+// for the old one.
 type pipelineKey struct {
-	shader    ShaderID
-	topology  PrimitiveTopology
-	blend     BlendMode
-	depthTest bool
-	layout    vertexLayoutKey
+	shader      ShaderID
+	topology    PrimitiveTopology
+	state       MaterialState
+	colorFormat TextureFormat
+	depthFormat TextureFormat
+	layout      vertexLayoutKey
 }
 
 // translator turns an OpQueue into a GpuQueue, lazily creating and caching
@@ -34,6 +40,17 @@ type translator struct {
 	textures       map[textureKey]TextureDescr
 	parameterPlans map[parameterPlanBucketKey][]cachedParameterPlan
 	ops            GpuQueue
+	// Pass bookkeeping, reused each frame: the run order of the frame's passes
+	// and its draws bucketed behind the pass that recorded them.
+	passOrder  []int
+	passStart  []int
+	passDraws  []int
+	passCursor []int
+	// strayDraws counts the frame's draws recorded outside any pass.
+	strayDraws int
+	// diagnostic holds a report that does not stop the frame - a shader over the
+	// web floor still renders here - until translate surfaces it.
+	diagnostic error
 }
 
 func newTranslator() *translator {
@@ -62,17 +79,11 @@ func (t *translator) translate(queue *OpQueue, persistent []op, backend Backend,
 
 	var firstErr error
 	uoff := 0
-	translateOps := func(list []op) {
+	// Resource ops belong to no pass: every bake is hoisted ahead of all of
+	// them, so a pass can read anything the frame uploaded.
+	translateResources := func(list []op) {
 		for i := range list {
 			op := &list[i]
-			if op.kind == opClear {
-				t.ops.Clear(op.color)
-				continue
-			}
-			if op.kind == opClearDepth {
-				t.ops.ClearDepth(op.depth)
-				continue
-			}
 			if op.kind == opBakeBuffer {
 				if len(op.bytes) > 0 {
 					t.ops.BakeBuffer(op.bufferID, op.bufferKind, op.bufferSize, op.bytes)
@@ -104,6 +115,7 @@ func (t *translator) translate(queue *OpQueue, persistent []op, backend Backend,
 			if op.kind == opAllocateTexture {
 				t.ops.AllocateTexture(op.textureID, TextureDesc{
 					Width: op.texW, Height: op.texH, Layers: op.texLayers, Format: op.format,
+					Renderable: op.renderable,
 				})
 				continue
 			}
@@ -111,64 +123,212 @@ func (t *translator) translate(queue *OpQueue, persistent []op, backend Backend,
 				t.ops.UpdateTexture(op.textureID, op.texLayer, op.region, op.bytes)
 				continue
 			}
-
-			m := &op.mesh
-			stride := m.stride()
-			if m.vertices.id == 0 || m.vertexCount <= 0 || stride <= 0 {
-				continue
-			}
-			shaderID, err := t.ensureShader(backend, filesystem, op.material.shader)
-			if err != nil {
-				if firstErr == nil {
-					firstErr = err
-				}
-				continue
-			}
-			pipeline := t.ensurePipeline(backend, shaderID, m, op.material.state)
-			if pipeline == 0 {
-				continue
-			}
-
-			layout := t.shaderLayout(backend, shaderID)
-			plan := t.prepareParameterPlan(shaderID, layout, op.material.params, op.params)
-			u := t.packParams(t.uarena[uoff:uoff+uniformMax], op.params, op.material.params, plan)
-			uoff += uniformMax
-
-			t.ops.SetPipeline(pipeline)
-			t.ops.SetParams(u)
-			t.emitResources(backend, filesystem, op.params, op.material.params, plan)
-			t.ops.SetVertexBuffer(m.vertices.id, 0)
-
-			instances := op.instances
-			if instances < 1 {
-				instances = 1
-			}
-			if m.indexed && m.indices.id != 0 && m.indexCount > 0 {
-				t.ops.SetIndexBuffer(m.indices.id, 0)
-				t.ops.Draw(0, m.indexCount, instances, true)
-			} else {
-				t.ops.Draw(0, m.vertexCount, instances, false)
-			}
 		}
 	}
-	translateOps(persistent)
-	translateOps(queue.ops)
+	translateResources(persistent)
+	translateResources(queue.ops)
+
+	t.translatePasses(queue, backend, filesystem, &uoff, &firstErr)
+
+	// A report that did not stop anything is still worth surfacing, but only
+	// behind an error that did.
+	if firstErr == nil {
+		firstErr = t.diagnostic
+	}
+	t.diagnostic = nil
 
 	return &t.ops, firstErr
+}
+
+// translatePasses runs the frame's passes in Order, merging the runs that are
+// indistinguishable from one longer pass, and emits each one's draws.
+func (t *translator) translatePasses(queue *OpQueue, backend Backend, filesystem storage.FileSystem, uoff *int, firstErr *error) {
+	t.planPasses(queue)
+	if t.strayDraws > 0 && *firstErr == nil {
+		*firstErr = ErrDrawWithoutPass{Count: t.strayDraws}
+	}
+	for i := 0; i < len(t.passOrder); {
+		head := queue.passes[t.passOrder[i]].desc
+		tail, draws := head, t.passDrawCount(t.passOrder[i])
+		last := i
+		for j := i + 1; j < len(t.passOrder); j++ {
+			next := queue.passes[t.passOrder[j]].desc
+			if !mergesInto(next, tail) {
+				break
+			}
+			tail, last = next, j
+			draws += t.passDrawCount(t.passOrder[j])
+		}
+		if !head.hasEffect(draws) {
+			i = last + 1
+			continue
+		}
+		t.ops.BeginPass(t.gpuPassDesc(backend, head, tail))
+		for j := i; j <= last; j++ {
+			pass := &queue.passes[t.passOrder[j]]
+			for _, index := range t.passDrawOps(t.passOrder[j]) {
+				t.translateDraw(&queue.ops[index], pass.desc, backend, filesystem, uoff, firstErr)
+			}
+		}
+		t.ops.EndPass()
+		i = last + 1
+	}
+}
+
+// gpuPassDesc resolves a merged run's attachments: it loads like the pass that
+// opened the run and stores like the one that closed it.
+func (t *translator) gpuPassDesc(backend Backend, head, tail PassDescr) GpuPassDesc {
+	desc := GpuPassDesc{
+		Load: head.Load, Clear: head.Clear, Store: tail.Store,
+		DepthLoad: head.DepthLoad, DepthClear: head.DepthClear, DepthStore: tail.DepthStore,
+		Label: head.Label,
+	}
+	switch head.Target.kind {
+	case targetScreen:
+		desc.Screen = true
+	case targetTexture:
+		desc.Target = backend.TextureView(head.Target.texture, head.Target.mip, head.Target.layer)
+	}
+	switch head.Depth.kind {
+	case depthKindAuto:
+		desc.DepthAuto = true
+	case depthKindTexture:
+		desc.Depth = backend.TextureView(head.Depth.texture, 0, 0)
+	}
+	return desc
+}
+
+// translateDraw emits one draw into the currently open pass.
+func (t *translator) translateDraw(op *op, pass PassDescr, backend Backend, filesystem storage.FileSystem, uoff *int, firstErr *error) {
+	m := &op.mesh
+	stride := m.stride()
+	if m.vertices.id == 0 || m.vertexCount <= 0 || stride <= 0 {
+		return
+	}
+	shaderID, err := t.ensureShader(backend, filesystem, op.material.shader)
+	if err != nil {
+		if *firstErr == nil {
+			*firstErr = err
+		}
+		return
+	}
+	pipeline := t.ensurePipeline(backend, shaderID, m, op.material.state)
+	if pipeline == 0 {
+		return
+	}
+
+	layout := t.shaderLayout(backend, shaderID)
+	plan := t.prepareParameterPlan(shaderID, layout, op.material.params, op.params)
+	if name, ok := sampledAttachment(plan, op.params, op.material.params, pass); ok {
+		if *firstErr == nil {
+			*firstErr = ErrDrawSamplesAttachment{Pass: pass.Label, Parameter: name}
+		}
+		return
+	}
+	u := t.packParams(t.uarena[*uoff:*uoff+uniformMax], op.params, op.material.params, plan)
+	*uoff += uniformMax
+
+	t.ops.SetPipeline(pipeline)
+	t.ops.SetParams(u)
+	t.emitResources(backend, filesystem, op.params, op.material.params, plan)
+	t.ops.SetVertexBuffer(m.vertices.id, 0)
+
+	instances := op.instances
+	if instances < 1 {
+		instances = 1
+	}
+	if m.indexed && m.indices.id != 0 && m.indexCount > 0 {
+		t.ops.SetIndexBuffer(m.indices.id, 0)
+		t.ops.Draw(0, m.indexCount, instances, op.firstInstance, true)
+	} else {
+		t.ops.Draw(0, m.vertexCount, instances, op.firstInstance, false)
+	}
+}
+
+// sampledAttachment names the first texture parameter a draw samples that its
+// own pass renders into. Only a baked texture can be an attachment, so this
+// resolves nothing and costs a comparison per binding.
+func sampledAttachment(plan *parameterPlan, drawParams, materialParams []ParameterDescr, pass PassDescr) (string, bool) {
+	attachment := func(id TextureID) bool {
+		if id == 0 {
+			return false
+		}
+		return (pass.Target.kind == targetTexture && pass.Target.texture == id) ||
+			(pass.Depth.kind == depthKindTexture && pass.Depth.texture == id)
+	}
+	for i := range plan.resources {
+		resource := &plan.resources[i]
+		if resource.kind != plannedTexture {
+			continue
+		}
+		p := resource.param.value(materialParams, drawParams)
+		if p != nil && p.kind == paramTexture && p.texture.source == TextureSourceBaked && attachment(p.texture.id) {
+			return p.name, true
+		}
+	}
+	return "", false
+}
+
+// planPasses puts the frame's passes in run order - Order first, declaration
+// sequence breaking ties - and buckets each pass's draws behind it.
+func (t *translator) planPasses(queue *OpQueue) {
+	count := len(queue.passes)
+	t.passOrder = t.passOrder[:0]
+	for i := range count {
+		t.passOrder = append(t.passOrder, i)
+	}
+	slices.SortStableFunc(t.passOrder, func(a, b int) int {
+		return cmp.Compare(queue.passes[a].desc.Order, queue.passes[b].desc.Order)
+	})
+
+	t.passStart = slices.Grow(t.passStart[:0], count+1)[:count+1]
+	clear(t.passStart)
+	t.strayDraws = 0
+	for i := range queue.ops {
+		if queue.ops[i].kind != opDraw {
+			continue
+		}
+		if pass := int(queue.ops[i].pass); pass >= 0 && pass < count {
+			t.passStart[pass+1]++
+		} else {
+			t.strayDraws++
+		}
+	}
+	for i := 1; i <= count; i++ {
+		t.passStart[i] += t.passStart[i-1]
+	}
+	t.passDraws = slices.Grow(t.passDraws[:0], t.passStart[count])[:t.passStart[count]]
+	cursor := append(t.passCursor[:0], t.passStart[:count]...)
+	for i := range queue.ops {
+		if pass := int(queue.ops[i].pass); queue.ops[i].kind == opDraw && pass >= 0 && pass < count {
+			t.passDraws[cursor[pass]] = i
+			cursor[pass]++
+		}
+	}
+	t.passCursor = cursor
+}
+
+func (t *translator) passDrawOps(pass int) []int {
+	return t.passDraws[t.passStart[pass]:t.passStart[pass+1]]
+}
+
+func (t *translator) passDrawCount(pass int) int {
+	return t.passStart[pass+1] - t.passStart[pass]
 }
 
 // emitResources binds each reflected texture/sampler resource, matching its name
 // to a material parameter (defaulting to the white texture / a clamp+linear
 // sampler when unset), so every binding the shader declares is provided.
 func (t *translator) emitResources(backend Backend, filesystem storage.FileSystem, drawParams, materialParams []ParameterDescr, plan *parameterPlan) {
-	// One sampler shared across textures (common case): the first sampler resource.
-	sampID := SamplerID(0)
-	if plan.samplerBinding >= 0 {
-		desc := SamplerDesc{Address: AddressClamp}
-		if p := plan.sampler.value(materialParams, drawParams); p != nil && p.kind == paramSampler {
+	// Each reflected sampler is filled by the parameter of its own name, and
+	// falls back to the zero descriptor - clamp and linear - when unset.
+	for i := range plan.samplers {
+		sampler := &plan.samplers[i]
+		var desc SamplerDesc
+		if p := sampler.param.value(materialParams, drawParams); p != nil && p.kind == paramSampler {
 			desc = p.sampler
 		}
-		sampID = t.ensureSampler(backend, desc)
+		t.ops.SetSampler(t.ensureSampler(backend, desc), sampler.group, sampler.binding)
 	}
 	for i := range plan.resources {
 		resource := &plan.resources[i]
@@ -176,7 +336,7 @@ func (t *translator) emitResources(backend Backend, filesystem storage.FileSyste
 		if resource.kind == plannedBuffer {
 			if p != nil && p.kind == paramBuffer {
 				if p.buffer.id != 0 {
-					t.ops.SetBuffer(resource.group, resource.binding, p.buffer.id, 0, 0)
+					t.ops.SetBuffer(resource.group, resource.binding, p.buffer.id, p.bufferOffset, p.bufferSize)
 				}
 			}
 			continue
@@ -185,7 +345,7 @@ func (t *translator) emitResources(backend Backend, filesystem storage.FileSyste
 		if p != nil && p.kind == paramTexture {
 			textureID = t.ensureTexture(backend, filesystem, p.texture)
 		}
-		t.ops.SetTexture(textureID, sampID, resource.group, resource.binding, plan.samplerBinding)
+		t.ops.SetTexture(textureID, resource.group, resource.binding)
 	}
 }
 
@@ -205,7 +365,7 @@ func (t *translator) ensureTexture(backend Backend, filesystem storage.FileSyste
 		return 0
 	}
 	id := backend.NewTexture()
-	t.ops.BakeTexture(id, width, height, FormatRGBA8, pixels, false)
+	t.ops.BakeTexture(id, width, height, descr.format, pixels, false)
 	t.textures[key] = TextureDescr{source: TextureSourceBaked, id: id}
 	return id
 }
@@ -218,19 +378,28 @@ func (t *translator) ensureShader(backend Backend, filesystem storage.FileSystem
 	if err != nil {
 		return 0, err
 	}
-	id, err := backend.NewShader(ShaderDesc{Code: code, Label: shaderLabel(descr)})
+	label := shaderLabel(descr)
+	id, err := backend.NewShader(ShaderDesc{Code: code, Label: label})
 	if err != nil {
 		return 0, err
 	}
 	t.shaders[descr] = id
+	// Every shader gfx reflects is measured, not only an engine's bundled ones:
+	// a caller-supplied material is what actually gets bound at draw time. The
+	// shader is cached, so this reports once rather than once a frame.
+	if diagnostic := checkWebLimits(label, t.shaderLayout(backend, id), backend.Limits()); diagnostic != nil && t.diagnostic == nil {
+		t.diagnostic = diagnostic
+	}
 	return id, nil
 }
 
 func (t *translator) releaseCachedResource(backend Backend, path string) {
-	textureKey := textureKey(path)
-	if texture, ok := t.textures[textureKey]; ok {
-		t.ops.ReleaseTexture(texture.id)
-		delete(t.textures, textureKey)
+	// One path can be cached once per format, and the caller names a file.
+	for key, texture := range t.textures {
+		if key.path == path {
+			t.ops.ReleaseTexture(texture.id)
+			delete(t.textures, key)
+		}
 	}
 	shaderDescr := ShaderWithResource(path)
 	if shader, ok := t.shaders[shaderDescr]; ok {
@@ -357,9 +526,12 @@ func (t *translator) ensurePipeline(backend Backend, shader ShaderID, m *MeshDes
 	if !ok {
 		return 0
 	}
+	// One target exists today, the screen, and its depth buffer. Explicit passes
+	// are what will hand these formats in instead of naming them here.
+	const colorFormat, depthFormat = FormatScreen, FormatDepth32F
 	k := pipelineKey{
-		shader: shader, topology: m.topology, blend: state.Blend, depthTest: state.DepthTest,
-		layout: layout,
+		shader: shader, topology: m.topology, state: state,
+		colorFormat: colorFormat, depthFormat: depthFormat, layout: layout,
 	}
 	if id, ok := t.pipelines[k]; ok {
 		return id
@@ -369,13 +541,14 @@ func (t *translator) ensurePipeline(backend Backend, shader ShaderID, m *MeshDes
 		attrs[i] = VertexAttribute{Offset: m.layout[i].offset, Type: m.layout[i].typ, Location: i}
 	}
 	id, err := backend.NewPipeline(PipelineDesc{
-		Shader:     shader,
-		Topology:   m.topology,
-		Blend:      state.Blend,
-		DepthTest:  state.DepthTest,
-		Stride:     stride,
-		Attributes: attrs,
-		Label:      "gfx.pipeline",
+		Shader:      shader,
+		Topology:    m.topology,
+		State:       state,
+		ColorFormat: colorFormat,
+		DepthFormat: depthFormat,
+		Stride:      stride,
+		Attributes:  attrs,
+		Label:       "gfx.pipeline",
 	})
 	if err != nil {
 		return 0

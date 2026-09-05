@@ -67,10 +67,9 @@ type opQueue struct {
 	// clip and hasClip are the recording-time clip cursor snapshotted into each op.
 	clip       m.Rect
 	clearColor m.Color
-	clearDepth float32
+	clearLayer Layer
 	hasClip    bool
 	hasColor   bool
-	hasDepth   bool
 }
 
 type layer struct {
@@ -79,14 +78,13 @@ type layer struct {
 	aspect AspectMode
 }
 
-func (w *opQueue) Clear(color m.Color) {
-	w.clearColor = color
-	w.hasColor = true
-}
-
-func (w *opQueue) ClearDepth(depth float32) {
-	w.clearDepth = depth
-	w.hasDepth = true
+// Clear fills the screen at one layer, before anything that layer draws. It is
+// positioned rather than frame-global because a frame-global clear cannot
+// survive anything rendering below canvas: a camera ordered under the clear
+// would be wiped. Naming the layer keeps the clear where the caller put it even
+// on a frame where that layer draws nothing.
+func (w *opQueue) Clear(layerID Layer, color m.Color) {
+	w.clearColor, w.clearLayer, w.hasColor = color, layerID, true
 }
 
 func (w *opQueue) SetLayerTransform(layerID Layer, window m.Rect, aspect AspectMode) {
@@ -206,10 +204,8 @@ func (w *opQueue) reset() {
 	w.vertexArena = w.vertexArena[:0]
 	w.clip = m.Rect{}
 	w.clearColor = m.Color{}
-	w.clearDepth = 0
 	w.hasClip = false
 	w.hasColor = false
-	w.hasDepth = false
 }
 
 func (w *opQueue) layer(layerID Layer) layer {

@@ -78,7 +78,7 @@ func TestOpsOmitVerticesOfCustomVertexLayouts(t *testing.T) {
 
 func TestOpsAreEmptyAfterReset(t *testing.T) {
 	write := &OpQueue{}
-	write.Clear(m.Color{G: 1, A: 1})
+	write.Clear(0, m.Color{G: 1, A: 1})
 	write.FillRect(1, m.Rect{Width: 10, Height: 10}, m.Color{A: 1})
 	if color, ok := write.ClearColor(); !ok || color != (m.Color{G: 1, A: 1}) {
 		t.Fatalf("clear colour = (%+v, %v), want the recorded clear", color, ok)

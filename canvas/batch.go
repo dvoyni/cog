@@ -63,7 +63,7 @@ func (b *spriteBatch) flush(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr) {
 		gfx.VecParam("canvasClip", m.Vec4{X: b.clip.X, Y: b.clip.Y, Z: b.clip.X + b.clip.Width, W: b.clip.Y + b.clip.Height}),
 		gfx.BufferParam("instances", buffer),
 		gfx.TextureParam(TextureSlot, b.texture),
-		gfx.SamplerParam(SamplerSlot, gfx.AddressClamp, b.filter),
+		gfx.SamplerParam(SamplerSlot, canvasSampler(gfx.AddressClamp, gfx.AddressClamp, b.filter)),
 	)
 	b.active = false
 	b.instances = b.instances[:0]
@@ -160,7 +160,7 @@ func (b *trianglesBatch) flush(gfxWrite *gfx.OpQueue) {
 	if b.hasTexture {
 		params = append(params,
 			gfx.TextureParam(TextureSlot, b.texture),
-			gfx.SamplerParam(SamplerSlot, b.sampler.Address, b.sampler.Filter),
+			gfx.SamplerParam(SamplerSlot, b.sampler),
 		)
 	}
 	params = append(params, gfx.ColorParam("keyColor", b.keyColor))

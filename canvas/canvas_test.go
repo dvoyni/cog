@@ -43,6 +43,7 @@ type testBackend struct {
 	drawParams       [][]byte
 	draws            int
 	pipelines        []gfx.PipelineDesc
+	passes           []gfx.GpuPassDesc
 	releasedTextures []gfx.TextureID
 	releasedBuffers  []gfx.BufferID
 	buffers          []bufferBake
@@ -130,11 +131,21 @@ func (b *testBackend) FreePipeline(gfx.PipelineID) {}
 func (b *testBackend) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
 	return 1, 100, 100
 }
-func (b *testBackend) Execute(_ gfx.TextureViewID, queue *gfx.GpuQueue) {
+func (b *testBackend) Limits() gfx.Limits { return gfx.DefaultLimits }
+func (b *testBackend) TextureView(texture gfx.TextureID, mip, layer int) gfx.TextureViewID {
+	b.nextID++
+	return gfx.TextureViewID(b.nextID)
+}
+func (b *testBackend) Execute(queue *gfx.GpuQueue) {
 	queue.ReplayBakes(b)
-	queue.ReplayRenderPass(b)
+	queue.ReplayPasses(b)
 	queue.ReplayReleases(b)
 }
+func (b *testBackend) BeginPass(desc gfx.GpuPassDesc) gfx.RenderPass {
+	b.passes = append(b.passes, desc)
+	return b
+}
+func (b *testBackend) EndPass(gfx.RenderPass) {}
 func (b *testBackend) BakeBuffer(_ gfx.BufferID, kind gfx.BufferKind, _ int, data []byte) {
 	if b.capture {
 		b.buffers = append(b.buffers, bufferBake{kind: kind, data: append([]byte(nil), data...)})
@@ -154,11 +165,13 @@ func (b *testBackend) SetParams(params []byte) {
 		b.drawParams = append(b.drawParams, append([]byte(nil), params...))
 	}
 }
-func (b *testBackend) SetTexture(gfx.TextureID, gfx.SamplerID, int, int, int) {}
-func (b *testBackend) SetVertexBuffer(gfx.BufferID, int)                      {}
-func (b *testBackend) SetIndexBuffer(gfx.BufferID, int)                       {}
-func (b *testBackend) SetBuffer(int, int, gfx.BufferID, int, int)             {}
-func (b *testBackend) Draw(_, _, _ int, _ bool)                               { b.draws++ }
+func (b *testBackend) SetTexture(gfx.TextureID, int, int) {}
+
+func (b *testBackend) SetSampler(gfx.SamplerID, int, int)         {}
+func (b *testBackend) SetVertexBuffer(gfx.BufferID, int)          {}
+func (b *testBackend) SetIndexBuffer(gfx.BufferID, int)           {}
+func (b *testBackend) SetBuffer(int, int, gfx.BufferID, int, int) {}
+func (b *testBackend) Draw(_, _, _, _ int, _ bool)                { b.draws++ }
 func (b *testBackend) ReleaseBuffer(id gfx.BufferID) {
 	b.releasedBuffers = append(b.releasedBuffers, id)
 }
@@ -373,8 +386,8 @@ func BenchmarkCanvasFlushTexturedTriangles(b *testing.B) {
 	k, _, backend := testKernel(b, filesystem, config, func(write *OpQueue) {
 		for i := 0; i < 300; i++ {
 			write.DrawTriangles(Layer(i%6), verts, nil,
-				gfx.TextureParam(TextureSlot, gfx.TextureWithResource(paths[i%len(paths)])),
-				gfx.SamplerParam(SamplerSlot, gfx.AddressClamp, gfx.FilterLinear))
+				gfx.TextureParam(TextureSlot, gfx.TextureWithResource(paths[i%len(paths)], gfx.FormatRGBA8)),
+				gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{}))
 		}
 	})
 	runFrame(k)
@@ -435,7 +448,7 @@ func TestEmptyPathUsesWhiteAtlasAndLayersAreOrdered(t *testing.T) {
 	if width, height := floatAt(backend.drawParams[0], 48), floatAt(backend.drawParams[0], 52); width != 100 || height != 100 {
 		t.Fatalf("Canvas viewport = %vx%v, want logical 100x100", width, height)
 	}
-	if len(backend.pipelines) != 1 || backend.pipelines[0].DepthTest || backend.pipelines[0].Blend != gfx.BlendAlpha {
+	if len(backend.pipelines) != 1 || backend.pipelines[0].State != gfx.StateOverlay2D {
 		t.Fatalf("default pipeline state = %+v, want alpha with depth disabled", backend.pipelines)
 	}
 }
@@ -621,7 +634,7 @@ func TestDrawTrianglesBindsTextureViaSlotParams(t *testing.T) {
 			{Position: m.Vec2{Y: 4}, Color: white, UV: m.Vec2{Y: 2}},
 		}, nil,
 			gfx.TextureParam(TextureSlot, gfx.TextureWithBytes(2, 2, gfx.FormatRGBA8, make([]byte, 16), true, false)),
-			gfx.SamplerParam(SamplerSlot, gfx.AddressRepeat, gfx.FilterNearest),
+			gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{AddressU: gfx.AddressRepeat, AddressV: gfx.AddressRepeat, Mag: gfx.FilterNearest, Min: gfx.FilterNearest, Mip: gfx.FilterNearest}),
 		)
 	})
 	runFrame(k)
@@ -638,7 +651,7 @@ func TestDrawTrianglesSupportsCustomVertexLayout(t *testing.T) {
 	}
 	material := gfx.MaterialWithState(
 		gfx.ShaderWithText("// custom triangle shader"),
-		gfx.MaterialState{Blend: gfx.BlendOpaque, DepthTest: false},
+		gfx.MaterialState{Blend: gfx.BlendOpaque},
 	)
 	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
@@ -655,7 +668,7 @@ func TestDrawTrianglesSupportsCustomVertexLayout(t *testing.T) {
 	if pipeline.Stride != 24 || len(pipeline.Attributes) != 2 ||
 		pipeline.Attributes[0] != (gfx.VertexAttribute{Offset: 0, Type: gfx.Float32x2, Location: 0}) ||
 		pipeline.Attributes[1] != (gfx.VertexAttribute{Offset: 8, Type: gfx.Float32x4, Location: 1}) ||
-		pipeline.Blend != gfx.BlendOpaque {
+		pipeline.State.Blend != gfx.BlendOpaque {
 		t.Fatalf("custom triangle pipeline = %+v", pipeline)
 	}
 	var uploaded []byte
@@ -673,7 +686,7 @@ func TestCustomMaterialAndParametersPassThrough(t *testing.T) {
 	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 	custom := gfx.MaterialWithState(
 		gfx.ShaderWithText("// custom canvas shader"),
-		gfx.MaterialState{Blend: gfx.BlendOpaque, DepthTest: false},
+		gfx.MaterialState{Blend: gfx.BlendOpaque},
 		gfx.FloatParam("customValue", 1),
 	)
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
@@ -692,7 +705,7 @@ func TestCustomMaterialAndParametersPassThrough(t *testing.T) {
 	if got := floatAt(backend.drawParams[0], 180); got != 7 {
 		t.Fatalf("custom value = %v, want draw override 7", got)
 	}
-	if len(backend.pipelines) != 1 || backend.pipelines[0].Blend != gfx.BlendOpaque || backend.pipelines[0].DepthTest {
+	if len(backend.pipelines) != 1 || backend.pipelines[0].State != (gfx.MaterialState{Blend: gfx.BlendOpaque}) {
 		t.Fatalf("custom pipeline state = %+v", backend.pipelines)
 	}
 }
@@ -906,12 +919,12 @@ func TestTiledSpriteRepeatsOnlyTiledAxes(t *testing.T) {
 	runFrame(k)
 	found := false
 	for _, sampler := range backend.samplers {
-		if sampler.Address == gfx.AddressRepeatX && sampler.Filter == gfx.FilterNearest {
+		if sampler.AddressU == gfx.AddressRepeat && sampler.AddressV == gfx.AddressClamp && sampler.Mag == gfx.FilterNearest {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("samplers = %+v, want one with AddressRepeatX and FilterNearest", backend.samplers)
+		t.Fatalf("samplers = %+v, want one repeating U only, filtered nearest", backend.samplers)
 	}
 }
 

@@ -57,7 +57,7 @@ func (q *resourceQueue) AllocateTexture(width, height, layers int, format Textur
 		kind: opAllocateTexture, textureID: id,
 		texW: width, texH: height, texLayers: layers, format: format,
 	})
-	return TextureDescr{source: TextureSourceBaked, id: id}
+	return TextureDescr{source: TextureSourceBaked, id: id, width: width, height: height}
 }
 
 // UpdateTexture queues a pixel upload into one texture layer and region.
@@ -86,7 +86,7 @@ func (q *resourceQueue) bakeTexture(id TextureID, width, height int, format Text
 		kind: opBakeTexture, textureID: id, texW: width, texH: height,
 		format: format, mipmaps: mipmaps, bytes: pixels,
 	})
-	return TextureDescr{source: TextureSourceBaked, id: id}
+	return TextureDescr{source: TextureSourceBaked, id: id, width: width, height: height}
 }
 
 // ReleaseTexture queues a durable release for texture.

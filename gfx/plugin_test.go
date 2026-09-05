@@ -39,15 +39,15 @@ type fakeBackend struct {
 	freedSamplers  []SamplerID
 	freedShaders   []ShaderID
 	freedPipelines []PipelineID
+	lastPipelines  []PipelineDesc
 
-	lastOps        []gpuOp
-	lastClear      m.Color
-	lastDepth      float32
-	lastClearColor bool
-	lastClearDepth bool
-	execCount      int
-	target         TextureViewID
-	layout         *ShaderLayout
+	lastOps    []gpuOp
+	lastPasses []GpuPassDesc
+	passDraws  []int
+	views      [][3]int
+	draws      []drawCall
+	execCount  int
+	layout     *ShaderLayout
 }
 
 func (b *fakeBackend) id() uint32 { b.nextID++; return b.nextID }
@@ -82,29 +82,80 @@ func (b *fakeBackend) ShaderLayout(ShaderID) ShaderLayout {
 		},
 	}
 }
-func (b *fakeBackend) NewPipeline(PipelineDesc) (PipelineID, error) {
+func (b *fakeBackend) NewPipeline(desc PipelineDesc) (PipelineID, error) {
 	b.pipes++
+	b.lastPipelines = append(b.lastPipelines, desc)
 	return PipelineID(b.id()), nil
 }
 func (b *fakeBackend) FreePipeline(id PipelineID) { b.freedPipelines = append(b.freedPipelines, id) }
 func (b *fakeBackend) ScreenFramebuffer() (TextureViewID, int, int) {
 	return 1, 100, 100
 }
-func (b *fakeBackend) Execute(target TextureViewID, queue *GpuQueue) {
+
+// Limits reports what a desktop adapter typically allows, which is far above
+// the web floor gfx measures shaders against.
+func (b *fakeBackend) Limits() Limits {
+	return Limits{
+		MaxBindGroups:                   8,
+		MaxStorageBuffersPerShaderStage: 200,
+		MaxStorageBufferBindingSize:     1 << 31,
+		MaxUniformBufferBindingSize:     1 << 20,
+		MaxBufferSize:                   1 << 31,
+	}
+}
+
+func (b *fakeBackend) TextureView(texture TextureID, mip, layer int) TextureViewID {
+	b.views = append(b.views, [3]int{int(texture), mip, layer})
+	return TextureViewID(len(b.views))
+}
+
+func (b *fakeBackend) Execute(queue *GpuQueue) {
 	b.execCount++
-	b.target = target
 	b.lastOps = append(b.lastOps[:0], queue.bakes...)
 	b.lastOps = append(b.lastOps, queue.render...)
 	b.lastOps = append(b.lastOps, queue.releases...)
-	b.lastClear = queue.ClearColor()
-	b.lastDepth = queue.ClearDepthValue()
-	b.lastClearColor, b.lastClearDepth = queue.Clears()
+	b.lastPasses = b.lastPasses[:0]
+	b.passDraws = b.passDraws[:0]
+	queue.ReplayPasses(b)
 	for i := range queue.bakes {
 		if queue.bakes[i].kind == gpuBakeTexture {
 			b.textures++
 			b.uploads++
 		}
 	}
+}
+
+// BeginPass records the pass and returns the backend itself as its RenderPass,
+// which counts the draws that land in it.
+func (b *fakeBackend) BeginPass(desc GpuPassDesc) RenderPass {
+	b.lastPasses = append(b.lastPasses, desc)
+	b.passDraws = append(b.passDraws, 0)
+	return b
+}
+
+func (b *fakeBackend) EndPass(RenderPass) {}
+
+func (b *fakeBackend) SetPipeline(PipelineID)                 {}
+func (b *fakeBackend) SetParams([]byte)                       {}
+func (b *fakeBackend) SetTexture(TextureID, int, int)         {}
+func (b *fakeBackend) SetSampler(SamplerID, int, int)         {}
+func (b *fakeBackend) SetVertexBuffer(BufferID, int)          {}
+func (b *fakeBackend) SetIndexBuffer(BufferID, int)           {}
+func (b *fakeBackend) SetBuffer(int, int, BufferID, int, int) {}
+func (b *fakeBackend) Draw(first, count, instances, firstInstance int, indexed bool) {
+	if len(b.passDraws) > 0 {
+		b.passDraws[len(b.passDraws)-1]++
+	}
+	b.draws = append(b.draws, drawCall{
+		first: first, count: count, instances: instances, firstInstance: firstInstance, indexed: indexed,
+	})
+}
+
+// drawCall is one recorded draw, so tests can assert on the arguments that
+// reach the backend rather than on op encodings.
+type drawCall struct {
+	first, count, instances, firstInstance int
+	indexed                                bool
 }
 
 // testPlugin registers recordCmd so tests can mutate the OpQueue under its
@@ -156,15 +207,32 @@ func newTestKernel(t *testing.T, p *Plugin) kernel.Executioner {
 
 func newTestKernelWithFS(t *testing.T, p *Plugin, filesystem fs.FS) kernel.Executioner {
 	t.Helper()
+	return newTestKernelWith(t, p, filesystem, func(err error) bool {
+		t.Errorf("unexpected kernel error: %v", err)
+		return true
+	})
+}
+
+// newTestKernelWithErrors builds a kernel whose reported errors are collected
+// instead of failing the test, for the paths that report one on purpose. Its
+// handler keeps the engine running, so a reported error does not end the frames
+// that follow it.
+func newTestKernelWithErrors(t *testing.T, p *Plugin, report func(error)) kernel.Executioner {
+	t.Helper()
+	return newTestKernelWith(t, p, fstest.MapFS{}, func(err error) bool {
+		report(err)
+		return false
+	})
+}
+
+func newTestKernelWith(t *testing.T, p *Plugin, filesystem fs.FS, handler kernel.ErrorHandler) kernel.Executioner {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	config := map[kernel.PluginName]any{
 		storage.Name: storage.DefaultConfig("gfx-test").WithReadFS("test", 10, filesystem),
 	}
-	engine := kernel.New(config).Handler(func(err error) bool {
-		t.Errorf("unexpected kernel error: %v", err)
-		return true
-	}).WithPlugins(storage.New(), p, testPlugin{})
+	engine := kernel.New(config).Handler(handler).WithPlugins(storage.New(), p, testPlugin{})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	return engine.Executioner()
@@ -240,7 +308,7 @@ func BenchmarkTranslateSteadyState(b *testing.B) {
 		ColorParam("tint", m.Color{R: 1, G: 1, B: 1, A: 1}),
 		FloatParam("scale", 1),
 		TextureParam("MainTexture", TextureDescr{source: TextureSourceBaked, id: 2}),
-		SamplerParam("MainSampler", AddressClamp, FilterLinear),
+		SamplerParam("MainSampler", SamplerDesc{}),
 		BufferParam("Data", BufferDescr{source: BufferSourceBaked, id: 3, size: 64}),
 	)
 	for range 100 {
@@ -267,30 +335,37 @@ func (benchmarkGpuSink) AllocateTexture(TextureID, TextureDesc)                 
 func (benchmarkGpuSink) UpdateTexture(TextureID, int, Region, []byte)                 {}
 func (benchmarkGpuSink) SetPipeline(PipelineID)                                       {}
 func (benchmarkGpuSink) SetParams([]byte)                                             {}
-func (benchmarkGpuSink) SetTexture(TextureID, SamplerID, int, int, int)               {}
-func (benchmarkGpuSink) SetVertexBuffer(BufferID, int)                                {}
-func (benchmarkGpuSink) SetIndexBuffer(BufferID, int)                                 {}
-func (benchmarkGpuSink) SetBuffer(int, int, BufferID, int, int)                       {}
-func (benchmarkGpuSink) Draw(int, int, int, bool)                                     {}
-func (benchmarkGpuSink) ReleaseBuffer(BufferID)                                       {}
-func (benchmarkGpuSink) ReleaseTexture(TextureID)                                     {}
+func (benchmarkGpuSink) SetTexture(TextureID, int, int)                               {}
+
+func (benchmarkGpuSink) SetSampler(SamplerID, int, int)         {}
+func (benchmarkGpuSink) SetVertexBuffer(BufferID, int)          {}
+func (benchmarkGpuSink) SetIndexBuffer(BufferID, int)           {}
+func (benchmarkGpuSink) SetBuffer(int, int, BufferID, int, int) {}
+func (benchmarkGpuSink) Draw(int, int, int, int, bool)          {}
+func (benchmarkGpuSink) ReleaseBuffer(BufferID)                 {}
+func (benchmarkGpuSink) ReleaseTexture(TextureID)               {}
+
+func (benchmarkGpuSink) BeginPass(GpuPassDesc) RenderPass { return benchmarkGpuSink{} }
+func (benchmarkGpuSink) EndPass(RenderPass)               {}
 
 func BenchmarkGpuQueueReplaySteadyState(b *testing.B) {
 	var queue GpuQueue
 	queue.Reset()
+	queue.BeginPass(GpuPassDesc{Screen: true, DepthAuto: true})
 	for i := range 100 {
 		queue.BakeBuffer(BufferID(i+1), BufferVertex, 64, []byte{1})
 		queue.SetPipeline(1)
 		queue.SetParams([]byte{1})
 		queue.SetVertexBuffer(BufferID(i+1), 0)
-		queue.Draw(0, 3, 1, false)
+		queue.Draw(0, 3, 1, 0, false)
 		queue.ReleaseBuffer(BufferID(i + 1))
 	}
+	queue.EndPass()
 	sink := benchmarkGpuSink{}
 	b.ReportAllocs()
 	for b.Loop() {
 		queue.ReplayBakes(sink)
-		queue.ReplayRenderPass(sink)
+		queue.ReplayPasses(sink)
 		queue.ReplayReleases(sink)
 	}
 }
@@ -305,41 +380,31 @@ func countOps(ops []gpuOp, kind gpuOpKind) int {
 	return n
 }
 
-func TestGpuQueueClearValuesAreDirectLastWinsState(t *testing.T) {
-	var queue GpuQueue
+func TestPassSelectionIsFrameLocalState(t *testing.T) {
+	queue := testOpQueue(&fakeBackend{})
 	queue.Reset()
-	if color, depth := queue.Clears(); color || depth {
-		t.Fatalf("default clear mask = (%v, %v), want neither", color, depth)
+	if len(queue.passes) != 0 || queue.current != -1 {
+		t.Fatalf("after reset: %d passes, current %d, want none declared or selected", len(queue.passes), queue.current)
 	}
-	queue.Clear(m.Color{R: 1})
-	queue.Clear(m.Color{G: 1, A: 1})
-	queue.ClearDepth(0.75)
-	queue.ClearDepth(0.25)
-	if got := queue.ClearColor(); got != (m.Color{G: 1, A: 1}) {
-		t.Fatalf("clear color = %+v, want last color", got)
+	first := queue.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: LoadClear})
+	second := queue.Pass(PassDescr{Order: 1, Target: ScreenTarget(), Depth: DepthAuto()})
+	if queue.selectedPass() != 1 {
+		t.Errorf("selected pass = %d, want the one just declared", queue.selectedPass())
 	}
-	if got := queue.ClearDepthValue(); got != 0.25 {
-		t.Fatalf("clear depth = %v, want 0.25", got)
+	queue.SetPass(first)
+	if queue.selectedPass() != 0 {
+		t.Errorf("selected pass = %d, want the re-selected first", queue.selectedPass())
 	}
-	if color, depth := queue.Clears(); !color || !depth {
-		t.Fatalf("clear mask = (%v, %v), want both", color, depth)
+	// An unknown reference leaves the selection alone rather than guessing.
+	queue.SetPass(PassRef(99))
+	if queue.selectedPass() != 0 {
+		t.Errorf("selected pass = %d, want the selection unchanged by an unknown ref", queue.selectedPass())
 	}
-	if len(queue.bakes) != 0 || len(queue.render) != 0 || len(queue.releases) != 0 {
-		t.Fatal("clear values were recorded as phase operations")
-	}
+	_ = second
+
 	queue.Reset()
-	queue.Clear(m.Color{})
-	if color, depth := queue.Clears(); !color || depth {
-		t.Fatalf("color-only clear mask = (%v, %v), want (true, false)", color, depth)
-	}
-	queue.Reset()
-	queue.ClearDepth(0)
-	if color, depth := queue.Clears(); color || !depth {
-		t.Fatalf("depth-only clear mask = (%v, %v), want (false, true)", color, depth)
-	}
-	queue.Reset()
-	if color, depth := queue.Clears(); color || depth {
-		t.Fatalf("reset clear mask = (%v, %v), want neither", color, depth)
+	if len(queue.passes) != 0 || queue.current != -1 {
+		t.Errorf("after reset: %d passes, current %d, want none selected", len(queue.passes), queue.current)
 	}
 }
 
@@ -459,7 +524,7 @@ func TestPersistentResourceTextureSurvivesDroppedFrame(t *testing.T) {
 
 	for range 2 {
 		w := recordList(t, k)
-		w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithResource("persistent.png"))), MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithResource("persistent.png", FormatRGBA8Srgb))), MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 	}
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -529,7 +594,6 @@ func TestDroppedFrameDiscardsTemporaryUploads(t *testing.T) {
 	w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithBytes(1, 1, FormatRGBA8, []byte{1, 2, 3, 4}, false, false))), MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	w = recordList(t, k)
-	w.Clear(m.Color{})
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -680,7 +744,7 @@ func TestOpQueueBakesInlineMaterialAndDrawParameters(t *testing.T) {
 	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
 	queue := recordList(t, k)
 	material := testMaterial(
-		TextureParam("MaterialTexture", TextureWithResource("shared.png")),
+		TextureParam("MaterialTexture", TextureWithResource("shared.png", FormatRGBA8Srgb)),
 		BufferParam("MaterialBuffer", BufferWithBytes([]byte{1, 2, 3, 4}, true)),
 	)
 	drawTexture := TextureWithBytes(1, 1, FormatRGBA8, []byte{5, 6, 7, 8}, true, false)
@@ -756,7 +820,7 @@ func TestBakedResourcesTranslateToBakedBindings(t *testing.T) {
 	w := recordList(t, k)
 	material := testMaterial(
 		TextureParam("MainTexture", texture),
-		SamplerParam("MainSampler", AddressClamp, FilterLinear),
+		SamplerParam("MainSampler", SamplerDesc{}),
 		BufferParam("Data", buffer),
 	)
 	w.Draw(triangle(), material, MatParam("mvp", m.NewMat4()))
@@ -845,9 +909,12 @@ func TestConsumeTranslatesDraws(t *testing.T) {
 
 	// Record a frame: clear + one triangle with a tint material.
 	k.ExecuteCommand[PresentCmd](PresentRequest{}) // ensure clean start
-	w := recordList(t, k)
-	w.Clear(m.Color{A: 1})
-	w.ClearDepth(0.5)
+	w := recordRaw(t, k)
+	w.Pass(PassDescr{
+		Target: ScreenTarget(), Depth: DepthAuto(),
+		Load: LoadClear, Clear: m.Color{A: 1},
+		DepthLoad: LoadClear, DepthClear: 0.5,
+	})
 	mat := testMaterial(ColorParam("tint", m.Color{R: 1, G: 1, B: 1, A: 1}))
 	w.Draw(triangle(), mat, MatParam("mvp", m.NewMat4()))
 
@@ -863,8 +930,12 @@ func TestConsumeTranslatesDraws(t *testing.T) {
 	if backend.pipes != 1 {
 		t.Errorf("pipelines created = %d, want 1", backend.pipes)
 	}
-	if backend.lastClear != (m.Color{A: 1}) || backend.lastDepth != 0.5 || !backend.lastClearColor || !backend.lastClearDepth {
-		t.Errorf("clear state = (%+v, %v, %v, %v), want (black, 0.5, true, true)", backend.lastClear, backend.lastDepth, backend.lastClearColor, backend.lastClearDepth)
+	if len(backend.lastPasses) != 1 {
+		t.Fatalf("passes = %d, want 1", len(backend.lastPasses))
+	}
+	pass := backend.lastPasses[0]
+	if pass.Clear != (m.Color{A: 1}) || pass.DepthClear != 0.5 || pass.Load != LoadClear || pass.DepthLoad != LoadClear {
+		t.Errorf("clear state = (%+v, %v, %v, %v), want (black, 0.5, clear, clear)", pass.Clear, pass.DepthClear, pass.Load, pass.DepthLoad)
 	}
 	if got := countOps(backend.lastOps, gpuDraw); got != 1 {
 		t.Errorf("draw ops = %d, want 1", got)
@@ -893,7 +964,6 @@ func TestConsumeCachesShaderAndPipeline(t *testing.T) {
 
 	for frame := 0; frame < 3; frame++ {
 		w := recordList(t, k)
-		w.Clear(m.Color{})
 		w.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
 		w.Draw(triangle(), testMaterial(), MatParam("mvp", m.Translation4(1, 0, 0)))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
@@ -1030,7 +1100,7 @@ func TestStorageResolvesMaterialTexture(t *testing.T) {
 
 	for frame := 0; frame < 2; frame++ {
 		w := recordList(t, k)
-		mat := testMaterial(TextureParam("MainTexture", TextureWithResource("hero.png")), SamplerParam("MainSampler", AddressClamp, FilterLinear))
+		mat := testMaterial(TextureParam("MainTexture", TextureWithResource("hero.png", FormatRGBA8Srgb)), SamplerParam("MainSampler", SamplerDesc{}))
 		w.Draw(triangle(), mat, MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
@@ -1084,7 +1154,7 @@ func TestReleaseCachedResourceReleasesPathAndAllowsReload(t *testing.T) {
 	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
 	material := Material(
 		ShaderWithResource("shader.wgsl"),
-		TextureParam("MainTexture", TextureWithResource("hero.png")),
+		TextureParam("MainTexture", TextureWithResource("hero.png", FormatRGBA8Srgb)),
 	)
 
 	w := recordList(t, k)
@@ -1098,7 +1168,6 @@ func TestReleaseCachedResourceReleasesPathAndAllowsReload(t *testing.T) {
 	k.ExecuteCommand[ReleaseCachedResourceCmd](ReleaseCachedResourceRequest{Path: "hero.png"})
 	k.ExecuteCommand[ReleaseCachedResourceCmd](ReleaseCachedResourceRequest{Path: "shader.wgsl"})
 	w = recordList(t, k)
-	w.Clear(m.Color{})
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -1133,19 +1202,18 @@ func TestFreeCachedResourcesClearsTranslatorOwnedCachesOnly(t *testing.T) {
 	})
 	w := recordList(t, k)
 	w.Draw(triangle(), testMaterial(
-		TextureParam("MainTexture", TextureWithResource("hero.png")),
-		SamplerParam("MainSampler", AddressClamp, FilterLinear),
+		TextureParam("MainTexture", TextureWithResource("hero.png", FormatRGBA8Srgb)),
+		SamplerParam("MainSampler", SamplerDesc{}),
 	), MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
-	cachedTexture := p.translator.textures[textureKey("hero.png")]
+	cachedTexture := p.translator.textures[textureKey{path: "hero.png", format: FormatRGBA8Srgb}]
 	if cachedTexture.id == 0 || cachedTexture.id == explicit.id {
 		t.Fatalf("cached/explicit texture IDs = (%d, %d), want distinct nonzero IDs", cachedTexture.id, explicit.id)
 	}
 
 	k.ExecuteCommand[FreeCachedResourcesCmd](FreeCachedResourcesRequest{})
 	w = recordList(t, k)
-	w.Clear(m.Color{})
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	if len(p.translator.shaders) != 0 || len(p.translator.pipelines) != 0 || len(p.translator.samplers) != 0 || len(p.translator.layouts) != 0 || len(p.translator.parameterPlans) != 0 {
@@ -1171,7 +1239,7 @@ func TestFailedTextureResourceLoadIsRetried(t *testing.T) {
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
-	material := testMaterial(TextureParam("MainTexture", TextureWithResource("later.png")))
+	material := testMaterial(TextureParam("MainTexture", TextureWithResource("later.png", FormatRGBA8Srgb)))
 
 	for attempt := range 2 {
 		w := recordList(t, k)
@@ -1294,7 +1362,17 @@ func TestBufferWithBytesReuploadsEveryFrame(t *testing.T) {
 
 // recordList runs a scoped write against the OpQueue through a helper command
 // so tests record under the proper resource lock.
+// recordList opens the frame's queue with a screen pass already declared, since
+// every draw names a pass and most tests do not care which one.
 func recordList(t *testing.T, k kernel.Executioner) *OpQueue {
+	t.Helper()
+	queue := recordRaw(t, k)
+	queue.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Label: "test"})
+	return queue
+}
+
+// recordRaw opens the frame's queue with no pass declared.
+func recordRaw(t *testing.T, k kernel.Executioner) *OpQueue {
 	t.Helper()
 	var captured *OpQueue
 	k.ExecuteCommand[recordCmd](recordRequest{fn: func(l *OpQueue) { captured = l }})

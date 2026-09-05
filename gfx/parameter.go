@@ -10,11 +10,15 @@ type ParameterDescr struct {
 	kind    paramKind
 	texture TextureDescr
 	buffer  BufferDescr
-	color   m.Color
-	num     float32
-	vec     m.Vec4
-	mat     m.Mat4
-	sampler SamplerDesc
+	// bufferOffset and bufferSize bind a range of buffer. A zero size means the
+	// whole buffer from the offset.
+	bufferOffset int
+	bufferSize   int
+	color        m.Color
+	num          float32
+	vec          m.Vec4
+	mat          m.Mat4
+	sampler      SamplerDesc
 }
 
 // paramKind tags the variant stored in a ParameterDescr.
@@ -56,14 +60,24 @@ func TextureParam(name string, tex TextureDescr) ParameterDescr {
 	return ParameterDescr{name: name, kind: paramTexture, texture: tex}
 }
 
-// SamplerParam creates a sampler parameter.
-func SamplerParam(name string, address AddressMode, filter FilterMode) ParameterDescr {
-	return ParameterDescr{name: name, kind: paramSampler, sampler: SamplerDesc{Address: address, Filter: filter}}
+// SamplerParam creates a sampler parameter. The zero SamplerDesc clamps and
+// filters linearly.
+func SamplerParam(name string, desc SamplerDesc) ParameterDescr {
+	return ParameterDescr{name: name, kind: paramSampler, sampler: desc}
 }
 
-// BufferParam creates a buffer parameter from a buffer descriptor.
+// BufferParam creates a buffer parameter from a buffer descriptor, binding the
+// whole buffer.
 func BufferParam(name string, buf BufferDescr) ParameterDescr {
 	return ParameterDescr{name: name, kind: paramBuffer, buffer: buf}
+}
+
+// BufferRangeParam binds one slice of a buffer, which is how a draw addresses
+// its own record in a shared arena: the binding is the addressing, so no index
+// has to be agreed on across the record/translate thread boundary. offset must
+// be a multiple of StorageAlignment.
+func BufferRangeParam(name string, buf BufferDescr, offset, size int) ParameterDescr {
+	return ParameterDescr{name: name, kind: paramBuffer, buffer: buf, bufferOffset: offset, bufferSize: size}
 }
 
 // Name reports the parameter's declared shader name.

@@ -100,12 +100,6 @@ func (p *Plugin) flushFrame(
 	if !p.ensureQuad(gfxResources) {
 		return nil
 	}
-	if write.hasColor {
-		gfxWrite.Clear(write.clearColor)
-	}
-	if write.hasDepth {
-		gfxWrite.ClearDepth(write.clearDepth)
-	}
 	spriteAtlas.beginFrame()
 	fontAtlas.beginFrame()
 	p.layers = p.layers[:0]
@@ -114,8 +108,14 @@ func (p *Plugin) flushFrame(
 			p.layers = append(p.layers, layerID)
 		}
 	}
+	// The clear's layer gets a pass even when it draws nothing, so a frame where
+	// the bottom layer happens to be empty still clears.
+	if write.hasColor && !slices.Contains(p.layers, write.clearLayer) {
+		p.layers = append(p.layers, write.clearLayer)
+	}
 	slices.Sort(p.layers)
-	for _, layerID := range p.layers {
+	for index, layerID := range p.layers {
+		gfxWrite.Pass(canvasPass(layerID, index, len(p.layers), write))
 		value := write.ops[layerID]
 		transform := resolveLayerTransform(value, view)
 		for i := range value.ops {
@@ -136,6 +136,32 @@ func (p *Plugin) flushFrame(
 		p.tris.flush(gfxWrite)
 	}
 	return nil
+}
+
+// canvasPass describes the pass one canvas layer draws into. A contiguous run
+// of them collapses back to one GPU pass through gfx's merge rule, which is why
+// the depth ops are asymmetric rather than uniform: depth clears once at the
+// bottom and is discarded once at the top, and every pass in between preserves
+// and keeps, which is what the merge predicate requires.
+func canvasPass(layerID Layer, index, count int, write *opQueue) gfx.PassDescr {
+	desc := gfx.PassDescr{
+		Order:  layerID,
+		Target: gfx.ScreenTarget(),
+		Depth:  gfx.DepthAuto(),
+		Label:  "canvas.layer",
+	}
+	if index == 0 {
+		desc.DepthLoad, desc.DepthClear = gfx.LoadClear, 1
+	}
+	if index == count-1 {
+		// Nothing reads canvas's depth after the frame, and discarding saves a
+		// tiled GPU the writeback.
+		desc.DepthStore = gfx.StoreDiscard
+	}
+	if write.hasColor && layerID == write.clearLayer {
+		desc.Load, desc.Clear = gfx.LoadClear, write.clearColor
+	}
+	return desc
 }
 
 func (p *Plugin) drawTriangles(gfxWrite *gfx.OpQueue, view *app.Viewport, layerTransform m.Mat4, clip m.Rect, hasClip bool, layout []gfx.VertexAttr, op *trianglesOp) {
@@ -378,24 +404,23 @@ func (p *Plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResourc
 		gfx.MatParam("canvasLayer", layerTransform),
 		gfx.VecParam("canvasClip", m.Vec4{X: clip.X, Y: clip.Y, Z: clip.X + clip.Width, W: clip.Y + clip.Height}),
 		gfx.TextureParam(TextureSlot, entry.texture),
-		gfx.SamplerParam(SamplerSlot, tileAddressMode(t), t.Filter),
+		gfx.SamplerParam(SamplerSlot, tileSampler(t)),
 	)
 	p.params = append(p.params, op.params...)
 	mesh := gfx.Mesh(gfx.BufferWithBytes(p.tileVertices, true), gfx.TopologyTriangleList, triangleVertexLayout[:]...)
 	gfxWrite.Draw(mesh, defaultTrianglesMaterial, p.params...)
 }
 
-// tileAddressMode repeats only the axes the transform tiles, so the non-tiled
-// axis clamps at its edges instead of wrapping.
-func tileAddressMode(t SpriteTransform) gfx.AddressMode {
-	address := gfx.AddressClamp
-	if t.TileX {
-		address |= gfx.AddressRepeatX
+// tileSampler repeats only the axes the transform tiles, so the non-tiled axis
+// clamps at its edges instead of wrapping.
+func tileSampler(t SpriteTransform) gfx.SamplerDesc {
+	address := func(tile bool) gfx.AddressMode {
+		if tile {
+			return gfx.AddressRepeat
+		}
+		return gfx.AddressClamp
 	}
-	if t.TileY {
-		address |= gfx.AddressRepeatY
-	}
-	return address
+	return canvasSampler(address(t.TileX), address(t.TileY), t.Filter)
 }
 
 // spriteTint returns the first "tint" color parameter, defaulting to opaque white.
@@ -450,7 +475,7 @@ func (p *Plugin) drawEntry(gfxWrite *gfx.OpQueue, view *app.Viewport, entry atla
 		gfx.MatParam("canvasLayer", layerTransform),
 		gfx.VecParam("canvasClip", m.Vec4{X: clip.X, Y: clip.Y, Z: clip.X + clip.Width, W: clip.Y + clip.Height}),
 		gfx.TextureParam(TextureSlot, entry.texture),
-		gfx.SamplerParam(SamplerSlot, gfx.AddressClamp, transform.Filter),
+		gfx.SamplerParam(SamplerSlot, canvasSampler(gfx.AddressClamp, gfx.AddressClamp, transform.Filter)),
 	)
 	p.params = append(p.params, params...)
 	gfxWrite.Draw(p.quad, *material, p.params...)

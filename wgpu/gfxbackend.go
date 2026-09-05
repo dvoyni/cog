@@ -3,7 +3,7 @@ package wgpu
 import (
 	"cmp"
 	"errors"
-	"log"
+	"fmt"
 	"slices"
 	"sync/atomic"
 
@@ -17,11 +17,12 @@ import (
 // plus material params. The renderer writes only the used prefix each draw.
 const gfxbUniformSize = 256
 
-// depthFormat is the depth buffer format used by the high-level renderer. It
-// includes a stencil aspect because the browser WebGPU binding always emits
-// stencilLoadOp/stencilStoreOp for the depth attachment, which WebGPU rejects on
-// a stencil-less format (native Dawn tolerates it, browsers do not).
-const depthFormat = gputypes.TextureFormatDepth24PlusStencil8
+// depthFormat is the one depth format the engine uses, renderable and
+// sampleable, with no stencil aspect anywhere. The browser WebGPU binding emits
+// stencilLoadOp/stencilStoreOp unless the attachment is stencil-read-only, and
+// WebGPU rejects those on a stencil-less format, so every depth attachment sets
+// StencilReadOnly.
+const depthFormat = gputypes.TextureFormatDepth32Float
 
 // gfxBackend implements gfx.Backend over gogpu/wgpu. TextureID and BufferID key
 // native textures and buffers directly; backend-minted IDs remain only for
@@ -53,13 +54,23 @@ type gfxBackend struct {
 	uniforms []*wgpu.Buffer
 
 	// Per-draw bind-group state: acc holds pending logical/native entries per
-	// group; bindGroups reuses exact resource combinations across frames.
+	// group; bindGroups reuses exact resource combinations across frames; bound
+	// filters out redundant SetBindGroup calls and is dropped whenever it stops
+	// being sound - a shader change or a pass boundary.
 	acc        [][]gfxbBindEntry
 	bindGroups *gfxbBindGroupCache
+	bound      []*wgpu.BindGroup
 
-	depthTex       *wgpu.Texture
-	depthView      *wgpu.TextureView
-	depthW, depthH int
+	// The frame's encoder and per-draw uniform cursor, live only inside Execute
+	// so that every pass writes into the same command buffer.
+	encoder      *wgpu.CommandEncoder
+	uniformIndex int
+
+	// depths are the DepthAuto textures, one per target size, and views caches
+	// renderable views by texture, mip and layer.
+	depths map[gfxbDepthKey]*gfxbTexture
+	views  map[gfxbViewKey]*gfxbView
+	viewID map[cgfx.TextureViewID]*gfxbView
 
 	// screen is the current frame's surface render target, refreshed by setScreen
 	// before each render and exposed to the plugin as screenID.
@@ -93,15 +104,19 @@ type gfxbPipeline struct {
 }
 
 type gfxRenderPass struct {
-	backend      *gfxBackend
-	pass         *wgpu.RenderPassEncoder
-	shader       *gfxbShader
-	uniformIndex int
+	backend *gfxBackend
+	pass    *wgpu.RenderPassEncoder
+	shader  *gfxbShader
 }
 
 func (s *gfxRenderPass) SetPipeline(id cgfx.PipelineID) {
 	if pipeline, ok := s.backend.pipelines[id]; ok {
 		s.pass.SetPipeline(pipeline.pipeline)
+		if s.shader != pipeline.shader {
+			// Bind-group layout compatibility across shaders cannot be inferred
+			// from object identity, so a bound group stops counting as bound.
+			s.backend.resetBound()
+		}
 		s.shader = pipeline.shader
 	}
 	s.backend.resetAcc()
@@ -111,9 +126,11 @@ func (s *gfxRenderPass) SetParams(params []byte) {
 	if s.shader == nil {
 		return
 	}
-	slot := s.uniformIndex
+	// The uniform cursor is the frame's, not the pass's: every draw in the frame
+	// writes its own buffer so all the writes can precede the single submit.
+	slot := s.backend.uniformIndex
 	buffer := s.backend.uniform(slot)
-	s.uniformIndex++
+	s.backend.uniformIndex++
 	if buffer != nil {
 		_ = s.backend.queue.WriteBuffer(buffer, 0, params)
 		binding := uint32(s.shader.layout.UniformBinding)
@@ -124,19 +141,20 @@ func (s *gfxRenderPass) SetParams(params []byte) {
 	}
 }
 
-func (s *gfxRenderPass) SetTexture(texture cgfx.TextureID, sampler cgfx.SamplerID, group, textureBinding, samplerBinding int) {
+func (s *gfxRenderPass) SetTexture(texture cgfx.TextureID, group, binding int) {
 	view, textureID, generation := s.backend.textureBinding(texture)
 	s.backend.addEntry(group, gfxbBindEntry{
-		key:    gfxbBindingKey{kind: gfxbBindTexture, binding: uint16(textureBinding), id: textureID, generation: generation},
-		native: wgpu.BindGroupEntry{Binding: uint32(textureBinding), TextureView: view},
+		key:    gfxbBindingKey{kind: gfxbBindTexture, binding: uint16(binding), id: textureID, generation: generation},
+		native: wgpu.BindGroupEntry{Binding: uint32(binding), TextureView: view},
 	})
-	if samplerBinding >= 0 {
-		native, samplerID := s.backend.samplerBinding(sampler)
-		s.backend.addEntry(group, gfxbBindEntry{
-			key:    gfxbBindingKey{kind: gfxbBindSampler, binding: uint16(samplerBinding), id: samplerID},
-			native: wgpu.BindGroupEntry{Binding: uint32(samplerBinding), Sampler: native},
-		})
-	}
+}
+
+func (s *gfxRenderPass) SetSampler(sampler cgfx.SamplerID, group, binding int) {
+	native, samplerID := s.backend.samplerBinding(sampler)
+	s.backend.addEntry(group, gfxbBindEntry{
+		key:    gfxbBindingKey{kind: gfxbBindSampler, binding: uint16(binding), id: samplerID},
+		native: wgpu.BindGroupEntry{Binding: uint32(binding), Sampler: native},
+	})
 }
 
 func (s *gfxRenderPass) SetVertexBuffer(id cgfx.BufferID, offset int) {
@@ -168,7 +186,7 @@ func (s *gfxRenderPass) SetBuffer(group, binding int, id cgfx.BufferID, offset, 
 	}
 }
 
-func (s *gfxRenderPass) Draw(first, count, instances int, indexed bool) {
+func (s *gfxRenderPass) Draw(first, count, instances, firstInstance int, indexed bool) {
 	if s.shader != nil {
 		s.backend.flushBinds(s.pass, s.shader)
 	}
@@ -176,9 +194,9 @@ func (s *gfxRenderPass) Draw(first, count, instances int, indexed bool) {
 		instances = 1
 	}
 	if indexed {
-		s.pass.DrawIndexed(uint32(count), uint32(instances), uint32(first), 0, 0)
+		s.pass.DrawIndexed(uint32(count), uint32(instances), uint32(first), 0, uint32(firstInstance))
 	} else {
-		s.pass.Draw(uint32(count), uint32(instances), uint32(first), 0)
+		s.pass.Draw(uint32(count), uint32(instances), uint32(first), uint32(firstInstance))
 	}
 	s.backend.resetAcc()
 }
@@ -201,6 +219,9 @@ func newGfxBackend(dp gogpu.DeviceProvider) (*gfxBackend, error) {
 		bakedTextures:      map[cgfx.TextureID]*gfxbTexture{},
 		bakedTextureDescs:  map[cgfx.TextureID]cgfx.TextureDesc{},
 		textureGenerations: map[cgfx.TextureID]uint32{},
+		depths:             map[gfxbDepthKey]*gfxbTexture{},
+		views:              map[gfxbViewKey]*gfxbView{},
+		viewID:             map[cgfx.TextureViewID]*gfxbView{},
 	}
 	if b.device == nil || b.queue == nil {
 		return nil, errDeviceNotReady
@@ -250,16 +271,17 @@ func (b *gfxBackend) NewBuffer() cgfx.BufferID {
 func (b *gfxBackend) newTexture(desc cgfx.TextureDesc) (*gfxbTexture, error) {
 	layers := max(desc.Layers, 1)
 	levels := uint32(1)
-	if desc.Mipmaps {
+	if desc.Mipmaps && mipmapsSupported(desc.Format) {
 		levels = uint32(mipLevelCount(desc.Width, desc.Height))
 	}
+	format := textureFormat(desc.Format)
 	tex, err := b.device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         desc.Label,
 		Size:          wgpu.Extent3D{Width: uint32(desc.Width), Height: uint32(desc.Height), DepthOrArrayLayers: uint32(layers)},
 		MipLevelCount: levels, SampleCount: 1,
 		Dimension: gputypes.TextureDimension2D,
-		Format:    gputypes.TextureFormatRGBA8Unorm,
-		Usage:     gputypes.TextureUsageTextureBinding | gputypes.TextureUsageCopyDst,
+		Format:    format,
+		Usage:     textureUsage(desc),
 	})
 	if err != nil {
 		return nil, err
@@ -269,7 +291,7 @@ func (b *gfxBackend) newTexture(desc cgfx.TextureDesc) (*gfxbTexture, error) {
 		viewDimension = gputypes.TextureViewDimension2DArray
 	}
 	view, err := b.device.CreateTextureView(tex, &wgpu.TextureViewDescriptor{
-		Label: desc.Label, Format: gputypes.TextureFormatRGBA8Unorm,
+		Label: desc.Label, Format: format,
 		Dimension: viewDimension, Aspect: gputypes.TextureAspectAll,
 		MipLevelCount: levels, ArrayLayerCount: uint32(layers),
 	})
@@ -280,30 +302,32 @@ func (b *gfxBackend) newTexture(desc cgfx.TextureDesc) (*gfxbTexture, error) {
 	return &gfxbTexture{tex: tex, view: view}, nil
 }
 
-func (b *gfxBackend) uploadTexture(texture *gfxbTexture, layer int, region cgfx.Region, pixels []byte) {
+func (b *gfxBackend) uploadTexture(texture *gfxbTexture, layer int, region cgfx.Region, format cgfx.TextureFormat, pixels []byte) {
 	if texture == nil {
 		return
 	}
 	_ = b.queue.WriteTexture(
 		&wgpu.ImageCopyTexture{Texture: texture.tex, MipLevel: 0, Origin: wgpu.Origin3D{X: uint32(region.X), Y: uint32(region.Y), Z: uint32(layer)}, Aspect: gputypes.TextureAspectAll},
 		pixels,
-		&wgpu.ImageDataLayout{Offset: 0, BytesPerRow: uint32(region.Width * 4), RowsPerImage: uint32(region.Height)},
+		&wgpu.ImageDataLayout{Offset: 0, BytesPerRow: uint32(region.Width * bytesPerTexel(format)), RowsPerImage: uint32(region.Height)},
 		&wgpu.Extent3D{Width: uint32(region.Width), Height: uint32(region.Height), DepthOrArrayLayers: 1},
 	)
 }
 
-// uploadMipChain box-filters level-0 RGBA pixels and writes each smaller mip.
-func (b *gfxBackend) uploadMipChain(texture *gfxbTexture, width, height int, pixels []byte) {
-	if texture == nil {
+// uploadMipChain box-filters level-0 pixels in the format's own colour space
+// and writes each smaller mip.
+func (b *gfxBackend) uploadMipChain(texture *gfxbTexture, width, height int, format cgfx.TextureFormat, pixels []byte) {
+	if texture == nil || !mipmapsSupported(format) {
 		return
 	}
+	stride := bytesPerTexel(format)
 	src, w, h := pixels, width, height
 	for level := 1; w > 1 || h > 1; level++ {
-		src, w, h = downsampleRGBA(src, w, h)
+		src, w, h = downsampleTexels(src, w, h, format)
 		_ = b.queue.WriteTexture(
 			&wgpu.ImageCopyTexture{Texture: texture.tex, MipLevel: uint32(level), Origin: wgpu.Origin3D{}, Aspect: gputypes.TextureAspectAll},
 			src,
-			&wgpu.ImageDataLayout{Offset: 0, BytesPerRow: uint32(w * 4), RowsPerImage: uint32(h)},
+			&wgpu.ImageDataLayout{Offset: 0, BytesPerRow: uint32(w * stride), RowsPerImage: uint32(h)},
 			&wgpu.Extent3D{Width: uint32(w), Height: uint32(h), DepthOrArrayLayers: 1},
 		)
 	}
@@ -347,24 +371,10 @@ func (b *gfxBackend) freeTexture(texture *gfxbTexture) {
 }
 
 func (b *gfxBackend) NewSampler(desc cgfx.SamplerDesc) (cgfx.SamplerID, error) {
-	addressU := gputypes.AddressModeClampToEdge
-	if desc.Address&cgfx.AddressRepeatX != 0 {
-		addressU = gputypes.AddressModeRepeat
+	if err := validateSampler(desc); err != nil {
+		return 0, err
 	}
-	addressV := gputypes.AddressModeClampToEdge
-	if desc.Address&cgfx.AddressRepeatY != 0 {
-		addressV = gputypes.AddressModeRepeat
-	}
-	filter := gputypes.FilterModeLinear
-	if desc.Filter == cgfx.FilterNearest {
-		filter = gputypes.FilterModeNearest
-	}
-	s, err := b.device.CreateSampler(&wgpu.SamplerDescriptor{
-		Label:        desc.Label,
-		AddressModeU: addressU, AddressModeV: addressV, AddressModeW: addressU,
-		MagFilter: filter, MinFilter: filter, MipmapFilter: filter,
-		LodMaxClamp: 1000,
-	})
+	s, err := b.device.CreateSampler(samplerDescriptor(desc))
 	if err != nil {
 		return 0, err
 	}
@@ -393,14 +403,19 @@ func (b *gfxBackend) NewShader(desc cgfx.ShaderDesc) (cgfx.ShaderID, error) {
 	if err != nil {
 		return 0, err
 	}
-	sh := &gfxbShader{module: module}
-	if mod, rerr := lowerWGSL(string(desc.Code)); rerr != nil {
-		log.Printf("wgpu: shader %q reflection failed: %v", label, rerr)
-	} else {
-		sh.layout = shaderLayoutFrom(mod)
+	// A shader whose bindings cannot be reflected, or whose layouts the device
+	// refuses, is unusable: nothing would bind and every draw through it would
+	// render undefined. Both are failures rather than warnings, and the module
+	// is released rather than leaked behind an ID nobody gets.
+	layout, err := reflectShaderLayout(string(desc.Code))
+	if err != nil {
+		module.Release()
+		return 0, fmt.Errorf("wgpu: shader %q reflection failed: %w", label, err)
 	}
+	sh := &gfxbShader{module: module, layout: layout}
 	if err := b.buildShaderLayouts(sh); err != nil {
-		log.Printf("wgpu: shader %q layout build failed: %v", label, err)
+		module.Release()
+		return 0, fmt.Errorf("wgpu: shader %q layout build failed: %w", label, err)
 	}
 	id := cgfx.ShaderID(b.id())
 	b.shaders[id] = sh
@@ -429,7 +444,11 @@ func (b *gfxBackend) buildShaderLayouts(sh *gfxbShader) error {
 	for _, r := range l.Resources {
 		e := gputypes.BindGroupLayoutEntry{Binding: uint32(r.Binding), Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment}
 		if r.Sampler {
-			e.Sampler = &gputypes.SamplerBindingLayout{Type: gputypes.SamplerBindingTypeFiltering}
+			samplerType := gputypes.SamplerBindingTypeFiltering
+			if r.Comparison {
+				samplerType = gputypes.SamplerBindingTypeComparison
+			}
+			e.Sampler = &gputypes.SamplerBindingLayout{Type: samplerType}
 		} else if r.StorageBuffer {
 			bindingType := gputypes.BufferBindingTypeReadOnlyStorage
 			if r.WritableBuffer {
@@ -441,7 +460,11 @@ func (b *gfxBackend) buildShaderLayouts(sh *gfxbShader) error {
 			if r.TextureView == cgfx.TextureView2DArray {
 				view = gputypes.TextureViewDimension2DArray
 			}
-			e.Texture = &gputypes.TextureBindingLayout{SampleType: gputypes.TextureSampleTypeFloat, ViewDimension: view}
+			sampleType := gputypes.TextureSampleTypeFloat
+			if r.Depth {
+				sampleType = gputypes.TextureSampleTypeDepth
+			}
+			e.Texture = &gputypes.TextureBindingLayout{SampleType: sampleType, ViewDimension: view}
 		}
 		groups[r.Group] = append(groups[r.Group], e)
 		note(r.Group)
@@ -528,23 +551,14 @@ func (b *gfxBackend) NewPipeline(desc cgfx.PipelineDesc) (cgfx.PipelineID, error
 		return 0, errors.New("gfx: unknown shader for pipeline")
 	}
 	module := sh.module
-	blend := gfxBlendState(desc.Blend)
-	// Every pipeline must declare a depth-stencil state matching the render pass
-	// attachment (browser WebGPU enforces this). When the pipeline does not depth
-	// test, depth/stencil are effectively disabled (compare Always, no write).
-	keep := gputypes.StencilOperationKeep
-	stencilOff := wgpu.StencilFaceState{
-		Compare: gputypes.CompareFunctionAlways, FailOp: keep, DepthFailOp: keep, PassOp: keep,
-	}
+	blend := gfxBlendState(desc.State.Blend)
+	// Every pipeline must declare a depth state matching the render pass
+	// attachment (browser WebGPU enforces this). Compare and write are
+	// independent: the transparent pass tests without writing.
 	depth := &wgpu.DepthStencilState{
-		Format:       depthFormat,
-		DepthCompare: gputypes.CompareFunctionAlways,
-		StencilFront: stencilOff,
-		StencilBack:  stencilOff,
-	}
-	if desc.DepthTest {
-		depth.DepthWriteEnabled = true
-		depth.DepthCompare = gputypes.CompareFunctionLess
+		Format:            depthFormat,
+		DepthCompare:      compareFunc(desc.State.DepthCompare),
+		DepthWriteEnabled: desc.State.DepthWrite,
 	}
 	var buffers []wgpu.VertexBufferLayout
 	if desc.Stride > 0 && len(desc.Attributes) > 0 {
@@ -569,11 +583,16 @@ func (b *gfxBackend) NewPipeline(desc cgfx.PipelineDesc) (cgfx.PipelineID, error
 			Module: module, EntryPoint: "vs_main",
 			Buffers: buffers,
 		},
-		Primitive:    gputypes.PrimitiveState{Topology: primitiveTopology(desc.Topology), CullMode: gputypes.CullModeNone},
+		Primitive: gputypes.PrimitiveState{
+			Topology:         primitiveTopology(desc.Topology),
+			StripIndexFormat: stripIndexFormat(desc.Topology),
+			CullMode:         cullMode(desc.State.Cull),
+			FrontFace:        frontFace(desc.State.FrontFace),
+		},
 		DepthStencil: depth,
 		Fragment: &wgpu.FragmentState{
 			Module: module, EntryPoint: "fs_main",
-			Targets: []gputypes.ColorTargetState{{Format: b.surfaceFormat, WriteMask: gputypes.ColorWriteMaskAll, Blend: blend}},
+			Targets: []gputypes.ColorTargetState{{Format: b.colorTargetFormat(desc.ColorFormat), WriteMask: gputypes.ColorWriteMaskAll, Blend: blend}},
 		},
 	})
 	if err != nil {
@@ -620,6 +639,11 @@ func (b *gfxBackend) FreePipeline(id cgfx.PipelineID) {
 // it on the render thread after acquiring the surface view, before triggering the
 // render.
 func (b *gfxBackend) setScreen(view *wgpu.TextureView, w, h int) {
+	if w != b.screenW || h != b.screenH {
+		// The shared depth textures are keyed by size, and nothing renders at
+		// the old one any more.
+		b.releaseDepths()
+	}
 	b.screenView, b.screenW, b.screenH = view, w, h
 }
 
@@ -637,49 +661,22 @@ func (b *gfxBackend) resolveTarget(target cgfx.TextureViewID) (*wgpu.TextureView
 	return nil, 0, 0
 }
 
-// Execute replays the GPU queue into a single render pass on target's view.
-func (b *gfxBackend) Execute(target cgfx.TextureViewID, queue *cgfx.GpuQueue) {
-	view, w, h := b.resolveTarget(target)
-	if view == nil {
-		return
-	}
-	b.ensureDepth(w, h)
-
+// Execute performs the frame's bakes, encodes every pass into one command
+// encoder, submits once, then performs releases.
+func (b *gfxBackend) Execute(queue *cgfx.GpuQueue) {
 	b.replacedBuffers = b.replacedBuffers[:0]
 	b.replacedTextures = b.replacedTextures[:0]
 	queue.ReplayBakes(b)
-	c := queue.ClearColor()
-	depth := queue.ClearDepthValue()
-	clearColor, clearDepth := queue.Clears()
-	clearValue := gputypes.Color{R: float64(c.R), G: float64(c.G), B: float64(c.B), A: float64(c.A)}
-	colorLoadOp := gputypes.LoadOpLoad
-	if clearColor {
-		colorLoadOp = gputypes.LoadOpClear
-	}
-	depthLoadOp := gputypes.LoadOpLoad
-	if clearDepth {
-		depthLoadOp = gputypes.LoadOpClear
-	}
 
 	encoder, err := b.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{Label: "gfx"})
 	if err != nil {
 		return
 	}
-	rp, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
-		ColorAttachments: []wgpu.RenderPassColorAttachment{{
-			View: view, LoadOp: colorLoadOp, StoreOp: gputypes.StoreOpStore, ClearValue: clearValue,
-		}},
-		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
-			View: b.depthView, DepthLoadOp: depthLoadOp, DepthStoreOp: gputypes.StoreOpStore, DepthClearValue: depth,
-		},
-	})
-	if err != nil {
-		return
-	}
+	b.encoder = encoder
+	b.uniformIndex = 0
+	queue.ReplayPasses(b)
+	b.encoder = nil
 
-	b.resetAcc()
-	queue.ReplayRenderPass(&gfxRenderPass{backend: b, pass: rp})
-	_ = rp.End()
 	cmd, err := encoder.Finish()
 	if err != nil {
 		return
@@ -712,7 +709,7 @@ func (b *gfxBackend) UpdateTexture(id cgfx.TextureID, layer int, region cgfx.Reg
 		region.Width <= 0 || region.Height <= 0 || region.X+region.Width > desc.Width || region.Y+region.Height > desc.Height || len(pixels) == 0 {
 		return
 	}
-	b.uploadTexture(texture, layer, region, pixels)
+	b.uploadTexture(texture, layer, region, desc.Format, pixels)
 }
 
 func (b *gfxBackend) allocateTexture(id cgfx.TextureID, desc cgfx.TextureDesc) *gfxbTexture {
@@ -730,6 +727,7 @@ func (b *gfxBackend) allocateTexture(id cgfx.TextureID, desc cgfx.TextureDesc) *
 	}
 	if old, ok := b.bakedTextures[id]; ok {
 		b.bindGroups.invalidateResource(gfxbBindTexture, uint32(id))
+		b.releaseTextureViews(id)
 		b.textureGenerations[id]++
 		b.replacedTextures = append(b.replacedTextures, old)
 	} else {
@@ -744,7 +742,7 @@ func (b *gfxBackend) bakeBuffer(id cgfx.BufferID, kind cgfx.BufferKind, size int
 	if id == 0 || size <= 0 || len(data) == 0 {
 		return
 	}
-	desc := cgfx.BufferDesc{Kind: kind, Size: size, Dynamic: kind == cgfx.BufferVertex || kind == cgfx.BufferIndex, Label: "gfx.baked"}
+	desc := cgfx.BufferDesc{Kind: kind, Size: size, Label: "gfx.baked"}
 	if old, ok := b.bakedBuffers[id]; ok && b.bakedBufferDescs[id] == desc {
 		b.uploadBuffer(old, 0, data)
 		return
@@ -773,9 +771,9 @@ func (b *gfxBackend) bakeTexture(id cgfx.TextureID, width, height int, format cg
 	if texture == nil {
 		return
 	}
-	b.uploadTexture(texture, 0, cgfx.Region{X: 0, Y: 0, Width: width, Height: height}, pixels)
+	b.uploadTexture(texture, 0, cgfx.Region{X: 0, Y: 0, Width: width, Height: height}, format, pixels)
 	if mipmaps {
-		b.uploadMipChain(texture, width, height, pixels)
+		b.uploadMipChain(texture, width, height, format, pixels)
 	}
 }
 
@@ -801,6 +799,7 @@ func (b *gfxBackend) ReleaseBuffer(id cgfx.BufferID) {
 func (b *gfxBackend) ReleaseTexture(id cgfx.TextureID) {
 	if texture, ok := b.bakedTextures[id]; ok {
 		b.bindGroups.invalidateResource(gfxbBindTexture, uint32(id))
+		b.releaseTextureViews(id)
 		b.freeTexture(texture)
 		delete(b.bakedTextures, id)
 		delete(b.bakedTextureDescs, id)
@@ -813,6 +812,14 @@ func (b *gfxBackend) resetAcc() {
 	for g := range b.acc {
 		b.acc[g] = b.acc[g][:0]
 	}
+}
+
+// resetBound forgets which bind groups are set, which is what every caller that
+// invalidates the redundant-bind filter needs: a pass boundary drops the
+// binding state, and a shader change means the layouts a group was bound
+// against no longer hold.
+func (b *gfxBackend) resetBound() {
+	clear(b.bound)
 }
 
 // addEntry records a pending bind-group entry for a group in the current draw.
@@ -836,7 +843,14 @@ func (b *gfxBackend) flushBinds(rp *wgpu.RenderPassEncoder, shader *gfxbShader) 
 		if bg == nil {
 			continue
 		}
+		for len(b.bound) <= g {
+			b.bound = append(b.bound, nil)
+		}
+		if b.bound[g] == bg {
+			continue
+		}
 		rp.SetBindGroup(uint32(g), bg, nil)
+		b.bound[g] = bg
 	}
 }
 
@@ -870,36 +884,54 @@ func (b *gfxBackend) samplerBinding(id cgfx.SamplerID) (*wgpu.Sampler, uint32) {
 	return b.defaultSampler, 0
 }
 
-// ensureDepth (re)creates the shared depth buffer when the target size changes.
-func (b *gfxBackend) ensureDepth(w, h int) {
-	if w <= 0 || h <= 0 || (b.depthView != nil && b.depthW == w && b.depthH == h) {
-		return
+func compareFunc(f cgfx.CompareFunc) gputypes.CompareFunction {
+	switch f {
+	case cgfx.CompareNever:
+		return gputypes.CompareFunctionNever
+	case cgfx.CompareLess:
+		return gputypes.CompareFunctionLess
+	case cgfx.CompareLessEqual:
+		return gputypes.CompareFunctionLessEqual
+	case cgfx.CompareGreater:
+		return gputypes.CompareFunctionGreater
+	case cgfx.CompareGreaterEqual:
+		return gputypes.CompareFunctionGreaterEqual
+	case cgfx.CompareEqual:
+		return gputypes.CompareFunctionEqual
+	case cgfx.CompareNotEqual:
+		return gputypes.CompareFunctionNotEqual
+	default:
+		return gputypes.CompareFunctionAlways
 	}
-	if b.depthView != nil {
-		b.depthView.Release()
-		b.depthTex.Release()
+}
+
+func cullMode(mode cgfx.CullMode) gputypes.CullMode {
+	switch mode {
+	case cgfx.CullFront:
+		return gputypes.CullModeFront
+	case cgfx.CullBack:
+		return gputypes.CullModeBack
+	default:
+		return gputypes.CullModeNone
 	}
-	tex, err := b.device.CreateTexture(&wgpu.TextureDescriptor{
-		Label:         "gfx.depth",
-		Size:          wgpu.Extent3D{Width: uint32(w), Height: uint32(h), DepthOrArrayLayers: 1},
-		MipLevelCount: 1, SampleCount: 1,
-		Dimension: gputypes.TextureDimension2D,
-		Format:    depthFormat,
-		Usage:     gputypes.TextureUsageRenderAttachment,
-	})
-	if err != nil {
-		return
+}
+
+func frontFace(face cgfx.FrontFace) gputypes.FrontFace {
+	if face == cgfx.FrontCW {
+		return gputypes.FrontFaceCW
 	}
-	view, err := b.device.CreateTextureView(tex, &wgpu.TextureViewDescriptor{
-		Label: "gfx.depth", Format: depthFormat,
-		Dimension: gputypes.TextureViewDimension2D, Aspect: gputypes.TextureAspectAll,
-		MipLevelCount: 1, ArrayLayerCount: 1,
-	})
-	if err != nil {
-		tex.Release()
-		return
+	return gputypes.FrontFaceCCW
+}
+
+// stripIndexFormat is the format that cuts a strip, which WebGPU requires a
+// pipeline to declare before an indexed strip draw is legal, and forbids on any
+// other topology. Index buffers are uint32 throughout the engine.
+func stripIndexFormat(topology cgfx.PrimitiveTopology) *gputypes.IndexFormat {
+	if topology != cgfx.TopologyTriangleStrip {
+		return nil
 	}
-	b.depthTex, b.depthView, b.depthW, b.depthH = tex, view, w, h
+	format := gputypes.IndexFormatUint32
+	return &format
 }
 
 func primitiveTopology(t cgfx.PrimitiveTopology) gputypes.PrimitiveTopology {
