@@ -145,8 +145,8 @@ func TestColorHSLA(t *testing.T) {
 		t.Fatalf("HSLA round trip = (%v, %v, %v, %v), want (%v, %v, %v, %v)", hue, saturation, lightness, alpha, wantHue, wantSaturation, wantLightness, wantAlpha)
 	}
 
-	hue, saturation, lightness, alpha = (Color{R: 0.25, G: 0.25, B: 0.25, A: 0.5}).Hsla()
-	if hue != 0 || saturation != 0 || lightness != 0.25 || alpha != 0.5 {
+	hue, saturation, lightness, alpha = NewColorSrgb(0.25, 0.25, 0.25, 0.5).Hsla()
+	if hue != 0 || saturation != 0 || !near(lightness, 0.25) || alpha != 0.5 {
 		t.Fatalf("achromatic HSLA = (%v, %v, %v, %v)", hue, saturation, lightness, alpha)
 	}
 }

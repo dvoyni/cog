@@ -167,6 +167,14 @@ func (v Vec3) Round() Vec3                          { return Vec3{round(v.X), ro
 func (v Vec3) Floor() Vec3                          { return Vec3{floor(v.X), floor(v.Y), floor(v.Z)} }
 func (v Vec3) Ceil() Vec3                           { return Vec3{ceil(v.X), ceil(v.Y), ceil(v.Z)} }
 func (v Vec3) Int() Vec3i                           { return Vec3i{int(v.X), int(v.Y), int(v.Z)} }
+func (v Vec3) Min(other Vec3) Vec3 {
+	return Vec3{min(v.X, other.X), min(v.Y, other.Y), min(v.Z, other.Z)}
+}
+func (v Vec3) Max(other Vec3) Vec3 {
+	return Vec3{max(v.X, other.X), max(v.Y, other.Y), max(v.Z, other.Z)}
+}
+func (v Vec3) Abs() Vec3           { return Vec3{abs32(v.X), abs32(v.Y), abs32(v.Z)} }
+func (v Vec3) Vec4(w float32) Vec4 { return Vec4{v.X, v.Y, v.Z, w} }
 
 func (v Vec4) Add(other Vec4) Vec4 {
 	return Vec4{v.X + other.X, v.Y + other.Y, v.Z + other.Z, v.W + other.W}
@@ -211,6 +219,7 @@ func (v Vec4) Lerp(other Vec4, amount float32) Vec4 { return v.Add(other.Sub(v).
 func (v Vec4) Round() Vec4                          { return Vec4{round(v.X), round(v.Y), round(v.Z), round(v.W)} }
 func (v Vec4) Floor() Vec4                          { return Vec4{floor(v.X), floor(v.Y), floor(v.Z), floor(v.W)} }
 func (v Vec4) Ceil() Vec4                           { return Vec4{ceil(v.X), ceil(v.Y), ceil(v.Z), ceil(v.W)} }
+func (v Vec4) Vec3() Vec3                           { return Vec3{v.X, v.Y, v.Z} }
 func (v Vec4) Int() Vec4i                           { return Vec4i{int(v.X), int(v.Y), int(v.Z), int(v.W)} }
 
 func (v Vec2i) Add(other Vec2i) Vec2i { return Vec2i{v.X + other.X, v.Y + other.Y} }
