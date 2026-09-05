@@ -1401,3 +1401,66 @@ func withResourceQueue(t *testing.T, k kernel.Executioner, use func(*ResourceQue
 type recordResourcesCmd kernel.Command[recordResourcesRequest, recordResourcesResponse]
 type recordResourcesRequest struct{ fn func(*ResourceQueue) }
 type recordResourcesResponse struct{}
+
+func TestTemporaryBufferUploadsOnceForEveryDrawThatBindsIt(t *testing.T) {
+	queue := testOpQueue(&fakeBackend{})
+	arena := make([]byte, 3*StorageAlignment)
+	arena[0] = 7
+
+	buffer := queue.TemporaryBuffer(arena, true)
+	arena[0] = 9
+	for i := range 3 {
+		queue.Draw(triangle(), testMaterial(),
+			BufferRangeParam("records", buffer, i*StorageAlignment, StorageAlignment))
+	}
+
+	bakes := 0
+	for i := range queue.ops {
+		if queue.ops[i].kind == opBakeBuffer && queue.ops[i].bufferKind == BufferStorage {
+			bakes++
+			if queue.ops[i].bytes[0] != 7 {
+				t.Fatal("the temporary arena aliases caller data past the call")
+			}
+		}
+	}
+	if bakes != 1 {
+		t.Fatalf("the arena uploaded %d times, want once for the whole frame", bakes)
+	}
+	for i := range queue.ops {
+		if queue.ops[i].kind != opDraw {
+			continue
+		}
+		param := queue.ops[i].params[0]
+		if param.buffer.id != buffer.id || param.buffer.source != BufferSourceBaked {
+			t.Fatalf("draw bound %+v, want the one baked arena %+v", param.buffer, buffer)
+		}
+	}
+}
+
+// A shader that declares no uniform block must get no uniform binding. Scene
+// declares none — all of its numeric data is storage — and emitting one anyway
+// puts an entry in group 0 that the pipeline layout does not have, which fails
+// CreateBindGroup and takes the whole frame's command buffer down.
+func TestAShaderWithoutAUniformBlockGetsNoUniformBinding(t *testing.T) {
+	p := New()
+	k := newTestKernel(t, p)
+	backend := &fakeBackend{layout: &ShaderLayout{Resources: []ShaderResource{
+		{Name: "records", StorageBuffer: true, Group: 0, Binding: 0},
+	}}}
+	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
+
+	w := recordRaw(t, k)
+	w.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto()})
+	w.Draw(triangle(), testMaterial(),
+		BufferParam("records", BufferWithBytes(make([]byte, 64), true)))
+
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
+	k.PublishEvent(app.RenderEvent{}).Wait()
+
+	if got := countOps(backend.lastOps, gpuDraw); got != 1 {
+		t.Fatalf("draw ops = %d, want 1", got)
+	}
+	if got := countOps(backend.lastOps, gpuSetParams); got != 0 {
+		t.Fatalf("uniform ops = %d, want none: the shader declares no uniform block", got)
+	}
+}

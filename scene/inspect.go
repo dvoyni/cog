@@ -10,6 +10,7 @@ type OpKind uint8
 
 const (
 	OpCamera OpKind = iota
+	OpBox
 )
 
 // Op is a read-only view of one recorded operation, canvas's shape exactly.
@@ -19,6 +20,10 @@ type Op struct {
 	// frame arena, like every other borrowed slice scene hands back.
 	Camera CameraID
 	Descr  CameraDescr
+	// Layers, Transform and Color describe a recorded draw.
+	Layers    LayerMask
+	Transform Transform
+	Color     m.Color
 }
 
 // PassView is the flush result for one pass: what scene decided, in numbers a

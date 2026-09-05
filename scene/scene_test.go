@@ -21,6 +21,54 @@ type testBackend struct {
 	nextID      uint32
 	passes      []gfx.GpuPassDesc
 	presents    int
+	// draws, bindings and bakes are what the frame actually asked the GPU to
+	// do, which is where the pass-relative instance slices and the one upload
+	// per arena become assertable.
+	draws    []drawCall
+	bindings []bufferBinding
+	bakes    int
+}
+
+// drawCall is one recorded draw, so a test can assert the arguments that reach
+// the backend rather than an op encoding.
+type drawCall struct {
+	first, count, instances, firstInstance int
+	indexed                                bool
+}
+
+// bufferBinding is one storage range bound into a bind group.
+type bufferBinding struct {
+	group, binding int
+	buffer         gfx.BufferID
+	offset, size   int
+}
+
+// testShaderLayout is what reflection reports for the bundled scene shader. The
+// real source is reflected and asserted in the wgpu package, the only tree with
+// a WGSL front end; here it stands in so that scene's bindings reach the
+// backend and can be read back by name.
+var testShaderLayout = gfx.ShaderLayout{Resources: []gfx.ShaderResource{
+	{Name: "sceneFrame", StorageBuffer: true, Group: 0, Binding: 0},
+	{Name: "sceneInstances", StorageBuffer: true, Group: 0, Binding: 1},
+	{Name: "scenePbrMaterial", StorageBuffer: true, Group: 1, Binding: 0},
+}}
+
+// buffersBoundTo reports every range bound to one reflected binding, in the
+// order the frame bound them.
+func (b *testBackend) buffersBoundTo(name string) []bufferBinding {
+	group, binding := -1, -1
+	for _, resource := range testShaderLayout.Resources {
+		if resource.Name == name {
+			group, binding = resource.Group, resource.Binding
+		}
+	}
+	var found []bufferBinding
+	for _, bound := range b.bindings {
+		if bound.group == group && bound.binding == binding {
+			found = append(found, bound)
+		}
+	}
+	return found
 }
 
 func (b *testBackend) NewTexture() gfx.TextureID { b.nextTexture++; return b.nextTexture }
@@ -35,7 +83,7 @@ func (b *testBackend) NewShader(gfx.ShaderDesc) (gfx.ShaderID, error) {
 	return gfx.ShaderID(b.nextID), nil
 }
 func (b *testBackend) FreeShader(gfx.ShaderID)                    {}
-func (b *testBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout { return gfx.ShaderLayout{} }
+func (b *testBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout { return testShaderLayout }
 func (b *testBackend) NewPipeline(gfx.PipelineDesc) (gfx.PipelineID, error) {
 	b.nextID++
 	return gfx.PipelineID(b.nextID), nil
@@ -60,7 +108,7 @@ func (b *testBackend) BeginPass(desc gfx.GpuPassDesc) gfx.RenderPass {
 }
 func (b *testBackend) EndPass(gfx.RenderPass)                                               {}
 func (b *testBackend) Present()                                                             { b.presents++ }
-func (b *testBackend) BakeBuffer(gfx.BufferID, gfx.BufferKind, int, []byte)                 {}
+func (b *testBackend) BakeBuffer(gfx.BufferID, gfx.BufferKind, int, []byte)                 { b.bakes++ }
 func (b *testBackend) BakeTexture(gfx.TextureID, int, int, gfx.TextureFormat, []byte, bool) {}
 func (b *testBackend) AllocateTexture(gfx.TextureID, gfx.TextureDesc)                       {}
 func (b *testBackend) UpdateTexture(gfx.TextureID, int, gfx.Region, []byte)                 {}
@@ -70,10 +118,19 @@ func (b *testBackend) SetTexture(gfx.TextureID, int, int)                       
 func (b *testBackend) SetSampler(gfx.SamplerID, int, int)                                   {}
 func (b *testBackend) SetVertexBuffer(gfx.BufferID, int)                                    {}
 func (b *testBackend) SetIndexBuffer(gfx.BufferID, int)                                     {}
-func (b *testBackend) SetBuffer(int, int, gfx.BufferID, int, int)                           {}
-func (b *testBackend) Draw(int, int, int, int, bool)                                        {}
-func (b *testBackend) ReleaseBuffer(gfx.BufferID)                                           {}
-func (b *testBackend) ReleaseTexture(gfx.TextureID)                                         {}
+func (b *testBackend) SetBuffer(group, binding int, buffer gfx.BufferID, offset, size int) {
+	b.bindings = append(b.bindings, bufferBinding{
+		group: group, binding: binding, buffer: buffer, offset: offset, size: size,
+	})
+}
+
+func (b *testBackend) Draw(first, count, instances, firstInstance int, indexed bool) {
+	b.draws = append(b.draws, drawCall{
+		first: first, count: count, instances: instances, firstInstance: firstInstance, indexed: indexed,
+	})
+}
+func (b *testBackend) ReleaseBuffer(gfx.BufferID)   {}
+func (b *testBackend) ReleaseTexture(gfx.TextureID) {}
 
 // recordPlugin is the gameplay side of the harness: a separate plugin that
 // locks scene's OpQueue, exactly as a real recorder does.
@@ -189,4 +246,19 @@ func (h *harness) ops() []Op {
 	var out []Op
 	h.inspect(func(q *OpQueue) { out = q.Ops(nil) })
 	return out
+}
+
+// readFile reads one path out of the engine's storage, which is how a test
+// checks that a plugin's builtin mount is in place.
+func (h *harness) readFile(t testing.TB, path string) []byte {
+	t.Helper()
+	var data []byte
+	var err error
+	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{run: func(la LookupAccess) {
+		data, err = fs.ReadFile(la.fs, path)
+	}})
+	if err != nil {
+		t.Fatalf("read %q: %v", path, err)
+	}
+	return data
 }

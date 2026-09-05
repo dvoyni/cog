@@ -1,6 +1,7 @@
 package scene
 
 import (
+	"math"
 	"strconv"
 
 	"github.com/dvoyni/cog/app"
@@ -30,6 +31,9 @@ type Plugin struct {
 	// passes of its own is flushed through.
 	defaultPasses [1]Pass
 	labels        map[passLabel]string
+	// build is the frame under construction. It lives on the plugin so its
+	// arenas keep their backing across frames.
+	build frameBuild
 }
 
 // passLabel keys the synthesised debug label of one camera's pass. Labels are
@@ -69,6 +73,16 @@ func (p *Plugin) Register(registrar *kernel.Registrar, value any) error {
 // thread — gfx renders from a latest-wins snapshot, so there is no mechanism
 // for it and no need for one, because a frustum needs aspect, not pixel size,
 // and app.Viewport already carries the exact aspect here.
+// Start mounts the bundled shader filesystem. Startup runs after every plugin
+// has registered and before the host loop, so the shader is in place for the
+// first frame without depending on a driver publishing an event.
+func (p *Plugin) Start(k kernel.Executioner) error {
+	_, err := k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{Mount: storage.ReadMount{
+		Id: shaderMountID, Priority: math.MaxInt, FS: shaderFS,
+	}})
+	return err
+}
+
 func (p *Plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var writeQueue kernel.Write[*OpQueue]
 	var lookupResource kernel.Write[*Lookup]
@@ -89,7 +103,7 @@ func (p *Plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 }
 
 func (p *Plugin) flushFrame(
-	k kernel.Kernel, write *OpQueue, _ *Lookup,
+	k kernel.Kernel, write *OpQueue, lookup *Lookup,
 	gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue, view *app.Viewport,
 ) {
 	cameras := write.beginFlush()
@@ -105,16 +119,22 @@ func (p *Plugin) flushFrame(
 		return
 	}
 
+	p.build.reset()
+	// Durable geometry bakes through the resource queue this handler already
+	// write-locks, which is why the Lookup never holds a gfx handle of its own:
+	// a mesh baked and drawn in the same update uploads in that same frame.
+	bake := func(data []byte) gfx.BufferDescr { return gfxResources.BakeBuffer(data, true) }
 	for i := range cameras {
-		p.flushCamera(k, write, gfxWrite, view, cameras[i])
+		p.flushCamera(k, write, lookup, bake, view, cameras[i])
 	}
+	p.build.emit(gfxWrite)
 }
 
 // flushCamera emits one camera's passes. A camera missing a clip plane is
 // skipped whole: the projection it would get instead is degenerate, and every
 // pass built from it would cull against a volume nobody asked for.
 func (p *Plugin) flushCamera(
-	k kernel.Kernel, write *OpQueue, gfxWrite *gfx.OpQueue,
+	k kernel.Kernel, write *OpQueue, lookup *Lookup, bake bakeFunc,
 	view *app.Viewport, camera cameraRecord,
 ) {
 	if camera.descr.Near == 0 || camera.descr.Far == 0 {
@@ -136,12 +156,12 @@ func (p *Plugin) flushCamera(
 		passes = p.defaultPasses[:]
 	}
 	for _, pass := range passes {
-		p.flushPass(k, write, gfxWrite, view, camera, viewMatrix, pass)
+		p.flushPass(k, write, lookup, bake, view, camera, viewMatrix, pass)
 	}
 }
 
 func (p *Plugin) flushPass(
-	k kernel.Kernel, write *OpQueue, gfxWrite *gfx.OpQueue, view *app.Viewport,
+	k kernel.Kernel, write *OpQueue, lookup *Lookup, bake bakeFunc, view *app.Viewport,
 	camera cameraRecord, viewMatrix m.Mat4, pass Pass,
 ) {
 	aspect, err := passAspect(camera.id, pass, view)
@@ -155,13 +175,43 @@ func (p *Plugin) flushPass(
 		return
 	}
 	order := gfx.Order(camera.id) + pass.Order
-	gfxWrite.Pass(p.passDescr(camera.id, pass, order))
-	write.publishPass(PassView{
+	viewProjection := projectionMatrix.Mul(viewMatrix)
+	pending := p.build.beginPass(p.passDescr(camera.id, pass, order), sceneFrameBlock{
+		View:           viewMatrix,
+		Projection:     projectionMatrix,
+		ViewProjection: viewProjection,
+		CameraPosition: cameraPosition(camera.descr.Transform),
+	})
+	result := PassView{
 		CameraID: camera.id,
 		Order:    order,
 		Tag:      pass.tag(),
-		Frustum:  m.FrustumFromMat4(projectionMatrix.Mul(viewMatrix)),
-	})
+		Frustum:  m.FrustumFromMat4(viewProjection),
+	}
+	for _, record := range write.flushDraws() {
+		if !record.layers.drawnBy(camera.descr.CullMask) {
+			continue
+		}
+		result.Recorded++
+		ref := lookup.ensureUnitBox(bake)
+		mesh, ok := lookup.mesh(ref)
+		if !ok {
+			continue
+		}
+		p.build.addDraw(pending, mesh, ref.ID(), record.transform.Mat4(), record.color)
+		result.Instances++
+	}
+	p.build.endPass(pending)
+	write.publishPass(result)
+	write.publishBatches(p.build.batches)
+}
+
+// cameraPosition reads the eye out of a camera's transform. Scale is ignored
+// the way the view matrix ignores it: a scaled camera scales the world instead,
+// and its position is unaffected either way.
+func cameraPosition(transform Transform) m.Vec4 {
+	eye := transform.Mat4().Translation()
+	return m.Vec4{X: eye.X, Y: eye.Y, Z: eye.Z, W: 1}
 }
 
 // passDescr translates one scene pass into the gfx pass it emits.

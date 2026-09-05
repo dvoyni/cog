@@ -3,6 +3,8 @@ package scene
 import (
 	"cmp"
 	"slices"
+
+	"github.com/dvoyni/cog/m"
 )
 
 // cameraRecord is one registered camera. Its descriptor's Passes slice aliases
@@ -20,14 +22,20 @@ type cameraRecord struct {
 // one. Nothing is copied to achieve that — the two halves swap.
 type opQueue struct {
 	cameras    []cameraRecord
+	draws      []drawRecord
 	passArena  []Pass
 	duplicates []CameraID
 
 	// published is the recording the last flush consumed, kept readable.
 	published      []cameraRecord
+	publishedDraws []drawRecord
 	publishedArena []Pass
 	opViews        []Op
 	passViews      []PassView
+	// batchArena backs every published pass's Batches slice, and passBatches
+	// is the span each pass claimed while the arena was still growing.
+	batchArena  []BatchView
+	passBatches [][2]int
 }
 
 // Camera registers a camera for this frame and gives it its passes. It is a
@@ -49,13 +57,15 @@ func (q *opQueue) Camera(id CameraID, descr CameraDescr) {
 
 // OpCount reports how many operations have been recorded into this frame so
 // far. It reads the recording in progress, not the published frame Ops returns.
-func (q *opQueue) OpCount() int { return len(q.cameras) }
+func (q *opQueue) OpCount() int { return len(q.cameras) + len(q.draws) }
 
 // Reset abandons everything recorded into the frame in progress. It does not
 // disturb the published frame.
 func (q *opQueue) Reset() {
 	clear(q.cameras)
 	q.cameras = q.cameras[:0]
+	clear(q.draws)
+	q.draws = q.draws[:0]
 	q.passArena = q.passArena[:0]
 	q.duplicates = q.duplicates[:0]
 }
@@ -85,17 +95,30 @@ func (q *opQueue) Passes(dst []PassView) []PassView { return append(dst, q.passV
 // frame output nondeterministic.
 func (q *opQueue) beginFlush() []cameraRecord {
 	q.cameras, q.published = q.published, q.cameras
+	q.draws, q.publishedDraws = q.publishedDraws, q.draws
 	q.passArena, q.publishedArena = q.publishedArena, q.passArena
 	clear(q.cameras)
 	q.cameras = q.cameras[:0]
+	clear(q.draws)
+	q.draws = q.draws[:0]
 	q.passArena = q.passArena[:0]
 
 	slices.SortFunc(q.published, func(a, b cameraRecord) int { return cmp.Compare(a.id, b.id) })
 	q.passViews = q.passViews[:0]
+	q.passBatches = q.passBatches[:0]
+	q.batchArena = q.batchArena[:0]
 	q.opViews = q.opViews[:0]
 	for i := range q.published {
 		q.opViews = append(q.opViews, Op{
 			Kind: OpCamera, Camera: q.published[i].id, Descr: q.published[i].descr,
+		})
+	}
+	for i := range q.publishedDraws {
+		q.opViews = append(q.opViews, Op{
+			Kind:      OpBox,
+			Layers:    q.publishedDraws[i].layers,
+			Transform: q.publishedDraws[i].transform,
+			Color:     q.publishedDraws[i].color,
 		})
 	}
 	return q.published
@@ -111,4 +134,47 @@ func (q *opQueue) recordedDuplicates() []CameraID { return q.duplicates }
 // has had its chance to report them.
 func (q *opQueue) endFlush() {
 	q.duplicates = q.duplicates[:0]
+	q.resolveBatches()
+}
+
+// drawRecord is one recorded draw. The debug vocabulary is sugar over scene's
+// own unit meshes, so a box needs nothing beyond where it stands and what
+// colour it is; the mesh it draws is scene's, and the material is the bundled
+// one.
+type drawRecord struct {
+	layers    LayerMask
+	transform Transform
+	color     m.Color
+}
+
+// Box records a unit cube at transform. It is the scene twin of canvas's
+// FillRect: one statement, no mesh handle, no material, no shader.
+func (q *opQueue) Box(layers LayerMask, transform Transform, color m.Color) {
+	q.draws = append(q.draws, drawRecord{layers: layers, transform: transform, color: color})
+}
+
+// publishedDraws lists the draws the flush is consuming, in recording order.
+func (q *opQueue) flushDraws() []drawRecord { return q.publishedDraws }
+
+// publishBatches copies one pass's batches into the frame's batch arena and
+// records the span, which endFlush resolves into the published PassView.
+//
+// The span is resolved late because appending to the arena may move it, and a
+// PassView published early would then alias a backing nobody writes to again.
+func (q *opQueue) publishBatches(batches []BatchView) {
+	start := len(q.batchArena)
+	q.batchArena = append(q.batchArena, batches...)
+	q.passBatches = append(q.passBatches, [2]int{start, len(batches)})
+}
+
+// resolveBatches points every published pass at its own span of the batch
+// arena, now that the arena has stopped moving.
+func (q *opQueue) resolveBatches() {
+	for i := range q.passViews {
+		if i >= len(q.passBatches) {
+			return
+		}
+		span := q.passBatches[i]
+		q.passViews[i].Batches = q.batchArena[span[0] : span[0]+span[1] : span[0]+span[1]]
+	}
 }

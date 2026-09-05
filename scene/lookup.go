@@ -14,6 +14,11 @@ import (
 // only through a scoped LookupAccess.
 type Lookup struct {
 	config Config
+	// meshes is the dense mesh table every MeshRef indexes, and a ref's id is
+	// its position in it plus one, so id 0 stays "no mesh".
+	meshes []meshRecord
+	// unitBox is scene's own cube, baked on first use.
+	unitBox MeshRef
 }
 
 func newLookup(config Config) *Lookup { return &Lookup{config: config} }

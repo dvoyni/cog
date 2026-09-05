@@ -234,11 +234,16 @@ func (t *translator) translateDraw(op *op, pass PassDescr, backend Backend, file
 		}
 		return
 	}
-	u := t.packParams(t.uarena[*uoff:*uoff+uniformMax], op.params, op.material.params, plan)
-	*uoff += uniformMax
-
 	t.ops.SetPipeline(pipeline)
-	t.ops.SetParams(u)
+	// A shader that declares no uniform block gets no uniform binding and no
+	// pooled buffer. Emitting one anyway puts an entry in a group the pipeline
+	// layout does not have, and CreateBindGroup fails the entry-count rule with
+	// the whole frame's command buffer as the casualty.
+	if plan.uniformSize > 0 {
+		u := t.packParams(t.uarena[*uoff:*uoff+uniformMax], op.params, op.material.params, plan)
+		*uoff += uniformMax
+		t.ops.SetParams(u)
+	}
 	t.emitResources(backend, filesystem, op.params, op.material.params, plan)
 	t.ops.SetVertexBuffer(m.vertices.id, 0)
 
