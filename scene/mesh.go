@@ -83,6 +83,10 @@ type meshRecord struct {
 	vertexCount int
 	topology    gfx.PrimitiveTopology
 	layout      []gfx.VertexAttr
+	// bounds is the mesh's local-space bounding sphere, or a zero sphere when
+	// none was computed - a custom layout, where scene cannot find the
+	// positions at all. A draw of such a mesh is never culled.
+	bounds m.Sphere
 }
 
 // descr builds the gfx geometry for one resident mesh.
@@ -117,12 +121,12 @@ type bakeTextureFunc func(width, height int, format gfx.TextureFormat, pixels []
 // bakeMesh registers durable geometry and returns its ref.
 func (l *Lookup) bakeMesh(
 	vertices, indices []byte, indexCount, vertexCount int,
-	topology gfx.PrimitiveTopology, layout []gfx.VertexAttr, bake bakeFunc,
+	topology gfx.PrimitiveTopology, layout []gfx.VertexAttr, bounds m.Sphere, bake bakeFunc,
 ) MeshRef {
 	l.meshes = append(l.meshes, meshRecord{
 		generation: 1, vertices: bake(vertices), indices: bake(indices),
 		indexCount: indexCount, vertexCount: vertexCount,
-		topology: topology, layout: layout,
+		topology: topology, layout: layout, bounds: bounds,
 	})
 	id := uint32(len(l.meshes))
 	return MeshRef{source: meshDurable, id: id, generation: l.meshes[id-1].generation}
@@ -139,7 +143,7 @@ func (l *Lookup) ensureUnitBox(bake bakeFunc) MeshRef {
 	vertices, indices := unitBoxGeometry()
 	l.unitBox = l.bakeMesh(
 		vertexBytes(vertices), indexBytes(indices), len(indices), len(vertices),
-		gfx.TopologyTriangleList, standardVertexLayout[:], bake,
+		gfx.TopologyTriangleList, standardVertexLayout[:], vertexBounds(vertices), bake,
 	)
 	return l.unitBox
 }
@@ -195,4 +199,21 @@ func indexBytes(indices []uint32) []byte {
 		return nil
 	}
 	return unsafe.Slice((*byte)(unsafe.Pointer(&indices[0])), len(indices)*4)
+}
+
+// vertexBounds is the bounding sphere of standard-layout vertices: the
+// circumsphere of their axis-aligned box, the same shape a glTF primitive gets
+// from its POSITION accessor's min and max. It runs once, at bake time, which
+// is why a temporary mesh never gets one - it is rebuilt every frame, and the
+// O(n) pass would run every frame rather than once.
+func vertexBounds(vertices []Vertex) m.Sphere {
+	if len(vertices) == 0 {
+		return m.Sphere{}
+	}
+	box := m.Box3{Min: vertices[0].Position, Max: vertices[0].Position}
+	for i := range vertices[1:] {
+		position := vertices[i+1].Position
+		box.Min, box.Max = box.Min.Min(position), box.Max.Max(position)
+	}
+	return box.Sphere()
 }

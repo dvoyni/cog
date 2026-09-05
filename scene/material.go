@@ -1,7 +1,8 @@
 package scene
 
 import (
-	"unsafe"
+	"encoding/binary"
+	"hash/maphash"
 
 	"github.com/dvoyni/cog/gfx"
 )
@@ -56,15 +57,33 @@ type materialEntry struct {
 	// duplicate-tag ruling is only checkable by which entry won.
 	index      int32
 	materialID uint32
+	// blend is the entry's sort class: true for anything that blends against
+	// the target and so must draw back to front. Alpha-masked is opaque plus a
+	// shader discard, and lands in the opaque class through its state alone.
+	blend bool
 }
 
-// materialKey identifies one caller material by the slice it was recorded as.
-// Materials intern once per frame, keyed by their backing rather than by
-// content: a caller hands scene the same slice every frame, and hashing the
-// descriptors would cost more than the interning saves.
-type materialKey struct {
-	data *MaterialTag
-	len  int
+// materialKey identifies one caller material by content: a fingerprint of each
+// entry's tag and gfx material - shader source-or-path, pipeline state and
+// parameter bytes. A caller-supplied gfx.MaterialDescr has no id of its own,
+// and keying by the slice's backing instead would hand the spec's own idiom,
+// Material{{Descr: descr}} built inline per draw, a fresh id every draw and so
+// never sort two of them together. The hash costs one map probe per draw that
+// names a material, once per frame, and nothing for the bundled PBR.
+type materialKey uint64
+
+var materialSeed = maphash.MakeSeed()
+
+func (m Material) key() materialKey {
+	var h maphash.Hash
+	h.SetSeed(materialSeed)
+	var buf [8]byte
+	for i := range m {
+		h.WriteString(string(m[i].tag()))
+		binary.LittleEndian.PutUint64(buf[:], m[i].Descr.Fingerprint())
+		h.Write(buf[:])
+	}
+	return materialKey(h.Sum64())
 }
 
 // internedMaterial is one material resolved against every tag it serves.
@@ -133,22 +152,24 @@ func (t *materialTable) entry(interned int32, tag tagID) (materialEntry, bool) {
 	if index < 0 {
 		return materialEntry{}, false
 	}
+	descr := &material.material[index].Descr
 	return materialEntry{
-		descr:      &material.material[index].Descr,
+		descr:      descr,
 		index:      index,
 		materialID: material.ids[tag],
+		blend:      descr.State().Blend != gfx.BlendOpaque,
 	}, true
 }
 
 // intern returns the frame-local index of one caller material, interning it and
 // checking its tags the first time the frame sees it. It is called once per
 // recorded draw per frame, before any pass walks them, which is what keeps the
-// map probe out of the per-pass path.
+// fingerprint and the map probe out of the per-pass path.
 func (t *materialTable) intern(report func(error), material Material) int32 {
 	if material == nil {
 		return 0
 	}
-	key := materialKey{data: unsafe.SliceData(material), len: len(material)}
+	key := material.key()
 	if index, ok := t.keys[key]; ok {
 		return index
 	}

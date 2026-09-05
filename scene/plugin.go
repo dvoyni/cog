@@ -38,6 +38,11 @@ type Plugin struct {
 	// outlive a frame because the tag set belongs to the passes an app
 	// declares; the materials in it do not.
 	materials materialTable
+	// prepared is the frame's per-draw resolution, parallel to the flushed
+	// draws, and culler the per-camera cull. Both keep their backing across
+	// frames.
+	prepared []preparedDraw
+	culler   culler
 }
 
 // passLabel keys the synthesised debug label of one camera's pass. Labels are
@@ -133,24 +138,42 @@ func (p *Plugin) flushFrame(
 	}
 	report := func(err error) { k.ReportError(err) }
 	p.materials.reset(lookup.ensureBundled(bakeTexture))
-	// Materials intern once per frame, before any pass walks the draws, so a
-	// draw's per-pass cost is one array read rather than a map probe per pass.
-	draws := write.flushDraws()
-	for i := range draws {
-		draws[i].interned = p.materials.intern(report, draws[i].material)
-	}
+	p.prepareDraws(report, lookup, bake, write.flushDraws())
 	for i := range cameras {
-		p.flushCamera(k, write, lookup, bake, view, cameras[i])
+		p.flushCamera(k, write, lookup, view, cameras[i])
 	}
 	p.build.emit(gfxWrite)
+}
+
+// prepareDraws resolves everything about a draw that no camera changes, once
+// per frame before any camera walks the draws: its mesh, its material's
+// interned index, its world matrix and its world-space bounding sphere. A draw's
+// per-camera cost is then one sphere test, and its per-pass cost one array read.
+func (p *Plugin) prepareDraws(report func(error), lookup *Lookup, bake bakeFunc, draws []drawRecord) {
+	p.prepared = grow(p.prepared, len(draws))
+	for i := range draws {
+		record := &draws[i]
+		ref := record.mesh
+		if ref.source == meshNone {
+			ref = lookup.ensureUnitBox(bake)
+		}
+		// A ref that no longer resolves - released, or stale - leaves the
+		// draw with no mesh, and every pass skips it.
+		mesh, ok := lookup.mesh(ref)
+		if !ok {
+			ref = MeshRef{}
+		}
+		p.prepared[i] = prepareDraw(*record, mesh)
+		p.prepared[i].mesh = ref
+		p.prepared[i].interned = p.materials.intern(report, record.material)
+	}
 }
 
 // flushCamera emits one camera's passes. A camera missing a clip plane is
 // skipped whole: the projection it would get instead is degenerate, and every
 // pass built from it would cull against a volume nobody asked for.
 func (p *Plugin) flushCamera(
-	k kernel.Kernel, write *OpQueue, lookup *Lookup, bake bakeFunc,
-	view *app.Viewport, camera cameraRecord,
+	k kernel.Kernel, write *OpQueue, lookup *Lookup, view *app.Viewport, camera cameraRecord,
 ) {
 	if camera.descr.Near == 0 || camera.descr.Far == 0 {
 		k.ReportError(ErrCameraClipPlanesMissing{
@@ -170,13 +193,17 @@ func (p *Plugin) flushCamera(
 		p.defaultPasses[0] = defaultPass()
 		passes = p.defaultPasses[:]
 	}
+	p.culler.beginCamera()
 	for _, pass := range passes {
-		p.flushPass(k, write, lookup, bake, view, camera, viewMatrix, pass)
+		p.flushPass(k, write, lookup, view, camera, viewMatrix, pass)
 	}
 }
 
+// flushPass decides one pass: which of the camera's survivors its tag admits,
+// in what order, and packs them. Within a pass, recording order is not
+// preserved - that is the trade the sort makes, and Passes documents it.
 func (p *Plugin) flushPass(
-	k kernel.Kernel, write *OpQueue, lookup *Lookup, bake bakeFunc, view *app.Viewport,
+	k kernel.Kernel, write *OpQueue, lookup *Lookup, view *app.Viewport,
 	camera cameraRecord, viewMatrix m.Mat4, pass Pass,
 ) {
 	aspect, err := passAspect(camera.id, pass, view)
@@ -191,6 +218,13 @@ func (p *Plugin) flushPass(
 	}
 	order := gfx.Order(camera.id) + pass.Order
 	viewProjection := projectionMatrix.Mul(viewMatrix)
+	draws := write.flushDraws()
+	// One cull per distinct frustum: a second pass at the same aspect reuses
+	// the first's survivors and filters them by its own tag.
+	cull := p.culler.results[p.culler.cull(
+		aspect, viewProjection, viewMatrix, camera.descr.CullMask, draws, p.prepared,
+	)]
+	survivors := p.culler.survivors[cull.first : cull.first+cull.count]
 	pending := p.build.beginPass(p.passDescr(camera.id, pass, order), packFrameLighting(sceneFrameBlock{
 		View:           viewMatrix,
 		Projection:     projectionMatrix,
@@ -201,29 +235,44 @@ func (p *Plugin) flushPass(
 		CameraID: camera.id,
 		Order:    order,
 		Tag:      pass.tag(),
-		Frustum:  m.FrustumFromMat4(viewProjection),
+		Frustum:  cull.frustum,
+		Recorded: cull.recorded,
+		Culled:   cull.culled,
 	}
 	// The tag interns once per pass, so no draw in it ever compares a string.
 	tag := p.materials.internTag(pass.tag())
-	for _, record := range write.flushDraws() {
-		if !record.layers.drawnBy(camera.descr.CullMask) {
+	p.build.opaque, p.build.blend = p.build.opaque[:0], p.build.blend[:0]
+	for i := range survivors {
+		prepared := &p.prepared[survivors[i].draw]
+		if prepared.mesh.ID() == 0 {
 			continue
 		}
-		result.Recorded++
 		// A material with no entry for this pass's tag skips it. Tag
 		// participation is purely a material property: a draw gets no say in
 		// which passes it appears in.
-		entry, serves := p.materials.entry(record.interned, tag)
+		entry, serves := p.materials.entry(prepared.interned, tag)
 		if !serves {
 			continue
 		}
-		ref := lookup.ensureUnitBox(bake)
-		mesh, ok := lookup.mesh(ref)
-		if !ok {
-			continue
+		if entry.blend {
+			p.build.blend = append(p.build.blend, sortEntry{key: blendKey(survivors[i].depth), draw: uint32(i)})
+		} else {
+			p.build.opaque = append(p.build.opaque, sortEntry{key: opaqueKey(entry.materialID, prepared.mesh.ID()), draw: uint32(i)})
 		}
-		p.build.addDraw(pending, mesh, ref.ID(), entry, record.transform.Mat4(), record.pbrRecord())
-		result.Instances++
+	}
+	// Opaque and blend are separate arrays emitted in that order, which is what
+	// removes any class bit from the key.
+	sortEntries(p.build.opaque)
+	sortEntries(p.build.blend)
+	for _, class := range [2][]sortEntry{p.build.opaque, p.build.blend} {
+		for _, entry := range class {
+			index := survivors[entry.draw].draw
+			prepared := &p.prepared[index]
+			material, _ := p.materials.entry(prepared.interned, tag)
+			mesh, _ := lookup.mesh(prepared.mesh)
+			p.build.addDraw(pending, mesh, prepared.mesh.ID(), material, prepared.world, draws[index].pbrRecord())
+			result.Instances++
+		}
 	}
 	p.build.endPass(pending)
 	write.publishPass(result)

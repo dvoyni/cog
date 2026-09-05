@@ -79,6 +79,11 @@ func (q *opQueue) Ops(dst []Op) []Op { return append(dst, q.opViews...) }
 // cameras by id ascending, then each camera's passes as declared. The returned
 // slices alias flush storage and stay valid until the next flush.
 //
+// Within a pass, recording order is not preserved. Every pass sorts what it
+// draws - opaque and alpha-masked by material key, then blended back to front
+// by view depth - so a pass's Batches are in emission order, which is the
+// sort's order, not the recorder's. Ops keeps the recording order.
+//
 // There is no Config knob gating this. The lists are built during the flush
 // regardless, so retaining them costs a slice header — and a knob would mean
 // tests exercise a code path production does not.
@@ -149,9 +154,15 @@ type drawRecord struct {
 	// PBR. Every debug shape leaves it nil, which is what makes a draw literal
 	// that omits the field untouched by the field existing.
 	material Material
-	// interned is that material's index in the frame's material table, filled
-	// by the flush before any pass walks the draws.
-	interned int32
+	// mesh is the mesh the draw renders. The debug vocabulary leaves it zero,
+	// which the flush reads as scene's own unit box: the box is baked lazily on
+	// first use, so its ref cannot be known at record time.
+	mesh MeshRef
+	// bounds is the draw's explicit local-space sphere, and neverCull exempts
+	// it from culling outright. Both are zero for a debug shape, which culls
+	// by its mesh's baked sphere.
+	bounds    m.Sphere
+	neverCull bool
 }
 
 // pbrRecord builds the bundled PBR record one recorded draw binds.
@@ -170,8 +181,11 @@ func (r drawRecord) pbrRecord() scenePbrRecord {
 // Box records a unit cube at transform. It is the scene twin of canvas's
 // FillRect: one statement, no mesh handle, no material, no shader.
 func (q *opQueue) Box(layers LayerMask, transform Transform, color m.Color) {
-	q.draws = append(q.draws, drawRecord{layers: layers, transform: transform, color: color})
+	q.draw(drawRecord{layers: layers, transform: transform, color: color})
 }
+
+// draw records one draw of any kind. Every recording call is sugar over it.
+func (q *opQueue) draw(record drawRecord) { q.draws = append(q.draws, record) }
 
 // publishedDraws lists the draws the flush is consuming, in recording order.
 func (q *opQueue) flushDraws() []drawRecord { return q.publishedDraws }

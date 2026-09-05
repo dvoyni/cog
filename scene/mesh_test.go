@@ -1,10 +1,12 @@
 package scene
 
 import (
+	"math"
 	"testing"
 	"unsafe"
 
 	"github.com/dvoyni/cog/gfx"
+	"github.com/dvoyni/cog/m"
 )
 
 func TestVertexIsTheEightyFourByteStandardLayout(t *testing.T) {
@@ -127,5 +129,42 @@ func TestMeshLookupResolvesABakedRef(t *testing.T) {
 	}
 	if _, ok := lookup.mesh(MeshRef{id: ref.id, generation: ref.generation + 1}); ok {
 		t.Fatal("a stale generation resolved to a mesh")
+	}
+}
+
+// A durable mesh with the standard layout bakes its bounding sphere once, at
+// bake time, so the unit box culls by a sphere of radius sqrt(3)/2 about the
+// origin without anybody computing it per frame.
+func TestUnitBoxBakesItsBoundingSphere(t *testing.T) {
+	lookup := NewLookup(DefaultConfig())
+	ref := lookup.ensureUnitBox(func(data []byte) gfx.BufferDescr {
+		return gfx.BufferWithBytes(data, false)
+	})
+	mesh, _ := lookup.mesh(ref)
+	if mesh.bounds.Center != (m.Vec3{}) {
+		t.Fatalf("the unit box's sphere is centred at %v, want the origin", mesh.bounds.Center)
+	}
+	if want := float32(math.Sqrt(3)) / 2; !near(mesh.bounds.Radius, want) {
+		t.Fatalf("the unit box's sphere has radius %v, want %v", mesh.bounds.Radius, want)
+	}
+}
+
+// The sphere is the circumsphere of the positions' axis-aligned box, the same
+// shape glTF's POSITION min/max gives a loaded primitive.
+func TestVertexBoundsIsTheCircumsphereOfThePositions(t *testing.T) {
+	vertices := []Vertex{
+		{Position: m.Vec3{X: 1, Y: 2, Z: 3}},
+		{Position: m.Vec3{X: 5, Y: 2, Z: 3}},
+		{Position: m.Vec3{X: 3, Y: 0, Z: 3}},
+	}
+	sphere := vertexBounds(vertices)
+	if sphere.Center != (m.Vec3{X: 3, Y: 1, Z: 3}) {
+		t.Fatalf("centre %v, want the box centre (3,1,3)", sphere.Center)
+	}
+	if want := float32(math.Sqrt(5)); !near(sphere.Radius, want) {
+		t.Fatalf("radius %v, want half the box diagonal %v", sphere.Radius, want)
+	}
+	if vertexBounds(nil) != (m.Sphere{}) {
+		t.Fatal("no vertices gave a non-zero sphere")
 	}
 }

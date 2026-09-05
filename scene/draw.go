@@ -56,6 +56,9 @@ type frameBuild struct {
 	// batches is the scratch one pass fills before publishing it, reused by
 	// every pass in the frame.
 	batches []BatchView
+	// opaque and blend are the two sort classes of the pass being built, reused
+	// by every pass in the frame so the sort allocates nothing.
+	opaque, blend []sortEntry
 }
 
 func (b *frameBuild) reset() {

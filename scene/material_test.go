@@ -219,3 +219,69 @@ func TestAlphaModeAndDoubleSidedMapOntoPipelineState(t *testing.T) {
 func resolve(table *materialTable, report func(error), material Material, tag tagID) (materialEntry, bool) {
 	return table.entry(table.intern(report, material), tag)
 }
+
+// A caller-supplied gfx.MaterialDescr has no id of its own, so materials intern
+// per frame by content: two Material values built separately with the same
+// shader, state and parameters take one id and sort together.
+func TestMaterialsInternByContentNotByBacking(t *testing.T) {
+	var table materialTable
+	table.reset(bundledPbr(pbrDefaults{}))
+	forward := table.internTag(TagForward)
+	build := func() Material {
+		return Material{{Descr: gfx.MaterialWithState(
+			gfx.ShaderWithResource(sceneShaderPath), gfx.StateOpaque3D, gfx.FloatParam("k", 1),
+		)}}
+	}
+	first, _ := resolve(&table, discardErrors, build(), forward)
+	second, _ := resolve(&table, discardErrors, build(), forward)
+	if first.materialID != second.materialID {
+		t.Fatalf("two identical materials took ids %d and %d", first.materialID, second.materialID)
+	}
+	different := Material{{Descr: gfx.MaterialWithState(
+		gfx.ShaderWithResource(sceneShaderPath), gfx.StateOpaque3D, gfx.FloatParam("k", 2),
+	)}}
+	if other, _ := resolve(&table, discardErrors, different, forward); other.materialID == first.materialID {
+		t.Fatal("a material with a different parameter took the same id")
+	}
+	// The tag is part of the identity too: the same descr under another tag is
+	// another (material, tag) pair.
+	tagged := Material{{Tag: "shadow", Descr: build()[0].Descr}}
+	if _, ok := resolve(&table, discardErrors, tagged, forward); ok {
+		t.Fatal("a shadow-only material served the forward pass")
+	}
+}
+
+// The sort class is the material's: anything that blends against the target
+// sorts back to front, and only an opaque blend mode sorts by material key.
+// Alpha-masked is opaque plus a shader discard, so it lands in the opaque class
+// through its state alone.
+func TestTheBlendClassFollowsTheEntrysBlendMode(t *testing.T) {
+	var table materialTable
+	table.reset(bundledPbr(pbrDefaults{}))
+	forward := table.internTag(TagForward)
+	shader := gfx.ShaderWithResource(sceneShaderPath)
+	cases := []struct {
+		name  string
+		descr gfx.MaterialDescr
+		blend bool
+	}{
+		{"opaque 3D", gfx.MaterialWithState(shader, gfx.StateOpaque3D), false},
+		{"mask", gfx.MaterialWithState(shader, pbrState(alphaMask, false)), false},
+		{"transparent 3D", gfx.MaterialWithState(shader, gfx.StateTransparent3D), true},
+		{"default gfx.Material", gfx.Material(shader), true},
+		{"additive", gfx.MaterialWithState(shader, gfx.MaterialState{Blend: gfx.BlendAdditive}), true},
+	}
+	for _, c := range cases {
+		entry, ok := resolve(&table, discardErrors, Material{{Descr: c.descr}}, forward)
+		if !ok {
+			t.Fatalf("%s: the material does not serve the forward pass", c.name)
+		}
+		if entry.blend != c.blend {
+			t.Fatalf("%s: blend class %v, want %v", c.name, entry.blend, c.blend)
+		}
+	}
+	bundled, _ := resolve(&table, discardErrors, nil, forward)
+	if bundled.blend {
+		t.Fatal("the bundled PBR is in the blend class")
+	}
+}
