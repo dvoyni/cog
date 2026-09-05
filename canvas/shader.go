@@ -9,11 +9,22 @@ import (
 	"github.com/dvoyni/cog/gfx"
 )
 
+// defaultKeyColor is what a draw that names no key colour gets: the mid-grey
+// that makes the shader's ramp reproduce the grey ramp the artist painted,
+// leaving an unkeyed sprite looking like its own artwork rather than like a
+// player colour nobody chose.
+//
+// It is sRGB 0.5 rather than linear 0.5 because 0.5 is what the artist's
+// colour picker said, and the ramp puts keyColor exactly at that intensity.
+// This is the one canvas constant where the two spaces differ visibly, which
+// is why it is named once and referenced everywhere else.
+var defaultKeyColor = m.NewColorSrgb(0.5, 0.5, 0.5, 1)
+
 var defaultMaterial = gfx.MaterialWithState(
 	gfx.ShaderWithResource(spriteShaderPath),
 	gfx.StateOverlay2D,
 	gfx.ColorParam("tint", m.Color{R: 1, G: 1, B: 1, A: 1}),
-	gfx.ColorParam("keyColor", m.Color{R: 0.5, G: 0.5, B: 0.5, A: 1}),
+	gfx.ColorParam("keyColor", defaultKeyColor),
 )
 
 // canvasSampler is the sampler a 2D draw wants: one filter for magnification,
@@ -38,7 +49,7 @@ var defaultTrianglesMaterial = gfx.MaterialWithState(
 	gfx.ShaderWithResource(trianglesShaderPath),
 	gfx.StateOverlay2D,
 	gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{}),
-	gfx.ColorParam("keyColor", m.Color{R: 0.5, G: 0.5, B: 0.5, A: 1}),
+	gfx.ColorParam("keyColor", defaultKeyColor),
 )
 
 // defaultSpriteBatchMaterial draws many sprites/glyphs in one instanced call:

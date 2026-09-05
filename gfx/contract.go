@@ -59,16 +59,15 @@ const (
 // canvas-context format on the web - so the engine has to own this buffer to
 // have any say over the colour space at all.
 //
-// It is deliberately a plain unorm buffer today. Recorders still write
-// gamma-encoded values, and this format plus a pass-through present is the one
-// combination that leaves the frame bit-for-bit what it was before the frame
-// buffer existed: an sRGB buffer would encode those values a second time on
-// write, and cancelling that in the present shader only re-quantises them.
-// Flipping this constant to FormatRGBA8Srgb is what turns the engine linear.
-// The present pass reads this same constant to decide whether it applies the
-// sRGB OETF, so the buffer's colour space and the transfer function that puts
-// it on screen stay one decision rather than two that can disagree.
-const FrameBufferFormat = FormatRGBA8
+// It is sRGB, which is what makes the engine linear. Recorders write light:
+// canvas samples an sRGB atlas, so its texels arrive decoded, and every colour
+// a caller hands in is linear by the time it reaches a uniform. Light stored
+// raw in a unorm buffer renders too dark, so the buffer encodes on store and
+// the hardware does it. The present pass reads this same constant to decide
+// whether it applies the sRGB OETF, so the buffer's colour space and the
+// transfer function that puts it on screen stay one decision rather than two
+// that can disagree.
+const FrameBufferFormat = FormatRGBA8Srgb
 
 // Resolve replaces the FormatScreen sentinel with the concrete frame-buffer
 // format and returns every other format unchanged.

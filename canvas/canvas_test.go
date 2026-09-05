@@ -388,7 +388,7 @@ func BenchmarkCanvasFlushTexturedTriangles(b *testing.B) {
 	k, _, backend := testKernel(b, filesystem, config, func(write *OpQueue) {
 		for i := 0; i < 300; i++ {
 			write.DrawTriangles(Layer(i%6), verts, nil,
-				gfx.TextureParam(TextureSlot, gfx.TextureWithResource(paths[i%len(paths)], gfx.FormatRGBA8)),
+				gfx.TextureParam(TextureSlot, gfx.TextureWithResource(paths[i%len(paths)])),
 				gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{}))
 		}
 	})
@@ -467,7 +467,7 @@ func TestLogicalAtlasPagesShareOneTextureArrayAndBatch(t *testing.T) {
 	})
 	runFrame(k)
 
-	if len(backend.allocations) != 1 || backend.allocations[0].desc != (gfx.TextureDesc{Width: 16, Height: 16, Layers: 2, Format: gfx.FormatRGBA8}) {
+	if len(backend.allocations) != 1 || backend.allocations[0].desc != (gfx.TextureDesc{Width: 16, Height: 16, Layers: 2, Format: gfx.FormatRGBA8Srgb}) {
 		t.Fatalf("atlas allocations = %+v, want one 16x16x2 texture array", backend.allocations)
 	}
 	if len(backend.updates) != 3 {
@@ -967,6 +967,41 @@ func TestDefaultShaderParses(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("Canvas uniform block was not reflected")
+	}
+}
+
+// The atlas holds artwork, and artwork is gamma-encoded, so the array has to
+// be sRGB for the hardware to decode it on read. Allocation is the only part of
+// that a device-free test can see: the decode itself happens in the sampler.
+// If this flips back to unorm, every sprite in every game renders too bright
+// and nothing else fails.
+func TestAtlasArrayIsAllocatedSrgb(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"a.png": &fstest.MapFile{Data: pngBytes(t, 10, 10)}}}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
+		write.Sprite(0, "a.png", SpriteTransform{}, nil)
+	})
+	runFrame(k)
+
+	if len(backend.allocations) != 1 {
+		t.Fatalf("atlas allocations = %d, want 1", len(backend.allocations))
+	}
+	if format := backend.allocations[0].desc.Format; format != gfx.FormatRGBA8Srgb {
+		t.Fatalf("atlas format = %v, want gfx.FormatRGBA8Srgb", format)
+	}
+}
+
+func TestSpriteBatchShaderParses(t *testing.T) {
+	shader, err := fs.ReadFile(shaderFS, spriteBatchShaderPath)
+	if err != nil {
+		t.Fatalf("read embedded sprite batch shader: %v", err)
+	}
+	parsed, err := naga.Parse(string(shader))
+	if err != nil {
+		t.Fatalf("parse sprite batch shader: %v", err)
+	}
+	if _, err := wgsl.Lower(parsed); err != nil {
+		t.Fatalf("lower sprite batch shader: %v", err)
 	}
 }
 

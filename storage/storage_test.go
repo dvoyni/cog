@@ -144,7 +144,7 @@ func TestValueStoreLoadDefaultsAndFlush(t *testing.T) {
 			missing, response.Found, len(store.entries))
 	}
 
-	store, _, err = SetValue("volume", 0.25, false).op.apply(store, filesystem)
+	store, _, err = SetValueNoFlush("volume", 0.25).op.apply(store, filesystem)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestValueRoundTripThroughOneWriteLock(t *testing.T) {
 	}
 	k := testKernel(t, DefaultConfig("test").WithPermanentFS(permanent))
 
-	if _, err := k.ExecuteCommand[AccessValuesCmd](SetValue("volume", 0.25, false)); err != nil {
+	if _, err := k.ExecuteCommand[AccessValuesCmd](SetValue("volume", 0.25)); err != nil {
 		t.Fatal(err)
 	}
 	volume := 1.0

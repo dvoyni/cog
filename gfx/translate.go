@@ -37,7 +37,7 @@ type translator struct {
 	samplers       map[SamplerDesc]SamplerID
 	uarena         []byte
 	layouts        map[ShaderID]ShaderLayout
-	textures       map[textureKey]TextureDescr
+	textures       map[string]TextureDescr
 	parameterPlans map[parameterPlanBucketKey][]cachedParameterPlan
 	ops            GpuQueue
 	// Pass bookkeeping, reused each frame: the run order of the frame's passes
@@ -59,7 +59,7 @@ func newTranslator() *translator {
 		pipelines:      map[pipelineKey]PipelineID{},
 		samplers:       map[SamplerDesc]SamplerID{},
 		layouts:        map[ShaderID]ShaderLayout{},
-		textures:       map[textureKey]TextureDescr{},
+		textures:       map[string]TextureDescr{},
 		parameterPlans: map[parameterPlanBucketKey][]cachedParameterPlan{},
 	}
 }
@@ -365,8 +365,7 @@ func (t *translator) ensureTexture(backend Backend, filesystem storage.FileSyste
 	if descr.source != TextureSourceResource {
 		return 0
 	}
-	key := textureKeyOf(descr)
-	if baked, ok := t.textures[key]; ok {
+	if baked, ok := t.textures[descr.path]; ok {
 		return baked.id
 	}
 	width, height, pixels, ok := loadTextureResource(filesystem, descr.path)
@@ -375,7 +374,7 @@ func (t *translator) ensureTexture(backend Backend, filesystem storage.FileSyste
 	}
 	id := backend.NewTexture()
 	t.ops.BakeTexture(id, width, height, descr.format, pixels, false)
-	t.textures[key] = TextureDescr{source: TextureSourceBaked, id: id}
+	t.textures[descr.path] = TextureDescr{source: TextureSourceBaked, id: id}
 	return id
 }
 
@@ -403,12 +402,9 @@ func (t *translator) ensureShader(backend Backend, filesystem storage.FileSystem
 }
 
 func (t *translator) releaseCachedResource(backend Backend, path string) {
-	// One path can be cached once per format, and the caller names a file.
-	for key, texture := range t.textures {
-		if key.path == path {
-			t.ops.ReleaseTexture(texture.id)
-			delete(t.textures, key)
-		}
+	if texture, ok := t.textures[path]; ok {
+		t.ops.ReleaseTexture(texture.id)
+		delete(t.textures, path)
 	}
 	shaderDescr := ShaderWithResource(path)
 	if shader, ok := t.shaders[shaderDescr]; ok {

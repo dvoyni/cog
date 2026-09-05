@@ -22,6 +22,52 @@ struct Instances {
 @group(2) @binding(0) var canvasSampler: sampler;
 @group(2) @binding(1) var canvasTexture: texture_2d_array<f32>;
 
+// The key-colour detector and ramp, identical to sprite.wgsl's - there is no
+// include mechanism, so all three canvas shaders carry a copy and any change
+// here has to be made in all three. sprite.wgsl carries the full rationale for
+// why both the classification and the ramp itself are done in sRGB.
+const keyChannelTolerance: f32 = 0.2;   // sRGB: how far R and B may differ
+const keyGreenCutoff: f32 = 0.0331048;  // 0.2 in sRGB
+const keyRampMidpoint: f32 = 0.5;       // sRGB: the intensity keyColor lands on
+
+fn srgbEncode(value: f32) -> f32 {
+    if value <= 0.0031308 {
+        return value * 12.92;
+    }
+    return 1.055 * pow(value, 1.0 / 2.4) - 0.055;
+}
+
+// srgbDecode is the inverse, the EOTF, on one channel.
+fn srgbDecode(value: f32) -> f32 {
+    if value <= 0.04045 {
+        return value / 12.92;
+    }
+    return pow((value + 0.055) / 1.055, 2.4);
+}
+
+fn srgbEncode3(value: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(srgbEncode(value.r), srgbEncode(value.g), srgbEncode(value.b));
+}
+
+fn srgbDecode3(value: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(srgbDecode(value.r), srgbDecode(value.g), srgbDecode(value.b));
+}
+
+fn keyColorRamp(sampled: vec4<f32>, keyColor: vec3<f32>) -> vec4<f32> {
+    let intensity = srgbEncode(sampled.r);
+    if abs(intensity - srgbEncode(sampled.b)) >= keyChannelTolerance || sampled.g >= keyGreenCutoff {
+        return sampled;
+    }
+    let key = srgbEncode3(keyColor);
+    var ramped: vec3<f32>;
+    if intensity <= keyRampMidpoint {
+        ramped = key * intensity / keyRampMidpoint;
+    } else {
+        ramped = mix(key, vec3<f32>(1.0), (intensity - keyRampMidpoint) / (1.0 - keyRampMidpoint));
+    }
+    return vec4<f32>(srgbDecode3(ramped), sampled.a);
+}
+
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
     @location(0) canvasPosition: vec2<f32>,
@@ -63,14 +109,6 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     ) {
         discard;
     }
-    var sampled = textureSample(canvasTexture, canvasSampler, in.uv, in.atlasLayer);
-    if abs(sampled.r - sampled.b) < 0.2 && sampled.g < 0.2 {
-        let intensity = sampled.r;
-        if intensity <= 0.5 {
-            sampled = vec4<f32>(in.keyColor.rgb * intensity * 2.0, sampled.a);
-        } else {
-            sampled = vec4<f32>(mix(in.keyColor.rgb, vec3<f32>(1.0), (intensity - 0.5) * 2.0), sampled.a);
-        }
-    }
+    let sampled = keyColorRamp(textureSample(canvasTexture, canvasSampler, in.uv, in.atlasLayer), in.keyColor.rgb);
     return sampled * in.tint;
 }

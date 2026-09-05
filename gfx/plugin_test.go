@@ -534,7 +534,7 @@ func TestPersistentResourceTextureSurvivesDroppedFrame(t *testing.T) {
 
 	for range 2 {
 		w := recordList(t, k)
-		w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithResource("persistent.png", FormatRGBA8Srgb))), MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithResource("persistent.png"))), MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 	}
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -754,7 +754,7 @@ func TestOpQueueBakesInlineMaterialAndDrawParameters(t *testing.T) {
 	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
 	queue := recordList(t, k)
 	material := testMaterial(
-		TextureParam("MaterialTexture", TextureWithResource("shared.png", FormatRGBA8Srgb)),
+		TextureParam("MaterialTexture", TextureWithResource("shared.png")),
 		BufferParam("MaterialBuffer", BufferWithBytes([]byte{1, 2, 3, 4}, true)),
 	)
 	drawTexture := TextureWithBytes(1, 1, FormatRGBA8, []byte{5, 6, 7, 8}, true, false)
@@ -1110,7 +1110,7 @@ func TestStorageResolvesMaterialTexture(t *testing.T) {
 
 	for frame := 0; frame < 2; frame++ {
 		w := recordList(t, k)
-		mat := testMaterial(TextureParam("MainTexture", TextureWithResource("hero.png", FormatRGBA8Srgb)), SamplerParam("MainSampler", SamplerDesc{}))
+		mat := testMaterial(TextureParam("MainTexture", TextureWithResource("hero.png")), SamplerParam("MainSampler", SamplerDesc{}))
 		w.Draw(triangle(), mat, MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
@@ -1164,7 +1164,7 @@ func TestReleaseCachedResourceReleasesPathAndAllowsReload(t *testing.T) {
 	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
 	material := Material(
 		ShaderWithResource("shader.wgsl"),
-		TextureParam("MainTexture", TextureWithResource("hero.png", FormatRGBA8Srgb)),
+		TextureParam("MainTexture", TextureWithResource("hero.png")),
 	)
 
 	w := recordList(t, k)
@@ -1212,12 +1212,12 @@ func TestFreeCachedResourcesClearsTranslatorOwnedCachesOnly(t *testing.T) {
 	})
 	w := recordList(t, k)
 	w.Draw(triangle(), testMaterial(
-		TextureParam("MainTexture", TextureWithResource("hero.png", FormatRGBA8Srgb)),
+		TextureParam("MainTexture", TextureWithResource("hero.png")),
 		SamplerParam("MainSampler", SamplerDesc{}),
 	), MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
-	cachedTexture := p.translator.textures[textureKey{path: "hero.png", format: FormatRGBA8Srgb}]
+	cachedTexture := p.translator.textures["hero.png"]
 	if cachedTexture.id == 0 || cachedTexture.id == explicit.id {
 		t.Fatalf("cached/explicit texture IDs = (%d, %d), want distinct nonzero IDs", cachedTexture.id, explicit.id)
 	}
@@ -1249,7 +1249,7 @@ func TestFailedTextureResourceLoadIsRetried(t *testing.T) {
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
-	material := testMaterial(TextureParam("MainTexture", TextureWithResource("later.png", FormatRGBA8Srgb)))
+	material := testMaterial(TextureParam("MainTexture", TextureWithResource("later.png")))
 
 	for attempt := range 2 {
 		w := recordList(t, k)

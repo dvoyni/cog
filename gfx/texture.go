@@ -14,18 +14,6 @@ type TextureDescr struct {
 	id            TextureID
 }
 
-// textureKey identifies a cached resource texture by path and format. The
-// format is part of the key because the same image is legitimately loaded as
-// sRGB in one material and linear in another.
-type textureKey struct {
-	path   string
-	format TextureFormat
-}
-
-func textureKeyOf(texture TextureDescr) textureKey {
-	return textureKey{path: texture.path, format: texture.format}
-}
-
 // ID returns the baked texture identifier, or 0 when the descriptor is not baked.
 func (t TextureDescr) ID() TextureID { return t.id }
 
@@ -45,12 +33,14 @@ const (
 	TextureSourceBaked
 )
 
-// TextureWithResource describes a texture loaded from storage.FileSystem.
-// format says what the decoded bytes mean: a photographic or authored image is
-// FormatRGBA8Srgb, while data maps such as normals or metallic-roughness are
-// FormatRGBA8.
-func TextureWithResource(path string, format TextureFormat) TextureDescr {
-	return TextureDescr{source: TextureSourceResource, path: path, format: format}
+// TextureWithResource describes a texture loaded from storage.FileSystem. It is
+// always sRGB: the loader decodes PNG and JPEG, both of which are gamma-encoded
+// by definition, so there is nothing for a caller to choose and a caller that
+// chose wrong would be a silently wrong picture. A data map - normals,
+// metallic-roughness, occlusion - is not a picture and does not come through
+// here; it comes through TextureWithBytes, which does take a format.
+func TextureWithResource(path string) TextureDescr {
+	return TextureDescr{source: TextureSourceResource, path: path, format: FormatRGBA8Srgb}
 }
 
 // TextureWithBytes describes a texture from inline pixel bytes. copyData

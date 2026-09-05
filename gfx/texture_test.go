@@ -31,7 +31,7 @@ func bakedTextureFormats(backend *fakeBackend) []TextureFormat {
 	return formats
 }
 
-func TestResourceTextureBakesWithItsDeclaredFormat(t *testing.T) {
+func TestResourceTextureAlwaysBakesSrgb(t *testing.T) {
 	filesystem := fstest.MapFS{"normal.png": &fstest.MapFile{Data: testPNG(t)}}
 	p := New()
 	k := newTestKernelWithFS(t, p, filesystem)
@@ -39,17 +39,17 @@ func TestResourceTextureBakesWithItsDeclaredFormat(t *testing.T) {
 	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithResource("normal.png", FormatRGBA8))), MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithResource("normal.png"))), MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	got := bakedTextureFormats(backend)
-	if len(got) != 1 || got[0] != FormatRGBA8 {
-		t.Fatalf("baked formats = %v, want one FormatRGBA8", got)
+	if len(got) != 1 || got[0] != FormatRGBA8Srgb {
+		t.Fatalf("baked formats = %v, want one FormatRGBA8Srgb: a decoded image is sRGB whatever it is named", got)
 	}
 }
 
-func TestSameResourcePathInTwoFormatsBakesTwoTextures(t *testing.T) {
+func TestSameResourcePathBakesOnce(t *testing.T) {
 	filesystem := &countingFS{FS: fstest.MapFS{
 		"hero.png": &fstest.MapFile{Data: testPNG(t)},
 	}}
@@ -59,13 +59,16 @@ func TestSameResourcePathInTwoFormatsBakesTwoTextures(t *testing.T) {
 	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithResource("hero.png", FormatRGBA8Srgb))), MatParam("mvp", m.NewMat4()))
-	w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithResource("hero.png", FormatRGBA8))), MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithResource("hero.png"))), MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithResource("hero.png"))), MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	got := bakedTextureFormats(backend)
-	if len(got) != 2 || got[0] != FormatRGBA8Srgb || got[1] != FormatRGBA8 {
-		t.Fatalf("baked formats = %v, want [FormatRGBA8Srgb FormatRGBA8]: one path in two formats is two textures", got)
+	if len(got) != 1 || got[0] != FormatRGBA8Srgb {
+		t.Fatalf("baked formats = %v, want one FormatRGBA8Srgb: a path has one colour space, so it bakes once", got)
+	}
+	if filesystem.opens != 1 {
+		t.Fatalf("opens of hero.png = %d, want 1", filesystem.opens)
 	}
 }

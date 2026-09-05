@@ -14,24 +14,6 @@ var (
 	White       = Color{R: 1, G: 1, B: 1, A: 1}
 )
 
-// NewColor writes components verbatim without naming a colour space. It is
-// being replaced by NewColorLinear and NewColorSrgb and will be deleted.
-func NewColor(red, green, blue, alpha float32) Color {
-	return Color{R: red, G: green, B: blue, A: alpha}
-}
-
-// NewColor8 scales bytes into components without naming a colour space. It is
-// being replaced by NewColorSrgb8 and will be deleted.
-func NewColor8(red, green, blue, alpha uint8) Color {
-	const scale = 1.0 / 255
-	return Color{
-		R: float32(red) * scale,
-		G: float32(green) * scale,
-		B: float32(blue) * scale,
-		A: float32(alpha) * scale,
-	}
-}
-
 // NewColorLinear creates a color from components already in linear space:
 // light, not a picker value.
 func NewColorLinear(red, green, blue, alpha float32) Color {

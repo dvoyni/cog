@@ -78,12 +78,3 @@ func TestHslaStaysAnSrgbSpaceModel(t *testing.T) {
 		t.Fatalf("lightness of sRGB 0.25 grey = %v, want 0.25", lightness)
 	}
 }
-
-func TestBareConstructorsStillWriteComponentsVerbatim(t *testing.T) {
-	if got, want := NewColor(0.25, 0.5, 0.75, 0.5), (Color{R: 0.25, G: 0.5, B: 0.75, A: 0.5}); got != want {
-		t.Fatalf("NewColor = %v, want %v", got, want)
-	}
-	if got, want := NewColor8(0, 128, 255, 255), (Color{R: 0, G: 128.0 / 255, B: 1, A: 1}); !colorNear(got, want) {
-		t.Fatalf("NewColor8 = %v, want %v", got, want)
-	}
-}

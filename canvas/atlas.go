@@ -205,7 +205,9 @@ func (a *atlas) resolveStandalone(path string, filesystem storage.FileSystem, re
 		return standaloneEntry{}, false
 	}
 	entry := standaloneEntry{
-		texture: resources.BakeTexture(width, height, gfx.FormatRGBA8, pixels, true, false),
+		// A decoded image is sRGB by definition, and there is no caller to say
+		// otherwise: canvas draws pictures, never data maps.
+		texture: resources.BakeTexture(width, height, gfx.FormatRGBA8Srgb, pixels, true, false),
 		width:   width,
 		height:  height,
 	}
@@ -318,7 +320,12 @@ func (a *atlas) place(width, height int, resources *gfx.ResourceQueue) (arrayInd
 	if index < 0 && a.bytes+a.arrayBytes() > int64(a.config.MaxAtlasBytes) {
 		return 0, 0, 0, 0, false
 	}
-	texture := resources.AllocateTexture(a.config.AtlasSize, a.config.AtlasSize, a.config.LayersPerArray, gfx.FormatRGBA8)
+	// Sprites, glyphs and the generated white texel share one array and so
+	// cannot take different colour spaces. sRGB is the one that is right for
+	// the sprites, correct for the glyphs (they are RGB=255 with coverage in
+	// alpha, and 1.0 is a fixed point of the transfer function), and correct
+	// for the white texel for the same reason.
+	texture := resources.AllocateTexture(a.config.AtlasSize, a.config.AtlasSize, a.config.LayersPerArray, gfx.FormatRGBA8Srgb)
 	if index < 0 {
 		a.arrays = append(a.arrays, atlasArray{texture: texture, layers: make([]atlasShelf, a.config.LayersPerArray)})
 		index = len(a.arrays) - 1

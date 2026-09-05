@@ -182,7 +182,7 @@ func (p *Plugin) drawTriangles(gfxWrite *gfx.OpQueue, view *app.Viewport, layerT
 // triangle op samples. batchable is false when the op carries any parameter the
 // batch path does not fold into its key, so it falls back to a direct draw.
 func trianglesBatchKey(op *trianglesOp) (texture gfx.TextureDescr, sampler gfx.SamplerDesc, keyColor m.Color, hasTexture bool, batchable bool) {
-	keyColor = m.Color{R: 0.5, G: 0.5, B: 0.5, A: 1}
+	keyColor = defaultKeyColor
 	batchable = true
 	for i := range op.params {
 		switch op.params[i].Name() {
@@ -282,7 +282,7 @@ func (p *Plugin) drawSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *g
 		return
 	}
 	tint := paramColorOr(op.params, "tint", m.Color{R: 1, G: 1, B: 1, A: 1})
-	keyColor := paramColorOr(op.params, "keyColor", m.Color{R: 0.5, G: 0.5, B: 0.5, A: 1})
+	keyColor := paramColorOr(op.params, "keyColor", defaultKeyColor)
 	p.batchEntry(gfxWrite, view, entry, t, layerTransform, clip, hasClip, tint, keyColor)
 }
 
@@ -305,7 +305,7 @@ func (p *Plugin) drawNineSlice(gfxWrite *gfx.OpQueue, view *app.Viewport, entry 
 	sourceX := [4]int{0, insets.Left, entry.width - insets.Right, entry.width}
 	sourceY := [4]int{0, insets.Top, entry.height - insets.Bottom, entry.height}
 	tint := paramColorOr(op.params, "tint", m.Color{R: 1, G: 1, B: 1, A: 1})
-	keyColor := paramColorOr(op.params, "keyColor", m.Color{R: 0.5, G: 0.5, B: 0.5, A: 1})
+	keyColor := paramColorOr(op.params, "keyColor", defaultKeyColor)
 	for row := 0; row < 3; row++ {
 		for column := 0; column < 3; column++ {
 			if transform.NineSliceNoCenter && row == 1 && column == 1 {
@@ -584,7 +584,7 @@ func (p *Plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, atlas *atlas, resources *gf
 					Position: m.Vec2{X: x + glyph.offset.X*toLogical, Y: y + glyph.offset.Y*toLogical},
 					Size:     m.Vec2{X: float32(glyph.entry.width) * toLogical, Y: float32(glyph.entry.height) * toLogical},
 				}
-				p.batchEntry(gfxWrite, view, glyph.entry, transform, layerTransform, clip, hasClip, op.draw.Color, m.Color{R: 0.5, G: 0.5, B: 0.5, A: 1})
+				p.batchEntry(gfxWrite, view, glyph.entry, transform, layerTransform, clip, hasClip, op.draw.Color, defaultKeyColor)
 			}
 			x += glyph.advance * toLogical
 			previous = character
@@ -650,7 +650,7 @@ func (p *Plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *atlas, 
 					Position: m.Vec2{X: x, Y: y + ascent - capHeight},
 					Size:     m.Vec2{X: width, Y: capHeight},
 				}
-				p.batchEntry(gfxWrite, view, entry, transform, layerTransform, clip, hasClip, m.Color{R: 1, G: 1, B: 1, A: 1}, m.Color{R: 0.5, G: 0.5, B: 0.5, A: 1})
+				p.batchEntry(gfxWrite, view, entry, transform, layerTransform, clip, hasClip, m.Color{R: 1, G: 1, B: 1, A: 1}, defaultKeyColor)
 				x += width
 				continue
 			}
