@@ -117,6 +117,30 @@ func (b *gfxBackend) Present() {
 	if b.encoder == nil || b.frame == nil || b.screenView == nil {
 		return
 	}
+	// The screen passes wrote the frame buffer as a colour attachment and this
+	// pass samples it. gogpu tracks resources for lifetime and for submit-time
+	// validation but derives no barriers from that tracking, so nothing orders
+	// this sample against those writes - not within one encoder, and not across
+	// a submit boundary either. On Vulkan the sample then reads the image while
+	// it is still being written, which shows as tiles of a half-drawn frame and
+	// is invisible to any capture taken while the app is redrawing.
+	//
+	// This is not a rule about the present pass: every pass in this engine that
+	// samples what an earlier pass rendered into has to place its own
+	// transition, so post-processing and scene render targets will each need
+	// one. Cost is a single image transition per frame, independent of scene
+	// complexity - unlike Device.WaitIdle, which also removes the artifact but
+	// stalls the CPU on the GPU and gives up a frame of overlap to do it.
+	b.encoder.TransitionTextures([]wgpu.TextureBarrier{{
+		Texture: b.frame.tex,
+		Range: wgpu.TextureRange{
+			Aspect: gputypes.TextureAspectAll, MipLevelCount: 1, ArrayLayerCount: 1,
+		},
+		Usage: wgpu.TextureUsageTransition{
+			OldUsage: gputypes.TextureUsageRenderAttachment,
+			NewUsage: gputypes.TextureUsageTextureBinding,
+		},
+	}})
 	pipeline := b.presentPipeline()
 	if pipeline == nil {
 		return

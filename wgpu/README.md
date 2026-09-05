@@ -89,5 +89,23 @@ hardware sRGB swapchain is unreachable: gogpu hardcodes `BGRA8Unorm` and
 exposes no view formats, and `bgra8unorm-srgb` is not a legal canvas-context
 format on the web.
 
+### Barriers Are Ours To Place
+
+`gogpu` tracks resources for lifetime and for submit-time validation, but it
+derives no barriers from that tracking. Nothing it does orders a pass that reads
+a texture against an earlier pass that rendered into it — not within one command
+encoder, and not across a submit boundary either. On Vulkan the read then
+happens while the image is still being written, which looks like a random
+flicker in tiles of a half-drawn frame and is invisible to any screen capture
+taken while the app is redrawing.
+
+So whenever a pass samples what an earlier pass rendered into — the present pass
+today, post-processing or shadow maps or scene render targets later — that pass
+must place its own `encoder.TransitionTextures` from `RenderAttachment` to
+`TextureBinding` first. `Present` in `gfxpresent.go` is the worked example.
+`Device.WaitIdle` also removes the artifact, but it stalls the CPU on the GPU
+and costs a frame of overlap; the barrier is one image transition per frame and
+costs close to nothing.
+
 Desktop and WebAssembly platform differences are hidden behind build-tagged
 files; the public API is identical.
