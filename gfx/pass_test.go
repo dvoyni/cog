@@ -176,3 +176,54 @@ func TestDrawSamplingItsOwnAttachmentIsRejected(t *testing.T) {
 		t.Error("no error reported for a draw sampling its own attachment")
 	}
 }
+
+func TestATextureTargetCarriesItsSize(t *testing.T) {
+	// A recorder that resolves a projection needs the target's aspect, and the
+	// only place the size is known is the descriptor it was built from.
+	texture := TextureDescr{source: TextureSourceBaked, id: 7, width: 1024, height: 256}
+	width, height, ok := TextureTarget(texture, 0, 0).Size()
+	if !ok || width != 1024 || height != 256 {
+		t.Errorf("size = %d x %d (ok %v), want 1024 x 256", width, height, ok)
+	}
+	if _, _, ok := ScreenTarget().Size(); ok {
+		t.Error("the screen sentinel reported a size; only the render thread knows it")
+	}
+	if _, _, ok := NoTarget().Size(); ok {
+		t.Error("a colourless target reported a size")
+	}
+}
+
+func TestADepthTargetCarriesItsSize(t *testing.T) {
+	// A depth-only pass has no colour target, so its aspect comes from here.
+	texture := TextureDescr{source: TextureSourceBaked, id: 9, width: 2048, height: 2048}
+	width, height, ok := DepthTarget(texture).Size()
+	if !ok || width != 2048 || height != 2048 {
+		t.Errorf("size = %d x %d (ok %v), want 2048 x 2048", width, height, ok)
+	}
+	if _, _, ok := DepthAuto().Size(); ok {
+		t.Error("DepthAuto reported a size; it takes the colour target's")
+	}
+}
+
+func TestATemporaryTargetCarriesItsSize(t *testing.T) {
+	q := &OpQueue{backend: &fakeBackend{}, temporaryTextureFree: map[temporaryTextureKey][]int{}}
+	width, height, ok := q.TemporaryTarget(640, 480, FormatRGBA8Srgb).Size()
+	if !ok || width != 640 || height != 480 {
+		t.Errorf("size = %d x %d (ok %v), want 640 x 480", width, height, ok)
+	}
+}
+
+func TestTheZeroAttachmentsAreTheScreenAndAutomaticDepth(t *testing.T) {
+	// A recorder that defaults a pass leaves these fields alone, so the zero
+	// value has to be the common case. NoTarget and DepthNone stay reachable and
+	// distinguishable, which is what a depth-only shadow pass needs.
+	if (TargetDescr{}) != ScreenTarget() {
+		t.Error("the zero target is not the screen sentinel")
+	}
+	if (DepthDescr{}) != DepthAuto() {
+		t.Error("the zero depth attachment is not DepthAuto")
+	}
+	if NoTarget() == ScreenTarget() || DepthNone() == DepthAuto() {
+		t.Error("a colourless or depthless pass is indistinguishable from an unset one")
+	}
+}

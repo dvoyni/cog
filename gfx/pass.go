@@ -32,18 +32,40 @@ const (
 
 type targetKind uint8
 
+// The screen is the zero value: a recorder that defaults a pass leaves Target
+// alone, and the screen is what it means by that. A colourless pass has to say
+// so explicitly, because "no colour attachment" is a deliberate choice a
+// depth-only prepass makes, never an omission.
 const (
-	targetNone targetKind = iota
-	targetScreen
+	targetScreen targetKind = iota
+	targetNone
 	targetTexture
 )
 
 // TargetDescr names a pass's colour attachment.
 type TargetDescr struct {
-	kind       targetKind
-	texture    TextureID
-	mip, layer int
+	kind          targetKind
+	texture       TextureID
+	mip, layer    int
+	width, height int
 }
+
+// Size reports the attachment's texel dimensions, and whether they are known at
+// all. A recorder resolving a projection needs the aspect, and the screen
+// sentinel cannot answer: its swapchain view is per-frame and sized on the
+// render thread.
+func (t TargetDescr) Size() (width, height int, ok bool) {
+	if t.kind != targetTexture {
+		return 0, 0, false
+	}
+	return t.width, t.height, true
+}
+
+// IsScreen reports whether the target is the frame's screen attachment.
+func (t TargetDescr) IsScreen() bool { return t.kind == targetScreen }
+
+// IsNone reports whether the pass declares no colour attachment.
+func (t TargetDescr) IsNone() bool { return t.kind == targetNone }
 
 // ScreenTarget is the frame's screen attachment. It stays a sentinel the
 // recorder cannot resolve: the swapchain view is per-frame and known only on
@@ -53,7 +75,10 @@ func ScreenTarget() TargetDescr { return TargetDescr{kind: targetScreen} }
 // TextureTarget renders into one mip level of one layer of a texture, which
 // must have been allocated Renderable.
 func TextureTarget(texture TextureDescr, mip, layer int) TargetDescr {
-	return TargetDescr{kind: targetTexture, texture: texture.id, mip: mip, layer: layer}
+	return TargetDescr{
+		kind: targetTexture, texture: texture.id, mip: mip, layer: layer,
+		width: texture.width, height: texture.height,
+	}
 }
 
 // NoTarget declares a pass with no colour attachment, such as a depth-only
@@ -62,17 +87,33 @@ func NoTarget() TargetDescr { return TargetDescr{kind: targetNone} }
 
 type depthKind uint8
 
+// DepthAuto is the zero value for the same reason the screen is: a 3D pass
+// wants depth, and forgetting to ask for it renders the scene inside out.
 const (
-	depthKindNone depthKind = iota
-	depthKindAuto
+	depthKindAuto depthKind = iota
+	depthKindNone
 	depthKindTexture
 )
 
 // DepthDescr names a pass's depth attachment.
 type DepthDescr struct {
-	kind    depthKind
-	texture TextureID
+	kind          depthKind
+	texture       TextureID
+	width, height int
 }
+
+// Size reports the depth attachment's texel dimensions, and whether they are
+// known. DepthAuto has none of its own: it takes the colour target's size.
+func (d DepthDescr) Size() (width, height int, ok bool) {
+	if d.kind != depthKindTexture {
+		return 0, 0, false
+	}
+	return d.width, d.height, true
+}
+
+// IsTexture reports whether the pass names a depth texture of its own, rather
+// than borrowing the backend's pooled one or declaring no depth at all.
+func (d DepthDescr) IsTexture() bool { return d.kind == depthKindTexture }
 
 // DepthAuto uses the backend's own depth texture for the target's size. Every
 // DepthAuto pass at a given size shares one texture, so a pass that means to
@@ -81,12 +122,12 @@ type DepthDescr struct {
 func DepthAuto() DepthDescr { return DepthDescr{kind: depthKindAuto} }
 
 // DepthNone declares a pass with no depth attachment.
-func DepthNone() DepthDescr { return DepthDescr{} }
+func DepthNone() DepthDescr { return DepthDescr{kind: depthKindNone} }
 
 // DepthTarget renders depth into a texture, which must be FormatDepth32F and
 // Renderable.
 func DepthTarget(texture TextureDescr) DepthDescr {
-	return DepthDescr{kind: depthKindTexture, texture: texture.id}
+	return DepthDescr{kind: depthKindTexture, texture: texture.id, width: texture.width, height: texture.height}
 }
 
 // PassDescr declares one render pass: where it draws, in what order, and what
@@ -147,7 +188,19 @@ func (q *OpQueue) selectedPass() int {
 // target, and therefore a size, and therefore the backend's one depth texture
 // for that size.
 func sameAttachments(a, b PassDescr) bool {
-	return a.Target == b.Target && a.Depth == b.Depth
+	return a.Target.sameAs(b.Target) && a.Depth.sameAs(b.Depth)
+}
+
+// sameAs compares where a target points, not how big it is. The dimensions ride
+// along only so a recorder can read the aspect back out; two descriptors naming
+// one texture are one attachment whatever they claim about its size.
+func (t TargetDescr) sameAs(other TargetDescr) bool {
+	return t.kind == other.kind && t.texture == other.texture &&
+		t.mip == other.mip && t.layer == other.layer
+}
+
+func (d DepthDescr) sameAs(other DepthDescr) bool {
+	return d.kind == other.kind && d.texture == other.texture
 }
 
 // mergesInto reports whether successor is by definition indistinguishable from
