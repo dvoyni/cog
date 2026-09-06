@@ -294,7 +294,7 @@ func runFrame(k kernel.Executioner) {
 func TestPluginMountsBuiltInShaders(t *testing.T) {
 	k, _, _ := testKernel(t, fstest.MapFS{}, DefaultConfig(), func(*OpQueue) {})
 	for _, path := range []string{spriteShaderPath, trianglesShaderPath} {
-		want, err := fs.ReadFile(shaderFS, path)
+		want, err := fs.ReadFile(builtinFS, path)
 		if err != nil {
 			t.Fatalf("read embedded shader %q: %v", path, err)
 		}
@@ -931,7 +931,7 @@ func TestTiledSpriteRepeatsOnlyTiledAxes(t *testing.T) {
 }
 
 func TestDefaultShaderParses(t *testing.T) {
-	shader, err := fs.ReadFile(shaderFS, spriteShaderPath)
+	shader, err := fs.ReadFile(builtinFS, spriteShaderPath)
 	if err != nil {
 		t.Fatalf("read embedded default shader: %v", err)
 	}
@@ -992,7 +992,7 @@ func TestAtlasArrayIsAllocatedSrgb(t *testing.T) {
 }
 
 func TestSpriteBatchShaderParses(t *testing.T) {
-	shader, err := fs.ReadFile(shaderFS, spriteBatchShaderPath)
+	shader, err := fs.ReadFile(builtinFS, spriteBatchShaderPath)
 	if err != nil {
 		t.Fatalf("read embedded sprite batch shader: %v", err)
 	}
@@ -1006,7 +1006,7 @@ func TestSpriteBatchShaderParses(t *testing.T) {
 }
 
 func TestTrianglesShaderParses(t *testing.T) {
-	shader, err := fs.ReadFile(shaderFS, trianglesShaderPath)
+	shader, err := fs.ReadFile(builtinFS, trianglesShaderPath)
 	if err != nil {
 		t.Fatalf("read embedded triangles shader: %v", err)
 	}

@@ -83,6 +83,10 @@ const (
 // Font identifies a font face for UI text: a resource path and a logical pixel
 // size. Text is measured and drawn through the canvas Lookup, which parses inline
 // ${path} icons in every UI string.
+//
+// An empty Path draws with the font canvas embeds (canvas.DefaultFontPath), so a
+// Font that names only a Size renders rather than disappearing. Size has no
+// default: a label with no size is still nothing.
 type Font struct {
 	Path string
 	Size int

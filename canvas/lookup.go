@@ -268,11 +268,13 @@ func (la LookupAccess) UnloadSprite(path string) {
 }
 
 // UnloadFont queues a font (all sizes) for release at the next frame boundary.
-// Unloading an absent font is a no-op; an invalid path is reported once.
+// Unloading an absent font is a no-op; an invalid path is reported once. An
+// empty path names the built-in default, the same as everywhere else.
 func (la LookupAccess) UnloadFont(path string) {
 	if la.lookup == nil {
 		return
 	}
+	path = resolveFontPath(path)
 	clean, ok := validateResourcePath(path)
 	if !ok {
 		la.report(fontReportKey(path), fmt.Errorf("canvas: invalid font path %q", path))
@@ -282,11 +284,13 @@ func (la LookupAccess) UnloadFont(path string) {
 }
 
 // face bakes (or reuses) a font face at the given logical size, reporting once on
-// failure. It needs only the filesystem, never the GPU queue.
+// failure. It needs only the filesystem, never the GPU queue. An empty path bakes
+// the built-in default font, so measurement matches what Text will draw.
 func (la LookupAccess) face(path string, size int) *canvasFont {
 	if la.lookup == nil {
 		return nil
 	}
+	path = resolveFontPath(path)
 	clean, ok := validateResourcePath(path)
 	if !ok || size <= 0 {
 		la.report(fontReportKey(path), fmt.Errorf("canvas: invalid font path %q or size %d", path, size))

@@ -41,6 +41,18 @@ type canvasGlyph struct {
 	visible bool
 }
 
+// resolveFontPath reads an empty path as a request for the built-in default
+// font, which is what makes debug text free of assets and a zero-value ui.Font
+// legible. Only the empty path is substituted: a named font that is missing or
+// unparseable keeps failing, so a broken asset stays visible rather than
+// quietly rendering in a different typeface.
+func resolveFontPath(path string) string {
+	if path == "" {
+		return DefaultFontPath
+	}
+	return path
+}
+
 func (s *fontStore) face(filesystem storage.FileSystem, path string, px int) *canvasFont {
 	key := fontKey{path: path, px: px}
 	if cached, ok := s.fonts[key]; ok {

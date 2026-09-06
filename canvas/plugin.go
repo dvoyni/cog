@@ -54,12 +54,13 @@ func (p *Plugin) Register(registrar *kernel.Registrar, value any) error {
 	return nil
 }
 
-// Start mounts the built-in shader filesystem. Startup runs after every plugin
-// has registered and before the host loop, so the shaders are in place for the
-// first frame without depending on a driver publishing an event.
+// Start mounts the built-in filesystem: the shaders and the default font.
+// Startup runs after every plugin has registered and before the host loop, so
+// both are in place for the first frame without depending on a driver
+// publishing an event.
 func (p *Plugin) Start(k kernel.Executioner) error {
 	_, err := k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{Mount: storage.ReadMount{
-		Id: shaderMountID, Priority: math.MaxInt, FS: shaderFS,
+		Id: builtinMountID, Priority: math.MaxInt, FS: builtinFS,
 	}})
 	return err
 }

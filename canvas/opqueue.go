@@ -156,7 +156,11 @@ func normalizeResourcePath(resourcePath string) string {
 	return cleaned
 }
 
+// Text records a text draw. An empty fontPath is resolved to DefaultFontPath
+// here, at record time, so every consumer downstream (the flush, inspection,
+// unloading) sees the path that will actually be drawn.
 func (w *opQueue) Text(layerID Layer, fontPath, text string, draw TextDraw) {
+	fontPath = resolveFontPath(fontPath)
 	w.record(layerID, drawOp{
 		kind: drawText,
 		text: textOp{fontPath: fontPath, text: text, draw: draw},
