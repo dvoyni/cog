@@ -236,3 +236,29 @@ func TestNoSunDirectionMeansNoSunRadiance(t *testing.T) {
 		t.Errorf("sunDirection is %v, want zero", block.SunDirection)
 	}
 }
+
+// TestPackInstanceRowsTransformLikeTheMatrix pins the row convention against a
+// matrix whose transpose is a different matrix. The test above cannot: a pure
+// translation's basis is the identity, and the identity is symmetric, so a
+// record packed as columns would pass it unchanged.
+//
+// The arithmetic here is sceneWorldPosition's, verbatim - scene.wgsl dots a
+// local vec4 against World0..World2 - so this is the seam where the shader's
+// reading of the record and m's own transform are held to the same answer.
+func TestPackInstanceRowsTransformLikeTheMatrix(t *testing.T) {
+	world := m.RotationY4(0.7).Mul(m.Translation4(1, 2, 3))
+	instance := packInstance(world)
+
+	point := m.Vec3{X: 0.3, Y: -1.4, Z: 2.6}
+	local := m.Vec4{X: point.X, Y: point.Y, Z: point.Z, W: 1}
+	got := m.Vec3{
+		X: instance.World0.Dot(local),
+		Y: instance.World1.Dot(local),
+		Z: instance.World2.Dot(local),
+	}
+
+	want := world.TransformPoint(point)
+	if !near(got.X, want.X) || !near(got.Y, want.Y) || !near(got.Z, want.Z) {
+		t.Fatalf("rows transform %v to %v, want %v", point, got, want)
+	}
+}

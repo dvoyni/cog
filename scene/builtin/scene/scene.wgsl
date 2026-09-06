@@ -198,21 +198,31 @@ fn sceneWorldPosition(instance: SceneInstance, position: vec3<f32>) -> vec3<f32>
 }
 
 // sceneWorldBasis is the instance's world matrix without its translation.
+//
+// world0..world2 are rows and mat3x3's arguments are columns, so the basis is
+// transposed into place here rather than passed straight through. Passing them
+// through returns M-transpose, which for the rotation most draws carry is the
+// inverse rotation - normals that counter-rotate, on every draw whose basis is
+// not symmetric.
 fn sceneWorldBasis(instance: SceneInstance) -> mat3x3<f32> {
     return mat3x3<f32>(
-        instance.world0.xyz,
-        instance.world1.xyz,
-        instance.world2.xyz,
+        vec3<f32>(instance.world0.x, instance.world1.x, instance.world2.x),
+        vec3<f32>(instance.world0.y, instance.world1.y, instance.world2.y),
+        vec3<f32>(instance.world0.z, instance.world1.z, instance.world2.z),
     );
 }
 
 // sceneWorldNormal transforms a local normal. The record carries no normal
 // matrix - it would double the record for a case most instances do not have -
 // so the inverse-transpose is derived here, for the instances that flagged it.
+//
+// A uniform scale leaves the normal matrix parallel to the basis, and the
+// normalize below discards the scale that separates them, so the flag buys the
+// cofactors only where they change a direction.
 fn sceneWorldNormal(instance: SceneInstance, normal: vec3<f32>) -> vec3<f32> {
     let basis = sceneWorldBasis(instance);
     if (instance.flags & SCENE_NONUNIFORM) != 0u {
-        return normalize(transpose(sceneInverse3(basis)) * normal);
+        return normalize(sceneInverseTranspose3(basis) * normal);
     }
     return normalize(basis * normal);
 }
@@ -225,8 +235,18 @@ fn sceneWorldTangent(instance: SceneInstance, tangent: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(world, tangent.w);
 }
 
-// sceneInverse3 inverts a 3x3 basis by cofactors.
-fn sceneInverse3(basis: mat3x3<f32>) -> mat3x3<f32> {
+// sceneInverseTranspose3 returns the normal matrix for a basis: the inverse
+// transposed, by cofactors.
+//
+// The transpose costs nothing and must not be applied again by the caller. The
+// three cross products below are the adjugate's rows, and the adjugate over the
+// determinant is the inverse; writing them as mat3x3's columns instead is what
+// transposes it, so the result is already inverse-transpose.
+//
+// A basis too flat to invert has no normal matrix at all. It returns the basis
+// unchanged there - the wrong matrix, but a finite one, where the cofactors
+// over a zero determinant would hand every downstream normalize a NaN.
+fn sceneInverseTranspose3(basis: mat3x3<f32>) -> mat3x3<f32> {
     let a = basis[0];
     let b = basis[1];
     let c = basis[2];
