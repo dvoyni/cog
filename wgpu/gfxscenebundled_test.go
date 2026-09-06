@@ -104,6 +104,7 @@ func TestBundledSceneShaderRecordsMatchTheirPackedOffsets(t *testing.T) {
 		"sceneFrame": {
 			"view": 0, "projection": 64, "viewProjection": 128, "cameraPosition": 192,
 			"sunDirection": 208, "sunColor": 224, "ambientSky": 240, "ambientGround": 256,
+			"lightCount": 272, "lights": 288,
 		},
 		// The per-slot metadata is flat named members rather than an array,
 		// because array members are not name-addressable through
@@ -126,21 +127,28 @@ func TestBundledSceneShaderRecordsMatchTheirPackedOffsets(t *testing.T) {
 		}
 	}
 	// The instance array's stride is the record size scene pads its arena to.
-	for _, member := range instancesMembers(t, layout) {
+	for _, member := range membersOf(t, layout, "sceneInstances") {
 		if member.Name == "data" && member.Stride != 64 {
 			t.Errorf("sceneInstances.data has stride %d, want the 64-byte record", member.Stride)
 		}
 	}
+	// The light array is the fixed cap of 48-byte records, which is the whole
+	// reason the cap is a constant rather than a knob.
+	for _, member := range membersOf(t, layout, "sceneFrame") {
+		if member.Name == "lights" && (member.Stride != 48 || member.Count != 16) {
+			t.Errorf("sceneFrame.lights is %d x %d bytes, want 16 x 48", member.Count, member.Stride)
+		}
+	}
 }
 
-func instancesMembers(t *testing.T, layout cgfx.ShaderLayout) []cgfx.StorageMember {
+func membersOf(t *testing.T, layout cgfx.ShaderLayout, name string) []cgfx.StorageMember {
 	t.Helper()
 	for _, resource := range layout.Resources {
-		if resource.Name == "sceneInstances" {
+		if resource.Name == name {
 			return resource.Members
 		}
 	}
-	t.Fatal("sceneInstances is not reflected")
+	t.Fatalf("%s is not reflected", name)
 	return nil
 }
 

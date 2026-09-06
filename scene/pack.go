@@ -80,6 +80,13 @@ type sceneFrameBlock struct {
 	SunColor      m.Vec4
 	AmbientSky    m.Vec4
 	AmbientGround m.Vec4
+	// LightCount bounds the shader's loop over Lights, the pass's punctual
+	// lights after culling and the cap. The array is a fixed 16 - 768 bytes
+	// inside the block - rather than runtime-sized, which the fixed cap is
+	// what allows; pad takes it to the array's 16-byte alignment.
+	LightCount uint32
+	pad        [3]uint32
+	Lights     [maxLights]sceneLight
 }
 
 // scenePbrRecord is the bundled PBR's per-batch record, bound as a range of the

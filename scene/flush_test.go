@@ -220,3 +220,91 @@ func TestEachPassFiltersTheSharedSurvivorsByTag(t *testing.T) {
 		t.Fatal("two passes at one aspect published different frustums; they should share one cull")
 	}
 }
+
+// Lights are culled per pass against that pass's frustum: a camera whose two
+// passes have different aspects can see different light sets. The count each
+// pass packed is published beside its draw counts.
+func TestLightsAreCulledPerPassAtFlush(t *testing.T) {
+	h := newHarness(t, func(q *OpQueue) {
+		q.Camera(testCamera, forwardCamera())
+		q.Box(0, At(0, 0, -5), testBoxColor)
+		q.PointLight(0, LightDescr{Position: m.Vec3{Z: -5}, Range: 2})
+		q.PointLight(0, LightDescr{Position: m.Vec3{Z: 5}, Range: 2})
+		q.SpotLight(0, LightDescr{Position: m.Vec3{Z: 5}, Direction: m.Vec3{Z: -1}})
+	})
+	h.frame()
+
+	if pass := h.passes()[0]; pass.Lights != 2 {
+		t.Fatalf("the pass packed %d lights, want 2: the ranged light in front and the infinite one behind", pass.Lights)
+	}
+}
+
+// A light's LayerMask decides which cameras' buffers it lands in, not which
+// objects it lights: a layer-1 light reaches only a camera that sees layer 1,
+// and lights everything that camera draws.
+func TestALightLayerMaskIsFilteredAgainstTheCameraCullMaskOnly(t *testing.T) {
+	h := newHarness(t, func(q *OpQueue) {
+		descr := forwardCamera()
+		descr.CullMask = Layer(1)
+		q.Camera(testCamera, descr)
+		descr.CullMask = Layer(2)
+		q.Camera(testCamera+1, descr)
+		q.Box(Layer(1), At(0, 0, -5), testBoxColor)
+		q.PointLight(Layer(1), LightDescr{Position: m.Vec3{Z: -5}})
+	})
+	h.frame()
+
+	passes := h.passes()
+	if passes[0].Lights != 1 || passes[0].Instances != 1 {
+		t.Errorf("the layer-1 camera packed %d lights and %d draws, want 1 and 1", passes[0].Lights, passes[0].Instances)
+	}
+	if passes[1].Lights != 0 || passes[1].Instances != 0 {
+		t.Errorf("the layer-2 camera packed %d lights and %d draws, want none of either", passes[1].Lights, passes[1].Instances)
+	}
+}
+
+// Past 16, the excess is dropped silently: no error, and the pass reports the
+// cap.
+func TestASeventeenthLightIsDroppedWithoutAReport(t *testing.T) {
+	var reported []error
+	h := newHarnessWithErrors(t, func(q *OpQueue) {
+		q.Camera(testCamera, forwardCamera())
+		for i := 0; i < 20; i++ {
+			q.PointLight(0, LightDescr{Position: m.Vec3{X: float32(i), Z: -5}})
+		}
+	}, &reported)
+	h.frame()
+
+	if pass := h.passes()[0]; pass.Lights != maxLights {
+		t.Errorf("the pass packed %d lights, want the cap of %d", pass.Lights, maxLights)
+	}
+	if len(reported) != 0 {
+		t.Errorf("the 17th light reported %v; the drop is silent by design", reported)
+	}
+}
+
+// A degenerate spot light is reported once per frame and skipped; the rest of
+// the frame's lights are unaffected.
+func TestADegenerateSpotLightIsReportedOncePerFrame(t *testing.T) {
+	var reported []error
+	h := newHarnessWithErrors(t, func(q *OpQueue) {
+		descr := forwardCamera()
+		descr.Passes = []Pass{{Tag: TagForward}, {Tag: "shadow", Order: -1000, Target: gfx.NoTarget(), Depth: gfx.DepthTarget(sizedTexture(800, 600))}}
+		q.Camera(testCamera, descr)
+		q.SpotLight(0, LightDescr{Position: m.Vec3{Z: -5}, Direction: m.Vec3{Z: -1}, InnerCone: 1, OuterCone: 0.5})
+		q.PointLight(0, LightDescr{Position: m.Vec3{Z: -5}})
+	}, &reported)
+	h.frame()
+
+	if len(reported) != 1 {
+		t.Fatalf("reported %v, want exactly one report for the inverted cone across two passes", reported)
+	}
+	if _, ok := reported[0].(ErrSpotConeInverted); !ok {
+		t.Errorf("reported %v, want ErrSpotConeInverted", reported[0])
+	}
+	for _, pass := range h.passes() {
+		if pass.Lights != 1 {
+			t.Errorf("pass %q packed %d lights, want only the point light", pass.Tag, pass.Lights)
+		}
+	}
+}

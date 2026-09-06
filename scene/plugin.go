@@ -43,6 +43,11 @@ type Plugin struct {
 	// frames.
 	prepared []preparedDraw
 	culler   culler
+	// preparedLights is the frame's per-light resolution, packed once before
+	// any camera, and lights the per-pass selection. Both keep their backing
+	// across frames.
+	preparedLights []preparedLight
+	lights         lightSelection
 }
 
 // passLabel keys the synthesised debug label of one camera's pass. Labels are
@@ -139,6 +144,7 @@ func (p *Plugin) flushFrame(
 	report := func(err error) { k.ReportError(err) }
 	p.materials.reset(lookup.ensureBundled(bakeTexture))
 	p.prepareDraws(report, lookup, bake, write.flushDraws())
+	p.preparedLights = prepareLights(report, p.preparedLights, write.flushLights())
 	for i := range cameras {
 		p.flushCamera(k, write, lookup, view, cameras[i])
 	}
@@ -225,12 +231,20 @@ func (p *Plugin) flushPass(
 		aspect, viewProjection, viewMatrix, camera.descr.CullMask, draws, p.prepared,
 	)]
 	survivors := p.culler.survivors[cull.first : cull.first+cull.count]
-	pending := p.build.beginPass(p.passDescr(camera.id, pass, order), packFrameLighting(sceneFrameBlock{
+	eye := cameraPosition(camera.descr.Transform)
+	// Lights are culled per pass, against this pass's frustum, and capped at
+	// the eye, before anything is packed. A camera's shadow pass and screen
+	// pass may end up with different light sets, which is correct.
+	p.lights.selectLights(cull.frustum, eye.Vec3(), camera.descr.CullMask, p.preparedLights)
+	block := packFrameLighting(sceneFrameBlock{
 		View:           viewMatrix,
 		Projection:     projectionMatrix,
 		ViewProjection: viewProjection,
-		CameraPosition: cameraPosition(camera.descr.Transform),
-	}, camera.descr))
+		CameraPosition: eye,
+		LightCount:     uint32(p.lights.count),
+		Lights:         p.lights.lights,
+	}, camera.descr)
+	pending := p.build.beginPass(p.passDescr(camera.id, pass, order), block)
 	result := PassView{
 		CameraID: camera.id,
 		Order:    order,
@@ -238,6 +252,7 @@ func (p *Plugin) flushPass(
 		Frustum:  cull.frustum,
 		Recorded: cull.recorded,
 		Culled:   cull.culled,
+		Lights:   p.lights.count,
 	}
 	// The tag interns once per pass, so no draw in it ever compares a string.
 	tag := p.materials.internTag(pass.tag())

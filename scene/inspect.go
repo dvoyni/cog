@@ -15,6 +15,8 @@ const (
 	OpPlane
 	OpLine3D
 	OpWireBox
+	OpPointLight
+	OpSpotLight
 )
 
 // Op is a read-only view of one recorded operation, canvas's shape exactly: it
@@ -40,6 +42,9 @@ type Op struct {
 	Start, End m.Vec3
 	// Thickness describes an OpLine3D or OpWireBox.
 	Thickness float32
+	// Light describes an OpPointLight or OpSpotLight, with Kind set by the
+	// call that recorded it. Layers is its layer mask.
+	Light LightDescr
 }
 
 // PassView is the flush result for one pass: what scene decided, in numbers a
@@ -56,6 +61,10 @@ type Op struct {
 // test can only count. The batch-shaped naming is kept even while InstanceCount
 // is 1 for everything but an explicit instanced draw, because that is the shape
 // it takes once instancing lands and renaming later would churn every test.
+//
+// Lights is how many punctual lights the pass packed after its own frustum
+// culled them and the cap of 16 took the brightest at the eye. The lights
+// dropped past the cap are not counted anywhere: the drop is silent by design.
 type PassView struct {
 	CameraID  CameraID
 	Order     gfx.Order
@@ -64,6 +73,7 @@ type PassView struct {
 	Recorded  int
 	Culled    int
 	Instances int
+	Lights    int
 	Batches   []BatchView
 }
 

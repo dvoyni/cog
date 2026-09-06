@@ -23,6 +23,7 @@ type cameraRecord struct {
 type opQueue struct {
 	cameras    []cameraRecord
 	draws      []drawRecord
+	lights     []lightRecord
 	passArena  []Pass
 	duplicates []CameraID
 	// calls is the frame's draw calls as the recorder made them, one Op each,
@@ -31,10 +32,11 @@ type opQueue struct {
 	calls []Op
 
 	// published is the recording the last flush consumed, kept readable.
-	published      []cameraRecord
-	publishedDraws []drawRecord
-	publishedArena []Pass
-	publishedCalls []Op
+	published       []cameraRecord
+	publishedDraws  []drawRecord
+	publishedLights []lightRecord
+	publishedArena  []Pass
+	publishedCalls  []Op
 	// cameraOps is the published frame's camera registrations as Ops, in id
 	// order, which Ops reports ahead of the draw calls.
 	cameraOps []Op
@@ -73,6 +75,7 @@ func (q *opQueue) Reset() {
 	q.cameras = q.cameras[:0]
 	clear(q.draws)
 	q.draws = q.draws[:0]
+	q.lights = q.lights[:0]
 	q.passArena = q.passArena[:0]
 	q.duplicates = q.duplicates[:0]
 	clear(q.calls)
@@ -112,12 +115,14 @@ func (q *opQueue) Passes(dst []PassView) []PassView { return append(dst, q.passV
 func (q *opQueue) beginFlush() []cameraRecord {
 	q.cameras, q.published = q.published, q.cameras
 	q.draws, q.publishedDraws = q.publishedDraws, q.draws
+	q.lights, q.publishedLights = q.publishedLights, q.lights
 	q.passArena, q.publishedArena = q.publishedArena, q.passArena
 	q.calls, q.publishedCalls = q.publishedCalls, q.calls
 	clear(q.cameras)
 	q.cameras = q.cameras[:0]
 	clear(q.draws)
 	q.draws = q.draws[:0]
+	q.lights = q.lights[:0]
 	q.passArena = q.passArena[:0]
 	clear(q.calls)
 	q.calls = q.calls[:0]

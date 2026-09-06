@@ -31,6 +31,12 @@
 // ambient is normal-dependent rather than a direction, so it could never join
 // the loop anyway. Every colour here is linear radiance with its intensity
 // already premultiplied.
+//
+// The punctual lights are naive forward: lightCount bounds a loop every shaded
+// fragment runs whole, so adding a light costs every shaded pixel in the pass.
+// The array is a fixed 16 because the cap is a fixed constant, which is what
+// lets it be declared here rather than runtime-sized. Nothing is reserved for
+// shadows: no sun matrix, no comparison sampler.
 struct SceneFrame {
     view: mat4x4<f32>,
     projection: mat4x4<f32>,
@@ -40,6 +46,26 @@ struct SceneFrame {
     sunColor: vec4<f32>,
     ambientSky: vec4<f32>,
     ambientGround: vec4<f32>,
+    lightCount: u32,
+    lights: array<SceneLight, 16>,
+};
+
+// SceneLight is one punctual light, 48 bytes, with no kind field. A point light
+// is a spot whose cone is always on: direction an actual zero vector, spotScale
+// 0 and spotOffset 1, so the cone term below is saturate(0 + 1). That relies on
+// x * 0 == 0, which is false for NaN, which is why the direction is a real
+// zero and never left uninitialised.
+//
+// invRange4 is 1/range^4, and 0 for an infinite range: saturate(1 - d^4 * 0)
+// is exactly 1, so infinity costs no branch and no select. color is linear
+// radiance with the light's intensity already premultiplied.
+struct SceneLight {
+    position: vec3<f32>,
+    invRange4: f32,
+    direction: vec3<f32>,
+    spotScale: f32,
+    color: vec3<f32>,
+    spotOffset: f32,
 };
 
 // SceneInstance is the 64-byte per-instance record. world0..world2 are the rows
@@ -276,6 +302,31 @@ fn sceneSun() -> SceneLightSample {
     return SceneLightSample(-sceneFrame.sunDirection.xyz, sceneFrame.sunColor.rgb);
 }
 
+// sceneLightCount is how many punctual lights this pass carries, after scene
+// culled them against the pass's frustum and capped them at 16.
+fn sceneLightCount() -> u32 {
+    return sceneFrame.lightCount;
+}
+
+// sceneLightSample is one punctual light's contribution at a point: glTF's
+// falloff geometry, branchless. The range window is exactly 1 for an infinite
+// range because invRange4 is 0 there; the cone is exactly 1 for a point light
+// because its direction is zero and spotOffset is 1. Intensity is unitless -
+// radiance at one world unit - so the inverse square lands in 0..1 directly.
+//
+// max(d2, 1e-6) is a robustness guard for a light sitting on the surface, not
+// a falloff parameter. Scene's cap ranks lights by this same expression
+// evaluated at the eye, so the two must stay in step.
+fn sceneLightSample(i: u32, position: vec3<f32>) -> SceneLightSample {
+    let light = sceneFrame.lights[i];
+    let toLight = light.position - position;
+    let d2 = dot(toLight, toLight);
+    let direction = toLight * inverseSqrt(max(d2, 1e-12));
+    let window = saturate(1.0 - d2 * d2 * light.invRange4);
+    let cone = saturate(dot(-direction, light.direction) * light.spotScale + light.spotOffset);
+    return SceneLightSample(direction, light.color * (window * cone / max(d2, 1e-6)));
+}
+
 // sceneD_GGX is the Trowbridge-Reitz microfacet distribution.
 fn sceneD_GGX(nDotH: f32, alphaRoughness: f32) -> f32 {
     let alphaSquared = alphaRoughness * alphaRoughness;
@@ -341,9 +392,10 @@ fn scenePunctualContribution(
     return (diffuse + specular) * light.radiance * nDotL;
 }
 
-// sceneShadeSurface is the sun plus hemispheric ambient scaled by the surface's
-// occlusion. Punctual lights join this loop when they land; nothing else about
-// the surface contract changes when they do.
+// sceneShadeSurface is the sun, every punctual light in the pass, and
+// hemispheric ambient scaled by the surface's occlusion. The light loop is
+// naive forward: every shaded fragment runs it whole, so each light in the
+// pass costs every shaded pixel one BRDF evaluation.
 fn sceneShadeSurface(s: SceneSurface) -> vec3<f32> {
     let view = normalize(sceneCameraPosition() - s.position);
     let nDotV = clamp(dot(s.normal, view), 1e-4, 1.0);
@@ -355,6 +407,10 @@ fn sceneShadeSurface(s: SceneSurface) -> vec3<f32> {
 
     var shaded = scenePunctualContribution(
         sceneSun(), s.normal, view, nDotV, diffuseColor, f0, alphaRoughness);
+    for (var i = 0u; i < sceneLightCount(); i++) {
+        shaded += scenePunctualContribution(
+            sceneLightSample(i, s.position), s.normal, view, nDotV, diffuseColor, f0, alphaRoughness);
+    }
 
     // Ambient splits two ways, both scaled by occlusion, because the diffuse
     // half alone leaves a metal black.
