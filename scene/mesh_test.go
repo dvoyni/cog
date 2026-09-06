@@ -91,7 +91,7 @@ func TestMeshRefZeroValueIsNoMesh(t *testing.T) {
 
 func TestUnitBoxBakesOnceAndOnlyOnFirstUse(t *testing.T) {
 	lookup := NewLookup(DefaultConfig())
-	if lookup.unitBox.ID() != 0 {
+	if lookup.unit[shapeBox].ID() != 0 {
 		t.Fatal("the unit box was baked before anything asked for it")
 	}
 	var baked []gfx.BufferDescr
@@ -99,8 +99,8 @@ func TestUnitBoxBakesOnceAndOnlyOnFirstUse(t *testing.T) {
 		baked = append(baked, gfx.BufferWithBytes(data, false))
 		return baked[len(baked)-1]
 	}
-	first := lookup.ensureUnitBox(bake)
-	second := lookup.ensureUnitBox(bake)
+	first := lookup.ensureUnit(shapeBox, bake)
+	second := lookup.ensureUnit(shapeBox, bake)
 	if first.ID() == 0 {
 		t.Fatal("the unit box did not bake on first use")
 	}
@@ -114,7 +114,7 @@ func TestUnitBoxBakesOnceAndOnlyOnFirstUse(t *testing.T) {
 
 func TestMeshLookupResolvesABakedRef(t *testing.T) {
 	lookup := NewLookup(DefaultConfig())
-	ref := lookup.ensureUnitBox(func(data []byte) gfx.BufferDescr {
+	ref := lookup.ensureUnit(shapeBox, func(data []byte) gfx.BufferDescr {
 		return gfx.BufferWithBytes(data, false)
 	})
 	mesh, ok := lookup.mesh(ref)
@@ -137,7 +137,7 @@ func TestMeshLookupResolvesABakedRef(t *testing.T) {
 // origin without anybody computing it per frame.
 func TestUnitBoxBakesItsBoundingSphere(t *testing.T) {
 	lookup := NewLookup(DefaultConfig())
-	ref := lookup.ensureUnitBox(func(data []byte) gfx.BufferDescr {
+	ref := lookup.ensureUnit(shapeBox, func(data []byte) gfx.BufferDescr {
 		return gfx.BufferWithBytes(data, false)
 	})
 	mesh, _ := lookup.mesh(ref)

@@ -132,59 +132,6 @@ func (l *Lookup) bakeMesh(
 	return MeshRef{source: meshDurable, id: id, generation: l.meshes[id-1].generation}
 }
 
-// ensureUnitBox bakes scene's own unit cube the first time something draws one
-// and returns the same ref forever after. It is lazy because the backend may
-// not be ready at startup, and a mesh baked then would either panic or silently
-// not exist.
-func (l *Lookup) ensureUnitBox(bake bakeFunc) MeshRef {
-	if l.unitBox.source != meshNone {
-		return l.unitBox
-	}
-	vertices, indices := unitBoxGeometry()
-	l.unitBox = l.bakeMesh(
-		vertexBytes(vertices), indexBytes(indices), len(indices), len(vertices),
-		gfx.TopologyTriangleList, standardVertexLayout[:], vertexBounds(vertices), bake,
-	)
-	return l.unitBox
-}
-
-// unitBoxGeometry builds the 1x1x1 cube centred on the origin: four vertices
-// per face, so every face keeps its own flat normal, and 12 triangles wound
-// counter-clockwise when seen from outside.
-func unitBoxGeometry() ([]Vertex, []uint32) {
-	faces := [6]struct {
-		normal, tangent, right, up m.Vec3
-	}{
-		{normal: m.Vec3{X: 1}, tangent: m.Vec3{Z: -1}, right: m.Vec3{Z: -1}, up: m.Vec3{Y: 1}},
-		{normal: m.Vec3{X: -1}, tangent: m.Vec3{Z: 1}, right: m.Vec3{Z: 1}, up: m.Vec3{Y: 1}},
-		{normal: m.Vec3{Y: 1}, tangent: m.Vec3{X: 1}, right: m.Vec3{X: 1}, up: m.Vec3{Z: -1}},
-		{normal: m.Vec3{Y: -1}, tangent: m.Vec3{X: 1}, right: m.Vec3{X: 1}, up: m.Vec3{Z: 1}},
-		{normal: m.Vec3{Z: 1}, tangent: m.Vec3{X: 1}, right: m.Vec3{X: 1}, up: m.Vec3{Y: 1}},
-		{normal: m.Vec3{Z: -1}, tangent: m.Vec3{X: -1}, right: m.Vec3{X: -1}, up: m.Vec3{Y: 1}},
-	}
-	corners := [4]m.Vec2{{X: -1, Y: -1}, {X: 1, Y: -1}, {X: 1, Y: 1}, {X: -1, Y: 1}}
-	vertices := make([]Vertex, 0, 24)
-	indices := make([]uint32, 0, 36)
-	for _, face := range faces {
-		base := uint32(len(vertices))
-		for _, corner := range corners {
-			position := face.normal.
-				Add(face.right.MulS(corner.X)).
-				Add(face.up.MulS(corner.Y)).
-				MulS(0.5)
-			vertices = append(vertices, Vertex{
-				Position: position,
-				Normal:   face.normal,
-				Tangent:  m.Vec4{X: face.tangent.X, Y: face.tangent.Y, Z: face.tangent.Z, W: 1},
-				UV0:      m.Vec2{X: (corner.X + 1) / 2, Y: 1 - (corner.Y+1)/2},
-				Color:    [4]uint8{255, 255, 255, 255},
-			})
-		}
-		indices = append(indices, base, base+1, base+2, base, base+2, base+3)
-	}
-	return vertices, indices
-}
-
 // vertexBytes and indexBytes reinterpret geometry as its upload bytes, the same
 // way the instance arena reinterprets its records.
 func vertexBytes(vertices []Vertex) []byte {

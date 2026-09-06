@@ -45,7 +45,7 @@ func resolveBounds(neverCull bool, explicit m.Sphere, mesh meshRecord) (m.Sphere
 // exact under scalar Scale, conservative under the Matrix escape hatch, since a
 // sphere under non-uniform scale is not a sphere.
 func prepareDraw(record drawRecord, mesh meshRecord) preparedDraw {
-	world := record.transform.Mat4()
+	world := record.world()
 	prepared := preparedDraw{world: world}
 	if local, cull := resolveBounds(record.neverCull, record.bounds, mesh); cull {
 		prepared.sphere = local.Transform(world)

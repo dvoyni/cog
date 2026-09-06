@@ -25,13 +25,20 @@ type opQueue struct {
 	draws      []drawRecord
 	passArena  []Pass
 	duplicates []CameraID
+	// calls is the frame's draw calls as the recorder made them, one Op each,
+	// kept apart from the draw records the flush consumes: a WireBox is one
+	// call and twelve draws, and Ops reports calls.
+	calls []Op
 
 	// published is the recording the last flush consumed, kept readable.
 	published      []cameraRecord
 	publishedDraws []drawRecord
 	publishedArena []Pass
-	opViews        []Op
-	passViews      []PassView
+	publishedCalls []Op
+	// cameraOps is the published frame's camera registrations as Ops, in id
+	// order, which Ops reports ahead of the draw calls.
+	cameraOps []Op
+	passViews []PassView
 	// batchArena backs every published pass's Batches slice, and passBatches
 	// is the span each pass claimed while the arena was still growing.
 	batchArena  []BatchView
@@ -57,7 +64,7 @@ func (q *opQueue) Camera(id CameraID, descr CameraDescr) {
 
 // OpCount reports how many operations have been recorded into this frame so
 // far. It reads the recording in progress, not the published frame Ops returns.
-func (q *opQueue) OpCount() int { return len(q.cameras) + len(q.draws) }
+func (q *opQueue) OpCount() int { return len(q.cameras) + len(q.calls) }
 
 // Reset abandons everything recorded into the frame in progress. It does not
 // disturb the published frame.
@@ -68,12 +75,16 @@ func (q *opQueue) Reset() {
 	q.draws = q.draws[:0]
 	q.passArena = q.passArena[:0]
 	q.duplicates = q.duplicates[:0]
+	clear(q.calls)
+	q.calls = q.calls[:0]
 }
 
-// Ops appends the published frame's recorded operations to dst, in flush order.
-// The returned slice and every slice inside it alias the queue's storage and
-// stay valid until the next flush.
-func (q *opQueue) Ops(dst []Op) []Op { return append(dst, q.opViews...) }
+// Ops appends the published frame's recorded operations to dst, in flush order:
+// every camera by id, then every draw call in the order it was recorded. A call
+// is one Op whatever it flushes to — a WireBox is one op and twelve draws. The
+// returned slice and every slice inside it alias the queue's storage and stay
+// valid until the next flush.
+func (q *opQueue) Ops(dst []Op) []Op { return append(append(dst, q.cameraOps...), q.publishedCalls...) }
 
 // Passes appends the published frame's pass results to dst, in emission order:
 // cameras by id ascending, then each camera's passes as declared. The returned
@@ -102,28 +113,23 @@ func (q *opQueue) beginFlush() []cameraRecord {
 	q.cameras, q.published = q.published, q.cameras
 	q.draws, q.publishedDraws = q.publishedDraws, q.draws
 	q.passArena, q.publishedArena = q.publishedArena, q.passArena
+	q.calls, q.publishedCalls = q.publishedCalls, q.calls
 	clear(q.cameras)
 	q.cameras = q.cameras[:0]
 	clear(q.draws)
 	q.draws = q.draws[:0]
 	q.passArena = q.passArena[:0]
+	clear(q.calls)
+	q.calls = q.calls[:0]
 
 	slices.SortFunc(q.published, func(a, b cameraRecord) int { return cmp.Compare(a.id, b.id) })
 	q.passViews = q.passViews[:0]
 	q.passBatches = q.passBatches[:0]
 	q.batchArena = q.batchArena[:0]
-	q.opViews = q.opViews[:0]
+	q.cameraOps = q.cameraOps[:0]
 	for i := range q.published {
-		q.opViews = append(q.opViews, Op{
+		q.cameraOps = append(q.cameraOps, Op{
 			Kind: OpCamera, Camera: q.published[i].id, Descr: q.published[i].descr,
-		})
-	}
-	for i := range q.publishedDraws {
-		q.opViews = append(q.opViews, Op{
-			Kind:      OpBox,
-			Layers:    q.publishedDraws[i].layers,
-			Transform: q.publishedDraws[i].transform,
-			Color:     q.publishedDraws[i].color,
 		})
 	}
 	return q.published
@@ -142,21 +148,34 @@ func (q *opQueue) endFlush() {
 	q.resolveBatches()
 }
 
-// drawRecord is one recorded draw. The debug vocabulary is sugar over scene's
-// own unit meshes, so a box needs nothing beyond where it stands and what
-// colour it is; the mesh it draws is scene's, and the material is the bundled
-// one.
+// drawRecord is one recorded draw: what the flush consumes, as distinct from
+// the call that produced it, which the queue keeps as an Op. The debug
+// vocabulary is sugar over scene's own unit meshes, so a box needs nothing
+// beyond where it stands and what colour it is; the mesh it draws is scene's,
+// and the material is the bundled one.
 type drawRecord struct {
 	layers    LayerMask
 	transform Transform
-	color     m.Color
+	// stretch is the non-uniform scale scene applied itself, on top of the
+	// transform's scalar Scale, to turn a unit mesh into a line, an edge or a
+	// plane of the requested size. Zero means none. It lives here rather than
+	// in Transform.Matrix so the recording API's scalar-Scale decision stays
+	// exactly as stated and no record points into a growing arena.
+	stretch m.Vec3
+	color   m.Color
+	// selfLit draws the shape as black with color as its emissive, so it
+	// reads the same in a frame with no lights at all.
+	selfLit bool
+	// shape names which of scene's own meshes a draw with no mesh of its own
+	// renders. Its zero value is the box.
+	shape unitShape
 	// material is the scene material the draw named, or nil for the bundled
 	// PBR. Every debug shape leaves it nil, which is what makes a draw literal
 	// that omits the field untouched by the field existing.
 	material Material
 	// mesh is the mesh the draw renders. The debug vocabulary leaves it zero,
-	// which the flush reads as scene's own unit box: the box is baked lazily on
-	// first use, so its ref cannot be known at record time.
+	// which the flush reads as the unit mesh shape names: those are baked
+	// lazily on first use, so their refs cannot be known at record time.
 	mesh MeshRef
 	// bounds is the draw's explicit local-space sphere, and neverCull exempts
 	// it from culling outright. Both are zero for a debug shape, which culls
@@ -165,23 +184,39 @@ type drawRecord struct {
 	neverCull bool
 }
 
+// world resolves the draw's model matrix: its transform, with the internal
+// stretch folded into the scale when there is one.
+func (r drawRecord) world() m.Mat4 {
+	if r.stretch == (m.Vec3{}) {
+		return r.transform.Mat4()
+	}
+	scale := r.transform.Scale
+	if scale == 0 {
+		scale = 1
+	}
+	return m.TRS4(r.transform.Position, r.transform.rotation(), r.stretch.MulS(scale))
+}
+
 // pbrRecord builds the bundled PBR record one recorded draw binds.
 //
 // A debug shape is paint, not metal: it takes glTF's defaults except for
 // metallic, because glTF defaults to a fully metallic surface and a metal has
 // no diffuse at all - a debug box would render as a dark mirror of an
 // environment that does not exist, which is the opposite of visible.
+//
+// A self-lit shape is black paint that glows: the colour goes into
+// emissiveFactor, which the shader adds after shading, and the base colour is
+// black so the lights contribute nothing to it.
 func (r drawRecord) pbrRecord() scenePbrRecord {
 	record := defaultPbrRecord()
 	record.MetallicFactor = 0
+	if r.selfLit {
+		record.BaseColorFactor = m.Vec4{W: r.color.A}
+		record.EmissiveFactor = m.Vec4{X: r.color.R, Y: r.color.G, Z: r.color.B}
+		return record
+	}
 	record.BaseColorFactor = m.Vec4{X: r.color.R, Y: r.color.G, Z: r.color.B, W: r.color.A}
 	return record
-}
-
-// Box records a unit cube at transform. It is the scene twin of canvas's
-// FillRect: one statement, no mesh handle, no material, no shader.
-func (q *opQueue) Box(layers LayerMask, transform Transform, color m.Color) {
-	q.draw(drawRecord{layers: layers, transform: transform, color: color})
 }
 
 // draw records one draw of any kind. Every recording call is sugar over it.

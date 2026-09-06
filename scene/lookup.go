@@ -18,8 +18,9 @@ type Lookup struct {
 	// meshes is the dense mesh table every MeshRef indexes, and a ref's id is
 	// its position in it plus one, so id 0 stays "no mesh".
 	meshes []meshRecord
-	// unitBox is scene's own cube, baked on first use.
-	unitBox MeshRef
+	// unit holds scene's own meshes - the box, sphere and plane the debug
+	// vocabulary draws - each baked on first use.
+	unit [shapeCount]MeshRef
 	// bundled is the bundled PBR material, built on first use around the two
 	// default textures. It is not a package-level value because those textures
 	// are baked resources: the backend may not be Ready() at startup, and a

@@ -155,7 +155,7 @@ func (p *Plugin) prepareDraws(report func(error), lookup *Lookup, bake bakeFunc,
 		record := &draws[i]
 		ref := record.mesh
 		if ref.source == meshNone {
-			ref = lookup.ensureUnitBox(bake)
+			ref = lookup.ensureUnit(record.shape, bake)
 		}
 		// A ref that no longer resolves - released, or stale - leaves the
 		// draw with no mesh, and every pass skips it.

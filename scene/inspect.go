@@ -11,19 +11,35 @@ type OpKind uint8
 const (
 	OpCamera OpKind = iota
 	OpBox
+	OpSphere
+	OpPlane
+	OpLine3D
+	OpWireBox
 )
 
-// Op is a read-only view of one recorded operation, canvas's shape exactly.
+// Op is a read-only view of one recorded operation, canvas's shape exactly: it
+// reports the call as the recorder made it, not the draws scene derived from
+// it, so a WireBox is one Op.
 type Op struct {
 	Kind OpKind
 	// Camera and Descr describe an OpCamera. Descr.Passes aliases the queue's
 	// frame arena, like every other borrowed slice scene hands back.
 	Camera CameraID
 	Descr  CameraDescr
-	// Layers, Transform and Color describe a recorded draw.
-	Layers    LayerMask
+	// Layers and Color describe every recorded draw.
+	Layers LayerMask
+	Color  m.Color
+	// Transform describes an OpBox.
 	Transform Transform
-	Color     m.Color
+	// Center describes an OpSphere, OpPlane or OpWireBox; Radius is the
+	// sphere's, and Size the plane's (X and Z) or the wire box's.
+	Center m.Vec3
+	Radius float32
+	Size   m.Vec3
+	// Start and End describe an OpLine3D.
+	Start, End m.Vec3
+	// Thickness describes an OpLine3D or OpWireBox.
+	Thickness float32
 }
 
 // PassView is the flush result for one pass: what scene decided, in numbers a
