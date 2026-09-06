@@ -48,6 +48,14 @@ type Plugin struct {
 	// across frames.
 	preparedLights []preparedLight
 	lights         lightSelection
+	// temporaries is the frame's temporary meshes as mesh records, built once
+	// so that a temporary ref resolves exactly the way a durable one does and
+	// everything downstream is blind to which kind it has.
+	temporaries []meshRecord
+	// meshReported is the set of mesh ids already reported this frame, so a
+	// released mesh named by a hundred draws is one report rather than a
+	// hundred.
+	meshReported map[uint32]struct{}
 }
 
 // passLabel keys the synthesised debug label of one camera's pass. Labels are
@@ -58,7 +66,9 @@ type passLabel struct {
 	tag    PassTag
 }
 
-func New() *Plugin { return &Plugin{labels: map[passLabel]string{}} }
+func New() *Plugin {
+	return &Plugin{labels: map[passLabel]string{}, meshReported: map[uint32]struct{}{}}
+}
 
 func (p *Plugin) Name() kernel.PluginName { return Name }
 
@@ -142,8 +152,22 @@ func (p *Plugin) flushFrame(
 		return gfxResources.BakeTexture(width, height, format, pixels, true, false)
 	}
 	report := func(err error) { k.ReportError(err) }
+	// The frame's meshes are settled before anything looks at a draw: the
+	// callers' deferred bakes and releases drain, then the frame's temporaries
+	// become records, so every ref a draw names resolves against final state.
+	// The staged bytes go to gfx without a second copy: BakeMesh already copied
+	// them out of its caller, and the arena they live in is handed over rather
+	// than reused. That is the one copy the whole durable path costs.
+	lookup.drainMeshes(meshBaker{
+		bake: func(data []byte) gfx.BufferDescr { return gfxResources.BakeBuffer(data, false) },
+		rebake: func(buffer gfx.BufferDescr, data []byte) gfx.BufferDescr {
+			return gfxResources.ReBakeBuffer(buffer, data, false)
+		},
+		release: gfxResources.ReleaseBuffer,
+	})
+	p.buildTemporaries(report, write)
 	p.materials.reset(lookup.ensureBundled(bakeTexture))
-	p.prepareDraws(report, lookup, bake, write.flushDraws())
+	p.prepareDraws(report, lookup, write, bake, write.flushDraws())
 	p.preparedLights = prepareLights(report, p.preparedLights, write.flushLights())
 	for i := range cameras {
 		p.flushCamera(k, write, lookup, view, cameras[i])
@@ -155,24 +179,74 @@ func (p *Plugin) flushFrame(
 // per frame before any camera walks the draws: its mesh, its material's
 // interned index, its world matrix and its world-space bounding sphere. A draw's
 // per-camera cost is then one sphere test, and its per-pass cost one array read.
-func (p *Plugin) prepareDraws(report func(error), lookup *Lookup, bake bakeFunc, draws []drawRecord) {
+func (p *Plugin) prepareDraws(
+	report func(error), lookup *Lookup, write *OpQueue, bake bakeFunc, draws []drawRecord,
+) {
 	p.prepared = grow(p.prepared, len(draws))
+	clear(p.meshReported)
 	for i := range draws {
 		record := &draws[i]
 		ref := record.mesh
-		if ref.source == meshNone {
+		if record.shape != shapeNone {
 			ref = lookup.ensureUnit(record.shape, bake)
 		}
-		// A ref that no longer resolves - released, or stale - leaves the
-		// draw with no mesh, and every pass skips it.
-		mesh, ok := lookup.mesh(ref)
-		if !ok {
+		mesh, ok := p.resolveMesh(lookup, write, ref)
+		switch {
+		case !ok:
+			// A ref that named a mesh and no longer resolves - released, stale,
+			// or temporary and from an earlier frame - is reported, once per
+			// ref. A ref that never named one was already reported at the mint
+			// that rejected it, so it skips in silence.
+			if ref.source != meshNone {
+				p.reportMeshOnce(report, ref, ErrMeshUnavailable{Mesh: ref.ID()})
+			}
 			ref = MeshRef{}
+		case !mesh.standard && record.material == nil:
+			p.reportMeshOnce(report, ref, ErrMeshCustomLayoutNeedsMaterial{Mesh: ref.ID()})
+			ref, mesh = MeshRef{}, meshRecord{}
 		}
 		p.prepared[i] = prepareDraw(*record, mesh)
 		p.prepared[i].mesh = ref
 		p.prepared[i].interned = p.materials.intern(report, record.material)
 	}
+}
+
+// resolveMesh reads one ref, whichever surface minted it. A temporary is
+// checked against the frame it was minted in, which is what stops a ref kept
+// across a frame boundary from drawing whatever now holds its slot.
+func (p *Plugin) resolveMesh(lookup *Lookup, write *OpQueue, ref MeshRef) (meshRecord, bool) {
+	if ref.source == meshTemporary {
+		if ref.generation != write.publishedFrame || ref.id == 0 || int(ref.id) > len(p.temporaries) {
+			return meshRecord{}, false
+		}
+		return p.temporaries[ref.id-1], true
+	}
+	return lookup.mesh(ref)
+}
+
+// buildTemporaries materialises the frame's temporary meshes and reports the
+// mints that were rejected, which the recording could not report itself: the
+// queue holds no kernel.
+func (p *Plugin) buildTemporaries(report func(error), write *OpQueue) {
+	recording := write.flushMeshes()
+	for _, err := range recording.reports {
+		report(err)
+	}
+	p.temporaries = grow(p.temporaries, len(recording.temporaries))
+	for i := range recording.temporaries {
+		p.temporaries[i] = recording.temporaries[i].record(recording.arena)
+	}
+}
+
+// reportMeshOnce reports one mesh's failure the first time a draw hits it this
+// frame. Keyed by the public id, so a hundred draws of one released mesh are one
+// report and two different meshes are two.
+func (p *Plugin) reportMeshOnce(report func(error), ref MeshRef, err error) {
+	if _, seen := p.meshReported[ref.ID()]; seen {
+		return
+	}
+	p.meshReported[ref.ID()] = struct{}{}
+	report(err)
 }
 
 // flushCamera emits one camera's passes. A camera missing a clip plane is
@@ -284,8 +358,9 @@ func (p *Plugin) flushPass(
 			index := survivors[entry.draw].draw
 			prepared := &p.prepared[index]
 			material, _ := p.materials.entry(prepared.interned, tag)
-			mesh, _ := lookup.mesh(prepared.mesh)
-			p.build.addDraw(pending, mesh, prepared.mesh.ID(), material, prepared.world, draws[index].pbrRecord())
+			mesh, _ := p.resolveMesh(lookup, write, prepared.mesh)
+			p.build.addDraw(pending, mesh, prepared.mesh.ID(), material,
+				prepared.world, draws[index].pbrRecord(), draws[index].params)
 			result.Instances++
 		}
 	}

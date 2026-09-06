@@ -759,6 +759,13 @@ frame-local and a durable path from one type. The zero value means none. `source
 is what makes a temporary ref used in a **later** frame detectable rather than
 silently wrong.
 
+The two sources allocate **independent dense ranges**, so `ID()` sets the top bit
+for a temporary one. The sort key is a single `uint32` of `meshID`, and without a
+bit to tell them apart the first durable and the first temporary mesh of a frame
+would batch as though they were the same geometry. The generation of a temporary
+ref is the **frame** it was minted in, which is what the later-frame check reads;
+a durable ref's is its slot's reissue count.
+
 Both mint functions feed the single `q.Mesh(layers, ref, draw)` recording call.
 An anonymous inline call, canvas's `DrawTriangles` shape, was rejected because
 sorting requires a dense `meshID` on every draw and an anonymous call has none.
@@ -790,8 +797,18 @@ frame, on the largest data this API produces.
 **A custom vertex layout requires a custom material.** The bundled PBR is one
 shader module with one vertex stage and no entry-point selection, so its inputs
 are locations 0..7 at those exact types. The reverse is fine. A violation is
-**reported once and the draw skipped** — checked at bake time for a durable ref
-and first draw for a temporary, so the report fires once per ref.
+**reported once and the draw skipped** — the layout is recognised by Go type at
+mint time, and the material is only known at draw time, so the check runs as the
+frame prepares its draws and the report is keyed by the ref's id: once per ref,
+however many draws named it. The stale-ref report is keyed the same way.
+
+**A mesh draw taking the bundled PBR is white paint, `metallicFactor` 0.**
+`MeshDraw` carries no colour: colour is a material's property, and a mesh that
+wants one names a `Material`. glTF's own default is fully metallic, and a metal
+has no diffuse at all — with no image-based lighting in v1 there is nothing to
+reflect, so a mesh with nothing said about it would render **black**, which is the
+one thing a draw with no material of its own must not be. This is the same
+"paint, not metal" ruling the debug vocabulary already takes, minus the colour.
 
 ### Topology and indices
 

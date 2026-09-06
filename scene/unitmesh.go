@@ -8,12 +8,14 @@ import (
 )
 
 // unitShape names one of scene's own meshes, the ones the debug vocabulary is
-// sugar over. The zero value is the box, so a draw record that says nothing
-// about its shape is a box.
+// sugar over. The zero value is shapeNone, so a draw record that says nothing
+// about its shape draws the mesh it names instead - and a draw that names no
+// mesh either draws nothing, which is what a rejected mint has to yield.
 type unitShape uint8
 
 const (
-	shapeBox unitShape = iota
+	shapeNone unitShape = iota
+	shapeBox
 	shapeSphere
 	shapePlane
 	shapeCount
@@ -52,10 +54,16 @@ func (l *Lookup) ensureUnit(shape unitShape, bake bakeFunc) MeshRef {
 		vertices, indices = unitBoxGeometry()
 		bounds = vertexBounds(vertices)
 	}
-	l.unit[shape] = l.bakeMesh(
-		vertexBytes(vertices), indexBytes(indices), len(indices), len(vertices),
-		gfx.TopologyTriangleList, standardVertexLayout[:], bounds, bake,
-	)
+	// The layout goes through the same cache a caller's bake uses, so scene's
+	// own meshes and a caller's standard-layout mesh share one layout id rather
+	// than two that happen to describe the same attributes.
+	layoutID, layout, _ := l.layouts.resolve[Vertex]()
+	l.unit[shape] = l.bakeMeshNow(meshInput{
+		vertices: uploadBytes(vertices), indices: indexBytes(indices),
+		vertexCount: len(vertices), indexCount: len(indices),
+		topology: gfx.TopologyTriangleList, layout: layout,
+		layoutID: layoutID, standard: true, bounds: bounds,
+	}, bake)
 	return l.unit[shape]
 }
 

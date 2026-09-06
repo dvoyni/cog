@@ -118,3 +118,53 @@ type ErrSpotDirectionMissing struct{}
 func (ErrSpotDirectionMissing) Error() string {
 	return "scene: spot light has no direction"
 }
+
+// ErrMeshGeometryInvalid reports geometry that could only draw garbage: no
+// vertices at all, an index past the last vertex, or an index count that is not
+// a multiple of three under a triangle list. The mint yields a zero MeshRef,
+// which then draws nothing.
+//
+// This departs from canvas.DrawTriangles, which silently returns on bad input,
+// because that is a per-frame recording call where a report would spam every
+// frame, whereas a bake happens once.
+type ErrMeshGeometryInvalid struct{ Reason string }
+
+func (e ErrMeshGeometryInvalid) Error() string {
+	return "scene: the mesh was rejected because " + e.Reason
+}
+
+// ErrMeshUnavailable reports a MeshRef that no longer names a mesh: released,
+// stale against a slot that has been reissued, or temporary and used in a later
+// frame. The draw is skipped, and the report fires once per ref per frame
+// however many draws named it - a mesh that quietly stops appearing is the same
+// failure class the generation counter exists to catch.
+type ErrMeshUnavailable struct{ Mesh uint32 }
+
+func (e ErrMeshUnavailable) Error() string {
+	return fmt.Sprintf("scene: mesh %d has been released or belongs to an earlier frame", e.Mesh)
+}
+
+// ErrMeshCustomLayoutNeedsMaterial reports a draw pairing a custom vertex
+// layout with the bundled PBR. The bundled material is one shader module with
+// one vertex stage and no entry-point selection, so its inputs are scene.Vertex's
+// eight attributes and nothing else; the draw is skipped rather than handed to a
+// pipeline that cannot describe it. The reverse - the standard layout with a
+// custom material - is fine.
+type ErrMeshCustomLayoutNeedsMaterial struct{ Mesh uint32 }
+
+func (e ErrMeshCustomLayoutNeedsMaterial) Error() string {
+	return fmt.Sprintf(
+		"scene: mesh %d has a custom vertex layout, which the bundled PBR cannot draw; give the draw a Material",
+		e.Mesh)
+}
+
+// ErrMeshUpdateRejected reports an UpdateMesh that would change something fixed
+// for a ref's life. The mesh keeps the geometry it had.
+type ErrMeshUpdateRejected struct {
+	Mesh   uint32
+	Reason string
+}
+
+func (e ErrMeshUpdateRejected) Error() string {
+	return fmt.Sprintf("scene: mesh %d was not updated because %s", e.Mesh, e.Reason)
+}

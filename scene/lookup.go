@@ -16,8 +16,22 @@ import (
 type Lookup struct {
 	config Config
 	// meshes is the dense mesh table every MeshRef indexes, and a ref's id is
-	// its position in it plus one, so id 0 stays "no mesh".
-	meshes []meshRecord
+	// its position in it plus one, so id 0 stays "no mesh". freeMeshes are the
+	// slots ReleaseMesh gave back, reissued newest first.
+	meshes     []meshRecord
+	freeMeshes []uint32
+	// layouts interns the vertex layouts durable meshes were baked from.
+	layouts layoutCache
+	// staging holds the bytes BakeMesh and UpdateMesh copied out of their
+	// callers, and pendingMeshes the uploads waiting on them. The arena is
+	// handed to gfx wholesale at the flush and a fresh one grown after, rather
+	// than reused: BakeBuffer takes the bytes without copying them, so reusing
+	// the backing would rewrite an upload still in flight.
+	staging       []byte
+	pendingMeshes []pendingMesh
+	// pendingReleases are the buffers ReleaseMesh gave up, freed at the frame
+	// boundary so nothing the frame already recorded draws from a dead buffer.
+	pendingReleases []gfx.BufferDescr
 	// unit holds scene's own meshes - the box, sphere and plane the debug
 	// vocabulary draws - each baked on first use.
 	unit [shapeCount]MeshRef

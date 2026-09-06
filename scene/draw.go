@@ -42,6 +42,10 @@ type pendingDraw struct {
 	materialOffset int
 	firstInstance  int
 	instances      int
+	// params are the extra parameters the draw asked to bind, aliasing the
+	// recording's arena. They are bound after the three ranges scene binds
+	// itself, so a caller cannot displace them by naming one of their names.
+	params []gfx.ParameterDescr
 }
 
 // frameBuild is everything one flush accumulates before it emits: the three
@@ -59,6 +63,10 @@ type frameBuild struct {
 	// opaque and blend are the two sort classes of the pass being built, reused
 	// by every pass in the frame so the sort allocates nothing.
 	opaque, blend []sortEntry
+	// params is the scratch one draw's full parameter list is assembled in.
+	// gfx copies parameters into its own arena as it records, so one slice
+	// serves every draw in the frame.
+	params []gfx.ParameterDescr
 }
 
 func (b *frameBuild) reset() {
@@ -81,11 +89,14 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 		pass := &b.passes[i]
 		gfxWrite.Pass(pass.descr)
 		for _, draw := range b.draws[pass.firstDraw : pass.firstDraw+pass.drawCount] {
-			gfxWrite.DrawInstancedFrom(draw.mesh, *draw.material, draw.firstInstance, draw.instances,
+			b.params = append(b.params[:0],
 				gfx.BufferRangeParam("sceneFrame", frames, pass.frameOffset, frameBlockSize),
 				gfx.BufferRangeParam("sceneInstances", instances, pass.instanceOffset, pass.instanceBytes),
 				gfx.BufferRangeParam("scenePbrMaterial", materials, draw.materialOffset, materialRecordSize),
 			)
+			b.params = append(b.params, draw.params...)
+			gfxWrite.DrawInstancedFrom(draw.mesh, *draw.material,
+				draw.firstInstance, draw.instances, b.params...)
 		}
 	}
 }
@@ -112,7 +123,7 @@ func (b *frameBuild) beginPass(descr gfx.PassDescr, block sceneFrameBlock) *pend
 // every frame to save an upload nobody has measured.
 func (b *frameBuild) addDraw(
 	pass *pendingPass, mesh meshRecord, id uint32, entry materialEntry,
-	world m.Mat4, record scenePbrRecord,
+	world m.Mat4, record scenePbrRecord, params []gfx.ParameterDescr,
 ) {
 	first := (len(b.instances.bytes()) - pass.instanceOffset) / instanceSize
 	instance := packInstance(world)
@@ -123,6 +134,7 @@ func (b *frameBuild) addDraw(
 		materialOffset: b.materials.appendRecord(&record),
 		firstInstance:  first,
 		instances:      1,
+		params:         params,
 	})
 	b.batches = append(b.batches, BatchView{
 		MeshID: id, MaterialID: entry.materialID,

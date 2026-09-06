@@ -81,12 +81,12 @@ func TestNeverCullAndExplicitBoundsOverrideTheBakedSphere(t *testing.T) {
 	h := newHarnessWithErrors(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		// Behind the camera, but exempt.
-		q.draw(drawRecord{transform: At(0, 0, 5), color: testBoxColor, neverCull: true})
+		q.draw(drawRecord{shape: shapeBox, transform: At(0, 0, 5), color: testBoxColor, neverCull: true})
 		// Behind the camera by its mesh, but its explicit sphere reaches the
 		// camera.
-		q.draw(drawRecord{transform: At(0, 0, 5), color: testBoxColor, bounds: m.Sphere{Radius: 10}})
+		q.draw(drawRecord{shape: shapeBox, transform: At(0, 0, 5), color: testBoxColor, bounds: m.Sphere{Radius: 10}})
 		// Behind the camera by its mesh, and its explicit sphere says so too.
-		q.draw(drawRecord{transform: At(0, 0, 5), color: testBoxColor, bounds: m.Sphere{Radius: 1}})
+		q.draw(drawRecord{shape: shapeBox, transform: At(0, 0, 5), color: testBoxColor, bounds: m.Sphere{Radius: 1}})
 	}, &reported)
 	h.frame()
 
@@ -135,7 +135,7 @@ func TestOpaqueDrawsGroupByMaterialNotRecordingOrder(t *testing.T) {
 		q.Camera(testCamera, forwardCamera())
 		a, b := opaqueMaterial(1), opaqueMaterial(2)
 		for i, material := range []Material{b, a, b, a, b} {
-			q.draw(drawRecord{transform: At(float32(i), 0, -5), color: testBoxColor, material: material})
+			q.draw(drawRecord{shape: shapeBox, transform: At(float32(i), 0, -5), color: testBoxColor, material: material})
 		}
 	})
 	h.frame()
@@ -168,9 +168,9 @@ func TestBlendDrawsFollowOpaqueAndSortBackToFront(t *testing.T) {
 		q.Camera(testCamera, forwardCamera())
 		// Recorded near first, and with the lower material id, so a sort by
 		// either recording order or material would put it first.
-		q.draw(drawRecord{transform: At(0, 0, -2), color: testBoxColor, material: blendMaterial(1)})
-		q.draw(drawRecord{transform: At(0, 0, -20), color: testBoxColor, material: blendMaterial(2)})
-		q.draw(drawRecord{transform: At(0, 0, -50), color: testBoxColor, material: opaqueMaterial(3)})
+		q.draw(drawRecord{shape: shapeBox, transform: At(0, 0, -2), color: testBoxColor, material: blendMaterial(1)})
+		q.draw(drawRecord{shape: shapeBox, transform: At(0, 0, -20), color: testBoxColor, material: blendMaterial(2)})
+		q.draw(drawRecord{shape: shapeBox, transform: At(0, 0, -50), color: testBoxColor, material: opaqueMaterial(3)})
 	})
 	h.frame()
 
@@ -322,7 +322,7 @@ func TestAMultiTagMaterialDrawsInEveryPassItServes(t *testing.T) {
 			{Tag: TagForward},
 		}
 		q.Camera(testCamera, descr)
-		q.draw(drawRecord{transform: At(0, 0, -5), color: testBoxColor, material: both})
+		q.draw(drawRecord{shape: shapeBox, transform: At(0, 0, -5), color: testBoxColor, material: both})
 		q.Box(0, At(1, 0, -5), testBoxColor)
 	})
 	h.frame()

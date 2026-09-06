@@ -15,6 +15,7 @@ const (
 	OpPlane
 	OpLine3D
 	OpWireBox
+	OpMesh
 	OpPointLight
 	OpSpotLight
 )
@@ -42,6 +43,11 @@ type Op struct {
 	Start, End m.Vec3
 	// Thickness describes an OpLine3D or OpWireBox.
 	Thickness float32
+	// Mesh and Draw describe an OpMesh, and carry everything that call said,
+	// including its own Transform. Draw's Transforms and Params alias the
+	// queue's frame arenas, like every other borrowed slice scene hands back.
+	Mesh MeshRef
+	Draw MeshDraw
 	// Light describes an OpPointLight or OpSpotLight, with Kind set by the
 	// call that recorded it. Layers is its layer mask.
 	Light LightDescr

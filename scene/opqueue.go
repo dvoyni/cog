@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"slices"
 
+	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/m"
 )
 
@@ -30,6 +31,12 @@ type opQueue struct {
 	// kept apart from the draw records the flush consumes: a WireBox is one
 	// call and twelve draws, and Ops reports calls.
 	calls []Op
+	// meshes is everything TemporaryMesh and Mesh recorded into this frame.
+	meshes meshRecording
+	// frame counts recordings, and stamps every temporary MeshRef minted into
+	// this one. It is what makes a temporary ref used in a later frame
+	// detectable rather than a draw of whatever now holds its slot.
+	frame uint32
 
 	// published is the recording the last flush consumed, kept readable.
 	published       []cameraRecord
@@ -37,6 +44,8 @@ type opQueue struct {
 	publishedLights []lightRecord
 	publishedArena  []Pass
 	publishedCalls  []Op
+	publishedMeshes meshRecording
+	publishedFrame  uint32
 	// cameraOps is the published frame's camera registrations as Ops, in id
 	// order, which Ops reports ahead of the draw calls.
 	cameraOps []Op
@@ -70,6 +79,10 @@ func (q *opQueue) OpCount() int { return len(q.cameras) + len(q.calls) }
 
 // Reset abandons everything recorded into the frame in progress. It does not
 // disturb the published frame.
+//
+// Temporary MeshRefs minted into the abandoned recording do not survive it:
+// their slots are reissued to whatever is recorded next, and the frame stamp
+// they carry cannot tell the difference. Re-record the geometry after a Reset.
 func (q *opQueue) Reset() {
 	clear(q.cameras)
 	q.cameras = q.cameras[:0]
@@ -80,6 +93,7 @@ func (q *opQueue) Reset() {
 	q.duplicates = q.duplicates[:0]
 	clear(q.calls)
 	q.calls = q.calls[:0]
+	q.meshes.reset()
 }
 
 // Ops appends the published frame's recorded operations to dst, in flush order:
@@ -118,6 +132,11 @@ func (q *opQueue) beginFlush() []cameraRecord {
 	q.lights, q.publishedLights = q.publishedLights, q.lights
 	q.passArena, q.publishedArena = q.publishedArena, q.passArena
 	q.calls, q.publishedCalls = q.publishedCalls, q.calls
+	// The layout cache is interning, not recording, so it stays with the half
+	// that keeps recording rather than travelling with the published frame.
+	q.meshes, q.publishedMeshes = q.publishedMeshes, q.meshes
+	q.meshes.layouts, q.publishedMeshes.layouts = q.publishedMeshes.layouts, q.meshes.layouts
+	q.publishedFrame, q.frame = q.frame, q.frame+1
 	clear(q.cameras)
 	q.cameras = q.cameras[:0]
 	clear(q.draws)
@@ -126,6 +145,7 @@ func (q *opQueue) beginFlush() []cameraRecord {
 	q.passArena = q.passArena[:0]
 	clear(q.calls)
 	q.calls = q.calls[:0]
+	q.meshes.reset()
 
 	slices.SortFunc(q.published, func(a, b cameraRecord) int { return cmp.Compare(a.id, b.id) })
 	q.passViews = q.passViews[:0]
@@ -171,17 +191,23 @@ type drawRecord struct {
 	// selfLit draws the shape as black with color as its emissive, so it
 	// reads the same in a frame with no lights at all.
 	selfLit bool
-	// shape names which of scene's own meshes a draw with no mesh of its own
-	// renders. Its zero value is the box.
+	// shape names which of scene's own meshes the draw renders. Its zero value
+	// is shapeNone, which means the draw names its own mesh instead - and a
+	// zero mesh there is a draw of nothing, which is what a rejected mint
+	// yields.
 	shape unitShape
 	// material is the scene material the draw named, or nil for the bundled
 	// PBR. Every debug shape leaves it nil, which is what makes a draw literal
 	// that omits the field untouched by the field existing.
 	material Material
-	// mesh is the mesh the draw renders. The debug vocabulary leaves it zero,
-	// which the flush reads as the unit mesh shape names: those are baked
-	// lazily on first use, so their refs cannot be known at record time.
+	// mesh is the mesh the draw renders, for a draw that names one. The debug
+	// vocabulary leaves it zero and names a shape instead: scene's unit meshes
+	// are baked lazily on first use, so their refs cannot be known at record
+	// time.
 	mesh MeshRef
+	// params are the extra gfx parameters a MeshDraw asked to bind, aliasing
+	// the recording's parameter arena.
+	params []gfx.ParameterDescr
 	// bounds is the draw's explicit local-space sphere, and neverCull exempts
 	// it from culling outright. Both are zero for a debug shape, which culls
 	// by its mesh's baked sphere.
@@ -204,10 +230,17 @@ func (r drawRecord) world() m.Mat4 {
 
 // pbrRecord builds the bundled PBR record one recorded draw binds.
 //
-// A debug shape is paint, not metal: it takes glTF's defaults except for
-// metallic, because glTF defaults to a fully metallic surface and a metal has
-// no diffuse at all - a debug box would render as a dark mirror of an
-// environment that does not exist, which is the opposite of visible.
+// Everything that takes the bundled PBR is paint, not metal: it takes glTF's
+// defaults except for metallic, because glTF defaults to a fully metallic
+// surface and a metal has no diffuse at all - it would render as a dark mirror
+// of an environment that does not exist, and scene has no image-based lighting
+// to reflect. That is the opposite of visible, which is the one thing a draw
+// with no material of its own has to be.
+//
+// A mesh draw stops there, at white paint. It carries no colour of its own
+// because colour is a material's business, and a mesh that wants one names a
+// Material; what white buys is that a mesh whose shading looks wrong is a
+// lighting question rather than an invisible one.
 //
 // A self-lit shape is black paint that glows: the colour goes into
 // emissiveFactor, which the shader adds after shading, and the base colour is
@@ -215,6 +248,9 @@ func (r drawRecord) world() m.Mat4 {
 func (r drawRecord) pbrRecord() scenePbrRecord {
 	record := defaultPbrRecord()
 	record.MetallicFactor = 0
+	if r.shape == shapeNone {
+		return record
+	}
 	if r.selfLit {
 		record.BaseColorFactor = m.Vec4{W: r.color.A}
 		record.EmissiveFactor = m.Vec4{X: r.color.R, Y: r.color.G, Z: r.color.B}
@@ -229,6 +265,9 @@ func (q *opQueue) draw(record drawRecord) { q.draws = append(q.draws, record) }
 
 // publishedDraws lists the draws the flush is consuming, in recording order.
 func (q *opQueue) flushDraws() []drawRecord { return q.publishedDraws }
+
+// flushMeshes hands the flush the mesh recording it is consuming.
+func (q *opQueue) flushMeshes() *meshRecording { return &q.publishedMeshes }
 
 // publishBatches copies one pass's batches into the frame's batch arena and
 // records the span, which endFlush resolves into the published PassView.
