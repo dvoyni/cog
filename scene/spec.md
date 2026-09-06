@@ -1306,6 +1306,21 @@ the lights dropped are exactly the ones contributing least. Record order was
 rejected as the drop policy because it silently punishes recording order, which
 a caller has no reason to believe is significant.
 
+**Among equal contributions the offer order decides**, and for a scene watched
+from outside its lights that is most of them. The score is the light's own
+falloff window evaluated at the eye, so every light whose `Range` does not reach
+the camera scores exactly zero, as does every spot the camera is not standing in
+the beam of; the insertion replaces the weakest kept entry only if the newcomer
+*beats* it, so a tie leaves the earlier light in place and the first 16 recorded
+are the 16 kept. This is not a weakening of "the lights dropped are the ones
+contributing least" — a light contributing nothing at the eye is contributing
+least — but it does mean a caller who records more than 16 chooses which survive
+by the order they record them in, and that a light mattering greatly to geometry
+the camera is looking *at* can score nothing because it is far from where the
+camera is looking *from*. The `pbr` demo is built on this: it records the lights
+it means to keep first, and its five surplus lamps stand deep enough behind the
+still life to score zero until the camera orbits in among them.
+
 16 is a **fixed constant, not a `Config` knob**: a knob needs documented
 interaction rules, and the answer to "I need 40 lights" is clustered lighting,
 not a number that makes the naive loop slower. Being fixed is also what lets the
@@ -2815,12 +2830,12 @@ set.
 | Demo | Assets | Contracts |
 | --- | --- | --- |
 | `box` | **none** | debug vocabulary; `Transform` TRS and scalar `Scale`; `LookAt`; empty `Passes` → implicit forward pass at the camera id; sun and hemispheric ambient; the linear pipeline and present pass; every-zero-value-is-the-default; the `m` additions |
-| `pbr` | WaterBottle, AlphaBlendModeTest, BoxVertexColors, CompareBaseColor, EmissiveStrengthTest, PointLightIntensityTest | the whole material contract (glTF names, five slots, two 1×1 defaults, Khronos BRDF, `EnvBRDFApprox`, `COLOR_0`, flat `KHR_texture_transform` members); `alphaMode`→state, `Cull`/`FrontFace`; the back-to-front blend bucket; point and spot lights, `Range` zero-means-infinite, the 16 cap and its silent drop; `emissive_strength`, `lights_punctual` as data |
+| `pbr` | WaterBottle, AlphaBlendModeTest, BoxVertexColors, CompareBaseColor, EmissiveStrengthTest, PointLightIntensityTest | the whole material contract (glTF names, five slots, two 1×1 defaults, Khronos BRDF, `EnvBRDFApprox`, `COLOR_0`, flat `KHR_texture_transform` members); `alphaMode`→state and `Cull`; the back-to-front blend bucket; a rotated non-uniform basis through the lit path, via `Transform.Matrix`; point and spot lights, `Range` zero-means-infinite, the 16 cap and its silent drop; `emissive_strength`, `lights_punctual` as data |
 | `cameras` | reuses `box` + `pbr` | multi-camera, orthographic, `CullMask`, no `Viewport` → `TemporaryTarget` composited by canvas, negative ids, duplicate-id error; targets, `DepthAuto`/`DepthTarget`, `Order` sorting and pass merging; layer masks; multi-tag material and a `NoTarget()` depth-only pass; `WorldToScreen`/`ScreenToRay`, per-target `viewport m.Vec2`, behind-camera `ok`, `m.Ray.IntersectSphere` |
 | `animated` | Fox, AnimatedMorphCube, MorphStressTest, InterpolationTest | baked poses, `ClipPlay` crossfade, the 4-play cap, the rest frame, `PoseBytes`; sparse morph weights, `MorphWeights` override, the attribute mask; degenerate single-joint skins; u8 index widening. **The web canary.** |
 | `procedural` | none (custom WGSL) | `TemporaryMesh` vs `BakeMesh`, the generic `VertexLayout`, `UpdateMesh`, `ReleaseMesh` generations, `NeverCull`, the null skin and `SCENE_NOSKIN`; `BakeBuffer`/`ReBakeBuffer`/`BufferWithBytes`; a caller-supplied material with a custom layout |
 | `instancing` | reuses `box` + `pbr` | explicit `Transforms`, per-instance culling, the `materialID`/`meshID` sort key, `SCENE_NONUNIFORM` via the `Matrix` escape hatch, `Passes(dst)`; `firstInstance`, the per-batch material record, one instance arena bound by range |
-| `loading` | CesiumMilkTruck, MultipleScenes, TextureSettingsTest, MeshPrimitiveModes, AnimatedMorphCube glTF-Quantized, `broken/truncated.glb` | `Node` views and re-rooting (no asset has a nameable scene, so `Scene` is exercised only by its unmatched report), async skip-never-substitute, `Preload`, `Material` replace vs `OverrideParams` merge, explicit unload with no texture cascade; `(value, ok)`, `State`, `Nodes`/`Bounds`/`AABB`, unmatched-node-reports-once; the four WebGPU papering-over gaps |
+| `loading` | CesiumMilkTruck, MultipleScenes, TextureSettingsTest, MeshPrimitiveModes, AnimatedMorphCube glTF-Quantized, `broken/truncated.glb` | `Node` views and re-rooting; `Scene` naming a file's only scene (six vendored assets name theirs `Scene`, `CesiumMilkTruck` among them) and its unmatched report — but **no asset has a nameable *non-default* scene**: `MultipleScenes`, the set's only multi-scene file, leaves both of its unnamed, so a matched `Scene` here always resolves to the same draw the default would, async skip-never-substitute, `Preload`, `Material` replace vs `OverrideParams` merge, explicit unload with no texture cascade; `(value, ok)`, `State`, `Nodes`/`Bounds`/`AABB`, unmatched-node-reports-once; the four WebGPU papering-over gaps |
 
 `custom-shader` is **merged into `procedural`**, not dropped: a custom vertex
 layout *requires* a custom material, so the two cannot be demonstrated apart.
@@ -2830,6 +2845,14 @@ test that still works when the asset story breaks. `loading` is kept despite
 being nearly all assertion and almost no picture, because loading and the lookup
 facade are the two contracts whose failures are *invisible*: a model that
 silently substitutes, a node that silently falls back to the whole scene.
+
+**`FrontFace` has no demo behind it, and cannot get one from this asset set.**
+It flips to `FrontCW` only for a primitive under a node transform with a
+negative determinant, which is decided at load from the file's own nodes and
+not from the transform a draw is given — so no call a demo can make provokes
+it, and no vendored asset carries a mirrored node. `pbr` asserts instead that
+every material it loads stays `FrontCCW`, which is the whole of what is
+reachable. A file with a mirrored node is what would close it.
 
 ### Acceptance: two mechanisms, split by failure class
 
