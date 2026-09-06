@@ -2071,6 +2071,17 @@ A caller may still supply a whole `gfx.MaterialDescr` with its own WGSL, as the
 `procedural` demo does — it simply gets no scene helper functions and must
 declare only bindings scene binds on every draw that uses it.
 
+Those bindings are `sceneFrame`, `sceneInstances` and `scenePbrMaterial`, and a
+caller material may declare any subset of them: gfx binds what reflection
+reports and silently drops a parameter no shader declares, so declaring fewer is
+free while declaring one more is frame-fatal. `scenePbrMaterial` is bound but
+inert for a caller material - a `MeshDraw` has no colour to put in the record,
+so it always reads the bundled white paint until `OverrideParams` lands - which
+leaves the frame block and the instance array as the whole usable contract. The
+`procedural` demo declares exactly those two, carries no parameters at all, and
+puts its per-object colour in its own vertices, which is what makes the
+constraint livable rather than merely legal.
+
 **Two findings that bind the bundled shaders themselves:**
 
 - **A declared-but-unused binding is frame-fatal.** Reflection is naga, which
@@ -2734,6 +2745,20 @@ without the `wgpu` plugin at all; and a headless engine is already a named
 concept. **`go test ./cmd/scene/...` is the one command the implementation effort
 runs.** Each demo additionally prints its own key numbers on screen through
 canvas, so a human running it sees them without a second command.
+
+Two things the shared harness owes a demo beyond the counts. It reports a
+reflected shader layout only for the shaders it was told about, so a demo
+carrying its own WGSL states its own layout to the fake backend; and it records
+every storage-buffer binding, which is the only way a caller material can assert
+which of scene's three per-draw parameters it actually bound. Both are inert for
+a demo that wants neither.
+
+A demo that provokes a report on purpose must install its own
+`kernel.ErrorHandler`. The default one terminates the engine, which is right -
+most reports are bugs - but it means `procedural`, whose whole point is that a
+released ref is reported and skipped, would otherwise shut its window on the
+first swap. It survives exactly that report, matched by mesh id, and terminates
+on everything else.
 
 **Demo time is accumulated fixed steps, never wall clock**, so frame N is
 reproducible and a test drives N steps directly. Each demo starts at a documented
