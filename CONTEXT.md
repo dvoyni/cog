@@ -115,7 +115,7 @@ A ratio of the containing axis, except for pivots, where it is a ratio of the El
 _Avoid_: Percentage
 
 **Borrowed children**:
-An Element sequence whose storage remains caller-owned and stable while the UI frame is processed.
+An Element sequence the UI may hold by reference instead of copying. Its storage remains caller-owned and must stay stable while the UI frame is processed; whether any given sequence is borrowed or copied is unspecified.
 _Avoid_: Copied children, owned children
 
 **UI Frame**:

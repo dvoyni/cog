@@ -291,8 +291,17 @@ func (element Element) State(add, remove VisualState) Element {
 	return element
 }
 
-// Children borrows children until Process returns.
+// Children appends children to the element. The first sequence may be borrowed
+// rather than copied, so the caller must leave its storage unchanged until
+// Process returns, and must not rely on later mutations being observed: a
+// subsequent Children call appends into fresh storage instead.
 func (element Element) Children(children ...Element) Element {
+	if element.children == nil {
+		// Borrow the callers storage. The full slice expression caps capacity so a
+		// later Children call appends into fresh storage instead of the borrowed array.
+		element.children = children[:len(children):len(children)]
+		return element
+	}
 	element.children = append(element.children, children...)
 	return element
 }

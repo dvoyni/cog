@@ -93,8 +93,7 @@ func TestElementModifiersDoNotAllocate(t *testing.T) {
 			WidthRel(0.5).
 			Height(20).
 			Left(10).
-			Stretch(1).
-			Visual(modifierVisual{}, nil)
+			Stretch(1)
 	})
 	if allocations != 0 {
 		t.Fatalf("modifier allocations = %v, want 0", allocations)

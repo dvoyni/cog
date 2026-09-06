@@ -308,9 +308,9 @@ func TestOverlayButtonKeepsBackgroundAndBorderOutsideLabelPadding(t *testing.T) 
 	borderVisual := &recordingVisual{}
 	labelVisual := &recordingVisual{defaultSize: m.Vec2{X: 20, Y: 10}}
 	children := []Element{
-		NewElement().WidthRel(1).HeightRel(1).Visual(backgroundVisual, nil),
-		NewElement().WidthRel(1).HeightRel(1).Visual(borderVisual, nil),
-		NewElement().Left(0).Right(0).Top(0).Bottom(0).Padding(8, 16).Visual(labelVisual, nil),
+		NewElement().Fill().IgnoreLayout().Visual(backgroundVisual, nil),
+		NewElement().Fill().IgnoreLayout().Visual(borderVisual, nil),
+		NewElement().Fill().IgnoreLayout().Padding(8, 16).Visual(labelVisual, nil),
 	}
 	root := Button(ButtonParams{ID: "button"}).Width(100).Height(40).Children(children...)
 

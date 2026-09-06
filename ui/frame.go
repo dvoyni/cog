@@ -10,7 +10,7 @@ type frame struct {
 }
 
 // Add submits root on layer for the current update tick. The root value is
-// copied; descendant slices remain borrowed until the UI plugin processes them.
+// copied; descendant slices may remain borrowed until the UI plugin processes them.
 func (frame *frame) Add(layer canvas.Layer, root ...Element) {
 	frame.roots = append(frame.roots, root...)
 	for range root {

@@ -199,18 +199,40 @@ func TestPluginProcessesAndClearsEveryUpdate(t *testing.T) {
 	})
 }
 
-func TestFrameBorrowsDescendantsUntilProcessing(t *testing.T) {
-	first := &recordingVisual{defaultSize: m.Vec2{X: 10, Y: 10}}
-	replacement := &recordingVisual{defaultSize: m.Vec2{X: 10, Y: 10}}
-	children := []Element{NewElement().Visual(first, nil)}
-	var frame Frame
-	frame.Add(4, NewElement().Width(20).Height(20).Children(children...))
-	children[0] = NewElement().Visual(replacement, nil)
+func TestChildrenDoesNotCopyTheFirstSequence(t *testing.T) {
+	children := []Element{NewElement(), NewElement(), NewElement()}
+	var sink Element
+	allocations := testing.AllocsPerRun(100, func() {
+		sink = NewElement().Children(children...)
+	})
+	_ = sink
+	if allocations != 0 {
+		t.Fatalf("first Children allocations = %v, want 0", allocations)
+	}
+}
 
-	var processor processor
-	processor.process(canvas.LookupAccess{}, frame.roots, frame.layers, globalState{Screen: Rect{Width: 20, Height: 20}}, nil)
-	if len(first.states) != 0 || len(replacement.states) != 1 {
-		t.Fatalf("draw counts = original %d, replacement %d; want 0, 1", len(first.states), len(replacement.states))
+// A second Children call must append into fresh storage rather than the borrowed
+// array, so independent branches off one element cannot overwrite each other or
+// the callers spare capacity.
+func TestChildrenBranchesDoNotShareBorrowedStorage(t *testing.T) {
+	shared := make([]Element, 2, 8)
+	shared[0] = NewElement().ID("a")
+	shared[1] = NewElement().ID("b")
+
+	base := NewElement().Children(shared...)
+	first := base.Children(NewElement().ID("first"))
+	second := base.Children(NewElement().ID("second"))
+
+	if got := first.children[2].id; got != "first" {
+		t.Errorf("first branch third child = %q, want first", got)
+	}
+	if got := second.children[2].id; got != "second" {
+		t.Errorf("second branch third child = %q, want second", got)
+	}
+	for index, child := range shared[:cap(shared)][2:] {
+		if child.id != "" {
+			t.Errorf("caller spare capacity slot %d written: %q", index, child.id)
+		}
 	}
 }
 

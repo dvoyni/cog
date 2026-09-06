@@ -21,9 +21,10 @@ The zero value `ui.Element{}` is a valid empty declaration. It is useful for
 conditional composition and as a grid placeholder. `ui.NewElement()` returns
 the same empty declaration when a fluent chain is clearer.
 
-The root passed to `Frame.Add` is copied. Descendant slices remain borrowed and
-must stay unchanged until UI processing completes. Rebuild declarations on the
-next tick instead of retaining and mutating a submitted tree.
+The root passed to `Frame.Add` is copied. Descendant slices may be borrowed
+rather than copied, so they must stay unchanged until UI processing completes,
+and a mutation made after submission may or may not be observed. Rebuild
+declarations on the next tick instead of retaining and mutating a submitted tree.
 
 ## Plugin
 
