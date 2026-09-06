@@ -595,9 +595,25 @@ are ignored.
 
 **WebGPU gaps the loader papers over:** no `uint8` indices (widen to 16),
 no 3-component 8/16-bit vertex formats (dequantise), no fan or loop topology and
-no strips (converted to triangle lists at load, so every model mesh is one
-topology and batching, index buffers and the skinning path never branch on it),
-and no mipmap generation API (CPU box filter).
+no strips (converted to lists at load, so a model mesh is always a list and
+batching, index buffers and the skinning path never branch on strip or fan
+assembly), and no mipmap generation API (CPU box filter).
+
+**Two topologies survive the conversion, not one.** A triangle strip or fan
+becomes a triangle list; a line strip or loop becomes a **line list**, because
+that is what gfx carries and there is nothing to turn a line into that is still
+a line. Normals and tangents are triangle properties, so a line primitive gets
+whatever the file supplied and is shaded by its base colour and emissive alone.
+The invariant the batching and skinning paths actually rely on is that a model
+mesh never assembles as a strip or a fan, which holds.
+
+**A `POINTS` primitive is skipped and reported, and the rest of the model
+loads.** gfx has three topologies — triangle list, triangle strip, line list —
+and no point list, so there is nothing to convert a point cloud into. Adding a
+fourth is engine work behind [#29](https://github.com/dvoyni/cog/issues/29), not
+a loader decision, and the alternative here is losing a mesh that is mostly
+triangles to one debug primitive. `MeshPrimitiveModes` is the only asset in the
+repository this reaches, and it is where the report is asserted.
 
 ### Addressing
 
@@ -671,9 +687,15 @@ broadcast safe across tags.
 
 **Loading is asynchronous and a non-resident model is skipped, never
 substituted.** A draw of a non-resident path enqueues a load through
-`kernel.ExecuteCommandAsync` and draws nothing this frame — no placeholder. The
-command parses, decodes and bakes CPU-side holding **no locks**, then acquires
-`*gfx.ResourceQueue` write only for the upload.
+`kernel.ExecuteCommandAsync` and draws nothing this frame — no placeholder.
+
+**The load is two commands, not one**, because the kernel grants a command its
+declared locks for the whole of its body. The first parses, decodes and bakes
+CPU-side holding only the **filesystem read lock** — a shared lock nothing in
+scene's flush takes, so it blocks a filesystem writer and nothing else — and
+dispatches the second, which acquires `*gfx.ResourceQueue` **and `*Lookup`**
+write for the length of the upload alone. A single command would have had to
+hold the `Lookup` across the parse, which is the lock every frame needs.
 
 Synchronous loading, canvas's model, was rejected: applied to a 47 MiB model or
 a 24-joint three-clip rig it is a multi-hundred-millisecond hitch mid-frame.
@@ -700,6 +722,18 @@ and per-texture samplers rule the atlas out). Keyed by **resolved storage path**
 and shared across models; GLB-embedded images key on `(modelPath, imageIndex)`.
 **No refcount**: nothing unloads automatically, so there is nothing for a count
 to drive.
+
+**The colour space is part of the key**, because it is the *slot's* property and
+not the image's: base colour and emissive are gamma-encoded pictures, and
+metallic-roughness, normal and occlusion are data. One image bound to both kinds
+of slot is therefore two GPU textures, and it has to be — sampling a normal map
+through an sRGB view is a wrong picture with nothing in the frame to explain it.
+
+**The cache is consulted at upload, not at parse**, because the parse holds no
+`Lookup` lock. The cost is that two models naming one external image both decode
+it and only the first uploads it; within a model the decode is deduplicated by
+the same key, which is what makes `TextureSettingsTest`'s three images back nine
+textures with three decodes.
 
 **Unload is explicit and lands at the frame boundary**, so a same-frame unload
 never dangles a live draw. `UnloadModel` frees geometry, baked poses and

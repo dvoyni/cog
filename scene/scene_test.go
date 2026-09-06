@@ -3,8 +3,10 @@ package scene
 import (
 	"context"
 	"io/fs"
+	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/dvoyni/cog/app"
 	"github.com/dvoyni/cog/gfx"
@@ -258,11 +260,37 @@ func lookupProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupProbeRequest, looku
 		}
 }
 
+// errorSink collects reports under a mutex. A model load reports from its own
+// goroutine rather than from the flush the test drives, which is the whole
+// point of "an error can outlive the draw call that caused it" - so the sink
+// that reads them has to be safe to read from a different one.
+type errorSink struct {
+	mu   sync.Mutex
+	errs []error
+}
+
+func (s *errorSink) add(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.errs = append(s.errs, err)
+}
+
+func (s *errorSink) snapshot() []error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]error(nil), s.errs...)
+}
+
 type harness struct {
 	kernel   kernel.Executioner
 	backend  *testBackend
 	reported *[]error
+	sink     *errorSink
 }
+
+// errors reports what the engine has reported so far, safely to read while a
+// load goroutine may still be running.
+func (h *harness) errors() []error { return h.sink.snapshot() }
 
 func newHarness(t testing.TB, record func(*OpQueue)) *harness {
 	t.Helper()
@@ -283,17 +311,34 @@ func newHarnessWithErrors(t testing.TB, record func(*OpQueue), reported *[]error
 	return newHarnessRecording(t, func(q *OpQueue, _ *gfx.OpQueue) { record(q) }, reported)
 }
 
+// newHarnessWithFiles is newHarness over a filesystem holding the given
+// files, which is how a model test hands scene a glTF file to load without
+// this package growing a testdata directory.
+func newHarnessWithFiles(t testing.TB, files fstest.MapFS, record func(*OpQueue)) *harness {
+	t.Helper()
+	var reported []error
+	return newHarnessOver(t, files, func(q *OpQueue, _ *gfx.OpQueue) { record(q) }, &reported)
+}
+
 func newHarnessRecording(t testing.TB, record func(*OpQueue, *gfx.OpQueue), reported *[]error) *harness {
+	return newHarnessOver(t, fstest.MapFS{}, record, reported)
+}
+
+func newHarnessOver(
+	t testing.TB, files fstest.MapFS,
+	record func(*OpQueue, *gfx.OpQueue), reported *[]error,
+) *harness {
 	t.Helper()
 	backend := &testBackend{}
+	sink := &errorSink{}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	configs := map[kernel.PluginName]any{
-		storage.Name: storage.DefaultConfig("scene-test").WithReadFS("test", 10, fs.FS(fstest.MapFS{})),
+		storage.Name: storage.DefaultConfig("scene-test").WithReadFS("test", 10, fs.FS(files)),
 		Name:         DefaultConfig(),
 	}
 	engine := kernel.New(configs).
-		Handler(func(err error) bool { *reported = append(*reported, err); return false }).
+		Handler(func(err error) bool { sink.add(err); *reported = append(*reported, err); return false }).
 		WithPlugins(storage.New(), gfx.New(), New(), recordPlugin{record: record})
 	go engine.Run(ctx)
 	<-engine.Ready()
@@ -303,12 +348,30 @@ func newHarnessRecording(t testing.TB, record func(*OpQueue, *gfx.OpQueue), repo
 	k.ExecuteCommand[app.SetViewportCmd](app.SetViewportRequest{
 		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
 	})
-	return &harness{kernel: k, backend: backend, reported: reported}
+	return &harness{kernel: k, backend: backend, reported: reported, sink: sink}
 }
 
 func (h *harness) frame() {
 	h.kernel.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
 	h.kernel.PublishEvent(app.RenderEvent{}).Wait()
+}
+
+// frameUntil runs frames until ready, which is how a test waits on an
+// asynchronous load: the parse and the upload are two commands on their own
+// goroutines, so residency lands some frames after the draw that asked for it.
+func (h *harness) frameUntil(t testing.TB, what string, ready func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		h.frame()
+		if ready() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // inspect runs fn inside a handler holding scene's OpQueue write lock.

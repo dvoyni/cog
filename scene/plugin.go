@@ -52,6 +52,10 @@ type Plugin struct {
 	// so that a temporary ref resolves exactly the way a durable one does and
 	// everything downstream is blind to which kind it has.
 	temporaries []meshRecord
+	// modelWorlds is the frame's expanded model instance matrices. A draw
+	// record points into it, so it is sized once before any record is written
+	// and never appended to while records already point at it.
+	modelWorlds []m.Mat4
 	// meshReported is the set of mesh ids already reported this frame, so a
 	// released mesh named by a hundred draws is one report rather than a
 	// hundred.
@@ -88,6 +92,10 @@ func (p *Plugin) Register(registrar *kernel.Registrar, value any) error {
 	registrar.InitResource(newLookup(config))
 	registrar.Subscribe[UpdateEventHandler](p.flush).
 		Last().Before[gfx.UpdateEventHandler]()
+	// The load's two hops: the parse, which holds only the filesystem, and the
+	// upload, which holds the Lookup and the resource queue and nothing else.
+	registrar.HandleCommand[loadModelCmd](loadModelCmdImpl)
+	registrar.HandleCommand[installModelCmd](installModelCmdImpl)
 	return nil
 }
 
@@ -167,6 +175,9 @@ func (p *Plugin) flushFrame(
 	})
 	p.buildTemporaries(report, write)
 	p.materials.reset(lookup.ensureBundled(bakeTexture))
+	// Model draws expand into ordinary draw records before anything looks at
+	// one, so culling, sorting and packing are blind to where a draw came from.
+	p.expandModels(k, lookup, write)
 	p.prepareDraws(report, lookup, write, bake, write.flushDraws())
 	p.preparedLights = prepareLights(report, p.preparedLights, write.flushLights())
 	for i := range cameras {

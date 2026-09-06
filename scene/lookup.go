@@ -35,6 +35,20 @@ type Lookup struct {
 	// unit holds scene's own meshes - the box, sphere and plane the debug
 	// vocabulary draws - each baked on first use.
 	unit [shapeCount]MeshRef
+	// models is the model table, keyed by the path that is a model's only cache
+	// key, and textures the scene-owned texture cache every resident model's
+	// materials bind out of. Neither is refcounted: nothing unloads
+	// automatically, so there is nothing for a count to drive.
+	models   map[string]*modelEntry
+	textures map[textureKey]gfx.TextureDescr
+	// defaults are the two 1x1 textures every empty PBR slot binds, baked on
+	// first use. hasDefaults rather than a zero test because a baked descriptor
+	// has no reserved zero value.
+	defaults    pbrDefaults
+	hasDefaults bool
+	// reported suppresses repeated reports for one model or texture path until
+	// it loads successfully or is unloaded - canvas's precedent.
+	reported map[string]struct{}
 	// bundled is the bundled PBR material, built on first use around the two
 	// default textures. It is not a package-level value because those textures
 	// are baked resources: the backend may not be Ready() at startup, and a
@@ -82,9 +96,13 @@ func (l *Lookup) ensureBundled(bake bakeTextureFunc) Material {
 	if l.bundled != nil {
 		return l.bundled
 	}
-	l.bundled = bundledPbr(pbrDefaults{
-		white:      bake(1, 1, gfx.FormatRGBA8, []byte{0xff, 0xff, 0xff, 0xff}),
-		flatNormal: bake(1, 1, gfx.FormatRGBA8, []byte{0x80, 0x80, 0xff, 0xff}),
-	})
+	if !l.hasDefaults {
+		l.defaults = pbrDefaults{
+			white:      bake(1, 1, gfx.FormatRGBA8, []byte{0xff, 0xff, 0xff, 0xff}),
+			flatNormal: bake(1, 1, gfx.FormatRGBA8, []byte{0x80, 0x80, 0xff, 0xff}),
+		}
+		l.hasDefaults = true
+	}
+	l.bundled = bundledPbr(l.defaults)
 	return l.bundled
 }

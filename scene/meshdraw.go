@@ -144,7 +144,8 @@ type temporaryMesh struct {
 
 // meshRecording is everything the frame's mesh calls own: the temporary meshes
 // minted into it, the bytes behind them, the transforms and parameters each
-// MeshDraw borrowed into it, and the mint errors the flush reports.
+// MeshDraw and ModelDraw borrowed into it, and the mint errors the flush
+// reports.
 //
 // It swaps with its published twin at the frame boundary along with the rest of
 // the recording, so a published Op's borrowed slices stay valid while the next

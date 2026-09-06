@@ -18,6 +18,7 @@ const (
 	OpMesh
 	OpPointLight
 	OpSpotLight
+	OpModel
 )
 
 // Op is a read-only view of one recorded operation, canvas's shape exactly: it
@@ -51,6 +52,11 @@ type Op struct {
 	// Light describes an OpPointLight or OpSpotLight, with Kind set by the
 	// call that recorded it. Layers is its layer mask.
 	Light LightDescr
+	// Path and Model describe an OpModel, and carry everything that call
+	// said, including its own Transform. Model's Transforms aliases the
+	// queue's frame arena, like every other borrowed slice scene hands back.
+	Path  string
+	Model ModelDraw
 }
 
 // PassView is the flush result for one pass: what scene decided, in numbers a

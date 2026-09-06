@@ -33,6 +33,11 @@ type opQueue struct {
 	calls []Op
 	// meshes is everything TemporaryMesh and Mesh recorded into this frame.
 	meshes meshRecording
+	// models is the frame's Model calls. They are kept apart from the draws
+	// because a model draw expands into one draw per primitive at flush time,
+	// and the expansion has to resolve residency first: a non-resident model
+	// contributes no draws at all.
+	models []modelDrawRecord
 	// frame counts recordings, and stamps every temporary MeshRef minted into
 	// this one. It is what makes a temporary ref used in a later frame
 	// detectable rather than a draw of whatever now holds its slot.
@@ -45,6 +50,7 @@ type opQueue struct {
 	publishedArena  []Pass
 	publishedCalls  []Op
 	publishedMeshes meshRecording
+	publishedModels []modelDrawRecord
 	publishedFrame  uint32
 	// cameraOps is the published frame's camera registrations as Ops, in id
 	// order, which Ops reports ahead of the draw calls.
@@ -94,6 +100,8 @@ func (q *opQueue) Reset() {
 	clear(q.calls)
 	q.calls = q.calls[:0]
 	q.meshes.reset()
+	clear(q.models)
+	q.models = q.models[:0]
 }
 
 // Ops appends the published frame's recorded operations to dst, in flush order:
@@ -135,6 +143,7 @@ func (q *opQueue) beginFlush() []cameraRecord {
 	// The layout cache is interning, not recording, so it stays with the half
 	// that keeps recording rather than travelling with the published frame.
 	q.meshes, q.publishedMeshes = q.publishedMeshes, q.meshes
+	q.models, q.publishedModels = q.publishedModels, q.models
 	q.meshes.layouts, q.publishedMeshes.layouts = q.publishedMeshes.layouts, q.meshes.layouts
 	q.publishedFrame, q.frame = q.frame, q.frame+1
 	clear(q.cameras)
@@ -146,6 +155,8 @@ func (q *opQueue) beginFlush() []cameraRecord {
 	clear(q.calls)
 	q.calls = q.calls[:0]
 	q.meshes.reset()
+	clear(q.models)
+	q.models = q.models[:0]
 
 	slices.SortFunc(q.published, func(a, b cameraRecord) int { return cmp.Compare(a.id, b.id) })
 	q.passViews = q.passViews[:0]
@@ -196,6 +207,10 @@ type drawRecord struct {
 	// zero mesh there is a draw of nothing, which is what a rejected mint
 	// yields.
 	shape unitShape
+	// pbr is the bundled-PBR record a model primitive brought with it, owned
+	// by the resident model entry and shared by every draw of it. It is nil
+	// for everything else, which synthesises its record from the draw.
+	pbr *scenePbrRecord
 	// material is the scene material the draw named, or nil for the bundled
 	// PBR. Every debug shape leaves it nil, which is what makes a draw literal
 	// that omits the field untouched by the field existing.
@@ -256,6 +271,9 @@ func (r drawRecord) world() m.Mat4 {
 // emissiveFactor, which the shader adds after shading, and the base colour is
 // black so the lights contribute nothing to it.
 func (r drawRecord) pbrRecord() scenePbrRecord {
+	if r.pbr != nil {
+		return *r.pbr
+	}
 	record := defaultPbrRecord()
 	record.MetallicFactor = 0
 	if r.shape == shapeNone {
@@ -272,6 +290,21 @@ func (r drawRecord) pbrRecord() scenePbrRecord {
 
 // draw records one draw of any kind. Every recording call is sugar over it.
 func (q *opQueue) draw(record drawRecord) { q.draws = append(q.draws, record) }
+
+// appendFlushDraw adds one draw to the frame the flush is consuming. It is how
+// a model draw expands: the records land in the same list culling, sorting and
+// packing already walk, so nothing downstream can tell an expanded draw from a
+// recorded one. Appending here rather than into the recording half is what
+// keeps the expansion out of the next frame.
+func (q *opQueue) appendFlushDraw(record drawRecord) {
+	q.publishedDraws = append(q.publishedDraws, record)
+}
+
+// drawCount reports how many draws the flush has to consume so far, which is
+// the recording ordinal the next appended record takes. Model expansion needs
+// it to stamp a group: the ordinal is what makes a group unique within a frame
+// with no counter to reset.
+func (q *opQueue) drawCount() int { return len(q.publishedDraws) }
 
 // publishedDraws lists the draws the flush is consuming, in recording order.
 func (q *opQueue) flushDraws() []drawRecord { return q.publishedDraws }
