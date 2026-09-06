@@ -353,20 +353,61 @@ func (p *Plugin) flushPass(
 	// removes any class bit from the key.
 	sortEntries(p.build.opaque)
 	sortEntries(p.build.blend)
-	for _, class := range [2][]sortEntry{p.build.opaque, p.build.blend} {
-		for _, entry := range class {
-			index := survivors[entry.draw].draw
+	// The opaque class packs an instanced call's survivors as one batch; the
+	// blend class packs one batch per entry, which is what keeps its back-to-
+	// front order intact.
+	for _, class := range [2]sortClass{{p.build.opaque, true}, {p.build.blend, false}} {
+		for i := 0; i < len(class.entries); {
+			run := 1
+			if class.batched {
+				run = groupRun(class.entries[i:], survivors, draws)
+			}
+			p.build.worlds = p.build.worlds[:0]
+			for _, entry := range class.entries[i : i+run] {
+				p.build.worlds = append(p.build.worlds, p.prepared[survivors[entry.draw].draw].world)
+			}
+			index := survivors[class.entries[i].draw].draw
 			prepared := &p.prepared[index]
 			material, _ := p.materials.entry(prepared.interned, tag)
 			mesh, _ := p.resolveMesh(lookup, write, prepared.mesh)
 			p.build.addDraw(pending, mesh, prepared.mesh.ID(), material,
-				prepared.world, draws[index].pbrRecord(), draws[index].params)
-			result.Instances++
+				p.build.worlds, draws[index].pbrRecord(), draws[index].params)
+			result.Instances += run
+			i += run
 		}
 	}
 	p.build.endPass(pending)
 	write.publishPass(result)
 	write.publishBatches(p.build.batches)
+}
+
+// sortClass is one of the two classes a pass emits, with whether its entries
+// batch. Only the opaque class does: a blended instanced draw is N entries
+// precisely so that each lands at its own depth.
+type sortClass struct {
+	entries []sortEntry
+	batched bool
+}
+
+// groupRun counts the entries at the head of a sorted class that came from one
+// instanced call and so pack as a single batch. An ungrouped draw runs alone,
+// which is what leaves the deferred collapse of consecutive equal draws
+// deferred.
+//
+// A group's survivors reach here contiguous, and nothing else can land between
+// them: the instances of one call share a mesh and a material and therefore a
+// sort key, ties break on the recording ordinal, and every other draw was
+// recorded wholly before or wholly after the call.
+func groupRun(entries []sortEntry, survivors []survivor, draws []drawRecord) int {
+	group := draws[survivors[entries[0].draw].draw].group
+	if group == 0 {
+		return 1
+	}
+	run := 1
+	for run < len(entries) && draws[survivors[entries[run].draw].draw].group == group {
+		run++
+	}
+	return run
 }
 
 // cameraPosition reads the eye out of a camera's transform. Scale is ignored

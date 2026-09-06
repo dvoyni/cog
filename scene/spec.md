@@ -1538,6 +1538,24 @@ collapse will be **output-identical** when it lands
 - **A blend-class instanced draw splits into N single-instance sort entries.**
   Sorting the set by its nearest instance would composite visibly wrong.
 
+The batch is **the call, not the key**. Each record an instanced call expands
+into carries the call's group, and the flush packs a run of one group's
+survivors as one batch — one draw call, one 256-byte material record, N
+contiguous instances. Two separate calls of the same mesh and material stay two
+batches, and so do a `WireBox`'s twelve edges; merging those is the deferred
+automatic collapse, and doing it early here would make that ticket unfalsifiable.
+
+A group's survivors arrive at the packer contiguous with nothing between them,
+which is what lets the run be found with a scan rather than a second grouping
+pass: the instances of one call share a mesh and a material and therefore a sort
+key, the sort's final tiebreak is the recording ordinal, and every other draw was
+recorded wholly before or wholly after the call.
+
+**Batching is per pass**, because the sort is. An instanced crate two cameras
+both see is packed twice, once into each pass's instance slice, and a camera with
+a shadow pass and a forward pass packs it in both. Sharing one packing across
+passes would mean one sort across passes, which is not what a sort is for.
+
 ### The instance record
 
 `sceneInstance` is ~64 B: `{world: 3 × vec4, animOffset: u32, flags: u32, …}`,

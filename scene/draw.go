@@ -67,6 +67,9 @@ type frameBuild struct {
 	// gfx copies parameters into its own arena as it records, so one slice
 	// serves every draw in the frame.
 	params []gfx.ParameterDescr
+	// worlds is the scratch one batch's instance matrices are gathered into
+	// before they are packed, reused by every batch in the frame.
+	worlds []m.Mat4
 }
 
 func (b *frameBuild) reset() {
@@ -114,31 +117,38 @@ func (b *frameBuild) beginPass(descr gfx.PassDescr, block sceneFrameBlock) *pend
 	return &b.passes[len(b.passes)-1]
 }
 
-// addDraw packs one instance and its material record into the pass being
-// accumulated. firstInstance is relative to the pass's own slice, which is what
-// lets the draw read its instance with no offset plumbing of its own.
+// addDraw packs one batch into the pass being accumulated: one instance per
+// world matrix, packed contiguously, one material record, and one entry in the
+// pass's batch list. firstInstance is relative to the pass's own slice, which
+// is what lets the batch read its instances with no offset plumbing of its own
+// - WebGPU's instance_index starts at firstInstance, so the shader is the same
+// whether the batch holds one instance or a thousand.
 //
 // One record per batch, no dedupe: two meshes sharing a material produce two
 // byte-identical records, and collapsing them would cost a hash of every record
-// every frame to save an upload nobody has measured.
+// every frame to save an upload nobody has measured. A batch is one instanced
+// call's survivors, so while the automatic collapse of consecutive equal draws
+// is deferred the table degenerates to one record per draw for everything else.
 func (b *frameBuild) addDraw(
 	pass *pendingPass, mesh meshRecord, id uint32, entry materialEntry,
-	world m.Mat4, record scenePbrRecord, params []gfx.ParameterDescr,
+	worlds []m.Mat4, record scenePbrRecord, params []gfx.ParameterDescr,
 ) {
 	first := (len(b.instances.bytes()) - pass.instanceOffset) / instanceSize
-	instance := packInstance(world)
-	b.instances.appendElement(&instance)
+	for _, world := range worlds {
+		instance := packInstance(world)
+		b.instances.appendElement(&instance)
+	}
 	b.draws = append(b.draws, pendingDraw{
 		mesh:           mesh.descr(),
 		material:       entry.descr,
 		materialOffset: b.materials.appendRecord(&record),
 		firstInstance:  first,
-		instances:      1,
+		instances:      len(worlds),
 		params:         params,
 	})
 	b.batches = append(b.batches, BatchView{
 		MeshID: id, MaterialID: entry.materialID,
-		FirstInstance: first, InstanceCount: 1,
+		FirstInstance: first, InstanceCount: len(worlds),
 	})
 }
 

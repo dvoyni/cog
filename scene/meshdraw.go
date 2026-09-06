@@ -13,6 +13,15 @@ type MeshDraw struct {
 	// Transform places the single instance. Transforms, when it is non-empty,
 	// overrides it and places one instance per entry - a forest, a particle
 	// field, a tile floor, from one call.
+	//
+	// The entries are culled one at a time and the survivors pack contiguously,
+	// so the draw costs N sphere tests - exactly what N separate calls would
+	// have paid - and one draw call. A blended instanced draw is the exception:
+	// it splits back into one single-instance batch per surviving entry,
+	// because sorting the set by its nearest instance would composite visibly
+	// wrong. Per-instance animation is out of scope either way: the instances
+	// share the draw's animation, so a hundred trees sway in lockstep and a
+	// hundred independently-animated characters need a hundred calls.
 	Transform  Transform
 	Transforms []Transform
 	// Material is the scene material to draw with; nil is the bundled PBR. A
@@ -73,9 +82,11 @@ func (q *opQueue) Mesh(layers LayerMask, ref MeshRef, draw MeshDraw) {
 		q.draw(record)
 		return
 	}
-	// One record per instance. Culling is per instance and a blended draw sorts
-	// per instance, both of which fall out of this; collapsing the opaque ones
-	// back into a single batched draw is what #84 adds on top.
+	// One record per instance, tied together by a group. Culling is per
+	// instance and a blended draw sorts per instance, both of which fall out of
+	// that; the flush then packs an opaque group's survivors back into one
+	// batch, so the N records cost one draw call and one material record.
+	record.group = uint32(len(q.draws)) + 1
 	for _, transform := range transforms {
 		record.transform = transform
 		q.draw(record)

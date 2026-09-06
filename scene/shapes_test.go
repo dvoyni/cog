@@ -383,3 +383,25 @@ func TestEveryDebugShapeBindsTheBundledMaterial(t *testing.T) {
 func nearVec3(a, b m.Vec3) bool {
 	return math.Abs(float64(a.X-b.X)) < 1e-4 && math.Abs(float64(a.Y-b.Y)) < 1e-4 && math.Abs(float64(a.Z-b.Z)) < 1e-4
 }
+
+// A wire box's twelve edges share one mesh and one material, and stay twelve
+// single-instance batches. The batching the flush does is per instanced call;
+// collapsing consecutive equal draws recorded one at a time is deferred, and a
+// wire box is twelve separate draws by design.
+func TestAWireBoxStaysTwelveSingleInstanceBatches(t *testing.T) {
+	h := newHarness(t, func(q *OpQueue) {
+		q.Camera(testCamera, forwardCamera())
+		q.WireBox(0, m.Vec3{Z: -5}, m.Vec3{X: 1, Y: 1, Z: 1}, 0.05, testLineColor)
+	})
+	h.frame()
+
+	batches := h.passes()[0].Batches
+	if len(batches) != 12 {
+		t.Fatalf("published %d batches, want the twelve edges: %+v", len(batches), batches)
+	}
+	for i, batch := range batches {
+		if batch.InstanceCount != 1 {
+			t.Fatalf("edge %d is a batch of %d instances, want 1", i, batch.InstanceCount)
+		}
+	}
+}

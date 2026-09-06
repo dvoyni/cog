@@ -505,3 +505,122 @@ func TestAMeshDrawTakesWhiteNonMetallicPaintFromTheBundledPbr(t *testing.T) {
 		t.Errorf("a debug box painted %v, want its own colour", shape.BaseColorFactor)
 	}
 }
+
+// An instanced opaque draw is one batch of its surviving instances: one gfx
+// draw call, one material record, and the survivors packed contiguously from
+// the batch's own firstInstance.
+func TestAnInstancedOpaqueDrawIsOneBatchOfItsSurvivors(t *testing.T) {
+	var ref MeshRef
+	h := newHarness(t, func(q *OpQueue) {
+		q.Camera(testCamera, forwardCamera())
+		q.Mesh(0, ref, MeshDraw{Transforms: []Transform{
+			At(0, 0, -5), At(0, 0, 5), At(2, 0, -5), At(-2, 0, -5),
+		}})
+	})
+	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	h.frame()
+
+	pass := h.passes()[0]
+	if pass.Recorded != 4 || pass.Culled != 1 || pass.Instances != 3 {
+		t.Fatalf("recorded %d, culled %d, packed %d; want 4, 1, 3",
+			pass.Recorded, pass.Culled, pass.Instances)
+	}
+	if len(pass.Batches) != 1 {
+		t.Fatalf("published %d batches, want the instanced call as one: %+v",
+			len(pass.Batches), pass.Batches)
+	}
+	if batch := pass.Batches[0]; batch.FirstInstance != 0 || batch.InstanceCount != 3 {
+		t.Fatalf("the batch spans instances [%d, %d), want [0, 3)",
+			batch.FirstInstance, batch.FirstInstance+batch.InstanceCount)
+	}
+	if len(h.backend.draws) != 1 {
+		t.Fatalf("the backend saw %d draw calls, want the one batch", len(h.backend.draws))
+	}
+	if draw := h.backend.draws[0]; draw.firstInstance != 0 || draw.instances != 3 {
+		t.Fatalf("drew %d instances from %d, want 3 from 0", draw.instances, draw.firstInstance)
+	}
+	if materials := h.backend.buffersBoundTo("scenePbrMaterial"); len(materials) != 1 {
+		t.Fatalf("scenePbrMaterial was bound %d times, want once per batch", len(materials))
+	}
+}
+
+// A blend-class instanced draw stays one sort entry, and so one batch, per
+// instance: sorting the set by its nearest instance would composite visibly
+// wrong, so the split survives the collapse the opaque class gets.
+func TestAnInstancedBlendDrawStaysOneBatchPerInstance(t *testing.T) {
+	var ref MeshRef
+	h := newHarness(t, func(q *OpQueue) {
+		q.Camera(testCamera, forwardCamera())
+		q.Mesh(0, ref, MeshDraw{
+			Material:   blendMaterial(1),
+			Transforms: []Transform{At(0, 0, -2), At(0, 0, -20), At(0, 0, -8)},
+		})
+	})
+	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	h.frame()
+
+	pass := h.passes()[0]
+	if pass.Instances != 3 {
+		t.Fatalf("packed %d instances, want 3", pass.Instances)
+	}
+	if len(pass.Batches) != 3 {
+		t.Fatalf("published %d batches, want one per instance: %+v", len(pass.Batches), pass.Batches)
+	}
+	for i, batch := range pass.Batches {
+		if batch.FirstInstance != i || batch.InstanceCount != 1 {
+			t.Fatalf("batch %d spans instances [%d, %d), want the single instance %d",
+				i, batch.FirstInstance, batch.FirstInstance+batch.InstanceCount, i)
+		}
+	}
+}
+
+// Two instanced calls of one mesh with one material stay two batches. What the
+// flush collapses is the instances of one call; collapsing consecutive equal
+// draws that were recorded separately is deferred.
+func TestTwoInstancedCallsStayTwoBatches(t *testing.T) {
+	var ref MeshRef
+	h := newHarness(t, func(q *OpQueue) {
+		q.Camera(testCamera, forwardCamera())
+		q.Mesh(0, ref, MeshDraw{Transforms: []Transform{At(0, 0, -5), At(1, 0, -5)}})
+		q.Mesh(0, ref, MeshDraw{Transforms: []Transform{At(2, 0, -5), At(3, 0, -5)}})
+	})
+	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	h.frame()
+
+	batches := h.passes()[0].Batches
+	if len(batches) != 2 {
+		t.Fatalf("published %d batches, want one per call: %+v", len(batches), batches)
+	}
+	if batches[0].FirstInstance != 0 || batches[0].InstanceCount != 2 ||
+		batches[1].FirstInstance != 2 || batches[1].InstanceCount != 2 {
+		t.Fatalf("the batches span %+v, want [0, 2) and [2, 4)", batches)
+	}
+}
+
+// Sorting is per pass, so an instanced draw two cameras both see is packed once
+// per pass - two batches of N rather than one shared batch. That is the cost of
+// the sort, and it is not worked around.
+func TestAnInstancedDrawIsPackedOncePerPass(t *testing.T) {
+	var ref MeshRef
+	h := newHarness(t, func(q *OpQueue) {
+		q.Camera(testCamera, forwardCamera())
+		q.Camera(testCamera+1, forwardCamera())
+		q.Mesh(0, ref, MeshDraw{Transforms: []Transform{At(0, 0, -5), At(1, 0, -5)}})
+	})
+	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	h.frame()
+
+	passes := h.passes()
+	if len(passes) != 2 {
+		t.Fatalf("published %d passes, want one per camera", len(passes))
+	}
+	for i, pass := range passes {
+		if len(pass.Batches) != 1 {
+			t.Fatalf("pass %d published %+v, want one batch", i, pass.Batches)
+		}
+		if batch := pass.Batches[0]; batch.FirstInstance != 0 || batch.InstanceCount != 2 {
+			t.Fatalf("pass %d packed instances [%d, %d), want [0, 2) of its own slice",
+				i, batch.FirstInstance, batch.FirstInstance+batch.InstanceCount)
+		}
+	}
+}

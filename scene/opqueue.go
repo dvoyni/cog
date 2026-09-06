@@ -213,6 +213,16 @@ type drawRecord struct {
 	// by its mesh's baked sphere.
 	bounds    m.Sphere
 	neverCull bool
+	// group ties together the records one instanced call expanded into, so the
+	// flush can pack their survivors as a single batch. It is the recording
+	// ordinal of the group's first record plus one - unique within a frame with
+	// no counter to reset - and zero for a record that stands alone.
+	//
+	// A debug shape leaves it zero even where a call makes several draws that
+	// would batch: a wire box's twelve edges share the unit box and the bundled
+	// material, and stay twelve batches, because collapsing draws that were
+	// recorded separately is the deferred automatic collapse, not this.
+	group uint32
 }
 
 // world resolves the draw's model matrix: its transform, with the internal
