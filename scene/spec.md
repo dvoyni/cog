@@ -140,7 +140,6 @@ func (q *OpQueue) Plane(layers LayerMask, center m.Vec3, size m.Vec2, color m.Co
 func (q *OpQueue) Line3D(layers LayerMask, start, end m.Vec3, thickness float32, color m.Color)
 func (q *OpQueue) WireBox(layers LayerMask, center, size m.Vec3, thickness float32, color m.Color)
 
-func (q *OpQueue) TemporaryTarget(w, h int, format gfx.TextureFormat) gfx.TargetDescr
 func (q *OpQueue) TemporaryMesh[TVertex VertexLayout](vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology) MeshRef
 
 func (q *OpQueue) Reset()
@@ -148,6 +147,14 @@ func (q *OpQueue) OpCount() int
 func (q *OpQueue) Ops(dst []Op) []Op
 func (q *OpQueue) Passes(dst []PassView) []PassView
 ```
+
+**Amended by [scene: multi-pass, pass tags and multi-tag materials](https://github.com/dvoyni/cog/issues/81):
+there is no `scene.OpQueue.TemporaryTarget`.** A temporary target's texture id is minted by the gfx
+backend through `gfx.OpQueue`, which a scene recorder does not hold, so a passthrough on scene's
+queue would either reach into a resource it has not locked or hand back a target with no id in it.
+Call `gfx.OpQueue.TemporaryTarget(w, h, format)` and pass the handle into `Pass.Target`, which takes
+it untouched; a recorder doing that locks both queues and orders itself before scene's flush.
+`TemporaryMesh` is unaffected — scene bakes meshes at flush through the resource queue it holds.
 
 The floor of the API is two statements:
 
