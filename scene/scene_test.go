@@ -197,8 +197,10 @@ func (b *testBackend) ReleaseBuffer(gfx.BufferID)   {}
 func (b *testBackend) ReleaseTexture(gfx.TextureID) {}
 
 // recordPlugin is the gameplay side of the harness: a separate plugin that
-// locks scene's OpQueue, exactly as a real recorder does.
-type recordPlugin struct{ record func(*OpQueue) }
+// locks scene's OpQueue, exactly as a real recorder does. It holds the gfx
+// queue as well, ordered ahead of scene's flush, so a recorder that allocates a
+// temporary target allocates it in the frame the pass using it is emitted into.
+type recordPlugin struct{ record func(*OpQueue, *gfx.OpQueue) }
 type recordHandler kernel.Subscription[app.UpdateEvent]
 
 // inspectCmd runs a callback inside a handler holding scene's OpQueue, so a
@@ -220,13 +222,15 @@ func (p recordPlugin) Dependencies() []kernel.PluginName {
 func (p recordPlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.Subscribe[recordHandler](func() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 		var queue kernel.Write[*OpQueue]
+		var gfxQueue kernel.Write[*gfx.OpQueue]
 		return func(access kernel.ResourceAccess) {
 				queue = access.GetWrite[*OpQueue]()
+				gfxQueue = access.GetWrite[*gfx.OpQueue]()
 			}, func(kernel.Kernel, app.UpdateEvent) error {
-				p.record(queue.Get())
+				p.record(queue.Get(), gfxQueue.Get())
 				return nil
 			}
-	})
+	}).Before[UpdateEventHandler]()
 	registrar.HandleCommand[inspectCmd](inspectCmdImpl)
 	registrar.HandleCommand[lookupProbeCmd](lookupProbeCmdImpl)
 	return nil
@@ -266,7 +270,20 @@ func newHarness(t testing.TB, record func(*OpQueue)) *harness {
 	return newHarnessWithErrors(t, record, &reported)
 }
 
+// newHarnessWithGfx is newHarness for a recorder that also allocates from the
+// gfx queue, the way an app rendering a camera into a temporary target does.
+func newHarnessWithGfx(t testing.TB, record func(*OpQueue, *gfx.OpQueue)) *harness {
+	t.Helper()
+	var reported []error
+	return newHarnessRecording(t, record, &reported)
+}
+
 func newHarnessWithErrors(t testing.TB, record func(*OpQueue), reported *[]error) *harness {
+	t.Helper()
+	return newHarnessRecording(t, func(q *OpQueue, _ *gfx.OpQueue) { record(q) }, reported)
+}
+
+func newHarnessRecording(t testing.TB, record func(*OpQueue, *gfx.OpQueue), reported *[]error) *harness {
 	t.Helper()
 	backend := &testBackend{}
 	ctx, cancel := context.WithCancel(context.Background())

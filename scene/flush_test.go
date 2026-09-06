@@ -308,3 +308,45 @@ func TestADegenerateSpotLightIsReportedOncePerFrame(t *testing.T) {
 		}
 	}
 }
+
+// A material with entries for two tags draws in both of a camera's passes, each
+// pass binding that tag's own gfx material, while a draw on the bundled PBR
+// appears in the forward pass alone. This is the shape shadows arrive in: a
+// second entry on a material, no call-site change.
+func TestAMultiTagMaterialDrawsInEveryPassItServes(t *testing.T) {
+	both := testMaterial(TagForward, "shadow")
+	h := newHarness(t, func(q *OpQueue) {
+		descr := forwardCamera()
+		descr.Passes = []Pass{
+			{Tag: "shadow", Order: -1000, Target: gfx.NoTarget(), Depth: gfx.DepthTarget(sizedTexture(800, 600))},
+			{Tag: TagForward},
+		}
+		q.Camera(testCamera, descr)
+		q.draw(drawRecord{transform: At(0, 0, -5), color: testBoxColor, material: both})
+		q.Box(0, At(1, 0, -5), testBoxColor)
+	})
+	h.frame()
+
+	passes := h.passes()
+	if len(passes) != 2 {
+		t.Fatalf("published %d passes, want 2", len(passes))
+	}
+	shadow, forward := passes[0], passes[1]
+	if shadow.Instances != 1 || forward.Instances != 2 {
+		t.Fatalf("shadow packed %d, forward %d; want 1 and 2", shadow.Instances, forward.Instances)
+	}
+	if len(shadow.Batches) != 1 || len(forward.Batches) != 2 {
+		t.Fatalf("shadow batches %v, forward %v; want 1 and 2", shadow.Batches, forward.Batches)
+	}
+	// One material id per (material, tag): the shadow entry is a different gfx
+	// material from the forward one, and neither is the bundled PBR's.
+	shadowID := shadow.Batches[0].MaterialID
+	for _, batch := range forward.Batches {
+		if batch.MaterialID == shadowID {
+			t.Fatalf("the forward pass drew with the shadow entry's material id %d", shadowID)
+		}
+	}
+	if len(h.backend.draws) != 3 {
+		t.Fatalf("gfx draws = %d, want 3 (1 shadow + 2 forward)", len(h.backend.draws))
+	}
+}

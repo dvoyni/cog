@@ -319,3 +319,86 @@ func TestAFrameBeforeTheWindowIsKnownIsSkippedSilently(t *testing.T) {
 		t.Fatalf("reported = %v, want nothing", reported)
 	}
 }
+
+func TestColourIsAlwaysKeptAndAutomaticDepthDiscarded(t *testing.T) {
+	// Store ops are inferred, not exposed: a pass that borrows the pooled
+	// depth texture has nothing to keep it for, so every forward pass gets the
+	// tiled-GPU discard for free, and colour is what the pass is for.
+	// Both passes clear depth so that gfx executes them: an empty pass with no
+	// clear has no effect, and gfx drops it rather than scene.
+	h := newHarness(t, func(q *OpQueue) {
+		descr := simpleCamera()
+		descr.Passes = []Pass{
+			{Tag: "offscreen", Target: gfx.TextureTarget(sizedTexture(256, 256), 0, 0), ClearDepth: &depthClearFar},
+			{ClearDepth: &depthClearFar},
+		}
+		q.Camera(cameraMain, descr)
+	})
+	h.frame()
+
+	if len(h.backend.passes) != 2 {
+		t.Fatalf("gfx passes = %d, want 2", len(h.backend.passes))
+	}
+	for i, pass := range h.backend.passes {
+		if pass.Store != gfx.StoreKeep {
+			t.Errorf("pass %d colour store = %v, want StoreKeep", i, pass.Store)
+		}
+		if pass.DepthStore != gfx.StoreDiscard {
+			t.Errorf("pass %d depth store = %v, want StoreDiscard for automatic depth", i, pass.DepthStore)
+		}
+	}
+}
+
+func TestATemporaryTargetPassTakesItsAspectFromItsSize(t *testing.T) {
+	// The target is gfx's handle passed through untouched, so a frame-local one
+	// carries its size the way a durable texture does, and the frustum follows
+	// it rather than the window.
+	h := newHarnessWithGfx(t, func(q *OpQueue, g *gfx.OpQueue) {
+		descr := CameraDescr{FovY: math.Pi / 2, Near: 1, Far: 10}
+		black := m.Color{A: 1}
+		descr.Passes = []Pass{{Target: g.TemporaryTarget(400, 100, gfx.FormatRGBA8Srgb), ClearColor: &black}}
+		q.Camera(cameraMain, descr)
+	})
+	h.frame()
+
+	passes := h.passes()
+	if len(passes) != 1 {
+		t.Fatalf("passes = %d, want 1", len(passes))
+	}
+	// At 5 deep a 4:1 frustum is 20 wide either side; the window's 4:3 would
+	// be under 7.
+	if !passes[0].Frustum.ContainsSphere(m.Vec3{X: 19, Z: -5}, 0) {
+		t.Error("the temporary-target pass culled a point inside a 4:1 frustum")
+	}
+	if passes[0].Frustum.ContainsSphere(m.Vec3{X: 21, Z: -5}, 0) {
+		t.Error("the temporary-target pass kept a point outside a 4:1 frustum")
+	}
+	if len(h.backend.passes) != 1 || h.backend.passes[0].Screen {
+		t.Fatalf("gfx passes = %+v, want one pass into the temporary texture", h.backend.passes)
+	}
+}
+
+func TestPassLabelsNameTheCameraAndTag(t *testing.T) {
+	// The label is synthesised for the debugger and never published: PassView
+	// carries the id and tag it is built from instead.
+	const id CameraID = -7
+	h := newHarness(t, func(q *OpQueue) {
+		descr := simpleCamera()
+		descr.Passes = []Pass{
+			{Tag: "shadow", Order: -1000, Target: gfx.NoTarget(), Depth: gfx.DepthTarget(sizedTexture(1024, 1024)), ClearDepth: &depthClearFar},
+			{ClearDepth: &depthClearFar},
+		}
+		q.Camera(id, descr)
+	})
+	h.frame()
+
+	if len(h.backend.passes) != 2 {
+		t.Fatalf("gfx passes = %d, want 2", len(h.backend.passes))
+	}
+	if got := h.backend.passes[0].Label; got != "scene.camera-7.shadow" {
+		t.Errorf("shadow label = %q, want scene.camera-7.shadow", got)
+	}
+	if got := h.backend.passes[1].Label; got != "scene.camera-7.forward" {
+		t.Errorf("forward label = %q, want scene.camera-7.forward", got)
+	}
+}

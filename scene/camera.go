@@ -12,7 +12,11 @@ import (
 //
 // gfx reserves no ranges, so a camera interleaves with canvas by taking an
 // order between two layer values. Scene cameras conventionally take negative
-// ids when canvas draws entirely over them.
+// ids when canvas draws entirely over them, since an app's canvas layers
+// usually start at zero. Two recorders emitting passes at an equal Order is an app-level bug
+// that promises nothing: gfx breaks the tie by declaration sequence, and canvas
+// and scene flush from separate subscriptions with no order defined between
+// them, so which one lands first is not a property the app can rely on.
 type CameraID gfx.Order
 
 // ProjectionKind selects how a camera flattens the world.
@@ -34,10 +38,30 @@ const TagForward PassTag = "forward"
 
 // Pass is one render pass a camera emits. Its zero value is the forward pass
 // into the screen with automatic depth, which is what the default pass is.
+//
+// Target is the gfx handle passed through untouched: the screen sentinel, a
+// durable texture from the resource queue, or a frame-local target from
+// gfx.OpQueue.TemporaryTarget. Scene keeps no name registry over it and offers
+// no allocator of its own, because minting a texture takes the gfx queue, which
+// a scene recorder does not hold; an app that renders a camera into a temporary
+// target locks both queues and hands the target across. A pass with NoTarget()
+// takes its size from an explicit depth texture, and one with neither, or with
+// NoTarget() and a ClearColor, is reported.
+//
+// Depth sharing with canvas: canvas declares DepthAuto on every pass it emits,
+// so a screen-sized camera pass and canvas draw against the same pooled depth
+// texture. That is harmless today, because no built-in canvas material tests
+// depth, but a caller-supplied depth-testing canvas material will interact with
+// the 3D depth left there. An app wanting isolation gets it by not ordering the
+// camera adjacent to canvas, or by giving the pass a depth texture of its own.
+//
+// Store ops are inferred, not exposed. Depth is kept iff Depth names a texture;
+// colour is always kept, and LoadDiscard on colour is not offered, since it
+// only pays for a pass that provably covers its whole target.
 type Pass struct {
 	Tag        PassTag         // zero reads as TagForward
 	Target     gfx.TargetDescr // zero is the screen sentinel; gfx.NoTarget() for depth-only
-	Depth      gfx.DepthDescr  // zero is gfx.DepthAuto()
+	Depth      gfx.DepthDescr  // zero is gfx.DepthAuto(), pooled by size and shared
 	ClearColor *m.Color        // nil preserves
 	ClearDepth *float32        // nil preserves; 1.0 is the useful value
 	Order      gfx.Order       // offset from the camera id, not an absolute
