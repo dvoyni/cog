@@ -37,6 +37,12 @@ type modelEntry struct {
 	primitives []modelPrimitive
 	materials  []modelMaterial
 	lights     []ModelLight
+	// scenes mirrors the file's scenes array, each entry naming the range of
+	// primitives it flattened to and the nodes within it a selector can
+	// address; defaultScene is the one an empty Scene selector takes. Both are
+	// taken from the load whole, because neither holds a GPU handle.
+	scenes       []loadedScene
+	defaultScene int
 	// neverCull is set when a primitive's POSITION accessor declared no
 	// min/max, which leaves the whole model with no bound to cull against.
 	neverCull bool
@@ -66,17 +72,6 @@ type modelMaterial struct {
 // under, cleared on a successful load and on unload - canvas's precedent.
 func modelReportKey(path string) string   { return "model:" + path }
 func textureReportKey(path string) string { return "texture:" + path }
-
-// residentModel returns one path's entry when it is resident, and nothing
-// otherwise. It triggers no load, so it is the read the flush's sizing pass
-// takes after requestModel has already had its chance to enqueue.
-func (l *Lookup) residentModel(path string) (*modelEntry, bool) {
-	entry, ok := l.models[path]
-	if !ok || entry.state != modelResident {
-		return nil, false
-	}
-	return entry, true
-}
 
 // requestModel returns one path's entry when it is resident and enqueues a load
 // when it is not. It is the one way a path enters residency, so a draw and a
@@ -167,6 +162,7 @@ func (l *Lookup) installModel(
 		entry.primitives = append(entry.primitives, placed)
 	}
 	entry.lights = loaded.lights
+	entry.scenes, entry.defaultScene = loaded.scenes, loaded.defaultScene
 	entry.neverCull = loaded.neverCull
 	entry.state = modelResident
 	// A successful load clears the model's report key, so a path that failed,

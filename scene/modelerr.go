@@ -69,3 +69,65 @@ func (e ErrModelBoundsMissing) Error() string {
 		"scene: model %q has a primitive whose POSITION accessor declares no min/max, so it is never culled",
 		e.Model)
 }
+
+// ErrModelNodeDuplicated reports two nodes of one file sharing a name. A Node
+// selector is the first depth-first match, so the second is unaddressable and
+// the file has to be renamed for it to be drawn on its own. The model loads
+// either way: the duplicate costs nothing to anything but the selector.
+type ErrModelNodeDuplicated struct {
+	Model string
+	Node  string
+}
+
+func (e ErrModelNodeDuplicated) Error() string {
+	return fmt.Sprintf(
+		"scene: model %q has more than one node named %q, so a Node selector reaches only the first",
+		e.Model, e.Node)
+}
+
+// ErrModelSceneMissing reports a draw naming a scene the file does not carry.
+// The draw is skipped and never falls back to the default scene, for the same
+// reason an unmatched node does not fall back to the whole file.
+//
+// glTF scene names are optional, and a file whose scenes are unnamed has no
+// addressable scene but its default - which is what an empty Scene selects.
+type ErrModelSceneMissing struct {
+	Model string
+	Scene string
+}
+
+func (e ErrModelSceneMissing) Error() string {
+	return fmt.Sprintf("scene: model %q has no scene named %q, so the draw was skipped",
+		e.Model, e.Scene)
+}
+
+// ErrModelNodeMissing reports a draw naming a node the selected scene does not
+// carry. The draw is skipped and never falls back to the whole scene: one
+// typo'd node name rendering an entire building at the origin is the worse
+// failure of the two.
+type ErrModelNodeMissing struct {
+	Model string
+	Scene string
+	Node  string
+}
+
+func (e ErrModelNodeMissing) Error() string {
+	return fmt.Sprintf("scene: model %q has no node named %q, so the draw was skipped",
+		e.Model, e.Node)
+}
+
+// ErrModelNodeDegenerate reports a Node draw of a node whose authored world
+// transform collapses an axis and so cannot be inverted. Re-rooting is exactly
+// that inverse, so there is nothing to draw the subtree through; a whole-scene
+// draw of the same file is unaffected and still draws it flat where the file
+// put it.
+type ErrModelNodeDegenerate struct {
+	Model string
+	Node  string
+}
+
+func (e ErrModelNodeDegenerate) Error() string {
+	return fmt.Sprintf(
+		"scene: node %q of model %q has a collapsed world transform, which cannot be re-rooted, so the draw was skipped",
+		e.Node, e.Model)
+}

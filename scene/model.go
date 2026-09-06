@@ -9,11 +9,11 @@ import (
 // A zero ModelDraw is a valid draw of the file's default scene at the origin,
 // culled by the bounds the file declares.
 //
-// The fields the specification's ModelDraw also carries - Scene and Node
-// selectors, ClipPlays, MorphWeights, Material and OverrideParams - arrive with
-// the tickets that implement them. A field that parses and does nothing is
-// worse than an absent one: it compiles at the call site and renders the wrong
-// picture with nothing to explain it.
+// The fields the specification's ModelDraw also carries - ClipPlays,
+// MorphWeights, Material and OverrideParams - arrive with the tickets that
+// implement them. A field that parses and does nothing is worse than an absent
+// one: it compiles at the call site and renders the wrong picture with nothing
+// to explain it.
 type ModelDraw struct {
 	// Transform places the single instance. Transforms, when it is non-empty,
 	// overrides it and places one instance per entry, exactly as MeshDraw does.
@@ -24,6 +24,28 @@ type ModelDraw struct {
 	// a hundred independently-animated characters is a hundred.
 	Transform  Transform
 	Transforms []Transform
+
+	// Scene names an entry in the file's scenes array; empty is the file's
+	// declared default. glTF scene names are optional, so a file whose scenes
+	// are unnamed has no addressable scene but that default.
+	//
+	// Node names a node within that scene, and empty is the whole scene. It is
+	// a plain name matched against the first depth-first node carrying it, not
+	// a slash path: a path would make the selector a parsed string, and glTF
+	// node names are not unique enough to make one mean anything.
+	//
+	// A Node draw re-roots. The node's authored world transform inside the file
+	// is discarded and Transform replaces it, descendants keeping their
+	// relative transforms, so props.glb with Node "crate" behaves as an
+	// independent asset however the artist laid the file out. An empty Node
+	// keeps the scene's root transforms, because a scene is authored as one
+	// unit.
+	//
+	// Neither selector falls back. A Scene or Node that matches nothing skips
+	// the draw and reports once: one typo'd node name rendering an entire
+	// building at the origin is the worse failure.
+	Scene string
+	Node  string
 }
 
 // ModelLight is one KHR_lights_punctual light a model file declares, in the
@@ -52,9 +74,13 @@ type ModelLight struct {
 // the expansion needs the path to be resolved against residency first - a
 // non-resident model contributes no draws at all.
 type modelDrawRecord struct {
-	layers    LayerMask
-	path      string
-	transform Transform
+	layers LayerMask
+	path   string
+	// scene and node are the draw's selectors, resolved against the resident
+	// entry at expansion rather than at record: the path may not be resident
+	// yet, and a selector means nothing until it is.
+	scene, node string
+	transform   Transform
 	// transforms aliases the recording's transform arena, never the caller's
 	// array, and is empty for a single-instance draw.
 	transforms []Transform
@@ -85,7 +111,8 @@ func (q *opQueue) Model(layers LayerMask, path string, draw ModelDraw) {
 	draw.Transforms = transforms
 	q.calls = append(q.calls, Op{Kind: OpModel, Layers: layers, Path: path, Model: draw})
 	q.models = append(q.models, modelDrawRecord{
-		layers: layers, path: path, transform: draw.Transform, transforms: transforms,
+		layers: layers, path: path, scene: draw.Scene, node: draw.Node,
+		transform: draw.Transform, transforms: transforms,
 	})
 }
 
@@ -115,41 +142,63 @@ func (r modelDrawRecord) instances(single *[1]Transform) []Transform {
 // contiguous and share a group, so the packer's run scan finds them the way it
 // finds a Mesh call's. Instance-major would interleave two primitives' records
 // and break the contiguity the whole batching path assumes.
-func (p *Plugin) expandModels(k kernel.Kernel, lookup *Lookup, write *OpQueue) {
+func (p *Plugin) expandModels(
+	k kernel.Kernel, report func(error), lookup *Lookup, write *OpQueue,
+) {
 	models := write.flushModels()
 	if len(models) == 0 {
 		return
 	}
 	// The world matrices are sized in one pass before any of them is written,
 	// because a draw record points into this arena and appending to it while
-	// records already point at it would move the backing under them.
+	// records already point at it would move the backing under them. The
+	// selectors resolve in that same pass and the views are kept, so a draw
+	// whose Node matched nothing is skipped and reported exactly once rather
+	// than resolved twice.
 	var single [1]Transform
+	p.modelViews = grow(p.modelViews, len(models))
 	worlds := 0
 	for i := range models {
+		p.modelViews[i] = modelView{}
 		entry, ok := lookup.requestModel(k, models[i].path)
 		if !ok {
 			continue
 		}
-		worlds += len(entry.primitives) * len(models[i].instances(&single))
+		view, err := entry.view(models[i].path, models[i].scene, models[i].node)
+		if err != nil {
+			lookup.reportOnce(report, err.reportKey(), err)
+			continue
+		}
+		p.modelViews[i] = view
+		worlds += len(view.primitives) * len(models[i].instances(&single))
 	}
 	p.modelWorlds = grow(p.modelWorlds, worlds)
 	at := 0
 	for i := range models {
 		model := &models[i]
-		entry, ok := lookup.residentModel(model.path)
-		if !ok {
+		view := &p.modelViews[i]
+		if !view.resolved {
 			continue
 		}
 		instances := model.instances(&single)
-		for j := range entry.primitives {
-			primitive := &entry.primitives[j]
-			material := &entry.materials[primitive.material]
+		for j := range view.primitives {
+			primitive := &view.primitives[j]
+			material := &view.materials[primitive.material]
 			group := uint32(0)
 			if len(instances) > 1 {
 				group = uint32(write.drawCount()) + 1
 			}
 			for _, instance := range instances {
-				p.modelWorlds[at] = instance.Mat4().Mul(primitive.local)
+				// Re-rooting sits between the draw's own transform and the
+				// primitive's flattened one, which is exactly what "the draw's
+				// Transform replaces the node's authored world transform"
+				// means: descendants keep their relative places, the subtree as
+				// a whole moves to where the call put it.
+				world := instance.Mat4()
+				if view.rerooted {
+					world = world.Mul(view.reroot)
+				}
+				p.modelWorlds[at] = world.Mul(primitive.local)
 				write.appendFlushDraw(drawRecord{
 					layers:    model.layers,
 					transform: Transform{Matrix: &p.modelWorlds[at]},
@@ -157,7 +206,7 @@ func (p *Plugin) expandModels(k kernel.Kernel, lookup *Lookup, write *OpQueue) {
 					mesh:      primitive.mesh,
 					pbr:       &material.record,
 					bounds:    primitive.bounds,
-					neverCull: entry.neverCull,
+					neverCull: view.neverCull,
 					group:     group,
 				})
 				at++

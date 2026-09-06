@@ -622,6 +622,20 @@ the file's `scenes` array (empty is the default scene). `Node` names a node
 within that scene (empty is the whole scene) — a **plain name, first depth-first
 match**, not a slash path; a duplicate name reports once and keeps the first.
 
+Both selectors are **names, and glTF names are optional**. A file whose scenes
+carry no name has no addressable scene but its declared default, which is what
+an empty `Scene` selects; the same is true of a node. This is not hypothetical:
+`MultipleScenes` is the only file in the whole Khronos repository with more than
+one `scenes` entry, and **both of its scenes are unnamed, as are both of its
+nodes** — so the one asset that exists to exercise the `Scene` selector can only
+be drawn through its default. The alternative, reading the selector as a decimal
+index when no name matches, was rejected: it makes the selector a parsed string,
+which is the same objection that keeps selectors out of the path.
+
+A name is resolved **pre-order**, so a node sharing a name with one of its own
+descendants resolves to the node — which is what "first depth-first match" says,
+and what recording a subtree on the way back out would get backwards.
+
 **Nodes only.** glTF `mesh` names are optional, non-unique and carry no place in
 space, so a mesh is not addressable by name. Selectors are not encoded in the
 path (`"props.glb#crate"`), because that makes the cache key a parsed string.
@@ -636,9 +650,22 @@ transforms, because a scene *is* authored as one unit.
 scene. One typo'd node name rendering an entire building at the origin is the
 worse failure ([Model lookup facade](https://github.com/dvoyni/cog/issues/21)).
 
+**A node whose authored world transform collapses an axis skips too**, under its
+own report. Re-rooting *is* that transform's inverse, so a node scaled to zero
+on some axis has nothing to draw the subtree through. A whole-scene draw of the
+same file is unaffected and still draws it flat where the file put it, which is
+why this is the draw's report rather than the load's.
+
+**The report keys carry the selector, not just the path.** An unmatched node
+reports under `"model:" + path + "#" + node` and an unmatched scene under
+`"model:" + path + "#scene:" + scene`, so two typo'd names in one file are two
+reports, a bad scene and a bad node are two more, and a bad draw repeated every
+frame is still one. They are separate from the load's own `"model:" + path` key
+and are not cleared by a successful load: the file is fine, the selector is not.
+
 ### Flattening
 
-Load walks the selected scene depth-first into a flat, **subtree-contiguous**
+Load walks every scene in the file depth-first into a flat, **subtree-contiguous**
 list of `{primitive, localMatrix, material, joint}`, each `localMatrix`
 accumulated relative to the scene root. Depth-first order is exactly what makes
 a subtree a slice rather than a filter, so a `Node` draw takes that node's
@@ -654,6 +681,16 @@ Three consequences:
 - **A node animated by TRS channels becomes a degenerate single-joint skin** —
   see [Animation](#animation).
 
+**Every scene in the file is flattened, not only the default one.** `path` is a
+model's only cache key, so a draw naming a scene has no second load to trigger
+and every scene a selector can reach has to be there already. Geometry is
+interned per glTF primitive across the whole file, so two scenes sharing a mesh
+share the upload and the mesh id; what a second scene costs is its own placement
+records.
+
+The cycle guard is therefore **per scene, not per file**: a node two scenes both
+root belongs to both, and a file-wide guard would leave the second empty.
+
 **The re-root inverse is resolved per instance per frame, not precomputed at
 load.** If an ancestor of the named node is animated, the node's true world
 transform is time-varying and a load-time inverse is the wrong matrix — the crate
@@ -664,6 +701,19 @@ against the same baked pose rows, inverts, and folds the result into the
 instance world matrix. The packer already knows the clip and time, the chain is
 a handful of joints, and the empty case costs nothing
 ([Baked pose buffer and skinning contract](https://github.com/dvoyni/cog/issues/15)).
+
+**The chain is of *ancestors*, and a node animated in its own right keeps that
+animation.** Re-rooting replaces where a node sits, not what it does: a wheel
+node with a spin channel drawn by name spins about the draw's transform rather
+than being frozen. So the node itself is never in its own chain, and a `weights`
+channel is in nobody's — morph weights reshape a mesh and leave the node where
+it was.
+
+**Until a clip can play, the load-time inverse is the whole answer.** The chain
+is recorded now; the pack-time walk lands with the baked pose rows, because the
+baked pose of a model with no clip playing *is* the rest pose, and the inverse of
+the rest pose is what a load computes. Nothing is silently approximate in the
+meantime: there is as yet no clip to make the two differ.
 
 ### Materials and overrides
 
@@ -2923,10 +2973,19 @@ generated by `cmd/prepare-assets` so it is not a mystery blob either, failing
   reachable through a packed `MeshPrimitiveModes`.
 - **`CesiumMilkTruck`** is the re-rooting asset: `Wheels` and `Wheels.001` sit at
   ±1.43 on X beneath a `Yup2Zup` root, so re-rooting has a real authored world
-  transform to discard, at hierarchy depth 4.
+  transform to discard, at hierarchy depth 4. What it cannot carry is a
+  *positional* assertion of the re-root through pass results alone: the wheel
+  mesh's bounding sphere has radius 1.22 against an authored offset of 1.50, so a
+  frustum tight enough to reject the un-re-rooted sphere rejects the re-rooted one
+  too. Selection, subtree extent and the reports are asserted against the real
+  bytes; where the re-rooted subtree *lands* is asserted against the same
+  transform chain built in memory, until `Bounds` gives it a public answer.
 - **`MultipleScenes`** is the **only** file in the repository with more than one
   `scenes` entry, and therefore the only possible exercise of the `Scene`
-  selector.
+  selector — except that **both of its scenes are unnamed, and so are both of its
+  nodes**. A name-keyed selector reaches neither, so what the file exercises is
+  the declared default (`"scene": 1`) and the report an unmatched name fires.
+  There is no asset anywhere that a non-empty `Scene` can select.
 - **No chosen model is both skinned and morphed**, so **morph-then-skin ordering
   — the one thing glTF is emphatic about — is untested by the demo set.** Stated
   here rather than assumed away.

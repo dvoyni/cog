@@ -2,6 +2,7 @@ package scene
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/dvoyni/cog/gfx"
@@ -514,4 +515,231 @@ func TestEmissiveStrengthFallsBackOnRubbish(t *testing.T) {
 	if got := emissiveStrength("not a payload at all", 1); got != 1 {
 		t.Errorf("a payload of the wrong type = %v, want the default", got)
 	}
+}
+
+// namedSceneOf appends one named scene, so a Scene selector has something to
+// match. sceneOf is the single-scene shorthand every other test uses.
+func namedSceneOf(doc *gltf.Document, name string, roots ...int) {
+	doc.Scenes = append(doc.Scenes, &gltf.Scene{Name: name, Nodes: roots})
+}
+
+// animate adds a one-channel animation targeting a node's rotation, which is
+// all the recording of animated ancestors reads: a node an animation steers has
+// no fixed authored world transform, and neither has any descendant of it.
+func animate(doc *gltf.Document, node int) {
+	doc.Animations = append(doc.Animations, &gltf.Animation{
+		Channels: []*gltf.AnimationChannel{{
+			Target: gltf.AnimationChannelTarget{Node: gltf.Index(node), Path: gltf.TRSRotation},
+		}},
+	})
+}
+
+// Every scene in the file is flattened, not just the default one, because path
+// is a model's only cache key: a draw naming a scene cannot trigger a second
+// load of the same file.
+func TestConvertDocumentFlattensEveryScene(t *testing.T) {
+	doc := testDoc()
+	mesh := triangleMesh(doc, nil)
+	doc.Nodes = []*gltf.Node{
+		{Name: "a", Mesh: gltf.Index(mesh)},
+		{Name: "b", Mesh: gltf.Index(mesh)},
+		{Name: "c", Mesh: gltf.Index(mesh)},
+	}
+	namedSceneOf(doc, "first", 0)
+	namedSceneOf(doc, "second", 1, 2)
+	doc.Scene = gltf.Index(1)
+	model, err := convertDocument(doc, "m.glb", nil)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if len(model.scenes) != 2 {
+		t.Fatalf("scenes = %d, want the file's two", len(model.scenes))
+	}
+	if model.defaultScene != 1 {
+		t.Errorf("default scene = %d, want the declared 1", model.defaultScene)
+	}
+	// A scene is a contiguous range for the same reason a subtree is: the
+	// flatten walks one scene to completion before it starts the next.
+	if got := model.scenes[0]; got.name != "first" || got.start != 0 || got.end != 1 {
+		t.Errorf("scene 0 spans [%d,%d) as %q, want first over [0,1)", got.start, got.end, got.name)
+	}
+	if got := model.scenes[1]; got.name != "second" || got.start != 1 || got.end != 3 {
+		t.Errorf("scene 1 spans [%d,%d) as %q, want second over [1,3)", got.start, got.end, got.name)
+	}
+}
+
+// A node walked in two scenes is flattened in both. The cycle guard is per
+// scene, not per file, or the second scene would come out empty.
+func TestConvertDocumentFlattensASharedNodeInEverySceneThatRootsIt(t *testing.T) {
+	doc := testDoc()
+	mesh := triangleMesh(doc, nil)
+	doc.Nodes = []*gltf.Node{{Name: "shared", Mesh: gltf.Index(mesh)}}
+	namedSceneOf(doc, "first", 0)
+	namedSceneOf(doc, "second", 0)
+	model, err := convertDocument(doc, "m.glb", nil)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if len(model.primitives) != 2 {
+		t.Fatalf("primitives = %d, want one per scene", len(model.primitives))
+	}
+	for i, scene := range model.scenes {
+		if _, ok := scene.nodes["shared"]; !ok {
+			t.Errorf("scene %d does not address the shared node", i)
+		}
+	}
+}
+
+// Depth-first order is what makes a subtree a slice rather than a filter, so a
+// named node records the half-open range its own primitives and its
+// descendants' occupy.
+func TestConvertDocumentRecordsANamedNodesSubtreeAsASlice(t *testing.T) {
+	doc := testDoc()
+	mesh := triangleMesh(doc, nil)
+	doc.Nodes = []*gltf.Node{
+		{Name: "root", Children: []int{1, 3}},
+		{Name: "child", Children: []int{2}, Mesh: gltf.Index(mesh)},
+		{Name: "grandchild", Mesh: gltf.Index(mesh)},
+		{Name: "sibling", Mesh: gltf.Index(mesh)},
+	}
+	sceneOf(doc, 0)
+	model, err := convertDocument(doc, "m.glb", nil)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	nodes := model.scenes[0].nodes
+	for name, want := range map[string][2]int{
+		"root": {0, 3}, "child": {0, 2}, "grandchild": {1, 2}, "sibling": {2, 3},
+	} {
+		node, ok := nodes[name]
+		if !ok {
+			t.Fatalf("node %q is not addressable", name)
+		}
+		if node.start != want[0] || node.end != want[1] {
+			t.Errorf("node %q covers [%d,%d), want [%d,%d)",
+				name, node.start, node.end, want[0], want[1])
+		}
+	}
+}
+
+// Re-rooting discards the node's authored world transform, so the matrix
+// recorded for it is that transform's inverse: composed with the world the
+// flatten baked into the node's own primitives, it is the identity.
+func TestConvertDocumentRecordsTheInverseOfANodesAuthoredWorld(t *testing.T) {
+	doc := testDoc()
+	mesh := triangleMesh(doc, nil)
+	doc.Nodes = []*gltf.Node{
+		{Name: "root", Children: []int{1}, Translation: [3]float64{4, 0, 0}},
+		{
+			Name: "crate", Mesh: gltf.Index(mesh),
+			Translation: [3]float64{0, 3, 0}, Scale: [3]float64{2, 2, 2},
+		},
+	}
+	sceneOf(doc, 0)
+	model, err := convertDocument(doc, "m.glb", nil)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	node, ok := model.scenes[0].nodes["crate"]
+	if !ok || !node.rerootable {
+		t.Fatalf("crate = %+v, want a rerootable node", node)
+	}
+	if rerooted := node.reroot.Mul(model.primitives[node.start].local); !nearlyIdentity(rerooted) {
+		t.Errorf("re-rooting the crate leaves %v, want the identity", rerooted)
+	}
+}
+
+// A node whose authored world transform collapses an axis cannot be inverted,
+// so it is recorded as unrerootable rather than as a matrix that is quietly
+// wrong. The draw reports it, because a whole-scene draw of the same file is
+// unaffected.
+func TestConvertDocumentMarksACollapsedNodeUnrerootable(t *testing.T) {
+	doc := testDoc()
+	mesh := triangleMesh(doc, nil)
+	doc.Nodes = []*gltf.Node{{Name: "flat", Mesh: gltf.Index(mesh), Scale: [3]float64{1, 0, 1}}}
+	sceneOf(doc, 0)
+	model, err := convertDocument(doc, "m.glb", nil)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if node := model.scenes[0].nodes["flat"]; node.rerootable {
+		t.Errorf("flat covers [%d,%d) and claims to reroot; want it marked unrerootable",
+			node.start, node.end)
+	}
+}
+
+// A duplicate name keeps the first match, which is what "first depth-first
+// match" means, and says so once.
+func TestConvertDocumentKeepsTheFirstOfADuplicateNodeNameAndReports(t *testing.T) {
+	doc := testDoc()
+	mesh := triangleMesh(doc, nil)
+	doc.Nodes = []*gltf.Node{
+		{Name: "crate", Mesh: gltf.Index(mesh), Translation: [3]float64{1, 0, 0}},
+		{Name: "crate", Mesh: gltf.Index(mesh), Translation: [3]float64{2, 0, 0}},
+	}
+	sceneOf(doc, 0, 1)
+	model, err := convertDocument(doc, "m.glb", nil)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if node := model.scenes[0].nodes["crate"]; node.start != 0 {
+		t.Errorf("crate covers [%d,%d), want the first match's [0,1)", node.start, node.end)
+	}
+	duplicates := 0
+	for _, err := range model.reports {
+		var duplicate ErrModelNodeDuplicated
+		if errors.As(err, &duplicate) {
+			duplicates++
+			if duplicate.Node != "crate" {
+				t.Errorf("report names %q, want crate", duplicate.Node)
+			}
+		}
+	}
+	if duplicates != 1 {
+		t.Errorf("a duplicated name reported %d times, want once", duplicates)
+	}
+}
+
+// The chain recorded is of animated *ancestors*. A node animated in its own
+// right keeps that animation - re-rooting replaces where a node sits, not what
+// it does - so it is not its own ancestor, and an unanimated hierarchy records
+// nothing at all.
+func TestConvertDocumentRecordsAnimatedAncestorsAndNotTheNodeItself(t *testing.T) {
+	doc := testDoc()
+	mesh := triangleMesh(doc, nil)
+	doc.Nodes = []*gltf.Node{
+		{Name: "turntable", Children: []int{1}},
+		{Name: "arm", Children: []int{2}},
+		{Name: "crate", Mesh: gltf.Index(mesh)},
+		{Name: "still", Mesh: gltf.Index(mesh)},
+	}
+	sceneOf(doc, 0, 3)
+	animate(doc, 0)
+	animate(doc, 2)
+	model, err := convertDocument(doc, "m.glb", nil)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	nodes := model.scenes[0].nodes
+	if got := nodes["crate"].animated; len(got) != 1 || got[0] != 0 {
+		t.Errorf("the crate's animated ancestors = %v, want the turntable alone", got)
+	}
+	if got := nodes["still"].animated; len(got) != 0 {
+		t.Errorf("an unanimated hierarchy recorded %v, want nothing", got)
+	}
+	if got := nodes["turntable"].animated; len(got) != 0 {
+		t.Errorf("the turntable is recorded as its own ancestor: %v", got)
+	}
+}
+
+// nearlyIdentity reports whether a matrix is the identity to single-precision
+// tolerance, which composing an inverse with its original is.
+func nearlyIdentity(matrix m.Mat4) bool {
+	identity := m.NewMat4()
+	for i := range matrix {
+		if abs32(matrix[i]-identity[i]) > 1e-4 {
+			return false
+		}
+	}
+	return true
 }

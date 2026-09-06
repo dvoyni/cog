@@ -51,6 +51,14 @@ type loadedModel struct {
 	materials  []loadedMaterial
 	textures   []loadedTexture
 	lights     []ModelLight
+	// scenes mirrors the file's scenes array entry for entry, each holding the
+	// contiguous range of primitives its walk produced. Every scene is
+	// flattened, not only the default one, because path is a model's only cache
+	// key: a draw naming a scene has no second load to trigger.
+	scenes []loadedScene
+	// defaultScene is the entry a draw with no Scene selector renders: the
+	// file's declared default, or the first.
+	defaultScene int
 	// neverCull is set by a primitive whose POSITION accessor declared no
 	// min/max. It is per model rather than per primitive because a model with
 	// one unbounded primitive has no bound at all - culling the rest of it
@@ -72,6 +80,36 @@ type loadedPrimitive struct {
 	geometry int
 	local    m.Mat4
 	material int
+}
+
+// loadedScene is one entry of the file's scenes array, flattened: the range of
+// primitives its walk produced and the nodes within it a Node selector can
+// address.
+type loadedScene struct {
+	name       string
+	start, end int
+	// nodes is keyed by name, holding the first depth-first match of each. An
+	// unnamed node is absent: a selector is a name, so a node without one is
+	// not addressable and there is nothing to record.
+	nodes map[string]loadedNode
+}
+
+// loadedNode is one addressable node: the contiguous slice of the flattened
+// list its subtree occupies, and what re-rooting that slice needs.
+type loadedNode struct {
+	start, end int
+	// reroot is the inverse of the node's authored world transform, which a
+	// Node draw applies to discard it. rerootable is false when that transform
+	// collapsed an axis and has no inverse - the draw reports and skips rather
+	// than drawing through a matrix that is quietly wrong.
+	reroot     m.Mat4
+	rerootable bool
+	// animated is the node's chain of animated ancestors, root-first, and is
+	// empty for almost every node in almost every file. A non-empty chain means
+	// the node's true world transform is time-varying, so the inverse above is
+	// the rest pose's and the real one has to be resolved against the frame's
+	// baked pose rows - which is the packer's job, and lands with skinning.
+	animated []int
 }
 
 // geometryKey interns one converted primitive. Tangent generation is part of
@@ -128,8 +166,19 @@ type modelConverter struct {
 	// them - builds exactly one record per glTF material.
 	variants map[materialVariant]int
 	// visited guards against a cyclic node graph, which is malformed but is a
-	// stack overflow rather than a report if nothing checks.
+	// stack overflow rather than a report if nothing checks. It is cleared
+	// between scenes rather than kept for the file: a node two scenes both root
+	// belongs to both, and a file-wide guard would leave the second empty.
 	visited map[int]bool
+	// scene is the entry the walk is filling, and points into model.scenes.
+	scene *loadedScene
+	// animated is the set of nodes some animation steers, and chain the
+	// animated ancestors of the node the walk is inside, root-first.
+	animated map[int]bool
+	chain    []int
+	// duplicated keeps a repeated node name to one report however many scenes
+	// and however many nodes carry it.
+	duplicated map[string]bool
 	// boundsReported keeps the missing-bounds report to one per model however
 	// many primitives declared no min/max.
 	boundsReported bool
@@ -142,6 +191,9 @@ func convertDocument(doc *gltf.Document, path string, filesystem fs.FS) (*loaded
 	if err := checkRequiredExtensions(doc); err != nil {
 		return nil, err
 	}
+	if len(doc.Scenes) == 0 {
+		return nil, errors.New("it has no scenes")
+	}
 	converter := &modelConverter{
 		doc:        doc,
 		path:       path,
@@ -149,13 +201,13 @@ func convertDocument(doc *gltf.Document, path string, filesystem fs.FS) (*loaded
 		geometries: map[geometryKey]int{},
 		variants:   map[materialVariant]int{},
 		visited:    map[int]bool{},
+		animated:   animatedNodes(doc),
+		duplicated: map[string]bool{},
 	}
-	roots, err := defaultSceneRoots(doc)
-	if err != nil {
-		return nil, err
-	}
-	for _, root := range roots {
-		converter.walkNode(root, m.NewMat4())
+	converter.model.defaultScene = defaultSceneIndex(doc)
+	converter.model.scenes = make([]loadedScene, 0, len(doc.Scenes))
+	for _, scene := range doc.Scenes {
+		converter.flattenScene(scene)
 	}
 	converter.model.textures = converter.textures.textures
 	converter.model.reports = append(converter.model.reports, converter.textures.reports...)
@@ -173,18 +225,61 @@ func checkRequiredExtensions(doc *gltf.Document) error {
 	return nil
 }
 
-// defaultSceneRoots picks the scene a draw with no selector renders: the file's
-// declared default, or the first one. The Scene selector itself lands with the
-// selectors ticket; the default is what every draw resolves to without one.
-func defaultSceneRoots(doc *gltf.Document) ([]int, error) {
-	if len(doc.Scenes) == 0 {
-		return nil, errors.New("it has no scenes")
-	}
-	index := 0
+// defaultSceneIndex picks the scene a draw with no Scene selector renders: the
+// file's declared default, or the first one.
+func defaultSceneIndex(doc *gltf.Document) int {
 	if doc.Scene != nil && *doc.Scene >= 0 && *doc.Scene < len(doc.Scenes) {
-		index = *doc.Scene
+		return *doc.Scene
 	}
-	return doc.Scenes[index].Nodes, nil
+	return 0
+}
+
+// animatedNodes is the set of nodes some animation steers with a TRS channel.
+// Such a node has no fixed authored world transform, and neither has any
+// descendant of it - which is the whole reason a re-root inverse cannot always
+// be a matrix computed here.
+//
+// A weights channel is not in it: morph weights reshape a mesh and leave the
+// node where it was.
+func animatedNodes(doc *gltf.Document) map[int]bool {
+	animated := map[int]bool{}
+	for _, animation := range doc.Animations {
+		if animation == nil {
+			continue
+		}
+		for _, channel := range animation.Channels {
+			if channel == nil || channel.Target.Node == nil {
+				continue
+			}
+			switch channel.Target.Path {
+			case gltf.TRSTranslation, gltf.TRSRotation, gltf.TRSScale:
+				animated[*channel.Target.Node] = true
+			}
+		}
+	}
+	return animated
+}
+
+// flattenScene walks one scene into its own contiguous range of the flattened
+// list. Every scene in the file gets one, because a draw that names a scene
+// resolves against the load the path already paid for.
+func (c *modelConverter) flattenScene(scene *gltf.Scene) {
+	if scene == nil {
+		c.model.scenes = append(c.model.scenes, loadedScene{})
+		return
+	}
+	start := len(c.model.primitives)
+	c.model.scenes = append(c.model.scenes, loadedScene{
+		name: scene.Name, start: start, nodes: map[string]loadedNode{},
+	})
+	c.scene = &c.model.scenes[len(c.model.scenes)-1]
+	clear(c.visited)
+	c.chain = c.chain[:0]
+	for _, root := range scene.Nodes {
+		c.walkNode(root, m.NewMat4())
+	}
+	c.scene.end = len(c.model.primitives)
+	c.scene = nil
 }
 
 // walkNode flattens one node and its subtree depth-first, accumulating the
@@ -209,13 +304,62 @@ func (c *modelConverter) walkNode(index int, parent m.Mat4) {
 	if node.Skin != nil {
 		placement = m.NewMat4()
 	}
+	// The name is claimed before the subtree is walked and closed after, so a
+	// name a node shares with one of its own descendants resolves to the node -
+	// which is what "first depth-first match" says, and what recording the
+	// subtree on the way back out would get backwards.
+	named := c.claimNode(node.Name, world)
 	if node.Mesh != nil {
 		c.flattenMesh(*node.Mesh, placement)
 	}
 	c.collectLight(node, world)
+	animated := c.animated[index]
+	if animated {
+		c.chain = append(c.chain, index)
+	}
 	for _, child := range node.Children {
 		c.walkNode(child, world)
 	}
+	if animated {
+		c.chain = c.chain[:len(c.chain)-1]
+	}
+	if named {
+		c.closeNode(node.Name)
+	}
+}
+
+// claimNode records one named node's slice, opened at the walk's position, and
+// reports whether this node is the one that owns the name. A duplicate keeps
+// the first match and says so once.
+func (c *modelConverter) claimNode(name string, world m.Mat4) bool {
+	if name == "" || c.scene == nil {
+		return false
+	}
+	if _, taken := c.scene.nodes[name]; taken {
+		if !c.duplicated[name] {
+			c.duplicated[name] = true
+			c.model.reports = append(c.model.reports,
+				ErrModelNodeDuplicated{Model: c.path, Node: name})
+		}
+		return false
+	}
+	reroot, rerootable := world.InverseAffine()
+	node := loadedNode{
+		start: len(c.model.primitives), reroot: reroot, rerootable: rerootable,
+	}
+	if len(c.chain) > 0 {
+		node.animated = append([]int(nil), c.chain...)
+	}
+	c.scene.nodes[name] = node
+	return true
+}
+
+// closeNode ends a claimed node's slice at the walk's position, which
+// depth-first order has just made the end of its whole subtree.
+func (c *modelConverter) closeNode(name string) {
+	node := c.scene.nodes[name]
+	node.end = len(c.model.primitives)
+	c.scene.nodes[name] = node
 }
 
 // flattenMesh emits one node's primitives at their flattened placement.
