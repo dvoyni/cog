@@ -2878,7 +2878,7 @@ set.
 | `box` | **none** | debug vocabulary; `Transform` TRS and scalar `Scale`; `LookAt`; empty `Passes` → implicit forward pass at the camera id; sun and hemispheric ambient; the linear pipeline and present pass; every-zero-value-is-the-default; the `m` additions |
 | `pbr` | WaterBottle, AlphaBlendModeTest, BoxVertexColors, CompareBaseColor, EmissiveStrengthTest, PointLightIntensityTest | the whole material contract (glTF names, five slots, two 1×1 defaults, Khronos BRDF, `EnvBRDFApprox`, `COLOR_0`, flat `KHR_texture_transform` members); `alphaMode`→state and `Cull`; the back-to-front blend bucket; a rotated non-uniform basis through the lit path, via `Transform.Matrix`; point and spot lights, `Range` zero-means-infinite, the 16 cap and its silent drop; `emissive_strength`, `lights_punctual` as data |
 | `cameras` | reuses `box` + `pbr` | multi-camera, orthographic, `CullMask`, no `Viewport` → `TemporaryTarget` composited by canvas, negative ids, duplicate-id error; targets, `DepthAuto`/`DepthTarget`, `Order` sorting and pass merging; layer masks; multi-tag material and a `NoTarget()` depth-only pass; `WorldToScreen`/`ScreenToRay`, per-target `viewport m.Vec2`, behind-camera `ok`, `m.Ray.IntersectSphere` |
-| `animated` | Fox, AnimatedMorphCube, MorphStressTest, InterpolationTest | baked poses, `ClipPlay` crossfade, the 4-play cap, the rest frame, `PoseBytes`; sparse morph weights, `MorphWeights` override, the attribute mask; degenerate single-joint skins; u8 index widening. **The web canary.** |
+| `animated` | Fox, AnimatedMorphCube **and its glTF-Quantized twin**, MorphStressTest, InterpolationTest | baked poses, `ClipPlay` crossfade, the 4-play cap, the rest frame, `PoseBytes`; sparse morph weights, `MorphWeights` override, the attribute mask; degenerate single-joint skins; u8 index widening. **The web canary.** The quantized twin is shared with `loading` and is not optional here: the attribute mask is *intersected with what the base primitive authored*, and the plain cube's authored `TANGENT` against the quantized one's absence is the only pair in the vendored set that can tell that rule from a mask read off the targets alone. |
 | `procedural` | none (custom WGSL) | `TemporaryMesh` vs `BakeMesh`, the generic `VertexLayout`, `UpdateMesh`, `ReleaseMesh` generations, `NeverCull`, the null skin and `SCENE_NOSKIN`; `BakeBuffer`/`ReBakeBuffer`/`BufferWithBytes`; a caller-supplied material with a custom layout |
 | `instancing` | reuses `box` + `pbr` | explicit `Transforms`, per-instance culling, the `materialID`/`meshID` sort key, `SCENE_NONUNIFORM` via the `Matrix` escape hatch, `Passes(dst)`; `firstInstance`, the per-batch material record, one instance arena bound by range |
 | `loading` | CesiumMilkTruck, MultipleScenes, TextureSettingsTest, MeshPrimitiveModes, AnimatedMorphCube glTF-Quantized, `broken/truncated.glb` | `Node` views and re-rooting; `Scene` naming a file's only scene (six vendored assets name theirs `Scene`, `CesiumMilkTruck` among them) and its unmatched report — but **no asset has a nameable *non-default* scene**: `MultipleScenes`, the set's only multi-scene file, leaves both of its unnamed, so a matched `Scene` here always resolves to the same draw the default would, async skip-never-substitute, `Preload`, `Material` replace vs `OverrideParams` merge, explicit unload with no texture cascade; `(value, ok)`, `State`, `Nodes`/`Bounds`/`AABB`, unmatched-node-reports-once; the four WebGPU papering-over gaps |
@@ -2972,9 +2972,12 @@ canary needs it; and writing `cmd/prepare-assets`.
 
 **Desktop is the acceptance bar**, with `animated` designated the **web canary**
 — it touches the most storage-buffer bindings, the budget has no spare, and a
-single unbound binding silently kills the whole frame. Paired with the debug
-check against `gfx.DefaultLimits`, so a desktop run fails loudly on a web
-violation rather than deferring the discovery to the browser. Every demo passing
+single unbound binding silently kills the whole frame. Paired with the check
+against `gfx.DefaultLimits`, so a desktop run fails loudly on a web violation
+rather than deferring the discovery to the browser — and that check is **not
+debug-gated**, as an earlier draft of this section said: `gfx` measures every
+shader it reflects, from `ensureShader`, on every build, and surfaces the
+result as a non-fatal diagnostic through the error handler. Every demo passing
 on both would double verification for no proportionate gain; desktop-only would
 defer the one class of failure desktop provably cannot catch, since a native
 device reports hardware limits.
