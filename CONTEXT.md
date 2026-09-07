@@ -121,3 +121,53 @@ _Avoid_: Copied children, owned children
 **UI Frame**:
 The complete set of root Element declarations produced for one update tick.
 _Avoid_: Retained UI, scene
+
+## Scene Declarations
+
+**Camera**:
+A declaration of a viewpoint and of the passes drawn from it. Its identity is also its place in the frame's ordering space, so declaring one twice is an error.
+
+**Pass**:
+One render pass a Camera emits, carrying the tag that selects materials for it, its target, and its clears.
+_Avoid_: Render step, stage
+
+**Pass tag**:
+The name of what a Pass is for, and the key that selects which of a Scene material's entries serves it.
+_Avoid_: Queue, light mode
+
+**Scene material**:
+The set of graphics materials one recorded thing offers, one per Pass tag. A Pass whose tag it has no entry for does not draw that thing.
+_Avoid_: Shader
+
+**Layer mask**:
+A selection of which Cameras see a recorded item. Both a Camera and an item carry one, and an empty mask on either side means every layer.
+_Avoid_: Render layer, culling group
+
+**Selector**:
+The scene and node names that address part of a model file. A Selector that matches nothing addresses nothing and never widens to the whole file.
+_Avoid_: Path, query
+
+**Re-rooting**:
+The discarding of a selected node's authored world transform, so that the node's subtree is placed by the recording call's own transform instead.
+
+**Residency**:
+One model path's position in the load cycle: never asked for, loading, resident, or terminally failed.
+_Avoid_: Cache state, load status
+
+**Frame boundary**:
+The point between two frames at which every deferred change to persistent scene state becomes visible — residency, unloads, and geometry bakes alike.
+
+**Rest pose**:
+A model's placement with no animation playing: its authored hierarchy resolved once. It is what a bounds query answers about, whatever the frame is playing.
+_Avoid_: Bind pose, default pose
+
+**Debug shape**:
+A recorded primitive drawn from a plugin-owned unit mesh rather than from an asset on disk.
+_Avoid_: Gizmo, primitive
+
+**Instance**:
+One placement of one recorded thing. A recording call carrying many transforms declares many Instances that share everything else it said.
+
+**Batch**:
+One run of Instances sharing a mesh and a Scene material, which is one draw call.
+_Avoid_: Cluster, group

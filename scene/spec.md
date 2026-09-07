@@ -49,7 +49,7 @@ cfg.PoseSampleRate = 60
 
 `Config` is the exported configuration type. `Plugin` implements `Name`,
 `Dependencies`, and `Init` for the kernel lifecycle. During `Init` scene
-executes `storage.SetReadFSCmd` to mount its embedded shaders, as canvas does.
+executes `storage.SetMountCmd` to mount its embedded shaders, as canvas does.
 Register `storage` before `scene`. A typical order is `storage`, `input`, `gfx`,
 `canvas`, `scene`, then the system driver.
 
@@ -77,9 +77,9 @@ map's no-fallback rule, but the failure is total
 Design to **browser spec defaults**, not to desktop's reported hardware limits:
 8 storage buffers per shader stage, 128 MiB per binding, 256 MiB per buffer, 4
 bind groups, 64 KiB uniform. A native device reports hardware limits, so a
-desktop run will **not** catch a web limit violation; the implementation adds a
-debug-build check against `gfx.DefaultLimits` so it fails loudly on desktop
-instead ([wgpu backend capabilities inventory](https://github.com/dvoyni/cog/issues/4)).
+desktop run will **not** catch a web limit violation; gfx therefore checks every
+reflected shader against `gfx.DefaultLimits` so it fails loudly on desktop
+instead. There is no build gate on that check ([wgpu backend capabilities inventory](https://github.com/dvoyni/cog/issues/4)).
 
 ---
 

@@ -60,6 +60,8 @@ error handling.
     and backend contract.
 - [`canvas`](canvas/README.md): layered 2D sprites, text, primitives, and custom
     triangles over gfx.
+- [`scene`](scene/README.md): declarative 3D cameras, glTF models, buffer-built
+    meshes, punctual lights, and debug shapes over gfx.
 - [`ui`](ui/README.md): immediate-mode layout, interaction, and canvas-backed
     visual processing.
 - [`wgpu`](wgpu/README.md): window, input, timing, and WebGPU system driver.

@@ -25,7 +25,7 @@ cfg.MaxAtlasBytes = 256 << 20
 `LayersPerArray` must be at least two. Atlas dimensions and the memory budget
 must be positive, and one array must fit within `MaxAtlasBytes`.
 
-During `Init`, canvas executes `storage.SetReadFSCmd` to mount its embedded
+During `Start`, canvas executes `storage.SetMountCmd` to mount its embedded
 shaders. Register `storage` before `canvas`. A typical order is `storage`,
 `input`, `gfx`, `canvas`, then the system driver.
 

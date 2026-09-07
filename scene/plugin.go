@@ -118,12 +118,6 @@ func (p *Plugin) Register(registrar *kernel.Registrar, value any) error {
 	return nil
 }
 
-// flush binds the resources the frame's decisions need. Everything scene
-// decides happens here, on the update thread: projection resolve, culling,
-// sorting, instance packing and buffer uploads. Scene never runs on the render
-// thread — gfx renders from a latest-wins snapshot, so there is no mechanism
-// for it and no need for one, because a frustum needs aspect, not pixel size,
-// and app.Viewport already carries the exact aspect here.
 // Start mounts the bundled shader filesystem. Startup runs after every plugin
 // has registered and before the host loop, so the shader is in place for the
 // first frame without depending on a driver publishing an event.
@@ -134,6 +128,12 @@ func (p *Plugin) Start(k kernel.Executioner) error {
 	return err
 }
 
+// flush binds the resources the frame's decisions need. Everything scene
+// decides happens here, on the update thread: projection resolve, culling,
+// sorting, instance packing and buffer uploads. Scene never runs on the render
+// thread — gfx renders from a latest-wins snapshot, so there is no mechanism
+// for it and no need for one, because a frustum needs aspect, not pixel size,
+// and app.Viewport already carries the exact aspect here.
 func (p *Plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var writeQueue kernel.Write[*OpQueue]
 	var lookupResource kernel.Write[*Lookup]
