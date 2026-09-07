@@ -1752,6 +1752,20 @@ takes a ~30-ALU inverse-transpose only for those instances, branch-uniform acros
 the whole instance. A second `3 × vec4` in the record was rejected at 128 B —
 every debug line paying for a case it does not have.
 
+**The stretched debug boxes are not the case that motivates it** —
+`instancing`'s eye criterion is, and the difference is worth writing down
+because it is easy to get backwards. Every face normal of an axis-aligned box is
+an eigenvector of an axis-aligned scale, so `world · n` and `(world⁻¹)ᵀ · n`
+point the same way and differ only in length, which normalising removes. A
+stretched `Line3D`, a `WireBox` edge and a slab-shaped `Box` therefore shade
+*identically* with the flag and without it, however non-uniform they are — and a
+rotation does not change that, since `R·S·n ∝ R·n ∝ R·S⁻¹·n` for an eigenvector
+`n`. Setting the flag for them is still right; it is simply not observable
+there. What is observable is a **curved** surface under a caller's `Matrix`: a
+bottle squashed through the escape hatch loses its specular highlight outright
+when the flag does not reach the shader, which is what `instancing` shows
+([demo: instancing](https://github.com/dvoyni/cog/issues/96)).
+
 **`SCENE_NOSKIN`** is the second flag, set for every non-model draw. A
 buffer-built mesh and the debug vocabulary have no group 2, but a declared
 binding must still be bound or the whole frame dies, so scene binds one shared
