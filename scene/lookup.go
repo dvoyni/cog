@@ -4,7 +4,6 @@ import (
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/m"
-	"github.com/dvoyni/cog/storage"
 )
 
 // Lookup is the single scene-owned persistent resource. It holds everything
@@ -56,6 +55,14 @@ type Lookup struct {
 	// reported suppresses repeated reports for one model or texture path until
 	// it loads successfully or is unloaded - canvas's precedent.
 	reported map[string]struct{}
+	// unloadModels and unloadTextures are the paths UnloadModel and
+	// UnloadTexture gave up, and unloadEverything the flag UnloadAll sets. All
+	// three are applied at the frame boundary rather than at the call, so a
+	// same-frame unload never frees geometry the frame has already recorded a
+	// draw against.
+	unloadModels     []string
+	unloadTextures   []string
+	unloadEverything bool
 	// bundled is the bundled PBR material, built on first use around the two
 	// default textures. It is not a package-level value because those textures
 	// are baked resources: the backend may not be Ready() at startup, and a
@@ -71,20 +78,25 @@ func newLookup(config Config) *Lookup { return &Lookup{config: config} }
 func NewLookup(config Config) *Lookup { return newLookup(config) }
 
 // LookupAccess is the scoped facade every query and mutation of a Lookup goes
-// through. Acquire a *Lookup write dependency plus storage.FileSystem in a
-// handler, build one with NewLookupAccess, and pass it to consumers for the
-// duration of that handler. Never store the result: the handles behind it are
-// valid only while the handler holds its locks.
+// through. Acquire a *Lookup write dependency in a handler, build one with
+// NewLookupAccess, and pass it to consumers for the duration of that handler.
+// Never store the result: the handles behind it are valid only while the
+// handler holds its lock.
 type LookupAccess struct {
 	kernel kernel.Kernel
 	lookup *Lookup
-	fs     storage.FileSystem
 }
 
 // NewLookupAccess builds a scoped facade. Call it inside a handler that holds
-// the *Lookup write lock and the storage.FileSystem read lock.
-func NewLookupAccess(k kernel.Kernel, lookup *Lookup, filesystem storage.FileSystem) LookupAccess {
-	return LookupAccess{kernel: k, lookup: lookup, fs: filesystem}
+// the *Lookup write lock.
+//
+// Two dependencies, not three: it takes no storage.FileSystem, unlike canvas's
+// equivalent, because scene's load command opens, parses and bakes the file
+// itself holding no locks. A consumer system therefore declares one fewer
+// resource than canvas's, which reads as an oversight unless it is said out
+// loud.
+func NewLookupAccess(k kernel.Kernel, lookup *Lookup) LookupAccess {
+	return LookupAccess{kernel: k, lookup: lookup}
 }
 
 // Valid reports whether the facade is backed by a live Lookup.

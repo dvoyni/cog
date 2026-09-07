@@ -179,6 +179,11 @@ func (p *Plugin) flushFrame(
 		return gfxResources.BakeTexture(width, height, format, pixels, true, false)
 	}
 	report := func(err error) { k.ReportError(err) }
+	// Unloads land here, at the boundary the caller who queued them has already
+	// passed: the frame that asked has recorded whatever draws it wanted, and
+	// its command buffer has been submitted. The buffers they give up join the
+	// pending releases the drain below frees in the same pass.
+	lookup.applyUnloads(gfxResources.ReleaseTexture)
 	// The frame's meshes are settled before anything looks at a draw: the
 	// callers' deferred bakes and releases drain, then the frame's temporaries
 	// become records, so every ref a draw names resolves against final state.

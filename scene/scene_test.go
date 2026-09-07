@@ -231,7 +231,13 @@ type inspectResponse struct{}
 
 // lookupProbeCmd runs a callback with a valid scoped LookupAccess.
 type lookupProbeCmd kernel.Command[lookupProbeRequest, lookupProbeResponse]
-type lookupProbeRequest struct{ run func(LookupAccess) }
+type lookupProbeRequest struct {
+	run func(LookupAccess)
+	// files is the separate probe readFile needs. LookupAccess carries no
+	// filesystem any more - that is the facade's whole "two dependencies, not
+	// three" - so a test that wants to read a mounted file asks for one here.
+	files func(storage.FileSystem)
+}
 type lookupProbeResponse struct{}
 
 func (p recordPlugin) Name() kernel.PluginName { return "scene-test-recorder" }
@@ -273,7 +279,12 @@ func lookupProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupProbeRequest, looku
 			lookup = access.GetWrite[*Lookup]()
 			filesystem = access.GetRead[storage.FileSystem]()
 		}, func(k kernel.Kernel, req lookupProbeRequest) (lookupProbeResponse, error) {
-			req.run(NewLookupAccess(k, lookup.Get(), filesystem.Get()))
+			if req.files != nil {
+				req.files(filesystem.Get())
+			}
+			if req.run != nil {
+				req.run(NewLookupAccess(k, lookup.Get()))
+			}
 			return lookupProbeResponse{}, nil
 		}
 }
@@ -416,8 +427,8 @@ func (h *harness) readFile(t testing.TB, path string) []byte {
 	t.Helper()
 	var data []byte
 	var err error
-	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{run: func(la LookupAccess) {
-		data, err = fs.ReadFile(la.fs, path)
+	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{files: func(files storage.FileSystem) {
+		data, err = fs.ReadFile(files, path)
 	}})
 	if err != nil {
 		t.Fatalf("read %q: %v", path, err)

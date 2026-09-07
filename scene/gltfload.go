@@ -110,12 +110,24 @@ type loadedScene struct {
 	// unnamed node is absent: a selector is a name, so a node without one is
 	// not addressable and there is nothing to record.
 	nodes map[string]loadedNode
+	// order is the same names again, in the order the walk claimed them, which
+	// is depth-first. The map answers a selector and this answers Nodes: a map
+	// has no order at all, and sorting one alphabetically would report a
+	// hierarchy as an alphabet.
+	order []string
 }
 
 // loadedNode is one addressable node: the contiguous slice of the flattened
 // list its subtree occupies, and what re-rooting that slice needs.
 type loadedNode struct {
 	start, end int
+	// first and last bracket the node's own entry and its named descendants'
+	// in the scene's order slice, which depth-first claiming makes contiguous
+	// the same way it makes the primitive range contiguous. It is a range over
+	// names rather than over primitives because a node carrying no geometry has
+	// an empty primitive range that a sibling's would be indistinguishable
+	// from, and Nodes has to list such a node.
+	first, last int
 	// reroot is the inverse of the node's authored world transform, which a
 	// Node draw applies to discard it. rerootable is false when that transform
 	// collapsed an axis and has no inverse - the draw reports and skips rather
@@ -448,8 +460,9 @@ func (c *modelConverter) claimNode(name string, world m.Mat4) bool {
 	reroot, rerootable := world.InverseAffine()
 	node := loadedNode{
 		start: len(c.model.primitives), reroot: reroot, rerootable: rerootable,
-		rerootJoint: -1,
+		rerootJoint: -1, first: len(c.scene.order),
 	}
+	c.scene.order = append(c.scene.order, name)
 	if len(c.chain) > 0 {
 		node.animated = append([]int(nil), c.chain...)
 		node.rest = c.chainWorlds[len(c.chainWorlds)-1]
@@ -463,6 +476,7 @@ func (c *modelConverter) claimNode(name string, world m.Mat4) bool {
 func (c *modelConverter) closeNode(name string) {
 	node := c.scene.nodes[name]
 	node.end = len(c.model.primitives)
+	node.last = len(c.scene.order)
 	c.scene.nodes[name] = node
 }
 

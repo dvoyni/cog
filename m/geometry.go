@@ -83,6 +83,32 @@ func (sphere Sphere) Transform(matrix Mat4) Sphere {
 	return Sphere{Center: matrix.TransformPoint(sphere.Center), Radius: sphere.Radius * scale}
 }
 
+// Union is the smallest sphere containing both, which is what a bound over
+// several primitives is built from. It is exact, unlike growing the first
+// sphere's radius to reach the second: that keeps the centre where it was and
+// so overshoots on the far side by the distance the centre should have moved.
+//
+// Containment is answered first because the general formula has no centre to
+// offer when one sphere swallows the other - the point it would place is inside
+// the container, and the radius it would compute is the container's own.
+func (sphere Sphere) Union(other Sphere) Sphere {
+	offset := other.Center.Sub(sphere.Center)
+	distance := offset.Length()
+	if distance+other.Radius <= sphere.Radius {
+		return sphere
+	}
+	if distance+sphere.Radius <= other.Radius {
+		return other
+	}
+	// Concentric spheres are already answered by the two containment tests -
+	// one radius is the larger - so the divide below always has a direction.
+	radius := (distance + sphere.Radius + other.Radius) / 2
+	return Sphere{
+		Center: sphere.Center.Add(offset.MulS((radius - sphere.Radius) / distance)),
+		Radius: radius,
+	}
+}
+
 // Box3 is an axis-aligned bounding box, the shape a glTF POSITION accessor
 // reports as min and max. The zero Box3 is a point at the origin, not an empty
 // box, so Union over a set starts from the set's first member.

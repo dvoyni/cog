@@ -8,26 +8,26 @@ import (
 	"github.com/dvoyni/cog/m"
 )
 
-// modelState is one path's residency. It is a state rather than an absence
+// ModelState is one path's residency. It is a state rather than an absence
 // precisely so that an in-flight load is distinguishable from a path nobody has
 // asked for: a model drawn every frame while it loads must enqueue exactly one
 // command.
-type modelState uint8
+type ModelState uint8
 
 const (
-	// modelMissing is a path the table has no entry for at all. It is the zero
+	// ModelMissing is a path the table has no entry for at all. It is the zero
 	// value so that a map miss reads as missing without a second test.
-	modelMissing modelState = iota
-	modelLoading
-	modelResident
-	// modelFailed is terminal. It never retries, and it clears only on unload -
+	ModelMissing ModelState = iota
+	ModelLoading
+	ModelResident
+	// ModelFailed is terminal. It never retries, and it clears only on unload -
 	// a typo'd path must not spawn a load command every frame forever.
-	modelFailed
+	ModelFailed
 )
 
 // modelEntry is one path's slot in the model table.
 type modelEntry struct {
-	state modelState
+	state ModelState
 	// generation makes an unload while a load is in flight discard the
 	// completing load rather than let it become resident as a ghost.
 	generation uint32
@@ -37,6 +37,18 @@ type modelEntry struct {
 	primitives []modelPrimitive
 	materials  []modelMaterial
 	lights     []ModelLight
+	// boxes are the primitives' own local-space axis-aligned boxes, parallel to
+	// primitives, and are what AABB reports and Bounds is derived from. They sit
+	// beside modelPrimitive rather than inside it because a primitive is read
+	// once per instance per frame on the expansion path and these are read only
+	// by the cold facade.
+	boxes []modelBox
+	// meshes are the distinct mesh slots the load claimed, one per glTF
+	// primitive rather than one per placement. An unload frees these, and it has
+	// to be this list rather than a walk of primitives: two nodes sharing a mesh
+	// hold the same ref, and releasing it twice would retire whatever slot the
+	// first release handed back.
+	meshes []MeshRef
 	// scenes mirrors the file's scenes array, each entry naming the range of
 	// primitives it flattened to and the nodes within it a selector can
 	// address; defaultScene is the one an empty Scene selector takes. Both are
@@ -95,26 +107,52 @@ func textureReportKey(path string) string { return "texture:" + path }
 // A loading path enqueues nothing: the entry is the record that a command is
 // already in flight. A failed path enqueues nothing either, and that is the
 // whole of "never retries".
+//
+// An invalid path is failed here, synchronously, rather than by the load. It
+// never reaches a load command at all, so the report-from-the-goroutine rule
+// cannot see it, and without this every query on it would return a silent false
+// forever. One state machine, rather than a set of bad strings beside it.
 func (l *Lookup) requestModel(k kernel.Kernel, path string) (*modelEntry, bool) {
-	entry, ok := l.models[path]
-	if !ok {
-		if l.models == nil {
-			l.models = map[string]*modelEntry{}
+	key, valid := modelKey(path)
+	entry := l.modelEntry(key)
+	if !valid {
+		// Only a missing entry is failed, so the second query neither reports
+		// again nor rewrites a state an unload has since reset.
+		if entry.state == ModelMissing {
+			entry.state = ModelFailed
+			l.reportOnce(func(err error) { k.ReportError(err) },
+				modelReportKey(key), ErrModelPathInvalid{Model: path})
 		}
-		entry = &modelEntry{generation: 1}
-		l.models[path] = entry
-	}
-	switch entry.state {
-	case modelResident:
-		return entry, true
-	case modelLoading, modelFailed:
 		return nil, false
 	}
-	entry.state = modelLoading
+	switch entry.state {
+	case ModelResident:
+		return entry, true
+	case ModelLoading, ModelFailed:
+		return nil, false
+	}
+	entry.state = ModelLoading
 	k.ExecuteCommandAsync[loadModelCmd](loadModelRequest{
-		Path: path, Generation: entry.generation, SampleRate: l.config.PoseSampleRate,
+		Path: key, Generation: entry.generation, SampleRate: l.config.PoseSampleRate,
 	})
 	return nil, false
+}
+
+// modelEntry returns the table slot for a key, minting a missing one. The
+// generation starts at one so that zero stays "no entry ever existed", and it
+// only ever climbs: an unload resets the slot rather than deleting it, because
+// a fresh slot would restart the count and let a load still in flight from
+// before the unload install into it as a ghost.
+func (l *Lookup) modelEntry(key string) *modelEntry {
+	if entry, ok := l.models[key]; ok {
+		return entry
+	}
+	if l.models == nil {
+		l.models = map[string]*modelEntry{}
+	}
+	entry := &modelEntry{generation: 1}
+	l.models[key] = entry
+	return entry
 }
 
 // installModel takes one completed load into residency, or records the failure
@@ -132,11 +170,11 @@ func (l *Lookup) installModel(
 	// An unload while the load was in flight bumped the generation, so this
 	// result belongs to a model nobody asked for any more and is dropped rather
 	// than installed as a ghost.
-	if !ok || entry.generation != generation || entry.state != modelLoading {
+	if !ok || entry.generation != generation || entry.state != ModelLoading {
 		return
 	}
 	if failure != nil {
-		entry.state = modelFailed
+		entry.state = ModelFailed
 		l.reportOnce(report, modelReportKey(path), ErrModelUnavailable{Model: path, Err: failure})
 		return
 	}
@@ -144,7 +182,7 @@ func (l *Lookup) installModel(
 	// missing rather than to failed: there is nothing wrong with the file, and
 	// the next draw should try again.
 	if !resources.Ready() {
-		entry.state = modelMissing
+		entry.state = ModelMissing
 		return
 	}
 	defaults := l.ensureDefaults(resources)
@@ -161,7 +199,9 @@ func (l *Lookup) installModel(
 	for i := range loaded.geometries {
 		meshes[i] = l.bakeModelGeometry(&loaded.geometries[i], resources)
 	}
+	entry.meshes = append(entry.meshes[:0], meshes...)
 	entry.primitives = entry.primitives[:0]
+	entry.boxes = entry.boxes[:0]
 	for i := range loaded.primitives {
 		primitive := &loaded.primitives[i]
 		geometry := &loaded.geometries[primitive.geometry]
@@ -169,6 +209,7 @@ func (l *Lookup) installModel(
 			mesh: meshes[primitive.geometry], local: primitive.local, material: primitive.material,
 			skinned: primitive.skinned, morph: primitive.morph,
 		}
+		entry.boxes = append(entry.boxes, modelBox{box: geometry.box, known: geometry.hasBox})
 		if geometry.hasBox {
 			// The sphere stays in the primitive's own space, unflattened,
 			// because the draw record's world matrix already folds localMatrix
@@ -182,7 +223,7 @@ func (l *Lookup) installModel(
 	entry.scenes, entry.defaultScene = loaded.scenes, loaded.defaultScene
 	entry.neverCull = loaded.neverCull
 	entry.animation = l.residentAnimation(loaded, resources)
-	entry.state = modelResident
+	entry.state = ModelResident
 	// A successful load clears the model's report key, so a path that failed,
 	// was unloaded and now loads reports again if it breaks again.
 	delete(l.reported, modelReportKey(path))
@@ -501,7 +542,7 @@ func (la LookupAccess) TotalPoseBytes() int {
 	}
 	total := 0
 	for _, entry := range la.lookup.models {
-		if entry.state == modelResident {
+		if entry.state == ModelResident {
 			total += entry.animation.poseBytes
 		}
 	}
@@ -559,7 +600,7 @@ func (la LookupAccess) TotalMorphBytes() int {
 	}
 	total := 0
 	for _, entry := range la.lookup.models {
-		if entry.state == modelResident {
+		if entry.state == ModelResident {
 			total += entry.animation.morphBytes
 		}
 	}

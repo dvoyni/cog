@@ -130,21 +130,31 @@ func (la LookupAccess) ReleaseMesh(ref MeshRef) {
 	if !la.Valid() {
 		return
 	}
-	record, ok := la.lookup.mesh(ref)
-	if !ok {
+	if !la.lookup.releaseMesh(ref) {
 		la.kernel.ReportError(ErrMeshUnavailable{Mesh: ref.ID()})
-		return
+	}
+}
+
+// releaseMesh retires one mesh slot and queues its buffers, and reports whether
+// the ref named a live mesh. It is shared with the model unload, which frees a
+// resident model's geometry through exactly this path - the alternative being a
+// second retirement rule that could drift from this one.
+func (l *Lookup) releaseMesh(ref MeshRef) bool {
+	record, ok := l.mesh(ref)
+	if !ok {
+		return false
 	}
 	if record.baked {
-		la.lookup.pendingReleases = append(la.lookup.pendingReleases, record.vertices)
+		l.pendingReleases = append(l.pendingReleases, record.vertices)
 		if record.indexed {
-			la.lookup.pendingReleases = append(la.lookup.pendingReleases, record.indices)
+			l.pendingReleases = append(l.pendingReleases, record.indices)
 		}
 	}
 	// The slot keeps only the bumped generation, which is what a later ref to
 	// the mesh that used to live here fails against.
-	la.lookup.meshes[ref.id-1] = meshRecord{generation: ref.generation + 1}
-	la.lookup.freeMeshes = append(la.lookup.freeMeshes, ref.id)
+	l.meshes[ref.id-1] = meshRecord{generation: ref.generation + 1}
+	l.freeMeshes = append(l.freeMeshes, ref.id)
+	return true
 }
 
 // stage copies one mint's bytes into the staging arena and queues the upload.

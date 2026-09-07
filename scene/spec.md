@@ -1768,9 +1768,9 @@ Bind `access.GetWrite[*scene.Lookup]()` in the handler's `Lock`, then use:
 
 | Method | Result | Notes |
 | --- | --- | --- |
-| `State(path) ModelState` | residency | the only way to tell *wait* from *never coming* |
+| `State(path) ModelState` | residency | the only way to tell *wait* from *never coming*; it fires the load like every other query, so `ModelMissing` is not one of its answers on a valid path |
 | `Preload(path)` | — | the load command fired without a draw; no return |
-| `Nodes(ref, dst) ([]string, bool)` | node names | a non-empty `Node` lists that subtree |
+| `Nodes(ref, dst) ([]string, bool)` | node names | a non-empty `Node` lists that subtree, the node itself first; the order is the flatten's depth-first order, never sorted |
 | `Bounds(ref) (m.Vec4, bool)` | xyz centre, w radius | local space post-re-rooting; rest pose when skinned |
 | `AABB(ref) (min, max m.Vec3, ok bool)` | axis-aligned box | same space and pose rules |
 | `Joints(path, dst) ([]string, bool)` | joint names | names only; count is `len` |
@@ -1806,6 +1806,14 @@ watching only `ok` hangs forever on a typo'd path. There is no `Pending()`
 aggregate — a caller polling a preload list it already holds can count residents
 itself.
 
+**`State` is a query, so it fires the load too.** That is the rule applied
+without an exception, and it is what makes a loading screen that polls only
+`State` work rather than spin. The consequence is that **`ModelMissing` is never
+what `State` returns for a valid path**: asking moves the path to `ModelLoading`
+in the same call. It stays in the enum as the table's zero value and as the
+state an unload resets a slot to — the state a path is *in* between being
+unloaded and being asked about, not a state a caller can observe.
+
 ### Selectors, and what is not here
 
 `Clips`, `MorphTargets`, `PoseBytes`, `MorphBytes`, `State`, `Preload` and the
@@ -1823,6 +1831,24 @@ computed from. Publishing only the AABB would be a regression, since a sphere
 derived from one is the circumsphere, up to √3 loose. `Bounds` uses the same
 `m.Vec4` convention as `MeshDraw.Bounds`, so the name means one thing across the
 plugin.
+
+Over a **multi-primitive** subtree the √3 claim is narrower than it sounds, and
+the implementation records the real rule. `Bounds` is the union (`m.Sphere.Union`)
+of the primitives' own spheres, each transformed by the re-rooted placement;
+`AABB` is the union of those primitives' boxes, each *refit* around its
+transformed corners. Transforming a sphere is exact and refitting a box is not,
+so the sphere wins wherever the placements rotate — which is the case the √3
+remark is about. Where nothing rotates, the AABB's own circumsphere can be the
+tighter of the two. **Neither dominates in general**, and both are published
+precisely so a caller picks the one their test wants rather than deriving one
+from the other.
+
+A primitive whose POSITION accessor declared no min/max has no bound to
+contribute, and makes both queries `ok = false` for any ref that selects it.
+Returning a bound over the rest of the model would be a real-looking number the
+unbounded piece sticks out of, with nothing in the answer to show the hole. A
+ref that resolves to a real node carrying no geometry at all is also `false`,
+but reports nothing — the absence of a report is what tells it apart from a typo.
 
 **Mesh names are cut** — a draw addresses nodes only, so a mesh name is a string
 a caller cannot act on. **No texture queries** beyond `UnloadTexture`. `Joints`
@@ -1844,7 +1870,28 @@ precisely so a caller resolves names to indices **once at startup**.
   rules) and records the path as `ModelFailed` — one state machine rather than a
   `reported` set beside it.
 - **An unmatched `Scene`/`Node` on a resident model** returns `ok = false` and
-  reports once, keyed `"model:" + path + "#" + node`.
+  reports once, keyed `"model:" + path + "#" + node`. An unload clears every key
+  under that path's prefix, not just `"model:" + path`, so a file that failed on
+  a typo and was unloaded reports again if it fails again.
+- **`Nodes` answers for a degenerate node**, one whose authored world transform
+  collapsed an axis. Its names are a real answer; only *re-rooting* it is
+  impossible, so it is `Bounds` and `AABB` that reject it — through the same
+  `view()` a draw goes through — while `Nodes` resolves the scene and the
+  subtree without one.
+- **`UnloadTexture` frees every texture the path baked**, because colour space
+  and embedded-image index are part of a texture's cache key while `path` is the
+  whole of what a caller can name. For a `.glb` that means every image the
+  container carries. Nothing checks whether a resident model still binds them:
+  this is the lever for a texture whose models are already gone, and the
+  no-cascade wart is what makes the two directions asymmetric.
+- **`UnloadAll` is models and textures, and nothing else.** Buffer-built meshes
+  are the caller's own handles — a lookup-wide sweep has no way to tell them
+  their `MeshRef`s went stale — and scene's own unit meshes, default textures
+  and null skin would be re-baked on the very next frame.
+- **An unloaded slot is reset, not deleted.** A deleted slot would be re-minted
+  at generation one by the next draw, and a load still in flight from before the
+  unload would match it and install as a ghost. Resetting is what makes the
+  generation counter monotonic per path, which is the whole of the rule.
 - **Unload is the only retry lever.** `failed` clears only on unload, so
   `UnloadModel(p)` on a failed path lets the next draw or query retry, including
   recovery from an invalid path once the string is fixed. There is no

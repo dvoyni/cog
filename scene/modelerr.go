@@ -74,6 +74,16 @@ func (e ErrModelBoundsMissing) Error() string {
 // selector is the first depth-first match, so the second is unaddressable and
 // the file has to be renamed for it to be drawn on its own. The model loads
 // either way: the duplicate costs nothing to anything but the selector.
+// ErrModelPathInvalid is a path that is not a resource path at all - empty,
+// absolute, NUL-bearing or escaping the mount root. It is reported from the
+// caller's own stack rather than from a load, because such a path never reaches
+// a load command: nothing downstream would ever have anything to say about it.
+type ErrModelPathInvalid struct{ Model string }
+
+func (e ErrModelPathInvalid) Error() string {
+	return fmt.Sprintf("scene: invalid model path %q", e.Model)
+}
+
 type ErrModelNodeDuplicated struct {
 	Model string
 	Node  string

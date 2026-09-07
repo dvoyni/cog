@@ -213,3 +213,43 @@ func TestVec3MinMaxAbsAndVec4Conversions(t *testing.T) {
 		t.Fatalf("Vec3 = %v, want %v", got, want)
 	}
 }
+
+// Two disjoint spheres union into the smallest sphere containing both, whose
+// diameter is the distance between the centres plus both radii. Growing the
+// first to reach the second is the wrong answer and the easy mistake: it keeps
+// the centre where it was and so overshoots on the far side.
+func TestSphereUnionOfTwoDisjointSpheres(t *testing.T) {
+	a := Sphere{Center: Vec3{X: -3}, Radius: 1}
+	b := Sphere{Center: Vec3{X: 3}, Radius: 2}
+	union := a.Union(b)
+	if union.Center != (Vec3{X: 0.5}) {
+		t.Errorf("centre = %v, want the midpoint of -4 and 5", union.Center)
+	}
+	if union.Radius != 4.5 {
+		t.Errorf("radius = %v, want (6+1+2)/2", union.Radius)
+	}
+}
+
+// A sphere that already contains the other is the answer unchanged. Falling
+// through to the general formula would be right on the radius and wrong on the
+// centre, which is how a contained sphere silently drags a bound off-centre.
+func TestSphereUnionKeepsTheContainingSphere(t *testing.T) {
+	outer := Sphere{Center: Vec3{X: 1, Y: 2}, Radius: 10}
+	inner := Sphere{Center: Vec3{X: 2, Y: 2}, Radius: 1}
+	if got := outer.Union(inner); got != outer {
+		t.Errorf("outer.Union(inner) = %+v, want the outer sphere", got)
+	}
+	if got := inner.Union(outer); got != outer {
+		t.Errorf("inner.Union(outer) = %+v, want the outer sphere", got)
+	}
+}
+
+// Concentric spheres have no direction to move the centre along, so the union
+// is the larger radius at the shared centre rather than a division by zero.
+func TestSphereUnionOfConcentricSpheres(t *testing.T) {
+	a := Sphere{Center: Vec3{Y: 4}, Radius: 1}
+	b := Sphere{Center: Vec3{Y: 4}, Radius: 3}
+	if got := a.Union(b); got != b {
+		t.Errorf("union = %+v, want the larger sphere", got)
+	}
+}

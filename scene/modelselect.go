@@ -11,6 +11,10 @@ import "github.com/dvoyni/cog/m"
 // outside it, so selecting one is two indices and no per-primitive test.
 type modelView struct {
 	primitives []modelPrimitive
+	// start is where that slice begins in the entry's own flattened list, which
+	// is what lets the arrays parallel to it - the load-time boxes the lookup
+	// facade reports - be indexed by the same range.
+	start int
 	// materials and neverCull come along so that the view is the whole answer
 	// to what a draw expands into: the expansion consults the model table once,
 	// in the sizing pass, and never again.
@@ -78,7 +82,7 @@ func (e *modelEntry) view(path, scene, node string) (modelView, modelSelectorErr
 		rerootJoint: -1, animation: &e.animation,
 	}
 	if node == "" {
-		view.primitives = e.primitives[within.start:within.end]
+		view.primitives, view.start = e.primitives[within.start:within.end], within.start
 		return view, nil
 	}
 	named, ok := within.nodes[node]
@@ -88,7 +92,7 @@ func (e *modelEntry) view(path, scene, node string) (modelView, modelSelectorErr
 	if !named.rerootable {
 		return modelView{}, ErrModelNodeDegenerate{Model: path, Node: node}
 	}
-	view.primitives = e.primitives[named.start:named.end]
+	view.primitives, view.start = e.primitives[named.start:named.end], named.start
 	view.reroot, view.rerooted = named.reroot, true
 	if len(named.animated) > 0 {
 		view.rerootJoint, view.rerootRest = named.rerootJoint, named.rest
