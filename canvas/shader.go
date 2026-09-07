@@ -52,6 +52,18 @@ var defaultTrianglesMaterial = gfx.MaterialWithState(
 	gfx.ColorParam("keyColor", defaultKeyColor),
 )
 
+// defaultTextureMaterial samples an arbitrary gfx texture as it is. It is a
+// second built-in rather than a parameter on the triangle one because the
+// difference is the shader: triangles.wgsl runs the key-colour ramp over every
+// texel, which is right for artwork and silent damage to a rendered image, and
+// no key colour turns the ramp off. Like the triangle material it carries no
+// inline texture default, because that would re-bake a temporary on every draw.
+var defaultTextureMaterial = gfx.MaterialWithState(
+	gfx.ShaderWithResource(textureShaderPath),
+	gfx.StateOverlay2D,
+	gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{}),
+)
+
 // defaultSpriteBatchMaterial draws many sprites/glyphs in one instanced call:
 // per-instance data comes from the "instances" storage buffer, and the texture,
 // sampler, and shared uniforms are bound per draw.
@@ -96,6 +108,11 @@ var triangleVertexLayout = [...]gfx.VertexAttr{
 func DefaultMaterial() *gfx.MaterialDescr { return &defaultMaterial }
 
 func DefaultTrianglesMaterial() *gfx.MaterialDescr { return &defaultTrianglesMaterial }
+
+// TextureMaterial returns the built-in material a texture-sourced draw uses:
+// sample the texture bound to TextureSlot, multiply by vertex colour, clip. Pass
+// it to DrawTriangles to get that behaviour for geometry recorded by hand.
+func TextureMaterial() *gfx.MaterialDescr { return &defaultTextureMaterial }
 
 func unitQuadBytes() (vertices, indices []byte) {
 	vertices = make([]byte, 4*2*4)

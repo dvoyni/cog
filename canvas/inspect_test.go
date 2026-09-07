@@ -80,7 +80,7 @@ func TestOpsAreEmptyAfterReset(t *testing.T) {
 	write := &OpQueue{}
 	write.Clear(0, m.Color{G: 1, A: 1})
 	write.FillRect(1, m.Rect{Width: 10, Height: 10}, m.Color{A: 1})
-	if color, ok := write.ClearColor(); !ok || color != (m.Color{G: 1, A: 1}) {
+	if color, ok := write.LayerClear(0); !ok || color != (m.Color{G: 1, A: 1}) {
 		t.Fatalf("clear colour = (%+v, %v), want the recorded clear", color, ok)
 	}
 
@@ -88,7 +88,60 @@ func TestOpsAreEmptyAfterReset(t *testing.T) {
 	if ops := write.Ops(nil); len(ops) != 0 {
 		t.Fatalf("ops after reset = %+v, want none", ops)
 	}
-	if _, ok := write.ClearColor(); ok {
+	if _, ok := write.LayerClear(0); ok {
 		t.Fatal("clear colour survived a reset")
+	}
+}
+
+// The recording-inspection surface has to report a texture-sourced sprite, or a
+// recorder's tests cannot tell one from a FillRect: both carry an empty Path.
+func TestOpsReportTheTextureASpriteAndACustomShapeSource(t *testing.T) {
+	texture := gfx.TextureWithBytes(8, 4, gfx.FormatRGBA8, make([]byte, 8*4*4), true, false)
+	white := m.Color{R: 1, G: 1, B: 1, A: 1}
+	write := &OpQueue{}
+	write.SpriteTexture(0, texture, SpriteTransform{Size: m.Vec2{X: 20, Y: 10}}, nil)
+	write.DrawTexture(1, texture, []Vertex{
+		{Position: m.Vec2{}, Color: white},
+		{Position: m.Vec2{X: 4}, Color: white},
+		{Position: m.Vec2{Y: 4}, Color: white},
+	}, nil)
+	write.FillRect(2, m.Rect{Width: 5, Height: 5}, white)
+
+	ops := write.Ops(nil)
+	if len(ops) != 3 {
+		t.Fatalf("ops = %d, want 3", len(ops))
+	}
+	if width, height := ops[0].Texture.Size(); ops[0].Kind != OpSprite || ops[0].Path != "" || width != 8 || height != 4 {
+		t.Fatalf("sprite op = %+v, want the recorded texture and no path", ops[0])
+	}
+	if ops[1].Kind != OpTriangles || ops[1].Texture.ID() != texture.ID() {
+		t.Fatalf("triangles op = %+v, want the texture DrawTexture bound", ops[1])
+	}
+	if width, height := ops[2].Texture.Size(); width != 0 || height != 0 {
+		t.Fatalf("fill rect texture = %dx%d, want none: it names a path, not a texture", width, height)
+	}
+}
+
+// SetLayerTarget is inspectable the way SetLayerTransform is, so a recorder can
+// assert where a layer went without running the pipeline. A layer nobody gave a
+// target reports none, which is the screen.
+func TestLayerTargetReportsWhereALayerDraws(t *testing.T) {
+	texture := gfx.TextureWithBytes(64, 32, gfx.FormatRGBA8Srgb, make([]byte, 64*32*4), true, false)
+	target := gfx.TextureTarget(texture, 0, 0)
+	write := &OpQueue{}
+	write.SetLayerTarget(3, target)
+	write.FillRect(3, m.Rect{Width: 5, Height: 5}, m.Color{A: 1})
+	write.FillRect(4, m.Rect{Width: 5, Height: 5}, m.Color{A: 1})
+
+	if got, ok := write.LayerTarget(3); !ok || got != target {
+		t.Fatalf("layer 3 target = (%+v, %v), want the one it was given", got, ok)
+	}
+	if _, ok := write.LayerTarget(4); ok {
+		t.Fatal("a layer without a target reported one")
+	}
+
+	write.Reset()
+	if _, ok := write.LayerTarget(3); ok {
+		t.Fatal("a layer target survived a reset; targets are frame-local")
 	}
 }

@@ -67,8 +67,15 @@ recorded outside every pass is dropped and reported as `ErrDrawWithoutPass`.
 
 - `Ready() bool`
 - `BakeBuffer`, `ReBakeBuffer`, `ReleaseBuffer`
-- `BakeTexture`, `ReBakeTexture`, `AllocateTexture`, `UpdateTexture`,
-  `ReleaseTexture`
+- `BakeTexture`, `ReBakeTexture`, `AllocateTexture`, `AllocateRenderTarget`,
+  `UpdateTexture`, `ReleaseTexture`
+
+`AllocateTexture` produces a texture to sample; `AllocateRenderTarget` produces
+one a pass can also render into, through `TextureTarget`. They are two methods
+because the render-attachment usage is not free, and almost every texture is
+sampled-only. `AllocateRenderTarget` is the durable counterpart of
+`OpQueue.TemporaryTarget`: take it when the rendered contents must outlive the
+frame, and `TemporaryTarget` when they need not.
 
 Methods accepting `copyData` snapshot bytes when true. When false, the caller
 must keep the source unchanged until the render thread consumes the operation.

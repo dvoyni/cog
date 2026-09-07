@@ -26,8 +26,12 @@ type Op struct {
 	Layer   Layer
 	Clip    m.Rect
 	HasClip bool
-	// Path, Transform and HasMaterial describe an OpSprite.
+	// Path, Transform and HasMaterial describe an OpSprite. Texture is the gfx
+	// texture the op samples - what SpriteTexture and DrawTexture were given, or
+	// whatever any op bound to TextureSlot - and is the zero descriptor for an op
+	// that names a resource path instead.
 	Path        string
+	Texture     gfx.TextureDescr
 	Transform   SpriteTransform
 	HasMaterial bool
 	// FontPath, Text and Draw describe an OpText.
@@ -89,8 +93,25 @@ func (w *opQueue) LayerWindow(layerID Layer) (m.Rect, AspectMode, bool) {
 	return value.window, value.aspect, true
 }
 
-// ClearColor reports the color passed to Clear, and whether it was called.
-func (w *opQueue) ClearColor() (m.Color, bool) { return w.clearColor, w.hasColor }
+// LayerTarget reports the render target set for a layer by SetLayerTarget, and
+// whether the layer has one. A layer without one draws to the screen.
+func (w *opQueue) LayerTarget(layerID Layer) (gfx.TargetDescr, bool) {
+	value, ok := w.ops[layerID]
+	if !ok || value.target == (gfx.TargetDescr{}) {
+		return gfx.TargetDescr{}, false
+	}
+	return value.target, true
+}
+
+// LayerClear reports the color passed to Clear for one layer, and whether that
+// layer clears at all.
+func (w *opQueue) LayerClear(layerID Layer) (m.Color, bool) {
+	value, ok := w.ops[layerID]
+	if !ok {
+		return m.Color{}, false
+	}
+	return value.clearColor, value.hasColor
+}
 
 func (w *opQueue) inspectOp(layerID Layer, op *drawOp) Op {
 	view := Op{Layer: layerID, Clip: op.clip, HasClip: op.hasClip}
@@ -98,6 +119,7 @@ func (w *opQueue) inspectOp(layerID Layer, op *drawOp) Op {
 	case drawSprite:
 		view.Kind = OpSprite
 		view.Path = op.sprite.path
+		view.Texture = op.sprite.texture
 		view.Transform = op.sprite.transform
 		view.HasMaterial = op.sprite.hasMaterial
 		view.Params = op.sprite.params
@@ -110,6 +132,9 @@ func (w *opQueue) inspectOp(layerID Layer, op *drawOp) Op {
 		view.Kind = OpTriangles
 		view.HasMaterial = op.triangles.hasMaterial
 		view.Params = op.triangles.params
+		if param, ok := view.Param(TextureSlot); ok {
+			view.Texture, _ = param.TextureValue()
+		}
 		view.Vertices = builtinVertices(&op.triangles)
 	}
 	return view

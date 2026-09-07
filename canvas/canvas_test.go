@@ -50,6 +50,14 @@ type testBackend struct {
 	samplers         []gfx.SamplerDesc
 	presents         int
 	capture          bool
+	// shaderSources maps each shader the backend was handed to its source, so a
+	// test can tell which built-in shader a pipeline was built from.
+	shaderSources map[gfx.ShaderID]string
+}
+
+// pipelineShader returns the source of the shader pipeline i was built from.
+func (b *testBackend) pipelineShader(i int) string {
+	return b.shaderSources[b.pipelines[i].Shader]
 }
 
 type textureAllocation struct {
@@ -93,9 +101,14 @@ func (b *testBackend) NewSampler(desc gfx.SamplerDesc) (gfx.SamplerID, error) {
 	return gfx.SamplerID(b.nextID), nil
 }
 func (b *testBackend) FreeSampler(gfx.SamplerID) {}
-func (b *testBackend) NewShader(gfx.ShaderDesc) (gfx.ShaderID, error) {
+func (b *testBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 	b.nextID++
-	return gfx.ShaderID(b.nextID), nil
+	id := gfx.ShaderID(b.nextID)
+	if b.shaderSources == nil {
+		b.shaderSources = map[gfx.ShaderID]string{}
+	}
+	b.shaderSources[id] = string(desc.Code)
+	return id, nil
 }
 func (b *testBackend) FreeShader(gfx.ShaderID) {}
 func (b *testBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout {
@@ -183,7 +196,13 @@ func (b *testBackend) ReleaseTexture(id gfx.TextureID) {
 	b.releasedTextures = append(b.releasedTextures, id)
 }
 
-type recordCanvasPlugin struct{ record func(*OpQueue) }
+// recordCanvasPlugin stands in for the app's own recording plugin. It locks
+// gfx's OpQueue as well as canvas's, because minting a render target takes the
+// gfx queue and an app that draws a canvas layer into a texture holds both.
+type recordCanvasPlugin struct {
+	record    func(*OpQueue)
+	recordGfx func(*OpQueue, *gfx.OpQueue)
+}
 type recordCanvasHandler kernel.Subscription[app.UpdateEvent]
 
 // lookupProbeCmd runs a callback inside a handler that holds the Lookup and
@@ -209,10 +228,17 @@ func (p recordCanvasPlugin) Dependencies() []kernel.PluginName {
 func (p recordCanvasPlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.Subscribe[recordCanvasHandler](func() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 		var queue kernel.Write[*OpQueue]
+		var gfxQueue kernel.Write[*gfx.OpQueue]
 		return func(access kernel.ResourceAccess) {
 				queue = access.GetWrite[*OpQueue]()
+				gfxQueue = access.GetWrite[*gfx.OpQueue]()
 			}, func(_ kernel.Kernel, _ app.UpdateEvent) error {
-				p.record(queue.Get())
+				if p.record != nil {
+					p.record(queue.Get())
+				}
+				if p.recordGfx != nil {
+					p.recordGfx(queue.Get(), gfxQueue.Get())
+				}
 				return nil
 			}
 	})
@@ -266,7 +292,22 @@ func testKernelCapturing(t testing.TB, filesystem fs.FS, config Config, record f
 	return k, &errs
 }
 
+// testKernelGfx builds the same harness as testKernel for a recorder that also
+// needs gfx's queue - the one an app allocating its own render target holds.
+func testKernelGfx(t testing.TB, filesystem fs.FS, config Config, record func(*OpQueue, *gfx.OpQueue)) (kernel.Executioner, *Plugin, *testBackend) {
+	t.Helper()
+	return testKernelRecorder(t, filesystem, config, recordCanvasPlugin{recordGfx: record}, func(err error) bool {
+		t.Errorf("unexpected kernel error: %v", err)
+		return true
+	})
+}
+
 func testKernelHandler(t testing.TB, filesystem fs.FS, config Config, record func(*OpQueue), onError func(error) bool) (kernel.Executioner, *Plugin, *testBackend) {
+	t.Helper()
+	return testKernelRecorder(t, filesystem, config, recordCanvasPlugin{record: record}, onError)
+}
+
+func testKernelRecorder(t testing.TB, filesystem fs.FS, config Config, recorder recordCanvasPlugin, onError func(error) bool) (kernel.Executioner, *Plugin, *testBackend) {
 	t.Helper()
 	canvasPlugin := New()
 	backend := &testBackend{capture: true}
@@ -276,7 +317,7 @@ func testKernelHandler(t testing.TB, filesystem fs.FS, config Config, record fun
 		storage.Name: storage.DefaultConfig("canvas-test").WithReadFS("test", 10, filesystem),
 		Name:         config,
 	}
-	engine := kernel.New(configs).Handler(onError).WithPlugins(storage.New(), gfx.New(), canvasPlugin, recordCanvasPlugin{record: record})
+	engine := kernel.New(configs).Handler(onError).WithPlugins(storage.New(), gfx.New(), canvasPlugin, recorder)
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()
@@ -547,7 +588,7 @@ func TestClipSnapshotIsPerOperation(t *testing.T) {
 }
 
 func TestLayerTransformAspectModes(t *testing.T) {
-	view := &app.Viewport{Width: 100, Height: 100}
+	view := layerSurface(gfx.TargetDescr{}, &app.Viewport{Width: 100, Height: 100})
 	tests := []struct {
 		name             string
 		aspect           AspectMode
@@ -993,32 +1034,30 @@ func TestAtlasArrayIsAllocatedSrgb(t *testing.T) {
 	}
 }
 
-func TestSpriteBatchShaderParses(t *testing.T) {
-	shader, err := fs.ReadFile(builtinFS, spriteBatchShaderPath)
+// assertBuiltinShaderLowers checks one embedded shader through the same front
+// end the backend puts it through, so a shader that ships broken fails here
+// rather than on a device.
+func assertBuiltinShaderLowers(t *testing.T, path string) {
+	t.Helper()
+	shader, err := fs.ReadFile(builtinFS, path)
 	if err != nil {
-		t.Fatalf("read embedded sprite batch shader: %v", err)
+		t.Fatalf("read embedded shader %q: %v", path, err)
 	}
 	parsed, err := naga.Parse(string(shader))
 	if err != nil {
-		t.Fatalf("parse sprite batch shader: %v", err)
+		t.Fatalf("parse %q: %v", path, err)
 	}
 	if _, err := wgsl.Lower(parsed); err != nil {
-		t.Fatalf("lower sprite batch shader: %v", err)
+		t.Fatalf("lower %q: %v", path, err)
 	}
 }
 
+func TestSpriteBatchShaderParses(t *testing.T) {
+	assertBuiltinShaderLowers(t, spriteBatchShaderPath)
+}
+
 func TestTrianglesShaderParses(t *testing.T) {
-	shader, err := fs.ReadFile(builtinFS, trianglesShaderPath)
-	if err != nil {
-		t.Fatalf("read embedded triangles shader: %v", err)
-	}
-	parsed, err := naga.Parse(string(shader))
-	if err != nil {
-		t.Fatalf("parse triangles shader: %v", err)
-	}
-	if _, err := wgsl.Lower(parsed); err != nil {
-		t.Fatalf("lower triangles shader: %v", err)
-	}
+	assertBuiltinShaderLowers(t, trianglesShaderPath)
 }
 
 func TestSpriteSizeReadsHeaderWithoutGPUUpload(t *testing.T) {

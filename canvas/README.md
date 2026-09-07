@@ -47,15 +47,22 @@ also writes `*Lookup` to resolve lazy sprites and apply deferred unloads.
 Bind `access.GetWrite[*canvas.OpQueue]()` in the recording subscription's `Lock`
 and call:
 
-- `Clear(Layer, m.Color)` to fill the screen at one layer, before anything that
-  layer draws. It is positioned rather than frame-global so that whatever
-  renders below canvas - a scene camera at a lower order - survives it.
+- `Clear(Layer, m.Color)` to fill one layer's target, before anything that layer
+  draws. It is positioned rather than frame-global so that whatever renders
+  below canvas - a scene camera at a lower order - survives it, and it is per
+  layer so a frame can clear a texture-targeted layer and the screen both.
 - `SetLayerTransform(Layer, m.Rect, AspectMode)` to map layer world coordinates
   into the logical viewport.
+- `SetLayerTarget(Layer, gfx.TargetDescr)` to render a layer into a texture
+  instead of the screen. See **Render to texture** below.
 - `SetClip(m.Rect)` and `RemoveClip()` to control the clip captured by subsequent
   operations.
 - `Sprite(Layer, path, SpriteTransform, *gfx.MaterialDescr, ...gfx.ParameterDescr)`.
   A nil material uses the built-in sprite material.
+- `SpriteTexture(Layer, gfx.TextureDescr, SpriteTransform, *gfx.MaterialDescr, ...gfx.ParameterDescr)`
+  for the same rectangle sourced from a gfx texture rather than a sprite path.
+- `DrawTexture[TVertex](Layer, gfx.TextureDescr, []TVertex, *gfx.MaterialDescr, ...gfx.ParameterDescr)`
+  for an arbitrary shape sourcing a gfx texture.
 - `FillRect`, `StrokeRect`, and `Line` for colored primitives.
 - `Text(Layer, fontPath, text, TextDraw)` for text with multiline and `${path}`
   inline-image support. A backslash escapes a literal `${` or `\`.
@@ -64,9 +71,9 @@ and call:
   number of recorded draw operations.
 
 `Layer` controls ascending draw order and is a `gfx.Order`: canvas declares one
-gfx pass per non-empty layer at that order, and a contiguous run of them
-collapses back into a single GPU pass. Another recorder interleaves with canvas
-by taking an order between two layer values. `m.Rect` and `m.Vec2` use `float32` logical
+gfx pass at that order for every layer that draws or clears, and a contiguous
+run of them sharing a target collapses back into a single GPU pass. Another
+recorder interleaves with canvas by taking an order between two layer values. `m.Rect` and `m.Vec2` use `float32` logical
 coordinates. `AspectMode` is `AspectInscribe`, `AspectOverlap`, or
 `AspectStretch`.
 
@@ -86,8 +93,61 @@ instance record matching the built-in sprite-batch shader.
 
 `TextureSlot` (`"canvasTexture"`) and `SamplerSlot` (`"canvasSampler"`) are the
 reserved shader parameter names for textured custom triangles.
-`DefaultMaterial()` and `DefaultTrianglesMaterial()` return the built-in
-materials.
+`DefaultMaterial()`, `DefaultTrianglesMaterial()` and `TextureMaterial()` return
+the built-in materials.
+
+## Render To Texture
+
+A canvas layer renders into a gfx texture, and a canvas draw samples one. The
+unit of exchange is a plain `gfx.TextureDescr`, so the same handle a layer
+rendered into is the one a later layer, another camera, or a `scene.Material`
+samples - there is no canvas-owned target type and no name registry.
+
+```go
+target, texture := gfxQueue.TemporaryTarget(512, 512, gfx.FormatRGBA8Srgb)
+q.SetLayerTarget(0, target)
+q.Clear(0, m.Transparent)
+q.Text(0, "", "PANEL", canvas.TextDraw{Size: 48})
+
+q.SpriteTexture(1, texture, canvas.SpriteTransform{Position: m.Vec2{X: 20, Y: 20}}, nil)
+```
+
+**Canvas mints nothing and names nothing.** The target is the gfx handle the
+caller allocated, passed through untouched, because minting a texture takes the
+gfx queue and a canvas recorder does not hold it. Take a frame-local target from
+`gfx.OpQueue.TemporaryTarget`, which hands back both the target and the texture,
+or a durable one from `gfx.ResourceQueue.AllocateRenderTarget` when the contents
+must outlive the frame - a panel baked once and sampled for many frames after.
+
+A layer with a target **measures against the target's size**, not the viewport:
+`SetLayerTransform`, text rasterization and the clip-space conversion all use
+the texture's dimensions. A texture is its own framebuffer, so there is no
+second framebuffer scale on top of that.
+
+Passes still merge. A contiguous run of layers naming one target collapses into
+a single GPU pass; a target change ends the run, and each run clears its own
+depth at the bottom and discards it at the top, because `DepthAuto` pools one
+depth texture per target size.
+
+**Barriers are gfx's.** It computes the frame's write-then-read pairs and emits
+the transitions, in both directions, so canvas carries no barrier code and
+neither does a caller.
+
+Two things a caller has to get right:
+
+- **Do not draw a render target through the sprite or triangle material.** Both
+  run the key-colour ramp, which rewrites any texel whose red and blue agree
+  within 0.2 in sRGB and whose green is below 0.2 to grey at its own red
+  intensity, with no key colour that switches it off. That is what makes a
+  sprite sheet wear a player colour, and it silently desaturates every dark,
+  low-green pixel of a rendered image. `SpriteTexture` and `DrawTexture` default
+  to `TextureMaterial()`, which samples and returns; keep that unless you are
+  supplying a shader of your own.
+- **Allocate the target `FormatRGBA8Srgb`.** The atlas is sRGB and the engine
+  blends linear, so that format is what everything else canvas draws matches. It
+  is also the only format that works today: gfx keys every pipeline to the frame
+  buffer's colour format regardless of the pass target, which is right while
+  every renderable texture is allocated in it and wrong the moment one is not.
 
 ## Inspecting A Recording
 
@@ -98,11 +158,12 @@ instead of rendered pixels:
   then recording order within a layer).
 - `Op` reports `Kind` (`OpSprite`, `OpText`, `OpTriangles`),
   `Layer`, the snapshotted `Clip`/`HasClip`, the sprite `Path`/`Transform`, the
-  text `FontPath`/`Text`/`Draw`, recorded `Params`, and `Vertices` for triangle
-  lists recorded with the built-in `Vertex` type. `Op.Param` and `Op.ColorParam`
-  look a parameter up by name.
-- `LayerWindow(Layer)` reports a layer's window and aspect mode, and
-  `ClearColor()` the color passed to `Clear`.
+  `Texture` the op samples, the text `FontPath`/`Text`/`Draw`, recorded
+  `Params`, and `Vertices` for triangle lists recorded with the built-in
+  `Vertex` type. `Op.Param` and `Op.ColorParam` look a parameter up by name.
+- `LayerWindow(Layer)` reports a layer's window and aspect mode,
+  `LayerTarget(Layer)` where it draws, and `LayerClear(Layer)` the color passed
+  to `Clear` for it.
 
 ## Coordinate Helpers
 

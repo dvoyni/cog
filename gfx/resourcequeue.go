@@ -49,15 +49,45 @@ func (q *resourceQueue) BakeTexture(width, height int, format TextureFormat, pix
 	return q.bakeTexture(q.backend.NewTexture(), width, height, format, pixels, copyData, mipmaps)
 }
 
-// AllocateTexture queues allocation of an empty texture. More than one layer
-// creates a 2D-array texture.
+// AllocateTexture queues allocation of an empty texture to sample from. More
+// than one layer creates a 2D-array texture. No pass can render into it: ask
+// AllocateRenderTarget for that.
 func (q *resourceQueue) AllocateTexture(width, height, layers int, format TextureFormat) TextureDescr {
+	return q.allocateTexture(width, height, layers, format, false)
+}
+
+// AllocateRenderTarget queues allocation of an empty texture a pass can render
+// into, through TextureTarget, and sample afterwards. More than one layer
+// creates a 2D-array texture, and TextureTarget names which layer a pass writes.
+//
+// It is a separate method rather than a flag on AllocateTexture because the
+// render-attachment usage is not free: a backend may keep a sampled-only
+// texture in a compressed layout it cannot render into, so a texture that says
+// it might be a target pays for the possibility on every frame it is only read.
+// Almost every texture in a frame is sampled-only, and the default belongs to
+// the cheap case.
+//
+// This is the durable counterpart of OpQueue.TemporaryTarget. Take it when the
+// rendered contents must outlive the frame - a canvas layer baked once and
+// sampled by a scene material for many frames after, a cached UI panel, a
+// shadow map held across frames. When they need only live until the frame ends,
+// TemporaryTarget pools its textures and this one does not: what this returns is
+// caller-owned and must be released.
+func (q *resourceQueue) AllocateRenderTarget(width, height, layers int, format TextureFormat) TextureDescr {
+	return q.allocateTexture(width, height, layers, format, true)
+}
+
+func (q *resourceQueue) allocateTexture(width, height, layers int, format TextureFormat, renderable bool) TextureDescr {
 	id := q.backend.NewTexture()
 	q.ops = append(q.ops, op{
 		kind: opAllocateTexture, textureID: id,
 		texW: width, texH: height, texLayers: layers, format: format,
+		renderable: renderable,
 	})
-	return TextureDescr{source: TextureSourceBaked, id: id, width: width, height: height}
+	return TextureDescr{
+		source: TextureSourceBaked, id: id,
+		width: width, height: height, format: format,
+	}
 }
 
 // UpdateTexture queues a pixel upload into one texture layer and region.

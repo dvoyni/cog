@@ -105,32 +105,33 @@ func (p *Plugin) flushFrame(
 	fontAtlas.beginFrame()
 	p.layers = p.layers[:0]
 	for layerID, value := range write.ops {
-		if len(value.ops) > 0 {
+		// A layer that only clears still gets a pass: clearing a target and
+		// drawing nothing into it is a legitimate frame, and a clear that
+		// migrated to whichever layer happened to draw would land on the wrong
+		// attachment.
+		if len(value.ops) > 0 || value.hasColor {
 			p.layers = append(p.layers, layerID)
 		}
 	}
-	// The clear's layer gets a pass even when it draws nothing, so a frame where
-	// the bottom layer happens to be empty still clears.
-	if write.hasColor && !slices.Contains(p.layers, write.clearLayer) {
-		p.layers = append(p.layers, write.clearLayer)
-	}
 	slices.Sort(p.layers)
 	for index, layerID := range p.layers {
-		gfxWrite.Pass(canvasPass(layerID, index, len(p.layers), write))
 		value := write.ops[layerID]
-		transform := resolveLayerTransform(value, view)
+		first := index == 0 || write.ops[p.layers[index-1]].target != value.target
+		last := index == len(p.layers)-1 || write.ops[p.layers[index+1]].target != value.target
+		gfxWrite.Pass(canvasPass(layerID, value, first, last))
+		surf := layerSurface(value.target, view)
+		transform := resolveLayerTransform(value, surf)
 		for i := range value.ops {
 			switch value.ops[i].kind {
 			case drawSprite:
-				p.tris.flush(gfxWrite)
-				p.drawSprite(gfxWrite, spriteAtlas, gfxResources, filesystem, view, transform, value.ops[i].clip, value.ops[i].hasClip, &value.ops[i].sprite)
+				p.drawSprite(gfxWrite, spriteAtlas, gfxResources, filesystem, surf, transform, value.ops[i].clip, value.ops[i].hasClip, &value.ops[i].sprite)
 			case drawText:
 				p.tris.flush(gfxWrite)
-				p.drawText(gfxWrite, spriteAtlas, fontAtlas, gfxResources, filesystem, view, fonts, transform, value.ops[i].clip, value.ops[i].hasClip, &value.ops[i].text)
+				p.drawText(gfxWrite, spriteAtlas, fontAtlas, gfxResources, filesystem, surf, fonts, transform, value.ops[i].clip, value.ops[i].hasClip, &value.ops[i].text)
 			case drawTriangles:
 				p.batch.flush(gfxWrite, p.quad)
 				op := &value.ops[i].triangles
-				p.drawTriangles(gfxWrite, view, transform, value.ops[i].clip, value.ops[i].hasClip, write.layouts[op.layoutID], op)
+				p.drawTriangles(gfxWrite, surf, transform, value.ops[i].clip, value.ops[i].hasClip, write.layouts[op.layoutID], op)
 			}
 		}
 		p.batch.flush(gfxWrite, p.quad)
@@ -140,43 +141,50 @@ func (p *Plugin) flushFrame(
 }
 
 // canvasPass describes the pass one canvas layer draws into. A contiguous run
-// of them collapses back to one GPU pass through gfx's merge rule, which is why
-// the depth ops are asymmetric rather than uniform: depth clears once at the
-// bottom and is discarded once at the top, and every pass in between preserves
-// and keeps, which is what the merge predicate requires.
-func canvasPass(layerID Layer, index, count int, write *opQueue) gfx.PassDescr {
+// of layers sharing a target collapses back to one GPU pass through gfx's merge
+// rule, which is why the depth ops are asymmetric rather than uniform: depth
+// clears once at the bottom of a run and is discarded once at the top, and every
+// pass in between preserves and keeps, which is what the merge predicate
+// requires.
+//
+// first and last bracket the run, not the frame. Depth is per attachment and
+// DepthAuto pools one texture per target size, so a layer that preserved depth
+// across a target change would z-test against whatever the other target left
+// behind. The zero TargetDescr is the screen, which is what a layer nobody gave
+// a target means by saying nothing.
+func canvasPass(layerID Layer, value layer, first, last bool) gfx.PassDescr {
 	desc := gfx.PassDescr{
 		Order:  layerID,
-		Target: gfx.ScreenTarget(),
+		Target: value.target,
 		Depth:  gfx.DepthAuto(),
 		Label:  "canvas.layer",
 	}
-	if index == 0 {
+	if first {
 		desc.DepthLoad, desc.DepthClear = gfx.LoadClear, 1
 	}
-	if index == count-1 {
-		// Nothing reads canvas's depth after the frame, and discarding saves a
+	if last {
+		// Nothing reads canvas's depth after the run, and discarding saves a
 		// tiled GPU the writeback.
 		desc.DepthStore = gfx.StoreDiscard
 	}
-	if write.hasColor && layerID == write.clearLayer {
-		desc.Load, desc.Clear = gfx.LoadClear, write.clearColor
+	if value.hasColor {
+		desc.Load, desc.Clear = gfx.LoadClear, value.clearColor
 	}
 	return desc
 }
 
-func (p *Plugin) drawTriangles(gfxWrite *gfx.OpQueue, view *app.Viewport, layerTransform m.Mat4, clip m.Rect, hasClip bool, layout []gfx.VertexAttr, op *trianglesOp) {
+func (p *Plugin) drawTriangles(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, layout []gfx.VertexAttr, op *trianglesOp) {
 	if hasClip && (clip.Width <= 0 || clip.Height <= 0) {
 		return
 	}
 	texture, sampler, keyColor, hasTexture, batchable := trianglesBatchKey(op)
 	if op.hasMaterial || !batchable {
 		p.tris.flush(gfxWrite)
-		p.emitTrianglesDirect(gfxWrite, view, layerTransform, clip, hasClip, layout, op)
+		p.emitTrianglesDirect(gfxWrite, surf, layerTransform, clip, hasClip, layout, op)
 		return
 	}
-	p.tris.add(gfxWrite, m.Vec2{X: view.Width, Y: view.Height}, op.layoutID, layout,
-		texture, hasTexture, sampler, keyColor, layerTransform, clip, hasClip, op.vertices)
+	p.tris.add(gfxWrite, surf.size, op.layoutID, layout,
+		texture, hasTexture, sampler, keyColor, op.unkeyed, layerTransform, clip, hasClip, op.vertices)
 }
 
 // trianglesBatchKey extracts the texture/sampler/keying a default-material
@@ -208,18 +216,21 @@ func trianglesBatchKey(op *trianglesOp) (texture gfx.TextureDescr, sampler gfx.S
 
 // emitTrianglesDirect draws one triangle op without batching (custom material or
 // unbatchable parameters).
-func (p *Plugin) emitTrianglesDirect(gfxWrite *gfx.OpQueue, view *app.Viewport, layerTransform m.Mat4, clip m.Rect, hasClip bool, layout []gfx.VertexAttr, op *trianglesOp) {
+func (p *Plugin) emitTrianglesDirect(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, layout []gfx.VertexAttr, op *trianglesOp) {
 	clipEnabled := float32(0)
 	if hasClip {
 		clipEnabled = 1
 	}
 	material := defaultTrianglesMaterial
-	if op.hasMaterial {
+	switch {
+	case op.hasMaterial:
 		material = op.material
+	case op.unkeyed:
+		material = defaultTextureMaterial
 	}
 	p.params = p.params[:0]
 	p.params = append(p.params,
-		gfx.VecParam("canvasViewport", m.Vec4{X: view.Width, Y: view.Height, Z: clipEnabled}),
+		gfx.VecParam("canvasViewport", m.Vec4{X: surf.size.X, Y: surf.size.Y, Z: clipEnabled}),
 		gfx.MatParam("canvasLayer", layerTransform),
 		gfx.VecParam("canvasClip", m.Vec4{X: clip.X, Y: clip.Y, Z: clip.X + clip.Width, W: clip.Y + clip.Height}),
 	)
@@ -232,8 +243,38 @@ func (p *Plugin) emitTrianglesDirect(gfxWrite *gfx.OpQueue, view *app.Viewport, 
 	gfxWrite.Draw(mesh, material, p.params...)
 }
 
-func resolveLayerTransform(value layer, view *app.Viewport) m.Mat4 {
-	scale, offset := LayerTransform(value.window, value.aspect, m.Vec2{X: view.Width, Y: view.Height})
+// surface is the pixel field one layer draws into: the logical size its
+// coordinates map onto, and the physical-to-logical ratio glyph rasterization
+// works at.
+//
+// The screen takes its size from the app viewport and rasterizes text at the
+// framebuffer's higher resolution, which is why the two are separate numbers. A
+// texture-targeted layer is its own framebuffer: its logical size is the
+// texture's own and there is no second ratio, because nothing scales the
+// texture on the way to being a texture.
+type surface struct {
+	size  m.Vec2
+	scale float32
+}
+
+// layerSurface picks the field a layer measures against. Scene's passAspect
+// settles the rule and this follows it: the target's size when the target has
+// one, the viewport otherwise. A screen target cannot answer - its swapchain
+// view is per-frame and sized on the render thread - and the viewport is the
+// number canvas can read on the update thread.
+func layerSurface(target gfx.TargetDescr, view *app.Viewport) surface {
+	if width, height, ok := target.Size(); ok && width > 0 && height > 0 {
+		return surface{size: m.Vec2{X: float32(width), Y: float32(height)}, scale: 1}
+	}
+	scale := float32(1)
+	if view.Width > 0 && view.FramebufferWidth > 0 {
+		scale = view.FramebufferWidth / view.Width
+	}
+	return surface{size: m.Vec2{X: view.Width, Y: view.Height}, scale: scale}
+}
+
+func resolveLayerTransform(value layer, surf surface) m.Mat4 {
+	scale, offset := LayerTransform(value.window, value.aspect, surf.size)
 	return m.Translation4(offset.X, offset.Y, 0).Mul(m.Scaling4(scale.X, scale.Y, 1))
 }
 
@@ -257,14 +298,24 @@ func clearFontFaces(fonts *fontStore) {
 	clear(fonts.fonts)
 }
 
-func (p *Plugin) drawSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *gfx.ResourceQueue, filesystem storage.FileSystem, view *app.Viewport, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *spriteOp) {
+func (p *Plugin) drawSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *spriteOp) {
+	// Recording order is the contract, so a sprite closes every batch whose
+	// pending draw would otherwise land after it. The atlas batch is the only one
+	// a path sprite can join; a texture-sourced sprite joins neither, because its
+	// draw emits here and now.
+	p.tris.flush(gfxWrite)
+	if op.hasTexture {
+		p.batch.flush(gfxWrite, p.quad)
+		p.drawTextureSprite(gfxWrite, surf, layerTransform, clip, hasClip, op)
+		return
+	}
 	t := op.transform
 	if t.TileX || t.TileY {
 		if op.path == "" {
 			t.TileX, t.TileY = false, false
 		} else {
 			p.batch.flush(gfxWrite, p.quad)
-			p.drawTiledSprite(gfxWrite, atlas, gfxResources, filesystem, view, t, layerTransform, clip, hasClip, op)
+			p.drawTiledSprite(gfxWrite, atlas, gfxResources, filesystem, surf, t, layerTransform, clip, hasClip, op)
 			return
 		}
 	}
@@ -273,27 +324,50 @@ func (p *Plugin) drawSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *g
 		return
 	}
 	if t.NineSlice != (SpriteFrame{}) {
-		p.drawNineSlice(gfxWrite, view, entry, t, layerTransform, clip, hasClip, op)
+		p.drawNineSlice(gfxWrite, surf, entry, t, layerTransform, clip, hasClip, op)
 		return
 	}
 	if op.hasMaterial {
 		p.batch.flush(gfxWrite, p.quad)
 		material := op.material
-		p.drawEntry(gfxWrite, view, entry, t, layerTransform, clip, hasClip, &material, op.params)
+		p.drawEntry(gfxWrite, surf, entry, t, layerTransform, clip, hasClip, &material, op.params)
 		return
 	}
 	tint := paramColorOr(op.params, "tint", m.Color{R: 1, G: 1, B: 1, A: 1})
 	keyColor := paramColorOr(op.params, "keyColor", defaultKeyColor)
-	p.batchEntry(gfxWrite, view, entry, t, layerTransform, clip, hasClip, tint, keyColor)
+	p.batchEntry(gfxWrite, surf, entry, t, layerTransform, clip, hasClip, tint, keyColor)
 }
 
-func (p *Plugin) drawNineSlice(gfxWrite *gfx.OpQueue, view *app.Viewport, entry atlasEntry, transform SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *spriteOp) {
+func (p *Plugin) drawNineSlice(gfxWrite *gfx.OpQueue, surf surface, entry atlasEntry, transform SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *spriteOp) {
+	tint := paramColorOr(op.params, "tint", m.Color{R: 1, G: 1, B: 1, A: 1})
+	keyColor := paramColorOr(op.params, "keyColor", defaultKeyColor)
+	nineSliceParts(transform, entry.width, entry.height, func(part SpriteTransform) {
+		if op.hasMaterial {
+			p.batch.flush(gfxWrite, p.quad)
+			material := op.material
+			p.drawEntry(gfxWrite, surf, entry, part, layerTransform, clip, hasClip, &material, op.params)
+			return
+		}
+		p.batchEntry(gfxWrite, surf, entry, part, layerTransform, clip, hasClip, tint, keyColor)
+	})
+}
+
+// nineSliceParts splits one transform into the sub-draws a nine-slice is made
+// of, each with its own destination rectangle and source Frame, and hands them
+// to emit in row-major order. Both sprite sources share it: the corners, sides
+// and centre of a nine-slice are the same arithmetic whether the pixels come
+// from an atlas entry or from a texture of their own.
+//
+// Insets that do not fit the source emit nothing, which is the house rule: a
+// nine-slice whose borders overlap has no correct picture, and drawing an
+// approximate one would hide the authoring mistake.
+func nineSliceParts(transform SpriteTransform, width, height int, emit func(SpriteTransform)) {
 	insets := transform.NineSlice
 	if insets.Left < 0 || insets.Right < 0 || insets.Top < 0 || insets.Bottom < 0 ||
-		insets.Left+insets.Right >= entry.width || insets.Top+insets.Bottom >= entry.height {
+		insets.Left+insets.Right >= width || insets.Top+insets.Bottom >= height {
 		return
 	}
-	size := entrySize(entry, transform)
+	size := spriteSize(width, height, transform)
 	if size.X <= 0 || size.Y <= 0 {
 		return
 	}
@@ -303,37 +377,29 @@ func (p *Plugin) drawNineSlice(gfxWrite *gfx.OpQueue, view *app.Viewport, entry 
 	}
 	destinationX := splitNineSliceAxis(size.X, float32(insets.Left)*scale, float32(insets.Right)*scale)
 	destinationY := splitNineSliceAxis(size.Y, float32(insets.Top)*scale, float32(insets.Bottom)*scale)
-	sourceX := [4]int{0, insets.Left, entry.width - insets.Right, entry.width}
-	sourceY := [4]int{0, insets.Top, entry.height - insets.Bottom, entry.height}
-	tint := paramColorOr(op.params, "tint", m.Color{R: 1, G: 1, B: 1, A: 1})
-	keyColor := paramColorOr(op.params, "keyColor", defaultKeyColor)
+	sourceX := [4]int{0, insets.Left, width - insets.Right, width}
+	sourceY := [4]int{0, insets.Top, height - insets.Bottom, height}
 	for row := 0; row < 3; row++ {
 		for column := 0; column < 3; column++ {
 			if transform.NineSliceNoCenter && row == 1 && column == 1 {
 				continue
 			}
-			width := destinationX[column+1] - destinationX[column]
-			height := destinationY[row+1] - destinationY[row]
-			if width <= 0 || height <= 0 {
+			partWidth := destinationX[column+1] - destinationX[column]
+			partHeight := destinationY[row+1] - destinationY[row]
+			if partWidth <= 0 || partHeight <= 0 {
 				continue
 			}
 			part := transform
 			part.Position = m.Vec2{X: transform.Position.X + destinationX[column], Y: transform.Position.Y + destinationY[row]}
-			part.Size = m.Vec2{X: width, Y: height}
+			part.Size = m.Vec2{X: partWidth, Y: partHeight}
 			part.Origin = m.Vec2{}
 			part.Rotation = 0
 			part.Frame = SpriteFrame{
 				Left: sourceX[column], Top: sourceY[row],
-				Right: entry.width - sourceX[column+1], Bottom: entry.height - sourceY[row+1],
+				Right: width - sourceX[column+1], Bottom: height - sourceY[row+1],
 			}
 			part.NineSlice = SpriteFrame{}
-			if op.hasMaterial {
-				p.batch.flush(gfxWrite, p.quad)
-				material := op.material
-				p.drawEntry(gfxWrite, view, entry, part, layerTransform, clip, hasClip, &material, op.params)
-			} else {
-				p.batchEntry(gfxWrite, view, entry, part, layerTransform, clip, hasClip, tint, keyColor)
-			}
+			emit(part)
 		}
 	}
 }
@@ -347,7 +413,7 @@ func splitNineSliceAxis(length, leading, trailing float32) [4]float32 {
 // drawTiledSprite renders a sprite that repeats on one or both axes. It samples a
 // standalone repeat texture through the textured-triangle path, so it ignores the
 // sprite material and Frame; Scale controls logical tile size and tint becomes vertex color.
-func (p *Plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *gfx.ResourceQueue, filesystem storage.FileSystem, view *app.Viewport, t SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *spriteOp) {
+func (p *Plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, t SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *spriteOp) {
 	entry, ok := atlas.resolveStandalone(op.path, filesystem, gfxResources)
 	if !ok {
 		return
@@ -401,7 +467,7 @@ func (p *Plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResourc
 	}
 	p.params = p.params[:0]
 	p.params = append(p.params,
-		gfx.VecParam("canvasViewport", m.Vec4{X: view.Width, Y: view.Height, Z: clipEnabled}),
+		gfx.VecParam("canvasViewport", m.Vec4{X: surf.size.X, Y: surf.size.Y, Z: clipEnabled}),
 		gfx.MatParam("canvasLayer", layerTransform),
 		gfx.VecParam("canvasClip", m.Vec4{X: clip.X, Y: clip.Y, Z: clip.X + clip.Width, W: clip.Y + clip.Height}),
 		gfx.TextureParam(TextureSlot, entry.texture),
@@ -410,6 +476,127 @@ func (p *Plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResourc
 	p.params = append(p.params, op.params...)
 	mesh := gfx.Mesh(gfx.BufferWithBytes(p.tileVertices, true), gfx.TopologyTriangleList, triangleVertexLayout[:]...)
 	gfxWrite.Draw(mesh, defaultTrianglesMaterial, p.params...)
+}
+
+// drawTextureSprite draws a sprite sourcing an arbitrary gfx texture rather than
+// an atlas entry.
+//
+// It cannot join the sprite batch: that shader's binding is a
+// texture_2d_array and an arbitrary texture is a texture_2d, so an atlas batch
+// and a texture sprite can never be the same draw. It emits its own quad
+// instead, the same route the tiled sprite takes, through the texture material
+// so the key-colour ramp never touches a rendered image.
+func (p *Plugin) drawTextureSprite(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *spriteOp) {
+	width, height := op.texture.Size()
+	if width <= 0 || height <= 0 {
+		// Skip, never substitute. A texture that does not know its size yet - a
+		// resource path nothing has baked - has no natural size to draw at and no
+		// pixels for a Frame to cut, and a guessed rectangle is worse than none.
+		return
+	}
+	if op.transform.NineSlice != (SpriteFrame{}) {
+		nineSliceParts(op.transform, width, height, func(part SpriteTransform) {
+			p.emitTextureQuad(gfxWrite, surf, layerTransform, clip, hasClip, width, height, part, op)
+		})
+		return
+	}
+	p.emitTextureQuad(gfxWrite, surf, layerTransform, clip, hasClip, width, height, op.transform, op)
+}
+
+// emitTextureQuad draws one rectangle of a texture-sourced sprite: two triangles
+// in the built-in vertex layout, with the tint as vertex colour so it needs no
+// parameter the texture material would have to declare.
+func (p *Plugin) emitTextureQuad(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, width, height int, t SpriteTransform, op *spriteOp) {
+	size := spriteSize(width, height, t)
+	if size.X == 0 || size.Y == 0 {
+		return
+	}
+	clipEnabled := float32(0)
+	if hasClip {
+		if clip.Width <= 0 || clip.Height <= 0 {
+			return
+		}
+		clipEnabled = 1
+	}
+	uv, ok := textureUV(width, height, t, size)
+	if !ok {
+		return
+	}
+	tint := paramColorOr(op.params, "tint", m.Color{R: 1, G: 1, B: 1, A: 1})
+	sine, cosine := sincos(t.Rotation)
+	corners := [4]m.Vec2{{X: 0, Y: 0}, {X: 1, Y: 0}, {X: 1, Y: 1}, {X: 0, Y: 1}}
+	uvs := [4]m.Vec2{{X: uv.X, Y: uv.Y}, {X: uv.Z, Y: uv.Y}, {X: uv.Z, Y: uv.W}, {X: uv.X, Y: uv.W}}
+	var positions [4]m.Vec2
+	for i, q := range corners {
+		sx := (q.X - t.Origin.X) * size.X
+		sy := (q.Y - t.Origin.Y) * size.Y
+		positions[i] = m.Vec2{
+			X: t.Position.X + sx*cosine - sy*sine,
+			Y: t.Position.Y + sx*sine + sy*cosine,
+		}
+	}
+	p.tileVertices = p.tileVertices[:0]
+	for _, i := range [6]int{0, 1, 2, 0, 2, 3} {
+		p.tileVertices = appendTileVertex(p.tileVertices, positions[i], tint, uvs[i])
+	}
+	material := defaultTextureMaterial
+	if op.hasMaterial {
+		material = op.material
+	}
+	p.params = p.params[:0]
+	p.params = append(p.params,
+		gfx.VecParam("canvasViewport", m.Vec4{X: surf.size.X, Y: surf.size.Y, Z: clipEnabled}),
+		gfx.MatParam("canvasLayer", layerTransform),
+		gfx.VecParam("canvasClip", m.Vec4{X: clip.X, Y: clip.Y, Z: clip.X + clip.Width, W: clip.Y + clip.Height}),
+		gfx.TextureParam(TextureSlot, op.texture),
+		gfx.SamplerParam(SamplerSlot, tileSampler(t)),
+	)
+	p.params = append(p.params, op.params...)
+	mesh := gfx.Mesh(gfx.BufferWithBytes(p.tileVertices, true), gfx.TopologyTriangleList, triangleVertexLayout[:]...)
+	gfxWrite.Draw(mesh, material, p.params...)
+}
+
+// textureUV resolves the uv rect a texture-sourced sprite samples. Unlike an
+// atlas entry the two axes have their own texel size, because a texture is not
+// square by construction and is not packed into anything.
+//
+// A tiled axis runs the uv past 1 by the number of repeats, which is what the
+// repeat sampler wraps. Tiling therefore ignores Frame and the flips, exactly as
+// the atlas tiling path does: what repeats is the texture, not a window onto it.
+func textureUV(width, height int, t SpriteTransform, size m.Vec2) (m.Vec4, bool) {
+	if t.TileX || t.TileY {
+		scale := t.Scale
+		if scale == 0 {
+			scale = 1
+		}
+		uv := m.Vec4{Z: 1, W: 1}
+		if t.TileX {
+			uv.Z = size.X / (float32(width) * scale)
+		}
+		if t.TileY {
+			uv.W = size.Y / (float32(height) * scale)
+		}
+		return uv, true
+	}
+	uv := m.Vec4{Z: 1, W: 1}
+	frame := t.Frame
+	if frame != (SpriteFrame{}) {
+		if frame.Left < 0 || frame.Top < 0 || frame.Right < 0 || frame.Bottom < 0 ||
+			frame.Left+frame.Right >= width || frame.Top+frame.Bottom >= height {
+			return m.Vec4{}, false
+		}
+		uv.X = float32(frame.Left) / float32(width)
+		uv.Y = float32(frame.Top) / float32(height)
+		uv.Z = 1 - float32(frame.Right)/float32(width)
+		uv.W = 1 - float32(frame.Bottom)/float32(height)
+	}
+	if t.FlipX {
+		uv.X, uv.Z = uv.Z, uv.X
+	}
+	if t.FlipY {
+		uv.Y, uv.W = uv.W, uv.Y
+	}
+	return uv, true
 }
 
 // tileSampler repeats only the axes the transform tiles, so the non-tiled axis
@@ -448,7 +635,7 @@ func appendTileVertex(dst []byte, position m.Vec2, color m.Color, uv m.Vec2) []b
 	return dst
 }
 
-func (p *Plugin) drawEntry(gfxWrite *gfx.OpQueue, view *app.Viewport, entry atlasEntry, transform SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, material *gfx.MaterialDescr, params []gfx.ParameterDescr) {
+func (p *Plugin) drawEntry(gfxWrite *gfx.OpQueue, surf surface, entry atlasEntry, transform SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, material *gfx.MaterialDescr, params []gfx.ParameterDescr) {
 	size := entrySize(entry, transform)
 	if size.X == 0 || size.Y == 0 {
 		return
@@ -470,7 +657,7 @@ func (p *Plugin) drawEntry(gfxWrite *gfx.OpQueue, view *app.Viewport, entry atla
 		gfx.VecParam("canvasTransform0", m.Vec4{X: transform.Position.X, Y: transform.Position.Y, Z: size.X, W: size.Y}),
 		gfx.VecParam("canvasTransform1", m.Vec4{X: transform.Origin.X, Y: transform.Origin.Y, Z: sine, W: cosine}),
 		gfx.VecParam("canvasFrame", uv),
-		gfx.VecParam("canvasViewport", m.Vec4{X: view.Width, Y: view.Height}),
+		gfx.VecParam("canvasViewport", m.Vec4{X: surf.size.X, Y: surf.size.Y}),
 		gfx.FloatParam("atlasLayer", float32(entry.layer)),
 		gfx.FloatParam("clipEnabled", clipEnabled),
 		gfx.MatParam("canvasLayer", layerTransform),
@@ -482,22 +669,29 @@ func (p *Plugin) drawEntry(gfxWrite *gfx.OpQueue, view *app.Viewport, entry atla
 	gfxWrite.Draw(p.quad, *material, p.params...)
 }
 
-// entrySize resolves the on-screen size of an atlas entry from a transform's
-// explicit size, single-axis size, or uniform scale.
+// entrySize resolves the on-screen size of an atlas entry.
 func entrySize(entry atlasEntry, transform SpriteTransform) m.Vec2 {
+	return spriteSize(entry.width, entry.height, transform)
+}
+
+// spriteSize resolves the on-screen size of a source of the given pixel
+// dimensions from a transform's explicit size, single-axis size, or uniform
+// scale. It is the one place the rule lives, because a texture-sourced sprite
+// means by Size and Scale exactly what an atlas-sourced one means.
+func spriteSize(width, height int, transform SpriteTransform) m.Vec2 {
 	size := transform.Size
 	switch {
 	case size.X != 0 && size.Y != 0:
 	case size.X != 0:
-		size.Y = size.X * float32(entry.height) / float32(entry.width)
+		size.Y = size.X * float32(height) / float32(width)
 	case size.Y != 0:
-		size.X = size.Y * float32(entry.width) / float32(entry.height)
+		size.X = size.Y * float32(width) / float32(height)
 	default:
 		scale := transform.Scale
 		if scale == 0 {
 			scale = 1
 		}
-		size = m.Vec2{X: float32(entry.width) * scale, Y: float32(entry.height) * scale}
+		size = m.Vec2{X: float32(width) * scale, Y: float32(height) * scale}
 	}
 	return size
 }
@@ -543,13 +737,13 @@ func paramColorOr(params []gfx.ParameterDescr, name string, def m.Color) m.Color
 	return def
 }
 
-func (p *Plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, atlas *atlas, resources *gfx.ResourceQueue, filesystem storage.FileSystem, view *app.Viewport, fonts *fontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *textOp) {
+func (p *Plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, atlas *atlas, resources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, fonts *fontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *textOp) {
 	if op.draw.Size <= 0 || op.text == "" || op.fontPath == "" {
 		return
 	}
 	// Rasterize glyphs at the on-screen pixel size (layer scale x framebuffer
 	// scale), then lay them out in logical units so text stays crisp at any scale.
-	px := max(1, int(math.Round(float64(op.draw.Size*textRasterScale(layerTransform, view)))))
+	px := max(1, int(math.Round(float64(op.draw.Size*textRasterScale(layerTransform, surf)))))
 	face := fonts.face(filesystem, op.fontPath, px)
 	if face == nil {
 		return
@@ -585,7 +779,7 @@ func (p *Plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, atlas *atlas, resources *gf
 					Position: m.Vec2{X: x + glyph.offset.X*toLogical, Y: y + glyph.offset.Y*toLogical},
 					Size:     m.Vec2{X: float32(glyph.entry.width) * toLogical, Y: float32(glyph.entry.height) * toLogical},
 				}
-				p.batchEntry(gfxWrite, view, glyph.entry, transform, layerTransform, clip, hasClip, op.draw.Color, defaultKeyColor)
+				p.batchEntry(gfxWrite, surf, glyph.entry, transform, layerTransform, clip, hasClip, op.draw.Color, defaultKeyColor)
 			}
 			x += glyph.advance * toLogical
 			previous = character
@@ -600,11 +794,11 @@ func (p *Plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, atlas *atlas, resources *gf
 }
 
 // drawText expands inline icons and wraps lines before drawing glyph runs.
-func (p *Plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *atlas, resources *gfx.ResourceQueue, filesystem storage.FileSystem, view *app.Viewport, fonts *fontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *textOp) {
+func (p *Plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *atlas, resources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, fonts *fontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *textOp) {
 	if op.draw.Size <= 0 || op.text == "" || op.fontPath == "" {
 		return
 	}
-	px := max(1, int(math.Round(float64(op.draw.Size*textRasterScale(layerTransform, view)))))
+	px := max(1, int(math.Round(float64(op.draw.Size*textRasterScale(layerTransform, surf)))))
 	face := fonts.face(filesystem, op.fontPath, px)
 	if face == nil {
 		return
@@ -651,14 +845,14 @@ func (p *Plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *atlas, 
 					Position: m.Vec2{X: x, Y: y + ascent - capHeight},
 					Size:     m.Vec2{X: width, Y: capHeight},
 				}
-				p.batchEntry(gfxWrite, view, entry, transform, layerTransform, clip, hasClip, m.Color{R: 1, G: 1, B: 1, A: 1}, defaultKeyColor)
+				p.batchEntry(gfxWrite, surf, entry, transform, layerTransform, clip, hasClip, m.Color{R: 1, G: 1, B: 1, A: 1}, defaultKeyColor)
 				x += width
 				continue
 			}
 			run := textOp{fontPath: op.fontPath, text: segment.text, draw: TextDraw{
 				Position: m.Vec2{X: x, Y: y}, Size: op.draw.Size, Color: op.draw.Color, Align: AlignLeft,
 			}}
-			p.drawGlyphRun(gfxWrite, fontAtlas, resources, filesystem, view, fonts, layerTransform, clip, hasClip, &run)
+			p.drawGlyphRun(gfxWrite, fontAtlas, resources, filesystem, surf, fonts, layerTransform, clip, hasClip, &run)
 			x += p.glyphLineWidth(fontAtlas, op.fontPath, px, face, segment.text, resources) * toLogical
 		}
 		y += lineHeight
@@ -704,9 +898,9 @@ func (p *Plugin) iconWidth(spriteAtlas *atlas, path string, capHeight float32, f
 }
 
 // textRasterScale is the world-to-physical-pixel scale for glyph rasterization:
-// the layer's uniform scale times the framebuffer/logical ratio. Layer transforms
-// are rotation-free, so [0] and [5] are the axis scales.
-func textRasterScale(layerTransform m.Mat4, view *app.Viewport) float32 {
+// the layer's uniform scale times the surface's physical-to-logical ratio. Layer
+// transforms are rotation-free, so [0] and [5] are the axis scales.
+func textRasterScale(layerTransform m.Mat4, surf surface) float32 {
 	sx, sy := layerTransform[0], layerTransform[5]
 	if sx < 0 {
 		sx = -sx
@@ -718,9 +912,5 @@ func textRasterScale(layerTransform m.Mat4, view *app.Viewport) float32 {
 	if layerScale <= 0 {
 		layerScale = 1
 	}
-	framebuffer := float32(1)
-	if view.Width > 0 && view.FramebufferWidth > 0 {
-		framebuffer = view.FramebufferWidth / view.Width
-	}
-	return layerScale * framebuffer
+	return layerScale * surf.scale
 }

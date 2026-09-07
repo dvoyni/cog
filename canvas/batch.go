@@ -1,7 +1,6 @@
 package canvas
 
 import (
-	"github.com/dvoyni/cog/app"
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/m"
 )
@@ -70,7 +69,7 @@ func (b *spriteBatch) flush(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr) {
 }
 
 // batchEntry computes one sprite/glyph instance and adds it to the batcher.
-func (p *Plugin) batchEntry(gfxWrite *gfx.OpQueue, view *app.Viewport, entry atlasEntry, transform SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, tint m.Color, keyColor m.Color) {
+func (p *Plugin) batchEntry(gfxWrite *gfx.OpQueue, surf surface, entry atlasEntry, transform SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, tint m.Color, keyColor m.Color) {
 	size := entrySize(entry, transform)
 	if size.X == 0 || size.Y == 0 {
 		return
@@ -87,7 +86,7 @@ func (p *Plugin) batchEntry(gfxWrite *gfx.OpQueue, view *app.Viewport, entry atl
 	t1 := m.Vec4{X: transform.Origin.X, Y: transform.Origin.Y, Z: sine, W: cosine}
 	misc := m.Vec4{X: float32(entry.layer)}
 	p.batch.add(gfxWrite, p.quad, entry.texture, layerTransform, clip, hasClip, transform.Filter,
-		m.Vec2{X: view.Width, Y: view.Height}, t0, t1, uv, colorVec(tint), misc, colorVec(keyColor))
+		surf.size, t0, t1, uv, colorVec(tint), misc, colorVec(keyColor))
 }
 
 // trianglesBatch concatenates the vertices of consecutive default-material
@@ -104,22 +103,25 @@ type trianglesBatch struct {
 	hasTexture  bool
 	sampler     gfx.SamplerDesc
 	keyColor    m.Color
-	layer       m.Mat4
-	clip        m.Rect
-	hasClip     bool
-	viewport    m.Vec2
-	vertices    []byte
+	// unkeyed selects the texture material over the triangle one, so a draw that
+	// samples its texture as it is never merges with one that ramps it.
+	unkeyed  bool
+	layer    m.Mat4
+	clip     m.Rect
+	hasClip  bool
+	viewport m.Vec2
+	vertices []byte
 }
 
-func (b *trianglesBatch) keyMatches(layoutID int, texture gfx.TextureDescr, hasTexture bool, sampler gfx.SamplerDesc, keyColor m.Color, layer m.Mat4, clip m.Rect, hasClip bool) bool {
+func (b *trianglesBatch) keyMatches(layoutID int, texture gfx.TextureDescr, hasTexture bool, sampler gfx.SamplerDesc, keyColor m.Color, unkeyed bool, layer m.Mat4, clip m.Rect, hasClip bool) bool {
 	return b.layoutID == layoutID && b.hasTexture == hasTexture &&
 		b.texturePath == texture.Path() && b.textureID == texture.ID() && b.sampler == sampler &&
-		b.keyColor == keyColor &&
+		b.keyColor == keyColor && b.unkeyed == unkeyed &&
 		b.layer == layer && b.clip == clip && b.hasClip == hasClip
 }
 
-func (b *trianglesBatch) add(gfxWrite *gfx.OpQueue, viewport m.Vec2, layoutID int, layout []gfx.VertexAttr, texture gfx.TextureDescr, hasTexture bool, sampler gfx.SamplerDesc, keyColor m.Color, layer m.Mat4, clip m.Rect, hasClip bool, vertices []byte) {
-	if b.active && !b.keyMatches(layoutID, texture, hasTexture, sampler, keyColor, layer, clip, hasClip) {
+func (b *trianglesBatch) add(gfxWrite *gfx.OpQueue, viewport m.Vec2, layoutID int, layout []gfx.VertexAttr, texture gfx.TextureDescr, hasTexture bool, sampler gfx.SamplerDesc, keyColor m.Color, unkeyed bool, layer m.Mat4, clip m.Rect, hasClip bool, vertices []byte) {
+	if b.active && !b.keyMatches(layoutID, texture, hasTexture, sampler, keyColor, unkeyed, layer, clip, hasClip) {
 		b.flush(gfxWrite)
 	}
 	if !b.active {
@@ -132,6 +134,7 @@ func (b *trianglesBatch) add(gfxWrite *gfx.OpQueue, viewport m.Vec2, layoutID in
 		b.hasTexture = hasTexture
 		b.sampler = sampler
 		b.keyColor = keyColor
+		b.unkeyed = unkeyed
 		b.layer = layer
 		b.clip = clip
 		b.hasClip = hasClip
@@ -163,9 +166,14 @@ func (b *trianglesBatch) flush(gfxWrite *gfx.OpQueue) {
 			gfx.SamplerParam(SamplerSlot, b.sampler),
 		)
 	}
-	params = append(params, gfx.ColorParam("keyColor", b.keyColor))
+	material := defaultTrianglesMaterial
+	if b.unkeyed {
+		material = defaultTextureMaterial
+	} else {
+		params = append(params, gfx.ColorParam("keyColor", b.keyColor))
+	}
 	mesh := gfx.Mesh(gfx.BufferWithBytes(b.vertices, true), gfx.TopologyTriangleList, b.layout...)
-	gfxWrite.Draw(mesh, defaultTrianglesMaterial, params...)
+	gfxWrite.Draw(mesh, material, params...)
 	b.active = false
 	b.vertices = b.vertices[:0]
 }

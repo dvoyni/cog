@@ -7,6 +7,7 @@ const (
 	spriteShaderPath      = "builtin/canvas/sprite.wgsl"
 	spriteBatchShaderPath = "builtin/canvas/spritebatch.wgsl"
 	trianglesShaderPath   = "builtin/canvas/triangles.wgsl"
+	textureShaderPath     = "builtin/canvas/texture.wgsl"
 
 	// DefaultFontPath is the font Canvas draws with when Text is given no font
 	// path. It ships inside the binary and is mounted alongside the built-in
