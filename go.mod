@@ -7,7 +7,7 @@ require (
 	github.com/gogpu/gpucontext v0.31.3
 	github.com/gogpu/gputypes v0.8.0
 	github.com/gogpu/naga v0.19.0
-	github.com/gogpu/wgpu v0.34.2
+	github.com/gogpu/wgpu v0.34.5-0.20260907183125-0e62880c3b55
 	github.com/qmuntal/gltf v0.29.0
 	golang.org/x/image v0.44.0
 )
@@ -18,5 +18,3 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 )
-
-replace github.com/gogpu/wgpu => ../wgpu
