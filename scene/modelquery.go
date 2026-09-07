@@ -40,7 +40,14 @@ func (la LookupAccess) reportOnce(key string, err error) {
 // the whole model never-cull - and it has to be carried rather than defaulted,
 // because the zero box is a real box at the origin.
 type modelBox struct {
-	box   m.Box3
+	box m.Box3
+	// rest places the box in the model's rest pose. It is here rather than read
+	// off the primitive because modelPrimitive.local is the identity for
+	// anything drawn through the pose buffer - a glTF skin, or the degenerate
+	// single-joint binding an animated node's own mesh takes - and a bound
+	// placed through that identity is a bound at the origin for geometry the
+	// frame draws somewhere else entirely.
+	rest  m.Mat4
 	known bool
 }
 
@@ -145,8 +152,18 @@ func (la LookupAccess) Nodes(ref ModelRef, dst []string) ([]string, bool) {
 //
 // It is local space post-re-rooting: a Node ref answers in the space a draw of
 // that node would place it in, with the node's authored world transform already
-// discarded. A skinned model answers in its rest pose, because that is the only
-// pose the load has.
+// discarded.
+//
+// Anything drawn through the pose buffer answers in its rest pose, because that
+// is the only pose the load has: a glTF skin, and also a node with a clip of
+// its own carrying a mesh, which takes a degenerate single-joint binding for
+// exactly the same reason. Row 0 of the pose buffer is the authored hierarchy
+// resolved once, so the rest pose is where the file says the geometry sits -
+// and it is what these two answer about, whatever a frame's plays would do to
+// it. A caller wanting this frame's bound for an animated model has to compute
+// it, because scene does not: replaying the blend on the CPU is the per-frame
+// hierarchy walk the whole design exists to remove, which is also why such a
+// draw is never culled.
 //
 // The sphere is the union of the primitives' own spheres, each transformed,
 // rather than the circumsphere of the box AABB reports. Under a rotation those
@@ -213,7 +230,14 @@ func (la LookupAccess) bounds(ref ModelRef) (m.Sphere, m.Box3, bool) {
 		if !bound.known {
 			return m.Sphere{}, m.Box3{}, false
 		}
-		place := entry.primitives[i].local
+		// The rest-pose placement, not the draw's. They are the same matrix
+		// for everything placed by its own instance record, and they differ
+		// exactly where that record holds an identity because the real
+		// placement is a row of the pose buffer. Re-rooting still composes the
+		// same way: reroot is the inverse of the node's authored world
+		// transform, so reroot * rest is the identity for the named node
+		// itself and each descendant's offset from it for the rest.
+		place := bound.rest
 		if view.rerooted {
 			place = view.reroot.Mul(place)
 		}

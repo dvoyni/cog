@@ -88,6 +88,13 @@ type loadedPrimitive struct {
 	// nodes is converted, uploaded and given a mesh id exactly once.
 	geometry int
 	local    m.Mat4
+	// rest is where the primitive sits in the model's rest pose: local for
+	// everything placed by its own instance record, and the node's authored
+	// world transform for everything placed by a row of the pose buffer. The
+	// two differ exactly where local is the identity, and only the cold facade
+	// reads this one - Bounds and AABB answer about a pose, and the only pose
+	// the load has is the rest one.
+	rest     m.Mat4
 	material int
 	// skinned reports whether the primitive's placement lives in the pose
 	// buffer rather than in local. A skinned primitive draws through its
@@ -406,11 +413,17 @@ func (c *modelConverter) walkNode(index int, parent m.Mat4) {
 	// the identity too. "Time-varying" is inherited, not local - a static prop
 	// bolted to a spinning turret moves with the turret - so the test is the
 	// node's own channels or a non-empty ancestor chain.
-	placement := world
+	//
+	// rest is where those primitives sit in the model's rest pose, which is the
+	// answer Bounds and AABB owe a caller. For a plain joint that is the node's
+	// own world transform, which row 0 of the pose buffer resolves to; for a
+	// glTF skin it is the identity, because the skin's joints already resolve
+	// against the scene root and its vertices are authored there.
+	placement, rest := world, world
 	binding := skinBinding{skin: -1, joint: -1}
 	switch {
 	case node.Skin != nil:
-		placement = m.NewMat4()
+		placement, rest = m.NewMat4(), m.NewMat4()
 		binding.skin = *node.Skin
 	case node.Mesh != nil && (c.animated[index] || len(c.chain) > 0):
 		placement = m.NewMat4()
@@ -422,7 +435,7 @@ func (c *modelConverter) walkNode(index int, parent m.Mat4) {
 	// subtree on the way back out would get backwards.
 	named := c.claimNode(node.Name, world)
 	if node.Mesh != nil {
-		c.flattenMesh(*node.Mesh, placement, binding, c.claimMorphSlots(index))
+		c.flattenMesh(*node.Mesh, placement, rest, binding, c.claimMorphSlots(index))
 	}
 	c.collectLight(node, world)
 	animated := c.animated[index]
@@ -493,7 +506,7 @@ type skinBinding struct {
 
 // flattenMesh emits one node's primitives at their flattened placement.
 func (c *modelConverter) flattenMesh(
-	index int, placement m.Mat4, binding skinBinding, slots morphSlotRun,
+	index int, placement, rest m.Mat4, binding skinBinding, slots morphSlotRun,
 ) {
 	if index < 0 || index >= len(c.doc.Meshes) || c.doc.Meshes[index] == nil {
 		return
@@ -520,7 +533,7 @@ func (c *modelConverter) flattenMesh(
 			morph.slotBase, morph.targets = slots.base, min(morph.targets, slots.count)
 		}
 		c.model.primitives = append(c.model.primitives, loadedPrimitive{
-			geometry: geometry, local: placement, material: material,
+			geometry: geometry, local: placement, rest: rest, material: material,
 			skinned: c.model.geometries[geometry].skinned, morph: morph,
 		})
 	}

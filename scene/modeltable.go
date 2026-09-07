@@ -209,7 +209,8 @@ func (l *Lookup) installModel(
 			mesh: meshes[primitive.geometry], local: primitive.local, material: primitive.material,
 			skinned: primitive.skinned, morph: primitive.morph,
 		}
-		entry.boxes = append(entry.boxes, modelBox{box: geometry.box, known: geometry.hasBox})
+		entry.boxes = append(entry.boxes,
+			modelBox{box: geometry.box, rest: primitive.rest, known: geometry.hasBox})
 		if geometry.hasBox {
 			// The sphere stays in the primitive's own space, unflattened,
 			// because the draw record's world matrix already folds localMatrix

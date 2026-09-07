@@ -30,7 +30,13 @@ func boundsModel(t testing.TB) *gltf.Document {
 // so a query test asserts the answer rather than the wait.
 func residentBoundsModel(t testing.TB) *harness {
 	t.Helper()
-	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*OpQueue) {})
+	return residentModel(t, boundsModel(t))
+}
+
+// residentModel loads one document and returns a harness with it resident.
+func residentModel(t testing.TB, doc *gltf.Document) *harness {
+	t.Helper()
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*OpQueue) {})
 	h.lookup(func(la LookupAccess) { la.Preload(modelPath) })
 	h.frameUntil(t, "the model to become resident", func() bool {
 		var state ModelState
@@ -138,6 +144,45 @@ func TestBoundsAndAABBAreLocalSpacePostRerooting(t *testing.T) {
 	}
 	if scene.X != 10.5 {
 		t.Errorf("scene Bounds centre X = %v, want 10.5", scene.X)
+	}
+}
+
+// Animating a node does not move its bounds. A node with a clip of its own
+// carrying a mesh takes the degenerate single-joint path: its placement moves
+// out of the instance record and into the pose buffer, and modelPrimitive.local
+// is left the identity. A bound read off that identity is a bound at the origin
+// for geometry the frame draws somewhere else - and re-rooted it is worse than
+// that, because the re-root then applies the inverse of a transform that was
+// never applied in the first place.
+//
+// So the whole assertion is that these two documents answer the same: the only
+// difference between them is a clip nobody plays.
+func TestAnimatingANodeDoesNotMoveItsBounds(t *testing.T) {
+	still := residentBoundsModel(t)
+	doc := boundsModel(t)
+	// One clip on the crate, which is node 1. Nothing plays it; declaring it is
+	// what routes the node through the pose buffer.
+	rotationClip(doc, "spin", 1, []float32{0, 1}, [][4]float32{{0, 0, 0, 1}, {0, 0, 1, 0}})
+	moving := residentModel(t, doc)
+
+	for _, ref := range []ModelRef{
+		{Path: modelPath},
+		{Path: modelPath, Node: "root"},
+		{Path: modelPath, Node: "crate"},
+		{Path: modelPath, Node: "sibling"},
+	} {
+		var stillMin, stillMax, movingMin, movingMax m.Vec3
+		var stillOK, movingOK bool
+		still.lookup(func(la LookupAccess) { stillMin, stillMax, stillOK = la.AABB(ref) })
+		moving.lookup(func(la LookupAccess) { movingMin, movingMax, movingOK = la.AABB(ref) })
+		if !stillOK || !movingOK {
+			t.Fatalf("AABB(%+v) answered %v still and %v animated", ref, stillOK, movingOK)
+		}
+		if stillMin != movingMin || stillMax != movingMax {
+			t.Errorf("AABB(%+v) = %v..%v with a clip on the crate and %v..%v without; "+
+				"the rest pose is the same pose either way",
+				ref, movingMin, movingMax, stillMin, stillMax)
+		}
 	}
 }
 

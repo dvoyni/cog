@@ -1822,7 +1822,7 @@ Bind `access.GetWrite[*scene.Lookup]()` in the handler's `Lock`, then use:
 | `State(path) ModelState` | residency | the only way to tell *wait* from *never coming*; it fires the load like every other query, so `ModelMissing` is not one of its answers on a valid path |
 | `Preload(path)` | — | the load command fired without a draw; no return |
 | `Nodes(ref, dst) ([]string, bool)` | node names | a non-empty `Node` lists that subtree, the node itself first; the order is the flatten's depth-first order, never sorted |
-| `Bounds(ref) (m.Vec4, bool)` | xyz centre, w radius | local space post-re-rooting; rest pose when skinned |
+| `Bounds(ref) (m.Vec4, bool)` | xyz centre, w radius | local space post-re-rooting; **rest pose for anything drawn through the pose buffer**, which is a skin *and* an animated node's own mesh |
 | `AABB(ref) (min, max m.Vec3, ok bool)` | axis-aligned box | same space and pose rules |
 | `Joints(path, dst) ([]string, bool)` | joint names | names only; count is `len` |
 | `Clips(path, dst) ([]ClipInfo, bool)` | clip names and durations | |
@@ -1875,6 +1875,31 @@ scene/node-scoped, and they take **`ModelRef{Path, Scene, Node}`** mirroring
 `ModelDraw`'s own fields — three bare strings were rejected on a transposition
 bug that compiles (`Bounds(p, "crate", "")` and `Bounds(p, "", "crate")` are both
 valid and mean different things).
+
+**Both answer about the rest pose, and "skinned" is the wrong word for which
+geometry that covers.** A glTF skin is the obvious case, but a node with an
+animation channel of its own *carrying a mesh* takes a degenerate single-joint
+binding for exactly the same reason, and its placement leaves the instance
+record for the pose buffer too. The flattened `local` matrix of both is the
+**identity**, so a bound placed through it is a bound at the origin for geometry
+the frame draws elsewhere — and under a `Node` selector it is worse than that,
+because the re-root then applies the inverse of a transform that was never
+applied. The load therefore keeps a second matrix per primitive, its **rest
+placement**: `local` for everything the instance record places, and the node's
+authored world transform for everything a pose row places. Row 0 of the pose
+buffer is the authored hierarchy resolved once, so the two agree.
+
+This is not a refinement, it is a correctness rule, and it was wrong until
+`loading` looked: `CesiumMilkTruck` animates its two wheel nodes, so
+`AABB(Node: "Wheels")` answered `inverse(world) · meshBox` — a box the wheel
+never occupies — and the whole scene's box counted both wheels at the origin.
+The demo's assertion is that the two wheel pairs, being one mesh under one local
+rotation beneath two differently offset parents, re-root to the **same** box.
+
+**Neither query reports where an animated model is *this* frame.** Replaying the
+blend on the CPU is the per-frame hierarchy walk the design exists to remove,
+which is also why such a draw is never culled. A caller who needs the live bound
+computes it.
 
 **Both bound geometries are published** because scene already has both: the tight
 sphere is baked per node anyway, and the AABB is the load-time by-product it is
@@ -2979,7 +3004,7 @@ set.
 | `animated` | Fox, AnimatedMorphCube **and its glTF-Quantized twin**, MorphStressTest, InterpolationTest | baked poses, `ClipPlay` crossfade, the 4-play cap, the rest frame, `PoseBytes`; sparse morph weights, `MorphWeights` override, the attribute mask; degenerate single-joint skins; u8 index widening. **The web canary.** The quantized twin is shared with `loading` and is not optional here: the attribute mask is *intersected with what the base primitive authored*, and the plain cube's authored `TANGENT` against the quantized one's absence is the only pair in the vendored set that can tell that rule from a mask read off the targets alone. |
 | `procedural` | none (custom WGSL) | `TemporaryMesh` vs `BakeMesh`, the generic `VertexLayout`, `UpdateMesh`, `ReleaseMesh` generations, `NeverCull`, the null skin and `SCENE_NOSKIN`; `BakeBuffer`/`ReBakeBuffer`/`BufferWithBytes`; a caller-supplied material with a custom layout |
 | `instancing` | reuses `box` + `pbr` | explicit `Transforms`, per-instance culling, the `materialID`/`meshID` sort key, `SCENE_NONUNIFORM` via the `Matrix` escape hatch, `Passes(dst)`; `firstInstance`, the per-batch material record, one instance arena bound by range |
-| `loading` | CesiumMilkTruck, MultipleScenes, TextureSettingsTest, MeshPrimitiveModes, AnimatedMorphCube glTF-Quantized, `broken/truncated.glb` | `Node` views and re-rooting; `Scene` naming a file's only scene (six vendored assets name theirs `Scene`, `CesiumMilkTruck` among them) and its unmatched report — but **no asset has a nameable *non-default* scene**: `MultipleScenes`, the set's only multi-scene file, leaves both of its unnamed, so a matched `Scene` here always resolves to the same draw the default would, async skip-never-substitute, `Preload`, `Material` replace vs `OverrideParams` merge, explicit unload with no texture cascade; `(value, ok)`, `State`, `Nodes`/`Bounds`/`AABB`, unmatched-node-reports-once; the four WebGPU papering-over gaps |
+| `loading` | CesiumMilkTruck, MultipleScenes, TextureSettingsTest, MeshPrimitiveModes, AnimatedMorphCube glTF-Quantized, InterpolationTest, `broken/truncated.glb`, `broken/does-not-exist.glb` | `Node` views and re-rooting; `Scene` naming a file's only scene (six vendored assets name theirs `Scene`, `CesiumMilkTruck` among them) and its unmatched report — but **no asset has a nameable *non-default* scene**: `MultipleScenes`, the set's only multi-scene file, leaves both of its unnamed, so a matched `Scene` here always resolves to the same draw the default would, async skip-never-substitute, `Preload`, `Material` replace vs `OverrideParams` merge, explicit unload with no texture cascade; `(value, ok)`, `State`, `Nodes`/`Bounds`/`AABB`, unmatched-node-reports-once; the four WebGPU papering-over gaps — **`InterpolationTest` is here for the u8-index one**, which none of the other five files in this set carries, and `does-not-exist.glb` for the absent-file failure, which is a *third* mode beside the truncated file and the invalid path. Sixteen stations on a grid, each drawn whether or not it can be, so **a bare pad is what skip-never-substitute looks like**. |
 
 `custom-shader` is **merged into `procedural`**, not dropped: a custom vertex
 layout *requires* a custom material, so the two cannot be demonstrated apart.
@@ -3140,7 +3165,12 @@ generated by `cmd/prepare-assets` so it is not a mystery blob either, failing
 - **No `.glb` in the repository contains a fan, strip, loop, line or point
   primitive** — the histogram is TRIANGLES ×14,192 against 21 of everything else,
   all inside `.gltf`-only assets. The `StripIndexFormat` bug is therefore only
-  reachable through a packed `MeshPrimitiveModes`.
+  reachable through a packed `MeshPrimitiveModes` — whose seven nodes are all
+  **unnamed**, so it exercises the topology conversion and nothing about
+  addressing. Six of its seven primitives survive; the `POINTS` one is skipped
+  and reported, and the frame's scene pipelines carry only `TopologyTriangleList`
+  and `TopologyLineList`, which is the invariant the batching, index and skinning
+  paths rely on.
 - **`CesiumMilkTruck`** is the re-rooting asset: `Wheels` and `Wheels.001` sit at
   ±1.43 on X beneath a `Yup2Zup` root, so re-rooting has a real authored world
   transform to discard, at hierarchy depth 4. What it cannot carry is a
@@ -3148,8 +3178,13 @@ generated by `cmd/prepare-assets` so it is not a mystery blob either, failing
   mesh's bounding sphere has radius 1.22 against an authored offset of 1.50, so a
   frustum tight enough to reject the un-re-rooted sphere rejects the re-rooted one
   too. Selection, subtree extent and the reports are asserted against the real
-  bytes; where the re-rooted subtree *lands* is asserted against the same
-  transform chain built in memory, until `Bounds` gives it a public answer.
+  bytes; where the re-rooted subtree *lands* is now asserted through `Bounds` and
+  `AABB`, which give it a public answer — and finding that answer wrong for this
+  very asset is what the rest-placement rule above came out of. The mesh the two
+  `Wheels` nodes share is an **axle pair**, not one wheel, and both nodes are
+  animated, which is why they are the sharpest re-rooting assertion in the set:
+  one mesh, one local rotation, two different parent offsets, and one correct
+  box.
 - **`MultipleScenes`** is the **only** file in the repository with more than one
   `scenes` entry, and therefore the only possible exercise of the `Scene`
   selector — except that **both of its scenes are unnamed, and so are both of its
