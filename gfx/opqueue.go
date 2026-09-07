@@ -280,17 +280,31 @@ func (q *OpQueue) temporaryTexture(width, height int, format TextureFormat, pixe
 	return q.bakeTexture(q.acquireTemporaryTexture(key), width, height, format, pixels, copyData, mipmaps)
 }
 
-// TemporaryTarget allocates a frame-lifetime renderable texture and returns a
-// target for it, for the passes that render into something they sample later in
-// the same frame. Its contents do not survive the frame.
-func (q *OpQueue) TemporaryTarget(width, height int, format TextureFormat) TargetDescr {
+// TemporaryTarget allocates a frame-lifetime renderable texture and returns
+// both handles onto it: the target a pass renders into, and the texture a later
+// pass samples. Its contents do not survive the frame.
+//
+// Both come back because a TargetDescr is write-only - it names an attachment
+// and answers nothing about the texture behind it - and sampling the result is
+// the entire reason this allocation exists. Split-screen, minimap,
+// picture-in-picture, render scale and post-processing are all spelled as one
+// temporary target per camera composited later in the same frame.
+//
+// A draw still may not sample the target its own pass renders into; that is
+// ErrDrawSamplesAttachment, and it is the guard that makes handing the texture
+// back safe.
+func (q *OpQueue) TemporaryTarget(width, height int, format TextureFormat) (TargetDescr, TextureDescr) {
 	key := temporaryTextureKey{width: width, height: height, format: format, renderable: true}
 	id := q.acquireTemporaryTexture(key)
 	q.ops = append(q.ops, op{
 		kind: opAllocateTexture, textureID: id,
 		texW: width, texH: height, texLayers: 1, format: format, renderable: true,
 	})
-	return TextureTarget(TextureDescr{source: TextureSourceBaked, id: id, width: width, height: height}, 0, 0)
+	texture := TextureDescr{
+		source: TextureSourceBaked, id: id,
+		width: width, height: height, format: format,
+	}
+	return TextureTarget(texture, 0, 0), texture
 }
 
 // acquireTemporaryTexture takes a matching texture from the frame pool, minting

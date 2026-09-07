@@ -30,6 +30,43 @@ type GpuQueue struct {
 	render   []gpuOp
 	releases []gpuOp
 	passes   []gpuPass
+
+	// transitions is one flat arena for the whole frame; each pass holds a
+	// half-open range into it, the same way it holds one into render.
+	// transitionsUsed marks how much of it earlier passes already claimed.
+	transitions     []TextureTransition
+	transitionsUsed int
+}
+
+// TextureUsage names the role a texture is in as far as the GPU's memory
+// pipeline is concerned. It is deliberately just the two roles gfx can put a
+// texture in, not a mirror of the backend's usage flags.
+type TextureUsage uint8
+
+const (
+	// TextureUsageRenderAttachment is a texture being written as a pass's
+	// colour or depth attachment.
+	TextureUsageRenderAttachment TextureUsage = iota
+	// TextureUsageTextureBinding is a texture being read by a shader.
+	TextureUsageTextureBinding
+)
+
+// TextureTransition orders one texture's writes against its reads, or the other
+// way round. The backend derives none of these itself: it tracks resources for
+// lifetime and submit-time validation only, so a texture written as an
+// attachment and then sampled is not ordered against those writes - not within
+// one command encoder, and not across a submit boundary either. On Vulkan the
+// sample then reads the image mid-write, which shows as a flicker that looks
+// random, is not a CPU/GPU race, and is invisible to a capture taken while the
+// app is redrawing.
+//
+// gfx is the layer that can see the hazard, because by translation time the
+// frame's passes are sorted and merged and the write-then-read pairs are
+// computable. From is the usage the texture is actually in, not a guess: a
+// layout transition that names the wrong old layout is undefined behaviour.
+type TextureTransition struct {
+	Texture  TextureID
+	From, To TextureUsage
 }
 
 // GpuPassDesc is one render pass for the backend to encode. Screen selects the
@@ -56,6 +93,10 @@ type gpuPass struct {
 	desc       GpuPassDesc
 	present    bool
 	start, end int
+	// transStart, transEnd is the range of transitions that must be placed
+	// before this pass is encoded. They sit outside the pass because a barrier
+	// cannot be recorded inside a render pass.
+	transStart, transEnd int
 }
 
 // GpuPassSink receives the frame's passes. BeginPass returns the RenderPass its
@@ -63,6 +104,11 @@ type gpuPass struct {
 type GpuPassSink interface {
 	BeginPass(GpuPassDesc) RenderPass
 	EndPass(RenderPass)
+	// TransitionTextures places the barriers a pass needs before it is encoded,
+	// and is called outside any render pass because that is the only place a
+	// barrier can be recorded. It is never called with an empty slice: a frame
+	// with no render-then-sample pair pays nothing.
+	TransitionTextures([]TextureTransition)
 	// Present puts the frame buffer on the swapchain. It takes no arguments
 	// because every piece of it - the buffer, the full-screen triangle, the
 	// transfer function and the swapchain's own format - belongs to the
@@ -106,15 +152,31 @@ func (q *GpuQueue) Reset() {
 	q.releases = q.releases[:0]
 	clear(q.passes)
 	q.passes = q.passes[:0]
+	clear(q.transitions)
+	q.transitions = q.transitions[:0]
+	q.transitionsUsed = 0
 }
 
-// BeginPass opens a pass; every render command until EndPass belongs to it.
+// TransitionTexture records a barrier to place before the next pass opens.
+// Calls accumulate until BeginPass claims them, so the translator can announce
+// a pass's hazards before it knows the pass descriptor is even worth emitting.
+func (q *GpuQueue) TransitionTexture(transition TextureTransition) {
+	q.transitions = append(q.transitions, transition)
+}
+
+// BeginPass opens a pass; every render command until EndPass belongs to it, and
+// every transition recorded since the last pass is placed before it.
 func (q *GpuQueue) BeginPass(desc GpuPassDesc) {
-	q.passes = append(q.passes, gpuPass{desc: desc, start: len(q.render), end: len(q.render)})
+	q.passes = append(q.passes, gpuPass{
+		desc: desc, start: len(q.render), end: len(q.render),
+		transStart: q.transitionsUsed, transEnd: len(q.transitions),
+	})
+	q.transitionsUsed = len(q.transitions)
 }
 
 // Present appends the frame's implicit present pass, which runs after every
-// declared pass because it reads what they wrote.
+// declared pass because it reads what they wrote. Its own barrier is the
+// backend's: the frame buffer is the one attachment gfx never names.
 func (q *GpuQueue) Present() {
 	q.passes = append(q.passes, gpuPass{present: true, start: len(q.render), end: len(q.render)})
 }
@@ -264,6 +326,9 @@ func (q *GpuQueue) ReplayPasses(sink GpuPassSink) {
 		if pass.present {
 			sink.Present()
 			continue
+		}
+		if pass.transEnd > pass.transStart {
+			sink.TransitionTextures(q.transitions[pass.transStart:pass.transEnd])
 		}
 		rp := sink.BeginPass(pass.desc)
 		if rp != nil {

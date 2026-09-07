@@ -152,8 +152,10 @@ func (q *OpQueue) Passes(dst []PassView) []PassView
 there is no `scene.OpQueue.TemporaryTarget`.** A temporary target's texture id is minted by the gfx
 backend through `gfx.OpQueue`, which a scene recorder does not hold, so a passthrough on scene's
 queue would either reach into a resource it has not locked or hand back a target with no id in it.
-Call `gfx.OpQueue.TemporaryTarget(w, h, format)` and pass the handle into `Pass.Target`, which takes
-it untouched; a recorder doing that locks both queues and orders itself before scene's flush.
+Call `gfx.OpQueue.TemporaryTarget(w, h, format)` and pass the target handle into `Pass.Target`, which
+takes it untouched; a recorder doing that locks both queues and orders itself before scene's flush.
+The same call returns the texture to sample it back with
+([#111](https://github.com/dvoyni/cog/issues/111)).
 `TemporaryMesh` is unaffected — scene bakes meshes at flush through the resource queue it holds.
 
 The floor of the API is two statements:
@@ -2483,9 +2485,24 @@ type PassDescr struct {
 
 ref := q.Pass(desc)  // declare + select
 q.SetPass(ref)       // re-select a pass declared earlier this frame
-q.TemporaryTarget(w, h int, format TextureFormat) TargetDescr
+q.TemporaryTarget(w, h int, format TextureFormat) (TargetDescr, TextureDescr)
 func (d TextureDescr) Size() (w, h int)
 ```
+
+**Amended by [gfx: a `TemporaryTarget`'s texture cannot be sampled](https://github.com/dvoyni/cog/issues/111):
+`TemporaryTarget` returns both handles, not just the target.** As first written it
+returned a `TargetDescr` alone, and a `TargetDescr` is write-only — it names an
+attachment and exposes only `Size`, `IsScreen` and `IsNone`, with no accessor to the
+texture and no public constructor from an id. So the frame-local render-then-sample
+round trip this spec names as the sanctioned mechanism in three places — post-processing,
+split-screen, and `cameras`'s composited viewports — was unexpressible: nothing could
+sample what the pass had just rendered. Returning the texture beside the target keeps
+`TargetDescr` write-only and matches how `TextureTarget` already reads, rather than
+making the target a two-way type. Both values are always wanted, because sampling the
+result is the only reason the allocation exists.
+
+**A draw still may not sample the attachment its own pass renders into**
+(`ErrDrawSamplesAttachment`); that guard is what makes handing the texture back safe.
 
 - Passes are **frame-local state on `OpQueue`**, declared and selected in one
   call; subsequent ops append to the selected pass. `Draw`'s signature is
@@ -2511,9 +2528,39 @@ func (d TextureDescr) Size() (w, h int)
   `LoadDiscard` makes it observable. "Clear this target and nothing else" is a
   legitimate frame, and so is a camera that culled everything.
 - **Ordering is the only intra-frame read-after-write guarantee**; gfx builds no
-  dependency graph. The whole frame stays one command encoder and one submit, so
-  WebGPU inserts the barriers. One debug validation: reject a draw that samples a
-  texture currently bound as its own pass's attachment.
+  dependency graph. One debug validation: reject a draw that samples a texture
+  currently bound as its own pass's attachment.
+- **Corrected by [gfx/wgpu: no barrier between a pass that renders a texture and
+  a later pass that samples it](https://github.com/dvoyni/cog/issues/112): the
+  runtime inserts no barriers, so gfx places them.** This spec said "the whole
+  frame stays one command encoder and one submit, so WebGPU inserts the
+  barriers". That is false of this backend. `gogpu/wgpu` tracks resources for
+  lifetime and for submit-time validation only and derives *no* barriers from
+  that tracking — not within one command encoder, and not across a submit
+  boundary either. A texture written as a colour or depth attachment and then
+  sampled goes straight from `RenderAttachment` to `TextureBinding` with nothing
+  ordering the read against the writes, and on Vulkan the sample reads the image
+  mid-write. Being one encoder is exactly what makes it *look* safe.
+  - The hazard is the worst kind to ship undetected: the symptom is a flicker
+    that **looks like a random CPU/GPU race and is not one**, and it is
+    invisible to any capture taken while the app is redrawing at speed. So the
+    barrier lands *with* render-to-texture, never after it.
+  - gfx is the layer that can see it. By translation time the frame's passes are
+    sorted and merged, so the write-then-read pairs are computable, and
+    `translatePasses` emits a `TextureTransition` for each. The rule is not
+    "every render target gets a barrier" but **every write-then-read pair, in
+    either direction**: a camera rendering into a temporary target a later pass
+    composites is write-then-read, and a post-processing chain ping-ponging two
+    targets is also read-then-write. The usage a texture is currently in is
+    tracked per frame rather than assumed, because **a layout transition naming
+    the wrong old layout is undefined behaviour, not a wasted instruction** —
+    which is also why a texture that was uploaded rather than rendered into is
+    never transitioned at all.
+  - Barriers sit *outside* the pass, because that is the only place one can be
+    recorded, and a texture already in the usage it needs pays nothing.
+  - The frame buffer is the exception gfx never names: `ScreenTarget()` carries
+    no texture id, so the present pass's own transition stays the backend's
+    ([#103](https://github.com/dvoyni/cog/issues/103)).
 - **The implicit default pass is deleted**, and `OpQueue.Clear` / `ClearDepth`
   with it — canvas was the only recorder and now declares its own passes. Every
   gfx draw names a pass.
@@ -2528,6 +2575,7 @@ TextureView(TextureID, mip, layer int) TextureViewID
 type GpuPassSink interface {
     BeginPass(GpuPassDesc) RenderPass
     EndPass(RenderPass)
+    TransitionTextures([]TextureTransition)  // #112; never called with an empty slice
 }
 func (q *GpuQueue) ReplayPasses(sink GpuPassSink)   // replaces ReplayRenderPass
 ```
@@ -2906,6 +2954,9 @@ one.
 
 Ordering and targets are all this needs, and the merge rule cannot accidentally
 collapse the chain: adjacent passes merge only when they share a colour target.
+The barrier each step of the chain needs is placed by gfx, in both directions, so
+a ping-pong costs the author nothing to get right
+([#112](https://github.com/dvoyni/cog/issues/112)).
 
 What a later effort adds is the **fullscreen draw**, not the passes: either a
 bundled blit material — a full-screen textured pass with an exposed source

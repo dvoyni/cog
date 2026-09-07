@@ -47,6 +47,9 @@ type gfxBackend struct {
 	textureGenerations map[cgfx.TextureID]uint32
 	replacedBuffers    []*wgpu.Buffer
 	replacedTextures   []*gfxbTexture
+	// barriers is scratch for one TransitionTextures call, reused so a frame
+	// with render targets allocates nothing per pass.
+	barriers []wgpu.TextureBarrier
 
 	white          *gfxbTexture
 	defaultSampler *wgpu.Sampler

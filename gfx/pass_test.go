@@ -260,9 +260,95 @@ func TestADepthTargetCarriesItsSize(t *testing.T) {
 
 func TestATemporaryTargetCarriesItsSize(t *testing.T) {
 	q := &OpQueue{backend: &fakeBackend{}, temporaryTextureFree: map[temporaryTextureKey][]int{}}
-	width, height, ok := q.TemporaryTarget(640, 480, FormatRGBA8Srgb).Size()
+	target, _ := q.TemporaryTarget(640, 480, FormatRGBA8Srgb)
+	width, height, ok := target.Size()
 	if !ok || width != 640 || height != 480 {
 		t.Errorf("size = %d x %d (ok %v), want 640 x 480", width, height, ok)
+	}
+}
+
+func TestATemporaryTargetHandsBackTheTextureItRendersInto(t *testing.T) {
+	// The whole reason the allocation exists is that a later pass samples it,
+	// and a target is write-only: it names an attachment and answers nothing
+	// about the texture behind it. So the texture has to come back from the
+	// same call, already carrying the size and format the caller asked for.
+	q := &OpQueue{backend: &fakeBackend{}, temporaryTextureFree: map[temporaryTextureKey][]int{}}
+	target, texture := q.TemporaryTarget(320, 200, FormatRGBA8Srgb)
+
+	if texture.ID() == 0 {
+		t.Fatal("the texture came back with no id, so nothing can sample it")
+	}
+	if texture.ID() != target.texture {
+		t.Errorf("texture id = %d, but the target renders into %d", texture.ID(), target.texture)
+	}
+	if width, height := texture.Size(); width != 320 || height != 200 {
+		t.Errorf("texture size = %d x %d, want 320 x 200", width, height)
+	}
+	if texture.format != FormatRGBA8Srgb {
+		t.Errorf("texture format = %v, want FormatRGBA8Srgb", texture.format)
+	}
+	if texture.source != TextureSourceBaked {
+		t.Errorf("texture source = %v, want TextureSourceBaked", texture.source)
+	}
+}
+
+func TestALaterPassSamplesWhatAnEarlierPassRenderedIntoATemporaryTarget(t *testing.T) {
+	// The frame-local render-then-sample round trip, which is how split-screen,
+	// minimap and post-processing are all spelled. The same-pass guard must not
+	// fire here: the sampling draw is in a different pass.
+	backend := &fakeBackend{}
+	var sampled TextureID
+	frame := func(q *OpQueue) {
+		target, texture := q.TemporaryTarget(64, 64, FormatRGBA8Srgb)
+		sampled = texture.ID()
+		q.Pass(PassDescr{Target: target, Depth: DepthNone(), Load: LoadClear, Order: 0, Label: "offscreen"})
+		drawInto(q)
+		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthNone(), Load: LoadClear, Order: 1, Label: "composite"})
+		q.Draw(triangle(), testMaterial(TextureParam("MainTexture", texture)), MatParam("mvp", m.NewMat4()))
+	}
+
+	p := New()
+	var reported []error
+	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
+	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
+	frame(recordRaw(t, k))
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
+	k.PublishEvent(app.RenderEvent{}).Wait()
+
+	if len(reported) != 0 {
+		t.Fatalf("errors reported for a cross-pass sample: %v", reported)
+	}
+	if len(backend.passDraws) != 2 {
+		t.Fatalf("passes = %d, want 2", len(backend.passDraws))
+	}
+	if backend.passDraws[1] != 1 {
+		t.Errorf("composite pass drew %d times, want the sampling draw kept", backend.passDraws[1])
+	}
+	if !backend.boundTexture(sampled) {
+		t.Errorf("texture %d never reached the backend as a binding", sampled)
+	}
+}
+
+func TestADrawStillCannotSampleTheTemporaryTargetItsOwnPassRendersInto(t *testing.T) {
+	// Handing the texture back is only safe because this guard survives it.
+	backend := &fakeBackend{}
+	p := New()
+	var reported []error
+	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
+	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
+
+	w := recordRaw(t, k)
+	target, texture := w.TemporaryTarget(64, 64, FormatRGBA8Srgb)
+	w.Pass(PassDescr{Target: target, Depth: DepthNone(), Load: LoadClear, Label: "feedback"})
+	w.Draw(triangle(), testMaterial(TextureParam("MainTexture", texture)), MatParam("mvp", m.NewMat4()))
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
+	k.PublishEvent(app.RenderEvent{}).Wait()
+
+	if backend.passDraws[0] != 0 {
+		t.Errorf("draws = %d, want the feedback draw dropped", backend.passDraws[0])
+	}
+	if len(reported) == 0 {
+		t.Error("no error reported for a draw sampling the temporary target its own pass writes")
 	}
 }
 

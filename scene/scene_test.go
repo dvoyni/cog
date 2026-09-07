@@ -177,6 +177,8 @@ func (b *testBackend) BeginPass(desc gfx.GpuPassDesc) gfx.RenderPass {
 func (b *testBackend) EndPass(gfx.RenderPass) {}
 func (b *testBackend) Present()               { b.presents++ }
 
+func (b *testBackend) TransitionTextures([]gfx.TextureTransition) {}
+
 // BakeBuffer keeps the bytes as well as counting the upload, because the
 // records scene packs are only readable here: everything downstream of the
 // arena is an offset and a size, and a flag written into the wrong instance is

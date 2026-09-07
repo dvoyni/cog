@@ -356,7 +356,8 @@ func TestATemporaryTargetPassTakesItsAspectFromItsSize(t *testing.T) {
 	h := newHarnessWithGfx(t, func(q *OpQueue, g *gfx.OpQueue) {
 		descr := CameraDescr{FovY: math.Pi / 2, Near: 1, Far: 10}
 		black := m.Color{A: 1}
-		descr.Passes = []Pass{{Target: g.TemporaryTarget(400, 100, gfx.FormatRGBA8Srgb), ClearColor: &black}}
+		target, _ := g.TemporaryTarget(400, 100, gfx.FormatRGBA8Srgb)
+		descr.Passes = []Pass{{Target: target, ClearColor: &black}}
 		q.Camera(cameraMain, descr)
 	})
 	h.frame()

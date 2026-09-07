@@ -110,6 +110,66 @@ func (b *gfxBackend) BeginPass(desc cgfx.GpuPassDesc) cgfx.RenderPass {
 	return &gfxRenderPass{backend: b, pass: encoded}
 }
 
+// TransitionTextures places the barriers gfx computed for the pass about to be
+// encoded. It is called outside any render pass, because that is the only place
+// a barrier can be recorded.
+//
+// gogpu tracks resources for lifetime and for submit-time validation but
+// derives no barriers from that tracking, so a texture written as an attachment
+// and then sampled is not ordered against those writes - not within one command
+// encoder, and not across a submit boundary. On Vulkan the sample reads the
+// image mid-write. The symptom is a flicker that looks random, is not a CPU/GPU
+// race, and is invisible to any capture taken while the app redraws at speed,
+// so the barrier has to ship with the feature rather than after it.
+//
+// Cost is one image transition per write-then-read pair, independent of scene
+// complexity - unlike Device.WaitIdle, which also removes the artifact but
+// stalls the CPU on the GPU to do it.
+func (b *gfxBackend) TransitionTextures(transitions []cgfx.TextureTransition) {
+	if b.encoder == nil || len(transitions) == 0 {
+		return
+	}
+	b.barriers = b.barriers[:0]
+	for _, transition := range transitions {
+		texture, ok := b.bakedTextures[transition.Texture]
+		if !ok || texture == nil {
+			continue
+		}
+		desc := b.bakedTextureDescs[transition.Texture]
+		levels := uint32(1)
+		if desc.Mipmaps && mipmapsSupported(desc.Format) {
+			levels = uint32(mipLevelCount(desc.Width, desc.Height))
+		}
+		b.barriers = append(b.barriers, wgpu.TextureBarrier{
+			Texture: texture.tex,
+			// The whole texture, not the one mip and layer the pass rendered
+			// into: a sampler reads every level, so ordering only the written
+			// one leaves the rest of the read unordered.
+			Range: wgpu.TextureRange{
+				Aspect:        gputypes.TextureAspectAll,
+				MipLevelCount: levels, ArrayLayerCount: uint32(max(desc.Layers, 1)),
+			},
+			Usage: wgpu.TextureUsageTransition{
+				OldUsage: textureBarrierUsage(transition.From),
+				NewUsage: textureBarrierUsage(transition.To),
+			},
+		})
+	}
+	if len(b.barriers) > 0 {
+		b.encoder.TransitionTextures(b.barriers)
+	}
+}
+
+// textureBarrierUsage maps gfx's two attachment roles onto the backend's usage
+// flags. gfx names only the two it can put a texture in; every other usage is
+// the backend's own business.
+func textureBarrierUsage(usage cgfx.TextureUsage) gputypes.TextureUsage {
+	if usage == cgfx.TextureUsageTextureBinding {
+		return gputypes.TextureUsageTextureBinding
+	}
+	return gputypes.TextureUsageRenderAttachment
+}
+
 // EndPass closes the pass BeginPass opened.
 func (b *gfxBackend) EndPass(pass cgfx.RenderPass) {
 	if encoded, ok := pass.(*gfxRenderPass); ok && encoded != nil {

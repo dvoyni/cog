@@ -48,6 +48,14 @@ type translator struct {
 	passCursor []int
 	// strayDraws counts the frame's draws recorded outside any pass.
 	strayDraws int
+	// textureUsage is what role each attachment texture is currently in, for
+	// the frame so far. A transition has to name the usage the texture is
+	// actually in, so this is tracked rather than assumed; a texture absent
+	// from the map has never been an attachment and needs no barrier.
+	textureUsage map[TextureID]TextureUsage
+	// runSampled is the scratch set of textures one merged run samples, reused
+	// across runs so a frame allocates nothing per pass.
+	runSampled []TextureID
 	// diagnostic holds a report that does not stop the frame - a shader over the
 	// web floor still renders here - until translate surfaces it.
 	diagnostic error
@@ -61,6 +69,7 @@ func newTranslator() *translator {
 		layouts:        map[ShaderID]ShaderLayout{},
 		textures:       map[string]TextureDescr{},
 		parameterPlans: map[parameterPlanBucketKey][]cachedParameterPlan{},
+		textureUsage:   map[TextureID]TextureUsage{},
 	}
 }
 
@@ -147,6 +156,10 @@ func (t *translator) translatePasses(queue *OpQueue, backend Backend, filesystem
 	if t.strayDraws > 0 && *firstErr == nil {
 		*firstErr = ErrDrawWithoutPass{Count: t.strayDraws}
 	}
+	// Attachment roles are per frame: the pool hands the same texture id to a
+	// different purpose next frame, and every frame's barriers are encoded from
+	// scratch anyway.
+	clear(t.textureUsage)
 	presents := false
 	for i := 0; i < len(t.passOrder); {
 		head := queue.passes[t.passOrder[i]].desc
@@ -165,6 +178,7 @@ func (t *translator) translatePasses(queue *OpQueue, backend Backend, filesystem
 			continue
 		}
 		presents = presents || head.Target.IsScreen()
+		t.transitionRun(queue, head, i, last)
 		t.ops.BeginPass(t.gpuPassDesc(backend, head, tail))
 		for j := i; j <= last; j++ {
 			pass := &queue.passes[t.passOrder[j]]
@@ -182,6 +196,82 @@ func (t *translator) translatePasses(queue *OpQueue, backend Backend, filesystem
 	if presents {
 		t.ops.Present()
 	}
+}
+
+// transitionRun places the barriers one merged run needs and records the roles
+// it leaves its textures in. It runs before the pass is opened because a
+// barrier cannot be recorded inside a render pass.
+//
+// The rule is not "every render target gets a barrier" - it is that a
+// write-then-read pair, in either direction, has to be ordered. Both directions
+// occur: a camera renders into a temporary target that a later pass composites
+// (write then read), and a post-processing chain ping-pongs two targets (read
+// then write). A texture nothing has used as an attachment this frame is not
+// gfx's to order.
+func (t *translator) transitionRun(queue *OpQueue, head PassDescr, first, last int) {
+	// Reads first: a texture this run samples has to have finished being written.
+	t.runSampled = t.runSampled[:0]
+	for j := first; j <= last; j++ {
+		for _, index := range t.passDrawOps(t.passOrder[j]) {
+			op := &queue.ops[index]
+			t.collectSampled(op.material.params)
+			t.collectSampled(op.params)
+		}
+	}
+	for _, texture := range t.runSampled {
+		t.transitionTo(texture, TextureUsageTextureBinding)
+	}
+	// Then writes: this run's own attachments. A texture that was sampled
+	// earlier in the frame is transitioned back before it is written again.
+	if head.Target.kind == targetTexture {
+		t.transitionTo(head.Target.texture, TextureUsageRenderAttachment)
+	}
+	if head.Depth.kind == depthKindTexture {
+		t.transitionTo(head.Depth.texture, TextureUsageRenderAttachment)
+	}
+}
+
+// collectSampled adds every baked texture the parameters name to the run's
+// sampled set, skipping the ones already in it: two draws sampling one render
+// target is a single hazard, and a duplicate barrier is a real pipeline stall.
+//
+// It reads the raw parameters rather than a resolved parameter plan, so it can
+// run before the pass opens. That over-approximates by the textures a shader
+// does not actually declare, which costs a barrier nothing reads and is the
+// safe direction to be wrong in.
+func (t *translator) collectSampled(params []ParameterDescr) {
+	for i := range params {
+		p := &params[i]
+		if p.kind != paramTexture || p.texture.source != TextureSourceBaked || p.texture.id == 0 {
+			continue
+		}
+		if !slices.Contains(t.runSampled, p.texture.id) {
+			t.runSampled = append(t.runSampled, p.texture.id)
+		}
+	}
+}
+
+// transitionTo moves one texture into a usage, emitting a barrier only when
+// that is a change from a role the frame has already put it in. A texture that
+// has never been an attachment this frame has no writes to order against, and
+// one already in the usage is a no-op the backend should not pay for.
+func (t *translator) transitionTo(texture TextureID, to TextureUsage) {
+	if texture == 0 {
+		return
+	}
+	from, seen := t.textureUsage[texture]
+	if !seen {
+		// First use this frame. Record the role without a barrier: the only
+		// hazard a barrier fixes is against this frame's own earlier passes,
+		// and there are none for this texture yet.
+		t.textureUsage[texture] = to
+		return
+	}
+	if from == to {
+		return
+	}
+	t.ops.TransitionTexture(TextureTransition{Texture: texture, From: from, To: to})
+	t.textureUsage[texture] = to
 }
 
 // gpuPassDesc resolves a merged run's attachments: it loads like the pass that

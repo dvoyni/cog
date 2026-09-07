@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"io/fs"
 	"math"
+	"slices"
 	"testing"
 	"testing/fstest"
 
@@ -41,15 +42,21 @@ type fakeBackend struct {
 	freedPipelines []PipelineID
 	lastPipelines  []PipelineDesc
 
-	lastOps      []gpuOp
-	lastPasses   []GpuPassDesc
-	passDraws    []int
-	views        [][3]int
-	draws        []drawCall
-	execCount    int
-	layout       *ShaderLayout
-	presents     int
-	presentAfter int
+	lastOps       []gpuOp
+	lastPasses    []GpuPassDesc
+	passDraws     []int
+	views         [][3]int
+	draws         []drawCall
+	execCount     int
+	layout        *ShaderLayout
+	presents      int
+	presentAfter  int
+	boundTextures []TextureID
+	// transitions accumulate across the frame; emptyTransitions counts the
+	// calls gfx promised never to make, so the promise is checked rather than
+	// trusted.
+	transitions      []placedTransition
+	emptyTransitions int
 }
 
 func (b *fakeBackend) id() uint32 { b.nextID++; return b.nextID }
@@ -137,6 +144,37 @@ func (b *fakeBackend) BeginPass(desc GpuPassDesc) RenderPass {
 
 func (b *fakeBackend) EndPass(RenderPass) {}
 
+// TransitionTextures records each barrier against the pass it precedes, so a
+// test can assert not just that a transition happened but that it happened
+// before the pass whose hazard it fixes.
+func (b *fakeBackend) TransitionTextures(transitions []TextureTransition) {
+	if len(transitions) == 0 {
+		b.emptyTransitions++
+	}
+	for _, transition := range transitions {
+		b.transitions = append(b.transitions, placedTransition{
+			TextureTransition: transition, beforePass: len(b.lastPasses),
+		})
+	}
+}
+
+// transitionBefore reports whether the transition was placed, and the index of
+// the pass it was placed before.
+func (b *fakeBackend) transitionBefore(want TextureTransition) (int, bool) {
+	for _, placed := range b.transitions {
+		if placed.TextureTransition == want {
+			return placed.beforePass, true
+		}
+	}
+	return -1, false
+}
+
+// placedTransition is one barrier and the pass it was recorded ahead of.
+type placedTransition struct {
+	TextureTransition
+	beforePass int
+}
+
 // Present records the implicit present pass and how many declared passes had
 // already run, so a test can assert both that it ran and that it ran last.
 func (b *fakeBackend) Present() {
@@ -144,9 +182,20 @@ func (b *fakeBackend) Present() {
 	b.presentAfter = len(b.lastPasses)
 }
 
-func (b *fakeBackend) SetPipeline(PipelineID)                 {}
-func (b *fakeBackend) SetParams([]byte)                       {}
-func (b *fakeBackend) SetTexture(TextureID, int, int)         {}
+func (b *fakeBackend) SetPipeline(PipelineID) {}
+func (b *fakeBackend) SetParams([]byte)       {}
+
+// SetTexture records the binding so a test can assert which texture reached the
+// GPU, which is the only way to tell a sampled render target from a draw that
+// was silently dropped before it ever bound one.
+func (b *fakeBackend) SetTexture(texture TextureID, group, binding int) {
+	b.boundTextures = append(b.boundTextures, texture)
+}
+
+// boundTexture reports whether the texture was bound at any point this frame.
+func (b *fakeBackend) boundTexture(id TextureID) bool {
+	return slices.Contains(b.boundTextures, id)
+}
 func (b *fakeBackend) SetSampler(SamplerID, int, int)         {}
 func (b *fakeBackend) SetVertexBuffer(BufferID, int)          {}
 func (b *fakeBackend) SetIndexBuffer(BufferID, int)           {}
@@ -354,9 +403,10 @@ func (benchmarkGpuSink) Draw(int, int, int, int, bool)          {}
 func (benchmarkGpuSink) ReleaseBuffer(BufferID)                 {}
 func (benchmarkGpuSink) ReleaseTexture(TextureID)               {}
 
-func (benchmarkGpuSink) BeginPass(GpuPassDesc) RenderPass { return benchmarkGpuSink{} }
-func (benchmarkGpuSink) EndPass(RenderPass)               {}
-func (benchmarkGpuSink) Present()                         {}
+func (benchmarkGpuSink) BeginPass(GpuPassDesc) RenderPass       { return benchmarkGpuSink{} }
+func (benchmarkGpuSink) EndPass(RenderPass)                     {}
+func (benchmarkGpuSink) TransitionTextures([]TextureTransition) {}
+func (benchmarkGpuSink) Present()                               {}
 
 func BenchmarkGpuQueueReplaySteadyState(b *testing.B) {
 	var queue GpuQueue
