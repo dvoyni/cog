@@ -237,6 +237,11 @@ type lookupProbeRequest struct {
 	// filesystem any more - that is the facade's whole "two dependencies, not
 	// three" - so a test that wants to read a mounted file asks for one here.
 	files func(storage.FileSystem)
+	// lookup hands over the table itself, which is how a test asserts that a
+	// draw record points at the resident entry rather than at a copy of it.
+	// Nothing outside this package can ask that question, and it is the whole
+	// of "binds the file's records directly".
+	lookup func(*Lookup)
 }
 type lookupProbeResponse struct{}
 
@@ -284,6 +289,9 @@ func lookupProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupProbeRequest, looku
 			}
 			if req.run != nil {
 				req.run(NewLookupAccess(k, lookup.Get()))
+			}
+			if req.lookup != nil {
+				req.lookup(lookup.Get())
 			}
 			return lookupProbeResponse{}, nil
 		}

@@ -733,6 +733,43 @@ It is matched against the *resolved tag entry*, and a name that entry's shader
 does not declare is **ignored rather than reported**: that is what keeps the
 broadcast safe across tags.
 
+**An override has two destinations, and scene resolves only one of them.** The
+gfx parameters the entry declares — the five textures and five samplers — need no
+code at all: an override rides on the draw's own parameter list, and gfx already
+resolves a draw parameter over a material one of the same name against the
+reflected layout of that entry's shader, dropping what the shader does not
+declare. That *is* the matching rule, enforced by the same reflection every
+other binding goes through. What gfx cannot serve is the record: `scenePbrMaterial`
+is a bound range of an arena scene packs itself, so its members
+— `baseColorFactor`, `metallicFactor`, the five transforms and rotations — are
+not reflected uniforms and no name of theirs ever reaches gfx. Scene merges
+those into the draw's own copy of the record.
+
+So "a per-draw copy in the frame arena" is the record and nothing else: the
+`Material` is never copied, overrides or not, and the record was already copied
+into the frame's material arena on every path. The no-copy guarantee holds for a
+stronger reason than it was written for.
+
+**`uvSets` and `pad` are deliberately not addressable.** `pad` is not a member
+anyone means, and `uvSets` is a packed five-bit selector no parameter kind
+expresses — which TEXCOORD set a slot samples is the file's statement about its
+own mesh, not a per-draw knob. Every other member the shader declares is
+reachable, and a test reads the WGSL struct and fails on one that is not.
+
+**A parameter whose kind does not fit the member it names is ignored**, on the
+same footing as a name the record does not carry. The merge runs per batch per
+pass with no reporter on the path, and the broadcast means one parameter list is
+matched against several materials, so "does not fit here" is not on its own
+evidence of a caller bug. A vec4 member takes either `ColorParam` or `VecParam`.
+
+**The two knobs compose rather than conflict.** A draw naming both takes glTF's
+own defaults for the replacement material's record — the file's numbers are gone
+with its bindings — and the overrides then merge over those.
+
+**`MeshDraw.Params` stay out of the record.** They are for what a custom
+material declares and scene knows nothing about; the bundled PBR record is the
+model's own, and a mesh that wants a colour names a `Material`.
+
 ### Loading
 
 **Loading is asynchronous and a non-resident model is skipped, never

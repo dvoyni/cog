@@ -237,9 +237,20 @@ type drawRecord struct {
 	// are baked lazily on first use, so their refs cannot be known at record
 	// time.
 	mesh MeshRef
-	// params are the extra gfx parameters a MeshDraw asked to bind, aliasing
-	// the recording's parameter arena.
+	// params are the extra gfx parameters a MeshDraw asked to bind, or a model
+	// draw's OverrideParams, both aliasing the recording's parameter arena.
+	// Either way gfx resolves them over the entry's own material parameters by
+	// name, against its reflected layout, and drops what it does not declare.
 	params []gfx.ParameterDescr
+	// overridesRecord marks params as a model draw's OverrideParams, which
+	// carry a second destination gfx cannot serve: the members of the bundled
+	// PBR record, which is a bound range of an arena scene packs itself rather
+	// than a set of reflected uniforms, so gfx never sees a name for them.
+	//
+	// A MeshDraw's Params are for what a custom material declares and scene
+	// knows nothing about, so they stop at gfx; a mesh that wants a colour
+	// names a Material.
+	overridesRecord bool
 	// bounds is the draw's explicit local-space sphere, and neverCull exempts
 	// it from culling outright. Both are zero for a debug shape, which culls
 	// by its mesh's baked sphere.
@@ -294,6 +305,17 @@ func (r drawRecord) world() m.Mat4 {
 // emissiveFactor, which the shader adds after shading, and the base colour is
 // black so the lights contribute nothing to it.
 func (r drawRecord) pbrRecord() scenePbrRecord {
+	record := r.basePbrRecord()
+	if r.overridesRecord {
+		overrideRecord(&record, r.params)
+	}
+	return record
+}
+
+// basePbrRecord is the record before a draw's own overrides merge into it: the
+// file's own for a model primitive, and paint synthesised from the draw for
+// everything else.
+func (r drawRecord) basePbrRecord() scenePbrRecord {
 	if r.pbr != nil {
 		return *r.pbr
 	}

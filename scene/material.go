@@ -254,10 +254,19 @@ type pbrDefaults struct {
 var pbrSampler = gfx.SamplerDesc{AddressU: gfx.AddressRepeat, AddressV: gfx.AddressRepeat}
 
 // pbrSlot is one texture slot of the bundled material: the glTF-verbatim
-// parameter name of its texture and the scene-owned name of its sampler.
+// parameter names of its texture and of the two record members that place it,
+// plus the scene-owned name of its sampler.
+//
+// The transform and the rotation are named here rather than derived from a
+// prefix because they are the shader's own member names, and OverrideParams
+// matches against those: the record declares them flat rather than as an array
+// precisely so that a caller can address one, and animating baseColorTransform
+// per frame is UV scrolling.
 type pbrSlot struct {
-	texture string
-	sampler string
+	texture   string
+	sampler   string
+	transform string
+	rotation  string
 }
 
 // pbrSlots are the five slots, in record order. Five samplers rather than one
@@ -265,11 +274,26 @@ type pbrSlot struct {
 // can legitimately differ — a tiling ground beside a clamped decal — so a
 // shared sampler would silently mis-sample a legal file.
 var pbrSlots = [...]pbrSlot{
-	{texture: "baseColorTexture", sampler: "baseColorSampler"},
-	{texture: "metallicRoughnessTexture", sampler: "metallicRoughnessSampler"},
-	{texture: "normalTexture", sampler: "normalSampler"},
-	{texture: "occlusionTexture", sampler: "occlusionSampler"},
-	{texture: "emissiveTexture", sampler: "emissiveSampler"},
+	{
+		texture: "baseColorTexture", sampler: "baseColorSampler",
+		transform: "baseColorTransform", rotation: "baseColorRotation",
+	},
+	{
+		texture: "metallicRoughnessTexture", sampler: "metallicRoughnessSampler",
+		transform: "metallicRoughnessTransform", rotation: "metallicRoughnessRotation",
+	},
+	{
+		texture: "normalTexture", sampler: "normalSampler",
+		transform: "normalTransform", rotation: "normalRotation",
+	},
+	{
+		texture: "occlusionTexture", sampler: "occlusionSampler",
+		transform: "occlusionTransform", rotation: "occlusionRotation",
+	},
+	{
+		texture: "emissiveTexture", sampler: "emissiveSampler",
+		transform: "emissiveTransform", rotation: "emissiveRotation",
+	},
 }
 
 // normalSlot is the one slot whose default is the flat normal rather than the

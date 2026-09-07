@@ -1,6 +1,7 @@
 package scene
 
 import (
+	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/kernel"
 )
 
@@ -8,11 +9,6 @@ import (
 //
 // A zero ModelDraw is a valid draw of the file's default scene at the origin,
 // culled by the bounds the file declares.
-//
-// The fields the specification's ModelDraw also carries - Material and
-// OverrideParams - arrive with the tickets that implement them. A field that
-// parses and does nothing is worse than an absent one: it compiles at the call
-// site and renders the wrong picture with nothing to explain it.
 type ModelDraw struct {
 	// Transform places the single instance. Transforms, when it is non-empty,
 	// overrides it and places one instance per entry, exactly as MeshDraw does.
@@ -79,6 +75,40 @@ type ModelDraw struct {
 	// backing the moment the call returns. A draw's instances share it, exactly
 	// as they share Plays.
 	MorphWeights []float32
+
+	// Material replaces the file's own materials wholesale, and nil is the
+	// file's. A non-nil value is bound instead of every record the load built,
+	// and the file's PBR records are not bound at all - its base colours,
+	// factors and texture transforms do not survive. That is the dissolve, the
+	// silhouette and the depth-only case, where binding the artist's numbers
+	// under a shader that never heard of them would be a wrong picture with
+	// nothing in the frame to explain it.
+	//
+	// It does not overlap with OverrideParams. This one replaces and that one
+	// merges, and a draw may still use both: the replacement takes glTF's own
+	// defaults for its record and the overrides merge over those.
+	Material Material
+
+	// OverrideParams merges by name over each primitive's own material,
+	// keeping the file's textures. That is the team-colour, hit-flash and fade
+	// case. glTF's parameter names are the user-facing contract, so
+	// gfx.ColorParam("baseColorFactor", c) is what tints a model, and the glTF
+	// specification is the documentation of what each name means.
+	//
+	// It broadcasts to every material the draw binds - all six of a
+	// six-material model's - which is what the common per-draw override
+	// actually wants. Matching is against the resolved tag entry, and a name
+	// that entry's shader does not declare is ignored rather than reported:
+	// that is what keeps the broadcast safe across tags, since an alphaMode
+	// MASK shadow shader declares baseColorTexture and alphaCutoff where an
+	// OPAQUE one declares neither.
+	//
+	// A nil Material with no overrides binds the file's records directly, with
+	// no copy of either.
+	//
+	// The slice is copied into the frame's own arena, so a caller may reuse its
+	// backing the moment the call returns, exactly as with Plays.
+	OverrideParams []gfx.ParameterDescr
 }
 
 // ModelLight is one KHR_lights_punctual light a model file declares, in the
@@ -124,6 +154,11 @@ type modelDrawRecord struct {
 	plays        []ClipPlay
 	morphWeights []float32
 	overridden   bool
+	// material is the caller's replacement for the file's own, nil when the
+	// draw takes the file's, and overrides aliases the recording's parameter
+	// arena for the same reason plays and morphWeights alias theirs.
+	material  Material
+	overrides []gfx.ParameterDescr
 }
 
 // Model records one draw of the glTF file at path.
@@ -161,12 +196,20 @@ func (q *opQueue) Model(layers LayerMask, path string, draw ModelDraw) {
 		q.morphWeights = append(q.morphWeights, weights...)
 		weights = q.morphWeights[start:len(q.morphWeights):len(q.morphWeights)]
 	}
+	overrides := draw.OverrideParams
+	if len(overrides) > 0 {
+		start := len(q.meshes.params)
+		q.meshes.params = append(q.meshes.params, overrides...)
+		overrides = q.meshes.params[start:len(q.meshes.params):len(q.meshes.params)]
+	}
 	draw.Transforms, draw.Plays, draw.MorphWeights = transforms, plays, weights
+	draw.OverrideParams = overrides
 	q.calls = append(q.calls, Op{Kind: OpModel, Layers: layers, Path: path, Model: draw})
 	q.models = append(q.models, modelDrawRecord{
 		layers: layers, path: path, scene: draw.Scene, node: draw.Node,
 		transform: draw.Transform, transforms: transforms, plays: plays,
 		morphWeights: weights, overridden: overridden,
+		material: draw.Material, overrides: overrides,
 	})
 }
 
@@ -242,7 +285,15 @@ func (p *Plugin) expandModels(
 		instances := model.instances(&single)
 		for j := range view.primitives {
 			primitive := &view.primitives[j]
-			material := &view.materials[primitive.material]
+			// A replacement material unbinds the file's record along with its
+			// bindings: "the file's parameters do not survive" is as much the
+			// numbers as the textures, and a nil record is what makes the draw
+			// take glTF's own defaults instead.
+			owned := &view.materials[primitive.material]
+			material, record := owned.material, &owned.record
+			if model.material != nil {
+				material, record = model.material, nil
+			}
 			group := uint32(0)
 			if len(instances) > 1 {
 				group = uint32(write.drawCount()) + 1
@@ -269,10 +320,16 @@ func (p *Plugin) expandModels(
 				write.appendFlushDraw(drawRecord{
 					layers:    model.layers,
 					transform: Transform{Matrix: &p.modelWorlds[at]},
-					material:  material.material,
+					material:  material,
 					mesh:      primitive.mesh,
-					pbr:       &material.record,
-					bounds:    primitive.bounds,
+					pbr:       record,
+					// The overrides ride on the draw's gfx parameters, which
+					// is where every name the entry's shader declares is
+					// resolved, and are marked as also addressing the record,
+					// which gfx cannot see.
+					params:          model.overrides,
+					overridesRecord: len(model.overrides) > 0,
+					bounds:          primitive.bounds,
 					// A skinned primitive is never culled. Its bind-pose sphere
 					// is the only bound the load has, and where the joints put
 					// it this frame is not knowable without replaying the blend

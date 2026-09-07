@@ -94,3 +94,6 @@ func (p ParameterDescr) TextureValue() (TextureDescr, bool) { return p.texture, 
 
 // SamplerValue returns the parameter's sampler and true when it is a sampler parameter.
 func (p ParameterDescr) SamplerValue() (SamplerDesc, bool) { return p.sampler, p.kind == paramSampler }
+
+// VecValue returns the parameter's vec4 and true when it is a vec4 parameter.
+func (p ParameterDescr) VecValue() (m.Vec4, bool) { return p.vec, p.kind == paramVec4 }
