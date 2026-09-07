@@ -46,6 +46,11 @@ type Lookup struct {
 	// has no reserved zero value.
 	defaults    pbrDefaults
 	hasDefaults bool
+	// nullSkin is the group 2 every draw with no skin of its own binds: one
+	// identity pose row and one identity joint record, baked on first use and
+	// shared by every buffer-built draw in the process. Sharing it is what
+	// keeps those draws batching together instead of fragmenting group 2.
+	nullSkin skinBuffers
 	// reported suppresses repeated reports for one model or texture path until
 	// it loads successfully or is unloaded - canvas's precedent.
 	reported map[string]struct{}
@@ -105,4 +110,30 @@ func (l *Lookup) ensureBundled(bake bakeTextureFunc) Material {
 	}
 	l.bundled = bundledPbr(l.defaults)
 	return l.bundled
+}
+
+// ensureNullSkin bakes the one-row, one-joint skin every unskinned draw binds,
+// once.
+//
+// It exists because a declared binding must be bound. Group 2 is declared by
+// the one bundled module, which every draw goes through, and a missing entry
+// is not a degraded frame: CreateBindGroup fails the entry-count rule, the
+// error is swallowed, encoder.Finish()'s error is dropped, and the whole
+// frame's command buffer vanishes with no error anywhere.
+//
+// The alternative - riding the free rest-frame path with SCENE_NOSKIN unset -
+// needs no new mechanism and is correct, but it charges a procedural terrain
+// mesh a per-vertex pose fetch and TRS blend for a guaranteed identity.
+func (l *Lookup) ensureNullSkin(bake bakeFunc) skinBuffers {
+	if l.nullSkin.bound {
+		return l.nullSkin
+	}
+	pose := identityPose()
+	joint := identitySkinJoint()
+	l.nullSkin = skinBuffers{
+		poses:  bake(recordBytes(&pose)),
+		joints: bake(recordBytes(&joint)),
+		bound:  true,
+	}
+	return l.nullSkin
 }

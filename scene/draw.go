@@ -34,6 +34,11 @@ type pendingPass struct {
 
 type pendingDraw struct {
 	mesh gfx.MeshDescr
+	// skin is the pair of group 2 buffers the draw binds: the model's own
+	// baked records, or the shared null skin for everything buffer-built. A
+	// declared binding must be bound or the whole frame's command buffer
+	// vanishes silently, so this is never zero.
+	skin skinBuffers
 	// material is the gfx material the draw's resolved tag entry named. It is
 	// carried per draw rather than looked up again at emit time because
 	// resolution is a pass-relative answer: the same scene material serves a
@@ -55,8 +60,12 @@ type frameBuild struct {
 	instances arena
 	frames    arena
 	materials arena
-	passes    []pendingPass
-	draws     []pendingDraw
+	// anims is the frame's sceneAnim arena. It is indexed absolutely rather
+	// than bound per pass: an instance's animOffset counts vec4s from the
+	// start of the whole buffer, so every draw binds it entire.
+	anims  arena
+	passes []pendingPass
+	draws  []pendingDraw
 	// batches is the scratch one pass fills before publishing it, reused by
 	// every pass in the frame.
 	batches []BatchView
@@ -76,6 +85,7 @@ func (b *frameBuild) reset() {
 	b.instances.reset()
 	b.frames.reset()
 	b.materials.reset()
+	b.anims.reset()
 	b.passes = b.passes[:0]
 	b.draws = b.draws[:0]
 	b.batches = b.batches[:0]
@@ -88,6 +98,10 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 	instances := gfxWrite.TemporaryBuffer(b.instances.bytes(), true)
 	frames := gfxWrite.TemporaryBuffer(b.frames.bytes(), true)
 	materials := gfxWrite.TemporaryBuffer(b.materials.bytes(), true)
+	// sceneAnim is declared whether or not anything animates, so a frame that
+	// packed no block still uploads one empty record: an unbound declared
+	// binding is the silent whole-frame loss, not a degraded frame.
+	anims := gfxWrite.TemporaryBuffer(b.animBytes(), true)
 	for i := range b.passes {
 		pass := &b.passes[i]
 		gfxWrite.Pass(pass.descr)
@@ -95,7 +109,10 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 			b.params = append(b.params[:0],
 				gfx.BufferRangeParam("sceneFrame", frames, pass.frameOffset, frameBlockSize),
 				gfx.BufferRangeParam("sceneInstances", instances, pass.instanceOffset, pass.instanceBytes),
+				gfx.BufferParam("sceneAnim", anims),
 				gfx.BufferRangeParam("scenePbrMaterial", materials, draw.materialOffset, materialRecordSize),
+				gfx.BufferParam("scenePoses", draw.skin.poses),
+				gfx.BufferParam("sceneSkinJoints", draw.skin.joints),
 			)
 			b.params = append(b.params, draw.params...)
 			gfxWrite.DrawInstancedFrom(draw.mesh, *draw.material,
@@ -131,15 +148,16 @@ func (b *frameBuild) beginPass(descr gfx.PassDescr, block sceneFrameBlock) *pend
 // is deferred the table degenerates to one record per draw for everything else.
 func (b *frameBuild) addDraw(
 	pass *pendingPass, mesh meshRecord, id uint32, entry materialEntry,
-	worlds []m.Mat4, record scenePbrRecord, params []gfx.ParameterDescr,
+	worlds []m.Mat4, record scenePbrRecord, params []gfx.ParameterDescr, anim animBinding,
 ) {
 	first := (len(b.instances.bytes()) - pass.instanceOffset) / instanceSize
 	for _, world := range worlds {
-		instance := packInstance(world)
+		instance := packInstance(world, anim)
 		b.instances.appendElement(&instance)
 	}
 	b.draws = append(b.draws, pendingDraw{
 		mesh:           mesh.descr(),
+		skin:           anim.skin,
 		material:       entry.descr,
 		materialOffset: b.materials.appendRecord(&record),
 		firstInstance:  first,
@@ -157,3 +175,22 @@ func (b *frameBuild) endPass(pass *pendingPass) {
 	pass.drawCount = len(b.draws) - pass.firstDraw
 	pass.instanceBytes = len(b.instances.bytes()) - pass.instanceOffset
 }
+
+// animBytes is the sceneAnim arena's upload. An empty arena still uploads one
+// vec4: TemporaryBuffer returns no buffer at all for no bytes, and the binding
+// is declared on every draw whether or not the frame animated anything - so an
+// empty one would be the unbound binding that takes the frame down silently.
+//
+// The placeholder is a package-level array rather than a fresh allocation,
+// because a frame that animates nothing is the common frame and the arenas'
+// whole discipline is that a steady frame allocates nothing.
+func (b *frameBuild) animBytes() []byte {
+	if len(b.anims.bytes()) == 0 {
+		return emptyAnimBlock[:]
+	}
+	return b.anims.bytes()
+}
+
+// emptyAnimBlock is one zeroed vec4, and it is read-only by convention:
+// TemporaryBuffer copies what it is handed.
+var emptyAnimBlock [16]byte

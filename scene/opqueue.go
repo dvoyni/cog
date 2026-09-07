@@ -38,6 +38,10 @@ type opQueue struct {
 	// and the expansion has to resolve residency first: a non-resident model
 	// contributes no draws at all.
 	models []modelDrawRecord
+	// plays backs every model draw's ClipPlay slice, so a record never aliases
+	// the caller's array and a caller may reuse its own the moment the call
+	// returns.
+	plays []ClipPlay
 	// frame counts recordings, and stamps every temporary MeshRef minted into
 	// this one. It is what makes a temporary ref used in a later frame
 	// detectable rather than a draw of whatever now holds its slot.
@@ -51,6 +55,7 @@ type opQueue struct {
 	publishedCalls  []Op
 	publishedMeshes meshRecording
 	publishedModels []modelDrawRecord
+	publishedPlays  []ClipPlay
 	publishedFrame  uint32
 	// cameraOps is the published frame's camera registrations as Ops, in id
 	// order, which Ops reports ahead of the draw calls.
@@ -102,6 +107,8 @@ func (q *opQueue) Reset() {
 	q.meshes.reset()
 	clear(q.models)
 	q.models = q.models[:0]
+	clear(q.plays)
+	q.plays = q.plays[:0]
 }
 
 // Ops appends the published frame's recorded operations to dst, in flush order:
@@ -144,6 +151,7 @@ func (q *opQueue) beginFlush() []cameraRecord {
 	// that keeps recording rather than travelling with the published frame.
 	q.meshes, q.publishedMeshes = q.publishedMeshes, q.meshes
 	q.models, q.publishedModels = q.publishedModels, q.models
+	q.plays, q.publishedPlays = q.publishedPlays, q.plays
 	q.meshes.layouts, q.publishedMeshes.layouts = q.publishedMeshes.layouts, q.meshes.layouts
 	q.publishedFrame, q.frame = q.frame, q.frame+1
 	clear(q.cameras)
@@ -157,6 +165,8 @@ func (q *opQueue) beginFlush() []cameraRecord {
 	q.meshes.reset()
 	clear(q.models)
 	q.models = q.models[:0]
+	clear(q.plays)
+	q.plays = q.plays[:0]
 
 	slices.SortFunc(q.published, func(a, b cameraRecord) int { return cmp.Compare(a.id, b.id) })
 	q.passViews = q.passViews[:0]
@@ -228,6 +238,12 @@ type drawRecord struct {
 	// by its mesh's baked sphere.
 	bounds    m.Sphere
 	neverCull bool
+	// anim is what the draw's instances say about animation: the group 2
+	// buffers, the sceneAnim offset and whether the geometry skins. A model
+	// expansion fills it; everything else leaves it zero and the flush fills
+	// in the shared null skin, which is what makes a draw literal that never
+	// heard of animation still bind a complete group 2.
+	anim animBinding
 	// group ties together the records one instanced call expanded into, so the
 	// flush can pack their survivors as a single batch. It is the recording
 	// ordinal of the group's first record plus one - unique within a frame with

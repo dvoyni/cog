@@ -33,6 +33,11 @@ type loadModelRequest struct {
 	// The install compares it, so an unload while this parse was running makes
 	// the result discard itself rather than become resident as a ghost.
 	Generation uint32
+	// SampleRate is Config.PoseSampleRate, carried on the request because the
+	// parse holds no Lookup and no configuration of its own. It is read where
+	// the load is enqueued, which is the one place both the config and the
+	// path are in hand.
+	SampleRate int
 }
 
 type loadModelResponse struct{}
@@ -58,7 +63,7 @@ func loadModelCmdImpl() (kernel.Lock, kernel.Execute[loadModelRequest, loadModel
 	return func(access kernel.ResourceAccess) {
 			filesystem = access.GetRead[storage.FileSystem]()
 		}, func(k kernel.Kernel, request loadModelRequest) (loadModelResponse, error) {
-			model, err := parseModel(filesystem.Get(), request.Path)
+			model, err := parseModel(filesystem.Get(), request.Path, request.SampleRate)
 			k.ExecuteCommandAsync[installModelCmd](installModelRequest{
 				Path: request.Path, Generation: request.Generation, Model: model, Err: err,
 			})
@@ -69,7 +74,9 @@ func loadModelCmdImpl() (kernel.Lock, kernel.Execute[loadModelRequest, loadModel
 // parseModel opens, decodes and converts one file. Everything it returns is
 // scene's own types: the gltf.Document is dropped here, so it never appears in
 // scene's API and never outlives the load that read it.
-func parseModel(filesystem storage.FileSystem, modelPath string) (*loadedModel, error) {
+func parseModel(
+	filesystem storage.FileSystem, modelPath string, sampleRate int,
+) (*loadedModel, error) {
 	file, err := filesystem.Open(modelPath)
 	if err != nil {
 		return nil, err
@@ -84,7 +91,7 @@ func parseModel(filesystem storage.FileSystem, modelPath string) (*loadedModel, 
 	if err := decoder.Decode(document); err != nil {
 		return nil, err
 	}
-	return convertDocument(document, modelPath, filesystem)
+	return convertDocument(document, modelPath, filesystem, sampleRate)
 }
 
 // directoryFS presents one directory of the filesystem as its own root, which

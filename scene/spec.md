@@ -1052,15 +1052,34 @@ node's transform lives in the pose buffer — the model would collapse to the
 origin. One extra frame per model (~1 KiB) makes `Preload` plus draw-with-no-plays
 legal, and defines the zero-total-weight case.
 
-**Any node targeted by a clip's TRS channels becomes a degenerate single-joint
-skin** with a weight-1.0 binding; nodes no clip touches bake flat into
-`localMatrix`. Rigid node animation — wheels, propellers, doors — is ordinary
-glTF, so the alternative was a second animation mechanism with the per-frame CPU
-hierarchy walk this design exists to eliminate. **The rule keys on TRS channels
-only**: a node whose clip touches only its `weights` channel creates **no joint**
-and keeps its authored `localMatrix`, so a morph-only model loads with zero
-joints and an empty pose buffer
+**Any node whose world transform a clip can move becomes a degenerate
+single-joint skin** with a weight-1.0 binding; nodes no clip reaches bake flat
+into `localMatrix`. Rigid node animation — wheels, propellers, doors — is
+ordinary glTF, so the alternative was a second animation mechanism with the
+per-frame CPU hierarchy walk this design exists to eliminate. **The rule keys on
+TRS channels only**: a node whose clip touches only its `weights` channel
+creates **no joint** and keeps its authored `localMatrix`, so a morph-only model
+loads with zero joints and an empty pose buffer
 ([Morph target contract](https://github.com/dvoyni/cog/issues/16)).
+
+**"A clip can move it" is inherited, not local.** A static prop bolted to a
+spinning turret moves with the turret, so the test is the node's own TRS
+channels *or* a non-empty chain of animated ancestors. Keying on the node's own
+channels alone would leave every mesh hanging under an animated bone frozen in
+its rest place while its parent turned — which is the same failure the rule
+exists to prevent, one level down.
+
+**Only nodes that bind something claim a joint.** A node a clip steers but which
+carries no mesh needs no joint of its own: its motion already reaches its
+descendants through the hierarchy walk that bakes them, and a joint for it would
+cost a 48 B row per frame for a binding nobody makes. The joints a model carries
+are therefore every skin's joints, every mesh node needing a degenerate binding,
+and the deepest animated ancestor of every *named* node — that last so a `Node`
+draw can re-root against the frame, and reusing an existing joint on the same
+node where there is one, because pose records are unpremultiplied and so hold
+the same world transform whatever inverse bind they are paired with. Claiming a
+fresh joint there instead very nearly doubles a rig: on Fox, whose every bone is
+both named and animated, 24 joints become 40.
 
 ### Clip plays
 
@@ -1077,11 +1096,16 @@ type ClipPlay struct {
 and the play dropped.
 
 **`Loop` is on the play, not the caller's time.** Gameplay owns time and `Time`
-arrives already advanced, but the frame *pair* at the seam — last frame to frame
-1, row 0 being the rest pose — can only be built by whoever knows the clip wraps,
-and that is not derivable from a raw time value. `Loop` false clamps to
-`[0, duration]`; true takes `Time` modulo duration, which makes negative time
-legal and a reversed animation free.
+arrives already advanced, but whether a time past the end wraps or holds can only
+be answered by whoever knows the clip loops, and that is not derivable from a raw
+time value. `Loop` false clamps to `[0, duration]`; true takes `Time` modulo
+duration, which makes negative time legal and a reversed animation free.
+
+**There is no seam case in the frame pair.** The grid rounds *up* to whole
+frames, so a clip's last row sits at or just past its own end and the wrapped
+time always lands on a pair inside the clip's own rows. A pair straddling the
+clip's boundary — its last frame blended back into its first — never has to be
+built, and the clamped case simply takes the last row twice.
 
 **Caps: 4 influences, 4 plays, no joint ceiling.** Influences are `JOINTS_0`
 only. A 5th play is **dropped by lowest weight and reported once per model**.
@@ -1109,6 +1133,19 @@ once keyed `"model:"+path` and bake the decomposition anyway: a slightly wrong
 elbow beats a missing character, and shear is invisible on virtually every real
 rig. A single-keyframe clip and a zero-duration clip each bake to one frame;
 neither is an error.
+
+**Faithfulness is decided by recomposing, not by classifying the matrix.** A
+collapsed axis in particular is *not* unrepresentable — a TRS record holds a zero
+scale exactly — and treating it as such would pop an object animated down to
+nothing back to full size. Scale keyframes reaching zero are ordinary: three of
+the Khronos `InterpolationTest`'s nine cubes do it. The rotation such a matrix
+cannot carry is rebuilt from the axes that survived, which is arbitrary and
+unobservable, because a zero-scaled axis has no direction to get wrong.
+
+**Vertex weights are normalised at load.** glTF requires `WEIGHTS_0` to sum to
+one and real files drift; unnormalised linear blend skinning then scales the
+mesh as well as posing it. Normalising is one pass over data already in cache at
+conversion time and removes a divide from the per-vertex path.
 
 **Skinning is model-only.** `MeshDraw` has no `Plays` field and no joint concept.
 

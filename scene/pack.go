@@ -45,11 +45,11 @@ const (
 	// correct, but it charges a procedural terrain mesh a per-vertex pose fetch
 	// for a guaranteed identity.
 	//
-	// It is set on every draw scene can make today, because every draw is
-	// buffer-built. The shared null-skin bind group it exists to select — one
-	// identity pose row and one-element inverse-bind, normal-matrix and
-	// morph-delta arrays — lands with the group 2 bindings themselves: a bind
-	// group can only fill bindings that exist, and no shader declares them yet.
+	// The bindings it selects away from are declared regardless, because a
+	// declared binding must still be bound: such a draw binds the shared null
+	// skin — one identity pose row and a one-element joint array — and every
+	// buffer-built draw shares that one pair, so they batch together instead
+	// of fragmenting group 2.
 	sceneNoSkin uint32 = 1 << 1
 )
 
@@ -198,16 +198,47 @@ func radiance(color m.Color, intensity float32) m.Vec4 {
 	return m.Vec4{X: color.R * intensity, Y: color.G * intensity, Z: color.B * intensity}
 }
 
-// packInstance builds the instance record for one world matrix. Everything the
-// record says about animation is the buffer-built answer — no anim, no skin —
-// because that is every draw scene can make until models land.
-func packInstance(world m.Mat4) sceneInstance {
+// animBinding is everything one batch's instances say about animation: the
+// group 2 buffers they read, the offset of their sceneAnim block, and whether
+// the geometry is skinned at all.
+//
+// It is per batch rather than per instance because a batch is one primitive of
+// one recorded call, and the instances of one call share the draw's animation
+// — a hundred crates is one call, and a hundred independently-animated
+// characters is a hundred calls.
+type animBinding struct {
+	skin   skinBuffers
+	offset uint32
+	// skinned is false for every buffer-built mesh and every debug shape, and
+	// for a model primitive no clip can move. Riding the free rest-frame path
+	// instead would be correct, but it charges a procedural terrain mesh — the
+	// highest-vertex-count thing scene can be handed — a per-vertex pose fetch
+	// and TRS blend for a guaranteed identity.
+	skinned bool
+}
+
+// skinBuffers is the pair of group 2 bindings a draw reads: a model's own
+// baked records, or the shared null skin.
+type skinBuffers struct {
+	poses  gfx.BufferDescr
+	joints gfx.BufferDescr
+	// bound says the pair is real. A gfx.BufferDescr holds a byte slice and so
+	// is not comparable, and there is no reserved zero descriptor, so "did
+	// anyone fill this in" needs a field of its own.
+	bound bool
+}
+
+// packInstance builds the instance record for one world matrix under one
+// batch's animation.
+func packInstance(world m.Mat4, anim animBinding) sceneInstance {
 	instance := sceneInstance{
 		World0:     m.Vec4{X: world[0], Y: world[4], Z: world[8], W: world[12]},
 		World1:     m.Vec4{X: world[1], Y: world[5], Z: world[9], W: world[13]},
 		World2:     m.Vec4{X: world[2], Y: world[6], Z: world[10], W: world[14]},
-		AnimOffset: sceneNoAnim,
-		Flags:      sceneNoSkin,
+		AnimOffset: anim.offset,
+	}
+	if !anim.skinned {
+		instance.Flags |= sceneNoSkin
 	}
 	if !uniformScale(world) {
 		instance.Flags |= sceneNonUniform
@@ -280,4 +311,14 @@ func (a *arena) appendElement[T any](element *T) int {
 // layout — the same reinterpretation canvas's sprite instances use.
 func recordBytes[T any](record *T) []byte {
 	return unsafe.Slice((*byte)(unsafe.Pointer(record)), unsafe.Sizeof(*record))
+}
+
+// recordSliceBytes reinterprets a slice of records as the bytes uploaded for
+// it, the array twin of recordBytes. Every GPU target cog builds for is
+// little-endian, so the in-memory layout is the wire layout.
+func recordSliceBytes[T any](records []T) []byte {
+	if len(records) == 0 {
+		return nil
+	}
+	return unsafe.Slice((*byte)(unsafe.Pointer(&records[0])), len(records)*int(unsafe.Sizeof(records[0])))
 }

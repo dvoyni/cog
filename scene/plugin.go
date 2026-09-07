@@ -58,8 +58,13 @@ type Plugin struct {
 	modelWorlds []m.Mat4
 	// modelViews is what each model draw's selectors resolved to, one per
 	// recorded draw, carried from the sizing pass to the expansion so the
-	// resolution and its report happen once.
+	// resolution and its report happen once. modelAnims is the same shape for
+	// the animation each draw resolved to, and modelPlays the scratch one
+	// draw's play records are folded in. All three keep their backing across
+	// frames.
 	modelViews []modelView
+	modelAnims []animBinding
+	modelPlays []scenePlayRecord
 	// meshReported is the set of mesh ids already reported this frame, so a
 	// released mesh named by a hundred draws is one report rather than a
 	// hundred.
@@ -223,6 +228,14 @@ func (p *Plugin) prepareDraws(
 		p.prepared[i] = prepareDraw(*record, mesh)
 		p.prepared[i].mesh = ref
 		p.prepared[i].interned = p.materials.intern(report, record.material)
+		// A draw that named no skin of its own binds the shared null skin, so
+		// group 2 is complete on every draw in the frame. Missing one is not a
+		// degraded frame: CreateBindGroup fails the entry-count rule, its
+		// error is swallowed, and the whole command buffer vanishes silently.
+		if !p.prepared[i].anim.skin.bound {
+			p.prepared[i].anim.skin = lookup.ensureNullSkin(bake)
+			p.prepared[i].anim.offset = sceneNoAnim
+		}
 	}
 }
 
@@ -386,7 +399,7 @@ func (p *Plugin) flushPass(
 			material, _ := p.materials.entry(prepared.interned, tag)
 			mesh, _ := p.resolveMesh(lookup, write, prepared.mesh)
 			p.build.addDraw(pending, mesh, prepared.mesh.ID(), material,
-				p.build.worlds, draws[index].pbrRecord(), draws[index].params)
+				p.build.worlds, draws[index].pbrRecord(), draws[index].params, prepared.anim)
 			result.Instances += run
 			i += run
 		}

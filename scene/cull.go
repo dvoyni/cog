@@ -16,6 +16,9 @@ type preparedDraw struct {
 	mesh     MeshRef
 	// interned is the draw's material's index in the frame's material table.
 	interned int32
+	// anim is the draw's animation binding, carried through so the packer
+	// reads one array rather than reaching back into the record.
+	anim animBinding
 }
 
 // resolveBounds picks the local-space sphere a draw is culled by, in a fixed
@@ -46,7 +49,7 @@ func resolveBounds(neverCull bool, explicit m.Sphere, mesh meshRecord) (m.Sphere
 // sphere under non-uniform scale is not a sphere.
 func prepareDraw(record drawRecord, mesh meshRecord) preparedDraw {
 	world := record.world()
-	prepared := preparedDraw{world: world}
+	prepared := preparedDraw{world: world, anim: record.anim}
 	if local, cull := resolveBounds(record.neverCull, record.bounds, mesh); cull {
 		prepared.sphere = local.Transform(world)
 		prepared.cullable = true

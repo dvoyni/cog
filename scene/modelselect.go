@@ -22,6 +22,18 @@ type modelView struct {
 	// identity: a scene is authored as one unit and keeps its root transforms.
 	reroot   m.Mat4
 	rerooted bool
+	// rerootJoint and rerootRest are the animated half of the re-root, and are
+	// -1 and unset for the overwhelming majority of nodes, whose ancestors
+	// hold still. Where they are set, the frame's true re-root is
+	// reroot * rerootRest * inverse(pose(rerootJoint)), which the packer folds
+	// in once per draw.
+	rerootJoint int
+	rerootRest  m.Mat4
+	// animation is the model's clip table and the two group 2 buffers a draw
+	// of it binds. It comes along so the view is the whole answer to what a
+	// draw expands into: the expansion consults the model table once, in the
+	// sizing pass, and never again.
+	animation *residentAnimation
 	// resolved separates a selector that matched an empty subtree - a real node
 	// that happens to carry no geometry - from one that matched nothing.
 	resolved bool
@@ -61,7 +73,10 @@ func (e *modelEntry) view(path, scene, node string) (modelView, modelSelectorErr
 		}
 	}
 	within := &e.scenes[selected]
-	view := modelView{materials: e.materials, neverCull: e.neverCull, resolved: true}
+	view := modelView{
+		materials: e.materials, neverCull: e.neverCull, resolved: true,
+		rerootJoint: -1, animation: &e.animation,
+	}
 	if node == "" {
 		view.primitives = e.primitives[within.start:within.end]
 		return view, nil
@@ -75,5 +90,8 @@ func (e *modelEntry) view(path, scene, node string) (modelView, modelSelectorErr
 	}
 	view.primitives = e.primitives[named.start:named.end]
 	view.reroot, view.rerooted = named.reroot, true
+	if len(named.animated) > 0 {
+		view.rerootJoint, view.rerootRest = named.rerootJoint, named.rest
+	}
 	return view, nil
 }

@@ -46,6 +46,9 @@ type modelEntry struct {
 	// neverCull is set when a primitive's POSITION accessor declared no
 	// min/max, which leaves the whole model with no bound to cull against.
 	neverCull bool
+	// animation is the model's baked animation once it is resident: the clip
+	// table the packer reads and the two group 2 buffers its draws bind.
+	animation residentAnimation
 }
 
 // modelPrimitive is one flattened primitive as the flush draws it.
@@ -59,6 +62,12 @@ type modelPrimitive struct {
 	// accessor's declared min/max, before local is applied - the world matrix
 	// carries that, and applying it here as well would place the sphere twice.
 	bounds m.Sphere
+	// skinned reports whether the primitive draws through the pose buffer. A
+	// skinned primitive is culled by its bind-pose sphere or not at all: where
+	// the joints put it this frame is not knowable without replaying the
+	// blend, so it is marked never-cull and the sphere is kept only for the
+	// blend sort's depth.
+	skinned bool
 }
 
 // modelMaterial is one converted glTF material: the scene material a draw binds
@@ -97,7 +106,9 @@ func (l *Lookup) requestModel(k kernel.Kernel, path string) (*modelEntry, bool) 
 		return nil, false
 	}
 	entry.state = modelLoading
-	k.ExecuteCommandAsync[loadModelCmd](loadModelRequest{Path: path, Generation: entry.generation})
+	k.ExecuteCommandAsync[loadModelCmd](loadModelRequest{
+		Path: path, Generation: entry.generation, SampleRate: l.config.PoseSampleRate,
+	})
 	return nil, false
 }
 
@@ -151,6 +162,7 @@ func (l *Lookup) installModel(
 		geometry := &loaded.geometries[primitive.geometry]
 		placed := modelPrimitive{
 			mesh: meshes[primitive.geometry], local: primitive.local, material: primitive.material,
+			skinned: primitive.skinned,
 		}
 		if geometry.hasBox {
 			// The sphere stays in the primitive's own space, unflattened,
@@ -164,6 +176,7 @@ func (l *Lookup) installModel(
 	entry.lights = loaded.lights
 	entry.scenes, entry.defaultScene = loaded.scenes, loaded.defaultScene
 	entry.neverCull = loaded.neverCull
+	entry.animation = l.residentAnimation(loaded, resources)
 	entry.state = modelResident
 	// A successful load clears the model's report key, so a path that failed,
 	// was unloaded and now loads reports again if it breaks again.
@@ -353,4 +366,130 @@ func (la LookupAccess) Preload(path string) {
 	if la.Valid() {
 		la.lookup.requestModel(la.kernel, path)
 	}
+}
+
+// residentAnimation uploads a model's baked poses and joint records and keeps
+// the clip table the packer reads every frame.
+//
+// A model with no joints uploads nothing and every one of its draws binds the
+// null skin. That is the common case - a static prop - and it is why the two
+// buffers are per model rather than a shared arena everything indexes into.
+func (l *Lookup) residentAnimation(
+	loaded *loadedModel, resources *gfx.ResourceQueue,
+) residentAnimation {
+	baked := &loaded.animation
+	resident := residentAnimation{
+		jointCount: baked.jointCount,
+		sampleRate: l.config.PoseSampleRate,
+		clips:      baked.clips,
+		jointNames: baked.jointNames,
+	}
+	if baked.jointCount == 0 {
+		return resident
+	}
+	resident.poseBytes = len(baked.poses) * poseSize
+	resident.skinJointBytes = len(baked.joints) * skinJointSize
+	// The bytes are handed over rather than copied: this is the load's private
+	// copy and nothing reads it again - except where a re-root has to follow a
+	// moving bone, which is what poseRows is, and which almost no file needs.
+	resident.poses = resources.BakeBuffer(recordSliceBytes(baked.poses), false)
+	resident.skinJoints = resources.BakeBuffer(recordSliceBytes(baked.joints), false)
+	if needsAnimatedReroot(loaded) {
+		resident.poseRows = baked.poses
+	}
+	return resident
+}
+
+// needsAnimatedReroot reports whether any node a selector can address has an
+// animated ancestor. Almost no file does, and the answer is what decides
+// whether the model keeps a CPU copy of its pose rows at all.
+func needsAnimatedReroot(loaded *loadedModel) bool {
+	for i := range loaded.scenes {
+		for _, node := range loaded.scenes[i].nodes {
+			if len(node.animated) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Joints appends the names of the model's joints, in the model's own joint
+// order, and reports whether they are real. A path that is not resident yet
+// returns dst untouched and triggers the same load a draw does.
+//
+// Names only, no hierarchy. A joint's parent is a question about the file's
+// node graph, which scene drops at load: the pose buffer holds bone world
+// transforms, so nothing downstream needs the tree, and exposing one would
+// mean keeping it resident for a reader that does not exist yet.
+//
+// An unnamed joint contributes an empty string rather than being skipped, so
+// the slice stays indexed by joint rather than searched.
+func (la LookupAccess) Joints(path string, dst []string) ([]string, bool) {
+	if !la.Valid() {
+		return dst, false
+	}
+	entry, ok := la.lookup.requestModel(la.kernel, path)
+	if !ok {
+		return dst, false
+	}
+	return append(dst, entry.animation.jointNames...), true
+}
+
+// Clips appends the model's animation clips, name and duration, and reports
+// whether they are real.
+//
+// Duration is here rather than left to the caller because a caller needs it to
+// know when a one-shot play has ended, and that is the one piece of clip state
+// gameplay cannot compute for itself: a play carries a time the caller
+// advanced, and only the clip knows how long it runs.
+func (la LookupAccess) Clips(path string, dst []ClipInfo) ([]ClipInfo, bool) {
+	if !la.Valid() {
+		return dst, false
+	}
+	entry, ok := la.lookup.requestModel(la.kernel, path)
+	if !ok {
+		return dst, false
+	}
+	for i := range entry.animation.clips {
+		dst = append(dst, ClipInfo{
+			Name:     entry.animation.clips[i].name,
+			Duration: entry.animation.clips[i].duration,
+		})
+	}
+	return dst, true
+}
+
+// PoseBytes reports how much GPU memory one model's baked poses occupy, and
+// whether the answer is real. It is the number to look at when a rig's storage
+// surprises you: it is joints x frames x 48 bytes, so it scales with the sample
+// rate and with the clips a file carries, not with what is playing.
+//
+// The per-joint records are not in it. They are one small array per model
+// rather than the per-frame cost this query exists to make visible.
+func (la LookupAccess) PoseBytes(path string) (int, bool) {
+	if !la.Valid() {
+		return 0, false
+	}
+	entry, ok := la.lookup.requestModel(la.kernel, path)
+	if !ok {
+		return 0, false
+	}
+	return entry.animation.poseBytes, true
+}
+
+// TotalPoseBytes reports the baked pose memory of every resident model. It
+// triggers no load and has no ok: it is a sum over what is resident now, and
+// zero is a true answer when nothing is.
+func (la LookupAccess) TotalPoseBytes() int {
+	if !la.Valid() {
+		return 0
+	}
+	total := 0
+	for _, entry := range la.lookup.models {
+		if entry.state == modelResident {
+			total += entry.animation.poseBytes
+		}
+	}
+	return total
 }

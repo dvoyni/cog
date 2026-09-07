@@ -101,23 +101,23 @@ func TestTheUnitSphereAndPlaneBakeLazilyAndOnce(t *testing.T) {
 		}
 	})
 	h.frame()
-	// Three arenas plus the unit box's two buffers.
-	if h.backend.bakes != 5 {
-		t.Fatalf("a boxes-only first frame uploaded %d buffers, want 5", h.backend.bakes)
+	// Four arenas, the unit box's two buffers and the null skin's two.
+	if h.backend.bakes != 8 {
+		t.Fatalf("a boxes-only first frame uploaded %d buffers, want 8", h.backend.bakes)
 	}
 
 	shapes = 3
 	h.backend.bakes = 0
 	h.frame()
-	// Three arenas, plus two buffers each for the sphere and the plane, once,
+	// Four arenas, plus two buffers each for the sphere and the plane, once,
 	// however many of them the frame draws.
-	if h.backend.bakes != 7 {
-		t.Fatalf("the first frame with spheres and planes uploaded %d buffers, want 7", h.backend.bakes)
+	if h.backend.bakes != 8 {
+		t.Fatalf("the first frame with spheres and planes uploaded %d buffers, want 8", h.backend.bakes)
 	}
 	h.backend.bakes = 0
 	h.frame()
-	if h.backend.bakes != 3 {
-		t.Fatalf("a steady frame uploaded %d buffers, want the three arenas", h.backend.bakes)
+	if h.backend.bakes != 4 {
+		t.Fatalf("a steady frame uploaded %d buffers, want the four arenas", h.backend.bakes)
 	}
 
 	pass := h.passes()[0]
@@ -247,7 +247,7 @@ func TestALineIsAStretchedBoxFromStartToEnd(t *testing.T) {
 					t.Fatalf("the box's half-extent %v maps to %v, want 0.1 across the line", across, offset)
 				}
 			}
-			if packInstance(world).Flags&sceneNonUniform == 0 {
+			if packInstance(world, animBinding{offset: sceneNoAnim}).Flags&sceneNonUniform == 0 {
 				t.Fatal("a line's instance lacks SCENE_NONUNIFORM")
 			}
 		})
@@ -312,13 +312,13 @@ func TestOnlyStretchedShapesFlagNonUniform(t *testing.T) {
 	q.Plane(0, m.Vec3{}, m.Vec2{X: 4, Y: 2}, testBoxColor)
 	sphere, plane := q.draws[0], q.draws[1]
 
-	if flags := packInstance(sphere.world()).Flags; flags&sceneNonUniform != 0 {
+	if flags := packInstance(sphere.world(), animBinding{offset: sceneNoAnim}).Flags; flags&sceneNonUniform != 0 {
 		t.Fatalf("a sphere's instance carries SCENE_NONUNIFORM (%#b)", flags)
 	}
 	if got := sphere.world().TransformPoint(m.Vec3{Y: 1}); !nearVec3(got, m.Vec3{X: 1, Y: 3}) {
 		t.Fatalf("the unit sphere's pole lands at %v, want (1,3,0) for radius 3 at x = 1", got)
 	}
-	if flags := packInstance(plane.world()).Flags; flags&sceneNonUniform == 0 {
+	if flags := packInstance(plane.world(), animBinding{offset: sceneNoAnim}).Flags; flags&sceneNonUniform == 0 {
 		t.Fatalf("a 4 x 2 plane's instance lacks SCENE_NONUNIFORM (%#b)", flags)
 	}
 	if got := plane.world().TransformPoint(m.Vec3{X: 0.5, Z: 0.5}); !nearVec3(got, m.Vec3{X: 2, Z: 1}) {
@@ -342,7 +342,7 @@ func TestWireBoxEdgesCloseAtTheCorners(t *testing.T) {
 			point := world.TransformPoint(corner)
 			extent.Min, extent.Max = extent.Min.Min(point), extent.Max.Max(point)
 		}
-		if packInstance(world).Flags&sceneNonUniform == 0 {
+		if packInstance(world, animBinding{offset: sceneNoAnim}).Flags&sceneNonUniform == 0 {
 			t.Fatal("an edge's instance lacks SCENE_NONUNIFORM")
 		}
 	}

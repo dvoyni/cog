@@ -38,7 +38,7 @@ func TestConvertDocumentFlattensDepthFirst(t *testing.T) {
 		{Name: "sibling", Mesh: gltf.Index(mesh)},
 	}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestConvertDocumentMakesAFrontCWVariantForMirroredNodes(t *testing.T) {
 		{Name: "mirrored", Mesh: gltf.Index(mesh), Scale: [3]float64{-1, 1, 1}},
 	}
 	sceneOf(doc, 0, 1)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestConvertDocumentSharesOneMaterialAcrossNodes(t *testing.T) {
 		{Mesh: gltf.Index(mesh), Translation: [3]float64{3, 0, 0}},
 	}
 	sceneOf(doc, 0, 1)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestConvertDocumentGivesSkinnedPrimitivesAnIdentityLocal(t *testing.T) {
 		{Name: "joint", Translation: [3]float64{1, 0, 0}},
 	}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestConvertDocumentKeepsTheHierarchyThroughASkinnedNode(t *testing.T) {
 		{Mesh: gltf.Index(mesh), Translation: [3]float64{0, 2, 0}},
 	}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestConvertDocumentRejectsARequiredExtension(t *testing.T) {
 	doc := testDoc()
 	sceneOf(doc)
 	doc.ExtensionsRequired = []string{"KHR_draco_mesh_compression"}
-	if _, err := convertDocument(doc, "m.glb", nil); err == nil {
+	if _, err := convertDocument(doc, "m.glb", nil, testSampleRate); err == nil {
 		t.Fatal("a required Draco extension must fail the model")
 	}
 }
@@ -166,7 +166,7 @@ func TestConvertDocumentAcceptsASupportedRequiredExtension(t *testing.T) {
 	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(0)}}
 	sceneOf(doc, 0)
 	doc.ExtensionsRequired = []string{extMeshQuantization}
-	if _, err := convertDocument(doc, "m.glb", nil); err != nil {
+	if _, err := convertDocument(doc, "m.glb", nil, testSampleRate); err != nil {
 		t.Fatalf("convert: %v", err)
 	}
 }
@@ -179,7 +179,7 @@ func TestConvertDocumentIgnoresAnUnknownExtensionInUse(t *testing.T) {
 	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(0)}}
 	sceneOf(doc, 0)
 	doc.ExtensionsUsed = []string{"KHR_materials_unlit"}
-	if _, err := convertDocument(doc, "m.glb", nil); err != nil {
+	if _, err := convertDocument(doc, "m.glb", nil, testSampleRate); err != nil {
 		t.Fatalf("an extensionsUsed entry must be ignored, not rejected: %v", err)
 	}
 }
@@ -201,7 +201,7 @@ func TestConvertDocumentReadsTheMetallicRoughnessSet(t *testing.T) {
 	triangleMesh(doc, gltf.Index(0))
 	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(0)}}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestConvertDocumentLeavesAnOpaqueCutoffAtZero(t *testing.T) {
 	triangleMesh(doc, gltf.Index(0))
 	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(0)}}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestConvertDocumentBlendsATransparentMaterial(t *testing.T) {
 	triangleMesh(doc, gltf.Index(0))
 	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(0)}}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestConvertDocumentFoldsAndClampsEmissiveStrength(t *testing.T) {
 	triangleMesh(doc, gltf.Index(0))
 	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(0)}}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestConvertDocumentReadsTextureTransformAndUVSet(t *testing.T) {
 	triangleMesh(doc, gltf.Index(0))
 	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(0)}}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestConvertDocumentReportsAThirdUVSet(t *testing.T) {
 	triangleMesh(doc, gltf.Index(0))
 	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(0)}}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -363,7 +363,7 @@ func TestConvertDocumentReportsAMissingImageAndKeepsTheModel(t *testing.T) {
 	triangleMesh(doc, gltf.Index(0))
 	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(0)}}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("a missing texture must not fail the model: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestConvertDocumentSkipsAPointsPrimitiveAndKeepsTheRest(t *testing.T) {
 	}}}
 	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(0)}}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestConvertDocumentMakesAnUnboundedModelNeverCull(t *testing.T) {
 	}}}
 	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(0)}}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -447,7 +447,7 @@ func TestConvertDocumentExposesPunctualLightsAsData(t *testing.T) {
 			lightspunctual.ExtensionName: lightspunctual.LightIndex(2)}},
 	}
 	sceneOf(doc, 0, 1, 2)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -548,7 +548,7 @@ func TestConvertDocumentFlattensEveryScene(t *testing.T) {
 	namedSceneOf(doc, "first", 0)
 	namedSceneOf(doc, "second", 1, 2)
 	doc.Scene = gltf.Index(1)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -576,7 +576,7 @@ func TestConvertDocumentFlattensASharedNodeInEverySceneThatRootsIt(t *testing.T)
 	doc.Nodes = []*gltf.Node{{Name: "shared", Mesh: gltf.Index(mesh)}}
 	namedSceneOf(doc, "first", 0)
 	namedSceneOf(doc, "second", 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -603,7 +603,7 @@ func TestConvertDocumentRecordsANamedNodesSubtreeAsASlice(t *testing.T) {
 		{Name: "sibling", Mesh: gltf.Index(mesh)},
 	}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -636,7 +636,7 @@ func TestConvertDocumentRecordsTheInverseOfANodesAuthoredWorld(t *testing.T) {
 		},
 	}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -658,7 +658,7 @@ func TestConvertDocumentMarksACollapsedNodeUnrerootable(t *testing.T) {
 	mesh := triangleMesh(doc, nil)
 	doc.Nodes = []*gltf.Node{{Name: "flat", Mesh: gltf.Index(mesh), Scale: [3]float64{1, 0, 1}}}
 	sceneOf(doc, 0)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -678,7 +678,7 @@ func TestConvertDocumentKeepsTheFirstOfADuplicateNodeNameAndReports(t *testing.T
 		{Name: "crate", Mesh: gltf.Index(mesh), Translation: [3]float64{2, 0, 0}},
 	}
 	sceneOf(doc, 0, 1)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -716,7 +716,7 @@ func TestConvertDocumentRecordsAnimatedAncestorsAndNotTheNodeItself(t *testing.T
 	sceneOf(doc, 0, 3)
 	animate(doc, 0)
 	animate(doc, 2)
-	model, err := convertDocument(doc, "m.glb", nil)
+	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}

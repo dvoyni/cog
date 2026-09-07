@@ -9,11 +9,10 @@ import (
 // A zero ModelDraw is a valid draw of the file's default scene at the origin,
 // culled by the bounds the file declares.
 //
-// The fields the specification's ModelDraw also carries - ClipPlays,
-// MorphWeights, Material and OverrideParams - arrive with the tickets that
-// implement them. A field that parses and does nothing is worse than an absent
-// one: it compiles at the call site and renders the wrong picture with nothing
-// to explain it.
+// The fields the specification's ModelDraw also carries - MorphWeights,
+// Material and OverrideParams - arrive with the tickets that implement them. A
+// field that parses and does nothing is worse than an absent one: it compiles
+// at the call site and renders the wrong picture with nothing to explain it.
 type ModelDraw struct {
 	// Transform places the single instance. Transforms, when it is non-empty,
 	// overrides it and places one instance per entry, exactly as MeshDraw does.
@@ -46,6 +45,21 @@ type ModelDraw struct {
 	// building at the origin is the worse failure.
 	Scene string
 	Node  string
+
+	// Plays are the animation clips this draw blends, up to four. An empty
+	// Plays draws the model's rest pose, which is a real pose rather than a
+	// collapse: row 0 of every model is the authored hierarchy resolved once.
+	//
+	// Weights are normalised across the plays before anything is packed, so
+	// they express proportions rather than intensities: two plays at 1.0 each
+	// is an even blend, and so is two at 0.1. A total of about zero falls back
+	// to the rest pose.
+	//
+	// The slice is copied into the frame's own arena, so a caller may reuse
+	// its backing the moment the call returns. A draw's instances share its
+	// plays - a hundred crates is one call, and a hundred independently
+	// animated characters is a hundred calls.
+	Plays []ClipPlay
 }
 
 // ModelLight is one KHR_lights_punctual light a model file declares, in the
@@ -84,6 +98,8 @@ type modelDrawRecord struct {
 	// transforms aliases the recording's transform arena, never the caller's
 	// array, and is empty for a single-instance draw.
 	transforms []Transform
+	// plays aliases the recording's play arena for the same reason.
+	plays []ClipPlay
 }
 
 // Model records one draw of the glTF file at path.
@@ -108,11 +124,17 @@ func (q *opQueue) Model(layers LayerMask, path string, draw ModelDraw) {
 		q.meshes.transforms = append(q.meshes.transforms, transforms...)
 		transforms = q.meshes.transforms[start:len(q.meshes.transforms):len(q.meshes.transforms)]
 	}
-	draw.Transforms = transforms
+	plays := draw.Plays
+	if len(plays) > 0 {
+		start := len(q.plays)
+		q.plays = append(q.plays, plays...)
+		plays = q.plays[start:len(q.plays):len(q.plays)]
+	}
+	draw.Transforms, draw.Plays = transforms, plays
 	q.calls = append(q.calls, Op{Kind: OpModel, Layers: layers, Path: path, Model: draw})
 	q.models = append(q.models, modelDrawRecord{
 		layers: layers, path: path, scene: draw.Scene, node: draw.Node,
-		transform: draw.Transform, transforms: transforms,
+		transform: draw.Transform, transforms: transforms, plays: plays,
 	})
 }
 
@@ -172,6 +194,11 @@ func (p *Plugin) expandModels(
 		p.modelViews[i] = view
 		worlds += len(view.primitives) * len(models[i].instances(&single))
 	}
+	// Animation resolves in its own pass, between the two, because packing a
+	// block appends to an arena and the draw records written below carry only
+	// the offset it returned. It is per model draw rather than per primitive:
+	// one call's primitives share its plays, and so do its instances.
+	p.resolveModelAnimation(report, lookup, models)
 	p.modelWorlds = grow(p.modelWorlds, worlds)
 	at := 0
 	for i := range models {
@@ -199,6 +226,8 @@ func (p *Plugin) expandModels(
 					world = world.Mul(view.reroot)
 				}
 				p.modelWorlds[at] = world.Mul(primitive.local)
+				anim := p.modelAnims[i]
+				anim.skinned = primitive.skinned
 				write.appendFlushDraw(drawRecord{
 					layers:    model.layers,
 					transform: Transform{Matrix: &p.modelWorlds[at]},
@@ -206,10 +235,52 @@ func (p *Plugin) expandModels(
 					mesh:      primitive.mesh,
 					pbr:       &material.record,
 					bounds:    primitive.bounds,
-					neverCull: view.neverCull,
+					// A skinned primitive is never culled. Its bind-pose sphere
+					// is the only bound the load has, and where the joints put
+					// it this frame is not knowable without replaying the blend
+					// on the CPU - which is the per-frame hierarchy walk this
+					// whole design exists to remove.
+					neverCull: view.neverCull || primitive.skinned,
 					group:     group,
+					anim:      anim,
 				})
 				at++
+			}
+		}
+	}
+}
+
+// resolveModelAnimation turns each model draw's clip plays into one sceneAnim
+// block, and folds an animated re-root into the view that needs one.
+//
+// It runs as its own pass over the frame's model draws, after the selectors
+// resolve and before any draw record is written: packing a block appends to
+// the frame's arena, and a record carries only the offset that append
+// returned.
+func (p *Plugin) resolveModelAnimation(
+	report func(error), lookup *Lookup, models []modelDrawRecord,
+) {
+	p.modelAnims = grow(p.modelAnims, len(models))
+	once := func(key string, err error) { lookup.reportOnce(report, key, err) }
+	for i := range models {
+		p.modelAnims[i] = animBinding{offset: sceneNoAnim}
+		view := &p.modelViews[i]
+		if !view.resolved {
+			continue
+		}
+		anim := view.animation
+		p.modelAnims[i].skin = anim.skin()
+		p.modelPlays = resolvePlays(anim, models[i].path, models[i].plays, p.modelPlays[:0], once)
+		p.modelAnims[i].offset = p.build.packAnim(p.modelPlays)
+		// The load's re-root inverse is the rest pose's. It is the right answer
+		// for every node whose ancestors hold still - which is almost all of
+		// them - and the wrong one for a subtree hanging off a bone a clip
+		// steers, whose true place this frame is only in the pose rows.
+		if view.rerooted && view.rerootJoint >= 0 {
+			if pose, ok := blendJoint(anim, p.modelPlays, view.rerootJoint); ok {
+				if inverse, ok := pose.InverseAffine(); ok {
+					view.reroot = view.reroot.Mul(view.rerootRest).Mul(inverse)
+				}
 			}
 		}
 	}

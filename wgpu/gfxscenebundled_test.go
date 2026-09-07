@@ -43,7 +43,13 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 	}{
 		{name: "sceneFrame", group: 0, binding: 0},
 		{name: "sceneInstances", group: 0, binding: 1},
+		{name: "sceneAnim", group: 0, binding: 2},
 		{name: "scenePbrMaterial", group: 1, binding: 0},
+		// Group 2 is per model. Every draw binds it, skinned or not: a draw
+		// with no skin of its own gets the shared null skin, because a
+		// declared binding must still be bound.
+		{name: "scenePoses", group: 2, binding: 0},
+		{name: "sceneSkinJoints", group: 2, binding: 1},
 	} {
 		got, ok := resources[want.name]
 		if !ok {
@@ -78,8 +84,8 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 			t.Errorf("%sSampler is %+v, want a group 1 filtering sampler", slot, sampler)
 		}
 	}
-	if len(layout.Resources) != 13 {
-		t.Fatalf("the scene shader declares %d bindings, want the 13 asserted above: %+v",
+	if len(layout.Resources) != 16 {
+		t.Fatalf("the scene shader declares %d bindings, want the 16 asserted above: %+v",
 			len(layout.Resources), layout.Resources)
 	}
 }
@@ -137,6 +143,28 @@ func TestBundledSceneShaderRecordsMatchTheirPackedOffsets(t *testing.T) {
 	for _, member := range membersOf(t, layout, "sceneFrame") {
 		if member.Name == "lights" && (member.Stride != 48 || member.Count != 16) {
 			t.Errorf("sceneFrame.lights is %d x %d bytes, want 16 x 48", member.Count, member.Stride)
+		}
+	}
+	// The three animation strides are the whole addressing contract. A pose
+	// row is indexed as clipBase + frame*jointCount + joint and a joint record
+	// by the same joint index, so a stride that drifts from scene's Go structs
+	// reads every joint after the first from the wrong place.
+	for _, want := range []struct {
+		binding string
+		stride  int
+	}{
+		// 112 is exactly seven vec4s with no tail padding, which is what the
+		// explicit-column form buys over mat4x3 and mat3x3.
+		{binding: "scenePoses", stride: 48},
+		{binding: "sceneSkinJoints", stride: 112},
+		// sceneAnim is a raw vec4 arena, because animOffset counts vec4s.
+		{binding: "sceneAnim", stride: 16},
+	} {
+		for _, member := range membersOf(t, layout, want.binding) {
+			if member.Name == "data" && member.Stride != want.stride {
+				t.Errorf("%s.data has stride %d, want %d",
+					want.binding, member.Stride, want.stride)
+			}
 		}
 	}
 }

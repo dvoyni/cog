@@ -26,6 +26,12 @@ type gltfGeometry struct {
 	// file omitted them, which makes the whole model never-cull.
 	box    m.Box3
 	hasBox bool
+	// skinned reports whether the vertices carry a joint binding the shader
+	// should follow. It is decided after conversion, by the node's binding and
+	// by whether the primitive actually carried weights: glTF requires a
+	// skinned node's mesh to have JOINTS_0 and WEIGHTS_0, and one that does not
+	// draws unskinned at the skin's root rather than being lost.
+	skinned bool
 }
 
 // errPointTopology reports a POINTS primitive, which gfx has no topology for -

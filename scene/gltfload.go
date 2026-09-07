@@ -64,6 +64,10 @@ type loadedModel struct {
 	// one unbounded primitive has no bound at all - culling the rest of it
 	// would leave the unbounded piece drawn alone.
 	neverCull bool
+	// animation is the model's baked poses, joint records and clip table. A
+	// file with no skins and no animated mesh node bakes an empty one, which
+	// is what puts every one of its draws on the null skin.
+	animation bakedAnimation
 	// reports are the non-fatal failures the load accumulated: a missing
 	// texture, an unsupported topology, a UV set past the two scene carries.
 	// They fire at install, from the load's own goroutine, which is why an
@@ -80,6 +84,11 @@ type loadedPrimitive struct {
 	geometry int
 	local    m.Mat4
 	material int
+	// skinned reports whether the primitive's placement lives in the pose
+	// buffer rather than in local. A skinned primitive draws through its
+	// joints, so local is the identity and its bounding sphere is the bind
+	// pose's - which is why it is also never culled.
+	skinned bool
 }
 
 // loadedScene is one entry of the file's scenes array, flattened: the range of
@@ -108,8 +117,21 @@ type loadedNode struct {
 	// empty for almost every node in almost every file. A non-empty chain means
 	// the node's true world transform is time-varying, so the inverse above is
 	// the rest pose's and the real one has to be resolved against the frame's
-	// baked pose rows - which is the packer's job, and lands with skinning.
-	animated []int
+	// baked pose rows.
+	//
+	// rerootJoint is the joint carrying the chain's deepest link - its last
+	// entry - and rest is that link's own authored world matrix. Everything
+	// between that link and this node is rigid, by construction: the link is
+	// the deepest ancestor a clip steers. So the frame's true re-root is
+	//
+	//	reroot * rest * inverse(pose(rerootJoint))
+	//
+	// which is two products at pack time and collapses to reroot exactly when
+	// the pose is the rest pose. Both fields are meaningless when animated is
+	// empty, and nothing reads them there.
+	animated    []int
+	rerootJoint int
+	rest        m.Mat4
 }
 
 // geometryKey interns one converted primitive. Tangent generation is part of
@@ -119,6 +141,10 @@ type loadedNode struct {
 type geometryKey struct {
 	mesh, primitive int
 	tangents        bool
+	// binding is part of the key because remapping JOINTS_0 into the model's
+	// one numbering rewrites the vertex buffer, and a degenerate binding
+	// writes it outright. The same mesh under two skins is two conversions.
+	binding skinBinding
 }
 
 // loadedMaterial is one glTF material converted to the bundled PBR: the record
@@ -174,8 +200,33 @@ type modelConverter struct {
 	scene *loadedScene
 	// animated is the set of nodes some animation steers, and chain the
 	// animated ancestors of the node the walk is inside, root-first.
-	animated map[int]bool
-	chain    []int
+	// chainWorlds holds those ancestors' authored world matrices, so a node
+	// claiming its name can record the deepest one without a second walk.
+	animated    map[int]bool
+	chain       []int
+	chainWorlds []m.Mat4
+	// sampleRate is Config.PoseSampleRate, the global grid every clip bakes
+	// onto. It reaches the parse through the load request rather than through
+	// a Lookup, because the parse holds no resource at all.
+	sampleRate int
+	// joints is the model's one joint numbering, and skinJoints each skin's
+	// slots resolved into it, so remapping a primitive's JOINTS_0 is an index
+	// rather than a search.
+	joints     jointSpace
+	skinJoints [][]int
+	// curves interns the animation samplers the clips decode, so a clip whose
+	// twenty bones share one input accessor reads it once.
+	curves map[samplerKey]*animCurve
+	// nodeRoots are the nodes nothing parents, and walked, locals and worlds
+	// the pose walk's scratch. All four keep their backing across the whole
+	// bake: the walk runs once per sampled frame and must allocate nothing.
+	nodeRoots []int
+	walked    []bool
+	locals    []m.Mat4
+	worlds    []m.Mat4
+	// poseReported keeps the unrepresentable-pose report to one per model
+	// however many joints and frames carry shear.
+	poseReported bool
 	// duplicated keeps a repeated node name to one report however many scenes
 	// and however many nodes carry it.
 	duplicated map[string]bool
@@ -187,7 +238,9 @@ type modelConverter struct {
 // convertDocument converts one parsed document. filesystem resolves external
 // image URIs and may be nil, in which case a file naming one loses that texture
 // to the 1x1 default and says so.
-func convertDocument(doc *gltf.Document, path string, filesystem fs.FS) (*loadedModel, error) {
+func convertDocument(
+	doc *gltf.Document, path string, filesystem fs.FS, sampleRate int,
+) (*loadedModel, error) {
 	if err := checkRequiredExtensions(doc); err != nil {
 		return nil, err
 	}
@@ -203,12 +256,23 @@ func convertDocument(doc *gltf.Document, path string, filesystem fs.FS) (*loaded
 		visited:    map[int]bool{},
 		animated:   animatedNodes(doc),
 		duplicated: map[string]bool{},
+		sampleRate: sampleRate,
+		curves:     map[samplerKey]*animCurve{},
 	}
+	// The joint numbering and the node forest are both settled before the walk
+	// starts: a primitive's JOINTS_0 remaps as it is read, and the pose walk
+	// needs roots the flattening never computes because a joint may sit
+	// outside every scene's node list.
+	converter.buildJointSpace()
+	converter.buildNodeForest()
 	converter.model.defaultScene = defaultSceneIndex(doc)
 	converter.model.scenes = make([]loadedScene, 0, len(doc.Scenes))
 	for _, scene := range doc.Scenes {
 		converter.flattenScene(scene)
 	}
+	// The bake runs last because the walk is what claims a degenerate node's
+	// joint, so the numbering is only complete once every scene is flattened.
+	converter.bakeAnimation()
 	converter.model.textures = converter.textures.textures
 	converter.model.reports = append(converter.model.reports, converter.textures.reports...)
 	return &converter.model, nil
@@ -300,9 +364,22 @@ func (c *modelConverter) walkNode(index int, parent m.Mat4) {
 	// joints resolve against the scene root, so applying the node's matrix as
 	// well would apply it twice. Descendants still inherit it, because the
 	// hierarchy is a hierarchy whether or not this node is skinned.
+	//
+	// A node whose world transform is time-varying and that carries a mesh of
+	// its own takes the same treatment through a degenerate single-joint skin:
+	// its transform lives in the pose buffer instead, so its placement here is
+	// the identity too. "Time-varying" is inherited, not local - a static prop
+	// bolted to a spinning turret moves with the turret - so the test is the
+	// node's own channels or a non-empty ancestor chain.
 	placement := world
-	if node.Skin != nil {
+	binding := skinBinding{skin: -1, joint: -1}
+	switch {
+	case node.Skin != nil:
 		placement = m.NewMat4()
+		binding.skin = *node.Skin
+	case node.Mesh != nil && (c.animated[index] || len(c.chain) > 0):
+		placement = m.NewMat4()
+		binding.joint = c.joints.claimPlain(index)
 	}
 	// The name is claimed before the subtree is walked and closed after, so a
 	// name a node shares with one of its own descendants resolves to the node -
@@ -310,18 +387,20 @@ func (c *modelConverter) walkNode(index int, parent m.Mat4) {
 	// subtree on the way back out would get backwards.
 	named := c.claimNode(node.Name, world)
 	if node.Mesh != nil {
-		c.flattenMesh(*node.Mesh, placement)
+		c.flattenMesh(*node.Mesh, placement, binding)
 	}
 	c.collectLight(node, world)
 	animated := c.animated[index]
 	if animated {
 		c.chain = append(c.chain, index)
+		c.chainWorlds = append(c.chainWorlds, world)
 	}
 	for _, child := range node.Children {
 		c.walkNode(child, world)
 	}
 	if animated {
 		c.chain = c.chain[:len(c.chain)-1]
+		c.chainWorlds = c.chainWorlds[:len(c.chainWorlds)-1]
 	}
 	if named {
 		c.closeNode(node.Name)
@@ -346,9 +425,11 @@ func (c *modelConverter) claimNode(name string, world m.Mat4) bool {
 	reroot, rerootable := world.InverseAffine()
 	node := loadedNode{
 		start: len(c.model.primitives), reroot: reroot, rerootable: rerootable,
+		rerootJoint: -1,
 	}
 	if len(c.chain) > 0 {
 		node.animated = append([]int(nil), c.chain...)
+		node.rest = c.chainWorlds[len(c.chainWorlds)-1]
 	}
 	c.scene.nodes[name] = node
 	return true
@@ -362,8 +443,19 @@ func (c *modelConverter) closeNode(name string) {
 	c.scene.nodes[name] = node
 }
 
+// skinBinding is how one node binds its mesh's vertices to the model's joints:
+// through a glTF skin's own JOINTS_0 and WEIGHTS_0, through a degenerate
+// single-joint binding at weight 1, or not at all.
+//
+// It is part of the geometry key rather than a property of the placement,
+// because remapping JOINTS_0 rewrites the vertex buffer: the same mesh under
+// two skins is two conversions, which is rare and correct.
+type skinBinding struct {
+	skin, joint int
+}
+
 // flattenMesh emits one node's primitives at their flattened placement.
-func (c *modelConverter) flattenMesh(index int, placement m.Mat4) {
+func (c *modelConverter) flattenMesh(index int, placement m.Mat4, binding skinBinding) {
 	if index < 0 || index >= len(c.doc.Meshes) || c.doc.Meshes[index] == nil {
 		return
 	}
@@ -375,12 +467,13 @@ func (c *modelConverter) flattenMesh(index int, placement m.Mat4) {
 	for at, primitive := range c.doc.Meshes[index].Primitives {
 		material := c.material(primitive.Material, frontCW)
 		tangents := c.model.materials[material].slots[normalSlot] != missingTexture
-		geometry, ok := c.geometry(index, at, primitive, tangents)
+		geometry, ok := c.geometry(index, at, primitive, tangents, binding)
 		if !ok {
 			continue
 		}
 		c.model.primitives = append(c.model.primitives, loadedPrimitive{
 			geometry: geometry, local: placement, material: material,
+			skinned: c.model.geometries[geometry].skinned,
 		})
 	}
 }
@@ -388,13 +481,16 @@ func (c *modelConverter) flattenMesh(index int, placement m.Mat4) {
 // geometry converts one primitive, or returns the conversion an earlier node
 // referencing the same mesh already paid for.
 func (c *modelConverter) geometry(
-	mesh, at int, primitive *gltf.Primitive, tangents bool,
+	mesh, at int, primitive *gltf.Primitive, tangents bool, binding skinBinding,
 ) (int, bool) {
-	key := geometryKey{mesh: mesh, primitive: at, tangents: tangents}
+	key := geometryKey{mesh: mesh, primitive: at, tangents: tangents, binding: binding}
 	if index, ok := c.geometries[key]; ok {
 		return index, index >= 0
 	}
 	geometry, err := convertPrimitive(c.doc, primitive, tangents)
+	if err == nil {
+		c.bindGeometryJoints(&geometry, binding)
+	}
 	if err != nil {
 		// The failure is interned too, so a mesh referenced by ten nodes
 		// reports its one bad primitive once rather than ten times.

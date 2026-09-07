@@ -20,7 +20,7 @@ func TestInstanceRecordIsSixtyFourBytesWithEightSpare(t *testing.T) {
 
 func TestPackInstanceWritesTheWorldMatrixAsThreeRows(t *testing.T) {
 	transform := Transform{Position: m.Vec3{X: 1, Y: 2, Z: 3}}
-	instance := packInstance(transform.Mat4())
+	instance := packInstance(transform.Mat4(), animBinding{offset: sceneNoAnim})
 	want := [3]m.Vec4{
 		{X: 1, W: 1},
 		{Y: 1, W: 2},
@@ -33,7 +33,7 @@ func TestPackInstanceWritesTheWorldMatrixAsThreeRows(t *testing.T) {
 }
 
 func TestPackInstanceSkipsAnimationAndSkinningForABufferBuiltDraw(t *testing.T) {
-	instance := packInstance(m.Mat4{})
+	instance := packInstance(m.Mat4{}, animBinding{offset: sceneNoAnim})
 	if instance.AnimOffset != sceneNoAnim {
 		t.Fatalf("animOffset is %d, want SCENE_NO_ANIM (%d)", instance.AnimOffset, sceneNoAnim)
 	}
@@ -55,7 +55,7 @@ func TestPackInstanceFlagsNonUniformScaleOnly(t *testing.T) {
 		{name: "flattened", matrix: m.Scaling4(1, 1, 0.2), nonUniform: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			instance := packInstance(test.matrix)
+			instance := packInstance(test.matrix, animBinding{offset: sceneNoAnim})
 			if got := instance.Flags&sceneNonUniform != 0; got != test.nonUniform {
 				t.Fatalf("SCENE_NONUNIFORM is %v, want %v", got, test.nonUniform)
 			}
@@ -247,7 +247,7 @@ func TestNoSunDirectionMeansNoSunRadiance(t *testing.T) {
 // reading of the record and m's own transform are held to the same answer.
 func TestPackInstanceRowsTransformLikeTheMatrix(t *testing.T) {
 	world := m.RotationY4(0.7).Mul(m.Translation4(1, 2, 3))
-	instance := packInstance(world)
+	instance := packInstance(world, animBinding{offset: sceneNoAnim})
 
 	point := m.Vec3{X: 0.3, Y: -1.4, Z: 2.6}
 	local := m.Vec4{X: point.X, Y: point.Y, Z: point.Z, W: 1}

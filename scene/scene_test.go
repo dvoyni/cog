@@ -31,6 +31,9 @@ type testBackend struct {
 	textures []textureBinding
 	samplers []samplerBinding
 	bakes    int
+	// baked keeps every uploaded buffer's bytes, so a test can read back the
+	// records scene packed rather than only their offsets.
+	baked map[gfx.BufferID][]byte
 }
 
 // drawCall is one recorded draw, so a test can assert the arguments that reach
@@ -66,6 +69,7 @@ type samplerBinding struct {
 var testShaderLayout = gfx.ShaderLayout{Resources: []gfx.ShaderResource{
 	{Name: "sceneFrame", StorageBuffer: true, Group: 0, Binding: 0},
 	{Name: "sceneInstances", StorageBuffer: true, Group: 0, Binding: 1},
+	{Name: "sceneAnim", StorageBuffer: true, Group: 0, Binding: 2},
 	{Name: "scenePbrMaterial", StorageBuffer: true, Group: 1, Binding: 0},
 	{Name: "baseColorTexture", Group: 1, Binding: 1},
 	{Name: "baseColorSampler", Sampler: true, Group: 1, Binding: 2},
@@ -77,6 +81,8 @@ var testShaderLayout = gfx.ShaderLayout{Resources: []gfx.ShaderResource{
 	{Name: "occlusionSampler", Sampler: true, Group: 1, Binding: 8},
 	{Name: "emissiveTexture", Group: 1, Binding: 9},
 	{Name: "emissiveSampler", Sampler: true, Group: 1, Binding: 10},
+	{Name: "scenePoses", StorageBuffer: true, Group: 2, Binding: 0},
+	{Name: "sceneSkinJoints", StorageBuffer: true, Group: 2, Binding: 1},
 }}
 
 // texturesBoundTo reports the texture bound to one reflected binding on each
@@ -167,9 +173,20 @@ func (b *testBackend) BeginPass(desc gfx.GpuPassDesc) gfx.RenderPass {
 	b.passes = append(b.passes, desc)
 	return b
 }
-func (b *testBackend) EndPass(gfx.RenderPass)                                               {}
-func (b *testBackend) Present()                                                             { b.presents++ }
-func (b *testBackend) BakeBuffer(gfx.BufferID, gfx.BufferKind, int, []byte)                 { b.bakes++ }
+func (b *testBackend) EndPass(gfx.RenderPass) {}
+func (b *testBackend) Present()               { b.presents++ }
+
+// BakeBuffer keeps the bytes as well as counting the upload, because the
+// records scene packs are only readable here: everything downstream of the
+// arena is an offset and a size, and a flag written into the wrong instance is
+// exactly the failure that reads as a plausible wrong picture.
+func (b *testBackend) BakeBuffer(id gfx.BufferID, _ gfx.BufferKind, _ int, data []byte) {
+	b.bakes++
+	if b.baked == nil {
+		b.baked = map[gfx.BufferID][]byte{}
+	}
+	b.baked[id] = append([]byte(nil), data...)
+}
 func (b *testBackend) BakeTexture(gfx.TextureID, int, int, gfx.TextureFormat, []byte, bool) {}
 func (b *testBackend) AllocateTexture(gfx.TextureID, gfx.TextureDesc)                       {}
 func (b *testBackend) UpdateTexture(gfx.TextureID, int, gfx.Region, []byte)                 {}

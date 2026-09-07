@@ -131,3 +131,66 @@ func (e ErrModelNodeDegenerate) Error() string {
 		"scene: node %q of model %q has a collapsed world transform, which cannot be re-rooted, so the draw was skipped",
 		e.Node, e.Model)
 }
+
+// ErrModelSkinUnbound reports a skin whose inverse bind accessor could not be
+// read. Every joint of that skin falls back to an identity inverse bind, which
+// draws the mesh in its joints' own space rather than losing it.
+type ErrModelSkinUnbound struct {
+	Model string
+	Skin  string
+	Err   error
+}
+
+func (e ErrModelSkinUnbound) Error() string {
+	return fmt.Sprintf(
+		"scene: skin %q of model %q has unreadable inverse bind matrices (%v), so its joints bind at the identity",
+		e.Skin, e.Model, e.Err)
+}
+
+func (e ErrModelSkinUnbound) Unwrap() error { return e.Err }
+
+// ErrModelPoseApproximated reports a joint whose baked world matrix carries
+// something translation, rotation and scale cannot represent - shear, almost
+// always, from a non-uniformly scaled parent under a rotated child.
+//
+// The pose is baked from the decomposition anyway. A slightly wrong elbow
+// beats a missing character, shear is invisible on virtually every real rig,
+// and the report is what makes the approximation visible rather than silent.
+// It fires once per model however many joints and frames carry it.
+type ErrModelPoseApproximated struct {
+	Model string
+	Joint string
+}
+
+func (e ErrModelPoseApproximated) Error() string {
+	return fmt.Sprintf(
+		"scene: joint %q of model %q has a pose no TRS record can hold, so it was baked from its decomposition",
+		e.Joint, e.Model)
+}
+
+// ErrModelClipMissing reports a ClipPlay naming a clip the model does not
+// declare. The play is dropped and the rest of the draw's plays still blend:
+// one typo'd clip name should cost the one play, not the character.
+type ErrModelClipMissing struct {
+	Model string
+	Clip  string
+}
+
+func (e ErrModelClipMissing) Error() string {
+	return fmt.Sprintf("scene: model %q declares no clip %q, so that play was dropped", e.Model, e.Clip)
+}
+
+// ErrModelPlaysOverLimit reports a draw that asked for more clip plays than one
+// draw may blend. The heaviest are kept and the rest dropped by weight, which
+// is what the character mostly looks like anyway.
+type ErrModelPlaysOverLimit struct {
+	Model string
+	Plays int
+	Limit int
+}
+
+func (e ErrModelPlaysOverLimit) Error() string {
+	return fmt.Sprintf(
+		"scene: a draw of model %q asked for %d clip plays against a limit of %d, so the lightest were dropped",
+		e.Model, e.Plays, e.Limit)
+}
