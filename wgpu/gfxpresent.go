@@ -162,7 +162,7 @@ func (b *gfxBackend) Present() {
 	}
 	pass.SetPipeline(pipeline)
 	pass.SetBindGroup(0, bind, nil)
-	pass.Draw(3, 1, 0, 0)
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	_ = pass.End()
 	// This pass binds outside the per-draw path, so what the draws thought was
 	// bound no longer holds.

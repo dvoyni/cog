@@ -219,9 +219,20 @@ func (s *gfxRenderPass) Draw(first, count, instances, firstInstance int, indexed
 		instances = 1
 	}
 	if indexed {
-		s.pass.DrawIndexed(uint32(count), uint32(instances), uint32(first), 0, uint32(firstInstance))
+		s.pass.DrawIndexed(gputypes.DrawIndexedArgs{
+			IndexCount:    uint32(count),
+			InstanceCount: uint32(instances),
+			FirstIndex:    uint32(first),
+			BaseVertex:    0,
+			FirstInstance: uint32(firstInstance),
+		})
 	} else {
-		s.pass.Draw(uint32(count), uint32(instances), uint32(first), uint32(firstInstance))
+		s.pass.Draw(gputypes.DrawArgs{
+			VertexCount:   uint32(count),
+			InstanceCount: uint32(instances),
+			FirstVertex:   uint32(first),
+			FirstInstance: uint32(firstInstance),
+		})
 	}
 	s.backend.resetAcc()
 }
@@ -584,7 +595,7 @@ func (b *gfxBackend) NewPipeline(desc cgfx.PipelineDesc) (cgfx.PipelineID, error
 		DepthCompare:      compareFunc(desc.State.DepthCompare),
 		DepthWriteEnabled: desc.State.DepthWrite,
 	}
-	var buffers []wgpu.VertexBufferLayout
+	var buffers []gputypes.VertexBufferLayout
 	if desc.Stride > 0 && len(desc.Attributes) > 0 {
 		attrs := make([]gputypes.VertexAttribute, len(desc.Attributes))
 		for i, a := range desc.Attributes {
@@ -594,7 +605,7 @@ func (b *gfxBackend) NewPipeline(desc cgfx.PipelineDesc) (cgfx.PipelineID, error
 				ShaderLocation: uint32(a.Location),
 			}
 		}
-		buffers = []wgpu.VertexBufferLayout{{
+		buffers = []gputypes.VertexBufferLayout{{
 			ArrayStride: uint64(desc.Stride),
 			StepMode:    gputypes.VertexStepModeVertex,
 			Attributes:  attrs,
