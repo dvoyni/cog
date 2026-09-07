@@ -3,6 +3,7 @@ package scene
 import (
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/m"
 	"github.com/dvoyni/cog/storage"
 )
 
@@ -46,10 +47,11 @@ type Lookup struct {
 	// has no reserved zero value.
 	defaults    pbrDefaults
 	hasDefaults bool
-	// nullSkin is the group 2 every draw with no skin of its own binds: one
-	// identity pose row and one identity joint record, baked on first use and
-	// shared by every buffer-built draw in the process. Sharing it is what
-	// keeps those draws batching together instead of fragmenting group 2.
+	// nullSkin is the group 2 every draw with no animation of its own binds:
+	// one identity pose row, one identity joint record and one zero morph
+	// delta, baked on first use and shared by every buffer-built draw in the
+	// process. Sharing it is what keeps those draws batching together instead
+	// of fragmenting group 2.
 	nullSkin skinBuffers
 	// reported suppresses repeated reports for one model or texture path until
 	// it loads successfully or is unloaded - canvas's precedent.
@@ -112,8 +114,8 @@ func (l *Lookup) ensureBundled(bake bakeTextureFunc) Material {
 	return l.bundled
 }
 
-// ensureNullSkin bakes the one-row, one-joint skin every unskinned draw binds,
-// once.
+// ensureNullSkin bakes the one-row, one-joint, one-delta skin every draw with
+// no animation of its own binds, once.
 //
 // It exists because a declared binding must be bound. Group 2 is declared by
 // the one bundled module, which every draw goes through, and a missing entry
@@ -130,10 +132,17 @@ func (l *Lookup) ensureNullSkin(bake bakeFunc) skinBuffers {
 	}
 	pose := identityPose()
 	joint := identitySkinJoint()
+	// One zero delta record, for the same reason as the pose and the joint. A
+	// draw that morphs nothing still declares sceneMorphDeltas, and an empty
+	// buffer is no buffer at all: BakeBuffer returns nothing for no bytes,
+	// which is the unbound binding the whole rule exists to avoid.
+	var delta m.Vec4
 	l.nullSkin = skinBuffers{
-		poses:  bake(recordBytes(&pose)),
-		joints: bake(recordBytes(&joint)),
-		bound:  true,
+		poses:   bake(recordBytes(&pose)),
+		joints:  bake(recordBytes(&joint)),
+		morphs:  bake(recordBytes(&delta)),
+		bound:   true,
+		morphed: true,
 	}
 	return l.nullSkin
 }

@@ -65,6 +65,16 @@ type Plugin struct {
 	modelViews []modelView
 	modelAnims []animBinding
 	modelPlays []scenePlayRecord
+	// The morph half of the same resolution. modelWeightFrames is parallel to
+	// modelPlays, modelWeights the draw's blended vector over the model's
+	// flattened slot list, and modelTargets the scratch one primitive's sparse
+	// list is culled into. modelMorphOffsets is the frame's per-primitive
+	// sceneAnim offsets, which a draw record reaches by index rather than by a
+	// slice: it is still being appended to while the records are written.
+	modelWeightFrames []weightFrames
+	modelWeights      []float32
+	modelTargets      []sceneMorphWeight
+	modelMorphOffsets []uint32
 	// meshReported is the set of mesh ids already reported this frame, so a
 	// released mesh named by a hundred draws is one report rather than a
 	// hundred.
@@ -228,13 +238,28 @@ func (p *Plugin) prepareDraws(
 		p.prepared[i] = prepareDraw(*record, mesh)
 		p.prepared[i].mesh = ref
 		p.prepared[i].interned = p.materials.intern(report, record.material)
-		// A draw that named no skin of its own binds the shared null skin, so
-		// group 2 is complete on every draw in the frame. Missing one is not a
-		// degraded frame: CreateBindGroup fails the entry-count rule, its
-		// error is swallowed, and the whole command buffer vanishes silently.
-		if !p.prepared[i].anim.skin.bound {
-			p.prepared[i].anim.skin = lookup.ensureNullSkin(bake)
-			p.prepared[i].anim.offset = sceneNoAnim
+		// A draw that named no animation of its own binds the shared null skin
+		// in whichever half it left empty, so group 2 is complete on every draw
+		// in the frame. Missing one is not a degraded frame: CreateBindGroup
+		// fails the entry-count rule, its error is swallowed, and the whole
+		// command buffer vanishes silently.
+		//
+		// The two halves are filled separately because a model may have either
+		// on its own: a rigged prop binds its poses and the null delta record,
+		// a morph-only face the other way round. Only a draw with neither loses
+		// its animOffset - a buffer-built draw's is the zero value, which is a
+		// valid offset rather than an absent one.
+		skin := &p.prepared[i].anim.skin
+		if !skin.bound {
+			null := lookup.ensureNullSkin(bake)
+			skin.poses, skin.joints, skin.bound = null.poses, null.joints, true
+			if !skin.morphed {
+				p.prepared[i].anim.offset = sceneNoAnim
+			}
+		}
+		if !skin.morphed {
+			null := lookup.ensureNullSkin(bake)
+			skin.morphs, skin.morphed = null.morphs, true
 		}
 	}
 }

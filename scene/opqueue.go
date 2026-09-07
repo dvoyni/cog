@@ -42,21 +42,25 @@ type opQueue struct {
 	// the caller's array and a caller may reuse its own the moment the call
 	// returns.
 	plays []ClipPlay
+	// morphWeights backs every model draw's MorphWeights slice, for the same
+	// reason plays does.
+	morphWeights []float32
 	// frame counts recordings, and stamps every temporary MeshRef minted into
 	// this one. It is what makes a temporary ref used in a later frame
 	// detectable rather than a draw of whatever now holds its slot.
 	frame uint32
 
 	// published is the recording the last flush consumed, kept readable.
-	published       []cameraRecord
-	publishedDraws  []drawRecord
-	publishedLights []lightRecord
-	publishedArena  []Pass
-	publishedCalls  []Op
-	publishedMeshes meshRecording
-	publishedModels []modelDrawRecord
-	publishedPlays  []ClipPlay
-	publishedFrame  uint32
+	published        []cameraRecord
+	publishedDraws   []drawRecord
+	publishedLights  []lightRecord
+	publishedArena   []Pass
+	publishedCalls   []Op
+	publishedMeshes  meshRecording
+	publishedModels  []modelDrawRecord
+	publishedPlays   []ClipPlay
+	publishedWeights []float32
+	publishedFrame   uint32
 	// cameraOps is the published frame's camera registrations as Ops, in id
 	// order, which Ops reports ahead of the draw calls.
 	cameraOps []Op
@@ -109,6 +113,7 @@ func (q *opQueue) Reset() {
 	q.models = q.models[:0]
 	clear(q.plays)
 	q.plays = q.plays[:0]
+	q.morphWeights = q.morphWeights[:0]
 }
 
 // Ops appends the published frame's recorded operations to dst, in flush order:
@@ -152,6 +157,7 @@ func (q *opQueue) beginFlush() []cameraRecord {
 	q.meshes, q.publishedMeshes = q.publishedMeshes, q.meshes
 	q.models, q.publishedModels = q.publishedModels, q.models
 	q.plays, q.publishedPlays = q.publishedPlays, q.plays
+	q.morphWeights, q.publishedWeights = q.publishedWeights, q.morphWeights
 	q.meshes.layouts, q.publishedMeshes.layouts = q.publishedMeshes.layouts, q.meshes.layouts
 	q.publishedFrame, q.frame = q.frame, q.frame+1
 	clear(q.cameras)
@@ -167,6 +173,7 @@ func (q *opQueue) beginFlush() []cameraRecord {
 	q.models = q.models[:0]
 	clear(q.plays)
 	q.plays = q.plays[:0]
+	q.morphWeights = q.morphWeights[:0]
 
 	slices.SortFunc(q.published, func(a, b cameraRecord) int { return cmp.Compare(a.id, b.id) })
 	q.passViews = q.passViews[:0]

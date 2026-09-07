@@ -122,8 +122,8 @@ type scenePlayRecord struct {
 }
 
 // sceneAnimHeader is the sceneAnim block's two-vec4 header. Every field is a
-// count or an offset the shader reads before it loops, and the four morph
-// words stay zero until morph targets land.
+// count or an offset the shader reads before it loops, and the morph words
+// are the primitive constants its delta address is built from.
 //
 // A draw is skinned only, morphed only, both, or neither, and PlayCount and
 // TargetCount are each independently zero-checkable - which is why there is no
@@ -151,6 +151,10 @@ var (
 	skinJointSize   = int(unsafe.Sizeof(sceneSkinJoint{}))
 	animHeaderVec4s = int(unsafe.Sizeof(sceneAnimHeader{})) / 16
 	playRecordVec4s = int(unsafe.Sizeof(scenePlayRecord{})) / 16
+	// morphRecordSize is one 16-byte delta slot. A record's stride is
+	// 16 * popcount(mask), so this is the unit morphBase, morphStride and
+	// morphTargetStride all count in, and what MorphBytes reports against.
+	morphRecordSize = int(unsafe.Sizeof(m.Vec4{}))
 )
 
 // identityPose is the pose row of a joint that transforms nothing, which is

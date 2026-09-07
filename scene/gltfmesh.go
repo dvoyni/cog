@@ -32,6 +32,12 @@ type gltfGeometry struct {
 	// skinned node's mesh to have JOINTS_0 and WEIGHTS_0, and one that does not
 	// draws unskinned at the skin's root rather than being lost.
 	skinned bool
+	// morph is the primitive's converted morph targets, empty for the
+	// overwhelming majority of primitives. It belongs to the geometry rather
+	// than to the placement because the deltas are shared per mesh: two nodes
+	// referencing one head morph independently through their own weight slots
+	// and read the same records.
+	morph gltfMorph
 }
 
 // errPointTopology reports a POINTS primitive, which gfx has no topology for -
@@ -62,6 +68,10 @@ func convertPrimitive(doc *gltf.Document, primitive *gltf.Primitive, needTangent
 		return gltfGeometry{}, err
 	}
 	geometry.box, geometry.hasBox = accessorBox(position)
+	// Targets are read before anything reorders the vertices, because a delta
+	// is addressed by its own vertex's index and unwelding renumbers them.
+	geometry.morph = readMorphTargets(doc, primitive, len(geometry.vertices))
+	geometry.expandBoxByMorph()
 
 	indices, err := readIndices(doc, primitive)
 	if err != nil {
@@ -84,7 +94,9 @@ func convertPrimitive(doc *gltf.Document, primitive *gltf.Primitive, needTangent
 		// come apart first. The specification also says the file's tangents are
 		// ignored in this case, which unwelding gives for free: the generator
 		// below rebuilds them against the normals scene just made.
-		geometry.vertices, geometry.indices = unweld(geometry.vertices, geometry.indices)
+		var source []uint32
+		geometry.vertices, geometry.indices, source = unweld(geometry.vertices, geometry.indices)
+		geometry.morph.remap(source)
 		generateFlatNormals(geometry.vertices)
 	}
 	if _, has := primitive.Attributes[gltf.TANGENT]; !has && needTangents {
@@ -282,7 +294,9 @@ func expandTriangleFan(fan []uint32) []uint32 {
 // rather than to a point in space can be written without one face overwriting
 // another's. It is what flat normals cost, and it is charged only to primitives
 // that omitted NORMAL.
-func unweld(vertices []Vertex, indices []uint32) ([]Vertex, []uint32) {
+// It also returns the permutation it applied, so anything else addressed by
+// vertex index - a primitive's morph deltas - can follow its vertices.
+func unweld(vertices []Vertex, indices []uint32) ([]Vertex, []uint32, []uint32) {
 	source := sequence(indices, len(vertices))
 	expanded := make([]Vertex, len(source))
 	unwelded := make([]uint32, len(source))
@@ -290,7 +304,22 @@ func unweld(vertices []Vertex, indices []uint32) ([]Vertex, []uint32) {
 		expanded[i] = vertices[index]
 		unwelded[i] = uint32(i)
 	}
-	return expanded, unwelded
+	return expanded, unwelded, source
+}
+
+// expandBoxByMorph grows the primitive's declared bounds by the reach its morph
+// targets can pull a vertex.
+//
+// The expansion is conservative - it assumes every target at weight 1 at once -
+// and it over-draws rather than under-draws, which is the right direction: a
+// culled face that should have been on screen is a hole, and an uncalled draw
+// is a cost you can profile.
+func (g *gltfGeometry) expandBoxByMorph() {
+	if !g.hasBox || g.morph.reach == 0 {
+		return
+	}
+	reach := m.Vec3{X: g.morph.reach, Y: g.morph.reach, Z: g.morph.reach}
+	g.box.Min, g.box.Max = g.box.Min.Sub(reach), g.box.Max.Add(reach)
 }
 
 // generateFlatNormals writes each triangle's geometric normal onto its three

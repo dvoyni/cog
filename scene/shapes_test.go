@@ -101,9 +101,9 @@ func TestTheUnitSphereAndPlaneBakeLazilyAndOnce(t *testing.T) {
 		}
 	})
 	h.frame()
-	// Four arenas, the unit box's two buffers and the null skin's two.
-	if h.backend.bakes != 8 {
-		t.Fatalf("a boxes-only first frame uploaded %d buffers, want 8", h.backend.bakes)
+	// Four arenas, the unit box's two buffers and the null skin's three.
+	if h.backend.bakes != 9 {
+		t.Fatalf("a boxes-only first frame uploaded %d buffers, want 9", h.backend.bakes)
 	}
 
 	shapes = 3

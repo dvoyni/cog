@@ -209,6 +209,11 @@ func radiance(color m.Color, intensity float32) m.Vec4 {
 type animBinding struct {
 	skin   skinBuffers
 	offset uint32
+	// morphAt indexes the frame's per-primitive morph offsets, or is -1 when
+	// the model has no shapes and the draw's one block serves every primitive.
+	// It is an index rather than a slice because the arena it points into is
+	// still being appended to while these are written.
+	morphAt int
 	// skinned is false for every buffer-built mesh and every debug shape, and
 	// for a model primitive no clip can move. Riding the free rest-frame path
 	// instead would be correct, but it charges a procedural terrain mesh — the
@@ -217,15 +222,22 @@ type animBinding struct {
 	skinned bool
 }
 
-// skinBuffers is the pair of group 2 bindings a draw reads: a model's own
-// baked records, or the shared null skin.
+// skinBuffers is the three group 2 bindings a draw reads: a model's own baked
+// records, or the shared null skin's, in either half independently.
 type skinBuffers struct {
 	poses  gfx.BufferDescr
 	joints gfx.BufferDescr
-	// bound says the pair is real. A gfx.BufferDescr holds a byte slice and so
-	// is not comparable, and there is no reserved zero descriptor, so "did
-	// anyone fill this in" needs a field of its own.
-	bound bool
+	// morphs is the model's one delta buffer, or the null skin's single zero
+	// record. It is a binding of its own rather than a range of the pose buffer
+	// because the two halves are answered separately: a rigged prop has poses
+	// and no shapes, and a face has shapes and no poses.
+	morphs gfx.BufferDescr
+	// bound says the pose pair is real and morphed says the delta buffer is. A
+	// gfx.BufferDescr holds a byte slice and so is not comparable, and there is
+	// no reserved zero descriptor, so "did anyone fill this in" needs a field
+	// of its own - two of them, because the halves are answered separately.
+	bound   bool
+	morphed bool
 }
 
 // packInstance builds the instance record for one world matrix under one
@@ -304,6 +316,16 @@ func (a *arena) appendElement[T any](element *T) int {
 	offset := len(a.data)
 	a.data = append(a.data, recordBytes(element)...)
 	return offset
+}
+
+// padToVec4 rounds the arena up to a whole vec4. The sceneAnim arena needs it
+// because animOffset counts vec4s while the morph list packs two eight-byte
+// entries into one, so an odd target count would leave the next block starting
+// at an offset no instance can name.
+func (a *arena) padToVec4() {
+	if remainder := len(a.data) % 16; remainder != 0 {
+		a.data = append(a.data, make([]byte, 16-remainder)...)
+	}
 }
 
 // recordBytes reinterprets a record as the bytes uploaded for it. Every GPU

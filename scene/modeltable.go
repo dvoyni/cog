@@ -68,6 +68,11 @@ type modelPrimitive struct {
 	// blend, so it is marked never-cull and the sphere is kept only for the
 	// blend sort's depth.
 	skinned bool
+	// morph is where the primitive's delta block sits and which of the model's
+	// weight slots feed it, empty for a primitive with no targets. Morphing
+	// needs no cull exemption of its own: the bounds were expanded at load by
+	// the reach the deltas can pull a vertex.
+	morph morphBinding
 }
 
 // modelMaterial is one converted glTF material: the scene material a draw binds
@@ -162,7 +167,7 @@ func (l *Lookup) installModel(
 		geometry := &loaded.geometries[primitive.geometry]
 		placed := modelPrimitive{
 			mesh: meshes[primitive.geometry], local: primitive.local, material: primitive.material,
-			skinned: primitive.skinned,
+			skinned: primitive.skinned, morph: primitive.morph,
 		}
 		if geometry.hasBox {
 			// The sphere stays in the primitive's own space, unflattened,
@@ -379,10 +384,19 @@ func (l *Lookup) residentAnimation(
 ) residentAnimation {
 	baked := &loaded.animation
 	resident := residentAnimation{
-		jointCount: baked.jointCount,
-		sampleRate: l.config.PoseSampleRate,
-		clips:      baked.clips,
-		jointNames: baked.jointNames,
+		jointCount:  baked.jointCount,
+		sampleRate:  l.config.PoseSampleRate,
+		clips:       baked.clips,
+		jointNames:  baked.jointNames,
+		slotCount:   baked.slotCount,
+		weights:     baked.weights,
+		targetNames: baked.targetNames,
+	}
+	// The delta buffer is uploaded whether or not the model has joints: a
+	// morph-only face has no pose row anywhere and still binds its own shapes.
+	if len(loaded.morphDeltas) > 0 {
+		resident.morphBytes = len(loaded.morphDeltas) * morphRecordSize
+		resident.morphDeltas = resources.BakeBuffer(recordSliceBytes(loaded.morphDeltas), false)
 	}
 	if baked.jointCount == 0 {
 		return resident
@@ -489,6 +503,64 @@ func (la LookupAccess) TotalPoseBytes() int {
 	for _, entry := range la.lookup.models {
 		if entry.state == modelResident {
 			total += entry.animation.poseBytes
+		}
+	}
+	return total
+}
+
+// MorphTargets appends the names of the model's morph targets, in the flattened
+// order MorphWeights is positional over, and reports whether they are real. A
+// path that is not resident yet returns dst untouched and triggers the same load
+// a draw does.
+//
+// The list is one entry per target of every morphed node in depth-first node
+// order, so a file whose head mesh hangs off two nodes appears here as two runs
+// of the same names - which is exactly what MorphWeights addresses, because the
+// weights are the node's while the deltas behind them stay shared.
+//
+// An unnamed target contributes an empty string rather than being skipped: glTF
+// carries target names only as the extras convention, so a file that names none
+// still has to keep the slice indexed by slot rather than searched.
+func (la LookupAccess) MorphTargets(path string, dst []string) ([]string, bool) {
+	if !la.Valid() {
+		return dst, false
+	}
+	entry, ok := la.lookup.requestModel(la.kernel, path)
+	if !ok {
+		return dst, false
+	}
+	return append(dst, entry.animation.targetNames...), true
+}
+
+// MorphBytes reports how much GPU memory one model's morph deltas occupy, and
+// whether the answer is real.
+//
+// It is the number to look at when a morphed model's storage surprises you: it
+// is targets x vertices x 16 x popcount(mask), so it scales with the shapes a
+// file carries and with how many attributes each deforms, not with what is
+// playing. The weight grid is not in it - that never reaches the GPU.
+func (la LookupAccess) MorphBytes(path string) (int, bool) {
+	if !la.Valid() {
+		return 0, false
+	}
+	entry, ok := la.lookup.requestModel(la.kernel, path)
+	if !ok {
+		return 0, false
+	}
+	return entry.animation.morphBytes, true
+}
+
+// TotalMorphBytes reports the morph delta memory of every resident model. It
+// triggers no load and has no ok: it is a sum over what is resident now, and
+// zero is a true answer when nothing is.
+func (la LookupAccess) TotalMorphBytes() int {
+	if !la.Valid() {
+		return 0
+	}
+	total := 0
+	for _, entry := range la.lookup.models {
+		if entry.state == modelResident {
+			total += entry.animation.morphBytes
 		}
 	}
 	return total

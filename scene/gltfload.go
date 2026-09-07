@@ -68,6 +68,11 @@ type loadedModel struct {
 	// file with no skins and no animated mesh node bakes an empty one, which
 	// is what puts every one of its draws on the null skin.
 	animation bakedAnimation
+	// morphDeltas is the model's one delta buffer, every morphed primitive's
+	// targets concatenated and reached by a base offset. One buffer per model
+	// rather than per primitive: a buffer per primitive would mean a bind
+	// group per primitive, collapsing group 2's whole reason for existing.
+	morphDeltas []m.Vec4
 	// reports are the non-fatal failures the load accumulated: a missing
 	// texture, an unsupported topology, a UV set past the two scene carries.
 	// They fire at install, from the load's own goroutine, which is why an
@@ -89,6 +94,10 @@ type loadedPrimitive struct {
 	// joints, so local is the identity and its bounding sphere is the bind
 	// pose's - which is why it is also never culled.
 	skinned bool
+	// morph is where the primitive's delta block sits and which of the model's
+	// weight slots feed it. The block comes from the geometry, shared by every
+	// node referencing that mesh; the slots come from this node.
+	morph morphBinding
 }
 
 // loadedScene is one entry of the file's scenes array, flattened: the range of
@@ -215,8 +224,18 @@ type modelConverter struct {
 	joints     jointSpace
 	skinJoints [][]int
 	// curves interns the animation samplers the clips decode, so a clip whose
-	// twenty bones share one input accessor reads it once.
-	curves map[samplerKey]*animCurve
+	// twenty bones share one input accessor reads it once. morphCurves is the
+	// same interning for the weights channels, which decode to a different
+	// shape: targetCount scalars per keyframe rather than one widened value.
+	curves      map[samplerKey]*animCurve
+	morphCurves map[samplerKey]*morphCurve
+	// morphNodes is each node's run of the model's flattened weight slots,
+	// claimed in the flattening walk's depth-first order, and morphDefaults
+	// and morphNames the slot-indexed arrays that grow with it. The defaults
+	// are node.weights over mesh.weights over zero, resolved once at load.
+	morphNodes    map[int]morphSlotRun
+	morphDefaults []float32
+	morphNames    []string
 	// nodeRoots are the nodes nothing parents, and walked, locals and worlds
 	// the pose walk's scratch. All four keep their backing across the whole
 	// bake: the walk runs once per sampled frame and must allocate nothing.
@@ -248,16 +267,18 @@ func convertDocument(
 		return nil, errors.New("it has no scenes")
 	}
 	converter := &modelConverter{
-		doc:        doc,
-		path:       path,
-		textures:   newTextureLoader(doc, filesystem, path),
-		geometries: map[geometryKey]int{},
-		variants:   map[materialVariant]int{},
-		visited:    map[int]bool{},
-		animated:   animatedNodes(doc),
-		duplicated: map[string]bool{},
-		sampleRate: sampleRate,
-		curves:     map[samplerKey]*animCurve{},
+		doc:         doc,
+		path:        path,
+		textures:    newTextureLoader(doc, filesystem, path),
+		geometries:  map[geometryKey]int{},
+		variants:    map[materialVariant]int{},
+		visited:     map[int]bool{},
+		animated:    animatedNodes(doc),
+		duplicated:  map[string]bool{},
+		sampleRate:  sampleRate,
+		curves:      map[samplerKey]*animCurve{},
+		morphCurves: map[samplerKey]*morphCurve{},
+		morphNodes:  map[int]morphSlotRun{},
 	}
 	// The joint numbering and the node forest are both settled before the walk
 	// starts: a primitive's JOINTS_0 remaps as it is read, and the pose walk
@@ -270,8 +291,10 @@ func convertDocument(
 	for _, scene := range doc.Scenes {
 		converter.flattenScene(scene)
 	}
-	// The bake runs last because the walk is what claims a degenerate node's
-	// joint, so the numbering is only complete once every scene is flattened.
+	// Both run last because the walk is what claims a degenerate node's joint
+	// and a morphed node's weight slots, so neither numbering is complete
+	// until every scene is flattened.
+	converter.packMorphDeltas()
 	converter.bakeAnimation()
 	converter.model.textures = converter.textures.textures
 	converter.model.reports = append(converter.model.reports, converter.textures.reports...)
@@ -387,7 +410,7 @@ func (c *modelConverter) walkNode(index int, parent m.Mat4) {
 	// subtree on the way back out would get backwards.
 	named := c.claimNode(node.Name, world)
 	if node.Mesh != nil {
-		c.flattenMesh(*node.Mesh, placement, binding)
+		c.flattenMesh(*node.Mesh, placement, binding, c.claimMorphSlots(index))
 	}
 	c.collectLight(node, world)
 	animated := c.animated[index]
@@ -455,7 +478,9 @@ type skinBinding struct {
 }
 
 // flattenMesh emits one node's primitives at their flattened placement.
-func (c *modelConverter) flattenMesh(index int, placement m.Mat4, binding skinBinding) {
+func (c *modelConverter) flattenMesh(
+	index int, placement m.Mat4, binding skinBinding, slots morphSlotRun,
+) {
 	if index < 0 || index >= len(c.doc.Meshes) || c.doc.Meshes[index] == nil {
 		return
 	}
@@ -471,9 +496,18 @@ func (c *modelConverter) flattenMesh(index int, placement m.Mat4, binding skinBi
 		if !ok {
 			continue
 		}
+		converted := &c.model.geometries[geometry]
+		morph := converted.morph.binding(len(converted.vertices))
+		if morph.morphed() {
+			// A primitive carrying more targets than its node claimed slots for
+			// is a malformed mesh - glTF requires every primitive of a mesh to
+			// declare the same targets - so the extra targets simply have no
+			// weight to read.
+			morph.slotBase, morph.targets = slots.base, min(morph.targets, slots.count)
+		}
 		c.model.primitives = append(c.model.primitives, loadedPrimitive{
 			geometry: geometry, local: placement, material: material,
-			skinned: c.model.geometries[geometry].skinned,
+			skinned: c.model.geometries[geometry].skinned, morph: morph,
 		})
 	}
 }

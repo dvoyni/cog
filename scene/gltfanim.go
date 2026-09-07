@@ -32,6 +32,19 @@ type bakedAnimation struct {
 	// lookup facade. An unnamed node contributes an empty string rather than
 	// being skipped: the slice is indexed by joint, not searched.
 	jointNames []string
+	// slotCount is the width of a weight row, and weights the grid itself,
+	// laid out exactly as poses are: [rest frame][clip 0][clip 1]..., with
+	// slotCount floats to a row.
+	//
+	// It never reaches the GPU. Morphing is linear in the weights, so the
+	// whole blend - the two-frame lerp and the weighted mean across plays -
+	// happens on the CPU at pack time and only the resulting sparse list is
+	// uploaded, which is why the shader never sees a play on the morph side.
+	slotCount int
+	weights   []float32
+	// targetNames is one entry per slot, in the same flattened depth-first
+	// node order MorphWeights is positional over.
+	targetNames []string
 }
 
 // bakedClip is one clip on the sampled grid.
@@ -46,6 +59,11 @@ type bakedClip struct {
 	// clip. base is the pose row its frame 0 sits on.
 	frames int
 	base   int
+	// weightBase is the float offset its frame 0 sits at in the weight grid.
+	// It is a second base rather than a scaling of the first because the two
+	// grids have different widths: joints per row against slots per row, and
+	// a model may have either count at zero.
+	weightBase int
 }
 
 // row reports the pose row one of the clip's frames sits on. The frame is
@@ -53,6 +71,12 @@ type bakedClip struct {
 // already decided which two frames it wants by the time it asks.
 func (c bakedClip) row(frame, jointCount int) int {
 	return c.base + min(max(frame, 0), c.frames-1)*jointCount
+}
+
+// weightRow reports the weight-grid row one of the clip's frames sits on, the
+// morph twin of row and clamped for the same reason.
+func (c bakedClip) weightRow(frame, slotCount int) int {
+	return c.weightBase + min(max(frame, 0), c.frames-1)*slotCount
 }
 
 // restRow is the pose row of the implicit rest frame, which is row 0 of every
@@ -283,10 +307,13 @@ func (c *modelConverter) bakeAnimation() {
 			animation.jointNames[joint] = c.doc.Nodes[node].Name
 		}
 	}
+	animation.slotCount = len(c.morphDefaults)
+	animation.targetNames = c.morphNames
 	tracks := c.clipTracks()
 	rows := 1
 	for i := range tracks {
 		tracks[i].clip.base = rows * joints
+		tracks[i].clip.weightBase = rows * animation.slotCount
 		rows += tracks[i].clip.frames
 		animation.clips = append(animation.clips, tracks[i].clip)
 	}
@@ -297,6 +324,7 @@ func (c *modelConverter) bakeAnimation() {
 			c.bakeClip(&animation, &tracks[i])
 		}
 	}
+	c.bakeMorphWeights(&animation, rows, tracks)
 	c.model.animation = animation
 }
 
@@ -337,6 +365,18 @@ type clipTrack struct {
 	// overrides and the curves that override it. Only nodes the clip actually
 	// targets are here: everything else holds still at its authored transform.
 	nodes []animatedNode
+	// weights are the morph channels this clip steers, each already resolved
+	// to the run of model slots it writes. A slot no clip steers holds its
+	// authored default, which is the morph half of the same rule the TRS half
+	// follows.
+	weights []animatedWeights
+}
+
+// animatedWeights is one weights channel resolved against the model's flattened
+// slot list.
+type animatedWeights struct {
+	run   morphSlotRun
+	curve *morphCurve
 }
 
 // animatedNode is one node one clip steers.
@@ -349,11 +389,11 @@ type animatedNode struct {
 }
 
 // clipTracks resolves every animation in the document into a track, in the
-// document's own order, skipping any that steers no node's TRS.
+// document's own order, skipping any that steers nothing scene can bake.
 //
-// A weights-only animation is skipped here rather than dropped: it carries no
-// pose and produces no joint, which is why a morph-only model loads with an
-// empty pose buffer. It still becomes a clip once morph targets land.
+// A weights-only animation is a real clip with no pose in it: it produces no
+// joint, so a morph-only model loads with an empty pose buffer and still plays
+// its clips by name.
 func (c *modelConverter) clipTracks() []clipTrack {
 	rate := float32(c.sampleRate)
 	tracks := make([]clipTrack, 0, len(c.doc.Animations))
@@ -369,6 +409,13 @@ func (c *modelConverter) clipTracks() []clipTrack {
 			}
 			node := *channel.Target.Node
 			if node < 0 || node >= len(c.doc.Nodes) || c.doc.Nodes[node] == nil {
+				continue
+			}
+			if channel.Target.Path == gltf.TRSWeights {
+				if weights, ok := c.animatedWeights(animation, channel, node); ok {
+					track.weights = append(track.weights, weights)
+					track.clip.duration = max(track.clip.duration, weights.curve.end())
+				}
 				continue
 			}
 			curve := c.animCurve(animation, channel.Sampler)
@@ -393,7 +440,7 @@ func (c *modelConverter) clipTracks() []clipTrack {
 			}
 			track.clip.duration = max(track.clip.duration, curve.end())
 		}
-		if len(track.nodes) == 0 {
+		if len(track.nodes) == 0 && len(track.weights) == 0 {
 			continue
 		}
 		// A single-keyframe clip and a zero-duration clip each bake to one

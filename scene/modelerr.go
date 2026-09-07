@@ -194,3 +194,41 @@ func (e ErrModelPlaysOverLimit) Error() string {
 		"scene: a draw of model %q asked for %d clip plays against a limit of %d, so the lightest were dropped",
 		e.Model, e.Plays, e.Limit)
 }
+
+// ErrModelMorphWeightsOverLength reports a draw whose MorphWeights is longer
+// than the model's flattened target list. The tail is ignored and the draw
+// renders: MorphWeights is positional, so a caller whose array outlives an edit
+// to the file should lose the shapes that went away, not the model.
+//
+// The short case is not an error at all and has no report. A caller animating
+// the first two shapes of a fifty-shape face should not have to carry the other
+// forty-eight zeros, so a short slice leaves the rest at 0.
+type ErrModelMorphWeightsOverLength struct {
+	Model   string
+	Weights int
+	Slots   int
+}
+
+func (e ErrModelMorphWeightsOverLength) Error() string {
+	return fmt.Sprintf(
+		"scene: a draw of model %q gave %d morph weights against %d targets, so the tail was ignored",
+		e.Model, e.Weights, e.Slots)
+}
+
+// ErrModelMorphTargetsOverLimit reports a draw whose active morph targets
+// exceed what one draw may blend. The heaviest are kept and the rest dropped by
+// absolute weight, which is what the shape mostly looks like anyway.
+//
+// Stored targets are unlimited: with sparse packing the cap constrains neither
+// memory nor layout, and is purely a guard against runaway per-vertex ALU.
+type ErrModelMorphTargetsOverLimit struct {
+	Model   string
+	Targets int
+	Limit   int
+}
+
+func (e ErrModelMorphTargetsOverLimit) Error() string {
+	return fmt.Sprintf(
+		"scene: a draw of model %q has %d active morph targets against a limit of %d, so the lightest were dropped",
+		e.Model, e.Targets, e.Limit)
+}

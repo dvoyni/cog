@@ -166,12 +166,33 @@ struct SceneSkinJoints {
     data: array<SceneSkinJoint>,
 };
 
+// SceneMorphDeltas is one model's whole morph delta store: every morphed
+// primitive's targets concatenated and reached by the block's own morphBase.
+// One buffer per model rather than per primitive, because a buffer per
+// primitive would mean a bind group per primitive.
+//
+// Records are vec4-aligned and masked, stride 16 / 32 / 48 bytes, in the fixed
+// slot order position, normal, tangent - so morphStride alone says which slots
+// a record holds, and the mask never has to be transmitted. A tightly packed
+// 12 / 24 / 36 layout would be smaller and would force scalar indexing: nine
+// loads per target per vertex instead of three.
+struct SceneMorphDeltas {
+    data: array<vec4<f32>>,
+};
+
 // SceneAnim is the per-frame animation arena, addressed absolutely by
 // sceneInstance.animOffset in vec4 units:
 //
 //     vec4 0: { playCount, targetCount, morphBase, morphStride }
 //     vec4 1: { morphTargetStride, 3 reserved words }
 //     then  : playCount x { baseRow0, baseRow1, w0, w1 }
+//     then  : targetCount x { targetIndex, weight }, two to a vec4
+//
+// The morph weights are a count-prefixed sparse list rather than a dense block:
+// the CPU knows which entries are non-zero before it writes anything, so a
+// 52-shape face with five active shapes costs 40 bytes instead of 256 and this
+// loop runs five times over real work instead of 64 times with a continue. The
+// zero-skip branch is gone entirely, because zeros never reach the GPU.
 //
 // It is indirect because sceneInstances is bound once per pass and shared by
 // every draw in it: a fixed per-instance record would have to be sized for the
@@ -211,14 +232,15 @@ struct SceneAnim {
 // anywhere. A draw with no skin of its own binds one shared null skin: a
 // single identity pose row and a single identity joint.
 //
-// Two bindings, not three: the inverse bind and the normal matrix interleave
+// Three bindings, not four: the inverse bind and the normal matrix interleave
 // above, which recovered the slot that keeps the whole module inside the
 // browser core-adapter's floor of eight storage buffers per stage. Every
 // reflected binding is emitted Vertex|Fragment unconditionally, so these count
 // against the fragment stage too, and sceneMorphDeltas is the seventh and last
-// one this module may ever declare.
+// one this module may ever declare - the eighth stays reserved.
 @group(2) @binding(0) var<storage, read> scenePoses: ScenePoses;
 @group(2) @binding(1) var<storage, read> sceneSkinJoints: SceneSkinJoints;
+@group(2) @binding(2) var<storage, read> sceneMorphDeltas: SceneMorphDeltas;
 
 // SCENE_NONUNIFORM marks an instance whose world matrix does not scale
 // uniformly. Transforming a normal by such a matrix is wrong, so those
@@ -446,6 +468,57 @@ fn sceneJointMatrix(pose: SceneJointPose, joint: SceneSkinJoint) -> mat4x3<f32> 
     );
 }
 
+// sceneMorphVertex adds this instance's active morph targets to a vertex.
+//
+// The shader never sees a play here. Morphing is linear in the weights, so the
+// CPU blends every play's weight vector into one and this applies the deltas
+// once, which is exactly equal to morphing per play and blending the results -
+// unlike the pose case, there is no approximation traded away.
+//
+// It adds deltas and normalises nothing. The naive reading of glTF renormalises
+// the normal after morphing and again after skinning; the first is dead work,
+// because skinning is linear. The tangent delta adds to xyz and leaves w - the
+// handedness - untouched.
+fn sceneMorphVertex(
+    instance: SceneInstance, vertexIndex: u32, vertex: SceneVertex,
+) -> SceneVertex {
+    if instance.animOffset == SCENE_NO_ANIM {
+        return vertex;
+    }
+    let header = sceneAnim.data[instance.animOffset];
+    let targetCount = header.y;
+    if targetCount == 0u {
+        return vertex;
+    }
+    let morphBase = header.z;
+    let morphStride = header.w;
+    let targetStride = sceneAnim.data[instance.animOffset + 1u].x;
+    // The list sits after the play records, and two of its eight-byte entries
+    // share one vec4.
+    let list = instance.animOffset + SCENE_ANIM_HEADER + header.x;
+    var out = vertex;
+    for (var i = 0u; i < targetCount; i = i + 1u) {
+        let packed = sceneAnim.data[list + i / 2u];
+        let entry = select(packed.zw, packed.xy, (i & 1u) == 0u);
+        let weight = bitcast<f32>(entry.y);
+        // No base-vertex correction: gfx.MeshDescr owns its buffers and binds
+        // them at offset 0, so vertexIndex is 0-based within the primitive and
+        // targetStride is vertexCount * morphStride, folded on the CPU.
+        let at = morphBase + entry.x * targetStride + vertexIndex * morphStride;
+        out.position = out.position + weight * sceneMorphDeltas.data[at].xyz;
+        if morphStride > 1u {
+            out.normal = out.normal + weight * sceneMorphDeltas.data[at + 1u].xyz;
+        }
+        if morphStride > 2u {
+            out.tangent = vec4<f32>(
+                out.tangent.xyz + weight * sceneMorphDeltas.data[at + 2u].xyz,
+                out.tangent.w,
+            );
+        }
+    }
+    return out;
+}
+
 // sceneDeformVertex runs linear blend skinning over the vertex's four
 // influences, or hands the vertex back untouched for a draw with no skin.
 //
@@ -456,9 +529,17 @@ fn sceneJointMatrix(pose: SceneJointPose, joint: SceneSkinJoint) -> mat4x3<f32> 
 // same path plus Gram-Schmidt against the skinned normal, and its handedness
 // follows the inverse bind's determinant sign, accumulated by weight so the
 // answer is the majority influence's with no search.
-fn sceneDeformVertex(instance: SceneInstance, vertex: SceneVertexIn) -> SceneVertex {
+fn sceneDeformVertex(
+    instance: SceneInstance, vertexIndex: u32, vertex: SceneVertexIn,
+) -> SceneVertex {
+    // Morph, then skin, per the glTF order: the shapes reshape the mesh in its
+    // own bind space and the skin then poses that.
+    let base = sceneMorphVertex(
+        instance, vertexIndex,
+        SceneVertex(vertex.position, vertex.normal, vertex.tangent),
+    );
     if (instance.flags & SCENE_NOSKIN) != 0u {
-        return SceneVertex(vertex.position, vertex.normal, vertex.tangent);
+        return base;
     }
     let playCount = sceneAnimPlayCount(instance.animOffset);
     var position = vec3<f32>(0.0);
@@ -476,10 +557,10 @@ fn sceneDeformVertex(instance: SceneInstance, vertex: SceneVertexIn) -> SceneVer
         let joint = sceneSkinJoints.data[index];
         let pose = sceneBlendJoint(instance.animOffset, playCount, index);
         let skin = sceneJointMatrix(pose, joint);
-        position = position + weight * (skin * vec4<f32>(vertex.position, 1.0));
+        position = position + weight * (skin * vec4<f32>(base.position, 1.0));
         let normalMatrix = mat3x3<f32>(joint.normal0.xyz, joint.normal1.xyz, joint.normal2.xyz);
-        normal = normal + weight * sceneQuatRotate(pose.rotation, normalMatrix * vertex.normal);
-        tangent = tangent + weight * sceneQuatRotate(pose.rotation, normalMatrix * vertex.tangent.xyz);
+        normal = normal + weight * sceneQuatRotate(pose.rotation, normalMatrix * base.normal);
+        tangent = tangent + weight * sceneQuatRotate(pose.rotation, normalMatrix * base.tangent.xyz);
         handedness = handedness + weight * joint.normal0.w;
     }
     // A vertex with no influence at all under a skinned draw is a malformed
@@ -487,24 +568,28 @@ fn sceneDeformVertex(instance: SceneInstance, vertex: SceneVertexIn) -> SceneVer
     // origin with a zero normal, and normalize would turn that into a NaN that
     // spreads through the whole fragment stage, so it keeps its bind pose.
     if total == 0.0 {
-        return SceneVertex(vertex.position, vertex.normal, vertex.tangent);
+        return base;
     }
     let skinnedNormal = normalize(normal);
-    var skinnedTangent = vertex.tangent;
+    var skinnedTangent = base.tangent;
     let orthogonal = tangent - skinnedNormal * dot(skinnedNormal, tangent);
     if dot(orthogonal, orthogonal) > 1e-12 {
-        skinnedTangent = vec4<f32>(normalize(orthogonal), vertex.tangent.w * sign(handedness));
+        skinnedTangent = vec4<f32>(normalize(orthogonal), base.tangent.w * sign(handedness));
     }
     return SceneVertex(position, skinnedNormal, skinnedTangent);
 }
 
 @vertex
-fn vs_main(vertex: SceneVertexIn, @builtin(instance_index) index: u32) -> SceneVertexOut {
+fn vs_main(
+    vertex: SceneVertexIn,
+    @builtin(instance_index) index: u32,
+    @builtin(vertex_index) vertexIndex: u32,
+) -> SceneVertexOut {
     let instance = sceneInstances.data[index];
-    // Skinning first, then the instance: the skin resolves a vertex into the
-    // model's own space, and the world matrix - re-root already folded in -
-    // takes that to the world.
-    let deformed = sceneDeformVertex(instance, vertex);
+    // Deformation first, then the instance: morphing and skinning resolve a
+    // vertex into the model's own space, and the world matrix - re-root already
+    // folded in - takes that to the world.
+    let deformed = sceneDeformVertex(instance, vertexIndex, vertex);
     let world = sceneWorldPosition(instance, deformed.position);
     var out: SceneVertexOut;
     out.position = sceneFrame.viewProjection * vec4<f32>(world, 1.0);

@@ -45,11 +45,12 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 		{name: "sceneInstances", group: 0, binding: 1},
 		{name: "sceneAnim", group: 0, binding: 2},
 		{name: "scenePbrMaterial", group: 1, binding: 0},
-		// Group 2 is per model. Every draw binds it, skinned or not: a draw
-		// with no skin of its own gets the shared null skin, because a
-		// declared binding must still be bound.
+		// Group 2 is per model. Every draw binds all three, skinned or morphed
+		// or neither: a draw with no animation of its own gets the shared null
+		// skin, because a declared binding must still be bound.
 		{name: "scenePoses", group: 2, binding: 0},
 		{name: "sceneSkinJoints", group: 2, binding: 1},
+		{name: "sceneMorphDeltas", group: 2, binding: 2},
 	} {
 		got, ok := resources[want.name]
 		if !ok {
@@ -84,8 +85,8 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 			t.Errorf("%sSampler is %+v, want a group 1 filtering sampler", slot, sampler)
 		}
 	}
-	if len(layout.Resources) != 16 {
-		t.Fatalf("the scene shader declares %d bindings, want the 16 asserted above: %+v",
+	if len(layout.Resources) != 17 {
+		t.Fatalf("the scene shader declares %d bindings, want the 17 asserted above: %+v",
 			len(layout.Resources), layout.Resources)
 	}
 }
@@ -157,8 +158,11 @@ func TestBundledSceneShaderRecordsMatchTheirPackedOffsets(t *testing.T) {
 		// explicit-column form buys over mat4x3 and mat3x3.
 		{binding: "scenePoses", stride: 48},
 		{binding: "sceneSkinJoints", stride: 112},
-		// sceneAnim is a raw vec4 arena, because animOffset counts vec4s.
+		// sceneAnim is a raw vec4 arena, because animOffset counts vec4s, and
+		// sceneMorphDeltas is one too: a delta record is 16 * popcount(mask)
+		// bytes, so the array element is the slot rather than the record.
 		{binding: "sceneAnim", stride: 16},
+		{binding: "sceneMorphDeltas", stride: 16},
 	} {
 		for _, member := range membersOf(t, layout, want.binding) {
 			if member.Name == "data" && member.Stride != want.stride {

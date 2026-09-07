@@ -83,6 +83,7 @@ var testShaderLayout = gfx.ShaderLayout{Resources: []gfx.ShaderResource{
 	{Name: "emissiveSampler", Sampler: true, Group: 1, Binding: 10},
 	{Name: "scenePoses", StorageBuffer: true, Group: 2, Binding: 0},
 	{Name: "sceneSkinJoints", StorageBuffer: true, Group: 2, Binding: 1},
+	{Name: "sceneMorphDeltas", StorageBuffer: true, Group: 2, Binding: 2},
 }}
 
 // texturesBoundTo reports the texture bound to one reflected binding on each

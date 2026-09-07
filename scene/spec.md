@@ -1203,6 +1203,15 @@ because scene generates flat normals for a primitive that has none — those are
 scene's reconstruction, not the asset's, so a NORMAL delta on a primitive with no
 authored NORMAL is dropped at load.
 
+**The mask is then widened to a prefix** of position, normal, tangent, so a gap
+is stored as explicit zeros rather than closed up. The `sceneAnim` header carries
+`morphStride` and no mask, and its layout is fixed — so which slots a record holds
+has to be recoverable from the stride alone, which is true only of a prefix. The
+gap this fills is a target that deforms the normal and not the position: without
+the widening its stride-1 record would be read as a position delta. It costs 16 B
+per vertex per target of zeros in a case almost no file has, against dropping
+authored data or spending a reserved header word every draw would then read.
+
 Addressing needs **no base-vertex correction**: `gfx.MeshDescr` owns its own
 buffers and always binds them at offset 0, so `@builtin(vertex_index)` is 0-based
 within a primitive and

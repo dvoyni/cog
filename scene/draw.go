@@ -34,10 +34,10 @@ type pendingPass struct {
 
 type pendingDraw struct {
 	mesh gfx.MeshDescr
-	// skin is the pair of group 2 buffers the draw binds: the model's own
-	// baked records, or the shared null skin for everything buffer-built. A
-	// declared binding must be bound or the whole frame's command buffer
-	// vanishes silently, so this is never zero.
+	// skin is the three group 2 buffers the draw binds: the model's own baked
+	// records, or the shared null skin for everything buffer-built. A declared
+	// binding must be bound or the whole frame's command buffer vanishes
+	// silently, so no member of this is ever zero.
 	skin skinBuffers
 	// material is the gfx material the draw's resolved tag entry named. It is
 	// carried per draw rather than looked up again at emit time because
@@ -113,6 +113,7 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 				gfx.BufferRangeParam("scenePbrMaterial", materials, draw.materialOffset, materialRecordSize),
 				gfx.BufferParam("scenePoses", draw.skin.poses),
 				gfx.BufferParam("sceneSkinJoints", draw.skin.joints),
+				gfx.BufferParam("sceneMorphDeltas", draw.skin.morphs),
 			)
 			b.params = append(b.params, draw.params...)
 			gfxWrite.DrawInstancedFrom(draw.mesh, *draw.material,

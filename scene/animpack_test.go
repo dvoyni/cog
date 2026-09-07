@@ -35,9 +35,9 @@ func TestResolvePlaysFoldsTheFramePairAndItsWeights(t *testing.T) {
 	report, _ := collectReports()
 	anim := testAnim()
 	// A quarter of a frame past frame 12, so the fraction is observable.
-	plays := resolvePlays(anim, "m.glb", []ClipPlay{
+	plays, _ := resolvePlays(anim, "m.glb", []ClipPlay{
 		{Clip: "walk", Time: 12.25 / testSampleRate, Weight: 1},
-	}, nil, report)
+	}, nil, nil, report)
 	if len(plays) != 1 {
 		t.Fatalf("plays = %d, want one", len(plays))
 	}
@@ -59,10 +59,10 @@ func TestResolvePlaysFoldsTheFramePairAndItsWeights(t *testing.T) {
 // would preserve only the ability to express a bug.
 func TestResolvePlaysNormalisesWeights(t *testing.T) {
 	report, _ := collectReports()
-	plays := resolvePlays(testAnim(), "m.glb", []ClipPlay{
+	plays, _ := resolvePlays(testAnim(), "m.glb", []ClipPlay{
 		{Clip: "walk", Weight: 3},
 		{Clip: "run", Weight: 1},
-	}, nil, report)
+	}, nil, nil, report)
 	if len(plays) != 2 {
 		t.Fatalf("plays = %d, want two", len(plays))
 	}
@@ -83,10 +83,10 @@ func TestResolvePlaysNormalisesWeights(t *testing.T) {
 // it, which is one of the three things row 0 answers.
 func TestResolvePlaysFallsBackToTheRestFrameOnZeroWeight(t *testing.T) {
 	report, _ := collectReports()
-	plays := resolvePlays(testAnim(), "m.glb", []ClipPlay{
+	plays, _ := resolvePlays(testAnim(), "m.glb", []ClipPlay{
 		{Clip: "walk", Weight: 0},
 		{Clip: "run", Weight: 0},
-	}, nil, report)
+	}, nil, nil, report)
 	if len(plays) != 0 {
 		t.Errorf("plays = %v, want the rest frame", plays)
 	}
@@ -113,7 +113,7 @@ func TestResolvePlaysWrapsOrClampsByLoop(t *testing.T) {
 		{"clamped before the start", ClipPlay{Clip: "walk", Time: -99, Weight: 1}, base},
 	} {
 		t.Run(sample.name, func(t *testing.T) {
-			plays := resolvePlays(anim, "m.glb", []ClipPlay{sample.play}, nil, report)
+			plays, _ := resolvePlays(anim, "m.glb", []ClipPlay{sample.play}, nil, nil, report)
 			if len(plays) != 1 {
 				t.Fatalf("plays = %d, want one", len(plays))
 			}
@@ -129,9 +129,9 @@ func TestResolvePlaysWrapsOrClampsByLoop(t *testing.T) {
 func TestResolvePlaysKeepsTheClampedPairInsideTheClip(t *testing.T) {
 	report, _ := collectReports()
 	anim := testAnim()
-	plays := resolvePlays(anim, "m.glb", []ClipPlay{
+	plays, _ := resolvePlays(anim, "m.glb", []ClipPlay{
 		{Clip: "walk", Time: 99, Weight: 1},
-	}, nil, report)
+	}, nil, nil, report)
 	last := uint32(anim.clips[0].base + 60*anim.jointCount)
 	if plays[0].BaseRow0 != last || plays[0].BaseRow1 != last {
 		t.Errorf("pair = %d/%d, want both on the last frame %d",
@@ -143,10 +143,10 @@ func TestResolvePlaysKeepsTheClampedPairInsideTheClip(t *testing.T) {
 // under a key carrying the name, so two typos in one file are two reports.
 func TestResolvePlaysDropsAnUnknownClipAndReportsIt(t *testing.T) {
 	report, keys := collectReports()
-	plays := resolvePlays(testAnim(), "m.glb", []ClipPlay{
+	plays, _ := resolvePlays(testAnim(), "m.glb", []ClipPlay{
 		{Clip: "sprint", Weight: 1},
 		{Clip: "walk", Weight: 1},
-	}, nil, report)
+	}, nil, nil, report)
 	if len(plays) != 1 {
 		t.Fatalf("plays = %d, want the one that named a real clip", len(plays))
 	}
@@ -170,13 +170,13 @@ func TestResolvePlaysDropsTheLightestOverTheCap(t *testing.T) {
 		bakedClip{name: "jump", duration: 1, frames: 61, base: anim.jointCount * 184},
 		bakedClip{name: "fall", duration: 1, frames: 61, base: anim.jointCount * 245},
 	)
-	plays := resolvePlays(anim, "m.glb", []ClipPlay{
+	plays, _ := resolvePlays(anim, "m.glb", []ClipPlay{
 		{Clip: "walk", Weight: 0.1},
 		{Clip: "run", Weight: 4},
 		{Clip: "idle", Weight: 3},
 		{Clip: "jump", Weight: 2},
 		{Clip: "fall", Weight: 1},
-	}, nil, report)
+	}, nil, nil, report)
 	if len(plays) != maxClipPlays {
 		t.Fatalf("plays = %d, want the cap of %d", len(plays), maxClipPlays)
 	}
@@ -194,9 +194,9 @@ func TestResolvePlaysDropsTheLightestOverTheCap(t *testing.T) {
 // A model with no joints has nothing to play, however many plays a draw names.
 func TestResolvePlaysIsEmptyForAModelWithNoJoints(t *testing.T) {
 	report, keys := collectReports()
-	plays := resolvePlays(&residentAnimation{}, "m.glb", []ClipPlay{
+	plays, _ := resolvePlays(&residentAnimation{}, "m.glb", []ClipPlay{
 		{Clip: "walk", Weight: 1},
-	}, nil, report)
+	}, nil, nil, report)
 	if len(plays) != 0 {
 		t.Errorf("plays = %v, want none", plays)
 	}
@@ -210,14 +210,14 @@ func TestResolvePlaysIsEmptyForAModelWithNoJoints(t *testing.T) {
 // sceneInstances is bound per pass and sceneAnim is not.
 func TestPackAnimLaysTheBlockOutInVec4s(t *testing.T) {
 	var build frameBuild
-	if got := build.packAnim(nil); got != sceneNoAnim {
+	if got := build.packAnim(nil, morphBlock{}); got != sceneNoAnim {
 		t.Errorf("an empty block is at %d, want sceneNoAnim", got)
 	}
-	first := build.packAnim([]scenePlayRecord{{BaseRow0: 4, BaseRow1: 6, W0: 0.5, W1: 0.5}})
+	first := build.packAnim([]scenePlayRecord{{BaseRow0: 4, BaseRow1: 6, W0: 0.5, W1: 0.5}}, morphBlock{})
 	if first != 0 {
 		t.Errorf("the first block is at %d, want the start of the arena", first)
 	}
-	second := build.packAnim([]scenePlayRecord{{}, {}})
+	second := build.packAnim([]scenePlayRecord{{}, {}}, morphBlock{})
 	if want := uint32(animHeaderVec4s + playRecordVec4s); second != want {
 		t.Errorf("the second block is at %d, want %d", second, want)
 	}

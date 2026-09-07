@@ -9,10 +9,10 @@ import (
 // A zero ModelDraw is a valid draw of the file's default scene at the origin,
 // culled by the bounds the file declares.
 //
-// The fields the specification's ModelDraw also carries - MorphWeights,
-// Material and OverrideParams - arrive with the tickets that implement them. A
-// field that parses and does nothing is worse than an absent one: it compiles
-// at the call site and renders the wrong picture with nothing to explain it.
+// The fields the specification's ModelDraw also carries - Material and
+// OverrideParams - arrive with the tickets that implement them. A field that
+// parses and does nothing is worse than an absent one: it compiles at the call
+// site and renders the wrong picture with nothing to explain it.
 type ModelDraw struct {
 	// Transform places the single instance. Transforms, when it is non-empty,
 	// overrides it and places one instance per entry, exactly as MeshDraw does.
@@ -60,6 +60,25 @@ type ModelDraw struct {
 	// plays - a hundred crates is one call, and a hundred independently
 	// animated characters is a hundred calls.
 	Plays []ClipPlay
+
+	// MorphWeights are this draw's morph target weights, positional over the
+	// model's whole flattened target list - which MorphTargets(path) names, in
+	// depth-first node order, one entry per target of every morphed node.
+	//
+	// It is the one index-addressed thing in the plugin. Name addressing would
+	// put about fifty-two map hits per face per frame on the recording path to
+	// re-derive a mapping the caller computed at startup; naming lives on the
+	// lookup facade instead, so this path is a memcpy.
+	//
+	// A non-nil value overrides the animated result wholesale; nil falls back
+	// to the animated weights, then node.weights, then mesh.weights, then zero.
+	// A short slice leaves the remaining targets at 0 and a long one ignores
+	// the tail and reports once per model. Neither is an error.
+	//
+	// The slice is copied into the frame's own arena, so a caller may reuse its
+	// backing the moment the call returns. A draw's instances share it, exactly
+	// as they share Plays.
+	MorphWeights []float32
 }
 
 // ModelLight is one KHR_lights_punctual light a model file declares, in the
@@ -98,8 +117,13 @@ type modelDrawRecord struct {
 	// transforms aliases the recording's transform arena, never the caller's
 	// array, and is empty for a single-instance draw.
 	transforms []Transform
-	// plays aliases the recording's play arena for the same reason.
-	plays []ClipPlay
+	// plays aliases the recording's play arena for the same reason, and
+	// morphWeights the recording's weight arena. A nil morphWeights is the
+	// draw taking the animated result; an empty non-nil one is the caller
+	// asking for every target at zero, which are different answers.
+	plays        []ClipPlay
+	morphWeights []float32
+	overridden   bool
 }
 
 // Model records one draw of the glTF file at path.
@@ -130,11 +154,19 @@ func (q *opQueue) Model(layers LayerMask, path string, draw ModelDraw) {
 		q.plays = append(q.plays, plays...)
 		plays = q.plays[start:len(q.plays):len(q.plays)]
 	}
-	draw.Transforms, draw.Plays = transforms, plays
+	weights := draw.MorphWeights
+	overridden := weights != nil
+	if len(weights) > 0 {
+		start := len(q.morphWeights)
+		q.morphWeights = append(q.morphWeights, weights...)
+		weights = q.morphWeights[start:len(q.morphWeights):len(q.morphWeights)]
+	}
+	draw.Transforms, draw.Plays, draw.MorphWeights = transforms, plays, weights
 	q.calls = append(q.calls, Op{Kind: OpModel, Layers: layers, Path: path, Model: draw})
 	q.models = append(q.models, modelDrawRecord{
 		layers: layers, path: path, scene: draw.Scene, node: draw.Node,
 		transform: draw.Transform, transforms: transforms, plays: plays,
+		morphWeights: weights, overridden: overridden,
 	})
 }
 
@@ -228,6 +260,12 @@ func (p *Plugin) expandModels(
 				p.modelWorlds[at] = world.Mul(primitive.local)
 				anim := p.modelAnims[i]
 				anim.skinned = primitive.skinned
+				// A morphed model packs a block per primitive rather than per
+				// call, because the four morph words and the sparse weight list
+				// are the primitive's, not the draw's.
+				if anim.morphAt >= 0 {
+					anim.offset = p.modelMorphOffsets[anim.morphAt+j]
+				}
 				write.appendFlushDraw(drawRecord{
 					layers:    model.layers,
 					transform: Transform{Matrix: &p.modelWorlds[at]},
@@ -261,17 +299,29 @@ func (p *Plugin) resolveModelAnimation(
 	report func(error), lookup *Lookup, models []modelDrawRecord,
 ) {
 	p.modelAnims = grow(p.modelAnims, len(models))
+	p.modelMorphOffsets = p.modelMorphOffsets[:0]
 	once := func(key string, err error) { lookup.reportOnce(report, key, err) }
 	for i := range models {
-		p.modelAnims[i] = animBinding{offset: sceneNoAnim}
+		p.modelAnims[i] = animBinding{offset: sceneNoAnim, morphAt: -1}
 		view := &p.modelViews[i]
 		if !view.resolved {
 			continue
 		}
 		anim := view.animation
 		p.modelAnims[i].skin = anim.skin()
-		p.modelPlays = resolvePlays(anim, models[i].path, models[i].plays, p.modelPlays[:0], once)
-		p.modelAnims[i].offset = p.build.packAnim(p.modelPlays)
+		p.modelPlays, p.modelWeightFrames = resolvePlays(
+			anim, models[i].path, models[i].plays,
+			p.modelPlays[:0], p.modelWeightFrames[:0], once,
+		)
+		// A model with no shapes packs one block for the whole call, which is
+		// what every primitive of it reads. A morphed one packs a block per
+		// primitive instead, because the morph words and the sparse weight list
+		// are the primitive's rather than the draw's.
+		if anim.slotCount == 0 {
+			p.modelAnims[i].offset = p.build.packAnim(p.modelPlays, morphBlock{})
+		} else {
+			p.packModelMorphs(&p.modelAnims[i], anim, view, &models[i], once)
+		}
 		// The load's re-root inverse is the rest pose's. It is the right answer
 		// for every node whose ancestors hold still - which is almost all of
 		// them - and the wrong one for a subtree hanging off a bone a clip
@@ -283,5 +333,38 @@ func (p *Plugin) resolveModelAnimation(
 				}
 			}
 		}
+	}
+}
+
+// packModelMorphs packs one model draw's per-primitive sceneAnim blocks. It is
+// called only for a model that has morph slots; a model without them packs one
+// block for the whole call.
+//
+// The blend is done once for the whole draw - it is over the model's flattened
+// slot list, which every primitive indexes into - and the cull, the cap and the
+// sparse list are then per primitive, because a primitive's targets are its own
+// block's and its addressing constants are per primitive too.
+//
+// A model with no shapes leaves morphAt at -1 and keeps the one block per call
+// the skinned path packs, which is what makes morph targets cost a rig nothing.
+func (p *Plugin) packModelMorphs(
+	binding *animBinding, anim *residentAnimation, view *modelView,
+	model *modelDrawRecord, report reportOnce,
+) {
+	p.modelWeights = blendMorphWeights(
+		anim, model.path, p.modelPlays, p.modelWeightFrames,
+		model.morphWeights, model.overridden, p.modelWeights, report,
+	)
+	binding.morphAt = len(p.modelMorphOffsets)
+	for j := range view.primitives {
+		morph := view.primitives[j].morph
+		block := morphBlock{binding: morph}
+		if morph.morphed() {
+			slots := p.modelWeights[morph.slotBase : morph.slotBase+morph.targets]
+			block.targets = selectMorphTargets(slots, p.modelTargets[:0], model.path, report)
+			p.modelTargets = block.targets
+		}
+		p.modelMorphOffsets = append(
+			p.modelMorphOffsets, p.build.packAnim(p.modelPlays, block))
 	}
 }

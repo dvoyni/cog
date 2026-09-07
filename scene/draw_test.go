@@ -191,8 +191,8 @@ func TestTheFrameUploadsOneBufferPerArena(t *testing.T) {
 		t.Fatalf("a steady frame uploaded %d buffers, want the four arenas", h.backend.bakes)
 	}
 	// The first frame also bakes the unit box's two durable buffers and the
-	// null skin's two, each once.
-	if first != 8 {
+	// null skin's three, each once.
+	if first != 9 {
 		t.Fatalf("the first frame uploaded %d buffers, want four arenas, the unit box and the null skin", first)
 	}
 }
