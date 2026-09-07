@@ -316,9 +316,24 @@ type PipelineDesc struct {
 	State       MaterialState
 	ColorFormat TextureFormat
 	DepthFormat TextureFormat
-	Stride      int
-	Attributes  []VertexAttribute
-	Label       string
+	// NoColorTarget builds a pipeline with no colour target at all, which is
+	// what a draw inside a depth-only pass needs. A render pass declares its
+	// attachments and a pipeline declares its targets, and the two are
+	// validated against each other at setPipeline time: a pipeline with one
+	// colour target set into a pass with none is rejected, and gfx drops that
+	// error along with the rest of the command buffer.
+	//
+	// It is a bool rather than a FormatNone member of TextureFormat because
+	// every member of that enum is a real texel layout and Resolve() is defined
+	// over all of them - a non-format in it would put a case into every switch
+	// that reads one.
+	//
+	// A backend that honours this builds no fragment stage, so a depth-only
+	// shader may declare no fs_main at all.
+	NoColorTarget bool
+	Stride        int
+	Attributes    []VertexAttribute
+	Label         string
 }
 
 // Backend is the low-level realization interface: a vendor-neutral, "wgpu-shaped"

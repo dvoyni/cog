@@ -24,7 +24,12 @@ type pipelineKey struct {
 	state       MaterialState
 	colorFormat TextureFormat
 	depthFormat TextureFormat
-	layout      vertexLayoutKey
+	// noColor separates the pipeline a shader needs in a depth-only pass from
+	// the one it needs in a colour pass. Without it in the key, a shader drawn
+	// in both gets whichever pass reached it first, which is a validation
+	// failure in the other one.
+	noColor bool
+	layout  vertexLayoutKey
 }
 
 // translator turns an OpQueue into a GpuQueue, lazily creating and caching
@@ -285,7 +290,14 @@ func (t *translator) gpuPassDesc(backend Backend, head, tail PassDescr) GpuPassD
 	switch head.Target.kind {
 	case targetScreen:
 		desc.Screen = true
+	case targetNone:
+		desc.NoColor = true
 	case targetTexture:
+		// This can resolve to zero: a temporary target is allocated by the same
+		// frame's bakes, which the backend replays after these descriptors were
+		// built, so a target used for the first time has no view yet. NoColor
+		// stays false, which is what keeps that case distinguishable from a
+		// pass that declares no colour attachment at all.
 		desc.Target = backend.TextureView(head.Target.texture, head.Target.mip, head.Target.layer)
 	}
 	switch head.Depth.kind {
@@ -311,7 +323,7 @@ func (t *translator) translateDraw(op *op, pass PassDescr, backend Backend, file
 		}
 		return
 	}
-	pipeline := t.ensurePipeline(backend, shaderID, m, op.material.state)
+	pipeline := t.ensurePipeline(backend, shaderID, m, op.material.state, pass)
 	if pipeline == 0 {
 		return
 	}
@@ -620,18 +632,23 @@ func writeParamAt(buf []byte, off int, p *ParameterDescr) {
 	}
 }
 
-func (t *translator) ensurePipeline(backend Backend, shader ShaderID, m *MeshDescr, state MaterialState) PipelineID {
+func (t *translator) ensurePipeline(backend Backend, shader ShaderID, m *MeshDescr, state MaterialState, pass PassDescr) PipelineID {
 	stride := m.stride()
 	layout, ok := vertexLayoutKeyOf(m.layout)
 	if !ok {
 		return 0
 	}
-	// One target exists today, the screen, and its depth buffer. Explicit passes
-	// are what will hand these formats in instead of naming them here.
+	// One colour format exists today, the frame buffer's, and every renderable
+	// texture in the tree is allocated in it - so the sentinel is still right
+	// for every pass that has a colour attachment at all. What is not
+	// interchangeable is having one: a depth-only pass has no colour
+	// attachment, and a pipeline that declares a target it will never be given
+	// is rejected at setPipeline.
 	const colorFormat, depthFormat = FormatScreen, FormatDepth32F
+	noColor := pass.Target.IsNone()
 	k := pipelineKey{
 		shader: shader, topology: m.topology, state: state,
-		colorFormat: colorFormat, depthFormat: depthFormat, layout: layout,
+		colorFormat: colorFormat, depthFormat: depthFormat, noColor: noColor, layout: layout,
 	}
 	if id, ok := t.pipelines[k]; ok {
 		return id
@@ -641,14 +658,15 @@ func (t *translator) ensurePipeline(backend Backend, shader ShaderID, m *MeshDes
 		attrs[i] = VertexAttribute{Offset: m.layout[i].offset, Type: m.layout[i].typ, Location: i}
 	}
 	id, err := backend.NewPipeline(PipelineDesc{
-		Shader:      shader,
-		Topology:    m.topology,
-		State:       state,
-		ColorFormat: colorFormat,
-		DepthFormat: depthFormat,
-		Stride:      stride,
-		Attributes:  attrs,
-		Label:       "gfx.pipeline",
+		Shader:        shader,
+		Topology:      m.topology,
+		State:         state,
+		ColorFormat:   colorFormat,
+		DepthFormat:   depthFormat,
+		NoColorTarget: noColor,
+		Stride:        stride,
+		Attributes:    attrs,
+		Label:         "gfx.pipeline",
 	})
 	if err != nil {
 		return 0

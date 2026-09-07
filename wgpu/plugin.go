@@ -245,6 +245,11 @@ func (p *Plugin) onDraw(k kernel.Executioner, dc *gogpu.Context) {
 		p.gfxBackend = backend
 		k.ExecuteCommand[cgfx.SetBackendCmd](cgfx.SetBackendRequest{Backend: backend})
 	}
+	// A pass the backend declined to encode is reported here rather than on the
+	// render thread, which has no kernel handle. It fires once per run.
+	if err := p.gfxBackend.takeRefusal(); err != nil {
+		k.ReportError(err)
+	}
 	p.gfxBackend.setScreen(view, fbW, fbH)
 	_ = k.PublishEvent(app.RenderEvent{Alpha: p.loadAlpha()}).Wait()
 

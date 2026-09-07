@@ -73,7 +73,12 @@ type TextureTransition struct {
 // frame buffer, which only the backend can resolve because it is sized from the
 // surface; Target names any other colour attachment, and zero means none.
 type GpuPassDesc struct {
-	Screen     bool
+	Screen bool
+	// NoColor is set by a pass that declares no colour attachment at all, which
+	// a zero Target cannot say on its own: a texture target whose view does not
+	// exist yet resolves to zero too, and the two want opposite handling. A
+	// backend must not read "depth-only pass" off a zero Target.
+	NoColor    bool
 	Target     TextureViewID
 	Depth      TextureViewID
 	DepthAuto  bool

@@ -98,6 +98,12 @@ type gfxBackend struct {
 	presentBind        *wgpu.BindGroup
 	presentFailed      bool
 
+	// refusedDepthOnly records that this backend has already declined a
+	// depth-only pass, and refusal holds the error until the plugin takes it to
+	// report on the update thread. The backend has no kernel handle of its own.
+	refusedDepthOnly bool
+	refusal          error
+
 	prevCmd *wgpu.CommandBuffer
 }
 
@@ -570,7 +576,6 @@ func (b *gfxBackend) NewPipeline(desc cgfx.PipelineDesc) (cgfx.PipelineID, error
 		return 0, errors.New("gfx: unknown shader for pipeline")
 	}
 	module := sh.module
-	blend := gfxBlendState(desc.State.Blend)
 	// Every pipeline must declare a depth state matching the render pass
 	// attachment (browser WebGPU enforces this). Compare and write are
 	// independent: the transparent pass tests without writing.
@@ -609,13 +614,7 @@ func (b *gfxBackend) NewPipeline(desc cgfx.PipelineDesc) (cgfx.PipelineID, error
 			FrontFace:        frontFace(desc.State.FrontFace),
 		},
 		DepthStencil: depth,
-		Fragment: &wgpu.FragmentState{
-			Module: module, EntryPoint: "fs_main",
-			// FormatScreen resolves to the frame buffer's format, not the
-			// surface's: a screen pass renders into the frame buffer, and the
-			// present pipeline is the only one built for the surface.
-			Targets: []gputypes.ColorTargetState{{Format: textureFormat(desc.ColorFormat), WriteMask: gputypes.ColorWriteMaskAll, Blend: blend}},
-		},
+		Fragment:     fragmentState(module, desc),
 	})
 	if err != nil {
 		return 0, err
@@ -623,6 +622,34 @@ func (b *gfxBackend) NewPipeline(desc cgfx.PipelineDesc) (cgfx.PipelineID, error
 	id := cgfx.PipelineID(b.id())
 	b.pipelines[id] = &gfxbPipeline{pipeline: pipeline, shader: sh}
 	return id, nil
+}
+
+// fragmentState builds the pipeline's fragment stage, and returns nil for a
+// pipeline that has no colour target.
+//
+// nil rather than an empty Targets slice, for two reasons. A render pass and a
+// pipeline are validated against each other at setPipeline time, and a
+// depth-only pass declares no colour attachment - which BeginPass already
+// encodes - so a pipeline that names a target it will never be given is
+// rejected and takes the frame's whole command buffer with it. And there is no
+// fragment entry point to name: dropping the stage is what lets a depth-only
+// shader declare no fs_main at all, which is the shape a shadow or prepass
+// shader wants.
+func fragmentState(module *wgpu.ShaderModule, desc cgfx.PipelineDesc) *wgpu.FragmentState {
+	if desc.NoColorTarget {
+		return nil
+	}
+	return &wgpu.FragmentState{
+		Module: module, EntryPoint: "fs_main",
+		// FormatScreen resolves to the frame buffer's format, not the
+		// surface's: a screen pass renders into the frame buffer, and the
+		// present pipeline is the only one built for the surface.
+		Targets: []gputypes.ColorTargetState{{
+			Format:    textureFormat(desc.ColorFormat),
+			WriteMask: gputypes.ColorWriteMaskAll,
+			Blend:     gfxBlendState(desc.State.Blend),
+		}},
+	}
 }
 
 func gfxBlendState(mode cgfx.BlendMode) *gputypes.BlendState {

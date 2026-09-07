@@ -75,9 +75,28 @@ func (b *gfxBackend) BeginPass(desc cgfx.GpuPassDesc) cgfx.RenderPass {
 	if b.encoder == nil {
 		return nil
 	}
+	if !depthOnlyPassSupported && isDepthOnly(desc) {
+		// One refusal is permanent - it is a property of the HAL, not of this
+		// pass - so it is recorded once and reported once. See gfxdepthonly.go
+		// for what the backend cannot encode and why.
+		if !b.refusedDepthOnly {
+			b.refusedDepthOnly = true
+			b.refusal = ErrDepthOnlyPassUnsupported{Pass: desc.Label}
+		}
+		return nil
+	}
 	colour, width, height := b.passColour(desc)
 	depth := b.passDepth(desc, width, height)
-	if colour == nil && depth == nil {
+	if colour == nil {
+		// Either there is nothing to render at all, or the pass declares a
+		// colour target whose view does not exist yet - which every temporary
+		// target does on its first frame, since its allocation is a bake this
+		// same Execute replays after the descriptors were built. Both are
+		// skipped, and skipping is not optional for the second: a descriptor
+		// carrying only a depth attachment is the shape the HAL never begins
+		// and then faults ending, so opening one here is a segfault rather than
+		// a wasted pass. isDepthOnly above has already reported the case that
+		// asked for it deliberately.
 		return nil
 	}
 	pass := &wgpu.RenderPassDescriptor{Label: desc.Label}
