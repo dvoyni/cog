@@ -34,10 +34,9 @@ type pendingPass struct {
 
 type pendingDraw struct {
 	mesh gfx.MeshDescr
-	// skin is the three group 2 buffers the draw binds: the model's own baked
-	// records, or the shared null skin for everything buffer-built. A declared
-	// binding must be bound or the whole frame's command buffer vanishes
-	// silently, so no member of this is ever zero.
+	// skin is the group 2 buffers the draw binds, and its two flags are also
+	// what picked the draw's shader variant: a half it does not have is a half
+	// the module does not declare, so there is nothing left unbound.
 	skin skinBuffers
 	// material is the gfx material the draw's resolved tag entry named. It is
 	// carried per draw rather than looked up again at emit time because
@@ -111,10 +110,18 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 				gfx.BufferRangeParam("sceneInstances", instances, pass.instanceOffset, pass.instanceBytes),
 				gfx.BufferParam("sceneAnim", anims),
 				gfx.BufferRangeParam("scenePbrMaterial", materials, draw.materialOffset, materialRecordSize),
-				gfx.BufferParam("scenePoses", draw.skin.poses),
-				gfx.BufferParam("sceneSkinJoints", draw.skin.joints),
-				gfx.BufferParam("sceneMorphDeltas", draw.skin.morphs),
 			)
+			// Group 2 is bound only where the draw's variant declares it. The
+			// two halves go separately because the variants split them: a
+			// morph-only face declares binding 2 alone.
+			if draw.skin.bound {
+				b.params = append(b.params,
+					gfx.BufferParam("scenePoses", draw.skin.poses),
+					gfx.BufferParam("sceneSkinJoints", draw.skin.joints))
+			}
+			if draw.skin.morphed {
+				b.params = append(b.params, gfx.BufferParam("sceneMorphDeltas", draw.skin.morphs))
+			}
 			b.params = append(b.params, draw.params...)
 			gfxWrite.DrawInstancedFrom(draw.mesh, *draw.material,
 				draw.firstInstance, draw.instances, b.params...)

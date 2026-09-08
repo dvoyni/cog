@@ -145,11 +145,13 @@ func (e ErrMeshUnavailable) Error() string {
 }
 
 // ErrMeshCustomLayoutNeedsMaterial reports a draw pairing a custom vertex
-// layout with the bundled PBR. The bundled material is one shader module with
-// one vertex stage and no entry-point selection, so its inputs are scene.Vertex's
-// eight attributes and nothing else; the draw is skipped rather than handed to a
+// layout with the bundled PBR. The bundled material has one vertex stage and no
+// entry-point selection, so its inputs are a subset of scene.Vertex's eight
+// attributes and nothing else; the draw is skipped rather than handed to a
 // pipeline that cannot describe it. The reverse - the standard layout with a
-// custom material - is fine.
+// custom material - is fine, and so is a variant declaring only six of the eight
+// the mesh supplies: the direction that fails validation is a shader input no
+// attribute supplies, never the other way round.
 type ErrMeshCustomLayoutNeedsMaterial struct{ Mesh uint32 }
 
 func (e ErrMeshCustomLayoutNeedsMaterial) Error() string {

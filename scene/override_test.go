@@ -135,16 +135,15 @@ func TestAnOverrideParamLeavesEveryMemberItDoesNotNameAlone(t *testing.T) {
 // and fails on the member somebody adds without a way to address it, which is
 // the whole reason the per-slot metadata is flat rather than an array.
 func TestEveryPbrRecordMemberTheShaderDeclaresIsAddressable(t *testing.T) {
-	source, err := shaderFS.ReadFile(sceneShaderPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", sceneShaderPath, err)
-	}
+	// The struct lives in one of the nine sources scene.wgsl composes, so the
+	// authority is the flattened module rather than any one file.
+	source := flattenedSceneShader(t)
 	// pad is not a member anyone means, and uvSets is a packed five-bit
 	// selector no parameter kind expresses - which TEXCOORD set a slot samples
 	// is the file's statement about its own mesh.
 	unaddressable := map[string]bool{"uvSets": true, "pad": true}
 	var record scenePbrRecord
-	members := wgslStructMembers(t, string(source), "ScenePbrMaterial")
+	members := wgslStructMembers(t, source, "ScenePbrMaterial")
 	if len(members) != 19 {
 		t.Fatalf("parsed %d members of ScenePbrMaterial: %v", len(members), members)
 	}

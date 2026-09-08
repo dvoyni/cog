@@ -19,8 +19,8 @@ import (
 // about 350 KiB at 60 Hz.
 type bakedAnimation struct {
 	// jointCount is the width of a pose row. Zero means the model has no
-	// skins and no animated mesh node, which leaves poses empty and every one
-	// of its draws on the null skin.
+	// skins and no animated mesh node, which leaves poses empty and puts every
+	// one of its draws on a variant that declares no pose bindings.
 	jointCount int
 	// poses is [rest frame][clip 0][clip 1]..., jointCount records to a row,
 	// so row = clipBase + frame*jointCount + joint is one MAD in the shader

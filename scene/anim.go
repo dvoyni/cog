@@ -157,17 +157,6 @@ var (
 	morphRecordSize = int(unsafe.Sizeof(m.Vec4{}))
 )
 
-// identityPose is the pose row of a joint that transforms nothing, which is
-// the null skin's one row.
-func identityPose() scenePose {
-	return scenePose{Rotation: m.Vec4{W: 1}, Scale: m.Vec4{X: 1, Y: 1, Z: 1}}
-}
-
-// identitySkinJoint is the joint record of a degenerate single-joint skin: an
-// identity inverse bind, an identity normal matrix and a positive handedness.
-// It is also the null skin's one entry.
-func identitySkinJoint() sceneSkinJoint { return skinJointRecord(m.NewMat4()) }
-
 // skinJointRecord builds one joint's interleaved record from its inverse bind,
 // precomputing the normal matrix and the handedness sign the shader would
 // otherwise have to derive per vertex per influence.

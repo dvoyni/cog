@@ -26,8 +26,9 @@ every section cites the tickets it came from. Nothing is decided here — where 
 claim rests on something unverified, it is marked **Gap** and says what would
 settle it.
 
-The preprocessor does not exist yet. `ShaderDescr`, `translate.go` and
-`ErrShaderNotFound` do, and the changes to them are specified in
+The preprocessor is implemented in `gfx`, in `directive.go`, `condition.go`,
+`flatten.go` and `hoist.go`, behind the one exported entry point
+`FlattenShader`. The changes it needed elsewhere in gfx are listed in
 [Required gfx changes](#required-gfx-changes).
 
 ---
@@ -1142,18 +1143,26 @@ Scene's own contract already says so: `ErrMeshCustomLayoutNeedsMaterial`
 standard layout with a custom material - is fine". `scene.wgsl`'s comment at
 line 261 claimed the opposite and has been corrected to match.
 
-**Gap.** Neither direction is checked anywhere in the local stack.
-`wgpu/hal/software/draw.go` builds a `shaderLocation → attribute` map from the
-layout and then iterates **the shader's** location inputs, `continue`ing on a
-miss — so an attribute nothing consumes is never visited, and a shader input
-with no attribute is silently skipped. The rule above therefore rests on the
-WebGPU specification, on scene's stated contract, and on
-`cog-examples/cmd/scene/loading/repaint.go` shipping a two-input replacement
-material over a standard eight-attribute glTF mesh — **not** on a run against a
-conformant device, since that example's test uses an instrumented fake backend.
-A dx12 or vulkan run would settle it. If it turns out otherwise the fix is
-small: keep all eight attributes declared and guard only the skinning code, at
-the cost of nothing but two unread inputs.
+**Measured, and the rule holds.** Neither direction is checked anywhere in the
+local stack — `wgpu/hal/software/draw.go` builds a `shaderLocation → attribute`
+map from the layout and then iterates **the shader's** location inputs,
+`continue`ing on a miss, so an attribute nothing consumes is never visited and a
+shader input with no attribute is silently skipped. So it was settled against a
+conformant implementation instead: Chrome's WebGPU on a D3D12 adapter, building
+the two pipelines directly.
+
+| pipeline | result |
+| --- | --- |
+| layout supplies 8 attributes, shader declares 6 | **validated** |
+| layout supplies 8, shader declares 8 | validated |
+| layout supplies 6, shader declares 8 | **rejected** — *"Vertex attribute slot 7 used in … is not present in the VertexState"* |
+
+The direction that fails is a shader input no attribute supplies, exactly as
+scene's own contract states; extra attributes the shader never declares are
+permitted. So cutting `@location(6)` / `@location(7)` for an unskinned draw is
+legal while the mesh keeps supplying all eight, and the fallback that was held in
+reserve — declaring all eight unconditionally and guarding only the skinning
+code — is not needed.
 
 ### The prototype code is gone
 

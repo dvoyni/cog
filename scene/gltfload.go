@@ -66,7 +66,7 @@ type loadedModel struct {
 	neverCull bool
 	// animation is the model's baked poses, joint records and clip table. A
 	// file with no skins and no animated mesh node bakes an empty one, which
-	// is what puts every one of its draws on the null skin.
+	// is what puts every one of its draws on a variant with no group 2 at all.
 	animation bakedAnimation
 	// morphDeltas is the model's one delta buffer, every morphed primitive's
 	// targets concatenated and reached by a base offset. One buffer per model

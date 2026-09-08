@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"math"
 	"slices"
+	"strings"
 
 	"github.com/dvoyni/cog/m"
 
@@ -37,7 +38,7 @@ type pipelineKey struct {
 // baked resource ID. It is owned by the plugin and used only on the driver's
 // render thread inside ConsumeCmd.
 type translator struct {
-	shaders        map[ShaderDescr]ShaderID
+	shaders        map[ShaderDescr]*cachedShader
 	pipelines      map[pipelineKey]PipelineID
 	samplers       map[SamplerDesc]SamplerID
 	uarena         []byte
@@ -68,7 +69,7 @@ type translator struct {
 
 func newTranslator() *translator {
 	return &translator{
-		shaders:        map[ShaderDescr]ShaderID{},
+		shaders:        map[ShaderDescr]*cachedShader{},
 		pipelines:      map[pipelineKey]PipelineID{},
 		samplers:       map[SamplerDesc]SamplerID{},
 		layouts:        map[ShaderID]ShaderLayout{},
@@ -316,11 +317,14 @@ func (t *translator) translateDraw(op *op, pass PassDescr, backend Backend, file
 	if m.vertices.id == 0 || m.vertexCount <= 0 || stride <= 0 {
 		return
 	}
+	// Every shader failure is fatal to its draw, whether or not this frame is the
+	// one that reports it: the error surfaces once, the draw is dropped every
+	// time. ErrShaderExceedsWebLimits stays the only non-fatal report in gfx.
 	shaderID, err := t.ensureShader(backend, filesystem, op.material.shader)
-	if err != nil {
-		if *firstErr == nil {
-			*firstErr = err
-		}
+	if err != nil && *firstErr == nil {
+		*firstErr = err
+	}
+	if shaderID == 0 {
 		return
 	}
 	pipeline := t.ensurePipeline(backend, shaderID, m, op.material.state, pass)
@@ -485,20 +489,63 @@ func (t *translator) ensureTexture(backend Backend, filesystem storage.FileSyste
 	return id
 }
 
-func (t *translator) ensureShader(backend Backend, filesystem storage.FileSystem, descr ShaderDescr) (ShaderID, error) {
-	if id, ok := t.shaders[descr]; ok {
-		return id, nil
+// cachedShader is one module in the translator's shader cache: the backend id
+// when it compiled, the error when it did not, and the sources it was built
+// from, which is what eviction scans.
+//
+// A failed shader is cached as failed, on the same (root, supply) key. Without
+// that, the next frame re-reads every source, re-flattens, re-fails and
+// re-reports - at the frame rate.
+type cachedShader struct {
+	id       ShaderID
+	err      error
+	sources  []string
+	reported bool
+}
+
+// report returns the entry's error the first time it is asked and nothing
+// afterwards, following the reportedMissingBackend precedent: a condition true
+// every frame is worth saying once. The caller drops the draw on a zero id
+// rather than on the error, so silence never lets a bad draw through.
+func (c *cachedShader) report() error {
+	if c.err == nil || c.reported {
+		return nil
 	}
-	code, err := t.shaderCode(filesystem, descr)
-	if err != nil {
-		return 0, err
+	c.reported = true
+	return c.err
+}
+
+func (t *translator) ensureShader(backend Backend, filesystem storage.FileSystem, descr ShaderDescr) (ShaderID, error) {
+	if cached, ok := t.shaders[descr]; ok {
+		return cached.id, cached.report()
 	}
 	label := shaderLabel(descr)
-	id, err := backend.NewShader(ShaderDesc{Code: code, Label: label})
+	// Flatten happens here, on the render thread, on a cache miss only - the
+	// first draw of a given (root, supply). The cost changes from one file read
+	// to N, which is the same shape as today's hitch rather than a new class of
+	// problem: if it ever bites, it bites the first frame a material appears,
+	// which is already true.
+	flattened, err := flattenShader(filesystem, descr)
+	// The include set is recorded on failure as well as on success, so that a
+	// failed entry evicts like any other and the developer loop stays: fix the
+	// file, hot-reload evicts, the next frame retries and reports afresh.
+	cached := &cachedShader{sources: flattened.sources}
+	t.shaders[descr] = cached
 	if err != nil {
-		return 0, err
+		cached.err = err
+		return 0, cached.report()
 	}
-	t.shaders[descr] = id
+	id, err := backend.NewShader(ShaderDesc{Code: []byte(flattened.text), Label: label})
+	if err != nil {
+		// Nothing the backend said is rewritten and no line number is parsed out
+		// of its message: gfx appends the rendered segment table and lets the
+		// reader subtract.
+		cached.err = ErrShaderSource{
+			Shader: label, Message: "failed to compile", Err: err, flattened: flattened.sourceMap.render(),
+		}
+		return 0, cached.report()
+	}
+	cached.id = id
 	// Every shader gfx reflects is measured, not only an engine's bundled ones:
 	// a caller-supplied material is what actually gets bound at draw time. The
 	// shader is cached, so this reports once rather than once a frame.
@@ -513,27 +560,40 @@ func (t *translator) releaseCachedResource(backend Backend, path string) {
 		t.ops.ReleaseTexture(texture.id)
 		delete(t.textures, path)
 	}
-	shaderDescr := ShaderWithResource(path)
-	if shader, ok := t.shaders[shaderDescr]; ok {
-		t.releaseShader(backend, shaderDescr, shader)
+	// Eviction scans the forward index rather than probing one descriptor,
+	// because three things break that probe under the preprocessor: a path may
+	// root several variants, a path may be an included source of modules rooted
+	// elsewhere, and a ShaderWithText shader can include resources, so a text
+	// shader is now evictable by a path. A reverse path-to-modules index would be
+	// O(1) instead of O(n), but it is a second structure to keep in sync on every
+	// release for a lookup nobody waits on - eviction is a developer-loop command
+	// and t.shaders holds single digits - and the forward direction is what
+	// flatten already produces.
+	for descr, cached := range t.shaders {
+		if slices.Contains(cached.sources, path) {
+			t.releaseShader(backend, descr, cached)
+		}
 	}
 }
 
-func (t *translator) releaseShader(backend Backend, descr ShaderDescr, shader ShaderID) {
+func (t *translator) releaseShader(backend Backend, descr ShaderDescr, cached *cachedShader) {
+	delete(t.shaders, descr)
+	if cached.id == 0 {
+		return
+	}
 	for key, pipeline := range t.pipelines {
-		if key.shader == shader {
+		if key.shader == cached.id {
 			backend.FreePipeline(pipeline)
 			delete(t.pipelines, key)
 		}
 	}
 	for key := range t.parameterPlans {
-		if key.shader == shader {
+		if key.shader == cached.id {
 			delete(t.parameterPlans, key)
 		}
 	}
-	delete(t.layouts, shader)
-	backend.FreeShader(shader)
-	delete(t.shaders, descr)
+	delete(t.layouts, cached.id)
+	backend.FreeShader(cached.id)
 }
 
 func (t *translator) freeCachedResources(backend Backend) {
@@ -543,8 +603,10 @@ func (t *translator) freeCachedResources(backend Backend) {
 	for _, pipeline := range t.pipelines {
 		backend.FreePipeline(pipeline)
 	}
-	for _, shader := range t.shaders {
-		backend.FreeShader(shader)
+	for _, cached := range t.shaders {
+		if cached.id != 0 {
+			backend.FreeShader(cached.id)
+		}
 	}
 	for _, sampler := range t.samplers {
 		backend.FreeSampler(sampler)
@@ -557,22 +619,15 @@ func (t *translator) freeCachedResources(backend Backend) {
 	clear(t.parameterPlans)
 }
 
-// shaderCode resolves inline source directly or reads a resource from storage.
-func (t *translator) shaderCode(filesystem storage.FileSystem, descr ShaderDescr) ([]byte, error) {
-	if descr.source == ShaderSourceResource {
-		if code, ok := loadShaderResource(filesystem, descr.textOrPath); ok {
-			return code, nil
-		}
-		return nil, ErrShaderNotFound{Name: descr.textOrPath}
-	}
-	return []byte(descr.textOrPath), nil
-}
-
 func shaderLabel(descr ShaderDescr) string {
+	root := "gfx.shader"
 	if descr.source == ShaderSourceResource {
-		return descr.textOrPath
+		root = descr.textOrPath
 	}
-	return "gfx.shader"
+	if descr.supply == "" {
+		return root
+	}
+	return root + " [" + strings.ReplaceAll(descr.supply, "\n", " ") + "]"
 }
 
 // shaderLayout returns the backend's reflected layout for a shader, cached by id.

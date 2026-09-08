@@ -258,9 +258,9 @@ type drawRecord struct {
 	neverCull bool
 	// anim is what the draw's instances say about animation: the group 2
 	// buffers, the sceneAnim offset and whether the geometry skins. A model
-	// expansion fills it; everything else leaves it zero and the flush fills
-	// in the shared null skin, which is what makes a draw literal that never
-	// heard of animation still bind a complete group 2.
+	// expansion fills it; everything else leaves it zero, which is also what
+	// picks the variant that declares no group 2 at all - so a draw literal
+	// that never heard of animation binds nothing there and declares nothing.
 	anim animBinding
 	// group ties together the records one instanced call expanded into, so the
 	// flush can pack their survivors as a single batch. It is the recording

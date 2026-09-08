@@ -331,14 +331,18 @@ at any size, keeping the ref and its id, and refuses a change of vertex layout o
 topology. `ReleaseMesh` stales the ref at once and frees at the frame boundary.
 
 `scene.Vertex` is the one standard layout: glTF's eight core attributes at
-locations 0..7, 84 bytes, interleaved. Nothing in it is optional, because the
-bundled shader is one module with one vertex stage and no entry-point selection.
+locations 0..7, 84 bytes, interleaved. Every mesh supplies all eight whatever it
+draws with — the bundled shader's static variant declares only the first six, and
+extra attributes a shader never declares are permitted (measured on a conformant
+D3D12 adapter; the direction that fails is a shader input no attribute supplies).
 Any other `VertexLayout` is a custom layout, and **a custom layout requires a
 custom `Material`**; the reverse — the standard layout with a custom material —
 is fine.
 
 Buffer-built meshes never skin and never morph. A `MeshRef` has no equivalent of
-the group-2 bindings those need.
+the group-2 bindings those need, and their draws take the bundled variant that
+declares no group 2 at all — thirteen bindings and three storage buffers, against
+the seventeen and seven a fully animated draw declares.
 
 ## Animation
 
@@ -542,10 +546,11 @@ a fragment-stage slot too. Three rules follow, and they are contract:
   `ErrShaderExceedsWebLimits`. A desktop adapter reports hardware limits, so
   checking the real device would pass a build no browser can run.
 
-There is no custom shader contract in v1: gfx does no shader preprocessing, so
-publishing scene's WGSL helpers would mean every consumer carrying a copy of the
-BRDF. A caller may still supply a whole `gfx.MaterialDescr` with its own WGSL —
-it simply gets no scene helper functions.
+There is no custom shader contract in v1. gfx now preprocesses, so scene's WGSL
+helpers *could* be published as includable sources, but what scene publishes and
+how it splits is a decision of its own that has not been taken. A caller may
+still supply a whole `gfx.MaterialDescr` with its own WGSL — it simply gets no
+scene helper functions.
 
 ## Errors
 

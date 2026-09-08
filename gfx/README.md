@@ -8,7 +8,9 @@ triple buffer, resolves resource-backed shaders and textures, translates to a
 [`docs/specs/preprocessor.md`](docs/specs/preprocessor.md) is the design record
 for the WGSL shader preprocessor — the `#include` / `#define` / `#const` / `#if`
 language shader sources are written in, and what each rule is and why. It is
-specified and not yet implemented; nothing else in this README describes it.
+implemented behind `FlattenShader`, which `ensureShader` calls on a cache miss so
+that every backend receives flattened source and none of them knows the
+preprocessor exists; nothing else in this README describes it.
 
 ## Plugin
 

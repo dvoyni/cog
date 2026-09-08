@@ -74,19 +74,26 @@ func firstInstance(t *testing.T, h *harness) sceneInstance {
 	return instances[0]
 }
 
-// Group 2 is declared on the one module every draw goes through, and a
-// declared binding that nothing binds does not degrade the frame - it takes the
-// whole command buffer down silently. So a debug box binds a skin too.
-func TestAnUnskinnedDrawBindsTheNullSkin(t *testing.T) {
+// A draw with no animation of its own declares no group 2 at all, so it binds
+// none: the identity pose and identity joint every such draw used to carry
+// existed only because a declared binding must be bound, and there is no longer
+// a declaration to satisfy.
+func TestAnUnskinnedDrawBindsNoGroupTwo(t *testing.T) {
 	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(cameraMain, testCameraDescr())
 		q.Box(0, At(0, 0, 0), testBoxColor)
 	})
 	h.frame()
-	for _, name := range []string{"scenePoses", "sceneSkinJoints", "sceneAnim"} {
-		if bound := h.backend.buffersBoundTo(name); len(bound) == 0 {
-			t.Errorf("%s was not bound; an unbound declared binding kills the frame", name)
+	for _, name := range []string{"scenePoses", "sceneSkinJoints", "sceneMorphDeltas"} {
+		if bound := h.backend.buffersBoundTo(name); len(bound) != 0 {
+			t.Errorf("%s was bound %d times; a static draw declares none of group 2", name, len(bound))
 		}
+	}
+	// sceneAnim is still supplied on every draw. The static variant does not
+	// declare it, so it simply goes unread: prepareParameterPlan walks the
+	// reflected layout, so a parameter no longer declared is never visited.
+	if bound := h.backend.buffersBoundTo("sceneAnim"); len(bound) == 0 {
+		t.Error("sceneAnim was not supplied")
 	}
 	instance := firstInstance(t, h)
 	if instance.Flags&sceneNoSkin == 0 {
@@ -97,9 +104,10 @@ func TestAnUnskinnedDrawBindsTheNullSkin(t *testing.T) {
 	}
 }
 
-// Every unskinned draw shares one null skin, which is what keeps them batching
-// together instead of fragmenting group 2 a bind group at a time.
-func TestEveryUnskinnedDrawSharesOneNullSkin(t *testing.T) {
+// Unskinned draws still batch together, and now for a better reason than
+// sharing one identity pose: they resolve to one bundled variant, so they take
+// one material id and sort into one instanced call.
+func TestEveryUnskinnedDrawTakesTheSameVariant(t *testing.T) {
 	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(cameraMain, testCameraDescr())
 		for i := range 4 {
@@ -107,36 +115,36 @@ func TestEveryUnskinnedDrawSharesOneNullSkin(t *testing.T) {
 		}
 	})
 	h.frame()
-	bound := h.backend.buffersBoundTo("scenePoses")
-	if len(bound) < 4 {
-		t.Fatalf("scenePoses was bound %d times, want once per draw", len(bound))
+	if bound := h.backend.buffersBoundTo("scenePoses"); len(bound) != 0 {
+		t.Errorf("scenePoses was bound %d times, want never", len(bound))
 	}
-	for i, binding := range bound {
-		if binding.buffer != bound[0].buffer {
-			t.Errorf("draw %d binds pose buffer %v, want the one shared null skin %v",
-				i, binding.buffer, bound[0].buffer)
+	passes := h.passes()
+	if len(passes) != 1 {
+		t.Fatalf("the frame emitted %d passes, want 1", len(passes))
+	}
+	batches := passes[0].Batches
+	if len(batches) != 4 {
+		t.Fatalf("four boxes packed %d batches, want one each", len(batches))
+	}
+	for i, batch := range batches {
+		if batch.MaterialID != batches[0].MaterialID {
+			t.Errorf("box %d took material id %d, want the one static variant's %d",
+				i, batch.MaterialID, batches[0].MaterialID)
 		}
-	}
-	// One identity pose row and one identity joint, and nothing more.
-	if got := len(boundBytes(t, h, "scenePoses")); got != poseSize {
-		t.Errorf("the null skin's pose buffer is %d bytes, want one row of %d", got, poseSize)
-	}
-	if got := len(boundBytes(t, h, "sceneSkinJoints")); got != skinJointSize {
-		t.Errorf("the null skin's joint buffer is %d bytes, want one record of %d", got, skinJointSize)
 	}
 }
 
-// A model with joints binds its own baked records rather than the null skin,
-// and its primitives are marked skinned so the shader follows the pose path.
+// A model with joints binds its own baked records, takes the variant that
+// declares them, and marks its primitives skinned so the shader follows the
+// pose path.
 func TestASkinnedModelBindsItsOwnPosesAndSkins(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))),
 		drawModel(modelPath, ModelDraw{Plays: []ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
-	// One joint over 61 frames plus the rest frame. The null skin is one row,
-	// so the size is what separates "bound the model" from "bound the null skin
-	// and animates nothing".
+	// One joint over 61 frames plus the rest frame. The size is what separates
+	// "bound the model" from "bound a single row and animates nothing".
 	if got, want := len(boundBytes(t, h, "scenePoses")), 62*poseSize; got != want {
 		t.Errorf("the bound pose buffer is %d bytes, want the model's %d", got, want)
 	}
@@ -230,9 +238,9 @@ func TestTheLookupReportsClipsJointsAndPoseBytes(t *testing.T) {
 	})
 }
 
-// A static prop bakes no poses at all, which is what puts it on the null skin
-// and off the per-vertex pose path entirely.
-func TestAStaticModelBakesNoPosesAndBindsTheNullSkin(t *testing.T) {
+// A static prop bakes no poses at all, which is what puts it on the variant that
+// declares none and off the per-vertex pose path entirely.
+func TestAStaticModelBakesNoPosesAndBindsNone(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, onePrimitiveModel(t))),
 		drawModel(modelPath, ModelDraw{}))
 	h.frameUntil(t, "the model to become resident", func() bool {
@@ -246,9 +254,8 @@ func TestAStaticModelBakesNoPosesAndBindsTheNullSkin(t *testing.T) {
 	if instance := firstInstance(t, h); instance.Flags&sceneNoSkin == 0 {
 		t.Error("a static model carries SCENE_NOSKIN")
 	}
-	// The one pose binding in the frame is the null skin's single row.
-	if got := len(boundBytes(t, h, "scenePoses")); got != poseSize {
-		t.Errorf("scenePoses is %d bytes, want the null skin's one row of %d", got, poseSize)
+	if bound := h.backend.buffersBoundTo("scenePoses"); len(bound) != 0 {
+		t.Errorf("scenePoses was bound %d times, want never for a file with no joints", len(bound))
 	}
 }
 

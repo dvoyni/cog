@@ -251,7 +251,7 @@ func TestPackInstanceMarksAnUnskinnedDraw(t *testing.T) {
 func TestBlendJointReadsTheRestFrameWithNoPlays(t *testing.T) {
 	anim := testAnim()
 	anim.poseRows = []scenePose{
-		identityPose(),
+		restPose(),
 		{Rotation: m.Vec4{W: 1}, Translation: m.Vec4{Y: 5}, Scale: m.Vec4{X: 1, Y: 1, Z: 1}},
 	}
 	got, ok := blendJoint(anim, nil, 1)
@@ -268,7 +268,7 @@ func TestBlendJointReadsTheRestFrameWithNoPlays(t *testing.T) {
 func TestBlendJointTakesTheWeightedMean(t *testing.T) {
 	anim := &residentAnimation{jointCount: 1, sampleRate: testSampleRate}
 	anim.poseRows = []scenePose{
-		identityPose(),
+		restPose(),
 		{Rotation: m.Vec4{W: 1}, Translation: m.Vec4{X: 2}, Scale: m.Vec4{X: 1, Y: 1, Z: 1}},
 		{Rotation: m.Vec4{W: 1}, Translation: m.Vec4{X: 6}, Scale: m.Vec4{X: 1, Y: 1, Z: 1}},
 	}
@@ -287,4 +287,10 @@ func TestBlendJointDeclinesWithoutCPUPoseRows(t *testing.T) {
 	if _, ok := blendJoint(testAnim(), nil, 0); ok {
 		t.Error("a model with no CPU rows has no frame-resolved pose to give")
 	}
+}
+
+// restPose is a pose row that transforms nothing, which several blends here use
+// as the row they measure another against.
+func restPose() scenePose {
+	return scenePose{Rotation: m.Vec4{W: 1}, Scale: m.Vec4{X: 1, Y: 1, Z: 1}}
 }

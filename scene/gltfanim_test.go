@@ -52,7 +52,7 @@ func TestAnimationRecordSizesMatchTheShaderContract(t *testing.T) {
 }
 
 // A file with no skins and no animation bakes nothing at all. That is what puts
-// every one of its draws on the null skin rather than charging a static prop a
+// every one of its draws on the variant with no pose bindings rather than charging a static prop a
 // per-vertex pose fetch for a guaranteed identity.
 func TestBakeAnimationIsEmptyWithoutSkinsOrClips(t *testing.T) {
 	doc := testDoc()
@@ -208,7 +208,7 @@ func TestSkinJointRecordCarriesTheHandednessOfTheInverseBind(t *testing.T) {
 	if mirrored.Normal0.W != -1 {
 		t.Errorf("mirrored handedness = %v, want -1", mirrored.Normal0.W)
 	}
-	if identitySkinJoint().Normal0.W != 1 {
+	if skinJointRecord(m.NewMat4()).Normal0.W != 1 {
 		t.Error("an identity bind is right-handed")
 	}
 }
@@ -341,7 +341,7 @@ func TestBakeAnimationGivesAnAnimatedMeshNodeADegenerateJoint(t *testing.T) {
 	}
 	// A degenerate joint has no inverse bind to premultiply, which is one of
 	// the two reasons the pose record holds globalJoint alone.
-	if got := model.animation.joints[0]; got != identitySkinJoint() {
+	if got := model.animation.joints[0]; got != skinJointRecord(m.NewMat4()) {
 		t.Errorf("degenerate joint record = %v, want the identity", got)
 	}
 }

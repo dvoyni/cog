@@ -242,29 +242,23 @@ func (p *Plugin) prepareDraws(
 		}
 		p.prepared[i] = prepareDraw(*record, mesh)
 		p.prepared[i].mesh = ref
-		p.prepared[i].interned = p.materials.intern(report, record.material)
-		// A draw that named no animation of its own binds the shared null skin
-		// in whichever half it left empty, so group 2 is complete on every draw
-		// in the frame. Missing one is not a degraded frame: CreateBindGroup
-		// fails the entry-count rule, its error is swallowed, and the whole
-		// command buffer vanishes silently.
+		// The variant is what the draw actually deforms, and it is decided here
+		// so that the module a draw compiles and the bindings it supplies come
+		// from one answer. A draw with neither half declares no group 2 at all,
+		// which is what removed the shared identity pose it used to bind: the
+		// rule was that a declared binding must be bound, and it now declares
+		// nothing there.
 		//
-		// The two halves are filled separately because a model may have either
-		// on its own: a rigged prop binds its poses and the null delta record,
-		// a morph-only face the other way round. Only a draw with neither loses
-		// its animOffset - a buffer-built draw's is the zero value, which is a
-		// valid offset rather than an absent one.
+		// The two halves are read separately because a model may have either on
+		// its own: a rigged prop has poses and no shapes, a morph-only face the
+		// other way round. Only a draw with neither loses its animOffset - a
+		// buffer-built draw's is the zero value, which is a valid offset rather
+		// than an absent one.
 		skin := &p.prepared[i].anim.skin
-		if !skin.bound {
-			null := lookup.ensureNullSkin(bake)
-			skin.poses, skin.joints, skin.bound = null.poses, null.joints, true
-			if !skin.morphed {
-				p.prepared[i].anim.offset = sceneNoAnim
-			}
-		}
-		if !skin.morphed {
-			null := lookup.ensureNullSkin(bake)
-			skin.morphs, skin.morphed = null.morphs, true
+		p.prepared[i].interned = p.materials.intern(report, record.material,
+			variantFor(skin.bound, skin.morphed))
+		if !skin.bound && !skin.morphed {
+			p.prepared[i].anim.offset = sceneNoAnim
 		}
 	}
 }

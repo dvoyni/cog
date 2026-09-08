@@ -57,9 +57,9 @@ func (la LookupAccess) UnloadTexture(path string) {
 //
 // Buffer-built meshes are not in it: those are the caller's own handles, minted
 // by BakeMesh and released by ReleaseMesh, and a lookup-wide sweep has no way
-// to tell the caller its refs went stale. Nor are scene's own unit meshes, the
-// two default textures or the null skin, which are the plugin's and would have
-// to be re-baked on the very next frame.
+// to tell the caller its refs went stale. Nor are scene's own unit meshes or the
+// two default textures, which are the plugin's and would have to be re-baked on
+// the very next frame.
 func (la LookupAccess) UnloadAll() {
 	if la.Valid() {
 		la.lookup.unloadEverything = true

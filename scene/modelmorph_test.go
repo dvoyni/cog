@@ -77,11 +77,10 @@ func residentMorphModel(t *testing.T, doc *gltf.Document, draw ModelDraw) *harne
 	return h
 }
 
-// A morphed model binds its own delta buffer, and everything else binds the
-// null skin's single zero record. sceneMorphDeltas is declared on the one
-// module every draw goes through, and a declared binding that nothing binds
-// does not degrade the frame - it takes the whole command buffer down silently.
-func TestAMorphedModelBindsItsOwnDeltasAndABoxBindsTheNullOne(t *testing.T) {
+// A morphed model binds its own delta buffer, and a draw with no shapes binds
+// none: sceneMorphDeltas is declared only in the variants that read it, so
+// there is no zero record for a debug box to carry.
+func TestAMorphedModelBindsItsOwnDeltasAndABoxBindsNone(t *testing.T) {
 	h := residentMorphModel(t, morphModel(t), ModelDraw{})
 	// Two targets over three vertices at one slot each.
 	if got, want := len(boundBytes(t, h, "sceneMorphDeltas")), 2*3*morphRecordSize; got != want {
@@ -92,8 +91,8 @@ func TestAMorphedModelBindsItsOwnDeltasAndABoxBindsTheNullOne(t *testing.T) {
 		q.Box(0, At(0, 0, 0), testBoxColor)
 	})
 	box.frame()
-	if got := len(boundBytes(t, box, "sceneMorphDeltas")); got != morphRecordSize {
-		t.Errorf("a debug box binds %d bytes of deltas, want the null skin's one record", got)
+	if bound := box.backend.buffersBoundTo("sceneMorphDeltas"); len(bound) != 0 {
+		t.Errorf("a debug box bound deltas %d times, want never", len(bound))
 	}
 }
 
@@ -168,8 +167,8 @@ func TestAModelWithNoShapesPacksNoMorphList(t *testing.T) {
 	if got := firstInstance(t, h).AnimOffset; got != sceneNoAnim {
 		t.Errorf("AnimOffset = %d, want sceneNoAnim for a model with no animation at all", got)
 	}
-	if got := len(boundBytes(t, h, "sceneMorphDeltas")); got != morphRecordSize {
-		t.Errorf("a static model binds %d bytes of deltas, want the null skin's one record", got)
+	if bound := h.backend.buffersBoundTo("sceneMorphDeltas"); len(bound) != 0 {
+		t.Errorf("a static model bound deltas %d times, want never", len(bound))
 	}
 	h.lookup(func(access LookupAccess) {
 		if got, _ := access.MorphBytes(modelPath); got != 0 {
@@ -227,7 +226,7 @@ func TestASkinnedAndMorphedModelBindsBothOfItsOwnBuffers(t *testing.T) {
 	if instance.Flags&sceneNoSkin != 0 {
 		t.Error("a skinned draw must not carry SCENE_NOSKIN, morphed or not")
 	}
-	// One joint over 61 frames plus the rest frame, not the null skin's row.
+	// One joint over 61 frames plus the rest frame, not a single row.
 	if got, want := len(boundBytes(t, h, "scenePoses")), 62*poseSize; got != want {
 		t.Errorf("the bound pose buffer is %d bytes, want the model's %d", got, want)
 	}

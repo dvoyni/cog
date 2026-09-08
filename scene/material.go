@@ -108,9 +108,10 @@ type materialTable struct {
 	nextID   uint32
 }
 
-// reset starts a frame, interning the bundled PBR first so that a draw naming
-// no material of its own resolves with no map probe at all.
-func (t *materialTable) reset(bundled Material) {
+// reset starts a frame, interning the bundled PBR's four variants first and in
+// variant order, so that a draw naming no material of its own resolves to its
+// variant with no map probe at all.
+func (t *materialTable) reset(bundled [variantCount]Material) {
 	if t.keys == nil {
 		t.keys = map[materialKey]int32{}
 		t.tags = map[PassTag]tagID{}
@@ -118,7 +119,9 @@ func (t *materialTable) reset(bundled Material) {
 	clear(t.keys)
 	t.interned = t.interned[:0]
 	t.nextID = 0
-	t.add(discardBundledReports, bundled)
+	for _, material := range bundled {
+		t.add(discardBundledReports, material)
+	}
 }
 
 // internTag interns one pass tag. It is called once per pass, and an empty tag
@@ -165,9 +168,9 @@ func (t *materialTable) entry(interned int32, tag tagID) (materialEntry, bool) {
 // checking its tags the first time the frame sees it. It is called once per
 // recorded draw per frame, before any pass walks them, which is what keeps the
 // fingerprint and the map probe out of the per-pass path.
-func (t *materialTable) intern(report func(error), material Material) int32 {
+func (t *materialTable) intern(report func(error), material Material, variant shaderVariant) int32 {
 	if material == nil {
-		return 0
+		return int32(variant)
 	}
 	key := material.key()
 	if index, ok := t.keys[key]; ok {
@@ -317,7 +320,7 @@ const normalSlot = 2
 // existing matcher binds them exactly like a material texture. A caller
 // material that names a scene* parameter is an app bug; gfx does not police it,
 // and the material simply loses.
-func bundledPbr(defaults pbrDefaults) Material {
+func bundledPbr(defaults pbrDefaults) [variantCount]Material {
 	params := make([]gfx.ParameterDescr, 0, 2*len(pbrSlots))
 	for i, slot := range pbrSlots {
 		texture := defaults.white
@@ -329,14 +332,59 @@ func bundledPbr(defaults pbrDefaults) Material {
 			gfx.SamplerParam(slot.sampler, pbrSampler),
 		)
 	}
-	return Material{{
-		Tag: TagForward,
-		Descr: gfx.MaterialWithState(
-			gfx.ShaderWithResource(sceneShaderPath),
-			pbrState(alphaOpaque, false),
-			params...,
-		),
-	}}
+	var bundled [variantCount]Material
+	for variant := range bundled {
+		// One params slice serves all four: only the shader differs, and gfx
+		// copies parameters into its own arena as it records.
+		bundled[variant] = Material{{
+			Tag: TagForward,
+			Descr: gfx.MaterialWithState(
+				shaderVariant(variant).shader(), pbrState(alphaOpaque, false), params...),
+		}}
+	}
+	return bundled
+}
+
+// shaderVariant is which of the bundled module's four variants a draw needs. It
+// is derived from the draw rather than declared, because the thing that varies
+// is what the mesh is: a debug line and a static prop read neither the poses nor
+// the deltas, and declaring bindings they never read costs every such draw four
+// of the eight storage buffers a browser core adapter guarantees.
+type shaderVariant int32
+
+const (
+	variantStatic shaderVariant = iota
+	variantSkin
+	variantMorph
+	variantSkinMorph
+	variantCount = 4
+)
+
+// variantFor picks the variant a draw needs from what it actually deforms.
+func variantFor(skinned, morphed bool) shaderVariant {
+	variant := variantStatic
+	if skinned {
+		variant |= variantSkin
+	}
+	if morphed {
+		variant |= variantMorph
+	}
+	return variant
+}
+
+// shader describes the bundled module under this variant's defines. Nothing in
+// gfx needs changing to allow the cut: prepareParameterPlan walks the reflected
+// layout and looks up a parameter by name for each resource, so a parameter that
+// is supplied but no longer declared is never visited.
+func (v shaderVariant) shader() gfx.ShaderDescr {
+	var opts []gfx.ShaderOption
+	if v&variantSkin != 0 {
+		opts = append(opts, gfx.ShaderDefine("SCENE_SKIN"))
+	}
+	if v&variantMorph != 0 {
+		opts = append(opts, gfx.ShaderDefine("SCENE_MORPH"))
+	}
+	return sceneShader(opts...)
 }
 
 // alphaMode is glTF's alphaMode, which selects fixed-function state and, for

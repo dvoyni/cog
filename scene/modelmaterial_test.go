@@ -70,7 +70,7 @@ func TestAPlainModelDrawBindsTheFilesRecordsWithNoCopy(t *testing.T) {
 			if records[i].pbr != &owned.record {
 				t.Errorf("draw %d binds a copied record, want the entry's own", i)
 			}
-			if &records[i].material[0] != &owned.material[0] {
+			if &records[i].material[0] != &owned.variants[variantStatic][0] {
 				t.Errorf("draw %d binds a copied Material, want the entry's own", i)
 			}
 		}
@@ -140,7 +140,7 @@ func TestOverrideParamsKeepTheFilesTexturesAndReachTheDrawsParameters(t *testing
 		key, _ := modelKey(modelPath)
 		entry := lookup.modelEntry(key)
 		for i := range records {
-			if &records[i].material[0] != &entry.materials[i].material[0] {
+			if &records[i].material[0] != &entry.materials[i].variants[variantStatic][0] {
 				t.Errorf("draw %d binds a copied Material, want the file's textures kept", i)
 			}
 		}

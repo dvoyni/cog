@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
 	"io/fs"
 	"math"
 	"slices"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -37,6 +39,8 @@ type fakeBackend struct {
 	samplers       int
 	uploads        int
 	shaderCode     []byte
+	shaderErr      error
+	shaderLabels   []string
 	freedSamplers  []SamplerID
 	freedShaders   []ShaderID
 	freedPipelines []PipelineID
@@ -70,8 +74,12 @@ func (b *fakeBackend) NewSampler(SamplerDesc) (SamplerID, error) {
 }
 func (b *fakeBackend) FreeSampler(id SamplerID) { b.freedSamplers = append(b.freedSamplers, id) }
 func (b *fakeBackend) NewShader(desc ShaderDesc) (ShaderID, error) {
+	if b.shaderErr != nil {
+		return 0, b.shaderErr
+	}
 	b.shaders++
 	b.shaderCode = append(b.shaderCode[:0], desc.Code...)
+	b.shaderLabels = append(b.shaderLabels, desc.Label)
 	return ShaderID(b.id()), nil
 }
 func (b *fakeBackend) FreeShader(id ShaderID) { b.freedShaders = append(b.freedShaders, id) }
@@ -1177,7 +1185,10 @@ func TestStorageResolvesMaterialTexture(t *testing.T) {
 }
 
 func TestStorageResolvesShaderResource(t *testing.T) {
-	const source = "// storage shader"
+	// What reaches the backend is the flattened source, not the file's bytes, so
+	// the fixture is code rather than a comment: comments blank to spaces on the
+	// way through.
+	const source = "const marker = 1;"
 	filesystem := &countingFS{FS: fstest.MapFS{
 		"shader.wgsl": &fstest.MapFile{Data: []byte(source)},
 	}}
@@ -1195,8 +1206,8 @@ func TestStorageResolvesShaderResource(t *testing.T) {
 	if filesystem.opens != 1 {
 		t.Errorf("shader resource opened %d times, want 1", filesystem.opens)
 	}
-	if string(backend.shaderCode) != source {
-		t.Errorf("shader source = %q, want %q", backend.shaderCode, source)
+	if string(backend.shaderCode) != source+"\n" {
+		t.Errorf("shader source = %q, want %q", backend.shaderCode, source+"\n")
 	}
 	if backend.shaders != 1 {
 		t.Errorf("shaders created = %d, want 1", backend.shaders)
@@ -1318,7 +1329,12 @@ func TestFailedTextureResourceLoadIsRetried(t *testing.T) {
 	}
 }
 
-func TestFailedShaderResourceLoadIsRetried(t *testing.T) {
+// A failed shader is cached as failed and reported once, following the
+// reportedMissingBackend precedent. Without the cache the next frame re-reads
+// every source, re-flattens, re-fails and re-reports - at the frame rate. The
+// developer loop is unchanged, because it goes through eviction: fix the file,
+// hot-reload evicts, the next frame retries and reports afresh.
+func TestFailedShaderIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	files := fstest.MapFS{}
 	filesystem := &countingFS{FS: files}
 	p := New()
@@ -1338,21 +1354,78 @@ func TestFailedShaderResourceLoadIsRetried(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
 	material := Material(ShaderWithResource("later.wgsl"))
-
-	for attempt := range 2 {
+	draw := func() {
 		w := recordList(t, k)
 		w.Draw(triangle(), material)
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
-		if attempt == 0 {
-			if len(p.translator.shaders) != 0 {
-				t.Fatal("failed shader load was cached")
-			}
-			files["later.wgsl"] = &fstest.MapFile{Data: []byte("// shader")}
-		}
 	}
+
+	draw()
+	if len(p.translator.shaders) != 1 {
+		t.Fatalf("failed shader entries cached = %d, want 1", len(p.translator.shaders))
+	}
+	if filesystem.opens != 1 || errorsReported != 1 || backend.shaders != 0 {
+		t.Fatalf("first frame opens/errors/shaders = (%d, %d, %d), want (1, 1, 0)", filesystem.opens, errorsReported, backend.shaders)
+	}
+
+	// The second frame neither re-reads nor re-reports: the entry says what
+	// happened, and the draw is dropped on the strength of it.
+	draw()
+	if filesystem.opens != 1 || errorsReported != 1 {
+		t.Fatalf("second frame opens/errors = (%d, %d), want (1, 1)", filesystem.opens, errorsReported)
+	}
+
+	// The path was recorded even though it could not be opened, which is what
+	// lets the hot-reload of the file the author just wrote clear the failure.
+	files["later.wgsl"] = &fstest.MapFile{Data: []byte("const marker = 1;")}
+	k.ExecuteCommand[ReleaseCachedResourceCmd](ReleaseCachedResourceRequest{Path: "later.wgsl"})
+	draw()
 	if filesystem.opens != 2 || len(p.translator.shaders) != 1 || backend.shaders != 1 || errorsReported != 1 {
-		t.Fatalf("retry opens/cache/shaders/errors = (%d, %d, %d, %d), want (2, 1, 1, 1)", filesystem.opens, len(p.translator.shaders), backend.shaders, errorsReported)
+		t.Fatalf("after eviction opens/cache/shaders/errors = (%d, %d, %d, %d), want (2, 1, 1, 1)",
+			filesystem.opens, len(p.translator.shaders), backend.shaders, errorsReported)
+	}
+}
+
+// Three things break the old single probe of t.shaders[ShaderWithResource(path)]:
+// a path may root several variants, a path may be an included source of modules
+// rooted elsewhere, and a ShaderWithText shader can include resources.
+func TestEvictionScansTheForwardIncludeSet(t *testing.T) {
+	filesystem := &countingFS{FS: fstest.MapFS{
+		"root.wgsl":   &fstest.MapFile{Data: []byte("#include ./shared.wgsl\nconst root = 1;")},
+		"shared.wgsl": &fstest.MapFile{Data: []byte("const shared = 1;")},
+	}}
+	p := New()
+	k := newTestKernelWithFS(t, p, filesystem)
+	backend := &fakeBackend{}
+	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
+
+	// Two variants rooted at one path, plus a text shader that includes the same
+	// shared source: three modules, none of them found by that probe.
+	materials := []MaterialDescr{
+		Material(ShaderWithResource("root.wgsl")),
+		Material(ShaderWithResource("root.wgsl", ShaderDefine("HQ"))),
+		Material(ShaderWithText("#include shared.wgsl\nconst inline = 1;")),
+	}
+	w := recordList(t, k)
+	for _, material := range materials {
+		w.Draw(triangle(), material)
+	}
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
+	k.PublishEvent(app.RenderEvent{}).Wait()
+	if len(p.translator.shaders) != 3 {
+		t.Fatalf("cached modules = %d, want 3", len(p.translator.shaders))
+	}
+
+	k.ExecuteCommand[ReleaseCachedResourceCmd](ReleaseCachedResourceRequest{Path: "shared.wgsl"})
+	w = recordList(t, k)
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
+	k.PublishEvent(app.RenderEvent{}).Wait()
+	if len(p.translator.shaders) != 0 {
+		t.Fatalf("releasing an included source left %d modules cached", len(p.translator.shaders))
+	}
+	if len(backend.freedShaders) != 3 {
+		t.Fatalf("freed %d backend shaders, want 3", len(backend.freedShaders))
 	}
 }
 
@@ -1512,5 +1585,98 @@ func TestAShaderWithoutAUniformBlockGetsNoUniformBinding(t *testing.T) {
 	}
 	if got := countOps(backend.lastOps, gpuSetParams); got != 0 {
 		t.Fatalf("uniform ops = %d, want none: the shader declares no uniform block", got)
+	}
+}
+
+// One root path with several supplies is several shaders, not one shader with
+// several states, and each reaches the backend under its own label. Without the
+// label four modules from one root source would be named identically, and the
+// storage-buffer limit report - the diagnostic conditional compilation exists to
+// make unnecessary - could not say which variant tripped it.
+func TestEachVariantIsItsOwnModuleUnderItsOwnLabel(t *testing.T) {
+	filesystem := &countingFS{FS: fstest.MapFS{
+		"scene.wgsl": &fstest.MapFile{Data: []byte("//#if SKIN\nconst skin = 1;\n//#endif\nconst always = 1;")},
+	}}
+	p := New()
+	k := newTestKernelWithFS(t, p, filesystem)
+	backend := &fakeBackend{}
+	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
+
+	w := recordList(t, k)
+	for _, opts := range [][]ShaderOption{
+		nil,
+		{ShaderDefine("SKIN")},
+		{ShaderDefine("MORPH")},
+		{ShaderDefine("SKIN"), ShaderDefine("MORPH")},
+	} {
+		w.Draw(triangle(), Material(ShaderWithResource("scene.wgsl", opts...)))
+	}
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
+	k.PublishEvent(app.RenderEvent{}).Wait()
+
+	if len(p.translator.shaders) != 4 || backend.shaders != 4 {
+		t.Fatalf("four supplies cached %d modules and built %d, want 4 and 4",
+			len(p.translator.shaders), backend.shaders)
+	}
+	want := []string{
+		"scene.wgsl",
+		"scene.wgsl [SKIN]",
+		"scene.wgsl [MORPH]",
+		"scene.wgsl [MORPH SKIN]",
+	}
+	for i, label := range want {
+		if backend.shaderLabels[i] != label {
+			t.Errorf("module %d is labelled %q, want %q", i, backend.shaderLabels[i], label)
+		}
+	}
+	// The cut is real, not just a distinct key: the last module built carries
+	// the declaration its define guards.
+	if !bytes.Contains(backend.shaderCode, []byte("const skin")) {
+		t.Error("the last variant lost its guarded declaration")
+	}
+}
+
+// No line number ever crosses the backend boundary as data: gogpu returns an
+// internal parse-error type, so errors.As can never recover a line, and gfx must
+// not import a backend's parser in any case. So gfx appends the rendered segment
+// table and lets the reader subtract.
+func TestABackendCompileFailureCarriesTheSegmentTable(t *testing.T) {
+	filesystem := &countingFS{FS: fstest.MapFS{
+		"root.wgsl": &fstest.MapFile{Data: []byte("#include ./part.wgsl\nconst root = 1;")},
+		"part.wgsl": &fstest.MapFile{Data: []byte("const part = 1;\nconst more = 2;")},
+	}}
+	p := New()
+	var reported []error
+	k := newTestKernelWith(t, p, filesystem, func(err error) bool {
+		reported = append(reported, err)
+		return false
+	})
+	backend := &fakeBackend{shaderErr: errors.New("wgpu: parse error: line 3, column 12: expected ';'")}
+	k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: backend})
+
+	w := recordList(t, k)
+	w.Draw(triangle(), Material(ShaderWithResource("root.wgsl", ShaderDefine("HQ"))))
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
+	k.PublishEvent(app.RenderEvent{}).Wait()
+
+	if len(reported) != 1 {
+		t.Fatalf("the frame reported %d errors, want 1: %v", len(reported), reported)
+	}
+	var refused ErrShaderSource
+	if !errors.As(reported[0], &refused) {
+		t.Fatalf("reported %v, want an ErrShaderSource", reported[0])
+	}
+	if !errors.Is(refused.Err, backend.shaderErr) {
+		t.Errorf("Err = %v, want the backend's own error unrewritten", refused.Err)
+	}
+	rendered := refused.Error()
+	for _, want := range []string{
+		`root.wgsl [HQ]`,
+		"line 3, column 12",
+		"flattened: 1-1 root.wgsl; 2-3 part.wgsl (root.wgsl:1); 4-4 root.wgsl@2",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("Error() = %q, missing %q", rendered, want)
+		}
 	}
 }

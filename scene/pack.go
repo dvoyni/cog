@@ -45,11 +45,10 @@ const (
 	// correct, but it charges a procedural terrain mesh a per-vertex pose fetch
 	// for a guaranteed identity.
 	//
-	// The bindings it selects away from are declared regardless, because a
-	// declared binding must still be bound: such a draw binds the shared null
-	// skin — one identity pose row and a one-element joint array — and every
-	// buffer-built draw shares that one pair, so they batch together instead
-	// of fragmenting group 2.
+	// The flag is read only by the variant that declares the pose bindings at
+	// all. A draw with no skin buffers takes a variant without them, so the
+	// early return it selects is a second line of defence rather than the
+	// mechanism: what removes the cost is that the code is not there.
 	sceneNoSkin uint32 = 1 << 1
 )
 
@@ -222,13 +221,14 @@ type animBinding struct {
 	skinned bool
 }
 
-// skinBuffers is the three group 2 bindings a draw reads: a model's own baked
-// records, or the shared null skin's, in either half independently.
+// skinBuffers is the group 2 bindings a draw reads, in either half
+// independently. The two flags are also what picks the draw's shader variant, so
+// a half left empty is a half the module does not declare.
 type skinBuffers struct {
 	poses  gfx.BufferDescr
 	joints gfx.BufferDescr
-	// morphs is the model's one delta buffer, or the null skin's single zero
-	// record. It is a binding of its own rather than a range of the pose buffer
+	// morphs is the model's one delta buffer. It is a binding of its own rather
+	// than a range of the pose buffer
 	// because the two halves are answered separately: a rigged prop has poses
 	// and no shapes, and a face has shapes and no poses.
 	morphs gfx.BufferDescr

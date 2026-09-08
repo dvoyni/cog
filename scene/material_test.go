@@ -215,9 +215,11 @@ func TestAlphaModeAndDoubleSidedMapOntoPipelineState(t *testing.T) {
 }
 
 // resolve is what one frame does with one draw: intern its material once, then
-// read its entry for the pass being flushed.
+// read its entry for the pass being flushed. A draw naming no material of its
+// own resolves to the bundled variant its mesh needs; these tests use the static
+// one, which is what a buffer-built mesh takes.
 func resolve(table *materialTable, report func(error), material Material, tag tagID) (materialEntry, bool) {
-	return table.entry(table.intern(report, material), tag)
+	return table.entry(table.intern(report, material, variantStatic), tag)
 }
 
 // A caller-supplied gfx.MaterialDescr has no id of its own, so materials intern

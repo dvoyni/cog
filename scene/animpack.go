@@ -21,7 +21,8 @@ type residentAnimation struct {
 	jointNames []string
 	// poses and skinJoints are the durable buffers, and the two byte counts
 	// are what PoseBytes and TotalPoseBytes report. A model with no joints
-	// bakes neither and draws on the null skin.
+	// bakes neither, and its draws take the variant that declares no pose
+	// bindings at all.
 	poses          gfx.BufferDescr
 	skinJoints     gfx.BufferDescr
 	poseBytes      int
@@ -46,10 +47,10 @@ type residentAnimation struct {
 
 // skin reports the group 2 buffers a draw of this model binds.
 //
-// The three bindings are answered independently: a rigged prop with no shapes
-// binds its own poses and the null skin's delta buffer, and a morph-only face
-// the other way round. A declared binding must still be bound whichever half
-// the model has, so the flush fills whatever is left here unbound.
+// The two halves are answered independently: a rigged prop has poses and no
+// shapes, and a morph-only face the other way round. What is answered here is
+// also what picks the draw's shader variant, so a half the model does not have
+// is a half the module does not declare and nothing is left unbound.
 func (a *residentAnimation) skin() skinBuffers {
 	var skin skinBuffers
 	if a.jointCount > 0 {

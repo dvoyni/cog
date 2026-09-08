@@ -3,7 +3,6 @@ package scene
 import (
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/m"
 )
 
 // Lookup is the single scene-owned persistent resource. It holds everything
@@ -46,12 +45,6 @@ type Lookup struct {
 	// has no reserved zero value.
 	defaults    pbrDefaults
 	hasDefaults bool
-	// nullSkin is the group 2 every draw with no animation of its own binds:
-	// one identity pose row, one identity joint record and one zero morph
-	// delta, baked on first use and shared by every buffer-built draw in the
-	// process. Sharing it is what keeps those draws batching together instead
-	// of fragmenting group 2.
-	nullSkin skinBuffers
 	// reported suppresses repeated reports for one model or texture path until
 	// it loads successfully or is unloaded - canvas's precedent.
 	reported map[string]struct{}
@@ -63,11 +56,12 @@ type Lookup struct {
 	unloadModels     []string
 	unloadTextures   []string
 	unloadEverything bool
-	// bundled is the bundled PBR material, built on first use around the two
-	// default textures. It is not a package-level value because those textures
+	// bundled is the bundled PBR material once per shader variant, built on
+	// first use around the two default textures. It is not a package-level value because those textures
 	// are baked resources: the backend may not be Ready() at startup, and a
 	// texture baked then would either panic or silently not exist.
-	bundled Material
+	bundled    [variantCount]Material
+	hasBundled bool
 }
 
 func newLookup(config Config) *Lookup { return &Lookup{config: config} }
@@ -102,17 +96,17 @@ func NewLookupAccess(k kernel.Kernel, lookup *Lookup) LookupAccess {
 // Valid reports whether the facade is backed by a live Lookup.
 func (la LookupAccess) Valid() bool { return la.lookup != nil }
 
-// ensureBundled builds the bundled PBR the first time something draws, baking
-// the two 1x1 default textures it binds into every absent slot, and returns the
-// same material forever after.
+// ensureBundled builds the bundled PBR's four variants the first time something
+// draws, baking the two 1x1 default textures they bind into every absent slot,
+// and returns the same materials forever after.
 //
 // 1x1 rather than larger because uploads carry no row-alignment rule and for a
 // constant texel every mip level is identical, so there is nothing to generate.
 // Both are linear-format: 1.0 is a fixed point of the sRGB transfer curve, so
 // the white texel reads 1.0 through an sRGB slot and a linear one alike, and
 // the flat normal is not a picture at all.
-func (l *Lookup) ensureBundled(bake bakeTextureFunc) Material {
-	if l.bundled != nil {
+func (l *Lookup) ensureBundled(bake bakeTextureFunc) [variantCount]Material {
+	if l.hasBundled {
 		return l.bundled
 	}
 	if !l.hasDefaults {
@@ -122,39 +116,6 @@ func (l *Lookup) ensureBundled(bake bakeTextureFunc) Material {
 		}
 		l.hasDefaults = true
 	}
-	l.bundled = bundledPbr(l.defaults)
+	l.bundled, l.hasBundled = bundledPbr(l.defaults), true
 	return l.bundled
-}
-
-// ensureNullSkin bakes the one-row, one-joint, one-delta skin every draw with
-// no animation of its own binds, once.
-//
-// It exists because a declared binding must be bound. Group 2 is declared by
-// the one bundled module, which every draw goes through, and a missing entry
-// is not a degraded frame: CreateBindGroup fails the entry-count rule, the
-// error is swallowed, encoder.Finish()'s error is dropped, and the whole
-// frame's command buffer vanishes with no error anywhere.
-//
-// The alternative - riding the free rest-frame path with SCENE_NOSKIN unset -
-// needs no new mechanism and is correct, but it charges a procedural terrain
-// mesh a per-vertex pose fetch and TRS blend for a guaranteed identity.
-func (l *Lookup) ensureNullSkin(bake bakeFunc) skinBuffers {
-	if l.nullSkin.bound {
-		return l.nullSkin
-	}
-	pose := identityPose()
-	joint := identitySkinJoint()
-	// One zero delta record, for the same reason as the pose and the joint. A
-	// draw that morphs nothing still declares sceneMorphDeltas, and an empty
-	// buffer is no buffer at all: BakeBuffer returns nothing for no bytes,
-	// which is the unbound binding the whole rule exists to avoid.
-	var delta m.Vec4
-	l.nullSkin = skinBuffers{
-		poses:   bake(recordBytes(&pose)),
-		joints:  bake(recordBytes(&joint)),
-		morphs:  bake(recordBytes(&delta)),
-		bound:   true,
-		morphed: true,
-	}
-	return l.nullSkin
 }

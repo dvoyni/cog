@@ -70,8 +70,8 @@ func (m MaterialDescr) CloneTo(arena []ParameterDescr) (MaterialDescr, []Paramet
 func (m MaterialDescr) State() MaterialState { return m.state }
 
 // Fingerprint hashes everything that makes one material different from
-// another: the shader by source kind and text-or-path, the pipeline state, and
-// every parameter in order by name, kind and value. Two descriptors with the
+// another: the shader by source kind, text-or-path and supply, the pipeline
+// state, and every parameter in order by name, kind and value. Two descriptors with the
 // same content fingerprint the same regardless of which backing their
 // parameters live in, so a recorder that builds its material inline every draw
 // still sorts those draws together.
@@ -89,6 +89,11 @@ func (m MaterialDescr) Fingerprint() uint64 {
 	h.SetSeed(fingerprintSeed)
 	writeUint(&h, uint64(m.shader.source))
 	h.WriteString(m.shader.textOrPath)
+	// The supply is part of the shader's identity, so it is part of the
+	// material's: without it two materials differing only in their defines
+	// fingerprint the same, merge into one batch, and one of them draws the
+	// wrong module.
+	h.WriteString(m.shader.supply)
 	writeUint(&h, uint64(m.state.Blend)|uint64(m.state.DepthCompare)<<8|
 		uint64(m.state.Cull)<<16|uint64(m.state.FrontFace)<<24|boolBit(m.state.DepthWrite)<<32)
 	for i := range m.params {

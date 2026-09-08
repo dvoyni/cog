@@ -5,27 +5,46 @@ import (
 	"testing"
 
 	cgfx "github.com/dvoyni/cog/gfx"
+	"github.com/dvoyni/cog/storage"
 )
 
-// bundledSceneShader reads scene's shader off disk rather than importing the
-// scene package. wgpu is the only tree with a WGSL front end, so the check has
-// to live here, and reading the file keeps the driver from depending on a
-// plugin that sits above it.
-func bundledSceneShader(t *testing.T) string {
+// bundledSceneShader flattens one variant of scene's shader off disk rather
+// than importing the scene package. wgpu is the only tree with a WGSL front end,
+// so the check has to live here, and reading the sources keeps the driver from
+// depending on a plugin that sits above it.
+//
+// SCENE_MAX_LIGHTS is deliberately not supplied: the array's size below is the
+// includee's own default, which is what an unsupplied #const means.
+func bundledSceneShader(t *testing.T, opts ...cgfx.ShaderOption) string {
 	t.Helper()
-	source, err := os.ReadFile("../scene/builtin/scene/scene.wgsl")
+	filesystem := storage.NewFileSystem("scene", os.DirFS("../scene"))
+	text, _, err := cgfx.FlattenShader(filesystem, cgfx.ShaderWithResource("builtin/scene/scene.wgsl", opts...))
 	if err != nil {
-		t.Fatalf("read the bundled scene shader: %v", err)
+		t.Fatalf("flatten the bundled scene shader: %v", err)
 	}
-	return string(source)
+	return text
 }
+
+// sceneVariant is the supply for one of the four variants scene draws.
+func sceneVariant(defines ...string) []cgfx.ShaderOption {
+	opts := make([]cgfx.ShaderOption, 0, len(defines))
+	for _, name := range defines {
+		opts = append(opts, cgfx.ShaderDefine(name))
+	}
+	return opts
+}
+
+// everyFeature is the variant a skinned, morphed draw gets. With both defines
+// supplied the reflected layout must match what the single unsplit module
+// declared, which is what makes the split falsifiable against one number.
+func everyFeature() []cgfx.ShaderOption { return sceneVariant("SCENE_SKIN", "SCENE_MORPH") }
 
 // The bundled shader is the one module every scene draw goes through, and a
 // binding it declares but scene does not bind takes the whole frame's command
 // buffer down silently. So the bindings it declares are asserted here, where
 // they can be read without a GPU.
 func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
-	layout, err := reflectShaderLayout(bundledSceneShader(t))
+	layout, err := reflectShaderLayout(bundledSceneShader(t, everyFeature()...))
 	if err != nil {
 		t.Fatalf("reflect the bundled scene shader: %v", err)
 	}
@@ -45,9 +64,9 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 		{name: "sceneInstances", group: 0, binding: 1},
 		{name: "sceneAnim", group: 0, binding: 2},
 		{name: "scenePbrMaterial", group: 1, binding: 0},
-		// Group 2 is per model. Every draw binds all three, skinned or morphed
-		// or neither: a draw with no animation of its own gets the shared null
-		// skin, because a declared binding must still be bound.
+		// Group 2 is per model, and this is the everything variant, so all
+		// three are declared. A draw that reads none of them declares none of
+		// them - see TestBundledSceneShaderVariantsDeclareOnlyWhatTheyRead.
 		{name: "scenePoses", group: 2, binding: 0},
 		{name: "sceneSkinJoints", group: 2, binding: 1},
 		{name: "sceneMorphDeltas", group: 2, binding: 2},
@@ -95,7 +114,7 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 // with nothing between them to catch a drift: scene packs bytes, the shader
 // reads them, and a mismatch renders a plausible wrong picture.
 func TestBundledSceneShaderRecordsMatchTheirPackedOffsets(t *testing.T) {
-	layout, err := reflectShaderLayout(bundledSceneShader(t))
+	layout, err := reflectShaderLayout(bundledSceneShader(t, everyFeature()...))
 	if err != nil {
 		t.Fatalf("reflect the bundled scene shader: %v", err)
 	}
@@ -188,7 +207,7 @@ func membersOf(t *testing.T, layout cgfx.ShaderLayout, name string) []cgfx.Stora
 // reflected binding costs a slot in both stages because reflection never
 // consults entry points.
 func TestBundledSceneShaderFitsTheWebStorageBudget(t *testing.T) {
-	layout, err := reflectShaderLayout(bundledSceneShader(t))
+	layout, err := reflectShaderLayout(bundledSceneShader(t, everyFeature()...))
 	if err != nil {
 		t.Fatalf("reflect the bundled scene shader: %v", err)
 	}
@@ -200,5 +219,103 @@ func TestBundledSceneShaderFitsTheWebStorageBudget(t *testing.T) {
 	}
 	if floor := cgfx.DefaultLimits.MaxStorageBuffersPerShaderStage; storage > floor {
 		t.Fatalf("the bundled scene shader declares %d storage buffers, past the web floor of %d", storage, floor)
+	}
+}
+
+// A draw declares only the bindings it actually uses, and the numbers below are
+// the whole argument for the split: a static draw drops from seven storage
+// buffers to three. scene.wgsl recorded that sceneMorphDeltas was "the seventh
+// and last one this module may ever declare - the eighth stays reserved",
+// against the browser core adapter's floor of eight per stage. The budget was
+// one binding from exhausted for every draw, including a debug line that reads
+// none of them.
+func TestBundledSceneShaderVariantsDeclareOnlyWhatTheyRead(t *testing.T) {
+	for _, want := range []struct {
+		name     string
+		defines  []string
+		bindings int
+		storage  int
+	}{
+		{name: "debug line or static prop", defines: nil, bindings: 13, storage: 3},
+		{name: "morph only, a face", defines: []string{"SCENE_MORPH"}, bindings: 15, storage: 5},
+		{name: "skinned, no morph", defines: []string{"SCENE_SKIN"}, bindings: 16, storage: 6},
+		{name: "everything", defines: []string{"SCENE_SKIN", "SCENE_MORPH"}, bindings: 17, storage: 7},
+	} {
+		layout, err := reflectShaderLayout(bundledSceneShader(t, sceneVariant(want.defines...)...))
+		if err != nil {
+			t.Fatalf("%s: reflect: %v", want.name, err)
+		}
+		storage := 0
+		for _, resource := range layout.Resources {
+			if resource.StorageBuffer {
+				storage++
+			}
+		}
+		if len(layout.Resources) != want.bindings || storage != want.storage {
+			t.Errorf("%s declares %d bindings and %d storage buffers, want %d and %d",
+				want.name, len(layout.Resources), storage, want.bindings, want.storage)
+		}
+	}
+}
+
+// The morph-only variant declares group 2 binding 2 with no bindings 0 or 1.
+// WebGPU permits non-contiguous binding numbers and gfx builds its layouts from
+// reflection rather than by counting, so the gap costs nothing - but it is the
+// first time a group's shape varies by variant, and anything assuming density
+// would break on it.
+func TestMorphOnlyVariantLeavesAGapInGroupTwo(t *testing.T) {
+	layout, err := reflectShaderLayout(bundledSceneShader(t, sceneVariant("SCENE_MORPH")...))
+	if err != nil {
+		t.Fatalf("reflect: %v", err)
+	}
+	var groupTwo []int
+	for _, resource := range layout.Resources {
+		if resource.Group == 2 {
+			groupTwo = append(groupTwo, resource.Binding)
+		}
+	}
+	if len(groupTwo) != 1 || groupTwo[0] != 2 {
+		t.Fatalf("group 2 holds bindings %v, want just binding 2", groupTwo)
+	}
+	// buildShaderLayouts keys every entry on the reflected binding number and
+	// sizes the group array by the highest group it saw, so the gap is carried
+	// rather than counted over. That it needs a device to run is why the shape is
+	// asserted here and the pipeline is built by the examples.
+	for _, resource := range layout.Resources {
+		if resource.Group == 2 && resource.Name != "sceneMorphDeltas" {
+			t.Errorf("group 2 also declares %q in the morph-only variant", resource.Name)
+		}
+	}
+}
+
+// The includee declares its own default and Go overrides it, which is what
+// keeps scene's cap and the shader's array in step instead of duplicated. The
+// span moves because the array is the record's tail.
+func TestSceneMaxLightsOverrideResizesTheFrameRecord(t *testing.T) {
+	for _, want := range []struct {
+		supplied string
+		span     int
+	}{
+		{supplied: "", span: 1056},
+		{supplied: "4", span: 480},
+	} {
+		opts := everyFeature()
+		if want.supplied != "" {
+			opts = append(opts, cgfx.ShaderConst("SCENE_MAX_LIGHTS", want.supplied))
+		}
+		layout, err := reflectShaderLayout(bundledSceneShader(t, opts...))
+		if err != nil {
+			t.Fatalf("supplied %q: reflect: %v", want.supplied, err)
+		}
+		span := 0
+		for _, member := range membersOf(t, layout, "sceneFrame") {
+			if member.Name == "lights" {
+				span = member.Offset + member.Count*member.Stride
+			}
+		}
+		if span != want.span {
+			t.Errorf("with SCENE_MAX_LIGHTS %q the frame record spans %d bytes, want %d",
+				want.supplied, span, want.span)
+		}
 	}
 }

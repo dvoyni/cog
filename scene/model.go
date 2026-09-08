@@ -289,8 +289,12 @@ func (p *Plugin) expandModels(
 			// bindings: "the file's parameters do not survive" is as much the
 			// numbers as the textures, and a nil record is what makes the draw
 			// take glTF's own defaults instead.
+			// The variant comes from the model's own skin, which is also what
+			// the draw binds, so the module a draw compiles and the bindings it
+			// supplies can never disagree.
 			owned := &view.materials[primitive.material]
-			material, record := owned.material, &owned.record
+			skin := p.modelAnims[i].skin
+			material, record := owned.variants[variantFor(skin.bound, skin.morphed)], &owned.record
 			if model.material != nil {
 				material, record = model.material, nil
 			}

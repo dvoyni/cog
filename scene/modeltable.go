@@ -87,10 +87,15 @@ type modelPrimitive struct {
 	morph morphBinding
 }
 
-// modelMaterial is one converted glTF material: the scene material a draw binds
-// and the per-batch record that carries its numbers.
+// modelMaterial is one converted glTF material: the scene material a draw binds,
+// once per shader variant, and the per-batch record that carries its numbers.
+//
+// One glTF material serves whatever primitives reference it, and what a
+// primitive deforms is not the material's business - so the variant is picked at
+// the draw, from the same skin the draw binds, and the material carries all four
+// rather than deciding.
 type modelMaterial struct {
-	material Material
+	variants [variantCount]Material
 	record   scenePbrRecord
 }
 
@@ -304,14 +309,15 @@ func bindModelMaterial(
 			gfx.SamplerParam(name.sampler, loaded.samplers[slot]),
 		)
 	}
-	return modelMaterial{
-		record: loaded.record,
-		material: Material{{
-			Tag: TagForward,
-			Descr: gfx.MaterialWithState(
-				gfx.ShaderWithResource(sceneShaderPath), loaded.state, params...),
-		}},
+	built := modelMaterial{record: loaded.record}
+	for variant := range built.variants {
+		// One params slice serves all four: only the shader differs.
+		built.variants[variant] = Material{{
+			Tag:   TagForward,
+			Descr: gfx.MaterialWithState(shaderVariant(variant).shader(), loaded.state, params...),
+		}}
 	}
+	return built
 }
 
 // bakeModelGeometry uploads one converted primitive and claims a durable mesh
@@ -418,9 +424,10 @@ func (la LookupAccess) Preload(path string) {
 // residentAnimation uploads a model's baked poses and joint records and keeps
 // the clip table the packer reads every frame.
 //
-// A model with no joints uploads nothing and every one of its draws binds the
-// null skin. That is the common case - a static prop - and it is why the two
-// buffers are per model rather than a shared arena everything indexes into.
+// A model with no joints uploads nothing and every one of its draws declares no
+// pose bindings to fill. That is the common case - a static prop - and it is why
+// the two buffers are per model rather than a shared arena everything indexes
+// into.
 func (l *Lookup) residentAnimation(
 	loaded *loadedModel, resources *gfx.ResourceQueue,
 ) residentAnimation {
