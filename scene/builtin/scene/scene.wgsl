@@ -259,9 +259,14 @@ const SCENE_PI: f32 = 3.14159265359;
 const SCENE_DIELECTRIC_F0: vec3<f32> = vec3<f32>(0.04, 0.04, 0.04);
 
 // SceneVertexIn is the one vertex layout, glTF's eight core attributes at
-// locations 0..7. All eight are declared even where this module does not read
-// them: the layout is fixed for every scene mesh, and a shader input that is
-// missing where the buffer supplies it is the mismatch that fails validation.
+// locations 0..7. Every scene mesh supplies all eight - scene.Vertex is one
+// struct with a fixed stride - and this module reads all eight, so the two
+// match exactly and neither direction of the layout rule is leaned on here.
+// The direction that does fail validation is a shader input no attribute
+// supplies; extra attributes the shader never declares are permitted, which
+// is why a replacement material may declare a subset of these locations and
+// still draw a standard mesh - see ErrMeshCustomLayoutNeedsMaterial, which
+// guards only the other way round.
 struct SceneVertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,

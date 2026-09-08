@@ -171,3 +171,30 @@ One placement of one recorded thing. A recording call carrying many transforms d
 **Batch**:
 One run of Instances sharing a mesh and a Scene material, which is one draw call.
 _Avoid_: Cluster, group
+
+## Shader Sources
+
+**Shader source**:
+One `.wgsl` file. Sources are what an include composes; a source is not a unit the GPU ever sees.
+
+**Shader module**:
+The compiled WGSL unit behind one shader identity. Many Shader sources flatten into one Shader module, so the two are never interchangeable.
+_Avoid_: Calling an included source a module
+
+**Root source**:
+The Shader source a shader descriptor names, by path or by text. It is the entry point of one flatten, and the only source addressed from Go.
+
+**Define**:
+A valueless flag readable only by a preprocessor conditional. It never reaches WGSL.
+_Avoid_: Macro, symbol
+
+**Const**:
+A named value that becomes a WGSL `const`. It is never readable by a conditional, and its value is text the preprocessor does not interpret.
+_Avoid_: Macro, override
+
+**Supply**:
+The set of Defines and Const values Go provides to one shader, fixed when its descriptor is constructed.
+_Avoid_: Options, flags
+
+**Variant**:
+The Shader module one Root source plus one Supply produces. One path with two Supplies is two shaders, not one shader with two states.

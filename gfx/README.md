@@ -5,6 +5,11 @@ high-level draws into an `OpQueue`; gfx rotates queues through a latest-wins
 triple buffer, resolves resource-backed shaders and textures, translates to a
 `GpuQueue`, and hands that queue to a driver-provided `Backend`.
 
+[`docs/specs/preprocessor.md`](docs/specs/preprocessor.md) is the design record
+for the WGSL shader preprocessor — the `#include` / `#define` / `#const` / `#if`
+language shader sources are written in, and what each rule is and why. It is
+specified and not yet implemented; nothing else in this README describes it.
+
 ## Plugin
 
 - Name: `gfx.Name` (`"gfx"`)

@@ -10,7 +10,7 @@ handler-scoped access facade. What differs is that scene *decides* things —
 which draws a camera sees, in what order, packed into which batches — and
 publishes those decisions back as `Passes`.
 
-This README is the API. `scene/spec.md` is the design record — what each rule is
+This README is the API. `scene/docs/specs/scene.md` is the design record — what each rule is
 for and what was rejected to get there — and
 [`.github/instructions/scene.instructions.md`](../.github/instructions/scene.instructions.md)
 is the traps a caller hits that neither the compiler nor a plausible-looking zero
@@ -605,7 +605,7 @@ storage-buffer budget and the depth-only pass**. Both need a browser run —
 
 ## Deviations From The Specification
 
-`scene/spec.md` is the contract this implementation was judged against, and each
+`scene/docs/specs/scene.md` is the contract this implementation was judged against, and each
 place the build had to depart from it is recorded in the spec itself rather than
 absorbed quietly. The ones a caller can observe:
 

@@ -71,6 +71,11 @@ error handling.
 Plugin file layout, handler structure, and resource-scope rules are enforced
 conventions; see [`.github/instructions/kernel.instructions.md`](.github/instructions/kernel.instructions.md).
 
+Each package's `README.md` is its API. Design records live under
+`<package>/docs/specs/`: the package's general spec is `<package>.md` (for
+example [`scene/docs/specs/scene.md`](scene/docs/specs/scene.md)) and a spec
+covering one focused mechanism takes that mechanism's name.
+
 ## Lifecycle
 
 ```go
