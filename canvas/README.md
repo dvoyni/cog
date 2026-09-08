@@ -96,6 +96,20 @@ reserved shader parameter names for textured custom triangles.
 `DefaultMaterial()`, `DefaultTrianglesMaterial()` and `TextureMaterial()` return
 the built-in materials.
 
+A shader of your own reaches the built-in key-colour ramp by including it, so a
+custom material can wear the exact ramp the built-ins do rather than a re-typed
+approximation:
+
+```wgsl
+//#include builtin/canvas/keycolor.wgsl
+```
+
+That file declares `keyColorRamp`, the `srgbEncode`/`srgbDecode` pair it is
+written in, and the three `key*` constants. Canvas mounts it at
+`math.MaxInt` priority alongside the built-in shaders, and an `#include`
+argument with no `./` prefix is an absolute storage name, so the path above
+resolves from any shader in any mount.
+
 ## Render To Texture
 
 A canvas layer renders into a gfx texture, and a canvas draw samples one. The

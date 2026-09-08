@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -336,7 +337,7 @@ func runFrame(k kernel.Executioner) {
 
 func TestPluginMountsBuiltInShaders(t *testing.T) {
 	k, _, _ := testKernel(t, fstest.MapFS{}, DefaultConfig(), func(*OpQueue) {})
-	for _, path := range []string{spriteShaderPath, trianglesShaderPath} {
+	for _, path := range []string{spriteShaderPath, trianglesShaderPath, keyColorShaderPath} {
 		want, err := fs.ReadFile(builtinFS, path)
 		if err != nil {
 			t.Fatalf("read embedded shader %q: %v", path, err)
@@ -974,11 +975,7 @@ func TestTiledSpriteRepeatsOnlyTiledAxes(t *testing.T) {
 }
 
 func TestDefaultShaderParses(t *testing.T) {
-	shader, err := fs.ReadFile(builtinFS, spriteShaderPath)
-	if err != nil {
-		t.Fatalf("read embedded default shader: %v", err)
-	}
-	parsed, err := naga.Parse(string(shader))
+	parsed, err := naga.Parse(flattenBuiltinShader(t, spriteShaderPath))
 	if err != nil {
 		t.Fatalf("parse default shader: %v", err)
 	}
@@ -1034,16 +1031,25 @@ func TestAtlasArrayIsAllocatedSrgb(t *testing.T) {
 	}
 }
 
-// assertBuiltinShaderLowers checks one embedded shader through the same front
-// end the backend puts it through, so a shader that ships broken fails here
-// rather than on a device.
+// flattenBuiltinShader resolves one built-in through the preprocessor, off the
+// same mounted filesystem the plugin installs. Tests read this rather than the
+// embedded source, because the key-colour ramp now lives in an included file
+// and no single source is a whole module.
+func flattenBuiltinShader(t *testing.T, path string) string {
+	t.Helper()
+	text, _, err := gfx.FlattenShader(storage.NewFileSystem(builtinMountID, builtinFS), gfx.ShaderWithResource(path))
+	if err != nil {
+		t.Fatalf("flatten %q: %v", path, err)
+	}
+	return text
+}
+
+// assertBuiltinShaderLowers checks one built-in through the same front end the
+// backend puts it through, so a shader that ships broken fails here rather than
+// on a device.
 func assertBuiltinShaderLowers(t *testing.T, path string) {
 	t.Helper()
-	shader, err := fs.ReadFile(builtinFS, path)
-	if err != nil {
-		t.Fatalf("read embedded shader %q: %v", path, err)
-	}
-	parsed, err := naga.Parse(string(shader))
+	parsed, err := naga.Parse(flattenBuiltinShader(t, path))
 	if err != nil {
 		t.Fatalf("parse %q: %v", path, err)
 	}
@@ -1058,6 +1064,98 @@ func TestSpriteBatchShaderParses(t *testing.T) {
 
 func TestTrianglesShaderParses(t *testing.T) {
 	assertBuiltinShaderLowers(t, trianglesShaderPath)
+}
+
+// The include has to resolve on the real path too: through the mount the plugin
+// installs, inside the translate step the backend drives, not only through a
+// filesystem a test hands to FlattenShader. If it did not, the pipeline would be
+// built from a module missing keyColorRamp.
+func TestASpriteDrawReachesTheBackendWithTheRampIncluded(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 2, 2)}}}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
+		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
+	})
+	runFrame(k)
+	if len(backend.pipelines) != 1 {
+		t.Fatalf("pipelines = %d, want 1", len(backend.pipelines))
+	}
+	if !strings.Contains(backend.pipelineShader(0), "fn keyColorRamp") {
+		t.Error("the sprite pipeline was built from a module with no keyColorRamp: the include did not resolve")
+	}
+}
+
+// An app's own shader, in an app's own mount, reaching the built-in ramp by its
+// absolute storage name. This is the cross-mount case a consuming app depends
+// on - the ramp is shared with downstream shaders, not merely between canvas's
+// own three - and nothing else exercises it.
+func TestAnAppShaderIncludesTheBuiltInRampAcrossMounts(t *testing.T) {
+	appShader := `//#include builtin/canvas/keycolor.wgsl
+struct AppUniforms {
+    canvasTransform0: vec4<f32>,
+    canvasTransform1: vec4<f32>,
+    canvasFrame: vec4<f32>,
+    canvasViewport: vec2<f32>,
+    atlasLayer: f32,
+    clipEnabled: f32,
+    canvasLayer: mat4x4<f32>,
+    canvasClip: vec4<f32>,
+    tint: vec4<f32>,
+    keyColor: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> u: AppUniforms;
+@group(1) @binding(0) var canvasSampler: sampler;
+@group(1) @binding(1) var canvasTexture: texture_2d_array<f32>;
+
+@vertex
+fn vs_main(@location(0) quad: vec2<f32>) -> @builtin(position) vec4<f32> {
+    return vec4<f32>(quad, 0.0, 1.0);
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    return keyColorRamp(u.tint, u.keyColor.rgb);
+}
+`
+	filesystem := fstest.MapFS{"app.wgsl": &fstest.MapFile{Data: []byte(appShader)}}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	material := gfx.MaterialWithState(gfx.ShaderWithResource("app.wgsl"), gfx.StateOverlay2D)
+	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
+		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, &material)
+	})
+	runFrame(k)
+	if len(backend.pipelines) != 1 {
+		t.Fatalf("pipelines = %d, want 1", len(backend.pipelines))
+	}
+	if !strings.Contains(backend.pipelineShader(0), "fn keyColorRamp") {
+		t.Error("an app shader's absolute #include of the built-in ramp did not resolve")
+	}
+}
+
+// The ramp is declared once and reached by #include. This is the test that the
+// preprocessor resolves a relative include for a shader loaded from canvas's
+// mount at all - nothing exercised that before - and the one that would catch a
+// copy creeping back into a second source.
+func TestTheKeyColorRampIsIncludedRatherThanCopied(t *testing.T) {
+	for _, path := range []string{spriteShaderPath, spriteBatchShaderPath, trianglesShaderPath} {
+		source, err := fs.ReadFile(builtinFS, path)
+		if err != nil {
+			t.Fatalf("read embedded shader %q: %v", path, err)
+		}
+		if bytes.Contains(source, []byte("fn keyColorRamp")) {
+			t.Errorf("%s declares keyColorRamp itself; it should include %s", path, keyColorShaderPath)
+		}
+		if got := strings.Count(flattenBuiltinShader(t, path), "fn keyColorRamp"); got != 1 {
+			t.Errorf("%s flattens to %d keyColorRamp declarations, want 1", path, got)
+		}
+	}
+	texture, err := fs.ReadFile(builtinFS, textureShaderPath)
+	if err != nil {
+		t.Fatalf("read embedded shader %q: %v", textureShaderPath, err)
+	}
+	if bytes.Contains(texture, []byte("keycolor.wgsl")) {
+		t.Errorf("%s includes the ramp; a render target is not artwork", textureShaderPath)
+	}
 }
 
 func TestSpriteSizeReadsHeaderWithoutGPUUpload(t *testing.T) {

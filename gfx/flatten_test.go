@@ -794,10 +794,10 @@ func TestRequiresIsHoistedWithNoSpecialCase(t *testing.T) {
 // ----- the shaders in the tree today -----
 
 // The sigil reservation costs no migration: a shader that uses no directive
-// flattens to itself, comments blanked and nothing else touched. The four canvas
-// shaders are the standing measurement - they are 58 to 121 lines, self-contained,
-// share nothing today, and are deliberately not migrated, so the mechanism must
-// not be designed around them and must not disturb them either.
+// flattens to itself, comments blanked and nothing else touched. The canvas
+// sources that declare no directive are the standing measurement - real shader
+// text this package never designed around - so the mechanism must not disturb a
+// source that has not opted in.
 func TestAnUnmigratedShaderFlattensUnchanged(t *testing.T) {
 	for _, name := range unmigratedShaderNames(t) {
 		text := readBuiltinShader(t, name)
@@ -818,12 +818,21 @@ func TestAnUnmigratedShaderFlattensUnchanged(t *testing.T) {
 
 // unmigratedShaderNames lists the .wgsl files that use no directive, read off
 // disk rather than through a package's embed so that gfx tests can measure them
-// without importing canvas.
+// without importing canvas. Canvas's artwork shaders now share their key-colour
+// ramp by #include, so the set is filtered rather than assumed: what is left is
+// the sources that opted out, and the measurement is only meaningful while at
+// least one of them exists.
 func unmigratedShaderNames(t *testing.T) []string {
 	t.Helper()
-	names, err := filepath.Glob(filepath.Join("..", "canvas", "builtin", "canvas", "*.wgsl"))
+	globbed, err := filepath.Glob(filepath.Join("..", "canvas", "builtin", "canvas", "*.wgsl"))
 	if err != nil {
 		t.Fatalf("glob: %v", err)
+	}
+	var names []string
+	for _, name := range globbed {
+		if !strings.Contains(readBuiltinShader(t, name), "//#") {
+			names = append(names, name)
+		}
 	}
 	if len(names) == 0 {
 		t.Fatal("found no unmigrated .wgsl files in the tree")

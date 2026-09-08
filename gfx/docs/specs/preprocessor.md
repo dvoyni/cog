@@ -1256,12 +1256,16 @@ Recorded so nobody reopens them believing they were overlooked.
   and how it splits, is a scene decision that *consumes* this language
   ([scene: custom shader contract and prelude](https://github.com/dvoyni/cog/issues/48)).
 
-- **Migrating the four canvas shaders.** They are 58–121 lines, self-contained,
-  and share nothing today. The mechanism must not be designed around them. The
-  `scene.wgsl` split did produce genuinely general sources — its `frame.wgsl`
-  and `pbr.wgsl` name nothing scene-specific — so what canvas and scene might
-  share is a real question, but it is a scene-and-canvas question about content,
-  not a question about this language.
+- **Migrating the four canvas shaders.** They were 58–121 lines and
+  self-contained when this spec was written, and the mechanism was deliberately
+  not designed around them. Canvas has since migrated on its own terms
+  ([canvas: a shared include for the canvas shaders](https://github.com/dvoyni/cog/issues/147)):
+  the three that draw artwork `#include ./keycolor.wgsl` for the key-colour ramp
+  they used to carry three copies of. The `scene.wgsl` split did produce
+  genuinely general sources — its `frame.wgsl` and `pbr.wgsl` name nothing
+  scene-specific — so what canvas and scene might share is a real question, but
+  it is a scene-and-canvas question about content, not a question about this
+  language.
 
 - **A phase-1 cache keyed on the root alone.** Available and permitted, never
   mandated; the observable rule is that identity is `(root, supply)` and

@@ -9,6 +9,12 @@ const (
 	trianglesShaderPath   = "builtin/canvas/triangles.wgsl"
 	textureShaderPath     = "builtin/canvas/texture.wgsl"
 
+	// keyColorShaderPath is not an entry point: it is the key-colour ramp and the
+	// sRGB transfer functions, included by the three built-in shaders that draw
+	// artwork. It is named here because it is mounted like any other built-in and
+	// a consuming app includes it by this absolute storage name.
+	keyColorShaderPath = "builtin/canvas/keycolor.wgsl"
+
 	// DefaultFontPath is the font Canvas draws with when Text is given no font
 	// path. It ships inside the binary and is mounted alongside the built-in
 	// shaders, so putting a number on screen costs no asset, no mount and no
