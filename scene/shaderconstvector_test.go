@@ -2,10 +2,7 @@ package scene
 
 import (
 	"encoding/binary"
-	"io/fs"
 	"math"
-	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/gogpu/naga"
@@ -19,11 +16,15 @@ import (
 const dielectricF0 = 0.04
 
 // The Vulkan path is the one that can lose this value. naga's SPIR-V backend
-// drops a module-scope vector used as an expression operand and hands the
+// dropped a module-scope vector used as an expression operand and handed the
 // shader (0, 0, 0) — no parse error, no validation error, no warning — so a
-// zeroed F0 is indistinguishable from a deliberately dark material. The bundled
-// shader therefore holds F0 in a function-local let, and this pins that it
-// survives all the way into the binary.
+// zeroed F0 is indistinguishable from a deliberately dark material.
+//
+// SCENE_DIELECTRIC_F0 is declared in exactly that form, which is safe only
+// because go.mod overrides naga with the fork carrying the fix
+// (gogpu/naga#92). This test is what stands between that override and the
+// picture: drop the replace directive before a fixed naga is released and it
+// fails here, loudly, rather than in a frame nobody can read.
 func TestTheDielectricF0ReachesTheSPIRVBinary(t *testing.T) {
 	text := flattenedSceneShader(t)
 
@@ -46,30 +47,8 @@ func TestTheDielectricF0ReachesTheSPIRVBinary(t *testing.T) {
 			return
 		}
 	}
-	t.Errorf("the SPIR-V binary carries no %v, so every dielectric reflects nothing", dielectricF0)
-}
-
-// moduleScopeVector matches a module-scope `const` or `var<private>` holding a
-// vector or matrix — the declaration form the SPIR-V backend loses.
-var moduleScopeVector = regexp.MustCompile(`(?m)^\s*(const|var<private>)\s+\w+\s*:\s*(vec|mat)`)
-
-// A module-scope vector is the trap, not the value: the next one written into
-// these sources would be zeroed just as quietly. Guard the whole bundled shader
-// rather than the one declaration that was found the hard way.
-func TestTheBundledShaderHoldsNoModuleScopeVector(t *testing.T) {
-	names, err := fs.Glob(shaderFS, "builtin/scene/*.wgsl")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-	for _, name := range names {
-		source, err := shaderFS.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		for _, line := range moduleScopeVector.FindAllString(string(source), -1) {
-			t.Errorf("%s declares %q at module scope; naga's SPIR-V backend zeroes it "+
-				"when it is used as an operand — hold it in a function-local let instead",
-				name, strings.TrimSpace(line))
-		}
-	}
+	t.Errorf("the SPIR-V binary carries no %v, so every dielectric reflects nothing. "+
+		"If go.mod no longer overrides naga, that is why: the fix for a module-scope "+
+		"vector used as an operand (gogpu/naga#92) has not shipped in a release yet",
+		dielectricF0)
 }
