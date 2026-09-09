@@ -18,15 +18,39 @@ type spriteBatch struct {
 	filter    gfx.FilterMode
 	viewport  m.Vec2
 	instances []SpriteInstance
+	// PROTOTYPE cog#153: the material the batch draws with, and the fingerprint
+	// that keys it. A nil material at the call site normalises to the built-in
+	// instanced descriptor before it reaches here, so hasMaterial is not a key
+	// field and DefaultMaterial() batches identically to nil.
+	material    gfx.MaterialDescr
+	fingerprint uint64
+	// params is the draw's own parameters, keyed by name only: two draws whose
+	// parameter names match merge, whatever the values.
+	params []gfx.ParameterDescr
 }
 
-func (b *spriteBatch) keyMatches(texture gfx.TextureDescr, layer m.Mat4, clip m.Rect, hasClip bool, filter gfx.FilterMode) bool {
+func (b *spriteBatch) keyMatches(texture gfx.TextureDescr, layer m.Mat4, clip m.Rect, hasClip bool, filter gfx.FilterMode, fingerprint uint64, params []gfx.ParameterDescr) bool {
 	return b.textureID == texture.ID() && b.layer == layer && b.clip == clip &&
-		b.hasClip == hasClip && b.filter == filter
+		b.hasClip == hasClip && b.filter == filter &&
+		b.fingerprint == fingerprint && sameParamNames(b.params, params)
 }
 
-func (b *spriteBatch) add(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr, texture gfx.TextureDescr, layer m.Mat4, clip m.Rect, hasClip bool, filter gfx.FilterMode, viewport m.Vec2, t0, t1, frame, tint, misc, keyColor m.Vec4) {
-	if b.active && !b.keyMatches(texture, layer, clip, hasClip, filter) {
+// sameParamNames compares two parameter slices by ordered name, which is the
+// sprite key's rule: the values become per-instance data, the names do not.
+func sameParamNames(a, b []gfx.ParameterDescr) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Name() != b[i].Name() {
+			return false
+		}
+	}
+	return true
+}
+
+func (b *spriteBatch) add(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr, texture gfx.TextureDescr, layer m.Mat4, clip m.Rect, hasClip bool, filter gfx.FilterMode, viewport m.Vec2, material gfx.MaterialDescr, fingerprint uint64, params []gfx.ParameterDescr, t0, t1, frame, tint, misc, keyColor m.Vec4) {
+	if b.active && !b.keyMatches(texture, layer, clip, hasClip, filter, fingerprint, params) {
 		b.flush(gfxWrite, quad)
 	}
 	if !b.active {
@@ -38,6 +62,9 @@ func (b *spriteBatch) add(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr, texture gfx
 		b.hasClip = hasClip
 		b.filter = filter
 		b.viewport = viewport
+		b.material = material
+		b.fingerprint = fingerprint
+		b.params = append(b.params[:0], params...)
 		b.instances = b.instances[:0]
 	}
 	b.instances = append(b.instances, SpriteInstance{
@@ -56,20 +83,25 @@ func (b *spriteBatch) flush(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr) {
 		clipEnabled = 1
 	}
 	buffer := gfx.BufferWithBytes(spriteInstanceBytes(b.instances), true)
-	gfxWrite.DrawInstanced(quad, defaultSpriteBatchMaterial, len(b.instances),
+	// PROTOTYPE cog#153: the material is the caller's, and the draw's own
+	// parameters ride after canvas's own. gfx resolves by name against the
+	// reflected layout, so a shader that declared none of them drops them.
+	params := []gfx.ParameterDescr{
 		gfx.VecParam("canvasViewport", m.Vec4{X: b.viewport.X, Y: b.viewport.Y, Z: clipEnabled}),
 		gfx.MatParam("canvasLayer", b.layer),
 		gfx.VecParam("canvasClip", m.Vec4{X: b.clip.X, Y: b.clip.Y, Z: b.clip.X + b.clip.Width, W: b.clip.Y + b.clip.Height}),
 		gfx.BufferParam("instances", buffer),
 		gfx.TextureParam(TextureSlot, b.texture),
 		gfx.SamplerParam(SamplerSlot, canvasSampler(gfx.AddressClamp, gfx.AddressClamp, b.filter)),
-	)
+	}
+	params = append(params, b.params...)
+	gfxWrite.DrawInstanced(quad, b.material, len(b.instances), params...)
 	b.active = false
 	b.instances = b.instances[:0]
 }
 
 // batchEntry computes one sprite/glyph instance and adds it to the batcher.
-func (p *Plugin) batchEntry(gfxWrite *gfx.OpQueue, surf surface, entry atlasEntry, transform SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, tint m.Color, keyColor m.Color) {
+func (p *Plugin) batchEntry(gfxWrite *gfx.OpQueue, surf surface, entry atlasEntry, transform SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, tint m.Color, keyColor m.Color, material *gfx.MaterialDescr, params []gfx.ParameterDescr) {
 	size := entrySize(entry, transform)
 	if size.X == 0 || size.Y == 0 {
 		return
@@ -85,8 +117,15 @@ func (p *Plugin) batchEntry(gfxWrite *gfx.OpQueue, surf surface, entry atlasEntr
 	t0 := m.Vec4{X: transform.Position.X, Y: transform.Position.Y, Z: size.X, W: size.Y}
 	t1 := m.Vec4{X: transform.Origin.X, Y: transform.Origin.Y, Z: sine, W: cosine}
 	misc := m.Vec4{X: float32(entry.layer)}
+	// PROTOTYPE cog#153: nil normalises here, once, so everything downstream
+	// sees a material and the fingerprint is the whole key.
+	resolved := defaultSpriteBatchMaterial
+	if material != nil {
+		resolved = *material
+	}
 	p.batch.add(gfxWrite, p.quad, entry.texture, layerTransform, clip, hasClip, transform.Filter,
-		surf.size, t0, t1, uv, colorVec(tint), misc, colorVec(keyColor))
+		surf.size, resolved, resolved.Fingerprint(), params,
+		t0, t1, uv, colorVec(tint), misc, colorVec(keyColor))
 }
 
 // trianglesBatch concatenates the vertices of consecutive default-material

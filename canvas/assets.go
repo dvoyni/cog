@@ -4,7 +4,6 @@ import "embed"
 
 const (
 	builtinMountID        = "builtin:canvas"
-	spriteShaderPath      = "builtin/canvas/sprite.wgsl"
 	spriteBatchShaderPath = "builtin/canvas/spritebatch.wgsl"
 	trianglesShaderPath   = "builtin/canvas/triangles.wgsl"
 	textureShaderPath     = "builtin/canvas/texture.wgsl"

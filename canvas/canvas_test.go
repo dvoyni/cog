@@ -337,7 +337,7 @@ func runFrame(k kernel.Executioner) {
 
 func TestPluginMountsBuiltInShaders(t *testing.T) {
 	k, _, _ := testKernel(t, fstest.MapFS{}, DefaultConfig(), func(*OpQueue) {})
-	for _, path := range []string{spriteShaderPath, trianglesShaderPath, keyColorShaderPath} {
+	for _, path := range []string{spriteBatchShaderPath, trianglesShaderPath, keyColorShaderPath} {
 		want, err := fs.ReadFile(builtinFS, path)
 		if err != nil {
 			t.Fatalf("read embedded shader %q: %v", path, err)
@@ -745,8 +745,22 @@ func TestCustomMaterialAndParametersPassThrough(t *testing.T) {
 	if len(backend.drawParams) != 1 {
 		t.Fatalf("draw params = %d, want 1", len(backend.drawParams))
 	}
-	if got := floatAt(backend.drawParams[0], 0); got != 12 {
-		t.Fatalf("reserved transform X = %v, want 12", got)
+	// PROTOTYPE cog#153: this used to assert that canvas's own canvasTransform0
+	// beat the caller's 999 in the uniform block. Under the collapse there is no
+	// canvasTransform0 in the uniform block at all - the transform is per
+	// instance - so a name gfx's reflection never sees is simply dropped, and
+	// the reserved-name rule moves to the instance record. Assert it there.
+	var instance []byte
+	for _, buffer := range backend.buffers {
+		if len(buffer.data) == len(spriteInstanceBytes([]SpriteInstance{{}})) {
+			instance = buffer.data
+		}
+	}
+	if instance == nil {
+		t.Fatalf("no one-instance buffer was baked; buffers = %d", len(backend.buffers))
+	}
+	if got := floatAt(instance, 0); got != 12 {
+		t.Fatalf("instance position X = %v, want 12 (canvas's, not the caller's 999)", got)
 	}
 	if got := floatAt(backend.drawParams[0], 180); got != 7 {
 		t.Fatalf("custom value = %v, want draw override 7", got)
@@ -974,22 +988,28 @@ func TestTiledSpriteRepeatsOnlyTiledAxes(t *testing.T) {
 	}
 }
 
-func TestDefaultShaderParses(t *testing.T) {
-	parsed, err := naga.Parse(flattenBuiltinShader(t, spriteShaderPath))
+// PROTOTYPE cog#153: this was TestDefaultShaderParses, asserting the member
+// offsets of sprite.wgsl's uniform block against what drawEntry packed by name.
+// That block is gone with the shader, but the guarantee it carried is not
+// incidental and has to land somewhere: under the collapse the per-sprite data
+// travels as a Go struct reinterpreted as bytes, so the thing that can now
+// silently go wrong is the Go SpriteInstance disagreeing with the WGSL one.
+// Nothing asserted that before - TestSpriteBatchShaderParses only lowers the
+// source. This is the replacement, and it is strictly stronger: a mismatch here
+// is a wrong picture, where a mismatch there was a dropped parameter.
+func TestSpriteInstanceMatchesTheShaderRecord(t *testing.T) {
+	parsed, err := naga.Parse(flattenBuiltinShader(t, spriteBatchShaderPath))
 	if err != nil {
-		t.Fatalf("parse default shader: %v", err)
+		t.Fatalf("parse instanced shader: %v", err)
 	}
 	module, err := wgsl.Lower(parsed)
 	if err != nil {
-		t.Fatalf("lower default shader: %v", err)
+		t.Fatalf("lower instanced shader: %v", err)
 	}
-	want := map[string]uint32{
-		"canvasTransform0": 0, "canvasTransform1": 16, "canvasFrame": 32,
-		"canvasViewport": 48, "atlasLayer": 56, "clipEnabled": 60,
-		"canvasLayer": 64, "canvasClip": 128,
-		"tint": 144, "keyColor": 160,
-	}
-	found := false
+	wantUniform := map[string]uint32{"canvasViewport": 0, "canvasLayer": 16, "canvasClip": 80}
+	wantInstance := []string{"transform0", "transform1", "frame", "tint", "misc", "keyColor"}
+
+	var uniformSeen bool
 	for _, variable := range module.GlobalVariables {
 		if variable.Name != "u" || variable.Space != ir.SpaceUniform {
 			continue
@@ -998,15 +1018,41 @@ func TestDefaultShaderParses(t *testing.T) {
 		if !ok {
 			t.Fatal("Canvas uniform is not a struct")
 		}
-		found = true
+		uniformSeen = true
 		for _, member := range structure.Members {
-			if offset, exists := want[member.Name]; !exists || member.Offset != offset {
+			if offset, exists := wantUniform[member.Name]; !exists || member.Offset != offset {
 				t.Fatalf("uniform %q offset = %d, want %d", member.Name, member.Offset, offset)
 			}
 		}
 	}
-	if !found {
+	if !uniformSeen {
 		t.Fatal("Canvas uniform block was not reflected")
+	}
+
+	var instanceSeen bool
+	for _, typ := range module.Types {
+		structure, ok := typ.Inner.(ir.StructType)
+		if !ok || typ.Name != "SpriteInstance" {
+			continue
+		}
+		instanceSeen = true
+		if got := int(structure.Span); got != len(spriteInstanceBytes([]SpriteInstance{{}})) {
+			t.Fatalf("WGSL SpriteInstance = %d bytes, Go SpriteInstance = %d",
+				got, len(spriteInstanceBytes([]SpriteInstance{{}})))
+		}
+		if len(structure.Members) != len(wantInstance) {
+			t.Fatalf("WGSL SpriteInstance has %d members, Go has %d",
+				len(structure.Members), len(wantInstance))
+		}
+		for i, member := range structure.Members {
+			if member.Name != wantInstance[i] || member.Offset != uint32(i*16) {
+				t.Fatalf("WGSL SpriteInstance member %d = %q@%d, want %q@%d",
+					i, member.Name, member.Offset, wantInstance[i], i*16)
+			}
+		}
+	}
+	if !instanceSeen {
+		t.Fatal("SpriteInstance was not reflected")
 	}
 }
 
@@ -1137,7 +1183,7 @@ fn fs_main() -> @location(0) vec4<f32> {
 // mount at all - nothing exercised that before - and the one that would catch a
 // copy creeping back into a second source.
 func TestTheKeyColorRampIsIncludedRatherThanCopied(t *testing.T) {
-	for _, path := range []string{spriteShaderPath, spriteBatchShaderPath, trianglesShaderPath} {
+	for _, path := range []string{spriteBatchShaderPath, trianglesShaderPath} {
 		source, err := fs.ReadFile(builtinFS, path)
 		if err != nil {
 			t.Fatalf("read embedded shader %q: %v", path, err)

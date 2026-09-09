@@ -327,28 +327,44 @@ func (p *Plugin) drawSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *g
 		p.drawNineSlice(gfxWrite, surf, entry, t, layerTransform, clip, hasClip, op)
 		return
 	}
-	if op.hasMaterial {
-		p.batch.flush(gfxWrite, p.quad)
-		material := op.material
-		p.drawEntry(gfxWrite, surf, entry, t, layerTransform, clip, hasClip, &material, op.params)
-		return
-	}
+	// PROTOTYPE cog#153: a material no longer forces the per-draw uniform path.
+	// It joins the batch key instead, and hasMaterial is only the guard that
+	// says whether there is one to take the address of.
 	tint := paramColorOr(op.params, "tint", m.Color{R: 1, G: 1, B: 1, A: 1})
 	keyColor := paramColorOr(op.params, "keyColor", defaultKeyColor)
-	p.batchEntry(gfxWrite, surf, entry, t, layerTransform, clip, hasClip, tint, keyColor)
+	p.batchEntry(gfxWrite, surf, entry, t, layerTransform, clip, hasClip, tint, keyColor,
+		spriteMaterial(op), spriteParams(op))
+}
+
+// spriteMaterial is the op's material, or nil for the built-in.
+func spriteMaterial(op *spriteOp) *gfx.MaterialDescr {
+	if !op.hasMaterial {
+		return nil
+	}
+	material := op.material
+	return &material
+}
+
+// spriteParams is the op's parameters with the two canvas consumes into the
+// instance record removed, since forwarding them would also make them key
+// fields and split batches that differ only in tint.
+func spriteParams(op *spriteOp) []gfx.ParameterDescr {
+	var out []gfx.ParameterDescr
+	for _, param := range op.params {
+		if param.Name() == "tint" || param.Name() == "keyColor" {
+			continue
+		}
+		out = append(out, param)
+	}
+	return out
 }
 
 func (p *Plugin) drawNineSlice(gfxWrite *gfx.OpQueue, surf surface, entry atlasEntry, transform SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, op *spriteOp) {
 	tint := paramColorOr(op.params, "tint", m.Color{R: 1, G: 1, B: 1, A: 1})
 	keyColor := paramColorOr(op.params, "keyColor", defaultKeyColor)
+	material, params := spriteMaterial(op), spriteParams(op)
 	nineSliceParts(transform, entry.width, entry.height, func(part SpriteTransform) {
-		if op.hasMaterial {
-			p.batch.flush(gfxWrite, p.quad)
-			material := op.material
-			p.drawEntry(gfxWrite, surf, entry, part, layerTransform, clip, hasClip, &material, op.params)
-			return
-		}
-		p.batchEntry(gfxWrite, surf, entry, part, layerTransform, clip, hasClip, tint, keyColor)
+		p.batchEntry(gfxWrite, surf, entry, part, layerTransform, clip, hasClip, tint, keyColor, material, params)
 	})
 }
 
@@ -635,39 +651,9 @@ func appendTileVertex(dst []byte, position m.Vec2, color m.Color, uv m.Vec2) []b
 	return dst
 }
 
-func (p *Plugin) drawEntry(gfxWrite *gfx.OpQueue, surf surface, entry atlasEntry, transform SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, material *gfx.MaterialDescr, params []gfx.ParameterDescr) {
-	size := entrySize(entry, transform)
-	if size.X == 0 || size.Y == 0 {
-		return
-	}
-	uv, ok := entryUV(entry, transform)
-	if !ok {
-		return
-	}
-	sine, cosine := sincos(transform.Rotation)
-	clipEnabled := float32(0)
-	if hasClip {
-		if clip.Width <= 0 || clip.Height <= 0 {
-			return
-		}
-		clipEnabled = 1
-	}
-	p.params = p.params[:0]
-	p.params = append(p.params,
-		gfx.VecParam("canvasTransform0", m.Vec4{X: transform.Position.X, Y: transform.Position.Y, Z: size.X, W: size.Y}),
-		gfx.VecParam("canvasTransform1", m.Vec4{X: transform.Origin.X, Y: transform.Origin.Y, Z: sine, W: cosine}),
-		gfx.VecParam("canvasFrame", uv),
-		gfx.VecParam("canvasViewport", m.Vec4{X: surf.size.X, Y: surf.size.Y}),
-		gfx.FloatParam("atlasLayer", float32(entry.layer)),
-		gfx.FloatParam("clipEnabled", clipEnabled),
-		gfx.MatParam("canvasLayer", layerTransform),
-		gfx.VecParam("canvasClip", m.Vec4{X: clip.X, Y: clip.Y, Z: clip.X + clip.Width, W: clip.Y + clip.Height}),
-		gfx.TextureParam(TextureSlot, entry.texture),
-		gfx.SamplerParam(SamplerSlot, canvasSampler(gfx.AddressClamp, gfx.AddressClamp, transform.Filter)),
-	)
-	p.params = append(p.params, params...)
-	gfxWrite.Draw(p.quad, *material, p.params...)
-}
+// PROTOTYPE cog#153: drawEntry was here. It had exactly one reason to exist -
+// a sprite carrying a material - and once that sprite joins the batch it has
+// none. Deleted to prove it is dead; `go build ./...` agrees.
 
 // entrySize resolves the on-screen size of an atlas entry.
 func entrySize(entry atlasEntry, transform SpriteTransform) m.Vec2 {
@@ -779,7 +765,7 @@ func (p *Plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, atlas *atlas, resources *gf
 					Position: m.Vec2{X: x + glyph.offset.X*toLogical, Y: y + glyph.offset.Y*toLogical},
 					Size:     m.Vec2{X: float32(glyph.entry.width) * toLogical, Y: float32(glyph.entry.height) * toLogical},
 				}
-				p.batchEntry(gfxWrite, surf, glyph.entry, transform, layerTransform, clip, hasClip, op.draw.Color, defaultKeyColor)
+				p.batchEntry(gfxWrite, surf, glyph.entry, transform, layerTransform, clip, hasClip, op.draw.Color, defaultKeyColor, nil, nil)
 			}
 			x += glyph.advance * toLogical
 			previous = character
@@ -845,7 +831,7 @@ func (p *Plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *atlas, 
 					Position: m.Vec2{X: x, Y: y + ascent - capHeight},
 					Size:     m.Vec2{X: width, Y: capHeight},
 				}
-				p.batchEntry(gfxWrite, surf, entry, transform, layerTransform, clip, hasClip, m.Color{R: 1, G: 1, B: 1, A: 1}, defaultKeyColor)
+				p.batchEntry(gfxWrite, surf, entry, transform, layerTransform, clip, hasClip, m.Color{R: 1, G: 1, B: 1, A: 1}, defaultKeyColor, nil, nil)
 				x += width
 				continue
 			}

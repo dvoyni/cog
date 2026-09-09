@@ -20,12 +20,6 @@ import (
 // is why it is named once and referenced everywhere else.
 var defaultKeyColor = m.NewColorSrgb(0.5, 0.5, 0.5, 1)
 
-var defaultMaterial = gfx.MaterialWithState(
-	gfx.ShaderWithResource(spriteShaderPath),
-	gfx.StateOverlay2D,
-	gfx.ColorParam("tint", m.Color{R: 1, G: 1, B: 1, A: 1}),
-	gfx.ColorParam("keyColor", defaultKeyColor),
-)
 
 // canvasSampler is the sampler a 2D draw wants: one filter for magnification,
 // minification and mip selection alike, since canvas never generates mipmaps.
@@ -105,7 +99,9 @@ var triangleVertexLayout = [...]gfx.VertexAttr{
 	gfx.Attr(int(unsafe.Offsetof(Vertex{}.UV)), gfx.Float32x2),
 }
 
-func DefaultMaterial() *gfx.MaterialDescr { return &defaultMaterial }
+// PROTOTYPE cog#153: repointed at the instanced material, which is what #151
+// decided. Nothing in cog, cog-examples or feuds-26 called this before.
+func DefaultMaterial() *gfx.MaterialDescr { return &defaultSpriteBatchMaterial }
 
 func DefaultTrianglesMaterial() *gfx.MaterialDescr { return &defaultTrianglesMaterial }
 
