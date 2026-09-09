@@ -1573,3 +1573,23 @@ func TestASpriteDrawParameterNamingAUniformMemberIsReported(t *testing.T) {
 		t.Fatalf("reported %v, want a kind mismatch naming customValue", (*errs)[0])
 	}
 }
+
+// Two sprites differing only in key colour are one batch. keyColor is a
+// reserved slot consumed into the per-instance record, so it never reaches the
+// material or the batch key - which is what lets a roster of units in different
+// player colours cost one draw rather than one per player.
+func TestDifferingKeyColoursShareOneBatch(t *testing.T) {
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	files := fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 3)}}
+	k, _, backend := testKernel(t, files, config, func(write *OpQueue) {
+		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}},
+			nil, gfx.ColorParam(KeyColorSlot, m.NewColorSrgb(0.2, 0.4, 0.9, 1)))
+		write.Sprite(0, "sprite.png", SpriteTransform{Position: m.Vec2{X: 8}, Size: m.Vec2{X: 4, Y: 4}},
+			nil, gfx.ColorParam(KeyColorSlot, m.NewColorSrgb(0.9, 0.3, 0.1, 1)))
+	})
+	runFrame(k)
+	instances := spriteInstances(backend)
+	if len(instances) != 1 || len(instances[0])/testInstanceSize != 2 {
+		t.Fatalf("key-coloured sprite draws = %d batches, want one batch of two", len(instances))
+	}
+}

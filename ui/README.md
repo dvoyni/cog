@@ -86,13 +86,13 @@ One modifier on a menu root puts a shader on every visual under it:
 root = root.Material(canvas.MaterialSet{Sprite: fadeMaterial})
 ```
 
-`canvas.MaterialSet` names one material per canvas family — sprite, triangles,
-texture — plus a shared parameter list. A nil slot keeps its built-in, so naming
+`canvas.MaterialSet` names one material per canvas family â€” sprite, triangles,
+texture â€” plus a shared parameter list. A nil slot keeps its built-in, so naming
 only `Sprite` leaves everything else alone.
 
 `Element.Material(canvas.MaterialSet)` is a Modifier and inherits down the tree
 exactly as `Layer` does. `Frame.SetMaterial(canvas.MaterialSet)` seeds every root
-of a tick, and like everything else on the frame it is cleared each tick — which
+of a tick, and like everything else on the frame it is cleared each tick â€” which
 is what a value that changes per frame wants, and why `canvas.Config`, which is
 construction time, cannot hold it. A child naming an **empty** set stops
 inheriting.
@@ -112,6 +112,25 @@ parameter named at a sprite draw call is **per sprite** and becomes a storage
 array, so a per-scope value belongs on the material itself or on
 `canvas.OpQueue.SetLayerMaterial`, where it is per batch by construction. See
 `canvas/README.md` for the frequency rules.
+
+### Tint and key colour
+
+`SpriteParams` carries the two artwork slots of the sprite record directly.
+`Tint` multiplies the sprite; `KeyColor` recolours the key ramp an artist
+painted into it, which is how one piece of artwork is shown in a player's
+colour:
+
+```go
+ui.Image(ui.SpriteParams{Path: unitSprite, KeyColor: unit.Owner.Color()})
+```
+
+A zero `KeyColor` names the slot not at all, so canvas's own default applies —
+`ui` does not restate a default only canvas should own. A zero `Tint` is opaque
+white, as it always was.
+
+Neither slot is a material parameter: both are reserved names consumed into the
+per-instance record, so they never reach the material or the batch key. A roster
+of unit icons in five different player colours is still **one draw**.
 
 ## Composition
 
@@ -331,7 +350,7 @@ release over the same ID also emits `Click`.
 ## Tooltips And Floating Elements
 
 `WithFloating(anchor, floating)` pairs an element with something that hangs off
-it — a tooltip, a dropdown, a badge. The floating element is added to the anchor
+it â€” a tooltip, a dropdown, a badge. The floating element is added to the anchor
 rather than the two being wrapped together, so the result *is* the anchor and
 takes the anchor's place in the surrounding layout unchanged. Wrapping the pair
 would quietly resize it: a wrapper carries none of the anchor's own dealings
@@ -385,7 +404,7 @@ edge, without resizing it.
 
 Not everything under the pointer is an element. A scene draws its own sprites
 and hit-tests them itself, and layout sees only whatever screen-filling element
-catches that scene's clicks — which it cannot tell apart from a button. Hand the
+catches that scene's clicks â€” which it cannot tell apart from a button. Hand the
 tracker the result of your own hit test instead:
 
 ```go
@@ -408,7 +427,7 @@ between an element and a fallback restarts the dwell rather than counting as
 moving between two tooltips: the click catcher is under the pointer the whole
 time it crosses the scene, and letting that count would spare every sprite its
 wait. For the same reason a fallback's dwell advances only while the position
-holds still from one frame to the next — a sprite has no edges to hold the
+holds still from one frame to the next â€” a sprite has no edges to hold the
 pointer inside, and a fallback's identity is only as fine as the caller made it.
 The position itself is not gated by the dwell, so a tooltip already up follows
 the pointer.
@@ -417,7 +436,7 @@ Give a wrapped text column a `MinWidth` equal to its `WrapWidth`. Text measures
 to its longest line, and wrapping fills each line right up to the limit, so a
 column left to measure itself comes out exactly as wide as its widest line. That
 line then sits exactly on the clip edge, and whatever ink its last glyph carries
-past its advance width is shaved off — a couple of pixels missing from the right
+past its advance width is shaved off â€” a couple of pixels missing from the right
 of the longest line only, on every tooltip. A minimum width breaks the
 circularity by fixing the box independently of what the text measured.
 
@@ -432,6 +451,6 @@ zero basis.
 tooltip's neighbours without jumping a dialog drawn above them all.
 
 Because a frame is declared afresh each tick, a tooltip exists only on the
-frames its anchor is hovered — there is nothing to hide and no visibility flag
+frames its anchor is hovered â€” there is nothing to hide and no visibility flag
 to keep. Note that a disabled element is not a hit target at all, so it never
 reports as hovered and cannot carry a tooltip.
