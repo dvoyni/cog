@@ -4,9 +4,6 @@
 //#include ./frame.wgsl
 
 const SCENE_PI: f32 = 3.14159265359;
-// SCENE_DIELECTRIC_F0 is the normal-incidence reflectance of a dielectric,
-// which metallic lerps toward the base colour.
-const SCENE_DIELECTRIC_F0: vec3<f32> = vec3<f32>(0.04, 0.04, 0.04);
 
 // SceneSurface is what lighting needs and nothing more. It carries no view
 // vector - that is one normalise away from sceneCameraPosition(), one less
@@ -106,7 +103,14 @@ fn sceneShadeSurface(s: SceneSurface) -> vec3<f32> {
     let roughness = clamp(s.roughness, 0.0, 1.0);
     let alphaRoughness = roughness * roughness;
     let diffuseColor = s.baseColor * (1.0 - metallic);
-    let f0 = mix(SCENE_DIELECTRIC_F0, s.baseColor, metallic);
+    // The normal-incidence reflectance of a dielectric, which metallic lerps
+    // toward the base colour. It is a local let holding its literal, not a
+    // module-scope const: naga's SPIR-V backend drops a module-scope vector
+    // used as an operand and hands the shader (0, 0, 0) with nothing to say so,
+    // which here would mean every dielectric reflecting nothing. Move it back
+    // out once a naga carrying the fix from dvoyni/cog#181 is released.
+    let dielectricF0 = vec3<f32>(0.04, 0.04, 0.04);
+    let f0 = mix(dielectricF0, s.baseColor, metallic);
 
     var shaded = scenePunctualContribution(
         sceneSun(), s.normal, view, nDotV, diffuseColor, f0, alphaRoughness);

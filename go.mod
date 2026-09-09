@@ -18,3 +18,5 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 )
+
+replace github.com/gogpu/naga => github.com/dvoyni/naga v0.19.1-0.20260909205556-fee6c529ac74
