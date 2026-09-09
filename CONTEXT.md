@@ -169,7 +169,7 @@ _Avoid_: Gizmo, primitive
 One placement of one recorded thing. A recording call carrying many transforms declares many Instances that share everything else it said.
 
 **Batch**:
-One run of Instances sharing a mesh and a Scene material, which is one draw call.
+One run of recorded work merged into a single draw call, whatever supplies its per-item data. In Scene that is Instances sharing a mesh and a Scene material; in Canvas it is sprites sharing an Instance record buffer, or triangles sharing concatenated vertices.
 _Avoid_: Cluster, group
 
 ## Shader Sources
@@ -198,3 +198,29 @@ _Avoid_: Options, flags
 
 **Variant**:
 The Shader module one Root source plus one Supply produces. One path with two Supplies is two shaders, not one shader with two states.
+
+## Canvas Materials
+
+**Canvas material**:
+A shader, pipeline state, and the parameters that belong to the material rather than to a draw, bound to a Canvas draw. Canvas has three built-ins and an app may supply its own.
+_Avoid_: Shader, effect
+
+**Family**:
+Sprite or triangles: the two Canvas draw shapes, which sample differently and can never be one shader. A Canvas material belongs to exactly one.
+_Avoid_: Kind, mode
+
+**Material set**:
+One Canvas material per Family plus one shared parameter list. A Scope names a Material set because it covers draws of more than one Family; a draw names a single Canvas material because at a draw the Family is known.
+_Avoid_: Using set and material interchangeably
+
+**Scope**:
+Something that covers many draws and supplies a Material set to those that name none: a layer, a UI frame, or a UI element subtree.
+_Avoid_: Context, group
+
+**Instance record**:
+The fixed record one sprite contributes to its Batch's storage buffer. It is not a parameter, not a uniform, and not extensible.
+_Avoid_: Instance buffer, which is the array of them
+
+**Reserved parameter name**:
+A parameter name Canvas consumes itself and never forwards to the Canvas material.
+_Avoid_: Built-in parameter

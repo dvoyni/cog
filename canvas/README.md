@@ -4,6 +4,15 @@
 custom triangles, then translates them into `gfx` draws at the end of each
 simulation update.
 
+[`docs/specs/materials.md`](docs/specs/materials.md) is the design record for
+the **canvas material contract** — what a custom material may replace and what
+it must match exactly, canvas's group and binding convention, what canvas
+publishes as includable WGSL, how draws merge into batches, and how a material
+reaches `ui` visuals, `Text` and the shape helpers. **It specifies work that is
+not implemented.** This README describes the API as it exists today; where the
+two disagree, the spec is the plan and the README is the truth. The spec's
+*Required canvas changes* section lists the gap.
+
 ## Plugin
 
 - Name: `canvas.Name` (`"canvas"`)
@@ -58,7 +67,9 @@ and call:
 - `SetClip(m.Rect)` and `RemoveClip()` to control the clip captured by subsequent
   operations.
 - `Sprite(Layer, path, SpriteTransform, *gfx.MaterialDescr, ...gfx.ParameterDescr)`.
-  A nil material uses the built-in sprite material.
+  A nil material batches the sprite into the built-in instanced sprite
+  material. Note that `DefaultMaterial()` currently returns a *different*,
+  single-draw material that no built-in path reaches; the spec repoints it.
 - `SpriteTexture(Layer, gfx.TextureDescr, SpriteTransform, *gfx.MaterialDescr, ...gfx.ParameterDescr)`
   for the same rectangle sourced from a gfx texture rather than a sprite path.
 - `DrawTexture[TVertex](Layer, gfx.TextureDescr, []TVertex, *gfx.MaterialDescr, ...gfx.ParameterDescr)`
@@ -95,6 +106,12 @@ instance record matching the built-in sprite-batch shader.
 reserved shader parameter names for textured custom triangles.
 `DefaultMaterial()`, `DefaultTrianglesMaterial()` and `TextureMaterial()` return
 the built-in materials.
+
+A custom material replaces a built-in shader, and the shape it has to match is
+specified in [`docs/specs/materials.md`](docs/specs/materials.md) rather than
+here — including the one trap that has no compiler behind it: the layer clip is
+a test inside `fs_main`, so a hand-written `fs_main` that omits it draws outside
+the clip rectangle with no error anywhere.
 
 A shader of your own reaches the built-in key-colour ramp by including it, so a
 custom material can wear the exact ramp the built-ins do rather than a re-typed
