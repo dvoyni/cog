@@ -167,11 +167,50 @@ and physical `FramebufferWidth`/`FramebufferHeight`.
 - `MeshDescr`: build with `Mesh` or `MeshIndexed` from buffer descriptors,
   topology, and `VertexAttr` values created by `Attr`.
 - `MaterialDescr`: build with `Material` or `MaterialWithState`; `Clone` and
-  `CloneTo` snapshot parameter descriptors.
+  `CloneTo` snapshot parameter descriptors. `Fingerprint()` hashes everything
+  that makes one material different from another, and `FingerprintParams` does
+  the same for a bare parameter slice — which is how a recorder keys a batch on
+  what a draw carries without writing a type switch that silently mis-keys the
+  kind it forgot.
 - `ParameterDescr`: build with `FloatParam`, `VecParam`, `MatParam`,
-  `ColorParam`, `TextureParam`, `SamplerParam`, `BufferParam`, or
-  `BufferRangeParam`. Accessors are `Name`, `FloatValue`, `ColorValue`,
-  `TextureValue`, and `SamplerValue`.
+  `ColorParam`, `TextureParam`, `SamplerParam`, `BufferParam`,
+  `BufferRangeParam`, or `RawParameter`. Accessors are `Name`, `FloatValue`,
+  `ColorValue`, `TextureValue`, `SamplerValue`, `VecValue`, `HasValue`, and
+  `AppendValue`.
+
+`HasValue` separates a value a shader reads out of its uniform block from a
+binding it attaches to a bind group, and `AppendValue(dst)` appends the value's
+bytes in the layout the shader reads them at. Together they let a recorder pack
+a parameter it did not construct.
+
+`RawParameter[T](name, value)` carries an arbitrary plain-data struct by copying
+its bytes, so a per-instance parameter can be a record rather than a scalar. It
+**validates `T`'s layout against WGSL's alignment rules once per type and panics
+on a mismatch**, naming the field, both offsets, and the padding that would fix
+it. A size check alone is not enough and fails in a way that looks like it works:
+
+```go
+type bad struct { A float32; B m.Vec3 }   // Go: 16 bytes. WGSL: 32.
+```
+
+Go aligns a float32-based struct to 4; WGSL aligns `vec2` to 8 and `vec3`,
+`vec4` and matrices to 16, so `bad` passes `size % 16 == 0` and every element
+after the first reads the wrong memory. Members may be `float32`, `int32`,
+`uint32`, `m.Vec2`, `m.Vec3`, `m.Vec4`, `m.Color`, `m.Quat`, `m.Mat4`, arrays of
+those, and structs of those; anything else panics, which is what keeps a pointer
+out of a byte copy.
+
+**A parameter whose kind cannot fill the binding its name matched is rejected.**
+Parameters resolve by name, and one name has one frequency: a value is a uniform
+member and a buffer is a storage binding. Supplying either where the shader
+declared the other used to bind the wrong descriptor into the slot and draw
+garbage with no diagnostic — and a missing storage binding is worse, because
+`CreateBindGroup` rejects the short list and the draw encodes with no bindings at
+all. It is now `ErrParameterKindMismatch` and the draw is dropped. The check
+lives in plan construction, which is cached per `(shader, parameter shape)`, so
+it costs nothing per draw. A name that matched no binding is not a mismatch:
+gfx drops a parameter no shader declared, which is ordinary.
+
 
 `BufferRangeParam(name, buf, offset, size)` binds one slice of a buffer, which
 is how a draw addresses its own record in a shared arena: the binding is the
@@ -286,3 +325,9 @@ use `m.Vec*`, `m.Rect`, `m.Color`, and column-major `m.Mat4` directly.
 
 `ErrShaderNotFound{Name}` is reported through the kernel when a resource-backed
 shader cannot be loaded. Its `Error() string` method implements `error`.
+
+`ErrParameterKindMismatch{Shader, Parameter, Supplied, Declared}` is reported
+when a parameter's name matches a binding its kind cannot fill, and the draw is
+dropped. See the parameter section above for why an unreported one is worse than
+a dropped draw.
+

@@ -46,8 +46,8 @@ func TestALayerWithATargetRendersIntoItsTextureRatherThanTheScreen(t *testing.T)
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(1, target)
-		write.FillRect(1, m.Rect{Width: 10, Height: 10}, m.Color{R: 1, A: 1})
-		write.FillRect(2, m.Rect{Width: 10, Height: 10}, m.Color{G: 1, A: 1})
+		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
+		write.FillRect(2, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
 	})
 	runFrame(k)
 
@@ -70,10 +70,10 @@ func TestALayerWithATargetRendersIntoItsTextureRatherThanTheScreen(t *testing.T)
 func TestEveryTargetRunClearsAndDiscardsItsOwnDepth(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
-		write.FillRect(0, m.Rect{Width: 10, Height: 10}, m.Color{A: 1})
+		write.FillRect(0, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{A: 1}})
 		write.SetLayerTarget(1, target)
-		write.FillRect(1, m.Rect{Width: 10, Height: 10}, m.Color{R: 1, A: 1})
-		write.FillRect(2, m.Rect{Width: 10, Height: 10}, m.Color{G: 1, A: 1})
+		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
+		write.FillRect(2, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
 	})
 	runFrame(k)
 
@@ -97,8 +97,8 @@ func TestLayersSharingATargetStillCollapseToOnePass(t *testing.T) {
 		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(1, target)
 		write.SetLayerTarget(2, target)
-		write.FillRect(1, m.Rect{Width: 10, Height: 10}, m.Color{R: 1, A: 1})
-		write.FillRect(2, m.Rect{Width: 10, Height: 10}, m.Color{G: 1, A: 1})
+		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
+		write.FillRect(2, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
 	})
 	runFrame(k)
 
@@ -117,9 +117,9 @@ func TestEveryLayerClearsItsOwnTarget(t *testing.T) {
 		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(0, target)
 		write.Clear(0, offscreenClear)
-		write.FillRect(0, m.Rect{Width: 10, Height: 10}, m.Color{G: 1, A: 1})
+		write.FillRect(0, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
 		write.Clear(1, screenClear)
-		write.FillRect(1, m.Rect{Width: 10, Height: 10}, m.Color{G: 1, A: 1})
+		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
 	})
 	runFrame(k)
 
@@ -143,8 +143,8 @@ func TestATextureTargetedLayerMeasuresAgainstItsTextureNotTheViewport(t *testing
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(0, target)
-		write.FillRect(0, m.Rect{Width: 10, Height: 10}, m.Color{A: 1})
-		write.FillRect(1, m.Rect{Width: 10, Height: 10}, m.Color{A: 1})
+		write.FillRect(0, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{A: 1}})
+		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{A: 1}})
 	})
 	runFrame(k)
 
@@ -241,7 +241,7 @@ func TestATextureACanvasLayerRenderedIsSampledByALaterLayer(t *testing.T) {
 		target, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(0, target)
 		write.Clear(0, m.Color{R: 1, A: 1})
-		write.FillRect(0, m.Rect{Width: 10, Height: 10}, m.Color{G: 1, A: 1})
+		write.FillRect(0, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
 		write.SpriteTexture(1, texture, SpriteTransform{Size: m.Vec2{X: 50, Y: 50}}, nil)
 	})
 	runFrame(k)
@@ -311,4 +311,3 @@ func TestATextureSpriteDrawsAfterTheTrianglesRecordedBeforeIt(t *testing.T) {
 		t.Fatalf("vertex uploads = %v, want the 3-vertex list before the 6-vertex quad", sizes)
 	}
 }
-

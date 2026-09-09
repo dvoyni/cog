@@ -79,7 +79,7 @@ func TestOpsOmitVerticesOfCustomVertexLayouts(t *testing.T) {
 func TestOpsAreEmptyAfterReset(t *testing.T) {
 	write := &OpQueue{}
 	write.Clear(0, m.Color{G: 1, A: 1})
-	write.FillRect(1, m.Rect{Width: 10, Height: 10}, m.Color{A: 1})
+	write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{A: 1}})
 	if color, ok := write.LayerClear(0); !ok || color != (m.Color{G: 1, A: 1}) {
 		t.Fatalf("clear colour = (%+v, %v), want the recorded clear", color, ok)
 	}
@@ -105,7 +105,7 @@ func TestOpsReportTheTextureASpriteAndACustomShapeSource(t *testing.T) {
 		{Position: m.Vec2{X: 4}, Color: white},
 		{Position: m.Vec2{Y: 4}, Color: white},
 	}, nil)
-	write.FillRect(2, m.Rect{Width: 5, Height: 5}, white)
+	write.FillRect(2, m.Rect{Width: 5, Height: 5}, ShapeDraw{Color: white})
 
 	ops := write.Ops(nil)
 	if len(ops) != 3 {
@@ -130,8 +130,8 @@ func TestLayerTargetReportsWhereALayerDraws(t *testing.T) {
 	target := gfx.TextureTarget(texture, 0, 0)
 	write := &OpQueue{}
 	write.SetLayerTarget(3, target)
-	write.FillRect(3, m.Rect{Width: 5, Height: 5}, m.Color{A: 1})
-	write.FillRect(4, m.Rect{Width: 5, Height: 5}, m.Color{A: 1})
+	write.FillRect(3, m.Rect{Width: 5, Height: 5}, ShapeDraw{Color: m.Color{A: 1}})
+	write.FillRect(4, m.Rect{Width: 5, Height: 5}, ShapeDraw{Color: m.Color{A: 1}})
 
 	if got, ok := write.LayerTarget(3); !ok || got != target {
 		t.Fatalf("layer 3 target = (%+v, %v), want the one it was given", got, ok)

@@ -26,10 +26,16 @@ type Op struct {
 	Layer   Layer
 	Clip    m.Rect
 	HasClip bool
-	// Path, Transform and HasMaterial describe an OpSprite. Texture is the gfx
-	// texture the op samples - what SpriteTexture and DrawTexture were given, or
-	// whatever any op bound to TextureSlot - and is the zero descriptor for an op
-	// that names a resource path instead.
+	// Path and Transform describe an OpSprite. Texture is the gfx texture the op
+	// samples - what SpriteTexture and DrawTexture were given, or whatever any op
+	// bound to TextureSlot - and is the zero descriptor for an op that names a
+	// resource path instead.
+	//
+	// HasMaterial says whether the op named a material of its own, on all three
+	// kinds. It is not what the op will draw with: a draw that names none
+	// resolves to the layer's material set and then to the built-in, both at
+	// flush.
+
 	Path        string
 	Texture     gfx.TextureDescr
 	Transform   SpriteTransform
@@ -128,6 +134,8 @@ func (w *opQueue) inspectOp(layerID Layer, op *drawOp) Op {
 		view.FontPath = op.text.fontPath
 		view.Text = op.text.text
 		view.Draw = op.text.draw
+		view.HasMaterial = op.text.hasMaterial
+		view.Params = op.text.draw.Params
 	case drawTriangles:
 		view.Kind = OpTriangles
 		view.HasMaterial = op.triangles.hasMaterial

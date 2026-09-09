@@ -160,3 +160,22 @@ func boolBit(value bool) uint64 {
 	}
 	return 0
 }
+
+// FingerprintParams hashes a parameter slice in order by name, kind and value,
+// under exactly the rules Fingerprint applies to a material's own parameters -
+// same seed, same per-kind encoding, inline texture and buffer bytes by pointer
+// identity rather than by content.
+//
+// It exists because a recorder that keys a batch on a draw's parameters cannot
+// write the comparison itself: ParameterDescr exposes an accessor for some
+// kinds and none for others, so a hand-written type switch would silently
+// mis-key every kind it forgot - and mis-keying merges two draws that differ,
+// which draws the wrong picture rather than costing a batch.
+func FingerprintParams(params []ParameterDescr) uint64 {
+	var h maphash.Hash
+	h.SetSeed(fingerprintSeed)
+	for i := range params {
+		params[i].fingerprint(&h)
+	}
+	return h.Sum64()
+}

@@ -123,6 +123,7 @@ type Element struct {
 	stretch, shrink                              opt[float32]
 	align                                        opt[Alignment]
 	layer                                        opt[int]
+	material                                     opt[canvas.MaterialSet]
 	ignoreLayout                                 bool
 	ignoreClip                                   bool
 	ignoreHitTest                                bool
@@ -147,6 +148,18 @@ type State struct {
 	VisualState
 	Rect, ContentRect, ClipRect Rect
 	Layer                       canvas.Layer
+	// Materials is the material set this element inherited: the frame's default,
+	// overridden by the nearest ancestor that named one, overridden by this
+	// element's own. A Visual picks the slot for the family it draws - the sprite
+	// slot for a sprite, a nine-slice, a glyph run or a fill, all of which are
+	// sprite draws - and passes it as the draw's material, which is what makes
+	// the whole mechanism record time and leaves the batch key untouched.
+	//
+	// A set's Params are here for a Visual that wants them; the built-in visuals
+	// pass the slot alone. A parameter named at a sprite draw is per sprite and
+	// becomes a storage array, so a per-scope value belongs on the material or on
+	// canvas.OpQueue.SetLayerMaterial, where it is per batch by construction.
+	Materials canvas.MaterialSet
 }
 
 type intermediate struct {

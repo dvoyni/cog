@@ -83,7 +83,9 @@ func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 					Y:      float32(pointer.Y),
 					Events: events,
 				},
+				Materials: frame.materials,
 			}, queue)
+
 			interactions.values, processor.interactions = processor.interactions, interactions.values
 			return nil
 		}

@@ -52,6 +52,27 @@ func (e ErrDrawSamplesAttachment) Error() string {
 	return fmt.Sprintf("gfx: draw in pass %q samples %q, which that pass renders into", e.Pass, e.Parameter)
 }
 
+// ErrParameterKindMismatch reports a parameter whose name matched a binding its
+// kind cannot fill - a buffer supplied where the shader declared a uniform
+// member, say, or a value where it declared a storage buffer.
+//
+// The draw is dropped. Parameters resolve by name and ignore kind, so without
+// this the wrong descriptor is bound into the slot and the draw renders garbage
+// with nothing reported anywhere; a missing storage binding is worse still,
+// because the bind group is rejected and the draw encodes with no bindings at
+// all. One name has one frequency, and naming it at two is an authoring error.
+type ErrParameterKindMismatch struct {
+	Shader    string
+	Parameter string
+	Supplied  string // the kind the caller passed
+	Declared  string // the kind the shader declared
+}
+
+func (e ErrParameterKindMismatch) Error() string {
+	return fmt.Sprintf("gfx: shader %q declares %s named %q, but the draw supplied a %s parameter",
+		e.Shader, e.Declared, e.Parameter, e.Supplied)
+}
+
 // ErrBackendMissing is reported the first time a frame is rendered without an
 // installed Backend. Without it nothing reaches the GPU, so it distinguishes a
 // missing or failed driver from a scene that legitimately drew nothing.

@@ -26,7 +26,7 @@ func (*pluginTestVisual) DefaultSize(canvas.LookupAccess, any) m.Vec2 {
 func (visual *pluginTestVisual) Draw(_ canvas.LookupAccess, queue *canvas.OpQueue, state State, _ any) {
 	visual.sawQueue = queue != nil
 	visual.states = append(visual.states, state)
-	queue.FillRect(state.Layer, state.Rect, m.Color{})
+	queue.FillRect(state.Layer, state.Rect, canvas.ShapeDraw{Material: state.Materials.Sprite})
 }
 
 type pluginTestBuildHandler kernel.Subscription[app.UpdateEvent]

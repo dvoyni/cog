@@ -4,14 +4,13 @@
 custom triangles, then translates them into `gfx` draws at the end of each
 simulation update.
 
-[`docs/specs/materials.md`](docs/specs/materials.md) is the design record for
-the **canvas material contract** — what a custom material may replace and what
-it must match exactly, canvas's group and binding convention, what canvas
-publishes as includable WGSL, how draws merge into batches, and how a material
-reaches `ui` visuals, `Text` and the shape helpers. **It specifies work that is
-not implemented.** This README describes the API as it exists today; where the
-two disagree, the spec is the plan and the README is the truth. The spec's
-*Required canvas changes* section lists the gap.
+[`docs/specs/materials.md`](docs/specs/materials.md) is the specification of the
+**canvas material contract** — what a custom material may replace and what it
+must match exactly, canvas's group and binding convention, what canvas publishes
+as includable WGSL, how draws merge into batches, and how a material reaches
+`ui` visuals, `Text` and the shape helpers. It is implemented; the spec carries
+the reasoning behind each rule, and this README is the API surface. Go there
+before proposing a change to any of it.
 
 ## Plugin
 
@@ -66,15 +65,17 @@ and call:
   instead of the screen. See **Render to texture** below.
 - `SetClip(m.Rect)` and `RemoveClip()` to control the clip captured by subsequent
   operations.
+- `SetLayerMaterial(Layer, MaterialSet)` to put one material set over everything
+  a layer draws that named no material of its own. See **Materials** below.
 - `Sprite(Layer, path, SpriteTransform, *gfx.MaterialDescr, ...gfx.ParameterDescr)`.
-  A nil material batches the sprite into the built-in instanced sprite
-  material. Note that `DefaultMaterial()` currently returns a *different*,
-  single-draw material that no built-in path reaches; the spec repoints it.
+  A nil material batches the sprite into the built-in instanced sprite material,
+  which is what `DefaultMaterial()` returns; naming a material batches too.
 - `SpriteTexture(Layer, gfx.TextureDescr, SpriteTransform, *gfx.MaterialDescr, ...gfx.ParameterDescr)`
   for the same rectangle sourced from a gfx texture rather than a sprite path.
 - `DrawTexture[TVertex](Layer, gfx.TextureDescr, []TVertex, *gfx.MaterialDescr, ...gfx.ParameterDescr)`
   for an arbitrary shape sourcing a gfx texture.
-- `FillRect`, `StrokeRect`, and `Line` for colored primitives.
+- `FillRect(Layer, m.Rect, ShapeDraw)`, `StrokeRect(Layer, m.Rect, ShapeDraw)`
+  and `Line(Layer, start, end m.Vec2, ShapeDraw)` for primitives.
 - `Text(Layer, fontPath, text, TextDraw)` for text with multiline and `${path}`
   inline-image support. A backslash escapes a literal `${` or `\`.
 - `DrawTriangles[TVertex VertexLayout](...)` for a non-indexed triangle list.
@@ -93,39 +94,205 @@ coordinates. `AspectMode` is `AspectInscribe`, `AspectOverlap`, or
 the texture's natural dimensions; setting one dimension preserves aspect.
 `SpriteFrame{Left, Top, Right, Bottom}` selects a pixel sub-rectangle.
 
-`TextDraw` contains `Position`, `Size`, `Color`, `Align`, `WordWrapping`, and
-`WrapWidth`. Its `TextAlign` values are `AlignLeft`, `AlignCenter`, and
-`AlignRight`. Wrapping uses `WrapWidth` only when `WordWrapping` is true.
+`TextDraw` contains `Position`, `Size`, `Color`, `Align`, `WordWrapping`,
+`WrapWidth`, `Material` and `Params`. Its `TextAlign` values are `AlignLeft`,
+`AlignCenter`, and `AlignRight`. Wrapping uses `WrapWidth` only when
+`WordWrapping` is true.
+
+`ShapeDraw` is what `FillRect`, `StrokeRect` and `Line` take: `Color`,
+`Thickness`, `Material` and `Params`. `FillRect` ignores `Thickness`, exactly as
+`TextDraw` ignores `WrapWidth` without `WordWrapping`. **A zero `Color` is
+opaque white**, matching `ui`'s default tint and canvas's habit of reading a
+zero scale as 1 — without it a `ShapeDraw` naming only a material would draw
+nothing at all.
+
+The two groups of entry points are deliberately not aligned into one shape.
+`Sprite`, `SpriteTexture`, `DrawTriangles` and `DrawTexture` take a transform or
+a path and then trailing `material, params...`; `Text` and the shape helpers
+take a struct describing the whole draw and carry them as fields. Naming a
+material is rare enough that the argument list is the wrong place to pay for it.
 
 `Vertex` is the built-in position/color/UV vertex and implements
 `VertexLayout`. Custom pointer-free vertex structs implement
 `VertexLayout() []gfx.VertexAttr`. `SpriteInstance` is the public 96-byte
-instance record matching the built-in sprite-batch shader.
+instance record matching the built-in sprite shader.
 
-`TextureSlot` (`"canvasTexture"`) and `SamplerSlot` (`"canvasSampler"`) are the
-reserved shader parameter names for textured custom triangles.
-`DefaultMaterial()`, `DefaultTrianglesMaterial()` and `TextureMaterial()` return
-the built-in materials.
+## Materials
 
-A custom material replaces a built-in shader, and the shape it has to match is
-specified in [`docs/specs/materials.md`](docs/specs/materials.md) rather than
-here — including the one trap that has no compiler behind it: the layer clip is
-a test inside `fs_main`, so a hand-written `fs_main` that omits it draws outside
-the clip rectangle with no error anywhere.
+Every surface canvas draws can carry a custom shader, and naming one costs no
+draw: the material joins the batch key by fingerprint, so two sprites sharing a
+material merge exactly as two sprites sharing none do, and
+`Sprite(..., DefaultMaterial())` batches identically to `Sprite(..., nil)`.
 
-A shader of your own reaches the built-in key-colour ramp by including it, so a
-custom material can wear the exact ramp the built-ins do rather than a re-typed
-approximation:
+There are three built-ins, one per **family**, and a material belongs to exactly
+one:
 
-```wgsl
-//#include builtin/canvas/keycolor.wgsl
+| constructor | family | entry point | what it does |
+|---|---|---|---|
+| `DefaultMaterial()` | sprite | `builtin/canvas/sprite.wgsl` | the instanced atlas draw every sprite, glyph, inline icon and fill goes through |
+| `DefaultTrianglesMaterial()` | triangles | `builtin/canvas/triangles.wgsl` | samples `canvasTexture` through the key-colour ramp, times vertex colour |
+| `TextureMaterial()` | triangles | `builtin/canvas/texture.wgsl` | samples and returns; no ramp |
+
+### Reaching draws that name none
+
+`MaterialSet` is what a **scope** names — one material per family plus one
+shared parameter list, because a layer is never one family:
+
+```go
+type MaterialSet struct {
+    Sprite    *gfx.MaterialDescr
+    Triangles *gfx.MaterialDescr
+    Texture   *gfx.MaterialDescr
+    Params    []gfx.ParameterDescr
+}
 ```
 
-That file declares `keyColorRamp`, the `srgbEncode`/`srgbDecode` pair it is
-written in, and the three `key*` constants. Canvas mounts it at
-`math.MaxInt` priority alongside the built-in shaders, and an `#include`
-argument with no `./` prefix is an absolute storage name, so the path above
-resolves from any shader in any mount.
+A nil slot keeps its built-in, so a set is an override rather than a whole-cloth
+requirement, and one parameter list serves all three slots because gfx drops a
+name the bound shader never declared.
+
+`SetLayerMaterial(Layer, MaterialSet)` puts one over a whole layer. Like `Clear`,
+`SetLayerTarget` and `SetLayerTransform` it is **key/value applied at flush, not
+positional**, so a caller running after every screen has recorded still reaches
+what they drew — which is the caller this exists for. The last call in a tick
+wins, with the values the set held at that moment, and it is cleared with the
+layer's other per-frame state.
+
+Canvas resolves a draw's material as **draw, then layer, then built-in**. A draw
+that names its own material takes **none** of the scope's parameters: a scope's
+material and its parameters are one unit, and a draw naming a material has said
+what it wants.
+
+`ui` inherits a set down the element tree — `Frame.SetMaterial` seeds the roots
+and `Element.Material` replaces it for a subtree — so one modifier on a menu root
+reaches every visual beneath it. See `ui/README.md`.
+
+### Parameters and their frequency
+
+**The call site declares the parameter's frequency.**
+
+| named on | frequency | where it lands |
+|---|---|---|
+| the **material** | one value per batch | a member of the uniform block, which a custom shader may append to |
+| a **sprite draw** | one value per sprite | one storage buffer per parameter name, at group 2, indexed by `@builtin(instance_index)` |
+| a **triangles draw** | per material | the uniform block; two values are two draws |
+
+Draw-parameter *values* are not in the sprite key, so two sprites differing only
+in one still merge. Their *names* are: every sprite contributes exactly one
+element to every array, so a sprite carrying a name another lacks splits the
+batch rather than zero-filling the gap.
+
+A triangle batch is concatenated vertices with **no instance index**, so the
+sprite path's arrays have nothing to hang on. A parameter named at a
+`DrawTriangles` call is therefore per material, and two values are two draws.
+That is a rule, not a shortcoming of the key.
+
+Naming one value at two frequencies — a name the shader declares as a uniform
+member, passed at a sprite draw call — is an authoring error, and gfx reports it
+as `ErrParameterKindMismatch` and drops the draw rather than binding a buffer
+descriptor into a uniform slot.
+
+Resolution is **first wins**, front to back: canvas's own parameters, then the
+draw's, then the scope's, then the material's. So canvas's viewport, transform,
+clip and texture bindings are guaranteed against anything a caller passes, and a
+caller who wants their own texture on their own shape uses `DrawTriangles`.
+
+### Reserved names
+
+`TextureSlot` (`"canvasTexture"`), `SamplerSlot` (`"canvasSampler"`),
+`TintSlot` (`"tint"`) and `KeyColorSlot` (`"keyColor"`) are the names canvas
+consumes itself and **never forwards to a material**. The first two are canvas's
+own bindings; the last two are fields of the sprite instance record, so a custom
+sprite shader reads them from the shared `VertexOut` rather than from a uniform
+and may not reclaim either name. Text already spends both: `TextDraw.Color`
+becomes the instance tint and glyphs carry the default key colour.
+
+### Writing one: the seven published sources
+
+An app writes a canvas material against published WGSL rather than copying the
+contract. Each is named by an exported constant and included by **absolute
+storage name** — an `#include` argument with no `./` prefix is one, and canvas
+mounts these at `math.MaxInt` priority, so they resolve from any shader in any
+mount.
+
+| source | constant | declares |
+|---|---|---|
+| `uniforms.wgsl` | `UniformsPath` | `struct CanvasUniforms` (`canvasViewport`, `canvasLayer`, `canvasClip`) and `@group(0) @binding(0) var<uniform> u` |
+| `clip.wgsl` | `ClipPath` | `fn canvasClipped(canvasPosition: vec2<f32>) -> bool` |
+| `spritebindings.wgsl` | `SpriteBindingsPath` | group 1 `canvasSampler` + `canvasTexture: texture_2d_array<f32>`; group 2 `instances`; `struct SpriteInstance`; `struct Instances`; `struct VertexOut` |
+| `spritevertex.wgsl` | `SpriteVertexPath` | includes `spritebindings.wgsl`; declares `vs_main` |
+| `trianglesbindings.wgsl` | `TrianglesBindingsPath` | group 1 `canvasSampler` + `canvasTexture: texture_2d<f32>`; `struct VertexOut` |
+| `trianglesvertex.wgsl` | `TrianglesVertexPath` | includes `trianglesbindings.wgsl`; declares `vs_main` |
+| `keycolor.wgsl` | `KeyColorPath` | the sRGB transfer functions, the three `key*` constants, and `keyColorRamp` |
+
+Each source's header states exactly what it declares, because the rule you must
+obey is **do not declare anything a source you included declares** — and a
+duplicated binding is not a compile error but a silent whole-frame loss.
+
+`sprite.wgsl`, `triangles.wgsl` and `texture.wgsl` stay **entry points**: roots a
+material names, not sources you include.
+
+A whole fade sprite material is six lines of declaration and three includes:
+
+```wgsl
+struct CanvasUniforms {
+    canvasViewport: vec4<f32>,
+    canvasLayer: mat4x4<f32>,
+    canvasClip: vec4<f32>,
+    fade: f32,
+};
+@group(0) @binding(0) var<uniform> u: CanvasUniforms;
+
+//#include builtin/canvas/spritevertex.wgsl
+//#include builtin/canvas/clip.wgsl
+//#include builtin/canvas/keycolor.wgsl
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    if canvasClipped(in.canvasPosition) { discard; }
+    let sampled = keyColorRamp(
+        textureSample(canvasTexture, canvasSampler, in.uv, in.atlasLayer),
+        in.keyColor.rgb,
+    );
+    return sampled * in.tint * vec4<f32>(1.0, 1.0, 1.0, u.fade);
+}
+```
+
+That material **extends** the uniform block, which is how a custom material
+declares its own per-batch parameters — so it hand-writes the block and does not
+include `uniforms.wgsl`. It cannot: include-once by resolved path means the
+struct would already be declared, and WGSL has no way to add a member to a struct
+declared elsewhere. That is exactly why the block is its own source.
+
+**⚠ The clip test is offered, not required, and its omission is silent.**
+`SetClip`/`RemoveClip` are implemented entirely as a test inside `fs_main` —
+there is no scissor rect anywhere in gfx — so a hand-written `fs_main` that does
+not call `canvasClipped` draws outside the clip rectangle with **no error
+anywhere**. The three built-in entry points call it and are the worked example.
+
+### What a custom material must match exactly
+
+- **Group and binding numbers, and the resource kind at each.** Groups are
+  numbered by what a binding *is*, not by how often it changes: 0 the uniform
+  block, 1 the texture a draw samples, 2 per-sprite storage. Group 3 is claimed
+  by nothing. An app's own per-instance parameter arrays go at group 2, binding 1
+  and up — seven of them fit beside `instances`.
+- **The `SpriteInstance` record** — struct name, member names, order and size: six
+  `vec4<f32>` at 16-byte offsets, 96 bytes, no padding. It is hand-mirrored by
+  `canvas.SpriteInstance` and uploaded by direct reinterpretation, so a
+  divergence is a silent misread rather than a compile error.
+- **The vertex input** `@location(0) quad: vec2<f32>` and the
+  `@builtin(instance_index)` read that selects the record.
+- **The reserved sampler and texture names.**
+
+Free to change: both entry-point bodies entirely, appended members on the uniform
+block, and additional per-instance parameter arrays at group 2.
+
+**Overriding a published source is a feature.** An included path resolves through
+the full mount overlay, so an app that mounts its own
+`builtin/canvas/keycolor.wgsl` at higher priority replaces that one source inside
+canvas's own module and keeps the rest.
+
 
 ## Render To Texture
 
@@ -190,8 +357,12 @@ instead of rendered pixels:
 - `Op` reports `Kind` (`OpSprite`, `OpText`, `OpTriangles`),
   `Layer`, the snapshotted `Clip`/`HasClip`, the sprite `Path`/`Transform`, the
   `Texture` the op samples, the text `FontPath`/`Text`/`Draw`, recorded
-  `Params`, and `Vertices` for triangle lists recorded with the built-in
-  `Vertex` type. `Op.Param` and `Op.ColorParam` look a parameter up by name.
+  `Params`, `HasMaterial`, and `Vertices` for triangle lists recorded with the
+  built-in `Vertex` type. `Op.Param` and `Op.ColorParam` look a parameter up by
+  name. `HasMaterial` says whether the op named a material of *its own*, not
+  what it will draw with: a draw that names none resolves to the layer's set and
+  then to the built-in, both at flush.
+
 - `LayerWindow(Layer)` reports a layer's window and aspect mode,
   `LayerTarget(Layer)` where it draws, and `LayerClear(Layer)` the color passed
   to `Clear` for it.

@@ -20,26 +20,46 @@ import (
 // is why it is named once and referenced everywhere else.
 var defaultKeyColor = m.NewColorSrgb(0.5, 0.5, 0.5, 1)
 
-var defaultMaterial = gfx.MaterialWithState(
-	gfx.ShaderWithResource(spriteShaderPath),
-	gfx.StateOverlay2D,
-	gfx.ColorParam("tint", m.Color{R: 1, G: 1, B: 1, A: 1}),
-	gfx.ColorParam("keyColor", defaultKeyColor),
-)
-
 // canvasSampler is the sampler a 2D draw wants: one filter for magnification,
 // minification and mip selection alike, since canvas never generates mipmaps.
 func canvasSampler(u, v gfx.AddressMode, filter gfx.FilterMode) gfx.SamplerDesc {
 	return gfx.SamplerDesc{AddressU: u, AddressV: v, Mag: filter, Min: filter, Mip: filter}
 }
 
-// TextureSlot and SamplerSlot are the reserved Canvas shader parameter names for
-// the texture and sampler a draw samples. Bind them through a material or through
-// DrawTriangles params; the built-in triangle shader samples them with raw uv.
+// The four reserved canvas parameter names: the names canvas consumes itself and
+// never forwards to a material.
+//
+// TextureSlot and SamplerSlot are the texture and sampler a draw samples; bind
+// them through a material or through DrawTriangles params, and the built-in
+// triangle shader samples them with raw uv. TintSlot and KeyColorSlot are fields
+// of the sprite instance record, which canvas reads out of a draw's parameters
+// by name and packs in, so a custom sprite shader reads them from the shared
+// VertexOut rather than from a uniform and may not reclaim either name.
+//
+// All four are constants rather than string literals scattered through the
+// flush, because a reserved name spelled in four places is reserved only by
+// coincidence.
 const (
-	TextureSlot = "canvasTexture"
-	SamplerSlot = "canvasSampler"
+	TextureSlot  = "canvasTexture"
+	SamplerSlot  = "canvasSampler"
+	TintSlot     = "tint"
+	KeyColorSlot = "keyColor"
 )
+
+// reservedName reports whether canvas consumes a parameter name itself.
+//
+// A reserved name never becomes a per-instance array and never enters the sprite
+// batch key. That second half is load-bearing: tint and keyColor arrive as draw
+// parameters and are consumed into the instance record, so keying on them would
+// split a batch whose draws differ only in tint - the exact merge the instanced
+// path exists to make.
+func reservedName(name string) bool {
+	switch name {
+	case TextureSlot, SamplerSlot, TintSlot, KeyColorSlot:
+		return true
+	}
+	return false
+}
 
 // defaultTrianglesMaterial samples canvasTexture; untextured draws bind no
 // texture param, so the backend's built-in white texture is used (texture id 0).
@@ -49,7 +69,7 @@ var defaultTrianglesMaterial = gfx.MaterialWithState(
 	gfx.ShaderWithResource(trianglesShaderPath),
 	gfx.StateOverlay2D,
 	gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{}),
-	gfx.ColorParam("keyColor", defaultKeyColor),
+	gfx.ColorParam(KeyColorSlot, defaultKeyColor),
 )
 
 // defaultTextureMaterial samples an arbitrary gfx texture as it is. It is a
@@ -64,18 +84,42 @@ var defaultTextureMaterial = gfx.MaterialWithState(
 	gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{}),
 )
 
-// defaultSpriteBatchMaterial draws many sprites/glyphs in one instanced call:
-// per-instance data comes from the "instances" storage buffer, and the texture,
-// sampler, and shared uniforms are bound per draw.
-var defaultSpriteBatchMaterial = gfx.MaterialWithState(
-	gfx.ShaderWithResource(spriteBatchShaderPath),
+// defaultSpriteMaterial draws many sprites, glyphs and fills in one instanced
+// call: per-instance data comes from the "instances" storage buffer, and the
+// texture, sampler and shared uniforms are bound per draw. It is the only sprite
+// material canvas has, and a lone sprite is its one-instance case.
+var defaultSpriteMaterial = gfx.MaterialWithState(
+	gfx.ShaderWithResource(spriteShaderPath),
 	gfx.StateOverlay2D,
 )
 
-// SpriteInstance is one per-instance record the spritebatch shader reads from its
-// storage buffer. Field order and size must match spritebatch.wgsl's SpriteInstance
+// The three built-ins indexed by family, with their fingerprints taken once. A
+// draw that names no material of its own adopts one of these as its batch key,
+// so computing the hash per draw would be per-draw work for a value that cannot
+// change.
+var (
+	builtinMaterials = [3]*gfx.MaterialDescr{
+		familySprite:    &defaultSpriteMaterial,
+		familyTriangles: &defaultTrianglesMaterial,
+		familyTexture:   &defaultTextureMaterial,
+	}
+	builtinFingerprints = [3]uint64{
+		familySprite:    defaultSpriteMaterial.Fingerprint(),
+		familyTriangles: defaultTrianglesMaterial.Fingerprint(),
+		familyTexture:   defaultTextureMaterial.Fingerprint(),
+	}
+)
+
+// SpriteInstance is one per-instance record the sprite shader reads from its
+// storage buffer. Field order and size must match the shader's SpriteInstance
 // (6 vec4, 96 bytes, no padding), so a []SpriteInstance uploads directly as the
 // instance buffer for the instanced draw.
+//
+// The record is frozen. A custom sprite material may replace both entry points
+// and append members to the uniform block, but it may not change this: the Go
+// struct is hand-mirrored against the WGSL one and uploaded by direct
+// reinterpretation, so a divergence is a silent misread rather than a compile
+// error. TestSpriteInstanceMatchesTheShaderRecord is what catches it.
 type SpriteInstance struct {
 	Transform0 m.Vec4 // position.xy, size.xy
 	Transform1 m.Vec4 // origin.xy, sine, cosine
@@ -105,7 +149,11 @@ var triangleVertexLayout = [...]gfx.VertexAttr{
 	gfx.Attr(int(unsafe.Offsetof(Vertex{}.UV)), gfx.Float32x2),
 }
 
-func DefaultMaterial() *gfx.MaterialDescr { return &defaultMaterial }
+// DefaultMaterial returns the built-in sprite material: the instanced atlas
+// draw every sprite, glyph, inline icon and fill reaches the screen through.
+// Passing it explicitly batches identically to passing nil, because the batch
+// key takes the material's fingerprint rather than the fact of naming one.
+func DefaultMaterial() *gfx.MaterialDescr { return &defaultSpriteMaterial }
 
 func DefaultTrianglesMaterial() *gfx.MaterialDescr { return &defaultTrianglesMaterial }
 

@@ -2,6 +2,8 @@ package ui
 
 import (
 	"iter"
+
+	"github.com/dvoyni/cog/canvas"
 )
 
 // NewElement returns an empty element declaration.
@@ -241,6 +243,24 @@ func (element Element) Align(alignment Alignment) Element {
 
 func (element Element) Layer(layer int) Element {
 	element.layer = someValue(layer)
+	return element
+}
+
+// Material names the material set this element and everything beneath it draws
+// with, replacing whatever was inherited from the frame or from an ancestor. It
+// inherits down the tree exactly as Layer does.
+//
+// A nil slot keeps its built-in, so naming only Sprite leaves triangles and
+// texture draws alone. An empty set stops inheriting, which is how a child opts
+// out of an ancestor's shader.
+//
+// One call on a menu root is what puts a shader on every visual under it,
+// glyphs and fills included, because ui records ordinary canvas draws: by the
+// time a draw reaches canvas the set has already collapsed into an ordinary
+// per-draw material, so ui adds no precedence rule of its own and the batch key
+// is untouched.
+func (element Element) Material(set canvas.MaterialSet) Element {
+	element.material = someValue(set)
 	return element
 }
 

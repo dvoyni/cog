@@ -7,7 +7,17 @@ import (
 type frame struct {
 	roots  []Element
 	layers []canvas.Layer
+	// materials seeds every root of this tick's tree. The frame is the natural
+	// home for it because the frame is cleared every tick, which is what a value
+	// that changes per frame wants; Config is construction time and cannot hold
+	// one.
+	materials canvas.MaterialSet
 }
+
+// SetMaterial names the material set every root of this tick inherits. Any
+// element below replaces it with Element.Material, and an element naming an
+// empty set stops inheriting.
+func (frame *frame) SetMaterial(set canvas.MaterialSet) { frame.materials = set }
 
 // Add submits root on layer for the current update tick. The root value is
 // copied; descendant slices may remain borrowed until the UI plugin processes them.
@@ -21,4 +31,5 @@ func (frame *frame) Add(layer canvas.Layer, root ...Element) {
 func (frame *frame) clear() {
 	frame.roots = frame.roots[:0]
 	frame.layers = frame.layers[:0]
+	frame.materials = canvas.MaterialSet{}
 }

@@ -27,7 +27,7 @@ type processor struct {
 
 func (context *processor) process(lookup canvas.LookupAccess, roots []Element, layers []canvas.Layer, state globalState, queue *canvas.OpQueue) {
 	context.interactions = context.interactions[:0]
-	context.flatten(roots, layers)
+	context.flatten(roots, layers, state.Materials)
 	context.disableGridOverflow()
 	context.measure(lookup)
 	context.arrange(state.Screen)
@@ -40,6 +40,8 @@ func (context *processor) process(lookup canvas.LookupAccess, roots []Element, l
 type globalState struct {
 	Screen  Rect
 	Pointer pointerState
+	// Materials is the frame's default material set, seeding every root.
+	Materials canvas.MaterialSet
 }
 
 type pointerState struct {
@@ -85,6 +87,7 @@ type layoutNode struct {
 	parent, firstChild, lastChild int
 	nextSibling, subtreeEnd       int
 	layer                         canvas.Layer
+	materials                     canvas.MaterialSet
 	order                         int
 	rect, clip, childrenClip      Rect
 	definiteWidth, definiteHeight bool
@@ -95,6 +98,9 @@ type walkItem struct {
 	element *Element
 	parent  int
 	base    canvas.Layer
+	// materials is the set a root starts from: the frame's default. Every other
+	// node takes its parent's, so this is only ever read at a root.
+	materials canvas.MaterialSet
 }
 
 type flowItem struct {
@@ -122,7 +128,7 @@ type interactionTarget struct {
 func Measure(element Element, available m.Vec2) m.Vec2 {
 	context := processor{}
 	roots := []Element{element}
-	context.flatten(roots, nil)
+	context.flatten(roots, nil, canvas.MaterialSet{})
 	context.measure(canvas.LookupAccess{})
 	context.arrange(Rect{Width: available.X, Height: available.Y})
 	if len(context.nodes) == 0 {
@@ -131,7 +137,7 @@ func Measure(element Element, available m.Vec2) m.Vec2 {
 	return m.Vec2{X: context.nodes[0].rect.Width, Y: context.nodes[0].rect.Height}
 }
 
-func (context *processor) flatten(roots []Element, layers []canvas.Layer) {
+func (context *processor) flatten(roots []Element, layers []canvas.Layer, materials canvas.MaterialSet) {
 	context.nodes = context.nodes[:0]
 	context.walk = context.walk[:0]
 	for index := len(roots) - 1; index >= 0; index-- {
@@ -139,7 +145,7 @@ func (context *processor) flatten(roots []Element, layers []canvas.Layer) {
 		if index < len(layers) {
 			layer = layers[index]
 		}
-		context.walk = append(context.walk, walkItem{element: &roots[index], parent: -1, base: layer})
+		context.walk = append(context.walk, walkItem{element: &roots[index], parent: -1, base: layer, materials: materials})
 	}
 
 	for len(context.walk) > 0 {
@@ -155,6 +161,17 @@ func (context *processor) flatten(roots []Element, layers []canvas.Layer) {
 			layer = item.base + canvas.Layer(item.element.layer.v)
 		}
 
+		// The material set inherits exactly as the layer does: the parent's,
+		// unless this element names one of its own. An element naming an empty
+		// set therefore stops inheriting, which is the opt-out.
+		elementMaterials := item.materials
+		if item.parent >= 0 {
+			elementMaterials = context.nodes[item.parent].materials
+		}
+		if item.element.material.set {
+			elementMaterials = item.element.material.v
+		}
+
 		nodeIndex := len(context.nodes)
 		context.nodes = append(context.nodes, layoutNode{
 			element:     item.element,
@@ -163,6 +180,7 @@ func (context *processor) flatten(roots []Element, layers []canvas.Layer) {
 			lastChild:   -1,
 			nextSibling: -1,
 			layer:       layer,
+			materials:   elementMaterials,
 			order:       nodeIndex,
 			active:      true,
 		})
@@ -816,8 +834,9 @@ func (context *processor) resolveClips(screen Rect) {
 		element.intermediate.state = State{
 			VisualState: transformVisualState(inheritedState, element),
 			Rect:        node.rect, ContentRect: elementContentRect(element, node.rect),
-			ClipRect: clip, Layer: node.layer,
+			ClipRect: clip, Layer: node.layer, Materials: node.materials,
 		}
+
 		element.intermediate.layer = node.layer
 		element.intermediate.active = true
 	}

@@ -112,29 +112,65 @@ func (b *testBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 	return id, nil
 }
 func (b *testBackend) FreeShader(gfx.ShaderID) {}
+
+// ShaderLayout is one hand-written union standing in for every shader, so it
+// puts bindings and offsets where the real shaders do not. Anything asserting
+// about groups, bindings or the uniform block must go through naga.Parse and
+// wgsl.Lower instead - see TestCanvasNumbersItsGroupsByKind.
+//
+// canvasViewport at 48 is what makes the tests' clipEnabled read at 56 work: the
+// batch supplies it as one vec4, so its .z lands on the union's clipEnabled
+// slot. wobble is here so a per-instance parameter array has a binding to
+// resolve against.
 func (b *testBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout {
 	return gfx.ShaderLayout{
 		UniformSize: 192, UniformGroup: 0, UniformBinding: 0,
 		Uniforms: []gfx.UniformMember{
-			{Name: "canvasTransform0", Offset: 0},
-			{Name: "canvasTransform1", Offset: 16},
-			{Name: "canvasFrame", Offset: 32},
 			{Name: "canvasViewport", Offset: 48},
-			{Name: "atlasLayer", Offset: 56},
-			{Name: "clipEnabled", Offset: 60},
 			{Name: "canvasLayer", Offset: 64},
 			{Name: "canvasClip", Offset: 128},
 			{Name: "tint", Offset: 144},
 			{Name: "keyColor", Offset: 160},
 			{Name: "customValue", Offset: 180},
+			{Name: "fade", Offset: 176},
 		},
 		Resources: []gfx.ShaderResource{
 			{Name: "canvasSampler", Sampler: true, Group: 1, Binding: 0},
 			{Name: "canvasTexture", TextureView: gfx.TextureView2DArray, Group: 1, Binding: 1},
 			{Name: "instances", StorageBuffer: true, Group: 2, Binding: 0},
+			{Name: "wobble", StorageBuffer: true, Group: 2, Binding: 1},
 		},
 	}
 }
+
+// extendingSpriteMaterialSource is the worked example from the material spec: a
+// fade sprite material as six lines of declaration plus three includes, where
+// copying the contract by hand would be seventy. It hand-writes the uniform
+// block precisely because it extends it, and so can never include the published
+// uniforms source.
+const extendingSpriteMaterialSource = `struct CanvasUniforms {
+    canvasViewport: vec4<f32>,
+    canvasLayer: mat4x4<f32>,
+    canvasClip: vec4<f32>,
+    fade: f32,
+};
+@group(0) @binding(0) var<uniform> u: CanvasUniforms;
+
+//#include builtin/canvas/spritevertex.wgsl
+//#include builtin/canvas/clip.wgsl
+//#include builtin/canvas/keycolor.wgsl
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    if canvasClipped(in.canvasPosition) { discard; }
+    let sampled = keyColorRamp(
+        textureSample(canvasTexture, canvasSampler, in.uv, in.atlasLayer),
+        in.keyColor.rgb,
+    );
+    return sampled * in.tint * vec4<f32>(1.0, 1.0, 1.0, u.fade);
+}
+`
+
 func (b *testBackend) NewPipeline(desc gfx.PipelineDesc) (gfx.PipelineID, error) {
 	b.nextID++
 	if b.capture {
@@ -337,7 +373,7 @@ func runFrame(k kernel.Executioner) {
 
 func TestPluginMountsBuiltInShaders(t *testing.T) {
 	k, _, _ := testKernel(t, fstest.MapFS{}, DefaultConfig(), func(*OpQueue) {})
-	for _, path := range []string{spriteShaderPath, trianglesShaderPath, keyColorShaderPath} {
+	for _, path := range []string{spriteShaderPath, trianglesShaderPath, KeyColorPath} {
 		want, err := fs.ReadFile(builtinFS, path)
 		if err != nil {
 			t.Fatalf("read embedded shader %q: %v", path, err)
@@ -447,8 +483,8 @@ func BenchmarkCanvasFlushTexturedTriangles(b *testing.B) {
 
 func TestPrimitiveHelpersUseWhiteSpriteAndNormalizePaths(t *testing.T) {
 	var list opQueue
-	list.FillRect(1, m.Rect{X: 1, Y: 2, Width: 3, Height: 4}, m.Color{R: 1})
-	list.Line(1, m.Vec2{}, m.Vec2{X: 10}, 2, m.Color{G: 1})
+	list.FillRect(1, m.Rect{X: 1, Y: 2, Width: 3, Height: 4}, ShapeDraw{Color: m.Color{R: 1}})
+	list.Line(1, m.Vec2{}, m.Vec2{X: 10}, ShapeDraw{Color: m.Color{G: 1}, Thickness: 2})
 	list.Sprite(1, `images\units\..\hero.png`, SpriteTransform{Size: m.Vec2{X: 1, Y: 1}}, nil)
 	ops := list.ops[1].ops
 	if len(ops) != 3 || ops[0].sprite.path != "" || ops[1].sprite.path != "" {
@@ -728,7 +764,12 @@ func TestDrawTrianglesSupportsCustomVertexLayout(t *testing.T) {
 	}
 }
 
-func TestCustomMaterialAndParametersPassThrough(t *testing.T) {
+// A custom material reaches the backend with its own pipeline state and its own
+// parameters, and canvas's reserved names are canvas's: a caller's tint is
+// consumed into the instance record rather than reaching the material, because
+// the record is where tint lives and a shader reads it from the shared
+// VertexOut.
+func TestCustomMaterialKeepsItsStateAndCannotReclaimTint(t *testing.T) {
 	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 	custom := gfx.MaterialWithState(
 		gfx.ShaderWithText("// custom canvas shader"),
@@ -737,23 +778,159 @@ func TestCustomMaterialAndParametersPassThrough(t *testing.T) {
 	)
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.Sprite(0, "", SpriteTransform{Position: m.Vec2{X: 12}, Size: m.Vec2{X: 8, Y: 8}}, &custom,
-			gfx.FloatParam("customValue", 7),
-			gfx.VecParam("canvasTransform0", m.Vec4{X: 999}),
+			gfx.ColorParam(TintSlot, m.Color{R: 0.25, G: 0.5, B: 0.75, A: 1}),
 		)
 	})
 	runFrame(k)
 	if len(backend.drawParams) != 1 {
 		t.Fatalf("draw params = %d, want 1", len(backend.drawParams))
 	}
-	if got := floatAt(backend.drawParams[0], 0); got != 12 {
-		t.Fatalf("reserved transform X = %v, want 12", got)
+	// The material's own value is per batch and lands in the uniform block. A
+	// per-sprite value would not: on the sprite path a draw parameter is per
+	// instance and becomes a storage array, which is what
+	// TestASpriteDrawParameterNamingAUniformMemberIsReported covers.
+	if got := floatAt(backend.drawParams[0], 180); got != 1 {
+		t.Fatalf("custom value = %v, want the material's 1", got)
 	}
-	if got := floatAt(backend.drawParams[0], 180); got != 7 {
-		t.Fatalf("custom value = %v, want draw override 7", got)
+
+	// The union layout puts tint at 144. Nothing writes it: canvas strips the
+	// reserved name before the parameters reach the material, so it stays zero
+	// there and appears in the instance record instead.
+	if got := floatAt(backend.drawParams[0], 144); got != 0 {
+		t.Fatalf("tint reached the uniform block as %v; it belongs to the instance record", got)
+	}
+	instances := spriteInstances(backend)
+	if len(instances) != 1 {
+		t.Fatalf("instance buffers = %d, want 1", len(instances))
+	}
+	record := instanceAt(instances[0], 0)
+	if got := floatAt(record, 48); got != 0.25 {
+		t.Fatalf("instance tint red = %v, want the caller's 0.25", got)
 	}
 	if len(backend.pipelines) != 1 || backend.pipelines[0].State != (gfx.MaterialState{Blend: gfx.BlendOpaque}) {
 		t.Fatalf("custom pipeline state = %+v", backend.pipelines)
 	}
+}
+
+// Naming a material no longer costs a draw, and naming the built-in explicitly
+// is the same as saying nothing: the key takes the material's fingerprint, not
+// the fact that one was named.
+func TestSpritesSharingAMaterialBatchAndDefaultMaterialBatchesWithNil(t *testing.T) {
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	custom := gfx.MaterialWithState(gfx.ShaderWithText("// custom"), gfx.StateOverlay2D)
+	other := gfx.MaterialWithState(gfx.ShaderWithText("// other"), gfx.StateOverlay2D)
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
+		at := func(x float32) SpriteTransform {
+			return SpriteTransform{Position: m.Vec2{X: x}, Size: m.Vec2{X: 4, Y: 4}}
+		}
+		write.Sprite(0, "", at(0), nil)
+		write.Sprite(0, "", at(8), DefaultMaterial())
+		write.Sprite(0, "", at(16), &custom)
+		write.Sprite(0, "", at(24), &custom)
+		write.Sprite(0, "", at(32), &other)
+	})
+	runFrame(k)
+	instances := spriteInstances(backend)
+	// nil + DefaultMaterial() merge; the two customs merge; the third is its own.
+	if len(instances) != 3 {
+		t.Fatalf("draws = %d, want 3", len(instances))
+	}
+	if got := len(instances[0]) / testInstanceSize; got != 2 {
+		t.Fatalf("the built-in batch holds %d sprites, want nil and DefaultMaterial() together", got)
+	}
+	if got := len(instances[1]) / testInstanceSize; got != 2 {
+		t.Fatalf("the shared custom material batch holds %d sprites, want 2", got)
+	}
+}
+
+// Two sprites differing only in tint still merge - the merge the instanced path
+// exists to make - because the reserved names are stripped before the ordered
+// name key is taken.
+func TestSpritesDifferingOnlyInTintStillMerge(t *testing.T) {
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
+		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil,
+			gfx.ColorParam(TintSlot, m.Color{R: 1, A: 1}))
+		write.Sprite(0, "", SpriteTransform{Position: m.Vec2{X: 8}, Size: m.Vec2{X: 4, Y: 4}}, nil,
+			gfx.ColorParam(TintSlot, m.Color{G: 1, A: 1}))
+	})
+	runFrame(k)
+	instances := spriteInstances(backend)
+	if len(instances) != 1 || len(instances[0])/testInstanceSize != 2 {
+		t.Fatalf("instance buffers = %v, want one batch of two", len(instances))
+	}
+}
+
+// An unreserved value parameter is per sprite: it is collected across the batch
+// into one storage buffer read with the same instance index the record uses, so
+// two sprites differing only in that value still merge. A sprite that carries a
+// name another lacks splits the batch, and the missing element is never
+// zero-filled - for a multiplier, zero is the opposite of absent.
+func TestAPerSpriteParameterBecomesOneArrayAndItsNameSplitsTheBatch(t *testing.T) {
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
+		at := func(x float32) SpriteTransform {
+			return SpriteTransform{Position: m.Vec2{X: x}, Size: m.Vec2{X: 4, Y: 4}}
+		}
+		write.Sprite(0, "", at(0), nil, gfx.FloatParam("wobble", 1))
+		write.Sprite(0, "", at(8), nil, gfx.FloatParam("wobble", 2))
+		write.Sprite(0, "", at(16), nil)
+	})
+	runFrame(k)
+	instances := spriteInstances(backend)
+	if len(instances) != 2 {
+		t.Fatalf("draws = %d, want the two wobbling sprites merged and the third split off", len(instances))
+	}
+	if got := len(instances[0]) / testInstanceSize; got != 2 {
+		t.Fatalf("the wobble batch holds %d sprites, want 2", got)
+	}
+	wobble := namedStorageBuffer(backend, 8)
+	if wobble == nil {
+		t.Fatal("no 8-byte storage buffer was baked; the wobble array was not collected")
+	}
+	if floatAt(wobble, 0) != 1 || floatAt(wobble, 4) != 2 {
+		t.Fatalf("wobble array = [%v %v], want [1 2]", floatAt(wobble, 0), floatAt(wobble, 4))
+	}
+}
+
+// Both shape helpers and text can carry a material, and both are sprite draws,
+// so they batch with each other exactly as any other sprite does.
+func TestAFillAndAGlyphCarryingAMaterialAreSpriteDraws(t *testing.T) {
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	custom := gfx.MaterialWithState(gfx.ShaderWithText("// custom"), gfx.StateOverlay2D)
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
+		write.FillRect(0, m.Rect{Width: 4, Height: 4}, ShapeDraw{Color: m.Color{R: 1, A: 1}, Material: &custom})
+		write.FillRect(0, m.Rect{X: 8, Width: 4, Height: 4}, ShapeDraw{Color: m.Color{G: 1, A: 1}, Material: &custom})
+	})
+	runFrame(k)
+	instances := spriteInstances(backend)
+	if len(instances) != 1 || len(instances[0])/testInstanceSize != 2 {
+		t.Fatalf("fill draws = %v, want one batch of two", len(instances))
+	}
+}
+
+// A zero colour is opaque white. Without that rule a ShapeDraw naming only a
+// material draws nothing at all, which is the likelier mistake in the world the
+// type creates.
+func TestAZeroShapeColourIsOpaqueWhite(t *testing.T) {
+	var list opQueue
+	list.FillRect(0, m.Rect{Width: 4, Height: 4}, ShapeDraw{})
+	color, ok := list.ops[0].ops[0].sprite.params[0].ColorValue()
+	if !ok || color != (m.Color{R: 1, G: 1, B: 1, A: 1}) {
+		t.Fatalf("zero shape colour = %+v (%v), want opaque white", color, ok)
+	}
+}
+
+// namedStorageBuffer returns the first baked storage buffer of exactly size
+// bytes, which is how a test picks out one per-instance parameter array: the
+// instance buffer is a multiple of 96 and the quad buffers are not storage.
+func namedStorageBuffer(b *testBackend, size int) []byte {
+	for i := range b.buffers {
+		if b.buffers[i].kind == gfx.BufferStorage && len(b.buffers[i].data) == size {
+			return b.buffers[i].data
+		}
+	}
+	return nil
 }
 
 func TestSpriteLoadsOnceAndAppliesFramePadding(t *testing.T) {
@@ -974,40 +1151,168 @@ func TestTiledSpriteRepeatsOnlyTiledAxes(t *testing.T) {
 	}
 }
 
-func TestDefaultShaderParses(t *testing.T) {
-	parsed, err := naga.Parse(flattenBuiltinShader(t, spriteShaderPath))
+// The per-sprite data travels as a Go struct reinterpreted as bytes, so a
+// divergence between canvas.SpriteInstance and the WGSL record is a silent
+// misread rather than a compile error - every sprite in the frame drawn from the
+// wrong offsets, with nothing reported anywhere. This is the only thing that
+// catches it.
+//
+// It goes through naga.Parse and wgsl.Lower rather than through the in-package
+// testBackend, whose ShaderLayout is one hand-written union for every shader and
+// puts bindings where the real shaders do not.
+func TestSpriteInstanceMatchesTheShaderRecord(t *testing.T) {
+	module := lowerBuiltinShader(t, spriteShaderPath)
+	var record ir.StructType
+	for _, typ := range module.Types {
+		structure, ok := typ.Inner.(ir.StructType)
+		if ok && typ.Name == "SpriteInstance" {
+			record = structure
+		}
+	}
+	if record.Members == nil {
+		t.Fatal("the sprite shader declares no SpriteInstance struct")
+	}
+	goType := reflect.TypeFor[SpriteInstance]()
+	if int(record.Span) != int(goType.Size()) {
+		t.Fatalf("WGSL SpriteInstance spans %d bytes, Go %d", record.Span, goType.Size())
+	}
+	if len(record.Members) != goType.NumField() {
+		t.Fatalf("WGSL SpriteInstance has %d members, Go %d", len(record.Members), goType.NumField())
+	}
+	// The names differ only in case: WGSL is lowerCamel and the Go fields are
+	// exported, so the comparison folds the first letter rather than pretending
+	// they are unrelated.
+	for i, member := range record.Members {
+		field := goType.Field(i)
+		if !strings.EqualFold(member.Name, field.Name) {
+			t.Fatalf("member %d is %q in WGSL and %q in Go", i, member.Name, field.Name)
+		}
+		if int(member.Offset) != int(field.Offset) {
+			t.Fatalf("member %q is at WGSL offset %d and Go offset %d", member.Name, member.Offset, field.Offset)
+		}
+	}
+}
+
+// The uniform block is what a custom material extends, so its member offsets are
+// part of the published contract: an extending shader hand-writes the canvas
+// prefix and appends after it, and a prefix that drifted would silently
+// misaddress every member the app declared.
+func TestTheUniformBlockIsThePublishedPrefix(t *testing.T) {
+	want := []struct {
+		name   string
+		offset uint32
+	}{
+		{"canvasViewport", 0}, {"canvasLayer", 16}, {"canvasClip", 80},
+	}
+	for _, path := range []string{spriteShaderPath, textureShaderPath} {
+		module := lowerBuiltinShader(t, path)
+		members := uniformBlockMembers(t, module)
+		if len(members) != len(want) {
+			t.Fatalf("%s uniform block has %d members, want %d", path, len(members), len(want))
+		}
+		for i, member := range members {
+			if member.Name != want[i].name || member.Offset != want[i].offset {
+				t.Fatalf("%s member %d = %q@%d, want %q@%d",
+					path, i, member.Name, member.Offset, want[i].name, want[i].offset)
+			}
+		}
+	}
+	// triangles.wgsl extends the block with its own keyColor, which is the
+	// mechanism a custom material uses, demonstrated by a built-in.
+	extended := uniformBlockMembers(t, lowerBuiltinShader(t, trianglesShaderPath))
+	if len(extended) != 4 || extended[3].Name != "keyColor" || extended[3].Offset != 96 {
+		t.Fatalf("the triangles block = %+v, want the canvas prefix plus keyColor at 96", extended)
+	}
+}
+
+// Groups are numbered by what a binding is: 0 the uniform block, 1 the texture a
+// draw samples, 2 per-sprite storage. Group 3 is claimed by nothing, and nothing
+// in Go names any of these numbers - gfx reflects them out of the source.
+func TestCanvasNumbersItsGroupsByKind(t *testing.T) {
+	want := map[string]map[string][2]uint32{
+		spriteShaderPath: {
+			"u": {0, 0}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1}, "instances": {2, 0},
+		},
+		trianglesShaderPath: {
+			"u": {0, 0}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1},
+		},
+		textureShaderPath: {
+			"u": {0, 0}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1},
+		},
+	}
+	for path, expected := range want {
+		module := lowerBuiltinShader(t, path)
+		seen := map[string][2]uint32{}
+		for _, variable := range module.GlobalVariables {
+			if variable.Binding == nil {
+				continue
+			}
+			seen[variable.Name] = [2]uint32{variable.Binding.Group, variable.Binding.Binding}
+			if variable.Binding.Group > 2 {
+				t.Errorf("%s binds %q at group %d; group 3 is claimed by nothing",
+					path, variable.Name, variable.Binding.Group)
+			}
+		}
+		if !reflect.DeepEqual(seen, expected) {
+			t.Errorf("%s bindings = %v, want %v", path, seen, expected)
+		}
+	}
+}
+
+// The case the uniform block was split out for: a material that APPENDS a member
+// cannot include uniforms.wgsl, because include-once means the struct would
+// already be declared and WGSL has no way to add a member to it. So it
+// hand-writes the block and includes the rest - and that has to compile.
+func TestAMaterialExtendingTheUniformBlockCompiles(t *testing.T) {
+	source := extendingSpriteMaterialSource
+	text, _, err := gfx.FlattenShader(storage.NewFileSystem(builtinMountID, builtinFS), gfx.ShaderWithText(source))
 	if err != nil {
-		t.Fatalf("parse default shader: %v", err)
+		t.Fatalf("flatten the extending material: %v", err)
+	}
+	parsed, err := naga.Parse(text)
+	if err != nil {
+		t.Fatalf("parse the extending material: %v", err)
 	}
 	module, err := wgsl.Lower(parsed)
 	if err != nil {
-		t.Fatalf("lower default shader: %v", err)
+		t.Fatalf("lower the extending material: %v", err)
 	}
-	want := map[string]uint32{
-		"canvasTransform0": 0, "canvasTransform1": 16, "canvasFrame": 32,
-		"canvasViewport": 48, "atlasLayer": 56, "clipEnabled": 60,
-		"canvasLayer": 64, "canvasClip": 128,
-		"tint": 144, "keyColor": 160,
+	members := uniformBlockMembers(t, module)
+	if len(members) != 4 || members[3].Name != "fade" {
+		t.Fatalf("extended block = %+v, want the canvas prefix plus fade", members)
 	}
-	found := false
+}
+
+// lowerBuiltinShader flattens and lowers one built-in through the same front end
+// the backend puts it through, and returns the module for reflection.
+func lowerBuiltinShader(t *testing.T, path string) *ir.Module {
+	t.Helper()
+	parsed, err := naga.Parse(flattenBuiltinShader(t, path))
+	if err != nil {
+		t.Fatalf("parse %q: %v", path, err)
+	}
+	module, err := wgsl.Lower(parsed)
+	if err != nil {
+		t.Fatalf("lower %q: %v", path, err)
+	}
+	return module
+}
+
+// uniformBlockMembers reflects the members of the module's one uniform block.
+func uniformBlockMembers(t *testing.T, module *ir.Module) []ir.StructMember {
+	t.Helper()
 	for _, variable := range module.GlobalVariables {
 		if variable.Name != "u" || variable.Space != ir.SpaceUniform {
 			continue
 		}
 		structure, ok := module.Types[variable.Type].Inner.(ir.StructType)
 		if !ok {
-			t.Fatal("Canvas uniform is not a struct")
+			t.Fatal("the canvas uniform is not a struct")
 		}
-		found = true
-		for _, member := range structure.Members {
-			if offset, exists := want[member.Name]; !exists || member.Offset != offset {
-				t.Fatalf("uniform %q offset = %d, want %d", member.Name, member.Offset, offset)
-			}
-		}
+		return structure.Members
 	}
-	if !found {
-		t.Fatal("Canvas uniform block was not reflected")
-	}
+	t.Fatal("the canvas uniform block was not reflected")
+	return nil
 }
 
 // The atlas holds artwork, and artwork is gamma-encoded, so the array has to
@@ -1058,8 +1363,8 @@ func assertBuiltinShaderLowers(t *testing.T, path string) {
 	}
 }
 
-func TestSpriteBatchShaderParses(t *testing.T) {
-	assertBuiltinShaderLowers(t, spriteBatchShaderPath)
+func TestSpriteShaderParses(t *testing.T) {
+	assertBuiltinShaderLowers(t, spriteShaderPath)
 }
 
 func TestTrianglesShaderParses(t *testing.T) {
@@ -1137,13 +1442,13 @@ fn fs_main() -> @location(0) vec4<f32> {
 // mount at all - nothing exercised that before - and the one that would catch a
 // copy creeping back into a second source.
 func TestTheKeyColorRampIsIncludedRatherThanCopied(t *testing.T) {
-	for _, path := range []string{spriteShaderPath, spriteBatchShaderPath, trianglesShaderPath} {
+	for _, path := range []string{spriteShaderPath, trianglesShaderPath} {
 		source, err := fs.ReadFile(builtinFS, path)
 		if err != nil {
 			t.Fatalf("read embedded shader %q: %v", path, err)
 		}
 		if bytes.Contains(source, []byte("fn keyColorRamp")) {
-			t.Errorf("%s declares keyColorRamp itself; it should include %s", path, keyColorShaderPath)
+			t.Errorf("%s declares keyColorRamp itself; it should include %s", path, KeyColorPath)
 		}
 		if got := strings.Count(flattenBuiltinShader(t, path), "fn keyColorRamp"); got != 1 {
 			t.Errorf("%s flattens to %d keyColorRamp declarations, want 1", path, got)
@@ -1245,4 +1550,26 @@ func spriteInstances(b *testBackend) [][]byte {
 // frame@32 (uv), tint@48, misc@64 (atlasLayer), keyColor@80.
 func instanceAt(buffer []byte, i int) []byte {
 	return buffer[i*testInstanceSize : (i+1)*testInstanceSize]
+}
+
+// One name has one frequency. A value named on the material is per batch and is
+// a uniform member; the same name at a sprite draw call is per sprite and
+// becomes a storage array. Naming a uniform member at the draw call is an
+// authoring error, and it is reported rather than silently rerouted - without
+// the check gfx would bind a buffer descriptor into a uniform slot and draw
+// garbage with no diagnostic anywhere.
+func TestASpriteDrawParameterNamingAUniformMemberIsReported(t *testing.T) {
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, errs := testKernelCapturing(t, fstest.MapFS{}, config, func(write *OpQueue) {
+		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil,
+			gfx.FloatParam("customValue", 7))
+	})
+	runFrame(k)
+	if len(*errs) != 1 {
+		t.Fatalf("reported errors = %d, want the kind mismatch", len(*errs))
+	}
+	mismatch, ok := (*errs)[0].(gfx.ErrParameterKindMismatch)
+	if !ok || mismatch.Parameter != "customValue" {
+		t.Fatalf("reported %v, want a kind mismatch naming customValue", (*errs)[0])
+	}
 }

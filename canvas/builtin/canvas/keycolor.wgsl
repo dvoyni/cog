@@ -1,13 +1,20 @@
 // The key-colour detector and ramp, and the sRGB transfer functions it is
-// written in. Included by every built-in canvas shader that draws artwork -
-// sprite.wgsl, spritebatch.wgsl and triangles.wgsl - so the ramp is one
-// declaration and a change to it cannot land in some copies and not others.
-// texture.wgsl deliberately includes nothing from here: a render target is not
-// artwork, and its header says why.
+// written in.
+//
+// DECLARES: fn keyColorRamp; fn srgbEncode, srgbDecode, srgbEncode3,
+// srgbDecode3; const keyChannelTolerance, keyGreenCutoff, keyRampMidpoint. No
+// binding and no struct, so it is includable by extending and non-extending
+// materials alike.
+//
+// Included by every built-in canvas shader that draws artwork - sprite.wgsl and
+// triangles.wgsl - so the ramp is one declaration and a change to it cannot land
+// in some copies and not others. texture.wgsl deliberately includes nothing from
+// here: a render target is not artwork, and its header says why.
 //
 // It is mounted at builtin/canvas/keycolor.wgsl, so a shader in a consuming
 // app includes it by that absolute storage name and gets a ramp identical to
 // the built-ins' rather than a re-typed approximation.
+
 
 const keyChannelTolerance: f32 = 0.2;   // sRGB: how far R and B may differ
 const keyGreenCutoff: f32 = 0.0331048;  // 0.2 in sRGB

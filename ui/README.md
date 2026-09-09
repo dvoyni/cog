@@ -78,6 +78,41 @@ to the parent's explicit offset. Elements are ordered first by effective layer,
 then by declaration order on the same layer. Drawing and hit testing share this
 order.
 
+## Materials
+
+One modifier on a menu root puts a shader on every visual under it:
+
+```go
+root = root.Material(canvas.MaterialSet{Sprite: fadeMaterial})
+```
+
+`canvas.MaterialSet` names one material per canvas family — sprite, triangles,
+texture — plus a shared parameter list. A nil slot keeps its built-in, so naming
+only `Sprite` leaves everything else alone.
+
+`Element.Material(canvas.MaterialSet)` is a Modifier and inherits down the tree
+exactly as `Layer` does. `Frame.SetMaterial(canvas.MaterialSet)` seeds every root
+of a tick, and like everything else on the frame it is cleared each tick — which
+is what a value that changes per frame wants, and why `canvas.Config`, which is
+construction time, cannot hold it. A child naming an **empty** set stops
+inheriting.
+
+`ui` records ordinary canvas draws, so what an element inherits reaches canvas as
+an ordinary per-draw material: `ui` gains no second precedence rule of its own,
+the whole mechanism is record time, and the canvas batch key is untouched. No
+`*Params` struct is involved, so the interactive payload wrappers are unaffected.
+
+The set reaches a `Visual` through `State.Materials`, and each picks the slot for
+the family it draws. Every built-in passes `Sprite`, because a sprite, a
+nine-slice, a glyph run and a fill are all sprite draws.
+
+A set's `Params` are carried in `State.Materials` for a custom `Visual` that
+wants them, and the built-in visuals pass the slot alone. That is deliberate: a
+parameter named at a sprite draw call is **per sprite** and becomes a storage
+array, so a per-scope value belongs on the material itself or on
+`canvas.OpQueue.SetLayerMaterial`, where it is per batch by construction. See
+`canvas/README.md` for the frequency rules.
+
 ## Composition
 
 The container helpers select how children are arranged:
@@ -218,7 +253,10 @@ stores the result as the untyped `ui.Visual` the layout pass measures and draws.
 
 Both methods receive a handler-scoped `canvas.LookupAccess` for sprite sizing
 and text measurement. `Draw` also receives final geometry, content geometry,
-effective layer, clip, and visual state through `ui.State`.
+effective layer, clip, visual state and the inherited `canvas.MaterialSet`
+through `ui.State`. Pick the slot for the family you draw and pass it as the
+draw's material; see **Materials** above.
+
 
 The plugin configures the canvas layer transform and clip before each draw and
 removes the clip afterward. A custom visual appends operations to the supplied

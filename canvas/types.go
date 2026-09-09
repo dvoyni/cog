@@ -127,4 +127,49 @@ type TextDraw struct {
 	Align        TextAlign
 	WordWrapping bool
 	WrapWidth    float32
+	// Material and Params shade the glyphs and inline icons this draw produces.
+	//
+	// Text is a sprite draw twice over - glyphs and inline icons both reach the
+	// sprite batcher - so a text material is a sprite material: it samples a
+	// texture_2d_array and keys exactly as any other sprite does. It costs no
+	// extra draw, because the batch key already separates glyphs from sprites
+	// through the texture, the font atlas not being the sprite atlas.
+	//
+	// Text already spends both reserved names: Color becomes the instance tint
+	// and glyphs carry the default key colour, so a text material may not
+	// reclaim TintSlot or KeyColorSlot.
+	Material *gfx.MaterialDescr
+	Params   []gfx.ParameterDescr
+}
+
+// ShapeDraw describes a FillRect, StrokeRect or Line: what colour it is, how
+// thick, and what shades it. It is the shape TextDraw already has, and it is a
+// struct rather than trailing arguments for the same reason - these calls
+// describe a whole draw, where Sprite and DrawTriangles take a transform or a
+// path and then say how to shade it.
+//
+// FillRect ignores Thickness, exactly as TextDraw ignores WrapWidth without
+// WordWrapping.
+//
+// A zero Color is opaque white, matching ui's default tint and canvas's habit of
+// reading a zero scale as 1. Without that rule a ShapeDraw naming only a
+// material would draw nothing at all, which is the likelier mistake in the world
+// this type creates.
+//
+// A fill is a sprite draw, so Material is a sprite material and the reserved
+// names apply to it as they do to text: Color becomes the instance tint.
+type ShapeDraw struct {
+	Color     m.Color
+	Thickness float32
+	Material  *gfx.MaterialDescr
+	Params    []gfx.ParameterDescr
+}
+
+// tint reports the colour a shape draws at, reading a zero colour as opaque
+// white.
+func (d ShapeDraw) tint() m.Color {
+	if d.Color == (m.Color{}) {
+		return m.Color{R: 1, G: 1, B: 1, A: 1}
+	}
+	return d.Color
 }

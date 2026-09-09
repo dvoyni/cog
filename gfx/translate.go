@@ -333,7 +333,13 @@ func (t *translator) translateDraw(op *op, pass PassDescr, backend Backend, file
 	}
 
 	layout := t.shaderLayout(backend, shaderID)
-	plan := t.prepareParameterPlan(shaderID, layout, op.material.params, op.params)
+	plan := t.prepareParameterPlan(shaderID, shaderLabel(op.material.shader), layout, op.material.params, op.params)
+	if plan.mismatch != nil {
+		if *firstErr == nil {
+			*firstErr = plan.mismatch
+		}
+		return
+	}
 	if name, ok := sampledAttachment(plan, op.params, op.material.params, pass); ok {
 		if *firstErr == nil {
 			*firstErr = ErrDrawSamplesAttachment{Pass: pass.Label, Parameter: name}
@@ -683,6 +689,10 @@ func writeParamAt(buf []byte, off int, p *ParameterDescr) {
 	case paramFloat:
 		if off+4 <= len(buf) {
 			binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(p.num))
+		}
+	case paramRaw:
+		if off+len(p.raw) <= len(buf) {
+			copy(buf[off:], p.raw)
 		}
 	}
 }

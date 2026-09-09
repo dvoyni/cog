@@ -229,7 +229,7 @@ func (spriteVisual) Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, stat
 		},
 		Size:     m.Vec2{X: bounds.Width, Y: bounds.Height},
 		Rotation: params.Rotation, Origin: m.Vec2{X: 0.5, Y: 0.5}, Frame: frame, Filter: params.Filter,
-	}, nil, gfx.ColorParam("tint", defaultTint(params.Tint)))
+	}, state.Materials.Sprite, gfx.ColorParam(canvas.TintSlot, defaultTint(params.Tint)))
 }
 
 func Sprite9Sliced(params Sprite9SlicedParams) (ParamVisual[Sprite9SlicedParams], Sprite9SlicedParams) {
@@ -281,7 +281,7 @@ func (sprite9SlicedVisual) Draw(_ canvas.LookupAccess, queue *canvas.OpQueue, st
 		Size:      m.Vec2{X: bounds.Width, Y: bounds.Height},
 		NineSlice: params.Insets, NineSliceScale: defaultScale(params.Scale), NineSliceNoCenter: params.NoCenter,
 		Filter: params.Filter,
-	}, nil, gfx.ColorParam("tint", defaultTint(params.Tint)))
+	}, state.Materials.Sprite, gfx.ColorParam(canvas.TintSlot, defaultTint(params.Tint)))
 }
 
 func Sprite9SliceTiled(params Sprite9SliceTiledParams) (ParamVisual[Sprite9SliceTiledParams], Sprite9SliceTiledParams) {
@@ -353,7 +353,7 @@ func (sprite9SliceTiledVisual) Draw(lookup canvas.LookupAccess, queue *canvas.Op
 				Position: m.Vec2{X: bounds.X + x[column], Y: bounds.Y + y[row]},
 				Size:     m.Vec2{X: width, Y: height},
 				Scale:    scale, TileX: column == 1, TileY: row == 1, Filter: params.Filter,
-			}, nil, gfx.ColorParam("tint", defaultTint(params.Tint)))
+			}, state.Materials.Sprite, gfx.ColorParam(canvas.TintSlot, defaultTint(params.Tint)))
 		}
 	}
 }
@@ -441,7 +441,10 @@ func (interactiveColorVisual) Draw(_ canvas.LookupAccess, queue *canvas.OpQueue,
 	if queue == nil {
 		return
 	}
-	queue.FillRect(state.Layer, state.Rect, params.colors.value(state.VisualState, params.defaultValue))
+	queue.FillRect(state.Layer, state.Rect, canvas.ShapeDraw{
+		Color:    params.colors.value(state.VisualState, params.defaultValue),
+		Material: state.Materials.Sprite,
+	})
 }
 
 func (colorVisual) DefaultSize(canvas.LookupAccess, ColorParams) m.Vec2 { return m.Vec2{} }
@@ -450,7 +453,7 @@ func (colorVisual) Draw(_ canvas.LookupAccess, queue *canvas.OpQueue, state Stat
 	if queue == nil {
 		return
 	}
-	queue.FillRect(state.Layer, state.Rect, params.Color)
+	queue.FillRect(state.Layer, state.Rect, canvas.ShapeDraw{Color: params.Color, Material: state.Materials.Sprite})
 }
 
 func (textVisual) DefaultSize(lookup canvas.LookupAccess, params TextParams) m.Vec2 {
@@ -483,10 +486,14 @@ func (textVisual) Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, state 
 		position.X = bounds.X + bounds.Width
 		align = canvas.AlignRight
 	}
+	// A glyph run and an inline icon are both sprite draws, so text takes the
+	// sprite slot like every other visual here.
 	queue.Text(state.Layer, params.Font.Path, params.Text, canvas.TextDraw{
 		Position: position, Size: float32(params.Font.Size), Color: params.Color, Align: align,
 		WordWrapping: params.WordWrapping, WrapWidth: bounds.Width,
+		Material: state.Materials.Sprite,
 	})
+
 }
 
 func packVisualStates[T any](values VisualStates[T]) packedVisualStates[T] {
