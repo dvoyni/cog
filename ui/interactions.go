@@ -55,6 +55,27 @@ func (interactions *interactions) Clicked(id ID) bool {
 	return result
 }
 
+// Clear discards every interaction from the last processed frame, so whoever
+// reads them next sees a frame nobody touched.
+//
+// It exists for the tick whose input belongs to nobody. An app that holds a
+// view change in flight - a screen fading out while the next one fades in - has
+// a stretch of frames where a click would land on a control that is halfway
+// gone; clearing here, once, after the plugin has processed the frame, swallows
+// that stretch for every consumer at once, instead of each of them asking
+// whether it should be listening.
+//
+// Hover interactions go with the rest, so a caller's own tooltip or highlight
+// stops too - but the VisualHovered state the processor stamps on an element is
+// hit-tested during layout, not read back from here, so a button still lights
+// up under the pointer. Clearing is about what the app acts on, not about what
+// the UI looks like.
+//
+// The buffer is kept, only emptied: the plugin swaps it back in next tick.
+func (interactions *interactions) Clear() {
+	interactions.values = interactions.values[:0]
+}
+
 // HoverTracker remembers what the pointer is resting on and for how long, so
 // callers can decide whether to show a tooltip without pairing up InteractionIn
 // and InteractionOut themselves.

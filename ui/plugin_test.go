@@ -291,3 +291,26 @@ func TestInteractionsHasReturnsTopmostUserData(t *testing.T) {
 		t.Fatalf("Has result = %v, %q; want true, %q", found, userData, "top data")
 	}
 }
+
+func TestInteractionsClearLeavesNothingToFindAndKeepsTheBuffer(t *testing.T) {
+	interactions := Interactions{values: []Interaction{
+		{ID: "clicked", Kind: InteractionClick, Button: 0},
+		{ID: "hovered", Kind: InteractionHover, Button: -1},
+	}}
+	buffer := interactions.values
+
+	interactions.Clear()
+
+	if len(interactions.values) != 0 {
+		t.Fatalf("cleared interactions = %v, want none", interactions.values)
+	}
+	if interactions.Clicked("clicked") {
+		t.Fatal("Clicked found a click after Clear")
+	}
+	for range interactions.All() {
+		t.Fatal("All yielded an interaction after Clear")
+	}
+	if cap(interactions.values) != cap(buffer) {
+		t.Fatalf("Clear replaced the buffer: cap = %d, want %d", cap(interactions.values), cap(buffer))
+	}
+}
