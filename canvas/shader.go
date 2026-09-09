@@ -149,6 +149,13 @@ var triangleVertexLayout = [...]gfx.VertexAttr{
 	gfx.Attr(int(unsafe.Offsetof(Vertex{}.UV)), gfx.Float32x2),
 }
 
+// DefaultKeyColor is the key colour a triangles draw gets when it names none:
+// mid grey, which leaves the ramp a no-op on artwork that was not authored for
+// keying. It is exported because a custom triangles material has to carry it as
+// its own default - keyColor is a reserved name canvas packs into the uniform
+// block, and a material that omits it keys every texel against black.
+func DefaultKeyColor() m.Color { return defaultKeyColor }
+
 // DefaultMaterial returns the built-in sprite material: the instanced atlas
 // draw every sprite, glyph, inline icon and fill reaches the screen through.
 // Passing it explicitly batches identically to passing nil, because the batch

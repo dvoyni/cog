@@ -64,8 +64,9 @@ interchangeable words is ambiguous.
   A **draw** names a single material, because at a draw the family is known.
   *Set is a scope word, material is a draw word*; the two are never
   interchangeable.
-- **Scope** — a layer, a `ui.Frame`, or a `ui` element subtree: something that
-  covers many draws and supplies a material set to those that name none.
+- **Scope** — the whole op queue, a layer, a `ui.Frame`, or a `ui` element
+  subtree: something that covers many draws and supplies a material set to those
+  that name none. The nearer scope wins.
 - **Batch** — one run of recorded work merged into a single draw call, whatever
   supplies its per-item data. Canvas has two batchers, one per family.
 - **Instance record** — the fixed 96-byte `SpriteInstance` struct one sprite
@@ -874,6 +875,16 @@ type MaterialSet struct {
   a caller that mutates its material afterwards does not retroactively change what
   was recorded — and the **last** call in a tick wins with the values it held at
   that moment. `reset()` clears it with the layer's other per-frame state.
+- **`SetMaterial(set MaterialSet)`** — the same thing over the whole queue,
+  the widest scope of all, resolved after a layer's own set and before the
+  built-in. **Added after this document was written**, by its first consumer:
+  reaching every layer through `SetLayerMaterial` means keeping a list of every
+  layer an app has, and layers are hand-picked integers spread across an app's
+  packages — feuds-26's run 0…16, 101, 1000, 2000, 3000, 6000, 9001 across six
+  packages. A shader over *everything on screen* is a property of the frame, not
+  of a list that a new screen silently falls out of. A layer opts out by naming
+  an empty set, which is what the `has` flag on the stored set is for; that is
+  the backdrop that must not fade and the layer rendering into a texture.
 - **`TextDraw` grows `Material *gfx.MaterialDescr` and `Params
   []gfx.ParameterDescr`.** `OpQueue.Text`'s signature does not change.
 - **`FillRect`, `StrokeRect` and `Line` take a new `ShapeDraw`** carrying

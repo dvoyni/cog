@@ -134,7 +134,14 @@ func (p *Plugin) flushFrame(
 		// The layer's set is read through a pointer into this layer's own copy,
 		// so the fingerprints it takes lazily are memoised for the rest of the
 		// layer rather than recomputed per draw. At most three, one per slot.
+		//
+		// A layer that named no set of its own falls through to the queue's,
+		// read through a pointer into the queue itself so that its fingerprints
+		// are taken once per frame rather than once per layer.
 		materials := &value.materials
+		if !value.materials.has {
+			materials = &write.defaults
+		}
 
 		for i := range value.ops {
 			switch value.ops[i].kind {
@@ -192,7 +199,7 @@ func canvasPass(layerID Layer, value layer, first, last bool) gfx.PassDescr {
 // longer a reason to leave it: the material joins the key by fingerprint and the
 // parameters join it by value, so two draws that agree on both are one draw and
 // an unrecognised parameter name is a key field rather than a bail-out.
-func (p *Plugin) drawTriangles(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, layout []gfx.VertexAttr, materials *layerMaterials, op *trianglesOp) {
+func (p *Plugin) drawTriangles(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, layout []gfx.VertexAttr, materials *scopeMaterials, op *trianglesOp) {
 	if hasClip && (clip.Width <= 0 || clip.Height <= 0) {
 		return
 	}
@@ -255,7 +262,7 @@ func clearFontFaces(fonts *fontStore) {
 	clear(fonts.fonts)
 }
 
-func (p *Plugin) drawSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *layerMaterials, op *spriteOp) {
+func (p *Plugin) drawSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *scopeMaterials, op *spriteOp) {
 	// Recording order is the contract, so a sprite closes every batch whose
 	// pending draw would otherwise land after it. The atlas batch is the only one
 	// a path sprite can join; a texture-sourced sprite joins neither, because its
@@ -356,7 +363,7 @@ func splitNineSliceAxis(length, leading, trailing float32) [4]float32 {
 // drawTiledSprite renders a sprite that repeats on one or both axes. It samples a
 // standalone repeat texture through the textured-triangle path, so it ignores the
 // sprite material and Frame; Scale controls logical tile size and tint becomes vertex color.
-func (p *Plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, t SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *layerMaterials, op *spriteOp) {
+func (p *Plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, t SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *scopeMaterials, op *spriteOp) {
 	entry, ok := atlas.resolveStandalone(op.path, filesystem, gfxResources)
 	if !ok {
 		return
@@ -431,7 +438,7 @@ func (p *Plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *atlas, gfxResourc
 // and a texture sprite can never be the same draw. It emits its own quad
 // instead, the same route the tiled sprite takes, through the texture material
 // so the key-colour ramp never touches a rendered image.
-func (p *Plugin) drawTextureSprite(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *layerMaterials, op *spriteOp) {
+func (p *Plugin) drawTextureSprite(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *scopeMaterials, op *spriteOp) {
 	width, height := op.texture.Size()
 	if width <= 0 || height <= 0 {
 		// Skip, never substitute. A texture that does not know its size yet - a
@@ -451,7 +458,7 @@ func (p *Plugin) drawTextureSprite(gfxWrite *gfx.OpQueue, surf surface, layerTra
 // emitTextureQuad draws one rectangle of a texture-sourced sprite: two triangles
 // in the built-in vertex layout, with the tint as vertex colour so it needs no
 // parameter the texture material would have to declare.
-func (p *Plugin) emitTextureQuad(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, width, height int, t SpriteTransform, materials *layerMaterials, op *spriteOp) {
+func (p *Plugin) emitTextureQuad(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, width, height int, t SpriteTransform, materials *scopeMaterials, op *spriteOp) {
 	size := spriteSize(width, height, t)
 	if size.X == 0 || size.Y == 0 {
 		return
@@ -703,7 +710,7 @@ func (p *Plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, atlas *atlas, resources *gf
 }
 
 // drawText expands inline icons and wraps lines before drawing glyph runs.
-func (p *Plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *atlas, resources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, fonts *fontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *layerMaterials, op *textOp) {
+func (p *Plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *atlas, resources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, fonts *fontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *scopeMaterials, op *textOp) {
 	if op.draw.Size <= 0 || op.text == "" || op.fontPath == "" {
 		return
 	}

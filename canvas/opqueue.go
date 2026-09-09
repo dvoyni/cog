@@ -110,6 +110,9 @@ type opQueue struct {
 	vertexArena   []byte
 	layoutIDs     map[reflect.Type]int
 	layouts       [][]gfx.VertexAttr
+	// defaults is the set SetMaterial put over the whole queue, supplying a slot
+	// to every layer that named none of its own.
+	defaults scopeMaterials
 	// clip and hasClip are the recording-time clip cursor snapshotted into each op.
 	clip    m.Rect
 	hasClip bool
@@ -131,7 +134,7 @@ type layer struct {
 	hasColor   bool
 	// materials is the set SetLayerMaterial put on this layer, supplying a slot
 	// to every draw under it that named no material of its own.
-	materials layerMaterials
+	materials scopeMaterials
 }
 
 // Clear fills one layer's target, before anything that layer draws. It is
@@ -196,14 +199,43 @@ func (w *opQueue) SetLayerTransform(layerID Layer, window m.Rect, aspect AspectM
 // reset clears it with the layer's other per-frame state.
 func (w *opQueue) SetLayerMaterial(layerID Layer, set MaterialSet) {
 	value := w.layer(layerID)
-	value.materials = layerMaterials{set: set, has: true}
-	value.materials.set.Sprite, w.materialArena = cloneMaterial(set.Sprite, w.materialArena)
-	value.materials.set.Triangles, w.materialArena = cloneMaterial(set.Triangles, w.materialArena)
-	value.materials.set.Texture, w.materialArena = cloneMaterial(set.Texture, w.materialArena)
+	value.materials = w.recordSet(set)
+	w.setLayer(layerID, value)
+}
+
+// SetMaterial puts one material set over everything the whole queue draws that
+// named no material of its own and sits on no layer that named a set - the
+// widest of the three scopes, beneath the layer and beneath the draw.
+//
+// It exists because the caller who wants one shader over everything on screen
+// does not know what everything is. Layers are hand-picked integers spread
+// across an app's packages, so reaching them all through SetLayerMaterial means
+// keeping a list of every layer the app has and revisiting it whenever a screen
+// grows one; a fade is a property of the frame, not of a list. Like the per-layer
+// set it is key/value applied at flush, so it reaches draws already recorded -
+// including the ones a ui pass records after the caller runs, which pass no
+// material of their own and so arrive here.
+//
+// A layer opts out with SetLayerMaterial and an empty set: naming a set is what
+// stops this one, and an empty set keeps the built-ins. That is how a backdrop
+// that must not fade, or a layer rendering into a texture, stays untouched.
+func (w *opQueue) SetMaterial(set MaterialSet) {
+	w.defaults = w.recordSet(set)
+}
+
+// recordSet snapshots a set into the queue's arenas, so a caller that mutates
+// their material or their parameters afterwards does not retroactively change
+// what was recorded. The last call in a tick wins, with the values the set held
+// at that moment.
+func (w *opQueue) recordSet(set MaterialSet) scopeMaterials {
+	recorded := scopeMaterials{set: set, has: true}
+	recorded.set.Sprite, w.materialArena = cloneMaterial(set.Sprite, w.materialArena)
+	recorded.set.Triangles, w.materialArena = cloneMaterial(set.Triangles, w.materialArena)
+	recorded.set.Texture, w.materialArena = cloneMaterial(set.Texture, w.materialArena)
 	start := len(w.paramArena)
 	w.paramArena = append(w.paramArena, set.Params...)
-	value.materials.set.Params = w.paramArena[start:]
-	w.setLayer(layerID, value)
+	recorded.set.Params = w.paramArena[start:]
+	return recorded
 }
 
 // cloneMaterial snapshots one slot of a material set into the queue's arena. The
@@ -407,9 +439,10 @@ func (w *opQueue) reset() {
 		value.target = gfx.TargetDescr{}
 		value.clearColor = m.Color{}
 		value.hasColor = false
-		value.materials = layerMaterials{}
+		value.materials = scopeMaterials{}
 		w.ops[layerID] = value
 	}
+	w.defaults = scopeMaterials{}
 	w.paramArena = w.paramArena[:0]
 	w.materialArena = w.materialArena[:0]
 	w.vertexArena = w.vertexArena[:0]

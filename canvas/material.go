@@ -19,9 +19,9 @@ const (
 	familyTexture
 )
 
-// MaterialSet is the shading a scope supplies to the draws beneath it that name
-// none of their own: one material per family, plus one parameter list shared by
-// all three.
+// MaterialSet is the shading a scope - the queue, a layer, a ui.Frame or a ui
+// element subtree - supplies to the draws beneath it that name none of their
+// own: one material per family, plus one parameter list shared by all three.
 //
 // A scope names a set rather than a material because a layer is never one
 // family: every interesting layer carries sprites and triangles, and the two can
@@ -58,34 +58,38 @@ func (s *MaterialSet) slot(f family) *gfx.MaterialDescr {
 	return s.Texture
 }
 
-// layerMaterials is one layer's set with its fingerprints taken lazily.
+// scopeMaterials is one scope's set - a layer's, or the queue's - with its
+// fingerprints taken lazily.
 //
-// A per-layer set is applied at flush rather than positionally, so it reaches
+// A scope's set is applied at flush rather than positionally, so it reaches
 // draws recorded before the call that set it - which is the whole point, because
 // the caller that wants a shader over a whole menu runs after every screen has
 // recorded. Fingerprinting it there would otherwise be per-draw work, so each
-// slot's key is taken on first use: at most three hashes per layer per frame,
+// slot's key is taken on first use: at most three hashes per scope per frame,
 // never one per draw. A draw that names its own material keeps the fingerprint
 // it was recorded with and never touches this.
-type layerMaterials struct {
+type scopeMaterials struct {
 	set MaterialSet
-	// has separates a layer that was given a set from one that was not, so an
+	// has separates a scope that was given a set from one that was not, so an
 	// explicitly empty set still stops an outer default rather than reading as
-	// "nothing was said".
+	// "nothing was said". That is how a layer opts out of the queue's set: it
+	// names an empty one, whose nil slots keep the built-ins.
 	has   bool
 	keys  [3]uint64
 	taken [3]bool
 }
 
 // resolve reports the material a draw of one family shades with and the key that
-// material contributes to its batch, following draw, then layer, then built-in.
+// material contributes to its batch, following draw, then scope, then built-in.
+// The caller has already picked the scope: a layer's own set where it has one,
+// the queue's otherwise.
 //
 // scopeParams is the scope's parameter list, and it is empty for a draw that
 // named its own material: a scope's material and its parameters are one unit, so
 // a draw that has said what it wants takes neither. The alternative - scope
 // parameters always applying - turns a layer into a general parameter-injection
 // channel, which is not what a material set is.
-func (l *layerMaterials) resolve(f family, draw *gfx.MaterialDescr, drawKey uint64) (material *gfx.MaterialDescr, key uint64, scopeParams []gfx.ParameterDescr) {
+func (l *scopeMaterials) resolve(f family, draw *gfx.MaterialDescr, drawKey uint64) (material *gfx.MaterialDescr, key uint64, scopeParams []gfx.ParameterDescr) {
 	if draw != nil {
 		return draw, drawKey, nil
 	}
@@ -112,7 +116,7 @@ func (l *layerMaterials) resolve(f family, draw *gfx.MaterialDescr, drawKey uint
 // buffer has no per-instance form - there is one bind group per draw - so it is
 // per batch. The scope's parameters follow the draw's, so the draw wins under
 // first-wins.
-func (p *Plugin) shadeSprite(materials *layerMaterials, material *gfx.MaterialDescr, fingerprint uint64, params []gfx.ParameterDescr) spriteShading {
+func (p *Plugin) shadeSprite(materials *scopeMaterials, material *gfx.MaterialDescr, fingerprint uint64, params []gfx.ParameterDescr) spriteShading {
 	shading := spriteShading{}
 	var scope []gfx.ParameterDescr
 	shading.material, shading.fingerprint, scope = materials.resolve(familySprite, material, fingerprint)
@@ -138,7 +142,7 @@ func (p *Plugin) shadeSprite(materials *layerMaterials, material *gfx.MaterialDe
 // is per material and two values are two draws. That is a rule, not a
 // shortcoming of the key - removing it would need somewhere per-vertex to put
 // the value, which this geometry does not have.
-func (p *Plugin) shadeTriangles(materials *layerMaterials, op *trianglesOp) trianglesShading {
+func (p *Plugin) shadeTriangles(materials *scopeMaterials, op *trianglesOp) trianglesShading {
 	f := familyTriangles
 	if op.unkeyed {
 		f = familyTexture

@@ -203,3 +203,81 @@ func TestOneArrayNameAtTwoKindsSplitsTheBatch(t *testing.T) {
 		t.Fatalf("draws = %d, want 2: a four-byte element and a sixteen-byte one cannot share an array", got)
 	}
 }
+
+// The queue's set is the widest scope: it reaches every layer that named none of
+// its own, and like the per-layer set it is applied at flush, so it reaches
+// draws already recorded - including ones on layers the caller never heard of,
+// which is the reason it exists.
+func TestTheQueueSetReachesEveryLayerThatNamedNone(t *testing.T) {
+	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn queueSpriteMark() {}"), gfx.StateOverlay2D)
+	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *OpQueue) {
+		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+		write.Sprite(7, "", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+		// After everything is recorded, as the real caller runs.
+		write.SetMaterial(MaterialSet{Sprite: &sprite})
+	})
+	runFrame(k)
+	if len(backend.pipelines) != 1 {
+		t.Fatalf("pipelines = %d, want 1: both layers shade with the queue's material", len(backend.pipelines))
+	}
+	if source := strings.TrimSpace(backend.pipelineShader(0)); source != "fn queueSpriteMark() {}" {
+		t.Fatalf("pipeline shader = %q, want the queue's material", source)
+	}
+}
+
+// Scopes nest: a layer that names a set of its own is not reached by the
+// queue's, because the nearer scope is the one that spoke last about that layer.
+func TestALayerSetOverridesTheQueueSet(t *testing.T) {
+	queueSprite := gfx.MaterialWithState(gfx.ShaderWithText("fn queueSpriteMark() {}"), gfx.StateOverlay2D)
+	layerSprite := gfx.MaterialWithState(gfx.ShaderWithText("fn layerSpriteMark() {}"), gfx.StateOverlay2D)
+	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *OpQueue) {
+		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+		write.SetLayerMaterial(0, MaterialSet{Sprite: &layerSprite})
+		write.SetMaterial(MaterialSet{Sprite: &queueSprite})
+	})
+	runFrame(k)
+	if len(backend.pipelines) != 1 || strings.TrimSpace(backend.pipelineShader(0)) != "fn layerSpriteMark() {}" {
+		t.Fatalf("pipeline shaders = %v, want the layer's set", backend.pipelines)
+	}
+}
+
+// An empty layer set is how a layer opts out of the queue's: naming a set is
+// what stops the outer one, and a set of nil slots keeps the built-ins. This is
+// the backdrop that must not fade and the layer rendering into a texture.
+func TestAnEmptyLayerSetOptsOutOfTheQueueSet(t *testing.T) {
+	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn queueSpriteMark() {}"), gfx.StateOverlay2D)
+	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *OpQueue) {
+		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+		write.SetLayerMaterial(0, MaterialSet{})
+		write.SetMaterial(MaterialSet{Sprite: &sprite})
+	})
+	runFrame(k)
+	if len(backend.pipelines) != 1 {
+		t.Fatalf("pipelines = %d, want 1", len(backend.pipelines))
+	}
+	if source := strings.TrimSpace(backend.pipelineShader(0)); source == "fn queueSpriteMark() {}" {
+		t.Fatal("an empty layer set did not stop the queue's set")
+	}
+}
+
+// The queue's set is per-frame state like the layer's, so a set named on one
+// tick does not leak into the next.
+func TestTheQueueSetDoesNotSurviveTheFrame(t *testing.T) {
+	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn queueSpriteMark() {}"), gfx.StateOverlay2D)
+	first := true
+	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *OpQueue) {
+		if first {
+			write.SetMaterial(MaterialSet{Sprite: &sprite})
+			first = false
+		}
+		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+	})
+	runFrame(k)
+	runFrame(k)
+	if len(backend.pipelines) != 2 {
+		t.Fatalf("pipelines = %d, want one per frame: the set applies to the first only", len(backend.pipelines))
+	}
+	if strings.TrimSpace(backend.pipelineShader(1)) == "fn queueSpriteMark() {}" {
+		t.Fatal("the queue's set survived into the next frame")
+	}
+}

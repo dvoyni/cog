@@ -214,7 +214,7 @@ One Canvas material per Family plus one shared parameter list. A Scope names a M
 _Avoid_: Using set and material interchangeably
 
 **Scope**:
-Something that covers many draws and supplies a Material set to those that name none: a layer, a UI frame, or a UI element subtree.
+Something that covers many draws and supplies a Material set to those that name none: the whole Canvas op queue, a layer, a UI frame, or a UI element subtree. The nearer scope wins, and a scope that names an empty set stops the wider one rather than reading as saying nothing.
 _Avoid_: Context, group
 
 **Instance record**:
