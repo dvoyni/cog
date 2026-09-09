@@ -6,6 +6,13 @@
 const SCENE_PI: f32 = 3.14159265359;
 // SCENE_DIELECTRIC_F0 is the normal-incidence reflectance of a dielectric,
 // which metallic lerps toward the base colour.
+//
+// A module-scope vector used as an operand is the form naga's SPIR-V backend
+// used to drop, handing the shader (0, 0, 0) with nothing to say so. It is
+// written this way again because go.mod overrides naga with the fork carrying
+// the fix (gogpu/naga#92); until that ships in a release, the override is what
+// keeps this from being zero, and TestTheDielectricF0ReachesTheSPIRVBinary is
+// what says so if the override goes first.
 const SCENE_DIELECTRIC_F0: vec3<f32> = vec3<f32>(0.04, 0.04, 0.04);
 
 // SceneSurface is what lighting needs and nothing more. It carries no view
