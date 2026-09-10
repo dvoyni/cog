@@ -172,6 +172,31 @@ One placement of one recorded thing. A recording call carrying many transforms d
 One run of recorded work merged into a single draw call, whatever supplies its per-item data. In Scene that is Instances sharing a mesh and a Scene material; in Canvas it is sprites sharing an Instance record buffer, or triangles sharing concatenated vertices.
 _Avoid_: Cluster, group
 
+## Mesh Storage
+
+**Vertex layout**:
+The ordered mapping from an interleaved vertex buffer's bytes to shader locations — a format and an offset per attribute, and the stride they imply. What a pipeline is keyed on, and what a shader's declared inputs are checked against.
+_Avoid_: Vertex format, vertex declaration
+
+**Named layout**:
+One of the vertex layouts Scene blesses and the bundled PBR knows. The set is closed and small; anything else is a Custom layout.
+
+**Custom layout**:
+A Vertex layout an app defines itself. Legal, and obliges the draw to carry its own material, because the bundled PBR knows only the Named layouts.
+
+**Authoring vertex**:
+The Go struct an app writes when it builds a mesh itself. Write-only: nothing in Scene ever hands one back, so it has exactly one authoritative form and it flows one way.
+_Avoid_: Vertex struct
+
+**Storage vertex**:
+The bytes Scene actually uploads for one vertex. Derived from the Authoring vertex when the mesh is baked, and read by a shader — so it is public contract rather than an internal detail, and need not have the same shape as what was authored.
+
+**Sparse target**:
+Which *vertices* one morph target stores a record for. Distinct from the sparse weight list, which is which *targets* reach the shader for a draw; the two are different mechanisms in different buffers.
+
+**Live span**:
+The contiguous run of vertices a Sparse target stores records for. Records are dense within it, and a vertex outside it has no record rather than a zero one.
+
 ## Shader Sources
 
 **Shader source**:

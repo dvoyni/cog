@@ -16,6 +16,13 @@ for and what was rejected to get there — and
 is the traps a caller hits that neither the compiler nor a plausible-looking zero
 value warns about.
 
+[`docs/specs/mesh.md`](docs/specs/mesh.md) specifies **what a mesh stores** — the
+vertex layout and the precision of each attribute, which attributes a mesh may
+omit, how wide its indices are, how morph deltas are packed, and what the bundled
+PBR requires of a mesh handed to it. It is not implemented: the engine still
+stores every mesh at one fixed 84-byte stride with `uint32` indices, and that
+spec is the plan for changing it.
+
 ## Plugin
 
 - Name: `scene.Name` (`"scene"`)
