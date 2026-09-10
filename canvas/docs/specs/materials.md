@@ -24,20 +24,22 @@ unverified it is marked **Gap** and says what would settle it; where assembling
 these decisions next to each other settled something no ticket did, it is marked
 **Settled here**.
 
-**Nothing in this specification is implemented.** The map that produced it is
-plan-only: it ends at this document, and the engine is unchanged. The one place
-the shape was executed is a throwaway branch,
+**This specification has since been implemented**, and it is kept as the
+contract rather than as a plan: read it for what a custom material may do and
+why, and read the code for what it does.
+[Required canvas changes](#required-canvas-changes) was the checklist the
+implementation session worked from and is now history rather than a to-do list.
+The map that produced the document was plan-only — it ended here, with the
+engine unchanged — and the measurements below come from the throwaway branch
 [`proto/sprite-collapse`](https://github.com/dvoyni/cog/tree/proto/sprite-collapse),
-which is where this spec's measurements come from and which is not to be merged.
-[Required canvas changes](#required-canvas-changes) is the checklist an
-implementation session works from.
+which is not to be merged.
 
 ---
 
 ## Contents
 
 - [Vocabulary](#vocabulary) · [The two families](#the-two-families)
-- [The one sprite shader](#the-one-sprite-shader) · [Group and binding convention](#group-and-binding-convention)
+- [The one sprite shader](#the-one-sprite-shader) · [The halo, and widening the inter-stage struct](#the-halo-and-widening-the-inter-stage-struct) · [Group and binding convention](#group-and-binding-convention)
 - [What canvas publishes](#what-canvas-publishes) · [The clip test](#the-clip-test)
 - [Parameters and their frequency](#parameters-and-their-frequency) · [Parameter resolution order](#parameter-resolution-order)
 - [Batching](#batching) · [The canvas uniform block](#the-canvas-uniform-block)
@@ -55,7 +57,9 @@ interchangeable words is ambiguous.
 
 - **Canvas material** — a `*gfx.MaterialDescr` bound to a canvas draw: a shader
   plus pipeline state plus the parameters that belong to the material rather
-  than to a draw. Canvas has three built-ins and an app may supply its own.
+  than to a draw. Canvas supplies a default per family, publishes others an app
+  can name, and an app may supply its own. *Three built-ins* used to mean both
+  *three defaults* and *three published*; since the halo it means neither.
 - **Family** — sprite or triangles. The two cannot be one shader (see
   [The two families](#the-two-families)), so *which family* is a property of the
   draw, and a material belongs to exactly one.
@@ -111,13 +115,20 @@ duplicate-declaration error
 The specification says so; nothing enforces it, and nothing needs to — the
 compiler does.
 
-Canvas therefore has three built-in materials and exactly three:
+Canvas therefore has exactly three **defaults**, one per family — the material a
+draw that names none gets:
 
 | constructor | family | entry-point source | what it does |
 |---|---|---|---|
 | `DefaultMaterial()` | sprite | `builtin/canvas/sprite.wgsl` | the instanced atlas sprite draw |
 | `DefaultTrianglesMaterial()` | triangles | `builtin/canvas/triangles.wgsl` | samples `canvasTexture` through the key-colour ramp, times vertex colour |
 | `TextureMaterial()` | triangles | `builtin/canvas/texture.wgsl` | samples and returns; no ramp |
+
+Canvas also **publishes** materials that are not defaults — ones an app names
+deliberately or gets not at all. There is one, and it is the sprite family's
+[halo](#the-halo-and-widening-the-inter-stage-struct):
+`HaloMaterialSet(HaloProfile) MaterialSet`, over
+`builtin/canvas/halo.wgsl`, which paints a soft outward band and no mark.
 
 `texture.wgsl` is a second built-in rather than a parameter on the triangles one
 because the difference is the shader: the ramp rewrites any texel whose red and
@@ -190,6 +201,9 @@ document a missing storage binding fails silently.
   rather than only a documented one.
 - **Declaring additional per-instance parameter arrays** at group 2 — see
   [Parameters and their frequency](#parameters-and-their-frequency).
+- **Declaring a wider inter-stage struct of its own**, beside the published
+  `VertexOut` — see
+  [The halo, and widening the inter-stage struct](#the-halo-and-widening-the-inter-stage-struct).
 
 **Appending to the uniform block is not
 [Extend a built-in shader with app-defined per-instance properties](https://github.com/dvoyni/cog/issues/148).**
@@ -254,6 +268,72 @@ caller a way to name explicitly what `nil` means, and makes
 `canvas/README.md:61` true again rather than merely deleting a false claim.
 Passing `DefaultMaterial()` must batch identically to passing `nil`; see
 [Batching](#batching).
+
+### The halo, and widening the inter-stage struct
+
+From [What a sprite material's vertex stage may do, and how its fragment stage
+learns the frame rect](https://github.com/dvoyni/cog/issues/189), which blessed
+the route, and
+[canvas: a halo material, and the two-layer idiom that reaches it](https://github.com/dvoyni/cog/issues/224),
+which is the first material to take it. **This part is built**, in
+`builtin/canvas/halo.wgsl`.
+
+**A sprite material's `vs_main` may map the frozen unit quad onto a rect larger
+than `s.transform0.zw`.** Nothing in canvas reads a sprite's on-screen extent —
+no clip intersection, no batch-key field, no flush inspection, no aspect
+coupling, and **no culling of any kind** — and the freeze above is on the vertex
+*input declaration*, leaving the `vs_main` body free entirely. A quad drawn
+larger than its sprite is simply drawn.
+
+**A material's fragment stage learns the instance record by declaring an
+inter-stage struct of its own**, under its own name, beside the published
+`VertexOut` — which is not frozen and is named nowhere in Go. It includes
+`spritebindings.wgsl` **alone**, not `spritevertex.wgsl`, because it is replacing
+`vs_main` as well.
+
+The thing carried across is the **instance index**, flat, and not the record or
+any field of it. Every reflected binding is bound `Vertex|Fragment`
+(`gfx/limits.go:9-10`, `wgpu/gfxbackend.go:475`), so one `u32` component buys the
+whole 96-byte record where the frame rect alone would cost four:
+
+```wgsl
+struct HaloVertexOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) canvasPosition: vec2<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) @interpolate(flat) atlasLayer: i32,
+    @location(3) tint: vec4<f32>,
+    @location(4) @interpolate(flat) index: u32,
+    @location(5) quad: vec2<f32>,
+};
+// in fs_main: let s = instances.data[in.index];
+```
+
+Two routes were rejected rather than overlooked. **Declining the published
+bindings and hand-declaring them** is legal — `lens/lens.go:58-80` in feuds-26 is
+the shipped precedent — but it creates a **third, untested copy** of the FROZEN
+`SpriteInstance`, which only `TestSpriteInstanceMatchesTheShaderRecord` guards
+and only inside cog. **Packing into spare components of an existing location** is
+impossible: each member owns its own `@location`, and `canvas/batch.go` writes
+only `Misc.X`, so `misc.yzw` are unreachable by an app anyway.
+
+**Gap: nothing in cog checks the WebGPU inter-stage floor.** `checkWebLimits`
+(`gfx/limits.go:11-43`) counts storage buffers, bind groups and uniform size
+only, while the floor also caps inter-stage variables at 16 and components at 60.
+A material widening this struct is exactly what could exceed that and pass every
+test gfx has. `HaloVertexOut` spends 6 locations and 12 components, so the halo is
+not the thing that trips it, and `TestTheHaloInterStageStructFitsTheWebGPUFloor`
+holds that one shader to the floor by hand. The general check is
+[#226](https://github.com/dvoyni/cog/issues/226).
+
+**Trap: no `any()` or `all()` over a vector of bools.** naga's SPIR-V backend
+cannot lower `ir.ExprRelational`: such a comparison compiles as WGSL, passes
+`wgsl.Lower`, and dies at pipeline creation with
+`unsupported expression kind: ir.ExprRelational`. Spell every vector comparison
+out component-wise. `TestEveryBuiltInCompilesToSpirv` takes each entry point the
+whole way rather than stopping at the IR, which is what catches it in cog rather
+than on a device. It is a naga gap, tracked as
+[#227](https://github.com/dvoyni/cog/issues/227).
 
 ---
 

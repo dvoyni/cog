@@ -13,6 +13,18 @@ const (
 	trianglesShaderPath = "builtin/canvas/triangles.wgsl"
 	textureShaderPath   = "builtin/canvas/texture.wgsl"
 
+	// The fourth entry point, and the one that is not a default: the halo, which
+	// paints a soft outward band and no mark at all. It is a sprite-family root
+	// like sprite.wgsl and reached only through HaloMaterialSet - unexported
+	// because the material is, and the material is because a draw naming it
+	// would take none of its scope's parameters and render at the material's own
+	// defaults, silently ignoring every profile named above it.
+	//
+	// Its WGSL is not published either. keycolor.wgsl is, because a custom
+	// triangles material must reproduce the key-colour ramp or key every texel
+	// against black; nothing has to reproduce a halo.
+	haloShaderPath = "builtin/canvas/halo.wgsl"
+
 	// The seven published sources: the WGSL an app includes when it writes a
 	// canvas material, so it declares six lines and three includes instead of
 	// copying seventy lines of contract it would then have to keep in sync by

@@ -124,14 +124,18 @@ draw: the material joins the batch key by fingerprint, so two sprites sharing a
 material merge exactly as two sprites sharing none do, and
 `Sprite(..., DefaultMaterial())` batches identically to `Sprite(..., nil)`.
 
-There are three built-ins, one per **family**, and a material belongs to exactly
-one:
+There are three **defaults**, one per **family** — what a draw that names no
+material gets — and a material belongs to exactly one family:
 
 | constructor | family | entry point | what it does |
 |---|---|---|---|
 | `DefaultMaterial()` | sprite | `builtin/canvas/sprite.wgsl` | the instanced atlas draw every sprite, glyph, inline icon and fill goes through |
 | `DefaultTrianglesMaterial()` | triangles | `builtin/canvas/triangles.wgsl` | samples `canvasTexture` through the key-colour ramp, times vertex colour |
 | `TextureMaterial()` | triangles | `builtin/canvas/texture.wgsl` | samples and returns; no ramp |
+
+Canvas also publishes one material that is **not** a default — the
+[halo](#the-halo) — which an app names deliberately over a scope or does not get
+at all.
 
 ### Reaching draws that name none
 
@@ -166,6 +170,68 @@ what it wants.
 `ui` inherits a set down the element tree — `Frame.SetMaterial` seeds the roots
 and `Element.Material` replaces it for a subtree — so one modifier on a menu root
 reaches every visual beneath it. See `ui/README.md`.
+
+### The halo
+
+A **halo** is a soft outward fade in a named colour, so a mark reads against
+whatever art it overlaps. `HaloMaterialSet` puts one over a whole layer, and it
+covers the sprite family entire — `Sprite`, `Text` glyphs, inline icons,
+`FillRect`, `Line`, `StrokeRect` — because all of them are sprite instances in
+one instanced atlas draw.
+
+```go
+type HaloProfile struct {
+    Reach    float32 // how far the band extends, in layer-local world units
+    Plateau  float32 // the fraction of the band that holds flat before the falloff
+    Exponent float32 // the shape of that falloff
+}
+
+func DefaultHaloProfile() HaloProfile                  // {Reach: 6, Plateau: 0.18, Exponent: 1}
+func HaloMaterialSet(profile HaloProfile) MaterialSet
+```
+
+**The material paints the band and no mark at all**, so the caller records the
+same marks twice: once on a halo layer under this set, once on the ink layer
+above it under no material.
+
+```go
+write.SetLayerMaterial(layerHalo, canvas.HaloMaterialSet(canvas.DefaultHaloProfile()))
+drawCluster(write, layerHalo, haloColor)
+drawCluster(write, layerInk, inkColor)
+```
+
+That is what makes overlap free: no band can reach anybody's ink, because no ink
+exists yet when the bands are drawn, and what is left is ordinary painter's
+order. It costs twice the instances, one extra batch, and one extra pass that
+merges away. Two layers is the idiom rather than a requirement, but is what to
+write — a draw added to the ink layer later lands in the ink run rather than
+becoming a coloured ghost.
+
+**Colour and strength ride `tint`, per sprite, for nothing.** `ShapeDraw.Color`,
+`TextDraw.Color` and a sprite's `tint` parameter all land in the instance
+record's frozen `Tint` field, so each mark's band is its own colour and `tint.a`
+is the band's peak alpha — fading a cluster fades its halo with it.
+
+**Dedicate the layer.** `Triangles` and `Texture` stay nil, so a `DrawTriangles`
+or `DrawTexture` recorded on the halo layer paints as itself rather than as a
+band.
+
+**The profile is per batch, and two reaches are two scopes.** The three knobs
+ride the set's `Params`; they cannot be named at a draw, because a draw's valued
+parameter becomes a per-sprite storage array while a scope's is shared. The
+material carries the defaults as its own parameters, so a hand-assembled
+`MaterialSet{Sprite: ...}` renders at reach 6 rather than rendering nothing. And
+`HaloProfile` is complete rather than a struct of optional fields: `Plateau: 0`
+is a legitimate value — no plateau, pure falloff — that a sentinel would read as
+`0.18`.
+
+There is deliberately **no `HaloMaterial()`** beside `DefaultMaterial()`, despite
+the symmetry: a draw naming its own material takes none of its scope's
+parameters, so naming the halo at a draw would render at the material's own
+defaults and silently ignore every profile above it. A scope is the only way in.
+Its WGSL is not published either — `keycolor.wgsl` is, because a custom triangles
+material *must* reproduce the ramp or key every texel against black, and nothing
+has to reproduce a halo.
 
 ### Parameters and their frequency
 

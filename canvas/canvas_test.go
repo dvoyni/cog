@@ -22,6 +22,7 @@ import (
 	"github.com/dvoyni/cog/storage"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/naga/spirv"
 	"github.com/gogpu/naga/wgsl"
 )
 
@@ -124,7 +125,7 @@ func (b *testBackend) FreeShader(gfx.ShaderID) {}
 // resolve against.
 func (b *testBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout {
 	return gfx.ShaderLayout{
-		UniformSize: 192, UniformGroup: 0, UniformBinding: 0,
+		UniformSize: 208, UniformGroup: 0, UniformBinding: 0,
 		Uniforms: []gfx.UniformMember{
 			{Name: "canvasViewport", Offset: 48},
 			{Name: "canvasLayer", Offset: 64},
@@ -133,6 +134,9 @@ func (b *testBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout {
 			{Name: "keyColor", Offset: 160},
 			{Name: "customValue", Offset: 180},
 			{Name: "fade", Offset: 176},
+			{Name: "haloReach", Offset: testHaloReachOffset},
+			{Name: "haloPlateau", Offset: testHaloPlateauOffset},
+			{Name: "haloExponent", Offset: testHaloExponentOffset},
 		},
 		Resources: []gfx.ShaderResource{
 			{Name: "canvasSampler", Sampler: true, Group: 1, Binding: 0},
@@ -1360,6 +1364,20 @@ func assertBuiltinShaderLowers(t *testing.T, path string) {
 	}
 	if _, err := wgsl.Lower(parsed); err != nil {
 		t.Fatalf("lower %q: %v", path, err)
+	}
+}
+
+// Lowering to IR is not the whole front end a native backend puts a shader
+// through: it then compiles to SPIR-V, and the two disagree about what WGSL is
+// legal. any() and all() over a vector of bools lower cleanly and then die in
+// the SPIR-V backend with "unsupported expression kind: ir.ExprRelational" - at
+// pipeline creation, on a device, which is the last place a built-in should
+// fail. Every canvas entry point goes the whole way here instead.
+func TestEveryBuiltInCompilesToSpirv(t *testing.T) {
+	for _, path := range []string{spriteShaderPath, trianglesShaderPath, textureShaderPath, haloShaderPath} {
+		if _, err := spirv.NewBackend(spirv.DefaultOptions()).Compile(lowerBuiltinShader(t, path)); err != nil {
+			t.Errorf("compile %q to SPIR-V: %v", path, err)
+		}
 	}
 }
 

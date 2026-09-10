@@ -227,7 +227,7 @@ The Shader module one Root source plus one Supply produces. One path with two Su
 ## Canvas Materials
 
 **Canvas material**:
-A shader, pipeline state, and the parameters that belong to the material rather than to a draw, bound to a Canvas draw. Canvas has three built-ins and an app may supply its own.
+A shader, pipeline state, and the parameters that belong to the material rather than to a draw, bound to a Canvas draw. Canvas supplies a default per Family, publishes others an app can name, and an app may supply its own.
 _Avoid_: Shader, effect
 
 **Family**:
@@ -249,3 +249,7 @@ _Avoid_: Instance buffer, which is the array of them
 **Reserved parameter name**:
 A parameter name Canvas consumes itself and never forwards to the Canvas material.
 _Avoid_: Built-in parameter
+
+**Halo**:
+A soft outward fade in a named colour, drawn by a Canvas material that paints the band and no mark, so a caller records the same marks on a halo layer and on the ink layer above it.
+_Avoid_: Glow, outline, shadow
