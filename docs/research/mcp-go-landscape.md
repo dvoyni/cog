@@ -13,6 +13,7 @@ Research for [research: the Go MCP landscape](https://github.com/dvoyni/cog/issu
 - **`mark3labs/mcp-go`** is the only community alternative worth considering — more imported than the official SDK, at v1.0.0 as of 2026-09-02, and the only community SDK implementing the current protocol revision. It carries *two* JSON Schema libraries.
 - **Hand-rolling is genuinely viable** at ~250–350 lines for a stdio-only tools-only server with **zero** new dependencies, but the recurring cost is a hand-written JSON Schema per tool, kept manually in sync with the Go struct it unmarshals into. That is precisely the drift the reflection path removes.
 - **A protocol revision landed on 2026-07-28 that removes the `initialize` handshake entirely** and, in the official SDK, makes **stateless mode mandatory** for that revision. This bears directly on the transport ticket.
+- **Claude Code's own limits settle two open questions.** An inline image result is capped at 25,000 tokens with no per-tool escape hatch and no spill-to-file, while an oversized *text* result is automatically saved to a file and replaced by its path — so the map's path-on-disk choice is close to forced, and a large queue snapshot degrades gracefully on its own. A blocking tool call is aborted after **five minutes idle**, which bounds what "the tool blocks until the next frame" may mean in a paused engine.
 
 ## 1. Protocol revisions
 
@@ -220,7 +221,84 @@ For calibration: the official SDK's `mcp/streamable.go` is 102 KB and mcp-go's e
 
 **The recurring cost is not the server, it is the schemas.** Every tool's `inputSchema` is hand-written JSON kept manually in sync with the Go struct that `arguments` unmarshals into. That drift is exactly what reflection removes, and cog's design — a broker rendering tools from typed capability interfaces — is the case where reflection pays most.
 
-## 5. What this means for the map
+## 5. The client side: what Claude Code actually does
+
+Read from Claude Code's own documentation (`code.claude.com/docs/en/mcp`) on 2026-09-10. This was the gap the first pass left open, and it turns out to carry the most consequential facts in this file.
+
+### Attaching
+
+```bash
+claude mcp add --transport http <name> <url>
+```
+
+That is the one-liner. `--transport sse` exists for the legacy transport and is deprecated; Claude Code "tries the HTTP transport first and switches to SSE when the server doesn't accept it" (v2.1.265+). In JSON config, `type` accepts `streamable-http` as an alias for `http`.
+
+Three scopes, in precedence order **local → project → user**:
+
+| Scope | File | Meaning |
+| --- | --- | --- |
+| local (default) | `~/.claude.json` | this project only, private |
+| **project** | **`.mcp.json` in the project root** | this project, **shared via version control** |
+| user | `~/.claude.json` | all the user's projects, private |
+
+**The project scope is directly useful to cog**: a game repo can commit a `.mcp.json` naming its own MCP endpoint, so an agent working in that repo finds the game without anybody running an `add` command. Claude Code "prompts for approval in interactive sessions before using project-scoped servers from `.mcp.json` files", which is the right amount of friction. This is a concrete answer to what [#206](https://github.com/dvoyni/cog/issues/206) asks about what a person must do once — possibly nothing, if the repo carries the file.
+
+### Disappearing and coming back
+
+This matters because **a game exiting is the normal case here, not an error**.
+
+- **Mid-session drops** on remote servers: "Claude Code reconnects a dropped remote server with exponential backoff: up to five attempts, starting at a one-second delay and doubling it each time." `/mcp` shows the server as pending meanwhile; after five failures it is marked failed, with a manual retry available from `/mcp`.
+- **First connection fails** with a transient error — 5xx, connection refused, timeout — retried up to three times. Authentication errors and 404s are not retried, since they need a config change.
+- Status is surfaced as `✔ Connected` / `! Needs authentication` / `✘ Failed to connect` (with the HTTP status appended), and `claude mcp get <name>` shows an `Issue:` line carrying the server's error text.
+
+So the loop cog wants — start the game, work, close the game, start it again — is **already handled by the client**, provided the port is stable across runs. That is an argument for a configured fixed port over an ephemeral one, and it belongs in [#206](https://github.com/dvoyni/cog/issues/206).
+
+### Timeouts: the constraint on a blocking tool
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `MCP_TIMEOUT` | server startup timeout | — |
+| `MCP_TOOL_TIMEOUT` | per-server tool wall-clock limit | ~28 hours |
+| **`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`** | **idle timeout before aborting a tool call** | **5 min** (HTTP/SSE/WS), 30 min (stdio) |
+| `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS` | threshold for backgrounding a long call | 2 min |
+
+There is also a per-request timer covering each request through to the server's **first response byte**, set to the greatest of 60 seconds, the server's tool timeout, and `MCP_TIMEOUT`. A per-server `timeout` field in `.mcp.json` overrides `MCP_TOOL_TIMEOUT` for that server.
+
+**The map's settled capture contract — the tool blocks until the next frame — is comfortably inside all of this at 16ms.** But it is *not* fine in one case the map has already surfaced: a **paused** engine. A capture that waits for "the next frame" in a paused engine waits forever, and the client aborts it after five minutes of idle. [#211](https://github.com/dvoyni/cog/issues/211) and [#207](https://github.com/dvoyni/cog/issues/207) must agree on this, and the answer is now bounded by a real number rather than by taste: **a blocking capability needs its own deadline well under five minutes, and a clear error when it expires.**
+
+### Output limits — this changes a decision
+
+| Threshold | Value |
+| --- | --- |
+| warning shown | 10,000 tokens |
+| **default maximum** | **25,000 tokens** (`MAX_MCP_OUTPUT_TOKENS`) |
+| hard ceiling via per-tool annotation | 500,000 characters |
+
+What happens past the limit is the striking part:
+
+> "When a result with no image content exceeds the limit, Claude Code saves it to a file and replaces it in the conversation with a message that names the file path, so Claude reads the file when it needs the content."
+
+**Claude Code already implements the map's path-on-disk pattern, automatically, for oversized text results.** A canvas op-queue snapshot that blows past 25,000 tokens does not need cog to invent spill-to-file — the client does it. That does not make the size question go away (a snapshot the agent must open a file to read is still worse than one it can skim), but it removes the failure mode where a huge snapshot wrecks a session.
+
+A server can raise its own ceiling per tool:
+
+```json
+{ "name": "get_schema", "_meta": { "anthropic/maxResultSizeChars": 200000 } }
+```
+
+up to 500,000 characters, "useful for tools that return inherently large but necessary outputs, such as database schemas or full file trees" — a canvas queue snapshot is exactly that shape.
+
+**And the exception is the decisive fact for [#207](https://github.com/dvoyni/cog/issues/207):**
+
+> "Tools that return image data are still subject to `MAX_MCP_OUTPUT_TOKENS`" — the per-tool annotation does not apply to images.
+
+So an inline image cannot buy itself more room the way a large text result can, **and** an oversized image result does not get spilled to a file, because the spill path is documented for results *with no image content*. Inline capture delivery is therefore capped at 25,000 tokens with no escape hatch and no graceful degradation. The map chose a path on disk to protect the context window; the client's own limits make that choice close to forced rather than merely prudent.
+
+### Management surface
+
+`claude mcp list` (status per server), `claude mcp get <name>` (config, status, `Issue:` line), `claude mcp remove <name>`, and `/mcp` in-session for status, toggling, reconnecting and viewing tool counts. Worth knowing that `/mcp` shows tool counts, since it is where a user would notice a broker exposing more tools than they expected.
+
+## 6. What this means for the map
 
 Not decisions; those belong to the tickets. But the facts point somewhere:
 
@@ -229,12 +307,14 @@ Not decisions; those belong to the tickets. But the facts point somewhere:
 3. **The list-changed capability has to be declared before `Connect`**, because a broker learns its tool set at `Start` when it collects providers. A server that discovers providers after connecting and never declared `HasTools` will silently fail to tell anyone.
 4. **`isError` versus a protocol error is a distinction cog should mirror.** The provider contract ticket asks what a capability returns when it cannot answer; the protocol has already answered the analogous question, and matching it means the agent gets a readable sentence instead of a transport fault.
 5. **Dependency cost is real but small**: one direct edge, six runtime deps, on a module that has seven today. Worth stating in the spec as a deliberate acceptance rather than leaving someone to discover it.
+6. **Inline image delivery is capped and cannot be raised.** `MAX_MCP_OUTPUT_TOKENS` defaults to 25,000; a per-tool `anthropic/maxResultSizeChars` annotation can raise a *text* result to 500,000 characters, but explicitly does not apply to images, and the automatic spill-to-file is documented only for results with no image content. The map chose a path on disk to protect the context window; the client's limits make it the only delivery that degrades gracefully. -> [#207](https://github.com/dvoyni/cog/issues/207)
+7. **A blocking capability needs a deadline under five minutes.** `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` defaults to five minutes for HTTP servers, so a capture waiting for "the next frame" in a paused engine is aborted by the client rather than hanging forever. That is a real number for [#207](https://github.com/dvoyni/cog/issues/207) and [#211](https://github.com/dvoyni/cog/issues/211) to agree against.
+8. **A game repo can ship its own `.mcp.json`.** Project scope is shared through version control and gated by an approval prompt, so "what does a person have to do once" may be answerable with *nothing*, provided the port is stable across runs — which argues for a configured fixed port over an ephemeral one. -> [#206](https://github.com/dvoyni/cog/issues/206)
 
 ## Gaps
 
-Named plainly, because the ticket asked for primary sources and these were not reached:
+Named plainly. Claude Code's client side, open after the first pass, is now covered in section 5.
 
-- **Claude Code's client side was not verified.** `claude mcp add --transport http` is referenced throughout from the SDK's and the protocol's documentation, but Claude Code's own docs were not read, so the exact invocation, config file shape and reconnection behaviour when a server disappears are **unconfirmed**. [The transport ticket](https://github.com/dvoyni/cog/issues/206) needs this and should not take it from here.
 - **No conformance testing of any SDK against a real client** — everything above is read off source and docs.
 - **Per-person maintainer roster** for the official SDK could not be established from primary sources; `CONTRIBUTING.md` names institutions only.
 - Facts are read off `main` (pushed 2026-09-07) except where a tag is named. `ServerOptions.SupportedProtocolVersions` and some `MCPGODEBUG` removals are **v1.8.0-pre material, not in stable**. The SDK's `ROADMAP.md` is stale and should not be relied on.
