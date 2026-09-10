@@ -2,6 +2,7 @@ package canvas
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io/fs"
 	"reflect"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/m"
 	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/naga/spirv"
 )
 
 // Where the halo's three knobs sit inside the test backend's hand-written union
@@ -284,19 +286,54 @@ func TestTheHaloInterStageStructFitsTheWebGPUFloor(t *testing.T) {
 	}
 }
 
-// naga's SPIR-V backend cannot lower ir.ExprRelational: any() and all() over a
-// vector of bools compile as WGSL and then die at pipeline creation with
-// "unsupported expression kind". Every vector comparison in a canvas shader is
-// spelled out component-wise because of it, and the halo is the shader most
-// tempted to write any(tap < lo).
-func TestTheHaloSpellsEveryVectorComparisonComponentWise(t *testing.T) {
-	code := builtinSourceCode(t, haloShaderPath)
-	for _, banned := range []string{"any(", "all("} {
-		if strings.Contains(code, banned) {
-			t.Errorf("%s calls %s...); naga's SPIR-V backend cannot lower it, spell the comparison out component-wise",
-				haloShaderPath, banned)
+// The halo's frame rejection is a vector comparison - any(tap < lo) - and that
+// is the form naga's SPIR-V backend used to refuse: it lowered cleanly to IR and
+// then died at pipeline creation with "unsupported expression kind:
+// ir.ExprRelational". Writing it the natural way is safe only because go.mod
+// overrides naga with the fork carrying the fix (cog#227).
+//
+// This test is what stands between that override and a device. Drop the replace
+// directive before a fixed naga is released and the halo stops compiling here,
+// loudly, rather than on the one machine that runs Vulkan.
+func TestTheHaloVectorComparisonsReachTheSPIRVBinary(t *testing.T) {
+	blob, err := spirv.NewBackend(spirv.DefaultOptions()).Compile(lowerBuiltinShader(t, haloShaderPath))
+	if err != nil {
+		t.Fatalf("compile %q to SPIR-V: %v", haloShaderPath, err)
+	}
+
+	// OpAny reduces the frame rejection, OpAll the silhouette test underneath it.
+	const opAny, opAll = 154, 155
+	for _, op := range []struct {
+		name string
+		code uint32
+	}{{"OpAny", opAny}, {"OpAll", opAll}} {
+		if !spirvCarriesOpcode(blob, op.code) {
+			t.Errorf("the halo's SPIR-V carries no %s, so its vector comparisons are no longer "+
+				"vector comparisons - if the shader was spelled out component-wise again, that "+
+				"workaround is obsolete", op.name)
 		}
 	}
+}
+
+// spirvCarriesOpcode walks the instruction stream past the five-word header and
+// reports whether any instruction has the given opcode.
+func spirvCarriesOpcode(blob []byte, opcode uint32) bool {
+	const headerWords = 5
+	if len(blob)%4 != 0 || len(blob) < headerWords*4 {
+		return false
+	}
+	for at := headerWords * 4; at+4 <= len(blob); {
+		word := binary.LittleEndian.Uint32(blob[at:])
+		words := int(word >> 16)
+		if words == 0 || at+words*4 > len(blob) {
+			return false
+		}
+		if word&0xFFFF == opcode {
+			return true
+		}
+		at += words * 4
+	}
+	return false
 }
 
 // The halo includes spritebindings.wgsl alone rather than declining the
@@ -390,9 +427,8 @@ func readBuiltinSource(t *testing.T, path string) []byte {
 // builtinSourceCode is one embedded source with its prose removed: everything
 // after a "//" that is not an "//#include" directive. A shader's header comment
 // names the very things these tests forbid the code from doing - it says why the
-// halo spells its comparisons out rather than calling any(), and why it does not
-// include keycolor.wgsl - so a scan of the raw bytes reads its own explanation
-// as a violation.
+// halo does not include keycolor.wgsl, and why it declares no SpriteInstance of
+// its own - so a scan of the raw bytes reads its own explanation as a violation.
 func builtinSourceCode(t *testing.T, path string) string {
 	t.Helper()
 	var code strings.Builder

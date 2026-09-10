@@ -1368,11 +1368,12 @@ func assertBuiltinShaderLowers(t *testing.T, path string) {
 }
 
 // Lowering to IR is not the whole front end a native backend puts a shader
-// through: it then compiles to SPIR-V, and the two disagree about what WGSL is
-// legal. any() and all() over a vector of bools lower cleanly and then die in
-// the SPIR-V backend with "unsupported expression kind: ir.ExprRelational" - at
-// pipeline creation, on a device, which is the last place a built-in should
-// fail. Every canvas entry point goes the whole way here instead.
+// through: it then compiles to SPIR-V, and the two can disagree about what WGSL
+// is legal. any() and all() over a vector of bools used to lower cleanly and
+// then die in the SPIR-V backend with "unsupported expression kind:
+// ir.ExprRelational" - at pipeline creation, on a device, which is the last
+// place a built-in should fail. Every canvas entry point goes the whole way
+// here instead, so the next such gap is caught in CI and not in a frame.
 func TestEveryBuiltInCompilesToSpirv(t *testing.T) {
 	for _, path := range []string{spriteShaderPath, trianglesShaderPath, textureShaderPath, haloShaderPath} {
 		if _, err := spirv.NewBackend(spirv.DefaultOptions()).Compile(lowerBuiltinShader(t, path)); err != nil {

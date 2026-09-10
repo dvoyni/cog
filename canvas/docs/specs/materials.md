@@ -326,14 +326,21 @@ not the thing that trips it, and `TestTheHaloInterStageStructFitsTheWebGPUFloor`
 holds that one shader to the floor by hand. The general check is
 [#226](https://github.com/dvoyni/cog/issues/226).
 
-**Trap: no `any()` or `all()` over a vector of bools.** naga's SPIR-V backend
-cannot lower `ir.ExprRelational`: such a comparison compiles as WGSL, passes
-`wgsl.Lower`, and dies at pipeline creation with
-`unsupported expression kind: ir.ExprRelational`. Spell every vector comparison
-out component-wise. `TestEveryBuiltInCompilesToSpirv` takes each entry point the
-whole way rather than stopping at the IR, which is what catches it in cog rather
-than on a device. It is a naga gap, tracked as
-[#227](https://github.com/dvoyni/cog/issues/227).
+**`any()` and `all()` over a vector of bools are safe again.** naga's SPIR-V
+backend could not lower `ir.ExprRelational`: such a comparison compiled as WGSL,
+passed `wgsl.Lower`, and died at pipeline creation with
+`unsupported expression kind: ir.ExprRelational`, so every vector comparison in a
+canvas shader was spelled out component-wise. Fixed in the naga fork `go.mod`
+overrides ([#227](https://github.com/dvoyni/cog/issues/227)); the halo reads
+`any(tap < lo)` again. Two tests hold it: `TestEveryBuiltInCompilesToSpirv` takes
+each entry point past the IR to SPIR-V, which is what catches a gap like this in
+cog rather than on a device, and
+`TestTheHaloVectorComparisonsReachTheSPIRVBinary` fails if the override is
+dropped before a fixed naga is released.
+
+**Lowering to IR is not the whole front end.** That is the general lesson: a
+shader can parse and lower and still be rejected by the backend that has to
+produce SPIR-V. Take a new material all the way to a binary in a test.
 
 ---
 

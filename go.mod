@@ -19,4 +19,4 @@ require (
 	golang.org/x/text v0.40.0 // indirect
 )
 
-replace github.com/gogpu/naga => github.com/dvoyni/naga v0.19.1-0.20260909205556-fee6c529ac74
+replace github.com/gogpu/naga => github.com/dvoyni/naga v0.19.1-0.20260910142728-7fd5ed312699

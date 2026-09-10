@@ -1,5 +1,5 @@
-github.com/dvoyni/naga v0.19.1-0.20260909205556-fee6c529ac74 h1:TUUywsaLG7xqSBwC/Uii/uaQ8tvNndDbt54egeGn+Zk=
-github.com/dvoyni/naga v0.19.1-0.20260909205556-fee6c529ac74/go.mod h1:15sQaHKkbqXcwTN+hHYGLsA0WBBnkmYzne/eF5p5WEg=
+github.com/dvoyni/naga v0.19.1-0.20260910142728-7fd5ed312699 h1:NE1BCcI/Bvzo30EitBrN5YIcsUTE0n6/+PCgxbZQarQ=
+github.com/dvoyni/naga v0.19.1-0.20260910142728-7fd5ed312699/go.mod h1:15sQaHKkbqXcwTN+hHYGLsA0WBBnkmYzne/eF5p5WEg=
 github.com/go-test/deep v1.0.1 h1:UQhStjbkDClarlmv0am7OXXO4/GaPdCGiUiMTvi28sg=
 github.com/go-test/deep v1.0.1/go.mod h1:wGDj63lr65AM2AQyKZd/NYHGb0R+1RLqB8NKt3aSFNA=
 github.com/go-webgpu/goffi v0.6.3 h1:p4gKGikHBAQ/8iUiew9MV4C5M1ZGIsk8QGFGuJjMj+A=

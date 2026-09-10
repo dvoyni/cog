@@ -190,11 +190,7 @@ fn fs_main(in: HaloVertexOut) -> @location(0) vec4<f32> {
                 // mandatory rather than an optimisation: without it a tap past
                 // the frame reads whatever the atlas packed next door, or this
                 // sprite's own edge extruded into its padding.
-                //
-                // Component-wise rather than any(): naga's SPIR-V backend cannot
-                // lower ir.ExprRelational, so a vector of bools compiles as WGSL
-                // and dies at pipeline creation.
-                if tap.x < lo.x || tap.y < lo.y || tap.x > hi.x || tap.y > hi.y {
+                if any(tap < lo) || any(tap > hi) {
                     continue;
                 }
                 best = max(best, textureSampleLevel(canvasTexture, canvasSampler, tap, in.atlasLayer, 0.0).a * weight);
@@ -203,7 +199,7 @@ fn fs_main(in: HaloVertexOut) -> @location(0) vec4<f32> {
         // Under the silhouette the band is at full strength, not only outside
         // it - otherwise an antialiased glyph edge blends against the backdrop
         // through the gap between the ink and the band.
-        if in.uv.x >= lo.x && in.uv.y >= lo.y && in.uv.x <= hi.x && in.uv.y <= hi.y {
+        if all(in.uv >= lo) && all(in.uv <= hi) {
             best = max(best, textureSampleLevel(canvasTexture, canvasSampler, in.uv, in.atlasLayer, 0.0).a);
         }
         coverage = best;
