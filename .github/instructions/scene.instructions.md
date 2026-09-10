@@ -191,10 +191,12 @@ Naming an explicit depth texture is also what makes scene keep the depth
 attachment, so two adjacent auto-depth passes into one target never merge.
 
 **A depth-only pass may be written, but its output may not be depended on in the
-same frame.** The desktop backend declines a `NoTarget()` pass and reports
-`wgpu.ErrDepthOnlyPassUnsupported`; a browser encodes it correctly. A later pass
-loading that depth with `ClearDepth: nil` therefore renders against undefined
-depth wherever the pass was skipped — the whole target, not the one draw.
+same frame unless the backend is known to encode it.** Vulkan and a browser do;
+GLES does not, and neither does anything `cog/wgpu` does not recognise — it
+declines a `NoTarget()` pass and reports `wgpu.ErrDepthOnlyPassUnsupported`. It
+is the backend that decides, not the platform. A later pass loading that depth
+with `ClearDepth: nil` therefore renders against undefined depth wherever the
+pass was skipped — the whole target, not the one draw.
 
 **Canvas cannot composite a rendered texture through its built-in triangle
 material.** All three canvas shaders run every texel through the key-colour
@@ -224,7 +226,13 @@ a whole hot loop.
 no GPU, because culling, sorting and packing all happen in the update-thread
 flush and the result is published as `Passes`. Assert on those numbers.
 
-Two contracts a desktop run passes while saying nothing about, both needing
+One contract a desktop run passes while saying nothing about, needing
 `bash cmd/web/build.sh <demo>` and a browser: the **storage-buffer budget** (a
-native adapter reports hardware limits, where 200 storage buffers is ordinary)
-and the **depth-only pass**. Treat a desktop green as silent on both.
+native adapter reports hardware limits, where 200 storage buffers is ordinary).
+Treat a desktop green as silent on it.
+
+The **depth-only pass** used to be the second, and is no longer: it executes on a
+Vulkan desktop as well as in a browser. It is still declined on GLES, so a
+desktop green says nothing about it on a machine where GLES won the adapter
+selection — the startup log's `adapter selected ... backend=` line is what tells
+you which run you had.

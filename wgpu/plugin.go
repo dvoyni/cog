@@ -232,7 +232,7 @@ func (p *Plugin) onDraw(k kernel.Executioner, dc *gogpu.Context) {
 	// Make the surface current on the backend, then publish app.RenderEvent — the
 	// gfx plugin renders in its render-thread handler.
 	if p.gfxBackend == nil {
-		backend, err := newGfxBackend(p.gpu.DeviceProvider())
+		backend, err := newGfxBackend(p.gpu.DeviceProvider(), dc.Backend())
 		if err != nil {
 			// The device is created asynchronously, so this is expected until it is
 			// ready; report once so a permanent failure is still visible.

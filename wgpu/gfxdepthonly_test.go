@@ -42,11 +42,41 @@ func TestTheRefusalNamesThePassAndSaysWhatWasSkipped(t *testing.T) {
 	// missing and that its depth texture was left as it found it, because the
 	// visible symptom is a later pass rendering against undefined depth rather
 	// than anything about the pass that was skipped.
-	err := ErrDepthOnlyPassUnsupported{Pass: "scene.camera-200.depth"}
+	err := ErrDepthOnlyPassUnsupported{Pass: "scene.camera-200.depth", Backend: "Pure Go (GLES)"}
 	text := err.Error()
-	for _, want := range []string{"scene.camera-200.depth", "skipped", "untouched"} {
+	for _, want := range []string{"scene.camera-200.depth", "Pure Go (GLES)", "skipped", "untouched"} {
 		if !contains(text, want) {
 			t.Errorf("the refusal does not mention %q: %s", want, text)
+		}
+	}
+}
+
+func TestOnlyABackendKnownToEncodeADepthOnlyPassIsAllowedOne(t *testing.T) {
+	// This replaced a build-tag constant, and the reason is the interesting
+	// part: a native build can select Vulkan or GLES, gogpu/wgpu#353 fixed only
+	// Vulkan, and the GLES HAL fails silently rather than faulting - it binds no
+	// framebuffer and draws into whatever was bound last. So an unrecognised
+	// backend must come back false. Refusing a pass that would have worked
+	// reports itself; encoding one that does not is a wrong picture nobody sees.
+	cases := []struct {
+		backend string
+		want    bool
+	}{
+		{"Pure Go (Vulkan)", true},
+		{"Browser WebGPU", true},
+		{"Pure Go (GLES)", false},
+		{"Pure Go (GL)", false},
+		{"Pure Go (Software)", false},
+		{"Pure Go (Metal)", false},
+		{"Pure Go (DX12)", false},
+		// The name gogpu reports before an adapter has been selected, and the
+		// one it reports for a HAL nobody here has tried.
+		{"Pure Go (Auto)", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := depthOnlyPassesWork(c.backend); got != c.want {
+			t.Errorf("depthOnlyPassesWork(%q) = %v, want %v", c.backend, got, c.want)
 		}
 	}
 }

@@ -603,10 +603,11 @@ and each with a `_test.go` beside it that asserts the flush result with no GPU.
 | `cameras` | two cameras, a texture target, layers, and screen-space projection |
 | `loading` | residency, addressing and the lookup facade |
 
-Two contracts a desktop run cannot check, because a native adapter reports
-hardware limits and the desktop backend declines a depth-only pass: **the
-storage-buffer budget and the depth-only pass**. Both need a browser run —
-`bash cmd/web/build.sh <demo>`.
+One contract a desktop run cannot check, because a native adapter reports
+hardware limits rather than the spec's floor: **the storage-buffer budget**. It
+needs a browser run — `bash cmd/web/build.sh <demo>`. The **depth-only pass** used
+to be the second one; it now executes on any Vulkan desktop as well as in a
+browser, and is declined only on GLES.
 
 ## Deviations From The Specification
 
@@ -619,12 +620,15 @@ absorbed quietly. The ones a caller can observe:
   which a scene recorder does not hold, so the passthrough would hand back a
   target with no id in it. `gfx.OpQueue.TemporaryTarget` returns the target and
   the texture together; `Pass.Target` takes the handle untouched.
-- **A `NoTarget()` depth-only pass does not execute on the desktop.** gogpu's
-  Vulkan HAL never begins a render pass with no colour attachments and then
-  faults ending it, so `cog/wgpu` declines the pass and reports
-  `wgpu.ErrDepthOnlyPassUnsupported` once per run. A browser encodes it
-  correctly. The rule this leaves: a depth-only pass may be written, but its
-  output may not be depended on in the same frame. Shadow maps inherit it.
+- **A `NoTarget()` depth-only pass executes on Vulkan and in a browser, and is
+  declined on GLES.** `cog/wgpu` asks the selected backend, not the build tag,
+  and reports `wgpu.ErrDepthOnlyPassUnsupported` once per run where it declines.
+  Vulkan was fixed by `gogpu/wgpu#353` in v0.34.5; the GLES HAL binds no
+  framebuffer for a colourless pass and would draw into whatever was bound last,
+  so it is refused rather than encoded. An unrecognised backend is refused too.
+  The rule this leaves: a depth-only pass may be written, but its output may not
+  be depended on in the same frame unless you know the backend. Shadow maps
+  inherit it.
 - **gfx places every texture barrier itself.** The spec claimed the frame being
   one command encoder and one submit meant WebGPU inserted them. It does not —
   `gogpu/wgpu` derives no barriers at all — so gfx transitions each texture in

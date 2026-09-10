@@ -98,6 +98,15 @@ type gfxBackend struct {
 	presentBind        *wgpu.BindGroup
 	presentFailed      bool
 
+	// depthOnlyPasses is whether the selected backend can encode a pass with a
+	// depth attachment and no colour attachment. It is a property of the HAL
+	// that was chosen rather than of the platform - see gfxdepthonly.go, where
+	// the platform used to be the axis and stopped being one.
+	depthOnlyPasses bool
+	// backendName is gogpu's display name for that HAL, kept so a refusal can
+	// say which backend refused rather than leaving a reader to guess.
+	backendName string
+
 	// refusedDepthOnly records that this backend has already declined a
 	// depth-only pass, and refusal holds the error until the plugin takes it to
 	// report on the update thread. The backend has no kernel handle of its own.
@@ -241,11 +250,13 @@ var _ cgfx.Backend = (*gfxBackend)(nil)
 
 // newGfxBackend builds the shared layouts, default sampler, and white texture. It
 // returns errDeviceNotReady until the GPU device/queue exist (async on browser).
-func newGfxBackend(dp gogpu.DeviceProvider) (*gfxBackend, error) {
+func newGfxBackend(dp gogpu.DeviceProvider, backend string) (*gfxBackend, error) {
 	b := &gfxBackend{
 		device:             dp.Device(),
 		queue:              dp.Queue(),
 		surfaceFormat:      dp.SurfaceFormat(),
+		backendName:        backend,
+		depthOnlyPasses:    depthOnlyPassesWork(backend),
 		samplers:           map[cgfx.SamplerID]*wgpu.Sampler{},
 		shaders:            map[cgfx.ShaderID]*gfxbShader{},
 		pipelines:          map[cgfx.PipelineID]*gfxbPipeline{},

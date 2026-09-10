@@ -75,13 +75,13 @@ func (b *gfxBackend) BeginPass(desc cgfx.GpuPassDesc) cgfx.RenderPass {
 	if b.encoder == nil {
 		return nil
 	}
-	if !depthOnlyPassSupported && isDepthOnly(desc) {
+	if !b.depthOnlyPasses && isDepthOnly(desc) {
 		// One refusal is permanent - it is a property of the HAL, not of this
 		// pass - so it is recorded once and reported once. See gfxdepthonly.go
 		// for what the backend cannot encode and why.
 		if !b.refusedDepthOnly {
 			b.refusedDepthOnly = true
-			b.refusal = ErrDepthOnlyPassUnsupported{Pass: desc.Label}
+			b.refusal = ErrDepthOnlyPassUnsupported{Pass: desc.Label, Backend: b.backendName}
 		}
 		return nil
 	}
