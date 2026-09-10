@@ -367,6 +367,7 @@ func (p *Plugin) flushPass(
 		Projection:     projectionMatrix,
 		ViewProjection: viewProjection,
 		CameraPosition: eye,
+		ViewDirection:  viewDirection(camera.descr),
 		LightCount:     uint32(p.lights.count),
 		Lights:         p.lights.lights,
 	}, camera.descr)

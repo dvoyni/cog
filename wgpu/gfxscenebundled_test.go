@@ -110,9 +110,12 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 	}
 }
 
-// The record offsets are a contract between this file and scene's Go structs,
-// with nothing between them to catch a drift: scene packs bytes, the shader
-// reads them, and a mismatch renders a plausible wrong picture.
+// The record offsets are a contract between the shader and scene's Go structs:
+// scene packs bytes, the shader reads them, and a mismatch renders a plausible
+// wrong picture. This half pins what the shader declares, through the same gfx
+// reflection the driver binds by, and the strides and counts with it;
+// scene's own TestEveryUploadedRecordMatchesItsShaderStruct pins the Go structs
+// against the same members, which is the half wgpu cannot reach from here.
 func TestBundledSceneShaderRecordsMatchTheirPackedOffsets(t *testing.T) {
 	layout, err := reflectShaderLayout(bundledSceneShader(t, everyFeature()...))
 	if err != nil {
@@ -128,9 +131,10 @@ func TestBundledSceneShaderRecordsMatchTheirPackedOffsets(t *testing.T) {
 	}
 	for binding, want := range map[string]map[string]int{
 		"sceneFrame": {
-			"view": 0, "projection": 64, "viewProjection": 128, "cameraPosition": 192,
-			"sunDirection": 208, "sunColor": 224, "ambientSky": 240, "ambientGround": 256,
-			"lightCount": 272, "lights": 288,
+			"view": 0, "projection": 64, "viewProjection": 128,
+			"cameraPosition": 192, "viewDirection": 208,
+			"sunDirection": 224, "sunColor": 240, "ambientSky": 256, "ambientGround": 272,
+			"lightCount": 288, "lights": 304,
 		},
 		// The per-slot metadata is flat named members rather than an array,
 		// because array members are not name-addressable through
@@ -296,8 +300,8 @@ func TestSceneMaxLightsOverrideResizesTheFrameRecord(t *testing.T) {
 		supplied string
 		span     int
 	}{
-		{supplied: "", span: 1056},
-		{supplied: "4", span: 480},
+		{supplied: "", span: 1072},
+		{supplied: "4", span: 496},
 	} {
 		opts := everyFeature()
 		if want.supplied != "" {

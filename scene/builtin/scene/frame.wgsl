@@ -28,6 +28,7 @@ struct SceneFrame {
     projection: mat4x4<f32>,
     viewProjection: mat4x4<f32>,
     cameraPosition: vec4<f32>,
+    viewDirection: vec4<f32>,
     sunDirection: vec4<f32>,
     sunColor: vec4<f32>,
     ambientSky: vec4<f32>,
@@ -63,8 +64,30 @@ struct SceneLightSample {
 
 @group(0) @binding(0) var<storage, read> sceneFrame: SceneFrame;
 
+// sceneCameraPosition is the eye read straight out of the camera transform. It
+// is a real viewer only under a perspective projection: an orthographic camera
+// has no eye point, and an oblique one looks one way while its viewer sees
+// another. Shading wants sceneViewDirection; this stays for the genuine
+// distance work - a fog term, a detail fade - that means the transform.
 fn sceneCameraPosition() -> vec3<f32> {
     return sceneFrame.cameraPosition.xyz;
+}
+
+// sceneViewDirection is the unit direction from a shaded point towards the
+// viewer, which every view-dependent term wants: specular, fresnel, rim,
+// anything consuming nDotV.
+//
+// Under a perspective projection it is radial from the eye and can only be a
+// per-fragment difference. Under orthographic and oblique the projection rays
+// are parallel, so it is one constant for the whole frame - and under oblique
+// that constant is emphatically not the camera's forward axis, which is what
+// makes differencing against cameraPosition wrong there rather than merely
+// imprecise. Scene packs the constant in xyz and w as the selector, 1 for the
+// constant and 0 for the difference, so the choice costs a mix rather than a
+// branch.
+fn sceneViewDirection(position: vec3<f32>) -> vec3<f32> {
+    let toEye = sceneCameraPosition() - position;
+    return normalize(mix(toEye, sceneFrame.viewDirection.xyz, sceneFrame.viewDirection.w));
 }
 
 // sceneAmbient is the hemispheric ambient a normal sees: ground below, sky

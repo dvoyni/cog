@@ -55,6 +55,7 @@ default the hard way.
 | `CameraDescr.CullMask` | `LayersAll` | So does a recorded item's own zero `LayerMask`. Zero reads as *all* on **both sides**, so a mask only ever excludes once both ends write one. |
 | `LightDescr.Range` | infinite | glTF's own default. A forgotten `Range` is a light that reaches too far — visible immediately — rather than a light silently dropped. |
 | `LightDescr.OuterCone` | π/4 | `InnerCone` zero is a **real value**, not a default: falloff straight from the axis. |
+| `CameraDescr.Shear` | `0`, i.e. plain `Orthographic` | Only `Oblique` reads it. Setting it on a `Perspective` or `Orthographic` camera does nothing, the way `FovY` does nothing under `Orthographic`. |
 | `Transform.Scale` | 1 | Scalar. Non-uniform scale goes through `Matrix`, which replaces the whole transform. |
 | `Material` (nil) | the bundled PBR | Every draw literal that omits the field gets lit PBR and needs no shader. |
 | `ModelDraw.Scene` / `.Node` | the default scene / the whole scene | A **non-empty** selector that matches nothing skips the draw and never falls back. |
@@ -65,6 +66,36 @@ either skips the camera and reports. Nothing plausible is substituted.
 A camera's `Transform.Scale` is **ignored**. Only position and rotation are
 inverted into the view matrix, so a rig that scales its camera node changes
 nothing about what is seen.
+
+**An `Oblique` camera's distance is not free, and getting it wrong reports
+nothing.** For `Perspective` and `Orthographic`, where the camera sits along its
+own view axis affects only what falls inside `Near..Far`. `Oblique` shears about
+the camera's own plane, so that distance *pans the image*: at `Shear: 1` a
+camera 50 units above the ground puts that ground 50 units down the screen. The
+usual instinct — stand the camera well back so nothing clips the near plane —
+is exactly what renders an empty frame, with no error anywhere, because the
+camera is working correctly and pointed at nothing.
+
+Put the camera **in** the plane you want held fixed and let `Near` go negative,
+which is legal and means what it says:
+
+```go
+q.Camera(cameraMain, scene.CameraDescr{
+	Transform:  scene.LookAt(m.Vec3{}, m.Vec3{Y: -1}, m.Vec3{Z: -1}), // in the ground plane
+	Projection: scene.Oblique,
+	Height:     30,
+	Shear:      0.5,
+	Near:       -100, Far: 100, // the camera sits inside its own depth range
+})
+```
+
+In a shader, **do not difference against `sceneCameraPosition()` for a view
+vector.** Use `sceneViewDirection(worldPos)`. The camera position is a real
+viewer only under `Perspective`: an orthographic camera has no eye point, and an
+oblique one looks one way while its viewer sees another, so a hand-rolled
+`normalize(sceneCameraPosition() - p)` lights vertical faces as if edge-on and
+floors as if head-on. `sceneCameraPosition()` remains correct for what it is —
+the transform's translation — and so for fog and detail fades.
 
 ## Layers Select Cameras
 

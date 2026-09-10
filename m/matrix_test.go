@@ -202,3 +202,79 @@ func TestLookAt4FallsBackWhenUpIsParallelToForward(t *testing.T) {
 		t.Fatalf("non-orthogonal basis: side %v, vertical %v, forward %v", side, vertical, forward)
 	}
 }
+
+func TestOblique4WithoutShearIsOrthographic(t *testing.T) {
+	// Shear 0 is the continuum's endpoint, not a special case: an app
+	// animating a shear up from rest must pass through it unchanged.
+	assertMat4Near(t, Oblique4(-2, 6, -3, 5, 1, 11, 0), Orthographic4(-2, 6, -3, 5, 1, 11))
+}
+
+func TestOblique4LeavesTheCameraPlaneUnsheared(t *testing.T) {
+	// The shear pivots about z = 0, the camera's own plane, so a point there
+	// projects exactly where the orthographic twin puts it. That is the whole
+	// placement rule: put the camera in the plane you want held fixed.
+	const shear = 0.5
+	projection := Oblique4(-4, 4, -2, 2, -10, 10, shear)
+
+	onCameraPlane, ok := Project(projection, Vec3{X: 2, Y: 1})
+	if !ok {
+		t.Fatal("a point on the camera plane should project")
+	}
+	unsheared, _ := Project(Orthographic4(-4, 4, -2, 2, -10, 10), Vec3{X: 2, Y: 1})
+	if !vec3Near(onCameraPlane, unsheared) {
+		t.Fatalf("the camera plane moved to %v, want the unsheared %v", onCameraPlane, unsheared)
+	}
+}
+
+func TestOblique4ShearsDepthIntoScreenUpByTheGain(t *testing.T) {
+	// One unit of view-space depth towards the viewer displaces screen-up by
+	// exactly the gain, in the same world units the height is measured in: at
+	// height 4, a unit of depth is 2/4 of NDC, and the gain multiplies it.
+	const shear = 0.5
+	projection := Oblique4(-8, 8, -2, 2, -10, 10, shear)
+
+	base, _ := Project(projection, Vec3{})
+	raised, _ := Project(projection, Vec3{Z: 1})
+	if got, want := raised.Y-base.Y, float32(shear*2/4); !near(got, want) {
+		t.Fatalf("a unit of depth displaced NDC y by %v, want %v", got, want)
+	}
+	// The ground is unforeshortened: nothing at a constant depth changes scale.
+	sideBase, _ := Project(projection, Vec3{X: 8})
+	if !near(sideBase.X-base.X, 1) {
+		t.Fatalf("the horizontal scale changed under shear: %v, want 1", sideBase.X-base.X)
+	}
+	sideRaised, _ := Project(projection, Vec3{X: 8, Z: 1})
+	if !near(sideRaised.Y-raised.Y, 0) || !near(sideRaised.X-raised.X, 1) {
+		t.Fatal("the shear is not constant across the plane it shears")
+	}
+}
+
+func TestOblique4KeepsDepthMonotonicAlongItsProjectionRay(t *testing.T) {
+	// The ticket's load-bearing claim: the ordinary depth buffer still sorts an
+	// oblique projection, so there is no painter's algorithm and no per-draw
+	// sort. Along the projection ray the two points share a screen position,
+	// and the nearer one must come back with the smaller clip depth.
+	const shear = 1.5
+	projection := Oblique4(-8, 8, -8, 8, -20, 20, shear)
+	// The ray that leaves both screen coordinates unchanged: dx = 0 and
+	// dy + k*dz = 0, so (0, -k, 1) up to scale.
+	ray := Vec3{Y: -shear, Z: 1}
+
+	nearer := Vec3{X: 1, Y: 2, Z: 3}
+	farther := nearer.Sub(ray.MulS(5))
+
+	nearNDC, ok := Project(projection, nearer)
+	if !ok {
+		t.Fatal("the nearer point should project")
+	}
+	farNDC, ok := Project(projection, farther)
+	if !ok {
+		t.Fatal("the farther point should project")
+	}
+	if !near(nearNDC.X, farNDC.X) || !near(nearNDC.Y, farNDC.Y) {
+		t.Fatalf("the two points are not on one projection ray: %v and %v", nearNDC, farNDC)
+	}
+	if !(nearNDC.Z < farNDC.Z) {
+		t.Fatalf("depth %v is not in front of %v along the projection ray", nearNDC.Z, farNDC.Z)
+	}
+}

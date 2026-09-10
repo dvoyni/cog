@@ -16,9 +16,10 @@ const SCENE_PI: f32 = 3.14159265359;
 const SCENE_DIELECTRIC_F0: vec3<f32> = vec3<f32>(0.04, 0.04, 0.04);
 
 // SceneSurface is what lighting needs and nothing more. It carries no view
-// vector - that is one normalise away from sceneCameraPosition(), one less
-// field to get wrong - and no emissive, because emissive is the material's own
-// output rather than lighting: a shader writes sceneShadeSurface(s) + emissive.
+// vector - sceneViewDirection(s.position) is that, one less field to get wrong
+// and one the frame answers correctly under every projection - and no emissive,
+// because emissive is the material's own output rather than lighting: a shader
+// writes sceneShadeSurface(s) + emissive.
 struct SceneSurface {
     position: vec3<f32>,
     normal: vec3<f32>,
@@ -107,7 +108,7 @@ fn scenePunctualContribution(
 // naive forward: every shaded fragment runs it whole, so each light in the
 // pass costs every shaded pixel one BRDF evaluation.
 fn sceneShadeSurface(s: SceneSurface) -> vec3<f32> {
-    let view = normalize(sceneCameraPosition() - s.position);
+    let view = sceneViewDirection(s.position);
     let nDotV = clamp(dot(s.normal, view), 1e-4, 1.0);
     let metallic = clamp(s.metallic, 0.0, 1.0);
     let roughness = clamp(s.roughness, 0.0, 1.0);

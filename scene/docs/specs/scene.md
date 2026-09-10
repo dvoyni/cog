@@ -286,6 +286,7 @@ type ProjectionKind uint8
 const (
     Perspective ProjectionKind = iota
     Orthographic
+    Oblique
 )
 
 type PassTag string
@@ -304,7 +305,8 @@ type CameraDescr struct {
     Transform  Transform       // the camera as a positioned object; scene inverts it
     Projection ProjectionKind
     FovY       float32         // Perspective: vertical field of view, radians
-    Height     float32         // Orthographic: world units across the target's height
+    Height     float32         // Orthographic and Oblique: world units across the target's height
+    Shear      float32         // Oblique: the gain depth rides up the screen by
     Near, Far  float32         // both required; zero is a reported error
 
     CullMask LayerMask         // zero reads as LayersAll
@@ -380,6 +382,57 @@ across the target's height, width derived. There is no `FovAxis` enum and no
 canvas-style `ReferenceAspect` — a 3D camera has no reference framing it does
 not invent, and a game that wants one computes `FovY` from the target aspect in
 one line at the call site.
+
+**`Oblique` is `Orthographic` with a shear**, and the two meet at `Shear: 0`.
+`Perspective` and `Orthographic` both project along the camera's forward axis,
+so revealing a vertical face always costs ground-plane scale: tilt to elevation
+φ and the ground foreshortens by exactly sin φ. **No camera placement shows
+vertical faces and leaves the ground unforeshortened.** `Oblique` projects along
+a direction that is *not* perpendicular to the image plane, so the plane the
+camera sits in renders at true scale while depth is sheared into screen-up by
+`Shear`. `1` is cavalier, `0.5` cabinet, and the implied elevation is
+`atan(1/Shear)`.
+
+It is a kind rather than something an app composes from outside because it
+cannot be faked from outside. **Two cameras do not register**: restricted to the
+ground plane, a tilted camera is the top-down one scaled by sin φ along screen-y
+*only*, so matching the vertical mismatches the horizontal by 1/sin φ, and the
+residual grows linearly toward the screen edges — at a 30-unit view height and
+φ = 60°, an object at the top of the screen stands a full 2 units off its own
+footprint. **A non-uniform world scale does not work either**: undoing the
+ground foreshortening that way stretches every object along one horizontal axis
+with it.
+
+Nothing about a shear is degenerate — `0` is the continuum's endpoint, which an
+app animating a shear up from rest must pass through; a negative one is a
+mirror; a large one is only a useless elevation. So `Oblique` inherits
+`Orthographic`'s rules exactly and adds no error of its own, and `Shear` is a
+field one kind reads and the others do not, the way `Orthographic` does not read
+`FovY`.
+
+**The shear pivots about the camera's own plane**, which is the one trap the
+kind carries. For `Orthographic`, distance along the view axis is free: only
+`Near` and `Far` care where the camera sits. For `Oblique` that distance *pans
+the image* — at `Shear: 1` a camera 50 units above the ground puts that ground
+50 units down the screen, and since the camera's height is normally chosen to
+bracket the scene in `Near..Far`, the two concerns are coupled through a number
+picked for an unrelated reason. Nothing is reported: the frame renders, empty.
+
+The rule is therefore **put the camera in the plane you want held fixed and let
+`Near` go negative** — `Near: -100, Far: 100` — rather than standing it off and
+re-aiming. `m.Oblique4` only requires `near < far`, the 0..1 depth mapping is
+unaffected, and `FrustumFromMat4` extracts correct planes either way. The
+rejected alternative was anchoring at world `y = 0` automatically, which would
+make `projection()` read `Transform` and assert a ground plane scene has no
+concept of anywhere else; anchoring at `(Near+Far)/2` is the same idea and is
+wrong for every asymmetric range.
+
+**Depth ordering and culling both hold.** The shear leaves view-space depth
+untouched, so along the projection ray depth varies monotonically and the
+ordinary depth buffer sorts — no painter's algorithm, no per-draw sort.
+`FrustumFromMat4` extracts its planes from the composed view-projection and
+`cull.go` reads that and nothing else, so a sheared matrix yields a sheared
+frustum with correct planes for free.
 
 **The projection is resolved per pass**, from that pass's target aspect, at
 flush. A camera's passes may target different sizes — a 1024×1024 shadow map and
@@ -2227,7 +2280,7 @@ mirroring canvas's `canvasTexture`/`canvasSampler`. A material parameter named
 
 | binding | group | contents |
 | --- | --- | --- |
-| `sceneFrame` | 0 | view, projection, viewProj, camera position, sun direction and colour, ambient sky/ground, `lightCount`, `lights: array<SceneLight, 16>` |
+| `sceneFrame` | 0 | view, projection, viewProj, camera position, view direction, sun direction and colour, ambient sky/ground, `lightCount`, `lights: array<SceneLight, 16>` |
 | `sceneInstances` | 0 | `array<SceneInstance>`, bound by range per pass |
 | `sceneAnim` | 0 | `array<vec4<f32>>` arena, indexed by `sceneInstance.animOffset` |
 | `scenePbrMaterial` | 1 | the bundled PBR record, a bound range |
@@ -2349,7 +2402,8 @@ fn sceneLightCount() -> u32
 fn sceneLightSample(i: u32, position: vec3<f32>) -> SceneLightSample
 fn sceneSun() -> SceneLightSample                 // radiance zero when SunDirection is zero
 fn sceneAmbient(normal: vec3<f32>) -> vec3<f32>   // mix(ground, sky, normal.y*0.5+0.5)
-fn sceneCameraPosition() -> vec3<f32>
+fn sceneCameraPosition() -> vec3<f32>              // the transform's eye; a real viewer only under Perspective
+fn sceneViewDirection(position: vec3<f32>) -> vec3<f32> // unit, surface -> viewer, under every projection
 
 struct ScenePbrSurface {
     surface:  SceneSurface,
@@ -2366,11 +2420,37 @@ Two levels for lighting because the common custom material wants a shaded
 surface, while the main reason to write one — a toon ramp — needs per-light
 `NdotL` *before* shading; without the low level such a shader must reimplement
 attenuation and the cone, reintroducing exactly the inconsistency the contract
-exists to prevent. `SceneSurface` carries **no view vector** (derived from
-`sceneCameraPosition()`, one normalise, one less field to get wrong) and **no
-emissive** (emissive is the material's own output, not lighting, and debug lines
+exists to prevent. `SceneSurface` carries **no view vector** (that is
+`sceneViewDirection(s.position)`, one less field to get wrong and one the frame
+answers correctly under every projection) and **no emissive** (emissive is the material's own output, not lighting, and debug lines
 are self-lit through `emissiveFactor`, so a lighting function owning it would
 read as a contradiction). A shader writes `sceneShadeSurface(s) + emissive`.
+
+**The view direction is the frame's, not the camera position's.**
+`sceneCameraPosition()` is the eye read straight out of the camera transform,
+and it is a real viewer only under `Perspective`. An orthographic camera has no
+eye point — its view direction is constant across the frame rather than radial
+from the transform's translation — and an oblique one looks one way while its
+viewer sees another, so every view-dependent term (specular, fresnel, rim,
+anything consuming `nDotV`) differenced against the eye lights vertical faces as
+if edge-on and floors as if head-on: the exact inverse of what is drawn. For
+`Orthographic` the error was already there and merely small, because ortho
+cameras tend to sit far away with narrow framing; `Oblique` turns it from a
+subtle bias into a visible artefact, and the one fix serves both.
+
+So `SceneFrame` carries `viewDirection: vec4<f32>` — **xyz the constant world
+direction from a surface towards the viewer, w a mix selector**: 1 when that
+constant is the answer, 0 when the shader must difference against
+`cameraPosition` per fragment. Only `Perspective` takes the 0, and
+`sceneViewDirection` is one `mix` rather than a branch or a discriminator
+member. The constant is the direction that leaves both screen coordinates
+unchanged — `(0, -Shear, 1)` in view space, which at `Shear: 0` is the camera's
+own +Z and so serves `Orthographic` by the same line. It is resolved through
+`cameraBasis`, the same unscaled world matrix `cameraView` inverts, so the two
+cannot disagree about which matrix the camera is.
+
+`sceneCameraPosition()` stays exported for the genuine distance work — a fog
+term, a detail fade — that means the transform.
 
 `scenePbrSurface` returns everything one set of texture fetches produces in one
 call, rather than separate emissive/alpha helpers that invite the same texture to
@@ -2464,7 +2544,8 @@ order, which is WGSL `mat4x4<f32>` layout, so no transpose.
 
 Additions:
 
-- `Orthographic4`
+- `Orthographic4` and `Oblique4` — the same volume with view-space depth
+  sheared into screen-up by a gain; `Orthographic4` is `Oblique4` at gain 0
 - `TRS4` composition and `Mat4.Decompose` — the existing `QuatFromMat4` assumes
   an unscaled rotation and returns a **wrong quaternion for scaled matrices**
 - `Mat4.TransformPoint` / `TransformDirection`
@@ -3373,7 +3454,9 @@ carries the trigger that would make it a real question.
 | Per-clip joint subsets | a file holding many independently-animated props *and* per-prop clips, where `(joints the clip does not animate) × frames` dominates |
 | Reverse-Z depth | visible z-fighting at the far end of a large scene |
 | A framing policy for off-reference aspects (`FovAxis`, or a reference aspect) | a demo is framed wrong on an ultrawide or portrait window |
-| A projection escape hatch (likely `ObliqueNearPlane`, not a raw matrix) | portal or water-reflection cameras; nothing in scope needs it |
+| A projection escape hatch (likely `ObliqueNearPlaneClip`, not a raw matrix) — oblique **near-plane clipping**, unrelated to the `Oblique` projection kind | portal or water-reflection cameras; nothing in scope needs it |
+| `Shear` widened to `m.Vec2` | a caller wants a diagonal shear with the ground upright — not reachable by rolling the camera, which rotates the ground with it |
+| A view direction for `selectLights` | the cap ranks lights by falloff at the eye (`contributionAt`), which for `Orthographic` and `Oblique` is a point the viewer is not at; shares `sceneViewDirection`'s root cause |
 | Per-pass viewport and scissor in gfx | shadow cascades, atlas-packed targets, or N on-screen cameras where a target each proves too expensive |
 | A pose-resolve pass | per-vertex pose fetch cost proves too high in the skinned demo |
 | f16 morph delta packing | `MorphBytes` shows delta memory is a measured problem |

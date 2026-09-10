@@ -172,7 +172,8 @@ type CameraDescr struct {
 	Transform  Transform // the camera as a positioned object; scene inverts it
 	Projection ProjectionKind
 	FovY       float32 // Perspective: the literal vertical field of view, radians
-	Height     float32 // Orthographic: world units across the target's height
+	Height     float32 // Orthographic and Oblique: world units across the target's height
+	Shear      float32 // Oblique: the gain depth rides up the screen by
 	Near, Far  float32 // both required
 
 	CullMask LayerMask // zero reads as LayersAll
@@ -198,7 +199,37 @@ conventionally takes a negative id when canvas draws entirely over it.
 A camera's `Transform.Scale` is **ignored**. Only its position and rotation are
 inverted into the view matrix.
 
+`ProjectionKind` is `Perspective`, `Orthographic` or `Oblique`. Both of the
+first two project along the camera's forward axis, so revealing a vertical face
+always costs ground-plane scale: tilt to elevation φ and the ground foreshortens
+by exactly sin φ. **`Oblique` separates the two** — it projects along a direction
+that is not perpendicular to the image plane, so the plane the camera sits in
+renders at true scale while depth is sheared into screen-up by `Shear` instead.
+`Shear: 1` is cavalier, `0.5` cabinet, `0` exactly `Orthographic`, and the
+implied elevation is `atan(1/Shear)`. It is the family behind most 2.5D looks,
+and it cannot be faked from outside scene: two cameras do not register, and a
+non-uniform world scale stretches every object along one horizontal axis.
+
+**An `Oblique` camera's distance is not free the way an `Orthographic` one's
+is.** The shear pivots about the camera's own plane, so standing the camera off
+pans the image: at `Shear: 1` a camera 50 units above the ground puts that ground
+50 units down the screen, with nothing reported. Put the camera **in** the plane
+you want held fixed and let `Near` go negative:
+
+```go
+q.Camera(-1, scene.CameraDescr{
+	// Straight down from inside the ground plane, screen-up towards -Z.
+	Transform:  scene.LookAt(m.Vec3{}, m.Vec3{Y: -1}, m.Vec3{Z: -1}),
+	Projection: scene.Oblique,
+	Height:     30,
+	Shear:      0.5,
+	Near:       -100, Far: 100, // the camera sits inside its own depth range
+})
+```
+
 Depth is conventional: near → 0, far → 1, compare `Less`, **clear to 1.0**.
+Oblique does not change that: the shear leaves view-space depth untouched, so
+the ordinary depth buffer still sorts and frustum culling still holds.
 
 ```go
 type Pass struct {

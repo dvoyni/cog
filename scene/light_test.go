@@ -17,17 +17,17 @@ func TestLightRecordIsFortyEightBytesAndTheFrameBlockHoldsSixteen(t *testing.T) 
 		t.Fatalf("sceneLight is %d bytes, want 48", size)
 	}
 	var block sceneFrameBlock
-	if offset := unsafe.Offsetof(block.LightCount); offset != 272 {
-		t.Errorf("lightCount is at offset %d, want 272", offset)
+	if offset := unsafe.Offsetof(block.LightCount); offset != 288 {
+		t.Errorf("lightCount is at offset %d, want 288", offset)
 	}
-	if offset := unsafe.Offsetof(block.Lights); offset != 288 {
-		t.Errorf("lights is at offset %d, want 288", offset)
+	if offset := unsafe.Offsetof(block.Lights); offset != 304 {
+		t.Errorf("lights is at offset %d, want 304", offset)
 	}
 	if len(block.Lights) != maxLights || maxLights != 16 {
 		t.Errorf("the block holds %d lights, want the fixed 16", len(block.Lights))
 	}
-	if size := unsafe.Sizeof(block); size != 288+16*48 {
-		t.Errorf("the frame block is %d bytes, want %d", size, 288+16*48)
+	if size := unsafe.Sizeof(block); size != 304+16*48 {
+		t.Errorf("the frame block is %d bytes, want %d", size, 304+16*48)
 	}
 }
 

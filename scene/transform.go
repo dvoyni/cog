@@ -70,8 +70,21 @@ func (t Transform) rotation() m.Quat {
 // Scaling a view matrix scales the whole world instead, and the field cannot be
 // avoided at the call site because its zero already means one.
 func cameraView(t Transform) (m.Mat4, bool) {
+	return cameraBasis(t).InverseAffine()
+}
+
+// cameraBasis is the world matrix a camera is read through: its own, with a TRS
+// camera's scale dropped, because a scaled camera scales the world instead. A
+// Matrix override is taken verbatim - a caller handing in a whole matrix has
+// said what they mean.
+//
+// It exists so cameraView and viewDirection cannot disagree about which matrix
+// the camera is. They resolve the same rotation from it, one inverted and one
+// not, and a scale applied to one but not the other would tilt every
+// view-dependent shading term against the geometry it shades.
+func cameraBasis(t Transform) m.Mat4 {
 	if t.Matrix == nil {
 		t.Scale = 1
 	}
-	return t.Mat4().InverseAffine()
+	return t.Mat4()
 }

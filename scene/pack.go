@@ -71,6 +71,12 @@ type sceneFrameBlock struct {
 	Projection     m.Mat4
 	ViewProjection m.Mat4
 	CameraPosition m.Vec4
+	// ViewDirection is xyz the constant world direction from a surface towards
+	// the viewer and w a mix selector: 1 when that constant is the answer, 0
+	// when the shader must difference against CameraPosition per fragment.
+	// Only Perspective has a real eye, so only Perspective takes the 0; see
+	// viewDirection.
+	ViewDirection m.Vec4
 	// SunDirection is the sun's direction of travel, normalised, and zero when
 	// the camera declared no sun. SunColor, AmbientSky and AmbientGround are
 	// linear radiance with their intensities already premultiplied: it removes

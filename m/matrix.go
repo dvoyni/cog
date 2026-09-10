@@ -323,8 +323,37 @@ func Perspective4(fieldOfViewY, aspect, near, far float32) Mat4 {
 // writing clip depth in 0..1 like Perspective4 and so like WebGPU. glTF gives
 // half-extents, so left and right are -xmag and +xmag.
 func Orthographic4(left, right, bottom, top, near, far float32) Mat4 {
+	return Oblique4(left, right, bottom, top, near, far, 0)
+}
+
+// Oblique4 builds a right-handed oblique projection: the orthographic volume
+// with view-space depth sheared into screen-up by shear, which is the family
+// behind cavalier (shear 1), cabinet (shear 0.5) and most 2.5D looks. The
+// implied elevation is atan(1/shear), and shear 0 is exactly Orthographic4.
+//
+// It projects along a direction that is not perpendicular to the image plane,
+// so the plane the camera sits in renders at true scale while depth is what
+// gets displaced. The ray it projects along is (0, -shear, 1) in view space,
+// which is what a shader consuming a view vector needs, since the camera's own
+// forward axis is no longer where the viewer is.
+//
+// The shear pivots about z = 0, the camera's own plane: it adds shear * z to
+// the vertical before scaling, so a point at the camera's depth does not move
+// at all and everything nearer the viewer rides up the screen. Distance along
+// the view axis is therefore not free the way it is for Orthographic4 - a
+// caller who wants a particular plane held fixed puts the camera in it, which
+// is what near is allowed to be negative for.
+//
+// Depth is untouched, so the ordinary depth buffer still sorts: along the
+// projection ray z varies monotonically, and clip depth is affine in z.
+func Oblique4(left, right, bottom, top, near, far, shear float32) Mat4 {
 	width, height, depth := 1/(right-left), 1/(top-bottom), 1/(near-far)
-	return Mat4{2 * width, 0, 0, 0, 0, 2 * height, 0, 0, 0, 0, depth, 0, -(right + left) * width, -(top + bottom) * height, near * depth, 1}
+	return Mat4{
+		2 * width, 0, 0, 0,
+		0, 2 * height, 0, 0,
+		0, 2 * height * shear, depth, 0,
+		-(right + left) * width, -(top + bottom) * height, near * depth, 1,
+	}
 }
 
 // lookAtFallbackUps are tried in order when the caller's up is parallel to

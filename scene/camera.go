@@ -20,11 +20,22 @@ import (
 type CameraID gfx.Order
 
 // ProjectionKind selects how a camera flattens the world.
+//
+// Perspective and Orthographic both project along the camera's forward axis, so
+// revealing a vertical face always costs ground-plane scale: tilt a camera to
+// elevation phi and the ground foreshortens by exactly sin phi. Oblique
+// separates the two, which is why it is a kind rather than something an app
+// composes from outside - see Shear.
 type ProjectionKind uint8
 
 const (
 	Perspective ProjectionKind = iota
 	Orthographic
+	// Oblique is Orthographic with view-space depth sheared into screen-up by
+	// Shear, and at Shear 0 it is exactly Orthographic. It reads Height the
+	// same way; what it adds is that the plane the camera sits in renders at
+	// true scale while depth is displaced instead.
+	Oblique
 )
 
 // PassTag names what a pass is for, and selects which of a material's gfx
@@ -74,8 +85,21 @@ type CameraDescr struct {
 	Transform  Transform // the camera as a positioned object; scene inverts it
 	Projection ProjectionKind
 	FovY       float32 // Perspective: the literal vertical field of view, radians
-	Height     float32 // Orthographic: world units across the target's height
-	Near, Far  float32 // both required; a zero in either is a reported error
+	Height     float32 // Orthographic and Oblique: world units across the target's height
+	// Shear is the Oblique gain: how far one world unit of view-space depth
+	// rides up the screen, in the units Height measures. 1 is cavalier, 0.5
+	// cabinet, 0 exactly Orthographic, and the implied elevation is
+	// atan(1/Shear). A negative value shears the other way. Perspective and
+	// Orthographic do not read it, the way Orthographic does not read FovY.
+	//
+	// The shear pivots about the camera's own plane, so unlike Orthographic,
+	// where distance along the view axis is free, an Oblique camera's distance
+	// pans the image: at Shear 1 a camera 50 units above the ground puts that
+	// ground 50 units down the screen. Place the camera in the plane you want
+	// held fixed and let Near go negative - Near: -50, Far: 50 - rather than
+	// standing it off and re-aiming.
+	Shear     float32
+	Near, Far float32 // both required; a zero in either is a reported error
 
 	CullMask LayerMask // zero reads as LayersAll
 
@@ -88,6 +112,18 @@ type CameraDescr struct {
 	AmbientIntensity float32 // zero means 1
 
 	Passes []Pass // empty means one default pass
+}
+
+// shear is the gain the camera's projection actually applies, which is Shear
+// under Oblique and zero under every other kind. It is one function rather than
+// a test repeated at each reader so that "which kinds read Shear" is answered
+// in one place: the projection matrix and the view direction must agree about
+// it, and they are built by separate code.
+func (d CameraDescr) shear() float32 {
+	if d.Projection != Oblique {
+		return 0
+	}
+	return d.Shear
 }
 
 // depthClearFar is the depth a pass clears to. Depth is conventional — near
