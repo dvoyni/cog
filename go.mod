@@ -20,3 +20,5 @@ require (
 )
 
 replace github.com/gogpu/naga => github.com/dvoyni/naga v0.19.1-0.20260910142728-7fd5ed312699
+
+replace github.com/gogpu/gogpu => github.com/dvoyni/gogpu v0.54.1-0.20260910171621-041de1a5716f

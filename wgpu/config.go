@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gogpu/gogpu"
+	"github.com/gogpu/gputypes"
 )
 
 // Config configures the wgpu driver. Build it from DefaultConfig and the With*
@@ -105,6 +106,17 @@ func (c Config) WithAppName(name string) Config {
 	return c
 }
 
+// requiredFeatures are the optional GPU features the driver cannot render
+// without, requested by name at device creation.
+//
+// IndirectFirstInstance is what lets a draw name a non-zero firstInstance.
+// Scene gives every batch its own slice of the pass's instance buffer and
+// offsets into it that way, so without the feature every scene draw is
+// rejected, the encoder never finishes, and nothing reaches the screen. It is
+// requested rather than hoped for because the alternative failure is a black
+// window: a device that lacks it fails here, by name.
+const requiredFeatures = gputypes.Features(gputypes.FeatureIndirectFirstInstance)
+
 // gogpuConfig maps a Config onto a gogpu.Config. Continuous render
 // is forced on: wgpu is a game-loop driver, not an idle UI app.
 func (c Config) gogpuConfig() gogpu.Config {
@@ -113,7 +125,8 @@ func (c Config) gogpuConfig() gogpu.Config {
 		WithSize(c.Width, c.Height).
 		WithContinuousRender(true).
 		WithResizable(c.Resizable).
-		WithVSync(c.VSync)
+		WithVSync(c.VSync).
+		WithRequiredFeatures(requiredFeatures)
 	if c.Fullscreen {
 		g = g.WithFullscreen()
 	}

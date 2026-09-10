@@ -109,3 +109,11 @@ costs close to nothing.
 
 Desktop and WebAssembly platform differences are hidden behind build-tagged
 files; the public API is identical.
+
+Frame pacing is gogpu's on both platforms, and the driver must not reach for it.
+On the web gogpu schedules `requestAnimationFrame` itself and runs the frame
+from inside that callback, so a frame ends by returning to it. Awaiting rAF from
+`onDraw` - which this package did while gogpu's `Run` was still a blocking loop
+that starved the event loop - deadlocks the program instead of pacing it: the
+next animation frame cannot fire until the current callback returns, and that
+callback is the one waiting.

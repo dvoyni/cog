@@ -252,11 +252,6 @@ func (p *Plugin) onDraw(k kernel.Executioner, dc *gogpu.Context) {
 	}
 	p.gfxBackend.setScreen(view, fbW, fbH)
 	_ = k.PublishEvent(app.RenderEvent{Alpha: p.loadAlpha()}).Wait()
-
-	// Return control to the browser event loop so it composites (presents) the
-	// frame we just submitted, and so wall-clock advances for the next update.
-	// No-op on desktop.
-	yieldMainThread()
 }
 
 // storeAlpha and loadAlpha carry the render interpolation factor across the
