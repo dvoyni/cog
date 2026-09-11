@@ -317,6 +317,34 @@ perfectly when the locks permit, so the modest gains above are a property of the
 The ~2.2 µs floor is not specific to that ticket. Sharding one System across row ranges pays the
 same per-task cost, so chunk-parallel execution has the same break-even.
 
+# Why splitting the walk is unsound (cog#242)
+
+`splitrange_test.go` is why chunk-parallel execution left v1 entirely rather than keeping a
+non-foreclosure clause. cog#239 specified `All()` as walking the driver's dense array over a
+**half-open index range**, which was taken to mean the storage foreclosed nothing. It does not —
+but cog#240 then made the walk run **backwards as a guarantee**, and *that* is what licenses "you
+may restructure the Entity you are on": swap-remove moves the last row into the hole, and a walk
+that started at the end has already been there.
+
+Split the range and the guarantee is gone:
+
+| walk | visited | left in store |
+| --- | --- | --- |
+| whole array, backwards | **1000 / 1000** | 0 |
+| split into 2 ranges | **500 / 1000** | 500 |
+| split into 4 ranges | 500 / 1000 | 500 |
+| split into 8 ranges | 500 / 1000 | 500 |
+
+The shards run **sequentially**, so this is index arithmetic alone with no data race involved; real
+concurrency could only make it worse. The low shard's removals drag the entire high half down into
+indices it has already passed, so half the entities are visited never and removed never — a silent
+wrong answer, not a crash.
+
+So preserving the option was never free. It would have cost either cog#240's self-structural-change
+affordance or cog#260's deferred command buffer pulled forward into v1. That, the ~2.2 µs floor
+above, and the fact that nox's expensive Systems are expensive *because* they leave the entity, are
+the three findings that ruled the feature out of scope.
+
 ## Files
 
 - `store.go` — the four store shapes.
@@ -333,3 +361,4 @@ same per-task cost, so chunk-parallel execution has the same break-even.
 - `refaccess_test.go` — following a reference, and the guarantees that makes safe.
 - `parallel_test.go` — what false serialisation costs a frame, on the real kernel.
 - `overlap_test.go` — proof that the disjoint regime really does overlap.
+- `splitrange_test.go` — why splitting the driver's index range silently skips half the Store.

@@ -130,7 +130,7 @@ The Registration-phase declaration that one Component type exists, made once per
 
 **Store**:
 The engine's holding of every value of one Component type. There is one per registered Component type, and it is the unit a lock is taken on. It knows how many Entities it holds, and that number is what a Query consults to choose its Driver.
-_Avoid_: Pool, column, table. Also Page, which stays unspent: a Store's index is not divided into blocks.
+_Avoid_: Pool, column, table. Also Page and Chunk, both of which stay unspent: a Store's index is not divided into blocks, and nothing groups its rows. Chunk is held in reserve for a run of rows sharing one change version, which is the only thing a real block would buy.
 
 **Query**:
 A struct type whose field types are the Component types one System touches. A field's pointer-ness is its access mode: a pointer field is written and yields the stored value itself, a value field is read and yields a copy. A Query matches every Entity having _at least_ those Component types, which is why it is not a Component set.
