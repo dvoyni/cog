@@ -119,7 +119,7 @@ func captureScreen(k kernel.Executioner, request CaptureRequest) (CaptureRespons
 	if err := validateCaptureSpan(amount, interval); err != nil {
 		return CaptureResponse{}, err
 	}
-	paused := enginePaused(k)
+	paused := app.Paused(k)
 	if amount > 1 && paused {
 		return CaptureResponse{}, mcp.Unavailable{Reason: "the game is paused, so a burst would " +
 			"write identical files; resume it, or ask for a single capture"}
@@ -308,16 +308,4 @@ func validateCaptureSpan(amount, interval int) error {
 			amount*interval, maxCaptureSpan)}
 	}
 	return nil
-}
-
-// enginePaused asks the tick source whether it is stopped, which decides both
-// whether a burst is legal and whether the capture waits for a tick that can
-// never come. A game composed without time control cannot be paused, so an
-// engine that does not handle the command is answering rather than failing.
-func enginePaused(k kernel.Executioner) bool {
-	state, err := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
-	if err != nil {
-		return false
-	}
-	return state.Paused
 }

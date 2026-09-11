@@ -9,8 +9,9 @@ handles the viewport commands.
 ## Files
 
 `contract.go` holds package documentation and shared value types, `events.go` the
-event declarations, `commands.go` the command/request/response declarations, and
-`resources.go` the resource contract. Because this package is contract-only,
+event declarations, `commands.go` the command/request/response declarations plus
+`Paused`, the one caller-side helper over them, and `resources.go` the resource
+contract. Because this package is contract-only,
 `resources.go` declares the resource type directly rather than aliasing a private
 one.
 
@@ -100,6 +101,20 @@ Two limits, stated as non-guarantees rather than left to be discovered:
 > **A game that reads wall-clock time itself is outside this contract, and
 > pause cannot reach it.** Animation driven by ticks freezes; animation a game
 > times with its own `time.Now` does not.
+
+#### `Paused`
+
+```go
+func Paused(k kernel.Executioner) bool
+```
+
+The caller-side half of `TimeCmd`, for frame-bound work that has to know
+whether a tick is coming: `gfx_capture` refuses a burst while paused, and
+anything that waits for a tick must not wait for one that can never come. It
+is one `TimeStatus` dispatch, so asking obliges nobody to import a host — and
+**an engine that does not handle `TimeCmd` is running**, because a game
+composed without time control cannot be paused. It lives here rather than
+beside any one capability so that fallback is stated once.
 
 ### `SetViewportCmd`
 

@@ -73,6 +73,27 @@ type TimeResponse struct {
 	Advanced int
 }
 
+// Paused reports whether the engine's tick source is stopped. It is the
+// caller-side half of TimeCmd, for the frame-bound work that has to know:
+// whether an observation spanning several ticks is worth arming at all, and
+// whether waiting for a tick would be waiting for one that can never come. The
+// answer is dispatched rather than read off a driver, so asking obliges nobody
+// to import a host.
+//
+// A game composed without time control cannot be paused, so an engine that
+// does not handle TimeCmd is answering rather than failing: with no tick
+// source to stop, it is running. Every other dispatch failure reads the same
+// way, which is the safe direction — believing a running engine paused refuses
+// work that would have succeeded, while the opposite costs at worst a wait
+// that ends in the caller's own deadline.
+func Paused(k kernel.Executioner) bool {
+	state, err := k.ExecuteCommand[TimeCmd](TimeRequest{Action: TimeStatus})
+	if err != nil {
+		return false
+	}
+	return state.Paused
+}
+
 // SetViewportCmd updates the Viewport resource with the current render target
 // size. A driver calls it when the size changes.
 type SetViewportCmd kernel.Command[SetViewportRequest, SetViewportResponse]
