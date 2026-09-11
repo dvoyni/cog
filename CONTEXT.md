@@ -107,8 +107,11 @@ An opaque handle to one thing in the simulation. It is comparable, copyable, and
 _Avoid_: Id, object, actor, game object
 
 **Entities**:
-The authority on which Entities exist: it allocates them, tracks their generations, and answers whether one is alive. It knows nothing about which Components an Entity has.
+The authority on which Entities exist: it allocates them, tracks their generations, and answers whether one is alive. It knows nothing about which Components an Entity has, but it can reach every Store, because a Despawn has to empty all of them and no Entity records which ones it is in. Holding it for write is therefore the one lock that covers every Store at once; every System that touches any Store holds it for read, and that is what makes the coverage true rather than merely intended.
 _Avoid_: World, Registry
+
+**Writeable Entities**:
+The promotion of a write-locked Entities into the thing that can Spawn and Despawn. A System gets one only by declaring the write, so the authority to change which Entities exist is visible in its signature and nowhere else.
 
 **Component**:
 A plain value an Entity either has or has not, addressed by its Go type. It contains no pointers of any kind, transitively, which is checked when the type is registered. An Entity holds at most one Component of a given type.
@@ -131,7 +134,7 @@ _Avoid_: Pool, column, table. Also Page, which stays unspent: a Store's index is
 
 **Query**:
 A struct type whose field types are the Component types one System touches. A field's pointer-ness is its access mode: a pointer field is written and yields the stored value itself, a value field is read and yields a copy. A Query matches every Entity having _at least_ those Component types, which is why it is not a Component set.
-_Avoid_: View, archetype. Also Bundle, which stays unspent for a set of Components spawned together.
+_Avoid_: View, archetype
 
 **Filter**:
 A Query field that narrows which Entities match without yielding anything into the Query. It still reads its Component's Store, because presence is information and reading it is a read, so it contributes to the System's lock set like any other field. It is the reason a Tag exists.
@@ -142,15 +145,27 @@ The one Store a Query walks to find candidates, every other Component it names b
 _Avoid_: lead, primary, base
 
 **System**:
-A plain Go func that takes Queries and is called once per tick, iterating the Entities they match itself. Its lock set is derived from its signature at registration, and it can touch no Component that signature does not name.
+A plain Go func that takes Queries, Accessors and the handles for Spawn and Despawn, and is called once per tick, iterating the Entities its Queries match itself. Its lock set is derived from its signature at registration, and it can touch no Component that signature does not name.
 _Avoid_: System plugin, which is the Host
 
 **Structural change**:
-Any change to which Entities have which Components — adding or removing a Component, spawning or despawning an Entity — as opposed to a change to a Component's value.
+Any change to which Entities have which Components — adding or removing a Component, spawning or despawning an Entity — as opposed to a change to a Component's value. A System may make one to the Entity it is currently visiting; changing whether some _other_ Entity is in the Store being iterated is undefined, and so is using any pointer into a Store after that Store has structurally changed.
 
 **Spawn**:
-Creating an Entity together with a complete set of Components, as one Structural change. Despawn is its inverse.
+Creating an Entity together with a complete set of Components, as one Structural change, naming that set as a Bundle. Despawn is its inverse and is total: it removes the Entity from every Store, so nothing anywhere still holds it.
 _Avoid_: Instantiate, Instance, create
+
+**Bundle**:
+The set of Components one Spawn creates together, named as a struct type the way a Query is. It is not a Component set: it describes one act of creation, not what an Entity has from then on, and the Entity may gain and lose Components afterwards without the Bundle meaning anything.
+_Avoid_: Prefab and Template, both still unspent; archetype
+
+**Reference**:
+An Entity kept inside a Component — a missile's target, a light's owner. Following one is the ordinary way to relate two Entities, and it stays safe when the far Entity is gone: a Reference to a despawned Entity resolves to nothing, because a Despawn empties every Store and a generation cannot match twice.
+_Avoid_: Link, pointer, handle
+
+**Accessor**:
+A System's means of reaching one Component of an Entity it did not iterate to, which is how a Reference is followed. It comes in a reading form and a writing one, and like a Query field it declares its Component in the System's lock set — reaching an Entity through a Reference is not a way to touch a Store the signature did not name.
+_Avoid_: Lookup, fetch, getter
 
 ## Agent Interface
 

@@ -230,6 +230,56 @@ thing it saves over the bitset is the AND, which is the cheap part, and it buys 
 every affected query index on every structural change. **The expensive part of a match is the sparse
 lookup, and neither form avoids it.**
 
+# Structural change (cog#240)
+
+Same machine and store shape. Iteration direction is free and decides self-invalidation:
+
+| 5000 entities | ns/op |
+|---|---|
+| forward, bare walk | 2926 |
+| reverse, bare walk | 2909 |
+| forward, one probe | 4979 |
+| **reverse, one probe** | **4569 — 8% faster** |
+
+Forward + swap-remove visits 667 of 1000; forward + a compensating `i--` is correct; **reverse is
+correct with no compensation**. Reverse never reaches an entity appended during the loop, forward
+does — a system spawning one entity per visited entity does not terminate (10001 visits from 100).
+Reverse only covers removing the *current* entity: removing another still skips one (999/1000).
+
+Despawn must ask every Store, since nothing indexes which hold an entity:
+
+| | ns/despawn |
+|---|---|
+| 8 Stores, through an interface | 27.5 |
+| **85 Stores, through an interface** | **218** |
+| 85 Stores, called directly | 199 |
+
+Dynamic dispatch is 9%. Eager beats deciding liveness lazily at nox's scale — 50 despawns a tick
+cost **10.9 µs eager** against **19.5 µs lazy**, because lazy taxes every query 0.195 ns per
+candidate (4691 → 5666 ns over 5000 entities, +20.8%). Crossover near **89 despawns a tick**. Eager
+also keeps `len(owners)` exact for driver selection and needs no reclamation at all; lazy needs an
+orphan-slot branch in `add` or 1000 recycles of one index leak 1000 dense entries.
+
+A `Uses` dispatch is not viable on a hot path:
+
+| | ns/call | allocs |
+|---|---|---|
+| `Uses` dispatch | **1113** | 0 |
+| direct call on a held handle | **0.49** | 0 |
+| `Spawn[2 fields]` through cached closures | 15.7 | 0 |
+| `Spawn[4 fields]` through cached closures | 26.0 | 0 |
+| …the same, hand-written | 10.7 / 12.3 | 0 |
+
+The zero allocations locate the 1113 ns: a subscription's Kernel is `bounded`, so the dispatcher
+skips its per-call context setup (169 ns, 4 allocs when taken). What is left is the scheduler
+round-trip, paid though the request is empty. Deferral into a **typed** queue costs +4.6% at zero
+allocations; into a type-erased `[]any` buffer it costs +24% and **one allocation per command**
+(50 allocs / 1600 B per tick). Passing a spawn bundle by value and taking its address allocates too
+— 48 B per spawn — unless it is copied into a buffer bound at registration.
+
+Following an `Entity` held in a Component costs nothing extra: 4360 ns through the reference against
+4693 ns for the same Component as a query field, 8213 ns for both.
+
 ## Files
 
 - `store.go` — the four store shapes.
@@ -238,3 +288,9 @@ lookup, and neither form avoids it.**
 - `scatter_test.go` — the shuffled-order sweep.
 - `nest_test.go`, `nest2_test.go`, `nest3_test.go` — nested iteration, and where its cost comes from.
 - `bitset_test.go` — bitset intersection against probing.
+- `structural_test.go` — iteration direction, deferral, the despawn scan, spawn cost.
+- `liveness_test.go` — the lazy-reclamation alternative, priced and rejected.
+- `registry_test.go` — eager despawn reaching every Store through `Entities`.
+- `dispatch_test.go` — `Uses` dispatch against a direct call, on the real kernel.
+- `spawn_test.go` — bundle scatter through cached closures, and the escaping-bundle trap.
+- `refaccess_test.go` — following a reference, and the guarantees that makes safe.
