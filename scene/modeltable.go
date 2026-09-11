@@ -344,13 +344,17 @@ func (l *Lookup) bakeModelGeometry(
 		vertexCount: len(geometry.vertices),
 		indexCount:  len(geometry.indices),
 		topology:    geometry.topology,
+		indexWidth:  indexWidthFor(len(geometry.vertices)),
 		layout:      layout,
 		layoutID:    layoutID,
 		standard:    true,
 		baked:       true,
 	}
+	// The narrowing is the one O(n) pass this path adds, and it replaces no
+	// walk: the width itself costs a comparison, because a glTF accessor's
+	// indices are below the vertex count by construction and need no scan.
 	if record.indexCount > 0 {
-		record.indices = resources.BakeBuffer(indexBytes(geometry.indices), false)
+		record.indices = resources.BakeBuffer(indexBytes(geometry.indices, record.indexWidth), false)
 		record.indexed = true
 	}
 	return l.claimMesh(record)

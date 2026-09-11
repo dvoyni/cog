@@ -109,7 +109,9 @@ func (q *opQueue) Mesh(layers LayerMask, ref MeshRef, draw MeshDraw) {
 //
 // A temporary mesh is never culled by a sphere of its own: computing one is an
 // O(n) pass over geometry that is thrown away at the end of the frame. Give the
-// draw an explicit MeshDraw.Bounds when it should cull.
+// draw an explicit MeshDraw.Bounds when it should cull. Its indices stay uint32
+// for the same reason: narrowing them would turn a zero-copy reinterpret into
+// an allocating pass paid every frame rather than once.
 func (q *opQueue) TemporaryMesh[TVertex VertexLayout](
 	vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology,
 ) MeshRef {
@@ -183,6 +185,9 @@ func (r *meshRecording) reset() {
 // inline bytes rather than baked ones, which is what makes gfx re-bake them
 // into its own pooled per-frame buffers; the bytes are snapshotted there, so
 // the recording is free to reuse this arena on the next frame.
+//
+// It names no index width, and the zero value is the uint32 a temporary mesh
+// stages its indices at.
 func (t temporaryMesh) record(arena []byte) meshRecord {
 	record := meshRecord{
 		vertices:    gfx.BufferWithBytes(t.vertices.of(arena), true),

@@ -31,6 +31,32 @@ type pipelineKey struct {
 	// failure in the other one.
 	noColor bool
 	layout  vertexLayoutKey
+	// stripIndex is the index width a strip topology's pipeline has to declare,
+	// and nothing at all for every other topology. It is the strip format
+	// rather than the mesh's width because keying on the width unconditionally
+	// would build two identical pipelines for two triangle lists differing only
+	// in an encoding detail the pipeline never sees.
+	stripIndex stripIndexKey
+}
+
+// stripIndexKey is a pipeline key's view of an index width: the format that
+// cuts a strip, or the zero value for a topology that has no strip to cut.
+type stripIndexKey uint8
+
+const (
+	stripIndexNone stripIndexKey = iota
+	stripIndexUint16
+	stripIndexUint32
+)
+
+func stripIndexKeyOf(topology PrimitiveTopology, width IndexWidth) stripIndexKey {
+	if topology != TopologyTriangleStrip {
+		return stripIndexNone
+	}
+	if width == IndexUint16 {
+		return stripIndexUint16
+	}
+	return stripIndexUint32
 }
 
 // translator turns an OpQueue into a GpuQueue, lazily creating and caching
@@ -65,17 +91,28 @@ type translator struct {
 	// diagnostic holds a report that does not stop the frame - a shader over the
 	// web floor still renders here - until translate surfaces it.
 	diagnostic error
+	// badIndexLengths is the set of malformed index-buffer shapes already
+	// reported, so one whose length does not divide by its declared width is
+	// reported once rather than at frame rate. It is the index twin of the
+	// failed-pipeline cache entry.
+	//
+	// It is keyed by the shape rather than by the buffer id because a mesh
+	// carrying inline bytes is re-baked into a fresh id every frame, which is
+	// exactly the case the quiet exists for; the cost is that two meshes broken
+	// the same way report once between them.
+	badIndexLengths map[indexLengthKey]struct{}
 }
 
 func newTranslator() *translator {
 	return &translator{
-		shaders:        map[ShaderDescr]*cachedShader{},
-		pipelines:      map[pipelineKey]PipelineID{},
-		samplers:       map[SamplerDesc]SamplerID{},
-		layouts:        map[ShaderID]ShaderLayout{},
-		textures:       map[string]TextureDescr{},
-		parameterPlans: map[parameterPlanBucketKey][]cachedParameterPlan{},
-		textureUsage:   map[TextureID]TextureUsage{},
+		shaders:         map[ShaderDescr]*cachedShader{},
+		pipelines:       map[pipelineKey]PipelineID{},
+		samplers:        map[SamplerDesc]SamplerID{},
+		layouts:         map[ShaderID]ShaderLayout{},
+		textures:        map[string]TextureDescr{},
+		parameterPlans:  map[parameterPlanBucketKey][]cachedParameterPlan{},
+		textureUsage:    map[TextureID]TextureUsage{},
+		badIndexLengths: map[indexLengthKey]struct{}{},
 	}
 }
 
@@ -338,9 +375,20 @@ func (t *translator) translateDraw(op *op, pass PassDescr, backend Backend, file
 	if m.vertices.id == 0 || m.vertexCount <= 0 || stride <= 0 {
 		return
 	}
+	// The index buffer is checked before anything is emitted for this draw, so
+	// a dropped one leaves no orphaned pipeline or binding behind it. It is the
+	// one thing gfx can say about an index buffer without walking it, and
+	// MeshIndexed is a pure value constructor with nowhere to say it.
+	if m.indexed && m.indices.id != 0 && m.indices.size%m.indexWidth.Bytes() != 0 {
+		if err := t.reportIndexLength(m, shaderLabel(op.material.shader)); err != nil && *firstErr == nil {
+			*firstErr = err
+		}
+		return
+	}
 	// Every shader failure is fatal to its draw, whether or not this frame is the
 	// one that reports it: the error surfaces once, the draw is dropped every
-	// time. ErrShaderExceedsWebLimits stays the only non-fatal report in gfx.
+	// time. ErrShaderExceedsWebLimits stays the only report in gfx that drops
+	// nothing at all.
 	shaderID, err := t.ensureShader(backend, filesystem, op.material.shader)
 	if err != nil && *firstErr == nil {
 		*firstErr = err
@@ -392,11 +440,31 @@ func (t *translator) translateDraw(op *op, pass PassDescr, backend Backend, file
 		instances = 1
 	}
 	if m.indexed && m.indices.id != 0 && m.indexCount > 0 {
-		t.ops.SetIndexBuffer(m.indices.id, 0)
+		t.ops.SetIndexBuffer(m.indices.id, 0, m.indexWidth)
 		t.ops.Draw(0, m.indexCount, instances, op.firstInstance, true)
 	} else {
 		t.ops.Draw(0, m.vertexCount, instances, op.firstInstance, false)
 	}
+}
+
+// indexLengthKey is one malformed index buffer's shape: the byte length that
+// did not divide, and the width it was declared at.
+type indexLengthKey struct {
+	length int
+	width  IndexWidth
+}
+
+// reportIndexLength returns the report for a malformed index buffer the first
+// time that shape is seen, and nothing on the frames after it. The draw is
+// dropped either way: the caller returns before emitting anything, so
+// report-once-drop-always holds here the way it does for a failed pipeline.
+func (t *translator) reportIndexLength(m *MeshDescr, label string) error {
+	key := indexLengthKey{length: m.indices.size, width: m.indexWidth}
+	if _, seen := t.badIndexLengths[key]; seen {
+		return nil
+	}
+	t.badIndexLengths[key] = struct{}{}
+	return ErrIndexBufferLength{Shader: label, Length: key.length, Width: key.width.Bytes()}
 }
 
 // sampledAttachment names the first texture parameter a draw samples that its
@@ -658,6 +726,7 @@ func (t *translator) freeCachedResources(backend Backend) {
 	clear(t.samplers)
 	clear(t.layouts)
 	clear(t.parameterPlans)
+	clear(t.badIndexLengths)
 }
 
 func shaderLabel(descr ShaderDescr) string {
@@ -759,6 +828,7 @@ func (t *translator) ensurePipeline(
 	k := pipelineKey{
 		shader: shader, topology: m.topology, state: state,
 		colorFormat: colorFormat, depthFormat: depthFormat, noColor: noColor, layout: layout,
+		stripIndex: stripIndexKeyOf(m.topology, m.indexWidth),
 	}
 	if id, ok := t.pipelines[k]; ok {
 		return id, nil
@@ -785,6 +855,7 @@ func (t *translator) ensurePipeline(
 		NoColorTarget: noColor,
 		Stride:        stride,
 		Attributes:    attrs,
+		IndexWidth:    m.indexWidth,
 		Label:         "gfx.pipeline",
 	})
 	if err != nil {

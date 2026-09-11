@@ -26,11 +26,15 @@ type testBackend struct {
 	// draws, bindings and bakes are what the frame actually asked the GPU to
 	// do, which is where the pass-relative instance slices and the one upload
 	// per arena become assertable.
-	draws    []drawCall
-	bindings []bufferBinding
-	textures []textureBinding
-	samplers []samplerBinding
-	bakes    int
+	draws []drawCall
+	// indexBinds is the width each of the frame's index buffers was bound at.
+	// A draw call carries a count and not a format, so this is the only place
+	// the width scene derived is observable from outside the package.
+	indexBinds []gfx.IndexWidth
+	bindings   []bufferBinding
+	textures   []textureBinding
+	samplers   []samplerBinding
+	bakes      int
 	// baked keeps every uploaded buffer's bytes, so a test can read back the
 	// records scene packed rather than only their offsets.
 	baked map[gfx.BufferID][]byte
@@ -208,7 +212,9 @@ func (b *testBackend) SetSampler(sampler gfx.SamplerID, group, binding int) {
 	b.samplers = append(b.samplers, samplerBinding{group: group, binding: binding, sampler: sampler})
 }
 func (b *testBackend) SetVertexBuffer(gfx.BufferID, int) {}
-func (b *testBackend) SetIndexBuffer(gfx.BufferID, int)  {}
+func (b *testBackend) SetIndexBuffer(_ gfx.BufferID, _ int, width gfx.IndexWidth) {
+	b.indexBinds = append(b.indexBinds, width)
+}
 func (b *testBackend) SetBuffer(group, binding int, buffer gfx.BufferID, offset, size int) {
 	b.bindings = append(b.bindings, bufferBinding{
 		group: group, binding: binding, buffer: buffer, offset: offset, size: size,

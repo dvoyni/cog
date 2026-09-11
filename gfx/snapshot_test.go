@@ -577,7 +577,7 @@ func TestTheNewAccessorsAnswerOutsideTheAgentPath(t *testing.T) {
 	// a view, a capability or a JSON document.
 	vertices := BufferWithBytes(make([]byte, 3*32), false)
 	indices := BufferWithBytes(make([]byte, 6*4), false)
-	mesh := MeshIndexed(vertices, indices, TopologyTriangleList,
+	mesh := MeshIndexed(vertices, indices, IndexUint32, TopologyTriangleList,
 		Attr(0, Float32x4), Attr(16, Float32x4))
 	if mesh.VertexCount() != 3 || mesh.IndexCount() != 6 {
 		t.Errorf("counts = %d vertices / %d indices, want 3 and 6",

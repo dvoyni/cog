@@ -52,6 +52,10 @@ type fakeBackend struct {
 	passDraws     []int
 	views         [][3]int
 	draws         []drawCall
+	// indexBinds records every index buffer the pass bound and the width it was
+	// bound at, which is the only place the width is observable: a draw call
+	// carries a count, not a format.
+	indexBinds    []indexBind
 	execCount     int
 	layout        *ShaderLayout
 	presents      int
@@ -285,7 +289,9 @@ func (b *fakeBackend) boundTexture(id TextureID) bool {
 }
 func (b *fakeBackend) SetSampler(SamplerID, int, int)         {}
 func (b *fakeBackend) SetVertexBuffer(BufferID, int)          {}
-func (b *fakeBackend) SetIndexBuffer(BufferID, int)           {}
+func (b *fakeBackend) SetIndexBuffer(buffer BufferID, offset int, width IndexWidth) {
+	b.indexBinds = append(b.indexBinds, indexBind{buffer: buffer, offset: offset, width: width})
+}
 func (b *fakeBackend) SetBuffer(int, int, BufferID, int, int) {}
 func (b *fakeBackend) Draw(first, count, instances, firstInstance int, indexed bool) {
 	if len(b.passDraws) > 0 {
@@ -294,6 +300,13 @@ func (b *fakeBackend) Draw(first, count, instances, firstInstance int, indexed b
 	b.draws = append(b.draws, drawCall{
 		first: first, count: count, instances: instances, firstInstance: firstInstance, indexed: indexed,
 	})
+}
+
+// indexBind is one recorded index-buffer binding.
+type indexBind struct {
+	buffer BufferID
+	offset int
+	width  IndexWidth
 }
 
 // drawCall is one recorded draw, so tests can assert on the arguments that
@@ -484,7 +497,7 @@ func (benchmarkGpuSink) SetTexture(TextureID, int, int)                         
 
 func (benchmarkGpuSink) SetSampler(SamplerID, int, int)         {}
 func (benchmarkGpuSink) SetVertexBuffer(BufferID, int)          {}
-func (benchmarkGpuSink) SetIndexBuffer(BufferID, int)           {}
+func (benchmarkGpuSink) SetIndexBuffer(BufferID, int, IndexWidth) {}
 func (benchmarkGpuSink) SetBuffer(int, int, BufferID, int, int) {}
 func (benchmarkGpuSink) Draw(int, int, int, int, bool)          {}
 func (benchmarkGpuSink) ReleaseBuffer(BufferID)                 {}

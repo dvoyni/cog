@@ -306,7 +306,12 @@ func (p *Plugin) ensureQuad(resources *gfx.ResourceQueue) bool {
 	vertices, indices := unitQuadBytes()
 	p.quadVertices = resources.BakeBuffer(vertices, true)
 	p.quadIndices = resources.BakeBuffer(indices, true)
-	p.quad = gfx.MeshIndexed(p.quadVertices, p.quadIndices, gfx.TopologyTriangleList, gfx.Attr(0, gfx.Float32x2))
+	// unitQuadBytes writes uint32 indices, so that is what the descriptor
+	// declares. Four vertices would fit in uint16 twice over; canvas's index
+	// buffer is six indices long once for the life of the plugin, so there is
+	// nothing there to halve.
+	p.quad = gfx.MeshIndexed(p.quadVertices, p.quadIndices, gfx.IndexUint32,
+		gfx.TopologyTriangleList, gfx.Attr(0, gfx.Float32x2))
 	p.quadReady = true
 	return true
 }

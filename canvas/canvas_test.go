@@ -232,7 +232,7 @@ func (b *testBackend) SetTexture(gfx.TextureID, int, int) {}
 
 func (b *testBackend) SetSampler(gfx.SamplerID, int, int)         {}
 func (b *testBackend) SetVertexBuffer(gfx.BufferID, int)          {}
-func (b *testBackend) SetIndexBuffer(gfx.BufferID, int)           {}
+func (b *testBackend) SetIndexBuffer(gfx.BufferID, int, gfx.IndexWidth) {}
 func (b *testBackend) SetBuffer(int, int, gfx.BufferID, int, int) {}
 func (b *testBackend) Draw(_, _, _, _ int, _ bool)                { b.draws++ }
 func (b *testBackend) ReleaseBuffer(id gfx.BufferID) {

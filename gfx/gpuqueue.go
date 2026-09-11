@@ -167,7 +167,11 @@ type RenderPass interface {
 	SetTexture(TextureID, int, int)
 	SetSampler(SamplerID, int, int)
 	SetVertexBuffer(BufferID, int)
-	SetIndexBuffer(BufferID, int)
+	// SetIndexBuffer binds the index buffer at the width one of its elements
+	// was written at. The width is the mesh's rather than the pass's: two
+	// meshes in one pass may well be indexed differently, because the width
+	// follows from how many vertices each of them has.
+	SetIndexBuffer(BufferID, int, IndexWidth)
 	SetBuffer(int, int, BufferID, int, int)
 	Draw(first, count, instances, firstInstance int, indexed bool)
 }
@@ -271,8 +275,11 @@ func (q *GpuQueue) SetVertexBuffer(buffer BufferID, offset int) {
 	q.render = append(q.render, o)
 }
 
-func (q *GpuQueue) SetIndexBuffer(buffer BufferID, offset int) {
-	o := gpuOp{kind: gpuSetIndexBuffer, res0: ResourceID(buffer), arg0: int32(offset)}
+func (q *GpuQueue) SetIndexBuffer(buffer BufferID, offset int, width IndexWidth) {
+	o := gpuOp{
+		kind: gpuSetIndexBuffer, res0: ResourceID(buffer),
+		arg0: int32(offset), arg1: int32(width),
+	}
 	q.render = append(q.render, o)
 }
 
@@ -407,7 +414,7 @@ func (q *GpuQueue) replayRange(sink RenderPass, start, end int) {
 		case gpuSetVertexBuffer:
 			sink.SetVertexBuffer(BufferID(o.res0), int(o.arg0))
 		case gpuSetIndexBuffer:
-			sink.SetIndexBuffer(BufferID(o.res0), int(o.arg0))
+			sink.SetIndexBuffer(BufferID(o.res0), int(o.arg0), IndexWidth(o.arg1))
 		case gpuSetBakedBuffer:
 			sink.SetBuffer(int(o.arg2), int(o.arg3), BufferID(o.res0), int(o.arg0), int(o.arg1))
 		case gpuDraw:

@@ -48,14 +48,27 @@ func TestCullAndWindingZeroValuesAreTheWebGPUDefaults(t *testing.T) {
 
 func TestStripTopologiesDeclareTheirIndexFormat(t *testing.T) {
 	// An indexed strip draw is invalid under WebGPU unless the pipeline says
-	// which index format cuts the strip, and index buffers are always uint32.
-	strip := stripIndexFormat(cgfx.TopologyTriangleStrip)
-	if strip == nil || *strip != gputypes.IndexFormatUint32 {
-		t.Fatalf("stripIndexFormat(TriangleStrip) = %v, want Uint32", strip)
+	// which index format cuts the strip, and with two widths in the engine the
+	// format a strip declares is the mesh's own.
+	for _, c := range []struct {
+		width cgfx.IndexWidth
+		want  gputypes.IndexFormat
+	}{
+		{cgfx.IndexUint16, gputypes.IndexFormatUint16},
+		{cgfx.IndexUint32, gputypes.IndexFormatUint32},
+	} {
+		strip := stripIndexFormat(cgfx.TopologyTriangleStrip, c.width)
+		if strip == nil || *strip != c.want {
+			t.Fatalf("stripIndexFormat(TriangleStrip, %v) = %v, want %v", c.width, strip, c.want)
+		}
 	}
+	// Every other topology has no strip to cut, and WebGPU forbids declaring a
+	// format for one - whatever width the mesh's own indices happen to be.
 	for _, topology := range []cgfx.PrimitiveTopology{cgfx.TopologyTriangleList, cgfx.TopologyLineList} {
-		if got := stripIndexFormat(topology); got != nil {
-			t.Errorf("stripIndexFormat(%v) = %v, want nil for a non-strip topology", topology, got)
+		for _, width := range []cgfx.IndexWidth{cgfx.IndexUint16, cgfx.IndexUint32} {
+			if got := stripIndexFormat(topology, width); got != nil {
+				t.Errorf("stripIndexFormat(%v, %v) = %v, want nil for a non-strip topology", topology, width, got)
+			}
 		}
 	}
 }

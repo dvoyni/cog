@@ -1035,10 +1035,14 @@ one thing a draw with no material of its own must not be. This is the same
 ### Topology and indices
 
 One `topology` argument, zero value `TriangleList`, every gfx topology passed
-straight through. Indices are `[]uint32` only, matching `gfx.MeshDescr` and the
-finding that WebGPU has no `uint8` indices. The bundled PBR is documented as
-meaningful for triangles only; a custom shader doing point sprites or a
-wireframe overlay is legitimate and costs scene nothing to allow.
+straight through. Indices are authored as `[]uint32` only, following the finding
+that WebGPU has no `uint8` indices. What scene *stores* is narrower: a durable
+mesh of 65535 vertices or fewer is uploaded as `uint16`, derived from the vertex
+count rather than chosen, and a temporary mesh keeps `uint32` because narrowing
+it would cost an allocating pass every frame rather than once. See **Index
+width** in [`mesh.md`](mesh.md). The bundled PBR is documented as meaningful for
+triangles only; a custom shader doing point sprites or a wireframe overlay is
+legitimate and costs scene nothing to allow.
 
 ### Baking is deferred, and holds no gfx lock
 

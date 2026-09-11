@@ -69,7 +69,8 @@ func (la LookupAccess) BakeMesh[TVertex VertexLayout](
 	}
 	ref := la.lookup.claimMesh(meshRecord{
 		vertexCount: input.vertexCount, indexCount: input.indexCount,
-		topology: input.topology, layout: input.layout, layoutID: input.layoutID,
+		topology: input.topology, indexWidth: input.indexWidth,
+		layout: input.layout, layoutID: input.layoutID,
 		standard: input.standard, bounds: input.bounds,
 	})
 	la.lookup.stage(ref, input, false)
@@ -87,7 +88,8 @@ func (la LookupAccess) BakeMesh[TVertex VertexLayout](
 // performance note, not a constraint this API encodes.
 //
 // The bounding sphere is recomputed from the new vertices, so a mesh that grows
-// past its old bounds still culls correctly.
+// past its old bounds still culls correctly, and the index width is re-derived
+// from the new vertex count, so a mesh that grows past 65535 vertices widens.
 func (la LookupAccess) UpdateMesh[TVertex VertexLayout](
 	ref MeshRef, vertices []TVertex, indices []uint32,
 ) bool {
@@ -117,6 +119,10 @@ func (la LookupAccess) UpdateMesh[TVertex VertexLayout](
 		return false
 	}
 	record.vertexCount, record.indexCount = input.vertexCount, input.indexCount
+	// The width is re-derived alongside indexCount and bounds, which UpdateMesh
+	// already re-derives: a mesh grown past 65535 vertices simply widens, and
+	// one shrunk back below it narrows again.
+	record.indexWidth = input.indexWidth
 	record.bounds = input.bounds
 	la.lookup.meshes[ref.id-1] = record
 	la.lookup.stage(ref, input, true)

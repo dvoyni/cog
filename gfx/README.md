@@ -320,7 +320,13 @@ and physical `FramebufferWidth`/`FramebufferHeight`.
   the supply is part of the identity rather than a detail beside it.
 - `MeshDescr`: build with `Mesh` or `MeshIndexed` from buffer descriptors,
   topology, and `VertexAttr` values created by `Attr`; inspect with
-  `VertexCount()`, `IndexCount()`, `Indexed()` and `Topology()`.
+  `VertexCount()`, `IndexCount()`, `Indexed()`, `IndexWidth()` and `Topology()`.
+  `MeshIndexed` also takes an `IndexWidth` - `IndexUint32` (the zero value) or
+  `IndexUint16`, the only two WebGPU has - which describes how the caller wrote
+  its index bytes rather than asking gfx to convert them. A buffer whose length
+  does not divide by its declared width is reported once and its draw dropped;
+  checking that every index is below the vertex count belongs to whoever built
+  the geometry.
 - `MaterialDescr`: build with `Material` or `MaterialWithState`; inspect with
   `State()`, `Shader()` and `Params()`; `Clone` and
   `CloneTo` snapshot parameter descriptors. `Fingerprint()` hashes everything
@@ -565,6 +571,13 @@ offending pair. See *The vertex interface* above.
 pipeline, which gfx used to discard — making "gfx refused to build this" and
 "the backend refused to build this" the same silent event from the caller's
 seat. It unwraps to the backend's error.
+
+`ErrIndexBufferLength{Shader, Length, Width}` reports an index buffer whose byte
+length is not a multiple of the width its `MeshDescr` declared — a buffer
+declared `uint16` and written as `uint32` being the way two widths make a draw
+silently wrong. The draw is dropped and the shape is reported once. It is the
+`O(1)` half: whether every index is below the vertex count is checked by
+whoever built the geometry, where a pass over the indices already runs.
 
 
 The capture errors are typed for the same reason: a caller reads them, and a

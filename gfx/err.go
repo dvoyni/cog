@@ -144,6 +144,26 @@ func (e ErrPipelineFailed) Error() string {
 
 func (e ErrPipelineFailed) Unwrap() error { return e.Err }
 
+// ErrIndexBufferLength reports an index buffer whose byte length is not a
+// multiple of the width the mesh declared it at. With two widths in the engine
+// a buffer declared uint16 and written as uint32 is a third way to be silently
+// wrong, and this is the O(1) half of catching it: the range check - that every
+// index is below the vertex count - stays in scene, where a pass over the
+// indices already runs.
+//
+// The draw is dropped, and the report is made once per offending buffer rather
+// than once a frame, the way a failed pipeline is.
+type ErrIndexBufferLength struct {
+	Shader string
+	Length int
+	Width  int
+}
+
+func (e ErrIndexBufferLength) Error() string {
+	return fmt.Sprintf("gfx: the index buffer drawn with shader %q is %d bytes, which is not a multiple of its %d-byte index width",
+		e.Shader, e.Length, e.Width)
+}
+
 // ErrBackendMissing is reported the first time a frame is rendered without an
 // installed Backend. Without it nothing reaches the GPU, so it distinguishes a
 // missing or failed driver from a scene that legitimately drew nothing.

@@ -1,6 +1,7 @@
 package scene
 
 import (
+	"encoding/binary"
 	"fmt"
 	"reflect"
 	"unsafe"
@@ -104,7 +105,12 @@ type meshRecord struct {
 	indexCount  int
 	vertexCount int
 	topology    gfx.PrimitiveTopology
-	layout      []gfx.VertexAttr
+	// indexWidth is how wide one element of indices is. It is re-derived on
+	// every bake rather than frozen for a ref's life the way layout is: layout
+	// is part of a mesh's contract with a material, and width is not - for a
+	// triangle list it never reaches the pipeline at all.
+	indexWidth gfx.IndexWidth
+	layout     []gfx.VertexAttr
 	// layoutID is the layout's dense index in the cache that resolved it, kept
 	// so UpdateMesh can reject a layout change with one integer compare rather
 	// than by walking two attribute slices.
@@ -128,7 +134,7 @@ type meshRecord struct {
 
 // descr builds the gfx geometry for one resident mesh.
 func (r meshRecord) descr() gfx.MeshDescr {
-	return gfx.MeshIndexed(r.vertices, r.indices, r.topology, r.layout...)
+	return gfx.MeshIndexed(r.vertices, r.indices, r.indexWidth, r.topology, r.layout...)
 }
 
 // layoutCache interns vertex layouts by their Go type, so a per-frame mint pays
@@ -168,6 +174,7 @@ type meshInput struct {
 	vertexCount int
 	indexCount  int
 	topology    gfx.PrimitiveTopology
+	indexWidth  gfx.IndexWidth
 	layout      []gfx.VertexAttr
 	layoutID    int
 	standard    bool
@@ -178,28 +185,38 @@ type meshInput struct {
 }
 
 // mintMesh validates one caller's geometry and describes it, whichever surface
-// is minting it. It computes the bounding sphere only when asked, because the
-// pass is O(n) and a temporary mesh would pay it every frame for a sphere that
-// is thrown away with the geometry.
+// is minting it.
+//
+// durable says the geometry outlives the frame, and it buys the two O(n) passes
+// that are worth paying once and not worth paying per frame: the bounding
+// sphere, which a temporary mesh would recompute for a sphere thrown away with
+// the geometry, and narrowing the indices, which turns a zero-copy reinterpret
+// into an allocating conversion. A temporary mesh keeps uint32 indices and
+// reinterprets them.
 func mintMesh[TVertex VertexLayout](
 	cache *layoutCache, vertices []TVertex, indices []uint32,
-	topology gfx.PrimitiveTopology, wantBounds bool,
+	topology gfx.PrimitiveTopology, durable bool,
 ) (meshInput, error) {
 	if err := validateMesh(len(vertices), indices, topology); err != nil {
 		return meshInput{}, err
 	}
 	layoutID, layout, standard := cache.resolve[TVertex]()
+	width := gfx.IndexUint32
+	if durable {
+		width = indexWidthFor(len(vertices))
+	}
 	input := meshInput{
 		vertices:    uploadBytes(vertices),
-		indices:     indexBytes(indices),
+		indices:     indexBytes(indices, width),
 		vertexCount: len(vertices),
 		indexCount:  len(indices),
 		topology:    topology,
+		indexWidth:  width,
 		layout:      layout,
 		layoutID:    layoutID,
 		standard:    standard,
 	}
-	if wantBounds && standard {
+	if durable && standard {
 		// The assertion holds because standard is exactly TVertex == Vertex,
 		// which makes []TVertex and []Vertex the same type.
 		input.bounds = vertexBounds(any(vertices).([]Vertex))
@@ -293,8 +310,9 @@ func (l *Lookup) claimMesh(record meshRecord) MeshRef {
 func (l *Lookup) bakeMeshNow(input meshInput, bake bakeFunc) MeshRef {
 	record := meshRecord{
 		vertices: bake(input.vertices), indexCount: input.indexCount,
-		vertexCount: input.vertexCount, topology: input.topology, layout: input.layout,
-		layoutID: input.layoutID, standard: input.standard, baked: true, bounds: input.bounds,
+		vertexCount: input.vertexCount, topology: input.topology, indexWidth: input.indexWidth,
+		layout: input.layout, layoutID: input.layoutID, standard: input.standard,
+		baked: true, bounds: input.bounds,
 	}
 	if input.indexCount > 0 {
 		record.indices, record.indexed = bake(input.indices), true
@@ -302,13 +320,49 @@ func (l *Lookup) bakeMeshNow(input meshInput, bake bakeFunc) MeshRef {
 	return l.claimMesh(record)
 }
 
-// indexBytes reinterprets indices as their upload bytes, the same way
-// uploadBytes reinterprets vertices.
-func indexBytes(indices []uint32) []byte {
+// narrowIndexLimit is the largest vertex count that still indexes in uint16.
+//
+// It is 65535 rather than 65536 because 0xFFFF is WebGPU's primitive-restart
+// value for a uint16 strip and scene keeps indexed strips legal. Every index is
+// below the vertex count, so a mesh at this limit indexes no higher than 65534
+// and the restart value never appears in a buffer at all - one vertex of
+// headroom in place of a special case to document.
+const narrowIndexLimit = 0xFFFF
+
+// indexWidthFor is the whole of the rule, and nobody chooses it: a mesh's index
+// width follows from how many vertices it has, O(1), on every path.
+//
+// No pass over the indices is needed to know it. Every index is already
+// guaranteed below the vertex count - validateMesh enforces it on the authoring
+// path and the glTF path has it by construction - so a max-index scan would
+// have been new O(n) load-time work where a comparison does.
+func indexWidthFor(vertexCount int) gfx.IndexWidth {
+	if vertexCount <= narrowIndexLimit {
+		return gfx.IndexUint16
+	}
+	return gfx.IndexUint32
+}
+
+// indexBytes renders indices as their upload bytes at the given width. At
+// uint32 it reinterprets and copies nothing, the way uploadBytes reinterprets
+// vertices; at uint16 it is an allocating O(n) narrowing pass, which is why
+// only durable geometry asks for one.
+//
+// The narrowing writes native-endian words because the uint32 path is a
+// reinterpret of native memory, and a buffer that changed byte order with the
+// width would be a difference no caller could see coming.
+func indexBytes(indices []uint32, width gfx.IndexWidth) []byte {
 	if len(indices) == 0 {
 		return nil
 	}
-	return unsafe.Slice((*byte)(unsafe.Pointer(&indices[0])), len(indices)*4)
+	if width != gfx.IndexUint16 {
+		return unsafe.Slice((*byte)(unsafe.Pointer(&indices[0])), len(indices)*4)
+	}
+	narrow := make([]byte, len(indices)*2)
+	for i, index := range indices {
+		binary.NativeEndian.PutUint16(narrow[i*2:], uint16(index))
+	}
+	return narrow
 }
 
 // vertexBounds is the bounding sphere of standard-layout vertices: the

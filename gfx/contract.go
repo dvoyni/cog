@@ -359,7 +359,12 @@ type PipelineDesc struct {
 	NoColorTarget bool
 	Stride        int
 	Attributes    []VertexAttribute
-	Label         string
+	// IndexWidth is the width a strip topology cuts on. WebGPU requires a
+	// pipeline to declare that format before an indexed strip draw is legal and
+	// forbids it on every other topology, so a backend reads this only when
+	// Topology is a strip: a list pipeline never sees the index buffer at all.
+	IndexWidth IndexWidth
+	Label      string
 }
 
 // Backend is the low-level realization interface: a vendor-neutral, "wgpu-shaped"

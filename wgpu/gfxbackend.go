@@ -202,9 +202,9 @@ func (s *gfxRenderPass) SetVertexBuffer(id cgfx.BufferID, offset int) {
 	}
 }
 
-func (s *gfxRenderPass) SetIndexBuffer(id cgfx.BufferID, offset int) {
+func (s *gfxRenderPass) SetIndexBuffer(id cgfx.BufferID, offset int, width cgfx.IndexWidth) {
 	if buffer, ok := s.backend.bakedBuffers[id]; ok {
-		s.pass.SetIndexBuffer(buffer, gputypes.IndexFormatUint32, uint64(offset))
+		s.pass.SetIndexBuffer(buffer, indexFormat(width), uint64(offset))
 	}
 }
 
@@ -636,7 +636,7 @@ func (b *gfxBackend) NewPipeline(desc cgfx.PipelineDesc) (cgfx.PipelineID, error
 		},
 		Primitive: gputypes.PrimitiveState{
 			Topology:         primitiveTopology(desc.Topology),
-			StripIndexFormat: stripIndexFormat(desc.Topology),
+			StripIndexFormat: stripIndexFormat(desc.Topology, desc.IndexWidth),
 			CullMode:         cullMode(desc.State.Cull),
 			FrontFace:        frontFace(desc.State.FrontFace),
 		},
@@ -1004,14 +1004,25 @@ func frontFace(face cgfx.FrontFace) gputypes.FrontFace {
 	return gputypes.FrontFaceCCW
 }
 
+// indexFormat is the WebGPU spelling of one of gfx's two index widths. There
+// is no uint8 member to map: WebGPU has none.
+func indexFormat(width cgfx.IndexWidth) gputypes.IndexFormat {
+	if width == cgfx.IndexUint16 {
+		return gputypes.IndexFormatUint16
+	}
+	return gputypes.IndexFormatUint32
+}
+
 // stripIndexFormat is the format that cuts a strip, which WebGPU requires a
 // pipeline to declare before an indexed strip draw is legal, and forbids on any
-// other topology. Index buffers are uint32 throughout the engine.
-func stripIndexFormat(topology cgfx.PrimitiveTopology) *gputypes.IndexFormat {
+// other topology. It is the one place a pipeline sees an index width at all -
+// a list pipeline never does, which is why only the strip format enters gfx's
+// pipeline key.
+func stripIndexFormat(topology cgfx.PrimitiveTopology, width cgfx.IndexWidth) *gputypes.IndexFormat {
 	if topology != cgfx.TopologyTriangleStrip {
 		return nil
 	}
-	format := gputypes.IndexFormatUint32
+	format := indexFormat(width)
 	return &format
 }
 

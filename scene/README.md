@@ -19,9 +19,11 @@ value warns about.
 [`docs/specs/mesh.md`](docs/specs/mesh.md) specifies **what a mesh stores** — the
 vertex layout and the precision of each attribute, which attributes a mesh may
 omit, how wide its indices are, how morph deltas are packed, and what the bundled
-PBR requires of a mesh handed to it. It is not implemented: the engine still
-stores every mesh at one fixed 84-byte stride with `uint32` indices, and that
-spec is the plan for changing it.
+PBR requires of a mesh handed to it. Its **Index width** section is implemented:
+a durable mesh of 65535 vertices or fewer stores `uint16` indices, derived from
+the vertex count with no pass over the indices, and a temporary mesh keeps
+`uint32`. The rest is not - the engine still stores every mesh at one fixed
+84-byte stride - and that spec is the plan for changing it.
 
 ## Plugin
 

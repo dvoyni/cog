@@ -58,10 +58,11 @@ func (l *Lookup) ensureUnit(shape unitShape, bake bakeFunc) MeshRef {
 	// own meshes and a caller's standard-layout mesh share one layout id rather
 	// than two that happen to describe the same attributes.
 	layoutID, layout, _ := l.layouts.resolve[Vertex]()
+	width := indexWidthFor(len(vertices))
 	l.unit[shape] = l.bakeMeshNow(meshInput{
-		vertices: uploadBytes(vertices), indices: indexBytes(indices),
+		vertices: uploadBytes(vertices), indices: indexBytes(indices, width),
 		vertexCount: len(vertices), indexCount: len(indices),
-		topology: gfx.TopologyTriangleList, layout: layout,
+		topology: gfx.TopologyTriangleList, indexWidth: width, layout: layout,
 		layoutID: layoutID, standard: true, bounds: bounds,
 	}, bake)
 	return l.unit[shape]

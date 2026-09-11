@@ -138,6 +138,39 @@ func (t VertexType) size() int {
 	return 0
 }
 
+// IndexWidth is how wide one element of an index buffer is. There are exactly
+// two, fixed by the platform rather than chosen: WebGPU has no uint8 index
+// format, so geometry that was authored at a byte per index is stored at two.
+//
+// Nothing about it is a fidelity call - an index is exact or it is broken - so
+// gfx neither derives nor validates the choice: it carries whatever width the
+// caller declared its bytes to be in, and the only thing it can check is that
+// the bytes divide by it.
+//
+// The zero value is IndexUint32, the width that is legal for any mesh, so a
+// descriptor built without naming one is wide rather than wrong.
+type IndexWidth uint8
+
+const (
+	IndexUint32 IndexWidth = iota
+	IndexUint16
+)
+
+// Bytes reports how many bytes one index of this width occupies.
+func (w IndexWidth) Bytes() int {
+	if w == IndexUint16 {
+		return 2
+	}
+	return 4
+}
+
+func (w IndexWidth) String() string {
+	if w == IndexUint16 {
+		return "uint16"
+	}
+	return "uint32"
+}
+
 // VertexAttr describes one attribute of the single interleaved vertex array: its
 // byte offset and element type. Attributes bind to shader @location values in the
 // order given. Build it with Attr.
@@ -167,12 +200,13 @@ func vertexLayoutKeyOf(layout []VertexAttr) (vertexLayoutKey, bool) {
 }
 
 // MeshDescr is CPU-side geometry for one draw: a single interleaved vertex array
-// (and optional uint32 index array) as buffer descriptors, a primitive topology,
-// and the vertex layout. Build it with Mesh or MeshIndexed; its fields are
-// unexported and read by the translator.
+// (and an optional index array at one of the two index widths) as buffer
+// descriptors, a primitive topology, and the vertex layout. Build it with Mesh
+// or MeshIndexed; its fields are unexported and read by the translator.
 type MeshDescr struct {
 	vertices    BufferDescr
 	indices     BufferDescr
+	indexWidth  IndexWidth
 	indexed     bool
 	topology    PrimitiveTopology
 	layout      []VertexAttr
@@ -183,24 +217,34 @@ type MeshDescr struct {
 // Mesh builds non-indexed geometry from an interleaved vertex buffer, a topology,
 // and the vertex layout.
 func Mesh(vertices BufferDescr, topology PrimitiveTopology, layout ...VertexAttr) MeshDescr {
-	return MeshIndexed(vertices, BufferDescr{}, topology, layout...)
+	return MeshIndexed(vertices, BufferDescr{}, IndexUint32, topology, layout...)
 }
 
-// MeshIndexed builds indexed geometry (uint32 indices) from vertex and index
-// buffers, a topology, and the vertex layout. A zero index buffer (as passed by
-// Mesh) yields a non-indexed mesh.
-func MeshIndexed(vertices, indices BufferDescr, topology PrimitiveTopology, layout ...VertexAttr) MeshDescr {
+// MeshIndexed builds indexed geometry from vertex and index buffers, the width
+// one index of that buffer is written at, a topology, and the vertex layout. A
+// zero index buffer (as passed by Mesh) yields a non-indexed mesh.
+//
+// The width describes the bytes rather than constraining them: gfx has no way
+// to know how a caller wrote its indices, so declaring uint16 over uint32 bytes
+// reads pairs of indices as one. What it can check - that the buffer's length
+// divides by the width - it checks where the draw is translated, since this is
+// a pure value constructor with no error return.
+func MeshIndexed(
+	vertices, indices BufferDescr, width IndexWidth,
+	topology PrimitiveTopology, layout ...VertexAttr,
+) MeshDescr {
 	mesh := MeshDescr{
-		vertices: vertices,
-		indices:  indices,
-		indexed:  indices.hasData(),
-		topology: topology,
-		layout:   layout,
+		vertices:   vertices,
+		indices:    indices,
+		indexWidth: width,
+		indexed:    indices.hasData(),
+		topology:   topology,
+		layout:     layout,
 	}
 	if stride := mesh.stride(); stride > 0 {
 		mesh.vertexCount = vertices.size / stride
 	}
-	mesh.indexCount = indices.size / 4
+	mesh.indexCount = indices.size / width.Bytes()
 	return mesh
 }
 
@@ -210,9 +254,12 @@ func MeshIndexed(vertices, indices BufferDescr, topology PrimitiveTopology, layo
 // a vertex is.
 func (m MeshDescr) VertexCount() int { return m.vertexCount }
 
-// IndexCount reports how many uint32 indices the mesh's index buffer holds,
-// and zero for a non-indexed mesh.
+// IndexCount reports how many indices the mesh's index buffer holds at the
+// width it was declared at, and zero for a non-indexed mesh.
 func (m MeshDescr) IndexCount() int { return m.indexCount }
+
+// IndexWidth reports how wide one of those indices is.
+func (m MeshDescr) IndexWidth() IndexWidth { return m.indexWidth }
 
 // Indexed reports whether the mesh draws through an index buffer.
 func (m MeshDescr) Indexed() bool { return m.indexed }
