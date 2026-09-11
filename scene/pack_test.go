@@ -9,12 +9,15 @@ import (
 	"github.com/dvoyni/cog/m"
 )
 
-func TestInstanceRecordIsSixtyFourBytesWithEightSpare(t *testing.T) {
+// The record stays 64 bytes, and one of its two spare words is now spent: the
+// node joint moved out of every vertex of a plain-bound mesh and into the
+// instance, which is what lets nine animated nodes share one conversion.
+func TestInstanceRecordIsSixtyFourBytesWithFourSpare(t *testing.T) {
 	if size := unsafe.Sizeof(sceneInstance{}); size != 64 {
 		t.Fatalf("sceneInstance is %d bytes, want 64", size)
 	}
-	if spare := unsafe.Sizeof(sceneInstance{}.Spare); spare != 8 {
-		t.Fatalf("sceneInstance has %d spare bytes, want 8", spare)
+	if spare := unsafe.Sizeof(sceneInstance{}.Spare); spare != 4 {
+		t.Fatalf("sceneInstance has %d spare bytes, want the one word Joint left", spare)
 	}
 }
 

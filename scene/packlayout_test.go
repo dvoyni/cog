@@ -64,6 +64,7 @@ func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
 			{"world2", unsafe.Offsetof(instance.World2)},
 			{"animOffset", unsafe.Offsetof(instance.AnimOffset)},
 			{"flags", unsafe.Offsetof(instance.Flags)},
+			{"joint", unsafe.Offsetof(instance.Joint)},
 			{"spare", unsafe.Offsetof(instance.Spare)},
 		}},
 		// The PBR record is the one pair that is not field-for-field: the

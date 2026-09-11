@@ -246,50 +246,47 @@ func (c *modelConverter) inverseBindMatrices(skin *gltf.Skin) []m.Mat4 {
 //
 // A skin's JOINTS_0 indexes that skin's own joints array, which is local to
 // the skin; the model's numbering is what makes rows addressable by
-// clipBase + frame*jointCount + joint with no per-skin offset anywhere. A
-// degenerate binding has no JOINTS_0 to remap and gets one written outright.
+// clipBase + frame*jointCount + joint with no per-skin offset anywhere.
+//
+// Only a real skin reaches here. A node joint overwrote every vertex with a
+// constant instead of remapping anything, which is what keyed it into the
+// geometry and made the same mesh under nine animated nodes nine conversions;
+// it rides the instance record now and touches no vertex at all.
 //
 // Weights are normalised here rather than in the shader. glTF requires them to
 // sum to one and files drift; normalising per vertex at load costs one pass
 // over data already in cache and removes a divide from the per-vertex path.
-func (c *modelConverter) bindGeometryJoints(geometry *gltfGeometry, binding skinBinding) {
-	switch {
-	case binding.joint >= 0:
-		joint := uint16(binding.joint)
-		for i := range geometry.vertices {
-			geometry.vertices[i].Joints = [4]uint16{joint}
-			geometry.vertices[i].Weights = m.Vec4{X: 1}
+func (c *modelConverter) bindGeometryJoints(geometry *gltfGeometry, skin int) {
+	if skin < 0 || skin >= len(c.skinJoints) {
+		return
+	}
+	slots := c.skinJoints[skin]
+	bound := false
+	for i := range geometry.vertices {
+		vertex := &geometry.vertices[i]
+		total := vertex.Weights.X + vertex.Weights.Y + vertex.Weights.Z + vertex.Weights.W
+		if total <= 0 {
+			vertex.Joints, vertex.Weights = [4]uint16{}, m.Vec4{}
+			continue
 		}
-		geometry.skinned = true
-	case binding.skin >= 0 && binding.skin < len(c.skinJoints):
-		slots := c.skinJoints[binding.skin]
-		bound := false
-		for i := range geometry.vertices {
-			vertex := &geometry.vertices[i]
-			total := vertex.Weights.X + vertex.Weights.Y + vertex.Weights.Z + vertex.Weights.W
-			if total <= 0 {
-				vertex.Joints, vertex.Weights = [4]uint16{}, m.Vec4{}
+		bound = true
+		vertex.Weights = m.Vec4{
+			X: vertex.Weights.X / total, Y: vertex.Weights.Y / total,
+			Z: vertex.Weights.Z / total, W: vertex.Weights.W / total,
+		}
+		for influence, slot := range vertex.Joints {
+			// A slot past the skin's joints array is a malformed file. It
+			// resolves to joint 0, whose weight the file has already decided;
+			// the alternative is dropping a whole primitive over one bad
+			// index.
+			if int(slot) < len(slots) {
+				vertex.Joints[influence] = uint16(slots[slot])
 				continue
 			}
-			bound = true
-			vertex.Weights = m.Vec4{
-				X: vertex.Weights.X / total, Y: vertex.Weights.Y / total,
-				Z: vertex.Weights.Z / total, W: vertex.Weights.W / total,
-			}
-			for influence, slot := range vertex.Joints {
-				// A slot past the skin's joints array is a malformed file. It
-				// resolves to joint 0, whose weight the file has already
-				// decided; the alternative is dropping a whole primitive over
-				// one bad index.
-				if int(slot) < len(slots) {
-					vertex.Joints[influence] = uint16(slots[slot])
-					continue
-				}
-				vertex.Joints[influence] = 0
-			}
+			vertex.Joints[influence] = 0
 		}
-		geometry.skinned = bound
 	}
+	geometry.skinned = bound
 }
 
 // bakeAnimation samples every clip onto the global grid and fills the pose and

@@ -10,7 +10,11 @@ struct SceneInstance {
     world2: vec4<f32>,
     animOffset: u32,
     flags: u32,
-    spare: vec2<u32>,
+    // joint is the model joint a plain-bound placement rides at full weight,
+    // and is meaningful only under SCENE_PLAINJOINT. It spent the first of the
+    // record's two spare words; spare is the one that is left.
+    joint: u32,
+    spare: u32,
 };
 
 // The runtime array is wrapped in a struct because reflection walks struct
@@ -30,6 +34,14 @@ const SCENE_NONUNIFORM: u32 = 1u;
 // SCENE_NOSKIN marks a draw with no skin of its own. It is set on every
 // buffer-built draw, which is every draw this shader can be asked to make.
 const SCENE_NOSKIN: u32 = 2u;
+// SCENE_PLAINJOINT marks a placement bound to the joint in `joint` at full
+// weight - an animated mesh node, which is how glTF authors a wheel, a door or
+// a propeller. The vertices carry no binding of their own, so the geometry
+// under it is the geometry every other node referencing that mesh draws.
+//
+// It is mutually exclusive with SCENE_NOSKIN: a plain-bound placement is a
+// skinned draw, and the packer sets one flag or neither.
+const SCENE_PLAINJOINT: u32 = 4u;
 // SCENE_NO_ANIM in animOffset means the instance animates nothing.
 const SCENE_NO_ANIM: u32 = 0xffffffffu;
 

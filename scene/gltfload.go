@@ -100,7 +100,18 @@ type loadedPrimitive struct {
 	// buffer rather than in local. A skinned primitive draws through its
 	// joints, so local is the identity and its bounding sphere is the bind
 	// pose's - which is why it is also never culled.
+	//
+	// It is the placement's answer and not the geometry's, and it has to be:
+	// one converted mesh is plain-bound under one node and static under
+	// another, so asking the geometry would cull a shared primitive by the
+	// static instance's bounds while its animated one walks out of them.
 	skinned bool
+	// joint is the model joint a plain-bound placement rides at full weight,
+	// and plain says it is one. A plain binding implies skinned; joint 0 is a
+	// joint like any other, which is why the bool is not derived from the
+	// index.
+	joint uint32
+	plain bool
 	// morph is where the primitive's delta block sits and which of the model's
 	// weight slots feed it. The block comes from the geometry, shared by every
 	// node referencing that mesh; the slots come from this node.
@@ -169,10 +180,16 @@ type loadedNode struct {
 type geometryKey struct {
 	mesh, primitive int
 	tangents        bool
-	// binding is part of the key because remapping JOINTS_0 into the model's
-	// one numbering rewrites the vertex buffer, and a degenerate binding
-	// writes it outright. The same mesh under two skins is two conversions.
-	binding skinBinding
+	// skin is part of the key because remapping JOINTS_0 into the model's one
+	// numbering rewrites the vertex buffer. The same mesh under two skins is
+	// two conversions, which is rare and correct.
+	//
+	// The node joint is not, and that is the whole of this field's history: it
+	// was keyed here because it shared a name with the skin, and it overwrites
+	// every vertex with a value the geometry has no opinion about. It rides
+	// the instance record instead, so a mesh under nine animated nodes is one
+	// conversion and nine placements.
+	skin int
 }
 
 // loadedMaterial is one glTF material converted to the bundled PBR: the record
@@ -420,7 +437,7 @@ func (c *modelConverter) walkNode(index int, parent m.Mat4) {
 	// glTF skin it is the identity, because the skin's joints already resolve
 	// against the scene root and its vertices are authored there.
 	placement, rest := world, world
-	binding := skinBinding{skin: -1, joint: -1}
+	binding := nodeBinding{skin: -1, joint: -1}
 	switch {
 	case node.Skin != nil:
 		placement, rest = m.NewMat4(), m.NewMat4()
@@ -493,20 +510,27 @@ func (c *modelConverter) closeNode(name string) {
 	c.scene.nodes[name] = node
 }
 
-// skinBinding is how one node binds its mesh's vertices to the model's joints:
-// through a glTF skin's own JOINTS_0 and WEIGHTS_0, through a degenerate
-// single-joint binding at weight 1, or not at all.
+// nodeBinding is how one node binds its mesh to the model's joints, and it is
+// two answers rather than one because the two live in different places.
 //
-// It is part of the geometry key rather than a property of the placement,
-// because remapping JOINTS_0 rewrites the vertex buffer: the same mesh under
-// two skins is two conversions, which is rare and correct.
-type skinBinding struct {
-	skin, joint int
+// They were one type once, named for the skin, and the node joint was keyed
+// into the geometry along with it. That is what made the same mesh under nine
+// animated nodes nine conversions.
+type nodeBinding struct {
+	// skin is the glTF skin whose JOINTS_0 the conversion remaps into the
+	// model's one numbering, or -1. Remapping rewrites the vertex buffer, so
+	// this belongs to the geometry and is part of its key.
+	skin int
+	// joint is the model joint the node's own transform lives in, or -1. It
+	// overwrites nothing: the placement names the bone and every vertex under
+	// it rides at full weight, so this belongs to the instance record and is
+	// not part of any key.
+	joint int
 }
 
 // flattenMesh emits one node's primitives at their flattened placement.
 func (c *modelConverter) flattenMesh(
-	index int, placement, rest m.Mat4, binding skinBinding, slots morphSlotRun,
+	index int, placement, rest m.Mat4, binding nodeBinding, slots morphSlotRun,
 ) {
 	if index < 0 || index >= len(c.doc.Meshes) || c.doc.Meshes[index] == nil {
 		return
@@ -519,7 +543,7 @@ func (c *modelConverter) flattenMesh(
 	for at, primitive := range c.doc.Meshes[index].Primitives {
 		material := c.material(primitive.Material, frontCW)
 		tangents := c.model.materials[material].slots[normalSlot] != missingTexture
-		geometry, ok := c.geometry(index, at, primitive, tangents, binding)
+		geometry, ok := c.geometry(index, at, primitive, tangents, binding.skin)
 		if !ok {
 			continue
 		}
@@ -532,25 +556,32 @@ func (c *modelConverter) flattenMesh(
 			// weight to read.
 			morph.slotBase, morph.targets = slots.base, min(morph.targets, slots.count)
 		}
-		c.model.primitives = append(c.model.primitives, loadedPrimitive{
+		// Skinned is the placement's answer, not the geometry's: the same
+		// converted cube is plain-bound under one node and static under
+		// another, so the geometry cannot be asked.
+		placed := loadedPrimitive{
 			geometry: geometry, local: placement, rest: rest, material: material,
-			skinned: c.model.geometries[geometry].skinned, morph: morph,
-		})
+			skinned: converted.skinned, morph: morph,
+		}
+		if binding.joint >= 0 {
+			placed.joint, placed.plain, placed.skinned = uint32(binding.joint), true, true
+		}
+		c.model.primitives = append(c.model.primitives, placed)
 	}
 }
 
 // geometry converts one primitive, or returns the conversion an earlier node
 // referencing the same mesh already paid for.
 func (c *modelConverter) geometry(
-	mesh, at int, primitive *gltf.Primitive, tangents bool, binding skinBinding,
+	mesh, at int, primitive *gltf.Primitive, tangents bool, skin int,
 ) (int, bool) {
-	key := geometryKey{mesh: mesh, primitive: at, tangents: tangents, binding: binding}
+	key := geometryKey{mesh: mesh, primitive: at, tangents: tangents, skin: skin}
 	if index, ok := c.geometries[key]; ok {
 		return index, index >= 0
 	}
 	geometry, err := convertPrimitive(c.doc, primitive, tangents)
 	if err == nil {
-		c.bindGeometryJoints(&geometry, binding)
+		c.bindGeometryJoints(&geometry, skin)
 	}
 	if err != nil {
 		// The failure is interned too, so a mesh referenced by ten nodes

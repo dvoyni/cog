@@ -160,6 +160,116 @@ func TestASkinnedModelBindsItsOwnPosesAndSkins(t *testing.T) {
 	}
 }
 
+// mixedModel puts the same mesh under an animated node and a static one, which
+// is the shape that makes "is this draw skinned" unanswerable from the
+// primitive: one converted geometry, two placements, one of them plain-bound.
+func mixedModel(t testing.TB) *gltf.Document {
+	t.Helper()
+	doc := testDoc()
+	triangleMesh(doc, nil)
+	doc.Nodes = []*gltf.Node{
+		{Name: "wheel", Mesh: gltf.Index(0)},
+		{Name: "prop", Mesh: gltf.Index(0), Translation: [3]float64{2, 0, 0}},
+	}
+	sceneOf(doc, 0, 1)
+	doc.Scene = gltf.Index(0)
+	rotationClip(doc, "spin", 0, []float32{0, 1}, [][4]float32{{0, 0, 0, 1}, {0, 0, 1, 0}})
+	return doc
+}
+
+// The node joint rides the instance record, in the second of the two spare
+// words, under a flag of its own. The flag is mutually exclusive with
+// SCENE_NOSKIN by construction: a plain-bound placement is a skinned draw.
+func TestAPlainBoundPlacementCarriesItsJointOnTheInstance(t *testing.T) {
+	h := newHarnessWithFiles(t, modelFiles(glb(t, mixedModel(t))),
+		drawModel(modelPath, ModelDraw{Plays: []ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
+	h.frameUntil(t, "the model to become resident", func() bool {
+		return len(h.passes()) == 1 && h.passes()[0].Instances == 2
+	})
+	bound := h.backend.buffersBoundTo("sceneInstances")
+	if len(bound) == 0 {
+		t.Fatal("nothing bound sceneInstances")
+	}
+	instances := instancesOf(t, h, bound[0])
+	if len(instances) != 2 {
+		t.Fatalf("the pass packed %d instances, want one per placement", len(instances))
+	}
+	plain, static := 0, 0
+	for _, instance := range instances {
+		switch {
+		case instance.Flags&scenePlainJoint != 0:
+			plain++
+			if instance.Flags&sceneNoSkin != 0 {
+				t.Error("a plain-bound instance carries SCENE_NOSKIN as well as SCENE_PLAINJOINT")
+			}
+			if instance.Joint != 0 {
+				t.Errorf("the plain-bound instance rides joint %d, want the file's one joint",
+					instance.Joint)
+			}
+		case instance.Flags&sceneNoSkin != 0:
+			static++
+			if instance.Joint != 0 {
+				t.Errorf("a static instance carries joint %d, want the field left alone",
+					instance.Joint)
+			}
+		default:
+			t.Errorf("instance flags %#b are neither plain-bound nor unskinned", instance.Flags)
+		}
+	}
+	if plain != 1 || static != 1 {
+		t.Errorf("the two placements packed %d plain and %d static, want one each", plain, static)
+	}
+}
+
+// The variant is the primitive's business, not the model's. A static primitive
+// of an animated model takes the variant that declares no group 2 at all, so it
+// stops paying for storage bindings it never reads - and the two placements of
+// one shared mesh take two variants, which is two material ids.
+func TestTheVariantFollowsThePrimitiveNotTheModel(t *testing.T) {
+	h := newHarnessWithFiles(t, modelFiles(glb(t, mixedModel(t))),
+		drawModel(modelPath, ModelDraw{Plays: []ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
+	h.frameUntil(t, "the model to become resident", func() bool {
+		return len(h.passes()) == 1 && h.passes()[0].Instances == 2
+	})
+	batches := h.passes()[0].Batches
+	if len(batches) != 2 {
+		t.Fatalf("the two placements packed %d batches, want one each", len(batches))
+	}
+	if batches[0].MaterialID == batches[1].MaterialID {
+		t.Error("both placements took one material id; the static one needs the static variant")
+	}
+	// One of the two draws binds group 2 and the other does not, which is the
+	// whole saving: a model's static primitives stop declaring the pose pair.
+	if bound := len(h.backend.buffersBoundTo("scenePoses")); bound != 1 {
+		t.Errorf("scenePoses was bound %d times, want only the animated placement's", bound)
+	}
+}
+
+// Never-cull moved to the placement with the flag. A shared primitive culled by
+// a static instance's bounds while its animated instance walks out of them is a
+// mesh that disappears with nothing reported - so the exemption follows the
+// placement that is plain-bound, and only that one.
+func TestOnlyThePlainBoundPlacementOfASharedMeshIsExempt(t *testing.T) {
+	h := newHarnessWithFiles(t, modelFiles(glb(t, mixedModel(t))), func(q *OpQueue) {
+		// A camera pointed the other way: whatever survives survives because it
+		// is exempt, not because it is in frustum.
+		q.Camera(cameraMain, CameraDescr{
+			Transform: LookAt(m.Vec3{Z: 500}, m.Vec3{Z: 1000}, m.Vec3{Y: 1}),
+			FovY:      1.0472, Near: 0.1, Far: 200,
+		})
+		q.Model(LayersAll, modelPath, ModelDraw{})
+	})
+	h.frameUntil(t, "the model to become resident", func() bool {
+		return len(h.passes()) == 1 && h.passes()[0].Recorded == 2
+	})
+	if got := h.passes()[0].Culled; got != 1 {
+		t.Errorf("culled %d of the two placements, want the static one alone", got)
+	}
+	if got := h.passes()[0].Instances; got != 1 {
+		t.Errorf("packed %d instances, want the plain-bound placement's alone", got)
+	}
+}
+
 // A model draw with no plays is the rest pose, which is a real pose: row 0 is
 // the authored hierarchy resolved once. Without it the model would collapse to
 // the origin, because a degenerate node's transform lives in the pose buffer.

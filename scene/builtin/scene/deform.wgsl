@@ -32,6 +32,14 @@ fn sceneDeformVertex(
         return base;
     }
     let playCount = sceneAnimPlayCount(instance.animOffset);
+    // A plain-bound placement - an animated mesh node, which is how glTF
+    // authors a wheel or a door - names its one joint on the instance and
+    // rides it at full weight. Its vertices carry no binding of their own, so
+    // the loop below has nothing to read: it is a flag inside this path rather
+    // than a fifth variant, and the variants stay four.
+    if (instance.flags & SCENE_PLAINJOINT) != 0u {
+        return scenePlainJointVertex(instance, playCount, base);
+    }
     var position = vec3<f32>(0.0);
     var normal = vec3<f32>(0.0);
     var tangent = vec3<f32>(0.0);

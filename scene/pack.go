@@ -27,12 +27,24 @@ type sceneInstance struct {
 	// nothing, which is what skips the animation path entirely.
 	AnimOffset uint32
 	Flags      uint32
-	// Spare is the record's eight unspent bytes, kept named so the next thing
-	// that needs per-instance data can see what it is spending.
-	Spare [2]uint32
+	// Joint is the model joint a plain-bound placement rides at full weight,
+	// and is meaningful only under SCENE_PLAINJOINT. It spent the first of the
+	// record's two spare words, which is what took the node joint out of every
+	// vertex of the geometry: a mesh under nine animated nodes is one
+	// conversion and nine instances rather than nine of each.
+	//
+	// It is a full 32 bits rather than the 16 a vertex attribute had. Nothing
+	// but node count bounds how many plain joints a file claims, and they are
+	// appended after every skin's, so a narrow field here would truncate a
+	// plain index into a different bone with no error anywhere.
+	Joint uint32
+	// Spare is the record's one remaining unspent word, kept named so the next
+	// thing that needs per-instance data can see what it is spending. The
+	// other went to Joint above.
+	Spare uint32
 }
 
-// The instance flags. Both are decided here rather than when their consumers
+// The instance flags. They are decided here rather than when their consumers
 // land, because the record's size and the null-skin bind group both follow from
 // them.
 const (
@@ -50,6 +62,21 @@ const (
 	// early return it selects is a second line of defence rather than the
 	// mechanism: what removes the cost is that the code is not there.
 	sceneNoSkin uint32 = 1 << 1
+	// scenePlainJoint marks a placement bound to one joint at full weight — an
+	// animated mesh node, which is how glTF authors a wheel, a door or a
+	// propeller. The joint is in the record rather than in the vertices, so
+	// the geometry under it is the geometry every other node referencing that
+	// mesh draws.
+	//
+	// It is a flag inside the skinning path rather than a fifth variant, which
+	// follows the precedent SCENE_NOSKIN already set. It is also cheaper than
+	// the vertex form was: one influence's work instead of a four-iteration
+	// loop that hit a zero-weight continue three times, and no attribute fetch
+	// for a value the whole draw shares.
+	//
+	// It is mutually exclusive with sceneNoSkin by construction — packInstance
+	// sets one or neither — because a plain-bound placement is a skinned draw.
+	scenePlainJoint uint32 = 1 << 2
 )
 
 // sceneNoAnim is the animOffset of an instance that animates nothing.
@@ -204,8 +231,9 @@ func radiance(color m.Color, intensity float32) m.Vec4 {
 }
 
 // animBinding is everything one batch's instances say about animation: the
-// group 2 buffers they read, the offset of their sceneAnim block, and whether
-// the geometry is skinned at all.
+// group 2 buffers they read, the offset of their sceneAnim block, whether the
+// placement is skinned at all, and the one joint it rides when it is
+// plain-bound.
 //
 // It is per batch rather than per instance because a batch is one primitive of
 // one recorded call, and the instances of one call share the draw's animation
@@ -225,6 +253,11 @@ type animBinding struct {
 	// highest-vertex-count thing scene can be handed — a per-vertex pose fetch
 	// and TRS blend for a guaranteed identity.
 	skinned bool
+	// joint is the model joint a plain-bound placement rides, and plain says
+	// it is one: joint 0 is a joint like any other, and every buffer-built
+	// draw's binding is the zero value. A plain binding implies skinned.
+	joint uint32
+	plain bool
 }
 
 // skinBuffers is the group 2 bindings a draw reads, in either half
@@ -255,8 +288,15 @@ func packInstance(world m.Mat4, anim animBinding) sceneInstance {
 		World2:     m.Vec4{X: world[2], Y: world[6], Z: world[10], W: world[14]},
 		AnimOffset: anim.offset,
 	}
-	if !anim.skinned {
+	// One arm or neither, which is what makes the two flags mutually exclusive
+	// by construction rather than by a rule someone has to keep: a plain-bound
+	// placement is a skinned draw, and an unskinned one has no joint to name.
+	switch {
+	case !anim.skinned:
 		instance.Flags |= sceneNoSkin
+	case anim.plain:
+		instance.Flags |= scenePlainJoint
+		instance.Joint = anim.joint
 	}
 	if !uniformScale(world) {
 		instance.Flags |= sceneNonUniform

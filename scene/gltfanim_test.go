@@ -326,6 +326,12 @@ func TestBakeAnimationGivesAnAnimatedMeshNodeADegenerateJoint(t *testing.T) {
 	if !model.primitives[0].skinned {
 		t.Error("an animated mesh node draws through its joint")
 	}
+	// The joint is the placement's, not the geometry's: it names a bone the
+	// mesh has no opinion about, so it rides the instance record.
+	if !model.primitives[0].plain || model.primitives[0].joint != 0 {
+		t.Errorf("node joint = %d (plain %v), want the one joint on the placement",
+			model.primitives[0].joint, model.primitives[0].plain)
+	}
 	// Its transform lives in the pose buffer now, so the flattened placement
 	// is the identity and the rest row carries the three units along X.
 	if got := model.primitives[0].local; got != m.NewMat4() {
@@ -334,15 +340,65 @@ func TestBakeAnimationGivesAnAnimatedMeshNodeADegenerateJoint(t *testing.T) {
 	if got := model.animation.poses[0].Translation; got != (m.Vec4{X: 3}) {
 		t.Errorf("rest pose = %v, want the node's authored place", got)
 	}
+	// Nothing was written into the vertices. The mesh carries no JOINTS_0 and
+	// no WEIGHTS_0, and a node joint is no reason to invent them: writing a
+	// constant into every vertex is what made the same cube nine conversions.
 	geometry := &model.geometries[model.primitives[0].geometry]
-	if got := geometry.vertices[0]; got.Joints != [4]uint16{0} || got.Weights != (m.Vec4{X: 1}) {
-		t.Errorf("degenerate binding = joints %v weights %v, want joint 0 at weight 1",
+	if got := geometry.vertices[0]; got.Joints != ([4]uint16{}) || got.Weights != (m.Vec4{}) {
+		t.Errorf("vertex = joints %v weights %v, want both left as the file authored them",
 			got.Joints, got.Weights)
+	}
+	if geometry.skinned {
+		t.Error("the geometry is not skinned; the placement is")
 	}
 	// A degenerate joint has no inverse bind to premultiply, which is one of
 	// the two reasons the pose record holds globalJoint alone.
 	if got := model.animation.joints[0]; got != skinJointRecord(m.NewMat4()) {
 		t.Errorf("degenerate joint record = %v, want the identity", got)
+	}
+}
+
+// The node joint is what made the same mesh under nine animated nodes nine
+// conversions: it was keyed into the geometry because the constant it wrote
+// into every vertex differed per node. With the joint on the instance the key
+// carries the skin alone, and InterpolationTest's nine byte-identical copies of
+// one cube - and CesiumMilkTruck's two wheels - collapse to one upload.
+func TestAnimatedNodesSharingOneMeshConvertItOnce(t *testing.T) {
+	const nodes = 9
+	doc := testDoc()
+	mesh := triangleMesh(doc, nil)
+	roots := make([]int, 0, nodes)
+	for i := range nodes {
+		doc.Nodes = append(doc.Nodes, &gltf.Node{
+			Name: "cube", Mesh: gltf.Index(mesh),
+			Translation: [3]float64{float64(i), 0, 0},
+		})
+		roots = append(roots, i)
+	}
+	sceneOf(doc, roots...)
+	for i := range nodes {
+		rotationClip(doc, "spin", i, []float32{0, 1},
+			[][4]float32{{0, 0, 0, 1}, {0, 0, 1, 0}})
+	}
+	model := convertTest(t, doc)
+	if len(model.geometries) != 1 {
+		t.Errorf("nine animated nodes converted %d geometries, want the one they share",
+			len(model.geometries))
+	}
+	if len(model.primitives) != nodes {
+		t.Fatalf("the walk emitted %d placements, want one per node", len(model.primitives))
+	}
+	// One conversion, nine placements, and each placement still rides its own
+	// bone. The walk claims joints in its own order, so node i is joint i.
+	for i := range model.primitives {
+		placed := &model.primitives[i]
+		if placed.geometry != 0 {
+			t.Errorf("placement %d converted geometry %d, want the shared 0", i, placed.geometry)
+		}
+		if !placed.plain || int(placed.joint) != i {
+			t.Errorf("placement %d rides joint %d (plain %v), want joint %d",
+				i, placed.joint, placed.plain, i)
+		}
 	}
 }
 

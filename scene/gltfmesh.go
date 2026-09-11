@@ -27,10 +27,15 @@ type gltfGeometry struct {
 	box    m.Box3
 	hasBox bool
 	// skinned reports whether the vertices carry a joint binding the shader
-	// should follow. It is decided after conversion, by the node's binding and
-	// by whether the primitive actually carried weights: glTF requires a
-	// skinned node's mesh to have JOINTS_0 and WEIGHTS_0, and one that does not
-	// draws unskinned at the skin's root rather than being lost.
+	// should follow. It is decided after conversion, by the node's skin and by
+	// whether the primitive actually carried weights: glTF requires a skinned
+	// node's mesh to have JOINTS_0 and WEIGHTS_0, and one that does not draws
+	// unskinned at the skin's root rather than being lost.
+	//
+	// It is not the answer to "is this draw skinned" - the placement is. A
+	// plain-bound node names its joint on the instance and writes nothing
+	// here, so the same converted mesh is plain-bound under one node and
+	// static under another.
 	skinned bool
 	// morph is the primitive's converted morph targets, empty for the
 	// overwhelming majority of primitives. It belongs to the geometry rather

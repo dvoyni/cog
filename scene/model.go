@@ -289,14 +289,28 @@ func (p *Plugin) expandModels(
 			// bindings: "the file's parameters do not survive" is as much the
 			// numbers as the textures, and a nil record is what makes the draw
 			// take glTF's own defaults instead.
-			// The variant comes from the model's own skin, which is also what
-			// the draw binds, so the module a draw compiles and the bindings it
-			// supplies can never disagree.
+			// The variant is what this primitive deforms, not what its model
+			// does: a static prop bolted to an animated model reads neither
+			// the poses nor the deltas, and asking the model would charge it
+			// four of the eight storage buffers a browser core adapter
+			// guarantees. The bindings are narrowed to the same answer here,
+			// so the module a draw compiles and what it binds come from one
+			// place and can never disagree.
 			owned := &view.materials[primitive.material]
-			skin := p.modelAnims[i].skin
-			material, record := owned.variants[variantFor(skin.bound, skin.morphed)], &owned.record
+			anim := p.modelAnims[i]
+			anim.skinned, anim.joint, anim.plain =
+				primitive.skinned, primitive.joint, primitive.plain
+			anim.skin.bound = anim.skin.bound && primitive.skinned
+			anim.skin.morphed = anim.skin.morphed && primitive.morph.morphed()
+			material, record := owned.variants[variantFor(anim.skin.bound, anim.skin.morphed)], &owned.record
 			if model.material != nil {
 				material, record = model.material, nil
+			}
+			// A morphed model packs a block per primitive rather than per
+			// call, because the four morph words and the sparse weight list
+			// are the primitive's, not the draw's.
+			if anim.morphAt >= 0 {
+				anim.offset = p.modelMorphOffsets[anim.morphAt+j]
 			}
 			group := uint32(0)
 			if len(instances) > 1 {
@@ -313,14 +327,6 @@ func (p *Plugin) expandModels(
 					world = world.Mul(view.reroot)
 				}
 				p.modelWorlds[at] = world.Mul(primitive.local)
-				anim := p.modelAnims[i]
-				anim.skinned = primitive.skinned
-				// A morphed model packs a block per primitive rather than per
-				// call, because the four morph words and the sparse weight list
-				// are the primitive's, not the draw's.
-				if anim.morphAt >= 0 {
-					anim.offset = p.modelMorphOffsets[anim.morphAt+j]
-				}
 				write.appendFlushDraw(drawRecord{
 					layers:    model.layers,
 					transform: Transform{Matrix: &p.modelWorlds[at]},
@@ -334,11 +340,16 @@ func (p *Plugin) expandModels(
 					params:          model.overrides,
 					overridesRecord: len(model.overrides) > 0,
 					bounds:          primitive.bounds,
-					// A skinned primitive is never culled. Its bind-pose sphere
+					// A skinned placement is never culled. Its bind-pose sphere
 					// is the only bound the load has, and where the joints put
 					// it this frame is not knowable without replaying the blend
 					// on the CPU - which is the per-frame hierarchy walk this
 					// whole design exists to remove.
+					//
+					// The placement is what is asked, not the mesh: a shared
+					// primitive culled by a static instance's bounds while its
+					// animated instance walks out of them is a mesh that
+					// disappears with nothing reported.
 					neverCull: view.neverCull || primitive.skinned,
 					group:     group,
 					anim:      anim,

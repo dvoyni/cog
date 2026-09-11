@@ -79,7 +79,16 @@ type modelPrimitive struct {
 	// the joints put it this frame is not knowable without replaying the
 	// blend, so it is marked never-cull and the sphere is kept only for the
 	// blend sort's depth.
+	//
+	// It is the placement's answer, not the mesh's. The same converted mesh is
+	// plain-bound under one node and static under another, so this is the only
+	// place either reader - the no-skin flag and the cull exemption - can ask.
 	skinned bool
+	// joint is the model joint a plain-bound placement rides at full weight,
+	// and plain says it is one. The instance record carries it, so the mesh
+	// under it is the mesh every other node referencing it draws.
+	joint uint32
+	plain bool
 	// morph is where the primitive's delta block sits and which of the model's
 	// weight slots feed it, empty for a primitive with no targets. Morphing
 	// needs no cull exemption of its own: the bounds were expanded at load by
@@ -91,9 +100,9 @@ type modelPrimitive struct {
 // once per shader variant, and the per-batch record that carries its numbers.
 //
 // One glTF material serves whatever primitives reference it, and what a
-// primitive deforms is not the material's business - so the variant is picked at
-// the draw, from the same skin the draw binds, and the material carries all four
-// rather than deciding.
+// primitive deforms is not the material's business - so the variant is picked
+// per primitive, from the same bindings that primitive's draw supplies, and the
+// material carries all four rather than deciding.
 type modelMaterial struct {
 	variants [variantCount]Material
 	record   scenePbrRecord
@@ -212,7 +221,8 @@ func (l *Lookup) installModel(
 		geometry := &loaded.geometries[primitive.geometry]
 		placed := modelPrimitive{
 			mesh: meshes[primitive.geometry], local: primitive.local, material: primitive.material,
-			skinned: primitive.skinned, morph: primitive.morph,
+			skinned: primitive.skinned, joint: primitive.joint,
+			plain: primitive.plain, morph: primitive.morph,
 		}
 		entry.boxes = append(entry.boxes,
 			modelBox{box: geometry.box, rest: primitive.rest, known: geometry.hasBox})

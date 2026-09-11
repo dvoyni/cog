@@ -159,4 +159,34 @@ fn sceneJointMatrix(pose: SceneJointPose, joint: SceneSkinJoint) -> mat4x3<f32> 
     );
 }
 
+// scenePlainJointVertex poses a vertex under the one joint its instance names,
+// at full weight. It is the whole of what an animated mesh node needs, and it
+// is what sceneDeformVertex's four-influence loop did for such a draw at four
+// times the cost: three of its iterations hit a zero-weight continue, and the
+// one that did the work fetched a constant joint index through a vertex
+// attribute.
+//
+// The arithmetic is that loop's with the weight fixed at one, so the two agree
+// exactly: the weighted sums collapse to their single terms, the normalize is
+// the same normalize, and the handedness is this joint's own rather than a
+// weighted majority of four.
+fn scenePlainJointVertex(
+    instance: SceneInstance, playCount: u32, base: SceneVertex,
+) -> SceneVertex {
+    let index = instance.joint;
+    let joint = sceneSkinJoints.data[index];
+    let pose = sceneBlendJoint(instance.animOffset, playCount, index);
+    let skin = sceneJointMatrix(pose, joint);
+    let position = skin * vec4<f32>(base.position, 1.0);
+    let normalMatrix = mat3x3<f32>(joint.normal0.xyz, joint.normal1.xyz, joint.normal2.xyz);
+    let normal = normalize(sceneQuatRotate(pose.rotation, normalMatrix * base.normal));
+    let turned = sceneQuatRotate(pose.rotation, normalMatrix * base.tangent.xyz);
+    var tangent = base.tangent;
+    let orthogonal = turned - normal * dot(normal, turned);
+    if dot(orthogonal, orthogonal) > 1e-12 {
+        tangent = vec4<f32>(normalize(orthogonal), base.tangent.w * sign(joint.normal0.w));
+    }
+    return SceneVertex(position, normal, tangent);
+}
+
 //#endif
