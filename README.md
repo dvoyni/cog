@@ -48,8 +48,8 @@ error handling.
     resources, and errors.
 - [`app`](app/README.md): driver-neutral update, render, time-control, and quit
     contracts. No implementation.
-- [`input`](input/README.md): input state, discrete events, and the driver-facing
-    apply command.
+- [`input`](input/README.md): input state, discrete events, the driver-facing
+    apply command, and scripted input.
 - [`anim`](anim/README.md): timelines of eased value tracks and one-tick cues,
     advanced every fixed step.
 - [`storage`](storage/README.md): layered read filesystems and one permanent
@@ -57,14 +57,15 @@ error handling.
 - [`m`](m): immutable vectors, rectangles, colors, matrices, quaternions,
     scalar helpers, and splines. Angles use radians.
 - [`gfx`](gfx/README.md): driver-neutral rendering queues, resources, viewport,
-    and backend contract.
+    backend contract, frame capture, and per-tick snapshots.
 - [`canvas`](canvas/README.md): layered 2D sprites, text, primitives, and custom
-    triangles over gfx.
+    triangles over gfx, with a snapshot of what a tick recorded.
 - [`scene`](scene/README.md): declarative 3D cameras, glTF models, buffer-built
     meshes, punctual lights, and debug shapes over gfx.
-- [`ui`](ui/README.md): immediate-mode layout, interaction, and canvas-backed
-    visual processing.
-- [`wgpu`](wgpu/README.md): window, input, timing, and WebGPU system driver.
+- [`ui`](ui/README.md): immediate-mode layout, interaction, canvas-backed visual
+    processing, and a snapshot of what layout resolved.
+- [`wgpu`](wgpu/README.md): window, input, timing with pause and step, and
+    WebGPU system driver.
 - [`mcp`](mcp/README.md): the agent-facing extension point — typed capabilities
     a plugin offers. No implementation.
 - [`mcpserver`](mcpserver/README.md): the broker that collects capabilities from
