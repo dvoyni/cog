@@ -246,6 +246,40 @@ architecture: plugins and their dependencies, resources and commands with their
 owners, and every subscription with its event, phase, and ordering dependencies.
 `Dump` renders it as a readable table.
 
+`CommandDescription` and `SubscriptionDescription` also carry `Reads`, `Writes`
+and `Uses`. `Reads` and `Writes` are the **resolved, transitive** lock sets —
+what the handler ends up holding once every command it declares in `Uses` has
+been folded in — and `Uses` holds the direct edges that explain them. This is
+the one fact in a description that no source file states, because a handler
+deliberately never names the resources behind a command it dispatches.
+
+`Executioner.Describe` returns the same value from inside the running engine.
+An `Executioner` exists only once `Run` begins, so the description it returns
+is always the final one, and it reads registry state that is immutable after
+finalization: no handle, no lock, no tick and no scheduler.
+
+```go
+func (e Executioner) Describe() ArchitectureDescription
+func (e Executioner) Plugins[T any]() []T
+```
+
+`Plugins[T]` returns every registered plugin satisfying `T`, in registration
+order. It is how one plugin finds the others that offer an interface it defines
+— a collector asking for its own contributor interface — without naming any of
+them.
+
+The encapsulation cost, stated plainly: `Plugins[kernel.Plugin]()` returns
+everything, and that is deliberately not policed, because a runtime panic on
+`T == Plugin` would be theatre against a caller who could write the assertion
+loop by hand. What the engine gives up is the property that a plugin reaches
+another plugin only through a typed command, a published event, or a locked
+resource. It gives that up knowingly, once, in exchange for making available a
+lookup it already performs privately for `PluginHost`, `PluginStarter` and
+`PluginStopper`.
+
+Both methods are on `Executioner` rather than `Kernel`, so both are phase-gated
+for free: only the engine mints an `Executioner`, and only once `Run` begins.
+
 ## Public API Index
 
 - Composition: `New`, `Engine`, `Engine.Handler`, `Engine.WithPlugins`,
@@ -253,7 +287,8 @@ owners, and every subscription with its event, phase, and ordering dependencies.
   `ArchitectureDescription`.
 - Runtime: `Kernel`, `Kernel.Context`, `Kernel.WithContext`,
   `Kernel.ExecuteCommandAsync`, `Kernel.PublishEvent`, `Kernel.ReportError`,
-  `Executioner`, `Executioner.ExecuteCommand`, `Publication`, `Publication.Wait`.
+  `Executioner`, `Executioner.ExecuteCommand`, `Executioner.Describe`,
+  `Executioner.Plugins`, `Publication`, `Publication.Wait`.
 - Registration: `Registrar`, `Registrar.InitResource`,
   `Registrar.HandleCommand`, `Registrar.Subscribe`, `Ordering[TEvent]`.
 - Handlers: `Lock`, `Execute`, `Observe`, `Command`, `Subscription`,

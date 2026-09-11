@@ -50,7 +50,6 @@ type subscription interface {
 func (s *Ordering[TEvent]) orderID() reflect.Type       { return s.id }
 func (s *Ordering[TEvent]) orderBefore() []reflect.Type { return s.before }
 func (s *Ordering[TEvent]) orderAfter() []reflect.Type  { return s.after }
-func (s *Ordering[TEvent]) pluginOwner() PluginName     { return s.owner }
 
 func (s *Ordering[TEvent]) coupling() (PluginName, *ResourceAccess) {
 	return s.owner, s.resources

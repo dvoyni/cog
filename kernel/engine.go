@@ -12,6 +12,7 @@ package kernel
 import (
 	"context"
 	"errors"
+	"iter"
 	"log"
 	"reflect"
 	"runtime/debug"
@@ -99,14 +100,15 @@ func (e *Engine) WithPlugins(plugins ...Plugin) *Engine {
 	}
 	accepted = ordered
 
-	for _, plugin := range accepted {
-		if candidate, ok := plugin.(PluginHost); ok {
-			if e.host != nil {
-				e.failComposition(ErrMultipleHosts{First: e.host.Name(), Second: plugin.Name()})
-				return e
-			}
-			e.host = candidate
+	for _, candidate := range pluginsOf[PluginHost](accepted) {
+		if e.host != nil {
+			e.failComposition(ErrMultipleHosts{First: e.host.Name(), Second: candidate.Name()})
+			return e
 		}
+		e.host = candidate
+	}
+
+	for _, plugin := range accepted {
 		registrar := &Registrar{registry: e.registry, owner: plugin.Name()}
 		if err := callPluginBoundary(plugin.Name(), "Register", func() error {
 			return plugin.Register(registrar, e.config[plugin.Name()])
@@ -156,6 +158,24 @@ func (e *Engine) failComposition(err error) {
 }
 
 func (e *Engine) markReady() { e.readyOnce.Do(func() { close(e.ready) }) }
+
+// pluginsOf yields every plugin satisfying T, in registration order, paired
+// with its index in plugins. It is the engine's only filtered plugin lookup:
+// the host, start and stop passes all ask it, and Executioner.Plugins exposes
+// it. The index is what lets Run cut the list at a plugin whose Start failed.
+func pluginsOf[T any](plugins []Plugin) iter.Seq2[int, T] {
+	return func(yield func(int, T) bool) {
+		for index, plugin := range plugins {
+			match, ok := any(plugin).(T)
+			if !ok {
+				continue
+			}
+			if !yield(index, match) {
+				return
+			}
+		}
+	}
+}
 
 func orderPlugins(plugins []Plugin) ([]Plugin, []PluginName) {
 	byName := make(map[PluginName]int, len(plugins))
@@ -221,17 +241,17 @@ func (e *Engine) Run(ctx context.Context) *Engine {
 	}()
 
 	runtime := e.executioner(e.ctx)
-	started := make([]Plugin, 0, len(e.plugins))
-	for _, plugin := range e.plugins {
-		if starter, ok := plugin.(PluginStarter); ok {
-			if err := callPluginBoundary(plugin.Name(), "Start", func() error {
-				return starter.Start(runtime)
-			}); err != nil {
-				e.reportError(err)
-				break
-			}
+	// started is the prefix of the plugin list that Run is responsible for
+	// stopping: every plugin up to, but not including, the one whose Start failed.
+	started := e.plugins
+	for index, starter := range pluginsOf[PluginStarter](e.plugins) {
+		if err := callPluginBoundary(starter.Name(), "Start", func() error {
+			return starter.Start(runtime)
+		}); err != nil {
+			e.reportError(err)
+			started = e.plugins[:index]
+			break
 		}
-		started = append(started, plugin)
 	}
 	e.markReady()
 	if len(started) == len(e.plugins) && e.ctx.Err() == nil {
@@ -247,14 +267,14 @@ func (e *Engine) Run(ctx context.Context) *Engine {
 	}
 	e.cancel(nil)
 	shutdown := e.executioner(context.WithoutCancel(ctx))
+	stoppers := make([]PluginStopper, 0, len(started))
+	for _, stopper := range pluginsOf[PluginStopper](started) {
+		stoppers = append(stoppers, stopper)
+	}
 	var shutdownErrs []error
-	for i := len(started) - 1; i >= 0; i-- {
-		plugin := started[i]
-		stopper, ok := plugin.(PluginStopper)
-		if !ok {
-			continue
-		}
-		if err := callPluginBoundary(plugin.Name(), "Stop", func() error {
+	for i := len(stoppers) - 1; i >= 0; i-- {
+		stopper := stoppers[i]
+		if err := callPluginBoundary(stopper.Name(), "Stop", func() error {
 			return stopper.Stop(shutdown)
 		}); err != nil {
 			shutdownErrs = append(shutdownErrs, err)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1457,5 +1458,114 @@ func TestKernel_PluginReceivesConfig(t *testing.T) {
 	}).WithPlugins(p)
 	if got != 42 {
 		t.Fatalf("config = %v, want 42", got)
+	}
+}
+
+// testTagged is a plugin-satisfiable interface the engine attaches no meaning
+// to: exactly the shape Executioner.Plugins exists to find.
+type testTagged interface {
+	Plugin
+	tag() string
+}
+
+type testTaggedPlugin struct {
+	testPlugin
+	label string
+}
+
+func (p testTaggedPlugin) tag() string { return p.label }
+
+// Plugins answers with the plugins satisfying T in the engine's registration
+// order, which is dependency order rather than the order the app listed them.
+func TestExecutioner_PluginsFiltersByTypeInRegistrationOrder(t *testing.T) {
+	later := testTaggedPlugin{testPlugin{name: "later", deps: []PluginName{"earlier"}}, "later"}
+	earlier := testTaggedPlugin{testPlugin{name: "earlier"}, "earlier"}
+	plain := testPlugin{name: "plain"}
+
+	e := startEngine(t, later, plain, earlier)
+
+	tagged := e.Executioner().Plugins[testTagged]()
+	labels := make([]string, 0, len(tagged))
+	for _, plugin := range tagged {
+		labels = append(labels, plugin.tag())
+	}
+	if !slices.Equal(labels, []string{"earlier", "later"}) {
+		t.Fatalf("Plugins[testTagged] = %v, want [earlier later]", labels)
+	}
+	if all := e.Executioner().Plugins[Plugin](); len(all) != 3 {
+		t.Fatalf("Plugins[Plugin] returned %d plugins, want every one", len(all))
+	}
+	if none := e.Executioner().Plugins[PluginHost](); len(none) != 0 {
+		t.Fatalf("Plugins[PluginHost] = %v, want none", none)
+	}
+}
+
+// The lock columns are the one fact in a description that no source file
+// states: a handler names the command it dispatches, never the resources
+// behind it, so the write below is asserted two Uses hops from where it was
+// declared.
+func TestKernel_DescribeReportsResolvedLockClosure(t *testing.T) {
+	p := testPlugin{name: "p", register: func(registry *Registrar) error {
+		registry.InitResource(testCounterResource(0))
+		registry.InitResource(testLateResource(0))
+		registry.HandleCommand[testFailCmd](func() (Lock, Execute[struct{}, int]) {
+			return func(access ResourceAccess) { access.GetWrite[testLateResource]() },
+				func(Kernel, struct{}) (int, error) { return 0, nil }
+		})
+		registry.HandleCommand[testDoubleCmd](func() (Lock, Execute[int, int]) {
+			return func(access ResourceAccess) {
+				access.GetRead[testCounterResource]()
+				access.Uses[testFailCmd]()
+			}, func(Kernel, int) (int, error) { return 0, nil }
+		})
+		registry.Subscribe[testHandlerA[int]](func() (Lock, Observe[int]) {
+			var double func(Kernel, int) (int, error)
+			return func(access ResourceAccess) { double = access.Uses[testDoubleCmd]() },
+				func(k Kernel, event int) error { _, err := double(k, event); return err }
+		})
+		return nil
+	}}
+	e := startEngine(t, p)
+	description := e.Executioner().Describe()
+
+	counter, late := reflect.TypeFor[testCounterResource](), reflect.TypeFor[testLateResource]()
+	var outer CommandDescription
+	for _, command := range description.Commands {
+		if command.Type == reflect.TypeFor[testDoubleCmd]() {
+			outer = command
+		}
+	}
+	if !slices.Equal(outer.Reads, []reflect.Type{counter}) {
+		t.Fatalf("testDoubleCmd reads = %v, want [%v]", outer.Reads, counter)
+	}
+	// testDoubleCmd never named testLateResource; testFailCmd, which it uses, did.
+	if !slices.Equal(outer.Writes, []reflect.Type{late}) {
+		t.Fatalf("testDoubleCmd writes = %v, want the absorbed [%v]", outer.Writes, late)
+	}
+	if !slices.Equal(outer.Uses, []reflect.Type{reflect.TypeFor[testFailCmd]()}) {
+		t.Fatalf("testDoubleCmd uses = %v, want the edge that explains the write", outer.Uses)
+	}
+
+	var subscriber SubscriptionDescription
+	for _, subscription := range description.Subscriptions {
+		if subscription.Type == reflect.TypeFor[testHandlerA[int]]() {
+			subscriber = subscription
+		}
+	}
+	if subscriber.Owner != "p" {
+		t.Fatalf("subscription owner = %q, want %q", subscriber.Owner, "p")
+	}
+	// Two hops: the subscriber names testDoubleCmd, which names testFailCmd.
+	if !slices.Equal(subscriber.Reads, []reflect.Type{counter}) ||
+		!slices.Equal(subscriber.Writes, []reflect.Type{late}) {
+		t.Fatalf("subscriber locks = reads %v writes %v, want the transitive closure",
+			subscriber.Reads, subscriber.Writes)
+	}
+	if !slices.Equal(subscriber.Uses, []reflect.Type{reflect.TypeFor[testDoubleCmd]()}) {
+		t.Fatalf("subscriber uses = %v, want its one direct edge", subscriber.Uses)
+	}
+
+	if dump := Dump(e); !strings.Contains(dump, "writes [kernel.testLateResource]") {
+		t.Fatalf("Dump omitted the resolved lock columns:\n%s", dump)
 	}
 }

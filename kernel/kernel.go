@@ -136,6 +136,29 @@ func (e Executioner) WithContext(ctx context.Context) Executioner {
 	return Executioner{e.Kernel.WithContext(ctx)}
 }
 
+// Plugins returns every registered plugin that satisfies T, in registration
+// order. The plugin set is fixed by WithPlugins, so the answer is the same
+// whenever it is asked.
+//
+// This is the one place the engine lets a plugin reach another plugin other
+// than through a typed command, a published event or a locked resource. It is
+// deliberately unpoliced: Plugins[Plugin] returns everything, and a caller who
+// wanted that could write the assertion loop by hand.
+func (e Executioner) Plugins[T any]() []T {
+	engine := e.bound()
+	found := make([]T, 0, len(engine.plugins))
+	for _, plugin := range pluginsOf[T](engine.plugins) {
+		found = append(found, plugin)
+	}
+	return found
+}
+
+// Describe returns the finalized architecture. An Executioner exists only once
+// Run begins, so the description it returns is always the final one. The value
+// is detached: it reads registry state that is immutable after finalization and
+// so needs no lock, no tick and no scheduler.
+func (e Executioner) Describe() ArchitectureDescription { return e.bound().Describe() }
+
 // ExecuteCommand runs a command synchronously and returns its response or system
 // error. Expected request rejection belongs in the response; callers propagate
 // system errors to an event, lifecycle, or host boundary for centralized reporting.

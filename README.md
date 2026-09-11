@@ -65,6 +65,10 @@ error handling.
 - [`ui`](ui/README.md): immediate-mode layout, interaction, and canvas-backed
     visual processing.
 - [`wgpu`](wgpu/README.md): window, input, timing, and WebGPU system driver.
+- [`mcp`](mcp/README.md): the agent-facing extension point — typed capabilities
+    a plugin offers. No implementation.
+- [`mcpserver`](mcpserver/README.md): the broker that collects capabilities from
+    every provider and serves them to an agent over MCP.
 
 ## Plugin Layout
 
