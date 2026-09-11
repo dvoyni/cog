@@ -85,7 +85,11 @@ type ArmDrawsResponse struct {
 // struct carries both so that a caller cannot handle one and forget the other.
 type DrawsSnapshot struct {
 	Draws DrawsView
-	Err   error
+	// Tick is app.UpdateEvent.Tick of the tick the snapshot was taken in. It
+	// travels with the snapshot rather than being asked for afterwards,
+	// because only the tick itself knows which one it was.
+	Tick int64
+	Err  error
 }
 
 // DrawsView is one tick's recorded canvas operations, rendered while they are
@@ -329,7 +333,7 @@ func (s *snapshotState) beginTick() {
 // The build happens under the slot's own lock. It is bounded by the filter and
 // does no I/O; the marshalling and the disk write happen on the caller's
 // goroutine, never here.
-func (s *snapshotState) record(queue *OpQueue) {
+func (s *snapshotState) record(queue *OpQueue, tick int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request == nil || !s.armed {
@@ -340,7 +344,7 @@ func (s *snapshotState) record(queue *OpQueue) {
 	// The channel is buffered to one and holds this slot's only send, so a full
 	// one means the waiter has gone and the value is simply collected.
 	select {
-	case request.done <- DrawsSnapshot{Draws: drawsViewOf(queue, request.filter)}:
+	case request.done <- DrawsSnapshot{Draws: drawsViewOf(queue, request.filter), Tick: tick}:
 	default:
 	}
 }

@@ -368,8 +368,21 @@ Reproduced in full, per the house style, so it is reviewed as prompt text:
 > own world window, which is also reported per layer.
 >
 > While the game is paused this performs one step to have something to record,
-> and says so in the response. Arm it together with `ui_layout` and `gfx_frame`
-> to describe one moment: they share that single step. Take `gfx_capture` last.
+> and says so in the response, along with the `tick` it describes. To describe
+> one moment, call `wgpu_time hold` first and arm this together with
+> `ui_layout` and `gfx_frame`, which then share that one step; they paired only
+> if all three report the same `tick`. Take `gfx_capture` last, because it
+> costs no tick and so shows whatever that step produced.
+
+> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).**
+> The last two sentences are new. As shipped the prose said *"Arm it together
+> with `ui_layout` and `gfx_frame` to describe one moment: they share that
+> single step"*, which an agent could follow and still get two ticks: sharing
+> the step is opportunistic without a `wgpu_time hold`, and nothing in the
+> response said which tick it got. `gfx.SnapshotView` now carries `tick`, so
+> this response names the moment it describes — see
+> [gfx §The view types](../../../gfx/docs/specs/mcp.md#the-view-types) and
+> [wgpu §A hold decides it](../../../wgpu/docs/specs/mcp.md#a-hold-decides-it).
 
 ---
 

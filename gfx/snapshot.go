@@ -57,7 +57,11 @@ type ArmFrameResponse struct {
 // struct carries both so that a caller cannot handle one and forget the other.
 type FrameSnapshot struct {
 	Frame FrameView
-	Err   error
+	// Tick is app.UpdateEvent.Tick of the tick the snapshot was taken in. It
+	// travels with the snapshot rather than being asked for afterwards,
+	// because only the tick itself knows which one it was.
+	Tick int64
+	Err  error
 }
 
 // FrameView is one tick's renderer declarations, rendered while they are still
@@ -237,7 +241,7 @@ func (s *snapshotState) beginTick() {
 // The build happens under the slot's own lock. It is bounded by the filter and
 // does no I/O; the marshalling and the disk write happen on the caller's
 // goroutine, never here.
-func (s *snapshotState) record(queue *OpQueue, resources *ResourceQueue) {
+func (s *snapshotState) record(queue *OpQueue, resources *ResourceQueue, tick int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request == nil || !s.armed {
@@ -248,7 +252,9 @@ func (s *snapshotState) record(queue *OpQueue, resources *ResourceQueue) {
 	// The channel is buffered to one and holds this slot's only send, so a
 	// full one means the waiter has gone and the value is simply collected.
 	select {
-	case request.done <- FrameSnapshot{Frame: frameViewOf(queue, resources, request.pass)}:
+	case request.done <- FrameSnapshot{
+		Frame: frameViewOf(queue, resources, request.pass), Tick: tick,
+	}:
 	default:
 	}
 }

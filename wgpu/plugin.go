@@ -185,6 +185,9 @@ func (p *Plugin) onUpdate(k kernel.Executioner, _ float64) {
 		// do their work and each step produces a complete frame; rendering
 		// then shows the last of them.
 		e.Last = paused || n == 1
+		// Every tick carries its own number, so that whatever a subscriber
+		// records inside one can name the tick it describes.
+		e.Tick = p.ticks.next()
 		_ = k.PublishEvent(e).Wait()
 	}
 	if paused {

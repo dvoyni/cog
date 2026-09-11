@@ -80,7 +80,11 @@ type ArmLayoutResponse struct {
 // struct carries both so that a caller cannot handle one and forget the other.
 type LayoutSnapshot struct {
 	Layout LayoutView
-	Err    error
+	// Tick is app.UpdateEvent.Tick of the tick the snapshot was taken in. It
+	// travels with the snapshot rather than being asked for afterwards,
+	// because only the tick itself knows which one it was.
+	Tick int64
+	Err  error
 }
 
 // LayoutView is one tick's element tree with what layout resolved it to,
@@ -324,7 +328,7 @@ func (s *snapshotState) beginTick() {
 // does no I/O; the marshalling of the document and the disk write happen on
 // the caller's goroutine, never here. The one encoding that cannot wait is
 // userData, which stops being readable the moment this returns.
-func (s *snapshotState) record(context *processor) {
+func (s *snapshotState) record(context *processor, tick int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request == nil || !s.armed {
@@ -336,7 +340,7 @@ func (s *snapshotState) record(context *processor) {
 	// The channel is buffered to one and holds this slot's only send, so a full
 	// one means the waiter has gone and the value is simply collected.
 	select {
-	case request.done <- LayoutSnapshot{Layout: view, Err: err}:
+	case request.done <- LayoutSnapshot{Layout: view, Tick: tick, Err: err}:
 	default:
 	}
 }

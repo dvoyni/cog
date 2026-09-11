@@ -4,8 +4,25 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/dvoyni/cog/app"
+)
+
+// defaultHoldDuration and maxHoldDuration bound how long a hold may keep the
+// step window open. The default is one second, which is long enough for
+// several requests arriving over separate connections and short enough that
+// an agent which forgets to release costs itself a second rather than a
+// session; the cap is the ten seconds every other span in this family is
+// capped at.
+//
+// A hold is the only wall-clock deadline in the tick source, and it is not an
+// engine clock: it measures how long an absent agent may keep the engine from
+// stepping, never how far the simulation has moved. There is still no time to
+// scale and no Dt to distort.
+const (
+	defaultHoldDuration = time.Second
+	maxHoldDuration     = 10 * time.Second
 )
 
 // tickSource decides when an update tick is published: the driver's frame
@@ -20,18 +37,29 @@ import (
 // goroutine against onUpdate on the main thread — is the same one alpha and
 // frameSeq already cross, and for the same reason.
 //
-// mu guards only the handover of one batch of steps to the frame that
-// publishes it, which is the one part of this that two atomics cannot express
-// without a window where a step is counted twice or released early. A running
-// frame reads one atomic and takes no lock; a paused frame with nothing
-// pending reads two.
+// mu guards the handover of one batch of steps to the frame that publishes
+// it, and the hold that can postpone the handover. The handover is the one
+// part of this that two atomics cannot express without a window where a step
+// is counted twice or released early. A running frame reads one atomic and
+// takes no lock; a paused frame with nothing pending reads two.
 type tickSource struct {
 	paused   atomic.Bool
 	pending  atomic.Int64
 	advanced atomic.Int64
+	// tick numbers the ticks this source has published, from one, and never
+	// resets. It is what lets everything recorded inside one tick say which
+	// tick it was, and it costs one atomic add per published tick.
+	tick atomic.Int64
 
 	mu    sync.Mutex
 	batch *stepBatch
+	// holdUntil is when the hold on the step window runs out; the zero time
+	// means no hold stands. holdExpired remembers that the last hold ended on
+	// its deadline rather than being released, so that an agent coming back
+	// to a window it thought it still had is told rather than left to infer
+	// it from a split.
+	holdUntil   time.Time
+	holdExpired bool
 }
 
 // stepBatch is one handover of requested steps to the frame that publishes
@@ -52,6 +80,12 @@ type stepBatch struct {
 //
 // It runs on the main thread every frame, which is why the common paths are
 // atomic loads: this is the read the whole design exists to keep cheap.
+//
+// A hold makes it decline the batch it finds. That is the whole of the
+// deterministic half of pairing: without it the join window is only as wide
+// as the gap before the next rendered frame, and whether several arms share
+// one tick depends on whether they all fit inside it. With it the window
+// belongs to whoever took the hold.
 func (t *tickSource) take() (steps int, paused bool, batch *stepBatch) {
 	if !t.paused.Load() {
 		return 0, false, nil
@@ -61,9 +95,22 @@ func (t *tickSource) take() (steps int, paused bool, batch *stepBatch) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	// Every frame is an observation, so a hold that has run out expires here
+	// rather than needing a timer of its own, and the batch it was keeping
+	// open goes out on this same frame.
+	if t.holding(time.Now()) {
+		return 0, true, nil
+	}
 	steps, batch = int(t.pending.Swap(0)), t.batch
 	t.batch = nil
 	return steps, true, batch
+}
+
+// next numbers the tick about to be published. It runs once per tick on the
+// main thread and is one atomic add, which is what "cheap on the frame path"
+// has to mean for something every tick pays.
+func (t *tickSource) next() int64 {
+	return t.tick.Add(1)
 }
 
 // published records the ticks the frame put out and releases whoever asked for
@@ -92,6 +139,14 @@ func (t *tickSource) control(ctx context.Context, request app.TimeRequest) (app.
 		return t.state(app.TimeResponse{Changed: t.resume()}), nil
 	case app.TimeStep:
 		return t.step(ctx, request)
+	case app.TimeHold:
+		changed, err := t.hold(time.Now(), request.Hold)
+		if err != nil {
+			return app.TimeResponse{}, err
+		}
+		return t.state(app.TimeResponse{Changed: changed}), nil
+	case app.TimeRelease:
+		return t.state(app.TimeResponse{Changed: t.release(time.Now())}), nil
 	default:
 		return app.TimeResponse{}, ErrUnknownTimeAction{Action: request.Action}
 	}
@@ -114,13 +169,13 @@ func (t *tickSource) pause() bool {
 //
 // A step still pending would never be published once the frame clock is back
 // in charge, so it is abandoned here and its caller released, rather than left
-// to wait out its deadline.
+// to wait out its deadline. A hold goes the same way and for the same reason:
+// there is no step window left to keep open, and resume is the one call that
+// must always get an engine moving again whatever state it was left in.
 func (t *tickSource) resume() bool {
 	was := t.paused.Swap(false)
-	if t.pending.Load() == 0 {
-		return was
-	}
 	t.mu.Lock()
+	t.holdUntil = time.Time{}
 	t.pending.Store(0)
 	batch := t.batch
 	t.batch = nil
@@ -129,6 +184,63 @@ func (t *tickSource) resume() bool {
 		close(batch.done)
 	}
 	return was
+}
+
+// hold keeps the step window open, so that arms landing over several frames
+// still share one step instead of racing the frame clock for a place in the
+// batch. It implies pause for the reason a step does: holding a running
+// engine is meaningless, so the request pauses rather than being refused.
+//
+// It carries a deadline because the alternative is an engine an absent agent
+// has left unable to step. Asking for longer than the cap is refused rather
+// than quietly shortened: a caller told it holds the window for a minute, and
+// silently given ten seconds, learns about the difference as a split.
+func (t *tickSource) hold(now time.Time, span time.Duration) (changed bool, err error) {
+	if span <= 0 {
+		span = defaultHoldDuration
+	}
+	if span > maxHoldDuration {
+		return false, ErrHoldTooLong{For: span, Max: maxHoldDuration}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.pause()
+	if t.holding(now) {
+		return false, nil
+	}
+	t.holdUntil, t.holdExpired = now.Add(span), false
+	return true, nil
+}
+
+// release ends a hold early and reports whether one was standing. The step it
+// was keeping open publishes on the next frame, exactly as it would have
+// without the hold; nothing waits here for that, because whoever asked for
+// the step is already waiting on the batch.
+func (t *tickSource) release(now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.holding(now) {
+		return false
+	}
+	t.holdUntil = time.Time{}
+	return true
+}
+
+// holding reports whether a hold still stands, expiring one that has run out.
+// It is the only place a hold ends by itself, and it is called from every
+// point the tick source is observed - each frame and each control request -
+// so an expiry needs no timer and no goroutine of its own.
+//
+// Callers hold mu.
+func (t *tickSource) holding(now time.Time) bool {
+	if t.holdUntil.IsZero() {
+		return false
+	}
+	if now.Before(t.holdUntil) {
+		return true
+	}
+	t.holdUntil, t.holdExpired = time.Time{}, true
+	return false
 }
 
 // step raises the requested ticks and waits for them. Stepping implies
@@ -158,6 +270,12 @@ func (t *tickSource) step(ctx context.Context, request app.TimeRequest) (app.Tim
 // which is the precise opposite of what arming them together is for. An
 // explicit step never joins — dropping ticks somebody asked for would be a
 // silent lie — so only a caller that sets Join shares one.
+//
+// On its own this is opportunistic: there is a pending step to join only
+// until the next rendered frame takes the batch, and three requests arriving
+// over three connections do not reliably fit in one frame's gap. A hold is
+// what makes it deterministic, by stopping the frame from taking the batch at
+// all — see take.
 func (t *tickSource) request(steps int, join bool) (batch *stepBatch, joined, changed bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -178,5 +296,13 @@ func (t *tickSource) request(steps int, join bool) (batch *stepBatch, joined, ch
 func (t *tickSource) state(response app.TimeResponse) app.TimeResponse {
 	response.Paused = t.paused.Load()
 	response.Advanced = int(t.advanced.Load())
+	response.Tick = t.tick.Load()
+	now := time.Now()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.holding(now) {
+		response.Held, response.HoldFor = true, t.holdUntil.Sub(now)
+	}
+	response.HoldExpired = t.holdExpired
 	return response
 }

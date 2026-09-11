@@ -115,8 +115,8 @@ func (p *Plugin) snapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent
 	var queue kernel.Read[*OpQueue]
 	return func(access kernel.ResourceAccess) {
 			queue = access.GetRead[*OpQueue]()
-		}, func(kernel.Kernel, app.UpdateEvent) error {
-			p.snapshots.record(queue.Get())
+		}, func(_ kernel.Kernel, event app.UpdateEvent) error {
+			p.snapshots.record(queue.Get(), event.Tick)
 			return nil
 		}
 }

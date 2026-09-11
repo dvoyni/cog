@@ -2,6 +2,7 @@ package wgpu
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/dvoyni/cog/app"
 )
@@ -26,4 +27,18 @@ type ErrUnknownTimeAction struct {
 
 func (e ErrUnknownTimeAction) Error() string {
 	return fmt.Sprintf("wgpu: unknown time action %d", e.Action)
+}
+
+// ErrHoldTooLong is returned by the app.TimeCmd handler when a hold asks to
+// keep the step window open for longer than the driver will honour. It is an
+// expected outcome rather than a fault — the agent-facing surface maps it to
+// words — and the hold does not begin, because a caller quietly given ten
+// seconds of a minute it asked for would meet the difference as a split.
+type ErrHoldTooLong struct {
+	For time.Duration
+	Max time.Duration
+}
+
+func (e ErrHoldTooLong) Error() string {
+	return fmt.Sprintf("wgpu: hold of %s exceeds the maximum of %s", e.For, e.Max)
 }

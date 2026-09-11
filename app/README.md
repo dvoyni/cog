@@ -42,17 +42,22 @@ quit := access.Uses[app.QuitCmd]()   // in the handler's Lock
 type TimeCmd kernel.Command[TimeRequest, TimeResponse]
 
 type TimeRequest struct {
-    Action TimeAction // TimeStatus | TimePause | TimeResume | TimeStep
+    Action TimeAction // TimeStatus | TimePause | TimeResume | TimeStep | TimeHold | TimeRelease
     Steps  int
     Join   bool
+    Hold   time.Duration
 }
 
 type TimeResponse struct {
-    Paused   bool
-    Changed  bool
-    Stepped  int
-    Joined   bool
-    Advanced int
+    Paused      bool
+    Changed     bool
+    Stepped     int
+    Joined      bool
+    Advanced    int
+    Tick        int64
+    Held        bool
+    HoldFor     time.Duration
+    HoldExpired bool
 }
 ```
 
@@ -85,7 +90,23 @@ none of them has to import a driver to get it.
 - **An arm joins a pending step.** A request with `Join` set attaches to a step
   already pending instead of raising another, so several observers arming
   together describe one tick instead of taking one tick each. It is a
-  tick-source behaviour before it is anything else.
+  tick-source behaviour before it is anything else. On its own it is
+  *opportunistic*: there is a step to join only until the next rendered frame
+  publishes it.
+- **A hold keeps the step window open.** `TimeHold` stops a frame from
+  publishing the pending step until `TimeRelease`, or until `Hold` runs out,
+  so arms landing over several frames still share one tick instead of racing
+  the frame clock for a place in the batch. It implies pausing for the reason
+  stepping does. It carries a deadline because the alternative is an engine an
+  absent caller has left unable to step, a duration longer than the driver
+  honours is **refused rather than quietly shortened**, and `HoldExpired`
+  reports a hold that ran out instead of being released. `TimeResume` drops a
+  hold along with the step it was keeping open, so resume is always the way
+  out.
+- **Every tick carries its number.** `UpdateEvent.Tick` counts from one and
+  never resets, so anything recorded inside a tick can name the tick it
+  describes and two such records can be *shown* to describe one moment rather
+  than assumed to. `TimeResponse.Tick` is the last one published.
 - **Pausing an already-paused engine is an ordinary answer**, `Changed` false,
   not an error.
 - `TimeStep` **does not return until its ticks have been published**, bounded
@@ -106,6 +127,7 @@ Two limits, stated as non-guarantees rather than left to be discovered:
 
 ```go
 func Paused(k kernel.Executioner) bool
+func HoldRemaining(k kernel.Executioner) time.Duration
 ```
 
 The caller-side half of `TimeCmd`, for frame-bound work that has to know
@@ -115,6 +137,13 @@ is one `TimeStatus` dispatch, so asking obliges nobody to import a host — and
 **an engine that does not handle `TimeCmd` is running**, because a game
 composed without time control cannot be paused. It lives here rather than
 beside any one capability so that fallback is stated once.
+
+`HoldRemaining` is the other half, for work that is about to wait for a step:
+the deadline that names a stopped engine has to be the wait for a tick that
+never comes, and a window somebody deliberately held open is not that, so a
+caller **adds** this to its own deadline rather than replacing it. Zero when
+no hold stands, and zero when the engine cannot be asked — the same safe
+direction `Paused` takes.
 
 ### `SetViewportCmd`
 
@@ -183,6 +212,7 @@ dispose application runtime state.
 type UpdateEvent struct {
     Dt   float64
     Last bool
+    Tick int64
 }
 ```
 
@@ -190,6 +220,13 @@ A fixed simulation step. `Dt` is the fixed timestep in seconds. `Last` is true
 for the final catch-up step of the current frame, allowing subscribers to defer
 once-per-frame work until the latest simulation state. A driver should publish
 updates in order.
+
+`Tick` numbers the tick within the engine's run, counting from one and never
+resetting. It is what names the moment something recorded inside a tick
+describes: cog's three snapshots each carry it out to an agent, so two of them
+can be shown to describe one tick rather than merely claimed to. A driver
+numbers every tick it publishes, stepped or not; zero means the driver does
+not number ticks at all.
 
 Known publishers and subscribers:
 

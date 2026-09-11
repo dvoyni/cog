@@ -1,6 +1,10 @@
 package app
 
-import "github.com/dvoyni/cog/kernel"
+import (
+	"time"
+
+	"github.com/dvoyni/cog/kernel"
+)
 
 // QuitCmd requests that the system driver stop its main loop.
 type QuitCmd kernel.Command[QuitRequest, QuitResponse]
@@ -48,7 +52,16 @@ type TimeRequest struct {
 	// another. Something arming a per-tick observation under pause sets it, so
 	// that arms landing together describe one tick instead of taking one tick
 	// each. It is a tick-source behaviour before it is an agent-facing one.
+	//
+	// Joining is opportunistic on its own: it can only join a step that is
+	// still pending, and a rendered frame publishes the pending step as soon
+	// as it finds one. TimeHold is what makes it deterministic.
 	Join bool
+	// Hold is how long a TimeHold may stand before it expires by itself; zero
+	// asks for the driver's default. A driver caps it, and refuses anything
+	// above the cap rather than silently shortening it: a hold nobody ends is
+	// an engine nothing can step.
+	Hold time.Duration
 }
 
 // TimeResponse reports the tick source as this call left it. Every action
@@ -56,9 +69,10 @@ type TimeRequest struct {
 type TimeResponse struct {
 	// Paused reports whether update ticks are stopped.
 	Paused bool
-	// Changed reports whether this call changed the paused state. Pausing an
-	// already-paused engine is an ordinary answer with Changed false, not an
-	// error.
+	// Changed reports whether this call changed the state it asked to change:
+	// the paused state for TimePause, TimeResume and TimeStep, the hold for
+	// TimeHold and TimeRelease. Pausing an already-paused engine is an
+	// ordinary answer with Changed false, not an error.
 	Changed bool
 	// Stepped is how many ticks the step this call waited for published. Calls
 	// sharing one step all report that step's ticks, which is the point of
@@ -71,6 +85,21 @@ type TimeResponse struct {
 	// resets when a pause begins, so after a resume it reports the total for
 	// the pause that just ended.
 	Advanced int
+	// Tick is the number of the last update tick published, matching
+	// UpdateEvent.Tick. It is what correlates a time-control answer with
+	// whatever else describes a tick; it never resets.
+	Tick int64
+	// Held reports whether a hold currently stands, and HoldFor how much
+	// longer it may stand before expiring. A caller about to wait for a step
+	// adds HoldFor to its own deadline, so that a window somebody deliberately
+	// held open is not read as a stalled engine.
+	Held    bool
+	HoldFor time.Duration
+	// HoldExpired reports that the most recent hold ended on its deadline
+	// rather than being released. It stays true until the next hold begins,
+	// because the caller that needs to know is the one that comes back to a
+	// window it thought it still had.
+	HoldExpired bool
 }
 
 // Paused reports whether the engine's tick source is stopped. It is the
@@ -92,6 +121,25 @@ func Paused(k kernel.Executioner) bool {
 		return false
 	}
 	return state.Paused
+}
+
+// HoldRemaining reports how much longer a hold may keep a requested step from
+// being published. It is the other caller-side half of TimeCmd, for the
+// frame-bound work that is about to wait for a step: the wait that names a
+// stopped engine has to be the wait for a tick that never comes, and a window
+// somebody deliberately held open is not that. A caller adds this to its own
+// deadline rather than replacing it.
+//
+// Zero is the answer whenever no hold stands, and also whenever the engine
+// cannot be asked — the same safe direction Paused takes, since a caller that
+// does not extend its deadline fails on its own terms rather than waiting
+// indefinitely.
+func HoldRemaining(k kernel.Executioner) time.Duration {
+	state, err := k.ExecuteCommand[TimeCmd](TimeRequest{Action: TimeStatus})
+	if err != nil {
+		return 0
+	}
+	return state.HoldFor
 }
 
 // SetViewportCmd updates the Viewport resource with the current render target

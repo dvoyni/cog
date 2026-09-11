@@ -2,6 +2,7 @@ package wgpu
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sync"
 	"testing"
@@ -92,6 +93,30 @@ func (h *tickHarness) frame(dt float64) {
 	h.plugin.frameDtBits.Store(math.Float64bits(dt))
 	h.plugin.frameSeq.Add(1)
 	h.plugin.onUpdate(h.k, 0)
+}
+
+// runFrames drives frames from a goroutine of its own until the returned stop
+// is called, which is what the driver's loop does and what the join window
+// was always racing against: a test that only steps the clock by hand can
+// never see an arm lose that race.
+func (h *tickHarness) runFrames() (stop func()) {
+	done, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			h.frame(0.010)
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	return func() {
+		close(done)
+		<-stopped
+	}
 }
 
 func (h *tickHarness) recorded() []app.UpdateEvent {
@@ -381,5 +406,224 @@ func TestTickSource_ResumeReleasesAPendingStep(t *testing.T) {
 	}
 	if got := len(harness.recorded()); got != 0 {
 		t.Errorf("a step abandoned by a resume published %d ticks, want 0", got)
+	}
+}
+
+// A hold keeps the step window open across frames that would otherwise have
+// taken the batch, so arms landing over several frames still share one step.
+// This is the defect #259 came from, in the small: without the hold the
+// frames below consume the batch and every later arm binds to a later tick.
+func TestTickSource_HoldKeepsTheStepWindowOpenAcrossFrames(t *testing.T) {
+	harness := newTickHarness(t, tickTestConfig())
+
+	held := harness.control(app.TimeRequest{Action: app.TimeHold, Hold: 5 * time.Second})
+	if !held.Paused || !held.Changed || !held.Held {
+		t.Fatalf("hold reported %+v, want a paused engine holding the step window", held)
+	}
+
+	responses := make(chan app.TimeResponse, 3)
+	for range 3 {
+		go func() {
+			responses <- harness.control(app.TimeRequest{Action: app.TimeStep, Join: true})
+		}()
+	}
+	harness.waitSharing(3)
+
+	for range 10 {
+		harness.frame(0.010)
+	}
+	if got := len(harness.recorded()); got != 0 {
+		t.Fatalf("a held step published %d ticks, want none until the hold ends", got)
+	}
+
+	released := harness.control(app.TimeRequest{Action: app.TimeRelease})
+	if !released.Changed || released.Held {
+		t.Fatalf("release reported %+v, want the hold gone", released)
+	}
+	harness.frame(0.010)
+
+	joined := 0
+	for range 3 {
+		response := <-responses
+		if response.Stepped != 1 {
+			t.Errorf("an arm read back %d ticks, want the one step the hold kept open", response.Stepped)
+		}
+		if response.Joined {
+			joined++
+		}
+	}
+	if joined != 2 {
+		t.Errorf("%d arms joined the held step, want 2", joined)
+	}
+	if got := len(harness.recorded()); got != 1 {
+		t.Errorf("three arms under one hold produced %d ticks, want 1", got)
+	}
+}
+
+// A hold ends on its own deadline, so an agent that walks away cannot leave
+// an engine nothing can step - and the expiry is reported rather than left to
+// be inferred from a split.
+func TestTickSource_HoldExpiresByItself(t *testing.T) {
+	harness := newTickHarness(t, tickTestConfig())
+	harness.control(app.TimeRequest{Action: app.TimeHold, Hold: 50 * time.Millisecond})
+
+	done := make(chan app.TimeResponse, 1)
+	go func() { done <- harness.control(app.TimeRequest{Action: app.TimeStep, Join: true}) }()
+	harness.waitPending(1)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for len(harness.recorded()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the hold never expired and the step was never published")
+		}
+		harness.frame(0.010)
+		time.Sleep(time.Millisecond)
+	}
+
+	if response := <-done; response.Stepped != 1 {
+		t.Errorf("a step held until the hold expired reported %d ticks, want 1", response.Stepped)
+	}
+	status := harness.control(app.TimeRequest{Action: app.TimeStatus})
+	if status.Held || !status.HoldExpired {
+		t.Errorf("status reported %+v, want no hold standing and the expiry named", status)
+	}
+}
+
+// Resume is the way out of anything: it drops a hold with the pending step it
+// was keeping open, so an engine left held is one call from running again.
+func TestTickSource_ResumeDropsAHold(t *testing.T) {
+	harness := newTickHarness(t, tickTestConfig())
+	harness.control(app.TimeRequest{Action: app.TimeHold, Hold: 5 * time.Second})
+
+	done := make(chan app.TimeResponse, 1)
+	go func() { done <- harness.control(app.TimeRequest{Action: app.TimeStep, Join: true}) }()
+	harness.waitPending(1)
+
+	resumed := harness.control(app.TimeRequest{Action: app.TimeResume})
+	if resumed.Paused || resumed.Held {
+		t.Fatalf("resume reported %+v, want a running engine with no hold", resumed)
+	}
+	if response := <-done; response.Stepped != 0 {
+		t.Errorf("a step abandoned by a resume reported %d ticks, want 0", response.Stepped)
+	}
+
+	harness.frame(0.010)
+	if got := len(harness.recorded()); got != 1 {
+		t.Errorf("the frame after a resumed hold published %d ticks, want the frame clock's 1", got)
+	}
+}
+
+// A hold longer than the driver will honour is refused rather than quietly
+// shortened, and no hold begins: a caller told it has a minute, and given ten
+// seconds, would meet the difference as a split.
+func TestTickSource_HoldLongerThanTheCapIsRefused(t *testing.T) {
+	var ticks tickSource
+
+	changed, err := ticks.hold(time.Now(), maxHoldDuration+time.Second)
+	var tooLong ErrHoldTooLong
+	if !errors.As(err, &tooLong) {
+		t.Fatalf("an over-long hold reported %v, want ErrHoldTooLong", err)
+	}
+	if changed {
+		t.Error("a refused hold reported that it changed something")
+	}
+	if state := ticks.state(app.TimeResponse{}); state.Held {
+		t.Error("a refused hold began anyway")
+	}
+}
+
+// Releasing when nothing is held, and holding twice, are ordinary answers
+// with nothing changed rather than errors - the shape pause and resume
+// already use.
+func TestTickSource_HoldAndReleaseReportWhatTheyChanged(t *testing.T) {
+	harness := newTickHarness(t, tickTestConfig())
+
+	if response := harness.control(app.TimeRequest{Action: app.TimeRelease}); response.Changed {
+		t.Errorf("releasing with no hold reported %+v, want nothing changed", response)
+	}
+	harness.control(app.TimeRequest{Action: app.TimeHold, Hold: 5 * time.Second})
+	second := harness.control(app.TimeRequest{Action: app.TimeHold, Hold: 5 * time.Second})
+	if second.Changed || !second.Held {
+		t.Errorf("a second hold reported %+v, want the standing hold and nothing changed", second)
+	}
+	if released := harness.control(app.TimeRequest{Action: app.TimeRelease}); !released.Changed {
+		t.Errorf("release reported %+v, want the hold ended", released)
+	}
+}
+
+// Every published tick carries its own number, whether the frame clock
+// published it or a step did, and the count never restarts.
+func TestTickSource_NumbersEveryTick(t *testing.T) {
+	harness := newTickHarness(t, tickTestConfig())
+
+	harness.frame(0.010)
+	harness.control(app.TimeRequest{Action: app.TimePause})
+	done := make(chan app.TimeResponse, 1)
+	go func() { done <- harness.control(app.TimeRequest{Action: app.TimeStep, Steps: 3}) }()
+	harness.waitPending(3)
+	harness.frame(0.010)
+	<-done
+
+	updates := harness.recorded()
+	if len(updates) != 4 {
+		t.Fatalf("the run published %d ticks, want 4", len(updates))
+	}
+	for i, update := range updates {
+		if update.Tick != int64(i+1) {
+			t.Errorf("tick %d is numbered %d, want %d", i, update.Tick, i+1)
+		}
+	}
+	if status := harness.control(app.TimeRequest{Action: app.TimeStatus}); status.Tick != 4 {
+		t.Errorf("status reported tick %d, want the last published 4", status.Tick)
+	}
+}
+
+// The whole point, against a frame loop that keeps running underneath: three
+// arms, then four, under one hold each, repeated enough that an arm losing
+// the race to a frame would show up. The frames are what made the shipped
+// join opportunistic; the hold is what makes it decide.
+func TestTickSource_ArmsUnderAHoldShareOneTickAgainstARunningFrameLoop(t *testing.T) {
+	harness := newTickHarness(t, tickTestConfig())
+	// Paused before the loop starts, so every tick counted below is one
+	// somebody asked for rather than one the frame clock produced.
+	harness.control(app.TimeRequest{Action: app.TimePause})
+	stop := harness.runFrames()
+	defer stop()
+
+	const rounds = 30
+	published := 0
+	for round := range rounds {
+		for _, arms := range []int{3, 4} {
+			harness.control(app.TimeRequest{Action: app.TimeHold, Hold: 5 * time.Second})
+			responses := make(chan app.TimeResponse, arms)
+			for range arms {
+				go func() {
+					responses <- harness.control(app.TimeRequest{Action: app.TimeStep, Join: true})
+				}()
+			}
+			harness.waitSharing(int64(arms))
+			harness.control(app.TimeRequest{Action: app.TimeRelease})
+
+			joined := 0
+			for range arms {
+				response := <-responses
+				if response.Stepped != 1 {
+					t.Fatalf("round %d: one of %d arms read back %d ticks, want the 1 they share",
+						round, arms, response.Stepped)
+				}
+				if response.Joined {
+					joined++
+				}
+			}
+			if joined != arms-1 {
+				t.Fatalf("round %d: %d of %d arms joined, want all but the one that raised the step",
+					round, joined, arms)
+			}
+			published++
+			if got := len(harness.recorded()); got != published {
+				t.Fatalf("round %d: %d arms produced %d ticks in all, want %d",
+					round, arms, got, published)
+			}
+		}
 	}
 }

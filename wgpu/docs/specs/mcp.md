@@ -24,7 +24,9 @@ settle it.
 - [Vocabulary](#vocabulary) · [There is no clock to fake](#there-is-no-clock-to-fake)
 - [What pause stops: the tick, not the frame](#what-pause-stops-the-tick-not-the-frame)
 - [Resume banks nothing](#resume-banks-nothing) · [A step](#a-step)
-- [An arm joins a pending step](#an-arm-joins-a-pending-step)
+- [An arm joins a pending step](#an-arm-joins-a-pending-step) ·
+  [A hold decides it](#a-hold-decides-it)
+- [Every tick is numbered](#every-tick-is-numbered)
 - [Whose capability it is](#whose-capability-it-is) ·
   [The flag is an atomic](#the-flag-is-an-atomic)
 - [`wgpu_time`](#wgpu_time) · [What the loop buys](#what-the-loop-buys)
@@ -61,6 +63,13 @@ that constant (`anim/plugin.go:43`).
 So there is no engine time to distort, only a driver-local accumulator, and
 pause is the decision to stop feeding it. **No time scaling, no virtual clock,
 no `Time` resource.**
+
+> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).** `time.Now()` now appears
+> **twice**: the frame pacer, and a hold's deadline in `wgpu/tick.go` — see
+> [A hold decides it](#a-hold-decides-it). The conclusion is unchanged. A hold
+> measures how long an absent agent may keep the engine from stepping, never
+> how far the simulation has moved, so there is still no engine clock, no
+> `Dt` to distort and nothing to scale.
 
 Two limits follow, and both are stated as non-guarantees rather than left to be
 discovered:
@@ -189,6 +198,101 @@ against the current frozen frame and straddle two ticks. See
 **It is a tick-source behaviour before it is an agent-facing one**, so it
 belongs in the `app` and `wgpu` READMEs alongside pause and step, not only here.
 
+> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).**
+> This section shipped as written and **is not sufficient on its own**. The
+> join window is only as wide as the gap before the next rendered frame
+> consumes the batch: `request` joins only while a step is still pending, and
+> `take` — once per frame on the main thread — swaps the pending count to zero
+> and drops the batch. Measured against **feuds-26** on a real window, three
+> concurrent arms over three HTTP connections advanced the engine **two ticks,
+> eleven times out of eleven**; two arms paired four times in five. So the
+> rule is *opportunistic*, and this section's claim that it "makes the pairing
+> recipe work without any broker mechanism" holds only when the arms happen to
+> fit inside one ~16 ms gap. The deterministic half is
+> [A hold decides it](#a-hold-decides-it) below; the rule itself stays exactly
+> as written, as the behaviour for arms that simply arrive together.
+
+---
+
+## A hold decides it
+
+> **Added at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).**
+> Everything in this section is new. It is the second half of the rule above,
+> and it exists because the first half turned out to be a race against the
+> frame clock rather than a decision.
+
+**A hold stops a frame from consuming the pending step, so the step window
+belongs to the agent rather than to the frame clock.**
+
+`wgpu_time` gains two actions. `hold` opens the window, `release` closes it,
+and `take` declines the batch it finds while one stands. The recipe becomes
+*pause, hold, arm everything to be paired, release*, and the pairing stops
+depending on whether several requests fit inside one frame's gap.
+
+It is **one mechanism, spelled as two actions on the capability that already
+owns pause and step**, which is where the state it acts on already lives.
+No new capability, no package learning about another, and `mcp` and
+`mcpserver` learn nothing: a hold is a tick-source behaviour with an
+agent-facing spelling, exactly as a step is.
+
+Four properties, each load-bearing:
+
+- **A hold carries a deadline and expires on its own.** An agent that walks
+  away must not leave a game nothing can step. Default **1 s**, maximum
+  **10 s** — the same ten seconds every other span in this family is capped
+  at, for the same reason.
+- **A longer one is refused, not shortened.** A caller told it holds the
+  window for a minute and quietly given ten seconds meets the difference as a
+  split. The refusal is a typed domain error in `wgpu/err.go` mapped to
+  `mcp.Unavailable` in the provider, which is this family's error shape.
+- **Expiry is reported.** `holdExpired` stands on every answer until the next
+  hold begins, because the caller who needs to know is the one coming back to
+  a window it thought it still had.
+- **`resume` drops a hold**, along with the pending step it was keeping open,
+  so resume remains the one call that gets an engine moving again whatever
+  state it was left in.
+
+And one consequence that has to be said out loud, because getting it wrong
+turns the mechanism into the failure:
+
+> **A wait for a step is extended by whatever a hold may still cost.** The
+> deadline that names a stalled engine is the wait for a tick that can never
+> come, and a window somebody deliberately held open is not that. The
+> snapshots' waits and `wgpu_time step`'s alike read `app.HoldRemaining` and
+> **add** it to their own floor.
+
+The deadline is the tick source's only wall-clock read, and it does not
+reintroduce the engine clock
+[There is no clock to fake](#there-is-no-clock-to-fake) rules out: it measures
+how long an absent agent may keep the engine from stepping, never how far the
+simulation has moved. `Dt` is still a constant and there is still nothing to
+scale. That section's count of `time.Now()` in the module goes from one to
+two: the frame pacer, and this.
+
+---
+
+## Every tick is numbered
+
+> **Added at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).**
+> Also new. The shipped design gave an agent no way to tell a pairing from a
+> split, which is what made the defect above invisible from the outside.
+
+**`app.UpdateEvent` carries a `Tick`: a count of the ticks published, from
+one, never reset.** The driver numbers every tick it publishes — one atomic
+add on the frame path — and the number rides the event, so anything recorded
+*inside* a tick knows which tick it was without asking the tick source
+afterwards, by which time the answer has moved.
+
+It reaches an agent as one field on `gfx.SnapshotView`, which `gfx_frame`,
+`canvas_draws` and `ui_layout` all embed: **one field, not three**, because a
+tick is the same tick in all of them. `wgpu_time` reports the current one on
+every answer, so a snapshot and a time-control call line up.
+
+This is what makes the hold *checkable* rather than merely asserted, and it is
+worth having whatever else changes: `stepped` and `joined` never were
+evidence, since two snapshots both reporting a step may be one tick apart —
+which is precisely what was measured.
+
 ---
 
 ## Whose capability it is
@@ -243,16 +347,29 @@ belongs to the engine; the tick source belongs to the driver alone.
 
 ```go
 type TimeRequest struct {
-	Action string `json:"action"`          // pause | resume | step | status
+	Action string `json:"action"`          // pause | resume | step | hold | release | status
 	Steps  int    `json:"steps,omitempty"` // for step; default 1, max 600
+	Ms     int    `json:"ms,omitempty"`    // for hold; default 1000, max 10000
 }
 
 type TimeResponse struct {
-	Paused   bool `json:"paused"`
-	Stepped  int  `json:"stepped"`  // ticks advanced by this call
-	Advanced int  `json:"advanced"` // total ticks advanced since the pause began
+	Paused      bool  `json:"paused"`
+	Stepped     int   `json:"stepped"`  // ticks advanced by this call
+	Advanced    int   `json:"advanced"` // total ticks advanced since the pause began
+	Tick        int64 `json:"tick"`     // number of the last tick published
+	Held        bool  `json:"held"`
+	HoldMs      int   `json:"holdMs,omitempty"`      // how much longer a hold may stand
+	HoldExpired bool  `json:"holdExpired,omitempty"` // the last hold ran out
 }
 ```
+
+> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).**
+> The shipped shape had four actions and three answers. `hold` and `release`
+> are the two new actions, `ms` the argument the first takes, and `tick`,
+> `held`, `holdMs` and `holdExpired` the four new answers — see
+> [A hold decides it](#a-hold-decides-it) and
+> [Every tick is numbered](#every-tick-is-numbered). Nothing was removed, and
+> it is still one tool.
 
 `mcp.Func`, because `step` waits. The resulting state comes back on **every**
 call, including `status`.
@@ -293,24 +410,40 @@ outcome the agent reads and moves past.
 
 Reproduced in full, per the house style, so it is reviewed as prompt text:
 
+> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).** The clause about arming
+> snapshots together was one sentence, and it was not true of the shipped
+> engine. It is now a paragraph of its own, naming `hold` and the `tick` field
+> an agent checks the pairing with.
+>
 > Stop, start or single-step the game's update loop. `pause` stops update ticks;
 > the window keeps drawing the last completed frame, stays responsive and can
 > still be captured, so a paused game does not look hung. `step` advances
 > exactly the number of ticks you ask for and implies pause. `resume` returns to
 > real time from exactly where it stopped — no time is banked and nothing
-> catches up. `status` just reports.
+> catches up. `status` just reports, and every answer names the current `tick`.
 >
 > Use this to take an observation that nothing moved underneath. Paused, two
 > captures are identical, and `key_down`, `step 1`, `key_up`, `step 1` holds a
 > key for exactly one tick — something a running engine cannot do. Snapshots
 > (`canvas_draws`, `ui_layout`, `gfx_frame`) each need a tick, so while paused
-> they perform one step themselves and say so; arming them together shares a
-> single step, and `gfx_capture` should come last because it costs no tick.
+> they perform one step themselves and say so.
+>
+> To make several snapshots describe *one* tick, call `hold` first, in the same
+> batch of parallel calls as the snapshots and listed before them. A hold keeps
+> the step they share open until you `release` it or until `ms` runs out
+> (default 1000, maximum 10000), instead of letting the next drawn frame close
+> it — without one, whether the calls pair depends on whether they all arrive
+> inside the same ~16 ms gap, and they often do not. Then check it: every
+> snapshot reports the `tick` it describes, and they paired only if that number
+> is the same in all of them. Take `gfx_capture` last, after the snapshots have
+> answered, because it costs no tick and so shows whatever the shared step
+> produced. If a hold runs out before you release it, the next answer here says
+> `holdExpired`.
 >
 > This stops cog's tick, and only that. Animation driven by ticks freezes;
 > anything a game times by its own wall-clock does not. There is no slow motion.
 > Nothing resumes the game when you disconnect — it stays paused until something
-> resumes it.
+> resumes it, and a hold you walk away from expires by itself.
 
 ---
 
@@ -354,6 +487,15 @@ The mechanism is one branch inside a function that already exists.
 
 ## Required wgpu changes
 
+> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).** Three additions to the
+> list below, all of them consequences of the two new sections above: the tick
+> counter and its `app.UpdateEvent.Tick` field; the hold state and its
+> deadline on the tick source, with `TimeHold`/`TimeRelease` on
+> `app.TimeAction` and `ErrHoldTooLong` in `wgpu/err.go`; and
+> `app.HoldRemaining`, the caller-side seam every wait for a step reads.
+> `gfx.SnapshotView` gains `Tick`, and `gfx`, `canvas` and `ui` carry it out
+> of the tick their snapshot was recorded in.
+
 **`wgpu/plugin.go`**
 
 - Atomics beside `alpha` and `frameSeq`: `paused`, `pendingSteps`, and the
@@ -383,6 +525,15 @@ The mechanism is one branch inside a function that already exists.
 - `step(5)` publishes five ticks in one `onUpdate`, each with `Last: true`.
 - Two snapshot arms landing while one step is pending produce **one** tick, and
   both snapshots report the same tick.
+- **Three arms, then four, under one hold, against a frame loop that keeps
+  running underneath them, repeated enough to catch a race** — one tick each
+  time, and every snapshot reporting the same `tick`. A hand-stepped test
+  cannot see this failure at all: the frame is what takes the batch.
+- A hold expires by itself, publishes the step it was keeping open rather than
+  stranding its arms, and the expiry is reported.
+- `resume` drops a hold along with its pending step.
+- A hold longer than the cap is refused and no hold begins.
+- A hold is not charged against a snapshot's own stall deadline.
 - A capture armed under pause resolves with no tick, and twice in a row gives
   byte-identical files. This is the assertion that documents the whole
   capture/snapshot asymmetry.

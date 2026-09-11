@@ -333,9 +333,11 @@ const frameDescription = "What the renderer was told to do for one frame: every 
 	"Blocks until the next tick has been recorded, so it reflects anything you did before " +
 	"calling it. Filter by `pass` to cut a busy frame down. Pass `path` to write the JSON to a " +
 	"file instead of returning it inline. While the game is paused this performs one step to " +
-	"have something to record, and says so in the response — to describe one moment, arm this " +
-	"together with `canvas_draws` and `ui_layout`, which share that single step, and take " +
-	"`gfx_capture` last."
+	"have something to record, and says so in the response.\n\n" +
+	"Every response names the `tick` it describes. To describe one moment, call `wgpu_time " +
+	"hold` first and arm this together with `canvas_draws` and `ui_layout`, which then share " +
+	"that one step; they paired only if all three report the same `tick`. Take `gfx_capture` " +
+	"last, because it costs no tick and so shows whatever that step produced."
 
 // FrameRequest asks what the renderer was told to do for one tick.
 type FrameRequest struct {
@@ -394,7 +396,7 @@ func frameSnapshot(k kernel.Executioner, request FrameRequest) (FrameResponse, e
 	// began after it. Joining a step another arm already raised is what makes
 	// three snapshots armed together describe one tick instead of three.
 	if paused {
-		if response.Stepped, response.Joined, err = stepForSnapshot(k); err != nil {
+		if response.Stepped, response.Joined, err = stepForSnapshot(k, snapshotWait(k)); err != nil {
 			return FrameResponse{}, err
 		}
 	}
@@ -406,7 +408,7 @@ func frameSnapshot(k kernel.Executioner, request FrameRequest) (FrameResponse, e
 		if snapshot.Err != nil {
 			return FrameResponse{}, frameRefusal(snapshot.Err)
 		}
-		response.FrameView = snapshot.Frame
+		response.FrameView, response.Tick = snapshot.Frame, snapshot.Tick
 	case <-deadline.C:
 		return FrameResponse{}, frameRefusal(nil)
 	case <-k.Context().Done():
@@ -424,12 +426,21 @@ func frameSnapshot(k kernel.Executioner, request FrameRequest) (FrameResponse, e
 	return response, nil
 }
 
+// snapshotWait is how long this snapshot's step may take: the deadline that
+// names a stopped engine, plus however long a hold may keep the step window
+// open. A hold is somebody's deliberate decision to postpone the tick, so
+// charging it against the stall deadline would turn the mechanism that makes
+// pairing reliable into the thing that breaks it.
+func snapshotWait(k kernel.Executioner) time.Duration {
+	return frameDeadline + app.HoldRemaining(k)
+}
+
 // stepForSnapshot runs the one tick a paused engine owes a snapshot, or joins
 // the one another arm already raised. Refusing instead would make snapshots
 // unreachable under pause, since a blocking arm cannot ask the agent to step
 // for it; waiting instead would be a guaranteed deadline expiry.
-func stepForSnapshot(k kernel.Executioner) (stepped, joined bool, err error) {
-	ctx, cancel := context.WithTimeout(k.Context(), frameDeadline)
+func stepForSnapshot(k kernel.Executioner, wait time.Duration) (stepped, joined bool, err error) {
+	ctx, cancel := context.WithTimeout(k.Context(), wait)
 	defer cancel()
 	answer, err := k.WithContext(ctx).ExecuteCommand[app.TimeCmd](app.TimeRequest{
 		Action: app.TimeStep, Steps: 1, Join: true,
@@ -437,9 +448,9 @@ func stepForSnapshot(k kernel.Executioner) (stepped, joined bool, err error) {
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return false, false, mcp.Unavailable{Reason: fmt.Sprintf(
-				"the paused game published no tick within %s — the window may be minimised or "+
-					"the game may have stopped drawing; the step will run when it draws again",
-				frameDeadline)}
+				"the paused game published no tick within %s — the window may be minimised, the "+
+					"game may have stopped drawing, or a hold may still be open; the step will "+
+					"run when the window closes", wait)}
 		}
 		return false, false, frameRefusal(err)
 	}

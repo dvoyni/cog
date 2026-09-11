@@ -609,6 +609,15 @@ between ticks rather than stale (`defer write.reset()`, `defer frame.clear()`).
   pending, and says so in its response.** There is no honest way to produce one
   without running a tick, and refusing would make snapshots unreachable under
   pause, since a blocking arm cannot ask the agent to step for it.
+- **Every snapshot names the tick it describes.** *Stepped* and *joined* say
+  what this call did; `tick` says which moment the document is of, which is
+  the only thing two snapshots can be compared on. See
+  [Pairing a moment](#pairing-a-moment).
+
+> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).** The third bullet is new, and
+> the second one's "or joins one already pending" is weaker than it reads: the
+> join only reaches a step that is still pending, which the next drawn frame
+> ends. `wgpu_time hold` is what holds it open.
 
 ---
 
@@ -621,34 +630,58 @@ a batch capability.
 
 ```
 wgpu_time pause
+wgpu_time hold                         (the step window stops belonging to the frame clock)
 canvas_draws + ui_layout + gfx_frame   (parallel arms, coalesced onto ONE step -> tick N+1)
+wgpu_time release                      (or let the hold expire)
+                                       -> all three report tick: N+1, or they did not pair
 gfx_capture                            (no tick; the frozen frame IS N+1)
 ```
 
 **Capture goes last, always.** It costs no tick, so it shows whatever the last
 step produced and can never be the thing that decides the moment. Armed first,
 it resolves against the *current* frozen frame and straddles two ticks, with
-neither response saying so.
+neither response saying so. It is also why the capture needs no tick number of
+its own: under pause it photographs whatever the shared step produced.
 
-The first line is only true because of one driver rule: **arming a snapshot
-while a step is pending joins that step rather than requesting another**. Read
-per-arm, three concurrent arms would be three steps on three different ticks —
-the precise opposite of what arming them together is for. The rule is a `wgpu`
-tick-source behaviour before it is an agent-facing one; see
+The middle line rests on one driver rule: **arming a snapshot while a step is
+pending joins that step rather than requesting another**. Read per-arm, three
+concurrent arms would be three steps on three different ticks — the precise
+opposite of what arming them together is for. The rule is a `wgpu` tick-source
+behaviour before it is an agent-facing one; see
 [wgpu/docs/specs/mcp.md](../../../wgpu/docs/specs/mcp.md).
+
+> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).**
+> The recipe shipped without the hold and the check, and **it did not describe
+> one tick**. Driven against **feuds-26** on a real window and GPU over
+> streamable HTTP, three concurrent arms advanced the engine **two ticks,
+> eleven attempts out of eleven**; two arms paired four times in five. The
+> join rule is real but *opportunistic*: the window is only as wide as the gap
+> before the next drawn frame consumes the batch, and three calls over three
+> connections do not reliably fit inside one.
+>
+> Two lines are therefore new. **`wgpu_time hold`** stops a frame from
+> consuming the step until `release` or until the hold's own deadline, so the
+> window belongs to the agent; and **every snapshot now reports the `tick` it
+> describes**, so the agent confirms the pairing from the responses instead of
+> trusting timing. The non-guarantee below is reworded to match: what "under
+> pause they provably do" was asserting is true only under a hold, and it is
+> now checkable either way rather than provable by argument.
 
 And the non-guarantee, stated in the same voice as every other one in this
 family:
 
-> Arms issued in parallel against a running engine usually describe one tick,
-> and may not. Under pause they provably do.
+> Arms issued in parallel usually describe one tick, and may not. Under pause
+> **and a hold** they do, and every response names the tick it describes, so
+> an agent never has to take it on trust.
 
 Two arms issued as parallel tool calls arrive within a millisecond of each other
 and will usually land inside one ~16 ms inter-tick gap. But that depends on the
-client choosing to parallelise, which no spec requires and cog cannot. Silence
-here is the failure mode that matters: an agent comparing a capture against a
-snapshot it believes is simultaneous will misread one tick of drift as a bug in
-the game.
+client choosing to parallelise, which no spec requires and cog cannot — and,
+measured, three arms over three connections usually do not. Silence is what
+made this the failure mode that mattered: an agent comparing a capture against
+a snapshot it believes is simultaneous would misread one tick of drift as a bug
+in the game, and had no field to check. The `tick` field is the end of the
+silence; the hold is the end of the drift.
 
 ---
 
@@ -768,6 +801,15 @@ game, so the whole tool is not read-only; `status` says it only reports in its
 description. Per-action approval annotation is out of scope for this effort —
 it would need vocabulary here and in the broker, which
 [#211](https://github.com/dvoyni/cog/issues/211) §12 rules out.
+
+> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).** `wgpu_time` has six actions
+> rather than four: `hold` and `release` join it so that several snapshots can
+> be made to describe one tick — see
+> [Pairing a moment](#pairing-a-moment). The row is unchanged in every column.
+> The annotation question in particular does not reopen: a capability is
+> `mcp.ReadOnly()` or it is not, `hold` and `release` change nothing about
+> that, and the table still has eight tools in it. **The broker learned
+> nothing**, which was the constraint the fix had to respect.
 
 Eight tools, seven of them one per question an agent actually asks. The set is
 small on purpose:

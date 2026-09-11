@@ -473,7 +473,9 @@ returning it inline.
 
 Textures, parameters and materials are rendered through the view types `gfx`
 declares, so one value reaches an agent in one shape whichever tool showed it,
-and the three coordinate sizes come from `gfx.SnapshotView`. The full contract
+and the three coordinate sizes come from `gfx.SnapshotView` — as does `tick`,
+the number of the tick this snapshot describes, which is how an agent confirms
+that this and `ui_layout` describe one moment rather than two. The full contract
 is in [docs/specs/mcp.md](docs/specs/mcp.md), and the capability that document
 specifies is implemented.
 

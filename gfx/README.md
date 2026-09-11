@@ -206,12 +206,20 @@ the two behave differently: under pause `gfx_frame` performs exactly one step,
 or joins one another arm already raised, and says so in its response, while a
 capture costs no tick at all.
 
+Every snapshot also **names the tick it describes**. `stepped` and `joined`
+were never evidence on their own — two snapshots both reporting a step may be
+one tick apart — so the response carries `tick`, taken out of the tick itself
+rather than read off the tick source afterwards. Snapshots armed together
+either agree on that number or they have split, and the agent can see which.
+Making them agree is `wgpu_time hold`'s job; saying whether they did is this
+field's.
+
 ### The shared view types
 
 gfx also declares the vocabulary every cog snapshot shares, in
 [`view.go`](view.go): `ParameterView`, `TextureView`, `MaterialView`, and
-`SnapshotView` — the three coordinate sizes plus the step fields every snapshot
-response carries. `canvas` and `ui` embed them, so one value reaches an agent in
+`SnapshotView` — the three coordinate sizes, the tick the snapshot describes,
+and the step fields, all of which every snapshot response carries. `canvas` and `ui` embed them, so one value reaches an agent in
 one shape whichever tool showed it.
 
 They exist because every gfx descriptor has entirely unexported fields, so

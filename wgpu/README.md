@@ -86,25 +86,51 @@ driver implements it.
   waiting on that step reads back the same ticks. Read per-caller, three arms
   landing together would be three steps on three different ticks, which is the
   opposite of what arming them together is for. An explicit step never joins.
+- **Joining alone is opportunistic; a hold is what decides it.** There is a
+  pending step to join only until the next rendered frame takes the batch, so
+  whether several arms pair depends on whether they all arrive inside one
+  frame's gap — which, measured against a real game, three calls over three
+  connections do not. `TimeHold` makes `take` decline the batch it finds, so
+  the window belongs to whoever took the hold rather than to the frame clock,
+  and `TimeRelease` gives it back. The hold carries a deadline (default 1 s,
+  maximum 10 s) and expires by itself, so an absent caller cannot leave an
+  engine nothing can step; a longer one is refused rather than shortened, and
+  an expiry is reported on the next answer rather than left to be inferred
+  from a split. It is the one wall-clock deadline in the tick source, and it
+  measures an absent caller rather than simulation time.
 - **Resuming with a step still pending abandons it** and releases its caller,
   rather than leaving somebody waiting on a tick the frame clock will never
-  publish; the caller reads back zero ticks stepped.
+  publish; the caller reads back zero ticks stepped. A hold goes the same way,
+  so resume is always the way out of whatever state an engine was left in.
+- **Every published tick is numbered**, from one, never reset, one atomic add
+  on the frame path. The number rides `app.UpdateEvent.Tick` so that anything
+  recorded inside a tick can say which tick it describes — which is what turns
+  "these snapshots pair" from a claim into something an agent checks.
 
 ## Offered To An Agent
 
 `wgpu` implements `mcp.Provider` and offers one capability, rendered as the
-tool `wgpu_time`: `pause`, `resume`, `step` and `status` over `app.TimeCmd`,
-with the resulting state on every answer. It is an `mcp.Func` rather than an
-`mcp.Command` because a step waits for a frame and so carries its own deadline
-(5s), and because the action is validated before anything is armed.
+tool `wgpu_time`: `pause`, `resume`, `step`, `hold`, `release` and `status`
+over `app.TimeCmd`, with the resulting state on every answer. It is an
+`mcp.Func` rather than an `mcp.Command` because a step waits for a frame and
+so carries its own deadline (5s), and because the action is validated before
+anything is armed.
 
 - `step` is capped at **600 ticks** — ten seconds of simulation — so the window
   in which a request can be created and then orphaned by its own deadline is
-  bounded.
+  bounded. A `hold` is capped at **10 s** on the same reasoning and with the
+  same figure, and defaults to 1 s.
+- `hold` and `release` are what make several snapshots describe one tick: hold
+  first, arm the snapshots, release. Every answer also names the current
+  `tick`, which is the number those snapshots report, so an agent confirms the
+  pairing from the responses rather than from timing.
+- A step's own wait, and each snapshot's, is **extended by whatever a hold may
+  still cost**. A window somebody deliberately held open is not a stalled
+  engine, and the deadline that names a stall must not be spent on it.
 - Asking for a state the engine is already in (`pause` while paused, `resume`
-  while running) is an `mcp.Unavailable` the agent reads and moves past, not an
-  error.
-- The capability is **not** `mcp.ReadOnly()`: three of its four actions change
+  while running, `hold` while held, `release` with nothing held) is an
+  `mcp.Unavailable` the agent reads and moves past, not an error.
+- The capability is **not** `mcp.ReadOnly()`: all but one of its actions change
   the game. `status` is the read-only one, and MCP annotates a tool rather than
   an argument, so the honest annotation for the tool is the acting one.
 - The provider offers it whether or not a broker is composed, and nothing

@@ -48,6 +48,14 @@ _Avoid_: System plugin
 **Tick source**:
 What decides when an update tick is published — the driver's frame clock while running, or an explicit step request while paused. Rendering is not a tick source: a paused engine keeps drawing the last completed frame.
 
+**Tick number**:
+Which tick, counted from the engine's first and never reset. It is what names the moment something recorded inside a tick describes, so that two such records can be shown to describe one tick rather than assumed to. It is not a frame number: a frame may publish several ticks or none.
+_Avoid_: Frame number, timestamp
+
+**Hold**:
+A deliberate stop on the publication of a pending step, so that requests arriving over several frames still share one tick. It carries a deadline and expires by itself, because an engine nothing can step is worse than a window that closed early. Without one, sharing a step is opportunistic: the window is only as wide as the gap before the next drawn frame.
+_Avoid_: Lock, freeze, barrier; a Hold does not stop the tick — Pause does
+
 **Event publication**:
 One delivery of an event value to its subscribers. Separate publications may execute concurrently.
 
@@ -128,7 +136,7 @@ _Avoid_: Sequence, film, recording, video
 The transfer of a rendered texture from GPU memory into CPU memory, which a Capture is built on. It is renderer vocabulary and belongs to gfx: a Provider offers Captures, and only gfx and its Backend speak of readback.
 
 **Snapshot**:
-One tick's recorded declarations, rendered while they are still alive. It is not a copy of a queue: no queue outlives the tick that filled it, so a Snapshot is produced inside one and shaped by the request that asked for it. A Capture is the pixels; a Snapshot is what produced them, and the two are meant to name one moment.
+One tick's recorded declarations, rendered while they are still alive. It is not a copy of a queue: no queue outlives the tick that filled it, so a Snapshot is produced inside one and shaped by the request that asked for it. It carries the Tick number of the tick it was produced in, so which moment it describes is something an Agent reads rather than infers. A Capture is the pixels; a Snapshot is what produced them, and the two are meant to name one moment.
 _Avoid_: Dump, inspection, capture
 
 **Synthetic input**:

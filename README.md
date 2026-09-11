@@ -64,8 +64,9 @@ error handling.
     meshes, punctual lights, and debug shapes over gfx.
 - [`ui`](ui/README.md): immediate-mode layout, interaction, canvas-backed visual
     processing, and a snapshot of what layout resolved.
-- [`wgpu`](wgpu/README.md): window, input, timing with pause and step, and
-    WebGPU system driver.
+- [`wgpu`](wgpu/README.md): window, input, timing with pause, step and a hold
+    that makes several observations describe one tick, and WebGPU system
+    driver.
 - [`mcp`](mcp/README.md): the agent-facing extension point — typed capabilities
     a plugin offers. No implementation.
 - [`mcpserver`](mcpserver/README.md): the broker that collects capabilities from

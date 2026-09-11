@@ -37,4 +37,16 @@ const (
 	// TimeStep publishes TimeRequest.Steps update ticks and implies TimePause:
 	// stepping a running engine pauses it rather than being refused.
 	TimeStep
+	// TimeHold keeps the step window open until TimeRelease or until
+	// TimeRequest.Hold runs out, so that steps requested over several frames
+	// still publish as one tick. It implies TimePause for the reason TimeStep
+	// does: holding a running engine is meaningless.
+	//
+	// Without it the window is only as wide as the gap before the next
+	// rendered frame, and whether two requests share a tick depends on
+	// whether they both fit inside it.
+	TimeHold
+	// TimeRelease ends a hold early. The step the hold was keeping open
+	// publishes on the next frame, as it would have without the hold.
+	TimeRelease
 )

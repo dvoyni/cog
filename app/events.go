@@ -14,6 +14,13 @@ type UpdateEvent struct {
 	// current frame, so subscribers can do once-per-frame work (e.g. recording
 	// draws) on the latest simulation state instead of every step.
 	Last bool
+	// Tick numbers this tick within the engine's run, counting from one. It
+	// is what names the moment something recorded inside a tick describes, so
+	// that two things recorded in one tick can be shown to describe one tick
+	// rather than merely claimed to. A driver numbers every tick it
+	// publishes, stepped or not, and never resets the count; zero means the
+	// driver does not number ticks at all.
+	Tick int64
 }
 
 // RenderEvent is the per-frame render event. A driver should publish it once per

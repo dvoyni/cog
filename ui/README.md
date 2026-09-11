@@ -510,7 +510,9 @@ Rects are in viewport units. `path` is optional and writes the JSON to a file
 instead of returning it inline, which a dozen-element frame rarely needs. The
 three coordinate sizes come from `gfx.SnapshotView`, the logical viewport among
 them — the value whose absence is silent on a 1:1 display and breaks
-find-the-button-click-the-button on anything else.
+find-the-button-click-the-button on anything else. `tick` comes from there too:
+it names the tick this layout describes, so the pairing with `canvas_draws`
+that this capability exists for is one an agent checks rather than assumes.
 
 There is no overlay, and no capability writes content into the game's frame;
 `ui.Overlay` is the layout container and nothing else. The full contract, and

@@ -356,8 +356,22 @@ Reproduced in full, per the house style, so it is reviewed as prompt text:
 > Blocks until the next tick has been processed, so it reflects anything you did
 > before calling it. Pass `path` to write the JSON to a file instead of
 > returning it inline. While the game is paused this performs one step, and says
-> so in the response; arm it together with `canvas_draws` and `gfx_frame` to
-> describe one moment, and take `gfx_capture` last.
+> so in the response, along with the `tick` it describes. To describe one
+> moment, call `wgpu_time hold` first and arm this together with `canvas_draws`
+> and `gfx_frame`, which then share that one step; they paired only if all three
+> report the same `tick`. Take `gfx_capture` last, because it costs no tick and
+> so shows whatever that step produced.
+
+> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).**
+> Everything after "and says so in the response" is new. As shipped the prose
+> said *"arm it together with `canvas_draws` and `gfx_frame` to describe one
+> moment"*, which an agent could follow and still get two ticks: sharing the
+> step is opportunistic without a `wgpu_time hold`, and nothing in the response
+> said which tick it got. `gfx.SnapshotView` now carries `tick` — see
+> [gfx §The view types](../../../gfx/docs/specs/mcp.md#the-view-types) and
+> [wgpu §A hold decides it](../../../wgpu/docs/specs/mcp.md#a-hold-decides-it).
+> This is the capability the pairing was worth most to: a ui bug is read by
+> putting `ui_layout` beside `canvas_draws` from the same moment.
 
 ---
 

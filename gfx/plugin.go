@@ -147,8 +147,8 @@ func (p *Plugin) presentOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]
 			write = access.GetWrite[*OpQueue]()
 			ready = access.GetWrite[*readyList]()
 			resources = access.GetRead[*ResourceQueue]()
-		}, func(kernel.Kernel, app.UpdateEvent) error {
-			p.snapshots.record(write.Get(), resources.Get())
+		}, func(_ kernel.Kernel, event app.UpdateEvent) error {
+			p.snapshots.record(write.Get(), resources.Get(), event.Tick)
 			present(write, ready)
 			// Bound beside the queue swap, so the capture rides the ready slot
 			// rather than one particular queue.

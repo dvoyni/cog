@@ -80,8 +80,8 @@ func (p *Plugin) snapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent
 	var processorResource kernel.Read[*processor]
 	return func(access kernel.ResourceAccess) {
 			processorResource = access.GetRead[*processor]()
-		}, func(kernel.Kernel, app.UpdateEvent) error {
-			p.snapshots.record(processorResource.Get())
+		}, func(_ kernel.Kernel, event app.UpdateEvent) error {
+			p.snapshots.record(processorResource.Get(), event.Tick)
 			return nil
 		}
 }

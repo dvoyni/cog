@@ -360,6 +360,24 @@ Not `mcp`, which is the contract leaf and must never learn what a texture is;
 and not each package separately, which would show the agent one value in two
 shapes across two tools.
 
+> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).**
+> `SnapshotView` — shipped as the three coordinate sizes plus `stepped` and
+> `joined` — gains **`tick`**, the number of the update tick the snapshot
+> describes. It belongs here, on the view `gfx_frame`, `canvas_draws` and
+> `ui_layout` all embed, for the same reason everything else does: **one
+> field, not three**, because a tick is the same tick in all of them.
+>
+> It is not a nicety. `stepped` and `joined` are what the shipped design
+> offered an agent to check a pairing with, and neither is evidence: two
+> snapshots both reporting a step may be one tick apart, which is what
+> [#259](https://github.com/dvoyni/cog/issues/259) measured against a real game. The tick number is what turns
+> "these describe one moment" from a claim into something the agent reads off
+> the responses. It costs the render path one atomic add — the driver numbers
+> every tick it publishes and the number rides `app.UpdateEvent` — and it is
+> carried out of the tick that produced the snapshot rather than asked for
+> afterwards, when the tick source has already moved on. See
+> [wgpu §Every tick is numbered](../../../wgpu/docs/specs/mcp.md#every-tick-is-numbered).
+
 A `MarshalJSON` on each descriptor implemented by `unsafe`-casting to a mirror
 struct with public fields was proposed and **rejected on four counts**:
 
@@ -405,8 +423,22 @@ mirror throws away.
 > before calling it. Filter by `pass` to cut a busy frame down. Pass `path` to
 > write the JSON to a file instead of returning it inline. While the game is
 > paused this performs one step to have something to record, and says so in the
-> response — to describe one moment, arm this together with `canvas_draws` and
-> `ui_layout`, which share that single step, and take `gfx_capture` last.
+> response.
+>
+> Every response names the `tick` it describes. To describe one moment, call
+> `wgpu_time hold` first and arm this together with `canvas_draws` and
+> `ui_layout`, which then share that one step; they paired only if all three
+> report the same `tick`. Take `gfx_capture` last, because it costs no tick and
+> so shows whatever that step produced.
+
+> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).**
+> The second paragraph above is new, and it replaces one clause of the first.
+> As shipped that clause read *"to describe one moment, arm this together with
+> `canvas_draws` and `ui_layout`, which share that single step, and take
+> `gfx_capture` last"* — which was an instruction an agent could follow and
+> still get two ticks, because sharing the step is opportunistic without a
+> `wgpu_time hold`, and nothing in the response said which tick it got. The
+> prose now names the hold and the check.
 
 ---
 
@@ -418,7 +450,16 @@ behave differently from each other, and an agent holding both will notice.
 | | needs | under pause |
 | --- | --- | --- |
 | `gfx_capture` | a render | served from the next render, **no tick**; two are identical; `amount > 1` refused |
-| `gfx_frame` | a tick | performs **one step**, or joins one already pending, and reports it |
+| `gfx_frame` | a tick | performs **one step**, or joins one already pending, and reports it — and names the tick |
+
+> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).** Two additions to the second
+> row. Joining a pending step is *opportunistic* on its own — the window is
+> only as wide as the gap before the next drawn frame — so a `wgpu_time hold`
+> is what makes several arms share one step reliably; and the response names
+> the `tick` it describes, so a split is visible rather than silent. A
+> capture still costs no tick, which is why it goes last and why it needs no
+> tick number of its own: under pause it photographs whatever the shared step
+> produced.
 
 The asymmetry is a fact about the data rather than a choice: pixels sit in the
 backend regardless, while the gfx queue is swapped away every tick and canvas's

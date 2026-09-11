@@ -409,6 +409,31 @@ func TestAFrameSnapshotJoiningAPendingStepSaysThatToo(t *testing.T) {
 	}
 }
 
+// A snapshot names the tick it describes, carried out of the tick itself
+// rather than read off the tick source afterwards, where it would already
+// have moved on. It is the field that makes a pairing checkable rather than
+// merely claimed: two responses agree on it, or they describe two moments
+// and say so.
+func TestAFrameSnapshotNamesTheTickItDescribes(t *testing.T) {
+	rig := newCaptureRig(t)
+	rig.clock.paused.Store(true)
+	rig.clock.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
+		k.PublishEvent(app.UpdateEvent{Last: true, Tick: 97}).Wait()
+		return app.TimeResponse{Paused: true, Stepped: 1}, nil
+	})
+	frozen := recordRaw(t, rig.k)
+	frozen.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Label: "shared"})
+
+	response, err := frameSnapshot(rig.k, FrameRequest{})
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if response.Tick != 97 {
+		t.Errorf("the snapshot names tick %d, want the 97 the tick it was taken in carried",
+			response.Tick)
+	}
+}
+
 func TestAFrameSnapshotIsWrittenToThePathTheAgentNames(t *testing.T) {
 	rig := newCaptureRig(t)
 	path := filepath.Join(t.TempDir(), "nested", "frame.json")

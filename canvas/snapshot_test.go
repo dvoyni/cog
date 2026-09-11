@@ -606,6 +606,32 @@ func TestADrawsSnapshotJoiningAPendingStepSaysThatToo(t *testing.T) {
 	}
 }
 
+// A snapshot names the tick it describes, carried out of the tick itself
+// rather than read off the tick source afterwards, where it would already
+// have moved on. It is the field that makes a pairing checkable rather than
+// merely claimed: two responses agree on it, or they describe two moments
+// and say so.
+func TestADrawsSnapshotNamesTheTickItDescribes(t *testing.T) {
+	rig := newDrawsRig(t)
+	rig.fixture.paused.Store(true)
+	rig.fixture.on(func(queue *OpQueue) {
+		queue.Text(1, "fonts/body.ttf", "shared", TextDraw{Size: 10})
+	})
+	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
+		k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60, Tick: 97}).Wait()
+		return app.TimeResponse{Paused: true, Stepped: 1}, nil
+	})
+
+	response, err := drawsSnapshot(rig.k, DrawsRequest{})
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if response.Tick != 97 {
+		t.Errorf("the snapshot names tick %d, want the 97 the tick it was taken in carried",
+			response.Tick)
+	}
+}
+
 func TestADrawsSnapshotIsWrittenToThePathTheAgentNames(t *testing.T) {
 	rig := newDrawsRig(t)
 	rig.fixture.on(aSpriteAndTriangles)
