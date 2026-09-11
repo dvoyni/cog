@@ -8,7 +8,7 @@ indices are, how morph deltas are stored, how a mesh's layout and the shader
 variant drawing it are guaranteed to agree, what an app writes when it authors a
 mesh itself, and what the bundled PBR requires of a mesh handed to it.
 
-The contract exists because scene currently stores every mesh at one fixed
+The contract exists because scene stored every mesh at one fixed
 84-byte stride and `uint32` indices regardless of what the file shipped. That is
 not an accident: `scene/mesh.go:13-21` explains the size with a reason that was
 true when it was written and stopped being true when
@@ -28,13 +28,26 @@ unverified it is marked **Gap** and says what would settle it; where assembling
 these decisions next to each other settled something no ticket did, it is marked
 **Settled here**.
 
-**Nothing in this specification is implemented.** The map that produced it is
-plan-only: it ends at this document, and the engine is unchanged. The places the
-shape was executed are throwaway branches in `dvoyni/cog-examples` — `proto/vertex-narrow`,
-`measure/mesh-bytes`, `measure/attr-precision`, `measure/morph-deltas` — which
-are where this spec's measurements come from and which are not to be merged.
-[Required scene changes](#required-scene-changes) is the checklist an
-implementation session works from.
+**This specification is implemented.** It landed under
+[scene: implement what a mesh stores](https://github.com/dvoyni/cog/issues/213)
+across [#214](https://github.com/dvoyni/cog/issues/214) to
+[#222](https://github.com/dvoyni/cog/issues/222): the gfx vertex-interface
+check, the `uint16` index path, the node joint moved to the instance, the
+authoring/storage split and the packer, the narrowed normal and tangent, the
+per-mesh UV range, the narrowed skin with the shader's renormalisation, the two
+named layouts, and the narrow sparse morph deltas.
+[Required scene changes](#required-scene-changes) is the checklist that work
+ran from, and is kept as the record of what changed rather than as an open list.
+
+**What remains open is the by-eye confirmation**
+([#223](https://github.com/dvoyni/cog/issues/223)). The size figures in
+[What all of it is worth](#what-all-of-it-is-worth) have been re-measured by
+driving the real loader over every vendored asset, which is what turned that
+table's `≈` into a number; every *fidelity* claim in this document is still a
+judgement by eye, because there is still no pixel readback in `gfx` or `wgpu`.
+The prototypes the fidelity findings came from are throwaway branches in
+`dvoyni/cog-examples` — `proto/vertex-narrow`, `measure/mesh-bytes`,
+`measure/attr-precision`, `measure/morph-deltas` — which are not to be merged.
 
 ---
 
@@ -89,11 +102,26 @@ different buffers were both already called "sparse".
 ## The corpus, and what it can and cannot say
 
 Every number in this document comes from the fifteen glTF assets vendored under
-`assets/`, measured by
-[Measure what scene stores per mesh across the vendored assets](https://github.com/dvoyni/cog/issues/168).
-Scene holds **3.77 MiB of geometry** for them — 3.16 MiB of vertices, 246.3 KiB
-of indices, 385.8 KiB of morph deltas, over 61 primitives and 39,411 vertices —
-against **5.25 MiB of `.glb` on disk with every texture included**.
+`assets/`, first measured by
+[Measure what scene stores per mesh across the vendored assets](https://github.com/dvoyni/cog/issues/168)
+and re-measured on the built loader by
+[#223](https://github.com/dvoyni/cog/issues/223).
+
+**Three counts are easy to conflate and this document conflated them.** The
+fifteen files hold **53 mesh primitives**. Before
+[#176](https://github.com/dvoyni/cog/issues/176)'s deduplication the loader made
+**61 conversions** of them — `InterpolationTest`'s cube nine times and
+`CesiumMilkTruck`'s wheel twice — and **61 is what every "today" figure in this
+document is counted over**, which is why it reads throughout as a primitive
+count and is not one. Today it makes **52** conversions, one `POINTS` primitive
+having no gfx topology, and places them at **71 instances**.
+
+Scene held **3.77 MiB of geometry** for these assets — 3,232.9 KiB of vertices,
+246.3 KiB of indices, 385.8 KiB of morph deltas, over those 61 conversions and
+39,411 vertices — against **5.25 MiB of `.glb` on disk with every texture
+included**. It now holds **1,356.8 KiB** over 52 conversions and 38,391
+vertices; the whole table is in
+[What all of it is worth](#what-all-of-it-is-worth).
 
 Two facts about that corpus govern how hard any ratio here may be leaned on, and
 they are stated up front because several sections below would read as stronger
@@ -101,9 +129,9 @@ evidence than they are:
 
 - **These are Khronos sample models**, built to exercise glTF features rather
   than to resemble a game's content. `CompareBaseColor` alone — three synthetic
-  9,216-vertex comparison grids — is **70% of the whole measurement**, and 60 of
-  the 61 primitives are small feature tests. `Fox` and `CesiumMilkTruck` are the
-  only two resembling authored content.
+  9,216-vertex comparison grids — is **70% of the vertex bytes** and 61% of the
+  whole measurement, and 50 of the 53 primitives are small feature tests. `Fox`
+  and `CesiumMilkTruck` are the only two resembling authored content.
 - **`#45`'s trigger has not fired.**
   [gfx: shader preprocessing and vertex variants](https://github.com/dvoyni/cog/issues/45)
   gated this whole effort on *"vertex memory is measurably a problem in a demo,
@@ -115,9 +143,12 @@ evidence than they are:
 
 There is also **no instrumentation of any kind** in the engine — no draw counter,
 no memory counter — and **no pixel readback anywhere in `gfx` or `wgpu`**. Every
-size here is arithmetic over the assets rather than an observation of a running
-program, and every fidelity claim was judged by eye or by offline analysis of
-screenshots. Both limits are load-bearing for what follows.
+size here was arithmetic over the assets when this document was written; the
+totals are now taken by driving `convertDocument` over the corpus and measuring
+what the packer emits, which is an observation of the built loader but still not
+of a running frame. Every **fidelity** claim is judged by eye or by offline
+analysis of screenshots and that has not changed. Both limits are load-bearing
+for what follows.
 
 ---
 
@@ -315,7 +346,7 @@ a normal map and the file shipped none, so a mesh with neither stores four bytes
 of zero.
 [#195](https://github.com/dvoyni/cog/issues/195) put the question directly —
 how much does scene expect to be normal-mapped? — and answered **genuinely
-mixed**: cog is general-purpose with one real consumer, the corpus's 11-of-61 is
+mixed**: cog is general-purpose with one real consumer, the corpus's 11-of-53 is
 worthless as evidence, and designing the vertex around either extreme is
 guessing. The four bytes are a knowing cost of having one layout.
 
@@ -402,6 +433,28 @@ encoding.** `octEncode` guards `l1 == 0` and returns the octahedral origin;
 `quantizeUnorm` maps that to mid-range; the decode of mid-range is `(0, 0, 1)`.
 So an unwritten `Normal` stores as **+Z** — no NaN, no invented constant.
 `Tangent` behaves the same, with `+1` handedness from `w = 0`.
+
+**This is visible, and it was not only a safety property.** Framed above as
+"no NaN", the +Z canonical also *changes how normal-less geometry shades*, and
+the corpus contains some: every one of `MeshPrimitiveModes`' seven primitives
+carries `POSITION` and nothing else. Before, an unwritten `Normal` was
+`m.Vec3{}` — `(0, 0, 0)` reached the shader, every dot product with it vanished,
+and those primitives drew **black**. They now decode to +Z, are lit like any
+other surface, and draw **light grey**.
+
+Found by capture under
+[#223](https://github.com/dvoyni/cog/issues/223), and it is the only difference
+above quantisation noise anywhere in the vendored set: in the `loading` demo,
+differencing the pre-change build against the narrowed one at a fixed pose, the
+line and strip primitives of that one station account for **363 of the 1,306
+pixels** that differ by more than one code, and the other 943 are the HUD's own
+counters.
+
+It is an improvement rather than a regression — lit geometry is the better
+answer for a file that declined to say, and nothing in the corpus depended on
+the black — but it is a **behaviour change on existing content**, not a
+transparent one, and an app relying on normal-less geometry rendering unlit will
+see it. Recorded here rather than absorbed.
 
 **There is no absence sentinel.** `Tangent`'s reserved bit could have carried
 one; `Normal`'s `oct32` has no spare bit pattern at all and could not. Buying an
@@ -515,10 +568,17 @@ Measured against the 32/40-byte stride rather than today's 84, presence is worth
 
 | attribute | primitives carrying | bytes not stored | share | variant cost |
 | --- | ---: | ---: | ---: | --- |
-| `JOINTS_0`+`WEIGHTS_0` | 1 / 61 | **294.4 KiB** | 41.8% | **none** |
-| `TEXCOORD_1` | 2 / 61 | 148.0 KiB | 21.0% | one define, ×2 |
-| `TANGENT` | 11 / 61 | 143.4 KiB | 20.4% | one define, ×2 |
-| `COLOR_0` | 2 / 61 | 117.9 KiB | 16.8% | one define, ×2 |
+| `JOINTS_0`+`WEIGHTS_0` | 1 / 53 | **294.4 KiB** | 41.8% | **none** |
+| `TEXCOORD_1` | 2 / 53 | 148.0 KiB | 21.0% | one define, ×2 |
+| `TANGENT` | 11 / 53 | 143.4 KiB | 20.4% | one define, ×2 |
+| `COLOR_0` | 2 / 53 | 117.9 KiB | 16.8% | one define, ×2 |
+
+> The counts are over the corpus's 53 authored primitives and the byte columns
+> over the 39,411 pre-deduplication vertices, which is the arithmetic the
+> decision was taken on and is left as taken. Both denominators read `61` until
+> [#223](https://github.com/dvoyni/cog/issues/223) separated the primitive count
+> from the conversion count; nothing in the columns moves, because a duplicate
+> conversion carries the same attributes as its original.
 
 **The three that would multiply the variants are worth 409.3 KiB between them,
 for 32 variants where there are 4.** That is the whole case and it fails on its
@@ -562,9 +622,10 @@ Two collisions had to be cleared to make that true, and neither costs a variant:
 
 **Plain-bound geometry keeps the skinned layout, zeros and all.** After
 deduplication that is 852 vertices — `InterpolationTest`'s single surviving cube
-and `CesiumMilkTruck`'s single surviving wheel — **6.7 KiB, 2.3% of the saving.**
+and `CesiumMilkTruck`'s single surviving wheel — **6.66 KiB measured, 2.3% of
+the saving**, against the 6.7 KiB this projected.
 The alternative is splitting `SCENE_SKIN` into a pose define and a vertex-skin
-define, which buys those 6.7 KiB for a fifth and sixth variant and reopens a
+define, which buys those 6.66 KiB for a fifth and sixth variant and reopens a
 question [#176](https://github.com/dvoyni/cog/issues/176) closed.
 `SCENE_PLAINJOINT` stays an instance flag; **the variants stay four**
 (`variantStatic`, `variantSkin`, `variantMorph`, `variantSkinMorph`,
@@ -572,7 +633,8 @@ question [#176](https://github.com/dvoyni/cog/issues/176) closed.
 
 ### Content occupies five signatures, and that is not evidence
 
-Across 61 primitives there are five distinct optional-attribute signatures and
+Across the corpus's 53 primitives there are five distinct optional-attribute
+signatures and
 **every one carries at most one optional attribute**. That is *not* evidence that
 content is one-hot — it is evidence that the corpus is fifteen glTF feature
 tests. **Real content correlates hard**: a normal-mapped skinned character is
@@ -616,7 +678,7 @@ From [Index width: does gfx gain a uint16 path?](https://github.com/dvoyni/cog/i
 from the vertex count, `O(1)`, on every path.**
 
 Exactly two widths exist, `uint16` and `uint32`, fixed by the platform rather
-than chosen — **WebGPU has no `uint8` index format**, which is why the 19
+than chosen — **WebGPU has no `uint8` index format**, which is why the 11
 primitives that shipped `uint8` cannot be stored as authored.
 
 > **A mesh with `vertexCount <= 65535` gets `uint16` indices. Every other mesh
@@ -635,23 +697,46 @@ headroom removes the special case entirely rather than documenting it.
 
 ### Why, given the saving is small
 
-Indices are **246.3 KiB of 3.77 MiB**. `uint16` is legal for **61 of 61**
-primitives, so all of them halve: **123.2 KiB, 3.2% of geometry today**, 8.4% of
-what remains after both vertex axes land. `CompareBaseColor` is 44% of that on
-its own. What decides it is not the byte count:
+Indices were **246.3 KiB of 3.77 MiB**. `uint16` is legal for **every**
+primitive in the corpus — the largest is `CompareBaseColor`'s 9,216-vertex
+grid — so all of them halve. Measured on the built loader that is **118.1 KiB, 3.1% of
+geometry as it was**, and 8.7% of what remains now that both vertex axes have
+landed. `CompareBaseColor` is 46% of that on its own. What decides it is not the
+byte count:
 
 - **The width is thrown away far more often than "glTF ships `uint16`" suggests.**
-  Of 61 primitives, **19 shipped `uint8`**, 32 shipped `uint16`, 3 shipped
-  `uint32`, and 7 carry no index accessor. **51 of the 54 authored index buffers
-  chose a narrow width and scene widened it** — 19 of them fourfold.
+  Of the corpus's 53 primitives, **11 shipped `uint8`**, 38 shipped `uint16`, 3
+  shipped `uint32`, and one — `Fox` — carries no index accessor. **49 of the 52
+  authored index buffers chose a narrow width and scene widened it** — 11 of
+  them fourfold.
 - **The derivation is free and there is no judgement to get wrong.** An index is
   exact or it is broken; unlike everything else on this map there is no fidelity
   call, no variant cost, and nothing to look at.
 
+> **Corrected here.** This section read *"19 shipped `uint8`, 32 shipped
+> `uint16`, 3 shipped `uint32`, and 7 carry no index accessor"* over *"61
+> primitives"*, and *"51 of the 54 authored index buffers"*. Those numbers are
+> per **conversion** and not per primitive: nine of the 19 `uint8` entries are
+> the same `InterpolationTest` cube. Re-counting the accessors off the files
+> also moves six primitives out of *no index accessor* and into `uint16` — only
+> `Fox` ships unindexed. The corrected counts are above; the byte figures the
+> decision rested on are unaffected, because a duplicate conversion re-used the
+> same authored width.
+>
+> One more gap between the two counts, found the same way: the corpus's authored
+> index accessors total **229.4 KiB** at `uint32` while the loader stored
+> 236.2 KiB of them post-deduplication. The 6.8 KiB difference is `Fox`, which
+> ships no index accessor and which the loader gives a **sequential identity
+> index buffer** of its 1,728 vertices, plus the 21 indices
+> `MeshPrimitiveModes`' strip, fan and line-loop primitives gain when they are
+> expanded into lists. So *"carries no index accessor"* describes the file and
+> not what scene uploads.
+
 *"Keep `uint32`" was defensible* and is recorded as the option not taken, not as
 an option that was wrong. No width available to WebGPU restores what the `uint8`
 files shipped; a `uint16` path halves their widening from fourfold to twofold,
-saving 366 B on `AlphaBlendModeTest` and 660 B on `InterpolationTest`.
+saving 366 B on `AlphaBlendModeTest` and 84 B on `InterpolationTest` — 660 B
+before deduplication collapsed its nine cubes to one.
 
 ### Scope: durable geometry only
 
@@ -703,7 +788,8 @@ alongside `indexCount` and `bounds`, which `UpdateMesh` already re-derives.
 From [Do morph deltas follow the vertex's precision answer?](https://github.com/dvoyni/cog/issues/178).
 **Deltas do not follow the vertex's precision answer, and precision was not the
 question.** They narrow to a quarter of their width *and* stop storing the 93% of
-themselves that is exactly zero: **385.8 KiB to 18.6 KiB, 4.8% of today.**
+themselves that is exactly zero: **385.8 KiB to 18.8 KiB as built, 4.9% of
+today** — 18.6 KiB projected, and the difference is accounted for below.
 
 The ticket asked precision; the measurement found precision is the smaller of two
 independent axes in the same buffer, **by 7x**, and that the precision answer
@@ -1097,30 +1183,59 @@ the cache that already exists.
 > [#173](https://github.com/dvoyni/cog/issues/173) could only say *"near 1.7 MiB
 > against 3.77 MiB"* because morph deltas were still pending
 > [#178](https://github.com/dvoyni/cog/issues/178), and #178 reported its own
-> buffer without re-totalling. Assembled:
+> buffer without re-totalling. Assembled, and then measured.
 
-| buffer | today | after | of today |
-| --- | ---: | ---: | ---: |
-| vertices | 3.16 MiB | 1,219.9 KiB | 37.8% |
-| indices | 246.3 KiB | 123.2 KiB | 50.0% |
-| morph deltas | 385.8 KiB | 18.6 KiB | 4.8% |
-| **geometry** | **3.77 MiB** | **≈1.33 MiB** | **≈35%** |
+**The table is a measurement, not a projection.**
+[#223](https://github.com/dvoyni/cog/issues/223) drove `convertDocument` over
+every vendored `.glb` and summed what the packer and `indexBytes` actually
+emit, against what the same loader stored before the umbrella landed.
 
-The vertex figure is counted **after** [#176](https://github.com/dvoyni/cog/issues/176)'s
-deduplication — 38,391 vertices, of which 2,580 take the 40-byte skinned layout
-(`Fox`'s 1,728 under a real skin, 852 plain-bound) and 35,811 take the 32-byte
-one. **The index and morph figures are pre-deduplication and have not been
-re-measured**, so the total is a ceiling: deduplication also removes
-`InterpolationTest`'s eight duplicate index buffers and `CesiumMilkTruck`'s
-second wheel, on the order of 5 KiB. The `≈` is doing real work and should not be
-quoted as though it were measured.
+| buffer | before | projected | **measured** | of before |
+| --- | ---: | ---: | ---: | ---: |
+| vertices | 3,232.9 KiB | 1,219.9 KiB | **1,219.9 KiB** | 37.7% |
+| indices | 246.3 KiB | 123.2 KiB | **118.1 KiB** | 47.9% |
+| morph deltas | 385.8 KiB | 18.6 KiB | **18.8 KiB** | 4.9% |
+| **geometry** | **3,865.0 KiB** | ≈1,361.7 KiB | **1,356.8 KiB** | **35.1%** |
+
+3,865.0 KiB is 3.77 MiB and 1,356.8 KiB is **1.325 MiB**. In bytes:
+3,957,756 before, 1,389,340 after.
+
+**The `≈` resolved, and what it was hiding.** The projection's vertex figure was
+counted **after** [#176](https://github.com/dvoyni/cog/issues/176)'s
+deduplication and its index and morph figures were not, so the total was a
+ceiling. The gap is **4,970 B**, and it is two effects of opposite sign:
+
+- **Deduplication takes 5,184 B off the indices**, which is exactly the halved
+  form of the 10,368 B of `uint32` it removes — `InterpolationTest`'s eight
+  duplicate cube buffers and `CesiumMilkTruck`'s second wheel. The pre-dedup
+  index total 246.3 KiB is 236.2 KiB post-dedup, and the narrowing halves that
+  to **118.1 KiB exactly**. The narrowing itself is therefore still the flat
+  50.0% the projection claimed; the extra 2.1 points in the table's last column
+  are #176's, not the index width's.
+- **The morph block overshoots its projection by 214 B**, the per-slot range
+  words and per-target headers the projection rounded away — the same 18.8 KiB
+  [#222](https://github.com/dvoyni/cog/issues/222) reported. No morphed
+  primitive is duplicated, so deduplication takes nothing off this row.
+
+The vertex row lands on its projection **exactly**, which it should: the
+projection was already post-deduplication and was the same arithmetic over the
+same two strides. It is 1,249,152 B over 38,391
+vertices, of which 2,580 take the 40-byte skinned layout (`Fox`'s 1,728 under a
+real skin, 852 plain-bound) and 35,811 take the 32-byte one.
 
 Decomposed by axis: **precision alone** reaches 1,499.6 KiB of vertices (46.4%);
-**the presence trim adds 279.8 KiB net**, the 6.7 KiB plain-joint tax already
+**the presence trim adds 279.8 KiB net**, the 6.66 KiB plain-joint tax already
 deducted. Stated plainly — the presence axis was charted as potentially half the
 prize and came back worth 279.8 KiB, **all of it from the one attribute pair that
 costs nothing**, and the map declined the rest. That is a finding, and it was the
 point of charting the axes in this order.
+
+> **What the measurement does not say.** It is taken from the loader's own
+> buffers, so it counts what scene uploads and not what a driver allocates, and
+> the corpus caveats above apply to it unchanged — `CompareBaseColor` is 67.7%
+> of the measured geometry total on its own. And it says nothing at all about
+> whether the narrowed engine **looks** right; that is #223's other half, and it
+> has no instrument in this repo.
 
 **No ADR.** [Assemble scene/docs/specs/mesh.md](https://github.com/dvoyni/cog/issues/175)
 provided for one on the *"change nothing"* outcome, where a spec section would
@@ -1132,8 +1247,11 @@ API change — so the decision has somewhere to live and this document is it.
 
 ## Required scene changes
 
-A checklist for an implementation session, in dependency order. **Items marked
-(gfx) are prerequisites** and land before scene can compile against this.
+**All of this has landed**, under
+[#213](https://github.com/dvoyni/cog/issues/213) and its tickets #214 to #222.
+The list is kept in its original imperative form as the record of what changed,
+in dependency order. **Items marked (gfx) were prerequisites** and landed before
+scene compiled against them.
 
 **Prerequisites (gfx)**
 
