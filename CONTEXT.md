@@ -134,11 +134,15 @@ A block of a Store's index, allocated only when some Entity in its range has the
 _Avoid_: Chunk, block
 
 **Query**:
-A System's declaration of the Component types it reads and writes. It matches every Entity having _at least_ those types, which is why it is not a Component set.
-_Avoid_: View, archetype
+A struct type whose field types are the Component types one System touches. A field's pointer-ness is its access mode: a pointer field is written and yields the stored value itself, a value field is read and yields a copy. A Query matches every Entity having _at least_ those Component types, which is why it is not a Component set.
+_Avoid_: View, archetype. Also Bundle, which stays unspent for a set of Components spawned together.
+
+**Filter**:
+A Query field that narrows which Entities match while reading and writing nothing. It is the reason a Tag exists.
+_Avoid_: Predicate, matcher
 
 **System**:
-A plain Go func the ECS runs over the Entities a Query matches. Its lock set is derived from the Component types in its signature, at registration only.
+A plain Go func that takes Queries and is called once per tick, iterating the Entities they match itself. Its lock set is derived from its signature at registration, and it can touch no Component that signature does not name.
 _Avoid_: System plugin, which is the Host
 
 **Structural change**:
