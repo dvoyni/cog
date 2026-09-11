@@ -36,8 +36,12 @@ buffer at `@group(0) @binding(3)`, named by the instance record's last spare
 word. Its **attribute presence** section is implemented too, and it is the one
 presence trim the axis earns: there are **two named layouts**, the standard 32
 bytes at six locations and the skinned 40 at eight, and a static primitive no
-longer carries joints and weights it never reads. Morph deltas are unchanged,
-and that spec is the plan for them.
+longer carries joints and weights it never reads. Its **morph delta storage**
+section is implemented last: a delta record is **8 bytes for position and 4 for
+each of normal and tangent** against a per-primitive, per-axis range, and a
+target stores records **only for the span of vertices it moves** — 18.8 KiB of
+deltas over the vendored corpus against 385.8 KiB, because 92% of the float
+store was exactly zero.
 
 ## Plugin
 
@@ -654,7 +658,7 @@ bound range of one.
 | `scenePbrMaterial` | 1 | the bundled PBR record, a bound range |
 | `scenePoses` | 2 | baked 48-byte pose records |
 | `sceneSkinJoints` | 2 | per-skin, per-joint 112-byte record |
-| `sceneMorphDeltas` | 2 | per-model morph delta records |
+| `sceneMorphDeltas` | 2 | `array<u32>`, one block per morphed primitive: per-slot ranges, a base/first/count per target, then the records |
 
 Plus the bundled PBR's five textures and five samplers in group 1. The `scene`
 name prefix is reserved for engine-supplied bindings.
@@ -765,9 +769,13 @@ absorbed quietly. The ones a caller can observe:
   both directions around the passes that use it.
 - **The morph attribute mask is a contiguous prefix** of position, normal,
   tangent, not an arbitrary set. The record header carries a stride and no mask,
-  so which slots a record holds must be recoverable from the stride alone. A
-  target that deforms the normal and not the position stores an explicit zero
+  so which slots a record holds must be recoverable from the stride alone — which
+  survives the per-slot widths only because 8 / 12 / 16 bytes are distinct sums.
+  A target that deforms the normal and not the position stores an explicit zero
   position slot.
+- **A morph target that moves nothing keeps its slot.** It stores no records and
+  costs 12 bytes of header. Dropping it would renumber every slot after it, and
+  `MorphWeights` is positional over that list.
 - **The storage-buffer budget is eight of eight**, not the "six with two spare"
   the early tickets record. Interleaving the two per-skin arrays into one
   `sceneSkinJoints` buffer recovered the eighth slot; the per-mesh UV record

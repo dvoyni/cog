@@ -773,17 +773,42 @@ a normal error is an angle. At `snorm8` the normal-delta error is at worst
 [#172](https://github.com/dvoyni/cog/issues/172) stared at (0.32° mean, 0.91°
 max) and could not see.
 
-**The invariant this looks like it breaks does not break.** `scene.md:1284`
-requires that *"which slots a record holds has to be recoverable from the stride
-alone"*. With a fixed prefix mask and fixed per-slot widths the prefix sums stay
-distinct — **8 / 12 / 16 bytes** rather than 16 / 32 / 48 — and each slot's offset
-inside a record stays a compile-time constant. All three builtins exist in naga
+**The invariant this looks like it breaks does not break.** The `sceneAnim`
+header carries `morphStride` and no mask, and its layout is fixed, so **which
+slots a record holds has to be recoverable from the stride alone**. With a fixed
+prefix mask and fixed per-slot widths the prefix sums stay distinct — **8 / 12 /
+16 bytes** rather than 16 / 32 / 48 — and each slot's offset inside a record stays
+a compile-time constant. All three builtins exist in naga
 (`wgsl/internal/lower/lower.go:11507-11511`).
 
-**It cannot be larger than today for any primitive that draws.** At position-only
-the crossover is `8TV < 16TV − 12T − 12`, satisfied for every `V >= 2`; a
-1-vertex position-only primitive with 100 targets would grow, and is a point-mode
-primitive with no geometry.
+### The mask, which the record layout depends on
+
+Moved here from `scene.md`, because it is part of the same layout and describing
+it in two documents is how they drift.
+
+**The mask is per primitive**: the union across that primitive's targets,
+intersected with the base primitive's **authored** attributes. Per-target masks
+would make the stride vary *within* a block, so a record's slot offsets would
+stop being compile-time constants. Intersecting against authored attributes
+matters because scene generates flat normals for a primitive that has none —
+those are scene's reconstruction, not the asset's, so a NORMAL delta on a
+primitive with no authored NORMAL is dropped at load.
+
+**The mask is then widened to a prefix** of position, normal, tangent, so a gap
+is stored as explicit zeros rather than closed up — which is what makes the
+stride alone say which slots are present. The gap this fills is a target that
+deforms the normal and not the position: without the widening its 4-byte record
+would be read as a position delta. It costs 8 bytes of zeros per *stored* record
+in a case almost no file has, against dropping authored data or spending a
+reserved header word every draw would then read.
+
+**It cannot be larger than today for any primitive with a surface to morph.** At
+position-only the block is `12 + 12T + 8TV` bytes against today's `16TV`, so the
+crossover is `12 + 12T <= 8TV`: satisfied for every `T` at **three vertices or
+more**, and from four targets up at two. Below that is a point- or line-mode
+primitive, which has no surface for a shape to deform. *(The first statement of
+this said "every `V >= 2`", which the inequality does not give at one to three
+targets; the corrected bound is above and was checked against the packer.)*
 
 ### A target stores only the vertices it moves
 
@@ -812,7 +837,8 @@ and adding three weighted zeros, and become one compare.
   `morphBase + target * targetStride + vertexIndex * morphStride`
   (`morph.wgsl:65`) can no longer work. Every target needs its own base; the
   header is `(base, first, count)`, 12 bytes per target. **The `sceneAnim`
-  header's `targetStride` word is freed** by this.
+  header's `targetStride` word is freed** by this, and is reserved rather than
+  reclaimed: the header stays two vec4s because `animOffset` counts vec4s.
 - **A target that moves nothing keeps its slot.** `MorphStressTest` 0/0's eight
   all-zero targets are tempting to drop at load and cannot be: `MorphWeights` is
   **positional** over the flattened slot list (`scene.md:1243`), so removing one
@@ -841,6 +867,16 @@ and adding three weighted zeros, and become one compare.
 > it is still the right call: a scattered asset gets spans covering its
 > primitive and lands at today's density plus 12 bytes per target. **The scheme
 > cannot lose; it can only fail to win.**
+
+> **Measured as built.** Over the three vendored morphed files the packer emits
+> **18.8 KiB against 385.8 KiB — 4.88%**, against the 18.6 KiB / 4.8% projected
+> above; the difference is the per-slot range words and the per-target headers
+> the projection rounded away. `MorphStressTest` 0/1's eight targets each span
+> **187** of 1,504 vertices, and 0/0's eight all-zero targets store 0 records for
+> 120 bytes of header. Fully-zero records are **92.2%** of the float store
+> counted whole, against the 93.0% the projection counted. Worst position error
+> over the real deltas is **0.35 of a code**, 1.06e-05 of the delta range's own
+> diagonal; worst normal error is half a code.
 
 ---
 

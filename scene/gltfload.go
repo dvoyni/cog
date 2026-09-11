@@ -69,10 +69,14 @@ type loadedModel struct {
 	// is what puts every one of its draws on a variant with no group 2 at all.
 	animation bakedAnimation
 	// morphDeltas is the model's one delta buffer, every morphed primitive's
-	// targets concatenated and reached by a base offset. One buffer per model
+	// block concatenated and reached by a base offset. One buffer per model
 	// rather than per primitive: a buffer per primitive would mean a bind
 	// group per primitive, collapsing group 2's whole reason for existing.
-	morphDeltas []m.Vec4
+	//
+	// It is a raw word array rather than a slice of records: a block holds its
+	// own ranges and per-target headers ahead of its records, and a record is
+	// no longer a whole number of vec4s.
+	morphDeltas []uint32
 	// reports are the non-fatal failures the load accumulated: a missing
 	// texture, an unsupported topology, a UV set past the two scene carries.
 	// They fire at install, from the load's own goroutine, which is why an
@@ -550,7 +554,7 @@ func (c *modelConverter) flattenMesh(
 			continue
 		}
 		converted := &c.model.geometries[geometry]
-		morph := converted.morph.binding(len(converted.vertices))
+		morph := converted.morph.binding()
 		if morph.morphed() {
 			// A primitive carrying more targets than its node claimed slots for
 			// is a malformed mesh - glTF requires every primitive of a mesh to

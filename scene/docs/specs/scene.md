@@ -1342,41 +1342,18 @@ overturned: it would mean a bind group per primitive, collapsing group 2's whole
 reason for existing. Every morphed primitive's targets concatenate into the one
 buffer and are reached by a base offset.
 
-**Records are vec4-aligned and masked, stride 16 / 32 / 48 B**, slot order fixed
-as position, normal, tangent, `stride = 16 * popcount(attrMask)`. Most targets in
-real assets carry POSITION only, and a fixed 48 B record stores explicit zeros
-for the rest — a 10k-vertex face with 52 shapes is 25 MiB at 48 B and ~8 MiB when
-position-only targets cost 16 B. A tightly packed 12/24/36 B layout is smaller
-still but forces scalar `array<f32>` indexing, 9 loads per target per vertex
-instead of 3: memory bought with per-vertex bandwidth, the wrong direction.
-
-**The mask is per primitive**: the union across that primitive's targets,
-intersected with the base primitive's **authored** attributes. Per-target masks
-would make the stride vary *within* a block, so the shader could no longer compute
-an address with one multiply. Intersecting against authored attributes matters
-because scene generates flat normals for a primitive that has none — those are
-scene's reconstruction, not the asset's, so a NORMAL delta on a primitive with no
-authored NORMAL is dropped at load.
-
-**The mask is then widened to a prefix** of position, normal, tangent, so a gap
-is stored as explicit zeros rather than closed up. The `sceneAnim` header carries
-`morphStride` and no mask, and its layout is fixed — so which slots a record holds
-has to be recoverable from the stride alone, which is true only of a prefix. The
-gap this fills is a target that deforms the normal and not the position: without
-the widening its stride-1 record would be read as a position delta. It costs 16 B
-per vertex per target of zeros in a case almost no file has, against dropping
-authored data or spending a reserved header word every draw would then read.
+**The delta layout is specified in [mesh.md](mesh.md#morph-delta-storage)**, and
+only there: the record's per-slot widths, the per-primitive ranges, the
+per-target span and the address the shader builds from them. It used to be
+described here as well, in a passage this document was the authority for — and
+two specs describing one layout is how they drift, so what was here is a pointer
+now. What stays in this document is the plumbing that layout change did not
+touch: one buffer per model, the per-node weight slots, the CPU-side blend, and
+the caps below.
 
 Addressing needs **no base-vertex correction**: `gfx.MeshDescr` owns its own
 buffers and always binds them at offset 0, so `@builtin(vertex_index)` is 0-based
-within a primitive and
-
-```
-i = morphBase + target * morphTargetStride + vertexIndex * morphStride + slot
-```
-
-indexes `sceneMorphDeltas` directly, with `morphTargetStride = vertexCount *
-morphStride` folded on the CPU.
+within a primitive and indexes `sceneMorphDeltas` directly.
 
 **Caps: 64 active targets**, culled first by `|w| < 1e-5` — absolute value,
 because glTF does not clamp weights to `[0,1]` and a negative weight is
@@ -2311,7 +2288,7 @@ mirroring canvas's `canvasTexture`/`canvasSampler`. A material parameter named
 | `scenePbrMaterial` | 1 | the bundled PBR record, a bound range |
 | `scenePoses` | 2 | baked 48 B pose records |
 | `sceneSkinJoints` | 2 | per-skin, per-joint 112 B record: inverse bind and normal matrix interleaved |
-| `sceneMorphDeltas` | 2 | per-model morph delta records |
+| `sceneMorphDeltas` | 2 | `array<u32>`, one block per morphed primitive: per-slot ranges, a base/first/count per target, then the records ([mesh.md](mesh.md#morph-delta-storage)) |
 
 Plus the PBR's five textures and five samplers in group 1
 (see [Bundled PBR material](#bundled-pbr-material)).
@@ -2370,11 +2347,17 @@ draws write to.
 
 ```
 vec4 0: { playCount: u32, targetCount: u32, morphBase: u32, morphStride: u32 }
-vec4 1: { morphTargetStride: u32, _, _, _ }          // 3 words reserved
+vec4 1: { _, _, _, _ }                               // 4 words reserved
 then  :  playCount   x { baseRow0: u32, baseRow1: u32, w0: f32, w1: f32 }  // 16 B
 then  :  targetCount x { targetIndex: u32, weight: f32 }                   // 8 B,
                                                                            // padded to a vec4 boundary
 ```
+
+**`vec4 1` is wholly reserved.** It carried `morphTargetStride` — the
+`vertexCount * morphStride` a dense delta address multiplied by — and a morph
+target now stores records only for the span of vertices it moves, so each one
+carries its own base in its block's header and no per-primitive stride exists to
+fold ([mesh.md](mesh.md#morph-delta-storage)).
 
 Morph weights are a **count-prefixed sparse list**, not a dense 64-float block:
 the CPU knows which entries are non-zero before it writes anything, so a 52-shape
@@ -2388,7 +2371,7 @@ independently zero-checkable and `animOffset == SCENE_NO_ANIM` covers neither. N
 flags bitfield — two counts the shader reads anyway already carry the
 information.
 
-The four morph words are per-*primitive* constants duplicated per instance, 20 B
+The three morph words are per-*primitive* constants duplicated per instance, 12 B
 of the 32 B header. Putting them in the per-batch material record would remove
 the duplication exactly, and was rejected: it would put scene geometry constants
 into a record gfx packs on the render thread while scene records on the update
@@ -3489,7 +3472,6 @@ carries the trigger that would make it a real question.
 | A view direction for `selectLights` | the cap ranks lights by falloff at the eye (`contributionAt`), which for `Orthographic` and `Oblique` is a point the viewer is not at; shares `sceneViewDirection`'s root cause |
 | Per-pass viewport and scissor in gfx | shadow cascades, atlas-packed targets, or N on-screen cameras where a target each proves too expensive |
 | A pose-resolve pass | per-vertex pose fetch cost proves too high in the skinned demo |
-| f16 morph delta packing | `MorphBytes` shows delta memory is a measured problem |
 | Vertex attribute packing (`Unorm1010102` normals, `Unorm16x4` weights) | vertex memory is a measured problem |
 | MikkTSpace tangent generation | a baked normal map shows a seam the UV-gradient tangent causes |
 | Texture compression (KTX2 / Basis) | wanting a transcoder; `basisu` is already rejected as a glTF extension |

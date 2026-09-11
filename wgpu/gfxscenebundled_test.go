@@ -185,11 +185,13 @@ func TestBundledSceneShaderRecordsMatchTheirPackedOffsets(t *testing.T) {
 		// explicit-column form buys over mat4x3 and mat3x3.
 		{binding: "scenePoses", stride: 48},
 		{binding: "sceneSkinJoints", stride: 112},
-		// sceneAnim is a raw vec4 arena, because animOffset counts vec4s, and
-		// sceneMorphDeltas is one too: a delta record is 16 * popcount(mask)
-		// bytes, so the array element is the slot rather than the record.
+		// sceneAnim is a raw vec4 arena, because animOffset counts vec4s.
 		{binding: "sceneAnim", stride: 16},
-		{binding: "sceneMorphDeltas", stride: 16},
+		// sceneMorphDeltas is a raw word array: a block holds per-slot ranges
+		// and a base, first and count per target ahead of its records, and a
+		// record is 8, 12 or 16 bytes, so neither the element nor the record is
+		// a vec4.
+		{binding: "sceneMorphDeltas", stride: 4},
 	} {
 		for _, member := range membersOf(t, layout, want.binding) {
 			if member.Name == "data" && member.Stride != want.stride {

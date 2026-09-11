@@ -20,12 +20,28 @@ const (
 	morphTangent
 )
 
-// slots is how many 16-byte slots one record spends. Records are vec4-aligned
-// and masked, so the stride is 16 * popcount(mask): most targets in real assets
-// carry POSITION only, and a fixed 48-byte record would store explicit zeros
-// for the rest - a 10k-vertex face with 52 shapes is 25 MiB at 48 bytes and
-// about 8 MiB when position-only targets cost 16.
+// slots is how many of position, normal and tangent one record carries. Most
+// targets in real assets carry POSITION only, and a fixed three-slot record
+// would store explicit zeros for the rest.
 func (mask morphMask) slots() int { return bits.OnesCount32(uint32(mask)) }
+
+// recordWords is how many words one record of this mask spends, and the stride
+// the shader is handed. The widths are per slot - see morphSlots - so the
+// prefix sums are 2 / 3 / 4 words rather than 4 / 8 / 12.
+//
+// The spare bits a narrowed slot leaves - 16 in the position slot, 8 in each
+// direction slot - stay reserved. Absence is expressed by a target's span, so
+// the sentinel a narrowed format would otherwise want is structurally
+// unnecessary.
+func (mask morphMask) recordWords() int {
+	words := 0
+	for _, slot := range morphSlots {
+		if mask&slot.bit != 0 {
+			words += slot.words
+		}
+	}
+	return words
+}
 
 // prefix widens a mask to the contiguous run of slots ending at its highest
 // one, so a gap is stored as explicit zeros rather than closed up.
@@ -35,7 +51,7 @@ func (mask morphMask) slots() int { return bits.OnesCount32(uint32(mask)) }
 // holds has to be recoverable from the stride alone, and that is true only when
 // the mask is a prefix of position, normal, tangent. The gap this fills is a
 // primitive whose targets carry a normal delta and no position delta, which
-// costs 16 bytes per vertex per target of zeros. The alternatives were dropping
+// costs eight bytes per stored record of zeros. The alternatives were dropping
 // the delta, which loses authored data, and spending a reserved header word on
 // a mask, which every draw would then read for a case almost no file has.
 func (mask morphMask) prefix() morphMask {
@@ -56,14 +72,17 @@ func (mask morphMask) prefix() morphMask {
 // have independent weights while the deltas stay shared, byte-identical between
 // them.
 type morphBinding struct {
-	// base is the vec4 index of this primitive's first record in
-	// sceneMorphDeltas, and stride the vec4s one vertex spends in one target.
+	// base is the word index of this primitive's block header in
+	// sceneMorphDeltas, and stride the words one record spends - which is also
+	// what says which slots that record holds.
+	//
+	// There is no targetStride any more: a target stores records only for the
+	// span it moves, so every target carries its own base in the block header
+	// and the one folded constant the old address formula needed is gone.
+	// No base-vertex correction is needed anywhere either: gfx.MeshDescr owns
+	// its buffers and binds them at offset 0, so @builtin(vertex_index) is
+	// 0-based within a primitive.
 	base, stride uint32
-	// targetStride is vertexCount * stride, folded here so the shader's delta
-	// address is one multiply. No base-vertex correction is needed anywhere:
-	// gfx.MeshDescr owns its buffers and binds them at offset 0, so
-	// @builtin(vertex_index) is 0-based within a primitive.
-	targetStride uint32
 	// targets is how many targets the block holds, and slotBase where this
 	// primitive's node's weight run starts in the model's flattened slot list.
 	targets  int

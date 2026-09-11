@@ -9,31 +9,42 @@ import (
 )
 
 // gltfMorph is one primitive's morph targets converted: the mask every target
-// in the block shares, the vec4-aligned records, and the reach the deltas add
-// to the primitive's bounds.
+// in the block shares, the load's dense working copy of the deltas, and the
+// reach they add to the primitive's bounds.
 //
-// The records are target-major - every vertex of target 0, then every vertex of
-// target 1 - which is what makes morphTargetStride a constant the header can
-// carry and the shader's address one multiply.
+// The working copy is float and dense - every vertex of target 0, then every
+// vertex of target 1 - because that is the shape the unweld permutation
+// rewrites and the range accumulation reads. What reaches the GPU is neither:
+// packMorphBlock narrows it and drops the 93% of records that are exactly zero.
 type gltfMorph struct {
 	targets int
 	mask    morphMask
-	// stride is vec4s per vertex per target, which is the mask's slot count.
-	stride int
-	// deltas is targets * vertexCount * stride records. It is dropped into the
+	// slots is m.Vec4s per vertex per target in the working copy, which is the
+	// mask's slot count. The packed record's own stride is mask.recordWords().
+	slots int
+	// deltas is targets * vertexCount * slots records. It is packed into the
 	// model's one buffer at pack time and nil afterwards.
 	deltas []m.Vec4
 	// reach is the largest position-delta magnitude summed over the targets:
 	// conservative, because it assumes every target at weight 1 at once, and
 	// computed in the one pass over delta data already being read.
 	reach float32
-	// base is the vec4 index of this block in the model's one delta buffer,
-	// assigned when the blocks are concatenated.
+	// base is the word index of this block's header in the model's one delta
+	// buffer, assigned when the blocks are concatenated.
 	base int
 }
 
 // morphed reports whether the primitive carries any target at all.
-func (g gltfMorph) morphed() bool { return g.targets > 0 && g.stride > 0 }
+func (g gltfMorph) morphed() bool { return g.targets > 0 && g.slots > 0 }
+
+// vertexCount recovers the primitive's vertex count from the working copy,
+// which is the one place it is still written down after the conversion returns.
+func (g gltfMorph) vertexCount() int {
+	if !g.morphed() {
+		return 0
+	}
+	return len(g.deltas) / g.targets / g.slots
+}
 
 // readMorphTargets converts one primitive's morph targets.
 //
@@ -77,10 +88,10 @@ func readMorphTargets(
 	morph := gltfMorph{
 		targets: len(primitive.Targets),
 		mask:    mask,
-		stride:  mask.slots(),
+		slots:   mask.slots(),
 	}
-	morph.deltas = make([]m.Vec4, morph.targets*vertexCount*morph.stride)
-	targetStride := vertexCount * morph.stride
+	morph.deltas = make([]m.Vec4, morph.targets*vertexCount*morph.slots)
+	targetStride := vertexCount * morph.slots
 	for target, attributes := range primitive.Targets {
 		at := 0
 		for _, slot := range morphSlots {
@@ -100,34 +111,41 @@ func readMorphTargets(
 				if i >= vertexCount {
 					return
 				}
-				morph.deltas[offset+i*morph.stride] = m.Vec4{X: value[0], Y: value[1], Z: value[2]}
+				morph.deltas[offset+i*morph.slots] = m.Vec4{X: value[0], Y: value[1], Z: value[2]}
 			})
 		}
 		if mask&morphPosition != 0 {
-			morph.reach += maxLength(morph.deltas[target*targetStride:(target+1)*targetStride], morph.stride)
+			morph.reach += maxLength(morph.deltas[target*targetStride:(target+1)*targetStride], morph.slots)
 		}
 	}
 	return morph
 }
 
-// morphSlots is the fixed slot order a record holds its deltas in, and the glTF
-// attribute each reads from. It is fixed rather than derived so that the mask,
-// the stride and the shader's slot indices all agree without anything having to
-// be transmitted.
+// morphSlots is the fixed slot order a record holds its deltas in, the glTF
+// attribute each reads from, and the words and encoder each spends. It is fixed
+// rather than derived so that the mask, the stride and the shader's slot
+// offsets all agree without anything having to be transmitted.
+//
+// The widths are 2 / 1 / 1 words, so the prefix sums are 2 / 3 / 4 - distinct,
+// which is what keeps "which slots a record holds is recoverable from the
+// stride alone" true of a per-slot width. Each slot's offset inside a record
+// stays a compile-time constant.
 var morphSlots = [...]struct {
 	bit       morphMask
 	attribute string
+	words     int
+	pack      func(words []uint32, delta m.Vec4, scale m.Vec3) []uint32
 }{
-	{bit: morphPosition, attribute: gltf.POSITION},
-	{bit: morphNormal, attribute: gltf.NORMAL},
-	{bit: morphTangent, attribute: gltf.TANGENT},
+	{bit: morphPosition, attribute: gltf.POSITION, words: 2, pack: packMorphPosition},
+	{bit: morphNormal, attribute: gltf.NORMAL, words: 1, pack: packMorphDirection},
+	{bit: morphTangent, attribute: gltf.TANGENT, words: 1, pack: packMorphDirection},
 }
 
 // maxLength reports the largest magnitude among one target's position deltas,
-// which sit at slot 0 of every stride'th record.
-func maxLength(records []m.Vec4, stride int) float32 {
+// which sit at slot 0 of every vertex's run of slots.
+func maxLength(records []m.Vec4, slots int) float32 {
 	var longest float32
-	for at := 0; at < len(records); at += stride {
+	for at := 0; at < len(records); at += slots {
 		record := records[at]
 		length := m.Vec3{X: record.X, Y: record.Y, Z: record.Z}.LengthSquared()
 		longest = max(longest, length)
@@ -148,39 +166,35 @@ func (g *gltfMorph) remap(source []uint32) {
 	if !g.morphed() || len(source) == 0 {
 		return
 	}
-	was := len(g.deltas) / g.targets / g.stride
-	targetStride := len(source) * g.stride
+	was := g.vertexCount()
+	targetStride := len(source) * g.slots
 	remapped := make([]m.Vec4, g.targets*targetStride)
 	for target := range g.targets {
 		for i, from := range source {
 			if int(from) >= was {
 				continue
 			}
-			at := target*targetStride + i*g.stride
-			old := target*was*g.stride + int(from)*g.stride
-			copy(remapped[at:at+g.stride], g.deltas[old:old+g.stride])
+			at := target*targetStride + i*g.slots
+			old := target*was*g.slots + int(from)*g.slots
+			copy(remapped[at:at+g.slots], g.deltas[old:old+g.slots])
 		}
 	}
 	g.deltas = remapped
 }
 
 // binding is the primitive's half of what a draw needs to address its block:
-// the stride and the target count, which conversion settles. The node's weight
-// slots come from the flattening and the base from the concatenation, neither
-// of which is known while a primitive is being placed.
-func (g gltfMorph) binding(vertexCount int) morphBinding {
+// the record stride and the target count, which conversion settles. The node's
+// weight slots come from the flattening and the base from the concatenation,
+// neither of which is known while a primitive is being placed.
+func (g gltfMorph) binding() morphBinding {
 	if !g.morphed() {
 		return morphBinding{}
 	}
-	return morphBinding{
-		stride:       uint32(g.stride),
-		targetStride: uint32(vertexCount * g.stride),
-		targets:      g.targets,
-	}
+	return morphBinding{stride: uint32(g.mask.recordWords()), targets: g.targets}
 }
 
-// packMorphDeltas concatenates every morphed primitive's block into the model's
-// one delta buffer and records where each landed.
+// packMorphDeltas narrows every morphed primitive's targets into the model's
+// one delta buffer and records where each block landed.
 //
 // One buffer per model rather than one per primitive: a buffer per primitive
 // would mean a bind group per primitive, collapsing group 2's whole reason for
@@ -191,24 +205,18 @@ func (g gltfMorph) binding(vertexCount int) morphBinding {
 // the flattened primitives take their base from here rather than carrying one
 // the walk could only have guessed at.
 func (c *modelConverter) packMorphDeltas() {
-	total := 0
-	for i := range c.model.geometries {
-		total += len(c.model.geometries[i].morph.deltas)
-	}
-	if total == 0 {
-		return
-	}
-	c.model.morphDeltas = make([]m.Vec4, 0, total)
 	for i := range c.model.geometries {
 		morph := &c.model.geometries[i].morph
 		if !morph.morphed() {
 			continue
 		}
 		morph.base = len(c.model.morphDeltas)
-		c.model.morphDeltas = append(c.model.morphDeltas, morph.deltas...)
-		// The per-primitive copy is dropped: the concatenation is the only
-		// reader from here on, and keeping both would double a morphed model's
-		// peak delta memory for nothing.
+		c.model.morphDeltas = packMorphBlock(
+			c.model.morphDeltas, morph.deltas, morph.mask, morph.targets, morph.vertexCount(),
+		)
+		// The load's float working copy is dropped: the packed block is the
+		// only reader from here on, and keeping both would hold a morphed
+		// model's peak delta memory at the width this change exists to leave.
 		morph.deltas = nil
 	}
 	for i := range c.model.primitives {

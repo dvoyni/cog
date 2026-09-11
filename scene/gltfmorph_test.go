@@ -70,15 +70,16 @@ func TestReadMorphTargetsMasksAgainstAuthoredAttributes(t *testing.T) {
 		normals  bool
 		tangents bool
 		mask     morphMask
-		stride   int
+		slots    int
+		bytes    int
 	}{
-		{name: "no authored normal or tangent", mask: morphPosition, stride: 1},
+		{name: "no authored normal or tangent", mask: morphPosition, slots: 1, bytes: 8},
 		{name: "an authored normal", normals: true,
-			mask: morphPosition | morphNormal, stride: 2},
+			mask: morphPosition | morphNormal, slots: 2, bytes: 12},
 		{name: "an authored tangent with no normal behind it", tangents: true,
-			mask: morphPosition, stride: 1},
+			mask: morphPosition, slots: 1, bytes: 8},
 		{name: "everything authored", normals: true, tangents: true,
-			mask: morphPosition | morphNormal | morphTangent, stride: 3},
+			mask: morphPosition | morphNormal | morphTangent, slots: 3, bytes: 16},
 	} {
 		t.Run(sample.name, func(t *testing.T) {
 			doc := testDoc()
@@ -89,11 +90,13 @@ func TestReadMorphTargetsMasksAgainstAuthoredAttributes(t *testing.T) {
 			if morph.mask != sample.mask {
 				t.Errorf("mask = %b, want %b", morph.mask, sample.mask)
 			}
-			if morph.stride != sample.stride {
-				t.Errorf("stride = %d slots, want %d", morph.stride, sample.stride)
+			if morph.slots != sample.slots {
+				t.Errorf("slots = %d, want %d", morph.slots, sample.slots)
 			}
-			if got, want := morph.stride*morphRecordSize, sample.stride*16; got != want {
-				t.Errorf("record is %d bytes, want 16 * popcount(mask) = %d", got, want)
+			// Eight bytes for position and four for each direction, so the
+			// prefix sums are 8 / 12 / 16 rather than one width for all three.
+			if got := morph.mask.recordWords() * morphWordSize; got != sample.bytes {
+				t.Errorf("record is %d bytes, want %d", got, sample.bytes)
 			}
 		})
 	}
@@ -122,14 +125,14 @@ func TestReadMorphTargetsWidensAGappedMaskToAPrefix(t *testing.T) {
 	}
 }
 
-// The record layout is the whole addressing contract: the shader computes
-// morphBase + target*morphTargetStride + vertexIndex*morphStride + slot with no
-// table to consult, so a record written anywhere else is read from the wrong
-// place with nothing to say so.
+// The load's working copy is dense and target-major - every vertex of target 0,
+// then every vertex of target 1 - because that is the shape the unweld
+// permutation rewrites and the range accumulation reads. What reaches the GPU
+// is neither dense nor float; that layout is TestPackMorphBlock's.
 //
-// The offsets below are spelled out from that formula rather than read back
-// through the code that wrote them: a fixture built through the same helper
-// agrees with itself whatever the layout is.
+// The offsets below are spelled out from the working copy's own formula rather
+// than read back through the code that wrote them: a fixture built through the
+// same helper agrees with itself whatever the layout is.
 func TestReadMorphTargetsLaysRecordsOutTargetMajor(t *testing.T) {
 	doc := testDoc()
 	mesh := morphedMesh(doc, true, false, []gltf.PrimitiveAttributes{
@@ -141,10 +144,10 @@ func TestReadMorphTargetsLaysRecordsOutTargetMajor(t *testing.T) {
 			[][3]float32{{7, 0, 0}, {8, 0, 0}, {9, 0, 0}}, nil),
 	})
 	morph := readMorphTargets(doc, doc.Meshes[mesh].Primitives[0], 3)
-	if morph.targets != 2 || morph.stride != 2 {
-		t.Fatalf("morph = %d targets of stride %d, want 2 of 2", morph.targets, morph.stride)
+	if morph.targets != 2 || morph.slots != 2 {
+		t.Fatalf("morph = %d targets of %d slots, want 2 of 2", morph.targets, morph.slots)
 	}
-	targetStride := 3 * morph.stride
+	targetStride := 3 * morph.slots
 	if got, want := len(morph.deltas), morph.targets*targetStride; got != want {
 		t.Fatalf("deltas = %d records, want %d", got, want)
 	}
@@ -157,7 +160,7 @@ func TestReadMorphTargetsLaysRecordsOutTargetMajor(t *testing.T) {
 		{target: 1, vertex: 0, slot: 0, value: m.Vec4{Z: 4}},
 		{target: 1, vertex: 1, slot: 1, value: m.Vec4{X: 8}},
 	} {
-		at := want.target*targetStride + want.vertex*morph.stride + want.slot
+		at := want.target*targetStride + want.vertex*morph.slots + want.slot
 		if got := morph.deltas[at]; got != want.value {
 			t.Errorf("target %d vertex %d slot %d = %v, want %v",
 				want.target, want.vertex, want.slot, got, want.value)
@@ -239,16 +242,17 @@ func TestConvertDocumentPacksOneDeltaBufferPerModel(t *testing.T) {
 	if len(model.primitives) != 2 {
 		t.Fatalf("primitives = %d, want two", len(model.primitives))
 	}
-	// The first block is three vertices of one slot, so the second starts
-	// three records in; the second is three vertices of two slots.
-	if got := model.primitives[0].morph; got.base != 0 || got.stride != 1 || got.targetStride != 3 {
-		t.Errorf("primitive 0 = %+v, want base 0 stride 1 targetStride 3", got)
+	// The first block is one position range, one target header and the single
+	// record its target's span covers: 3 + 3 + 2 words. The second carries a
+	// normal range too and a three-word record: 6 + 3 + 3.
+	if got := model.primitives[0].morph; got.base != 0 || got.stride != 2 {
+		t.Errorf("primitive 0 = %+v, want base 0 stride 2", got)
 	}
-	if got := model.primitives[1].morph; got.base != 3 || got.stride != 2 || got.targetStride != 6 {
-		t.Errorf("primitive 1 = %+v, want base 3 stride 2 targetStride 6", got)
+	if got := model.primitives[1].morph; got.base != 8 || got.stride != 3 {
+		t.Errorf("primitive 1 = %+v, want base 8 stride 3", got)
 	}
-	if got, want := len(model.morphDeltas), 3+6; got != want {
-		t.Errorf("the model's delta buffer is %d records, want %d", got, want)
+	if got, want := len(model.morphDeltas), 8+12; got != want {
+		t.Errorf("the model's delta buffer is %d words, want %d", got, want)
 	}
 }
 

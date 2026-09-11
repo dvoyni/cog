@@ -11,9 +11,15 @@
 // sceneInstance.animOffset in vec4 units:
 //
 //     vec4 0: { playCount, targetCount, morphBase, morphStride }
-//     vec4 1: { morphTargetStride, 3 reserved words }
+//     vec4 1: 4 reserved words
 //     then  : playCount x { baseRow0, baseRow1, w0, w1 }
 //     then  : targetCount x { targetIndex, weight }, two to a vec4
+//
+// The second vec4 is wholly reserved. It carried morphTargetStride - the
+// vertexCount * morphStride the dense delta address multiplied by - and a morph
+// target now stores records only for the span of vertices it moves, so each one
+// carries its own base in its block's header and no per-primitive stride exists
+// to fold.
 //
 // The morph weights are a count-prefixed sparse list rather than a dense block:
 // the CPU knows which entries are non-zero before it writes anything, so a

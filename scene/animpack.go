@@ -238,7 +238,7 @@ func playsReportKey(path string) string      { return "model:" + path + "#plays"
 // about 48 bytes of content.
 //
 // A skinned draw packs one block per call and a morphed one packs a block per
-// primitive, because the four morph words are per-primitive constants. Putting
+// primitive, because the three morph words are per-primitive constants. Putting
 // them in the per-batch material record would remove that duplication exactly,
 // and was rejected: it would put scene geometry constants into a record gfx
 // packs on the render thread while scene records on the update thread.
@@ -248,11 +248,10 @@ func (b *frameBuild) packAnim(plays []scenePlayRecord, morph morphBlock) uint32 
 	}
 	offset := len(b.anims.bytes()) / 16
 	header := sceneAnimHeader{
-		PlayCount:         uint32(len(plays)),
-		TargetCount:       uint32(len(morph.targets)),
-		MorphBase:         morph.binding.base,
-		MorphStride:       morph.binding.stride,
-		MorphTargetStride: morph.binding.targetStride,
+		PlayCount:   uint32(len(plays)),
+		TargetCount: uint32(len(morph.targets)),
+		MorphBase:   morph.binding.base,
+		MorphStride: morph.binding.stride,
 	}
 	b.anims.appendElement(&header)
 	for i := range plays {

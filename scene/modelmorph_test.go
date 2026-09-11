@@ -25,6 +25,12 @@ func morphModel(t testing.TB) *gltf.Document {
 	return doc
 }
 
+// morphModelWords is what morphModel's one block costs: three range words, a
+// twelve-byte header for each of the two targets, and one two-word record each,
+// because each shape moves one of the three vertices. The dense float layout
+// stored six sixteen-byte records for the same file.
+const morphModelWords = morphRangeWords + 2*morphTargetHeaderWords + 2*2
+
 // animBlock is one instance's sceneAnim block decoded out of the frame's arena:
 // the header words the shader reads before it loops, and the sparse morph list
 // behind the play records.
@@ -35,8 +41,12 @@ func morphModel(t testing.TB) *gltf.Document {
 type animBlock struct {
 	playCount, targetCount uint32
 	morphBase, morphStride uint32
-	morphTargetStride      uint32
-	targets                []sceneMorphWeight
+	// reserved is the first word of the header's second vec4. It carried
+	// morphTargetStride until a target stopped storing a record per vertex;
+	// nothing writes it now, and a block that still does is a block whose
+	// header the shader and the packer disagree about.
+	reserved uint32
+	targets  []sceneMorphWeight
 }
 
 func decodeAnimBlock(t *testing.T, arena []byte, offset uint32) animBlock {
@@ -49,11 +59,11 @@ func decodeAnimBlock(t *testing.T, arena []byte, offset uint32) animBlock {
 	}
 	base := int(offset) * 16
 	block := animBlock{
-		playCount:         word(base),
-		targetCount:       word(base + 4),
-		morphBase:         word(base + 8),
-		morphStride:       word(base + 12),
-		morphTargetStride: word(base + 16),
+		playCount:   word(base),
+		targetCount: word(base + 4),
+		morphBase:   word(base + 8),
+		morphStride: word(base + 12),
+		reserved:    word(base + 16),
 	}
 	list := base + animHeaderVec4s*16 + int(block.playCount)*16
 	for i := range int(block.targetCount) {
@@ -82,8 +92,9 @@ func residentMorphModel(t *testing.T, doc *gltf.Document, draw ModelDraw) *harne
 // there is no zero record for a debug box to carry.
 func TestAMorphedModelBindsItsOwnDeltasAndABoxBindsNone(t *testing.T) {
 	h := residentMorphModel(t, morphModel(t), ModelDraw{})
-	// Two targets over three vertices at one slot each.
-	if got, want := len(boundBytes(t, h, "sceneMorphDeltas")), 2*3*morphRecordSize; got != want {
+	// One position range, two target headers and one record each: the two
+	// shapes move one vertex apiece out of three.
+	if got, want := len(boundBytes(t, h, "sceneMorphDeltas")), morphModelWords*morphWordSize; got != want {
 		t.Errorf("the bound delta buffer is %d bytes, want the model's %d", got, want)
 	}
 	box := newHarness(t, func(q *OpQueue) {
@@ -121,11 +132,14 @@ func TestAMorphOnlyModelKeepsItsAnimBlock(t *testing.T) {
 	if got := block.targets[0]; got.Target != 1 || got.Weight != 0.5 {
 		t.Errorf("target = %+v, want target 1 at the mesh's authored 0.5", got)
 	}
-	// The addressing constants are the primitive's, folded on the CPU: one
-	// slot per vertex, three vertices to a target.
-	if block.morphBase != 0 || block.morphStride != 1 || block.morphTargetStride != 3 {
-		t.Errorf("addressing = base %d stride %d targetStride %d, want 0/1/3",
-			block.morphBase, block.morphStride, block.morphTargetStride)
+	// The addressing constants are the primitive's: the block sits at word 0
+	// and a position-only record is two words. There is no third constant -
+	// every target carries its own base in the block header now.
+	if block.morphBase != 0 || block.morphStride != 2 {
+		t.Errorf("addressing = base %d stride %d, want 0/2", block.morphBase, block.morphStride)
+	}
+	if block.reserved != 0 {
+		t.Errorf("the freed targetStride word is %d, want it reserved", block.reserved)
 	}
 }
 
@@ -194,7 +208,7 @@ func TestTheLookupReportsMorphTargetsAndBytes(t *testing.T) {
 	if len(names) != 2 || names[0] != "smile" || names[1] != "blink" {
 		t.Errorf("MorphTargets = %v, want the mesh's two named shapes", names)
 	}
-	if want := 2 * 3 * morphRecordSize; bytes != want {
+	if want := morphModelWords * morphWordSize; bytes != want {
 		t.Errorf("MorphBytes = %d, want %d", bytes, want)
 	}
 	h.lookup(func(access LookupAccess) {
@@ -230,7 +244,10 @@ func TestASkinnedAndMorphedModelBindsBothOfItsOwnBuffers(t *testing.T) {
 	if got, want := len(boundBytes(t, h, "scenePoses")), 62*poseSize; got != want {
 		t.Errorf("the bound pose buffer is %d bytes, want the model's %d", got, want)
 	}
-	if got, want := len(boundBytes(t, h, "sceneMorphDeltas")), 3*morphRecordSize; got != want {
+	// One position range, one target header, one record: the shape moves one
+	// of the three vertices.
+	if got, want := len(boundBytes(t, h, "sceneMorphDeltas")),
+		(morphRangeWords+morphTargetHeaderWords+2)*morphWordSize; got != want {
 		t.Errorf("the bound delta buffer is %d bytes, want the model's %d", got, want)
 	}
 	block := decodeAnimBlock(t, boundBytes(t, h, "sceneAnim"), instance.AnimOffset)

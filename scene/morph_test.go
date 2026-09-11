@@ -161,7 +161,7 @@ func TestSelectMorphTargetsCapsByWeight(t *testing.T) {
 func TestPackAnimLaysTheMorphListOutInWholeVec4s(t *testing.T) {
 	var build frameBuild
 	block := morphBlock{
-		binding: morphBinding{base: 7, stride: 2, targetStride: 12, targets: 3},
+		binding: morphBinding{base: 7, stride: 2, targets: 3},
 		targets: []sceneMorphWeight{{Target: 0, Weight: 1}, {Target: 2, Weight: 0.5}},
 	}
 	// A morphed draw with no plays still packs a block: playCount and

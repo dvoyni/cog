@@ -480,7 +480,7 @@ func (l *Lookup) residentAnimation(
 	// The delta buffer is uploaded whether or not the model has joints: a
 	// morph-only face has no pose row anywhere and still binds its own shapes.
 	if len(loaded.morphDeltas) > 0 {
-		resident.morphBytes = len(loaded.morphDeltas) * morphRecordSize
+		resident.morphBytes = len(loaded.morphDeltas) * morphWordSize
 		resident.morphDeltas = resources.BakeBuffer(recordSliceBytes(loaded.morphDeltas), false)
 	}
 	if baked.jointCount == 0 {

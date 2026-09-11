@@ -134,14 +134,19 @@ type scenePlayRecord struct {
 type sceneAnimHeader struct {
 	PlayCount   uint32
 	TargetCount uint32
+	// MorphBase is the word index of the primitive's block in the model's
+	// delta buffer and MorphStride the words one record spends there, which is
+	// also what says which slots that record holds.
 	MorphBase   uint32
 	MorphStride uint32
-	// MorphTargetStride is vertexCount * MorphStride, folded here so the
-	// shader's delta address is one multiply. The three words after it are
-	// reserved: the header is a whole number of vec4s because the block is an
-	// array<vec4<f32>> and animOffset counts vec4s.
-	MorphTargetStride uint32
-	reserved          [3]uint32
+	// The second vec4 is wholly reserved. It carried MorphTargetStride -
+	// vertexCount * MorphStride, the folded constant the old dense address
+	// formula multiplied by - and a target now stores records only for the span
+	// it moves, so each one carries its own base in the block header and no
+	// per-primitive stride exists to fold. The header stays a whole number of
+	// vec4s because the block is an array<vec4<u32>> and animOffset counts
+	// vec4s.
+	reserved [4]uint32
 }
 
 // The sizes of the animation records: bytes for the two durable buffers, and
@@ -151,10 +156,6 @@ var (
 	skinJointSize   = int(unsafe.Sizeof(sceneSkinJoint{}))
 	animHeaderVec4s = int(unsafe.Sizeof(sceneAnimHeader{})) / 16
 	playRecordVec4s = int(unsafe.Sizeof(scenePlayRecord{})) / 16
-	// morphRecordSize is one 16-byte delta slot. A record's stride is
-	// 16 * popcount(mask), so this is the unit morphBase, morphStride and
-	// morphTargetStride all count in, and what MorphBytes reports against.
-	morphRecordSize = int(unsafe.Sizeof(m.Vec4{}))
 )
 
 // skinJointRecord builds one joint's interleaved record from its inverse bind,
