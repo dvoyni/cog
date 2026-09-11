@@ -172,22 +172,61 @@ on that texture, and it is paid whether or not a capture ever happens.
 
 ## Offered To An Agent
 
-gfx implements `mcp.Provider` and offers one capability, `capture`, rendered as
-the tool `gfx_capture`. It is screen-only: `GpuCaptureDesc` addresses any
-colour texture and that generality is right for gfx, but nothing lists textures
-to an agent and a `TextureID` is an opaque handle it has no way to obtain.
+gfx implements `mcp.Provider` and offers two capabilities, `capture` and
+`frame`, rendered as the tools `gfx_capture` and `gfx_frame`. They are the two
+halves of one question — what did the frame actually do — and they are separate
+tools because "nothing is on screen" and "this looks wrong" are different
+sentences. Both are `mcp.ReadOnly()`, which in cog's reading means the
+capability does not change the game.
+
+`gfx_capture` is screen-only: `GpuCaptureDesc` addresses any colour texture and
+that generality is right for gfx, but nothing lists textures to an agent and a
+`TextureID` is an opaque handle it has no way to obtain.
 
 The agent names an absolute `.png` path, optionally with `amount`, `interval`
 and a `%d` numbering verb; every check — the path, the extension, the verb and
 the caps — happens before a frame is spent, so a burst is refused whole or
 armed whole. The response carries the ordinals actually written plus the image
 size in pixels and the window size in the units input capabilities use, which
-together convert a point in the picture into a point that can be clicked. The
-capability is `mcp.ReadOnly()`: it writes exactly the file it was told to.
+together convert a point in the picture into a point that can be clicked.
+
+`gfx_frame` is the snapshot: every declared pass in run order with its label,
+ordering key, target, depth and clears, a draw and instance count per pass, and
+every resource operation from both queues with its handle, size, format and
+mipmap flag. Individual draws are counted rather than listed, because a draw's
+mesh and material are opaque handles with nothing to resolve them against.
+Every index in the response is a **source index** — a position in the queue
+that recorded the thing — so an index stays the address of what it named when a
+filter is on. `pass` filters by label and says how many passes it dropped;
+`path` is optional and writes the JSON to a file instead of returning it
+inline.
+
+A snapshot needs a tick where a capture needs a render, which is the one place
+the two behave differently: under pause `gfx_frame` performs exactly one step,
+or joins one another arm already raised, and says so in its response, while a
+capture costs no tick at all.
+
+### The shared view types
+
+gfx also declares the vocabulary every cog snapshot shares, in
+[`view.go`](view.go): `ParameterView`, `TextureView`, `MaterialView`, and
+`SnapshotView` — the three coordinate sizes plus the step fields every snapshot
+response carries. `canvas` and `ui` embed them, so one value reaches an agent in
+one shape whichever tool showed it.
+
+They exist because every gfx descriptor has entirely unexported fields, so
+`json.Marshal` over one yields `{}`. The rejected repair — an `unsafe` cast to a
+mirror struct with public fields — fails four ways: it emits the dead half of a
+tagged union, it base64s inline pixel data into the reply, it puts JSON in gfx's
+public contract for every cog app, and nothing checks that the mirror still
+matches the struct it shadows. Each view is built through gfx's own union-aware
+accessors instead, which the compiler checks. Two rules hold across all of them:
+a tagged union serializes to exactly one value, and bulk bytes never travel —
+inline pixels and raw parameter data are reported as a byte count.
 
 The full contract is in [docs/specs/capture.md](docs/specs/capture.md) and
-[docs/specs/mcp.md](docs/specs/mcp.md). `gfx_frame`, the other capability those
-documents specify, is not implemented yet.
+[docs/specs/mcp.md](docs/specs/mcp.md); both capabilities those documents
+specify are implemented.
 
 ## Commands Implemented
 
@@ -201,6 +240,7 @@ documents specify, is not implemented yet.
 | `SetViewportCmd` | `SetViewportRequest` with window/framebuffer dimensions / `SetViewportResponse{Viewport}` | read desired policy, write `*Viewport` |
 | `SetDesiredViewportCmd` | `SetDesiredViewportRequest{Mode, Width, Height, Size}` / `SetDesiredViewportResponse{Viewport}` | write desired policy and `*Viewport` |
 | `ArmCaptureCmd` | `ArmCaptureRequest{Target, Amount, Interval, Paused}` / `ArmCaptureResponse{Done, Viewport}` | read `*Viewport` |
+| `ArmFrameCmd` | `ArmFrameRequest{Pass}` / `ArmFrameResponse{Done, Viewport}` | read `*Viewport` |
 
 `PresentCmd` and `AcquireCmd` are public for explicit queue control, but normal
 operation uses the update and render subscriptions. Cache-release commands
@@ -222,9 +262,18 @@ not subscribe to this event itself.
   running waits for the next one. It declares no resources: the capture slot is
   plugin-owned and carries its own lock, because shutdown has to complete a
   waiting capture and a stopped scheduler grants none.
+- `FrameUpdateEventHandler` handles `app.UpdateEvent` and runs `First()`, for
+  the same reason and with the same absence of declared resources: a frame
+  snapshot describes a tick that *began* after the request, so an arm landing
+  inside a running tick waits for the next one.
 - `UpdateEventHandler` handles `app.UpdateEvent`, writes `*OpQueue` plus the
-  ready queue, and runs `Last()` to present the completed frame queue. A
-  capture armed before this tick began binds here, beside the queue swap.
+  ready queue, reads `*ResourceQueue`, and runs `Last()` to present the
+  completed frame queue. A capture armed before this tick began binds here,
+  beside the queue swap, and the frame snapshot is taken here too, immediately
+  before it — the only point at which the frame is both complete (canvas
+  orders its flush before this handler) and still alive. The `*ResourceQueue`
+  read is the snapshot's: most resource traffic is recorded there and never
+  reaches the frame queue.
 - `RenderEventHandler` handles `app.RenderEvent`, writes the read queue, ready
   queue, and `*ResourceQueue`, reads `storage.FileSystem`, then translates and
   executes the latest queue on the driver's render thread. It drains
@@ -245,15 +294,21 @@ and physical `FramebufferWidth`/`FramebufferHeight`.
 ## Draw Descriptors
 
 - `BufferDescr`: build inline data with `BufferWithBytes`; durable storage
-  buffers come from `ResourceQueue.BakeBuffer`.
+  buffers come from `ResourceQueue.BakeBuffer`. Inspect with `ID()`, `Size()`
+  and `InlineBytes()`.
 - `TextureDescr`: build with `TextureWithResource` or `TextureWithBytes`, or use
-  `ResourceQueue`; inspect with `ID()` and `Path()`. Both constructors take a
+  `ResourceQueue`; inspect with `ID()`, `Path()`, `Size()`, `Format()`,
+  `Mipmaps()` and `PixelBytes()`. Both constructors take a
   `TextureFormat`, which says whether the texels are light or a gamma-encoded
   picker value; the same path in two formats is two textures.
-- `ShaderDescr`: build with `ShaderWithResource` or `ShaderWithText`.
+- `ShaderDescr`: build with `ShaderWithResource` or `ShaderWithText`; inspect
+  with `Path()` and `Supply()`. One path under two supplies is two shaders, so
+  the supply is part of the identity rather than a detail beside it.
 - `MeshDescr`: build with `Mesh` or `MeshIndexed` from buffer descriptors,
-  topology, and `VertexAttr` values created by `Attr`.
-- `MaterialDescr`: build with `Material` or `MaterialWithState`; `Clone` and
+  topology, and `VertexAttr` values created by `Attr`; inspect with
+  `VertexCount()`, `IndexCount()`, `Indexed()` and `Topology()`.
+- `MaterialDescr`: build with `Material` or `MaterialWithState`; inspect with
+  `State()`, `Shader()` and `Params()`; `Clone` and
   `CloneTo` snapshot parameter descriptors. `Fingerprint()` hashes everything
   that makes one material different from another, and `FingerprintParams` does
   the same for a bare parameter slice — which is how a recorder keys a batch on
@@ -262,8 +317,10 @@ and physical `FramebufferWidth`/`FramebufferHeight`.
 - `ParameterDescr`: build with `FloatParam`, `VecParam`, `MatParam`,
   `ColorParam`, `TextureParam`, `SamplerParam`, `BufferParam`,
   `BufferRangeParam`, or `RawParameter`. Accessors are `Name`, `FloatValue`,
-  `ColorValue`, `TextureValue`, `SamplerValue`, `VecValue`, `HasValue`, and
-  `AppendValue`.
+  `ColorValue`, `TextureValue`, `SamplerValue`, `VecValue`, `MatValue`,
+  `BufferValue`, `BufferRange`, `RawLen`, `HasValue`, and `AppendValue`. Each
+  value accessor returns `(value, ok)` keyed on the parameter's own kind, so a
+  reader can never take one arm of the union for another.
 
 `HasValue` separates a value a shader reads out of its uniform block from a
 binding it attaches to a bind group, and `AppendValue(dst)` appends the value's

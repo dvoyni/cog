@@ -166,8 +166,15 @@ const (
 	FrontCW
 )
 
-// Region is a rectangular sub-area of a texture in texels.
-type Region struct{ X, Y, Width, Height int }
+// Region is a rectangular sub-area of a texture in texels. The json tags are
+// there because a region reaches an agent inside a frame snapshot, and the
+// rest of that document is lowerCamel.
+type Region struct {
+	X      int `json:"x"`
+	Y      int `json:"y"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
 
 // TextureDesc describes a texture to create. Layers <= 1 creates a regular 2D
 // texture; larger values create a 2D-array texture. Renderable asks for a

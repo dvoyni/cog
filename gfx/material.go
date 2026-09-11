@@ -69,6 +69,16 @@ func (m MaterialDescr) CloneTo(arena []ParameterDescr) (MaterialDescr, []Paramet
 // State reports the material's fixed pipeline state.
 func (m MaterialDescr) State() MaterialState { return m.state }
 
+// Shader reports the shader the material shades with, supply included: one
+// path under two supplies is two shaders, so the descriptor answers rather
+// than the path alone.
+func (m MaterialDescr) Shader() ShaderDescr { return m.shader }
+
+// Params reports the material's own parameters, which a draw's same-named
+// parameters override. The slice aliases the material's storage and must not
+// be written to.
+func (m MaterialDescr) Params() []ParameterDescr { return m.params }
+
 // Fingerprint hashes everything that makes one material different from
 // another: the shader by source kind, text-or-path and supply, the pipeline
 // state, and every parameter in order by name, kind and value. Two descriptors with the

@@ -47,6 +47,11 @@ type Plugin struct {
 	// captures is gfx's one capture slot, plugin-owned and self-synchronizing.
 	// See captureState for why it is not a kernel resource.
 	captures captureState
+	// snapshots is gfx's one frame-snapshot slot, plugin-owned for the same
+	// reason and separate from captures because the two are separate kinds: a
+	// capture and a snapshot may be in flight together, and refusing them
+	// would destroy the pairing they exist for.
+	snapshots snapshotState
 }
 
 // New creates the gfx plugin.
@@ -76,7 +81,9 @@ func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[app.SetViewportCmd](setViewportCmdImpl)
 	registrar.HandleCommand[app.SetDesiredViewportCmd](setDesiredViewportCmdImpl)
 	registrar.HandleCommand[ArmCaptureCmd](p.armCaptureCmdImpl)
+	registrar.HandleCommand[ArmFrameCmd](p.armFrameCmdImpl)
 	registrar.Subscribe[CaptureUpdateEventHandler](p.captureOnUpdate).First()
+	registrar.Subscribe[FrameUpdateEventHandler](p.frameOnUpdate).First()
 	registrar.Subscribe[UpdateEventHandler](p.presentOnUpdate).Last()
 	registrar.Subscribe[RenderEventHandler](p.renderOnRender)
 	return nil
@@ -92,6 +99,7 @@ func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
 // it: the host loop has returned and every handler is done.
 func (p *Plugin) Stop(kernel.Executioner) error {
 	p.captures.abandon()
+	p.snapshots.abandon()
 	return nil
 }
 
@@ -104,13 +112,43 @@ func (p *Plugin) captureOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]
 	}
 }
 
+// frameOnUpdate admits a waiting frame snapshot to the tick that has just
+// begun. It declares no resources: the snapshot slot carries its own lock.
+func (p *Plugin) frameOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
+	return nil, func(kernel.Kernel, app.UpdateEvent) error {
+		p.snapshots.beginTick()
+		return nil
+	}
+}
+
+// presentOnUpdate swaps the recorded queue into the ready slot, and takes the
+// frame snapshot immediately before doing so.
+//
+// The snapshot is taken here rather than from a subscriber of its own because
+// this is the only place the ordering it needs can be expressed. It has to run
+// after canvas has flushed into the queue and before present swaps it away -
+// but canvas.UpdateEventHandler is a type gfx cannot name, since canvas
+// imports gfx and not the other way round. A second Last subscriber would
+// carry no order relative to canvas's flush at all, and would see the frame
+// half recorded half the time. Present already sits exactly where the snapshot
+// belongs: canvas orders its own flush Before gfx's present, so by the time
+// this runs the frame is complete, and it has not been swapped away yet.
+//
+// The Read on ResourceQueue is what widens this handler's lock set, and it is
+// not optional: most of the resource traffic a snapshot is asked about -
+// durable bakes, allocations, uploads, releases - is recorded there and never
+// reaches the frame queue. Read conflicts only with a writer, and every writer
+// of it in a tick already orders itself before present.
 func (p *Plugin) presentOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var write kernel.Write[*OpQueue]
 	var ready kernel.Write[*readyList]
+	var resources kernel.Read[*ResourceQueue]
 	return func(access kernel.ResourceAccess) {
 			write = access.GetWrite[*OpQueue]()
 			ready = access.GetWrite[*readyList]()
+			resources = access.GetRead[*ResourceQueue]()
 		}, func(kernel.Kernel, app.UpdateEvent) error {
+			p.snapshots.record(write.Get(), resources.Get())
 			present(write, ready)
 			// Bound beside the queue swap, so the capture rides the ready slot
 			// rather than one particular queue.

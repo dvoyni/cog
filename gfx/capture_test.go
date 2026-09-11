@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -36,18 +37,19 @@ type captureRig struct {
 	backend *fakeBackend
 	clock   *timePlugin
 	gate    *gatePlugin
+	flush   *flushPlugin
 }
 
 func newCaptureRig(t *testing.T) *captureRig {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	plugin, clock, gate := New(), &timePlugin{}, &gatePlugin{}
+	plugin, clock, gate, flush := New(), &timePlugin{}, &gatePlugin{}, &flushPlugin{}
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.DefaultConfig("gfx-capture-test"),
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storage.New(), plugin, clock, gate, testPlugin{})
+	}).WithPlugins(storage.New(), plugin, clock, gate, flush, testPlugin{})
 	stopped := make(chan struct{})
 	go func() { engine.Run(ctx); close(stopped) }()
 	<-engine.Ready()
@@ -58,7 +60,7 @@ func newCaptureRig(t *testing.T) *captureRig {
 
 	rig := &captureRig{
 		t: t, k: engine.Executioner(), plugin: plugin,
-		backend: &fakeBackend{}, clock: clock, gate: gate,
+		backend: &fakeBackend{}, clock: clock, gate: gate, flush: flush,
 	}
 	rig.k.ExecuteCommand[SetBackendCmd](SetBackendRequest{Backend: rig.backend})
 	rig.k.ExecuteCommand[app.SetViewportCmd](app.SetViewportRequest{
@@ -123,9 +125,22 @@ func (r *captureRig) runCapture(request CaptureRequest) (CaptureResponse, error)
 }
 
 // timePlugin answers app.TimeCmd so a test can tell the capability that the
-// tick source is stopped. The real answer belongs to whichever host owns the
-// loop, which a gfx test does not have.
-type timePlugin struct{ paused atomic.Bool }
+// tick source is stopped, and can stand in for the host when something steps
+// it. The real answer belongs to whichever host owns the loop, which a gfx
+// test does not have.
+type timePlugin struct {
+	paused atomic.Bool
+
+	mu sync.Mutex
+	// step, when set, is what a TimeStep does. A fixture host publishes the
+	// ticks the real tick source would; nil means a step reports and does
+	// nothing, which is what the capture tests want.
+	step func(kernel.Kernel, app.TimeRequest) (app.TimeResponse, error)
+	// requests records what was asked of the tick source, so a test can assert
+	// on the shape of the step a capability raised rather than only on its
+	// effect.
+	requests []app.TimeRequest
+}
 
 func (*timePlugin) Name() kernel.PluginName           { return "gfxtesttime" }
 func (*timePlugin) Dependencies() []kernel.PluginName { return nil }
@@ -136,9 +151,30 @@ func (t *timePlugin) Register(r *kernel.Registrar, _ any) error {
 }
 
 func (t *timePlugin) timeCmdImpl() (kernel.Lock, kernel.Execute[app.TimeRequest, app.TimeResponse]) {
-	return nil, func(kernel.Kernel, app.TimeRequest) (app.TimeResponse, error) {
+	return nil, func(k kernel.Kernel, request app.TimeRequest) (app.TimeResponse, error) {
+		t.mu.Lock()
+		t.requests = append(t.requests, request)
+		step := t.step
+		t.mu.Unlock()
+		if request.Action == app.TimeStep && step != nil {
+			return step(k, request)
+		}
 		return app.TimeResponse{Paused: t.paused.Load()}, nil
 	}
+}
+
+// onStep installs what a step does, and asked reports what the tick source was
+// asked for.
+func (t *timePlugin) onStep(step func(kernel.Kernel, app.TimeRequest) (app.TimeResponse, error)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.step = step
+}
+
+func (t *timePlugin) asked() []app.TimeRequest {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return slices.Clone(t.requests)
 }
 
 // gatePlugin holds the first phase of a tick open, so a test can make an arm
@@ -178,23 +214,32 @@ func (g *gatePlugin) open() func() {
 	}
 }
 
-func TestGfxOffersCaptureAsAReadOnlyCapability(t *testing.T) {
+func TestGfxOffersItsTwoCapabilitiesAsReadOnly(t *testing.T) {
 	offered := New().Capabilities()
-	if len(offered) != 1 {
-		t.Fatalf("capabilities = %d, want the one gfx implements today", len(offered))
+	if len(offered) != 2 {
+		t.Fatalf("capabilities = %d, want the two gfx implements", len(offered))
 	}
-	capability := offered[0]
-	if err := capability.Err(); err != nil {
-		t.Fatalf("the capability failed construction: %v", err)
+	want := []struct {
+		name, description string
+	}{
+		{captureName, captureDescription},
+		{frameName, frameDescription},
 	}
-	if capability.Name() != captureName {
-		t.Fatalf("name = %q, want %q", capability.Name(), captureName)
-	}
-	if !capability.ReadOnly() {
-		t.Error("a capture writes only the file it was told to write, and is read-only in cog's reading")
-	}
-	if capability.Description() != captureDescription {
-		t.Error("the description an agent reads is not the one the spec reproduces")
+	for i, expected := range want {
+		capability := offered[i]
+		if err := capability.Err(); err != nil {
+			t.Fatalf("%s failed construction: %v", expected.name, err)
+		}
+		if capability.Name() != expected.name {
+			t.Fatalf("name = %q, want %q", capability.Name(), expected.name)
+		}
+		if !capability.ReadOnly() {
+			t.Errorf("%s changes nothing in the game, and is read-only in cog's reading", expected.name)
+		}
+		if capability.Description() != expected.description {
+			t.Errorf("the description an agent reads for %s is not the one the spec reproduces",
+				expected.name)
+		}
 	}
 }
 

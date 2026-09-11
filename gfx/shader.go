@@ -135,6 +135,23 @@ func malformedSupplyEntry(entry ShaderOption) string {
 	return ""
 }
 
+// Path reports the storage path a ShaderWithResource descriptor names, and is
+// empty for one built from inline text. The text itself is not offered back:
+// a whole shader source is not an identity, and nothing outside gfx can do
+// with it what FlattenShader already does.
+func (d ShaderDescr) Path() string {
+	if d.source != ShaderSourceResource {
+		return ""
+	}
+	return d.textOrPath
+}
+
+// Supply reports the canonical spelling of the descriptor's defines and
+// consts - entries sorted by name and joined with newlines, a define written
+// NAME and a const NAME=value. It is part of the shader's identity: one path
+// under two supplies is two shaders.
+func (d ShaderDescr) Supply() string { return d.supply }
+
 // supplyEntries splits the canonical supply back into its defines and consts.
 // It is meaningful only for a supply that is not malformed.
 func (d ShaderDescr) supplyEntries() []ShaderOption {

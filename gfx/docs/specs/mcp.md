@@ -255,6 +255,31 @@ The ordering is **derived, not chosen**, and it is one link in the chain the
 three snapshots share: `ui_layout` runs after ui's processing, `canvas_draws`
 before canvas's flush, `gfx_frame` after it.
 
+> **Amended at implementation ([#253](https://github.com/dvoyni/cog/issues/253)).**
+> That expression cannot be written from `gfx`. `canvas` imports `gfx`, so
+> `gfx` cannot name `canvas.UpdateEventHandler` at all, and the subscriber
+> `gfx` *can* write — a second `Last` — carries no order against canvas's flush
+> whatsoever: the two would merely conflict on `*gfx.OpQueue` and be serialized
+> in whichever order the scheduler's conflict-aware FIFO happened to produce,
+> so the snapshot would see a half-recorded frame about half the time.
+>
+> **The snapshot is therefore taken inside `presentOnUpdate` itself,
+> immediately before the queue swap.** That is the same point in the frame the
+> expression named, reached from the other side: canvas orders its own flush
+> `Before[gfx.UpdateEventHandler]()`, so by the time `present` runs the frame is
+> complete, and the snapshot is built before `present` swaps it away. The
+> handler gains a `Read[*gfx.ResourceQueue]` alongside its existing writes —
+> see [What it reports](#what-it-reports) — and the arm still binds through a
+> `First()` subscriber of its own, `FrameUpdateEventHandler`, which is what
+> makes "a tick that *began* after the request" decidable.
+>
+> **This applies to `gfx_frame` and to nothing else.** The other two links stay
+> writable exactly as specified, because each names a handler type its own
+> package declares: `canvas_draws` is `.Last().Before[canvas.UpdateEventHandler]()`
+> inside `canvas`, and `ui_layout` is `.After[ui.UpdateEventHandler]()` inside
+> `ui`. Only the gfx link crossed a package boundary in the forbidden
+> direction.
+
 ### What it reports
 
 Flat JSON, always, with **source indices** — the index into the gfx queue, not
@@ -273,6 +298,21 @@ at the wrong thing. With source indices no addressing scheme needs inventing:
   `opFreeCachedResources` and the rest (`gfx/opqueue.go:11-53`) — each with its
   path, id, size, format and mipmap flag, and each carrying its queue index and
   its pass index.
+
+  > **Amended at implementation ([#253](https://github.com/dvoyni/cog/issues/253)).**
+  > A resource op carries **no pass index**, because it has none to carry:
+  > `op.pass` is set by `draw` and by nothing else (`gfx/opqueue.go`), and
+  > every bake is hoisted ahead of all the passes anyway — `translate` says so
+  > outright, "resource ops belong to no pass". Emitting the field would
+  > publish a constant `0` that reads as *pass 0*, which is worse than the
+  > absence. Each op carries its queue index and **which queue** instead:
+  > durable ops from `*ResourceQueue` and frame ops from `*OpQueue` are two
+  > sequences with two index spaces, and most of the kinds listed above —
+  > `opUpdateTexture`, `opReleaseTexture`, `opReleaseBuffer`,
+  > `opReleaseCachedResource`, `opFreeCachedResources` — are only ever recorded
+  > in the durable one. Reading only the frame queue would answer *was the
+  > texture ever baked* with silence, which is why the snapshot reads both, in
+  > the order `translate` executes them.
 - **The viewport block**: `PixelWidth`, `PixelHeight`, `WindowWidth`,
   `WindowHeight`, and the **logical viewport width and height**. Every snapshot
   carries all six.
@@ -288,6 +328,14 @@ the in-tick serialization, which matters more here than for a capture because
 this work happens on the game's own goroutine inside the tick. Nothing is
 decided before the request is known, which is what dissolves the objection that
 serializing forces the output format to be chosen too early.
+
+> **Amended at implementation ([#253](https://github.com/dvoyni/cog/issues/253)).**
+> `pass` is **one exact label, not a list**, which is what the description
+> prose already tells the agent it is. It filters passes only: a resource op
+> belongs to no pass, so no pass filter can select one, and dropping them all
+> would hide half of what this tool answers. The whole frame's pass, draw and
+> instance totals are reported whatever the filter kept, beside the count of
+> passes it dropped — what is omitted is named rather than implied.
 
 **`path` is optional**, per the family's delivery contract: omit it and the JSON
 comes back inline, supply it and a greppable file is written.

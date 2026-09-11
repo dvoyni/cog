@@ -2,6 +2,7 @@ package gfx
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image/png"
@@ -20,8 +21,14 @@ import (
 // where the Backend internals are, and this is where they are.
 var _ mcp.Provider = (*Plugin)(nil)
 
-// captureName is the capability rendered as the tool gfx_capture.
-const captureName = "capture"
+// captureName is the capability rendered as the tool gfx_capture, and
+// frameName the one rendered as gfx_frame. They are two tools rather than one
+// because "nothing is on screen" and "this looks wrong" are different
+// sentences.
+const (
+	captureName = "capture"
+	frameName   = "frame"
+)
 
 // captureFloorDeadline is the fixed part of a capture's own wait, and
 // captureTick the per-still part. Two seconds is a hundred and twenty frames
@@ -91,12 +98,24 @@ type CaptureResponse struct {
 	WindowHeight float32 `json:"windowHeight"`
 }
 
-// Capabilities reports what gfx offers an agent. Capture is screen-only:
-// GpuCaptureDesc addresses any colour texture and that generality is right for
-// gfx, but nothing lists textures to an agent and a TextureID is an opaque
-// handle it has no way to obtain.
+// Capabilities reports what gfx offers an agent: the pixels, and the passes
+// and resource traffic that produced them.
+//
+// Capture is screen-only: GpuCaptureDesc addresses any colour texture and that
+// generality is right for gfx, but nothing lists textures to an agent and a
+// TextureID is an opaque handle it has no way to obtain.
+//
+// Both are Func rather than Command, and for the same reason: each arms a flag
+// and then waits for the engine, which cannot be one dispatch. Both are
+// ReadOnly, which in cog's reading means the capability does not change the
+// game - a capture writes exactly the file it was told to, and a snapshot
+// under pause costs a step, which its description states rather than its
+// annotation.
 func (p *Plugin) Capabilities() []mcp.Capability {
-	return []mcp.Capability{mcp.Func(captureName, captureDescription, captureScreen, mcp.ReadOnly())}
+	return []mcp.Capability{
+		mcp.Func(captureName, captureDescription, captureScreen, mcp.ReadOnly()),
+		mcp.Func(frameName, frameDescription, frameSnapshot, mcp.ReadOnly()),
+	}
 }
 
 // captureScreen is the gfx_capture body: validate, arm, wait, and do the
@@ -293,6 +312,190 @@ func countCaptureVerbs(path string) (verbs int, offender string) {
 		i = end
 	}
 	return verbs, ""
+}
+
+// frameDeadline is the frame snapshot's own wait, below the broker's thirty
+// seconds and the client's five minutes so the specific message wins the race
+// against both generic ones. Two seconds is a hundred and twenty ticks at
+// 60 Hz: anything slower is not slow, it is not ticking.
+const frameDeadline = 2 * time.Second
+
+// frameDescription is prompt text, and it is reproduced in
+// gfx/docs/specs/mcp.md so it is reviewed as prompt text rather than buried as
+// a string literal.
+const frameDescription = "What the renderer was told to do for one frame: every render pass in " +
+	"run order with its label, ordering key, target and clears, a draw and instance count per " +
+	"pass, and every resource operation — textures baked, allocated, uploaded or released, with " +
+	"their paths and sizes. Use it when nothing appears on screen, or appears in the wrong " +
+	"order: it shows whether a pass ran at all, what it drew into, and whether the texture you " +
+	"expected was ever baked. Individual draws are counted rather than listed, because a draw's " +
+	"mesh and material are opaque handles with nothing to resolve them against.\n\n" +
+	"Blocks until the next tick has been recorded, so it reflects anything you did before " +
+	"calling it. Filter by `pass` to cut a busy frame down. Pass `path` to write the JSON to a " +
+	"file instead of returning it inline. While the game is paused this performs one step to " +
+	"have something to record, and says so in the response — to describe one moment, arm this " +
+	"together with `canvas_draws` and `ui_layout`, which share that single step, and take " +
+	"`gfx_capture` last."
+
+// FrameRequest asks what the renderer was told to do for one tick.
+type FrameRequest struct {
+	// Path is optional, per the family's delivery contract: omit it and the
+	// JSON comes back inline, supply it and a greppable file is written and
+	// the path returned. A large dump becomes a file either way - an oversized
+	// text result is spilled by the client under a name nobody chose - so the
+	// only question is whether cog controls it.
+	Path string `json:"path,omitempty" jsonschema:"absolute path ending in .json; omit to get the JSON inline"`
+	// Pass is the filter, and it travels with the arm because it is what
+	// bounds the work done inside the tick.
+	Pass string `json:"pass,omitempty" jsonschema:"keep only passes with exactly this label; omit for every pass"`
+}
+
+// FrameResponse is one tick's renderer declarations, the three coordinate
+// sizes they are to be read against, and whether producing them cost a step.
+//
+// It is flat: FrameView and SnapshotView are embedded rather than nested, so
+// an agent reads one object rather than reaching through two.
+type FrameResponse struct {
+	// Path is the file the JSON was written to, when one was asked for. The
+	// file holds the whole document; what comes back inline then carries the
+	// counts and the viewport but not the two arrays, so the reply says what
+	// the frame was without repeating it.
+	Path string `json:"path,omitempty"`
+	FrameView
+	SnapshotView
+}
+
+// frameSnapshot is the gfx_frame body: validate, arm, step if the engine is
+// paused, wait, and do the marshalling and the disk write here. The engine's
+// own goroutine builds the view and hands it over; nothing else.
+//
+// It is a package function rather than a method for the reason captureScreen
+// is: the capability-body rule stays visible at the call site.
+func frameSnapshot(k kernel.Executioner, request FrameRequest) (FrameResponse, error) {
+	// Every check happens before anything is armed, so a typo costs
+	// microseconds rather than a tick.
+	if err := validateSnapshotPath(request.Path); err != nil {
+		return FrameResponse{}, err
+	}
+	if request.Path != "" {
+		if err := os.MkdirAll(filepath.Dir(request.Path), 0o755); err != nil {
+			return FrameResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+				"the directory for %s could not be created: %v", request.Path, err)}
+		}
+	}
+	paused := app.Paused(k)
+
+	armed, err := k.ExecuteCommand[ArmFrameCmd](ArmFrameRequest{Pass: request.Pass})
+	if err != nil {
+		return FrameResponse{}, frameRefusal(err)
+	}
+	response := FrameResponse{SnapshotView: SnapshotViewOf(armed.Viewport)}
+	// The arm is placed first so that the tick the step produces is one that
+	// began after it. Joining a step another arm already raised is what makes
+	// three snapshots armed together describe one tick instead of three.
+	if paused {
+		if response.Stepped, response.Joined, err = stepForSnapshot(k); err != nil {
+			return FrameResponse{}, err
+		}
+	}
+
+	deadline := time.NewTimer(frameDeadline)
+	defer deadline.Stop()
+	select {
+	case snapshot := <-armed.Done:
+		if snapshot.Err != nil {
+			return FrameResponse{}, frameRefusal(snapshot.Err)
+		}
+		response.FrameView = snapshot.Frame
+	case <-deadline.C:
+		return FrameResponse{}, frameRefusal(nil)
+	case <-k.Context().Done():
+		return FrameResponse{}, frameRefusal(k.Context().Err())
+	}
+
+	if request.Path != "" {
+		response.Path = request.Path
+		if err := writeSnapshotJSON(request.Path, response); err != nil {
+			return FrameResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+				"the snapshot could not be written to %s: %v", request.Path, err)}
+		}
+		response.Passes, response.ResourceOps = nil, nil
+	}
+	return response, nil
+}
+
+// stepForSnapshot runs the one tick a paused engine owes a snapshot, or joins
+// the one another arm already raised. Refusing instead would make snapshots
+// unreachable under pause, since a blocking arm cannot ask the agent to step
+// for it; waiting instead would be a guaranteed deadline expiry.
+func stepForSnapshot(k kernel.Executioner) (stepped, joined bool, err error) {
+	ctx, cancel := context.WithTimeout(k.Context(), frameDeadline)
+	defer cancel()
+	answer, err := k.WithContext(ctx).ExecuteCommand[app.TimeCmd](app.TimeRequest{
+		Action: app.TimeStep, Steps: 1, Join: true,
+	})
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return false, false, mcp.Unavailable{Reason: fmt.Sprintf(
+				"the paused game published no tick within %s — the window may be minimised or "+
+					"the game may have stopped drawing; the step will run when it draws again",
+				frameDeadline)}
+		}
+		return false, false, frameRefusal(err)
+	}
+	return answer.Stepped > 0, answer.Joined, nil
+}
+
+// writeSnapshotJSON puts the whole document on disk, indented because the
+// point of a file is that a person or a grep can read it. An existing file is
+// overwritten without complaint: re-writing the same name is the
+// iterate-and-look loop.
+func writeSnapshotJSON(path string, response FrameResponse) error {
+	document, err := json.MarshalIndent(response, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, document, 0o644)
+}
+
+// validateSnapshotPath checks what the agent named. The path is optional here,
+// unlike a capture's, because a structured dump can come back inline.
+func validateSnapshotPath(path string) error {
+	if path == "" {
+		return nil
+	}
+	if !filepath.IsAbs(path) {
+		return mcp.Unavailable{Reason: fmt.Sprintf(
+			"%s is relative; give an absolute path, because the game's working directory is not yours",
+			path)}
+	}
+	if !strings.EqualFold(filepath.Ext(path), ".json") {
+		return mcp.Unavailable{Reason: fmt.Sprintf(
+			"%s does not end in .json, and a snapshot is always JSON", path)}
+	}
+	return nil
+}
+
+// frameRefusal turns whatever went wrong into words an agent reads and acts
+// on. A nil reason is the deadline, which is the one worth naming a cause for:
+// a paused engine nothing steps, or a window that has stopped updating,
+// produces no tick at all and reports nothing about it.
+func frameRefusal(reason error) error {
+	switch {
+	case reason == nil:
+		return mcp.Unavailable{Reason: fmt.Sprintf(
+			"no tick was recorded within %s — the game may be paused with nothing stepping it, "+
+				"minimised, or not updating", frameDeadline)}
+	case errors.Is(reason, ErrFrameBusy{}):
+		return mcp.Unavailable{Reason: "a frame snapshot is already in flight; ask again. A " +
+			"capture and the other snapshots may run alongside it, and arming them together is " +
+			"how they describe one tick."}
+	case errors.Is(reason, ErrFrameAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
+		errors.Is(reason, context.Canceled):
+		// A game exiting is the normal case, not a fault.
+		return mcp.Unavailable{Reason: "the game is shutting down"}
+	}
+	return mcp.Unavailable{Reason: reason.Error()}
 }
 
 // validateCaptureSpan checks the burst caps. interval is what buys a long

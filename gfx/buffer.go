@@ -10,6 +10,19 @@ type BufferDescr struct {
 	copyData bool
 }
 
+// ID returns the baked buffer identifier, or 0 when the descriptor is not
+// baked.
+func (b BufferDescr) ID() BufferID { return b.id }
+
+// Size returns the buffer's size in bytes: what was uploaded for an inline
+// descriptor, and what the baked buffer holds for a baked one.
+func (b BufferDescr) Size() int { return b.size }
+
+// InlineBytes reports how many bytes of inline data the descriptor carries,
+// and zero for a baked buffer. The bytes themselves stay inside it, for the
+// reason TextureDescr.PixelBytes gives.
+func (b BufferDescr) InlineBytes() int { return len(b.bytes) }
+
 // bufferSource selects how a BufferDescr is resolved.
 type bufferSource int
 

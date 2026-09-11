@@ -133,6 +133,22 @@ func MeshIndexed(vertices, indices BufferDescr, topology PrimitiveTopology, layo
 	return mesh
 }
 
+// VertexCount reports how many vertices the mesh's vertex buffer holds,
+// derived from its size and the stride the layout implies. It is zero for a
+// mesh whose layout declares no attributes, since nothing then says how wide
+// a vertex is.
+func (m MeshDescr) VertexCount() int { return m.vertexCount }
+
+// IndexCount reports how many uint32 indices the mesh's index buffer holds,
+// and zero for a non-indexed mesh.
+func (m MeshDescr) IndexCount() int { return m.indexCount }
+
+// Indexed reports whether the mesh draws through an index buffer.
+func (m MeshDescr) Indexed() bool { return m.indexed }
+
+// Topology reports how the mesh's vertices assemble into primitives.
+func (m MeshDescr) Topology() PrimitiveTopology { return m.topology }
+
 // stride reports the interleaved vertex stride derived from the layout (the
 // largest attribute end offset).
 func (m *MeshDescr) stride() int {

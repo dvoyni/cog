@@ -89,6 +89,23 @@ func (p *Plugin) armCaptureCmdImpl() (kernel.Lock, kernel.Execute[ArmCaptureRequ
 		}
 }
 
+// armFrameCmdImpl installs the frame's one snapshot request and hands back
+// the channel the result arrives on, plus the viewport the caller cannot read
+// for itself. The Viewport read is the only lock it needs: the snapshot slot
+// is plugin-owned and carries its own.
+func (p *Plugin) armFrameCmdImpl() (kernel.Lock, kernel.Execute[ArmFrameRequest, ArmFrameResponse]) {
+	var viewport kernel.Read[*app.Viewport]
+	return func(access kernel.ResourceAccess) {
+			viewport = access.GetRead[*app.Viewport]()
+		}, func(_ kernel.Kernel, request ArmFrameRequest) (ArmFrameResponse, error) {
+			live, err := p.snapshots.arm(request)
+			if err != nil {
+				return ArmFrameResponse{}, err
+			}
+			return ArmFrameResponse{Done: live.done, Viewport: *viewport.Get()}, nil
+		}
+}
+
 func setViewportCmdImpl() (kernel.Lock, kernel.Execute[app.SetViewportRequest, app.SetViewportResponse]) {
 	var preference kernel.Read[*desiredViewport]
 	var current kernel.Write[*app.Viewport]

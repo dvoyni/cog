@@ -153,6 +153,29 @@ func (ErrCaptureBurstPaused) Error() string {
 	return "gfx: a burst needs ticks, and the engine is paused"
 }
 
+// ErrFrameBusy reports a frame-snapshot arm made while one is already live.
+// It is refused rather than queued, for the reason a second capture is: the
+// window is one tick and the retry is one call.
+//
+// It is deliberately its own kind. A capture, a frame snapshot and the other
+// packages' snapshots are separate slots and may be in flight together -
+// refusing across kinds would destroy the one thing arming them together is
+// for, which is describing a single tick.
+type ErrFrameBusy struct{}
+
+func (ErrFrameBusy) Error() string {
+	return "gfx: a frame snapshot is already in flight"
+}
+
+// ErrFrameAbandoned reports a frame snapshot the engine stopped before a tick
+// completed. It travels the channel a result would have used, so that a
+// waiter learns the answer rather than sitting until its own deadline.
+type ErrFrameAbandoned struct{}
+
+func (ErrFrameAbandoned) Error() string {
+	return "gfx: the engine stopped before a frame was recorded"
+}
+
 // formatName names a texture format for a message. TextureFormat is a small
 // closed enum with no String of its own, and giving it one would put a
 // rendering of every member into gfx's public surface for one error.

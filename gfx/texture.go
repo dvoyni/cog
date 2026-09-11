@@ -24,6 +24,21 @@ func (t TextureDescr) Path() string { return t.path }
 // resource path reports zero until it is baked, since only the file knows.
 func (t TextureDescr) Size() (width, height int) { return t.width, t.height }
 
+// Format returns the texture's pixel format. A texture loaded from a resource
+// path is always sRGB, because the loader decodes PNG and JPEG and both are
+// gamma-encoded by definition.
+func (t TextureDescr) Format() TextureFormat { return t.format }
+
+// Mipmaps reports whether a full mip chain is generated when the texture is
+// baked.
+func (t TextureDescr) Mipmaps() bool { return t.mipmaps }
+
+// PixelBytes reports how many bytes of inline pixel data the descriptor
+// carries, and zero for a texture named by path or already baked. The pixels
+// themselves stay inside the descriptor - a caller wanting to know that an
+// upload is a megabyte should not have to hold the megabyte to find out.
+func (t TextureDescr) PixelBytes() int { return len(t.pixels) }
+
 // textureSource selects how a TextureDescr is resolved.
 type textureSource int
 

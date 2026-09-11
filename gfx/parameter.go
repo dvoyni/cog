@@ -142,6 +142,31 @@ func (p ParameterDescr) SamplerValue() (SamplerDesc, bool) { return p.sampler, p
 // VecValue returns the parameter's vec4 and true when it is a vec4 parameter.
 func (p ParameterDescr) VecValue() (m.Vec4, bool) { return p.vec, p.kind == paramVec4 }
 
+// MatValue returns the parameter's mat4 and true when it is a mat4 parameter.
+func (p ParameterDescr) MatValue() (m.Mat4, bool) { return p.mat, p.kind == paramMat4 }
+
+// BufferValue returns the parameter's buffer and true when it is a buffer
+// parameter. The range it binds is BufferRange, not part of the descriptor:
+// two draws addressing their own slices of one arena share the buffer and
+// differ only in the range.
+func (p ParameterDescr) BufferValue() (BufferDescr, bool) {
+	return p.buffer, p.kind == paramBuffer
+}
+
+// BufferRange returns the slice of the buffer this parameter binds, and true
+// when it is a buffer parameter. A zero size means the whole buffer from the
+// offset.
+func (p ParameterDescr) BufferRange() (offset, size int, ok bool) {
+	return p.bufferOffset, p.bufferSize, p.kind == paramBuffer
+}
+
+// RawLen returns the byte length of a raw parameter's data and true when it is
+// one. The bytes themselves stay inside the descriptor: they are already laid
+// out the way one shader reads them, so nothing outside can do anything with
+// them but forward them, and a reader that only wants to know how much is
+// travelling gets the number without the copy.
+func (p ParameterDescr) RawLen() (int, bool) { return len(p.raw), p.kind == paramRaw }
+
 // HasValue reports whether the parameter carries bytes a shader reads out of its
 // uniform block, as opposed to a binding it attaches to a bind group. It is the
 // question a recorder asks to decide whether a parameter can vary per item at
