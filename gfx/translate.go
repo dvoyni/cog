@@ -348,13 +348,20 @@ func (t *translator) translateDraw(op *op, pass PassDescr, backend Backend, file
 	if shaderID == 0 {
 		return
 	}
-	pipeline := t.ensurePipeline(backend, shaderID, m, op.material.state, pass)
+	label := shaderLabel(op.material.shader)
+	// A vertex layout that does not supply what the shader reads is fatal to
+	// the draw on the same terms a shader failure is: it reports on the frame
+	// that built the pipeline and drops the draw on every frame after it.
+	pipeline, err := t.ensurePipeline(backend, shaderID, label, m, op.material.state, pass)
+	if err != nil && *firstErr == nil {
+		*firstErr = err
+	}
 	if pipeline == 0 {
 		return
 	}
 
 	layout := t.shaderLayout(backend, shaderID)
-	plan := t.prepareParameterPlan(shaderID, shaderLabel(op.material.shader), layout, op.material.params, op.params)
+	plan := t.prepareParameterPlan(shaderID, label, layout, op.material.params, op.params)
 	if plan.mismatch != nil {
 		if *firstErr == nil {
 			*firstErr = plan.mismatch
@@ -609,10 +616,15 @@ func (t *translator) releaseShader(backend Backend, descr ShaderDescr, cached *c
 		return
 	}
 	for key, pipeline := range t.pipelines {
-		if key.shader == cached.id {
-			backend.FreePipeline(pipeline)
-			delete(t.pipelines, key)
+		if key.shader != cached.id {
+			continue
 		}
+		// A zero entry is the marker for a pipeline that failed to build, not
+		// a resource: there is nothing to hand back.
+		if pipeline != 0 {
+			backend.FreePipeline(pipeline)
+		}
+		delete(t.pipelines, key)
 	}
 	for key := range t.parameterPlans {
 		if key.shader == cached.id {
@@ -628,7 +640,9 @@ func (t *translator) freeCachedResources(backend Backend) {
 		t.ops.ReleaseTexture(texture.id)
 	}
 	for _, pipeline := range t.pipelines {
-		backend.FreePipeline(pipeline)
+		if pipeline != 0 {
+			backend.FreePipeline(pipeline)
+		}
 	}
 	for _, cached := range t.shaders {
 		if cached.id != 0 {
@@ -718,11 +732,21 @@ func writeParamAt(buf []byte, off int, p *ParameterDescr) {
 	}
 }
 
-func (t *translator) ensurePipeline(backend Backend, shader ShaderID, m *MeshDescr, state MaterialState, pass PassDescr) PipelineID {
+// ensurePipeline returns the cached pipeline for one (shader, mesh layout,
+// state, attachments) combination, building it on a miss.
+//
+// It returns an error only on the miss that produced it, which is what makes
+// report-once-drop-always fall out of the cache that already exists: a failure
+// is cached as the zero id, so every frame after the first finds `ok` true,
+// returns zero and no error, and the caller drops the draw on the zero id
+// exactly as it did before.
+func (t *translator) ensurePipeline(
+	backend Backend, shader ShaderID, label string, m *MeshDescr, state MaterialState, pass PassDescr,
+) (PipelineID, error) {
 	stride := m.stride()
 	layout, ok := vertexLayoutKeyOf(m.layout)
 	if !ok {
-		return 0
+		return 0, nil
 	}
 	// One colour format exists today, the frame buffer's, and every renderable
 	// texture in the tree is allocated in it - so the sentinel is still right
@@ -737,7 +761,16 @@ func (t *translator) ensurePipeline(backend Backend, shader ShaderID, m *MeshDes
 		colorFormat: colorFormat, depthFormat: depthFormat, noColor: noColor, layout: layout,
 	}
 	if id, ok := t.pipelines[k]; ok {
-		return id
+		return id, nil
+	}
+	// The vertex interface is checked before the backend is asked for anything,
+	// because no backend checks it: gogpu performs no vertex-interface
+	// validation of any kind, the software rasterizer keeps an unsupplied
+	// input's zero value, and WebGPU itself fills the components a format does
+	// not supply with (0, 0, 0, 1).
+	if err := CheckVertexInterface(label, t.shaderLayout(backend, shader), m.layout); err != nil {
+		t.pipelines[k] = 0
+		return 0, err
 	}
 	attrs := make([]VertexAttribute, len(m.layout))
 	for i := range m.layout {
@@ -755,10 +788,11 @@ func (t *translator) ensurePipeline(backend Backend, shader ShaderID, m *MeshDes
 		Label:         "gfx.pipeline",
 	})
 	if err != nil {
-		return 0
+		t.pipelines[k] = 0
+		return 0, ErrPipelineFailed{Shader: label, Err: err}
 	}
 	t.pipelines[k] = id
-	return id
+	return id, nil
 }
 
 func (t *translator) ensureSampler(backend Backend, desc SamplerDesc) SamplerID {

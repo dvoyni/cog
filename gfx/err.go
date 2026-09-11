@@ -73,6 +73,77 @@ func (e ErrParameterKindMismatch) Error() string {
 		e.Shader, e.Declared, e.Parameter, e.Supplied)
 }
 
+// ErrVertexInputUnsupplied reports a shader input no attribute of the bound
+// vertex layout fills. The draw is dropped: WebGPU hands the input
+// (0, 0, 0, 1) and the software rasterizer hands it a zero value, so what
+// renders is wrong shading rather than an absence anyone would notice.
+//
+// It goes to the fatal error path rather than the web-limits diagnostic path.
+// A diagnostic says "this renders here but would not on the web"; a vertex
+// interface mismatch renders wrongly, everywhere.
+type ErrVertexInputUnsupplied struct {
+	Shader   string
+	Input    string
+	Location int
+	Declared string // the WGSL type the shader declared
+}
+
+func (e ErrVertexInputUnsupplied) Error() string {
+	return fmt.Sprintf("gfx: shader %q reads %s %s at @location(%d), which the bound vertex layout does not supply",
+		e.Shader, e.Declared, e.Input, e.Location)
+}
+
+// ErrVertexInputMismatch reports a shader input the bound layout supplies at a
+// different type. The draw is dropped, for the reason an unsupplied one is: the
+// components that do not line up are filled in or dropped silently.
+//
+// Declared and Supplied are WGSL spellings rather than format names because the
+// rule is over what a format decodes to, not over how its bytes are stored -
+// Unorm8x4 and Float32x4 both supply vec4<f32> and both are legal under a
+// vec4<f32> declaration.
+type ErrVertexInputMismatch struct {
+	Shader   string
+	Input    string
+	Location int
+	Declared string
+	Supplied string
+}
+
+func (e ErrVertexInputMismatch) Error() string {
+	return fmt.Sprintf("gfx: shader %q reads %s %s at @location(%d), which the bound vertex layout supplies as %s",
+		e.Shader, e.Declared, e.Input, e.Location, e.Supplied)
+}
+
+// ErrVertexStrideAlignment reports a vertex stride that is not a multiple of 4.
+// WebGPU requires that unconditionally, and the platforms disagree about it:
+// a 30-byte stride succeeds on Vulkan, Apple-silicon Metal and D3D12 and fails
+// on js/wasm, on GLES and on older Apple GPUs. The draw is dropped here so that
+// a Windows dev machine and a browser give the same answer.
+type ErrVertexStrideAlignment struct {
+	Shader string
+	Stride int
+}
+
+func (e ErrVertexStrideAlignment) Error() string {
+	return fmt.Sprintf("gfx: the vertex layout bound to shader %q has a %d-byte stride; WebGPU requires a multiple of 4",
+		e.Shader, e.Stride)
+}
+
+// ErrPipelineFailed reports a pipeline the backend refused. gfx used to discard
+// this diagnosis and return a zero id, which from the caller's seat made "gfx
+// refused to build this" and "the backend refused to build this" the same
+// silent event.
+type ErrPipelineFailed struct {
+	Shader string
+	Err    error
+}
+
+func (e ErrPipelineFailed) Error() string {
+	return fmt.Sprintf("gfx: the backend refused a pipeline for shader %q: %v", e.Shader, e.Err)
+}
+
+func (e ErrPipelineFailed) Unwrap() error { return e.Err }
+
 // ErrBackendMissing is reported the first time a frame is rendered without an
 // installed Backend. Without it nothing reaches the GPU, so it distinguishes a
 // missing or failed driver from a scene that legitimately drew nothing.

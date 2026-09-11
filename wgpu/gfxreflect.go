@@ -9,6 +9,11 @@ import (
 	"github.com/gogpu/naga/wgsl"
 )
 
+// vertexEntryPoint is the vertex function every gfx pipeline is built against.
+// Reflection and pipeline creation read the same constant so that what is
+// checked cannot drift from what is built.
+const vertexEntryPoint = "vs_main"
+
 // lowerWGSL parses and lowers WGSL to naga's typed IR (pure, no GPU).
 func lowerWGSL(source string) (*ir.Module, error) {
 	ast, err := naga.Parse(source)
@@ -79,7 +84,92 @@ func shaderLayoutFrom(mod *ir.Module) (cgfx.ShaderLayout, error) {
 			})
 		}
 	}
+	layout.VertexInputs = vertexInputs(mod)
 	return layout, nil
+}
+
+// vertexInputs reflects every @location the vertex entry point declares, which
+// is the half of the vertex interface only the shader knows. It walks the
+// module the global-variable loop above already has: no new parse, no second
+// lowering, no new dependency.
+//
+// The entry point is the one named vs_main, because that is the one
+// gfxBackend.NewPipeline names. A module carrying a second vertex function
+// nothing is built against has no say in what a draw through this shader reads.
+func vertexInputs(mod *ir.Module) []cgfx.ShaderVertexInput {
+	var inputs []cgfx.ShaderVertexInput
+	for i := range mod.EntryPoints {
+		entry := &mod.EntryPoints[i]
+		if entry.Stage != ir.StageVertex || entry.Name != vertexEntryPoint {
+			continue
+		}
+		for _, arg := range entry.Function.Arguments {
+			// An argument is either one @location itself or a struct whose
+			// members carry the bindings - SceneVertexIn is the second shape and
+			// canvas's vs_main the first. A @builtin argument carries a binding
+			// that is not a location and is skipped by the type switch below.
+			if arg.Binding != nil {
+				if input, ok := vertexInput(mod, arg.Name, arg.Type, *arg.Binding); ok {
+					inputs = append(inputs, input)
+				}
+				continue
+			}
+			structure, ok := mod.Types[arg.Type].Inner.(ir.StructType)
+			if !ok {
+				continue
+			}
+			for _, member := range structure.Members {
+				if member.Binding == nil {
+					continue
+				}
+				if input, ok := vertexInput(mod, member.Name, member.Type, *member.Binding); ok {
+					inputs = append(inputs, input)
+				}
+			}
+		}
+	}
+	return inputs
+}
+
+// vertexInput reduces one @location declaration to the pair a vertex format is
+// compared against: the scalar kind it decodes to and how many components it
+// has. Anything else - a @builtin, or a declared type no vertex format can
+// present - is not a vertex input and is reported as not one.
+func vertexInput(
+	mod *ir.Module, name string, typ ir.TypeHandle, binding ir.Binding,
+) (cgfx.ShaderVertexInput, bool) {
+	location, ok := binding.(ir.LocationBinding)
+	if !ok {
+		return cgfx.ShaderVertexInput{}, false
+	}
+	input := cgfx.ShaderVertexInput{Name: name, Location: int(location.Location)}
+	switch inner := mod.Types[typ].Inner.(type) {
+	case ir.ScalarType:
+		input.Kind, input.Count = vertexScalar(inner.Kind), 1
+	case ir.VectorType:
+		input.Kind, input.Count = vertexScalar(inner.Scalar.Kind), int(inner.Size)
+	default:
+		return cgfx.ShaderVertexInput{}, false
+	}
+	if input.Kind == cgfx.VertexScalarNone {
+		return cgfx.ShaderVertexInput{}, false
+	}
+	return input, true
+}
+
+// vertexScalar maps a WGSL scalar kind onto what a vertex format decodes to.
+// Half-width floats are still floats: WebGPU's float16 formats present as f32,
+// so the width is not part of the comparison.
+func vertexScalar(kind ir.ScalarKind) cgfx.VertexScalar {
+	switch kind {
+	case ir.ScalarFloat:
+		return cgfx.VertexScalarFloat
+	case ir.ScalarUint:
+		return cgfx.VertexScalarUint
+	case ir.ScalarSint:
+		return cgfx.VertexScalarSint
+	}
+	return cgfx.VertexScalarNone
 }
 
 // storageMembers walks one level of a storage struct. An array member carries

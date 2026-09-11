@@ -631,7 +631,7 @@ func (b *gfxBackend) NewPipeline(desc cgfx.PipelineDesc) (cgfx.PipelineID, error
 		Label:  desc.Label,
 		Layout: sh.pipeLayout,
 		Vertex: wgpu.VertexState{
-			Module: module, EntryPoint: "vs_main",
+			Module: module, EntryPoint: vertexEntryPoint,
 			Buffers: buffers,
 		},
 		Primitive: gputypes.PrimitiveState{

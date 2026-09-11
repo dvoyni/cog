@@ -40,6 +40,7 @@ type fakeBackend struct {
 	uploads        int
 	shaderCode     []byte
 	shaderErr      error
+	pipelineErr    error
 	shaderLabels   []string
 	freedSamplers  []SamplerID
 	freedShaders   []ShaderID
@@ -172,6 +173,9 @@ func (b *fakeBackend) ShaderLayout(ShaderID) ShaderLayout {
 	}
 }
 func (b *fakeBackend) NewPipeline(desc PipelineDesc) (PipelineID, error) {
+	if b.pipelineErr != nil {
+		return 0, b.pipelineErr
+	}
 	b.pipes++
 	b.lastPipelines = append(b.lastPipelines, desc)
 	return PipelineID(b.id()), nil

@@ -412,6 +412,52 @@ independently by name, so a material's textures can sample differently.
 `Snorm16x2`, `Snorm16x4`, `Uint32`, `Uint32x2`, `Uint32x3`, `Uint32x4`,
 `Sint32`, `Sint32x2`, `Sint32x3`, `Sint32x4`, and `Unorm1010102`.
 
+## The vertex interface
+
+**A shader that reads an `@location` the bound layout does not supply — or
+supplies at a different type — is reported and the draw is dropped.** Nothing
+else in the stack catches this: gogpu performs no vertex-interface validation of
+any kind, the software rasterizer keeps an unsupplied input's zero value, and
+WebGPU itself fills the components a format does not supply with `(0, 0, 0, 1)`,
+as Vulkan does. So `vec3<f32>` over a two-component oct pair yields `(x, y, 0)`
+— a plausible unit-ish direction lying in the XY plane. Not a black screen, not
+garbage triangles: wrong shading that looks like art, in an engine with no pixel
+readback anywhere.
+
+**The rule is exact, and deliberately stricter than WebGPU.** The format's
+`(kind, count)` must *equal* the shader's declared `(kind, count)`, where the
+kind is what the hardware decodes to — `VertexScalarFloat`, `VertexScalarUint`
+or `VertexScalarSint`, so every normalized format is a float however many bits
+it occupies. Presence-only and base-type-compatible were both rejected because
+both let the real mismatch through: a two-component unorm decodes to `f32`, and
+`vec3<f32>` is `f32`. WebGPU's legal widening and narrowing are forbidden as a
+result, and that costs nothing — every `@location` in `scene/builtin` and
+`canvas/builtin` is already an exact match.
+
+**The check is one-directional.** A layout supplying an attribute the shader
+does not read is legal and common: scene's bundled vertex struct declares six of
+its eight under the no-skin variant. The direction that fails is a shader input
+no attribute supplies, never the other way round.
+
+**It also checks the stride.** WebGPU requires `arrayStride` to be a multiple of
+4 unconditionally, and the platforms disagree: a 30-byte stride succeeds on
+Vulkan, Apple-silicon Metal and D3D12 and fails on `js/wasm`, on GLES and on
+older Apple GPUs — green on a Windows dev machine, broken in the browser.
+
+The shader half comes from `ShaderLayout.VertexInputs`, which a backend reflects
+alongside the bindings; the mesh half is the `VertexAttr` list, whose index *is*
+the `@location`. `CheckVertexInterface(shader, layout, attrs)` is where they
+meet, exported for the reason `FlattenShader` is: it is the test surface for a
+rule that otherwise could only be exercised through a backend.
+
+**Failures are loud, drop the draw, and report once.** They go to the fatal
+error path rather than the web-limits diagnostic path — a diagnostic says "this
+renders here but would not on the web", and a vertex-interface mismatch renders
+wrongly everywhere. A failed pipeline is cached as the zero id, so `ok` is true
+from the second frame on, the caller drops the draw on the zero id exactly as it
+did before, and report-once-drop-always falls out of the cache that already
+exists.
+
 ## Backend API
 
 `Backend` is implemented by a system driver. It reserves logical texture and
@@ -443,11 +489,15 @@ whose map resolved on the submit `Execute` just made.
 
 Low-level descriptors are `TextureDesc`, `BufferDesc`, `SamplerDesc`,
 `ShaderDesc`, `PipelineDesc`, `ShaderLayout`, `UniformMember`,
-`ShaderResource`, `StorageMember`, `VertexAttribute`, and `Region`. Reflection
+`ShaderResource`, `StorageMember`, `ShaderVertexInput`, `VertexAttribute`, and
+`Region`. Reflection
 reports member layout for storage structs too — a one-level walk in which an
 array member carries its element stride and count — so a recorder that declares
 no uniform block at all packs its records from the same source of truth. A
 shader declaring two uniform blocks is an error rather than a silent overwrite.
+It also reports the vertex stage's `@location` inputs as `ShaderVertexInput`
+values — the location plus a `VertexScalar` kind and a component count — which
+is the half of the vertex interface only the shader knows.
 Enums include
 `TextureFormat` (`FormatRGBA8`, `FormatRGBA8Srgb`, `FormatDepth32F`, and the
 `FormatScreen` sentinel that `Resolve()` turns into `FrameBufferFormat`),
@@ -504,6 +554,17 @@ shader cannot be loaded. Its `Error() string` method implements `error`.
 when a parameter's name matches a binding its kind cannot fill, and the draw is
 dropped. See the parameter section above for why an unreported one is worse than
 a dropped draw.
+
+`ErrVertexInputUnsupplied{Shader, Input, Location, Declared}`,
+`ErrVertexInputMismatch{Shader, Input, Location, Declared, Supplied}` and
+`ErrVertexStrideAlignment{Shader, Stride}` are the three ways a vertex layout
+fails the shader bound with it. Each drops the draw and reports once per
+offending pair. See *The vertex interface* above.
+
+`ErrPipelineFailed{Shader, Err}` carries the backend's own refusal of a
+pipeline, which gfx used to discard — making "gfx refused to build this" and
+"the backend refused to build this" the same silent event from the caller's
+seat. It unwraps to the backend's error.
 
 
 The capture errors are typed for the same reason: a caller reads them, and a

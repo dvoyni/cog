@@ -234,6 +234,25 @@ type ShaderLayout struct {
 	UniformBinding int
 	Uniforms       []UniformMember
 	Resources      []ShaderResource
+	// VertexInputs is every @location the vertex stage declares, which is the
+	// half of the vertex interface only the shader knows. The other half is the
+	// mesh's VertexAttr list, and CheckVertexInterface is where they meet.
+	VertexInputs []ShaderVertexInput
+}
+
+// ShaderVertexInput is one @location input of a shader's vertex stage: where it
+// binds and what it declares, reduced to the pair a vertex format can be
+// compared against.
+//
+// The declared type is carried as (Kind, Count) rather than as source text
+// because that is what the comparison is over: a format decodes to a scalar
+// kind and a component count, and nothing in a spelling like "vec3<f32>"
+// survives into the hardware beyond those two numbers.
+type ShaderVertexInput struct {
+	Name     string
+	Location int
+	Kind     VertexScalar
+	Count    int
 }
 
 // UniformMember is one member of the shader-parameter uniform block: its name and

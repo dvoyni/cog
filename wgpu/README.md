@@ -174,6 +174,13 @@ opaque IDs to native WebGPU textures and buffers, reflects WGSL bindings, caches
 pipelines/samplers/bind groups, maintains depth targets, performs queued bakes
 and releases, and submits each translated `gfx.GpuQueue` to the current surface.
 
+Reflection walks a shader's lowered module once. Alongside the global variables
+it reads the `vs_main` entry point's arguments — flat `@location` parameters and
+the members of a struct argument alike — and reports each as a
+`gfx.ShaderVertexInput`, which is what `gfx.CheckVertexInterface` compares the
+bound vertex layout against. `vs_main` is a constant shared with pipeline
+creation, so what is checked cannot drift from what is built.
+
 A pass whose target is `gfx.ScreenTarget()` does not render into the surface.
 It renders into a frame-sized frame buffer the backend allocates on first use
 in `gfx.FrameBufferFormat` and drops whenever the surface resizes; the frame's
