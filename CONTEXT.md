@@ -43,7 +43,7 @@ The optional lifecycle phase in which a plugin begins operating after all regist
 
 **Host**:
 The single plugin that owns the application's blocking runtime loop.
-_Avoid_: System plugin
+_Avoid_: System plugin. A System is the ECS's term for a func run over matching Entities, and has nothing to do with the Host.
 
 **Tick source**:
 What decides when an update tick is published — the driver's frame clock while running, or an explicit step request while paused. Rendering is not a tick source: a paused engine keeps drawing the last completed frame.
@@ -68,6 +68,7 @@ The final subscriber group in an event publication. Members may execute concurre
 
 **Resource**:
 Shared state whose declared access is coordinated by the engine. Plugins may also own state and coordinate its concurrent access themselves.
+_Avoid_: A second, ECS-local meaning — what other engines call a resource is exactly this.
 
 **Resource handle**:
 A binding to a resource cell, obtained during registration and valid for the engine lifetime. The value it exposes is valid only while the owning handler holds its lock.
@@ -98,6 +99,54 @@ An engine without a Host. It remains running until its context is canceled.
 
 **Shutdown**:
 The optional lifecycle phase that stops active plugins in reverse dependency order before the scheduler stops.
+
+## Entities and Components
+
+**Entity**:
+An opaque handle to one thing in the simulation. It is comparable, copyable, and usable as a map key. It carries a generation, so a handle to a despawned Entity is detectably stale rather than silently addressing whatever took its place. Its zero value means "no Entity".
+_Avoid_: Id, object, actor, game object
+
+**Entities**:
+The authority on which Entities exist: it allocates them, tracks their generations, and answers whether one is alive. It knows nothing about which Components an Entity has.
+_Avoid_: World, Registry
+
+**Component**:
+A plain value an Entity either has or has not, addressed by its Go type. It contains no pointers of any kind, transitively, which is checked when the type is registered. An Entity holds at most one Component of a given type.
+_Avoid_: Attribute, property, field
+
+**Tag**:
+A Component with no fields. Its presence is the whole of what it says, and its purpose is to narrow a Query. It is not a place to keep a boolean: a fact the Entity carries data about belongs in that data's Component, and no fact is encoded twice.
+_Avoid_: Flag, marker, label
+
+**Component set**:
+The exact set of Component types one Entity has. It describes an Entity; it is not a structure the engine keeps, and nothing groups Entities by it.
+_Avoid_: Archetype, table, signature
+
+**Component registration**:
+The Registration-phase declaration that one Component type exists, made once per type by exactly one plugin. It is what makes the type's Store exist, so a type no plugin registered cannot be added, read, or locked.
+
+**Store**:
+The engine's holding of every value of one Component type. There is one per registered Component type, and it is the unit a lock is taken on.
+_Avoid_: Pool, column, table
+
+**Page**:
+A block of a Store's index, allocated only when some Entity in its range has the Component. Nothing observes a Page; it is not a unit of iteration.
+_Avoid_: Chunk, block
+
+**Query**:
+A System's declaration of the Component types it reads and writes. It matches every Entity having _at least_ those types, which is why it is not a Component set.
+_Avoid_: View, archetype
+
+**System**:
+A plain Go func the ECS runs over the Entities a Query matches. Its lock set is derived from the Component types in its signature, at registration only.
+_Avoid_: System plugin, which is the Host
+
+**Structural change**:
+Any change to which Entities have which Components — adding or removing a Component, spawning or despawning an Entity — as opposed to a change to a Component's value.
+
+**Spawn**:
+Creating an Entity together with a complete set of Components, as one Structural change. Despawn is its inverse.
+_Avoid_: Instantiate, Instance, create
 
 ## Agent Interface
 
