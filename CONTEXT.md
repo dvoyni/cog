@@ -126,20 +126,20 @@ _Avoid_: Archetype, table, signature
 The Registration-phase declaration that one Component type exists, made once per type by exactly one plugin. It is what makes the type's Store exist, so a type no plugin registered cannot be added, read, or locked.
 
 **Store**:
-The engine's holding of every value of one Component type. There is one per registered Component type, and it is the unit a lock is taken on.
-_Avoid_: Pool, column, table
-
-**Page**:
-A block of a Store's index, allocated only when some Entity in its range has the Component. Nothing observes a Page; it is not a unit of iteration.
-_Avoid_: Chunk, block
+The engine's holding of every value of one Component type. There is one per registered Component type, and it is the unit a lock is taken on. It knows how many Entities it holds, and that number is what a Query consults to choose its Driver.
+_Avoid_: Pool, column, table. Also Page, which stays unspent: a Store's index is not divided into blocks.
 
 **Query**:
 A struct type whose field types are the Component types one System touches. A field's pointer-ness is its access mode: a pointer field is written and yields the stored value itself, a value field is read and yields a copy. A Query matches every Entity having _at least_ those Component types, which is why it is not a Component set.
 _Avoid_: View, archetype. Also Bundle, which stays unspent for a set of Components spawned together.
 
 **Filter**:
-A Query field that narrows which Entities match while reading and writing nothing. It is the reason a Tag exists.
+A Query field that narrows which Entities match without yielding anything into the Query. It still reads its Component's Store, because presence is information and reading it is a read, so it contributes to the System's lock set like any other field. It is the reason a Tag exists.
 _Avoid_: Predicate, matcher
+
+**Driver**:
+The one Store a Query walks to find candidates, every other Component it names being checked against each candidate in turn. A Query costs what its Driver is long, not what it matches, so narrowing a Query with a Tag can be the difference between visiting a hundred Entities and five thousand. A Filter can never be the Driver: it names the Entities to exclude, and nothing lists the rest.
+_Avoid_: lead, primary, base
 
 **System**:
 A plain Go func that takes Queries and is called once per tick, iterating the Entities they match itself. Its lock set is derived from its signature at registration, and it can touch no Component that signature does not name.
