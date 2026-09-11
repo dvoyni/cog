@@ -11,12 +11,18 @@
 // never the other way round, so declaring six of the eight is legal. See
 // ErrMeshCustomLayoutNeedsMaterial, which guards only the other way round.
 //
-// The normal and the tangent are stored encoded, four bytes each: the normal as
-// oct32 in a two-component 16-bit unorm, the tangent as one word of oct 15/15
-// plus handedness. So they arrive as vec2<f32> and u32 and are directions only
-// after vertexdecode.wgsl has had them. These types must equal what scene's
-// standardVertexLayout supplies - gfx compares the pair at pipeline time and
-// refuses the draw - so neither side can drift.
+// The normal, the tangent and both UV sets are stored encoded, four bytes each:
+// the normal as oct32 in a two-component 16-bit unorm, the tangent as one word
+// of oct 15/15 plus handedness, each UV set as a two-component 16-bit unorm
+// against the mesh's own range. So the first two arrive as vec2<f32> and u32
+// and are directions only after vertexdecode.wgsl has had them. These types
+// must equal what scene's standardVertexLayout supplies - gfx compares the pair
+// at pipeline time and refuses the draw - so neither side can drift.
+//
+// The UVs are the exception to that guard, and it is worth naming: a Unorm16x2
+// and a Float32x2 both arrive as vec2<f32>, so the declaration below is the
+// same either way and the interface check cannot see the narrowing. What makes
+// a raw uv0 wrong is the mesh record, not the type - see sceneDecodeUV.
 struct SceneVertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec2<f32>,

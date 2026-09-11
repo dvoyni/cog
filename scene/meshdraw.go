@@ -133,6 +133,7 @@ func (q *opQueue) TemporaryMesh[TVertex VertexLayout](
 		vertices: input.vertices, indices: input.indices,
 		vertexCount: input.vertexCount, indexCount: input.indexCount,
 		topology: input.topology, layout: input.layout, standard: input.standard,
+		uv: input.uv,
 	})
 	return MeshRef{
 		source: meshTemporary, id: uint32(len(q.meshes.temporaries)), generation: q.frame,
@@ -149,6 +150,9 @@ type temporaryMesh struct {
 	topology    gfx.PrimitiveTopology
 	layout      []gfx.VertexAttr
 	standard    bool
+	// uv is the per-mesh record this frame's pack quantised the UVs against,
+	// carried through to the mesh record so the draw names the right slot.
+	uv sceneMesh
 }
 
 // meshRecording is everything the frame's mesh calls own: the temporary meshes
@@ -190,7 +194,7 @@ func (t temporaryMesh) record(arena []byte) meshRecord {
 	record := meshRecord{
 		vertices:    gfx.BufferWithBytes(t.vertices.of(arena), true),
 		vertexCount: t.vertexCount, indexCount: t.indexCount,
-		topology: t.topology, layout: t.layout, standard: t.standard,
+		topology: t.topology, layout: t.layout, standard: t.standard, uv: t.uv,
 	}
 	if t.indexCount > 0 {
 		record.indices, record.indexed = gfx.BufferWithBytes(t.indices.of(arena), true), true

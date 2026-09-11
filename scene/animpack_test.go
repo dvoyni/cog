@@ -230,14 +230,14 @@ func TestPackAnimLaysTheBlockOutInVec4s(t *testing.T) {
 // which is what skips the whole pose path for a debug line or a procedural
 // terrain mesh rather than charging it a per-vertex fetch of an identity.
 func TestPackInstanceMarksAnUnskinnedDraw(t *testing.T) {
-	instance := packInstance(m.NewMat4(), animBinding{offset: sceneNoAnim})
+	instance := packInstance(m.NewMat4(), animBinding{offset: sceneNoAnim}, 0)
 	if instance.Flags&sceneNoSkin == 0 {
 		t.Error("a draw with no skin of its own carries SCENE_NOSKIN")
 	}
 	if instance.AnimOffset != sceneNoAnim {
 		t.Errorf("AnimOffset = %d, want sceneNoAnim", instance.AnimOffset)
 	}
-	skinned := packInstance(m.NewMat4(), animBinding{offset: 7, skinned: true})
+	skinned := packInstance(m.NewMat4(), animBinding{offset: 7, skinned: true}, 0)
 	if skinned.Flags&sceneNoSkin != 0 {
 		t.Error("a skinned draw must not carry SCENE_NOSKIN")
 	}

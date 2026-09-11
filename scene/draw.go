@@ -14,6 +14,7 @@ var (
 	instanceSize       = int(unsafe.Sizeof(sceneInstance{}))
 	frameBlockSize     = int(unsafe.Sizeof(sceneFrameBlock{}))
 	materialRecordSize = int(unsafe.Sizeof(scenePbrRecord{}))
+	meshRecordSize     = int(unsafe.Sizeof(sceneMesh{}))
 )
 
 // pendingPass is one pass the flush has decided but not yet emitted, and
@@ -62,7 +63,13 @@ type frameBuild struct {
 	// anims is the frame's sceneAnim arena. It is indexed absolutely rather
 	// than bound per pass: an instance's animOffset counts vec4s from the
 	// start of the whole buffer, so every draw binds it entire.
-	anims  arena
+	anims arena
+	// meshes is the frame's per-mesh record arena, bound entire like anims
+	// because an instance's Mesh counts records from the start of the whole
+	// buffer rather than from a pass's own slice. Slot 0 is the reserved
+	// identity, written at every reset, so the arena is never empty and the
+	// meshes that need no record of their own cost nothing.
+	meshes arena
 	passes []pendingPass
 	draws  []pendingDraw
 	// batches is the scratch one pass fills before publishing it, reused by
@@ -85,6 +92,11 @@ func (b *frameBuild) reset() {
 	b.frames.reset()
 	b.materials.reset()
 	b.anims.reset()
+	b.meshes.reset()
+	// Slot 0 first, before any draw can claim an index: the identity record is
+	// what a custom-layout mesh and a UV-less standard mesh name, and it has to
+	// be there whether or not any mesh this frame carries a range of its own.
+	b.meshes.appendElement(&identityMesh)
 	b.passes = b.passes[:0]
 	b.draws = b.draws[:0]
 	b.batches = b.batches[:0]
@@ -101,6 +113,9 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 	// packed no block still uploads one empty record: an unbound declared
 	// binding is the silent whole-frame loss, not a degraded frame.
 	anims := gfxWrite.TemporaryBuffer(b.animBytes(), true)
+	// The per-mesh arena needs no placeholder of its own: the identity record
+	// at slot 0 is written at every reset, so it always has one record in it.
+	meshes := gfxWrite.TemporaryBuffer(b.meshes.bytes(), true)
 	for i := range b.passes {
 		pass := &b.passes[i]
 		gfxWrite.Pass(pass.descr)
@@ -109,6 +124,7 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 				gfx.BufferRangeParam("sceneFrame", frames, pass.frameOffset, frameBlockSize),
 				gfx.BufferRangeParam("sceneInstances", instances, pass.instanceOffset, pass.instanceBytes),
 				gfx.BufferParam("sceneAnim", anims),
+				gfx.BufferParam("sceneMeshes", meshes),
 				gfx.BufferRangeParam("scenePbrMaterial", materials, draw.materialOffset, materialRecordSize),
 			)
 			// Group 2 is bound only where the draw's variant declares it. The
@@ -159,8 +175,12 @@ func (b *frameBuild) addDraw(
 	worlds []m.Mat4, record scenePbrRecord, params []gfx.ParameterDescr, anim animBinding,
 ) {
 	first := (len(b.instances.bytes()) - pass.instanceOffset) / instanceSize
+	// One record per batch, the way the material record goes, and for the same
+	// reason: two batches of one mesh write two identical records rather than
+	// paying a hash of every record every frame to find that out.
+	meshIndex := b.meshIndex(mesh.uv)
 	for _, world := range worlds {
-		instance := packInstance(world, anim)
+		instance := packInstance(world, anim, meshIndex)
 		b.instances.appendElement(&instance)
 	}
 	b.draws = append(b.draws, pendingDraw{
@@ -176,6 +196,19 @@ func (b *frameBuild) addDraw(
 		MeshID: id, MaterialID: entry.materialID,
 		FirstInstance: first, InstanceCount: len(worlds),
 	})
+}
+
+// meshIndex is the slot a draw's instances name in the per-mesh record buffer.
+//
+// A mesh with no range of its own - a custom layout, which scene never packed,
+// or a standard mesh whose every UV is zero - names slot 0, the reserved
+// identity, and appends nothing. That is the whole of the "no UVs" case: there
+// is no validity flag, no branch in the shader and no second path to test.
+func (b *frameBuild) meshIndex(record sceneMesh) uint32 {
+	if record == (sceneMesh{}) {
+		return 0
+	}
+	return uint32(b.meshes.appendElement(&record) / meshRecordSize)
 }
 
 // endPass closes the pass being accumulated.

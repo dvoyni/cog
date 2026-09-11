@@ -9,21 +9,28 @@ import (
 	"github.com/dvoyni/cog/m"
 )
 
-// The record stays 64 bytes, and one of its two spare words is now spent: the
-// node joint moved out of every vertex of a plain-bound mesh and into the
-// instance, which is what lets nine animated nodes share one conversion.
-func TestInstanceRecordIsSixtyFourBytesWithFourSpare(t *testing.T) {
-	if size := unsafe.Sizeof(sceneInstance{}); size != 64 {
+// The record stays 64 bytes and both of its spare words are now spent: the node
+// joint moved out of every vertex of a plain-bound mesh, and the mesh index
+// names the per-mesh record the geometry's UVs decode against. There is nothing
+// left, which is the fact this test now records - the next thing that wants
+// per-instance data pays 128 bytes or a repack of what is already here.
+func TestInstanceRecordIsSixtyFourFullyAllocatedBytes(t *testing.T) {
+	var instance sceneInstance
+	if size := unsafe.Sizeof(instance); size != 64 {
 		t.Fatalf("sceneInstance is %d bytes, want 64", size)
 	}
-	if spare := unsafe.Sizeof(sceneInstance{}.Spare); spare != 4 {
-		t.Fatalf("sceneInstance has %d spare bytes, want the one word Joint left", spare)
+	named := unsafe.Sizeof(instance.World0) + unsafe.Sizeof(instance.World1) +
+		unsafe.Sizeof(instance.World2) + unsafe.Sizeof(instance.AnimOffset) +
+		unsafe.Sizeof(instance.Flags) + unsafe.Sizeof(instance.Joint) +
+		unsafe.Sizeof(instance.Mesh)
+	if named != 64 {
+		t.Fatalf("sceneInstance's named fields are %d of its 64 bytes, want every one of them", named)
 	}
 }
 
 func TestPackInstanceWritesTheWorldMatrixAsThreeRows(t *testing.T) {
 	transform := Transform{Position: m.Vec3{X: 1, Y: 2, Z: 3}}
-	instance := packInstance(transform.Mat4(), animBinding{offset: sceneNoAnim})
+	instance := packInstance(transform.Mat4(), animBinding{offset: sceneNoAnim}, 0)
 	want := [3]m.Vec4{
 		{X: 1, W: 1},
 		{Y: 1, W: 2},
@@ -36,7 +43,7 @@ func TestPackInstanceWritesTheWorldMatrixAsThreeRows(t *testing.T) {
 }
 
 func TestPackInstanceSkipsAnimationAndSkinningForABufferBuiltDraw(t *testing.T) {
-	instance := packInstance(m.Mat4{}, animBinding{offset: sceneNoAnim})
+	instance := packInstance(m.Mat4{}, animBinding{offset: sceneNoAnim}, 0)
 	if instance.AnimOffset != sceneNoAnim {
 		t.Fatalf("animOffset is %d, want SCENE_NO_ANIM (%d)", instance.AnimOffset, sceneNoAnim)
 	}
@@ -58,7 +65,7 @@ func TestPackInstanceFlagsNonUniformScaleOnly(t *testing.T) {
 		{name: "flattened", matrix: m.Scaling4(1, 1, 0.2), nonUniform: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			instance := packInstance(test.matrix, animBinding{offset: sceneNoAnim})
+			instance := packInstance(test.matrix, animBinding{offset: sceneNoAnim}, 0)
 			if got := instance.Flags&sceneNonUniform != 0; got != test.nonUniform {
 				t.Fatalf("SCENE_NONUNIFORM is %v, want %v", got, test.nonUniform)
 			}
@@ -250,7 +257,7 @@ func TestNoSunDirectionMeansNoSunRadiance(t *testing.T) {
 // reading of the record and m's own transform are held to the same answer.
 func TestPackInstanceRowsTransformLikeTheMatrix(t *testing.T) {
 	world := m.RotationY4(0.7).Mul(m.Translation4(1, 2, 3))
-	instance := packInstance(world, animBinding{offset: sceneNoAnim})
+	instance := packInstance(world, animBinding{offset: sceneNoAnim}, 0)
 
 	point := m.Vec3{X: 0.3, Y: -1.4, Z: 2.6}
 	local := m.Vec4{X: point.X, Y: point.Y, Z: point.Z, W: 1}

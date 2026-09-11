@@ -1,9 +1,13 @@
 // The storage vertex's decode: how the four bytes of normal and the four bytes
-// of tangent become directions.
+// of tangent become directions, and how the four bytes of each UV set become
+// texture coordinates.
 //
-// DECLARES: fn sceneOctDecode, sceneDecodeNormal, sceneDecodeTangent; const
-// SCENE_OCT_TANGENT_MAX, SCENE_TANGENT_Y_SHIFT, SCENE_TANGENT_HANDEDNESS. No
-// binding and no struct, so it is includable by any material, extending or not.
+// DECLARES: fn sceneOctDecode, sceneDecodeNormal, sceneDecodeTangent,
+// sceneDecodeUV; const SCENE_OCT_TANGENT_MAX, SCENE_TANGENT_Y_SHIFT,
+// SCENE_TANGENT_HANDEDNESS. No binding and no struct, so it is includable by
+// any material, extending or not - sceneDecodeUV takes the scale and the bias
+// as arguments rather than reading the per-mesh buffer, which is declared in
+// instance.wgsl at @group(0) @binding(3) and reached through sceneMeshOf.
 //
 // It is mounted at builtin/scene/vertexdecode.wgsl and published as
 // scene.VertexDecodePath, so a custom scene material includes it by that
@@ -72,4 +76,23 @@ fn sceneDecodeTangent(stored: u32) -> vec4<f32> {
     let y = f32((stored >> SCENE_TANGENT_Y_SHIFT) & 0x7fffu) / SCENE_OCT_TANGENT_MAX * 2.0 - 1.0;
     let handedness = select(-1.0, 1.0, (stored & SCENE_TANGENT_HANDEDNESS) != 0u);
     return vec4<f32>(sceneOctDecode(vec2<f32>(x, y)), handedness);
+}
+
+// sceneDecodeUV decodes @location(3) or @location(4): a two-component 16-bit
+// unorm the fetch unit has already divided by 65535, against the scale and the
+// bias of that set in the mesh's own record.
+//
+// One multiply-add and no branch, which is the whole point of the record's two
+// reserved shapes. Slot 0's identity - scale 1, bias 0 - returns the stored
+// value, which is what a mesh with no UVs stored anyway; a range of zero width
+// carries scale 0 and bias equal to the constant, and 0 * scale + bias is that
+// constant exactly.
+//
+// A range is what buys the four bytes their accuracy. A half float costs the
+// same four and needs no record, but an island touching exactly 1.0 crosses
+// into the next binade and doubles its step for the whole primitive - 2 to 4
+// texels at 4096, and 64 on a tiled outlier, where a per-mesh range is inside
+// one texel.
+fn sceneDecodeUV(stored: vec2<f32>, scale: vec2<f32>, bias: vec2<f32>) -> vec2<f32> {
+    return stored * scale + bias;
 }

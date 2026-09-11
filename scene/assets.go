@@ -16,9 +16,10 @@ const (
 	sceneShaderPath = "builtin/scene/scene.wgsl"
 
 	// VertexDecodePath is the one published source of the ten: the decode for
-	// the two attributes a storage vertex holds encoded, the normal as oct32 in
-	// a two-component 16-bit unorm and the tangent as one word of oct 15/15
-	// plus handedness.
+	// the four attributes a storage vertex holds encoded, the normal as oct32
+	// in a two-component 16-bit unorm, the tangent as one word of oct 15/15
+	// plus handedness, and each UV set as a two-component 16-bit unorm against
+	// its mesh's range.
 	//
 	// A custom material drawing a standard-layout mesh includes it by this
 	// absolute storage name and calls sceneDecodeNormal and sceneDecodeTangent,
@@ -28,7 +29,15 @@ const (
 	// pipeline time, which is the point: the storage layout is contract, so the
 	// decode for it is published rather than private.
 	//
-	// It declares three functions and three constants, and no binding and no
+	// The UV half is the one nothing refuses: @location(3) and @location(4) are
+	// vec2<f32> whether they store as floats or as unorms, so a material that
+	// samples a texture and skips sceneDecodeUV samples the wrong place rather
+	// than failing to build. The scale and the bias come from the mesh record,
+	// which instance.wgsl declares at @group(0) @binding(3) and sceneMeshOf
+	// reaches - sceneDecodeUV itself takes them as arguments, which is what
+	// keeps this file free of bindings.
+	//
+	// It declares four functions and three constants, and no binding and no
 	// struct, so including it is safe from an extending material and a
 	// non-extending one alike. Its header says what it declares; do not declare
 	// those names again.

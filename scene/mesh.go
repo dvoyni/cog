@@ -16,17 +16,23 @@ import (
 // It is not the bytes scene uploads. Scene packs every standard-layout vertex
 // into the storage layout at bake (scene/vertexpack.go), so what a shader reads
 // is that layout's offsets and formats rather than this struct's: 84 bytes of
-// float are authored here and 64 are stored, because the normal and the tangent
-// each store in four. An app writes directions in the m.Vec3 and m.Vec4 it
-// would write anyway and never sees the encoding. Nothing in scene ever hands a
-// Vertex back, so there is exactly one authoritative form, the authored one,
-// and it flows one way.
+// float are authored here and 56 are stored, because the normal, the tangent
+// and both UV sets each store in four. An app writes directions in the m.Vec3
+// and m.Vec4 it would write anyway and never sees the encoding. Nothing in
+// scene ever hands a Vertex back, so there is exactly one authoritative form,
+// the authored one, and it flows one way.
 //
 // Normal and Tangent.XYZ are directions. Their length is divided out by the
 // octahedral encode and is unrecoverable after bake - silently, as contract,
 // because a check would fire on correct code: a normal computed from a cross
 // product is one float of rounding from length 1.0001 and draws correctly.
 // Tangent.W is handedness, and only its sign is stored.
+//
+// UV0 and UV1 store as positions inside the range the whole mesh spans, which
+// scene derives at bake and re-derives on every update. A coordinate comes back
+// within half a code of that range rather than exactly, and the range is what
+// makes that half-code small: over the vendored corpus the worst is under half
+// a texel of a 4096 texture, where a half float at the same coordinate is 32.
 //
 // Nothing in it is optional. A buffer-built mesh never skins, so its Joints and
 // Weights are dead - but their Go zero value is the correct one, because such a
@@ -77,9 +83,9 @@ const temporaryMeshID uint32 = 1 << 31
 // offsets are also the Go struct's field offsets and the two readings coincide.
 // scene.Vertex is the one exception: scene packs it, so its method reports the
 // storage layout and its Go fields are the authoring ones. The two differ - the
-// stored normal and tangent are four bytes each against the struct's twelve and
-// sixteen - so nothing may read a scene.Vertex layout as a description of the
-// Go struct.
+// stored normal, tangent and two UV sets are four bytes each against the
+// struct's twelve, sixteen, eight and eight - so nothing may read a
+// scene.Vertex layout as a description of the Go struct.
 //
 // The one direction that fails is a shader input no attribute supplies. A
 // layout supplying an attribute the shader never declares is legal and common,
@@ -144,6 +150,13 @@ type meshRecord struct {
 	// none was computed - a custom layout, where scene cannot find the
 	// positions at all. A draw of such a mesh is never culled.
 	bounds m.Sphere
+	// uv is the per-mesh record the mesh's stored UVs decode against, and it is
+	// re-derived on every bake and every update because a mesh's UV precision
+	// follows the spread of the UVs in that same bake. Its zero value is the
+	// record of a mesh with no range of its own - a custom layout, or a
+	// standard mesh whose every UV is zero - which names the identity at slot
+	// 0 instead of a record of its own.
+	uv sceneMesh
 }
 
 // descr builds the gfx geometry for one resident mesh.
@@ -198,6 +211,11 @@ type meshInput struct {
 	// vertices on the durable path; every other mesh gets a zero sphere and is
 	// therefore never culled.
 	bounds m.Sphere
+	// uv is the per-mesh record the mint's UVs were quantised against, empty
+	// for a custom layout. Unlike bounds it is kept for a temporary mesh too:
+	// it is the only thing that makes its stored UVs mean anything, and it
+	// costs the walk that was already made.
+	uv sceneMesh
 }
 
 // mintMesh validates one caller's geometry, describes it, and writes its bytes
@@ -243,8 +261,8 @@ func mintMesh[TVertex VertexLayout](
 	if standard {
 		// The assertion holds because standard is exactly TVertex == Vertex,
 		// which makes []TVertex and []Vertex the same type.
-		packed, bounds := packVertices(arena, any(vertices).([]Vertex))
-		input.vertices = packed
+		packed, bounds, uv := packVertices(arena, any(vertices).([]Vertex))
+		input.vertices, input.uv = packed, uv
 		if durable {
 			input.bounds = bounds
 		}
@@ -345,7 +363,7 @@ func (l *Lookup) bakeMeshNow(input meshInput, arena []byte, bake bakeFunc) MeshR
 		vertices: bake(input.vertices.of(arena)), indexCount: input.indexCount,
 		vertexCount: input.vertexCount, topology: input.topology, indexWidth: input.indexWidth,
 		layout: input.layout, layoutID: input.layoutID, standard: input.standard,
-		baked: true, bounds: input.bounds,
+		baked: true, bounds: input.bounds, uv: input.uv,
 	}
 	if input.indexCount > 0 {
 		record.indices, record.indexed = bake(input.indices.of(arena)), true

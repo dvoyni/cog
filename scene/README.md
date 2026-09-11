@@ -25,12 +25,15 @@ the vertex count with no pass over the indices, and a temporary mesh keeps
 `uint32`. Its **authoring API** section is half-implemented: scene *packs* the
 standard vertex at bake rather than reinterpreting the caller's slice, in the
 same traversal that bounds it, so what a mesh stores is scene's to change one
-attribute at a time. Two attributes have moved: the **normal** stores as `oct32`
-in a `Unorm16x2` and the **tangent** as one `Uint32` of 15/15 octahedral plus
-handedness plus a reserved bit, four bytes each against twelve and sixteen, and
-the stride is 64. The rest is not implemented — the UVs are still `Float32x2`,
-there is no per-mesh record, presence trims nothing, and morph deltas are
-unchanged — and that spec is the plan for the rest.
+attribute at a time. Four attributes have moved: the **normal** stores as
+`oct32` in a `Unorm16x2`, the **tangent** as one `Uint32` of 15/15 octahedral
+plus handedness plus a reserved bit, and **both UV sets** as a `Unorm16x2`
+against a scale and bias derived per mesh — four bytes each against twelve,
+sixteen, eight and eight — and the stride is 56. Its **per-mesh record** section
+is implemented with it: a 32-byte record per mesh in a storage buffer at
+`@group(0) @binding(3)`, named by the instance record's last spare word. The
+rest is not implemented — presence trims nothing and morph deltas are unchanged
+— and that spec is the plan for the rest.
 
 ## Plugin
 
@@ -378,7 +381,7 @@ at any size, keeping the ref and its id, and refuses a change of vertex layout o
 topology. `ReleaseMesh` stales the ref at once and frees at the frame boundary.
 
 `scene.Vertex` is the one standard layout: glTF's eight core attributes at
-locations 0..7, 84 bytes authored and 64 stored, interleaved. Every mesh
+locations 0..7, 84 bytes authored and 56 stored, interleaved. Every mesh
 supplies all eight whatever it
 draws with — the bundled shader's static variant declares only the first six, and
 extra attributes a shader never declares are permitted (measured on a conformant
@@ -395,12 +398,34 @@ out and unrecoverable after bake, and `Tangent.W` keeps only its sign. An
 unwritten one stores as +Z with positive handedness, which falls out of the
 encoding rather than being a special case.
 
+`UV0` and `UV1` store in four bytes each too, as two 16-bit unorms against a
+**scale and bias derived per mesh** from the spread of that mesh's own UVs. The
+range is never a parameter: `BakeMesh`, `UpdateMesh` and `TemporaryMesh` take
+none, and every one of them re-derives it, so an update that moves a mesh's UVs
+moves its precision with them. A half float would cost the same four bytes and
+carry no record, but an island touching exactly 1.0 crosses a binade and doubles
+its step for the whole primitive — over the vendored corpus, at a 4096-texel
+texture, the derived range's worst error is **0.48 texels where a half float at
+the same coordinate is 32**.
+
+The record lives in a per-frame storage buffer at `@group(0) @binding(3)`, and
+`sceneInstance`'s last spare word indexes it. **Slot 0 is a reserved identity
+record** — scale 1, bias 0 — which a custom-layout mesh and a standard mesh with
+no UVs both name, so their dequantisation is a branchless no-op with no validity
+flag anywhere. A UV set collapsed to one point stores scale 0 and bias equal to
+that point, which the same multiply-add decodes exactly.
+
 A **custom material drawing a standard-layout mesh must decode them**: include
 `scene.VertexDecodePath` (`builtin/scene/vertexdecode.wgsl`) and declare
 `@location(1) normal: vec2<f32>` and `@location(2) tangent: u32`, then call
 `sceneDecodeNormal` and `sceneDecodeTangent` at the top of the vertex stage,
 before any morph or skin. Declaring the old `vec3<f32>`/`vec4<f32>` is refused at
 pipeline time by gfx's vertex-interface check rather than shading from garbage.
+A material that *samples* a texture must also call `sceneDecodeUV` with that
+set's scale and bias from the mesh record — `@location(3)` and `@location(4)`
+are still `vec2<f32>`, so nothing refuses a shader that reads them raw; it
+samples the wrong place instead. `instance.wgsl` declares the buffer and
+`sceneMeshOf(instance)` reaches it.
 
 A custom layout has no such split — scene cannot pack a struct it does not know,
 so its buffer is the caller's Go memory reinterpreted, and its declared offsets
@@ -408,8 +433,8 @@ must be the struct's own.
 
 Buffer-built meshes never skin and never morph. A `MeshRef` has no equivalent of
 the group-2 bindings those need, and their draws take the bundled variant that
-declares no group 2 at all — thirteen bindings and three storage buffers, against
-the seventeen and seven a fully animated draw declares.
+declares no group 2 at all — fourteen bindings and four storage buffers, against
+the eighteen and eight a fully animated draw declares.
 
 ## Animation
 
@@ -590,6 +615,7 @@ bound range of one.
 | `sceneFrame` | 0 | view, projection, viewProj, camera position, sun, ambient, `lightCount`, `lights: array<SceneLight, 16>` |
 | `sceneInstances` | 0 | `array<SceneInstance>`, bound by range per pass |
 | `sceneAnim` | 0 | `array<vec4<f32>>` arena, indexed by `sceneInstance.animOffset` |
+| `sceneMeshes` | 0 | `array<SceneMesh>`, 32-byte UV scale/bias records, indexed by `sceneInstance.mesh`; slot 0 is the identity |
 | `scenePbrMaterial` | 1 | the bundled PBR record, a bound range |
 | `scenePoses` | 2 | baked 48-byte pose records |
 | `sceneSkinJoints` | 2 | per-skin, per-joint 112-byte record |
@@ -598,12 +624,14 @@ bound range of one.
 Plus the bundled PBR's five textures and five samplers in group 1. The `scene`
 name prefix is reserved for engine-supplied bindings.
 
-**The storage-buffer budget is seven of eight, and the eighth is reserved.**
+**The storage-buffer budget is eight of eight, and it is now fully spent.**
 Reflection walks module globals without consulting entry points, so every
 reflected binding is emitted `Vertex|Fragment` and a vertex-only buffer consumes
 a fragment-stage slot too. Three rules follow, and they are contract:
 
-- No scene shader may declare an eighth storage buffer.
+- No scene shader may declare a ninth storage buffer. The eighth, which
+  interleaving the two per-skin arrays had recovered and which was reserved,
+  went to the per-mesh record at `@group(0) @binding(3)`.
 - **A caller-supplied material may declare none of its own.** It may freely use
   the bindings scene binds on every draw — `sceneFrame`, `sceneInstances` and
   `scenePbrMaterial`, any subset — because those are scene's and already counted.
@@ -705,9 +733,11 @@ absorbed quietly. The ones a caller can observe:
   so which slots a record holds must be recoverable from the stride alone. A
   target that deforms the normal and not the position stores an explicit zero
   position slot.
-- **The storage-buffer budget is seven of eight**, not the "six with two spare"
+- **The storage-buffer budget is eight of eight**, not the "six with two spare"
   the early tickets record. Interleaving the two per-skin arrays into one
-  `sceneSkinJoints` buffer recovered the eighth slot, and it stays reserved.
+  `sceneSkinJoints` buffer recovered the eighth slot; the per-mesh UV record
+  then spent it, so the fully animated variant now sits exactly on the browser
+  floor and there is no ninth.
 - **`Bounds` and `AABB` answer about a primitive's rest placement**, not the
   local matrix the load first used. That matrix is the identity for anything
   drawn through the pose buffer — a glTF skin, and equally a node with an

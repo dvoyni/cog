@@ -74,6 +74,7 @@ var testShaderLayout = gfx.ShaderLayout{Resources: []gfx.ShaderResource{
 	{Name: "sceneFrame", StorageBuffer: true, Group: 0, Binding: 0},
 	{Name: "sceneInstances", StorageBuffer: true, Group: 0, Binding: 1},
 	{Name: "sceneAnim", StorageBuffer: true, Group: 0, Binding: 2},
+	{Name: "sceneMeshes", StorageBuffer: true, Group: 0, Binding: 3},
 	{Name: "scenePbrMaterial", StorageBuffer: true, Group: 1, Binding: 0},
 	{Name: "baseColorTexture", Group: 1, Binding: 1},
 	{Name: "baseColorSampler", Sampler: true, Group: 1, Binding: 2},

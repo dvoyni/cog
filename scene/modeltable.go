@@ -347,6 +347,10 @@ func (l *Lookup) bakeModelGeometry(
 	geometry *gltfGeometry, resources *gfx.ResourceQueue,
 ) MeshRef {
 	layoutID, layout, _ := l.layouts.resolve[Vertex]()
+	// The UV ranges were accumulated while the accessors were being read, so
+	// the record is in hand before the pack needs it and the pack stays the one
+	// walk this path makes over the vertices.
+	uv := meshRecordFor(geometry.uv0, geometry.uv1)
 	// The converted vertices are packed over themselves and the bytes are then
 	// handed over rather than copied. This load's vertices are its private copy
 	// and nothing reads them again, so packing into a second buffer would hold
@@ -354,7 +358,7 @@ func (l *Lookup) bakeModelGeometry(
 	// reinterpret this replaced was avoiding. A storage vertex is smaller than
 	// an authoring one, so the pack fits inside the memory it reads.
 	record := meshRecord{
-		vertices:    resources.BakeBuffer(packOverAuthored(geometry.vertices), false),
+		vertices:    resources.BakeBuffer(packOverAuthored(geometry.vertices, uv), false),
 		vertexCount: len(geometry.vertices),
 		indexCount:  len(geometry.indices),
 		topology:    geometry.topology,
@@ -363,6 +367,7 @@ func (l *Lookup) bakeModelGeometry(
 		layoutID:    layoutID,
 		standard:    true,
 		baked:       true,
+		uv:          uv,
 	}
 	// The narrowing is the one O(n) pass this path adds, and it replaces no
 	// walk: the width itself costs a comparison, because a glTF accessor's

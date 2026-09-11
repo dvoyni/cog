@@ -44,6 +44,11 @@ fn vs_main(
         sceneDecodeNormal(vertex.normal),
         sceneDecodeTangent(vertex.tangent),
     );
+    // The UVs decode against this mesh's own record, one draw-uniform fetch.
+    // They are not deformed, so where they decode is free - but they decode
+    // here, beside the two that are, so the whole storage vertex becomes the
+    // authored one in one place.
+    let mesh = sceneMeshOf(instance);
     // Deformation next, then the instance: morphing and skinning resolve a
     // vertex into the model's own space, and the world matrix - re-root already
     // folded in - takes that to the world.
@@ -54,8 +59,8 @@ fn vs_main(
     out.worldPosition = world;
     out.normal = sceneWorldNormal(instance, deformed.normal);
     out.tangent = sceneWorldTangent(instance, deformed.tangent);
-    out.uv0 = vertex.uv0;
-    out.uv1 = vertex.uv1;
+    out.uv0 = sceneDecodeUV(vertex.uv0, mesh.uv0Scale, mesh.uv0Bias);
+    out.uv1 = sceneDecodeUV(vertex.uv1, mesh.uv1Scale, mesh.uv1Bias);
     out.color = vertex.color;
     return out;
 }

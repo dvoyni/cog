@@ -56,7 +56,9 @@ struct SceneSkinJoints {
 // interleave above, which recovered a slot. Every reflected binding is emitted
 // Vertex|Fragment unconditionally, so these count against the fragment stage
 // too, and the budget they sit in is the browser core adapter's floor of eight
-// storage buffers per stage.
+// storage buffers per stage - which the per-mesh record at group 0 binding 3
+// spent, so the everything variant now sits exactly on the floor and there is
+// no ninth slot for anything here to take.
 @group(2) @binding(0) var<storage, read> scenePoses: ScenePoses;
 @group(2) @binding(1) var<storage, read> sceneSkinJoints: SceneSkinJoints;
 

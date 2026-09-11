@@ -57,7 +57,7 @@ func (l *Lookup) ensureUnit(shape unitShape, bake bakeFunc) MeshRef {
 	// through the same pass a caller's bake takes - into an arena of its own,
 	// because this path bakes on the spot rather than staging for the flush.
 	var arena []byte
-	vertexSpan, bounds := packVertices(&arena, vertices)
+	vertexSpan, bounds, uv := packVertices(&arena, vertices)
 	if shape == shapeSphere {
 		// The exact sphere, not the circumsphere of its box, which would be
 		// sqrt(3) times too generous.
@@ -68,7 +68,7 @@ func (l *Lookup) ensureUnit(shape unitShape, bake bakeFunc) MeshRef {
 		vertices: vertexSpan, indices: indexSpan,
 		vertexCount: len(vertices), indexCount: len(indices),
 		topology: gfx.TopologyTriangleList, indexWidth: width, layout: layout,
-		layoutID: layoutID, standard: true, bounds: bounds,
+		layoutID: layoutID, standard: true, bounds: bounds, uv: uv,
 	}, arena, bake)
 	return l.unit[shape]
 }

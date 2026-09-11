@@ -63,6 +63,10 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 		{name: "sceneFrame", group: 0, binding: 0},
 		{name: "sceneInstances", group: 0, binding: 1},
 		{name: "sceneAnim", group: 0, binding: 2},
+		// The per-mesh record buffer, at the first free binding in group 0. It
+		// carries the scale and bias each mesh's two UV sets decode against,
+		// and the instance's mesh word indexes it.
+		{name: "sceneMeshes", group: 0, binding: 3},
 		{name: "scenePbrMaterial", group: 1, binding: 0},
 		// Group 2 is per model, and this is the everything variant, so all
 		// three are declared. A draw that reads none of them declares none of
@@ -104,8 +108,8 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 			t.Errorf("%sSampler is %+v, want a group 1 filtering sampler", slot, sampler)
 		}
 	}
-	if len(layout.Resources) != 17 {
-		t.Fatalf("the scene shader declares %d bindings, want the 17 asserted above: %+v",
+	if len(layout.Resources) != 18 {
+		t.Fatalf("the scene shader declares %d bindings, want the 18 asserted above: %+v",
 			len(layout.Resources), layout.Resources)
 	}
 }
@@ -227,12 +231,12 @@ func TestBundledSceneShaderFitsTheWebStorageBudget(t *testing.T) {
 }
 
 // A draw declares only the bindings it actually uses, and the numbers below are
-// the whole argument for the split: a static draw drops from seven storage
-// buffers to three. scene.wgsl recorded that sceneMorphDeltas was "the seventh
-// and last one this module may ever declare - the eighth stays reserved",
-// against the browser core adapter's floor of eight per stage. The budget was
-// one binding from exhausted for every draw, including a debug line that reads
-// none of them.
+// the whole argument for the split: a static draw drops from eight storage
+// buffers to four. The everything variant now sits exactly on the browser core
+// adapter's floor of eight per stage - the per-mesh record spent the slot
+// interleaving the two per-skin arrays had recovered - so the split is what
+// keeps a debug line that reads none of them from paying for all eight, and
+// there is no ninth for anything to spend.
 func TestBundledSceneShaderVariantsDeclareOnlyWhatTheyRead(t *testing.T) {
 	for _, want := range []struct {
 		name     string
@@ -240,10 +244,10 @@ func TestBundledSceneShaderVariantsDeclareOnlyWhatTheyRead(t *testing.T) {
 		bindings int
 		storage  int
 	}{
-		{name: "debug line or static prop", defines: nil, bindings: 13, storage: 3},
-		{name: "morph only, a face", defines: []string{"SCENE_MORPH"}, bindings: 15, storage: 5},
-		{name: "skinned, no morph", defines: []string{"SCENE_SKIN"}, bindings: 16, storage: 6},
-		{name: "everything", defines: []string{"SCENE_SKIN", "SCENE_MORPH"}, bindings: 17, storage: 7},
+		{name: "debug line or static prop", defines: nil, bindings: 14, storage: 4},
+		{name: "morph only, a face", defines: []string{"SCENE_MORPH"}, bindings: 16, storage: 6},
+		{name: "skinned, no morph", defines: []string{"SCENE_SKIN"}, bindings: 17, storage: 7},
+		{name: "everything", defines: []string{"SCENE_SKIN", "SCENE_MORPH"}, bindings: 18, storage: 8},
 	} {
 		layout, err := reflectShaderLayout(bundledSceneShader(t, sceneVariant(want.defines...)...))
 		if err != nil {

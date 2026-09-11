@@ -26,6 +26,17 @@ type gltfGeometry struct {
 	// file omitted them, which makes the whole model never-cull.
 	box    m.Box3
 	hasBox bool
+	// uv0 and uv1 are the ranges the two TEXCOORD accessors spanned, filled as
+	// the accessors are read rather than by a walk of their own: the read
+	// already visits every UV element, so the ranges cost this path no
+	// traversal. An attribute the file does not carry leaves an unseen range,
+	// which is the zero-width one at the origin - exactly what the unwritten
+	// UVs it left behind decode to.
+	//
+	// They outlive unwelding, which only duplicates and drops vertices: a range
+	// taken before it holds every UV that survives it, and a dropped vertex can
+	// only leave it wider than it strictly needed to be.
+	uv0, uv1 uvRange
 	// skinned reports whether the vertices carry a joint binding the shader
 	// should follow. It is decided after conversion, by the node's skin and by
 	// whether the primitive actually carried weights: glTF requires a skinned
@@ -69,7 +80,7 @@ func convertPrimitive(doc *gltf.Document, primitive *gltf.Primitive, needTangent
 	for i := range geometry.vertices {
 		geometry.vertices[i].Color = [4]uint8{0xff, 0xff, 0xff, 0xff}
 	}
-	if err := readVertexAttributes(doc, primitive, geometry.vertices); err != nil {
+	if err := readVertexAttributes(doc, primitive, &geometry); err != nil {
 		return gltfGeometry{}, err
 	}
 	geometry.box, geometry.hasBox = accessorBox(position)
@@ -111,9 +122,15 @@ func convertPrimitive(doc *gltf.Document, primitive *gltf.Primitive, needTangent
 }
 
 // readVertexAttributes fills one primitive's vertices from the accessors it
-// names. Every attribute but POSITION is optional, and an attribute the file
-// does not carry leaves scene's default in place.
-func readVertexAttributes(doc *gltf.Document, primitive *gltf.Primitive, vertices []Vertex) error {
+// names, and accumulates the two UV ranges as it goes. Every attribute but
+// POSITION is optional, and an attribute the file does not carry leaves scene's
+// default in place.
+//
+// The UV ranges ride the reads rather than taking a walk of their own: the
+// TEXCOORD callbacks below already visit every element, so the per-mesh record
+// costs this path one compare pair per coordinate and no second traversal.
+func readVertexAttributes(doc *gltf.Document, primitive *gltf.Primitive, geometry *gltfGeometry) error {
+	vertices := geometry.vertices
 	position, _ := attributeAccessor(doc, primitive.Attributes, gltf.POSITION)
 	if err := readAttribute(doc, position, func(i int, v attrValue) {
 		vertices[i].Position = m.Vec3{X: v[0], Y: v[1], Z: v[2]}
@@ -137,6 +154,7 @@ func readVertexAttributes(doc *gltf.Document, primitive *gltf.Primitive, vertice
 	if accessor, ok := attributeAccessor(doc, primitive.Attributes, gltf.TEXCOORD_0); ok {
 		if err := readAttribute(doc, accessor, func(i int, v attrValue) {
 			vertices[i].UV0 = m.Vec2{X: v[0], Y: v[1]}
+			geometry.uv0.add(vertices[i].UV0)
 		}); err != nil {
 			return fmt.Errorf("TEXCOORD_0: %w", err)
 		}
@@ -144,6 +162,7 @@ func readVertexAttributes(doc *gltf.Document, primitive *gltf.Primitive, vertice
 	if accessor, ok := attributeAccessor(doc, primitive.Attributes, gltf.TEXCOORD_1); ok {
 		if err := readAttribute(doc, accessor, func(i int, v attrValue) {
 			vertices[i].UV1 = m.Vec2{X: v[0], Y: v[1]}
+			geometry.uv1.add(vertices[i].UV1)
 		}); err != nil {
 			return fmt.Errorf("TEXCOORD_1: %w", err)
 		}

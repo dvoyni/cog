@@ -12,9 +12,13 @@ struct SceneInstance {
     flags: u32,
     // joint is the model joint a plain-bound placement rides at full weight,
     // and is meaningful only under SCENE_PLAINJOINT. It spent the first of the
-    // record's two spare words; spare is the one that is left.
+    // record's two spare words.
     joint: u32,
-    spare: u32,
+    // mesh indexes sceneMeshes, the per-mesh record this instance's geometry
+    // decodes its UVs against. It spent the last one: SceneInstance is fully
+    // allocated at 64 bytes, and the next thing that wants per-instance data
+    // pays 128 bytes or a repack of what is already here.
+    mesh: u32,
 };
 
 // The runtime array is wrapped in a struct because reflection walks struct
@@ -25,6 +29,37 @@ struct SceneInstances {
 };
 
 @group(0) @binding(1) var<storage, read> sceneInstances: SceneInstances;
+
+// SceneMesh is the 32-byte per-mesh record: the scale and the bias that take
+// each stored UV set's two unorm codes back to the coordinates that were
+// authored. It lives here rather than beside the vertex decode because it is
+// reached only through the instance, whose mesh word indexes it.
+//
+// Slot 0 is a reserved identity record - scale 1, bias 0 - so a custom-layout
+// mesh and a standard mesh with no UVs both name it and the dequantisation is a
+// branchless no-op. An identity record is free where a validity flag in the
+// instance's flags word would have cost a bit, a branch and a second path to
+// test. A range of zero width stores scale 0 and bias equal to the constant,
+// which the same arithmetic decodes exactly.
+struct SceneMesh {
+    uv0Scale: vec2<f32>,
+    uv0Bias: vec2<f32>,
+    uv1Scale: vec2<f32>,
+    uv1Bias: vec2<f32>,
+};
+
+struct SceneMeshes {
+    data: array<SceneMesh>,
+};
+
+@group(0) @binding(3) var<storage, read> sceneMeshes: SceneMeshes;
+
+// sceneMeshOf returns the per-mesh record an instance's geometry decodes
+// against. One fetch per vertex, draw-uniform, and no branch: the mesh that has
+// no range of its own names slot 0 rather than testing for one.
+fn sceneMeshOf(instance: SceneInstance) -> SceneMesh {
+    return sceneMeshes.data[instance.mesh];
+}
 
 // SCENE_NONUNIFORM marks an instance whose world matrix does not scale
 // uniformly. Transforming a normal by such a matrix is wrong, so those

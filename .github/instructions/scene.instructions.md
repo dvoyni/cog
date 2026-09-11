@@ -199,8 +199,8 @@ reads.
 
 A caller-supplied material declares **no storage buffers of its own**. Use the
 bindings scene binds on every draw — `sceneFrame`, `sceneInstances`,
-`scenePbrMaterial`, any subset — because those are scene's and already counted
-against a budget that stands at seven of eight with the eighth reserved. Put
+`sceneMeshes`, `scenePbrMaterial`, any subset — because those are scene's and
+already counted against a budget that is now fully spent at eight of eight. Put
 per-object data in the vertices.
 
 A **custom vertex layout requires a custom `Material`**: the bundled PBR is one
@@ -216,6 +216,14 @@ stage, before any morph or skin. Declaring the `vec3<f32>` and `vec4<f32>` those
 used to be is refused at pipeline time — which is the only reason it is not a
 trap: WebGPU itself would have filled the missing components with `(0, 0, 0, 1)`
 and shaded from a plausible direction lying in the XY plane.
+
+**The UVs are the trap that nothing refuses.** They are stored as 16-bit unorms
+against a per-mesh scale and bias, but `@location(3)` and `@location(4)` are
+`vec2<f32>` either way, so a custom material that samples a texture from them
+raw builds, runs, and samples the wrong place. Call `sceneDecodeUV(vertex.uv0,
+mesh.uv0Scale, mesh.uv0Bias)` with the record `sceneMeshOf(instance)` returns —
+which means declaring `SceneMesh` and `@group(0) @binding(3)` as
+`instance.wgsl` does, because scene binds `sceneMeshes` on every draw.
 
 ## Passes And Targets
 

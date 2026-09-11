@@ -187,14 +187,14 @@ func TestTheFrameUploadsOneBufferPerArena(t *testing.T) {
 	h.backend.bakes = 0
 	h.frame()
 
-	if h.backend.bakes != 4 {
-		t.Fatalf("a steady frame uploaded %d buffers, want the four arenas", h.backend.bakes)
+	if h.backend.bakes != 5 {
+		t.Fatalf("a steady frame uploaded %d buffers, want the five arenas", h.backend.bakes)
 	}
 	// The first frame also bakes the unit box's two durable buffers, once. It
 	// bakes nothing else: a debug box declares no group 2, so there is no
 	// identity pose, identity joint or zero delta for it to bind.
-	if first != 6 {
-		t.Fatalf("the first frame uploaded %d buffers, want the four arenas and the unit box", first)
+	if first != 7 {
+		t.Fatalf("the first frame uploaded %d buffers, want the five arenas and the unit box", first)
 	}
 }
 

@@ -2295,23 +2295,28 @@ mirroring canvas's `canvasTexture`/`canvasSampler`. A material parameter named
 Plus the PBR's five textures and five samplers in group 1
 (see [Bundled PBR material](#bundled-pbr-material)).
 
-**The storage-buffer budget is seven of eight, and the eighth is reserved.**
+**The storage-buffer budget is eight of eight, and there is no spare left.**
 Every reflected binding is emitted with visibility `Vertex|Fragment`
 unconditionally, because reflection walks module globals without consulting entry
 points, so a buffer only the vertex stage reads still consumes a fragment-stage
 slot — which means the count above is seven in **each** stage, against the
 browser core-adapter floor of 8.
 
-It was eight. Interleaving the two per-skin arrays into one `sceneSkinJoints`
-buffer recovered the slot at no gfx cost, because they share a joint index and
-are fetched together per influence
+It was eight, then seven, and it is eight again. Interleaving the two per-skin
+arrays into one `sceneSkinJoints` buffer recovered a slot at no gfx cost, because
+they share a joint index and are fetched together per influence
 ([scene: the storage-buffer budget is eight of eight, not six](https://github.com/dvoyni/cog/issues/58),
-correcting the "six with two spare" figure the closed tickets record).
+correcting the "six with two spare" figure the closed tickets record). That
+recovered slot was the one permitted growth, and
+[scene: UV0 and UV1 narrow against a per-mesh range](https://github.com/dvoyni/cog/issues/219)
+spent it on `sceneMeshes`, the per-mesh UV range every narrowed UV decodes
+against. The fully animated variant now sits exactly on the browser core floor.
 
 Three rules follow, and they are contract rather than guidance:
 
-- **No scene shader may declare an eighth storage buffer.** The spare exists so
-  the engine can grow once, not to be spent.
+- **No scene shader may declare a ninth storage buffer**, and there is no longer
+  a spare to spend: the one growth the spare existed for has been taken. Any
+  further per-draw datum must go into a buffer that already exists.
 - **A caller-supplied material may declare none of its own.** It may freely use
   the bindings scene binds on every draw — those are scene's and already counted
   — which is what the `procedural` demo does.

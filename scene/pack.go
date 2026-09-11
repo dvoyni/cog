@@ -38,10 +38,16 @@ type sceneInstance struct {
 	// appended after every skin's, so a narrow field here would truncate a
 	// plain index into a different bone with no error anywhere.
 	Joint uint32
-	// Spare is the record's one remaining unspent word, kept named so the next
-	// thing that needs per-instance data can see what it is spending. The
-	// other went to Joint above.
-	Spare uint32
+	// Mesh indexes the per-mesh record buffer, which carries the scale and bias
+	// the instance's geometry decodes its two UV sets against. Slot 0 is the
+	// reserved identity, so a custom-layout mesh and a standard mesh with no
+	// UVs both name it and dequantise to a no-op.
+	//
+	// It spent the record's last spare word. sceneInstance is fully allocated
+	// at 64 bytes: there is nothing left for the next thing that wants
+	// per-instance data, and that next spender pays 128 bytes or a repack of
+	// what is already here.
+	Mesh uint32
 }
 
 // The instance flags. They are decided here rather than when their consumers
@@ -280,13 +286,15 @@ type skinBuffers struct {
 }
 
 // packInstance builds the instance record for one world matrix under one
-// batch's animation.
-func packInstance(world m.Mat4, anim animBinding) sceneInstance {
+// batch's animation, naming the per-mesh record slot its geometry decodes
+// against.
+func packInstance(world m.Mat4, anim animBinding, mesh uint32) sceneInstance {
 	instance := sceneInstance{
 		World0:     m.Vec4{X: world[0], Y: world[4], Z: world[8], W: world[12]},
 		World1:     m.Vec4{X: world[1], Y: world[5], Z: world[9], W: world[13]},
 		World2:     m.Vec4{X: world[2], Y: world[6], Z: world[10], W: world[14]},
 		AnimOffset: anim.offset,
+		Mesh:       mesh,
 	}
 	// One arm or neither, which is what makes the two flags mutually exclusive
 	// by construction rather than by a rule someone has to keep: a plain-bound

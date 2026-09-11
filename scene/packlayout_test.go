@@ -35,6 +35,7 @@ func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
 	var frame sceneFrameBlock
 	var light sceneLight
 	var instance sceneInstance
+	var mesh sceneMesh
 	var pbr scenePbrRecord
 	records := []shaderRecord{
 		{"SceneFrame", unsafe.Sizeof(frame), []shaderMember{
@@ -65,7 +66,13 @@ func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
 			{"animOffset", unsafe.Offsetof(instance.AnimOffset)},
 			{"flags", unsafe.Offsetof(instance.Flags)},
 			{"joint", unsafe.Offsetof(instance.Joint)},
-			{"spare", unsafe.Offsetof(instance.Spare)},
+			{"mesh", unsafe.Offsetof(instance.Mesh)},
+		}},
+		{"SceneMesh", unsafe.Sizeof(mesh), []shaderMember{
+			{"uv0Scale", unsafe.Offsetof(mesh.UV0Scale)},
+			{"uv0Bias", unsafe.Offsetof(mesh.UV0Bias)},
+			{"uv1Scale", unsafe.Offsetof(mesh.UV1Scale)},
+			{"uv1Bias", unsafe.Offsetof(mesh.UV1Bias)},
 		}},
 		// The PBR record is the one pair that is not field-for-field: the
 		// shader declares the per-slot metadata as flat named members, because

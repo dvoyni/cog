@@ -72,7 +72,7 @@ func (la LookupAccess) BakeMesh[TVertex VertexLayout](
 		vertexCount: input.vertexCount, indexCount: input.indexCount,
 		topology: input.topology, indexWidth: input.indexWidth,
 		layout: input.layout, layoutID: input.layoutID,
-		standard: input.standard, bounds: input.bounds,
+		standard: input.standard, bounds: input.bounds, uv: input.uv,
 	})
 	la.lookup.stage(ref, input, false)
 	return ref
@@ -89,8 +89,10 @@ func (la LookupAccess) BakeMesh[TVertex VertexLayout](
 // performance note, not a constraint this API encodes.
 //
 // The bounding sphere is recomputed from the new vertices, so a mesh that grows
-// past its old bounds still culls correctly, and the index width is re-derived
-// from the new vertex count, so a mesh that grows past 65535 vertices widens.
+// past its old bounds still culls correctly; the index width is re-derived from
+// the new vertex count, so a mesh that grows past 65535 vertices widens; and the
+// per-mesh UV range is re-derived too, so a mesh whose UVs move keeps the
+// precision that spread deserves.
 func (la LookupAccess) UpdateMesh[TVertex VertexLayout](
 	ref MeshRef, vertices []TVertex, indices []uint32,
 ) bool {
@@ -126,6 +128,11 @@ func (la LookupAccess) UpdateMesh[TVertex VertexLayout](
 	// one shrunk back below it narrows again.
 	record.indexWidth = input.indexWidth
 	record.bounds = input.bounds
+	// The UV range is re-derived from the new vertices for the same reason the
+	// bounds are: it is a property of what the mesh now holds. It is not a
+	// parameter anywhere, so an update cannot disagree with the bake about
+	// whose range the stored codes mean.
+	record.uv = input.uv
 	la.lookup.meshes[ref.id-1] = record
 	la.lookup.stage(ref, input, true)
 	return true
