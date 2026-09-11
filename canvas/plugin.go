@@ -39,6 +39,11 @@ type Plugin struct {
 	// trianglesParams is the same for a triangle draw, which needs one list
 	// rather than two because every parameter it names is per material.
 	trianglesParams []gfx.ParameterDescr
+
+	// snapshots is canvas's one draw-snapshot slot, plugin-owned and
+	// self-synchronizing. See snapshotState for why it is not a kernel
+	// resource.
+	snapshots snapshotState
 }
 
 func New() *Plugin { return &Plugin{} }
@@ -59,9 +64,61 @@ func (p *Plugin) Register(registrar *kernel.Registrar, value any) error {
 	p.config = config
 	registrar.InitResource(&opQueue{})
 	registrar.InitResource(newLookup(config))
+	registrar.HandleCommand[ArmDrawsCmd](p.armDrawsCmdImpl)
+	registrar.Subscribe[DrawsArmUpdateEventHandler](p.armSnapshotOnUpdate).First()
+	registrar.Subscribe[DrawsUpdateEventHandler](p.snapshotOnUpdate).
+		Last().Before[UpdateEventHandler]()
 	registrar.Subscribe[UpdateEventHandler](p.flush).
 		Last().Before[gfx.UpdateEventHandler]()
 	return nil
+}
+
+// Stop completes any snapshot the engine walked away from. A request armed in
+// a tick the engine never finishes would otherwise leave its waiter learning
+// nothing until its client's idle abort; abandonment is delivered rather than
+// merely true.
+//
+// It touches the snapshot slot directly because by Stop the scheduler has
+// stopped and grants no locks, which is also why nothing else can be touching
+// it: the host loop has returned and every handler is done.
+func (p *Plugin) Stop(kernel.Executioner) error {
+	p.snapshots.abandon()
+	return nil
+}
+
+// armSnapshotOnUpdate admits a waiting snapshot to the tick that has just
+// begun. It declares no resources: the snapshot slot carries its own lock.
+func (p *Plugin) armSnapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
+	return nil, func(kernel.Kernel, app.UpdateEvent) error {
+		p.snapshots.beginTick()
+		return nil
+	}
+}
+
+// snapshotOnUpdate renders the tick's recorded operations for whoever armed a
+// snapshot, from the Last phase and ordered before canvas's own flush.
+//
+// That is the only point at which the frame is both complete and still alive.
+// ui records into this queue during the earlier phase, so what it drew is
+// already here - which is what makes canvas_draws and ui_layout complementary
+// rather than redundant - and flushFrame's deferred reset, which empties the
+// queue for the next tick, has not run yet.
+//
+// A Read conflicts only with a writer, and a writer in the earlier phase is
+// ordered ahead of this by Last alone. The one recorder it would not see is
+// one that itself takes Last and orders only against the flush: the two would
+// carry no order between them and merely be serialized by the conflict. That
+// is the same shape of gap gfx's own snapshot had to step around, and canvas
+// has the better half of it - recording from Last is not how a game records,
+// where ui, scene and gameplay all run in the earlier phase.
+func (p *Plugin) snapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
+	var queue kernel.Read[*OpQueue]
+	return func(access kernel.ResourceAccess) {
+			queue = access.GetRead[*OpQueue]()
+		}, func(kernel.Kernel, app.UpdateEvent) error {
+			p.snapshots.record(queue.Get())
+			return nil
+		}
 }
 
 // Start mounts the built-in filesystem: the shaders and the default font.

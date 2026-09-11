@@ -369,6 +369,16 @@ func addressModeName(mode AddressMode) string {
 	return unknownName(int(mode))
 }
 
+// FilterModeName is the view vocabulary's spelling of a sampler filter. It is
+// the one name table that is exported, and the rule is narrow: a name crosses
+// the package boundary only where a sibling snapshot reports a gfx enum of its
+// own - canvas records a FilterMode on every sprite transform. Exporting it
+// rather than letting canvas keep a second table is the same promise the views
+// make, that one value reaches an agent in one shape. It is still not
+// FilterMode.String: naming an enum for a debug document is not a commitment to
+// render every gfx enum for every cog app.
+func FilterModeName(mode FilterMode) string { return filterModeName(mode) }
+
 func filterModeName(mode FilterMode) string {
 	switch mode {
 	case FilterLinear:

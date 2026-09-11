@@ -61,6 +61,18 @@ func (t TargetDescr) Size() (width, height int, ok bool) {
 	return t.width, t.height, true
 }
 
+// Texture reports the attachment a texture target names, with the mip level
+// and array layer it renders into, and whether the target is a texture at all.
+// It is the read side of TextureTarget, for a caller holding a TargetDescr
+// somebody else built - canvas hands one to SetLayerTarget untouched, so
+// reporting where a layer draws means reading it back out.
+func (t TargetDescr) Texture() (texture TextureID, mip, layer int, ok bool) {
+	if t.kind != targetTexture {
+		return 0, 0, 0, false
+	}
+	return t.texture, t.mip, t.layer, true
+}
+
 // IsScreen reports whether the target is the frame's screen attachment.
 func (t TargetDescr) IsScreen() bool { return t.kind == targetScreen }
 

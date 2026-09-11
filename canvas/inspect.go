@@ -36,9 +36,15 @@ type Op struct {
 	// resolves to the layer's material set and then to the built-in, both at
 	// flush.
 
-	Path        string
-	Texture     gfx.TextureDescr
-	Transform   SpriteTransform
+	Path       string
+	Texture    gfx.TextureDescr
+	HasTexture bool
+	Transform  SpriteTransform
+	// Material is the material the op named, recorded as it stood at record
+	// time, and HasMaterial says whether it named one at all. Reading it is how
+	// a caller answers "what shades this draw" without running the flush; the
+	// resolution an op that named none goes through is described above.
+	Material    gfx.MaterialDescr
 	HasMaterial bool
 	// FontPath, Text and Draw describe an OpText.
 	FontPath string
@@ -47,7 +53,12 @@ type Op struct {
 	// Vertices holds an OpTriangles list recorded with the built-in Vertex type.
 	// A custom vertex layout reports no vertices.
 	Vertices []Vertex
-	Params   []gfx.ParameterDescr
+	// VertexBytes is how much vertex data an OpTriangles recorded, whatever
+	// layout it used. It is the only thing a custom layout can say about its
+	// geometry, and it is what tells "recorded with a layout nothing here can
+	// read" apart from "recorded nothing".
+	VertexBytes int
+	Params      []gfx.ParameterDescr
 }
 
 // Param returns the recorded parameter with the given name.
@@ -120,32 +131,43 @@ func (w *opQueue) LayerClear(layerID Layer) (m.Color, bool) {
 }
 
 func (w *opQueue) inspectOp(layerID Layer, op *drawOp) Op {
-	view := Op{Layer: layerID, Clip: op.clip, HasClip: op.hasClip}
+	view := Op{Kind: opKindOf(op.kind), Layer: layerID, Clip: op.clip, HasClip: op.hasClip}
 	switch op.kind {
 	case drawSprite:
-		view.Kind = OpSprite
 		view.Path = op.sprite.path
-		view.Texture = op.sprite.texture
+		view.Texture, view.HasTexture = op.sprite.texture, op.sprite.hasTexture
 		view.Transform = op.sprite.transform
-		view.HasMaterial = op.sprite.hasMaterial
+		view.Material, view.HasMaterial = op.sprite.material, op.sprite.hasMaterial
 		view.Params = op.sprite.params
 	case drawText:
-		view.Kind = OpText
 		view.FontPath = op.text.fontPath
 		view.Text = op.text.text
 		view.Draw = op.text.draw
-		view.HasMaterial = op.text.hasMaterial
+		view.Material, view.HasMaterial = op.text.material, op.text.hasMaterial
 		view.Params = op.text.draw.Params
 	case drawTriangles:
-		view.Kind = OpTriangles
-		view.HasMaterial = op.triangles.hasMaterial
+		view.Material, view.HasMaterial = op.triangles.material, op.triangles.hasMaterial
 		view.Params = op.triangles.params
 		if param, ok := view.Param(TextureSlot); ok {
-			view.Texture, _ = param.TextureValue()
+			view.Texture, view.HasTexture = param.TextureValue()
 		}
 		view.Vertices = builtinVertices(&op.triangles)
+		view.VertexBytes = len(op.triangles.vertices)
 	}
 	return view
+}
+
+// opKindOf names the recording call one drawOp came from. It is one table
+// rather than a case per site, because the snapshot decides whether to inspect
+// an op from its kind alone and must agree with what inspection then reports.
+func opKindOf(kind drawOpKind) OpKind {
+	switch kind {
+	case drawText:
+		return OpText
+	case drawTriangles:
+		return OpTriangles
+	}
+	return OpSprite
 }
 
 // builtinVertices reinterprets a recorded triangle list as built-in vertices,

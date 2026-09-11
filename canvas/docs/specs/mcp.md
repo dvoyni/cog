@@ -67,6 +67,13 @@ changes nothing in the game — with the one asterisk that under pause it costs 
 step, which is stated in the description rather than expressed in the
 annotation.
 
+> **Amended at implementation ([#254](https://github.com/dvoyni/cog/issues/254)).**
+> The body is the package function `drawsSnapshot`, not the method `p.draws`
+> the sketch above spells. A method puts provider state one dereference from a
+> body the capability-body rule forbids to touch it; a package function keeps
+> that rule visible at the call site, which is why `gfx` writes its two bodies
+> the same way. Nothing else about the registration changes.
+
 It follows
 [mcp §Arm-then-wait](../../../mcp/docs/specs/mcp.md#arm-then-wait) and does not
 restate it.
@@ -169,6 +176,21 @@ have.
 > **The other two rows are unaffected and stay exactly as written**, because
 > each names a handler type its own package declares.
 
+> **Amended at implementation ([#254](https://github.com/dvoyni/cog/issues/254)).**
+> The row above is the link that *takes* the snapshot, and it is implemented
+> exactly as written — `canvas.DrawsUpdateEventHandler`, `.Last()`,
+> `.Before[canvas.UpdateEventHandler]()`, reading `Read[*canvas.OpQueue]`.
+>
+> It is not the only subscription the capability needs. Arming inherits
+> [mcp §Arm-then-wait](../../../mcp/docs/specs/mcp.md#arm-then-wait) verbatim —
+> *a snapshot shows the game as of a tick that began after the request* — and a
+> request landing inside a tick that has already recorded cannot be told from
+> one that arrived between ticks by anything running at the end of the tick. So
+> canvas also registers `DrawsArmUpdateEventHandler`, ordered `First()` and
+> declaring no resources, which admits a waiting request to the tick that has
+> just begun. It is the same two-stage slot `gfx` builds for the same reason
+> (`gfx/snapshot.go`), and it is a mutex-guarded no-op when nothing is armed.
+
 ---
 
 ## The request
@@ -217,6 +239,49 @@ descriptors, plus their resolutions**:
   [gfx §The view types](../../../gfx/docs/specs/mcp.md#the-view-types).
 - canvas's own types — `SpriteTransform`, `TextDraw`, `Vertex` — marshal
   directly and need no view.
+
+> **Amended at implementation ([#254](https://github.com/dvoyni/cog/issues/254)).**
+> The third bullet is false, and it is false in the two ways the view types
+> exist to prevent.
+>
+> `SpriteTransform.Filter` is a `gfx.FilterMode` and `TextDraw.Align` a
+> `TextAlign`; marshalled directly, each is an **ordinal** — an enum reported
+> as `1` is a lookup an agent cannot perform, and every enum in this family is
+> a name. Worse, `TextDraw` carries `Material *gfx.MaterialDescr` and
+> `Params []gfx.ParameterDescr`, and every gfx descriptor has entirely
+> unexported fields, so marshalling one yields `{}`: a text draw would publish
+> an empty object where its material is and a row of empty objects where its
+> parameters are, which is precisely the dead end
+> [gfx §The view types](../../../gfx/docs/specs/mcp.md#the-view-types)
+> documents. `Vertex` marshals without lying but with `X`/`Y`/`R` keys, against
+> a document that is camelCase throughout.
+>
+> The repair is the one `gfx` already made: canvas declares
+> `SpriteTransformView`, `SpriteFrameView`, `TextDrawView`, `VertexView` and
+> `RectView` in `canvas/snapshot.go`, built through the same rules — one value
+> per union arm, every enum a name, `unknown(n)` for a member no table knows,
+> and vectors as the component arrays `ParameterView` already uses for numbers.
+> `TextDrawView` carries neither the draw's material nor its parameters,
+> because the op reports both already.
+>
+> The alternative — json tags on `m.Vec2`, `m.Rect` and `m.Color` — was
+> rejected for the reason [#253](https://github.com/dvoyni/cog/issues/253)
+> rejected it: `m` is the math package every cog app uses, and one debug
+> document is not a reason to fix its wire shape.
+>
+> Two additions come with it, both consistent with *minus the gfx descriptors,
+> plus their resolutions*. An op reports the **material it named**, through
+> `gfx.MaterialViewOf` — the tool's own description promises materials, and a
+> full-screen material is one of the ways a frame ends up blank. And a triangle
+> op reports **`vertexBytes`** beside its count, because a list recorded with a
+> custom vertex layout has no positions canvas can read, and a count of zero
+> with nothing beside it reads as a list that recorded nothing.
+>
+> `canvas.Op` gained `Material`, `HasTexture` and `VertexBytes` to serve this,
+> as ordinary inspection API rather than an agent back door, and
+> `gfx.TargetDescr.Texture()` and `gfx.FilterModeName` were added for the same
+> reason: a layer's target is a gfx handle canvas passes through untouched, so
+> reporting where a layer draws means reading it back out.
 
 **Per layer**, and not optional, because without them the world-space
 coordinates in an op mean nothing:

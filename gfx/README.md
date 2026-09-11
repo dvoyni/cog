@@ -224,6 +224,12 @@ accessors instead, which the compiler checks. Two rules hold across all of them:
 a tagged union serializes to exactly one value, and bulk bytes never travel —
 inline pixels and raw parameter data are reported as a byte count.
 
+The enum name tables behind the views are unexported, because naming an enum
+for a debug document is not a commitment to render every gfx enum for every cog
+app. `FilterModeName` is the one exception, and the rule is narrow: a name
+crosses the package boundary only where a sibling snapshot reports a gfx enum
+of its own, which `canvas` does on every sprite transform.
+
 The full contract is in [docs/specs/capture.md](docs/specs/capture.md) and
 [docs/specs/mcp.md](docs/specs/mcp.md); both capabilities those documents
 specify are implemented.

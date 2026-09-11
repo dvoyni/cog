@@ -17,7 +17,8 @@ before proposing a change to any of it.
 - Name: `canvas.Name` (`"canvas"`)
 - Constructor: `canvas.New() *canvas.Plugin`
 - Plugin dependencies: `gfx`, `storage`
-- Go package dependencies: `app`, `gfx`, `kernel`, `storage`, `x/image`
+- Go package dependencies: `app`, `gfx`, `kernel`, `mcp`, `storage`, `x/image`
+- Implements: `mcp.Provider`, `kernel.PluginStopper`
 - Events declared or published: none
 
 ```go
@@ -422,16 +423,59 @@ instead of rendered pixels:
   then recording order within a layer).
 - `Op` reports `Kind` (`OpSprite`, `OpText`, `OpTriangles`),
   `Layer`, the snapshotted `Clip`/`HasClip`, the sprite `Path`/`Transform`, the
-  `Texture` the op samples, the text `FontPath`/`Text`/`Draw`, recorded
-  `Params`, `HasMaterial`, and `Vertices` for triangle lists recorded with the
-  built-in `Vertex` type. `Op.Param` and `Op.ColorParam` look a parameter up by
-  name. `HasMaterial` says whether the op named a material of *its own*, not
-  what it will draw with: a draw that names none resolves to the layer's set and
-  then to the built-in, both at flush.
+  `Texture` the op samples with `HasTexture`, the text `FontPath`/`Text`/`Draw`,
+  recorded `Params`, the `Material` the op named with `HasMaterial`, and
+  `Vertices` plus `VertexBytes` for triangle lists — `Vertices` only for a list
+  recorded with the built-in `Vertex` type, `VertexBytes` whatever the layout.
+  `Op.Param` and `Op.ColorParam` look a parameter up by name. `HasMaterial` says
+  whether the op named a material of *its own*, not what it will draw with: a
+  draw that names none resolves to the layer's set and then to the built-in,
+  both at flush.
 
 - `LayerWindow(Layer)` reports a layer's window and aspect mode,
   `LayerTarget(Layer)` where it draws, and `LayerClear(Layer)` the color passed
   to `Clear` for it.
+
+## Offered To An Agent
+
+canvas implements `mcp.Provider` and offers one capability, `draws`, rendered
+as the tool `canvas_draws`: one tick's recorded operations in flush order, with
+each layer's world window, aspect mode, target and clear. It answers *nothing
+is on screen; was it even recorded, and on which layer* — and it answers it
+about the app's drawing **and ui's**, because ui records into this queue during
+its own processing, one phase earlier. That is what makes `canvas_draws` and
+`ui_layout` complementary rather than redundant: one says what ui intended, the
+other what it emitted.
+
+It is `mcp.Func`, because a snapshot arms and waits, and `mcp.ReadOnly()`,
+which in cog's reading means the capability does not change the game — with the
+one asterisk that under pause it performs exactly one step, or joins one
+another arm already raised, and says so in the response. That is stated in the
+description rather than expressed in the annotation, and it cannot be
+otherwise: the canvas queue is *empty* between ticks rather than stale, so
+producing a snapshot without running a tick is not a thing that exists.
+
+The snapshot is **serialized inside the tick**, from a subscriber ordered
+`Last()` and `Before[UpdateEventHandler]()` — after ui and the app have
+recorded, before the flush's deferred reset. Nothing that outlives the tick
+aliases the queue: `Ops` hands out slices that die at the next reset, which is
+why the snapshot renders each op into owned values as it walks the queue rather
+than calling it. The JSON marshalling and any file write happen on the
+capability's own goroutine.
+
+Every index in the response is a **source index** — a position in canvas flush
+order, never a position in the emitted array — so an index stays the address of
+what it named when a filter is on. Triangle vertices are summarised as a count
+and a bounding box; naming an op's index in `vertices` returns that op's list in
+full. `fromLayer`/`toLayer` and `kinds` cut a busy frame down and say how much
+they dropped, and `path` is optional and writes the JSON to a file instead of
+returning it inline.
+
+Textures, parameters and materials are rendered through the view types `gfx`
+declares, so one value reaches an agent in one shape whichever tool showed it,
+and the three coordinate sizes come from `gfx.SnapshotView`. The full contract
+is in [docs/specs/mcp.md](docs/specs/mcp.md), and the capability that document
+specifies is implemented.
 
 ## Coordinate Helpers
 
@@ -479,3 +523,11 @@ pages are freed only by the whole-glyph-atlas resize invalidation.
 `gfx.OpQueue` and `gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
 `gfx.UpdateEventHandler`, so gameplay records first, canvas emits graphics
 draws second, and gfx presents last.
+
+`DrawsArmUpdateEventHandler` and `DrawsUpdateEventHandler` are the two halves
+of the agent snapshot and are inert when none is armed. The first is ordered
+`First()` and declares no resources: it admits a waiting request to the tick
+that has just begun, which is what makes "a tick that *began* after the
+request" decidable. The second reads `*OpQueue` from `Last()`, ordered
+`Before[UpdateEventHandler]()`, and renders the frame between ui's recording
+and the flush's reset.
