@@ -83,7 +83,10 @@ func newTranslator() *translator {
 // by the latest frame. The returned ops (and their payloads) are valid until
 // the next translate call. It returns the first error encountered; valid draws
 // are still translated.
-func (t *translator) translate(queue *OpQueue, persistent []op, backend Backend, filesystem storage.FileSystem) (*GpuQueue, error) {
+func (t *translator) translate(
+	queue *OpQueue, persistent []op, backend Backend, filesystem storage.FileSystem,
+	capture GpuCaptureDesc, capturing bool,
+) (*GpuQueue, error) {
 	t.ops.Reset()
 
 	need := len(queue.ops) * uniformMax
@@ -143,7 +146,7 @@ func (t *translator) translate(queue *OpQueue, persistent []op, backend Backend,
 	translateResources(persistent)
 	translateResources(queue.ops)
 
-	t.translatePasses(queue, backend, filesystem, &uoff, &firstErr)
+	t.translatePasses(queue, backend, filesystem, &uoff, &firstErr, capture, capturing)
 
 	// A report that did not stop anything is still worth surfacing, but only
 	// behind an error that did.
@@ -157,7 +160,10 @@ func (t *translator) translate(queue *OpQueue, persistent []op, backend Backend,
 
 // translatePasses runs the frame's passes in Order, merging the runs that are
 // indistinguishable from one longer pass, and emits each one's draws.
-func (t *translator) translatePasses(queue *OpQueue, backend Backend, filesystem storage.FileSystem, uoff *int, firstErr *error) {
+func (t *translator) translatePasses(
+	queue *OpQueue, backend Backend, filesystem storage.FileSystem, uoff *int, firstErr *error,
+	capture GpuCaptureDesc, capturing bool,
+) {
 	t.planPasses(queue)
 	if t.strayDraws > 0 && *firstErr == nil {
 		*firstErr = ErrDrawWithoutPass{Count: t.strayDraws}
@@ -201,6 +207,21 @@ func (t *translator) translatePasses(queue *OpQueue, backend Backend, filesystem
 	// screen alone rather than blitting a buffer nothing wrote to.
 	if presents {
 		t.ops.Present()
+	}
+	// The capture is the last thing in the frame. The present pass moves the
+	// frame buffer out of RenderAttachment and samples it, so a copy encoded
+	// ahead of it would name a layout that is no longer true; encoded here it
+	// costs the frame nothing but the copy's own bandwidth and keeps Execute's
+	// one-submit contract literally true.
+	if capturing {
+		// A texture capture is a third role for a texture gfx has been
+		// tracking, so it declares the barrier like any other. A screen
+		// capture declares none: the frame buffer is the one attachment gfx
+		// never names, and the backend places that transition itself.
+		if !capture.Screen {
+			t.transitionTo(capture.Texture, TextureUsageCopySrc)
+		}
+		t.ops.Capture(capture)
 	}
 }
 

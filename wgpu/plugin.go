@@ -135,6 +135,17 @@ func (p *Plugin) Run(k kernel.Executioner) error {
 	return err
 }
 
+// Stop abandons any readback the window closed on. A capture armed in the
+// last frame has no further submit to resolve against, so its staging buffer
+// and pending map are released here and the reason takes their place; gfx's
+// own Stop is what delivers that reason to whoever armed it.
+func (p *Plugin) Stop(kernel.Executioner) error {
+	if p.gfxBackend != nil {
+		p.gfxBackend.captures.abandon()
+	}
+	return nil
+}
+
 func quitOnCancellation(ctx context.Context, runDone <-chan struct{}, quit func()) {
 	select {
 	case <-runDone:

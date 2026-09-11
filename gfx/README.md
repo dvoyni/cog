@@ -17,13 +17,15 @@ preprocessor exists; nothing else in this README describes it.
 - Name: `gfx.Name` (`"gfx"`)
 - Constructor: `gfx.New() *gfx.Plugin`
 - Plugin dependency: `storage`
-- Go package dependencies: `app`, `kernel`, `storage`, `x/image`
+- Go package dependencies: `app`, `kernel`, `mcp`, `storage`, `x/image`
+- Implements: `mcp.Provider`, `kernel.PluginStopper`
 
 The plugin has no configuration. Register `storage` before it so shader and
 texture resources are available at runtime.
 
-`Plugin` implements the kernel lifecycle methods `Name`, `Dependencies`, and
-`Init`.
+`Plugin` implements the kernel lifecycle methods `Name`, `Dependencies`,
+`Init`, and `Stop`. `Stop` exists for one job: completing a capture the engine
+walked away from.
 
 ## Resources
 
@@ -110,6 +112,83 @@ before the frame buffer existed; the present pass reads the same constant to
 decide whether it applies the sRGB OETF, so flipping the constant flips both
 halves of the decision together.
 
+## Reading A Frame Back
+
+A **capture** is one rendered colour target taken off the GPU and handed to
+whoever asked for it. It is a gfx feature rather than an agent one: anything
+holding a kernel handle may arm one, and the agent-facing capability below is
+one caller among them.
+
+`ArmCaptureCmd` takes an `ArmCaptureRequest{Target, Amount, Interval, Paused}`
+and answers with `ArmCaptureResponse{Done, Viewport}`. `Done` is a buffered
+channel carrying one `GpuCapture` per still; `GpuCapture` carries either the
+mapped bytes or the reason there are none, so a caller cannot handle a result
+and forget a failure. `GpuCapture.Image()` un-strides the padded rows into an
+`image.NRGBA` — straight-alpha, because `image.RGBA` is premultiplied and
+`FormatRGBA8` is not.
+
+`Target` is a `GpuCaptureDesc{Screen bool, Texture TextureID}`, mirroring
+`GpuPassDesc`'s addressing. A capture always reads mip 0, layer 0. Depth is
+refused, and so is any format that is not 8-bit RGBA.
+
+**The moment a capture names.** The still binds to a tick that *began* after
+the request, so a caller that sends input and then captures cannot get the
+frame recorded before that input was consumed. Mechanically the request moves
+through four stages, one still at a time: `pending` waits for a tick to begin,
+`armed` waits for it to complete, `bound` rides the next render whatever queue
+that render draws, and `inflight` waits for the readback. That costs one extra
+tick and makes press-then-capture correct with no composition mechanism at all.
+
+**Nothing waits.** The copy is encoded into the frame's own encoder after the
+present, and the map is started right after that frame's single submit; the
+*next* frame's submit is what resolves it, and `Backend.TakeCapture` is a
+status check gfx drains once per frame. With nothing outstanding the whole
+per-frame cost is one length check. One frame of latency is therefore a fixed
+property of every capture, and a capture needs a frame to be *submitted* before
+it can resolve — which is why a paused engine keeps drawing.
+
+**Under pause.** `ArmCaptureRequest.Paused` says the caller knows no further
+tick can begin, so the still binds straight to the next render and costs no
+tick. gfx does not read the tick source itself: pausing belongs to whichever
+host owns the loop, and gfx must not require a host to exist. Two captures
+taken under one pause are byte-identical, and a burst while paused is refused.
+
+**Bursts.** `Amount` stills, `Interval` ticks apart, capped at 60 stills and
+600 ticks of span. Each still binds on its own terms, so a burst spans many
+moments on purpose. A burst truncates rather than failing: the caller sees the
+stills that landed.
+
+**One at a time.** A second arm while one is live is `ErrCaptureBusy`, refused
+rather than queued or coalesced. The backend refuses a second in-flight map the
+same way, through `GpuCapture.Err`, because a game's own code may arm one.
+Shutdown completes a live capture with `ErrCaptureAbandoned` on the channel a
+result would have used.
+
+`Renderable` now implies copy-source. You can only read back what something
+rendered into, so `TextureDesc.Renderable` already names exactly the capturable
+set and no new flag has to predict it. The cost, stated so nobody finds it in a
+profile: on some drivers copy-source disables lossless framebuffer compression
+on that texture, and it is paid whether or not a capture ever happens.
+
+## Offered To An Agent
+
+gfx implements `mcp.Provider` and offers one capability, `capture`, rendered as
+the tool `gfx_capture`. It is screen-only: `GpuCaptureDesc` addresses any
+colour texture and that generality is right for gfx, but nothing lists textures
+to an agent and a `TextureID` is an opaque handle it has no way to obtain.
+
+The agent names an absolute `.png` path, optionally with `amount`, `interval`
+and a `%d` numbering verb; every check — the path, the extension, the verb and
+the caps — happens before a frame is spent, so a burst is refused whole or
+armed whole. The response carries the ordinals actually written plus the image
+size in pixels and the window size in the units input capabilities use, which
+together convert a point in the picture into a point that can be clicked. The
+capability is `mcp.ReadOnly()`: it writes exactly the file it was told to.
+
+The full contract is in [docs/specs/capture.md](docs/specs/capture.md) and
+[docs/specs/mcp.md](docs/specs/mcp.md). `gfx_frame`, the other capability those
+documents specify, is not implemented yet.
+
 ## Commands Implemented
 
 | Command | Request / response | Declared resource access |
@@ -121,6 +200,7 @@ halves of the decision together.
 | `FreeCachedResourcesCmd` | `FreeCachedResourcesRequest` / `FreeCachedResourcesResponse` | write `*ResourceQueue` |
 | `SetViewportCmd` | `SetViewportRequest` with window/framebuffer dimensions / `SetViewportResponse{Viewport}` | read desired policy, write `*Viewport` |
 | `SetDesiredViewportCmd` | `SetDesiredViewportRequest{Mode, Width, Height, Size}` / `SetDesiredViewportResponse{Viewport}` | write desired policy and `*Viewport` |
+| `ArmCaptureCmd` | `ArmCaptureRequest{Target, Amount, Interval, Paused}` / `ArmCaptureResponse{Done, Viewport}` | read `*Viewport` |
 
 `PresentCmd` and `AcquireCmd` are public for explicit queue control, but normal
 operation uses the update and render subscriptions. Cache-release commands
@@ -137,11 +217,18 @@ not subscribe to this event itself.
 
 ### Subscribed
 
+- `CaptureUpdateEventHandler` handles `app.UpdateEvent` and runs `First()`,
+  ahead of every other subscriber, so a capture armed while a tick is already
+  running waits for the next one. It declares no resources: the capture slot is
+  plugin-owned and carries its own lock, because shutdown has to complete a
+  waiting capture and a stopped scheduler grants none.
 - `UpdateEventHandler` handles `app.UpdateEvent`, writes `*OpQueue` plus the
-  ready queue, and runs `Last()` to present the completed frame queue.
+  ready queue, and runs `Last()` to present the completed frame queue. A
+  capture armed before this tick began binds here, beside the queue swap.
 - `RenderEventHandler` handles `app.RenderEvent`, writes the read queue, ready
   queue, and `*ResourceQueue`, reads `storage.FileSystem`, then translates and
-  executes the latest queue on the driver's render thread.
+  executes the latest queue on the driver's render thread. It drains
+  `Backend.TakeCapture` immediately after `Execute`.
 
 ## Viewport
 
@@ -275,8 +362,13 @@ type Backend interface {
     ScreenFramebuffer() (TextureViewID, int, int)
     TextureView(TextureID, mip, layer int) TextureViewID
     Execute(*GpuQueue)
+    TakeCapture() (GpuCapture, bool)
 }
 ```
+
+`TakeCapture` is drained once per frame, immediately after `Execute`, and
+never blocks: what it has ready is the copy the *previous* frame encoded,
+whose map resolved on the submit `Execute` just made.
 
 Low-level descriptors are `TextureDesc`, `BufferDesc`, `SamplerDesc`,
 `ShaderDesc`, `PipelineDesc`, `ShaderLayout`, `UniformMember`,
@@ -302,14 +394,25 @@ Opaque handles are based on `ResourceID`: `TextureID`, `BufferID`, `SamplerID`,
 `GpuQueue` records through `BakeBuffer`, `BakeTexture`, `AllocateTexture`,
 `UpdateTexture`, `BeginPass`, `EndPass`, `SetPipeline`, `SetParams`,
 `SetTexture`, `SetSampler`, `SetVertexBuffer`, `SetIndexBuffer`, `SetBuffer`,
-`Draw`, `Present`, `ReleaseBuffer`, and `ReleaseTexture`. `ReplayBakes(GpuBakeSink)`,
+`Draw`, `Present`, `Capture`, `ReleaseBuffer`, and `ReleaseTexture`. `ReplayBakes(GpuBakeSink)`,
 `ReplayPasses(GpuPassSink)`, and `ReplayReleases(GpuReleaseSink)` send each
 phase to a backend; `Reset` reuses the queue. Bakes are hoisted ahead of every
 pass, so a pass can read anything the frame uploaded. The sink interfaces define
 the backend-facing replay contracts, and `BeginPass` returns the `RenderPass`
 its commands go to, so the backend owns encoder and pass lifetime. `Present`
 takes no arguments: the frame buffer, the full-screen triangle, the transfer
-function and the surface format are all the backend's.
+function and the surface format are all the backend's. `Capture` is the same
+shape one step further on — a whole-frame action carrying no commands, emitted
+last, after the present, because the present pass moves the frame buffer out of
+`RenderAttachment` and a copy encoded ahead of it would name a layout that is
+no longer true. Its result arrives a frame later through `TakeCapture`.
+
+`TextureUsage` has three values rather than two: `TextureUsageRenderAttachment`,
+`TextureUsageTextureBinding`, and `TextureUsageCopySrc` for a texture being
+read back. A texture capture declares its own transition into the third role
+like any other write-then-read pair; a screen capture declares none, because
+the frame buffer is the one attachment gfx never names and the backend places
+that barrier itself.
 
 `BufferSourceBytes`, `BufferSourceBaked`, `ShaderSourceText`,
 `ShaderSourceResource`, `TextureSourceResource`, `TextureSourceBytes`, and
@@ -331,3 +434,11 @@ when a parameter's name matches a binding its kind cannot fill, and the draw is
 dropped. See the parameter section above for why an unreported one is worse than
 a dropped draw.
 
+
+The capture errors are typed for the same reason: a caller reads them, and a
+burst branches on them. `ErrCaptureBusy{}` is a second arm while one is live;
+`ErrCaptureAbandoned{}` a capture the engine stopped before its readback
+resolved; `ErrCaptureUnsupported{Format}` depth or anything else that is not
+8-bit RGBA; `ErrCaptureNoTarget{}` a target the frame never rendered into; and
+`ErrCaptureAmount{Amount, Max}`, `ErrCaptureSpan{Ticks, Max}` and
+`ErrCaptureBurstPaused{}` the three ways a burst is asked for and refused.

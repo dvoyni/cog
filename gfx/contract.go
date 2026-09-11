@@ -379,4 +379,14 @@ type Backend interface {
 	// submits once, then performs releases. queue is owned by the caller and
 	// valid only for the duration of the call.
 	Execute(queue *GpuQueue)
+
+	// TakeCapture returns a completed capture, if one is ready, and clears it.
+	// gfx calls it once per frame immediately after Execute; a capture armed in
+	// the previous frame is normally ready by the time the current frame's
+	// submit has triaged it, so neither thread ever waits for a map.
+	//
+	// Its cost with nothing outstanding is a nil check. The returned value
+	// carries either the mapped bytes or the reason there are none, so a caller
+	// cannot handle a result and forget a failure.
+	TakeCapture() (GpuCapture, bool)
 }

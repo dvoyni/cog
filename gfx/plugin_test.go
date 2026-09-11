@@ -61,6 +61,78 @@ type fakeBackend struct {
 	// trusted.
 	transitions      []placedTransition
 	emptyTransitions int
+
+	// Readback, modelled with the real backend's one frame of latency: a
+	// capture encoded during frame N is handed back by the drain that follows
+	// frame N+1's Execute, because that submit is what resolves its map.
+	// captureDescs records every readback the translator asked for, and
+	// captureAfter records how many passes had run when it did.
+	captureDescs   []GpuCaptureDesc
+	captureAfter   int
+	captureLabels  [][]string
+	takeCalls      int
+	captureResult  func(GpuCaptureDesc) GpuCapture
+	capturePending *GpuCapture
+	captureReady   *GpuCapture
+}
+
+// Capture records the readback and prepares its result for the drain after the
+// next Execute.
+func (b *fakeBackend) Capture(desc GpuCaptureDesc) {
+	b.captureDescs = append(b.captureDescs, desc)
+	b.captureAfter = len(b.lastPasses)
+	labels := make([]string, 0, len(b.lastPasses))
+	for _, pass := range b.lastPasses {
+		labels = append(labels, pass.Label)
+	}
+	b.captureLabels = append(b.captureLabels, labels)
+	result := defaultCapture()
+	if b.captureResult != nil {
+		result = b.captureResult(desc)
+	}
+	b.capturePending = &result
+}
+
+func (b *fakeBackend) TakeCapture() (GpuCapture, bool) {
+	b.takeCalls++
+	if b.captureReady == nil {
+		return GpuCapture{}, false
+	}
+	done := *b.captureReady
+	b.captureReady = nil
+	return done, true
+}
+
+// defaultCapture is a two-by-two image with padded rows, so that the ordinary
+// path through a test still exercises the un-stride.
+func defaultCapture() GpuCapture {
+	return paddedCapture(2, 2, func(x, y int) color.NRGBA {
+		return color.NRGBA{R: uint8(x * 60), G: uint8(y * 60), B: 7, A: 255}
+	})
+}
+
+// paddedCapture builds what a backend hands back: rows padded to the GPU's own
+// alignment, with the padding filled with a value that is not the picture, so
+// a test can tell an un-stride from a straight copy.
+func paddedCapture(width, height int, at func(x, y int) color.NRGBA) GpuCapture {
+	const alignment = 256
+	rowBytes := (width*4 + alignment - 1) / alignment * alignment
+	pixels := make([]byte, rowBytes*height)
+	for i := range pixels {
+		pixels[i] = 0xAB
+	}
+	for y := range height {
+		for x := range width {
+			texel := y*rowBytes + x*4
+			c := at(x, y)
+			pixels[texel], pixels[texel+1] = c.R, c.G
+			pixels[texel+2], pixels[texel+3] = c.B, c.A
+		}
+	}
+	return GpuCapture{
+		Pixels: pixels, Width: width, Height: height,
+		Format: FrameBufferFormat, BytesPerRow: rowBytes,
+	}
 }
 
 func (b *fakeBackend) id() uint32 { b.nextID++; return b.nextID }
@@ -128,6 +200,9 @@ func (b *fakeBackend) TextureView(texture TextureID, mip, layer int) TextureView
 
 func (b *fakeBackend) Execute(queue *GpuQueue) {
 	b.execCount++
+	// What this frame encodes resolves on the next frame's submit, so the
+	// readback the previous frame armed is the one that becomes drainable now.
+	b.captureReady, b.capturePending = b.capturePending, nil
 	b.lastOps = append(b.lastOps[:0], queue.bakes...)
 	b.lastOps = append(b.lastOps, queue.render...)
 	b.lastOps = append(b.lastOps, queue.releases...)
@@ -384,12 +459,12 @@ func BenchmarkTranslateSteadyState(b *testing.B) {
 			ColorParam("tint", m.Color{R: 0.5, A: 1}),
 		)
 	}
-	translator.translate(&queue, nil, backend, storage.FileSystem{})
+	translator.translate(&queue, nil, backend, storage.FileSystem{}, GpuCaptureDesc{}, false)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		translator.translate(&queue, nil, backend, storage.FileSystem{})
+		translator.translate(&queue, nil, backend, storage.FileSystem{}, GpuCaptureDesc{}, false)
 	}
 }
 
@@ -415,6 +490,7 @@ func (benchmarkGpuSink) BeginPass(GpuPassDesc) RenderPass       { return benchma
 func (benchmarkGpuSink) EndPass(RenderPass)                     {}
 func (benchmarkGpuSink) TransitionTextures([]TextureTransition) {}
 func (benchmarkGpuSink) Present()                               {}
+func (benchmarkGpuSink) Capture(GpuCaptureDesc)                 {}
 
 func BenchmarkGpuQueueReplaySteadyState(b *testing.B) {
 	var queue GpuQueue

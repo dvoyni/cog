@@ -179,14 +179,18 @@ func (b *gfxBackend) TransitionTextures(transitions []cgfx.TextureTransition) {
 	}
 }
 
-// textureBarrierUsage maps gfx's two attachment roles onto the backend's usage
-// flags. gfx names only the two it can put a texture in; every other usage is
+// textureBarrierUsage maps gfx's three texture roles onto the backend's usage
+// flags. gfx names only the roles it can put a texture in; every other usage is
 // the backend's own business.
 func textureBarrierUsage(usage cgfx.TextureUsage) gputypes.TextureUsage {
-	if usage == cgfx.TextureUsageTextureBinding {
+	switch usage {
+	case cgfx.TextureUsageTextureBinding:
 		return gputypes.TextureUsageTextureBinding
+	case cgfx.TextureUsageCopySrc:
+		return gputypes.TextureUsageCopySrc
+	default:
+		return gputypes.TextureUsageRenderAttachment
 	}
-	return gputypes.TextureUsageRenderAttachment
 }
 
 // EndPass closes the pass BeginPass opened.

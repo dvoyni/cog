@@ -11,14 +11,15 @@ feeds `input`, and drives the `app` update/render contract on desktop and WebAss
 - Plugin dependencies: `gfx`, `input`
 - Go package dependencies: `app`, `gfx`, `input`, `kernel`, `mcp`, `gogpu`,
   WebGPU implementation packages
-- Implements: `kernel.Host`, `mcp.Provider`
+- Implements: `kernel.Host`, `mcp.Provider`, `kernel.PluginStopper`
 - Subscribed kernel events: none
 
 Register dependencies before the driver. `Run(ctx)` owns the calling thread and
 blocks in the platform main loop until the window closes, `app.QuitCmd` runs, or
 the context is canceled.
 
-`Plugin` implements `Name`, `Dependencies`, `Init`, and `Run`.
+`Plugin` implements `Name`, `Dependencies`, `Init`, `Run`, and `Stop`. `Stop`
+exists for one job: releasing a readback the closing window left outstanding.
 
 ## Configuration
 
@@ -156,6 +157,62 @@ format — every other pipeline is built for the frame buffer's — because a
 hardware sRGB swapchain is unreachable: gogpu hardcodes `BGRA8Unorm` and
 exposes no view formats, and `bgra8unorm-srgb` is not a legal canvas-context
 format on the web.
+
+### Reading A Frame Back Without Waiting
+
+`gfx` decides *that* a frame is read back; the backend owns *how*. The whole
+sequence runs on the render thread and nothing in it blocks, which is the point
+rather than an optimisation: `Device.Poll(PollWait)` calls `WaitIdle`, a
+device-wide CPU-on-GPU stall, so a capture that waited for its map would make
+the very frame an agent is asking about slow.
+
+1. Inside `Execute`, when the queue's `Capture` op replays — last, after the
+   present — the backend creates a fresh staging buffer sized
+   `alignedRowBytes * height` and encodes `CopyTextureToBuffer` into the
+   frame's own encoder. The buffer is `MapRead | CopyDst`, the copy offset is
+   always zero (which dodges DX12's separate 512-byte offset alignment, which
+   no public API reveals), and rows are padded to **256 bytes**, hardcoded
+   because `hal.Alignments` is HAL-only and `Limits` has no row-pitch field.
+2. `Finish`, then the frame's single `Submit`, exactly as before: the copy
+   costs the frame its own bandwidth and nothing else, and `Execute` still
+   submits once.
+3. Immediately *after* that submit, `MapAsync` starts the map and the
+   `*MapPending` is kept. No polling code exists anywhere in this package:
+   `Queue.Submit` auto-polls at its tail, so the **next** frame's submit is
+   what resolves it. On wasm the map resolves through a JS promise with no
+   poll at all and `Status` reads the same either way, so the sequence needs no
+   build tag.
+4. `TakeCapture`, which `gfx` drains once per frame after `Execute`, is a
+   `Status` check; on ready it copies the bytes out of the mapped range —
+   which is a pointer into HAL memory, not a copy, and dies at `Unmap` —
+   then unmaps, releases the buffer and releases the pending handle.
+
+Two readbacks may be live at once and no more. That is not two captures in
+flight: the frame that encodes the next still is the frame whose submit
+resolves the previous one, so one slot is transiently held by a readback that
+has resolved and not yet been taken. Anything beyond that is refused with
+`gfx.ErrCaptureBusy`, and a refusal travels the same seam a result would have,
+through `GpuCapture.Err`. Depth and any format that is not 8-bit RGBA are
+refused the same way, as is a target the frame never rendered into.
+
+A screen capture reads the frame buffer, which `gfx` never names, so the
+backend places that texture's barriers itself: `TextureBinding -> CopySrc`
+before the copy and back again after it, because the present pass left it in
+`TextureBinding` and the next frame's present barrier still has to name the
+layout it is actually in. A texture capture needs neither — `gfx` tracked that
+texture's role all frame and declared the transition itself, which is what the
+third `gfx.TextureUsage` value is for.
+
+`textureUsage` grants `CopySrc` to every `Renderable` texture, the one blocking
+change the whole feature rested on. Nothing in cog was copyable off the GPU
+before it, and the cost is stated rather than discovered: on some drivers
+`CopySrc` disables lossless framebuffer compression on that texture, paid
+whether or not a capture ever happens, and bounded to render targets.
+
+`Stop` abandons whatever is still live. A capture armed in the last frame has
+no further submit to resolve against, so its staging buffer and pending map are
+released and `gfx.ErrCaptureAbandoned` takes their place; `gfx` delivers that
+reason to whoever armed it.
 
 ### Barriers Are Ours To Place
 

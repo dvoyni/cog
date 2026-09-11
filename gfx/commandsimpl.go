@@ -72,6 +72,23 @@ func (p *Plugin) freeCachedResourcesCmdImpl() (kernel.Lock, kernel.Execute[FreeC
 		}
 }
 
+// armCaptureCmdImpl installs the frame's one capture request and hands back
+// the channel its stills arrive on, plus the window size the caller cannot
+// read for itself. The Viewport read is the only lock it needs: the capture
+// slot is plugin-owned and carries its own.
+func (p *Plugin) armCaptureCmdImpl() (kernel.Lock, kernel.Execute[ArmCaptureRequest, ArmCaptureResponse]) {
+	var viewport kernel.Read[*app.Viewport]
+	return func(access kernel.ResourceAccess) {
+			viewport = access.GetRead[*app.Viewport]()
+		}, func(_ kernel.Kernel, request ArmCaptureRequest) (ArmCaptureResponse, error) {
+			live, err := p.captures.arm(request)
+			if err != nil {
+				return ArmCaptureResponse{}, err
+			}
+			return ArmCaptureResponse{Done: live.done, Viewport: *viewport.Get()}, nil
+		}
+}
+
 func setViewportCmdImpl() (kernel.Lock, kernel.Execute[app.SetViewportRequest, app.SetViewportResponse]) {
 	var preference kernel.Read[*desiredViewport]
 	var current kernel.Write[*app.Viewport]

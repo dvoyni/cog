@@ -82,6 +82,93 @@ func (ErrBackendMissing) Error() string {
 	return "gfx: no Backend installed; a driver must run SetBackendCmd before rendering"
 }
 
+// ErrCaptureBusy reports a capture arm made while one is already live. It is
+// refused rather than queued or coalesced: queueing turns a boolean into a
+// queue for a fifty-millisecond window, and coalescing two waiters onto one
+// frame founders on the fact that each names a different file.
+//
+// Both refusal sites raise it. gfx refuses a second arm synchronously, and the
+// backend refuses a second in-flight map through GpuCapture.Err, because
+// capture is a public gfx feature and a game's own code may arm one.
+type ErrCaptureBusy struct{}
+
+func (ErrCaptureBusy) Error() string {
+	return "gfx: a capture is already in flight"
+}
+
+// ErrCaptureAbandoned reports a capture the engine stopped before its readback
+// resolved. It travels the channel a result would have used, so that a waiter
+// learns the answer rather than sitting until its own deadline.
+type ErrCaptureAbandoned struct{}
+
+func (ErrCaptureAbandoned) Error() string {
+	return "gfx: the engine stopped before the capture was read back"
+}
+
+// ErrCaptureUnsupported reports a target a capture cannot be an image of:
+// depth, or any format that is not 8-bit RGBA. Depth readback is a real want
+// and it is a visualization question rather than a readback one - a depth
+// capture is a float field needing a range to be legible.
+type ErrCaptureUnsupported struct{ Format TextureFormat }
+
+func (e ErrCaptureUnsupported) Error() string {
+	return fmt.Sprintf("gfx: %s cannot be captured; a capture is 8-bit RGBA", formatName(e.Format))
+}
+
+// ErrCaptureNoTarget reports a capture of something the frame never rendered
+// into: a screen capture in a frame that drew nothing to the screen, or a
+// texture that has no GPU object yet. It is distinct from an unsupported
+// format because the answers differ - one says wait for a frame that draws,
+// the other says this can never be an image.
+type ErrCaptureNoTarget struct{}
+
+func (ErrCaptureNoTarget) Error() string {
+	return "gfx: the capture's target was not rendered into this frame"
+}
+
+// ErrCaptureAmount reports a burst asking for more stills than one request may
+// take. A longer window is bought with the interval, never with the amount.
+type ErrCaptureAmount struct{ Amount, Max int }
+
+func (e ErrCaptureAmount) Error() string {
+	return fmt.Sprintf("gfx: %d stills is more than the %d one capture may take", e.Amount, e.Max)
+}
+
+// ErrCaptureSpan reports a burst whose stills would span more ticks than one
+// request may cover. It is the same figure as a time step's cap, because a
+// request that outlives its caller is bounded the same way either side.
+type ErrCaptureSpan struct{ Ticks, Max int }
+
+func (e ErrCaptureSpan) Error() string {
+	return fmt.Sprintf("gfx: %d ticks is a longer span than the %d one capture may cover", e.Ticks, e.Max)
+}
+
+// ErrCaptureBurstPaused reports a burst armed against a stopped tick source.
+// No new ticks means N byte-identical files, and a silent pile of duplicates is
+// exactly the failure a debug facility must not have. A single capture while
+// paused stays legal, and costs no tick.
+type ErrCaptureBurstPaused struct{}
+
+func (ErrCaptureBurstPaused) Error() string {
+	return "gfx: a burst needs ticks, and the engine is paused"
+}
+
+// formatName names a texture format for a message. TextureFormat is a small
+// closed enum with no String of its own, and giving it one would put a
+// rendering of every member into gfx's public surface for one error.
+func formatName(format TextureFormat) string {
+	switch format.Resolve() {
+	case FormatRGBA8:
+		return "RGBA8"
+	case FormatRGBA8Srgb:
+		return "RGBA8 sRGB"
+	case FormatDepth32F:
+		return "depth"
+	default:
+		return fmt.Sprintf("texture format %d", format)
+	}
+}
+
 // ErrShaderSource reports a shader the preprocessor refused, or one the backend
 // refused after flattening.
 //

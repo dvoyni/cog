@@ -28,6 +28,15 @@ func bytesPerTexel(format cgfx.TextureFormat) int {
 // textureUsage picks the GPU usage flags a descriptor asks for. Depth is
 // renderable and sampleable but never a copy destination: WebGPU forbids
 // writing texels into a depth32float texture.
+//
+// Renderable also grants CopySrc, which is what makes a capture possible: you
+// can only read back what something rendered into, so Renderable already names
+// exactly the capturable set and no new field has to predict it. The cost,
+// stated so nobody finds it in a profile instead: on some drivers CopySrc
+// disables lossless framebuffer compression on that texture, and it is paid
+// whether or not a capture ever happens. It is bounded to render targets,
+// which is why the alternative - granting it to every non-depth texture - was
+// not taken: that pays on every atlas and material map in the scene.
 func textureUsage(desc cgfx.TextureDesc) gputypes.TextureUsage {
 	usage := gputypes.TextureUsageTextureBinding
 	if desc.Format.Resolve() == cgfx.FormatDepth32F {
@@ -35,7 +44,7 @@ func textureUsage(desc cgfx.TextureDesc) gputypes.TextureUsage {
 	}
 	usage |= gputypes.TextureUsageCopyDst
 	if desc.Renderable {
-		usage |= gputypes.TextureUsageRenderAttachment
+		usage |= gputypes.TextureUsageRenderAttachment | gputypes.TextureUsageCopySrc
 	}
 	return usage
 }

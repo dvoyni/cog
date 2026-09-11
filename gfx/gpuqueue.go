@@ -49,6 +49,13 @@ const (
 	TextureUsageRenderAttachment TextureUsage = iota
 	// TextureUsageTextureBinding is a texture being read by a shader.
 	TextureUsageTextureBinding
+	// TextureUsageCopySrc is a texture being read back into CPU-visible
+	// memory. It is the third role rather than a reuse of the other two
+	// because From must name the usage a texture is actually in: a layout
+	// transition that names the wrong old layout is undefined behaviour, and
+	// a backend silently inserting an unnamed barrier for a capture is
+	// precisely the undeclared hazard this type exists to abolish.
+	TextureUsageCopySrc
 )
 
 // TextureTransition orders one texture's writes against its reads, or the other
@@ -91,12 +98,27 @@ type GpuPassDesc struct {
 	Label      string
 }
 
+// GpuCaptureDesc names one colour target to read back. Screen selects the frame
+// buffer, which only the backend can resolve; Texture names any other colour
+// texture, and zero means none. It mirrors GpuPassDesc's addressing exactly.
+//
+// A capture always reads mip 0, layer 0. Texture is a TextureID rather than a
+// TextureViewID because a texture-to-buffer copy names a texture, and because
+// TextureTransition.Texture already names one.
+type GpuCaptureDesc struct {
+	Screen  bool
+	Texture TextureID
+}
+
 // gpuPass is a pass descriptor and the half-open range of render commands in it.
 // present marks the frame's implicit present pass instead, which carries no
-// descriptor and no commands: everything about it is the backend's.
+// descriptor and no commands: everything about it is the backend's. capture
+// marks the frame's readback the same way, and carries the one target it reads.
 type gpuPass struct {
 	desc       GpuPassDesc
 	present    bool
+	capture    bool
+	captured   GpuCaptureDesc
 	start, end int
 	// transStart, transEnd is the range of transitions that must be placed
 	// before this pass is encoded. They sit outside the pass because a barrier
@@ -119,6 +141,15 @@ type GpuPassSink interface {
 	// transfer function and the swapchain's own format - belongs to the
 	// backend; gfx only decides that the frame has something to show.
 	Present()
+	// Capture copies one colour target into CPU-visible memory. Like Present it
+	// is a whole-frame action rather than a pass, so it carries no commands;
+	// unlike Present its result arrives later, through Backend.TakeCapture.
+	//
+	// It is the last thing in the frame, after the present: the present pass
+	// transitions the frame buffer out of RenderAttachment and then samples it,
+	// so a copy encoded before it would name an old layout that is no longer
+	// true.
+	Capture(GpuCaptureDesc)
 }
 
 // GpuBakeSink receives resource uploads before render-pass encoding.
@@ -184,6 +215,19 @@ func (q *GpuQueue) BeginPass(desc GpuPassDesc) {
 // backend's: the frame buffer is the one attachment gfx never names.
 func (q *GpuQueue) Present() {
 	q.passes = append(q.passes, gpuPass{present: true, start: len(q.render), end: len(q.render)})
+}
+
+// Capture appends the frame's readback, which runs after everything else
+// including the present. It claims the transitions recorded since the last
+// pass the same way BeginPass does, because a texture capture has to be moved
+// into TextureUsageCopySrc first; a screen capture declares none, since the
+// frame buffer is the one attachment gfx never names.
+func (q *GpuQueue) Capture(desc GpuCaptureDesc) {
+	q.passes = append(q.passes, gpuPass{
+		capture: true, captured: desc, start: len(q.render), end: len(q.render),
+		transStart: q.transitionsUsed, transEnd: len(q.transitions),
+	})
+	q.transitionsUsed = len(q.transitions)
 }
 
 // EndPass closes the pass BeginPass opened.
@@ -334,6 +378,10 @@ func (q *GpuQueue) ReplayPasses(sink GpuPassSink) {
 		}
 		if pass.transEnd > pass.transStart {
 			sink.TransitionTextures(q.transitions[pass.transStart:pass.transEnd])
+		}
+		if pass.capture {
+			sink.Capture(pass.captured)
+			continue
 		}
 		rp := sink.BeginPass(pass.desc)
 		if rp != nil {

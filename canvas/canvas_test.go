@@ -203,6 +203,11 @@ func (b *testBackend) BeginPass(desc gfx.GpuPassDesc) gfx.RenderPass {
 func (b *testBackend) EndPass(gfx.RenderPass) {}
 func (b *testBackend) Present()               { b.presents++ }
 
+// Capture is the readback seam; nothing here reads a frame back.
+func (b *testBackend) Capture(gfx.GpuCaptureDesc) {}
+
+func (b *testBackend) TakeCapture() (gfx.GpuCapture, bool) { return gfx.GpuCapture{}, false }
+
 func (b *testBackend) TransitionTextures([]gfx.TextureTransition) {}
 func (b *testBackend) BakeBuffer(_ gfx.BufferID, kind gfx.BufferKind, _ int, data []byte) {
 	if b.capture {

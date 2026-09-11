@@ -107,6 +107,11 @@ type gfxBackend struct {
 	// say which backend refused rather than leaving a reader to guess.
 	backendName string
 
+	// captures are the readbacks this backend owes an answer for. Empty is the
+	// overwhelmingly common case, and the per-frame cost of that case is one
+	// length check.
+	captures captureRing
+
 	// refusedDepthOnly records that this backend has already declined a
 	// depth-only pass, and refusal holds the error until the plugin takes it to
 	// report on the update thread. The backend has no kernel handle of its own.
@@ -759,6 +764,9 @@ func (b *gfxBackend) Execute(queue *cgfx.GpuQueue) {
 	}
 	_, _ = b.queue.Submit(cmd)
 	b.prevCmd = cmd
+	// After the submit, not before it: the map needs a submission to resolve
+	// against, and Submit's own tail poll is what triages the previous frame's.
+	b.armCapture()
 	b.releaseReplacedBaked()
 	queue.ReplayReleases(b)
 }

@@ -13,6 +13,15 @@ const Name kernel.PluginName = "gfx"
 // handler on app.UpdateEvent; it runs last so gameplay has finished recording.
 type UpdateEventHandler kernel.Subscription[app.UpdateEvent]
 
+// CaptureUpdateEventHandler is the subscription type of the plugin's
+// start-of-tick capture handler on app.UpdateEvent. It is ordered First - ahead
+// of every other subscriber, not merely in the first phase - because that is
+// what makes "a tick that began after the request" decidable: a capture armed
+// while a tick is already running has to wait for the next one, and nothing
+// later in the publication can tell the two apart. Its whole body is a
+// mutex-guarded no-op when no capture is waiting.
+type CaptureUpdateEventHandler kernel.Subscription[app.UpdateEvent]
+
 // RenderEventHandler is the subscription type of the plugin's per-frame render
 // handler on app.RenderEvent. A driver publishes app.RenderEvent synchronously on
 // its render thread (after making the surface current), so this handler acquires
@@ -35,6 +44,9 @@ type Plugin struct {
 	translator *translator
 	// reportedMissingBackend is render-thread-only, like the translator caches.
 	reportedMissingBackend bool
+	// captures is gfx's one capture slot, plugin-owned and self-synchronizing.
+	// See captureState for why it is not a kernel resource.
+	captures captureState
 }
 
 // New creates the gfx plugin.
@@ -63,9 +75,33 @@ func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[FreeCachedResourcesCmd](p.freeCachedResourcesCmdImpl)
 	registrar.HandleCommand[app.SetViewportCmd](setViewportCmdImpl)
 	registrar.HandleCommand[app.SetDesiredViewportCmd](setDesiredViewportCmdImpl)
+	registrar.HandleCommand[ArmCaptureCmd](p.armCaptureCmdImpl)
+	registrar.Subscribe[CaptureUpdateEventHandler](p.captureOnUpdate).First()
 	registrar.Subscribe[UpdateEventHandler](p.presentOnUpdate).Last()
 	registrar.Subscribe[RenderEventHandler](p.renderOnRender)
 	return nil
+}
+
+// Stop completes any capture the engine walked away from. A capture armed in
+// frame N resolves in N+1; if the window closes between them no further submit
+// happens, the pending map never resolves, and a waiter left alone learns
+// nothing at all. Abandonment is delivered rather than merely true.
+//
+// It touches the capture slot directly because by Stop the scheduler has
+// stopped and grants no locks, which is also why nothing else can be touching
+// it: the host loop has returned and every handler is done.
+func (p *Plugin) Stop(kernel.Executioner) error {
+	p.captures.abandon()
+	return nil
+}
+
+// captureOnUpdate admits a waiting capture to the tick that has just begun. It
+// declares no resources: the capture slot carries its own lock.
+func (p *Plugin) captureOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
+	return nil, func(kernel.Kernel, app.UpdateEvent) error {
+		p.captures.beginTick()
+		return nil
+	}
 }
 
 func (p *Plugin) presentOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
@@ -76,6 +112,9 @@ func (p *Plugin) presentOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]
 			ready = access.GetWrite[*readyList]()
 		}, func(kernel.Kernel, app.UpdateEvent) error {
 			present(write, ready)
+			// Bound beside the queue swap, so the capture rides the ready slot
+			// rather than one particular queue.
+			p.captures.endTick()
 			return nil
 		}
 }
@@ -129,11 +168,22 @@ func (p *Plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 				return nil
 			}
 			queue := resources.Get()
-			ops, err := p.translator.translate(list.OpQueue, queue.ops, list.backend, filesystem.Get())
+			capture, capturing := p.captures.target()
+			ops, err := p.translator.translate(
+				list.OpQueue, queue.ops, list.backend, filesystem.Get(), capture, capturing)
 			if err != nil {
 				k.ReportError(err)
 			}
 			list.backend.Execute(ops)
+			// Drained before this frame's own copy is promoted, because what a
+			// backend has ready now is the copy the previous frame encoded: its
+			// map resolved on the submit Execute just made.
+			if done, ready := list.backend.TakeCapture(); ready {
+				p.captures.deliver(done)
+			}
+			if capturing {
+				p.captures.encoded()
+			}
 			queue.reset()
 			return nil
 		}
