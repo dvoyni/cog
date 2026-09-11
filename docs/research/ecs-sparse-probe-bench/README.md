@@ -61,8 +61,13 @@ much at this size: A 1.184, B 1.001, C 1.023, D 1.517 ns/entity.
 
 1. **Folding the generation into the sparse slot is worth 24–26%** of probe cost and costs nothing.
    C is the same 4 bytes per slot as A and is cheaper at every arity measured.
-2. **The 8-byte slot buys almost nothing over the 4-byte one** — 0.384 against 0.422 ns, ~9% — for
-   double the index memory. C dominates B.
+2. **The 8-byte slot is ~9% faster than the 4-byte one** — 0.384 against 0.422 ns — for double the
+   index memory, so on speed and memory alone the choice is close to a wash. cog#239 chose **B**,
+   and not for either: C's 8-bit generation aliases after 255 recycles of an index, which is sound
+   only if a store slot is *always* cleared when its component leaves the entity. B's 32-bit
+   generation matches `Entity`'s own field exactly, so staleness is decided rather than estimated,
+   and [cog#240](https://github.com/dvoyni/cog/issues/240) stays free to choose lazy reclamation.
+   C is the lever to pull if index memory ever bites, at the price of constraining that ticket.
 3. **Paging costs 93% more per probe** than the flat index it replaces (0.813 against 0.422).
 4. The generation compare that makes the one-load probe possible is the *same* compare that makes a
    stale handle fail membership. The liveness check is not an extra cost; it is the probe.
@@ -158,9 +163,42 @@ it, dense order does not matter at all. nox lives at low thousands, two orders o
 the flat region — which is the concrete form of the research note's finding that iteration speed is
 not what decides this design.
 
+## Nested iteration
+
+cog#239 calls this the sharp edge, because cog#234 measured nested *boxed* iteration at 2050 allocs
+/ 57 KB per frame — the inner closure rebuilt once per outer entity. Outer query 1024 entities,
+inner query 64, so 65 536 inner steps. `ns/inner` is `ns/op / 65536`.
+
+| shape | ns/op | ns/inner | allocs/op |
+|---|---|---|---|
+| hand-written slice loops, both levels | 56 400 | **0.861** | 0 |
+| outer `All()`, inner slice loop | 56 635 | **0.864** | 0 |
+| control: `All()` called 1024× in an ordinary loop, no outer query | 89 875 | 1.371 | 0 |
+| outer slice loop, inner `All()` | 124 001 | 1.892 | 0 |
+| outer `All()`, inner `All()` | 262 962 | **4.013** | 0 |
+| … with the inner iterator hoisted out of the outer loop | 257 240 | 3.925 | 0 |
+| … with the inner iterator reached through an interface | 253 174 | 3.863 | 0 |
+
+The control matters: `All()` called 1024 times in an *ordinary* loop costs 1.371 ns/inner, the same
+as iterating it once. **Rebuilding the iterator is free.** Hoisting it changes nothing (3.925
+against 4.013), and neither does boxing it through an interface (3.863) — so this is not cog#234's
+failure mode, and **nothing here allocates**.
+
+What costs is position:
+
+1. **An `All()` in the *outer* position is free.** Outer `All()` with a plain inner loop is 0.864
+   against the hand-written 0.861 — parity.
+2. **An `All()` in the *inner* position loses inlining**, and it compounds: 1.38× the control when
+   the outer is a plain loop, **2.93× when the outer is also `All()`**.
+
+So the cost is the inner yield becoming an indirect call once its range statement sits inside
+another yield closure. It is a time cost only; requirement 1 — zero heap allocation on the hot path
+— holds in every variant measured.
+
 ## Files
 
 - `store.go` — the four store shapes.
 - `probe_test.go` — baseline and the arity-2 / arity-4 probe comparison.
 - `shape_test.go` — paging residency, the bad case, driver selection, tags, growth, scale sweep.
 - `scatter_test.go` — the shuffled-order sweep.
+- `nest_test.go`, `nest2_test.go`, `nest3_test.go` — nested iteration, and where its cost comes from.
