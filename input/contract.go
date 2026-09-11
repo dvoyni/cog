@@ -8,6 +8,12 @@
 // handler folds the batch into the State resource (under its write lock) and
 // publishes the discrete events. A tick-boundary subscription on app.UpdateEvent
 // rolls the per-tick edges (JustPressed/JustReleased).
+//
+// The package also plays a scripted sequence of input into the engine through
+// that same seam — Action, SynthesizeCmd and Play — carrying no mark that
+// distinguishes it from a driver's own and no lifetime of its own. Tests,
+// replays and demos are first-class callers; the two capabilities an agent
+// reaches it through are an adapter over Play.
 package input
 
 import (
@@ -187,7 +193,10 @@ const (
 func (m Mods) Has(x Mods) bool { return m&x == x }
 
 // Pos is a pointer position in logical window coordinates (DIP).
-type Pos struct{ X, Y float64 }
+type Pos struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
 
 // changeKind tags the variant of a Change.
 type changeKind uint8

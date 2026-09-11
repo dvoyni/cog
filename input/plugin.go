@@ -8,9 +8,10 @@ import (
 // Name is the input plugin's name.
 const Name kernel.PluginName = "input"
 
-// Plugin registers the input State resource, the Apply command, the discrete
-// input events, and the tick-boundary subscription that rolls per-tick edges. It
-// holds no state of its own — the State lives in the kernel resource.
+// Plugin registers the input State resource, the Apply, Synthesize and State
+// commands, the discrete input events, and the tick-boundary subscription that
+// rolls per-tick edges. It holds no state of its own — the State lives in the
+// kernel resource.
 type Plugin struct{}
 
 // New creates the input plugin.
@@ -26,6 +27,8 @@ func (p *Plugin) Dependencies() []kernel.PluginName { return nil }
 func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.InitResource(newState())
 	registrar.HandleCommand[ApplyCmd](applyCmdImpl)
+	registrar.HandleCommand[SynthesizeCmd](synthesizeCmdImpl)
+	registrar.HandleCommand[StateCmd](stateCmdImpl)
 	registrar.Subscribe[UpdateEventHandler](handleUpdateEvent).First()
 	return nil
 }

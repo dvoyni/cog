@@ -1,5 +1,7 @@
 package input
 
+import "slices"
+
 // state is the polled input state. It is registered as *state; gameplay reads
 // it under a read lock and queries it. The "just pressed/released", scroll, and
 // text values are per-tick: a driver's Apply folds changes into pending
@@ -91,3 +93,48 @@ func (s *state) Scroll() (dx, dy float64) { return s.scrollDx, s.scrollDy }
 
 // Text returns the runes typed during the current tick.
 func (s *state) Text() []rune { return s.text }
+
+// snapshot is the picture of the seam every input capability answers with: the
+// live down-set, sorted because map iteration is not, and the live pointer. The
+// slice is always non-nil, so "nothing is held" reads as an empty list rather
+// than as a missing answer.
+func (s *state) snapshot() StateResponse {
+	down := make([]Key, 0, len(s.down))
+	for key := range s.down {
+		down = append(down, key)
+	}
+	slices.Sort(down)
+	return StateResponse{Down: down, Pointer: s.pointer}
+}
+
+// modifiers derives the modifier bitmask from the live down-set. A driver
+// carries Mods from the platform and the state does not track them, so this is
+// the only place a chord assembled from separate presses can report the
+// modifier that is actually held instead of zero.
+//
+// ModCapsLock and ModNumLock are never derived: they report a lock being
+// active, not a key being held, and nothing in the state knows which locks are
+// on. Reporting them from a held key would be a lie in the one direction that
+// matters — a caller comparing Pressed against Mods.
+func (s *state) modifiers() Mods {
+	var mods Mods
+	for key, mod := range modifierKeys {
+		if _, held := s.down[key]; held {
+			mods |= mod
+		}
+	}
+	return mods
+}
+
+// modifierKeys maps each modifier key onto the bit it contributes. Left and
+// right contribute the same bit, as they do on every platform cog maps from.
+var modifierKeys = map[Key]Mods{
+	KeyLeftShift:    ModShift,
+	KeyRightShift:   ModShift,
+	KeyLeftControl:  ModCtrl,
+	KeyRightControl: ModCtrl,
+	KeyLeftAlt:      ModAlt,
+	KeyRightAlt:     ModAlt,
+	KeyLeftSuper:    ModSuper,
+	KeyRightSuper:   ModSuper,
+}

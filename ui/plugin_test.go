@@ -2,7 +2,9 @@ package ui
 
 import (
 	stdcontext "context"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/dvoyni/cog/m"
 
@@ -313,4 +315,119 @@ func TestInteractionsClearLeavesNothingToFindAndKeepsTheBuffer(t *testing.T) {
 	if cap(interactions.values) != cap(buffer) {
 		t.Fatalf("Clear replaced the buffer: cap = %d, want %d", cap(interactions.values), cap(buffer))
 	}
+}
+
+// A scripted move, press and release in one call is a complete click. The
+// batching rule puts every step with no delay between it and the next into one
+// tick, and one tick's down and up on one target is what ui turns into
+// InteractionClick — so an agent needs no compound click step.
+func TestPluginSeesAScriptedClickAsAClick(t *testing.T) {
+	runContext, cancel := stdcontext.WithCancel(stdcontext.Background())
+	defer cancel()
+
+	consumer := &pluginTestConsumer{visual: &pluginTestVisual{}}
+	engine := kernel.New(map[kernel.PluginName]any{
+		storage.Name: storage.DefaultConfig("ui-scripted-click-test"),
+	}).Handler(func(err error) bool {
+		t.Errorf("unexpected kernel error: %v", err)
+		return true
+	}).WithPlugins(storage.New(), input.New(), gfx.New(), canvas.New(), New(), consumer)
+	go engine.Run(runContext)
+	<-engine.Ready()
+	k := engine.Executioner()
+
+	k.ExecuteCommand[app.SetViewportCmd](app.SetViewportRequest{
+		Width: 100, Height: 80, FramebufferWidth: 100, FramebufferHeight: 80,
+	})
+	if _, err := input.Play(k, []input.Action{
+		{Do: input.ActionMove, X: 5, Y: 5},
+		{Do: input.ActionKeyDown, Key: input.KeyMouseLeft},
+		{Do: input.ActionKeyUp, Key: input.KeyMouseLeft},
+	}); err != nil {
+		t.Fatalf("play: %v", err)
+	}
+	k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
+
+	if !hasInteraction(consumer.observed[0], "button", InteractionClick) {
+		t.Fatalf("interactions = %+v, want a click", consumer.observed[0])
+	}
+	if !hasInteraction(consumer.observed[0], "button", InteractionDown) ||
+		!hasInteraction(consumer.observed[0], "button", InteractionUp) {
+		t.Fatalf("interactions = %+v, want both edges of the click", consumer.observed[0])
+	}
+}
+
+// A delay between the press and the release is a held press, and a move
+// between them is a drag: the capture follows the pointer off the target, so
+// the release still reports Up and reports no click.
+func TestPluginSeesAScriptedDragAsADrag(t *testing.T) {
+	runContext, cancel := stdcontext.WithCancel(stdcontext.Background())
+	defer cancel()
+
+	consumer := &pluginTestConsumer{visual: &pluginTestVisual{}}
+	engine := kernel.New(map[kernel.PluginName]any{
+		storage.Name: storage.DefaultConfig("ui-scripted-drag-test"),
+	}).Handler(func(err error) bool {
+		t.Errorf("unexpected kernel error: %v", err)
+		return true
+	}).WithPlugins(storage.New(), input.New(), gfx.New(), canvas.New(), New(), consumer)
+	go engine.Run(runContext)
+	<-engine.Ready()
+	k := engine.Executioner()
+
+	k.ExecuteCommand[app.SetViewportCmd](app.SetViewportRequest{
+		Width: 100, Height: 80, FramebufferWidth: 100, FramebufferHeight: 80,
+	})
+	played := make(chan error, 1)
+	go func() {
+		_, err := input.Play(k, []input.Action{
+			{Do: input.ActionMove, X: 5, Y: 5},
+			{Do: input.ActionKeyDown, Key: input.KeyMouseLeft},
+			{Do: input.ActionDelay, Ms: 150},
+			{Do: input.ActionMove, X: 60, Y: 60},
+			{Do: input.ActionKeyUp, Key: input.KeyMouseLeft},
+		})
+		played <- err
+	}()
+
+	// The first batch lands before the wait, so the press is observable while
+	// the sequence is still mid-delay.
+	deadline := time.Now().Add(2 * time.Second)
+	for !scriptedButtonHeld(t, k) {
+		if time.Now().After(deadline) {
+			t.Fatal("the press never landed")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
+
+	if err := <-played; err != nil {
+		t.Fatalf("play: %v", err)
+	}
+	k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
+
+	if !hasInteraction(consumer.observed[0], "button", InteractionDown) {
+		t.Fatalf("the press tick saw %+v, want a down", consumer.observed[0])
+	}
+	if hasInteraction(consumer.observed[0], "button", InteractionUp) {
+		t.Fatalf("the press tick saw %+v; the delay did not hold the button", consumer.observed[0])
+	}
+	if !hasInteraction(consumer.observed[1], "button", InteractionUp) {
+		t.Fatalf("the release tick saw %+v, want an up", consumer.observed[1])
+	}
+	if hasInteraction(consumer.observed[1], "button", InteractionClick) {
+		t.Fatalf("the release tick saw %+v; a drag off the target is not a click",
+			consumer.observed[1])
+	}
+}
+
+// scriptedButtonHeld asks the input seam the way input_state does, so the test
+// waits on the contract rather than on a sleep.
+func scriptedButtonHeld(t *testing.T, k kernel.Executioner) bool {
+	t.Helper()
+	seam, err := k.ExecuteCommand[input.StateCmd](input.StateRequest{})
+	if err != nil {
+		t.Fatalf("state: %v", err)
+	}
+	return slices.Contains(seam.Down, input.KeyMouseLeft)
 }
