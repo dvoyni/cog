@@ -464,3 +464,90 @@ func TestBakeMeshStagesThePackedVertices(t *testing.T) {
 		}
 	}
 }
+
+// benchVertices builds a mesh of n authored vertices whose positions and both
+// UV sets actually spread, so that neither the bounding box nor either UV range
+// collapses and the walks below do the work a real bake does.
+//
+// The two sizes the benchmarks run it at are chosen against the cache rather
+// than against any asset: 4,096 vertices is 288 KiB of authoring struct and
+// stays resident, 65,536 is 4.5 MiB and cannot, which is the regime where a
+// second walk pays for the source stream twice. The vendored corpus reaches
+// neither - its largest primitive is 9,216 vertices and its median is 24 - but
+// the corpus does not take this path at all, so the sizes answer what an app
+// baking a large mesh of its own would pay.
+func benchVertices(n int) []Vertex {
+	vertices := make([]Vertex, n)
+	for i := range vertices {
+		f := float64(i)
+		vertices[i] = Vertex{
+			Position: m.Vec3{X: float32(math.Sin(f)), Y: float32(i) * 0.001, Z: float32(math.Cos(f))},
+			Normal:   m.Vec3{Y: 1},
+			Tangent:  m.Vec4{X: 1, W: 1},
+			UV0:      m.Vec2{X: float32(i%97) / 97, Y: float32(i%89) / 89},
+			UV1:      m.Vec2{X: float32(i%53) / 53, Y: float32(i%61) / 61},
+			Color:    m.NewColorLinear(0.5, 0.25, 0.75, 1),
+		}
+	}
+	return vertices
+}
+
+// benchVertexSizes are the two meshes every bake benchmark below runs.
+var benchVertexSizes = []struct {
+	name string
+	n    int
+}{{"4096", 4096}, {"65536", 65536}}
+
+// BenchmarkPackVertices is the whole authoring bake: the bounds and UV walk,
+// then the pack. The arena is reset rather than reallocated, because a bake's
+// allocation is the staging arena's business and what is being measured here is
+// the traversals.
+func BenchmarkPackVertices(b *testing.B) {
+	for _, size := range benchVertexSizes {
+		b.Run(size.name, func(b *testing.B) {
+			vertices := benchVertices(size.n)
+			arena := make([]byte, 0, size.n*storageStride)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				arena = arena[:0]
+				packVertices(&arena, vertices)
+			}
+		})
+	}
+}
+
+// BenchmarkBoundVertices is the first of those two walks on its own - the one
+// the per-mesh UV range made unavoidable - so that what the second traversal
+// costs is a number this package reports rather than an estimate. See
+// packVertices for what the two figures together settled.
+func BenchmarkBoundVertices(b *testing.B) {
+	for _, size := range benchVertexSizes {
+		b.Run(size.name, func(b *testing.B) {
+			vertices := benchVertices(size.n)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				boundVertices(vertices)
+			}
+		})
+	}
+}
+
+// BenchmarkPackInto is the second walk on its own: the transform-copy that
+// would be the whole bake if a UV could be quantised before the range was
+// known.
+func BenchmarkPackInto(b *testing.B) {
+	for _, size := range benchVertexSizes {
+		b.Run(size.name, func(b *testing.B) {
+			vertices := benchVertices(size.n)
+			_, record := boundVertices(vertices)
+			dst := make([]byte, size.n*storageStride)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				packInto(dst, vertices, record)
+			}
+		})
+	}
+}

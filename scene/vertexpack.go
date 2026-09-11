@@ -121,11 +121,32 @@ func (skinnedVertex) VertexLayout() []gfx.VertexAttr { return skinnedVertexLayou
 // arena and reports the span they landed in, together with the bounding sphere
 // of their positions and the per-mesh record their UVs were quantised against.
 //
-// It is two traversals, and the second one is why: a UV cannot be quantised
-// against a range the walk has not finished deriving, so the bounds walk runs
-// first and the pack reads its answer. Those are the same two walks the mint
-// made before it packed at all - a copy into the arena and a pass for the
-// sphere - with the UV ranges riding the bounds walk for free.
+// It is two traversals, and it stays two. A UV cannot be quantised against a
+// range the walk has not finished deriving, so the bounds walk runs first and
+// the pack reads its answer. Those are the same two walks the mint made before
+// it packed at all - a copy into the arena and a pass for the sphere - with the
+// UV ranges riding the bounds walk for free.
+//
+// Two was measured rather than settled for. BenchmarkBoundVertices and
+// BenchmarkPackVertices put the bounds walk at ~314us of a ~1.72ms bake over
+// 65,536 authored vertices - 18% - and that is the whole of what a fused bake
+// could be competing for. It cannot win it: the quantisation must read every
+// authored UV after the range is known, so no shape here is one traversal over
+// the authored vertices.
+//
+// Both fused shapes were built and measured, and neither is faster. Packing
+// everything but the UVs while accumulating, then rewriting the eight UV bytes
+// per vertex in a second, narrower pass, came out 4.5% slower at 4,096
+// vertices, 1.7% slower at 262,144 and inside the noise at 65,536; writing the
+// whole vertex and then fixing it up was 7-13% slower at every size. The fixup
+// re-streams the same source cache lines the wide read already pulled and
+// touches the destination twice, which is what eats the walk it saves. For a
+// change that measures at best like nothing, it would split packVertex - the
+// one function that writes a standard vertex's storage bytes, and which the
+// glTF path shares - into two halves only this path uses.
+//
+// See scene/docs/specs/mesh.md, "The per-mesh record", and
+// github.com/dvoyni/cog/issues/261.
 //
 // It writes native-endian words for the same reason indexBytes does: a
 // reinterpret of native memory is what these bytes replace, and a buffer that

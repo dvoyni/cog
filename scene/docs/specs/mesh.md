@@ -161,9 +161,20 @@ nothing, because the copy it needs already happens.**
 `BakeMesh` does not hand a caller's slice to `gfx`. `uploadBytes` reinterprets it
 (`scene/mesh.go:238`) and `appendStaging` copies every byte into the staging
 arena (`scene/meshbake.go:168`). Packing replaces that memcpy with a
-transform-copy writing **fewer** bytes — 84n to 32n per mesh — and the traversal
-it needs is one `mintMesh` already makes for `vertexBounds`, which is the same
-walk the per-mesh UV range needs. One pass, already there, now doing three things.
+transform-copy writing **fewer** bytes — 84n to 32n per mesh — over the two
+walks `mintMesh` already made: a bounds walk and a copy into the arena. Those
+two walks now do three things, the per-mesh UV range riding the bounds walk for
+free.
+
+> **Corrected.** This paragraph read *"one pass, already there, now doing three
+> things"* and was true when written. It stopped being true one ticket later:
+> [#217](https://github.com/dvoyni/cog/issues/217) did fuse the bounds walk into
+> the pack and delete `vertexBounds`, and
+> [#219](https://github.com/dvoyni/cog/issues/219)'s per-mesh range unfused it,
+> because a UV cannot be quantised against a range the walk has not finished
+> deriving. **Two walks is the settled shape of the authoring bake** and
+> [#261](https://github.com/dvoyni/cog/issues/261) measured it rather than
+> settling for it — see [The per-mesh record](#the-per-mesh-record).
 
 **Authoring vertex — `scene.Vertex`, 72 bytes. Its size no longer matters.**
 
@@ -521,6 +532,41 @@ The record is **32 bytes: `uv0` scale and bias, `uv1` scale and bias.**
 > per-mesh record costs bytes on **every** mesh whether or not it morphs. The
 > per-mesh record is indexed per instance; the morph header is reached through
 > `morphBase`, which already points there.
+
+### What the record costs the authoring bake
+
+**It cost a traversal, and the traversal is staying.** Quantising a UV needs a
+range no walk has finished deriving until it has seen every vertex, so the
+authoring bake is `boundVertices` — positions and both UV ranges — and then
+`packVertices`. [#217](https://github.com/dvoyni/cog/issues/217) had briefly
+fused those into one walk and deleted `vertexBounds`;
+[#219](https://github.com/dvoyni/cog/issues/219) unfused it one ticket later,
+which is why the claim above that the accumulation rides a walk that already
+runs is true of the glTF path and **not** of the authoring path.
+
+[#261](https://github.com/dvoyni/cog/issues/261) measured it rather than
+settling for it. `BenchmarkBoundVertices`, `BenchmarkPackInto` and
+`BenchmarkPackVertices` in `scene/vertexpack_test.go`, at `-benchtime 300x
+-count=7`, medians:
+
+| vertices | bounds walk | pack walk | both | bounds as a share |
+| ---: | ---: | ---: | ---: | ---: |
+| 4,096 | 19.5 µs | 85.0 µs | 103.3 µs | 18.9% |
+| 65,536 | 314.3 µs | 1,405.6 µs | 1,721.1 µs | **18.3%** |
+
+**18% is the entire prize, and no fused shape collects it.** Both were built and
+measured. Packing everything but the UVs while accumulating the range, then
+rewriting only the eight UV bytes per vertex in a narrow second pass, came out
+**4.5% slower** at 4,096, **1.7% slower** at 262,144 and inside the noise at
+65,536. Writing the whole vertex and fixing it up afterwards was **7–13%
+slower** at every size. The fixup re-streams the source cache lines the wide
+read already pulled and writes the destination twice, and that costs about what
+the saved walk was worth.
+
+So **two walks is the settled shape of the authoring bake**, and the price of
+the per-mesh record on this path is one extra read of the authored vertices —
+paid by apps baking their own meshes, not by the glTF loader, and not by the
+vendored corpus, which does not take this path at all.
 
 ---
 
