@@ -14,6 +14,7 @@ import "testing"
 type entities struct {
 	gen  []uint32
 	free []uint32
+	next int // next never-used index, when the free list is empty
 }
 
 func newEntities(space uint32) *entities {
