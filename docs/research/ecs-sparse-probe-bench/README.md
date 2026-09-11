@@ -195,6 +195,41 @@ So the cost is the inner yield becoming an indirect call once its range statemen
 another yield closure. It is a time cost only; requirement 1 — zero heap allocation on the hot path
 — holds in every variant measured.
 
+## Narrowing the iteration list: bitset intersection
+
+Every Query is known at registration, so one could maintain a per-query list of entities matching
+the *whole* query and iterate only those. The cheaper relative needs no maintenance at all: give
+each Store a presence bitset, one bit per entity index, and intersect the bitsets at query time into
+a reusable scratch buffer. Structural change touches one bit; query time is peak/64 words of AND
+plus the matches. specs does this with `hibitset`; nobody surveyed does it inside a sparse-set
+layout.
+
+| | ns/op | ns/entity | vs probing |
+|---|---|---|---|
+| arity 4, all 1024 entities match — probing (shape C) | 2250 | 2.197 | 1.00× |
+| arity 4, all 1024 entities match — bitset AND | 3261 | 3.185 | **1.45× worse** |
+| bad case 5000/5000/100 — probing | 2545 | — | 1.00× |
+| bad case 5000/5000/100 — bitset AND | **277** | — | **9.2× better** |
+
+Zero allocations in both. The stores here are shape B, whose probe is ~9% cheaper than the shape C
+figure it is compared against, so the all-match gap is slightly wider than the table shows.
+
+**It is a selectivity trade, and a sharp one.** When most candidates match, the AND is wasted work
+and bit-walking is slower than walking `owners` — 45% worse. When few match, it skips the rejects
+entirely and wins 9.2×. Both regimes are real: the first is the common query, the second is the
+bad case above.
+
+The cost is one bit per entity per component type — **43 KB across all 85 of nox's tag types** — and
+one bit written per structural change. Crucially it adds **no new lock units**: the bitset lives in
+`Store[T]`, written under `write{T}` and read under `read{T}`, both of which a query already holds.
+
+**Why this beats the maintained per-query index it is derived from.** A per-query index can only
+store entity ids, never dense indices, because swap-remove relocates dense indices on every removal.
+So it still pays a sparse lookup per component per match — exactly what the bitset pays. The only
+thing it saves over the bitset is the AND, which is the cheap part, and it buys that by writing
+every affected query index on every structural change. **The expensive part of a match is the sparse
+lookup, and neither form avoids it.**
+
 ## Files
 
 - `store.go` — the four store shapes.
@@ -202,3 +237,4 @@ another yield closure. It is a time cost only; requirement 1 — zero heap alloc
 - `shape_test.go` — paging residency, the bad case, driver selection, tags, growth, scale sweep.
 - `scatter_test.go` — the shuffled-order sweep.
 - `nest_test.go`, `nest2_test.go`, `nest3_test.go` — nested iteration, and where its cost comes from.
+- `bitset_test.go` — bitset intersection against probing.
