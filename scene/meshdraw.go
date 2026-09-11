@@ -97,10 +97,18 @@ func (q *opQueue) Mesh(layers LayerMask, ref MeshRef, draw MeshDraw) {
 // frame-local ref to it. It is the surface for geometry rebuilt every frame -
 // a deforming procedural mesh, a debug hull, a stroke of terrain being edited.
 //
-// The vertices are copied into the queue's arena here, so the caller's slice is
-// free the moment the call returns. The ref carries the frame it was minted in:
-// used in a later frame it is reported and skipped, rather than silently
+// The vertices are written into the queue's arena here, so the caller's slice
+// is free the moment the call returns. The ref carries the frame it was minted
+// in: used in a later frame it is reported and skipped, rather than silently
 // drawing whatever geometry now occupies its slot.
+//
+// A temporary mesh built on scene.Vertex pays an O(n) pack every frame, where a
+// custom layout pays an O(n) memcpy: scene packs the standard vertex and cannot
+// hand a caller's slice to gfx. That cost is stated rather than designed
+// around - carving the standard vertex out would mean a second stored layout
+// for one Go struct, which is two pipeline keys and two shader variants for a
+// case that has no caller: every temporary mesh anything builds today ships a
+// custom layout.
 //
 // The line to remember is that Mesh covers "the vertices change" and Model
 // covers "the vertices are deformed by weights or bones". A caller wanting
@@ -115,18 +123,17 @@ func (q *opQueue) Mesh(layers LayerMask, ref MeshRef, draw MeshDraw) {
 func (q *opQueue) TemporaryMesh[TVertex VertexLayout](
 	vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology,
 ) MeshRef {
-	input, err := mintMesh[TVertex](&q.meshes.layouts, vertices, indices, topology, false)
+	input, err := mintMesh[TVertex](
+		&q.meshes.layouts, &q.meshes.arena, vertices, indices, topology, false)
 	if err != nil {
 		q.meshes.reports = append(q.meshes.reports, err)
 		return MeshRef{}
 	}
-	mesh := temporaryMesh{
+	q.meshes.temporaries = append(q.meshes.temporaries, temporaryMesh{
+		vertices: input.vertices, indices: input.indices,
 		vertexCount: input.vertexCount, indexCount: input.indexCount,
 		topology: input.topology, layout: input.layout, standard: input.standard,
-	}
-	mesh.vertices = q.meshes.stage(input.vertices)
-	mesh.indices = q.meshes.stage(input.indices)
-	q.meshes.temporaries = append(q.meshes.temporaries, mesh)
+	})
 	return MeshRef{
 		source: meshTemporary, id: uint32(len(q.meshes.temporaries)), generation: q.frame,
 	}
@@ -161,15 +168,6 @@ type meshRecording struct {
 	params      []gfx.ParameterDescr
 	reports     []error
 	layouts     layoutCache
-}
-
-func (r *meshRecording) stage(data []byte) span {
-	if len(data) == 0 {
-		return span{}
-	}
-	at := len(r.arena)
-	r.arena = append(r.arena, data...)
-	return span{at: at, size: len(data)}
 }
 
 func (r *meshRecording) reset() {

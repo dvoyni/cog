@@ -22,7 +22,11 @@ omit, how wide its indices are, how morph deltas are packed, and what the bundle
 PBR requires of a mesh handed to it. Its **Index width** section is implemented:
 a durable mesh of 65535 vertices or fewer stores `uint16` indices, derived from
 the vertex count with no pass over the indices, and a temporary mesh keeps
-`uint32`. The rest is not - the engine still stores every mesh at one fixed
+`uint32`. Its **authoring API** section is half-implemented: scene now *packs*
+the standard vertex at bake rather than reinterpreting the caller's slice, in
+the same traversal that bounds it, so what a mesh stores is scene's to change
+one attribute at a time. The layout it packs into is byte-identical to the old
+reinterpret. The rest is not - the engine still stores every mesh at one fixed
 84-byte stride - and that spec is the plan for changing it.
 
 ## Plugin
@@ -378,6 +382,12 @@ D3D12 adapter; the direction that fails is a shader input no attribute supplies)
 Any other `VertexLayout` is a custom layout, and **a custom layout requires a
 custom `Material`**; the reverse — the standard layout with a custom material —
 is fine.
+
+`scene.Vertex` is what an app *writes*, not what scene *stores*: scene packs it
+into the storage layout its `VertexLayout()` reports, so the two are free to
+diverge and are byte-identical today. A custom layout has no such split — scene
+cannot pack a struct it does not know, so its buffer is the caller's Go memory
+reinterpreted, and its declared offsets must be the struct's own.
 
 Buffer-built meshes never skin and never morph. A `MeshRef` has no equivalent of
 the group-2 bindings those need, and their draws take the bundled variant that

@@ -40,31 +40,36 @@ func (l *Lookup) ensureUnit(shape unitShape, bake bakeFunc) MeshRef {
 	}
 	var vertices []Vertex
 	var indices []uint32
-	var bounds m.Sphere
 	switch shape {
 	case shapeSphere:
 		vertices, indices = unitSphereGeometry()
-		// The exact sphere, not the circumsphere of its box, which would be
-		// sqrt(3) times too generous.
-		bounds = m.Sphere{Radius: 1}
 	case shapePlane:
 		vertices, indices = unitPlaneGeometry()
-		bounds = vertexBounds(vertices)
 	default:
 		vertices, indices = unitBoxGeometry()
-		bounds = vertexBounds(vertices)
 	}
 	// The layout goes through the same cache a caller's bake uses, so scene's
 	// own meshes and a caller's standard-layout mesh share one layout id rather
 	// than two that happen to describe the same attributes.
 	layoutID, layout, _ := l.layouts.resolve[Vertex]()
 	width := indexWidthFor(len(vertices))
+	// A unit mesh is a standard-layout mesh like any other, so it is packed
+	// through the same pass a caller's bake takes - into an arena of its own,
+	// because this path bakes on the spot rather than staging for the flush.
+	var arena []byte
+	vertexSpan, bounds := packVertices(&arena, vertices)
+	if shape == shapeSphere {
+		// The exact sphere, not the circumsphere of its box, which would be
+		// sqrt(3) times too generous.
+		bounds = m.Sphere{Radius: 1}
+	}
+	indexSpan := appendArena(&arena, indexBytes(indices, width))
 	l.unit[shape] = l.bakeMeshNow(meshInput{
-		vertices: uploadBytes(vertices), indices: indexBytes(indices, width),
+		vertices: vertexSpan, indices: indexSpan,
 		vertexCount: len(vertices), indexCount: len(indices),
 		topology: gfx.TopologyTriangleList, indexWidth: width, layout: layout,
 		layoutID: layoutID, standard: true, bounds: bounds,
-	}, bake)
+	}, arena, bake)
 	return l.unit[shape]
 }
 

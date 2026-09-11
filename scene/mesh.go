@@ -10,15 +10,20 @@ import (
 	"github.com/dvoyni/cog/m"
 )
 
-// Vertex is the one vertex layout every scene mesh uses: glTF's eight core
-// attributes at locations 0..7, 84 bytes, interleaved in one buffer.
+// Vertex is the authoring vertex: the struct an app fills in for a scene mesh,
+// carrying glTF's eight core attributes at locations 0..7.
 //
-// Nothing in it is optional. The bundled shader is one module with one vertex
-// stage and no entry-point selection, so its inputs are these attributes at
-// these types; a variant would be a whole second module carrying its own copy
-// of the shading code. A buffer-built mesh never skins, so its last 24 bytes
-// are dead — but the Go zero value of Joints and Weights is the correct one,
-// because such a draw carries SCENE_NOSKIN and the shader never reads them.
+// It is not the bytes scene uploads. Scene packs every standard-layout vertex
+// into the storage layout at bake (scene/vertexpack.go), so what a shader reads
+// is that layout's offsets and formats rather than this struct's - they are
+// byte-identical today and the divergence exists so that changing one
+// attribute's stored format is a change to the packer alone. Nothing in scene
+// ever hands a Vertex back, so there is exactly one authoritative form, the
+// authored one, and it flows one way.
+//
+// Nothing in it is optional. A buffer-built mesh never skins, so its Joints and
+// Weights are dead - but their Go zero value is the correct one, because such a
+// draw carries SCENE_NOSKIN and the shader never reads them.
 //
 // Color is included on failure mode rather than on evidence: it is glTF core,
 // costs four bytes as Unorm8x4, and leaving it out renders a vertex-coloured
@@ -35,20 +40,10 @@ type Vertex struct {
 	Weights  m.Vec4
 }
 
-// VertexLayout reports the attribute layout of the standard vertex, in
-// @location order.
+// VertexLayout reports the standard vertex's storage layout, in @location
+// order. It is the one implementation whose attributes are not this struct's
+// field offsets - see the interface's own documentation below.
 func (Vertex) VertexLayout() []gfx.VertexAttr { return standardVertexLayout[:] }
-
-var standardVertexLayout = [...]gfx.VertexAttr{
-	gfx.Attr(int(unsafe.Offsetof(Vertex{}.Position)), gfx.Float32x3),
-	gfx.Attr(int(unsafe.Offsetof(Vertex{}.Normal)), gfx.Float32x3),
-	gfx.Attr(int(unsafe.Offsetof(Vertex{}.Tangent)), gfx.Float32x4),
-	gfx.Attr(int(unsafe.Offsetof(Vertex{}.UV0)), gfx.Float32x2),
-	gfx.Attr(int(unsafe.Offsetof(Vertex{}.UV1)), gfx.Float32x2),
-	gfx.Attr(int(unsafe.Offsetof(Vertex{}.Color)), gfx.Unorm8x4),
-	gfx.Attr(int(unsafe.Offsetof(Vertex{}.Joints)), gfx.Uint16x4),
-	gfx.Attr(int(unsafe.Offsetof(Vertex{}.Weights)), gfx.Float32x4),
-}
 
 // meshSource discriminates where a MeshRef came from. It is what makes a
 // frame-local ref used in a later frame detectable rather than silently wrong.
@@ -67,9 +62,19 @@ const (
 const temporaryMeshID uint32 = 1 << 31
 
 // VertexLayout is implemented by the plain-data vertex types scene accepts.
-// The returned attributes map struct byte offsets to shader locations in
-// order, and must match both the struct's memory layout and the vertex inputs
-// of the material the mesh is drawn with.
+// The returned attributes describe the *buffer* scene uploads: they map byte
+// offsets within one stored vertex to shader locations, in order, and must
+// match the vertex inputs of the material the mesh is drawn with.
+//
+// For a custom layout the buffer is the caller's slice reinterpreted, so the
+// offsets are also the Go struct's field offsets and the two readings coincide.
+// scene.Vertex is the one exception: scene packs it, so its method reports the
+// storage layout and its Go fields are the authoring ones. They are byte-for-
+// byte the same today and are not required to stay that way.
+//
+// The one direction that fails is a shader input no attribute supplies. A
+// layout supplying an attribute the shader never declares is legal and common,
+// and gfx checks the pairing at pipeline time either way.
 type VertexLayout interface {
 	VertexLayout() []gfx.VertexAttr
 }
@@ -164,13 +169,15 @@ func (c *layoutCache) resolve[TVertex VertexLayout]() (int, []gfx.VertexAttr, bo
 	return id, c.layouts[id], standard
 }
 
-// meshInput is one mint's geometry once it has been validated and described,
-// but before it has been copied anywhere: vertices still alias the caller's
-// slice. The copy is the minting path's business, because the durable and
-// frame-local paths copy into arenas with different lifetimes.
+// meshInput is one mint's geometry once it has been validated, described and
+// written into an arena: vertices and indices are spans of that arena and no
+// longer touch the caller's slices at all. Which arena is the minting surface's
+// business - the Lookup's staging arena outlives the call, the recording's
+// frame-local one does not - and is why the mint is handed one rather than
+// owning it.
 type meshInput struct {
-	vertices    []byte
-	indices     []byte
+	vertices    span
+	indices     span
 	vertexCount int
 	indexCount  int
 	topology    gfx.PrimitiveTopology
@@ -184,17 +191,27 @@ type meshInput struct {
 	bounds m.Sphere
 }
 
-// mintMesh validates one caller's geometry and describes it, whichever surface
-// is minting it.
+// mintMesh validates one caller's geometry, describes it, and writes its bytes
+// into arena, whichever surface is minting it.
 //
-// durable says the geometry outlives the frame, and it buys the two O(n) passes
-// that are worth paying once and not worth paying per frame: the bounding
-// sphere, which a temporary mesh would recompute for a sphere thrown away with
-// the geometry, and narrowing the indices, which turns a zero-copy reinterpret
-// into an allocating conversion. A temporary mesh keeps uint32 indices and
-// reinterprets them.
+// A standard-layout mesh is packed into the arena rather than reinterpreted and
+// copied: the walk that writes it is the walk that bounds it, so the pack, the
+// staging copy and the bounding sphere are one traversal where the first two
+// were already two. A custom layout is still reinterpreted and copied, because
+// scene cannot find an attribute inside a struct it does not know.
+//
+// durable says the geometry outlives the frame. It buys the bounding sphere -
+// which a temporary mesh would recompute for a sphere thrown away with the
+// geometry, and which would start culling draws that are not culled today - and
+// narrowing the indices, which turns a zero-copy reinterpret into an allocating
+// conversion. A temporary mesh keeps uint32 indices and reinterprets them.
+//
+// The bytes are written before a caller of UpdateMesh can reject the mint for
+// changing layout, so a rejected update leaves its bytes in the arena with
+// nothing pointing at them. The arena is discarded whole at the next drain, so
+// that is a frame's worth of unread staging rather than a leak.
 func mintMesh[TVertex VertexLayout](
-	cache *layoutCache, vertices []TVertex, indices []uint32,
+	cache *layoutCache, arena *[]byte, vertices []TVertex, indices []uint32,
 	topology gfx.PrimitiveTopology, durable bool,
 ) (meshInput, error) {
 	if err := validateMesh(len(vertices), indices, topology); err != nil {
@@ -206,8 +223,6 @@ func mintMesh[TVertex VertexLayout](
 		width = indexWidthFor(len(vertices))
 	}
 	input := meshInput{
-		vertices:    uploadBytes(vertices),
-		indices:     indexBytes(indices, width),
 		vertexCount: len(vertices),
 		indexCount:  len(indices),
 		topology:    topology,
@@ -216,11 +231,18 @@ func mintMesh[TVertex VertexLayout](
 		layoutID:    layoutID,
 		standard:    standard,
 	}
-	if durable && standard {
+	if standard {
 		// The assertion holds because standard is exactly TVertex == Vertex,
 		// which makes []TVertex and []Vertex the same type.
-		input.bounds = vertexBounds(any(vertices).([]Vertex))
+		packed, bounds := packVertices(arena, any(vertices).([]Vertex))
+		input.vertices = packed
+		if durable {
+			input.bounds = bounds
+		}
+	} else {
+		input.vertices = appendArena(arena, uploadBytes(vertices))
 	}
+	input.indices = appendArena(arena, indexBytes(indices, width))
 	return input, nil
 }
 
@@ -250,8 +272,10 @@ func validateMesh(vertexCount int, indices []uint32, topology gfx.PrimitiveTopol
 	return nil
 }
 
-// uploadBytes reinterprets any vertex slice as its upload bytes. It is the one
-// place both mesh paths copy from, and it copies nothing itself.
+// uploadBytes reinterprets a vertex slice as its upload bytes, copying nothing.
+// It is what a custom layout uploads - scene cannot pack a struct it does not
+// know, so a custom layout's Go memory is its buffer - and what the glTF
+// loader hands its already-converted geometry over as.
 func uploadBytes[TVertex VertexLayout](vertices []TVertex) []byte {
 	if len(vertices) == 0 {
 		return nil
@@ -307,15 +331,15 @@ func (l *Lookup) claimMesh(record meshRecord) MeshRef {
 // The index buffer is baked only when there is one: a zero-length bake still
 // mints a buffer id, and a mesh carrying one would be recorded as indexed with
 // no indices in it.
-func (l *Lookup) bakeMeshNow(input meshInput, bake bakeFunc) MeshRef {
+func (l *Lookup) bakeMeshNow(input meshInput, arena []byte, bake bakeFunc) MeshRef {
 	record := meshRecord{
-		vertices: bake(input.vertices), indexCount: input.indexCount,
+		vertices: bake(input.vertices.of(arena)), indexCount: input.indexCount,
 		vertexCount: input.vertexCount, topology: input.topology, indexWidth: input.indexWidth,
 		layout: input.layout, layoutID: input.layoutID, standard: input.standard,
 		baked: true, bounds: input.bounds,
 	}
 	if input.indexCount > 0 {
-		record.indices, record.indexed = bake(input.indices), true
+		record.indices, record.indexed = bake(input.indices.of(arena)), true
 	}
 	return l.claimMesh(record)
 }
@@ -363,21 +387,4 @@ func indexBytes(indices []uint32, width gfx.IndexWidth) []byte {
 		binary.NativeEndian.PutUint16(narrow[i*2:], uint16(index))
 	}
 	return narrow
-}
-
-// vertexBounds is the bounding sphere of standard-layout vertices: the
-// circumsphere of their axis-aligned box, the same shape a glTF primitive gets
-// from its POSITION accessor's min and max. It runs once, at bake time, which
-// is why a temporary mesh never gets one - it is rebuilt every frame, and the
-// O(n) pass would run every frame rather than once.
-func vertexBounds(vertices []Vertex) m.Sphere {
-	if len(vertices) == 0 {
-		return m.Sphere{}
-	}
-	box := m.Box3{Min: vertices[0].Position, Max: vertices[0].Position}
-	for i := range vertices[1:] {
-		position := vertices[i+1].Position
-		box.Min, box.Max = box.Min.Min(position), box.Max.Max(position)
-	}
-	return box.Sphere()
 }

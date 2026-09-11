@@ -148,23 +148,3 @@ func TestUnitBoxBakesItsBoundingSphere(t *testing.T) {
 		t.Fatalf("the unit box's sphere has radius %v, want %v", mesh.bounds.Radius, want)
 	}
 }
-
-// The sphere is the circumsphere of the positions' axis-aligned box, the same
-// shape glTF's POSITION min/max gives a loaded primitive.
-func TestVertexBoundsIsTheCircumsphereOfThePositions(t *testing.T) {
-	vertices := []Vertex{
-		{Position: m.Vec3{X: 1, Y: 2, Z: 3}},
-		{Position: m.Vec3{X: 5, Y: 2, Z: 3}},
-		{Position: m.Vec3{X: 3, Y: 0, Z: 3}},
-	}
-	sphere := vertexBounds(vertices)
-	if sphere.Center != (m.Vec3{X: 3, Y: 1, Z: 3}) {
-		t.Fatalf("centre %v, want the box centre (3,1,3)", sphere.Center)
-	}
-	if want := float32(math.Sqrt(5)); !near(sphere.Radius, want) {
-		t.Fatalf("radius %v, want half the box diagonal %v", sphere.Radius, want)
-	}
-	if vertexBounds(nil) != (m.Sphere{}) {
-		t.Fatal("no vertices gave a non-zero sphere")
-	}
-}

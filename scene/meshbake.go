@@ -43,7 +43,7 @@ type meshBaker struct {
 //
 // The ref is minted and returned immediately; the upload is queued onto the
 // Lookup for scene's own flush to drain, so a mesh baked and drawn in the same
-// update handler still uploads in that frame. The vertices are copied into
+// update handler still uploads in that frame. The vertices are packed into
 // scene's staging arena here, and handed to gfx without a second copy at the
 // flush.
 //
@@ -62,7 +62,8 @@ func (la LookupAccess) BakeMesh[TVertex VertexLayout](
 	if !la.Valid() {
 		return MeshRef{}
 	}
-	input, err := mintMesh[TVertex](&la.lookup.layouts, vertices, indices, topology, true)
+	input, err := mintMesh[TVertex](
+		&la.lookup.layouts, &la.lookup.staging, vertices, indices, topology, true)
 	if err != nil {
 		la.kernel.ReportError(err)
 		return MeshRef{}
@@ -107,7 +108,8 @@ func (la LookupAccess) UpdateMesh[TVertex VertexLayout](
 		la.kernel.ReportError(ErrMeshUnavailable{Mesh: ref.ID()})
 		return false
 	}
-	input, err := mintMesh[TVertex](&la.lookup.layouts, vertices, indices, record.topology, true)
+	input, err := mintMesh[TVertex](
+		&la.lookup.layouts, &la.lookup.staging, vertices, indices, record.topology, true)
 	if err != nil {
 		la.kernel.ReportError(err)
 		return false
@@ -163,21 +165,13 @@ func (l *Lookup) releaseMesh(ref MeshRef) bool {
 	return true
 }
 
-// stage copies one mint's bytes into the staging arena and queues the upload.
+// stage queues the upload of one mint, whose bytes the mint already wrote into
+// the staging arena.
 func (l *Lookup) stage(ref MeshRef, input meshInput, rebake bool) {
-	pending := pendingMesh{id: ref.id, generation: ref.generation, rebake: rebake}
-	pending.vertices = l.appendStaging(input.vertices)
-	pending.indices = l.appendStaging(input.indices)
-	l.pendingMeshes = append(l.pendingMeshes, pending)
-}
-
-func (l *Lookup) appendStaging(data []byte) span {
-	if len(data) == 0 {
-		return span{}
-	}
-	at := len(l.staging)
-	l.staging = append(l.staging, data...)
-	return span{at: at, size: len(data)}
+	l.pendingMeshes = append(l.pendingMeshes, pendingMesh{
+		id: ref.id, generation: ref.generation, rebake: rebake,
+		vertices: input.vertices, indices: input.indices,
+	})
 }
 
 // drainMeshes applies everything the frame's callers queued: the uploads first,
