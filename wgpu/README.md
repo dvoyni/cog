@@ -9,9 +9,9 @@ feeds `input`, and drives the `app` update/render contract on desktop and WebAss
 - Name: `wgpu.Name` (`"wgpu"`)
 - Constructor: `wgpu.New() *wgpu.Plugin`
 - Plugin dependencies: `gfx`, `input`
-- Go package dependencies: `app`, `gfx`, `input`, `kernel`, `gogpu`, WebGPU
-  implementation packages
-- Implements: `kernel.Host`
+- Go package dependencies: `app`, `gfx`, `input`, `kernel`, `mcp`, `gogpu`,
+  WebGPU implementation packages
+- Implements: `kernel.Host`, `mcp.Provider`
 - Subscribed kernel events: none
 
 Register dependencies before the driver. `Run(ctx)` owns the calling thread and
@@ -42,10 +42,76 @@ cfg := wgpu.DefaultConfig().
 `ErrInvalidConfig{Got}` reports a configuration value of the wrong type and its
 `Error() string` method implements `error`.
 
-## Command Implemented
+## Commands Implemented
 
 `app.QuitCmd` calls the underlying application's `Quit` method. It has no
 resource locks.
+
+`app.TimeCmd` controls the tick source; see below. It has no resource locks
+either, which is what makes a step safe to wait on inside it.
+
+## The Tick Source
+
+The driver decides when an update tick is published — from its frame clock
+while running, from an explicit step while paused. Rendering is not a tick
+source: **a paused engine keeps drawing the last completed frame.** `app`
+declares the contract (`app.TimeCmd`) and states its limits; this is how the
+driver implements it.
+
+- **Pause is one branch in `onUpdate`.** While paused it consumes the frame
+  sequence and **discards its `dt`**, leaving the accumulator untouched, and
+  publishes only the steps somebody asked for. Nothing else changes: the input
+  flush at the top of `onUpdate` still runs, and the whole of `onDraw` — the
+  frame clock, `app.WindowSizeChangeEvent`, `app.SetViewportCmd`,
+  `app.RenderEvent` — runs exactly as it does while running. `gfx` replays the
+  last completed queue every frame, so the window shows the frozen frame
+  rather than going black, and a frame is still submitted.
+- **Discarding the frame time is what makes resume cost nothing.** `MaxFrame`
+  and `MaxPending` would already bound a naive resume to four catch-up ticks;
+  discarding makes it zero, so a resumed game continues from exactly where it
+  stopped.
+- **A step publishes all of its ticks in one `onUpdate`, bypassing
+  `MaxPending`**, and marks **every one** of them `Last: true`. The cap exists
+  to keep a real-time engine near real time by dropping work; a step is not
+  real time, and dropping requested ticks would be a silent lie. `Last` on each
+  makes every step a complete frame, and rendering shows the last of them.
+- **The state is atomics, not a kernel resource.** The command handler runs on
+  whatever goroutine dispatched it and `onUpdate` runs on the main thread — the
+  boundary `alpha` and `frameDtBits`/`frameSeq` already cross. A resource would
+  mean a dispatch every frame merely to ask whether to tick. A running frame
+  reads one atomic; a paused frame with nothing pending reads two.
+- **An arm joins a pending step.** A `TimeCmd` request with `Join` set attaches
+  to the step already pending rather than raising another, and everything
+  waiting on that step reads back the same ticks. Read per-caller, three arms
+  landing together would be three steps on three different ticks, which is the
+  opposite of what arming them together is for. An explicit step never joins.
+- **Resuming with a step still pending abandons it** and releases its caller,
+  rather than leaving somebody waiting on a tick the frame clock will never
+  publish; the caller reads back zero ticks stepped.
+
+## Offered To An Agent
+
+`wgpu` implements `mcp.Provider` and offers one capability, rendered as the
+tool `wgpu_time`: `pause`, `resume`, `step` and `status` over `app.TimeCmd`,
+with the resulting state on every answer. It is an `mcp.Func` rather than an
+`mcp.Command` because a step waits for a frame and so carries its own deadline
+(5s), and because the action is validated before anything is armed.
+
+- `step` is capped at **600 ticks** — ten seconds of simulation — so the window
+  in which a request can be created and then orphaned by its own deadline is
+  bounded.
+- Asking for a state the engine is already in (`pause` while paused, `resume`
+  while running) is an `mcp.Unavailable` the agent reads and moves past, not an
+  error.
+- The capability is **not** `mcp.ReadOnly()`: three of its four actions change
+  the game. `status` is the read-only one, and MCP annotates a tool rather than
+  an argument, so the honest annotation for the tool is the acting one.
+- The provider offers it whether or not a broker is composed, and nothing
+  resumes a paused game on disconnect: a pause stands until something resumes
+  it.
+
+The description prose the agent reads is reproduced in full in
+[`docs/specs/mcp.md`](docs/specs/mcp.md), so it is reviewed as prompt text.
 
 ## Commands Executed
 
@@ -62,7 +128,9 @@ resource locks.
   entering gogpu's blocking main loop.
 - `app.UpdateEvent`: published synchronously on the main thread at the fixed
   `Config.Step`. Long frames are clamped by `MaxFrame`; at most `MaxPending`
-  catch-up events are emitted, and the last has `Last: true`.
+  catch-up events are emitted, and the last has `Last: true`. While the tick
+  source is paused none is published at all, except the steps `app.TimeCmd`
+  asks for — which ignore `MaxPending` and each carry `Last: true`.
 - `gfx.WindowSizeChangeEvent`: published synchronously when DIP window size
   changes, before `SetViewportCmd` resolves the viewport.
 - `app.RenderEvent`: published synchronously on the render thread after the

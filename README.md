@@ -46,8 +46,8 @@ error handling.
 
 - [`kernel`](kernel/README.md): plugin lifecycle, typed registry, scheduler,
     resources, and errors.
-- [`app`](app/README.md): driver-neutral update, render, and quit contracts. No
-    implementation.
+- [`app`](app/README.md): driver-neutral update, render, time-control, and quit
+    contracts. No implementation.
 - [`input`](input/README.md): input state, discrete events, and the driver-facing
     apply command.
 - [`anim`](anim/README.md): timelines of eased value tracks and one-tick cues,

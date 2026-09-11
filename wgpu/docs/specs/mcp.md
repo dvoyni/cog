@@ -262,11 +262,24 @@ family applies unchanged: multiple spellings of one operation move the selection
 risk inside the tool set. These four actions are genuinely one operation on one
 piece of state.
 
-**`status` is the read-only path**, so the broker can annotate approval per
-action rather than needing a second capability. This is the one place the design
-differs from `input_state`, which had to be separate because *looking* and
-*pressing* are different capabilities, not different arguments to one — here
-they are different arguments to one.
+**`status` is the read-only path**, and it is a different argument to one tool
+rather than a second capability. This is the one place the design differs from
+`input_state`, which had to be separate because *looking* and *pressing* are
+different capabilities, not different arguments to one — here they are
+different arguments to one.
+
+> **Amended at implementation ([#250](https://github.com/dvoyni/cog/issues/250)).**
+> This section originally said the broker could annotate approval *per action*.
+> It cannot: MCP annotates a tool, not an argument, and `mcp.ReadOnly()` is the
+> only lever a provider has — so the choice is one annotation for all four
+> actions. Three of them change the game, so **`wgpu_time` is not
+> `mcp.ReadOnly()`**, as
+> [#204](https://github.com/dvoyni/cog/issues/204) and
+> [#211](https://github.com/dvoyni/cog/issues/211) already required of pause and
+> step. `status` says it only reports in the description prose, and per-action
+> approval annotation is out of scope for this effort: buying it would mean new
+> vocabulary in `mcp` and the broker, which [#211](https://github.com/dvoyni/cog/issues/211)
+> §12 rules out, or the second capability this tool exists to avoid.
 
 **It binds to a frame for `step` and to none for `pause`, `resume` and
 `status`**, which makes it the only capability that is both. That is a fact

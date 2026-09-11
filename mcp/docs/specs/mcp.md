@@ -758,8 +758,16 @@ agent reads them in.
 | `ui_layout` | `ui` | `Func` | tick | yes |
 | `input_send` | `input` | `Func` | no | no |
 | `input_state` | `input` | `Command` | no | yes |
-| `wgpu_time` | `wgpu` | `Func` | `step` only | per action |
+| `wgpu_time` | `wgpu` | `Func` | `step` only | no |
 | `mcpserver_architecture` | `mcpserver` | `Func` | no | yes |
+
+`wgpu_time`'s row read *per action* until
+[#250](https://github.com/dvoyni/cog/issues/250) implemented it. An annotation
+is per tool, not per argument, and three of that tool's four actions change the
+game, so the whole tool is not read-only; `status` says it only reports in its
+description. Per-action approval annotation is out of scope for this effort —
+it would need vocabulary here and in the broker, which
+[#211](https://github.com/dvoyni/cog/issues/211) §12 rules out.
 
 Eight tools, seven of them one per question an agent actually asks. The set is
 small on purpose:

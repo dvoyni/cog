@@ -13,3 +13,15 @@ func (p *Plugin) quitCmdImpl() (kernel.Lock, kernel.Execute[app.QuitRequest, app
 		return app.QuitResponse{}, nil
 	}
 }
+
+// timeCmdImpl controls the tick source: it pauses update ticks, resumes them,
+// steps a named number of them, and reports which is true.
+//
+// It declares no locks and takes none, which is what makes a step safe to wait
+// on here: the handler blocks until the main thread has published its ticks,
+// and it holds nothing that the tick, or the frame carrying it, could need.
+func (p *Plugin) timeCmdImpl() (kernel.Lock, kernel.Execute[app.TimeRequest, app.TimeResponse]) {
+	return nil, func(k kernel.Kernel, request app.TimeRequest) (app.TimeResponse, error) {
+		return p.ticks.control(k.Context(), request)
+	}
+}

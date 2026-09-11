@@ -49,6 +49,11 @@ type Plugin struct {
 	windowWidth  int
 	windowHeight int
 
+	// ticks is the tick source: what decides when an update tick is published.
+	// Its state lives beside alpha and frameSeq, as atomics crossing the same
+	// main-thread boundary, so onUpdate reads it without a dispatch per frame.
+	ticks tickSource
+
 	// pending holds input changes accumulated from gogpu's EventSource callbacks
 	// (main thread), flushed once per frame in onUpdate. Main-thread-only; no lock.
 	pending []input.Change
@@ -97,6 +102,7 @@ func (p *Plugin) Register(registrar *kernel.Registrar, config any) error {
 	p.wireInput()
 
 	registrar.HandleCommand[app.QuitCmd](p.quitCmdImpl)
+	registrar.HandleCommand[app.TimeCmd](p.timeCmdImpl)
 	return nil
 }
 
@@ -149,19 +155,44 @@ func quitOnCancellation(ctx context.Context, runDone <-chan struct{}, quit func(
 // onDraw), because gogpu's deltaTime is 0 on wasm and onUpdate's own time deltas
 // are quantized within gogpu's busy-loop burst. Publishing on the main thread —
 // not a separate goroutine — avoids starving the game under gogpu's busy loop.
+//
+// While paused the frame's time is consumed and discarded rather than
+// accumulated, so nothing is banked and a resume costs no catch-up ticks, and
+// the only ticks published are the steps somebody asked for. Everything else
+// this frame — the input flush here, and the whole of onDraw — runs exactly as
+// it does while running, because pause stops the tick and not the frame.
 func (p *Plugin) onUpdate(k kernel.Executioner, _ float64) {
 	p.flushInput(k)
-	var dt float64
-	if seq := p.frameSeq.Load(); seq > p.lastFrameSeq {
-		dt = math.Float64frombits(p.frameDtBits.Load()) * float64(seq-p.lastFrameSeq)
-		p.lastFrameSeq = seq
+	dt := p.consumeFrameTime()
+	steps, paused, batch := p.ticks.take()
+	if !paused {
+		steps = p.accumulate(dt)
 	}
-	n := p.accumulate(dt)
 	e := app.UpdateEvent{Dt: p.config.Step.Seconds()}
-	for ; n > 0; n-- {
-		e.Last = n == 1
+	for n := steps; n > 0; n-- {
+		// Every step is the last of its frame, so once-per-frame subscribers
+		// do their work and each step produces a complete frame; rendering
+		// then shows the last of them.
+		e.Last = paused || n == 1
 		_ = k.PublishEvent(e).Wait()
 	}
+	if paused {
+		p.ticks.published(steps, batch)
+	}
+}
+
+// consumeFrameTime reports the real time of the frames rendered since the last
+// call, and marks them consumed. It runs whether or not the tick source is
+// paused: a paused engine keeps drawing, and leaving its frames unconsumed is
+// what would turn a thirty-second pause into a catch-up burst on resume.
+func (p *Plugin) consumeFrameTime() float64 {
+	seq := p.frameSeq.Load()
+	if seq <= p.lastFrameSeq {
+		return 0
+	}
+	dt := math.Float64frombits(p.frameDtBits.Load()) * float64(seq-p.lastFrameSeq)
+	p.lastFrameSeq = seq
+	return dt
 }
 
 // accumulate folds dt (clamped to MaxFrame) into the fixed-step accumulator and

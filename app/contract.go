@@ -17,3 +17,24 @@ const (
 	ViewportFit
 	ViewportCover
 )
+
+// TimeAction selects what TimeCmd does to the engine's tick source: what
+// decides when an update tick is published.
+type TimeAction uint8
+
+const (
+	// TimeStatus reports the tick source without changing it.
+	TimeStatus TimeAction = iota
+	// TimePause stops update ticks, and stops nothing else. The driver keeps
+	// drawing the last completed frame, input still reaches the input
+	// contract, window size changes still publish, and the window stays live
+	// and resizable — a paused game must not look hung.
+	TimePause
+	// TimeResume returns to the driver's frame clock from exactly where the
+	// pause stopped. Nothing is banked while paused, however long it lasted,
+	// so a resume costs no catch-up ticks.
+	TimeResume
+	// TimeStep publishes TimeRequest.Steps update ticks and implies TimePause:
+	// stepping a running engine pauses it rather than being refused.
+	TimeStep
+)
