@@ -280,6 +280,43 @@ allocations; into a type-erased `[]any` buffer it costs +24% and **one allocatio
 Following an `Entity` held in a Component costs nothing extra: 4360 ns through the reference against
 4693 ns for the same Component as a query field, 8213 ns for both.
 
+# What false serialisation costs (cog#241)
+
+Two Systems writing one Component over disjoint entity sets serialise under per-component locking.
+Solving that needs kernel machinery, so the question is what solving it would be worth.
+
+`parallel_test.go` prices the ceiling. K Systems do **identical** work on their **own private** data
+and differ in one respect only: the lock each declares — a type nobody else names (the scheduler may
+overlap them) against one shared write lock (it may not). No System touches another's memory either
+way, so admission is the only variable, and shared minus disjoint is the entire prize any mechanism
+in that ticket could win.
+
+| Systems | Entities | Work each | Disjoint | Shared | Prize |
+|---|---|---|---|---|---|
+| 2 | 1000 | ~0.4 µs | 6.96 µs | 6.77 µs | **0.97×** |
+| 2 | 5000 | ~2.1 µs | 10.59 µs | 11.38 µs | 1.07× |
+| 2 | 5000 ×20 | ~43 µs | 55.25 µs | 100.96 µs | 1.83× |
+| 8 | 100 | ~0.04 µs | 17.45 µs | 22.96 µs | 1.32× |
+| 8 | 1000 | ~0.4 µs | 18.70 µs | 27.85 µs | 1.49× |
+| 8 | 5000 | ~2.1 µs | 23.99 µs | 52.82 µs | 2.20× |
+| 8 | 5000 ×20 | ~43 µs | 120.38 µs | 402.50 µs | 3.34× |
+
+At two Systems over a thousand entities, serialising is **marginally faster** than running in
+parallel. The prize is a function of **per-System work**, not of entity count or System count,
+because a scheduled task costs **~2.2 µs**: eight Systems doing essentially nothing still cost
+17.45 µs a frame. A System doing 0.4 µs of work is five times cheaper to run than to schedule.
+
+The worst case constructible at nox's scale — 8 Systems contending one Component over 5000 entities
+— is 28.8 µs, or **0.086% of a 30 Hz frame**.
+
+`overlap_test.go` validates the harness rather than the design, since a null result invites the
+objection that nothing ran in parallel at all: 8 Systems sleeping 20 ms each finish in **20.7 ms**
+disjoint against **161.6 ms** shared, **7.81×** on 8 Systems. The scheduler parallelises essentially
+perfectly when the locks permit, so the modest gains above are a property of the workload.
+
+The ~2.2 µs floor is not specific to that ticket. Sharding one System across row ranges pays the
+same per-task cost, so chunk-parallel execution has the same break-even.
+
 ## Files
 
 - `store.go` — the four store shapes.
@@ -294,3 +331,5 @@ Following an `Entity` held in a Component costs nothing extra: 4360 ns through t
 - `dispatch_test.go` — `Uses` dispatch against a direct call, on the real kernel.
 - `spawn_test.go` — bundle scatter through cached closures, and the escaping-bundle trap.
 - `refaccess_test.go` — following a reference, and the guarantees that makes safe.
+- `parallel_test.go` — what false serialisation costs a frame, on the real kernel.
+- `overlap_test.go` — proof that the disjoint regime really does overlap.
