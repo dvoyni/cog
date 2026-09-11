@@ -144,16 +144,19 @@ func (e ErrMeshUnavailable) Error() string {
 	return fmt.Sprintf("scene: mesh %d has been released or belongs to an earlier frame", e.Mesh)
 }
 
-// ErrMeshCustomLayoutNeedsMaterial reports a draw pairing a custom vertex
-// layout with the bundled PBR. The bundled material has one vertex stage and no
-// entry-point selection, so its inputs are a subset of scene.Vertex's eight
-// attributes and nothing else; the draw is skipped rather than handed to a
-// pipeline that cannot describe it. The reverse - the standard layout with a
-// custom material - is fine, and so is a variant declaring only six of the eight
-// the mesh supplies: the direction that fails validation is a shader input no
-// attribute supplies, never the other way round. A custom material over the
-// standard layout does have to read the stored formats, which are not the Go
-// struct's: include VertexDecodePath for the normal and the tangent.
+// ErrMeshCustomLayoutNeedsMaterial reports a draw handing the bundled PBR a
+// layout it does not know. It knows exactly two - the standard layout every
+// scene.Vertex mesh takes, and the skinned layout the glTF loader gives a
+// geometry some placement skins - and every variant of it reads a prefix of
+// one of them. The draw is skipped rather than handed to a pipeline that cannot
+// describe it.
+//
+// The reverse - a named layout with a custom material - is fine, and so is a
+// variant declaring fewer attributes than the mesh supplies: the direction that
+// fails validation is a shader input no attribute supplies, never the other way
+// round. A custom material over a named layout does have to read the stored
+// formats, which are not the Go struct's: include VertexDecodePath for the
+// normal and the tangent.
 type ErrMeshCustomLayoutNeedsMaterial struct{ Mesh uint32 }
 
 func (e ErrMeshCustomLayoutNeedsMaterial) Error() string {

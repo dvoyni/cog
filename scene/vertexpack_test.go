@@ -21,9 +21,7 @@ func everyAttribute() []Vertex {
 			Tangent:  m.Vec4{X: -1, Y: 0.25, Z: 0.75, W: -1},
 			UV0:      m.Vec2{X: 0.125, Y: 0.875},
 			UV1:      m.Vec2{X: 18.52, Y: -13.49},
-			Color:    [4]uint8{1, 2, 3, 4},
-			Joints:   [4]uint16{5, 6, 7, 8},
-			Weights:  m.Vec4{X: 0.1, Y: 0.2, Z: 0.3, W: 0.4},
+			Color:    m.NewColorLinear(1.0/255, 2.0/255, 3.0/255, 4.0/255),
 		},
 		{
 			Position: m.Vec3{X: -7, Y: 11, Z: 0.03125},
@@ -31,7 +29,26 @@ func everyAttribute() []Vertex {
 			Tangent:  m.Vec4{X: 0, Y: 1, Z: 0, W: 1},
 			UV0:      m.Vec2{X: 1, Y: 0},
 			UV1:      m.Vec2{X: -0.5, Y: 2.5},
-			Color:    [4]uint8{255, 254, 253, 252},
+			Color:    m.NewColorLinear(1, 254.0/255, 253.0/255, 252.0/255),
+		},
+	}
+}
+
+// everySkinnedAttribute is the same mesh as the loader converts it: every
+// standard attribute distinct, and a joint and a weight set no two vertices
+// share. Only the glTF loader can build one, which is the whole point of the
+// type - so this is also the only fixture that can exercise the skinned layout
+// at all.
+func everySkinnedAttribute() []skinnedVertex {
+	standard := everyAttribute()
+	return []skinnedVertex{
+		{
+			Vertex:  standard[0],
+			Joints:  [4]uint16{5, 6, 7, 8},
+			Weights: m.Vec4{X: 0.1, Y: 0.2, Z: 0.3, W: 0.4},
+		},
+		{
+			Vertex: standard[1],
 			// 255 is the largest joint a byte holds and the cap the loader
 			// rejects a skin for exceeding, so it belongs in the fixture.
 			Joints:  [4]uint16{255, 0, 137, 23},
@@ -49,21 +66,21 @@ type storedVertex struct {
 	normal   m.Vec3
 	tangent  m.Vec4
 	uv0, uv1 m.Vec2
-	color    [4]uint8
-	joints   [4]uint16
-	weights  m.Vec4
+	color    m.Color
 }
 
-// readStoredVertex reads one packed vertex back through the mesh's own record,
-// because a stored UV means nothing without it: the codes are positions inside
-// the range this bake derived.
-func readStoredVertex(t *testing.T, packed []byte, index int, mesh sceneMesh) storedVertex {
+// readStoredVertex reads one packed vertex's six shared rows back through the
+// mesh's own record, because a stored UV means nothing without it: the codes
+// are positions inside the range this bake derived. stride says which of the
+// two named layouts the buffer was written at; the rows this reads are the ones
+// both of them share.
+func readStoredVertex(t *testing.T, packed []byte, index, stride int, mesh sceneMesh) storedVertex {
 	t.Helper()
 	// An empty record is the one that names slot 0 at draw time, so reading one
 	// back goes through the identity exactly as the shader would.
 	mesh = mesh.packRecord()
-	at := packed[index*storageStride:]
-	stored := storedVertex{
+	at := packed[index*stride:]
+	return storedVertex{
 		position: readVec3(at[storagePosition:]),
 		normal: decodeStoredNormal(
 			binary.NativeEndian.Uint16(at[storageNormal:]),
@@ -72,23 +89,39 @@ func readStoredVertex(t *testing.T, packed []byte, index int, mesh sceneMesh) st
 		tangent: decodeStoredTangent(binary.NativeEndian.Uint32(at[storageTangent:])),
 		uv0:     readStoredUV(at[storageUV0:], mesh.UV0Scale, mesh.UV0Bias),
 		uv1:     readStoredUV(at[storageUV1:], mesh.UV1Scale, mesh.UV1Bias),
-		weights: readStoredWeights(at[storageWeights:]),
+		color:   readStoredColor(at[storageColor:]),
 	}
-	copy(stored.color[:], at[storageColor:storageColor+4])
-	for i := range stored.joints {
-		stored.joints[i] = uint16(at[storageJoints+i])
-	}
-	return stored
 }
 
-// readStoredWeights reads the four influences the way the fetch unit does for a
-// Unorm8x4: a byte each, divided by 255. What the shader then makes of them is
-// deform.wgsl's business - it divides the deformed position by their total,
-// because these four do not sum to one and nothing at bake can make them.
-func readStoredWeights(at []byte) m.Vec4 {
+// readStoredColor reads the colour the way the fetch unit does for a Unorm8x4:
+// a byte a channel, divided by 255, and linear because glTF's COLOR_0 is.
+func readStoredColor(at []byte) m.Color {
+	return m.NewColorLinear(
+		float32(at[0])/unorm8CodeMax, float32(at[1])/unorm8CodeMax,
+		float32(at[2])/unorm8CodeMax, float32(at[3])/unorm8CodeMax)
+}
+
+// readStoredJoints reads the four joint indices of a skinned-layout vertex the
+// way the fetch unit does for a Uint8x4.
+func readStoredJoints(packed []byte, index int) [4]uint16 {
+	at := packed[index*storageSkinnedStride:]
+	var joints [4]uint16
+	for i := range joints {
+		joints[i] = uint16(at[storageJoints+i])
+	}
+	return joints
+}
+
+// readStoredWeights reads the four influences of a skinned-layout vertex the
+// way the fetch unit does for a Unorm8x4: a byte each, divided by 255. What the
+// shader then makes of them is deform.wgsl's business - it divides the deformed
+// position by their total, because these four do not sum to one and nothing at
+// bake can make them.
+func readStoredWeights(packed []byte, index int) m.Vec4 {
+	at := packed[index*storageSkinnedStride+storageWeights:]
 	return m.Vec4{
-		X: float32(at[0]) / weightCodeMax, Y: float32(at[1]) / weightCodeMax,
-		Z: float32(at[2]) / weightCodeMax, W: float32(at[3]) / weightCodeMax,
+		X: float32(at[0]) / unorm8CodeMax, Y: float32(at[1]) / unorm8CodeMax,
+		Z: float32(at[2]) / unorm8CodeMax, W: float32(at[3]) / unorm8CodeMax,
 	}
 }
 
@@ -121,10 +154,10 @@ func readVec3(at []byte) m.Vec3 {
 }
 
 // What the pack writes, attribute by attribute, read back the way the fetch
-// unit reads it. Four of the eight are the caller's own bytes at a new offset
-// and must come back bit for bit; the normal and the tangent are encoded and
-// come back as directions, and the two UV sets come back inside a step of the
-// range this mesh's own record carries.
+// unit reads it. The position is the caller's own bytes at a new offset and
+// must come back bit for bit; the normal and the tangent are encoded and come
+// back as directions, the two UV sets come back inside a step of the range this
+// mesh's own record carries, and the colour inside one eight-bit code.
 //
 // The vertices are the ones with no two fields alike, so a pack that swapped
 // two attributes or wrote one at the wrong offset cannot pass by accident.
@@ -149,7 +182,7 @@ func TestEveryStoredAttributeReadsBackAsWhatWasAuthored(t *testing.T) {
 				c.what, len(packed), len(c.vertices), storageStride)
 		}
 		for i, authored := range c.vertices {
-			stored := readStoredVertex(t, packed, i, record)
+			stored := readStoredVertex(t, packed, i, storageStride, record)
 			// The four exact attributes. A position that moved would crack a
 			// seam between two primitives, so it is not quantised at all.
 			if stored.position != authored.Position {
@@ -160,16 +193,12 @@ func TestEveryStoredAttributeReadsBackAsWhatWasAuthored(t *testing.T) {
 			// - the range itself is what makes that step small.
 			checkStoredUV(t, c.what, i, "uv0", stored.uv0, authored.UV0, record.packRecord().UV0Scale)
 			checkStoredUV(t, c.what, i, "uv1", stored.uv1, authored.UV1, record.packRecord().UV1Scale)
-			if stored.color != authored.Color || stored.joints != authored.Joints {
-				t.Errorf("%s vertex %d: colour %v joints %v, want %v %v",
-					c.what, i, stored.color, stored.joints, authored.Color, authored.Joints)
-			}
-			// A weight comes back within half its own eight-bit code. Their
-			// total does not come back at one, which is exactly why the skin
-			// path divides by it rather than trusting it.
-			if !nearWeights(stored.weights, authored.Weights) {
-				t.Errorf("%s vertex %d: weights %v, want %v within a code",
-					c.what, i, stored.weights, authored.Weights)
+			// The colour is quantised now that it is authored as linear
+			// floats, so what it owes is one eight-bit code - which is what a
+			// file's own byte colour round-trips to exactly.
+			if !nearColor(stored.color, authored.Color) {
+				t.Errorf("%s vertex %d: colour %v, want %v within a code",
+					c.what, i, stored.color, authored.Color)
 			}
 			// The two encoded ones. Direction only: magnitude is divided out
 			// by the encode and handedness is the tangent's w.
@@ -193,24 +222,35 @@ func TestEveryStoredAttributeReadsBackAsWhatWasAuthored(t *testing.T) {
 // nearWeights reports whether four stored influences are each within one
 // eight-bit code of what was authored.
 func nearWeights(stored, authored m.Vec4) bool {
-	return abs32(stored.X-authored.X) <= 1.0/weightCodeMax &&
-		abs32(stored.Y-authored.Y) <= 1.0/weightCodeMax &&
-		abs32(stored.Z-authored.Z) <= 1.0/weightCodeMax &&
-		abs32(stored.W-authored.W) <= 1.0/weightCodeMax
+	return abs32(stored.X-authored.X) <= 1.0/unorm8CodeMax &&
+		abs32(stored.Y-authored.Y) <= 1.0/unorm8CodeMax &&
+		abs32(stored.Z-authored.Z) <= 1.0/unorm8CodeMax &&
+		abs32(stored.W-authored.W) <= 1.0/unorm8CodeMax
 }
 
-// The stride and every offset in it. WebGPU requires arrayStride to be a
+// nearColor reports whether a stored colour's four channels are each within one
+// eight-bit code of what was authored.
+func nearColor(stored, authored m.Color) bool {
+	return nearWeights(
+		m.Vec4{X: stored.R, Y: stored.G, Z: stored.B, W: stored.A},
+		m.Vec4{X: authored.R, Y: authored.G, Z: authored.B, W: authored.A})
+}
+
+// Both strides and every offset in them. WebGPU requires arrayStride to be a
 // multiple of four unconditionally - a 30-byte stride runs on Vulkan, Metal on
 // Apple silicon and D3D12 and fails on js/wasm, on GLES and on older Apple
 // GPUs, which is green on a dev machine and broken in a browser - and gfx
 // refuses the pipeline either way. Both named layouts satisfy it by
 // construction, and this is where "by construction" is checked.
-func TestTheStorageVertexIsFortyFourAlignedBytes(t *testing.T) {
-	if storageStride != 40 || storageStride%4 != 0 {
-		t.Errorf("the storage stride is %d, want 40 and a multiple of four", storageStride)
+func TestBothNamedLayoutsAreFourAlignedAndUnpadded(t *testing.T) {
+	if storageStride != 32 || storageStride%4 != 0 {
+		t.Errorf("the standard stride is %d, want 32 and a multiple of four", storageStride)
+	}
+	if storageSkinnedStride != 40 || storageSkinnedStride%4 != 0 {
+		t.Errorf("the skinned stride is %d, want 40 and a multiple of four", storageSkinnedStride)
 	}
 	end := 0
-	for _, attr := range []struct {
+	for at, attr := range []struct {
 		name          string
 		offset, bytes int
 	}{
@@ -227,13 +267,43 @@ func TestTheStorageVertexIsFortyFourAlignedBytes(t *testing.T) {
 			t.Errorf("%s starts at %d, which is not 4-aligned", attr.name, attr.offset)
 		}
 		if attr.offset != end {
-			t.Errorf("%s starts at %d, want %d - the storage vertex has no padding in it",
+			t.Errorf("%s starts at %d, want %d - neither storage vertex has padding in it",
 				attr.name, attr.offset, end)
 		}
 		end = attr.offset + attr.bytes
+		// The standard layout is exactly the rows before the joints, so the
+		// stride it ends on is where the skinned layout's two extra rows start.
+		if at == standardVertexAttrs-1 && end != storageStride {
+			t.Errorf("the six shared rows end at %d, want the standard stride %d", end, storageStride)
+		}
 	}
-	if end != storageStride {
-		t.Errorf("the attributes end at %d, want the stride %d", end, storageStride)
+	if end != storageSkinnedStride {
+		t.Errorf("the attributes end at %d, want the skinned stride %d", end, storageSkinnedStride)
+	}
+}
+
+// The two named layouts, and the closed set they make: six attributes at 32
+// bytes, and the same six plus two at 40. The standard layout is a reslice of
+// the skinned one rather than a second list, so a row cannot be written down
+// twice and drift - and that is what this pins, along with the six the public
+// vertex reports.
+func TestTheTwoNamedLayoutsAreTheSixAndTheSameSixPlusTwo(t *testing.T) {
+	standard, skinned := Vertex{}.VertexLayout(), skinnedVertex{}.VertexLayout()
+	if len(standard) != standardVertexAttrs || len(skinned) != 8 {
+		t.Fatalf("the layouts have %d and %d attributes, want 6 and 8", len(standard), len(skinned))
+	}
+	for i := range standard {
+		if standard[i] != skinned[i] {
+			t.Errorf("attribute %d differs between the layouts: %+v against %+v",
+				i, standard[i], skinned[i])
+		}
+	}
+	// The two rows the standard layout declines to supply are the two
+	// SceneVertexIn declares only under SCENE_SKIN.
+	if skinned[6] != gfx.Attr(storageJoints, gfx.Uint8x4) ||
+		skinned[7] != gfx.Attr(storageWeights, gfx.Unorm8x4) {
+		t.Errorf("the skinned layout's last two rows are %+v and %+v, want the joints and the weights",
+			skinned[6], skinned[7])
 	}
 }
 
@@ -290,9 +360,13 @@ func TestPackingOverTheAuthoredVerticesWritesTheSameBytes(t *testing.T) {
 	at, _, record := packVertices(&arena, vertices)
 	want := append([]byte(nil), at.of(arena)...)
 
-	// The same vertices again, because the pack consumes the slice it is given.
-	consumed := append(everyAttribute(), sphere...)
-	packed := packOverAuthored(consumed, record)
+	// The same vertices again, carried by the loader's own type, because the
+	// pack consumes the slice it is given.
+	consumed := make([]skinnedVertex, len(vertices))
+	for i, vertex := range vertices {
+		consumed[i] = skinnedVertex{Vertex: vertex, Joints: [4]uint16{9, 9, 9, 9}, Weights: m.Vec4{X: 1}}
+	}
+	packed := packOverAuthored(consumed, record, false)
 	if len(packed) != len(want) {
 		t.Fatalf("packed %d bytes over the vertices, want %d", len(packed), len(want))
 	}
@@ -302,8 +376,63 @@ func TestPackingOverTheAuthoredVerticesWritesTheSameBytes(t *testing.T) {
 				i%storageStride, i/storageStride, packed[i], want[i])
 		}
 	}
-	if packed := packOverAuthored(nil, record); packed != nil {
+	if packed := packOverAuthored(nil, record, false); packed != nil {
 		t.Errorf("no vertices packed %v, want nothing", packed)
+	}
+}
+
+// The skinned layout is the standard one plus eight bytes, and that is what the
+// buffer has to say: the same six rows at the same offsets, at a stride of 40,
+// with the joints and the weights after them. A geometry no placement skins is
+// packed at 32 and the last eight bytes are simply not there.
+func TestTheSkinnedLayoutAppendsTheJointsAndWeightsToTheSameSixRows(t *testing.T) {
+	standard := everyAttribute()
+	var arena []byte
+	at, _, record := packVertices(&arena, standard)
+	want := at.of(arena)
+
+	skinned := packOverAuthored(everySkinnedAttribute(), record, true)
+	if len(skinned) != len(standard)*storageSkinnedStride {
+		t.Fatalf("the skinned pack wrote %d bytes, want %d vertices at %d",
+			len(skinned), len(standard), storageSkinnedStride)
+	}
+	authored := everySkinnedAttribute()
+	for i := range authored {
+		// The six shared rows are byte-identical to the standard pack's, which
+		// is what makes the two layouts one layout with a tail rather than two
+		// descriptions of a vertex.
+		shared := skinned[i*storageSkinnedStride : i*storageSkinnedStride+storageStride]
+		for at := range shared {
+			if shared[at] != want[i*storageStride+at] {
+				t.Fatalf("skinned vertex %d differs from the standard pack at byte %d: %#02x, want %#02x",
+					i, at, shared[at], want[i*storageStride+at])
+			}
+		}
+		if got := readStoredJoints(skinned, i); got != authored[i].Joints {
+			t.Errorf("vertex %d stores joints %v, want %v", i, got, authored[i].Joints)
+		}
+		// A weight comes back within one eight-bit code. Their total does not
+		// come back at one, which is exactly why the skin path divides by it
+		// rather than trusting it.
+		if got := readStoredWeights(skinned, i); !nearWeights(got, authored[i].Weights) {
+			t.Errorf("vertex %d stores weights %v, want %v within a code",
+				i, got, authored[i].Weights)
+		}
+	}
+
+	// The unskinned pack of the same converted vertices is the standard layout
+	// exactly: the joints and the weights the loader read are not stored at
+	// all.
+	unskinned := packOverAuthored(everySkinnedAttribute(), record, false)
+	if len(unskinned) != len(standard)*storageStride {
+		t.Fatalf("the unskinned pack wrote %d bytes, want %d vertices at %d",
+			len(unskinned), len(standard), storageStride)
+	}
+	for i := range want {
+		if unskinned[i] != want[i] {
+			t.Fatalf("unskinned byte %d is %#02x, want the standard pack's %#02x",
+				i, unskinned[i], want[i])
+		}
 	}
 }
 

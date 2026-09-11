@@ -8,23 +8,28 @@ import (
 	"github.com/dvoyni/cog/m"
 )
 
-// sceneStandardLayout and the three beside it are the layout halves of the four
+// sceneSkinnedLayout and the three beside it are the layout halves of the
 // shader/layout pairs the engine ships, restated here rather than imported:
 // scene and canvas both sit above gfx, so gfx cannot see their Go types, and a
 // check gfx performs has to be exercised against the pairs gfx is actually
-// handed. They mirror scene/mesh.go and canvas/shader.go; the shader halves
-// mirror scene/builtin/scene/vertex.wgsl and canvas/builtin/canvas.
+// handed. They mirror scene/vertexpack.go and canvas/shader.go; the shader
+// halves mirror scene/builtin/scene/vertex.wgsl and canvas/builtin/canvas.
+//
+// Scene ships two named layouts, and the standard one is the skinned one's
+// first six rows - the same reslice scene itself makes, so the pair below
+// cannot disagree about the six they share.
 var (
-	sceneStandardLayout = []VertexAttr{
+	sceneSkinnedLayout = []VertexAttr{
 		Attr(0, Float32x3),  // position
-		Attr(12, Float32x3), // normal
-		Attr(24, Float32x4), // tangent
-		Attr(40, Float32x2), // uv0
-		Attr(48, Float32x2), // uv1
-		Attr(56, Unorm8x4),  // color
-		Attr(60, Uint16x4),  // joints
-		Attr(68, Float32x4), // weights
+		Attr(12, Unorm16x2), // normal  - oct32
+		Attr(16, Uint32),    // tangent - oct 15/15 + handedness
+		Attr(20, Unorm16x2), // uv0     - against the mesh record
+		Attr(24, Unorm16x2), // uv1     - against the mesh record
+		Attr(28, Unorm8x4),  // color
+		Attr(32, Uint8x4),   // joints
+		Attr(36, Unorm8x4),  // weights
 	}
+	sceneStandardLayout  = sceneSkinnedLayout[:6]
 	canvasTriangleLayout = []VertexAttr{
 		Attr(0, Float32x2),  // position
 		Attr(8, Float32x4),  // color
@@ -37,8 +42,8 @@ var (
 // variant is its first six.
 var sceneVertexIn = []ShaderVertexInput{
 	{Name: "position", Location: 0, Kind: VertexScalarFloat, Count: 3},
-	{Name: "normal", Location: 1, Kind: VertexScalarFloat, Count: 3},
-	{Name: "tangent", Location: 2, Kind: VertexScalarFloat, Count: 4},
+	{Name: "normal", Location: 1, Kind: VertexScalarFloat, Count: 2},
+	{Name: "tangent", Location: 2, Kind: VertexScalarUint, Count: 1},
 	{Name: "uv0", Location: 3, Kind: VertexScalarFloat, Count: 2},
 	{Name: "uv1", Location: 4, Kind: VertexScalarFloat, Count: 2},
 	{Name: "color", Location: 5, Kind: VertexScalarFloat, Count: 4},
@@ -52,10 +57,13 @@ func TestVertexInterfaceAcceptsEveryBundledShaderAndLayoutPair(t *testing.T) {
 		inputs []ShaderVertexInput
 		attrs  []VertexAttr
 	}{
-		{"scene skinned", sceneVertexIn, sceneStandardLayout},
-		// The no-skin variant declares six of the eight the layout supplies,
-		// which is the direction that has to stay legal.
-		{"scene unskinned", sceneVertexIn[:6], sceneStandardLayout},
+		{"scene skinned", sceneVertexIn, sceneSkinnedLayout},
+		{"scene standard", sceneVertexIn[:6], sceneStandardLayout},
+		// A skinned-layout mesh under the no-skin variant is the pairing a
+		// plain-bound geometry's static sibling makes: six inputs declared
+		// against eight attributes supplied, which is the direction that has to
+		// stay legal.
+		{"scene standard variant over a skinned mesh", sceneVertexIn[:6], sceneSkinnedLayout},
 		{"canvas triangles", []ShaderVertexInput{
 			{Name: "position", Location: 0, Kind: VertexScalarFloat, Count: 2},
 			{Name: "color", Location: 1, Kind: VertexScalarFloat, Count: 4},

@@ -20,7 +20,7 @@ func skinPosition(joints, weights [4]byte, base m.Vec3, posed func(joint byte) m
 	var position m.Vec3
 	var total float32
 	for influence := range 4 {
-		weight := float32(weights[influence]) / weightCodeMax
+		weight := float32(weights[influence]) / unorm8CodeMax
 		if weight == 0 {
 			continue
 		}
@@ -135,7 +135,7 @@ func TestTheDivideRemovesTheDriftEightBitWeightsPutIntoANormalisedSet(t *testing
 						packWeight(weights.Z), packWeight(weights.W),
 					}
 					samples++
-					if int(codes[0])+int(codes[1])+int(codes[2])+int(codes[3]) != weightCodeMax {
+					if int(codes[0])+int(codes[1])+int(codes[2])+int(codes[3]) != unorm8CodeMax {
 						drifted++
 					}
 					want := exactSkinPosition(joints, weights, fourBones)
@@ -148,7 +148,7 @@ func TestTheDivideRemovesTheDriftEightBitWeightsPutIntoANormalisedSet(t *testing
 					var raw m.Vec3
 					for influence := range 4 {
 						raw = raw.Add(fourBones(joints[influence]).
-							MulS(float32(codes[influence]) / weightCodeMax))
+							MulS(float32(codes[influence]) / unorm8CodeMax))
 					}
 					worstRaw = math.Max(worstRaw, float64(raw.Distance(want)))
 				}
@@ -161,7 +161,7 @@ func TestTheDivideRemovesTheDriftEightBitWeightsPutIntoANormalisedSet(t *testing
 	// Two codes of the 30 units the four bones span, which is what the ratio
 	// alone can cost. The distance to the origin does not appear in it, and
 	// that is the whole difference the divide makes.
-	if bound := 2 * 30.0 / weightCodeMax; worstDivided > bound {
+	if bound := 2 * 30.0 / unorm8CodeMax; worstDivided > bound {
 		t.Errorf("the divided blend is %.6f out at worst, want under %.6f", worstDivided, bound)
 	}
 	if worstRaw < 2*worstDivided {
@@ -197,8 +197,8 @@ func TestTheWeightCodeIsAPlainUnormWithBothEndsExact(t *testing.T) {
 		weight float32
 		want   byte
 	}{
-		{0, 0}, {1, weightCodeMax}, {0.5, 128}, {1.0 / weightCodeMax, 1},
-		{-0.25, 0}, {2, weightCodeMax}, {float32(math.NaN()), 0},
+		{0, 0}, {1, unorm8CodeMax}, {0.5, 128}, {1.0 / unorm8CodeMax, 1},
+		{-0.25, 0}, {2, unorm8CodeMax}, {float32(math.NaN()), 0},
 	} {
 		if got := packWeight(c.weight); got != c.want {
 			t.Errorf("weight %v packs to %d, want %d", c.weight, got, c.want)

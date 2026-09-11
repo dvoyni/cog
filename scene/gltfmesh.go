@@ -10,15 +10,17 @@ import (
 	"github.com/qmuntal/gltf/modeler"
 )
 
-// gltfGeometry is one glTF primitive converted to scene's own vertex layout:
-// one interleaved buffer, one index list, one topology.
+// gltfGeometry is one glTF primitive converted to scene's own vertices: one
+// interleaved buffer, one index list, one topology. Which of the two named
+// layouts that buffer is packed into is skinnedLayout below, and it is not
+// known until every placement of this geometry has been walked.
 //
 // Missing attributes are generated and repacked here rather than bound from a
 // second buffer, because gfx binds exactly one vertex buffer per mesh. Total
 // memory is identical either way, so the only saving a second buffer would
 // bring is a copy this one-pass conversion largely already spends.
 type gltfGeometry struct {
-	vertices []Vertex
+	vertices []skinnedVertex
 	indices  []uint32
 	topology gfx.PrimitiveTopology
 	// box is the primitive's local-space bounds, taken from the POSITION
@@ -48,6 +50,23 @@ type gltfGeometry struct {
 	// here, so the same converted mesh is plain-bound under one node and
 	// static under another.
 	skinned bool
+	// skinnedLayout is which of the two named layouts this geometry stores in,
+	// and it is the union over the walk: the skinned layout iff *any* placement
+	// draws this geometry under SCENE_SKIN, which the plain-bound case makes
+	// broader than skinned above.
+	//
+	// The union is what makes a 32-byte layout under a skinning variant
+	// unrepresentable rather than merely unchecked. Both answers come from the
+	// one fact flattenMesh computes per placement, so a variant that declares
+	// locations 6 and 7 can only ever be paired with a buffer that supplies
+	// them. It is a union rather than a key so that one geometry stays one
+	// conversion however many nodes place it.
+	//
+	// A geometry plain-bound under one node and static under another therefore
+	// stores joints and weights of zero for the static placements too. That is
+	// 6.7 KiB across the vendored corpus, and it is paid rather than bought
+	// with a fifth and sixth shader variant.
+	skinnedLayout bool
 	// morph is the primitive's converted morph targets, empty for the
 	// overwhelming majority of primitives. It belongs to the geometry rather
 	// than to the placement because the deltas are shared per mesh: two nodes
@@ -73,12 +92,12 @@ func convertPrimitive(doc *gltf.Document, primitive *gltf.Primitive, needTangent
 	if !ok {
 		return gltfGeometry{}, errors.New("it has no POSITION attribute")
 	}
-	geometry := gltfGeometry{vertices: make([]Vertex, position.Count)}
+	geometry := gltfGeometry{vertices: make([]skinnedVertex, position.Count)}
 	// White rather than the Go zero value, which is transparent black: the
 	// shader multiplies the vertex colour into base colour unconditionally, so
 	// a primitive with no COLOR_0 has to carry the identity for that multiply.
 	for i := range geometry.vertices {
-		geometry.vertices[i].Color = [4]uint8{0xff, 0xff, 0xff, 0xff}
+		geometry.vertices[i].Color = m.White
 	}
 	if err := readVertexAttributes(doc, primitive, &geometry); err != nil {
 		return gltfGeometry{}, err
@@ -172,16 +191,27 @@ func readVertexAttributes(doc *gltf.Document, primitive *gltf.Primitive, geometr
 		if err != nil {
 			return fmt.Errorf("COLOR_0: %w", err)
 		}
+		// glTF's COLOR_0 is linear whatever component type it was written in,
+		// and modeler has already widened the file's form to eight-bit RGBA.
+		// The bake quantises straight back to those same eight bits, so this
+		// round trip through the float form is exact.
+		const scale = 1.0 / unorm8CodeMax
 		for i := range colors {
-			vertices[i].Color = colors[i]
+			vertices[i].Color = m.NewColorLinear(
+				float32(colors[i][0])*scale, float32(colors[i][1])*scale,
+				float32(colors[i][2])*scale, float32(colors[i][3])*scale)
 		}
 	}
-	// JOINTS_0 and WEIGHTS_0 are read into the vertex here so that the one
-	// vertex layout is filled by the one conversion pass. What is read is the
+	// JOINTS_0 and WEIGHTS_0 are read into the conversion vertex here so that
+	// the one pass fills it whichever layout the geometry ends up storing in.
+	// Which one that is cannot be known yet: it is the union over every
+	// placement the flattening walk makes, and a primitive read here may be
+	// placed under a skinned node and a static one both. What is read is the
 	// skin's own numbering and the file's own weights; bindGeometryJoints
 	// remaps the indices into the model's single joint space and normalises
-	// the weights once the skin behind the primitive is known, and the pack
-	// then narrows each to a byte.
+	// the weights once the skin behind the primitive is known, and a pack into
+	// the skinned layout then narrows each to a byte - where a pack into the
+	// standard layout drops them entirely.
 	if accessor, ok := attributeAccessor(doc, primitive.Attributes, gltf.JOINTS_0); ok {
 		joints, err := modeler.ReadJoints(doc, accessor, nil)
 		if err != nil {
@@ -322,9 +352,9 @@ func expandTriangleFan(fan []uint32) []uint32 {
 // that omitted NORMAL.
 // It also returns the permutation it applied, so anything else addressed by
 // vertex index - a primitive's morph deltas - can follow its vertices.
-func unweld(vertices []Vertex, indices []uint32) ([]Vertex, []uint32, []uint32) {
+func unweld(vertices []skinnedVertex, indices []uint32) ([]skinnedVertex, []uint32, []uint32) {
 	source := sequence(indices, len(vertices))
-	expanded := make([]Vertex, len(source))
+	expanded := make([]skinnedVertex, len(source))
 	unwelded := make([]uint32, len(source))
 	for i, index := range source {
 		expanded[i] = vertices[index]
@@ -350,7 +380,7 @@ func (g *gltfGeometry) expandBoxByMorph() {
 
 // generateFlatNormals writes each triangle's geometric normal onto its three
 // vertices. It runs on unwelded geometry, so the write is unambiguous.
-func generateFlatNormals(vertices []Vertex) {
+func generateFlatNormals(vertices []skinnedVertex) {
 	for i := 0; i+2 < len(vertices); i += 3 {
 		edge0 := vertices[i+1].Position.Sub(vertices[i].Position)
 		edge1 := vertices[i+2].Position.Sub(vertices[i].Position)
@@ -374,7 +404,7 @@ func generateFlatNormals(vertices []Vertex) {
 // with no contribution takes an arbitrary basis orthogonal to its normal. That
 // is the honest answer: with no UV gradient there is no tangent direction to
 // recover, only one that will not produce a black or NaN frame.
-func generateTangents(vertices []Vertex, indices []uint32) {
+func generateTangents(vertices []skinnedVertex, indices []uint32) {
 	accumulated := make([]m.Vec3, len(vertices))
 	bitangents := make([]m.Vec3, len(vertices))
 	for _, triangle := range triangles(indices, len(vertices)) {

@@ -94,7 +94,7 @@ func appendQuad(vertices []Vertex, indices []uint32, face quadFace, centre m.Vec
 			Normal:   face.normal,
 			Tangent:  m.Vec4{X: face.tangent.X, Y: face.tangent.Y, Z: face.tangent.Z, W: 1},
 			UV0:      m.Vec2{X: (corner.X + 1) / 2, Y: 1 - (corner.Y+1)/2},
-			Color:    [4]uint8{255, 255, 255, 255},
+			Color:    m.White,
 		})
 	}
 	return vertices, append(indices, base, base+1, base+2, base, base+2, base+3)
@@ -161,7 +161,7 @@ func unitSphereGeometry() ([]Vertex, []uint32) {
 				Normal:   position,
 				Tangent:  m.Vec4{X: -sin, Z: cos, W: 1},
 				UV0:      m.Vec2{X: float32(u), Y: float32(v)},
-				Color:    [4]uint8{255, 255, 255, 255},
+				Color:    m.White,
 			})
 		}
 	}

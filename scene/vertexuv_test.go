@@ -164,7 +164,7 @@ func TestPackingTheVerticesDerivesTheirUVRange(t *testing.T) {
 	}
 	packed := at.of(arena)
 	for i, vertex := range vertices {
-		stored := readStoredVertex(t, packed, i, record)
+		stored := readStoredVertex(t, packed, i, storageStride, record)
 		if stored.uv0 != vertex.UV0 || stored.uv1 != vertex.UV1 {
 			t.Errorf("vertex %d stored %v %v, want the authored %v %v",
 				i, stored.uv0, stored.uv1, vertex.UV0, vertex.UV1)
@@ -176,7 +176,7 @@ func TestPackingTheVerticesDerivesTheirUVRange(t *testing.T) {
 // record: one face whose TEXCOORD_0 tiles well outside 0..1, which is the case
 // a half float loses four texels of.
 func uvTriangle() []Vertex {
-	white := [4]uint8{255, 255, 255, 255}
+	white := m.White
 	return []Vertex{
 		{Position: m.Vec3{X: -1, Y: -1}, Normal: m.Vec3{Z: 1}, UV0: m.Vec2{X: 2.5, Y: -13.5}, Color: white},
 		{Position: m.Vec3{X: 1, Y: -1}, Normal: m.Vec3{Z: 1}, UV0: m.Vec2{X: 18.5, Y: 0.5}, Color: white},

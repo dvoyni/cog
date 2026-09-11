@@ -9,16 +9,21 @@ import (
 	"github.com/dvoyni/cog/m"
 )
 
-// The authoring struct is 84 bytes of float and the layout it reports is the
-// 40-byte storage vertex, because six of its eight attributes narrow: the
-// normal, the tangent and both UV sets to four bytes each, the four joints to
-// one byte apiece and the four weights to one unorm byte apiece. The two
-// numbers are pinned together in one test deliberately: what used to make them
-// the same number was that nothing narrowed, and a reader who assumes that
-// still holds writes an offset that addresses the wrong attribute.
-func TestVertexAuthorsInFloatsAndStoresInFortyBytes(t *testing.T) {
-	if size := unsafe.Sizeof(Vertex{}); size != 84 {
-		t.Fatalf("the authoring Vertex is %d bytes, want 84", size)
+// The authoring struct is 72 bytes of float and the layout it reports is the
+// 32-byte standard storage vertex, because four of its six attributes narrow -
+// the normal, the tangent and both UV sets to four bytes each - and the colour
+// quantises to four unorm bytes. The two numbers are pinned together in one
+// test deliberately: what used to make them the same number was that nothing
+// narrowed, and a reader who assumes that still holds writes an offset that
+// addresses the wrong attribute.
+//
+// Six rows and no more is the other half. The joints and the weights are the
+// skinned layout's, the loader is the only thing that can produce one, and an
+// app that could author them would be an app that could pair a 32-byte buffer
+// with a shader variant declaring locations 6 and 7.
+func TestVertexAuthorsInFloatsAndStoresInThirtyTwoBytes(t *testing.T) {
+	if size := unsafe.Sizeof(Vertex{}); size != 72 {
+		t.Fatalf("the authoring Vertex is %d bytes, want 72", size)
 	}
 	layout := Vertex{}.VertexLayout()
 	want := []gfx.VertexAttr{
@@ -28,8 +33,6 @@ func TestVertexAuthorsInFloatsAndStoresInFortyBytes(t *testing.T) {
 		gfx.Attr(20, gfx.Unorm16x2), // TEXCOORD_0 - against the mesh record
 		gfx.Attr(24, gfx.Unorm16x2), // TEXCOORD_1 - against the mesh record
 		gfx.Attr(28, gfx.Unorm8x4),  // COLOR_0
-		gfx.Attr(32, gfx.Uint8x4),   // JOINTS_0   - one byte a joint, capped at 256
-		gfx.Attr(36, gfx.Unorm8x4),  // WEIGHTS_0  - renormalised in the shader
 	}
 	if len(layout) != len(want) {
 		t.Fatalf("layout has %d attributes, want %d", len(layout), len(want))
@@ -58,7 +61,7 @@ func TestUnitBoxIsACentredCubeWithPerFaceNormals(t *testing.T) {
 		if length := vertex.Normal.Length(); length < 0.999 || length > 1.001 {
 			t.Fatalf("vertex %d has normal %v of length %v, want a unit normal", i, vertex.Normal, length)
 		}
-		if vertex.Color != [4]uint8{255, 255, 255, 255} {
+		if vertex.Color != m.White {
 			t.Fatalf("vertex %d has colour %v, want opaque white", i, vertex.Color)
 		}
 	}

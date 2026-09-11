@@ -568,6 +568,13 @@ func (c *modelConverter) flattenMesh(
 		if binding.joint >= 0 {
 			placed.joint, placed.plain, placed.skinned = uint32(binding.joint), true, true
 		}
+		// The layout is the union of that same answer over every placement, and
+		// it is taken here so that the two can never be derived from different
+		// facts: a placement that draws under SCENE_SKIN is a placement whose
+		// geometry supplies the joints and the weights that variant declares.
+		// A plain-bound placement widens a geometry no skin ever touched, which
+		// is the tax this union charges and the reason it is a union at all.
+		converted.skinnedLayout = converted.skinnedLayout || placed.skinned
 		c.model.primitives = append(c.model.primitives, placed)
 	}
 }

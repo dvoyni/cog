@@ -62,7 +62,7 @@ func TestConvertPrimitiveDefaultsColorToWhite(t *testing.T) {
 		t.Fatalf("convert: %v", err)
 	}
 	for i, vertex := range geometry.vertices {
-		if vertex.Color != [4]uint8{0xff, 0xff, 0xff, 0xff} {
+		if vertex.Color != m.White {
 			t.Fatalf("colour[%d] = %v, want opaque white", i, vertex.Color)
 		}
 	}

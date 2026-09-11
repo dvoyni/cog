@@ -1007,18 +1007,17 @@ to layout, and because it lets scene recognise the standard layout **by type**
 rather than by comparing attribute slices — which the custom-material check and
 the bounds computation both need.
 
-`scene.Vertex` carries **all eight** attributes of the bundled PBR layout, 84 B.
-A buffer-built mesh never skins, so the last 24 bytes are dead — but the Go zero
-value of `Joints`/`Weights` is **correct**, because the no-skin flag means the
-shader never reads them. There is no trap to document, there is one struct rather
-than two, and both paths stay a pure `unsafe.Slice` append with no per-vertex
-conversion. A 60-byte static subset expanded at pack time was rejected because it
-charges the **per-frame** inline path an expansion loop over every vertex, every
-frame, on the largest data this API produces.
+`scene.Vertex` carries the **six** attributes of the standard layout, 72 B
+authored and 32 B stored. It has no `Joints` and no `Weights`: no public path
+ever wrote them — a skin binding is set only from a loaded model's animation —
+so a buffer-built mesh never skins and the eight stored bytes would be dead in
+every mesh an app can build. The **skinned layout**, the same six plus `JOINTS_0`
+and `WEIGHTS_0` at 40 B, belongs to the glTF loader and is unreachable from the
+public API. See [`mesh.md`](mesh.md) for both layouts row by row.
 
-**A custom vertex layout requires a custom material.** The bundled PBR is one
-shader module with one vertex stage and no entry-point selection, so its inputs
-are locations 0..7 at those exact types. The reverse is fine. A violation is
+**A custom vertex layout requires a custom material.** The bundled PBR knows the
+two named layouts and nothing else, and every variant of it reads a prefix of
+one of them. The reverse is fine. A violation is
 **reported once and the draw skipped** — the layout is recognised by Go type at
 mint time, and the material is only known at draw time, so the check runs as the
 frame prepares its draws and the report is keyed by the ref's id: once per ref,
@@ -1673,19 +1672,25 @@ double-sided material; making it conditional would cost a record flag and a
 branch to save nothing, since for single-sided materials the select is a proven
 no-op.
 
-### One vertex layout, 84 bytes
+### Two named layouts, 32 and 40 bytes
 
-`POSITION` Float32x3 · `NORMAL` Float32x3 · `TANGENT` Float32x4 · `TEXCOORD_0`
-Float32x2 · `TEXCOORD_1` Float32x2 · `COLOR_0` Unorm8x4 · `JOINTS_0` Uint16x4 ·
-`WEIGHTS_0` Float32x4. Eight of gfx's 16 attribute slots, at positional
-`@location(0..7)`, well inside its 2048 stride cap.
+The **standard layout** is six attributes at `@location(0..5)`, 32 bytes:
+`POSITION` Float32x3 · `NORMAL` Unorm16x2 (oct32) · `TANGENT` Uint32 (oct 15/15
+plus handedness) · `TEXCOORD_0` Unorm16x2 · `TEXCOORD_1` Unorm16x2 · `COLOR_0`
+Unorm8x4. The **skinned layout** is the same six plus `JOINTS_0` Uint8x4 and
+`WEIGHTS_0` Unorm8x4 at `@location(6..7)`, 40 bytes, and only the glTF loader
+produces one. Eight of gfx's 16 attribute slots at most, well inside its 2048
+stride cap. [`mesh.md`](mesh.md) is the authority on both, attribute by
+attribute.
 
-**Nothing is truly optional.** Row 0 makes every scene mesh effectively skinned
-and any animated node becomes a degenerate joint, so joints and weights are never
-absent; the PBR needs tangents and both UV sets. **`COLOR_0` is included on
-failure mode**, not on evidence: it is glTF core, costs 4 bytes as `Unorm8x4`,
-and omitting it renders a vertex-coloured model **silently white** rather than
-erroring.
+**Presence is trimmed exactly once, along a seam WGSL already had.**
+`SceneVertexIn` declares locations 6 and 7 only under `SCENE_SKIN`, and a
+converted geometry takes the skinned layout iff some placement draws it under
+that define — one union per geometry, no new define, no new variant. Nothing
+else is optional: the PBR needs tangents and both UV sets, and **`COLOR_0` is
+included on failure mode**, not on evidence — it is glTF core, costs 4 bytes as
+`Unorm8x4`, and omitting it renders a vertex-coloured model **silently white**
+rather than erroring.
 
 **Variants were rejected for a mechanical reason.** `gfx.ShaderDescr` is
 source-or-path and the backend hardcodes `vs_main`/`fs_main`, so one module is
@@ -1708,9 +1713,11 @@ rasteriser drops the whole draw, GLES reads 0 as "tightly packed", Metal sets
 HAL is exactly the divergence the map forbids
 ([gogpu/wgpu: arrayStride 0 is unvalidated and backends diverge](https://github.com/dvoyni/cog/issues/47)).
 
-**Nothing is packed in v1.** `Unorm1010102` normals and `Unorm16x4` weights would
-save 20 of the 84 bytes and gfx has both formats, but that is a load-time
-encoding behind unchanged attribute names, so it waits on a measured trigger.
+**Packing waited on a measured trigger and then got one.** v1 stored all eight
+attributes wide, at 84 bytes; the narrowing above — oct normals and tangents,
+per-mesh UV ranges, byte joints and weights — is a load-time encoding behind
+unchanged attribute names, charted in [`mesh.md`](mesh.md) attribute by
+attribute.
 
 ### Tangents
 

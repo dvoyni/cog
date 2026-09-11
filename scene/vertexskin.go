@@ -20,11 +20,6 @@ package scene
 // scene/vertexskin_test.go holds the transcription that measures it.
 
 const (
-	// weightCodeMax is the largest code of one influence's 8-bit unorm, and
-	// the divisor the fetch unit has already applied by the time the skin path
-	// sees the weight. The encode scales by exactly it.
-	weightCodeMax = 0xFF
-
 	// sceneMaxSkinJoints is how many joints a model's skins may claim between
 	// them, because the storage vertex names one in a single byte.
 	//
@@ -52,12 +47,12 @@ const (
 //
 // It saturates rather than truncating, and neither is meant to happen: the load
 // path rejects a model whose skins claim more than sceneMaxSkinJoints before a
-// vertex is packed, and the authoring path's Joints are dead because a
-// buffer-built mesh never skins. Saturating is what keeps an out-of-range index
-// from quietly naming a plausible bone if either of those ever stops holding.
+// vertex is packed, and the loader is the only path that writes a joint at all.
+// Saturating is what keeps an out-of-range index from quietly naming a
+// plausible bone if either of those ever stops holding.
 func packJoint(joint uint16) byte {
-	if joint > weightCodeMax {
-		return weightCodeMax
+	if joint > unorm8CodeMax {
+		return unorm8CodeMax
 	}
 	return byte(joint)
 }
@@ -70,17 +65,8 @@ func packJoint(joint uint16) byte {
 // public API, where scene does not do the rounding, and it would leave a
 // malformed file skinned silently wrong. The shader's divide covers both.
 //
-// The clamps are the ends of the range only. The glTF path normalises a
-// vertex's weights at load, so its values are in [0, 1] by construction; an
-// authored one is whatever the app wrote, and a weight outside the range has no
-// code to land on.
-func packWeight(weight float32) byte {
-	scaled := float64(weight) * weightCodeMax
-	if !(scaled > 0) {
-		return 0
-	}
-	if scaled >= weightCodeMax {
-		return weightCodeMax
-	}
-	return byte(scaled + 0.5)
-}
+// The clamps packUnorm8 applies are the ends of the range only. The glTF path
+// normalises a vertex's weights at load, so its values are in [0, 1] by
+// construction, and no public path writes a weight at all: the skinned layout
+// is the loader's alone.
+func packWeight(weight float32) byte { return packUnorm8(weight) }

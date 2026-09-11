@@ -22,7 +22,7 @@ omit, how wide its indices are, how morph deltas are packed, and what the bundle
 PBR requires of a mesh handed to it. Its **Index width** section is implemented:
 a durable mesh of 65535 vertices or fewer stores `uint16` indices, derived from
 the vertex count with no pass over the indices, and a temporary mesh keeps
-`uint32`. Its **authoring API** section is half-implemented: scene *packs* the
+`uint32`. Its **authoring API** section is implemented: scene *packs* the
 standard vertex at bake rather than reinterpreting the caller's slice, in the
 same traversal that bounds it, so what a mesh stores is scene's to change one
 attribute at a time. Six attributes have moved: the **normal** stores as
@@ -30,11 +30,14 @@ attribute at a time. Six attributes have moved: the **normal** stores as
 plus handedness plus a reserved bit, **both UV sets** as a `Unorm16x2`
 against a scale and bias derived per mesh, the four **joints** as a `Uint8x4`
 and the four **weights** as a `Unorm8x4` — four bytes each against twelve,
-sixteen, eight, eight, eight and sixteen — and the stride is 40. Its **per-mesh
+sixteen, eight, eight, eight and sixteen. Its **per-mesh
 record** section is implemented with it: a 32-byte record per mesh in a storage
 buffer at `@group(0) @binding(3)`, named by the instance record's last spare
-word. The rest is not implemented — presence trims nothing and morph deltas are
-unchanged — and that spec is the plan for the rest.
+word. Its **attribute presence** section is implemented too, and it is the one
+presence trim the axis earns: there are **two named layouts**, the standard 32
+bytes at six locations and the skinned 40 at eight, and a static primitive no
+longer carries joints and weights it never reads. Morph deltas are unchanged,
+and that spec is the plan for them.
 
 ## Plugin
 
@@ -381,15 +384,22 @@ uploads in that frame. `UpdateMesh` replaces a durable mesh's geometry wholesale
 at any size, keeping the ref and its id, and refuses a change of vertex layout or
 topology. `ReleaseMesh` stales the ref at once and frees at the frame boundary.
 
-`scene.Vertex` is the one standard layout: glTF's eight core attributes at
-locations 0..7, 84 bytes authored and 40 stored, interleaved. Every mesh
-supplies all eight whatever it
-draws with — the bundled shader's static variant declares only the first six, and
-extra attributes a shader never declares are permitted (measured on a conformant
-D3D12 adapter; the direction that fails is a shader input no attribute supplies).
-Any other `VertexLayout` is a custom layout, and **a custom layout requires a
-custom `Material`**; the reverse — the standard layout with a custom material —
-is fine.
+Scene blesses **two named layouts and no others**. `scene.Vertex` is the
+**standard** layout: six attributes at locations 0..5, 72 bytes authored and 32
+stored, interleaved. The **skinned** layout is the same six plus `JOINTS_0` and
+`WEIGHTS_0` at locations 6..7, 40 bytes, and it belongs to the glTF loader — a
+converted geometry takes it iff some placement draws it under `SCENE_SKIN`,
+decided once per geometry. **No exported type reports it and no app can author
+one**: nothing but a loaded model's animation ever set a skin binding, so the
+public vertex carries no joints and no weights at all.
+
+A skinned-layout mesh drawn by a variant that declares only the first six is
+ordinary and happens on every model that shares a mesh between an animated node
+and a static one: extra attributes a shader never declares are permitted
+(measured on a conformant D3D12 adapter; the direction that fails is a shader
+input no attribute supplies). Any other `VertexLayout` is a custom layout, and
+**a custom layout requires a custom `Material`**; the reverse — a named layout
+with a custom material — is fine.
 
 `scene.Vertex` is what an app *writes*, not what scene *stores*: scene packs it
 into the storage layout its `VertexLayout()` reports, and the two differ. The
@@ -428,10 +438,16 @@ are still `vec2<f32>`, so nothing refuses a shader that reads them raw; it
 samples the wrong place instead. `instance.wgsl` declares the buffer and
 `sceneMeshOf(instance)` reaches it.
 
-`Joints` and `Weights` store in four bytes each as well — a `Uint8x4` and a
-`Unorm8x4` — and neither needs a decode source, because the fetch unit hands a
-shader the same `vec4<u32>` and `vec4<f32>` the wide forms did. Two consequences
-are contract:
+`Color` is an `m.Color` and stores as a `Unorm8x4`. It is the one attribute
+whose authored and stored forms would otherwise have coincided, and a colour
+type also says which space a component is in where four raw bytes cannot —
+glTF's `COLOR_0` is linear, so a loaded model's byte colour round-trips through
+the float form exactly.
+
+The **skinned layout's** `JOINTS_0` and `WEIGHTS_0` store in four bytes each — a
+`Uint8x4` and a `Unorm8x4` — and neither needs a decode source, because the
+fetch unit hands a shader the same `vec4<u32>` and `vec4<f32>` the wide forms
+did. Only a loaded model has them, and two consequences are contract:
 
 - **A skin is capped at 256 joints**, because a joint index is one byte. It is a
   per-model cap: every model has its own joint numbering, so a level full of
@@ -443,7 +459,7 @@ are contract:
   weights that sum to exactly one. This is a **behaviour change on existing
   content, in the direction of correctness**: glTF only says a producer *should*
   normalise `WEIGHTS_0`, and a file that does not used to be skinned silently
-  shrunk or inflated. A custom material that skins a standard mesh itself owes
+  shrunk or inflated. A custom material that skins a model's mesh itself owes
   the same divide.
 
 A custom layout has no such split — scene cannot pack a struct it does not know,

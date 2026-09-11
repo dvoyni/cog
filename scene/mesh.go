@@ -11,17 +11,24 @@ import (
 )
 
 // Vertex is the authoring vertex: the struct an app fills in for a scene mesh,
-// carrying glTF's eight core attributes at locations 0..7.
+// carrying the six attributes of the standard layout at locations 0..5.
 //
 // It is not the bytes scene uploads. Scene packs every standard-layout vertex
 // into the storage layout at bake (scene/vertexpack.go), so what a shader reads
-// is that layout's offsets and formats rather than this struct's: 84 bytes of
-// float are authored here and 40 are stored, because six of the eight rows
-// narrow - the normal, the tangent and both UV sets to four bytes each, the
-// four joints to a byte apiece and the four weights to a unorm byte apiece. An
-// app writes directions in the m.Vec3 and m.Vec4 it would write anyway and
-// never sees the encoding. Nothing in scene ever hands a Vertex back, so there
-// is exactly one authoritative form, the authored one, and it flows one way.
+// is that layout's offsets and formats rather than this struct's: 72 bytes of
+// float are authored here and 32 are stored, because four of the six rows
+// narrow - the normal, the tangent and both UV sets to four bytes each - and
+// the colour quantises to a unorm byte a channel. An app writes directions in
+// the m.Vec3 and m.Vec4 it would write anyway and never sees the encoding.
+// Nothing in scene ever hands a Vertex back, so there is exactly one
+// authoritative form, the authored one, and it flows one way.
+//
+// There is no joint and no weight here, and that is contract rather than an
+// omission. No public path ever wrote them: a skin binding is set only from a
+// loaded model's animation, so a buffer-built mesh never skins and the eight
+// bytes would be dead in every mesh an app can build. The skinned layout - the
+// same six attributes plus JOINTS_0 and WEIGHTS_0, 40 bytes at eight locations
+// - belongs to the glTF loader and is unreachable from here.
 //
 // Normal and Tangent.XYZ are directions. Their length is divided out by the
 // octahedral encode and is unrecoverable after bake - silently, as contract,
@@ -35,38 +42,28 @@ import (
 // makes that half-code small: over the vendored corpus the worst is under half
 // a texel of a 4096 texture, where a half float at the same coordinate is 32.
 //
-// Nothing in it is optional. A buffer-built mesh never skins, so its Joints and
-// Weights are dead - but their Go zero value is the correct one, because such a
-// draw carries SCENE_NOSKIN and the shader never reads them. A joint stores in
-// one byte, capping a skin at 256, which the glTF loader enforces by refusing a
-// model outright; an authored index past it saturates rather than wrapping,
-// because there is no load to refuse and no draw that would read it.
-//
-// Weights store in one byte each and are renormalised in the shader, which
-// divides the deformed position by the total it accumulates. Eight bits cannot
-// hold four weights that sum to exactly one, and glTF only says a producer
-// SHOULD normalise anyway, so nothing on either side of the bake is permitted
-// to assume the sum.
-//
 // Color is included on failure mode rather than on evidence: it is glTF core,
 // costs four bytes as Unorm8x4, and leaving it out renders a vertex-coloured
-// model silently white instead of erroring. Its zero value is transparent
-// black, so anything scene builds itself writes white.
+// model silently white instead of erroring. It is an m.Color rather than four
+// raw bytes because this is the one attribute whose authored and stored forms
+// would otherwise have coincided, and a caller should not have to know which
+// fields scene packs and which it copies; m.Color also says which space a
+// component is in, where a byte cannot - glTF's COLOR_0 is linear, which is
+// m.NewColorLinear. Its zero value is transparent black, so anything scene
+// builds itself writes m.White.
 type Vertex struct {
 	Position m.Vec3
 	Normal   m.Vec3
 	Tangent  m.Vec4
 	UV0      m.Vec2
 	UV1      m.Vec2
-	Color    [4]uint8
-	Joints   [4]uint16
-	Weights  m.Vec4
+	Color    m.Color
 }
 
 // VertexLayout reports the standard vertex's storage layout, in @location
-// order. It is the one implementation whose attributes are not this struct's
-// field offsets - see the interface's own documentation below.
-func (Vertex) VertexLayout() []gfx.VertexAttr { return standardVertexLayout[:] }
+// order. It is the one exported implementation whose attributes are not this
+// struct's field offsets - see the interface's own documentation below.
+func (Vertex) VertexLayout() []gfx.VertexAttr { return standardVertexLayout }
 
 // meshSource discriminates where a MeshRef came from. It is what makes a
 // frame-local ref used in a later frame detectable rather than silently wrong.
@@ -91,12 +88,17 @@ const temporaryMeshID uint32 = 1 << 31
 //
 // For a custom layout the buffer is the caller's slice reinterpreted, so the
 // offsets are also the Go struct's field offsets and the two readings coincide.
-// scene.Vertex is the one exception: scene packs it, so its method reports the
-// storage layout and its Go fields are the authoring ones. The two differ - the
-// stored normal, tangent and two UV sets are four bytes each against the
-// struct's twelve, sixteen, eight and eight, and the stored joints and weights
-// four each against eight and sixteen - so nothing may read a scene.Vertex
-// layout as a description of the Go struct.
+// scene.Vertex is the one exception a caller can see: scene packs it, so its
+// method reports the storage layout and its Go fields are the authoring ones.
+// The two differ - the stored normal, tangent and two UV sets are four bytes
+// each against the struct's twelve, sixteen, eight and eight, and the stored
+// colour is four against sixteen - so nothing may read a scene.Vertex layout as
+// a description of the Go struct.
+//
+// There are exactly two layouts scene blesses: the standard one scene.Vertex
+// reports, and the skinned one - the same six attributes plus JOINTS_0 and
+// WEIGHTS_0 - which the glTF loader alone produces and which no exported type
+// reports. Everything else is a custom layout and needs a custom Material.
 //
 // The one direction that fails is a shader input no attribute supplies. A
 // layout supplying an attribute the shader never declares is legal and common,
@@ -146,10 +148,12 @@ type meshRecord struct {
 	// so UpdateMesh can reject a layout change with one integer compare rather
 	// than by walking two attribute slices.
 	layoutID int
-	// standard reports whether the mesh was built from scene.Vertex. It is
-	// recognised by type at mint time rather than by comparing attributes,
-	// which is what lets the bundled PBR reject a custom layout and what
-	// decides whether a bounding sphere could be computed at all.
+	// standard reports whether the mesh carries one of the two layouts the
+	// bundled PBR knows - the standard one every scene.Vertex mesh takes, or
+	// the skinned one a model's geometry takes where some placement skins it.
+	// It is recognised by type at mint time rather than by comparing
+	// attributes, which is what lets the bundled PBR reject a custom layout and
+	// what decides whether a bounding sphere could be computed at all.
 	standard bool
 	// baked reports whether the record's buffers have reached gfx. A mesh baked
 	// this frame and released before the flush drained it never had a buffer to
@@ -185,7 +189,10 @@ type layoutCache struct {
 }
 
 // resolve returns the layout's dense id, the interned attributes, and whether
-// the vertex is scene's own standard one.
+// the vertex is scene.Vertex itself - which is what decides that the mint packs
+// rather than reinterprets, and is narrower than the meshRecord flag it feeds:
+// a model's geometry is a layout the bundled PBR knows without ever passing
+// through here, and bakeModelGeometry says so directly.
 func (c *layoutCache) resolve[TVertex VertexLayout]() (int, []gfx.VertexAttr, bool) {
 	vertexType := reflect.TypeFor[TVertex]()
 	standard := vertexType == reflect.TypeFor[Vertex]()

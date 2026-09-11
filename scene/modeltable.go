@@ -346,7 +346,18 @@ func bindModelMaterial(
 func (l *Lookup) bakeModelGeometry(
 	geometry *gltfGeometry, resources *gfx.ResourceQueue,
 ) MeshRef {
-	layoutID, layout, _ := l.layouts.resolve[Vertex]()
+	// Which of the two named layouts this geometry stores in was decided by the
+	// flattening walk, once per geometry: the skinned one iff some placement
+	// draws it under SCENE_SKIN. Both are resolved through the same layout
+	// cache every other mesh takes, so each gets a dense id of its own and an
+	// UpdateMesh comparing ids still compares one integer.
+	var layoutID int
+	var layout []gfx.VertexAttr
+	if geometry.skinnedLayout {
+		layoutID, layout, _ = l.layouts.resolve[skinnedVertex]()
+	} else {
+		layoutID, layout, _ = l.layouts.resolve[Vertex]()
+	}
 	// The UV ranges were accumulated while the accessors were being read, so
 	// the record is in hand before the pack needs it and the pack stays the one
 	// walk this path makes over the vertices.
@@ -356,9 +367,11 @@ func (l *Lookup) bakeModelGeometry(
 	// and nothing reads them again, so packing into a second buffer would hold
 	// both forms of every primitive at once - which is the peak memory the
 	// reinterpret this replaced was avoiding. A storage vertex is smaller than
-	// an authoring one, so the pack fits inside the memory it reads.
+	// a converted one under either layout, so the pack fits inside the memory
+	// it reads.
 	record := meshRecord{
-		vertices:    resources.BakeBuffer(packOverAuthored(geometry.vertices, uv), false),
+		vertices: resources.BakeBuffer(
+			packOverAuthored(geometry.vertices, uv, geometry.skinnedLayout), false),
 		vertexCount: len(geometry.vertices),
 		indexCount:  len(geometry.indices),
 		topology:    geometry.topology,

@@ -203,10 +203,13 @@ bindings scene binds on every draw — `sceneFrame`, `sceneInstances`,
 already counted against a budget that is now fully spent at eight of eight. Put
 per-object data in the vertices.
 
-A **custom vertex layout requires a custom `Material`**: the bundled PBR is one
-module with one vertex stage and no entry-point selection, so its inputs are
-`scene.Vertex`'s eight attributes and nothing else. The reverse — the standard
-layout with a custom material — is fine.
+A **custom vertex layout requires a custom `Material`**: the bundled PBR knows
+two layouts and no others — the **standard** one `scene.Vertex` reports, six
+attributes at 32 bytes, and the **skinned** one the glTF loader gives a geometry
+some placement skins, the same six plus `JOINTS_0` and `WEIGHTS_0` at 40. The
+skinned layout is unreachable from the public API; nothing an app builds can
+supply locations 6 and 7, and nothing needs to. The reverse — a named layout
+with a custom material — is fine.
 
 A custom material over the **standard** layout must **decode the normal and the
 tangent**. They are stored octahedrally, four bytes each, so `@location(1)` is a

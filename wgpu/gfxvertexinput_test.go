@@ -86,7 +86,11 @@ func TestEveryBundledShaderAndLayoutPairPassesTheVertexInterfaceCheck(t *testing
 		attrs  []cgfx.VertexAttr
 	}{
 		{"scene", bundledSceneShader(t), scene.Vertex{}.VertexLayout()},
-		{"scene skinned", bundledSceneShader(t, everyFeature()...), scene.Vertex{}.VertexLayout()},
+		{"scene skinned", bundledSceneShader(t, everyFeature()...), sceneSkinnedLayout(t)},
+		// A skinned-layout mesh under the variant that declares six is the
+		// pairing a plain-bound geometry's static sibling makes, and it is the
+		// direction that has to stay legal.
+		{"scene skinned mesh, static variant", bundledSceneShader(t), sceneSkinnedLayout(t)},
 		{"canvas triangles", canvasShader(t, "builtin/canvas/triangles.wgsl"), canvas.Vertex{}.VertexLayout()},
 		{"canvas texture", canvasShader(t, "builtin/canvas/texture.wgsl"), canvas.Vertex{}.VertexLayout()},
 		{"canvas sprite", canvasShader(t, "builtin/canvas/sprite.wgsl"), quad},
@@ -105,6 +109,26 @@ func TestEveryBundledShaderAndLayoutPairPassesTheVertexInterfaceCheck(t *testing
 			}
 		})
 	}
+}
+
+// sceneSkinnedLayout is the layout half of the skinned pair. Scene's skinned
+// layout is unexported by design - no public path can author a joint or a
+// weight - so the six rows it shares with the standard layout are imported and
+// the two it adds are spelled here, at the offsets scene/vertexpack.go names.
+//
+// Those two rows are the only thing in this file that can drift from scene, and
+// what would notice is scene's own TestBothNamedLayoutsAreFourAlignedAndUnpadded:
+// it pins the same two offsets and formats against the same constants.
+func sceneSkinnedLayout(t *testing.T) []cgfx.VertexAttr {
+	t.Helper()
+	standard := scene.Vertex{}.VertexLayout()
+	if len(standard) != 6 {
+		t.Fatalf("the standard layout has %d attributes, want the six it shares", len(standard))
+	}
+	return append(append([]cgfx.VertexAttr(nil), standard...),
+		cgfx.Attr(32, cgfx.Uint8x4),  // joints
+		cgfx.Attr(36, cgfx.Unorm8x4), // weights
+	)
 }
 
 func canvasShader(t *testing.T, path string) string {

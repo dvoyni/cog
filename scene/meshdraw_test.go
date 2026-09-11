@@ -21,9 +21,9 @@ func (customVertex) VertexLayout() []gfx.VertexAttr {
 // face large enough that a camera at the default distance keeps it.
 func triangle() []Vertex {
 	return []Vertex{
-		{Position: m.Vec3{X: -1, Y: -1}, Normal: m.Vec3{Z: 1}, Color: [4]uint8{255, 255, 255, 255}},
-		{Position: m.Vec3{X: 1, Y: -1}, Normal: m.Vec3{Z: 1}, Color: [4]uint8{255, 255, 255, 255}},
-		{Position: m.Vec3{Y: 1}, Normal: m.Vec3{Z: 1}, Color: [4]uint8{255, 255, 255, 255}},
+		{Position: m.Vec3{X: -1, Y: -1}, Normal: m.Vec3{Z: 1}, Color: m.White},
+		{Position: m.Vec3{X: 1, Y: -1}, Normal: m.Vec3{Z: 1}, Color: m.White},
+		{Position: m.Vec3{Y: 1}, Normal: m.Vec3{Z: 1}, Color: m.White},
 	}
 }
 
