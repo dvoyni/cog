@@ -2,7 +2,9 @@ package scene
 
 import (
 	"errors"
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -623,5 +625,77 @@ func TestBakeAnimationReportsAnUnrepresentablePose(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("reported %d times, want once per model", count)
+	}
+}
+
+// jointCappedDoc builds a skin over count bones in one chain, which is the
+// cheapest way to make a file whose joint indices need more than a byte.
+func jointCappedDoc(count int) *gltf.Document {
+	doc := testDoc()
+	joints := make([]int, count)
+	doc.Nodes = []*gltf.Node{{Name: "body", Mesh: gltf.Index(triangleMesh(doc, nil)), Skin: gltf.Index(0)}}
+	for i := range count {
+		joints[i] = len(doc.Nodes)
+		doc.Nodes = append(doc.Nodes, &gltf.Node{Name: fmt.Sprintf("bone%d", i)})
+	}
+	doc.Skins = append(doc.Skins, &gltf.Skin{Name: "rig", Joints: joints})
+	sceneOf(doc, 0)
+	return doc
+}
+
+// A joint index is one byte in the storage vertex, so 256 joints is the most a
+// skin may have - and the whole point of a cap is that exceeding it cannot be
+// missed. A 257th joint written into a byte would truncate to a different bone
+// and attach a prop to the wrong limb with nothing reported anywhere, so the
+// model fails wholesale at load instead.
+//
+// The cap is per model rather than per scene: every model has its own joint
+// numbering, so a level full of rigged characters does not share one budget.
+func TestASkinPastTheJointCapFailsTheModelAtLoad(t *testing.T) {
+	if model := convertTest(t, jointCappedDoc(sceneMaxSkinJoints)); model.animation.jointCount != sceneMaxSkinJoints {
+		t.Fatalf("a skin at the cap baked %d joints, want %d", model.animation.jointCount, sceneMaxSkinJoints)
+	}
+	_, err := convertDocument(jointCappedDoc(sceneMaxSkinJoints+1), "m.glb", nil, testSampleRate)
+	if err == nil {
+		t.Fatal("a skin one joint past the cap loaded, want the model refused")
+	}
+	// The message has to carry the skin and the number, because the file is
+	// what has to change and a cap with no count in the report is a puzzle.
+	for _, want := range []string{`"rig"`, "257", "256"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal %q does not name %s", err, want)
+		}
+	}
+	// It is the whole model that fails, which is what wraps the message in
+	// ErrModelUnavailable and so names the model. Nothing is half-loaded.
+	unavailable := ErrModelUnavailable{Model: "m.glb", Err: err}
+	if !strings.Contains(unavailable.Error(), `model "m.glb"`) {
+		t.Errorf("the report %q does not name the model", unavailable)
+	}
+}
+
+// Skins share one joint numbering, because that is what lets a pose row be
+// addressed with no per-skin offset. So two skins that each fit can still put a
+// remapped index past a byte between them, and the vertex would name a bone
+// from the wrong skin. The cap binds what a vertex can name, so it binds the
+// pair.
+func TestTwoSkinsPastTheJointCapBetweenThemFailTheModelAtLoad(t *testing.T) {
+	doc := jointCappedDoc(sceneMaxSkinJoints / 2)
+	second := make([]int, sceneMaxSkinJoints/2+1)
+	for i := range second {
+		second[i] = len(doc.Nodes)
+		doc.Nodes = append(doc.Nodes, &gltf.Node{Name: fmt.Sprintf("other%d", i)})
+	}
+	doc.Skins = append(doc.Skins, &gltf.Skin{Name: "second", Joints: second})
+	if _, err := convertDocument(doc, "m.glb", nil, testSampleRate); err == nil {
+		t.Fatal("two skins claiming 257 joints between them loaded, want the model refused")
+	}
+	// Joints are claimed per node, so two skins over the *same* bones claim
+	// them once and stay inside the cap. The count that matters is what the
+	// vertex can name, not what the file declares.
+	shared := jointCappedDoc(sceneMaxSkinJoints)
+	shared.Skins = append(shared.Skins, &gltf.Skin{Name: "second", Joints: shared.Skins[0].Joints})
+	if _, err := convertDocument(shared, "m.glb", nil, testSampleRate); err != nil {
+		t.Errorf("two skins over one set of bones were refused: %v", err)
 	}
 }

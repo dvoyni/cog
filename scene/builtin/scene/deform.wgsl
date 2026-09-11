@@ -19,7 +19,10 @@
 // entry point does before calling this. It is passed in rather than decoded
 // here so that the order - decode, morph, skin - is visible at the top of
 // vs_main rather than buried; vertex itself is still needed for the joints and
-// weights, which are stored in the formats the fetch unit hands over directly.
+// weights, which are the two rows the fetch unit hands over ready to use. A
+// joint is one byte and a weight one unorm byte, so the joints arrive as the
+// indices they are and the weights already divided by 255 - narrow enough that
+// the four of them no longer sum to one, which is what the divide below is for.
 fn sceneDeformVertex(
     instance: SceneInstance, vertexIndex: u32, vertex: SceneVertexIn, decoded: SceneVertex,
 ) -> SceneVertex {
@@ -67,10 +70,24 @@ fn sceneDeformVertex(
     // A vertex with no influence at all under a skinned draw is a malformed
     // file rather than a case to be correct about. It would collapse to the
     // origin with a zero normal, and normalize would turn that into a NaN that
-    // spreads through the whole fragment stage, so it keeps its bind pose.
+    // spreads through the whole fragment stage, so it keeps its bind pose. The
+    // divide below shares this guard, which is the whole of what it costs
+    // beyond the three divides themselves.
     if total == 0.0 {
         return base;
     }
+    // The renormalisation, and it is not a tidiness measure: a weight is eight
+    // bits, and no rounding of four of them sums to exactly one. Naive rounding
+    // puts 11.7% of Fox's vertices a code off, and Fox's file weights are
+    // normalised to within a float32 ULP, so without this the drift would be
+    // scene's own doing. It also fixes something that was already wrong - glTF
+    // only says a producer SHOULD normalise WEIGHTS_0, and a file that does not
+    // is skinned silently shrunk or inflated today.
+    //
+    // Only the position needs it. The normal and the tangent are normalised
+    // immediately below, which divides out any common factor the weights
+    // carried, and the handedness is read for its sign alone.
+    position = position / total;
     let skinnedNormal = normalize(normal);
     var skinnedTangent = base.tangent;
     let orthogonal = tangent - skinnedNormal * dot(skinnedNormal, tangent);

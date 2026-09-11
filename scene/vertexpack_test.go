@@ -32,8 +32,10 @@ func everyAttribute() []Vertex {
 			UV0:      m.Vec2{X: 1, Y: 0},
 			UV1:      m.Vec2{X: -0.5, Y: 2.5},
 			Color:    [4]uint8{255, 254, 253, 252},
-			Joints:   [4]uint16{65535, 0, 300, 23},
-			Weights:  m.Vec4{X: 1},
+			// 255 is the largest joint a byte holds and the cap the loader
+			// rejects a skin for exceeding, so it belongs in the fixture.
+			Joints:  [4]uint16{255, 0, 137, 23},
+			Weights: m.Vec4{X: 1},
 		},
 	}
 }
@@ -70,13 +72,24 @@ func readStoredVertex(t *testing.T, packed []byte, index int, mesh sceneMesh) st
 		tangent: decodeStoredTangent(binary.NativeEndian.Uint32(at[storageTangent:])),
 		uv0:     readStoredUV(at[storageUV0:], mesh.UV0Scale, mesh.UV0Bias),
 		uv1:     readStoredUV(at[storageUV1:], mesh.UV1Scale, mesh.UV1Bias),
-		weights: readVec4(at[storageWeights:]),
+		weights: readStoredWeights(at[storageWeights:]),
 	}
 	copy(stored.color[:], at[storageColor:storageColor+4])
 	for i := range stored.joints {
-		stored.joints[i] = binary.NativeEndian.Uint16(at[storageJoints+i*2:])
+		stored.joints[i] = uint16(at[storageJoints+i])
 	}
 	return stored
+}
+
+// readStoredWeights reads the four influences the way the fetch unit does for a
+// Unorm8x4: a byte each, divided by 255. What the shader then makes of them is
+// deform.wgsl's business - it divides the deformed position by their total,
+// because these four do not sum to one and nothing at bake can make them.
+func readStoredWeights(at []byte) m.Vec4 {
+	return m.Vec4{
+		X: float32(at[0]) / weightCodeMax, Y: float32(at[1]) / weightCodeMax,
+		Z: float32(at[2]) / weightCodeMax, W: float32(at[3]) / weightCodeMax,
+	}
 }
 
 func readFloat32(at []byte) float32 { return math.Float32frombits(binary.NativeEndian.Uint32(at)) }
@@ -105,13 +118,6 @@ func checkStoredUV(t *testing.T, what string, index int, set string, stored, aut
 
 func readVec3(at []byte) m.Vec3 {
 	return m.Vec3{X: readFloat32(at[0:]), Y: readFloat32(at[4:]), Z: readFloat32(at[8:])}
-}
-
-func readVec4(at []byte) m.Vec4 {
-	return m.Vec4{
-		X: readFloat32(at[0:]), Y: readFloat32(at[4:]),
-		Z: readFloat32(at[8:]), W: readFloat32(at[12:]),
-	}
 }
 
 // What the pack writes, attribute by attribute, read back the way the fetch
@@ -158,8 +164,12 @@ func TestEveryStoredAttributeReadsBackAsWhatWasAuthored(t *testing.T) {
 				t.Errorf("%s vertex %d: colour %v joints %v, want %v %v",
 					c.what, i, stored.color, stored.joints, authored.Color, authored.Joints)
 			}
-			if stored.weights != authored.Weights {
-				t.Errorf("%s vertex %d: weights %v, want %v", c.what, i, stored.weights, authored.Weights)
+			// A weight comes back within half its own eight-bit code. Their
+			// total does not come back at one, which is exactly why the skin
+			// path divides by it rather than trusting it.
+			if !nearWeights(stored.weights, authored.Weights) {
+				t.Errorf("%s vertex %d: weights %v, want %v within a code",
+					c.what, i, stored.weights, authored.Weights)
 			}
 			// The two encoded ones. Direction only: magnitude is divided out
 			// by the encode and handedness is the tangent's w.
@@ -180,15 +190,24 @@ func TestEveryStoredAttributeReadsBackAsWhatWasAuthored(t *testing.T) {
 	}
 }
 
+// nearWeights reports whether four stored influences are each within one
+// eight-bit code of what was authored.
+func nearWeights(stored, authored m.Vec4) bool {
+	return abs32(stored.X-authored.X) <= 1.0/weightCodeMax &&
+		abs32(stored.Y-authored.Y) <= 1.0/weightCodeMax &&
+		abs32(stored.Z-authored.Z) <= 1.0/weightCodeMax &&
+		abs32(stored.W-authored.W) <= 1.0/weightCodeMax
+}
+
 // The stride and every offset in it. WebGPU requires arrayStride to be a
 // multiple of four unconditionally - a 30-byte stride runs on Vulkan, Metal on
 // Apple silicon and D3D12 and fails on js/wasm, on GLES and on older Apple
 // GPUs, which is green on a dev machine and broken in a browser - and gfx
 // refuses the pipeline either way. Both named layouts satisfy it by
 // construction, and this is where "by construction" is checked.
-func TestTheStorageVertexIsFiftySixFourAlignedBytes(t *testing.T) {
-	if storageStride != 56 || storageStride%4 != 0 {
-		t.Errorf("the storage stride is %d, want 56 and a multiple of four", storageStride)
+func TestTheStorageVertexIsFortyFourAlignedBytes(t *testing.T) {
+	if storageStride != 40 || storageStride%4 != 0 {
+		t.Errorf("the storage stride is %d, want 40 and a multiple of four", storageStride)
 	}
 	end := 0
 	for _, attr := range []struct {
@@ -201,8 +220,8 @@ func TestTheStorageVertexIsFiftySixFourAlignedBytes(t *testing.T) {
 		{"uv0", storageUV0, 4},
 		{"uv1", storageUV1, 4},
 		{"color", storageColor, 4},
-		{"joints", storageJoints, 8},
-		{"weights", storageWeights, 16},
+		{"joints", storageJoints, 4},
+		{"weights", storageWeights, 4},
 	} {
 		if attr.offset%4 != 0 {
 			t.Errorf("%s starts at %d, which is not 4-aligned", attr.name, attr.offset)

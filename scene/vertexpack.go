@@ -14,9 +14,10 @@ import (
 //
 // These are written down rather than taken from Vertex's field offsets, and
 // that is the whole point of them. The authoring struct is 84 bytes of float
-// and the storage vertex is 56; the normal, the tangent and both UV sets have
-// moved, so an offset derived from the Go struct would silently be the wrong
-// one - the authoring offset, used to address the storage buffer.
+// and the storage vertex is 40; the normal, the tangent, both UV sets, the
+// joints and the weights have all moved, so an offset derived from the Go
+// struct would silently be the wrong one - the authoring offset, used to
+// address the storage buffer.
 //
 // Every offset is a multiple of four and so is the stride, which WebGPU
 // requires of arrayStride unconditionally. A narrower attribute that broke that
@@ -29,27 +30,34 @@ const (
 	storageUV1      = 24
 	storageColor    = 28
 	storageJoints   = 32
-	storageWeights  = 40
-	storageStride   = 56
+	storageWeights  = 36
+	storageStride   = 40
 )
 
 // standardVertexLayout is the storage layout the bundled PBR's vertex stage
 // reads, in @location order. It describes the bytes packVertices writes, not
 // the Go struct a caller fills in.
 //
-// The normal, the tangent and both UV sets are the narrowed rows, and what
-// reads them is builtin/scene/vertexdecode.wgsl: a two-component 16-bit unorm
-// holding oct32, one 32-bit word holding oct 15/15 plus handedness plus a
-// reserved bit, and two more 16-bit unorm pairs holding UVs against the range
-// in the mesh's own record. gfx requires a shader's declared (kind, count) at a
-// location to equal what the layout supplies, so the pair here and the pair in
-// vertex.wgsl cannot drift apart without a pipeline being refused.
+// Six of the eight rows are narrowed, and what reads the first four of those is
+// builtin/scene/vertexdecode.wgsl: a two-component 16-bit unorm holding oct32,
+// one 32-bit word holding oct 15/15 plus handedness plus a reserved bit, and
+// two more 16-bit unorm pairs holding UVs against the range in the mesh's own
+// record. gfx requires a shader's declared (kind, count) at a location to equal
+// what the layout supplies, so the pair here and the pair in vertex.wgsl cannot
+// drift apart without a pipeline being refused.
 //
-// The UVs are the one narrowing the interface check cannot catch, because both
-// Float32x2 and Unorm16x2 arrive as a vec2<f32>: the fetch unit's divide is the
-// only difference the shader sees, and its declaration is the same either way.
-// What holds those two rows together is the record - a UV read without one is
-// a coordinate in [0, 1] where the mesh's range said otherwise.
+// The joints and the weights need no decode source at all: a Uint8x4 arrives as
+// the same vec4<u32> a Uint16x4 did and a Unorm8x4 as the same vec4<f32> a
+// Float32x4 did, so the fetch unit does the whole of it. What the narrowing
+// does need is the divide in deform.wgsl, because eight bits cannot hold four
+// weights that sum to exactly one - see scene/vertexskin.go.
+//
+// The UVs and the weights are the narrowings the interface check cannot catch,
+// because a Float32x2 and a Unorm16x2 both arrive as a vec2<f32> and a
+// Float32x4 and a Unorm8x4 both as a vec4<f32>: the fetch unit's divide is the
+// only difference the shader sees, and the declaration is the same either way.
+// What holds the UV rows together is the mesh record, and what holds the weight
+// row together is that divide.
 var standardVertexLayout = [...]gfx.VertexAttr{
 	gfx.Attr(storagePosition, gfx.Float32x3), // POSITION
 	gfx.Attr(storageNormal, gfx.Unorm16x2),   // NORMAL     - oct32
@@ -57,8 +65,8 @@ var standardVertexLayout = [...]gfx.VertexAttr{
 	gfx.Attr(storageUV0, gfx.Unorm16x2),      // TEXCOORD_0 - against the mesh record
 	gfx.Attr(storageUV1, gfx.Unorm16x2),      // TEXCOORD_1 - against the mesh record
 	gfx.Attr(storageColor, gfx.Unorm8x4),     // COLOR_0
-	gfx.Attr(storageJoints, gfx.Uint16x4),    // JOINTS_0
-	gfx.Attr(storageWeights, gfx.Float32x4),  // WEIGHTS_0
+	gfx.Attr(storageJoints, gfx.Uint8x4),     // JOINTS_0   - one byte a joint, capped at 256
+	gfx.Attr(storageWeights, gfx.Unorm8x4),   // WEIGHTS_0  - renormalised in the shader
 }
 
 // packVertices writes the storage bytes of standard-layout vertices into the
@@ -172,6 +180,12 @@ func packInto(dst []byte, vertices []Vertex, mesh sceneMesh) {
 // consecutive in the buffer and a single native-endian uint32 would order them
 // by the host's endianness.
 //
+// The joints and the weights are narrowed here too, a byte each, and they need
+// no decode source: the fetch unit hands the shader the same types the wide
+// forms did. What the weight's eight bits do need is deform.wgsl's divide,
+// because no rounding of four weights into four bytes makes them sum to exactly
+// one - and the divide covers a malformed file into the bargain.
+//
 // mesh is the record this mesh's UVs are quantised against, already resolved to
 // the identity where the mesh has no range of its own, so there is no branch
 // here for the mesh that names slot 0.
@@ -185,9 +199,13 @@ func packVertex(dst []byte, vertex Vertex, mesh sceneMesh) {
 	putUV(dst[storageUV1:], vertex.UV1, mesh.UV1Scale, mesh.UV1Bias)
 	copy(dst[storageColor:storageColor+4], vertex.Color[:])
 	for i, joint := range vertex.Joints {
-		binary.NativeEndian.PutUint16(dst[storageJoints+i*2:], joint)
+		dst[storageJoints+i] = packJoint(joint)
 	}
-	putVec4(dst[storageWeights:], vertex.Weights)
+	for i, weight := range [4]float32{
+		vertex.Weights.X, vertex.Weights.Y, vertex.Weights.Z, vertex.Weights.W,
+	} {
+		dst[storageWeights+i] = packWeight(weight)
+	}
 }
 
 // putUV writes one UV set's two unorm codes against the mesh's range.
@@ -204,13 +222,6 @@ func putVec3(dst []byte, value m.Vec3) {
 	putFloat32(dst[0:], value.X)
 	putFloat32(dst[4:], value.Y)
 	putFloat32(dst[8:], value.Z)
-}
-
-func putVec4(dst []byte, value m.Vec4) {
-	putFloat32(dst[0:], value.X)
-	putFloat32(dst[4:], value.Y)
-	putFloat32(dst[8:], value.Z)
-	putFloat32(dst[12:], value.W)
 }
 
 // appendArena copies data into the arena and reports the span it landed in.

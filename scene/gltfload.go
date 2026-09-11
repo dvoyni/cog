@@ -320,7 +320,9 @@ func convertDocument(
 	// starts: a primitive's JOINTS_0 remaps as it is read, and the pose walk
 	// needs roots the flattening never computes because a joint may sit
 	// outside every scene's node list.
-	converter.buildJointSpace()
+	if err := converter.buildJointSpace(); err != nil {
+		return nil, err
+	}
 	converter.buildNodeForest()
 	converter.model.defaultScene = defaultSceneIndex(doc)
 	converter.model.scenes = make([]loadedScene, 0, len(doc.Scenes))

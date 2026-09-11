@@ -1249,11 +1249,19 @@ time always lands on a pair inside the clip's own rows. A pair straddling the
 clip's boundary — its last frame blended back into its first — never has to be
 built, and the clamped case simply takes the last row twice.
 
-**Caps: 4 influences, 4 plays, no joint ceiling.** Influences are `JOINTS_0`
+**Caps: 4 influences, 4 plays, 256 joints a model.** Influences are `JOINTS_0`
 only. A 5th play is **dropped by lowest weight and reported once per model**.
-There is deliberately no joints-per-model cap: poses live in a storage buffer
-indexed by row against a 128 MiB binding, so the only real limit is glTF's own
-u16 joint index.
+
+The joint ceiling is the storage vertex's, not the pose buffer's: poses live in
+a storage buffer indexed by row against a 128 MiB binding and would take any
+count, but a vertex names its joint in **one byte**
+([mesh.md](mesh.md#per-attribute)). It binds what a vertex can name — the joints
+a model's *skins* claim, which are numbered first and contiguously — so the
+plain joints a node binding claims, which ride the instance record in a full
+`u32`, are outside it. **A model whose skins claim more fails wholesale at load,
+naming the model**, because an index that did not fit would truncate to a
+different bone with nothing reported. The cap is per model: every model has its
+own joint numbering, so a level full of rigged characters does not share it.
 
 **Play weights are normalised on the CPU** at pack time. The blend is a weighted
 *mean* of TRS, not an additive layer: weights summing to 0.5 do not half-apply
@@ -1284,10 +1292,16 @@ the Khronos `InterpolationTest`'s nine cubes do it. The rotation such a matrix
 cannot carry is rebuilt from the axes that survived, which is arbitrary and
 unobservable, because a zero-scaled axis has no direction to get wrong.
 
-**Vertex weights are normalised at load.** glTF requires `WEIGHTS_0` to sum to
-one and real files drift; unnormalised linear blend skinning then scales the
-mesh as well as posing it. Normalising is one pass over data already in cache at
-conversion time and removes a divide from the per-vertex path.
+**Vertex weights are normalised at load *and* renormalised in the shader**, and
+the two are not redundant. glTF only says a producer *should* make `WEIGHTS_0`
+sum to one and real files drift; unnormalised linear blend skinning then scales
+the mesh as well as posing it. The load pass is what puts a weight inside
+`[0, 1]` so that it has a `Unorm8` code to land on at all, and the shader's
+divide by the accumulated total is what covers the sum that rounding four
+weights into four bytes then misses — 11.7% of `Fox`'s vertices, always by
+exactly one code ([mesh.md](mesh.md#per-attribute)). Neither half is permitted
+to assume the other made the sum one, which is also what makes a malformed file
+skinned correctly rather than silently shrunk.
 
 **Skinning is model-only.** `MeshDraw` has no `Plays` field and no joint concept.
 

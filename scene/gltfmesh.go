@@ -177,9 +177,11 @@ func readVertexAttributes(doc *gltf.Document, primitive *gltf.Primitive, geometr
 		}
 	}
 	// JOINTS_0 and WEIGHTS_0 are read into the vertex here so that the one
-	// vertex layout is filled by the one conversion pass. Nothing binds them
-	// yet - every draw scene makes carries SCENE_NOSKIN - and the joint index
-	// space is remapped per model when skinning lands.
+	// vertex layout is filled by the one conversion pass. What is read is the
+	// skin's own numbering and the file's own weights; bindGeometryJoints
+	// remaps the indices into the model's single joint space and normalises
+	// the weights once the skin behind the primitive is known, and the pack
+	// then narrows each to a byte.
 	if accessor, ok := attributeAccessor(doc, primitive.Attributes, gltf.JOINTS_0); ok {
 		joints, err := modeler.ReadJoints(doc, accessor, nil)
 		if err != nil {

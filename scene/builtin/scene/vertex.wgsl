@@ -19,10 +19,19 @@
 // must equal what scene's standardVertexLayout supplies - gfx compares the pair
 // at pipeline time and refuses the draw - so neither side can drift.
 //
-// The UVs are the exception to that guard, and it is worth naming: a Unorm16x2
-// and a Float32x2 both arrive as vec2<f32>, so the declaration below is the
-// same either way and the interface check cannot see the narrowing. What makes
-// a raw uv0 wrong is the mesh record, not the type - see sceneDecodeUV.
+// The joints and the weights are stored narrow too - one byte a joint index,
+// capping a skin at 256, and one unorm byte a weight - and neither needs a
+// decode source, because the fetch unit hands over the same vec4<u32> and
+// vec4<f32> the wide forms did. What eight-bit weights do need is
+// sceneDeformVertex's divide by the accumulated total: four of them cannot sum
+// to exactly one, and a malformed file's never did.
+//
+// The UVs and the weights are the exception to that guard, and it is worth
+// naming: a Unorm16x2 and a Float32x2 both arrive as vec2<f32>, and a Unorm8x4
+// and a Float32x4 both as vec4<f32>, so the declarations below are the same
+// either way and the interface check cannot see either narrowing. What makes a
+// raw uv0 wrong is the mesh record, not the type - see sceneDecodeUV - and what
+// makes raw weights wrong is the missing divide.
 struct SceneVertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec2<f32>,

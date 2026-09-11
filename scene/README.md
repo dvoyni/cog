@@ -25,15 +25,16 @@ the vertex count with no pass over the indices, and a temporary mesh keeps
 `uint32`. Its **authoring API** section is half-implemented: scene *packs* the
 standard vertex at bake rather than reinterpreting the caller's slice, in the
 same traversal that bounds it, so what a mesh stores is scene's to change one
-attribute at a time. Four attributes have moved: the **normal** stores as
+attribute at a time. Six attributes have moved: the **normal** stores as
 `oct32` in a `Unorm16x2`, the **tangent** as one `Uint32` of 15/15 octahedral
-plus handedness plus a reserved bit, and **both UV sets** as a `Unorm16x2`
-against a scale and bias derived per mesh — four bytes each against twelve,
-sixteen, eight and eight — and the stride is 56. Its **per-mesh record** section
-is implemented with it: a 32-byte record per mesh in a storage buffer at
-`@group(0) @binding(3)`, named by the instance record's last spare word. The
-rest is not implemented — presence trims nothing and morph deltas are unchanged
-— and that spec is the plan for the rest.
+plus handedness plus a reserved bit, **both UV sets** as a `Unorm16x2`
+against a scale and bias derived per mesh, the four **joints** as a `Uint8x4`
+and the four **weights** as a `Unorm8x4` — four bytes each against twelve,
+sixteen, eight, eight, eight and sixteen — and the stride is 40. Its **per-mesh
+record** section is implemented with it: a 32-byte record per mesh in a storage
+buffer at `@group(0) @binding(3)`, named by the instance record's last spare
+word. The rest is not implemented — presence trims nothing and morph deltas are
+unchanged — and that spec is the plan for the rest.
 
 ## Plugin
 
@@ -381,7 +382,7 @@ at any size, keeping the ref and its id, and refuses a change of vertex layout o
 topology. `ReleaseMesh` stales the ref at once and frees at the frame boundary.
 
 `scene.Vertex` is the one standard layout: glTF's eight core attributes at
-locations 0..7, 84 bytes authored and 56 stored, interleaved. Every mesh
+locations 0..7, 84 bytes authored and 40 stored, interleaved. Every mesh
 supplies all eight whatever it
 draws with — the bundled shader's static variant declares only the first six, and
 extra attributes a shader never declares are permitted (measured on a conformant
@@ -426,6 +427,24 @@ set's scale and bias from the mesh record — `@location(3)` and `@location(4)`
 are still `vec2<f32>`, so nothing refuses a shader that reads them raw; it
 samples the wrong place instead. `instance.wgsl` declares the buffer and
 `sceneMeshOf(instance)` reaches it.
+
+`Joints` and `Weights` store in four bytes each as well — a `Uint8x4` and a
+`Unorm8x4` — and neither needs a decode source, because the fetch unit hands a
+shader the same `vec4<u32>` and `vec4<f32>` the wide forms did. Two consequences
+are contract:
+
+- **A skin is capped at 256 joints**, because a joint index is one byte. It is a
+  per-model cap: every model has its own joint numbering, so a level full of
+  rigged characters does not share one budget. Exceeding it **fails the whole
+  model at load**, naming it, rather than truncating an index to a different
+  bone and welding a prop to the wrong limb with nothing reported.
+- **The shader renormalises.** `sceneDeformVertex` divides the deformed position
+  by the weight total it accumulates, because eight bits cannot hold four
+  weights that sum to exactly one. This is a **behaviour change on existing
+  content, in the direction of correctness**: glTF only says a producer *should*
+  normalise `WEIGHTS_0`, and a file that does not used to be skinned silently
+  shrunk or inflated. A custom material that skins a standard mesh itself owes
+  the same divide.
 
 A custom layout has no such split — scene cannot pack a struct it does not know,
 so its buffer is the caller's Go memory reinterpreted, and its declared offsets

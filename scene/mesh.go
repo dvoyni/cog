@@ -16,11 +16,12 @@ import (
 // It is not the bytes scene uploads. Scene packs every standard-layout vertex
 // into the storage layout at bake (scene/vertexpack.go), so what a shader reads
 // is that layout's offsets and formats rather than this struct's: 84 bytes of
-// float are authored here and 56 are stored, because the normal, the tangent
-// and both UV sets each store in four. An app writes directions in the m.Vec3
-// and m.Vec4 it would write anyway and never sees the encoding. Nothing in
-// scene ever hands a Vertex back, so there is exactly one authoritative form,
-// the authored one, and it flows one way.
+// float are authored here and 40 are stored, because six of the eight rows
+// narrow - the normal, the tangent and both UV sets to four bytes each, the
+// four joints to a byte apiece and the four weights to a unorm byte apiece. An
+// app writes directions in the m.Vec3 and m.Vec4 it would write anyway and
+// never sees the encoding. Nothing in scene ever hands a Vertex back, so there
+// is exactly one authoritative form, the authored one, and it flows one way.
 //
 // Normal and Tangent.XYZ are directions. Their length is divided out by the
 // octahedral encode and is unrecoverable after bake - silently, as contract,
@@ -36,7 +37,16 @@ import (
 //
 // Nothing in it is optional. A buffer-built mesh never skins, so its Joints and
 // Weights are dead - but their Go zero value is the correct one, because such a
-// draw carries SCENE_NOSKIN and the shader never reads them.
+// draw carries SCENE_NOSKIN and the shader never reads them. A joint stores in
+// one byte, capping a skin at 256, which the glTF loader enforces by refusing a
+// model outright; an authored index past it saturates rather than wrapping,
+// because there is no load to refuse and no draw that would read it.
+//
+// Weights store in one byte each and are renormalised in the shader, which
+// divides the deformed position by the total it accumulates. Eight bits cannot
+// hold four weights that sum to exactly one, and glTF only says a producer
+// SHOULD normalise anyway, so nothing on either side of the bake is permitted
+// to assume the sum.
 //
 // Color is included on failure mode rather than on evidence: it is glTF core,
 // costs four bytes as Unorm8x4, and leaving it out renders a vertex-coloured
@@ -84,8 +94,9 @@ const temporaryMeshID uint32 = 1 << 31
 // scene.Vertex is the one exception: scene packs it, so its method reports the
 // storage layout and its Go fields are the authoring ones. The two differ - the
 // stored normal, tangent and two UV sets are four bytes each against the
-// struct's twelve, sixteen, eight and eight - so nothing may read a
-// scene.Vertex layout as a description of the Go struct.
+// struct's twelve, sixteen, eight and eight, and the stored joints and weights
+// four each against eight and sixteen - so nothing may read a scene.Vertex
+// layout as a description of the Go struct.
 //
 // The one direction that fails is a shader input no attribute supplies. A
 // layout supplying an attribute the shader never declares is legal and common,

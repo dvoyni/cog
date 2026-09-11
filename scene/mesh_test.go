@@ -10,12 +10,13 @@ import (
 )
 
 // The authoring struct is 84 bytes of float and the layout it reports is the
-// 56-byte storage vertex, because the normal, the tangent and both UV sets
-// store in four bytes each. The two numbers are pinned together in one test
-// deliberately: what used to make them the same number was that nothing
-// narrowed, and a reader who assumes that still holds writes an offset that
-// addresses the wrong attribute.
-func TestVertexAuthorsInFloatsAndStoresInFiftySixBytes(t *testing.T) {
+// 40-byte storage vertex, because six of its eight attributes narrow: the
+// normal, the tangent and both UV sets to four bytes each, the four joints to
+// one byte apiece and the four weights to one unorm byte apiece. The two
+// numbers are pinned together in one test deliberately: what used to make them
+// the same number was that nothing narrowed, and a reader who assumes that
+// still holds writes an offset that addresses the wrong attribute.
+func TestVertexAuthorsInFloatsAndStoresInFortyBytes(t *testing.T) {
 	if size := unsafe.Sizeof(Vertex{}); size != 84 {
 		t.Fatalf("the authoring Vertex is %d bytes, want 84", size)
 	}
@@ -27,8 +28,8 @@ func TestVertexAuthorsInFloatsAndStoresInFiftySixBytes(t *testing.T) {
 		gfx.Attr(20, gfx.Unorm16x2), // TEXCOORD_0 - against the mesh record
 		gfx.Attr(24, gfx.Unorm16x2), // TEXCOORD_1 - against the mesh record
 		gfx.Attr(28, gfx.Unorm8x4),  // COLOR_0
-		gfx.Attr(32, gfx.Uint16x4),  // JOINTS_0
-		gfx.Attr(40, gfx.Float32x4), // WEIGHTS_0
+		gfx.Attr(32, gfx.Uint8x4),   // JOINTS_0   - one byte a joint, capped at 256
+		gfx.Attr(36, gfx.Unorm8x4),  // WEIGHTS_0  - renormalised in the shader
 	}
 	if len(layout) != len(want) {
 		t.Fatalf("layout has %d attributes, want %d", len(layout), len(want))

@@ -175,12 +175,30 @@ func (s *jointSpace) append(node int, inverseBind m.Mat4) int {
 // carrying no mesh has nothing to bind and would cost a row per frame for
 // nothing - except where the re-root chain wants its world transform, which
 // claims it after the walk.
-func (c *modelConverter) buildJointSpace() {
+//
+// That order is what makes the joint cap mean what it says. The storage vertex
+// names a joint in one byte, so everything a vertex can name has to fit in
+// sceneMaxSkinJoints - and everything a vertex can name is claimed here, in one
+// contiguous block at the bottom of the numbering, before a plain joint or a
+// re-root joint can take an index. A plain joint rides the instance record in a
+// full u32 and is bounded by node count rather than by anything, so however
+// many a file has, none of them can push a vertex's index over.
+//
+// Failing the whole model is the point. A joint index that did not fit would
+// truncate to a different bone, and a prop welded to the wrong limb with
+// nothing reported is exactly the failure a cap exists to prevent - so the
+// report is the loudest one a load has, which fails the model and names it.
+func (c *modelConverter) buildJointSpace() error {
 	c.joints = newJointSpace()
 	c.skinJoints = make([][]int, len(c.doc.Skins))
 	for index, skin := range c.doc.Skins {
 		if skin == nil {
 			continue
+		}
+		if len(skin.Joints) > sceneMaxSkinJoints {
+			return fmt.Errorf(
+				"its skin %q has %d joints, and a vertex names one in a byte, so %d is the most a skin may have",
+				skin.Name, len(skin.Joints), sceneMaxSkinJoints)
 		}
 		inverseBind := c.inverseBindMatrices(skin)
 		slots := make([]int, len(skin.Joints))
@@ -192,7 +210,19 @@ func (c *modelConverter) buildJointSpace() {
 			slots[slot] = c.joints.claimSkinned(node, bind)
 		}
 		c.skinJoints[index] = slots
+		// Skins share a numbering, because one numbering per model is what
+		// lets a pose row be addressed with no per-skin offset. So two skins
+		// inside the cap can still put a remapped index past it between them,
+		// and the check that actually guards the byte is this one - the
+		// per-skin test above is what names the skin when one skin alone is
+		// the reason.
+		if c.joints.count() > sceneMaxSkinJoints {
+			return fmt.Errorf(
+				"its skins claim %d joints between them, and a vertex names one in a byte, so %d is the most a model may bind",
+				c.joints.count(), sceneMaxSkinJoints)
+		}
 	}
+	return nil
 }
 
 // inverseBindMatrices reads one skin's inverse bind accessor. A skin that
@@ -253,9 +283,12 @@ func (c *modelConverter) inverseBindMatrices(skin *gltf.Skin) []m.Mat4 {
 // geometry and made the same mesh under nine animated nodes nine conversions;
 // it rides the instance record now and touches no vertex at all.
 //
-// Weights are normalised here rather than in the shader. glTF requires them to
-// sum to one and files drift; normalising per vertex at load costs one pass
-// over data already in cache and removes a divide from the per-vertex path.
+// Weights are normalised here as well as in the shader, and the two are not
+// redundant. This pass is what puts a weight inside [0, 1] so that it has a
+// unorm8 code to land on at all - a file writing 3 and 1 would otherwise clamp
+// both to full influence - and the shader's divide is what covers the sum the
+// rounding then misses, which no bake-time scheme can prevent and which a
+// mesh authored through the public API would never have had a bake to fix.
 func (c *modelConverter) bindGeometryJoints(geometry *gltfGeometry, skin int) {
 	if skin < 0 || skin >= len(c.skinJoints) {
 		return

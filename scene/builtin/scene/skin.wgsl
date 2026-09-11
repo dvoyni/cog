@@ -169,9 +169,10 @@ fn sceneJointMatrix(pose: SceneJointPose, joint: SceneSkinJoint) -> mat4x3<f32> 
 // attribute.
 //
 // The arithmetic is that loop's with the weight fixed at one, so the two agree
-// exactly: the weighted sums collapse to their single terms, the normalize is
-// the same normalize, and the handedness is this joint's own rather than a
-// weighted majority of four.
+// exactly: the weighted sums collapse to their single terms, the loop's divide
+// by the accumulated total is a divide by one, the normalize is the same
+// normalize, and the handedness is this joint's own rather than a weighted
+// majority of four.
 fn scenePlainJointVertex(
     instance: SceneInstance, playCount: u32, base: SceneVertex,
 ) -> SceneVertex {
