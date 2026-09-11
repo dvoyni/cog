@@ -1,0 +1,400 @@
+# wgpu as an mcp provider — specification
+
+`wgpu` offers an agent one capability: **`wgpu_time`**, which pauses the engine,
+resumes it, steps it a named number of ticks, and reports which of those is
+true.
+
+Underneath it is an engine feature that MCP happens to want, not an MCP feature:
+`app` declares the contract, `wgpu` implements it, and a frame-step debugger, a
+deterministic test harness and a replay tool all want the identical thing. It
+ships whether or not the broker exists, and `mcp` learns nothing new from it.
+
+The extension point is
+[mcp/docs/specs/mcp.md](../../../mcp/docs/specs/mcp.md). Assembled from the
+resolved tickets of
+[An agent-facing extension point across cog](https://github.com/dvoyni/cog/issues/199);
+every section cites the tickets it came from. Nothing is decided here — where a
+claim rests on something unverified, it is marked **Gap** and says what would
+settle it.
+
+---
+
+## Contents
+
+- [Vocabulary](#vocabulary) · [There is no clock to fake](#there-is-no-clock-to-fake)
+- [What pause stops: the tick, not the frame](#what-pause-stops-the-tick-not-the-frame)
+- [Resume banks nothing](#resume-banks-nothing) · [A step](#a-step)
+- [An arm joins a pending step](#an-arm-joins-a-pending-step)
+- [Whose capability it is](#whose-capability-it-is) ·
+  [The flag is an atomic](#the-flag-is-an-atomic)
+- [`wgpu_time`](#wgpu_time) · [What the loop buys](#what-the-loop-buys)
+- [Required app changes](#required-app-changes) ·
+  [Required wgpu changes](#required-wgpu-changes)
+- [Out of scope](#out-of-scope)
+
+---
+
+## Vocabulary
+
+**Tick source** — what decides when an update tick is published: the driver's
+frame clock while running, or an explicit step request while paused. **Rendering
+is not a tick source: a paused engine keeps drawing the last completed frame.**
+It is in `CONTEXT.md`.
+
+That second sentence is the one every reader gets wrong, and it is why the term
+exists at all. The fact is spread across an accumulator in `wgpu`, an ignored
+`acquire` return in `gfx`, and two `defer` resets in `canvas` and `ui` — nobody
+gets it from source.
+
+---
+
+## There is no clock to fake
+
+The hardest-looking question here dissolves on one grep.
+
+**`time.Now()` appears exactly once in the whole module** — `wgpu/plugin.go:203`,
+the frame pacer measuring draw-to-draw interval. Nothing else in cog reads
+wall-clock time. `app.UpdateEvent.Dt` is always `p.config.Step.Seconds()`
+(`wgpu/plugin.go:160`), a **constant**, and `anim` advances timelines by exactly
+that constant (`anim/plugin.go:43`).
+
+So there is no engine time to distort, only a driver-local accumulator, and
+pause is the decision to stop feeding it. **No time scaling, no virtual clock,
+no `Time` resource.**
+
+Two limits follow, and both are stated as non-guarantees rather than left to be
+discovered:
+
+> **cog can stop the tick; it cannot slow it.** There is no `timeScale`, and
+> there should not be one.
+>
+> **A game that calls `time.Now()` itself is outside cog's contract, and pause
+> cannot reach it.** A game whose animation is driven by ticks freezes; a game
+> whose animation is driven by its own wall-clock does not.
+
+### `UpdateEvent{Dt: 0}` was rejected
+
+The tempting alternative is to keep publishing ticks with `Dt` zero. It would
+make everything uniform — `anim` freezes because it multiplies by `Dt`, `input`
+edges roll, `ui` re-lays-out, `canvas` re-records, and **every snapshot and
+capture keeps working with no special case at all.** The whole of
+[Under pause](#what-pause-stops-the-tick-not-the-frame) below would not exist.
+
+It loses because **`Dt` is a constant in cog.** Every tick carries the same
+value, so a game is positively encouraged to ignore it and count ticks:
+`pos += velPerTick` is idiomatic here, not sloppy. A zero-`Dt` pause is a lie to
+that entire class of game, and **a pause that half-works is worse than one that
+visibly stops.**
+
+---
+
+## What pause stops: the tick, not the frame
+
+**Pause stops `app.UpdateEvent` publication and nothing else.**
+
+The lever already exists and is one branch deep. `onUpdate`
+(`wgpu/plugin.go:152`) converts measured frame time into N update events through
+`accumulate` (`:171`); `onDraw` (`:200`) is gogpu's own vsync callback and is
+independent of it. Stop feeding the accumulator and updates stop while draws
+continue.
+
+**A paused engine still paints, and this is already true of the code.**
+`renderOnRender` (`gfx/plugin.go:111`) calls `acquire`, **ignores its `false`
+return** (`:122`), and re-translates `read.Get()` regardless. With no new queue
+completing, the last completed queue is replayed every frame indefinitely. The
+window shows the frozen frame rather than going black or stale-buffered, and a
+capture still has something to read.
+
+What else keeps running while paused, all of it deliberate:
+
+- `flushInput` still dispatches `input.ApplyCmd` (`wgpu/input.go:98-105`), so
+  synthetic input still reaches the seam and banks there.
+- `app.WindowSizeChangeEvent` still publishes, and `app.SetViewportCmd` still
+  fires from `onDraw`.
+- The window stays live, movable and resizable.
+
+**Nothing about pause makes the application look hung**, and the spec says so in
+those words, because the opposite reading is the one that silently breaks every
+capture: a capture needs a frame to be *submitted* before its readback can
+resolve, so "paused" cannot mean "no submits". See
+[gfx/docs/specs/capture.md §The wait](../../../gfx/docs/specs/capture.md#the-wait).
+
+---
+
+## Resume banks nothing
+
+While paused, `onDraw` keeps incrementing `frameSeq` (`wgpu/plugin.go:205`), so
+a naive resume computes `dt = frameDt × (seq − lastFrameSeq)` and turns thirty
+paused seconds into a thirty-second delta.
+
+The existing guards already contain it — `MaxFrame` clamps to 250 ms
+(`wgpu/plugin.go:176`, default `wgpu/config.go:45`) and `MaxPending` caps at 4
+whole steps (`:180`) — so the worst case today is four catch-up ticks, not a
+spiral. This is polish rather than safety, and it is worth taking anyway:
+
+**While paused, `onUpdate` consumes the frame sequence and discards its `dt`,
+leaving `accum` untouched.** Resume then costs zero catch-up ticks and the
+clamps are never exercised.
+
+A resumed game continues from exactly where it stopped, which is the property an
+agent relies on when it compares two observations across a pause.
+
+---
+
+## A step
+
+- **A step publishes exactly one `app.UpdateEvent{Dt: Step, Last: true}`.**
+  `Last` is true because a step *is* the last — and only — catch-up step of its
+  frame, so once-per-frame subscribers (`canvas.flush`, `gfx.presentOnUpdate`,
+  `scene.flush`) do their work and the step produces a complete frame.
+- **`step(n)` publishes all n in one `onUpdate`, bypassing `MaxPending`.** That
+  cap exists to keep a real-time engine near real time by dropping excess work;
+  a step is not real time, and dropping requested steps would be a silent lie.
+  Rendering shows the last of the n, which is what *advance sixty ticks and
+  look* means.
+- **`step` implies pause.** Stepping a running engine is meaningless; the
+  capability pauses first rather than refusing.
+- **`step` blocks until the steps are published.** The request arrives on an
+  HTTP goroutine and the tick happens on the main thread, so `step` is a user of
+  [mcp §Arm-then-wait](../../../mcp/docs/specs/mcp.md#arm-then-wait) and carries
+  its own deadline for the same reason a capture does: the broker's 30 s is not
+  the specific message.
+- **`n` is capped at 600 — ten seconds of simulation** — on the same reasoning
+  as `input_send`'s duration cap: a request that outlives its deadline leaves
+  state the capability body can no longer unwind. The same figure bounds a
+  capture burst's span, so there is one number to remember.
+
+---
+
+## An arm joins a pending step
+
+**Arming a snapshot while a step is pending joins that step rather than
+requesting another.**
+
+Read per-arm, "a snapshot under pause performs exactly one step" would make
+three concurrent arms three steps — three different ticks, which is the precise
+opposite of what arming them together is for, and it would leave *canvas and ui
+from one moment* unreachable. That pairing is the common case for a ui bug.
+
+Implementation is **one more atomic on the driver** beside the pause flag,
+`alpha` and `frameSeq` — the same thread boundary, for the same reason as
+[below](#the-flag-is-an-atomic). It costs nothing when no step is pending.
+
+This is what makes the pairing recipe work without any broker mechanism, and it
+is why that recipe orders a capture **last**: a capture costs no tick, so it
+shows whatever the last step produced, while armed first it would resolve
+against the current frozen frame and straddle two ticks. See
+[mcp §Pairing a moment](../../../mcp/docs/specs/mcp.md#pairing-a-moment).
+
+**It is a tick-source behaviour before it is an agent-facing one**, so it
+belongs in the `app` and `wgpu` READMEs alongside pause and step, not only here.
+
+---
+
+## Whose capability it is
+
+**`app` declares the contract; `wgpu` implements it and provides the
+capability.**
+
+`app` is contract-only and a driver implements it — the exact precedent is
+`app.QuitCmd`, declared at `app/commands.go:6` and handled by `wgpu` at
+`wgpu/plugin.go:99`, with `app.SetViewportCmd` handled by `gfx` as the second
+instance. Time control is the same shape: **only the host that owns the loop can
+stop it**, and `app` names the contract so gameplay code never imports a driver.
+
+**The provider must be `wgpu`**, because `mcp.Provider` embeds `kernel.Plugin`
+and **`app` has no plugin at all**. There is no `app`-side thing that could
+provide. This makes `wgpu` the first `wgpu_` provider and puts this file in the
+spec family.
+
+The tool is therefore named **`wgpu_time`**, and a different host driver would
+name its own `sdl_time`. Two ways out were considered and rejected:
+
+- **Amend the `<plugin>_<capability>` rule** so a provider declares its own
+  prefix. Rejected: the rule's whole value is that the prefix is unforgeable and
+  unique by construction, and one case does not buy an escape hatch.
+- **Give `app` a plugin.** Rejected on cost: every existing application's
+  composition breaks, and the driver would have to dispatch a command every
+  frame merely to ask whether to tick, where today it reads a field.
+
+**The driver-shaped name is accurate rather than unfortunate.** Pausing is a
+property of the host that owns the loop, and a different host genuinely is a
+different thing with a different answer.
+
+---
+
+## The flag is an atomic
+
+The command handler runs on an HTTP goroutine; `onUpdate` runs on the main
+thread. **That boundary already exists in this plugin and is already crossed
+with atomics** — `alpha` (`wgpu/plugin.go:37`) and `frameDtBits`/`frameSeq`
+(`:46-47`). The pause state, the pending-step count and the step-coalescing flag
+join them as atomics on `wgpu.Plugin`, written only by the command handler.
+
+A kernel resource was the alternative and loses concretely: `onUpdate` is a
+driver callback holding an `Executioner`, not a handler holding a lock, so
+reading a resource would mean **a dispatch every frame just to ask whether to
+tick**. `gfx` pays that cost for the viewport because the viewport genuinely
+belongs to the engine; the tick source belongs to the driver alone.
+
+---
+
+## `wgpu_time`
+
+```go
+type TimeRequest struct {
+	Action string `json:"action"`          // pause | resume | step | status
+	Steps  int    `json:"steps,omitempty"` // for step; default 1, max 600
+}
+
+type TimeResponse struct {
+	Paused   bool `json:"paused"`
+	Stepped  int  `json:"stepped"`  // ticks advanced by this call
+	Advanced int  `json:"advanced"` // total ticks advanced since the pause began
+}
+```
+
+`mcp.Func`, because `step` waits. The resulting state comes back on **every**
+call, including `status`.
+
+**One tool rather than four.** The same reasoning that collapsed `input`'s verb
+family applies unchanged: multiple spellings of one operation move the selection
+risk inside the tool set. These four actions are genuinely one operation on one
+piece of state.
+
+**`status` is the read-only path**, so the broker can annotate approval per
+action rather than needing a second capability. This is the one place the design
+differs from `input_state`, which had to be separate because *looking* and
+*pressing* are different capabilities, not different arguments to one — here
+they are different arguments to one.
+
+**It binds to a frame for `step` and to none for `pause`, `resume` and
+`status`**, which makes it the only capability that is both. That is a fact
+about the action rather than a crack in the discipline: the discipline says a
+capability that waits for a frame arms and then waits, and `step` does.
+
+**"Already paused" is `mcp.Unavailable{Reason}`, not an error** — an expected
+outcome the agent reads and moves past.
+
+### The description prose
+
+Reproduced in full, per the house style, so it is reviewed as prompt text:
+
+> Stop, start or single-step the game's update loop. `pause` stops update ticks;
+> the window keeps drawing the last completed frame, stays responsive and can
+> still be captured, so a paused game does not look hung. `step` advances
+> exactly the number of ticks you ask for and implies pause. `resume` returns to
+> real time from exactly where it stopped — no time is banked and nothing
+> catches up. `status` just reports.
+>
+> Use this to take an observation that nothing moved underneath. Paused, two
+> captures are identical, and `key_down`, `step 1`, `key_up`, `step 1` holds a
+> key for exactly one tick — something a running engine cannot do. Snapshots
+> (`canvas_draws`, `ui_layout`, `gfx_frame`) each need a tick, so while paused
+> they perform one step themselves and say so; arming them together shares a
+> single step, and `gfx_capture` should come last because it costs no tick.
+>
+> This stops cog's tick, and only that. Animation driven by ticks freezes;
+> anything a game times by its own wall-clock does not. There is no slow motion.
+> Nothing resumes the game when you disconnect — it stays paused until something
+> resumes it.
+
+---
+
+## What the loop buys
+
+The reason this is in the first version rather than later, stated as the loop it
+makes possible:
+
+```
+gfx_capture          -> image A, no tick
+input_send key_down  -> banked, nothing ticks
+wgpu_time step 1     -> exactly one tick, carrying exactly that input
+gfx_capture          -> image B, no tick
+```
+
+**The difference between A and B is one tick carrying one input, with nothing
+else moving.** That is not achievable in a running engine at all, and without it
+every observation an agent makes is contaminated by however far the game moved
+while it was thinking.
+
+The mechanism is one branch inside a function that already exists.
+
+---
+
+## Required app changes
+
+**`app/commands.go`**
+
+- Declare the time-control command, `app.QuitCmd`-shaped: a request naming the
+  action and a step count, a response carrying paused-ness and the ticks
+  advanced.
+
+**`app/README.md`**
+
+- Document it as an engine feature with its stated limits: the `time.Now()`
+  non-guarantee, *stop but not slow*, that pause stops the tick and not the
+  frame, and that an arm joining a pending step is part of what stepping means.
+  A test harness must find this without reading an agent spec.
+
+---
+
+## Required wgpu changes
+
+**`wgpu/plugin.go`**
+
+- Atomics beside `alpha` and `frameSeq`: `paused`, `pendingSteps`, and the
+  step-coalescing flag.
+- `onUpdate` (`:152`) gains the pause branch: when paused, consume the frame
+  sequence, **discard its `dt`**, leave `accum` untouched, and publish
+  `pendingSteps` × `app.UpdateEvent{Dt: Step, Last: true}`, bypassing
+  `MaxPending`.
+- Register the time-control command handler; it writes the atomics and blocks
+  until the requested steps have been published.
+
+**`wgpu/mcpprovider.go`** (new)
+
+- `wgpu` implements `mcp.Provider`, returning the one capability.
+- `TimeRequest`/`TimeResponse`, the `Func` body with its own deadline, and the
+  description string reproduced above.
+
+**`wgpu/README.md`**
+
+- The accumulator branch, the discard-on-pause, step semantics, the atomics, and
+  the step-coalescing rule.
+
+**Tests**
+
+- A paused engine publishes no `app.UpdateEvent` and keeps calling `onDraw`.
+- `resume` after a long pause produces **one** tick, not a catch-up burst.
+- `step(5)` publishes five ticks in one `onUpdate`, each with `Last: true`.
+- Two snapshot arms landing while one step is pending produce **one** tick, and
+  both snapshots report the same tick.
+- A capture armed under pause resolves with no tick, and twice in a row gives
+  byte-identical files. This is the assertion that documents the whole
+  capture/snapshot asymmetry.
+
+**`CONTEXT.md`** — already applied: **Tick source** is defined under Runtime
+Architecture.
+
+---
+
+## Out of scope
+
+- **Time scaling.** There is no clock to scale — see
+  [There is no clock to fake](#there-is-no-clock-to-fake). cog can stop the
+  tick; it cannot slow it.
+
+- **Reaching a game's own `time.Now()`.** Outside cog's contract.
+
+- **Auto-resume on disconnect.** A paused game is *visible* but not
+  self-explaining — it looks like a hang rather than like a decision someone
+  made — so this is the sharpest case of the contract's no-lifecycle rule. It is
+  still ruled out for the reasons that rule gives: there is no session to hang
+  it on, a streamable-HTTP disconnect is not prompt, and resuming a game
+  someone deliberately froze is the wrong default at the moment the agent hands
+  it to a human. The remedies are `status`, which says so, and `resume`, which is
+  one call.
+
+- **Deterministic replay built on stepping.** A step is the primitive a replay
+  tool would use, and this document deliberately stops at the primitive.

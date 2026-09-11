@@ -45,6 +45,9 @@ The optional lifecycle phase in which a plugin begins operating after all regist
 The single plugin that owns the application's blocking runtime loop.
 _Avoid_: System plugin
 
+**Tick source**:
+What decides when an update tick is published — the driver's frame clock while running, or an explicit step request while paused. Rendering is not a tick source: a paused engine keeps drawing the last completed frame.
+
 **Event publication**:
 One delivery of an event value to its subscribers. Separate publications may execute concurrently.
 
@@ -88,13 +91,53 @@ Scheduler fairness in which later work may pass an earlier request only when it 
 A command executed by another handler using only resource access already held by that handler.
 
 **Architecture description**:
-A read-only account of finalized plugin order, contract ownership, and subscription dependency graphs.
+A read-only account of finalized plugin order, contract ownership, subscription dependency graphs, and the lock set each handler ends up holding once its declared dispatches are folded in. It states what composition produced, which no single source file does.
 
 **Headless engine**:
 An engine without a Host. It remains running until its context is canceled.
 
 **Shutdown**:
 The optional lifecycle phase that stops active plugins in reverse dependency order before the scheduler stops.
+
+## Agent Interface
+
+**Agent**:
+An external, LLM-driven client attached to a running engine. It observes through capabilities and reaches the game only through synthetic input.
+_Avoid_: Client, user, bot
+
+**Capability**:
+A named, described, typed unit of engine functionality a Provider offers to an Agent. It carries its own request and response types and is fixed for the engine lifetime.
+_Avoid_: Tool, action, endpoint
+
+**Provider**:
+A plugin that offers capabilities. It speaks cog contracts only; it never emits protocol vocabulary.
+
+**Broker**:
+The single plugin that collects capabilities from every provider and serves them to an agent. It holds no knowledge of what any capability does.
+_Avoid_: Server, gateway, bridge
+
+**Capture**:
+One rendered colour target taken off the GPU and written to a file the Agent names. It names a moment: a Capture shows the game as of a tick that began after the request, rather than the last frame kept around. One request may ask for several, but each one still names its own moment — see Burst.
+_Avoid_: Screenshot, frame grab; a Snapshot is the other thing an Agent asks for from the same moment
+
+**Burst**:
+One Capture request that writes a still per tick for several consecutive ticks, at a fixed interval. It is not a recording: nothing is encoded, nothing plays, and an Agent reads a few of the stills rather than all of them.
+_Avoid_: Sequence, film, recording, video
+
+**Readback**:
+The transfer of a rendered texture from GPU memory into CPU memory, which a Capture is built on. It is renderer vocabulary and belongs to gfx: a Provider offers Captures, and only gfx and its Backend speak of readback.
+
+**Snapshot**:
+One tick's recorded declarations, rendered while they are still alive. It is not a copy of a queue: no queue outlives the tick that filled it, so a Snapshot is produced inside one and shaped by the request that asked for it. A Capture is the pixels; a Snapshot is what produced them, and the two are meant to name one moment.
+_Avoid_: Dump, inspection, capture
+
+**Synthetic input**:
+Input an Agent sends through the same seam a person's input arrives on: folded into the polled input state and published as the same discrete events, carrying no mark that distinguishes it and no lifetime of its own. A key an Agent presses stays down until something releases it.
+_Avoid_: Simulated input, fake input, injection
+
+**Tool**:
+The protocol rendering of one Capability: its name, JSON schema, description, and annotations as an agent's client sees them. Written by the Broker, never by a Provider.
+_Avoid_: Use Capability when talking about cog
 
 ## UI Declarations
 
