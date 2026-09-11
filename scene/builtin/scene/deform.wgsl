@@ -14,18 +14,21 @@
 // same path plus Gram-Schmidt against the skinned normal, and its handedness
 // follows the inverse bind's determinant sign, accumulated by weight so the
 // answer is the majority influence's with no search.
+//
+// decoded is the vertex with its normal and tangent already decoded, which the
+// entry point does before calling this. It is passed in rather than decoded
+// here so that the order - decode, morph, skin - is visible at the top of
+// vs_main rather than buried; vertex itself is still needed for the joints and
+// weights, which are stored in the formats the fetch unit hands over directly.
 fn sceneDeformVertex(
-    instance: SceneInstance, vertexIndex: u32, vertex: SceneVertexIn,
+    instance: SceneInstance, vertexIndex: u32, vertex: SceneVertexIn, decoded: SceneVertex,
 ) -> SceneVertex {
     // Morph, then skin, per the glTF order: the shapes reshape the mesh in its
     // own bind space and the skin then poses that.
 //#if SCENE_MORPH
-    let base = sceneMorphVertex(
-        instance, vertexIndex,
-        SceneVertex(vertex.position, vertex.normal, vertex.tangent),
-    );
+    let base = sceneMorphVertex(instance, vertexIndex, decoded);
 //#else
-    let base = SceneVertex(vertex.position, vertex.normal, vertex.tangent);
+    let base = decoded;
 //#endif
 //#if SCENE_SKIN
     if (instance.flags & SCENE_NOSKIN) != 0u {

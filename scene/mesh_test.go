@@ -9,20 +9,26 @@ import (
 	"github.com/dvoyni/cog/m"
 )
 
-func TestVertexIsTheEightyFourByteStandardLayout(t *testing.T) {
+// The authoring struct is 84 bytes of float and the layout it reports is the
+// 64-byte storage vertex, because the normal and the tangent store in four
+// bytes each. The two numbers are pinned together in one test deliberately:
+// what used to make them the same number was that nothing narrowed, and a
+// reader who assumes that still holds writes an offset that addresses the wrong
+// attribute.
+func TestVertexAuthorsInFloatsAndStoresInSixtyFourBytes(t *testing.T) {
 	if size := unsafe.Sizeof(Vertex{}); size != 84 {
-		t.Fatalf("Vertex is %d bytes, want 84", size)
+		t.Fatalf("the authoring Vertex is %d bytes, want 84", size)
 	}
 	layout := Vertex{}.VertexLayout()
 	want := []gfx.VertexAttr{
 		gfx.Attr(0, gfx.Float32x3),  // POSITION
-		gfx.Attr(12, gfx.Float32x3), // NORMAL
-		gfx.Attr(24, gfx.Float32x4), // TANGENT
-		gfx.Attr(40, gfx.Float32x2), // TEXCOORD_0
-		gfx.Attr(48, gfx.Float32x2), // TEXCOORD_1
-		gfx.Attr(56, gfx.Unorm8x4),  // COLOR_0
-		gfx.Attr(60, gfx.Uint16x4),  // JOINTS_0
-		gfx.Attr(68, gfx.Float32x4), // WEIGHTS_0
+		gfx.Attr(12, gfx.Unorm16x2), // NORMAL     - oct32
+		gfx.Attr(16, gfx.Uint32),    // TANGENT    - oct 15/15 + handedness
+		gfx.Attr(20, gfx.Float32x2), // TEXCOORD_0
+		gfx.Attr(28, gfx.Float32x2), // TEXCOORD_1
+		gfx.Attr(36, gfx.Unorm8x4),  // COLOR_0
+		gfx.Attr(40, gfx.Uint16x4),  // JOINTS_0
+		gfx.Attr(48, gfx.Float32x4), // WEIGHTS_0
 	}
 	if len(layout) != len(want) {
 		t.Fatalf("layout has %d attributes, want %d", len(layout), len(want))

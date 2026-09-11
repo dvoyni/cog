@@ -27,15 +27,18 @@ func flattenedSceneShader(t testing.TB, opts ...gfx.ShaderOption) string {
 }
 
 // The split is line-preserving, which is what makes the source map a small
-// table rather than a per-line array: the ten sources' lines total exactly the
+// table rather than a per-line array: the eleven sources' lines total exactly the
 // flattened module's, with a zero-line §4 prologue.
 func TestTheSplitFlattensToExactlyItsSourcesLineCount(t *testing.T) {
 	names, err := fs.Glob(shaderFS, "builtin/scene/*.wgsl")
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
-	if len(names) != 10 {
-		t.Fatalf("the split ships %d sources, want the ten named in the migration: %v", len(names), names)
+	// Ten from the split, plus vertexdecode.wgsl, which the storage vertex's
+	// narrowed normal and tangent added and which is published rather than
+	// internal - an app writing its own scene material includes it.
+	if len(names) != 11 {
+		t.Fatalf("the split ships %d sources, want eleven: %v", len(names), names)
 	}
 	total := 0
 	for _, name := range names {

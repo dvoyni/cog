@@ -339,18 +339,22 @@ func bindModelMaterial(
 // third source bit. It also means unloading a model releases its meshes through
 // the machinery that already exists.
 //
-// The bounding sphere is not recomputed from the vertices: glTF requires the
-// POSITION accessor to declare min/max, and that box is both authoritative and
-// already read. A pass over the vertices would produce the same answer at O(n).
+// The bounding sphere is not taken from the pack even though the pack computes
+// one: glTF requires the POSITION accessor to declare min/max, and that box is
+// both authoritative and already read, so a model's bounds come from the file
+// on this path and from the walk on the buffer-built one.
 func (l *Lookup) bakeModelGeometry(
 	geometry *gltfGeometry, resources *gfx.ResourceQueue,
 ) MeshRef {
 	layoutID, layout, _ := l.layouts.resolve[Vertex]()
-	// The bytes are handed over rather than copied: the converted geometry is
-	// this load's private copy and nothing reads it again, so a second copy
-	// would double a model's peak memory for no reader.
+	// The converted vertices are packed over themselves and the bytes are then
+	// handed over rather than copied. This load's vertices are its private copy
+	// and nothing reads them again, so packing into a second buffer would hold
+	// both forms of every primitive at once - which is the peak memory the
+	// reinterpret this replaced was avoiding. A storage vertex is smaller than
+	// an authoring one, so the pack fits inside the memory it reads.
 	record := meshRecord{
-		vertices:    resources.BakeBuffer(uploadBytes(geometry.vertices), false),
+		vertices:    resources.BakeBuffer(packOverAuthored(geometry.vertices), false),
 		vertexCount: len(geometry.vertices),
 		indexCount:  len(geometry.indices),
 		topology:    geometry.topology,

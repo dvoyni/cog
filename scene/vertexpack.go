@@ -3,6 +3,7 @@ package scene
 import (
 	"encoding/binary"
 	"math"
+	"unsafe"
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/m"
@@ -12,34 +13,40 @@ import (
 // the buffer scene uploads, and the stride one vertex occupies there.
 //
 // These are written down rather than taken from Vertex's field offsets, and
-// that is the whole point of them. The authoring struct and the storage bytes
-// are two layouts that happen to coincide today; the moment one attribute
-// changes format they stop coinciding, and an offset derived from the Go
-// struct would silently become the wrong one - the authoring offset, used to
-// address the storage buffer. Writing them here means the divergence is a diff
-// in one place rather than a class of bug.
+// that is the whole point of them. The authoring struct is 84 bytes of float
+// and the storage vertex is 64; the normal and the tangent have moved, so an
+// offset derived from the Go struct would silently be the wrong one - the
+// authoring offset, used to address the storage buffer.
 //
-// scene/vertexpack_test.go asserts that they still agree with the struct
-// today, and is deleted by the first ticket that moves an attribute.
+// Every offset is a multiple of four and so is the stride, which WebGPU
+// requires of arrayStride unconditionally. A narrower attribute that broke that
+// would not save a byte: it pads straight back.
 const (
 	storagePosition = 0
 	storageNormal   = 12
-	storageTangent  = 24
-	storageUV0      = 40
-	storageUV1      = 48
-	storageColor    = 56
-	storageJoints   = 60
-	storageWeights  = 68
-	storageStride   = 84
+	storageTangent  = 16
+	storageUV0      = 20
+	storageUV1      = 28
+	storageColor    = 36
+	storageJoints   = 40
+	storageWeights  = 48
+	storageStride   = 64
 )
 
 // standardVertexLayout is the storage layout the bundled PBR's vertex stage
 // reads, in @location order. It describes the bytes packVertices writes, not
 // the Go struct a caller fills in.
+//
+// The normal and the tangent are the two narrowed rows, and what reads them is
+// builtin/scene/vertexdecode.wgsl: a two-component 16-bit unorm holding oct32,
+// and one 32-bit word holding oct 15/15 plus handedness plus a reserved bit.
+// gfx requires a shader's declared (kind, count) at a location to equal what
+// the layout supplies, so the pair here and the pair in vertex.wgsl cannot
+// drift apart without a pipeline being refused.
 var standardVertexLayout = [...]gfx.VertexAttr{
 	gfx.Attr(storagePosition, gfx.Float32x3), // POSITION
-	gfx.Attr(storageNormal, gfx.Float32x3),   // NORMAL
-	gfx.Attr(storageTangent, gfx.Float32x4),  // TANGENT
+	gfx.Attr(storageNormal, gfx.Unorm16x2),   // NORMAL   - oct32
+	gfx.Attr(storageTangent, gfx.Uint32),     // TANGENT  - oct 15/15 + handedness
 	gfx.Attr(storageUV0, gfx.Float32x2),      // TEXCOORD_0
 	gfx.Attr(storageUV1, gfx.Float32x2),      // TEXCOORD_1
 	gfx.Attr(storageColor, gfx.Unorm8x4),     // COLOR_0
@@ -72,23 +79,72 @@ func packVertices(arena *[]byte, vertices []Vertex) (span, m.Sphere) {
 	}
 	at, size := len(*arena), len(vertices)*storageStride
 	*arena = append(*arena, make([]byte, size)...)
-	dst := (*arena)[at:]
+	return span{at: at, size: size}, packInto((*arena)[at:], vertices)
+}
+
+// packOverAuthored packs vertices over the memory they are already in and
+// reports the bytes, which are the front of that same allocation.
+//
+// It exists for the glTF loader, which holds a whole model's converted vertices
+// at once and hands them to the resource queue without copying them. A storage
+// vertex is smaller than an authoring one, so the pack runs forward over the
+// slice and every write lands strictly behind the vertex it has already read -
+// which means the loader pays no second buffer for a model's geometry, where
+// packing into a fresh one would have held the authored and the packed form of
+// every primitive at the same time.
+//
+// The slice is consumed: after this returns, its elements are storage bytes
+// wearing a Vertex's type, and nothing may read them as vertices again.
+func packOverAuthored(vertices []Vertex) []byte {
+	if len(vertices) == 0 {
+		return nil
+	}
+	// Sound only because a storage vertex is the smaller of the two, which the
+	// guard below makes a compile error rather than a trust.
+	dst := unsafe.Slice((*byte)(unsafe.Pointer(&vertices[0])), len(vertices)*storageStride)
+	packInto(dst, vertices)
+	return dst
+}
+
+// A storage vertex must fit inside an authoring one for packOverAuthored's walk
+// to stay behind itself. This is that requirement, spelled so that breaking it
+// fails the build with a negative array length rather than corrupting a model's
+// geometry at load.
+var _ [unsafe.Sizeof(Vertex{}) - storageStride]byte
+
+// packInto writes every vertex's storage bytes at its stride in dst and reports
+// the bounding sphere of their positions. dst may be the vertices' own memory;
+// each vertex is copied into the call before anything is written, and the write
+// for one vertex ends before the next one begins.
+func packInto(dst []byte, vertices []Vertex) m.Sphere {
 	box := m.Box3{Min: vertices[0].Position, Max: vertices[0].Position}
 	for i := range vertices {
-		vertex := &vertices[i]
-		box.Min, box.Max = box.Min.Min(vertex.Position), box.Max.Max(vertex.Position)
-		packVertex(dst[i*storageStride:], vertex)
+		box.Min = box.Min.Min(vertices[i].Position)
+		box.Max = box.Max.Max(vertices[i].Position)
+		packVertex(dst[i*storageStride:], vertices[i])
 	}
-	return span{at: at, size: size}, box.Sphere()
+	return box.Sphere()
 }
 
 // packVertex writes one authoring vertex as its storage bytes. dst is the whole
 // of the arena from this vertex's offset on, so every write is at a constant
 // offset from its start.
-func packVertex(dst []byte, vertex *Vertex) {
+//
+// The vertex arrives by value rather than by pointer, which is what lets the
+// glTF loader pack a slice over itself: the copy is made before the first store
+// into dst, so a dst that overlaps the vertex reads the right bytes.
+//
+// The normal and the tangent are encoded here rather than stored: four bytes
+// each, decoded in the vertex stage from builtin/scene/vertexdecode.wgsl. The
+// normal's two 16-bit unorm codes are written as two words rather than one,
+// because a Unorm16x2 attribute's components are consecutive in the buffer and
+// a single native-endian uint32 would order them by the host's endianness.
+func packVertex(dst []byte, vertex Vertex) {
 	putVec3(dst[storagePosition:], vertex.Position)
-	putVec3(dst[storageNormal:], vertex.Normal)
-	putVec4(dst[storageTangent:], vertex.Tangent)
+	normalX, normalY := packNormal(vertex.Normal)
+	binary.NativeEndian.PutUint16(dst[storageNormal:], normalX)
+	binary.NativeEndian.PutUint16(dst[storageNormal+2:], normalY)
+	binary.NativeEndian.PutUint32(dst[storageTangent:], packTangent(vertex.Tangent))
 	putVec2(dst[storageUV0:], vertex.UV0)
 	putVec2(dst[storageUV1:], vertex.UV1)
 	copy(dst[storageColor:storageColor+4], vertex.Color[:])

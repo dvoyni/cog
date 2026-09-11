@@ -208,6 +208,15 @@ module with one vertex stage and no entry-point selection, so its inputs are
 `scene.Vertex`'s eight attributes and nothing else. The reverse — the standard
 layout with a custom material — is fine.
 
+A custom material over the **standard** layout must **decode the normal and the
+tangent**. They are stored octahedrally, four bytes each, so `@location(1)` is a
+`vec2<f32>` and `@location(2)` is a `u32`; include `scene.VertexDecodePath` and
+call `sceneDecodeNormal` and `sceneDecodeTangent` at the top of the vertex
+stage, before any morph or skin. Declaring the `vec3<f32>` and `vec4<f32>` those
+used to be is refused at pipeline time — which is the only reason it is not a
+trap: WebGPU itself would have filled the missing components with `(0, 0, 0, 1)`
+and shaded from a plausible direction lying in the XY plane.
+
 ## Passes And Targets
 
 `Pass.Target` takes the gfx handle untouched. Scene mints no textures, so a

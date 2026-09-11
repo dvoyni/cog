@@ -1,9 +1,9 @@
 package scene
 
 import (
+	"encoding/binary"
 	"math"
 	"testing"
-	"unsafe"
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/m"
@@ -38,14 +38,66 @@ func everyAttribute() []Vertex {
 	}
 }
 
-// The expand step's whole claim: scene now writes the storage bytes itself
-// rather than reinterpreting the caller's slice, and what it writes is what the
-// reinterpret produced. Nothing narrows and nothing moves, so the two byte
-// strings are equal - which is what makes the next three tickets "change one
-// attribute's format" rather than "rewrite the upload path".
+// storedVertex reads one packed vertex back out of the arena, through the same
+// offsets and formats the layout hands the fetch unit. It is what makes the
+// tests below assertions about the buffer rather than about the packer's
+// internals: every read here is the read a GPU makes.
+type storedVertex struct {
+	position m.Vec3
+	normal   m.Vec3
+	tangent  m.Vec4
+	uv0, uv1 m.Vec2
+	color    [4]uint8
+	joints   [4]uint16
+	weights  m.Vec4
+}
+
+func readStoredVertex(t *testing.T, packed []byte, index int) storedVertex {
+	t.Helper()
+	at := packed[index*storageStride:]
+	stored := storedVertex{
+		position: readVec3(at[storagePosition:]),
+		normal: decodeStoredNormal(
+			binary.NativeEndian.Uint16(at[storageNormal:]),
+			binary.NativeEndian.Uint16(at[storageNormal+2:]),
+		),
+		tangent: decodeStoredTangent(binary.NativeEndian.Uint32(at[storageTangent:])),
+		uv0:     readVec2(at[storageUV0:]),
+		uv1:     readVec2(at[storageUV1:]),
+		weights: readVec4(at[storageWeights:]),
+	}
+	copy(stored.color[:], at[storageColor:storageColor+4])
+	for i := range stored.joints {
+		stored.joints[i] = binary.NativeEndian.Uint16(at[storageJoints+i*2:])
+	}
+	return stored
+}
+
+func readFloat32(at []byte) float32 { return math.Float32frombits(binary.NativeEndian.Uint32(at)) }
+
+func readVec2(at []byte) m.Vec2 {
+	return m.Vec2{X: readFloat32(at[0:]), Y: readFloat32(at[4:])}
+}
+
+func readVec3(at []byte) m.Vec3 {
+	return m.Vec3{X: readFloat32(at[0:]), Y: readFloat32(at[4:]), Z: readFloat32(at[8:])}
+}
+
+func readVec4(at []byte) m.Vec4 {
+	return m.Vec4{
+		X: readFloat32(at[0:]), Y: readFloat32(at[4:]),
+		Z: readFloat32(at[8:]), W: readFloat32(at[12:]),
+	}
+}
+
+// What the pack writes, attribute by attribute, read back the way the fetch
+// unit reads it. Six of the eight are the caller's own bytes at a new offset
+// and must come back bit for bit; the normal and the tangent are encoded and
+// come back as directions, to the accuracy the four bytes buy.
 //
-// This test dies with the last format change that leaves the layout as it is.
-func TestPackedVerticesAreByteIdenticalToTheReinterpret(t *testing.T) {
+// The vertices are the ones with no two fields alike, so a pack that swapped
+// two attributes or wrote one at the wrong offset cannot pass by accident.
+func TestEveryStoredAttributeReadsBackAsWhatWasAuthored(t *testing.T) {
 	box, _ := unitBoxGeometry()
 	sphere, _ := unitSphereGeometry()
 	for _, c := range []struct {
@@ -60,18 +112,83 @@ func TestPackedVerticesAreByteIdenticalToTheReinterpret(t *testing.T) {
 	} {
 		var arena []byte
 		at, _ := packVertices(&arena, c.vertices)
-
 		packed := at.of(arena)
-		want := uploadBytes(c.vertices)
-		if len(packed) != len(want) {
-			t.Fatalf("%s packed %d bytes, the reinterpret is %d", c.what, len(packed), len(want))
+		if len(packed) != len(c.vertices)*storageStride {
+			t.Fatalf("%s packed %d bytes, want %d vertices at %d",
+				c.what, len(packed), len(c.vertices), storageStride)
 		}
-		for i := range want {
-			if packed[i] != want[i] {
-				t.Fatalf("%s: byte %d of vertex %d is %#02x, want %#02x",
-					c.what, i%storageStride, i/storageStride, packed[i], want[i])
+		for i, authored := range c.vertices {
+			stored := readStoredVertex(t, packed, i)
+			// The six exact attributes. A position that moved would crack a
+			// seam between two primitives, so it is not quantised at all.
+			if stored.position != authored.Position {
+				t.Errorf("%s vertex %d: position %v, want %v", c.what, i, stored.position, authored.Position)
+			}
+			if stored.uv0 != authored.UV0 || stored.uv1 != authored.UV1 {
+				t.Errorf("%s vertex %d: uvs %v %v, want %v %v",
+					c.what, i, stored.uv0, stored.uv1, authored.UV0, authored.UV1)
+			}
+			if stored.color != authored.Color || stored.joints != authored.Joints {
+				t.Errorf("%s vertex %d: colour %v joints %v, want %v %v",
+					c.what, i, stored.color, stored.joints, authored.Color, authored.Joints)
+			}
+			if stored.weights != authored.Weights {
+				t.Errorf("%s vertex %d: weights %v, want %v", c.what, i, stored.weights, authored.Weights)
+			}
+			// The two encoded ones. Direction only: magnitude is divided out
+			// by the encode and handedness is the tangent's w.
+			if angle := angleBetween(stored.normal, authored.Normal); angle > 0.01 {
+				t.Errorf("%s vertex %d: normal %v is %.5f degrees off the authored %v",
+					c.what, i, stored.normal, angle, authored.Normal)
+			}
+			tangent := m.Vec3{X: stored.tangent.X, Y: stored.tangent.Y, Z: stored.tangent.Z}
+			authoredTangent := m.Vec3{X: authored.Tangent.X, Y: authored.Tangent.Y, Z: authored.Tangent.Z}
+			if angle := angleBetween(tangent, authoredTangent); angle > 0.02 {
+				t.Errorf("%s vertex %d: tangent %v is %.5f degrees off the authored %v",
+					c.what, i, tangent, angle, authoredTangent)
+			}
+			if want := signNotZero(authored.Tangent.W); stored.tangent.W != want {
+				t.Errorf("%s vertex %d: handedness %v, want %v", c.what, i, stored.tangent.W, want)
 			}
 		}
+	}
+}
+
+// The stride and every offset in it. WebGPU requires arrayStride to be a
+// multiple of four unconditionally - a 30-byte stride runs on Vulkan, Metal on
+// Apple silicon and D3D12 and fails on js/wasm, on GLES and on older Apple
+// GPUs, which is green on a dev machine and broken in a browser - and gfx
+// refuses the pipeline either way. Both named layouts satisfy it by
+// construction, and this is where "by construction" is checked.
+func TestTheStorageVertexIsSixtyFourFourAlignedBytes(t *testing.T) {
+	if storageStride != 64 || storageStride%4 != 0 {
+		t.Errorf("the storage stride is %d, want 64 and a multiple of four", storageStride)
+	}
+	end := 0
+	for _, attr := range []struct {
+		name          string
+		offset, bytes int
+	}{
+		{"position", storagePosition, 12},
+		{"normal", storageNormal, 4},
+		{"tangent", storageTangent, 4},
+		{"uv0", storageUV0, 8},
+		{"uv1", storageUV1, 8},
+		{"color", storageColor, 4},
+		{"joints", storageJoints, 8},
+		{"weights", storageWeights, 16},
+	} {
+		if attr.offset%4 != 0 {
+			t.Errorf("%s starts at %d, which is not 4-aligned", attr.name, attr.offset)
+		}
+		if attr.offset != end {
+			t.Errorf("%s starts at %d, want %d - the storage vertex has no padding in it",
+				attr.name, attr.offset, end)
+		}
+		end = attr.offset + attr.bytes
+	}
+	if end != storageStride {
+		t.Errorf("the attributes end at %d, want the stride %d", end, storageStride)
 	}
 }
 
@@ -115,33 +232,33 @@ func TestPackingTheVerticesAlsoBoundsThem(t *testing.T) {
 	}
 }
 
-// The storage offsets are written down rather than taken from the authoring
-// struct, and today they still agree with it. That is the point of doing the
-// divergence now: this test asserts the two are the same while they are, and is
-// deleted by the first ticket that moves an attribute.
-func TestTheStorageOffsetsStillAgreeWithTheAuthoringStruct(t *testing.T) {
-	var vertex Vertex
-	for _, c := range []struct {
-		field   string
-		storage int
-		field_  uintptr
-	}{
-		{"Position", storagePosition, unsafe.Offsetof(vertex.Position)},
-		{"Normal", storageNormal, unsafe.Offsetof(vertex.Normal)},
-		{"Tangent", storageTangent, unsafe.Offsetof(vertex.Tangent)},
-		{"UV0", storageUV0, unsafe.Offsetof(vertex.UV0)},
-		{"UV1", storageUV1, unsafe.Offsetof(vertex.UV1)},
-		{"Color", storageColor, unsafe.Offsetof(vertex.Color)},
-		{"Joints", storageJoints, unsafe.Offsetof(vertex.Joints)},
-		{"Weights", storageWeights, unsafe.Offsetof(vertex.Weights)},
-	} {
-		if uintptr(c.storage) != c.field_ {
-			t.Errorf("%s is stored at %d and authored at %d", c.field, c.storage, c.field_)
+// The glTF loader packs a model's converted vertices over the memory they are
+// already in, so that a load never holds both forms of a primitive at once. The
+// result has to be the bytes the arena path writes - the two are one packer -
+// and the walk has to stay behind itself, which is the half that a wrong stride
+// would break silently: a vertex overwritten before it is read comes back as
+// whatever the previous vertex left there.
+func TestPackingOverTheAuthoredVerticesWritesTheSameBytes(t *testing.T) {
+	sphere, _ := unitSphereGeometry()
+	vertices := append(everyAttribute(), sphere...)
+	var arena []byte
+	at, _ := packVertices(&arena, vertices)
+	want := append([]byte(nil), at.of(arena)...)
+
+	// The same vertices again, because the pack consumes the slice it is given.
+	consumed := append(everyAttribute(), sphere...)
+	packed := packOverAuthored(consumed)
+	if len(packed) != len(want) {
+		t.Fatalf("packed %d bytes over the vertices, want %d", len(packed), len(want))
+	}
+	for i := range want {
+		if packed[i] != want[i] {
+			t.Fatalf("byte %d of vertex %d is %#02x, want %#02x",
+				i%storageStride, i/storageStride, packed[i], want[i])
 		}
 	}
-	if uintptr(storageStride) != unsafe.Sizeof(vertex) {
-		t.Errorf("the storage stride is %d and the authoring struct is %d bytes",
-			storageStride, unsafe.Sizeof(vertex))
+	if packed := packOverAuthored(nil); packed != nil {
+		t.Errorf("no vertices packed %v, want nothing", packed)
 	}
 }
 
@@ -161,7 +278,9 @@ func TestBakeMeshStagesThePackedVertices(t *testing.T) {
 		pending := lookup.pendingMeshes[len(lookup.pendingMeshes)-1]
 		staged = append(staged, pending.vertices.of(lookup.staging)...)
 	}})
-	want := uploadBytes(vertices)
+	var arena []byte
+	at, _ := packVertices(&arena, vertices)
+	want := at.of(arena)
 	if len(staged) != len(want) {
 		t.Fatalf("staged %d vertex bytes, want %d", len(staged), len(want))
 	}

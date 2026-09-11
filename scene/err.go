@@ -151,7 +151,9 @@ func (e ErrMeshUnavailable) Error() string {
 // pipeline that cannot describe it. The reverse - the standard layout with a
 // custom material - is fine, and so is a variant declaring only six of the eight
 // the mesh supplies: the direction that fails validation is a shader input no
-// attribute supplies, never the other way round.
+// attribute supplies, never the other way round. A custom material over the
+// standard layout does have to read the stored formats, which are not the Go
+// struct's: include VertexDecodePath for the normal and the tangent.
 type ErrMeshCustomLayoutNeedsMaterial struct{ Mesh uint32 }
 
 func (e ErrMeshCustomLayoutNeedsMaterial) Error() string {

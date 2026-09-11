@@ -22,6 +22,7 @@
 // module's worth of source - the BRDF below is written once, so a shading fix
 // cannot land in some copies and not others - and the variants differ only in
 // which declarations survive.
+//#include ./vertexdecode.wgsl
 //#include ./instance.wgsl
 //#include ./deform.wgsl
 //#include ./material.wgsl
@@ -33,10 +34,20 @@ fn vs_main(
     @builtin(vertex_index) vertexIndex: u32,
 ) -> SceneVertexOut {
     let instance = sceneInstances.data[index];
-    // Deformation first, then the instance: morphing and skinning resolve a
+    // Decode first, before anything deforms: the normal and the tangent are
+    // stored quantised and every stage below - the morph deltas, the skin, the
+    // world matrix - is arithmetic on directions. There is nowhere cheaper to
+    // put this; see vertexdecode.wgsl, which says why each of the three
+    // tempting foldings does not work.
+    let decoded = SceneVertex(
+        vertex.position,
+        sceneDecodeNormal(vertex.normal),
+        sceneDecodeTangent(vertex.tangent),
+    );
+    // Deformation next, then the instance: morphing and skinning resolve a
     // vertex into the model's own space, and the world matrix - re-root already
     // folded in - takes that to the world.
-    let deformed = sceneDeformVertex(instance, vertexIndex, vertex);
+    let deformed = sceneDeformVertex(instance, vertexIndex, vertex, decoded);
     let world = sceneWorldPosition(instance, deformed.position);
     var out: SceneVertexOut;
     out.position = sceneFrame.viewProjection * vec4<f32>(world, 1.0);

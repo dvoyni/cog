@@ -15,11 +15,18 @@ import (
 //
 // It is not the bytes scene uploads. Scene packs every standard-layout vertex
 // into the storage layout at bake (scene/vertexpack.go), so what a shader reads
-// is that layout's offsets and formats rather than this struct's - they are
-// byte-identical today and the divergence exists so that changing one
-// attribute's stored format is a change to the packer alone. Nothing in scene
-// ever hands a Vertex back, so there is exactly one authoritative form, the
-// authored one, and it flows one way.
+// is that layout's offsets and formats rather than this struct's: 84 bytes of
+// float are authored here and 64 are stored, because the normal and the tangent
+// each store in four. An app writes directions in the m.Vec3 and m.Vec4 it
+// would write anyway and never sees the encoding. Nothing in scene ever hands a
+// Vertex back, so there is exactly one authoritative form, the authored one,
+// and it flows one way.
+//
+// Normal and Tangent.XYZ are directions. Their length is divided out by the
+// octahedral encode and is unrecoverable after bake - silently, as contract,
+// because a check would fire on correct code: a normal computed from a cross
+// product is one float of rounding from length 1.0001 and draws correctly.
+// Tangent.W is handedness, and only its sign is stored.
 //
 // Nothing in it is optional. A buffer-built mesh never skins, so its Joints and
 // Weights are dead - but their Go zero value is the correct one, because such a
@@ -69,8 +76,10 @@ const temporaryMeshID uint32 = 1 << 31
 // For a custom layout the buffer is the caller's slice reinterpreted, so the
 // offsets are also the Go struct's field offsets and the two readings coincide.
 // scene.Vertex is the one exception: scene packs it, so its method reports the
-// storage layout and its Go fields are the authoring ones. They are byte-for-
-// byte the same today and are not required to stay that way.
+// storage layout and its Go fields are the authoring ones. The two differ - the
+// stored normal and tangent are four bytes each against the struct's twelve and
+// sixteen - so nothing may read a scene.Vertex layout as a description of the
+// Go struct.
 //
 // The one direction that fails is a shader input no attribute supplies. A
 // layout supplying an attribute the shader never declares is legal and common,

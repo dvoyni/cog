@@ -22,12 +22,15 @@ omit, how wide its indices are, how morph deltas are packed, and what the bundle
 PBR requires of a mesh handed to it. Its **Index width** section is implemented:
 a durable mesh of 65535 vertices or fewer stores `uint16` indices, derived from
 the vertex count with no pass over the indices, and a temporary mesh keeps
-`uint32`. Its **authoring API** section is half-implemented: scene now *packs*
-the standard vertex at bake rather than reinterpreting the caller's slice, in
-the same traversal that bounds it, so what a mesh stores is scene's to change
-one attribute at a time. The layout it packs into is byte-identical to the old
-reinterpret. The rest is not - the engine still stores every mesh at one fixed
-84-byte stride - and that spec is the plan for changing it.
+`uint32`. Its **authoring API** section is half-implemented: scene *packs* the
+standard vertex at bake rather than reinterpreting the caller's slice, in the
+same traversal that bounds it, so what a mesh stores is scene's to change one
+attribute at a time. Two attributes have moved: the **normal** stores as `oct32`
+in a `Unorm16x2` and the **tangent** as one `Uint32` of 15/15 octahedral plus
+handedness plus a reserved bit, four bytes each against twelve and sixteen, and
+the stride is 64. The rest is not implemented — the UVs are still `Float32x2`,
+there is no per-mesh record, presence trims nothing, and morph deltas are
+unchanged — and that spec is the plan for the rest.
 
 ## Plugin
 
@@ -375,7 +378,8 @@ at any size, keeping the ref and its id, and refuses a change of vertex layout o
 topology. `ReleaseMesh` stales the ref at once and frees at the frame boundary.
 
 `scene.Vertex` is the one standard layout: glTF's eight core attributes at
-locations 0..7, 84 bytes, interleaved. Every mesh supplies all eight whatever it
+locations 0..7, 84 bytes authored and 64 stored, interleaved. Every mesh
+supplies all eight whatever it
 draws with — the bundled shader's static variant declares only the first six, and
 extra attributes a shader never declares are permitted (measured on a conformant
 D3D12 adapter; the direction that fails is a shader input no attribute supplies).
@@ -384,10 +388,23 @@ custom `Material`**; the reverse — the standard layout with a custom material 
 is fine.
 
 `scene.Vertex` is what an app *writes*, not what scene *stores*: scene packs it
-into the storage layout its `VertexLayout()` reports, so the two are free to
-diverge and are byte-identical today. A custom layout has no such split — scene
-cannot pack a struct it does not know, so its buffer is the caller's Go memory
-reinterpreted, and its declared offsets must be the struct's own.
+into the storage layout its `VertexLayout()` reports, and the two differ. The
+`Normal` and `Tangent` an app writes as `m.Vec3` and `m.Vec4` store octahedrally
+encoded in four bytes each — so they are **directions**, their length is divided
+out and unrecoverable after bake, and `Tangent.W` keeps only its sign. An
+unwritten one stores as +Z with positive handedness, which falls out of the
+encoding rather than being a special case.
+
+A **custom material drawing a standard-layout mesh must decode them**: include
+`scene.VertexDecodePath` (`builtin/scene/vertexdecode.wgsl`) and declare
+`@location(1) normal: vec2<f32>` and `@location(2) tangent: u32`, then call
+`sceneDecodeNormal` and `sceneDecodeTangent` at the top of the vertex stage,
+before any morph or skin. Declaring the old `vec3<f32>`/`vec4<f32>` is refused at
+pipeline time by gfx's vertex-interface check rather than shading from garbage.
+
+A custom layout has no such split — scene cannot pack a struct it does not know,
+so its buffer is the caller's Go memory reinterpreted, and its declared offsets
+must be the struct's own.
 
 Buffer-built meshes never skin and never morph. A `MeshRef` has no equivalent of
 the group-2 bindings those need, and their draws take the bundled variant that

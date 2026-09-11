@@ -10,10 +10,17 @@
 // direction that fails validation is a shader input no attribute supplies,
 // never the other way round, so declaring six of the eight is legal. See
 // ErrMeshCustomLayoutNeedsMaterial, which guards only the other way round.
+//
+// The normal and the tangent are stored encoded, four bytes each: the normal as
+// oct32 in a two-component 16-bit unorm, the tangent as one word of oct 15/15
+// plus handedness. So they arrive as vec2<f32> and u32 and are directions only
+// after vertexdecode.wgsl has had them. These types must equal what scene's
+// standardVertexLayout supplies - gfx compares the pair at pipeline time and
+// refuses the draw - so neither side can drift.
 struct SceneVertexIn {
     @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) tangent: vec4<f32>,
+    @location(1) normal: vec2<f32>,
+    @location(2) tangent: u32,
     @location(3) uv0: vec2<f32>,
     @location(4) uv1: vec2<f32>,
     @location(5) color: vec4<f32>,

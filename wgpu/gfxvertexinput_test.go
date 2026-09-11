@@ -46,8 +46,12 @@ func TestBundledSceneShaderReflectsItsVertexStageInputs(t *testing.T) {
 			}
 			want := []cgfx.ShaderVertexInput{
 				{Name: "position", Location: 0, Kind: cgfx.VertexScalarFloat, Count: 3},
-				{Name: "normal", Location: 1, Kind: cgfx.VertexScalarFloat, Count: 3},
-				{Name: "tangent", Location: 2, Kind: cgfx.VertexScalarFloat, Count: 4},
+				// The two encoded attributes: the normal is oct32 in a
+				// two-component unorm and the tangent is one word of oct 15/15
+				// plus handedness, so what the stage declares is a vec2<f32>
+				// and a u32 and vertexdecode.wgsl makes directions of them.
+				{Name: "normal", Location: 1, Kind: cgfx.VertexScalarFloat, Count: 2},
+				{Name: "tangent", Location: 2, Kind: cgfx.VertexScalarUint, Count: 1},
 				{Name: "uv0", Location: 3, Kind: cgfx.VertexScalarFloat, Count: 2},
 				{Name: "uv1", Location: 4, Kind: cgfx.VertexScalarFloat, Count: 2},
 				{Name: "color", Location: 5, Kind: cgfx.VertexScalarFloat, Count: 4},

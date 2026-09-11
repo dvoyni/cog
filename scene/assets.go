@@ -10,10 +10,29 @@ import (
 const (
 	shaderMountID = "builtin:scene"
 	// sceneShaderPath is the bundled scene shader's root source: the two entry
-	// points, composed by #include from the nine sources beside it. One vertex
+	// points, composed by #include from the ten sources beside it. One vertex
 	// stage and one fragment stage, because the backend hardcodes vs_main and
 	// fs_main; the variants differ only in which declarations survive.
 	sceneShaderPath = "builtin/scene/scene.wgsl"
+
+	// VertexDecodePath is the one published source of the ten: the decode for
+	// the two attributes a storage vertex holds encoded, the normal as oct32 in
+	// a two-component 16-bit unorm and the tangent as one word of oct 15/15
+	// plus handedness.
+	//
+	// A custom material drawing a standard-layout mesh includes it by this
+	// absolute storage name and calls sceneDecodeNormal and sceneDecodeTangent,
+	// rather than re-typing the arithmetic or - what the float layout allowed -
+	// declaring @location(1) as a vec3<f32> and shading from whatever the fetch
+	// unit made of two unorm components. That declaration is now refused at
+	// pipeline time, which is the point: the storage layout is contract, so the
+	// decode for it is published rather than private.
+	//
+	// It declares three functions and three constants, and no binding and no
+	// struct, so including it is safe from an extending material and a
+	// non-extending one alike. Its header says what it declares; do not declare
+	// those names again.
+	VertexDecodePath = "builtin/scene/vertexdecode.wgsl"
 )
 
 //go:embed builtin/scene/*.wgsl
