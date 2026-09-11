@@ -51,6 +51,14 @@ func (p *Plugin) Capabilities() []mcp.Capability {
 asterisk that under pause it costs a step, stated in the description rather than
 expressed in the annotation.
 
+> **Amended at implementation ([#255](https://github.com/dvoyni/cog/issues/255)).**
+> The body is the package function `layoutSnapshot`, not the method `p.layout`
+> the sketch above spells. A method puts provider state one dereference from a
+> body the capability-body rule forbids to touch it; a package function keeps
+> that rule visible at the call site, which is why `gfx` writes both of its
+> bodies that way and why #254 made the same amendment. Nothing else about the
+> registration changes.
+
 It follows
 [mcp §Arm-then-wait](../../../mcp/docs/specs/mcp.md#arm-then-wait) and does not
 restate it.
@@ -105,6 +113,25 @@ one specific window.
 `ui_layout` runs earliest of the three snapshots, which is what lets
 `canvas_draws` see ui's own output; see
 [canvas/docs/specs/mcp.md §Where it sits in the tick](../../../canvas/docs/specs/mcp.md#where-it-sits-in-the-tick).
+
+> **Amended at implementation ([#255](https://github.com/dvoyni/cog/issues/255)).**
+> The link above is the one that *takes* the snapshot, and it is implemented
+> exactly as written: `ui.SnapshotUpdateEventHandler`,
+> `.After[UpdateEventHandler]()`, reading `Read[*processor]`. #253 had to
+> deviate from its own prescribed ordering because `gfx` cannot name
+> `canvas.UpdateEventHandler`; this row names a handler type `ui` itself
+> declares, and was unaffected.
+>
+> It is not the only subscription the capability needs. Arming inherits
+> [mcp §Arm-then-wait](../../../mcp/docs/specs/mcp.md#arm-then-wait) verbatim —
+> *a snapshot shows the game as of a tick that began after the request* — and a
+> request landing inside a tick whose frame is already being declared cannot be
+> told from one that arrived between ticks by anything running at the end of
+> the tick. So `ui` also registers `SnapshotArmUpdateEventHandler`, ordered
+> `First()` and declaring no resources, which admits a waiting request to the
+> tick that has just begun. It is the same two-stage slot `gfx` and `canvas`
+> build for the same reason, and it is a mutex-guarded no-op when nothing is
+> armed.
 
 ---
 
@@ -165,6 +192,20 @@ And on the response as a whole: the **viewport block** — `PixelWidth`,
 and height** — plus **whether a step was performed**, when the engine was
 paused, and **what the filter omitted**.
 
+> **Amended at implementation ([#255](https://github.com/dvoyni/cog/issues/255)).**
+> `order` in the resolved list is emitted as **`drawOrder`, the element's place
+> in the sequence ui draws in**, not as `layoutNode.order`. The field the spec
+> cites is set once, in `flatten`, to the node's own index
+> (`ui/layout.go:180`), and it is never rewritten: reporting it verbatim would
+> put `index` in the response twice under two names. The draw sequence is
+> `processor.ordered` — active elements sorted by layer, then by that same
+> `order` — and it is what the ticket's "draw order" means and the only one of
+> the two that says which of two overlapping elements is on top. An inactive
+> element has no place in it and reports none.
+>
+> `layoutNode.order` stays as it is. It is a sort key, and the snapshot names
+> the result of the sort rather than the key.
+
 ---
 
 ## Resolved and declared
@@ -179,6 +220,36 @@ The source shows what was written; the snapshot shows what survived the
 modifiers. A `stretch` that did not apply is invisible in a resolved rect and
 invisible in the source; it is visible in the two side by side. That is *why is
 my button in the wrong place*, answered rather than restated.
+
+> **Amended at implementation ([#255](https://github.com/dvoyni/cog/issues/255)).**
+> "The `opt[size]` constraint fields" is narrower than the paragraph below it
+> and than the description prose, and following it literally would have left
+> out the example both of them lead with: **`stretch` is `opt[float32]`, not
+> `opt[size]`** (`ui/element.go:123`). The declared block therefore carries
+> *every* declaration the element made about layout, not only the lengths:
+>
+> - the `opt[size]` lengths — width, height and their minima and maxima, the
+>   four edges, the four pivots, the four paddings, and the gap;
+> - `stretch` and `shrink`, the two weights, which is the pair the prose names;
+> - `align`, the declared `layer` offset, `columns` and `rows`;
+> - `layout`, `childrenArrangement`, `childrenAlignment` and `wrap`, which are
+>   declarations about the children rather than about the element, and are the
+>   other half of why a child ended up where it did;
+> - the five opt-outs — `ignoreLayout`, `ignoreClip`, `ignoreHitTest`,
+>   `stayOnScreen`, `preserveAspectRatio` — each of which is a silent way for
+>   one element to behave unlike its neighbours;
+> - `addState` and `removeState`, named as the resolved state is.
+>
+> The argument for "only when set" is unchanged and is what keeps this free:
+> every one of these is an `opt` that already carries `set`, a bool that is
+> false, or an enum with a documented default, so a plain element still emits
+> no declared block at all.
+>
+> **The material set is the one declaration left out.** `material` is
+> `opt[canvas.MaterialSet]`, it is not layout, and reporting it would mean
+> ui declaring material views that `gfx` already declares for the two
+> capabilities whose subject materials are. A ui element's material reaches an
+> agent through `canvas_draws`, on the op the visual recorded.
 
 ---
 
@@ -322,6 +393,29 @@ A checklist for an implementation session.
   absence is silent on a 1:1 display.
 
 **`ui/README.md`** — a pointer to this document.
+
+> **Amended at implementation ([#255](https://github.com/dvoyni/cog/issues/255)).**
+> The checklist names two new files and the implementation has four, because
+> the package file layout
+> ([`.github/instructions/kernel.instructions.md`](../../../.github/instructions/kernel.instructions.md))
+> places a declaration by what it is:
+>
+> - **`ui/commandsimpl.go`** (new) holds `armLayoutCmdImpl` and ui's
+>   `registerCommands`. Command handlers always live there, however small the
+>   package; `ArmLayoutCmd` and its request and response stay in
+>   `snapshot.go` beside the slot they drive, as `gfx`'s and `canvas`'s arms do.
+> - **`ui/err.go`** (new) holds `ErrLayoutBusy`, `ErrLayoutAbandoned` and
+>   `ErrLayoutNoSuchElement`, the typed domain errors the provider maps to
+>   `mcp.Unavailable` — the shape #251, #253 and #254 settled.
+>
+> No file outside the capability's own is touched. `snapshot.go` carries a
+> `visualNamer` seam and `boundVisual`'s one-line implementation of it, so the
+> visual's reported Go type is the application's own `ParamVisual` rather than
+> the `boundVisual` wrapper `ui` puts around it — a type the application never
+> wrote and would not recognise. It sits there rather than beside `boundVisual`
+> in `element.go` because the snapshot is the only thing that ever asks, and
+> because every line citation in this document and in the two specs that quote
+> it stays true.
 
 **`CONTEXT.md`** — nothing. **Snapshot** is already defined, and *Overlay* was
 left to a ticket that defined no term, so the word stays free for `ui.Overlay`,

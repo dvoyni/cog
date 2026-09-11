@@ -14,7 +14,12 @@ const Name kernel.PluginName = "ui"
 // UpdateEventHandler identifies the UI plugin's per-tick processing subscription.
 type UpdateEventHandler kernel.Subscription[app.UpdateEvent]
 
-type Plugin struct{}
+type Plugin struct {
+	// snapshots is ui's one layout-snapshot slot, plugin-owned and
+	// self-synchronizing. See snapshotState for why it is not a kernel
+	// resource.
+	snapshots snapshotState
+}
 
 func New() *Plugin { return &Plugin{} }
 
@@ -24,14 +29,61 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{input.Name, gfx.Name, canvas.Name}
 }
 
-func (*Plugin) Register(registrar *kernel.Registrar, _ any) error {
+func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.InitResource(&Frame{})
 	registrar.InitResource(&Interactions{})
 	registrar.InitResource(&processor{})
+	p.registerCommands(registrar)
 	registrar.Subscribe[UpdateEventHandler](processUpdate).
 		After[input.UpdateEventHandler]().
 		Before[canvas.UpdateEventHandler]()
+	registrar.Subscribe[SnapshotArmUpdateEventHandler](p.armSnapshotOnUpdate).First()
+	registrar.Subscribe[SnapshotUpdateEventHandler](p.snapshotOnUpdate).
+		After[UpdateEventHandler]()
 	return nil
+}
+
+// Stop completes any snapshot the engine walked away from. A request armed in
+// a tick the engine never finishes would otherwise leave its waiter learning
+// nothing until its client's idle abort; abandonment is delivered rather than
+// merely true.
+//
+// It touches the snapshot slot directly because by Stop the scheduler has
+// stopped and grants no locks, which is also why nothing else can be touching
+// it: the host loop has returned and every handler is done.
+func (p *Plugin) Stop(kernel.Executioner) error {
+	p.snapshots.abandon()
+	return nil
+}
+
+// armSnapshotOnUpdate admits a waiting snapshot to the tick that has just
+// begun. It declares no resources: the snapshot slot carries its own lock.
+func (p *Plugin) armSnapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
+	return nil, func(kernel.Kernel, app.UpdateEvent) error {
+		p.snapshots.beginTick()
+		return nil
+	}
+}
+
+// snapshotOnUpdate renders the tick's resolved tree for whoever armed a
+// snapshot, from a subscriber ordered after ui's own processing.
+//
+// That is the only window in which the tree can be read. processor.nodes
+// keeps its geometry until the next flatten, but layoutNode.element points
+// into the app's borrowed child storage, which Frame.clear releases at the end
+// of processUpdate - so afterwards the id, the visual and userData are
+// unreadable while the numbers beside them still look right.
+//
+// A Read conflicts only with a writer, and processUpdate's write is ordered
+// ahead of this by the link above.
+func (p *Plugin) snapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
+	var processorResource kernel.Read[*processor]
+	return func(access kernel.ResourceAccess) {
+			processorResource = access.GetRead[*processor]()
+		}, func(kernel.Kernel, app.UpdateEvent) error {
+			p.snapshots.record(processorResource.Get())
+			return nil
+		}
 }
 
 func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {

@@ -32,6 +32,7 @@ declarations on the next tick instead of retaining and mutating a submitted tree
 - Constructor: `ui.New() *ui.Plugin`
 - Dependencies: `input`, `gfx`, and `canvas`
 - Configuration: none
+- Implements: `mcp.Provider`, `kernel.PluginStopper`
 
 Register dependencies before UI, typically in this order: `storage`, `input`,
 `gfx`, `canvas`, then `ui`.
@@ -454,3 +455,65 @@ Because a frame is declared afresh each tick, a tooltip exists only on the
 frames its anchor is hovered â€” there is nothing to hide and no visibility flag
 to keep. Note that a disabled element is not a hit target at all, so it never
 reports as hovered and cannot carry a tooltip.
+
+## Offered To An Agent
+
+ui implements `mcp.Provider` and offers one capability, `layout`, rendered as
+the tool `ui_layout`: one tick's element tree, flattened, with what layout
+actually resolved each element to — its rect, content rect, clip, layer and
+draw order, whether it is active, which visual it uses, and its id and user
+data where it has them. For an element that declared a size or a constraint it
+also reports **what was declared**, beside what was resolved, which is the
+pairing the capability exists for: the source shows what was written and the
+snapshot shows what survived the modifiers, so a `Stretch` that did not apply
+becomes visible for the first time.
+
+It is `mcp.Func`, because a snapshot arms and waits, and `mcp.ReadOnly()`,
+which in cog's reading means the capability does not change the game — with
+the one asterisk that under pause it performs exactly one step, or joins one
+another arm already raised, and says so in the response. That is stated in the
+description rather than expressed in the annotation, and it cannot be
+otherwise: `processUpdate` ends in `defer frame.clear()`, so between ticks the
+frame is *empty* rather than stale and producing a snapshot without running a
+tick is not a thing that exists.
+
+The tree is **serialized inside the tick**, from `SnapshotUpdateEventHandler`,
+ordered `After[UpdateEventHandler]()`. That is the only window in which it can
+be read at all. `processor.nodes` keeps its geometry until the next flatten,
+but `layoutNode.element` points into the app's borrowed child storage, which
+the frame releases at the end of `processUpdate` — so a read taken afterwards
+compiles, runs, and returns plausible nonsense for the id, the visual and the
+user data while the numbers beside them still look right. `userData` is
+marshalled there too, per element and inside a `recover`: an app's own
+`MarshalJSON` can panic, and a debug facility that can kill a frame is not
+one. A payload that will not marshal degrades to `{"$type": …, "$opaque":
+true}` with the reason, which is usually the whole answer anyway.
+
+`SnapshotArmUpdateEventHandler` is the other half, ordered `First()` and
+declaring no resources: it admits a waiting request to the tick that has just
+begun, which is what makes "a tick that *began* after the request" decidable.
+Both handlers are a mutex-guarded no-op when nothing is armed. Anything
+holding a kernel handle can take the same snapshot through `ArmLayoutCmd`; the
+capability is one caller among them.
+
+Every index in the response is a **source index** — a position in
+`processor.nodes`, never a position in the emitted array — and the only other
+structural field is `parent`. Flatten is depth-first pre-order, so a subtree is
+a contiguous range of indices, `subtree` is a slice rather than a traversal,
+and a filtered reply's parent links still resolve. `maxDepth` caps how far
+below the reported root the tree is walked, and both filters say how much they
+dropped. Note that ids are optional and `Interactions.Has` matches them by
+prefix: **the index is the address**, and the id is a hint about what the app
+calls something.
+
+Rects are in viewport units. `path` is optional and writes the JSON to a file
+instead of returning it inline, which a dozen-element frame rarely needs. The
+three coordinate sizes come from `gfx.SnapshotView`, the logical viewport among
+them — the value whose absence is silent on a 1:1 display and breaks
+find-the-button-click-the-button on anything else.
+
+There is no overlay, and no capability writes content into the game's frame;
+`ui.Overlay` is the layout container and nothing else. The full contract, and
+the argument for the overlay's absence, is in
+[docs/specs/mcp.md](docs/specs/mcp.md), and the capability that document
+specifies is implemented.
