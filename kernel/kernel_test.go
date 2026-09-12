@@ -31,6 +31,7 @@ type testPanicCmd Command[struct{}, int]
 type testMissingCmd Command[struct{}, int]
 type testCounterResource int
 type testLateResource int
+type testContendedResource int
 
 type invocationContextKey struct{}
 
@@ -1567,5 +1568,260 @@ func TestKernel_DescribeReportsResolvedLockClosure(t *testing.T) {
 
 	if dump := Dump(e); !strings.Contains(dump, "writes [kernel.testLateResource]") {
 		t.Fatalf("Dump omitted the resolved lock columns:\n%s", dump)
+	}
+}
+
+// contendingPlugin registers three subscriptions whose lock sets overlap by
+// construction, so every conflict view has something to report. Counter is
+// written by all three; contended is written by one and read by another.
+func contendingPlugin() testPlugin {
+	return testPlugin{name: "p", register: func(registry *Registrar) error {
+		registry.InitResource(testCounterResource(0))
+		registry.InitResource(testContendedResource(0))
+		subscribeForTest[int](registry, "a", func(access ResourceAccess) {
+			access.GetWrite[testCounterResource]()
+			access.GetWrite[testContendedResource]()
+		}, nil, nil, func(Kernel, int) error { return nil })
+		subscribeForTest[int](registry, "b", func(access ResourceAccess) {
+			access.GetWrite[testCounterResource]()
+			access.GetRead[testContendedResource]()
+		}, nil, nil, func(Kernel, int) error { return nil })
+		subscribeForTest[int](registry, "c", func(access ResourceAccess) {
+			access.GetWrite[testCounterResource]()
+		}, nil, nil, func(Kernel, int) error { return nil })
+		return nil
+	}}
+}
+
+// Per-resource contention is ranked, not enumerated: the resource that
+// serialises the most handler pairs comes first, whatever its type name sorts
+// as, and a resource nothing contends on is left out entirely.
+func TestKernel_DescribeRanksResourceContention(t *testing.T) {
+	e := New(nil).WithPlugins(contendingPlugin())
+	contention := e.Describe().Contention
+
+	if len(contention.Resources) != 2 {
+		t.Fatalf("contended resources = %+v, want the two that have conflicting pairs", contention.Resources)
+	}
+	counter, contended := reflect.TypeFor[testCounterResource](), reflect.TypeFor[testContendedResource]()
+	// Alphabetically testContendedResource sorts first; by contention it does not.
+	if contention.Resources[0].Type != counter || contention.Resources[0].Conflicts != 3 {
+		t.Fatalf("top contended resource = %+v, want %v with three pairs", contention.Resources[0], counter)
+	}
+	if contention.Resources[1].Type != contended || contention.Resources[1].Conflicts != 1 {
+		t.Fatalf("second contended resource = %+v, want %v with one pair", contention.Resources[1], contended)
+	}
+	if contention.Resources[0].Owner != "p" {
+		t.Fatalf("contended resource owner = %q, want %q", contention.Resources[0].Owner, "p")
+	}
+	if len(contention.Resources[0].Writers) != 3 || len(contention.Resources[0].Readers) != 0 {
+		t.Fatalf("counter holders = writers %+v readers %+v, want three writers",
+			contention.Resources[0].Writers, contention.Resources[0].Readers)
+	}
+	if len(contention.Resources[1].Writers) != 1 || len(contention.Resources[1].Readers) != 1 {
+		t.Fatalf("contended holders = writers %+v readers %+v, want one of each",
+			contention.Resources[1].Writers, contention.Resources[1].Readers)
+	}
+}
+
+// The pairwise view names which handlers can never overlap and on which
+// resource, ranked by how much they share rather than listed in type order.
+func TestKernel_DescribeReportsHandlerPairConflicts(t *testing.T) {
+	e := New(nil).WithPlugins(contendingPlugin())
+	conflicts := e.Describe().Contention.Handlers
+
+	if len(conflicts) != 3 {
+		t.Fatalf("handler conflicts = %+v, want the three pairs that share testCounterResource", conflicts)
+	}
+	counter, contended := reflect.TypeFor[testCounterResource](), reflect.TypeFor[testContendedResource]()
+	top := conflicts[0]
+	if !slices.Equal(top.Resources, []reflect.Type{contended, counter}) {
+		t.Fatalf("top pair serialises on %v, want both resources", top.Resources)
+	}
+	if top.A.Type != reflect.TypeFor[testHandlerA[int]]() || top.B.Type != reflect.TypeFor[testHandlerB[int]]() {
+		t.Fatalf("top pair = %v and %v, want the two handlers sharing both resources", top.A.Type, top.B.Type)
+	}
+	if top.A.Kind != "subscription" || top.A.Owner != "p" || top.A.Event != reflect.TypeFor[int]() {
+		t.Fatalf("handler reference = %+v, want a subscription on int owned by p", top.A)
+	}
+	for _, pair := range conflicts[1:] {
+		if !slices.Equal(pair.Resources, []reflect.Type{counter}) {
+			t.Fatalf("pair %v/%v serialises on %v, want testCounterResource alone", pair.A.Type, pair.B.Type, pair.Resources)
+		}
+	}
+}
+
+// The per-phase view says whether a phase went effectively single-threaded, and
+// names the widest lock in it: the handler that conflicts with every other
+// member, which is the one making the phase serialise.
+func TestKernel_DescribeReportsPhaseSerialisation(t *testing.T) {
+	p := testPlugin{name: "p", register: func(registry *Registrar) error {
+		registry.InitResource(testCounterResource(0))
+		registry.InitResource(testLateResource(0))
+		// Every member of int's ordinary phase writes the same resource.
+		for _, name := range []string{"a", "b", "c"} {
+			subscribeForTest[int](registry, name, func(access ResourceAccess) {
+				access.GetWrite[testCounterResource]()
+			}, nil, nil, func(Kernel, int) error { return nil })
+		}
+		// One writer against two readers: the readers can still overlap.
+		subscribeForTest[string](registry, "a", func(access ResourceAccess) {
+			access.GetWrite[testLateResource]()
+		}, nil, nil, func(Kernel, string) error { return nil })
+		for _, name := range []string{"b", "c"} {
+			subscribeForTest[string](registry, name, func(access ResourceAccess) {
+				access.GetRead[testLateResource]()
+			}, nil, nil, func(Kernel, string) error { return nil })
+		}
+		return nil
+	}}
+	e := New(nil).WithPlugins(p)
+	phases := e.Describe().Contention.Phases
+
+	if len(phases) != 2 {
+		t.Fatalf("phases = %+v, want one per event", phases)
+	}
+	// Ranked: the phase that serialises completely comes first.
+	serial := phases[0]
+	if serial.Event != reflect.TypeFor[int]() || serial.Phase != "ordinary" {
+		t.Fatalf("top phase = %v %s, want int's ordinary phase", serial.Event, serial.Phase)
+	}
+	if serial.Members != 3 || serial.Conflicts != 3 || !serial.SingleThreaded {
+		t.Fatalf("int ordinary phase = %+v, want three members, three conflicting pairs, single-threaded", serial)
+	}
+	if len(serial.WidestLocks) != 3 {
+		t.Fatalf("widest locks = %+v, want every member, since each conflicts with both others", serial.WidestLocks)
+	}
+
+	partial := phases[1]
+	if partial.Members != 3 || partial.Conflicts != 2 || partial.SingleThreaded {
+		t.Fatalf("string ordinary phase = %+v, want two of three pairs conflicting and not single-threaded", partial)
+	}
+	if len(partial.WidestLocks) != 1 || partial.WidestLocks[0].Type != reflect.TypeFor[testHandlerA[string]]() {
+		t.Fatalf("widest locks = %+v, want the one writer the two readers both wait on", partial.WidestLocks)
+	}
+}
+
+// The report serves plain commands and subscriptions equally, and it does not
+// cry wolf: two readers of one resource never serialise, and a resource only one
+// handler ever touches is not contended at all.
+func TestKernel_DescribeContentionCoversCommandsAndSparesReaders(t *testing.T) {
+	p := testPlugin{name: "p", register: func(registry *Registrar) error {
+		registry.InitResource(testCounterResource(0))
+		registry.InitResource(testLateResource(0))
+		registry.HandleCommand[testDoubleCmd](func() (Lock, Execute[int, int]) {
+			return func(access ResourceAccess) { access.GetWrite[testCounterResource]() },
+				func(Kernel, int) (int, error) { return 0, nil }
+		})
+		for _, name := range []string{"a", "b"} {
+			subscribeForTest[int](registry, name, func(access ResourceAccess) {
+				access.GetRead[testCounterResource]()
+				access.GetWrite[testLateResource]()
+			}, nil, nil, func(Kernel, int) error { return nil })
+		}
+		return nil
+	}}
+	e := New(nil).WithPlugins(p)
+	contention := e.Describe().Contention
+
+	// testLateResource is written by both subscriptions, so it is contended;
+	// the two of them only read testCounterResource, which the command writes.
+	if len(contention.Resources) != 2 {
+		t.Fatalf("contended resources = %+v, want both", contention.Resources)
+	}
+	counter := reflect.TypeFor[testCounterResource]()
+	var reported ResourceContention
+	for _, entry := range contention.Resources {
+		if entry.Type == counter {
+			reported = entry
+		}
+	}
+	if reported.Conflicts != 2 || len(reported.Writers) != 1 || len(reported.Readers) != 2 {
+		t.Fatalf("testCounterResource contention = %+v, want one writing command against two reading subscriptions", reported)
+	}
+	if reported.Writers[0].Kind != "command" || reported.Writers[0].Type != reflect.TypeFor[testDoubleCmd]() {
+		t.Fatalf("writer = %+v, want the command", reported.Writers[0])
+	}
+
+	// Three pairs exist; the two readers of testCounterResource conflict only
+	// through the resource they both write.
+	for _, pair := range contention.Handlers {
+		if pair.A.Kind == "subscription" && pair.B.Kind == "subscription" {
+			if slices.Contains(pair.Resources, counter) {
+				t.Fatalf("two readers reported as serialising on %v: %+v", counter, pair)
+			}
+		}
+	}
+
+	// The command is in no phase, so the phase view sees only the two
+	// subscriptions, which do serialise on the resource they both write.
+	if len(contention.Phases) != 1 || contention.Phases[0].Members != 2 || !contention.Phases[0].SingleThreaded {
+		t.Fatalf("phases = %+v, want int's ordinary phase running single file", contention.Phases)
+	}
+}
+
+// Dump renders the conflict report as part of the architecture table: resources
+// ranked first, then phases, then as many handler pairs as are worth reading at
+// once, with the rest counted rather than listed.
+func TestKernel_DumpRendersRankedContention(t *testing.T) {
+	e := New(nil).WithPlugins(contendingPlugin())
+	dump := Dump(e)
+
+	for _, want := range []string{
+		"contention:",
+		"kernel.testCounterResource (p): 3 pairs, 3 writers, 0 readers",
+		"kernel.testContendedResource (p): 1 pair, 1 writer, 1 reader",
+		"int ordinary: 3 members, 3/3 pairs serialise, single-threaded",
+		"kernel.testHandlerA[int] / kernel.testHandlerB[int]:",
+	} {
+		if !strings.Contains(dump, want) {
+			t.Fatalf("Dump omitted %q:\n%s", want, dump)
+		}
+	}
+	// The ranked resource comes before the one it outranks.
+	if strings.Index(dump, "kernel.testCounterResource (p): 3 pairs") >
+		strings.Index(dump, "kernel.testContendedResource (p): 1 pair") {
+		t.Fatalf("Dump listed contended resources out of rank order:\n%s", dump)
+	}
+}
+
+// An engine whose handlers never overlap says so, rather than printing an empty
+// heading the reader has to interpret.
+func TestKernel_DumpReportsAbsenceOfContention(t *testing.T) {
+	p := testPlugin{name: "p", register: func(registry *Registrar) error {
+		registry.InitResource(testCounterResource(0))
+		subscribeForTest[int](registry, "a", func(access ResourceAccess) {
+			access.GetRead[testCounterResource]()
+		}, nil, nil, func(Kernel, int) error { return nil })
+		subscribeForTest[int](registry, "b", func(access ResourceAccess) {
+			access.GetRead[testCounterResource]()
+		}, nil, nil, func(Kernel, int) error { return nil })
+		return nil
+	}}
+	if dump := Dump(New(nil).WithPlugins(p)); !strings.Contains(dump, "contention:\n  none\n") {
+		t.Fatalf("Dump did not report the absence of contention:\n%s", dump)
+	}
+}
+
+// Ten handlers writing one resource make forty-five pairs. Dump ranks them and
+// counts the tail instead of printing it: the list is what the ticket calls
+// true, unavoidable, and useless.
+func TestKernel_DumpCountsTheHandlerPairsItDoesNotList(t *testing.T) {
+	lock := func(access ResourceAccess) { access.GetWrite[testCounterResource]() }
+	p := testPlugin{name: "p", register: func(registry *Registrar) error {
+		registry.InitResource(testCounterResource(0))
+		for _, name := range []string{"a", "b", "c", "writer", "reader"} {
+			subscribeForTest[int](registry, name, lock, nil, nil, func(Kernel, int) error { return nil })
+			subscribeForTest[string](registry, name, lock, nil, nil, func(Kernel, string) error { return nil })
+		}
+		return nil
+	}}
+	e := New(nil).WithPlugins(p)
+	if pairs := len(e.Describe().Contention.Handlers); pairs != 45 {
+		t.Fatalf("handler pairs = %d, want every one of the 45 reported in the description", pairs)
+	}
+	dump := Dump(e)
+	if !strings.Contains(dump, "and 35 more pairs") {
+		t.Fatalf("Dump listed the whole pairwise set instead of counting its tail:\n%s", dump)
 	}
 }

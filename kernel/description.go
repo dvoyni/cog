@@ -12,6 +12,10 @@ type ArchitectureDescription struct {
 	Resources     []ResourceDescription
 	Commands      []CommandDescription
 	Subscriptions []SubscriptionDescription
+	// Contention is the conflict report derived from the lock sets above: which
+	// handlers can never overlap, which resources they serialise on, and which
+	// phases that leaves effectively single-threaded.
+	Contention ContentionDescription
 }
 
 type PluginDescription struct {
@@ -106,6 +110,7 @@ func (e *Engine) Describe() ArchitectureDescription {
 		}
 		return compareTypes(a.Type, b.Type)
 	})
+	description.Contention = e.registry.describeContention()
 	return description
 }
 
@@ -134,7 +139,19 @@ func subscriptionPhase(value subscription) string {
 	return "ordinary"
 }
 
+// compareTypes orders two types by name. A nil type sorts first, which is how a
+// command — which names no event — precedes every subscription in the conflict
+// report.
 func compareTypes(a, b reflect.Type) int {
+	if a == nil || b == nil {
+		if a == b {
+			return 0
+		}
+		if a == nil {
+			return -1
+		}
+		return 1
+	}
 	if a.String() < b.String() {
 		return -1
 	}
@@ -186,6 +203,7 @@ func Dump(engine *Engine) string {
 		out.WriteString(dumpAccess(sub.Reads, sub.Writes, sub.Uses))
 		out.WriteString("\n")
 	}
+	dumpContention(&out, description.Contention)
 	return out.String()
 }
 

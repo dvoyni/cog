@@ -243,8 +243,8 @@ Each exported error type implements `Error() string`.
 
 `Engine.Describe` returns a detached `ArchitectureDescription` of the finalized
 architecture: plugins and their dependencies, resources and commands with their
-owners, and every subscription with its event, phase, and ordering dependencies.
-`Dump` renders it as a readable table.
+owners, every subscription with its event, phase, and ordering dependencies, and
+the conflict report described below. `Dump` renders it as a readable table.
 
 `CommandDescription` and `SubscriptionDescription` also carry `Reads`, `Writes`
 and `Uses`. `Reads` and `Writes` are the **resolved, transitive** lock sets —
@@ -252,6 +252,41 @@ what the handler ends up holding once every command it declares in `Uses` has
 been folded in — and `Uses` holds the direct edges that explain them. This is
 the one fact in a description that no source file states, because a handler
 deliberately never names the resources behind a command it dispatches.
+
+### The conflict report
+
+`ArchitectureDescription.Contention` is the pairwise reading of those same lock
+sets: which handlers can never overlap, and what that costs. It is computed once,
+by `Describe`, from registry state that is immutable after finalization — no new
+reflection, no resource walk, and nothing on the dispatch path.
+
+It has three views, each **ranked rather than enumerated**:
+
+- `Contention.Resources` — the resources handler pairs serialise on, most
+  contended first. This is the view that stays useful however wide the widest
+  lock is: the resource every handler touches comes out on top, correctly, and
+  the narrower ones are named underneath it. A resource nothing contends on is
+  absent.
+- `Contention.Phases` — per event and phase, how many member pairs serialise out
+  of the pairs the phase has, whether that leaves it `SingleThreaded`, and which
+  members hold `WidestLocks`: the ones conflicting with every other member, which
+  are what makes the phase run single file. It accounts for locks only;
+  `Before`/`After` edges are reported by `SubscriptionDescription.DependsOn`.
+- `Contention.Handlers` — every handler pair that can never overlap and the
+  resources that is true of, the pair sharing the most first. This set is
+  quadratic, so `Dump` prints the worst of it and counts the rest; the
+  description carries all of it.
+
+Commands and subscriptions are treated alike in `Resources` and `Handlers`: any
+two handlers may be in flight at once, so any two may serialise. Only `Phases` is
+subscriptions alone, because a command is in no phase. A `HandlerRef` names a
+handler in any of them: its `Kind`, its identity `Type`, its `Owner`, and for a
+subscription the `Event`.
+
+**It reports; it never errors and never panics.** A conflict is not a defect —
+two handlers writing one resource is how shared state works, and only the reader
+knows whether the serialisation is worth paying for. There are no suppression
+knobs and no thresholds.
 
 `Executioner.Describe` returns the same value from inside the running engine.
 An `Executioner` exists only once `Run` begins, so the description it returns
@@ -285,6 +320,9 @@ for free: only the engine mints an `Executioner`, and only once `Run` begins.
 - Composition: `New`, `Engine`, `Engine.Handler`, `Engine.WithPlugins`,
   `Engine.Run`, `Engine.Ready`, `Engine.Executioner`, `Engine.Describe`, `Dump`,
   `ArchitectureDescription`.
+- Introspection: `PluginDescription`, `ResourceDescription`,
+  `CommandDescription`, `SubscriptionDescription`, `ContentionDescription`,
+  `ResourceContention`, `PhaseContention`, `HandlerConflict`, `HandlerRef`.
 - Runtime: `Kernel`, `Kernel.Context`, `Kernel.WithContext`,
   `Kernel.ExecuteCommandAsync`, `Kernel.PublishEvent`, `Kernel.ReportError`,
   `Executioner`, `Executioner.ExecuteCommand`, `Executioner.Describe`,
