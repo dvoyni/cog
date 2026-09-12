@@ -199,6 +199,8 @@ little work is cheaper to run than to schedule.
   ([#245](https://github.com/dvoyni/cog/issues/245)).
 - `scene_test.go` — the binding, against the **real `scene` package**
   ([#246](https://github.com/dvoyni/cog/issues/246)).
+- `spawnlock_test.go` — what a Spawn excludes, and what that costs a frame
+  ([#256](https://github.com/dvoyni/cog/issues/256)).
 
 ## Binding: what it costs to draw an Entity
 
@@ -238,3 +240,57 @@ draw because `OpQueue.Model` takes a `string`. At 5 000 drawables that is
 ~235 µs a frame against ~265 µs for all the recording, three quarters of it
 re-normalising a path validated when it was first loaded. That is a scene
 optimisation, not an ECS one.
+
+## Spawning: what it excludes, and what the exclusion costs
+
+[#256](https://github.com/dvoyni/cog/issues/256) asked how a **data-driven**
+spawn names its lock set, given that a data row is read long after `Lock` ran.
+The premise does not survive [#240](https://github.com/dvoyni/cog/issues/240):
+`Entities` holds a reference to every `Store`, so `Despawn` empties all of them
+holding `write{*Entities}` alone, and every System touching any Store declares
+`read{*Entities}` unconditionally. So `write{*Entities}` already excludes every
+System in the frame, and a spawn whose Components are chosen at runtime has
+exactly the lock set of one whose Components are spelled in Go.
+
+That was an argument read off the source. Measured instead, with two Systems
+that write **different Components** — `Alpha` and `Beta` — and differ only in
+whether the first spawns:
+
+| | greatest occupancy |
+| --- | --- |
+| two Queries, disjoint writes | **2** |
+| the same pair, first one spawning | **1** |
+
+The control matters: an observed 1 proves nothing unless a 2 was observable,
+which is how [#241](https://github.com/dvoyni/cog/issues/241) validated its own
+scheduler harness.
+
+### The cost is paid at registration, not at spawn time
+
+Three Systems over 2 000 entities, the third iterating the same entities in
+every mode. Only its **declared lock** changes:
+
+| third System declares | ns/frame | allocs |
+| --- | --- | --- |
+| *(absent — two workers only)* | 18 633 | 10 |
+| `read{*Entities}`, a Query | **30 230** | 11 |
+| `write{*Entities}` — a `Spawn` parameter it never uses | **36 016** | 11 |
+| the same, spawning and despawning one Entity a tick | **36 226** | 11 |
+
+Minima over 8 runs of 5 000 frames; the machine's noise floor is wide enough
+that medians say the same thing (30.7 / 37.2 / 36.5 µs).
+
+Two readings, and the second is the one with teeth.
+
+- **The barrier costs ~6 µs a frame** — one scheduling round, which is what
+  [#241](https://github.com/dvoyni/cog/issues/241)'s ~2.2 µs task floor
+  predicts for a writer waiting on readers to drain and then releasing them.
+  At 30 Hz that is **0.018 % of a frame**, and it costs **no allocation**: 11
+  either way.
+- **The spawning itself is free.** Declaring a `Spawn` and never using it costs
+  36 016 ns; actually spawning and despawning an Entity every tick costs
+  36 226 ns, a difference inside the noise. **The entire cost is the
+  declaration.** A System that holds a `Spawn` for a rare event pays the
+  barrier every frame regardless — so a rarely-spawning System should be split
+  out rather than folded into a worker, and that is a usage rule the spec has
+  to state.
