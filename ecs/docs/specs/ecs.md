@@ -36,21 +36,28 @@ unverified it is marked **Gap** and says what would settle it; where assembling
 these decisions next to each other settled something no ticket did, it is marked
 **Settled here**.
 
-**Nothing in this specification is implemented.** The map that produced it is
-plan-only apart from one deliberate exception — the zero-allocation prototype,
-whose job was to produce a number. That prototype lives on the throwaway branch
-`proto/ecs-zero-alloc` under `docs/research/ecs-zero-alloc-proto/`, is a nested
-module so a root `go build ./...` skips it, and is deleted once this document
-cites it. There is no `ecs` package in the tree.
-[Required work](#required-work) is the checklist an implementation session works
-from.
+**This specification is implemented.** `github.com/dvoyni/cog/ecs` is the
+package it describes, and where the two disagree the code is the defect unless
+this document says otherwise. [Required work](#required-work) is the checklist
+it was built from and now records what is still open. The zero-allocation
+prototype that produced the numbers below lived on the throwaway branch
+`proto/ecs-zero-alloc` and is gone; the benchmarks that replaced it are in the
+package.
+
+**One thing here is younger than the rest, and it is marked where it appears.**
+The Component rule was relaxed after the package shipped: a Component holds no
+*mutable* indirection rather than no pointers at all, which admits `string` and
+[`ecs.List[T]`](#the-list). The sections that changed say what they used to say
+and why the old reason did not survive, because the old rule was argued for in
+this document at some length and a reader who remembers that argument is owed
+the correction rather than a silent overwrite.
 
 ---
 
 ## Contents
 
 - [Vocabulary](#vocabulary) · [What the numbers are, and what they are not](#what-the-numbers-are-and-what-they-are-not)
-- [Entity](#entity) · [Component](#component) · [Naming an engine-side thing](#naming-an-engine-side-thing)
+- [Entity](#entity) · [Component](#component) · [The List](#the-list) · [Validation mode](#validation-mode) · [Naming an engine-side thing](#naming-an-engine-side-thing)
 - [Registration and ownership](#registration-and-ownership)
 - [The Store](#the-store) · [The Query](#the-query) · [The Driver](#the-driver)
 - [The System](#the-system) · [The lock set](#the-lock-set)
@@ -75,7 +82,10 @@ are retired outright.
 - **Entity** — an opaque handle to one thing. Comparable, copyable, map-keyable;
   the zero value means no Entity.
 - **Component** — a plain value an Entity either has or has not, addressed by
-  its Go type, containing no pointers transitively.
+  its Go type, containing no *mutable* indirection transitively.
+- **List** — a fixed-length run of values a Component may hold. It is what a
+  slice is not allowed to be: its backing array is unexported and its one
+  mutator is checked.
 - **Tag** — a Component with no fields, whose presence is the whole of what it
   says.
 - **Component set** — the exact set of Component types one Entity has. It
@@ -102,6 +112,8 @@ are retired outright.
 - **Hash** — the 64-bit hash of a name, and how a Component says which model,
   clip or node it means. **Name table** — where the plugin that resolves names
   keeps them.
+- **Validation mode** — a build tag that checks, at the one place the rule can
+  be broken, that nobody writes a List through a read.
 
 ---
 
@@ -176,33 +188,60 @@ and it is what makes [the Store's flat index](#the-store) affordable.
 
 ## Component
 
-**A Component type contains no pointers, transitively.** That one sentence
-replaces "a plain copyable struct", and it is better because it is
+**A Component type contains no mutable indirection, transitively.** Every
+pointer it holds, it holds to memory nothing can write. That is
 **mechanically checkable**: a `reflect.Type` walk at registration, where cost is
-irrelevant. It forbids pointers, slices, maps, channels, funcs, interfaces,
-`sync` types — **and strings**. It permits numerics, bools, fixed-size arrays,
-`Entity`, and structs of those.
+irrelevant. It permits numerics, bools, fixed-size arrays, `Entity`, structs of
+those, **`string`**, and **`ecs.List[T]`**. It refuses pointers, bare slices,
+maps, channels, funcs, interfaces and `sync` types.
 
 The check reports the offending field **by path**, because the field that fails
 is usually several structs down and naming only the Component is useless:
 
 ```
-plugin "stringly" panicked in Register: ecs: proto.PathedDrawable.Path is a
-string, which is not pointer-free
+plugin "pointy" panicked in Register: ecs: proto.PathedDrawable.Handle is a
+ptr, which is mutable indirection
 ```
 
-Three reasons for the rule, in the order they carry weight, and the third is
-weaker than it sounds — which is stated because it cuts both ways.
+**This replaced "contains no pointers, transitively", and the history is worth
+keeping because the reason the old rule carried was not the reason it gave.**
+The old rule was stated with three justifications — copying, serialisation and
+the collector — and a `string` survives all three. A string copy stays
+meaningful after the thing it was copied from is gone; a string is trivially
+serialisable; and the collector was always the thin one, measured below. What
+forbade strings was never those. It was the lock unit, and the old rule was an
+over-approximation of it that happened to be easy to state.
+
+**The lock unit is what the rule is actually protecting.** A read yields a copy,
+and that is the whole of why `read{C}` is sound for concurrent readers — but
+only where the copy is not itself a write handle. This is where the kinds part
+company, and the split is sharp rather than a matter of degree:
+
+| a read yields… | can the reader write the Store through it? |
+| --- | --- |
+| a `float32`, an `Entity`, a `[32]byte` | no — it is a copy of the bytes |
+| a **`string`** | **no** — the header is a copy and the bytes are immutable |
+| a `[]T` | **yes** — the header is a copy and the array is shared |
+| an **`ecs.List[T]`** | only through `Set`, which validation mode checks |
+
+A System holding nothing but `read{C}` writing the Store through a shared
+backing array is a data race **no lock anywhere names**, and it would make the
+claim this document opens with — that under-declaration is unrepresentable —
+false. So `string` is admitted outright, for a property rather than as an
+exception, and a variable-length run is admitted only as a [List](#the-list).
 
 **Copying.** A Component is copied into and out of a Store by value and must
-stay meaningful after the thing it was copied from is gone. Every forbidden kind
+stay meaningful after the thing it was copied from is gone. Every refused kind
 names memory the Store does not own and cannot keep alive.
 
-**Serialisation.** A pointer-free type is trivially serialisable, which is the
-cheap constraint that keeps replication from being foreclosed. This is the
-expensive half of that future already paid for, and it is why [data-driven
-spawning](https://github.com/dvoyni/cog/issues/266) will be additive when it
-arrives.
+**Serialisation.** A Component is trivially serialisable, which is the cheap
+constraint that keeps replication from being foreclosed, and admitting `string`
+does not spend it: a string is one of the easiest things there is to encode.
+What it costs [data-driven
+spawning](https://github.com/dvoyni/cog/issues/266) is narrower and is recorded
+there rather than waved at — **a row stops being a fixed width**, so an encoder
+that would have been `memcpy(row, size)` needs a per-type walk for the
+Components that hold one.
 
 **The collector, and honestly it is the thin one.** Measured while resolving
 [The binding shape](https://github.com/dvoyni/cog/issues/246): forced full
@@ -230,11 +269,129 @@ objects. And **a pointer is not only a GC cost** — it widens the Component fro
 (55.3 µs against 49.4 µs over 100k rows).
 
 But 0.21 ms per *collection* at 100 000 Entities, when nox is two orders of
-magnitude below that, is a thin reason to forbid strings on its own. **The
-lookup is what actually forces the handle**, not the collector: naming a model
-by path costs **46.9 ns** against **0.54 ns** by dense index, and that is
-per-draw, per-frame. See [Naming an engine-side
-thing](#naming-an-engine-side-thing).
+magnitude below that, is **not a reason to forbid strings**, and this document
+previously drew the opposite conclusion from the same number. Scaled to nox's
+low thousands it is on the order of ten microseconds per collection. **The
+lookup is what forces the handle where a handle is wanted**, not the collector:
+naming a model by path costs **46.9 ns** against **0.54 ns** by dense index, and
+that is per-draw, per-frame. See [Naming an engine-side
+thing](#naming-an-engine-side-thing) — a hash is still the right way to name an
+engine-side thing, and a string is now available for data the game owns.
+
+**Two costs are real and land per-Store rather than globally**, which is what
+makes admitting them affordable at all. A Component holding a string or a List
+leaves the noscan span, so its Store is scanned; every Component that was legal
+before this rule changed keeps the span, the memcpy fill and the iteration speed
+it was measured with, bit for bit. And width: 48 B → 64 B for one string field
+costs **12% more per iteration** (55.3 µs against 49.4 µs over 100k rows), which
+is a reason to prefer a `[32]byte` where the bound is real, not a reason to
+refuse.
+
+### The rule costs three mechanisms, and they are not optional
+
+Admitting a pointer into a row changes three places, each of which was written
+against the old rule and says so in a comment. They are correctness, not tuning.
+
+1. **The fill takes a typed copy.** `fill`'s sized moves write a row's bytes
+   through an `unsafe.Pointer` and emit no write barrier. For a pointer-free row
+   that is sound and is the measured path; for a row holding a string it is a
+   pointer store the collector never sees. A non-trivial Component plans a typed
+   closure instead — `*(*C)(dst) = *(*C)(src)`, baked where `C` was still a
+   type, so the compiler emits whatever barriers the row needs.
+2. **A vacated row is zeroed.** `remove` deliberately left the value in the
+   vacated slot, because "a Component holds no pointer for it to keep alive".
+   With one, the slot keeps a despawned Entity's data reachable until something
+   else happens to take the row. Both arche (#147) and ark (#324) shipped this
+   bug and fixed it the same way.
+3. **A Query naming one takes the per-field loop.** This is the only one that is
+   a trade rather than a repair, and it was measured: `fill` inlines at **cost
+   67 against a budget of 80**, and an indirect call costs **68**, so a `fill`
+   that could take a closure does not inline — which this document already
+   prices at about **8% of a frame**, paid by every Query in the engine. Routing
+   instead leaves every existing Query's machine code exactly as measured and
+   puts the cost on the Queries that use the new types, at about **2.4×** a
+   hand-written walk instead of **1.4×**. Interleaved A/B over pre-built
+   binaries confirms the trivial path is unmoved: `DriverBadCase` −0.8%,
+   `DriverTagRemedy` −1.7%, both inside the noise. Closing the gap for
+   non-trivial Queries needs monomorphised fillers per Component type
+   ([#257](https://github.com/dvoyni/cog/issues/257)), which is an optimisation
+   and not a correctness question.
+
+### The List
+
+**A `[]T` in a Component is refused and always will be.** A List is what a
+Component holds instead: a fixed-length run of `T` whose backing array is
+unexported, whose constructors copy into a fresh one, and whose only element
+write is `Set`.
+
+```go
+type Inventory struct {
+    Slots ecs.List[ItemHash]
+}
+
+func use(q *ecs.Query[InvQ]) {
+    for _, it := range q.All() {
+        it.Inv.Slots.Set(0, empty)   // legal: Inv is a *Inventory field
+    }
+}
+```
+
+`Len`, `At` and `All` yield copies. **There is no `Slice`**, and its absence is
+the type: handing back the backing array would give away exactly the writable
+alias the type withholds.
+
+**Its length is fixed at construction, and there is no `Append`.** Growing means
+a new backing array, which is an allocation, and an allocation on the hot path
+is what requirement 1 exists to refuse. A List whose length changes is a new
+List written into the Component under an ordinary write lock. Where the length
+changes every frame the answer is unchanged — a fixed-capacity array with a live
+count, a child Entity, or a side store keyed by Entity.
+
+**`List[T]` where `T` itself contains a List is refused.** Validation stamps the
+arrays a Component row names and cannot reach one a List's elements name, so
+allowing it would ship a check with a silent hole in it.
+
+**Deep-copying on the way into the Store was considered and does not work.** It
+fixes ownership and not access: after a copy-in, the header a *read* yields
+still points at Store-owned memory, so the read-lock holder can still write
+through it. The hazard is on the read-out side, and closing it there means a
+deep copy per entity per frame — an allocation on the hot path. Copying at the
+boundary cannot manufacture immutability.
+
+### Validation mode
+
+**`List.Set` is checked under `-tags ecs_validate` and nowhere else.** The build
+tag selects between a file where `const validate = true` and one where it is
+`false`, so a release build contains no branch, no table and no load for any of
+it. This is ark's own pattern (`//go:build ark_debug`) and Unity DOTS's
+(`ENABLE_UNITY_COLLECTIONS_CHECKS`, on in the editor, compiled out of player
+builds).
+
+The check stamps each List backing array with the last handle it was reached
+through, and `Set` consults the stamp. Four cases, all tested:
+
+| what the code does | validating build |
+| --- | --- |
+| `Set` through a `*C` Query field | allowed |
+| `Set` through a `C` read field, or a `Get[C]` | **panics**, naming the Component and the mode |
+| `Set` through a value retained past the `All()` that yielded it | **panics**, naming the run |
+| `Set` through the caller's own copy, after the value entered a Store | **panics** — `ListOf` copies, but `Set` shares |
+
+**This is detection and not prevention, and that is a weaker guarantee than
+anything else in this document.** `string` is sound by construction; a List is
+sound if a run exercises the bug. It is worth saying why it is still worth
+having: an illegal write is a lock-model violation whether or not two goroutines
+interleave, so a single-threaded run catches it on the first frame it happens —
+which the race detector, [which cannot build in this
+environment](#what-the-numbers-are-and-what-they-are-not), would not.
+
+What it does not catch is stated in `validate_on.go` rather than left to be
+discovered: a write through `unsafe`; a write by a callee the value was passed
+to, which is reported against whoever called `Set`; a List whose array was
+evicted from the bounded table; and anything a run never executes. Its cost is a
+map write per List field per stamped row per run under one mutex, so a
+validating build serialises where a release build runs concurrently. That cost
+is confined to a build nobody ships, which is the whole reason it is a tag.
 
 ### An Entity holds at most one Component of a given type
 
@@ -284,11 +441,12 @@ Three limits are real and are named rather than claiming "unlimited":
 3. **Flip cost.** Adding or removing a Tag is a structural change, not a field
    write.
 
-### Variable-length data has three answers
+### Variable-length data has four answers
 
-In preference order, unchanged since
+In preference order. The first two are unchanged since
 [#237](https://github.com/dvoyni/cog/issues/237) and sharpened by
-[#246](https://github.com/dvoyni/cog/issues/246):
+[#246](https://github.com/dvoyni/cog/issues/246); the List is third because it
+is the one that allocates.
 
 1. **A child Entity** with an owning Reference, for structured data (an
    inventory, a spell list). This is how nox already works: a carried sword and
@@ -298,10 +456,15 @@ In preference order, unchanged since
    collector **−0.015 ms** against an empty heap at 100k and **+0.051 ms** at
    1M, against **+0.805 ms** for the same field as a `string`. The costs are
    truncation and width, not the collector.
-3. **A side resource keyed by Entity** — and this is **deferred out of v1**, to
+3. **An `ecs.List[T]` in the Component**, where the bound is not real but the
+   contents are set at spawn and rarely rewritten. It costs one allocation per
+   construction, takes its Store out of the noscan span, and routes every Query
+   naming it to the per-field loop. See [The List](#the-list).
+4. **A side resource keyed by Entity** — and this is **deferred out of v1**, to
    [per-entity data a Component cannot
-   hold](https://github.com/dvoyni/cog/issues/264). What v1 ships is
-   [hashing](#naming-an-engine-side-thing), which covers every case v1 has.
+   hold](https://github.com/dvoyni/cog/issues/264). It remains the right answer
+   for per-entity data that churns every frame, which a List is the wrong shape
+   for.
 
 What is **not** on the list is a content-addressed table, and the reason is the
 cleanup question: such a table must hold the buffer itself, so it grows with
@@ -316,8 +479,10 @@ count. **Sharing is what costs; ownership is free.**
 ## Naming an engine-side thing
 
 **A Component names an engine-side thing by a hash of its name, never by the
-name itself and never by an assigned index.** The name is a string and a
-Component holds no pointers; a hash is a plain number.
+name itself and never by an assigned index.** A Component may now hold a string,
+so this is a preference rather than a prohibition — and the number behind it is
+the lookup, not the storage: a path costs **46.9 ns** against **0.54 ns** by
+dense index, per draw, per frame.
 
 ```go
 type ClipHash uint64                              // the caller's own named type
@@ -405,23 +570,27 @@ tag — **strings, and nothing else**.
 
 ### The obligation this puts on a bound plugin
 
-A plugin a System will record into must offer a **pointer-free handle** for
-everything a Component needs to name. Where it does not, the app makes its own
-table. Machine-checked against the real `scene` package by running the
-pointer-free walk over its recording vocabulary:
+A plugin a System will record into must offer a handle for everything a
+Component needs to name, and the relaxed rule moves two of these across the line
+without changing the advice. Machine-checked against the real `scene` package by
+running the walk over its recording vocabulary:
 
 | type | verdict |
 | --- | --- |
 | `scene.Transform` | rejected — `.Matrix` is a pointer |
 | `scene.ModelDraw`, `scene.MeshDraw` | rejected — `.Transform.Matrix` is a pointer |
-| `scene.ClipPlay` | rejected — `.Clip` is a `string` |
 | `scene.Material` | rejected — is a slice |
-| `scene.ModelRef` | rejected — `.Path` is a `string` |
+| `scene.ClipPlay` | **legal** — `.Clip` is a `string`; a `ClipHash` is still preferable, per draw |
+| `scene.ModelRef` | **legal** — `.Path` is a `string`; a `ModelHash` is still preferable, per draw |
 | **`scene.MeshRef`** | **legal Component** — already a dense id and a generation |
 | **`scene.LayerMask`, `scene.CameraID`** | **legal Component** |
 
-Note the exception. The gap is not a principle; it is one type that has not been
-given the treatment another one already has.
+Note what did *not* change. The two rejections that remain are pointers to
+mutable memory, which is the line the rule actually draws; the two that moved
+were only ever refused for holding a name, and the cost of holding one is the
+lookup rather than the storage. The obligation on a bound plugin is therefore
+softer than it was — a string-bearing type is now storable — and the guidance is
+unchanged: offer a dense handle, because the per-draw lookup is what costs.
 
 **One caveat the spec must carry:** a hash is stable across processes and runs,
 which an interned ordering is not — so it is the form that survives being
@@ -783,10 +952,17 @@ which emits **no GC write barrier**. A barrier-free pointer write is unsound in
 general. It is sound here for a reason that must be stated rather than left
 implicit: **a Query's fill buffer may only ever hold pointers into a live
 Store**, and a Store is a kernel resource cell held for the engine lifetime, so
-the pointee is independently reachable whether the barrier fires or not. The
-pointer-free rule is what guarantees the value fields need no barrier at all.
-The safe alternative is a typed setter closure per pointer field — the ~5× shape
-that allocates.
+the pointee is independently reachable whether the barrier fires or not.
+
+**The value fields are a separate argument, and it is the one the Component rule
+carries.** A *pointer-free* row's bytes need no barrier at all, which is what
+licenses the sized moves. A row holding a string or a List does, so it is not
+filled by them: it takes the typed copy, and the Query naming it takes the
+per-field loop, for the inlining reason measured in [the rule costs three
+mechanisms](#the-rule-costs-three-mechanisms-and-they-are-not-optional). The
+invariant to carry forward is therefore sharper than "Components are
+pointer-free": **the sized moves may only ever be planned for a row the
+collector never has to scan.**
 
 ### Nested iteration allocates nothing, and costs ~3× anyway
 
@@ -1294,6 +1470,15 @@ So: swap-remove on `Remove[T]`, swap-remove on Despawn, **no compaction, no
 shrink, no sweep**, and the index returns to the free list immediately — safe
 not merely because generations are exact but because nothing stale is left to
 trip over.
+
+**The vacated row is zeroed if, and only if, the Component is not pointer-free.**
+A pointer-free row is left where it lies, because nothing it holds keeps
+anything alive and clearing it would be work for no one — which is what the
+numbers above were taken against and they are unchanged. A row holding a string
+or a List is cleared by a typed assignment, because otherwise the slot keeps a
+despawned Entity's data reachable until something else happens to take the row.
+`TestARemovedRowDoesNotKeepItsValueAlive` pins it with a finaliser, which is the
+only way to ask about reachability rather than a proxy for it.
 
 A Despawn reaches every Store through an interface carrying **exactly one
 method**, `remove(Entity)`. That costs 9%: 85 Stores are 218 ns through the
@@ -1808,7 +1993,11 @@ frame](https://github.com/dvoyni/cog/issues/268).
 
 **Data-driven spawning and serialisation — additive.** No Component, Query,
 System signature or lock changes when it arrives, and the expensive part is
-already paid: Components are pointer-free *explicitly so they serialise*. Three
+already paid: a Component holds nothing that is not trivially encodable. One
+thing the relaxed rule adds to that ticket, recorded here so it is not
+discovered there: **a row holding a string or a List is not a fixed width**, so
+a row encoder needs a per-type walk for those Components rather than one
+`memcpy`. Three
 things are genuinely missing — naming a Component type from a string, decoding a
 row into a Component value, and closing the hole that reaching a Store through
 `Entities` declares nothing, so `ErrUndeclaredDependency` never fires on that
@@ -1969,6 +2158,28 @@ existed because a dense index could not be written where the Entity was
 declared. A hash can, because hashing is pure, so the Bundle field simply *is*
 the Component field and there is nothing to convert.
 
+**A bare `[]T` as a Component field.** Refused for the lock unit and not for the
+collector, which is the distinction the whole relaxation turns on: a copy of a
+slice header shares its backing array, so a read yields a write handle and
+`read{C}` stops meaning anything. Every Go ECS surveyed permits it — arche, ark,
+donburi, unitoftime/ecs and go-gameengine-ecs all store the header and copy it —
+and **not one of them has a lock-deriving scheduler**, so none has the guarantee
+to lose. Ark, which permits slices, tells its users in the same breath not to
+use them: *"For fast memory access, the use of slices in components should be
+avoided. Use fixed-size arrays where possible."* The engines that allow the
+shape *safely* are not in Go: Bevy can own a `Vec<T>` in a component because
+`Query<&T>` hands out `&T` and `&` is transitively immutable. Go has no
+pointer-to-const, which this document already says about reads, and `string` is
+the one Go type that has the property built in.
+
+**Deep-copying a Component's variable-length data on the way into the Store.**
+It fixes ownership and leaves access untouched: the header a read yields still
+points at Store-owned memory, so a read-lock holder still writes the Store
+through it. Closing that means copying on the way *out*, which is an allocation
+per entity per frame. It would also have cost an allocation per `Set`, a
+recursive walk on every write, and the `memcpy` Store — the same three the
+content-addressed table was refused for.
+
 **A pointer hash.** A pointer is not a string with an awkward shape. Hashing one
 answers no question — the object cannot be recovered from the hash, and an
 address is not an identity anything else can agree on. The reference cases
@@ -1985,8 +2196,10 @@ connotes a slice-like value, which a Query is not.
 
 ## Required work
 
-A checklist for implementation sessions, in dependency order. Nothing here
-exists.
+The checklist the implementation was built from, in dependency order. It is kept
+because it is the record of what was promised; everything in the three code
+sections below exists in the package, the documentation items are done, and what
+remains open is called out at the end of the verification list.
 
 **`ecs` package — the core**
 
@@ -1996,10 +2209,15 @@ exists.
 - `Store[T]`: the three arrays, the one-load probe, swap-remove, `append`
   doubling, a reserve hint, and the type-erased `storeCore` carrying exactly one
   method.
-- `PointerFree(reflect.Type) error`, reporting the offending field by path.
+- `Storable(reflect.Type) error` and `PointerFree(reflect.Type) error`, each
+  reporting the offending field by path: the first is the registration gate, the
+  second the fast-path property. **`PointerFree` alone was the original item**;
+  the split arrived with the relaxed rule.
+- `List[T]`, its registration walk, and validation mode behind `-tags
+  ecs_validate`. **Not in the original checklist**, and added with the rule.
 - `RegisterComponent[C]`: `InitResource[*Store[C]]` on the caller's `Registrar`,
-  enrolment with `Entities`, the baked per-type closures, and the pointer-free
-  check.
+  enrolment with `Entities`, the baked per-type closures including the typed
+  copy a non-trivial Component takes, and the legality check.
 - `Plugin(world *Entities) kernel.Plugin`.
 
 **`ecs` package — Query and System**
@@ -2052,9 +2270,14 @@ exists.
   forward walk is *shown* to skip so the reverse walk is a tested guarantee, not
   a comment; a Reference to a despawned Entity resolves to nothing; a recycled
   index does not alias a stale Reference.
-- **`-race` in CI.** Every measurement behind this document was taken in an
-  environment where the race detector cannot build, and `-count=10` was
-  substituted. That substitution must not survive into the implementation.
+- **`-race` in CI — still open, and the one item on this list that is.** Every
+  measurement behind this document was taken in an environment where the race
+  detector cannot build, and `-count=10` was substituted. That substitution has
+  survived into the implementation, which is exactly what this line said must
+  not happen, so it is recorded as outstanding rather than quietly dropped. It
+  matters more since the Component rule was relaxed: a `List` written through a
+  read is a data race, and validation mode catches the ones a run executes while
+  the detector would catch the ones that interleave.
 
 ---
 
@@ -2069,7 +2292,8 @@ here so a reader of the spec alone does not re-propose them.
   beside archetype tables. Lock granularity would stop being a static property
   of the Query type, which destroys the premise.
 - **Replication and networking implementation.** Cheap constraints only, so
-  nothing is foreclosed; the pointer-free rule is the whole of what v1 pays.
+  nothing is foreclosed; the Component rule is the whole of what v1 pays, and a
+  row that is not a fixed width is the one thing it adds to the bill.
 - **The physics contract itself** — [Physics plugin: contract, swept queries,
   and an adopted backend](https://github.com/dvoyni/cog/issues/182), its own
   map. This spec fixes only the binding shape physics attaches through.

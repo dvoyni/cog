@@ -176,35 +176,111 @@ Two consequences of swap-remove are contract:
 A **Tag** — a Component with no fields — is an ordinary Store whose rows carry
 nothing, so its dense array costs no memory however many entities it holds.
 
-## Components: the pointer-free rule
+## Components: what a Component may hold
 
 ```go
-func PointerFree(t reflect.Type) error
+func Storable(t reflect.Type) error    // the registration gate
+func PointerFree(t reflect.Type) error // the fast-path property
 ```
 
-**A Component type contains no pointers, transitively.** That replaces "a plain
-copyable struct" and is better because it is mechanically checkable: this walk,
-run once when the type is registered. It forbids pointers, slices, maps,
-channels, funcs, interfaces and **strings**, and permits numerics, bools,
-fixed-size arrays, `Entity`, and structs of those.
+**A Component type contains no mutable indirection, transitively** — every
+pointer it holds, it holds to memory nothing can write. That is mechanically
+checkable: one walk, run once when the type is registered. It permits numerics,
+bools, fixed-size arrays, `Entity`, structs of those, **`string`** and
+**`ecs.List[T]`**; it refuses pointers, bare slices, maps, channels, funcs and
+interfaces.
 
-The reason is copying before it is the collector: a Component is copied into and
-out of a Store by value and must stay meaningful after the thing it was copied
-from is gone. Being pointer-free also makes it trivially serialisable, and puts
-the dense array in a span the mark phase never walks.
+**The rule is about the lock unit, not the collector.** A read yields a copy,
+and that is what makes `read{C}` sound for concurrent readers — but only where
+the copy is not itself a write handle:
+
+| a read yields… | can the reader write the Store through it? |
+| --- | --- |
+| a number, an `Entity`, a `[32]byte` | no |
+| a **`string`** | **no** — the header is a copy and the bytes are immutable |
+| a `[]T` | **yes** — refused for exactly this |
+| an **`ecs.List[T]`** | only through `Set`, which validation mode checks |
+
+Copying and serialisation come second, and a string satisfies both: it stays
+meaningful after the thing it was copied from is gone, and it encodes trivially.
 
 The error names the offending field **by path**, because the field that fails is
 usually several structs down and naming only the Component is useless:
 
 ```
-ecs.PathedDrawable.Deep.Inner.Path is a string, which is not pointer-free
+ecs.PathedDrawable.Deep.Inner.Handle is a ptr, which is mutable indirection
 ```
 
-An engine-side thing is named by a hash of its name rather than by the name
-itself. Variable-length data has three answers: a child entity with an owning
-reference, a fixed-capacity array where the bound is small and real, or a hash.
-`sync` types are not special-cased — a mutex is pointer-free by this walk and is
-still wrong in a Component, for the same reason `go vet` already says so.
+`PointerFree` is still here and still means what it meant. It is no longer the
+gate but the **fast path**: a pointer-free Component is copied by sized moves,
+left where it lies by a swap-remove, kept in a span the mark phase never walks,
+and iterated by an unrolled filler. A Component holding a string or a List gives
+all four up, for its own Store only — so prefer `[32]byte` and a hash wherever
+the bound or the name is real.
+
+An engine-side thing is still named by a hash rather than by the name itself,
+and that is now a preference with a number behind it rather than a prohibition:
+a path lookup costs about 47 ns against half a nanosecond by dense index, per
+draw, per frame.
+
+`sync` types are not special-cased — a mutex is refused by this walk, and would
+be wrong in a Component anyway, for the same reason `go vet` already says so.
+
+## Variable-length data: `List[T]`
+
+```go
+func NewList[T any](values ...T) List[T]
+func ListOf[T any](values []T) List[T]
+
+func (l List[T]) Len() int
+func (l List[T]) At(i int) T
+func (l List[T]) All() iter.Seq2[int, T]
+func (l List[T]) Set(i int, value T)   // write lock only; checked under -tags ecs_validate
+```
+
+**A `[]T` in a Component is refused; a `List[T]` is what it holds instead.** The
+backing array is unexported, the constructors copy into a fresh one, and `Len`,
+`At` and `All` yield copies. There is deliberately **no `Slice`** — handing back
+the backing array would give away the writable alias the type exists to
+withhold.
+
+Its length is fixed at construction and there is no `Append`: growing means an
+allocation, and a List whose length changes is a new List written into the
+Component under a write lock. Where the length changes every frame, prefer a
+fixed-capacity array with a live count, or a child Entity.
+
+In preference order, variable-length data has four answers: **a child Entity**
+with an owning reference; **a fixed-capacity array** where the bound is small
+and real; **a `List`** where the bound is not real but the contents are set at
+spawn; and a side store keyed by Entity, which is post-v1.
+
+## Validation mode
+
+```
+go test -tags ecs_validate ./...
+```
+
+`List.Set` writes through to memory every reader of that Component shares, so it
+is legal only for a caller holding the write lock. That is a rule rather than a
+property, and the tag is what checks it — at the write, where the error is,
+naming the Component and the access mode:
+
+```
+ecs: List.Set through a read of game.Inventory: a read yields a copy and a copy
+of a List shares its backing array, so this writes the Store while every
+concurrent reader holds read{game.Inventory}. Name the Component as
+*game.Inventory to write it
+```
+
+It catches a write through a read field or a `Get`, a write through a value
+retained past the `All()` that yielded it, and a write through the caller's own
+copy after that value entered a Store. Without the tag `validate` is a constant
+`false`, so a release build contains no branch, no table and no load for any of
+it.
+
+**It is detection, not prevention.** Its coverage is what a run executes. Run
+the tag in tests and in development; a string needs none of this, which is a
+reason to reach for one first.
 
 ## Naming an engine-side thing
 
@@ -330,7 +406,7 @@ func RegisterComponent[C any](registrar *kernel.Registrar, en *ecs.Entities, ids
 ```
 
 A Component type is registered **explicitly, once, by exactly one plugin**.
-`RegisterComponent` checks the pointer-free rule, creates the Store, enrols it
+`RegisterComponent` checks the Component rule, creates the Store, enrols it
 with the authority, hands it to the kernel as an ordinary resource of type
 `*ecs.Store[C]` — **owned by the calling plugin** — and bakes the per-type
 closures a Query is later planned against. There is no resource factory and

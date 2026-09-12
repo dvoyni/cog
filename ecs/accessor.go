@@ -61,7 +61,13 @@ func (g *Get[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 // rejects the handle, so asking "does e still have T" costs exactly one probe
 // under a lock the System already holds — which is almost always the question
 // wanted, where Entities.Alive asks the rarer one and needs a wider lock.
-func (g *Get[T]) Of(e Entity) (T, bool) { return g.store.Get().Get(e) }
+func (g *Get[T]) Of(e Entity) (T, bool) {
+	store := g.store.Get()
+	if validate {
+		store.stampFor(e, modeRead)
+	}
+	return store.Get(e)
+}
 
 // Set is the write half of reaching another Entity: it reads the same way Get
 // does, hands out a pointer to the stored value, and inserts one where the
@@ -85,7 +91,13 @@ func (s *Set[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 
 // Of reports e's Component, and whether e has one — the same copy Get yields,
 // available here because a write authorises a read.
-func (s *Set[T]) Of(e Entity) (T, bool) { return s.store.Get().Get(e) }
+func (s *Set[T]) Of(e Entity) (T, bool) {
+	store := s.store.Get()
+	if validate {
+		store.stampFor(e, modeWrite)
+	}
+	return store.Get(e)
+}
 
 // Ref is the stored value itself, for a caller that would otherwise read, edit
 // and write back.
@@ -96,7 +108,13 @@ func (s *Set[T]) Of(e Entity) (T, bool) { return s.store.Get().Get(e) }
 // dense array leaves the old one behind entirely. Either way a retained pointer
 // addresses a slot that is no longer the Entity's. Use it and drop it; nothing
 // may be held across an UpdateFor, a From, a spawn or a despawn.
-func (s *Set[T]) Ref(e Entity) (*T, bool) { return s.store.Get().Ref(e) }
+func (s *Set[T]) Ref(e Entity) (*T, bool) {
+	store := s.store.Get()
+	if validate {
+		store.stampFor(e, modeWrite)
+	}
+	return store.Ref(e)
+}
 
 // UpdateFor gives e this Component, replacing the value if it already has one.
 // Inserting is legal here rather than needing a handle of its own, because the

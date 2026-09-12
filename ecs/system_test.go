@@ -105,7 +105,17 @@ func newWorldWith(t testing.TB, ids uint32, subscribe func(*kernel.Registrar, *E
 	deps []kernel.PluginName, bound ...kernel.Plugin,
 ) (*Entities, *componentsPlugin, *kernel.Engine) {
 	t.Helper()
-	entities := NewEntities(ids)
+	return newWorldFor(t, NewEntities(ids), ids, subscribe, deps, bound...)
+}
+
+// newWorldFor is newWorldWith over an authority the caller already has, which
+// is what a bound plugin registering a Component of its own needs: its Store
+// has to be enrolled with the same Entities every other plugin's is, or a
+// despawn would not reach it and a Query could not find it.
+func newWorldFor(t testing.TB, entities *Entities, ids uint32,
+	subscribe func(*kernel.Registrar, *Entities), deps []kernel.PluginName, bound ...kernel.Plugin,
+) (*Entities, *componentsPlugin, *kernel.Engine) {
+	t.Helper()
 	components := &componentsPlugin{world: entities, ids: ids}
 	plugins := []kernel.Plugin{Plugin(entities), components}
 	plugins = append(plugins, bound...)

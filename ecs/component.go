@@ -18,7 +18,35 @@ import (
 // reflection looks it up by reflect.Type afterwards and never needs the
 // instantiation at all.
 type componentClass struct {
-	size         uintptr
+	size uintptr
+	// trivial is the pointer-free answer for this Component type, and it is a
+	// fast-path selector rather than a gate. A trivial row is copied by the
+	// sized moves in fill, is left where it lies by a swap-remove, and sits in
+	// a span the mark phase never walks. A non-trivial one takes copyValue and
+	// is zeroed on removal, and both of those are correctness rather than
+	// tuning: see copyValue.
+	trivial bool
+	// lists is every offset within the Component at which a List's backing
+	// array pointer sits, found once here. It is what validation mode stamps
+	// from, and it is nil for the overwhelming majority of Components.
+	lists []uintptr
+	// owner is the Component type's name, kept because the only place it is
+	// wanted is a diagnostic and reaching back for a reflect.Type there would
+	// mean keeping one on the hot struct.
+	owner string
+	// copyValue is the typed copy a read field's fill takes when the Component
+	// is not trivial, and it exists for the garbage collector rather than for
+	// speed. fill's sized moves write a row's bytes through an unsafe.Pointer,
+	// which emits no write barrier; for a pointer-free row that is sound and
+	// measured, and for a row holding a string or a List it is a pointer store
+	// the collector never sees. This closure is an ordinary typed assignment,
+	// so the compiler emits the barriers, and it is baked here for the same
+	// reason declareSet is: a generic cannot be instantiated from a
+	// reflect.Type, but it can be closed over where C is still a type.
+	//
+	// It is nil when the Component is trivial, which is what keeps the fill of
+	// every Component that was legal before this one arrived unchanged.
+	copyValue    func(dst, src unsafe.Pointer)
 	declareRead  func(access kernel.ResourceAccess) func() *storeHeader
 	declareWrite func(access kernel.ResourceAccess) func() *storeHeader
 	// declareSet is what a Spawn binds per Bundle field: the same write
@@ -36,7 +64,7 @@ type componentClass struct {
 }
 
 // RegisterComponent declares that C is a Component of this world, and is the
-// only thing that makes a Store for it exist. It checks the pointer-free rule,
+// only thing that makes a Store for it exist. It checks the legality rule,
 // creates the Store, enrols it with the authority so a despawn can empty it,
 // hands it to the kernel as an ordinary resource of type *Store[C] — owned by
 // the calling plugin — and bakes the per-type closures a Query is later planned
@@ -55,20 +83,24 @@ type componentClass struct {
 //
 // ids is the peak population hint the Store reserves for; it is not a cap.
 //
-// It panics if C is not pointer-free, naming the offending field by path. The
-// plugin boundary turns that into a composition failure naming the plugin.
+// It panics if C names mutable indirection, naming the offending field by path.
+// The plugin boundary turns that into a composition failure naming the plugin.
 func RegisterComponent[C any](registrar *kernel.Registrar, en *Entities, ids uint32) *Store[C] {
 	if en == nil {
 		panic("ecs: RegisterComponent needs the Entities the Component belongs to")
 	}
 	componentType := reflect.TypeFor[C]()
-	if err := PointerFree(componentType); err != nil {
+	if err := Storable(componentType); err != nil {
 		panic("ecs: " + err.Error())
 	}
 	store := NewStore[C](en, ids)
 	registrar.InitResource(store)
-	en.declare(componentType, &componentClass{
-		size: componentType.Size(),
+	trivial := PointerFree(componentType) == nil
+	class := &componentClass{
+		size:    componentType.Size(),
+		trivial: trivial,
+		lists:   listOffsets(componentType),
+		owner:   componentType.String(),
 		declareRead: func(access kernel.ResourceAccess) func() *storeHeader {
 			handle := access.GetRead[*Store[C]]()
 			return func() *storeHeader { return handle.Get().erase() }
@@ -88,33 +120,104 @@ func RegisterComponent[C any](registrar *kernel.Registrar, en *Entities, ids uin
 				handle.Get().Set(e, *(*C)(value))
 			}
 		},
-	})
+	}
+	if !trivial {
+		class.copyValue = func(dst, src unsafe.Pointer) { *(*C)(dst) = *(*C)(src) }
+	}
+	en.declare(componentType, class)
 	return store
 }
 
-// PointerFree reports whether a type may be a Component: a Component contains
-// no pointers, transitively. That one sentence replaces "a plain copyable
-// struct", and it is better because it is mechanically checkable — this walk,
-// run once when the type is registered, where cost is irrelevant.
+// Storable reports whether a type may be a Component. It is the registration
+// gate, and the rule it checks is:
 //
-// It forbids pointers, slices, maps, channels, funcs, interfaces and strings,
-// and permits numerics, bools, fixed-size arrays, Entity, and structs of those.
-// The reason is copying before it is the collector: a Component is copied into
-// and out of a Store by value and must stay meaningful after the thing it was
-// copied from is gone, and every forbidden kind names memory the Store does not
-// own and cannot keep alive. Being pointer-free is also what makes a Component
-// trivially serialisable, and what puts the dense array in a span the mark
-// phase never walks.
+//	A Component contains no mutable indirection, transitively.
+//
+// Every pointer a Component holds, it holds to memory nothing can write. That
+// admits numerics, bools, fixed-size arrays, Entity, structs of those, string,
+// and List[T]; it refuses pointers, slices, maps, channels, funcs, interfaces
+// and sync types.
+//
+// The rule it replaced was "a Component contains no pointers, transitively",
+// which is a stronger statement than the design ever needed. Two of the three
+// reasons given for it survive a string untouched. Copying: a string copy stays
+// meaningful after the thing it was copied from is gone, because the bytes are
+// immutable and the header keeps them alive. Serialisation: a string is
+// trivially serialisable, and the only thing it costs a future encoder is that
+// a row stops being a fixed width. The third reason, the collector, was always
+// the thin one and is measured in the spec.
+//
+// What no longer survives unstated is the reason the rule really carried, which
+// is the lock unit. A read yields a copy, and that is what makes read{C}
+// sound for concurrent readers — but only where the copy is not itself a write
+// handle. A string's is not. A []T's is: it shares the backing array, so a
+// System holding nothing but read{C} could write the Store through it and no
+// lock anywhere would name the write. That is why string is admitted outright
+// and a slice is admitted only as a List, whose backing array is unexported and
+// whose one mutator is checked. See list.go.
 //
 // The error names the offending field by path, because the field that fails is
 // usually several structs down and naming only the Component is useless:
 //
-//	ecs: proto.PathedDrawable.Path is a string, which is not pointer-free
+//	ecs: proto.PathedDrawable.Handle is a ptr, which is mutable indirection
 //
-// Variable-length data has three answers instead: a child entity with an owning
-// reference, a fixed-capacity array where the bound is small and real, or —
-// for the name of an engine-side thing — a hash of that name, which is a plain
-// number.
+// Variable-length data still has better answers than a List in most cases: a
+// child entity with an owning reference, a fixed-capacity array where the bound
+// is small and real, or — for the name of an engine-side thing — a hash of that
+// name, which is a plain number and costs the collector nothing at all.
+func Storable(t reflect.Type) error { return storable(t, t.String()) }
+
+func storable(t reflect.Type, path string) error {
+	if isList(t) {
+		elem := listElem(t)
+		if listsWithin(elem) {
+			return refuseNestedList(elem, path)
+		}
+		return storable(elem, path+"[_]")
+	}
+	switch t.Kind() {
+	case reflect.String:
+		// The one pointer a Component may hold outright, and it is admitted for
+		// a property rather than as an exception: there is no operation on a
+		// copy of a string that writes through to its bytes, so a read handing
+		// one out hands out nothing a reader can use to mutate the Store.
+		return nil
+	case reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Uintptr, reflect.Float32, reflect.Float64,
+		reflect.Complex64, reflect.Complex128:
+		return nil
+	case reflect.Array:
+		return storable(t.Elem(), path+"[_]")
+	case reflect.Struct:
+		for i := range t.NumField() {
+			field := t.Field(i)
+			if err := storable(field.Type, path+"."+field.Name); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf(
+			"%s is a %s, which is mutable indirection: a Component may hold a pointer only to memory nothing can write, so a string is admitted, a variable-length run belongs in an ecs.List, and everything else is a child Entity or a hash",
+			path, t.Kind())
+	}
+}
+
+// PointerFree reports whether a type contains no pointers, transitively. It was
+// the registration gate and is now the fast-path selector [Storable] consults
+// once per Component type: a pointer-free row is copied by the sized moves in
+// fill, is left where it lies by a swap-remove, and sits in a span the mark
+// phase never walks, while a row holding a string or a List takes a typed copy
+// and is zeroed on removal.
+//
+// It is exported because the property is worth asserting about your own types.
+// A Component that answers yes here is the cheapest thing this package can
+// store, and nothing in the relaxed rule makes it less so.
+//
+// It forbids pointers, slices, maps, channels, funcs, interfaces and strings,
+// and permits numerics, bools, fixed-size arrays, Entity, and structs of those.
 func PointerFree(t reflect.Type) error { return pointerFree(t, t.String()) }
 
 func pointerFree(t reflect.Type, path string) error {
@@ -137,7 +240,7 @@ func pointerFree(t reflect.Type, path string) error {
 		return nil
 	default:
 		return fmt.Errorf(
-			"%s is a %s, which is not pointer-free: a Component carries no pointer of any kind, transitively",
+			"%s is a %s, which is not pointer-free: a pointer-free Component carries no pointer of any kind, transitively",
 			path, t.Kind())
 	}
 }

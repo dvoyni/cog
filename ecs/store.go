@@ -1,6 +1,9 @@
 package ecs
 
-import "unsafe"
+import (
+	"reflect"
+	"unsafe"
+)
 
 // absentSlot is the sparse slot of an entity a Store holds nothing for. Its
 // generation half is all-ones, which no live generation reaches, so membership
@@ -33,6 +36,15 @@ type Store[T any] struct {
 	sparse []uint64
 	owners []Entity
 	dense  []T
+	// trivial is the pointer-free answer for T, and the only thing it decides
+	// is whether a vacated row is zeroed. It sits after the three arrays so the
+	// erased header can mirror it and the two layouts stay identical.
+	trivial bool
+	// lists and owner are what validation mode needs and what a release build
+	// never reads: the offsets of the List backing pointers in a row, and the
+	// Component's name for the diagnostic.
+	lists []uintptr
+	owner string
 }
 
 // storeHeader is what every *Store[T] looks like once T is forgotten, and it is
@@ -44,9 +56,12 @@ type Store[T any] struct {
 // the layout of Store[T] is three headers in this order, whatever T is.
 // TestTheErasedStoreMatchesTheTypedOne asserts that rather than assuming it.
 type storeHeader struct {
-	sparse []uint64
-	owners []Entity
-	dense  denseRows
+	sparse  []uint64
+	owners  []Entity
+	dense   denseRows
+	trivial bool
+	lists   []uintptr
+	owner   string
 }
 
 // denseRows is the header of dense []T with the element type erased. A row is
@@ -73,10 +88,14 @@ func NewStore[T any](en *Entities, ids uint32) *Store[T] {
 	if en == nil {
 		panic("ecs: NewStore needs the Entities the Store belongs to, so a despawn can empty it")
 	}
+	rowType := reflect.TypeFor[T]()
 	s := &Store[T]{
-		sparse: make([]uint64, ids),
-		owners: make([]Entity, 0, ids),
-		dense:  make([]T, 0, ids),
+		sparse:  make([]uint64, ids),
+		owners:  make([]Entity, 0, ids),
+		dense:   make([]T, 0, ids),
+		trivial: PointerFree(rowType) == nil,
+		lists:   listOffsets(rowType),
+		owner:   rowType.String(),
 	}
 	for i := range s.sparse {
 		s.sparse[i] = absentSlot
@@ -108,6 +127,22 @@ func (s *Store[T]) Get(e Entity) (T, bool) {
 		return zero, false
 	}
 	return s.dense[row], true
+}
+
+// stampFor is validation mode's hook for the accessors, which reach a row
+// without a Query and so without a run. It stamps with a nil run, so the mode
+// is checked and retention is not: a value a Get handed out is illegal to write
+// whenever it happens, and one a Set handed out is legal the same way, so
+// neither answer depends on the window it is asked in.
+func (s *Store[T]) stampFor(e Entity, mode listMode) {
+	if len(s.lists) == 0 {
+		return
+	}
+	row, ok := s.probe(e)
+	if !ok {
+		return
+	}
+	stampRun(unsafe.Pointer(&s.dense[row]), s.lists, s.owner, nil, mode)
 }
 
 // Ref returns a pointer to e's stored value, for a caller holding the write
@@ -145,6 +180,9 @@ func (s *Store[T]) update(e Entity, value T) bool {
 		return false
 	}
 	s.dense[row] = value
+	if validate {
+		stampStored(unsafe.Pointer(&s.dense[row]), s.lists, s.owner)
+	}
 	return true
 }
 
@@ -160,6 +198,9 @@ func (s *Store[T]) add(e Entity, value T) {
 	s.owners = append(s.owners, e)
 	s.dense = append(s.dense, value)
 	s.sparse[index] = uint64(e.gen())<<32 | uint64(row)
+	if validate {
+		stampStored(unsafe.Pointer(&s.dense[row]), s.lists, s.owner)
+	}
 }
 
 // Remove takes this Component away from e and reports whether it had one.
@@ -194,8 +235,17 @@ func (s *Store[T]) remove(e Entity) bool {
 		s.sparse[moved.idx()] = uint64(moved.gen())<<32 | uint64(row)
 	}
 	// The arrays are re-sliced, never handed back: a later Set reuses the row.
-	// The vacated row keeps a copy of the value until then, which costs nothing
-	// because a Component holds no pointer for it to keep alive.
+	// A pointer-free row is left where it lies, because nothing it holds keeps
+	// anything alive and clearing it would be work for no one. A row holding a
+	// string or a List is zeroed, and that is not tidiness: the vacated slot
+	// would otherwise keep that entity's bytes reachable until something else
+	// happened to take the row, so a despawned Entity's data would outlive it
+	// by an unbounded time. This is the same fix arche made for its own storage
+	// and ark after it; it is a typed assignment, so the collector sees it.
+	if !s.trivial {
+		var zero T
+		s.dense[last] = zero
+	}
 	s.owners = s.owners[:last]
 	s.dense = s.dense[:last]
 	s.sparse[e.idx()] = absentSlot

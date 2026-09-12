@@ -50,6 +50,10 @@ type Query[Q any] struct {
 	// what makes restructuring the Entity being visited safe under swap-remove:
 	// the array is shared, so a removal is seen, and an append is not.
 	walk []Entity
+	// run is validation mode's handle on this Query's current All(), and is nil
+	// in a release build, where the type it points at is empty and every method
+	// on it does nothing. See validate_on.go.
+	run *runToken
 	// shape is the filler chosen once, at registration, by field count. A
 	// per-field loop costs 2.4x a hand-written one and per-field binder closures
 	// about 5x — and those allocate.
@@ -75,6 +79,31 @@ type queryField struct {
 	// plan rather than of the cursor because it is consulted once per field per
 	// run, and the cursor is what the fillers copy into registers per Entity.
 	filter bool
+	// lists and owner are validation mode's, and are on the field rather than on
+	// the cursor deliberately: the cursor is what the fillers copy into
+	// registers per Entity, and widening it would make a release build pay for
+	// a check it does not contain. Reaching these costs a memory load, which is
+	// affordable in the only build that reads them.
+	lists []uintptr
+	owner string
+	// copy is the typed copy this field takes instead of fill's sized moves,
+	// and it is nil for every pointer-free Component — which is every Component
+	// this package could hold before string and List arrived.
+	//
+	// It is here rather than in the cursor, and the Query that has one is
+	// routed to the per-field loop rather than to an unrolled filler, for one
+	// measured reason: fill inlines at cost 67 against a budget of 80, and an
+	// indirect call costs 68, so a fill that could take a closure does not
+	// inline at all. That is a cost the spec already prices at about 8% of a
+	// frame, and it would be paid by every Query in the engine to serve the few
+	// that name a Component holding a string or a List. Routing instead leaves
+	// the machine code of every existing Query exactly as it was measured, and
+	// puts the whole cost of the new types on the Queries that use them, where
+	// it is a per-field loop at about 2.4x a hand-written walk instead of an
+	// unrolled fill at about 1.4x. Closing that gap is an optimisation, not a
+	// correctness question: the unrolled fillers would have to be generated per
+	// Component type to take a typed copy without an indirect call.
+	copy func(dst, src unsafe.Pointer)
 	// cursor is what the run needs and nothing else. It is separate from get
 	// because the fillers copy it into locals: reached through a pointer it is
 	// memory the compiler has to reload after every fill, since a write through
@@ -177,7 +206,15 @@ func (q *Query[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
 		}
 		planned := queryField{
 			filter: isFilter,
+			lists:  class.lists,
+			owner:  class.owner,
 			cursor: queryCursor{offset: field.Offset, size: width, wanted: wanted, write: write},
+		}
+		// A filter fills nothing, so it needs no copy however fat its Component
+		// is; a write field fills an address, which is the same address for
+		// every Component type there is.
+		if !isFilter && !write {
+			planned.copy = class.copyValue
 		}
 		if write {
 			planned.get = class.declareWrite(access)
@@ -191,8 +228,18 @@ func (q *Query[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
 			"ecs: Query %s names no present-typed Component, so nothing can drive it: a filter names the Entities to exclude and nothing enumerates the rest, so a Query needs at least one Component or Tag it matches on presence",
 			queryType))
 	}
-	// Unrolled by field count, chosen here and never again.
+	// Unrolled by field count, chosen here and never again — unless some field
+	// needs a typed copy, in which case the per-field loop is the only filler
+	// that can make one. See queryField.copy for why that routing exists rather
+	// than a branch inside fill.
 	q.shape = uint8(min(len(q.fields), wideShape))
+	for i := range q.fields {
+		if q.fields[i].copy != nil {
+			q.shape = wideShape
+			break
+		}
+	}
+	q.run = newRunToken(queryType.String())
 }
 
 // All iterates the Entities having every Component the Query names, yielding
@@ -217,6 +264,14 @@ func (q *Query[Q]) All() iter.Seq2[Entity, *Q] {
 // here is a direct one, which is what keeps the range statement's yield closure
 // on the caller's stack.
 func (q *Query[Q]) iterate(yield func(Entity, *Q) bool) {
+	if validate {
+		// One All() is one run, which is stricter than the System's lock
+		// window and is meant to be: the value a Query yields is valid only for
+		// the current step, so a List that outlives the loop it came out of is
+		// already invalid whether or not the lock is still held.
+		q.run.begin()
+		defer q.run.end()
+	}
 	switch q.shape {
 	case 1:
 		q.iterate1(yield)
@@ -330,6 +385,27 @@ func (c queryCursor) fill(row uintptr, buffer unsafe.Pointer) {
 	}
 }
 
+// fillTyped is fill for a Component that is not pointer-free, and the whole of
+// what it changes is that the row is copied by a typed assignment instead of by
+// a sized move through an unsafe.Pointer.
+//
+// That is correctness and not tuning. A sized move writes the row's bytes and
+// emits no write barrier, which is sound for a pointer-free row — the invariant
+// fill documents — and is a pointer store the collector never sees for a row
+// holding a string or a List. The closure is an ordinary `*(*C)(dst) =
+// *(*C)(src)` baked where C was still a type, so the compiler emits whatever
+// barriers the row needs and this package needs to know nothing about them.
+//
+// A write field never reaches here. It fills an address, and an address into a
+// live Store is the one pointer this package may write barrier-free, for the
+// reason fill states.
+func (c queryCursor) fillTyped(row uintptr, buffer unsafe.Pointer, copy func(dst, src unsafe.Pointer)) {
+	if c.size == 0 {
+		return
+	}
+	copy(unsafe.Add(buffer, c.offset), unsafe.Add(c.rows, row*c.size))
+}
+
 // copyRow is the general-width copy, kept out of fill so that fill stays within
 // the inlining budget.
 func copyRow(target, source unsafe.Pointer, size uintptr) {
@@ -351,6 +427,9 @@ func (q *Query[Q]) iterate1(yield func(Entity, *Q) bool) {
 	walk := q.walk
 	for row := len(walk) - 1; row >= 0; row-- {
 		driver.fill(uintptr(row), buffer)
+		if validate {
+			q.stampRow(walk[row], uintptr(row))
+		}
 		if !yield(walk[row], &q.rows) {
 			return
 		}
@@ -370,6 +449,9 @@ func (q *Query[Q]) iterate2(yield func(Entity, *Q) bool) {
 		}
 		second.fill(secondRow, buffer)
 		driver.fill(uintptr(row), buffer)
+		if validate {
+			q.stampRow(e, uintptr(row))
+		}
 		if !yield(e, &q.rows) {
 			return
 		}
@@ -394,6 +476,9 @@ func (q *Query[Q]) iterate3(yield func(Entity, *Q) bool) {
 		second.fill(secondRow, buffer)
 		third.fill(thirdRow, buffer)
 		driver.fill(uintptr(row), buffer)
+		if validate {
+			q.stampRow(e, uintptr(row))
+		}
 		if !yield(e, &q.rows) {
 			return
 		}
@@ -424,6 +509,9 @@ func (q *Query[Q]) iterate4(yield func(Entity, *Q) bool) {
 		third.fill(thirdRow, buffer)
 		fourth.fill(fourthRow, buffer)
 		driver.fill(uintptr(row), buffer)
+		if validate {
+			q.stampRow(e, uintptr(row))
+		}
 		if !yield(e, &q.rows) {
 			return
 		}
@@ -444,20 +532,63 @@ func (q *Query[Q]) iterateWide(yield func(Entity, *Q) bool) {
 		e := walk[row]
 		matched := true
 		for i := range probed {
-			cursor := probed[i].cursor
+			field := &probed[i]
+			cursor := field.cursor
 			probedRow, ok := cursor.row(e)
 			if !ok {
 				matched = false
 				break
 			}
-			cursor.fill(probedRow, buffer)
+			if field.copy != nil {
+				cursor.fillTyped(probedRow, buffer, field.copy)
+			} else {
+				cursor.fill(probedRow, buffer)
+			}
 		}
 		if !matched {
 			continue
 		}
-		driver.fill(uintptr(row), buffer)
+		if q.fields[0].copy != nil {
+			driver.fillTyped(uintptr(row), buffer, q.fields[0].copy)
+		} else {
+			driver.fill(uintptr(row), buffer)
+		}
+		if validate {
+			q.stampRow(e, uintptr(row))
+		}
 		if !yield(e, &q.rows) {
 			return
 		}
+	}
+}
+
+// stampRow is validation mode's per-Entity work and nothing else: it records,
+// for every List the row's Components name, which run reached it and under
+// which access mode. A release build never calls it, because every call site
+// sits behind `if validate` and validate is a constant false there.
+//
+// It re-probes rather than taking the rows the fillers already found, which is
+// redundant work in the only build that does it. The alternative was to hand
+// the rows out of fill, which would have put validation's shape into the hot
+// path's signature — exactly what keeping lists off the cursor avoids.
+func (q *Query[Q]) stampRow(e Entity, driverRow uintptr) {
+	for i := range q.fields {
+		field := &q.fields[i]
+		if field.filter || len(field.lists) == 0 {
+			continue
+		}
+		row := driverRow
+		if i != 0 {
+			probed, ok := field.cursor.row(e)
+			if !ok {
+				continue
+			}
+			row = probed
+		}
+		mode := modeRead
+		if field.cursor.write {
+			mode = modeWrite
+		}
+		stampRun(unsafe.Add(field.cursor.rows, row*field.cursor.size), field.lists, field.owner, q.run, mode)
 	}
 }

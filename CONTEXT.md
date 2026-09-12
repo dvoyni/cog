@@ -122,8 +122,12 @@ _Avoid_: World, Registry
 The promotion of a write-locked Entities into the thing that can Spawn and Despawn. A System gets one only by declaring the write, so the authority to change which Entities exist is visible in its signature and nowhere else.
 
 **Component**:
-A plain value an Entity either has or has not, addressed by its Go type. It contains no pointers of any kind, transitively, which is checked when the type is registered. An Entity holds at most one Component of a given type.
+A plain value an Entity either has or has not, addressed by its Go type. It contains no _mutable_ indirection, transitively — every pointer it holds, it holds to memory nothing can write — which is checked when the type is registered. That admits numerics, bools, fixed-size arrays, an Entity, a string and a List, and refuses pointers, bare slices, maps, channels, funcs and interfaces. The rule is about the lock unit rather than the collector: a read yields a copy, and a copy of a slice header is a write handle on the Store that no lock names, where a copy of a string is not. An Entity holds at most one Component of a given type.
 _Avoid_: Attribute, property, field
+
+**List**:
+A fixed-length run of values a Component may hold, and the only way a Component holds variable-length data at all. Its backing array is unexported and its constructors copy, so reading one hands out no way to write the Store; its one element mutator is legal under a write lock and is checked in a validating build. Its length is fixed at construction, because growing means allocating, so a List whose length changes is a new List written into the Component.
+_Avoid_: Slice, array, vector, buffer. A bare slice in a Component is refused, and the word for the fixed-size Go array a Component may also hold is just an array.
 
 **Tag**:
 A Component with no fields. Its presence is the whole of what it says, and its purpose is to narrow a Query. It is not a place to keep a boolean: a fact the Entity carries data about belongs in that data's Component, and no fact is encoded twice.
@@ -176,12 +180,16 @@ A System's means of reaching one Component of an Entity it did not iterate to, w
 _Avoid_: Lookup, fetch, getter
 
 **Hash**:
-The 64-bit hash of a name, and the way a Component says which model, clip or node it means. A Component may not hold the name itself, because a name is a string and a Component holds no pointers; a Hash is a plain number, so it may. Producing one needs nothing — hashing is a pure function, so a System changes what an Entity names while holding only the lock it already had — and the same name hashes the same in every process and every run, which an assigned index does not.
+The 64-bit hash of a name, and the way a Component says which model, clip or node it means. A Component may hold a string, so this is a preference rather than a prohibition, and the reason is the lookup rather than the storage: naming a model by path costs about 47 ns against half a nanosecond by dense index, per draw, per frame. Producing one needs nothing — hashing is a pure function, so a System changes what an Entity names while holding only the lock it already had — and the same name hashes the same in every process and every run, which an assigned index does not.
 _Avoid_: Id, interned index. An index is legitimate inside whatever resolves a Hash; it is not what a Component carries.
 
 **Name table**:
 What a plugin registers its own names in, so that a Hash arriving on a Component can be resolved back to the thing it names. It belongs to the side that reads a name, not to the side that writes one, so one System declares it rather than every System that ever assigns a name. It holds what was registered and nothing else: asking it about a name nobody declared answers that there is no such thing, and leaves it the size it was.
 _Avoid_: Interner, registry, atlas
+
+**Validation mode**:
+A build tag that compiles in the check that nobody writes a List through a read. It is on under `-tags ecs_validate` and absent otherwise, so a release build carries no branch and no table for it. It is detection rather than prevention, and its coverage is whatever a run executes — which is a weaker guarantee than the rest of the design offers and is the price of a Component holding mutable data at all.
+_Avoid_: Debug mode, safety checks, assertions.
 
 ## Agent Interface
 
