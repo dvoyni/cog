@@ -5,18 +5,24 @@
 // parameter types say what it touches: a Query over the Components it iterates,
 // whose field pointer-ness is its access mode, narrowed by Without and With
 // filters that yield nothing and still declare a read; a Spawn over the Bundle
-// it creates; the WriteableEntities that can retire one; and the Get, Set and
-// Remove accessors that reach one Component of an Entity it did not iterate to.
-// ToHandler turns one into the factory an ordinary cog subscription takes, so
-// the ECS contributes no scheduler, no ordering and no registration API of its
-// own.
+// it creates; the WriteableEntities that can retire one; the Get, Set and
+// Remove accessors that reach one Component of an Entity it did not iterate to;
+// the Read and Write handles that name another plugin's resource; and the In
+// that carries a value projected out of the event. ToHandler turns one into the
+// factory an ordinary cog subscription takes and ToExecute into the factory a
+// command takes, so the ECS contributes no scheduler, no ordering and no
+// registration API of its own.
 //
 // Nothing here is a Command. A structural change is a direct call on a handle
 // the System already holds, and the exclusion it needs was arranged before the
 // frame started: Spawn and WriteableEntities declare write{*Entities}, which is
 // a total barrier because Entities holds a reference to every Store.
 //
-// The resource and event handles a binding uses are not here yet; see
+// There is no binding mechanism, and that is the decision. A plugin that is not
+// the ECS attaches to the world by being an ordinary plugin: it registers
+// Components if it has any, subscribes Systems like anything else, and reaches
+// its own frame-local resource from inside them through Read and Write. No
+// binding type, no adapter, no registration call of the ECS's own. See
 // ecs/docs/specs/ecs.md, which this package is judged against.
 //
 // The two decisions the rest of the design rests on are made here. Storage is

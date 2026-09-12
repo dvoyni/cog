@@ -5,11 +5,12 @@
 plain Go funcs whose parameter types say what they touch.
 
 **A Component moves, a Query can be narrowed, Entities can be created and
-retired, and one Entity can reach another: the storage, the registration, the
-Query, its filters, structural change, the accessors and the handler builder are
-here.** What is not here yet is the resource and event handles a binding uses;
+retired, one Entity can reach another, and another plugin attaches with no
+mechanism at all: the storage, the registration, the Query, its filters,
+structural change, the accessors, the resource and event handles, and both
+handler builders are here.**
 [`docs/specs/ecs.md`](docs/specs/ecs.md) is the specification the whole plugin is
-judged against, and this README covers only what is built.
+judged against.
 
 ## Files
 
@@ -19,8 +20,11 @@ authority; `store.go` the `Store`, the type-erased `storeCore` a despawn reaches
 every Store through, and the erased header a Query fills from; `query.go` the
 `Query`, its driver and its fillers; `filter.go` the `Without` and `With` field
 types; `spawn.go` the `Spawn` and `WriteableEntities` handles; `accessor.go` the
-`Get`, `Set` and `Remove` accessors; `system.go` the `ToHandler` builder;
-`plugin.go` the plugin that publishes the authority.
+`Get`, `Set` and `Remove` accessors; `resource.go` the `Read` and `Write`
+handles that name another plugin's resource; `in.go` the `In` cell and the
+`Feed` that fills it; `system.go` the `ToHandler` and `ToExecute` builders and
+the parameter classification both share; `plugin.go` the plugin that publishes
+the authority.
 
 ## Dependencies
 
@@ -409,16 +413,27 @@ on: a despawn reaches every Store through Go pointers the kernel does not
 police, and holding the authority for write is what excludes every System that
 holds it for read.
 
-What a signature may contain today is a `*ecs.Query[Q]`, a `*ecs.Spawn[B]`, a
-`*ecs.WriteableEntities`, a `*ecs.Get[T]`, a `*ecs.Set[T]`, a `*ecs.Remove[T]`
-and, at most once, the event value itself. Naming the
-event is legal but is not the ordinary shape: a
-System that names one can only ever be subscribed to that one, where the same
-gameplay should be drivable by a fixed-step tick, a rollback re-simulation or a
-test harness publishing its own frames. A parameter the builder does not
-recognise is a registration-time panic, which the plugin boundary reports as
-`ErrPluginPanic` naming the plugin — and so is a Query naming a Component no
-plugin registered:
+### What a signature may contain
+
+**This is contract, not convention.** A System takes any number of:
+
+| parameter | declares | what it is |
+| --- | --- | --- |
+| `*ecs.Query[Q]` | `read{*Entities}` + per-field access | the Components it iterates |
+| `*ecs.Spawn[B]` | `write{*Entities}` + `write{*Store[F]}` per Bundle field | creating Entities |
+| `*ecs.WriteableEntities` | `write{*Entities}` | despawning |
+| `*ecs.Get[T]` | `read{*Store[T]}` + `read{*Entities}` | reading one Component of an Entity it did not iterate to |
+| `*ecs.Set[T]`, `*ecs.Remove[T]` | `write{*Store[T]}` + `read{*Entities}` | writing, inserting or taking away the same |
+| `*ecs.Read[T]`, `*ecs.Write[T]` | the kernel's own read/write on `T` | any other plugin's resource |
+| `*ecs.In[T]` | nothing | a value projected out of the event or request |
+| `kernel.Kernel` | nothing | the kernel value, for publishing an event |
+| the event or request value | nothing | legal, and not the default shape |
+
+**Anything else is a composition-time failure naming the System's type.** This
+is a mistake every new user makes once, so the diagnostic matters more than the
+mechanism. The failure is a registration-time panic, which the plugin boundary
+reports as `ErrPluginPanic` naming the plugin — the same route a Query naming a
+Component no plugin registered takes:
 
 ```
 plugin "systems" panicked in Register: ecs: Query game.GuardedQ names
@@ -426,7 +441,92 @@ unregistered Component game.Guarded
 ```
 
 That names the **Component** and the **Query**, rather than the store type the
-user never wrote.
+user never wrote. Which of the three answers the specs record for this
+diagnostic is right is still open
+([#279](https://github.com/dvoyni/cog/issues/279)); the panic is the one taken
+here, because the alternative — a sentence in the composition error list — needs
+a way for a plugin-side builder to reach `kernel`'s private error list, and
+nothing else in the ECS needs that.
+
+The classification is a **closed set**, and structurally so: every parameter
+that reaches the world is a pointer to a type in this package implementing one
+unexported method, so no package outside can add one and the builder never has
+to ask what a type means. A new handle is a new type, not a new branch.
+
+`ecs.Read[T]` and `ecs.Write[T]` will **not** name the ECS's own cells —
+`*ecs.Entities` or a `*ecs.Store[T]` — and the refusal is soundness rather than
+tidiness. `Store.Remove` is exported, so `ecs.Read[*ecs.Store[Body]]` would hand
+a read-locked System a mutator: a data race the kernel cannot see, because the
+lock set says read and the code writes. The accessors take the right lock,
+declare `read{*Entities}` with it, and check the Component was registered at
+all.
+
+### The event does not belong in the signature
+
+```go
+func advance(q *ecs.Query[AdvanceQ], dt *ecs.In[float64]) {
+    step := dt.Get()                              // once, outside the loop
+    for _, it := range q.All() { … }
+}
+
+ecs.ToHandler[app.UpdateEvent](world, advance, ecs.Feed(func(e app.UpdateEvent) float64 { return e.Dt }))
+ecs.ToHandler[FixedTick](world, advance,       ecs.Feed(func(e FixedTick) float64 { return e.Step }))
+```
+
+A System that names the event **can only ever be subscribed to that event**. The
+same gameplay cannot then be driven by a fixed-step tick, by a rollback
+re-simulation, or by a test harness publishing its own frames, without being
+written twice. The event belongs to the **adapter**, which is already generic
+over it. Naming it stays legal — a System genuinely about one event should name
+it — but it is not the shape to reach for.
+
+`In[T]` carries a per-tick value and declares no lock; `Feed` is the projection,
+resolved at registration. The `Feeder` carries the `In[T]` **instance** rather
+than a way to build one, because a generic cannot be instantiated from a
+`reflect.Type`, and the projection reads the event through the **same stable
+cell** a named event parameter would have used — so `In` costs no allocation at
+all over naming the event.
+
+Three ways to get it wrong, each its own sentence at composition:
+
+- an `*ecs.In[T]` no `Feed` supplies — the parameter is right and the
+  registration site is missing a line;
+- a `Feed` the System does not take — a projection computed every tick and
+  thrown away, almost always a type that does not match;
+- **one `Feed` given to two Systems.** Call `ecs.Feed` at each registration
+  site. Hoisting one into a variable would have two Systems share a cell with no
+  lock between them, and publications that may run concurrently writing it.
+
+> **`In.Get()` belongs outside the loop.** `In` is a pointer to a cell the
+> adapter writes, so a `Get()` inside the loop is a load the compiler cannot
+> hoist past the Component writes — it has no way to prove they do not alias,
+> and the disassembly confirms the load is re-issued per Entity. **On this
+> implementation that costs nothing measurable** — see the cost table — because
+> `All()` is a `range`-over-func, so the loop body is a separate closure that
+> reloads anything it reads from outside itself anyway. Hoist it regardless: the
+> rule is free to follow, the reason it might matter has not gone away, and a
+> Query shape whose body does less work than this one's would show it.
+
+### A System as a command
+
+```go
+type ResetCmd kernel.Command[ResetRequest, ResetResponse]
+
+registrar.HandleCommand[ResetCmd](ecs.ToExecute[ResetRequest, ResetResponse](world, reset,
+    ecs.Feed(func(r ResetRequest) int { return r.Seed })))
+```
+
+`ToExecute` is `ToHandler`'s command twin: the same signature, the same
+classification, the same lock set, registered with `HandleCommand` instead of
+`Subscribe`. The request is to a command what the event is to a subscription —
+it may be named, and `Feed` projects out of it, so **one System func is both a
+command and a subscription** without being written twice.
+
+**The response is the zero `Resp` and the error is always nil**, because a
+System returns nothing. So `ToExecute` is for a command that is an instruction
+rather than a question; a handler that must answer is not a System, it is an
+ordinary command with a `Lock` of its own, and writing it that way costs nothing
+the ECS was providing.
 
 ## Structural change
 
@@ -634,6 +734,55 @@ A stale slot in a `[4]Entity` is the game's to compact, and detecting one is fre
 on the read that was already happening. Centralising either would need the
 reverse index refused above: **any global index is a global lock.**
 
+## Binding: how another plugin attaches
+
+```go
+func recordDraws(
+    q      *ecs.Query[DrawQ],                  // the Components
+    models *ecs.Read[*scene.Names],            // a resource, read
+    out    *ecs.Write[*scene.OpQueue],         // a resource, written
+) {
+    table, queue := models.Get(), out.Get()
+    for _, it := range q.All() {
+        path, _ := table.Lookup(it.D.Model)
+        queue.Model(it.D.Layers, path, scene.ModelDraw{ /* … */ })
+    }
+}
+```
+
+**There is no binding mechanism, and that is the decision.** A plugin that is
+not the ECS — physics, audio, scene — attaches to the world by being an ordinary
+plugin: it registers Components if it has any, subscribes Systems like anything
+else, and reaches its own frame-local resource from inside them. `ecs.Read[T]`
+and `ecs.Write[T]` are the only addition, and they wrap the
+`kernel.Read`/`kernel.Write` a handler's `Lock` already declares — reached
+through the signature instead of through a `Lock` func, so the resource joins the
+System's lock set beside the Query's Stores, at registration, **as visible in the
+signature as a Component is**. No binding type, no adapter, no registration call
+of the ECS's own.
+
+**The binding is necessarily a third plugin.** `ecs` imports only `kernel`, and
+a plugin like `scene` imports nothing of `ecs`, so neither can know about the
+other. That is what "no binding mechanism" means in practice — and a project not
+using the ECS simply does not register that plugin and schedules no Systems.
+
+**Neither handle is a place to keep anything.** `Get` goes to the cell the lock
+covers on every call, so the value is refreshed per tick and valid only for the
+body of the System, under the kernel's standing rule that a value read from a
+handle lives only as long as the handler holds its lock. `Set` is for the few
+resources reassigned wholesale rather than mutated in place.
+
+**The wide lock lands in the bound plugin, not in the ECS.** A `*scene.OpQueue`
+is one resource, so every recording System serialises against every other
+recording System for write, whatever Components they read — a property of the
+bound plugin's API, not of the ECS. One recording System per bound plugin is the
+shape.
+
+**Publishing an event out of a System** is the other direction, and it needs
+only `kernel.Kernel` in the signature. It is the one thing on this page that
+allocates, and the cost is the kernel's publication rather than the ECS's: see
+below.
+
 ## What it costs
 
 Measured on a real `kernel.Engine` driven by a real `app.UpdateEvent`, AMD Ryzen
@@ -813,3 +962,59 @@ the bar this design is held to. The remedy, if the number ever matters, is to
 resolve the Store **once per tick** rather than once per call, which the handler
 builder is the only thing positioned to do — and which is a change to the
 parameter seam rather than to an accessor, so it is not made here.
+
+### What the binding and the projection cost
+
+Same engine, same event, same medians. Two claims, and both are "nothing".
+
+| whole frame | ns/op | allocs/op |
+| --- | --- | --- |
+| a System naming `app.UpdateEvent`, 1 000 | 8 536 | **6** |
+| **a System with `In` + `Feed`, 1 000** | **8 629** | **6** |
+| …the same, `Get()` left inside the loop, 1 000 | 8 374 | **6** |
+| a recording System — Query + `Read` + `Write`, 1 000 | 8 513 | **6** |
+| a System naming `app.UpdateEvent`, 10 000 | 40 242 | **6** |
+| **a System with `In` + `Feed`, 10 000** | **39 650** | **6** |
+| …the same, `Get()` left inside the loop, 10 000 | 39 320 | **6** |
+| a recording System — Query + `Read` + `Write`, 10 000 | 38 011 | **6** |
+| a System publishing one event, 1 000 | 12 606 | **12** |
+
+**`In` plus `Feed` costs no allocation over naming the event, and neither does a
+resource in the signature** — six objects a frame, the engine's own
+2-per-publication-plus-4-per-subscriber line, identical at 1 000 and at 10 000
+Entities. Over a ten-thousand-frame steady state: **6.004 at 1k and 6.001 at
+10k** for `In` + `Feed` against **6.004 and 6.003** for naming the event, and
+**6.002 at both** for the recording System. `-gcflags=-m` still reports no
+`moved to heap` anywhere in the package, and `queryCursor.row` and
+`queryCursor.fill` still inline.
+
+**Time is the same too**, and the three timed arms are inside this machine's
+whole-frame noise of each other. That noise is several hundred nanoseconds on a
+frame, so the hoist question is answered on the walk alone instead — the same
+10 000-Entity two-Component walk, with the engine's publication out of the
+picture:
+
+| the walk over 10 000 Entities | ns/op | ns an Entity |
+| --- | --- | --- |
+| the step in a local the compiler keeps in a register | 33 794 | 3.38 |
+| `In.Get()` hoisted out of the loop | 34 356 | 3.44 |
+| `In.Get()` left inside the loop | 34 008 | 3.40 |
+
+**The hoist rule's mechanism is real and its cost here is not.** The
+disassembly shows the unhoisted body re-issuing the load per Entity, exactly as
+the rule says — but the hoisted body issues one too, from the closure context,
+because `All()` is a `range`-over-func and the loop body is a separate function.
+Hoisting moves the load; it does not remove it. The spec records **~3% hoisted
+and ~10% unhoisted** from the prototype; on this implementation, at this Query
+shape, the spread is **under 2% and not consistently ordered**. The rule stays
+in the docs — it is free to follow and the aliasing fact behind it has not
+changed — but the 10% is not reproduced here and should not be quoted.
+
+**Publishing from a System is the one thing that allocates**, and it is the
+kernel's charge rather than the ECS's: a publication is a goroutine, a
+completion handle and an event context. Measured over a two-thousand-frame
+steady state, a System that publishes one event costs **12.046 objects a frame
+against a silent System's 6.005** — **6.04 for the publication**, which is one
+more publication's worth of exactly the line every other row here sits on. A
+System that publishes per Entity would pay it per Entity; publish once a frame,
+or not at all.

@@ -54,15 +54,21 @@ func (p *componentsPlugin) Register(registrar *kernel.Registrar, _ any) error {
 }
 
 // systemsPlugin subscribes Systems, and declares the components plugin because
-// it locks the Stores that plugin owns.
+// it locks the Stores that plugin owns. deps is overridable because a System
+// that names another plugin's resource locks that plugin's cell too, and the
+// coupling check is exactly what that is supposed to trip.
 type systemsPlugin struct {
 	world     *Entities
+	deps      []kernel.PluginName
 	subscribe func(registrar *kernel.Registrar, world *Entities)
 }
 
 func (p *systemsPlugin) Name() kernel.PluginName { return "systems" }
 
 func (p *systemsPlugin) Dependencies() []kernel.PluginName {
+	if p.deps != nil {
+		return p.deps
+	}
 	return []kernel.PluginName{Name, "components"}
 }
 
@@ -88,15 +94,25 @@ func newWorld(t testing.TB, ids uint32, subscribe func(*kernel.Registrar, *Entit
 	*Entities, *componentsPlugin, *kernel.Engine,
 ) {
 	t.Helper()
+	return newWorldWith(t, ids, subscribe, nil)
+}
+
+// newWorldWith is newWorld with a bound plugin beside it: the third plugin a
+// binding necessarily is, publishing the frame-local resource a System reaches
+// through its signature. deps is the systems plugin's dependency list, which has
+// to name the bound plugin for the same reason it names the components one.
+func newWorldWith(t testing.TB, ids uint32, subscribe func(*kernel.Registrar, *Entities),
+	deps []kernel.PluginName, bound ...kernel.Plugin,
+) (*Entities, *componentsPlugin, *kernel.Engine) {
+	t.Helper()
 	entities := NewEntities(ids)
 	components := &componentsPlugin{world: entities, ids: ids}
+	plugins := []kernel.Plugin{Plugin(entities), components}
+	plugins = append(plugins, bound...)
+	plugins = append(plugins, &systemsPlugin{world: entities, deps: deps, subscribe: subscribe})
 	engine := kernel.New(nil).
 		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
-		WithPlugins(
-			Plugin(entities),
-			components,
-			&systemsPlugin{world: entities, subscribe: subscribe},
-		)
+		WithPlugins(plugins...)
 	ctx, cancel := context.WithCancel(context.Background())
 	// The cleanup waits for Run to return rather than only cancelling it. A
 	// dying engine allocates while it winds down, and several tests here count
@@ -296,6 +312,27 @@ func TestASystemTakingAnUnknownParameterIsRejected(t *testing.T) {
 		}
 	}()
 	ToHandler[app.UpdateEvent](entities, func(s *Store[body]) {})
+}
+
+// TestASystemNamingTheEventTwiceIsRejected holds the "at most once" half of the
+// classification. Two parameters would read one cell, so the second is never a
+// second value — it is always a mistake, and saying so is cheaper than letting
+// it look like it works.
+func TestASystemNamingTheEventTwiceIsRejected(t *testing.T) {
+	entities := NewEntities(8)
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatalf("a System naming the event twice was accepted")
+		}
+		message, _ := recovered.(string)
+		for _, want := range []string{"event value", "app.UpdateEvent", "more than once"} {
+			if !strings.Contains(message, want) {
+				t.Fatalf("panic %v does not name %q", recovered, want)
+			}
+		}
+	}()
+	ToHandler[app.UpdateEvent](entities, func(a app.UpdateEvent, b app.UpdateEvent) {})
 }
 
 func namesType(types []reflect.Type, want string) bool {
