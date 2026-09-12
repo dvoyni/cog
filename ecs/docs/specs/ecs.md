@@ -903,9 +903,21 @@ registrar.Subscribe[MoveSystem](
 
 `ecs.ToHandler[E](world, system, feeds...)` returns a
 `func() (kernel.Lock, kernel.Observe[E])` — exactly `kernel.Subscription[E]`, the
-factory shape `Subscribe` already takes. `ecs.ToExecute[Req, Resp]` is its
-command twin, returning `kernel.Execute[Req, Resp]`, which is what makes a
-System invocable as a command.
+factory shape `Subscribe` already takes. `ecs.ToExecute[Req, Res]` is its
+command twin, returning `kernel.Execute[Req, Res]`, which is what makes a System
+invocable as a command.
+
+**A System still returns nothing, so a command answers through `*ecs.Resp[Res]`
+in the signature** — recognised by its type and injected by the builder, so the
+classification stays a contract rather than a positional convention. Naming it
+is optional: a command that is an order rather than a question takes no `Resp`
+and answers the zero value. The cell is allocated once at registration and
+cleared on the way out, so an invocation that writes nothing cannot inherit the
+one before it, and answering costs **0 allocations and 52 ns on a 6.5 µs
+invocation**, which is inside the noise. It holds a `Res` rather than a `*Res`:
+every wrapper here is `X[T]` over the domain type, and making the System supply
+the storage would be either an allocation an invocation or a pointer that need
+not outlive the lock.
 
 **That is requirement 2 satisfied completely.** `Before`/`After`/`First`/`Last`,
 ownership, `Describe` and every `Err*` kind work unchanged; the identity type is
@@ -945,6 +957,7 @@ This is contract, not convention. A System takes any number of:
 | `*ecs.Set[T]` | `write{*Store[T]}` | writing, or inserting, the same |
 | `*ecs.Read[T]`, `*ecs.Write[T]` | the kernel's own read/write on `T` | any other plugin's resource |
 | `*ecs.In[T]` | nothing | a value projected out of the event |
+| `*ecs.Resp[Res]` | nothing | a command only: the answer it writes |
 | `kernel.Kernel` | nothing | the kernel value |
 | the event or request value | nothing | legal, and not the default — see below |
 
@@ -988,19 +1001,43 @@ than a way to build one, because a generic cannot be instantiated from a
 `reflect.Type`; and the projection closure reads the event through the same
 stable cell the event parameter would have used, so nothing is boxed per tick.
 
-**And `In.Get()` must be hoisted out of the loop — that is a usage rule, not an
-implementation detail.** `In` is a pointer to a cell the adapter writes, so a
-`Get()` inside the loop is a load the compiler cannot hoist past the Component
-writes: it has no way to prove they do not alias.
+**And `In.Get()` should be read once outside the loop — that is a usage rule,
+not an implementation detail.** `In` is a pointer to a cell the adapter writes,
+so a `Get()` inside the loop is a load the compiler cannot hoist past the
+Component writes: it has no way to prove they do not alias. The disassembly of
+the built package confirms it, the unhoisted body re-issuing the load on every
+Entity.
 
-| whole frame | ns/op | allocs/op |
+**No allocation cost at all**, which the implementation holds: a ten-thousand
+frame steady state is **6.004 objects a frame at 1k and 6.001 at 10k** for `In`
++ `Feed`, against **6.004 and 6.003** for naming the event — the engine's own
+line, identical either way.
+
+**The time cost, however, did not survive implementation, and the number this
+spec first carried should not be quoted.** The prototype measured it whole-frame
+at 50 438 / 52 111 / 55 620 ns and read ~3% hoisted and ~10% unhoisted out of
+that; whole-frame variance on the implementation is several hundred nanoseconds,
+which is the same size as the effect, so the question is settled on the walk
+alone. The same 10 000-Entity two-Component walk, the engine's publication out
+of the picture, medians of five:
+
+| the walk over 10 000 Entities | ns/op | ns an Entity |
 | --- | --- | --- |
-| names the event, 10 000 | 50 438 | 6 |
-| `In` + `Feed`, 10 000 | 52 111 | 6 |
-| `In` + `Feed`, unhoisted `Get()`, 10 000 | 55 620 | 6 |
+| the step in a local the compiler keeps in a register | 33 794 | 3.38 |
+| `In.Get()` hoisted out of the loop | 34 356 | 3.44 |
+| `In.Get()` left inside the loop | 34 008 | 3.40 |
 
-**No allocation cost at all**, ~3% of frame time hoisted, ~10% unhoisted. Same
-class of hazard as the escaping fill buffer: invisible until it is written down.
+**Under 2%, and not consistently ordered** — the unhoisted arm lands *between*
+the other two. The disassembly says why, and it is a property of the iteration
+shape rather than of `In`: `All()` is a `range`-over-func, so **the loop body is
+a separate function**, and anything it reads from outside itself it reads
+through its closure context. The hoisted body issues its own load
+(`MOVSS 0x10(DX), X0`) exactly as the unhoisted one does. **Hoisting moves the
+load; it does not remove it.**
+
+The rule stays, because it is free to follow, because the aliasing fact behind
+it is real, and because a loop body doing less work than this one's would make
+the extra dependent load visible. What is withdrawn is the ~10%.
 
 ### What a mis-declared System does
 
@@ -1974,7 +2011,7 @@ exists.
 - `Without[T]`, and `With[T]` if it is wanted in v1; the fill skips blank
   fields.
 - The registration-time error for a Query naming no present-typed Component.
-- `ToHandler[E]` and `ToExecute[Req, Resp]`; the parameter classification table
+- `ToHandler[E]` and `ToExecute[Req, Res]`; the parameter classification table
   above is the contract; a System returning anything is rejected.
 - `In[T]` and `Feed`.
 - `Read[T]` and `Write[T]`.

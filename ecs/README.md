@@ -22,9 +22,9 @@ every Store through, and the erased header a Query fills from; `query.go` the
 types; `spawn.go` the `Spawn` and `WriteableEntities` handles; `accessor.go` the
 `Get`, `Set` and `Remove` accessors; `resource.go` the `Read` and `Write`
 handles that name another plugin's resource; `in.go` the `In` cell and the
-`Feed` that fills it; `system.go` the `ToHandler` and `ToExecute` builders and
-the parameter classification both share; `plugin.go` the plugin that publishes
-the authority.
+`Feed` that fills it; `response.go` the `Resp` cell a command answers through;
+`system.go` the `ToHandler` and `ToExecute` builders and the parameter
+classification both share; `plugin.go` the plugin that publishes the authority.
 
 ## Dependencies
 
@@ -426,6 +426,7 @@ holds it for read.
 | `*ecs.Set[T]`, `*ecs.Remove[T]` | `write{*Store[T]}` + `read{*Entities}` | writing, inserting or taking away the same |
 | `*ecs.Read[T]`, `*ecs.Write[T]` | the kernel's own read/write on `T` | any other plugin's resource |
 | `*ecs.In[T]` | nothing | a value projected out of the event or request |
+| `*ecs.Resp[Res]` | nothing | **a command only** — the answer it writes |
 | `kernel.Kernel` | nothing | the kernel value, for publishing an event |
 | the event or request value | nothing | legal, and not the default shape |
 
@@ -510,10 +511,19 @@ Three ways to get it wrong, each its own sentence at composition:
 ### A System as a command
 
 ```go
-type ResetCmd kernel.Command[ResetRequest, ResetResponse]
+type CountCmd kernel.Command[CountRequest, CountResponse]
 
-registrar.HandleCommand[ResetCmd](ecs.ToExecute[ResetRequest, ResetResponse](world, reset,
-    ecs.Feed(func(r ResetRequest) int { return r.Seed })))
+func count(request CountRequest, q *ecs.Query[CountQ], answer *ecs.Resp[CountResponse]) {
+    reply := CountResponse{}
+    for _, it := range q.All() {
+        if it.Health.HP >= request.AtLeast {
+            reply.N++
+        }
+    }
+    answer.Set(reply)
+}
+
+registrar.HandleCommand[CountCmd](ecs.ToExecute[CountRequest, CountResponse](world, count))
 ```
 
 `ToExecute` is `ToHandler`'s command twin: the same signature, the same
@@ -522,11 +532,33 @@ classification, the same lock set, registered with `HandleCommand` instead of
 it may be named, and `Feed` projects out of it, so **one System func is both a
 command and a subscription** without being written twice.
 
-**The response is the zero `Resp` and the error is always nil**, because a
-System returns nothing. So `ToExecute` is for a command that is an instruction
-rather than a question; a handler that must answer is not a System, it is an
-ordinary command with a `Lock` of its own, and writing it that way costs nothing
-the ECS was providing.
+**A System still returns nothing**, so it answers through `*ecs.Resp[Res]`
+instead — **recognised by its type, not by its position**, so there is no "the
+last parameter is the response" convention to remember or to get wrong.
+`Set` is the whole of the API, the cell is allocated once at registration, and
+the value is copied out under the lock and the cell cleared behind it, so an
+invocation that writes nothing answers the zero value rather than the previous
+invocation's. **Zero allocations either way** — see the cost table.
+
+Naming it is **optional**: a command that is an order rather than a question
+takes no `Resp` and answers the zero value. Three refusals guard the rest:
+
+- a `ToHandler` System naming any `Resp` — an event has no response to write
+  into, and the sentence points at `ToExecute`;
+- `*ecs.Resp[X]` where the command's response is `Y` — the message names both,
+  because the mistake is always a copied registration line;
+- naming the response twice, the same "at most once" rule the event and the
+  request carry.
+
+`Resp[T]` holds a `T`, not a `*T`. Every wrapper here is `X[T]` over the domain
+type; `Read[T]`/`Write[T]` take a pointer only because a **kernel resource** is
+keyed by its exact Go type, which is the kernel's rule and not this package's. A
+`Resp[*T]` would also make the System supply the storage — either an allocation
+an invocation, or a pointer to something that need not outlive the lock.
+
+The error is always nil. A System has no way to fail that is not a panic, and a
+panic is already `ErrPluginPanic`; expected rejection belongs in the response,
+which is where the kernel asks for it anyway.
 
 ## Structural change
 
@@ -1018,3 +1050,26 @@ against a silent System's 6.005** — **6.04 for the publication**, which is one
 more publication's worth of exactly the line every other row here sits on. A
 System that publishes per Entity would pay it per Entity; publish once a frame,
 or not at all.
+
+### What answering a command costs
+
+Nothing measurable, and nothing at all in allocation. One whole invocation over
+1 000 Entities — `ExecuteCommand`, the lock acquisition, the System, the answer
+on its way back — with the two arms doing **identical** per-Entity work and
+differing only in where the result goes:
+
+| one command invocation, 1 000 Entities | ns/op | allocs/op | B/op |
+| --- | --- | --- | --- |
+| the System writes no answer, caller gets the zero response | 6 470 | **0** | 0 |
+| **the System answers through `*ecs.Resp[Res]`** | **6 522** | **0** | 0 |
+
+**52 ns on 6.5 µs, 0.8%, inside the noise — and zero objects either way**, which
+is the claim that matters: a response leaving through a cell is exactly where an
+allocation could appear, and none does. `testing.AllocsPerRun` over 1 000
+invocations reports **0.000** for both arms.
+
+The cell is allocated **once, at registration**, like every other parameter
+object here, and `take` clears it on the way out so an invocation that answers
+nothing cannot inherit the answer before it. Nothing is boxed: the `reflect.Value`
+holding the cell pointer is built once and reused, the same way the event cell,
+the kernel cell and every handle are.

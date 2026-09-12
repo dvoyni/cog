@@ -296,3 +296,56 @@ func TestWhatPublishingFromASystemCosts(t *testing.T) {
 	t.Logf("objects a frame: a silent System %.3f, a System publishing one event %.3f (%.3f for the publication)",
 		quiet, publishing, publishing-quiet)
 }
+
+// benchmarkCommand prices one whole command invocation — dispatch, locks, the
+// System, and the answer on its way back — for a System that answers and one
+// that does not. The pair is what says whether the response wrapper costs
+// anything, which is the question a response leaving through a cell raises.
+func benchmarkCommand(b *testing.B, n int, system any) {
+	entities, components, engine := newWorld(b, uint32(n), func(registrar *kernel.Registrar, world *Entities) {
+		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](world, system))
+	})
+	populate(entities, components, n)
+	executioner := engine.Executioner()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := executioner.ExecuteCommand[nudgeCmd](nudgeRequest{By: 1}); err != nil {
+			b.Fatalf("executing the System as a command: %v", err)
+		}
+	}
+}
+
+// sink keeps the silent arm's accumulation observable, so the two arms below do
+// exactly the same per-Entity work and differ only in where the result goes.
+var sink nudgeResponse
+
+// BenchmarkCommandSilent1k is the instruction shape: the System computes the
+// same thing and writes no answer, so the caller gets the zero response.
+func BenchmarkCommandSilent1k(b *testing.B) {
+	benchmarkCommand(b, 1_000, func(request nudgeRequest, q *Query[moveQuery]) {
+		reply := nudgeResponse{}
+		for _, it := range q.All() {
+			it.Body.X += request.By
+			reply.Moved++
+			reply.Total += it.Body.X
+		}
+		sink = reply
+	})
+}
+
+// BenchmarkCommandAnswering1k is the question shape: the same walk, the same
+// locks, the same arithmetic, and the result written into the wrapper instead.
+// Against the pair above, the difference is the response and nothing else.
+func BenchmarkCommandAnswering1k(b *testing.B) {
+	benchmarkCommand(b, 1_000, func(request nudgeRequest, q *Query[moveQuery], answer *Resp[nudgeResponse]) {
+		reply := nudgeResponse{}
+		for _, it := range q.All() {
+			it.Body.X += request.By
+			reply.Moved++
+			reply.Total += it.Body.X
+		}
+		answer.Set(reply)
+	})
+}

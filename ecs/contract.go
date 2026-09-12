@@ -7,11 +7,11 @@
 // filters that yield nothing and still declare a read; a Spawn over the Bundle
 // it creates; the WriteableEntities that can retire one; the Get, Set and
 // Remove accessors that reach one Component of an Entity it did not iterate to;
-// the Read and Write handles that name another plugin's resource; and the In
-// that carries a value projected out of the event. ToHandler turns one into the
-// factory an ordinary cog subscription takes and ToExecute into the factory a
-// command takes, so the ECS contributes no scheduler, no ordering and no
-// registration API of its own.
+// the Read and Write handles that name another plugin's resource; the In that
+// carries a value projected out of the event; and, for a command, the Resp it
+// answers through. ToHandler turns one into the factory an ordinary cog
+// subscription takes and ToExecute into the factory a command takes, so the ECS
+// contributes no scheduler, no ordering and no registration API of its own.
 //
 // Nothing here is a Command. A structural change is a direct call on a handle
 // the System already holds, and the exclusion it needs was arranged before the

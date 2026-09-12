@@ -53,7 +53,7 @@ type systemParam interface {
 // See prepareSystem for the classification contract and what happens to a
 // signature that breaks it.
 func ToHandler[E any](en *Entities, system any, feeds ...Feeder[E]) func() (kernel.Lock, kernel.Observe[E]) {
-	call := prepareSystem(en, system, feeds, "event")
+	call := prepareSystem(en, system, feeds, "event", nil)
 	return func() (kernel.Lock, kernel.Observe[E]) {
 		return call.lock, func(handle kernel.Kernel, event E) error {
 			call.call(handle, event)
@@ -73,21 +73,30 @@ func ToHandler[E any](en *Entities, system any, feeds ...Feeder[E]) func() (kern
 // projects out of it so the same System is invocable as a command and drivable
 // by a tick without being written twice.
 //
-// The response is the zero Resp and the error is always nil, because a System
-// returns nothing — reflect.Value.Call allocates for a callee that does, which
-// is a hard rule and not a style preference. So ToExecute is for a command that
-// is an instruction rather than a question. A handler that must answer is not a
-// System; it is an ordinary command with a Lock of its own, and writing it that
-// way costs nothing the ECS was providing.
-func ToExecute[Req any, Resp any](
+// The System still returns nothing — reflect.Value.Call allocates for a callee
+// that does — so it answers through a *Resp[Res] parameter instead, which the
+// builder recognises by type and injects. Naming one is optional: a command that
+// is an order rather than a question takes no Resp and answers the zero value.
+// See Resp.
+//
+// The type parameter is spelled Res rather than Resp only because Resp is the
+// wrapper's own name and a type parameter would shadow it here.
+//
+// The error is always nil. A System has no way to fail that is not a panic, and
+// a panic is already ErrPluginPanic; expected rejection belongs in the response,
+// which is where the kernel asks for it anyway.
+func ToExecute[Req any, Res any](
 	en *Entities, system any, feeds ...Feeder[Req],
-) func() (kernel.Lock, kernel.Execute[Req, Resp]) {
-	call := prepareSystem(en, system, feeds, "request")
-	return func() (kernel.Lock, kernel.Execute[Req, Resp]) {
-		return call.lock, func(handle kernel.Kernel, request Req) (Resp, error) {
+) func() (kernel.Lock, kernel.Execute[Req, Res]) {
+	// One cell, allocated here and read back on every invocation. It is the only
+	// route a Resp instance reaches a System by, which is what makes the
+	// parameter unambiguous: there is nothing else of that type to inject.
+	answer := new(Resp[Res])
+	call := prepareSystem(en, system, feeds, "request", answer)
+	return func() (kernel.Lock, kernel.Execute[Req, Res]) {
+		return call.lock, func(handle kernel.Kernel, request Req) (Res, error) {
 			call.call(handle, request)
-			var response Resp
-			return response, nil
+			return answer.take(), nil
 		}
 	}
 }
@@ -155,8 +164,9 @@ func (c *systemCall[E]) call(handle kernel.Kernel, driven E) {
 //
 // A System takes any number of *Query[Q], *Spawn[B], *WriteableEntities,
 // *Get[T], *Set[T], *Remove[T], *Read[T], *Write[T] and *In[T]; the
-// kernel.Kernel value; and at most once the event or request value itself.
-// Anything else is a composition-time failure naming the System's type.
+// kernel.Kernel value; at most once the event or request value itself; and, for
+// a command only, at most once the *Resp[Res] it answers through. Anything else
+// is a composition-time failure naming the System's type.
 //
 // A System returns nothing, which is a hard rule rather than a style
 // preference: reflect.Value.Call allocates for a callee that returns a value,
@@ -173,8 +183,12 @@ func (c *systemCall[E]) call(handle kernel.Kernel, driven E) {
 // https://github.com/dvoyni/cog/issues/279, which is where that is settled.
 //
 // driven names the value E is in the diagnostics: "event" for a subscription,
-// "request" for a command. It is the only thing the two builders differ by.
-func prepareSystem[E any](en *Entities, system any, feeds []Feeder[E], driven string) *systemCall[E] {
+// "request" for a command. answer is the response cell a command reads back, and
+// is nil for a subscription — which is the whole of what makes naming a Resp a
+// refusal there. Those two arguments are the only things the builders differ by.
+func prepareSystem[E any](
+	en *Entities, system any, feeds []Feeder[E], driven string, answer responseCell,
+) *systemCall[E] {
 	if en == nil {
 		panic("ecs: the handler builder needs the Entities the System runs against")
 	}
@@ -200,7 +214,7 @@ func prepareSystem[E any](en *Entities, system any, feeds []Feeder[E], driven st
 	kernelType := reflect.TypeFor[kernel.Kernel]()
 	args := make([]reflect.Value, systemType.NumIn())
 	fed := make([]bool, len(feeds))
-	named := false
+	named, answered := false, false
 
 	for i := range systemType.NumIn() {
 		paramType := systemType.In(i)
@@ -232,6 +246,29 @@ func prepareSystem[E any](en *Entities, system any, feeds []Feeder[E], driven st
 				// reflect.New, because the typed closure that fills it was bound
 				// to that instance when Feed baked it.
 				args[i] = feeds[index].value
+				continue
+			}
+			if _, isResponse := responseOf(paramType); isResponse {
+				if answer == nil {
+					panic(fmt.Sprintf(
+						"ecs: System %s takes %s, and an event has no response to write into; a System that answers is registered with ecs.ToExecute",
+						systemType, paramType))
+				}
+				slot, argument := answer.slot()
+				if paramType != slot {
+					panic(fmt.Sprintf(
+						"ecs: System %s takes %s, but this command's response is %s",
+						systemType, paramType, answer.answers()))
+				}
+				if answered {
+					panic(fmt.Sprintf("ecs: System %s names the response %s more than once",
+						systemType, slot))
+				}
+				answered = true
+				// The Resp instance comes from the builder rather than from
+				// reflect.New, because the builder is the only thing that reads it
+				// back: an instance nobody collects is an answer thrown away.
+				args[i] = argument
 				continue
 			}
 			param, ok := newSystemParam(paramType)
@@ -291,6 +328,6 @@ func refusal(systemType, paramType, drivenType reflect.Type, driven string) stri
 		}
 	}
 	return fmt.Sprintf(
-		"ecs: System %s takes %s, which is not something a System may take; a System takes *ecs.Query, *ecs.Spawn, *ecs.WriteableEntities, *ecs.Get, *ecs.Set, *ecs.Remove, *ecs.Read, *ecs.Write, *ecs.In, the kernel.Kernel value, and at most once the %s value %s",
+		"ecs: System %s takes %s, which is not something a System may take; a System takes *ecs.Query, *ecs.Spawn, *ecs.WriteableEntities, *ecs.Get, *ecs.Set, *ecs.Remove, *ecs.Read, *ecs.Write, *ecs.In, the kernel.Kernel value, at most once the %s value %s, and for a command at most once the *ecs.Resp it answers through",
 		systemType, paramType, driven, drivenType)
 }
