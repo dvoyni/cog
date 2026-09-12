@@ -25,24 +25,25 @@ import (
 // A hash has no table on the writing side. This file measures whether that
 // holds up.
 
-// Clip and Model are domain tags. They carry no data; they exist so that a clip
-// name cannot be assigned where a model name belongs.
+// ClipHash and ModelHash are the named types the hashes are stored as. Being
+// distinct types is what stops a clip name being assigned where a model name
+// belongs, and being ~uint64 is what makes them legal in a Component.
 type (
-	Clip  struct{}
-	Model struct{}
+	ClipHash  uint64
+	ModelHash uint64
 )
 
 // The names, hashed once at package level. This is the thing an interned index
 // cannot do: there is no table at package initialisation, and under cog#245
 // two Engines would have two tables and two different ids for this one string.
 var (
-	idleClip = ecs.HashOf[Clip]("Idle")
-	walkClip = ecs.HashOf[Clip]("Walk")
+	idleClip = ecs.HashOf[ClipHash]("Idle")
+	walkClip = ecs.HashOf[ClipHash]("Walk")
 )
 
 // Animated is a legal Component carrying what was declared as a string.
 type Animated struct {
-	Clip ecs.Hash[Clip]
+	Clip ClipHash
 	Time float32
 }
 
@@ -149,7 +150,7 @@ func TestAClipChangesMidFrameWithNoExtraLock(t *testing.T) {
 // package-level var -- and what an assigned index can never be, because the
 // index depends on which table assigned it and in what order.
 func TestAHashIsTheSameEverywhereAndAnIndexIsNot(t *testing.T) {
-	if ecs.HashOf[Clip]("Walk") != walkClip {
+	if ecs.HashOf[ClipHash]("Walk") != walkClip {
 		t.Fatalf("the same string hashed to two different values")
 	}
 
@@ -166,7 +167,7 @@ func TestAHashIsTheSameEverywhereAndAnIndexIsNot(t *testing.T) {
 		t.Fatalf("two independently built tables happened to agree; the test proves nothing")
 	}
 	t.Logf("one string, two tables, ids %d and %d -- but one Hash: %v",
-		crateA, crateB, ecs.HashOf[Model]("models/crate.glb"))
+		crateA, crateB, ecs.HashOf[ModelHash]("models/crate.glb"))
 }
 
 // A Hash carries no pointer, which is the whole reason it exists.
@@ -176,7 +177,7 @@ func TestAnAnimatedComponentIsPointerFree(t *testing.T) {
 	}
 	// And the phantom tag really does separate the domains, so a clip name
 	// cannot be assigned where a model name belongs.
-	if reflect.TypeFor[ecs.Hash[Clip]]() == reflect.TypeFor[ecs.Hash[Model]]() {
+	if reflect.TypeFor[ClipHash]() == reflect.TypeFor[ModelHash]() {
 		t.Fatalf("Hash[Clip] and Hash[Model] are the same type")
 	}
 }
@@ -186,14 +187,14 @@ func TestAnAnimatedComponentIsPointerFree(t *testing.T) {
 // list without a collision, and the table catches one if it ever happens.
 func TestTheConsumerTableResolvesAtRealisticScale(t *testing.T) {
 	const n = 100_000
-	table := ecs.NewNames[Model, int]()
-	names := make([]ecs.Hash[Model], n)
+	table := ecs.NewNames[ModelHash, int]()
+	names := make([]ModelHash, n)
 	for i := range n {
 		text := fmt.Sprintf("models/props/%05d/variant_%03d.glb", i, i%128)
 		if err := table.Register(text, i); err != nil {
 			t.Fatalf("registering %d names hit a collision: %v", n, err)
 		}
-		names[i] = ecs.HashOf[Model](text)
+		names[i] = ecs.HashOf[ModelHash](text)
 	}
 	if table.Len() != n {
 		t.Fatalf("table holds %d of %d names", table.Len(), n)
@@ -220,18 +221,18 @@ type syncInterner struct {
 	ids  sync.Map // string -> uint64
 }
 
-func (s *syncInterner) id(text string) ecs.Hash[Clip] {
+func (s *syncInterner) id(text string) ClipHash {
 	if v, ok := s.ids.Load(text); ok {
-		return ecs.HashFromRaw[Clip](v.(uint64))
+		return ClipHash(v.(uint64))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if v, ok := s.ids.Load(text); ok {
-		return ecs.HashFromRaw[Clip](v.(uint64))
+		return ClipHash(v.(uint64))
 	}
 	s.next++
 	s.ids.Store(text, s.next)
-	return ecs.HashFromRaw[Clip](s.next)
+	return ClipHash(s.next)
 }
 
 func animateInterned(in *syncInterner) any {
