@@ -124,11 +124,34 @@ func (s *Store[T]) Ref(e Entity) (*T, bool) {
 
 // Set gives e this Component, replacing the value if it already has one. A new
 // row is appended, so nothing already in the Store moves.
+//
+// It does not ask whether e exists, because it cannot: a Store is enrolled with
+// the authority and never holds a reference back to it. Its callers are the ones
+// that know — a spawn supplies an id it has just allocated, and the accessor
+// that inserts for an arbitrary handle checks liveness first.
 func (s *Store[T]) Set(e Entity, value T) {
-	if row, ok := s.probe(e); ok {
-		s.dense[row] = value
+	if s.update(e, value) {
 		return
 	}
+	s.add(e, value)
+}
+
+// update replaces e's stored value and reports whether e had one. It is the half
+// of Set that changes no structure, split out so a caller that must do something
+// between finding the absence and filling it can.
+func (s *Store[T]) update(e Entity, value T) bool {
+	row, ok := s.probe(e)
+	if !ok {
+		return false
+	}
+	s.dense[row] = value
+	return true
+}
+
+// add appends a row for an entity the caller has already established has none.
+// It is the structural half of Set: it grows the sparse index if the entity's
+// index has never been seen, appends the row, and points the slot at it.
+func (s *Store[T]) add(e Entity, value T) {
 	index := int(e.idx())
 	for len(s.sparse) <= index {
 		s.sparse = append(s.sparse, absentSlot)

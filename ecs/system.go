@@ -35,11 +35,11 @@ type systemParam interface {
 // System returns nothing, which is a hard rule rather than a style preference:
 // Call allocates for a callee that returns a value, so one is rejected here.
 //
-// What this build accepts is a *Query[Q], a *Spawn[B], a *WriteableEntities
-// and, at most once, the event value itself. Naming the event is legal but is
-// not the ordinary shape, because a System that names one can only ever be
-// subscribed to that one; In and Feed, the accessors and the resource handles
-// arrive with their own tickets.
+// What this build accepts is a *Query[Q], a *Spawn[B], a *WriteableEntities, a
+// *Get[T], a *Set[T], a *Remove[T] and, at most once, the event value itself.
+// Naming the event is legal but is not the ordinary shape, because a System that
+// names one can only ever be subscribed to that one; In and Feed and the
+// resource handles arrive with their own tickets.
 //
 // A parameter it does not recognise is a panic at registration, which the
 // plugin boundary reports as ErrPluginPanic naming the plugin. That is the
@@ -78,7 +78,7 @@ func ToHandler[E any](en *Entities, system any) func() (kernel.Lock, kernel.Obse
 		param, ok := newSystemParam(paramType)
 		if !ok {
 			panic(fmt.Sprintf(
-				"ecs: System %s takes %s, which is not something a System may take; a System takes Queries, a Spawn, the WriteableEntities, the event value, and the handles later tickets add",
+				"ecs: System %s takes %s, which is not something a System may take; a System takes Queries, a Spawn, the WriteableEntities, the Get, Set and Remove accessors, the event value, and the handles later tickets add",
 				systemType, paramType))
 		}
 		args[i] = reflect.ValueOf(param)

@@ -4,13 +4,12 @@
 **Entities** carrying **Components**, and describe behaviour as **Systems** —
 plain Go funcs whose parameter types say what they touch.
 
-**A Component moves, a Query can be narrowed, and Entities can be created and
-retired: the storage, the registration, the Query, its filters, structural
-change and the handler builder are here.** What is not here yet is the accessors
-that reach an Entity a System did not iterate to, and the resource and event
-handles a binding uses; [`docs/specs/ecs.md`](docs/specs/ecs.md) is the
-specification the whole plugin is judged against, and this README covers only
-what is built.
+**A Component moves, a Query can be narrowed, Entities can be created and
+retired, and one Entity can reach another: the storage, the registration, the
+Query, its filters, structural change, the accessors and the handler builder are
+here.** What is not here yet is the resource and event handles a binding uses;
+[`docs/specs/ecs.md`](docs/specs/ecs.md) is the specification the whole plugin is
+judged against, and this README covers only what is built.
 
 ## Files
 
@@ -19,8 +18,9 @@ what is built.
 authority; `store.go` the `Store`, the type-erased `storeCore` a despawn reaches
 every Store through, and the erased header a Query fills from; `query.go` the
 `Query`, its driver and its fillers; `filter.go` the `Without` and `With` field
-types; `spawn.go` the `Spawn` and `WriteableEntities` handles; `system.go` the
-`ToHandler` builder; `plugin.go` the plugin that publishes the authority.
+types; `spawn.go` the `Spawn` and `WriteableEntities` handles; `accessor.go` the
+`Get`, `Set` and `Remove` accessors; `system.go` the `ToHandler` builder;
+`plugin.go` the plugin that publishes the authority.
 
 ## Dependencies
 
@@ -97,10 +97,23 @@ There is no compaction, no shrink and no sweep anywhere in the package.
 held for read by every handler that touches any Store, so the authority to
 change which entities exist arrives only through its write-locked promotion —
 [`Spawn` and `WriteableEntities`](#structural-change) — and is visible in a
-System's signature and nowhere else. `Alive` is the only question a read may ask, and it is rarely
-the one wanted: "is my target still alive" almost always means "does my target
-still have `Health`", which a Store probe answers under a lock the System
-already holds.
+System's signature and nowhere else.
+
+**`Alive` is the only question a read may ask, and it is the rarer of the two
+liveness questions.** There are exactly two, and the one almost always wanted is
+the cheaper one:
+
+| the question | who answers it | what it needs |
+| --- | --- | --- |
+| **"does `e` still have `Health`?"** | the [accessor's](#reaching-another-entity) own probe — `Get[Health].Of`, or `Has` on the Store | **`read{*Store[Health]}`, a lock the System already holds** |
+| "does `e` exist at all?" | `Entities.Alive(e)` | `read{*Entities}`, which is wider |
+
+"Is my target still alive" really means "does my target still have `Health`", and
+the accessor answers it in the probe it was going to make anyway — the compare
+that finds the row is the compare that rejects a stale handle, so the liveness
+costs nothing extra. Reaching for `Alive` instead pushes the wider lock into
+every System that holds an Entity across frames, which is every System that holds
+a target, an owner or a caster.
 
 A despawn is **total**. Nothing records which Stores hold an entity, so every
 Store is asked, through an interface carrying exactly one method. That is also
@@ -397,7 +410,8 @@ police, and holding the authority for write is what excludes every System that
 holds it for read.
 
 What a signature may contain today is a `*ecs.Query[Q]`, a `*ecs.Spawn[B]`, a
-`*ecs.WriteableEntities` and, at most once, the event value itself. Naming the
+`*ecs.WriteableEntities`, a `*ecs.Get[T]`, a `*ecs.Set[T]`, a `*ecs.Remove[T]`
+and, at most once, the event value itself. Naming the
 event is legal but is not the ordinary shape: a
 System that names one can only ever be subscribed to that one, where the same
 gameplay should be drivable by a fixed-step tick, a rollback re-simulation or a
@@ -490,6 +504,136 @@ type-erased one costs one allocation per queued command, which at 30 Hz is tens
 of KB a second fed to the collector during frames. What a command buffer would
 buy is **lock duration**, not safety and not allocation.
 
+## Reaching another Entity
+
+```go
+type Homing struct{ Target ecs.Entity }   // a Reference: an Entity in a Component
+
+func home(q *ecs.Query[HomingQ], bodies *ecs.Get[Body], burning *ecs.Remove[Burning]) {
+    for e, it := range q.All() {
+        target, ok := bodies.Of(it.Homing.Target)
+        if !ok {
+            continue                       // gone, or never had a Body
+        }
+        it.Velocity.V = target.Pos.Sub(it.Body.Pos)
+        burning.From(e)
+    }
+}
+```
+
+A Query reaches only what it drives over. A missile's target, a spell's owner, a
+projectile's caster is an `Entity` kept inside a Component — a **Reference** —
+and it is followed with an **accessor**. An `Entity` is pointer-free, so a
+Reference is an ordinary Component field and earns no vocabulary of its own; so
+does a bounded run of them, `[4]Entity`, whose cardinality is fixed in the type
+because the engine caps nothing.
+
+| handle | methods | declares |
+| --- | --- | --- |
+| `ecs.Get[T]` | `.Of(Entity) (T, bool)` | `read{*Store[T]}`, `read{*Entities}` |
+| `ecs.Set[T]` | `.Of`, `.Ref(Entity) (*T, bool)`, `.UpdateFor(Entity, T)` | `write{*Store[T]}`, `read{*Entities}` |
+| `ecs.Remove[T]` | `.From(Entity) bool` | `write{*Store[T]}`, `read{*Entities}` |
+
+**`Get[T]` has no `Ref`, and that is what stops a read handle being a write in
+disguise.** A read yields a copy for the reason every read in this package does:
+a read yielding a pointer is a data race against concurrent readers, and Go has
+no pointer-to-const. A test asserts that no method on `Get` returns a pointer at
+all, so it is a property of the type rather than of this paragraph.
+
+**Each accessor declares `read{*Entities}` itself**, as well as its Store. That
+is redundant while every System is built by `ToHandler`, which declares it first
+and unconditionally — and it is declared here anyway, because the despawn
+traversal rests on *every* route to a Store declaring it, and an invariant that
+holds by the accident that everything also carries a Query is not closed.
+
+**`Get` and `Remove` declare the read and then drop the handle**, so neither can
+reach the authority at all — which is what makes "no liveness check of its own"
+structural rather than a promise. `Set` keeps it, for the one question an
+[insertion](#adding-and-removing-a-component) has to ask, and that second job is
+what makes the declaration load-bearing rather than ceremonial.
+
+### Adding and removing a Component
+
+**`Set[T].UpdateFor` inserts when absent, so it is how a Component is added**, and
+`Remove[T].From` is how one is taken away. Both are immediate — there is no
+command buffer, because a type-erased one costs an allocation per queued command.
+
+Inserting needs no handle of its own because it needs no authority: nothing
+anywhere records which Entities have which Components, so `write{*Store[T]}` is
+the whole of what adding one takes. That is the practical difference from a
+spawn, and it is large:
+
+| | declares | excludes |
+| --- | --- | --- |
+| `Spawn[B].New`, `WriteableEntities.Despawn` | `write{*Entities}` | **every System in the frame** |
+| `Set[T].UpdateFor`, `Remove[T].From` | `write{*Store[T]}` | only Systems that touch `T` |
+
+**`UpdateFor` is safe on the Entity a Query is currently visiting**, and on any
+Entity at all with respect to the Query's own driver: an insertion appends a row,
+and the backwards walk never reaches one. Removing the driver's Component from
+the Entity being visited is safe for the same reason a despawn is. Doing it to
+some *other* Entity of that driver is undefined, exactly as before.
+
+**An insertion through a Reference to an Entity that no longer exists does
+nothing**, and that refusal is load-bearing rather than defensive. Reading
+through a dangling Reference is safe because the despawn already emptied every
+Store; *inserting* through one would put a row back that no later despawn can
+reach, because the despawn that would have reached it has happened. `Len` would
+stop being the population, the driver scan reads `Len`, and a one-Component Query
+would yield an Entity that does not exist. A System cannot make that check
+itself — "does this Entity still exist" is the authority's question and no System
+is handed the authority — so the accessor makes it, which is affordable for
+exactly the reason it declares `read{*Entities}` in the first place. It is a load
+and a compare, on the insertion path only, and it measured **0.3 ns**. Nothing is
+reported, because absence is already what every accessor answers a dangling
+Reference with: `Of` and `Ref` miss and `From` reports false.
+
+### Three guarantees, and two of them are free
+
+- **A Reference to a despawned Entity resolves to nothing, with no liveness check
+  of its own.** A despawn is eager and total, so every Store was already emptied;
+  the probe that would have found the row finds absence instead. `Get` and
+  `Remove` keep no way to reach the authority at all, so that is a property of
+  the types and not a promise about their code.
+- **A recycled index never aliases a stale Reference.** The generation is in the
+  sparse slot, so the compare that finds the row is the compare that rejects the
+  handle. There is no window and no second structure.
+- **A write pointer *is* invalidated by a structural change to that Store**, and
+  this one is not free — it is the sharp edge.
+
+### A pointer is invalidated by a structural change, in two shapes
+
+Both shapes are silent, so both have a test rather than a sentence:
+
+- **Swap-remove relocates.** `Remove[T].From` moves the last row into the hole,
+  so the Entity that owned the last row is now somewhere else and a `Ref` taken
+  before the removal addresses a slot that is nobody's. The write lands, in
+  memory no Entity reads.
+- **A growth abandons the array, and it takes the whole Query run with it.** A
+  Query captures the driver's `owners` and every Store's arrays **once per run**,
+  so an `UpdateFor` that grows a Store past its reserve mid-iteration leaves the
+  rest of that run — the Query's own `*T` fields included — writing into the
+  array the growth left behind. Measured as a test with a control: with the
+  reserve exhausted **none** of the writes after the insertion land; with room to
+  spare **all** of them do.
+
+So: use a pointer and drop it. Nothing may be held across an `UpdateFor`, a
+`From`, a spawn or a despawn — which is the standing rule that no dense row index
+may be held across a mutation, seen from the other end.
+
+### A Reference points one way
+
+**A Query selects on presence and on nothing else**, so nothing narrows by what a
+Component *contains* and **nothing anywhere lists what points at a given
+Entity**. The far Entity does not know it is referenced. Finding everything that
+points at a target is a Query over the Component that holds the Reference and a
+comparison the System makes itself, costing the length of that one Store — an
+ordinary Query and user code, requiring nothing of the ECS.
+
+A stale slot in a `[4]Entity` is the game's to compact, and detecting one is free
+on the read that was already happening. Centralising either would need the
+reverse index refused above: **any global index is a global lock.**
+
 ## What it costs
 
 Measured on a real `kernel.Engine` driven by a real `app.UpdateEvent`, AMD Ryzen
@@ -540,7 +684,8 @@ done:
 
 The spawn itself, on the handles a System holds, in the steady state a game runs
 in — the free list has ids and the Stores have rows, so nothing here is
-measuring growth. Five Component types are enrolled with the authority:
+measuring growth. Six Component types are enrolled with the authority, and the
+despawn line is linear in that number, at about 3 ns a Store:
 
 | | ns/op | allocs/op | B/op |
 | --- | --- | --- | --- |
@@ -548,7 +693,7 @@ measuring growth. Five Component types are enrolled with the authority:
 | **`Spawn[B].New`, a two-field Bundle** | **14.50 — 1.70×** | **0** | 0 |
 | `Spawn[B].New`, a four-field Bundle | 27.59 | **0** | 0 |
 | …the same two-field spawn, bundle staged through the **parameter's address** | 21.21 | **1** | **16** |
-| `WriteableEntities.Despawn`, asking all five Stores | 15.39 | **0** | 0 |
+| `WriteableEntities.Despawn`, asking all six Stores | 18.50 | **0** | 0 |
 
 **`Spawn` stages its bundle through a field of the `Spawn`**, and that is the
 fourth thing on the list above rather than a detail: the obvious spelling —
@@ -608,3 +753,63 @@ free either — it is about 0.08 ns a probe, which is 14% of the Driver's
 bad-case walk, where nearly every probe is a rejection and nothing else happens.
 Making it free would mean a second set of unrolled fillers for Queries that
 carry a filter, which is where monomorphised fillers would put it.
+
+### What reaching another Entity costs
+
+This is the one figure in this package the spec did not have. `Get`, `Set` and
+`Remove` were specified from measurements taken on a *model* of the Store and
+were never composed as kernel-bound handles, so the spec recorded their in-situ
+allocation behaviour as a **Gap** inferred from the other handles. It is now
+measured, and the inference was right.
+
+Whole frame, the homing shape — a two-Component Query over the near Entity and
+one scattered probe per Entity through the Reference it carries, the target
+chosen by a stride coprime with the population so the probed rows are hit in an
+order unrelated to the walk:
+
+| whole frame | ns/op | allocs/op |
+| --- | --- | --- |
+| hand-written walk and probe, 1 000 | 5 424 | **6** |
+| **Query + `Get` through a Reference, 1 000** | **9 834** | **6** |
+| hand-written walk and probe, 10 000 | 23 230 | **6** |
+| **Query + `Get` through a Reference, 10 000** | **60 485** | **6** |
+| Query + `UpdateFor` and `From` per Entity, 1 000 | 16 920 | **6** |
+| Query + `UpdateFor` and `From` per Entity, 10 000 | 120 229 | **6** |
+
+**Six allocations a frame, identical at 1 000 and 10 000 Entities** — the
+engine's own 2-per-publication-plus-4-per-subscriber line, the same one `Query`
+and `Spawn` sit on. The second pair is the sharper test: it adds and removes a
+Component **per Entity per tick**, so ten thousand structural changes a frame,
+and it charges nothing for them. Over a ten-thousand-frame steady state:
+**6.004 objects a frame at 1k and 6.003 at 10k** following a Reference, **6.003
+and 6.001** adding and removing a Component per Entity, against the hand-written
+**6.010**. `testing.AllocsPerRun` over the calls themselves reports **0** for
+`Of`, `Ref`, `UpdateFor` and `From`. **The Gap is closed and the spec's
+inference held.**
+
+Per call, on the handles outside a frame, against the same probe with the
+resource cell dereferenced once outside the loop:
+
+| | ns/op | allocs/op |
+| --- | --- | --- |
+| the Store probed directly, the cell hoisted | **0.69** | 0 |
+| **`Get[T].Of`** | **2.65** | 0 |
+| `Set[T].Ref` | 3.17 | 0 |
+| `Set[T].UpdateFor`, replacing a value | 3.66 | 0 |
+| `Set[T].UpdateFor` inserting and `Remove[T].From` taking away | 7.21 | 0 |
+
+**And there is a finding in that first pair.** The probe is the cheap part and
+the spec is right that following a Reference is the same one-load probe the
+Driver already pays — but the *handle* is not free: `Read[*Store[T]].Get()` is a
+type assertion out of the `any`-typed resource cell, it costs **~2.0 ns**, and
+an accessor pays it **per call** where a Query pays it once per run inside
+`bind`. That is 3.9× the bare probe and it is the whole of the difference. From
+the 1k→10k slope it shows up as **5.63 ns an Entity for the accessor shape
+against the hand-written 1.98**, where the plain Query is 3.32 against 1.56 —
+so the accessor arm is 2.8× its baseline where the Query is 2.1×.
+
+It costs no allocation and it is not on the Query's path, so nothing here fails
+the bar this design is held to. The remedy, if the number ever matters, is to
+resolve the Store **once per tick** rather than once per call, which the handler
+builder is the only thing positioned to do — and which is a change to the
+parameter seam rather than to an accessor, so it is not made here.

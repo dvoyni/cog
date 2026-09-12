@@ -36,6 +36,7 @@ type componentsPlugin struct {
 	colliders  *Store[collider]
 	disableds  *Store[disabled]
 	solids     *Store[solid]
+	homings    *Store[homing]
 }
 
 func (p *componentsPlugin) Name() kernel.PluginName { return "components" }
@@ -48,6 +49,7 @@ func (p *componentsPlugin) Register(registrar *kernel.Registrar, _ any) error {
 	p.colliders = RegisterComponent[collider](registrar, p.world, p.ids)
 	p.disableds = RegisterComponent[disabled](registrar, p.world, p.ids)
 	p.solids = RegisterComponent[solid](registrar, p.world, p.ids)
+	p.homings = RegisterComponent[homing](registrar, p.world, p.ids)
 	return nil
 }
 
