@@ -179,13 +179,9 @@ _Avoid_: Link, pointer, handle. Also Parent, Child and Hierarchy, which are a ga
 A System's means of reaching one Component of an Entity it did not iterate to, which is how a Reference is followed. It comes in a reading form and a writing one, and like a Query field it declares its Component in the System's lock set — reaching an Entity through a Reference is not a way to touch a Store the signature did not name.
 _Avoid_: Lookup, fetch, getter
 
-**Hash**:
-The 64-bit hash of a name, and the way a Component says which model, clip or node it means. A Component may hold a string, so this is a preference rather than a prohibition, and the reason is the lookup rather than the storage: naming a model by path costs about 47 ns against half a nanosecond by dense index, per draw, per frame. Producing one needs nothing — hashing is a pure function, so a System changes what an Entity names while holding only the lock it already had — and the same name hashes the same in every process and every run, which an assigned index does not.
-_Avoid_: Id, interned index. An index is legitimate inside whatever resolves a Hash; it is not what a Component carries.
-
-**Name table**:
-What a plugin registers its own names in, so that a Hash arriving on a Component can be resolved back to the thing it names. It belongs to the side that reads a name, not to the side that writes one, so one System declares it rather than every System that ever assigns a name. It holds what was registered and nothing else: asking it about a name nobody declared answers that there is no such thing, and leaves it the size it was.
-_Avoid_: Interner, registry, atlas
+**Hash**, **Name table**:
+_Retired._ The ECS supplied a 64-bit name hash and the table a consumer resolved one through, because a Component could not hold a string. One can, so naming an engine-side thing is a matter between the plugin that writes the name and the plugin that resolves it, and the engine has no word for it. Measured before removal: a stored hash resolved in 6.66 ns against 7.79 ns for the name itself as a map key, and a dense index in 0.64 ns against either.
+_Avoid_: reintroducing either word in the ECS. A consumer that wants a process-stable name is free to hash in its own package, where it is that package's vocabulary.
 
 **Validation mode**:
 A build tag that compiles in the check that nobody writes a List through a read. It is on under `-tags ecs_validate` and absent otherwise, so a release build carries no branch and no table for it. It is detection rather than prevention, and its coverage is whatever a run executes — which is a weaker guarantee than the rest of the design offers and is the price of a Component holding mutable data at all.

@@ -22,8 +22,9 @@ import (
 //	}
 //
 // A Bundle field simply *is* a Component field: there is no conversion step and
-// none is needed, because a hash is pure and can be written into a package-level
-// var, so a declarative spawn naming a model by name needs nothing from the ECS.
+// none is needed, because everything a Component may hold can be written where
+// the Bundle is declared, so a declarative spawn naming a model needs nothing
+// from the ECS.
 // A Bundle is also not a Component set — it describes one act of creation, and
 // the Entity may gain and lose Components afterwards without the Bundle meaning
 // anything.

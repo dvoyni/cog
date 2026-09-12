@@ -109,9 +109,8 @@ are retired outright.
 - **Reference** — an Entity kept inside a Component. It points one way.
 - **Accessor** — a System's means of reaching one Component of an Entity it did
   not iterate to.
-- **Hash** — the 64-bit hash of a name, and how a Component says which model,
-  clip or node it means. **Name table** — where the plugin that resolves names
-  keeps them.
+- **Hash**, **Name table** — retired. Naming an engine-side thing is the
+  business of the two plugins that share the name, not of the ECS.
 - **Validation mode** — a build tag that checks, at the one place the rule can
   be broken, that nobody writes a List through a read.
 
@@ -271,12 +270,12 @@ objects. And **a pointer is not only a GC cost** — it widens the Component fro
 But 0.21 ms per *collection* at 100 000 Entities, when nox is two orders of
 magnitude below that, is **not a reason to forbid strings**, and this document
 previously drew the opposite conclusion from the same number. Scaled to nox's
-low thousands it is on the order of ten microseconds per collection. **The
-lookup is what forces the handle where a handle is wanted**, not the collector:
-naming a model by path costs **46.9 ns** against **0.54 ns** by dense index, and
-that is per-draw, per-frame. See [Naming an engine-side
-thing](#naming-an-engine-side-thing) — a hash is still the right way to name an
-engine-side thing, and a string is now available for data the game owns.
+low thousands it is on the order of ten microseconds per collection. **Nor is
+the lookup the reason it once was**: a name as a map key costs **7.79 ns**
+against **6.66 ns** for the hash this package used to supply, and a dense index
+**0.64 ns** against either. See [Naming an engine-side thing is not the ECS's
+business](#naming-an-engine-side-thing-is-not-the-ecss-business), which is a
+section about what this package no longer does.
 
 **Two costs are real and land per-Store rather than globally**, which is what
 makes admitting them affordable at all. A Component holding a string or a List
@@ -326,7 +325,7 @@ write is `Set`.
 
 ```go
 type Inventory struct {
-    Slots ecs.List[ItemHash]
+    Slots ecs.List[ItemID]
 }
 
 func use(q *ecs.Query[InvQ]) {
@@ -476,127 +475,71 @@ count. **Sharing is what costs; ownership is free.**
 
 ---
 
-## Naming an engine-side thing
+## Naming an engine-side thing is not the ECS's business
 
-**A Component names an engine-side thing by a hash of its name, never by the
-name itself and never by an assigned index.** A Component may now hold a string,
-so this is a preference rather than a prohibition — and the number behind it is
-the lookup, not the storage: a path costs **46.9 ns** against **0.54 ns** by
-dense index, per draw, per frame.
+**The ECS supplies no naming scheme, and this section records the one it used to
+supply.** A Component may hold a `string`, so how a Component says which model,
+clip or node it means is a matter between the plugin that writes the name and
+the plugin that resolves it. The ECS has no opinion, no type and no table.
 
-```go
-type ClipHash uint64                              // the caller's own named type
-var walkClip = ecs.HashOf[ClipHash]("Walk")       // package level
+**What was here.** `HashOf[K HashKey](string) K`, a 64-bit FNV-1a of a name
+typed as the caller's own `~uint64`; `NoHash`; and `Names[K, V]`, the reverse
+table a resolving plugin kept. It existed for one reason — **a Component could
+not hold a string**, so a name had to become a number before it could be stored.
+That reason is gone, and the machinery went with it.
 
-func animate(q *ecs.Query[AnimQ]) {               // two Components, nothing else
-    for _, it := range q.All() {
-        if it.M.Speed > 0.1 {
-            it.A.Clip = walkClip
-        } else {
-            it.A.Clip = idleClip
-        }
-    }
-}
-```
+**The cost argument that survived the first rule change did not survive
+measurement.** This document justified the hash against **46.9 ns** for "a path,
+as `scene` resolves one", which is `scene` re-resolving through its own
+machinery and not the price of a name as a map key. Measured against the thing
+it actually replaced, on the implementation rather than the prototype:
 
-`ecs.HashOf[K HashKey](string) K` constrains `K` to `~uint64`, so the hash **is**
-the caller's type — nothing to unwrap, no accessor, directly comparable,
-printable, usable as a map key, and pointer-free because the constraint admits
-nothing else. `ClipHash` and `ModelHash` stay distinct without a second type
-parameter, so a clip name cannot be assigned where a model name belongs; a
-codebase that does not want the distinction declares one such type and is done.
-`~uint64` rather than `~int` because `int` is 32 bits on some platforms, and a
-hash that depends on where the game was built has given up the one advantage it
-had.
-
-**The property that decides this is that producing a hash needs nothing.**
-Hashing is pure, so a System changes what an Entity names holding only the lock
-it already has on the Component. An assigned index cannot: interning is what
-*assigns* the index, so the interning table would join the lock set of every
-System that ever changed an animation clip. That is the case a registration-time
-conversion cannot reach, because the common case is *mutation* — a clip changing
-from `"Idle"` to `"Walk"` while the game runs — not spawning.
-
-Measured, whole-frame, assigning a clip to every Entity:
-
-| | ns/op | allocs/op | per entity |
-| --- | --- | --- | --- |
-| hashed name, 1 000 | 7 624 | **6** | — |
-| synchronised interner, 1 000 | 18 827 | **9** | — |
-| hashed name, 10 000 | 31 578 | **6** | **2.66 ns** |
-| synchronised interner, 10 000 | 143 985 | **9** | **13.9 ns** |
-
-The interner is 5× the per-entity cost **and it allocates**, failing requirement
-1 outright — for a naming scheme rather than for anything the game asked for.
-
-Per lookup, over 1 000 lookups:
-
-| | ns |
+| per lookup, over 1 000 lookups | ns |
 | --- | --- |
-| dense index | **0.55** |
-| stored 64-bit hash → map | **4.6** |
-| hashing the string every lookup | 19.0 |
-| a path, as `scene` resolves one | 44.3–46.9 |
+| a dense index into a slice | **0.64** |
+| **`Names.Lookup`, the stored hash** | **6.66** |
+| a `map[string]V` keyed by the path | **7.79** |
+| hashing the string on every lookup | 25.19 |
 
-**And an assigned index can never be a package-level `var`.** There is no table
-at package initialisation, and two Engines mean two tables:
-`TestANameIsTheSameEverywhereAndAnIndexIsNot` interns the same two paths in
-opposite orders into two tables and gets ids `0` and `1` for one string, against
-one hash.
+**1.1 ns**, which at 5 000 drawables is about **5.5 µs a frame**. A whole
+vocabulary — `Hash`, `Name table`, two exported types, a constant and a generic
+— for 1.1 ns, in a package whose stated job is entities, components and systems.
 
-### The name table belongs to the consumer
+**Two of its properties were real and a consumer that wants them should keep
+them, in its own package.** A hash is the same in every process and every run,
+which an assigned index is not, so it is the form that survives a save file or a
+wire; and producing one needs nothing, so a System renames what an Entity points
+at holding only the lock it already had. Neither property requires the *ECS* to
+own it. `TestANameIsTheSameEverywhereAndAnIndexIsNot`, which interned two paths
+in opposite orders into two tables and got different ids, was the evidence, and
+it is worth rebuilding wherever the scheme lands.
 
-`ecs.Names[K, V]` is the reverse half, and **where it lives is the whole point**:
-it belongs to the plugin that resolves names into things — a model table, a clip
-table — under that plugin's own lock, read once per draw where a lock is held
-anyway. **One** System declares it, rather than every System that ever assigns a
-name. There is deliberately no process-wide interner.
+**A dense index is still 10× cheaper than either and is still the right thing to
+resolve *to*.** That was true when the hash was here and it is the advice that
+outlives it: name in the Component, index inside whatever consumes it.
 
-`Names.Register(text, value)` is also where a **collision** is caught.
-Sixty-four bits makes one vanishingly unlikely — about 3×10⁻¹² at ten thousand
-distinct names — but vanishingly unlikely is not impossible, and an undetected
-one would silently draw the wrong model. Every resolvable name passes through
-`Register`, so one compare turns the class into a startup error. `TextOf`
-recovers the original string, so a hash stays legible in tooling.
+### What a bound plugin owes, and the scene vocabulary
 
-**Nothing cleans the table because nothing accumulates in it.** It holds what
-the consumer registered — its asset manifest, fixed at startup. Asking it about
-a name nobody declared answers that there is no such thing and leaves it the
-size it was: `TestHashingAccumulatesNothing` hashes **1 000 000** procedural
-names against eight declared models and the table still holds eight entries.
-That is a property of a manifest rather than of hashing in general, which is why
-this is the **only** thing v1 hashes: v1 hashes a model, a clip, a node, a pass
-tag — **strings, and nothing else**.
-
-### The obligation this puts on a bound plugin
-
-A plugin a System will record into must offer a handle for everything a
-Component needs to name, and the relaxed rule moves two of these across the line
-without changing the advice. Machine-checked against the real `scene` package by
-running the walk over its recording vocabulary:
+A plugin a System records into must offer Components that are storable.
+Machine-checked against the real `scene` package by running the walk over its
+recording vocabulary:
 
 | type | verdict |
 | --- | --- |
 | `scene.Transform` | rejected — `.Matrix` is a pointer |
 | `scene.ModelDraw`, `scene.MeshDraw` | rejected — `.Transform.Matrix` is a pointer |
 | `scene.Material` | rejected — is a slice |
-| `scene.ClipPlay` | **legal** — `.Clip` is a `string`; a `ClipHash` is still preferable, per draw |
-| `scene.ModelRef` | **legal** — `.Path` is a `string`; a `ModelHash` is still preferable, per draw |
+| `scene.ClipPlay` | **legal** — `.Clip` is a `string` |
+| `scene.ModelRef` | **legal** — `.Path` is a `string` |
 | **`scene.MeshRef`** | **legal Component** — already a dense id and a generation |
 | **`scene.LayerMask`, `scene.CameraID`** | **legal Component** |
 
-Note what did *not* change. The two rejections that remain are pointers to
-mutable memory, which is the line the rule actually draws; the two that moved
-were only ever refused for holding a name, and the cost of holding one is the
-lookup rather than the storage. The obligation on a bound plugin is therefore
-softer than it was — a string-bearing type is now storable — and the guidance is
-unchanged: offer a dense handle, because the per-draw lookup is what costs.
-
-**One caveat the spec must carry:** a hash is stable across processes and runs,
-which an interned ordering is not — so it is the form that survives being
-written to a save file or sent over a wire. A dense index is not wrong, it is
-simply not the *Component's* business; a consumer may index internally all it
-likes.
+The two rejections that remain are pointers to mutable memory, which is the line
+the rule draws. The two that moved were refused only for holding a name, and
+holding a name is now ordinary. **`ecsscene` was built on the removed
+vocabulary** — `ModelHash`, `ClipHash`, `ecs.Names`, `ecs.NoHash` — and does not
+compile against this package until it is reworked, which is deliberate and is
+that package's own decision to make.
 
 ---
 
@@ -1523,15 +1466,13 @@ handler holds `write{*Entities}`.
 **A Bundle is not a Component set.** It describes one act of creation; the
 Entity may gain and lose Components afterwards without the Bundle meaning
 anything. A Bundle field simply *is* a Component field — there is no conversion
-step, because a hash is pure and can be written at a package-level `var`, so a
-declarative spawn naming a model by name needs nothing from the ECS:
+step, because everything a Component may hold can be written where the Bundle is
+declared, so a declarative spawn naming a model needs nothing from the ECS:
 
 ```go
-var crateModel = ecs.HashOf[ModelHash]("models/crate.glb")
-
 sp.New(DeclBundle{
     P: Placement{Scale: 1},
-    D: Drawable{Model: crateModel, Layers: scene.LayersAll},
+    D: Drawable{Model: "models/crate.glb", Layers: scene.LayersAll},
 })
 ```
 
@@ -2155,8 +2096,8 @@ processes, and it has no answer to what empties it.
 
 **`RegisterConversion`, a Bundle-field conversion.** Built and then removed: it
 existed because a dense index could not be written where the Entity was
-declared. A hash can, because hashing is pure, so the Bundle field simply *is*
-the Component field and there is nothing to convert.
+declared. Everything a Component may now hold can be, so the Bundle field simply
+*is* the Component field and there is nothing to convert.
 
 **A bare `[]T` as a Component field.** Refused for the lock unit and not for the
 collector, which is the distinction the whole relaxation turns on: a copy of a
@@ -2185,7 +2126,7 @@ answers no question — the object cannot be recovered from the hash, and an
 address is not an identity anything else can agree on. The reference cases
 decompose and each already has an answer: another Entity → `Entity`; an engine
 object → not in the Component at all, but named in the System's signature; an
-asset → a hash.
+asset → its name, in whatever form the plugin that resolves names asks for.
 
 **`Archetype` as a word.** Retired outright rather than annotated. An archetype
 is the *exact* Component set of a group of Entities, which this design neither
@@ -2236,8 +2177,10 @@ remains open is called out at the end of the verification list.
 - `Spawn[B]` staging its bundle **through a field**; `WriteableEntities`.
 - `Get[T]`, `Set[T]` (`Of`, `Ref`, `UpdateFor`), `Remove[T]` — the three the
   prototype did not build.
-- `HashKey`, `HashOf[K]`, `NoHash`, `Names[K, V]` with `Register`, `Lookup` and
-  `TextOf`, and the collision check.
+- ~~`HashKey`, `HashOf[K]`, `NoHash`, `Names[K, V]` with `Register`, `Lookup`
+  and `TextOf`, and the collision check.~~ **Built, then removed.** It existed
+  because a Component could not hold a string; once one could, the whole
+  vocabulary bought 1.1 ns a lookup.
 
 **`kernel`**
 

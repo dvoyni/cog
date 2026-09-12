@@ -162,9 +162,9 @@ func RegisterComponent[C any](registrar *kernel.Registrar, en *Entities, ids uin
 //	ecs: proto.PathedDrawable.Handle is a ptr, which is mutable indirection
 //
 // Variable-length data still has better answers than a List in most cases: a
-// child entity with an owning reference, a fixed-capacity array where the bound
-// is small and real, or — for the name of an engine-side thing — a hash of that
-// name, which is a plain number and costs the collector nothing at all.
+// child entity with an owning reference, or a fixed-capacity array where the
+// bound is small and real. Both cost the collector nothing at all, which a List
+// does not.
 func Storable(t reflect.Type) error { return storable(t, t.String()) }
 
 func storable(t reflect.Type, path string) error {
@@ -200,7 +200,7 @@ func storable(t reflect.Type, path string) error {
 		return nil
 	default:
 		return fmt.Errorf(
-			"%s is a %s, which is mutable indirection: a Component may hold a pointer only to memory nothing can write, so a string is admitted, a variable-length run belongs in an ecs.List, and everything else is a child Entity or a hash",
+			"%s is a %s, which is mutable indirection: a Component may hold a pointer only to memory nothing can write, so a string is admitted, a variable-length run belongs in an ecs.List, and everything else is a child Entity",
 			path, t.Kind())
 	}
 }

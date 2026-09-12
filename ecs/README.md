@@ -7,22 +7,23 @@ plain Go funcs whose parameter types say what they touch.
 **A Component moves, a Query can be narrowed, Entities can be created and
 retired, one Entity can reach another, a Component can name an engine-side
 thing, and another plugin attaches with no mechanism at all: the storage, the
-registration, the Query, its filters, structural change, the accessors, the name
-hash and its table, the resource and event handles, and both handler builders
-are here.**
+registration, the Query, its filters, structural change, the accessors, the
+`List` and its write check, the resource and event handles, and both handler
+builders are here.**
 [`docs/specs/ecs.md`](docs/specs/ecs.md) is the specification the whole plugin is
 judged against.
 
 ## Files
 
 `contract.go` holds the package documentation and `Entity`; `component.go` the
-`PointerFree` rule and `RegisterComponent`; `entities.go` the `Entities`
+`Storable` and `PointerFree` rules and `RegisterComponent`; `entities.go` the `Entities`
 authority; `store.go` the `Store`, the type-erased `storeCore` a despawn reaches
 every Store through, and the erased header a Query fills from; `query.go` the
 `Query`, its driver and its fillers; `filter.go` the `Without` and `With` field
 types; `spawn.go` the `Spawn` and `WriteableEntities` handles; `accessor.go` the
-`Get`, `Set` and `Remove` accessors; `hash.go` the `HashOf` name hash and the
-`Names` table a consumer resolves one through; `resource.go` the `Read` and `Write`
+`Get`, `Set` and `Remove` accessors; `list.go` the `List` a Component holds
+variable-length data in; `validate.go` and its two build-tagged halves the List
+write check; `resource.go` the `Read` and `Write`
 handles that name another plugin's resource; `in.go` the `In` cell and the
 `Feed` that fills it; `response.go` the `Resp` cell a command answers through;
 `system.go` the `ToHandler` and `ToExecute` builders and the parameter
@@ -215,13 +216,13 @@ ecs.PathedDrawable.Deep.Inner.Handle is a ptr, which is mutable indirection
 gate but the **fast path**: a pointer-free Component is copied by sized moves,
 left where it lies by a swap-remove, kept in a span the mark phase never walks,
 and iterated by an unrolled filler. A Component holding a string or a List gives
-all four up, for its own Store only — so prefer `[32]byte` and a hash wherever
-the bound or the name is real.
+all four up, for its own Store only — so prefer `[32]byte` wherever the bound is
+real.
 
-An engine-side thing is still named by a hash rather than by the name itself,
-and that is now a preference with a number behind it rather than a prohibition:
-a path lookup costs about 47 ns against half a nanosecond by dense index, per
-draw, per frame.
+A Component names an engine-side thing however the plugin that resolves those
+names asks it to. This package used to supply a name hash for that and no longer
+does; see [Naming an engine-side thing:
+removed](#naming-an-engine-side-thing-removed).
 
 `sync` types are not special-cased — a mutex is refused by this walk, and would
 be wrong in a Component anyway, for the same reason `go vet` already says so.
@@ -282,122 +283,30 @@ it.
 the tag in tests and in development; a string needs none of this, which is a
 reason to reach for one first.
 
-## Naming an engine-side thing
+## Naming an engine-side thing: removed
 
-```go
-type HashKey interface{ ~uint64 }
+**This package supplied `HashOf`, `HashKey`, `NoHash` and `Names[K, V]`, and no
+longer does.** They existed for one reason — a Component could not hold a
+`string`, so a name had to become a number before it could be stored. A
+Component may hold a string now, so how a Component says which model, clip or
+node it means is a matter between the plugin that writes the name and the plugin
+that resolves it. The ECS has no type, no table and no opinion.
 
-func HashOf[K HashKey](text string) K
-const NoHash = 0
-```
+The cost that justified the machinery did not survive being measured against
+what it actually replaced: **6.66 ns** for a stored hash against **7.79 ns** for
+a `map[string]V` keyed by the path — 1.1 ns, about 5.5 µs a frame at 5 000
+drawables. A dense index is **0.64 ns** and is still what a consumer should
+resolve *to*, which is the advice that outlives the hash: name in the Component,
+index inside whatever consumes it.
 
-**A Component names an engine-side thing — a model, a clip, a node, a pass tag —
-by the 64-bit hash of its name.** The name is a string and a Component holds no
-pointers; a hash is a plain number, so it may.
+Two properties of a hash were real and a consumer that wants them should keep
+them in its own package. It is the same in every process and every run, which an
+assigned index is not, so it survives a save file or a wire; and producing one
+needs nothing, so a System renames what an Entity points at holding only the
+lock it already had. Neither needs the *ECS* to own it.
 
-```go
-type ClipHash uint64                             // the caller's own named type
-var walkClip = ecs.HashOf[ClipHash]("Walk")      // package level, at init
-
-func animate(q *ecs.Query[AnimQ]) {              // two Components, nothing else
-    for _, it := range q.All() {
-        if it.Motion.Speed > 0.1 {
-            it.Anim.Clip = walkClip
-        }
-    }
-}
-```
-
-`HashKey` constrains `K` to `~uint64`, so the hash **is** the caller's type:
-nothing to unwrap, directly comparable, printable, usable as a map key, and
-pointer-free because the constraint admits nothing else. `ClipHash` and
-`ModelHash` stay distinct without a second type parameter, so a clip name cannot
-be assigned where a model name belongs; a codebase that does not want the
-distinction declares one such type and is done. `~uint64` rather than `~int`
-because `int` is 32 bits on some platforms, and a hash that differs by where the
-game was built has given up its one advantage over an assigned index.
-
-**The property that decides this against interning is that producing a hash
-needs nothing.** Hashing is pure, so a System changes what an Entity names
-holding only the lock it already has on the Component. Interning is what
-*assigns* the id, so the table would join the lock set of every System that ever
-changed a clip — and the common case is mutation, a clip going from `"Idle"` to
-`"Walk"` while the game runs, which a registration-time conversion never reaches.
-An assigned id also cannot be a package-level `var`: there is no table at package
-initialisation, and two Engines mean two tables.
-`TestANameIsTheSameEverywhereAndAnIndexIsNot` is that stated as a test — two
-tables see the same two paths in opposite orders and one string comes out as `0`
-and as `1`, against one hash.
-
-The hash is **FNV-1a 64**, written out in five lines rather than taken from
-`hash/fnv`, which is an interface over a `[]byte` `Write` and so allocates on a
-string and cannot inline. `TestTheHashIsFNV1a64` audits those five lines against
-the standard library, so the wire format is pinned by an implementation that is
-not this one: a hash that survives a save file is worth nothing if a later edit
-quietly renumbers every name already written down.
-
-`NoHash` is `0` and is untyped, so it compares against any `HashKey` without a
-conversion and an unset Component field already means "no name". Nothing a game
-writes down lands on it: the offset basis is the hash of the empty string, which
-is not zero, and reaching zero needs the state after the second-to-last byte to
-be a value below 256 — and `Names.Register` rejects the residue outright, so no
-**resolvable** name is `NoHash` at all.
-
-### The name table belongs to the consumer
-
-```go
-type Names[K HashKey, V any] struct{ … }
-
-func (n *Names[K, V]) Register(text string, value V) error
-func (n *Names[K, V]) Lookup(key K) (V, bool)
-func (n *Names[K, V]) TextOf(key K) (string, bool)
-```
-
-`Names` is the reverse half, and **where it lives is the whole point**: it
-belongs to the plugin that resolves names into things — a model table, a clip
-table — under that plugin's own lock, read once per draw where a lock is held
-anyway. **One** System declares it, rather than every System that ever assigns a
-name. There is deliberately no process-wide interner.
-
-It therefore has **no lock of its own and wants none**. A `Names` is an ordinary
-value inside the resource that holds it, so its lock set is that resource's,
-declared with `ecs.Read` or `ecs.Write` and taken by the kernel at registration
-like any other. A mutex inside it would be the global lock this design exists to
-avoid, paid on every draw. Its zero value is ready to use, and the owning plugin
-fills it during Registration or Startup, before any System reads it.
-
-`Register` is also where a **collision** is caught. Sixty-four bits makes one
-vanishingly unlikely — about 3×10⁻¹² at ten thousand distinct names — but
-vanishingly unlikely is not impossible, and an undetected one silently draws the
-wrong model. Every resolvable name passes through `Register`, so one compare
-turns the class into a startup error naming both strings. Re-registering a text
-already registered replaces its value and is not an error: the table is keyed by
-name, and the later registration is the one the manifest meant.
-
-`TextOf` recovers the string, because a hash is opaque in a debugger and has to
-stay legible in tooling. That is why a row keeps its text beside its value, and
-it is the one structural choice here with a price: **1.2 ns a lookup**, measured
-below against the same probe into a map holding the value alone.
-
-**Nothing cleans the table because nothing accumulates in it.** It holds what the
-consumer registered — its asset manifest, fixed at startup. Asking about a name
-nobody declared answers that there is no such thing and leaves it the size it
-was: `TestHashingAccumulatesNothing` hashes **1 000 000** procedural names
-against eight declared models and the table still holds eight entries.
-
-> **v1 hashes strings and nothing else** — a model, a clip, a node, a pass tag.
-> Per-entity variable-length data is a different problem with a different answer
-> ([#264](https://github.com/dvoyni/cog/issues/264)), and content-addressing is
-> the wrong tool for it: such a table must hold the buffer itself, so it grows
-> with every distinct value the game ever produces, and the only way to empty it
-> is to count how many Entities still refer to each entry. Nothing can empty the
-> table. What makes a manifest safe to never clean is that it is a manifest.
-
-A plugin a System will record into must offer a **pointer-free handle** for
-everything a Component needs to name; where it does not, the app makes its own
-table. A dense index is not wrong — a consumer may index internally all it likes,
-and it is the cheapest thing measured below. It is simply not the *Component's*
-business, because it is not the same number in the next process.
+`ecsscene` was built on `ModelHash`, `ClipHash`, `ecs.Names` and `ecs.NoHash`
+and does not compile against this package until it is reworked.
 
 ## Component registration
 
@@ -1272,55 +1181,28 @@ nothing cannot inherit the answer before it. Nothing is boxed: the `reflect.Valu
 holding the cell pointer is built once and reused, the same way the event cell,
 the kernel cell and every handle are.
 
-### What naming an engine-side thing costs
+### What naming an engine-side thing cost
 
-Microbenchmarks, not a frame: producing a hash and resolving one are both too
-small to read off a whole-frame number. Same machine, `-benchtime 1s`, medians
-of five. A thousand names of about thirty characters each, which is what a
-manifest of model paths looks like.
-
-| producing a name | ns/op | allocs/op |
-| --- | --- | --- |
-| **`HashOf` of a clip name, four bytes** | **1.44** | **0** |
-| `HashOf` of a 28-byte path, a constant | 13.83 | **0** |
-| `HashOf` of a 28-byte path the compiler cannot fold | 13.47 | **0** |
-
-**Zero, and it has to be zero**: a System that changes what an Entity names does
-this per Entity per tick, and `-gcflags=-m` reports `HashOf` inlined at every
-call site with nothing escaping. FNV-1a is a byte at a time on a serial
-multiply, so the cost is the length of the name and nothing else — which is the
-argument for hashing a clip name where a path is not needed, and for hashing at
-`init` where the name is a constant.
+Kept because it is the evidence for removing the name hash rather than for
+having it. The benchmarks are gone with `hash.go`; these are their last numbers,
+same machine, `-benchtime 1s`, medians of five, over a thousand names of about
+thirty characters each.
 
 | resolving a name, per lookup | ns |
 | --- | --- |
 | a dense index into a slice | **0.64** |
 | the same map, value only, no text in the row | 5.45 |
-| **`Names.Lookup`, the stored hash** | **6.66** |
-| `Names.TextOf`, the same probe for tooling | 6.42 |
-| `Names.Lookup` of a name nobody registered | 5.24 |
-| a `map[string]V` keyed by the path | 7.79 |
+| `Names.Lookup`, the stored hash | 6.66 |
+| a `map[string]V` keyed by the path | **7.79** |
 | hashing the string on every lookup | 25.19 |
 
-Three things those numbers say. **A stored hash beats the path it came from** by
-about 1.1 ns, and beats re-hashing it by 3.8×, which is the whole reason the
-Component carries the hash rather than the name or the name's source. **A dense
-index is 10× cheaper still** and is exactly what a consumer should use
-internally once it has resolved — the hash is the *Component's* business, not
-the table's. And **a miss is cheaper than a hit**, which is what makes the
-two-million-probe sweep in `TestHashingAccumulatesNothing` finish in 40 ms and
-leave the table at eight entries.
+**1.1 ns** between the hash and the name it was standing in for. That is what
+`HashOf`, `HashKey`, `NoHash`, `Names[K, V]`, a glossary entry apiece for *Hash*
+and *Name table*, and about 190 lines of package were buying once a Component
+could hold the string itself — roughly 5.5 µs a frame at 5 000 drawables.
 
-The **1.2 ns** between a bare map and `Names.Lookup` is the text the row carries
-so `TextOf` can make a hash legible again. That is the one structural choice
-here and it is deliberate: 1.2 ns on a per-draw probe buys a hash that is
-readable in a debugger and a collision that is a named startup error rather than
-a wrong model. Narrowing it further — a row holding an index into a text slice
-rather than the string — is available and has not been spent.
-
-| building the table | ns/op | allocs/op | B/op |
-| --- | --- | --- | --- |
-| `Register`, a manifest of 1 000 names | 89 434 — **89 ns a name** | 22 | 226 056 |
-
-A startup cost, reported rather than defended. The 22 allocations are the map's
-growth steps, not a per-name charge.
+Two numbers from the same suite are worth carrying into whatever replaces it. A
+dense index is **10× cheaper than either**, and is what a consumer should resolve
+*to*. And producing a hash was free — 1.44 ns for a four-byte clip name, zero
+allocations, inlined at every call site — so a consumer that wants a hash's
+process-stable property pays nothing at the producing end to keep it.
