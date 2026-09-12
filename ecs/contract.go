@@ -13,6 +13,13 @@
 // subscription takes and ToExecute into the factory a command takes, so the ECS
 // contributes no scheduler, no ordering and no registration API of its own.
 //
+// A Component names an engine-side thing — a model, a clip, a node, a pass tag
+// — by the 64-bit hash of its name, because a name is a string and a Component
+// holds no pointers. HashOf produces one and needs nothing to do it, so a
+// System renames what an Entity points at holding only the lock it already had.
+// Names is the reverse half and belongs to the plugin that resolves names, not
+// to anything central: there is deliberately no process-wide interner.
+//
 // Nothing here is a Command. A structural change is a direct call on a handle
 // the System already holds, and the exclusion it needs was arranged before the
 // frame started: Spawn and WriteableEntities declare write{*Entities}, which is
