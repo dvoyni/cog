@@ -36,9 +36,6 @@ type HashKey interface{ ~uint64 }
 // table would join the lock set of every System that ever changed an animation.
 func HashOf[K HashKey](s string) K { return K(fnv1a(s)) }
 
-// HashBytesOf is HashOf over bytes, for a name that did not arrive as a string.
-func HashBytesOf[K HashKey](b []byte) K { return K(fnv1aBytes(b)) }
-
 // NoHash is the absent value. FNV-1a's offset basis is the hash of the empty
 // string, so no input hashes to 0 and the zero value is free to mean "none".
 const NoHash = 0
@@ -59,15 +56,6 @@ func fnv1a(s string) uint64 {
 	return h
 }
 
-func fnv1aBytes(b []byte) uint64 {
-	h := uint64(fnvOffset)
-	for _, c := range b {
-		h ^= uint64(c)
-		h *= fnvPrime
-	}
-	return h
-}
-
 // Names is the *consumer's* half, and where it lives is the whole point: it
 // belongs to the plugin that resolves names into things -- scene's model table,
 // an animation plugin's clip table -- under that plugin's own lock, reached
@@ -80,9 +68,12 @@ func fnv1aBytes(b []byte) uint64 {
 //
 // Nothing cleans this table because nothing accumulates in it: it holds what
 // the consumer *registered*, which is its asset manifest, and asking it a
-// question never adds to it. That is a property of a manifest, not of hashing
-// in general -- per-entity *data* is a different problem with a different
-// answer, and it is in sidestore.go.
+// question never adds to it.
+//
+// That is a property of a manifest rather than of hashing in general, and it is
+// why this is the *only* thing being hashed. Per-entity variable-length data --
+// a byte buffer, anything a Component cannot hold -- is a different problem
+// with a different answer, and it is out of scope for v1 (cog#264).
 type Names[K HashKey, V any] struct {
 	byHash map[K]hashEntry[V]
 }

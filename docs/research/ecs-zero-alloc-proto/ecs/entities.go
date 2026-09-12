@@ -27,38 +27,7 @@ type Entities struct {
 	// conv holds the Bundle-field conversions RegisterConversion baked, keyed by
 	// the type written in the Bundle rather than by the Component it becomes.
 	conv map[reflect.Type]conversion
-
-	// side holds the per-Entity stores that are not Components, so that a
-	// Despawn empties them too.
-	side []SideStore
 }
-
-// SideStore is per-Entity data that cannot be a Component because it is not
-// pointer-free -- a byte buffer, a decoded mesh, anything variable-length.
-//
-// It is the answer to the one thing a hash cannot do. Hashing a name is free to
-// clean up because nothing accumulates: the consumer's table holds a fixed
-// manifest. Hashing *runtime data* is not, because the table would then have to
-// hold the data itself, would grow with every distinct value the game ever
-// made, and could only be emptied by counting who still refers to each entry.
-//
-// The way out is to stop content-addressing it. Keyed by Entity there is
-// exactly one owner, so there is nothing to count: the buffer dies with its
-// Entity, under the Despawn that already empties every Store (cog#240).
-// Sharing is what costs; ownership is free.
-type SideStore interface {
-	// Remove drops e's row, and reports whether there was one.
-	Remove(e Entity) bool
-}
-
-// RegisterSideStore enrols a store in Despawn. Call it at registration, beside
-// the Components the plugin declares.
-//
-// The store stays the plugin's own: the ECS never reads it, does not know its
-// element type, and imposes nothing on it except that a Despawn empties it.
-// Its lock is the plugin's own resource lock, declared by the Systems that
-// touch it like any other.
-func (en *Entities) RegisterSideStore(s SideStore) { en.side = append(en.side, s) }
 
 // conversion turns one Bundle field into one Component at Spawn time. It exists
 // because a Bundle is *not* a Component set -- cog#237 defines it as describing
@@ -177,13 +146,6 @@ func (en *Entities) Despawn(e Entity) bool {
 	}
 	for _, c := range en.stores {
 		c.remove(e)
-	}
-	// Side stores are emptied by the same Despawn and under the same lock. That
-	// is what makes per-entity variable-length data cleanable at all: it is
-	// owned by one Entity, so it dies when that Entity does, and nothing has to
-	// count references to decide.
-	for _, s := range en.side {
-		s.Remove(e)
 	}
 	en.gens[idx]++
 	en.freed = append(en.freed, idx)
