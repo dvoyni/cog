@@ -36,13 +36,13 @@ type (
 // cannot do: there is no table at package initialisation, and under cog#245
 // two Engines would have two tables and two different ids for this one string.
 var (
-	idleClip = ecs.NameOf[Clip]("Idle")
-	walkClip = ecs.NameOf[Clip]("Walk")
+	idleClip = ecs.HashOf[Clip]("Idle")
+	walkClip = ecs.HashOf[Clip]("Walk")
 )
 
 // Animated is a legal Component carrying what was declared as a string.
 type Animated struct {
-	Clip ecs.Name[Clip]
+	Clip ecs.Hash[Clip]
 	Time float32
 }
 
@@ -145,12 +145,12 @@ func TestAClipChangesMidFrameWithNoExtraLock(t *testing.T) {
 	t.Logf("clips switched by a System naming two Components and nothing else")
 }
 
-// A Name is the same value everywhere, which is what makes it writable from a
+// A Hash is the same value everywhere, which is what makes it writable from a
 // package-level var -- and what an assigned index can never be, because the
 // index depends on which table assigned it and in what order.
-func TestANameIsTheSameEverywhereAndAnIndexIsNot(t *testing.T) {
-	if ecs.NameOf[Clip]("Walk") != walkClip {
-		t.Fatalf("the same string hashed to two different Names")
+func TestAHashIsTheSameEverywhereAndAnIndexIsNot(t *testing.T) {
+	if ecs.HashOf[Clip]("Walk") != walkClip {
+		t.Fatalf("the same string hashed to two different values")
 	}
 
 	// Two worlds, two tables, the same two names registered in opposite orders
@@ -165,35 +165,35 @@ func TestANameIsTheSameEverywhereAndAnIndexIsNot(t *testing.T) {
 	if crateA == crateB {
 		t.Fatalf("two independently built tables happened to agree; the test proves nothing")
 	}
-	t.Logf("one string, two tables, ids %d and %d -- but one Name: %v",
-		crateA, crateB, ecs.NameOf[Model]("models/crate.glb"))
+	t.Logf("one string, two tables, ids %d and %d -- but one Hash: %v",
+		crateA, crateB, ecs.HashOf[Model]("models/crate.glb"))
 }
 
-// A Name carries no pointer, which is the whole reason it exists.
+// A Hash carries no pointer, which is the whole reason it exists.
 func TestAnAnimatedComponentIsPointerFree(t *testing.T) {
 	if err := ecs.PointerFree(reflect.TypeFor[Animated]()); err != nil {
 		t.Fatalf("Animated is not a legal Component: %v", err)
 	}
 	// And the phantom tag really does separate the domains, so a clip name
 	// cannot be assigned where a model name belongs.
-	if reflect.TypeFor[ecs.Name[Clip]]() == reflect.TypeFor[ecs.Name[Model]]() {
-		t.Fatalf("Name[Clip] and Name[Model] are the same type")
+	if reflect.TypeFor[ecs.Hash[Clip]]() == reflect.TypeFor[ecs.Hash[Model]]() {
+		t.Fatalf("Hash[Clip] and Hash[Model] are the same type")
 	}
 }
 
-// The consumer's half: resolve a Name back to the thing, and back to its text
+// The consumer's half: resolve a Hash back to the thing, and back to its text
 // for tooling. Also the scale check -- 64 bits has to survive a real asset
 // list without a collision, and the table catches one if it ever happens.
-func TestANameTableResolvesAtRealisticScale(t *testing.T) {
+func TestTheConsumerTableResolvesAtRealisticScale(t *testing.T) {
 	const n = 100_000
-	table := ecs.NewNameTable[Model, int]()
-	names := make([]ecs.Name[Model], n)
+	table := ecs.NewNames[Model, int]()
+	names := make([]ecs.Hash[Model], n)
 	for i := range n {
 		text := fmt.Sprintf("models/props/%05d/variant_%03d.glb", i, i%128)
 		if err := table.Register(text, i); err != nil {
 			t.Fatalf("registering %d names hit a collision: %v", n, err)
 		}
-		names[i] = ecs.NameOf[Model](text)
+		names[i] = ecs.HashOf[Model](text)
 	}
 	if table.Len() != n {
 		t.Fatalf("table holds %d of %d names", table.Len(), n)
@@ -220,18 +220,18 @@ type syncInterner struct {
 	ids  sync.Map // string -> uint64
 }
 
-func (s *syncInterner) id(text string) ecs.Name[Clip] {
+func (s *syncInterner) id(text string) ecs.Hash[Clip] {
 	if v, ok := s.ids.Load(text); ok {
-		return ecs.NameFromRaw[Clip](v.(uint64))
+		return ecs.HashFromRaw[Clip](v.(uint64))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if v, ok := s.ids.Load(text); ok {
-		return ecs.NameFromRaw[Clip](v.(uint64))
+		return ecs.HashFromRaw[Clip](v.(uint64))
 	}
 	s.next++
 	s.ids.Store(text, s.next)
-	return ecs.NameFromRaw[Clip](s.next)
+	return ecs.HashFromRaw[Clip](s.next)
 }
 
 func animateInterned(in *syncInterner) any {
