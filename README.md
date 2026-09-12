@@ -64,6 +64,8 @@ error handling.
     triangles over gfx, with a snapshot of what a tick recorded.
 - [`scene`](scene/README.md): declarative 3D cameras, glTF models, buffer-built
     meshes, punctual lights, and debug shapes over gfx.
+- [`ecsscene`](ecsscene/README.md): the ecs↔scene binding — drawable components,
+    a model name table, and the one system that records them into scene.
 - [`ui`](ui/README.md): immediate-mode layout, interaction, canvas-backed visual
     processing, and a snapshot of what layout resolved.
 - [`wgpu`](wgpu/README.md): window, input, timing with pause, step and a hold

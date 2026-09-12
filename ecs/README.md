@@ -916,6 +916,9 @@ of the ECS's own.
 a plugin like `scene` imports nothing of `ecs`, so neither can know about the
 other. That is what "no binding mechanism" means in practice — and a project not
 using the ECS simply does not register that plugin and schedules no Systems.
+cog ships the ecs↔scene one as [`ecsscene`](../ecsscene/README.md), which is the
+whole shape in one System and carries the prohibitions a second binding has to
+keep true.
 
 **Neither handle is a place to keep anything.** `Get` goes to the cell the lock
 covers on every call, so the value is refreshed per tick and valid only for the
