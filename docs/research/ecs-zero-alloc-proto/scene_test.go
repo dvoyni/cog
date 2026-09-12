@@ -29,16 +29,10 @@ import (
 // recording side -- so these tests publish a bare *scene.OpQueue resource of
 // their own and read back what the frame recorded into it.
 
-// ModelID is how a Component names a model: a dense index into a table the app
-// interned at registration. It is the answer to the gap this ticket is really
-// about, because scene addresses a model by its path and a Component may not
-// hold a string.
+// ModelID and modelTable are the interned-index alternative, kept only so that
+// BenchmarkNamingAModel can price it against a hash. Nothing in the binding
+// uses them: a Component names a model by ModelHash.
 type ModelID uint32
-
-// modelTable is that table. It is ordinary app-owned memory threaded through a
-// plugin constructor the way cog#244 settled, not an engine structure: the ECS
-// has no opinion about it beyond requiring that what lands in the Component is
-// pointer-free.
 type modelTable struct {
 	paths  []string
 	byPath map[string]ModelID
@@ -62,9 +56,7 @@ func (t *modelTable) Intern(p string) ModelID {
 // to turn a Component back into what scene's API takes.
 func (t *modelTable) Path(id ModelID) string { return t.paths[id] }
 
-// Lookup resolves a path without interning it, for a reader that must not
-// mutate the table -- a Bundle conversion running inside a Spawn, which holds
-// no lock on the table.
+// Lookup resolves a path without interning it.
 func (t *modelTable) Lookup(p string) (ModelID, bool) {
 	id, ok := t.byPath[p]
 	return id, ok
@@ -79,12 +71,18 @@ type Placement struct {
 	Scale    float32
 }
 
-// Drawable says an Entity is drawn, in eight bytes, naming no memory it does
-// not own.
+// Drawable says an Entity is drawn, naming no memory it does not own: the model
+// is the hash of its path, which a System may write from a package-level var
+// holding no lock but this Component's own.
 type Drawable struct {
-	Model  ModelID
+	Model  ModelHash
 	Layers scene.LayerMask
 }
+
+// modelNames is the consumer's table -- hash to the path scene's API wants. It
+// belongs to the binding plugin, is registered once, and is read where a lock
+// is already held: once per draw, never once per assignment.
+type modelNames = ecs.Names[ModelHash, string]
 
 // DrawQ reads both: recording writes into scene's queue, not into the world, so
 // a recording System takes read locks on everything it draws from.
@@ -110,10 +108,11 @@ type (
 // ecs.In, which the adapter projects.
 //
 // Nothing here is a binding type. The only thing this does that gameplay would
-// not is turn an id back into the path scene's API wants.
+// not is turn a hash back into the path scene's API wants -- once per draw,
+// where a lock is held anyway, which is the only place a name table is needed.
 func recordDraws(
 	q *ecs.Query[DrawQ],
-	models *ecs.Read[*modelTable],
+	models *ecs.Read[*modelNames],
 	out *ecs.Write[*scene.OpQueue],
 	k kernel.Kernel,
 ) {
@@ -123,7 +122,13 @@ func recordDraws(
 		return
 	}
 	for _, it := range q.All() {
-		queue.Model(it.D.Layers, table.Path(it.D.Model), scene.ModelDraw{
+		path, ok := table.Lookup(it.D.Model)
+		if !ok {
+			// An unregistered model draws nothing, which is scene's own rule
+			// for a selector that matches nothing.
+			continue
+		}
+		queue.Model(it.D.Layers, path, scene.ModelDraw{
 			Transform: scene.Transform{
 				Position: it.P.Position,
 				Rotation: it.P.Rotation,
@@ -154,7 +159,7 @@ type drawWorld struct {
 
 type drawPlug struct {
 	w     *drawWorld
-	table *modelTable
+	table *modelNames
 	n     int
 	seen  *int
 }
@@ -170,15 +175,19 @@ func (p drawPlug) Register(r *kernel.Registrar, _ any) error {
 	// nothing here flushes, and it is the same type either way.
 	queue := new(scene.OpQueue)
 	r.InitResource[*scene.OpQueue](queue)
-	// The model table is an ordinary resource too, so the interning it did at
-	// registration is visible in every recording System's lock set rather than
-	// hidden in a closure.
-	r.InitResource[*modelTable](p.table)
+	// The name table is an ordinary resource, so it sits in the recording
+	// System's lock set rather than hidden in a closure -- and only in that
+	// System's, because only a reader of names ever needs it.
+	r.InitResource[*modelNames](p.table)
 	placements := ecs.RegisterComponent[Placement](r, en, ids)
 	drawables := ecs.RegisterComponent[Drawable](r, en, ids)
 	p.w.en, p.w.placements, p.w.drawables, p.w.queue = en, placements, drawables, queue
 
-	crate := p.table.Intern("models/crate.glb")
+	const cratePath = "models/crate.glb"
+	if err := p.table.Register(cratePath, cratePath); err != nil {
+		return err
+	}
+	crate := ecs.HashOf[ModelHash](cratePath)
 	for i := range p.n {
 		e := en.Alloc()
 		placements.Add(e, Placement{Position: m.Vec3{X: float32(i)}, Scale: 1})
@@ -202,7 +211,7 @@ func startDraw(tb testing.TB, n int) (*kernel.Engine, *drawWorld, *int) {
 	w, seen := &drawWorld{}, new(int)
 	e := kernel.New(nil).
 		Handler(func(err error) bool { tb.Errorf("kernel error: %v", err); return true }).
-		WithPlugins(drawPlug{w, newModelTable(), n, seen})
+		WithPlugins(drawPlug{w, ecs.NewNames[ModelHash, string](), n, seen})
 	go e.Run(ctx)
 	<-e.Ready()
 	return e, w, seen

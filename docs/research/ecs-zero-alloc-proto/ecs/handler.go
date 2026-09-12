@@ -41,9 +41,6 @@ type Spawn[B any] struct {
 	en      *Entities
 	adds    []func(e Entity, src unsafe.Pointer)
 	offs    []uintptr
-	// convs is parallel to adds: nil where the Bundle field already is the
-	// Component, and the conversion's apply where it stands for one.
-	convs []func(src unsafe.Pointer) unsafe.Pointer
 
 	// buf holds the bundle for the duration of New. It is a field rather than a
 	// local because taking the address of a local parameter and handing it to an
@@ -62,29 +59,13 @@ func (s *Spawn[B]) plan(a kernel.ResourceAccess, en *Entities) {
 	for i := range t.NumField() {
 		sf := t.Field(i)
 		ops, ok := en.ops[sf.Type]
-		var apply func(unsafe.Pointer) unsafe.Pointer
 		if !ok {
-			// Not a Component itself: it may still stand for one. A Bundle
-			// describes one act of creation rather than what an Entity has
-			// (cog#237), so a Bundle field may be a string where the Component
-			// it becomes may not be.
-			cv, converts := en.conv[sf.Type]
-			if !converts {
-				panic(fmt.Sprintf("ecs: Spawn bundle %s names unregistered Component %s", t, sf.Type))
-			}
-			ops, ok = en.ops[cv.to]
-			if !ok {
-				panic(fmt.Sprintf("ecs: Spawn bundle %s converts %s to unregistered Component %s", t, sf.Type, cv.to))
-			}
-			apply = cv.apply
+			panic(fmt.Sprintf("ecs: Spawn bundle %s names unregistered Component %s", t, sf.Type))
 		}
-		// A spawn names its Components, so its lock set is knowable here --
-		// and a converted field names the Component it converts *to*, so the
-		// lock set stays derivable from the signature either way.
+		// A spawn names its Components, so its lock set is knowable here.
 		ops.declareWrite(a)
 		s.adds = append(s.adds, ops.addRaw)
 		s.offs = append(s.offs, sf.Offset)
-		s.convs = append(s.convs, apply)
 	}
 }
 
@@ -95,11 +76,7 @@ func (s *Spawn[B]) New(b B) Entity {
 	p := unsafe.Pointer(&s.buf)
 	e := s.en.Alloc()
 	for i, add := range s.adds {
-		src := unsafe.Add(p, s.offs[i])
-		if conv := s.convs[i]; conv != nil {
-			src = conv(src)
-		}
-		add(e, src)
+		add(e, unsafe.Add(p, s.offs[i]))
 	}
 	return e
 }
