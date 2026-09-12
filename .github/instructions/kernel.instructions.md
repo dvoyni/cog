@@ -102,12 +102,42 @@ func handler() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 Per-invocation state belongs in the `Execute`/`Observe` body. State that must
 persist across invocations belongs in a resource.
 
-### Keep `Lock` Straight-Line
+### Keep `Lock` Deterministic and Total
 
-`Lock` binds handles and nothing else. No branching, no loops, no work. Every
-`GetRead`/`GetWrite` must run unconditionally, because the lock set it produces
-is fixed at registration and reused forever. Conditional logic belongs in the
-body, where early returns are fine.
+`Lock` binds handles and nothing else, and it runs **once**, during
+registration: `Subscribe` and `HandleCommand` call it immediately and keep the
+lock set it produces for the engine lifetime. Three guarantees are what the rule
+is about.
+
+- **Deterministic.** The set is fixed by the end of registration and never
+  changes. It may depend on types and on registration-time configuration; it
+  must not depend on anything observable only while the engine runs — no clock,
+  no resource value, no entity count, no global mutable state.
+- **Total.** Every handle the handler body can reach is bound here. There is no
+  runtime guard on `Get`/`Set`, so a lock the body takes that `Lock` did not
+  declare is a silent data race, not an error.
+- **Final.** No lock is acquired after registration. A handler never widens its
+  own set; it declares what it dispatches with `Uses` and composition folds
+  those locks in.
+
+**Hand-written `Lock` bodies stay straight-line** — no branching, no loops, no
+work — because that is the cheapest way to satisfy all three and the only one a
+reviewer can check by eye. Conditional logic belongs in the body, where early
+returns are fine.
+
+**A generated `Lock` may loop**, and the `ecs` handler builder does: it walks a
+System's parameter list and declares one lock per Component named there. That
+satisfies all three — deterministic, because the parameter list is fixed by the
+System's Go signature; total, because the body can reach nothing its parameters
+do not name; final, because the walk happens inside the single registration-time
+call. What violates the rule is a loop whose **extent is not fixed by types**:
+over a slice a later run could size differently, over the entities alive at
+registration, or over anything read from the world.
+
+A generated `Lock` must be able to point at the type-level function that
+produces its set. If you cannot name that function, the loop is not generated,
+it is conditional. `ecs.ToHandler` is the only sanctioned user of this
+exemption; see [`kernel/docs/specs/ecs-support.md`](../../kernel/docs/specs/ecs-support.md).
 
 ## Resource Handles
 

@@ -43,7 +43,7 @@ The optional lifecycle phase in which a plugin begins operating after all regist
 
 **Host**:
 The single plugin that owns the application's blocking runtime loop.
-_Avoid_: System plugin
+_Avoid_: System plugin. A System is the ECS's term for a func run over matching Entities, and has nothing to do with the Host.
 
 **Tick source**:
 What decides when an update tick is published — the driver's frame clock while running, or an explicit step request while paused. Rendering is not a tick source: a paused engine keeps drawing the last completed frame.
@@ -76,6 +76,7 @@ The final subscriber group in an event publication. Members may execute concurre
 
 **Resource**:
 Shared state whose declared access is coordinated by the engine. Plugins may also own state and coordinate its concurrent access themselves.
+_Avoid_: A second, ECS-local meaning — what other engines call a resource is exactly this.
 
 **Resource handle**:
 A binding to a resource cell, obtained during registration and valid for the engine lifetime. The value it exposes is valid only while the owning handler holds its lock.
@@ -106,6 +107,81 @@ An engine without a Host. It remains running until its context is canceled.
 
 **Shutdown**:
 The optional lifecycle phase that stops active plugins in reverse dependency order before the scheduler stops.
+
+## Entities and Components
+
+**Entity**:
+An opaque handle to one thing in the simulation. It is comparable, copyable, and usable as a map key. It carries a generation, so a handle to a despawned Entity is detectably stale rather than silently addressing whatever took its place. Its zero value means "no Entity".
+_Avoid_: Id, object, actor, game object
+
+**Entities**:
+The authority on which Entities exist: it allocates them, tracks their generations, and answers whether one is alive. It knows nothing about which Components an Entity has, but it can reach every Store, because a Despawn has to empty all of them and no Entity records which ones it is in. Holding it for write is therefore the one lock that covers every Store at once; every System that touches any Store holds it for read, and that is what makes the coverage true rather than merely intended. There is exactly one per Engine, and that is what makes an Engine the boundary of one simulation: a second simulation is a second Engine, never a second Entities.
+_Avoid_: World, Registry
+
+**Writeable Entities**:
+The promotion of a write-locked Entities into the thing that can Spawn and Despawn. A System gets one only by declaring the write, so the authority to change which Entities exist is visible in its signature and nowhere else.
+
+**Component**:
+A plain value an Entity either has or has not, addressed by its Go type. It contains no pointers of any kind, transitively, which is checked when the type is registered. An Entity holds at most one Component of a given type.
+_Avoid_: Attribute, property, field
+
+**Tag**:
+A Component with no fields. Its presence is the whole of what it says, and its purpose is to narrow a Query. It is not a place to keep a boolean: a fact the Entity carries data about belongs in that data's Component, and no fact is encoded twice.
+_Avoid_: Flag, marker, label
+
+**Component set**:
+The exact set of Component types one Entity has. It describes an Entity; it is not a structure the engine keeps, and nothing groups Entities by it.
+_Avoid_: Archetype, table, signature
+
+**Component registration**:
+The Registration-phase declaration that one Component type exists, made once per type by exactly one plugin. It is what makes the type's Store exist, so a type no plugin registered cannot be added, read, or locked.
+
+**Store**:
+The engine's holding of every value of one Component type. There is one per registered Component type, and it is the unit a lock is taken on. It knows how many Entities it holds, and that number is what a Query consults to choose its Driver.
+_Avoid_: Pool, column, table. Also Page and Chunk, both of which stay unspent: a Store's index is not divided into blocks, and nothing groups its rows. Chunk is held in reserve for a run of rows sharing one change version, which is the only thing a real block would buy.
+
+**Query**:
+A struct type whose field types are the Component types one System touches. A field's pointer-ness is its access mode: a pointer field is written and yields the stored value itself, a value field is read and yields a copy. A Query matches every Entity having _at least_ those Component types, which is why it is not a Component set. It selects on presence and on nothing else: no Query narrows by what a Component _contains_, so finding every Entity whose Reference points somewhere in particular is a comparison the System makes itself, once per candidate.
+_Avoid_: View, archetype
+
+**Filter**:
+A Query field that narrows which Entities match without yielding anything into the Query. It still reads its Component's Store, because presence is information and reading it is a read, so it contributes to the System's lock set like any other field. It is the reason a Tag exists.
+_Avoid_: Predicate, matcher
+
+**Driver**:
+The one Store a Query walks to find candidates, every other Component it names being checked against each candidate in turn. A Query costs what its Driver is long, not what it matches, so narrowing a Query with a Tag can be the difference between visiting a hundred Entities and five thousand. A Filter can never be the Driver: it names the Entities to exclude, and nothing lists the rest.
+_Avoid_: lead, primary, base
+
+**System**:
+A plain Go func called once per tick, which iterates the Entities its Queries match itself. It takes whatever a cog handler may take — Queries for its Components, Accessors for Entities it did not iterate to, the handles for Spawn and Despawn, read or write access to the Resources of any plugin it binds to, and the Kernel — and its lock set is the union of all of them, derived from the signature at registration. It can touch nothing that signature does not name. Naming the event that drove the tick is legal but is not the ordinary shape, because a System that names one can only ever be subscribed to that one; what it needs from the tick reaches it as a plain value instead.
+_Avoid_: System plugin, which is the Host
+
+**Structural change**:
+Any change to which Entities have which Components — adding or removing a Component, spawning or despawning an Entity — as opposed to a change to a Component's value. A System may make one to the Entity it is currently visiting; changing whether some _other_ Entity is in the Store being iterated is undefined, and so is using any pointer into a Store after that Store has structurally changed.
+
+**Spawn**:
+Creating an Entity together with a complete set of Components, as one Structural change, naming that set as a Bundle. Despawn is its inverse and is total: it removes the Entity from every Store, so nothing anywhere still holds it.
+_Avoid_: Instantiate, Instance, create
+
+**Bundle**:
+The set of Components one Spawn creates together, named as a struct type the way a Query is. It is not a Component set: it describes one act of creation, not what an Entity has from then on, and the Entity may gain and lose Components afterwards without the Bundle meaning anything.
+_Avoid_: Prefab and Template, both still unspent; archetype
+
+**Reference**:
+An Entity kept inside a Component — a missile's target, a light's owner. Following one is the ordinary way to relate two Entities, and it stays safe when the far Entity is gone: a Reference to a despawned Entity resolves to nothing, because a Despawn empties every Store and a generation cannot match twice. It points one way only. The far Entity does not know it is referenced and nothing anywhere lists what points at a given Entity, so a relation with a many side keeps that side as several References on the one side — the count fixed by whoever declares the Component, never by the engine.
+_Avoid_: Link, pointer, handle. Also Parent, Child and Hierarchy, which are a game's words for its own Components and mean nothing to the engine. Relation is held in reserve for a Store holding many rows per Entity keyed by the Entity each names, which is the only shape that would make the far side answerable without an index every Structural change has to maintain.
+
+**Accessor**:
+A System's means of reaching one Component of an Entity it did not iterate to, which is how a Reference is followed. It comes in a reading form and a writing one, and like a Query field it declares its Component in the System's lock set — reaching an Entity through a Reference is not a way to touch a Store the signature did not name.
+_Avoid_: Lookup, fetch, getter
+
+**Hash**:
+The 64-bit hash of a name, and the way a Component says which model, clip or node it means. A Component may not hold the name itself, because a name is a string and a Component holds no pointers; a Hash is a plain number, so it may. Producing one needs nothing — hashing is a pure function, so a System changes what an Entity names while holding only the lock it already had — and the same name hashes the same in every process and every run, which an assigned index does not.
+_Avoid_: Id, interned index. An index is legitimate inside whatever resolves a Hash; it is not what a Component carries.
+
+**Name table**:
+What a plugin registers its own names in, so that a Hash arriving on a Component can be resolved back to the thing it names. It belongs to the side that reads a name, not to the side that writes one, so one System declares it rather than every System that ever assigns a name. It holds what was registered and nothing else: asking it about a name nobody declared answers that there is no such thing, and leaves it the size it was.
+_Avoid_: Interner, registry, atlas
 
 ## Agent Interface
 
