@@ -94,7 +94,12 @@ type (
 // everything a cog handler may take. Queries for the Components, ecs.Read and
 // ecs.Write for the resources -- the same kernel.Read and kernel.Write a
 // handler declares, reached through a System parameter instead of through a
-// Lock func -- the kernel itself, and the event.
+// Lock func -- and the kernel.
+//
+// It names no event. Naming one would weld the System to app.UpdateEvent, and
+// this one has no business knowing what drives it: it draws the world as the
+// world currently is. What it did need from the frame it takes through
+// ecs.In, which the adapter projects.
 //
 // Nothing here is a binding type. The only thing this does that gameplay would
 // not is turn an id back into the path scene's API wants.
@@ -103,7 +108,6 @@ func recordDraws(
 	models *ecs.Read[*modelTable],
 	out *ecs.Write[*scene.OpQueue],
 	k kernel.Kernel,
-	_ app.UpdateEvent,
 ) {
 	table, queue := models.Get(), out.Get()
 	if table == nil || queue == nil {
@@ -126,7 +130,7 @@ func recordDraws(
 // capacity, which is what makes a steady frame allocate nothing. It records the
 // count first so a test can see what the frame recorded.
 func consumeFrame(seen *int) any {
-	return func(out *ecs.Write[*scene.OpQueue], _ app.UpdateEvent) {
+	return func(out *ecs.Write[*scene.OpQueue]) {
 		queue := out.Get()
 		*seen = queue.OpCount()
 		queue.Reset()

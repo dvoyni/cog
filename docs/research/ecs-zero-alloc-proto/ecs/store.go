@@ -109,6 +109,10 @@ func (s *Store[T]) Len() int { return len(s.owners) }
 // System may depend on it.
 func (s *Store[T]) OwnerAt(j int) Entity { return s.owners[j] }
 
+// RowAt is for tests only, like OwnerAt: it reads the dense array positionally
+// so a measurement can walk the rows without going through a Query.
+func (s *Store[T]) RowAt(j int) *T { return &s.data[j] }
+
 func (s *Store[T]) Add(e Entity, v T) {
 	j := len(s.owners)
 	if j == len(s.data) {

@@ -91,7 +91,14 @@ func (s *Spawn[B]) New(b B) Entity {
 // provided nothing is re-boxed per call and the callee returns nothing. Both
 // conditions are enforced: a System returning anything is rejected, and the
 // event and Kernel are written through stable pointer cells rather than boxed.
-func ToHandler[E any](en *Entities, system any) func() (kernel.Lock, kernel.Observe[E]) {
+//
+// The event parameter is optional, and leaving it out is the better default: a
+// System that names E can only ever be subscribed to E. Feed projects what the
+// System actually needs out of the event instead, so the System stays usable
+// under any event that can supply it.
+func ToHandler[E any](
+	en *Entities, system any, feeds ...Feeder,
+) func() (kernel.Lock, kernel.Observe[E]) {
 	return func() (kernel.Lock, kernel.Observe[E]) {
 		fnv := reflect.ValueOf(system)
 		ft := fnv.Type()
@@ -118,6 +125,11 @@ func ToHandler[E any](en *Entities, system any) func() (kernel.Lock, kernel.Obse
 				args[i] = reflect.ValueOf(evp).Elem()
 			case pt == kType:
 				args[i] = reflect.ValueOf(kp).Elem()
+			case feederFor(feeds, pt) >= 0:
+				// The In instance comes from the Feeder rather than from
+				// reflect.New, because the typed closure that fills it was
+				// already bound to that instance at registration.
+				args[i] = feeds[feederFor(feeds, pt)].val
 			case pt.Kind() == reflect.Pointer:
 				obj := reflect.New(pt.Elem())
 				p, ok := obj.Interface().(paramLike)
@@ -143,6 +155,11 @@ func ToHandler[E any](en *Entities, system any) func() (kernel.Lock, kernel.Obse
 		observe := func(k kernel.Kernel, ev E) error {
 			*evp = ev
 			*kp = k
+			// The feeds run off the same stable cell the event parameter would
+			// have read, so projecting costs one indirect call and no boxing.
+			for _, f := range feeds {
+				f.feed(unsafe.Pointer(evp))
+			}
 			for _, p := range params {
 				p.refresh()
 			}
@@ -151,6 +168,18 @@ func ToHandler[E any](en *Entities, system any) func() (kernel.Lock, kernel.Obse
 		}
 		return lock, observe
 	}
+}
+
+// feederFor is the index of the Feeder that supplies parameter type pt, or -1.
+// A linear scan over a list that is empty or one long, walked once per
+// parameter at registration.
+func feederFor(feeds []Feeder, pt reflect.Type) int {
+	for i := range feeds {
+		if feeds[i].typ == pt {
+			return i
+		}
+	}
+	return -1
 }
 
 // ToHandlerHybrid keeps every part of ToHandler except the call: the same
