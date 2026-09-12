@@ -70,6 +70,11 @@ type queryField struct {
 	// get resolves the Store from the handle the Lock bound. It is called once
 	// per field per run, never per Entity.
 	get func() *storeHeader
+	// filter says the field is a Without or a With, and it exists for exactly
+	// one reader: the driver scan, which must not pick one. It is a field of the
+	// plan rather than of the cursor because it is consulted once per field per
+	// run, and the cursor is what the fillers copy into registers per Entity.
+	filter bool
 	// cursor is what the run needs and nothing else. It is separate from get
 	// because the fillers copy it into locals: reached through a pointer it is
 	// memory the compiler has to reload after every fill, since a write through
@@ -92,6 +97,27 @@ type queryCursor struct {
 	rows   unsafe.Pointer
 	offset uintptr
 	size   uintptr
+	// wanted is or-ed into the generation the probe compares against, and it is
+	// how a Without matches without the loop growing a branch. It is 0 for a
+	// Component field and for a With, so the probe compares against the
+	// Entity's own generation exactly as it always did; it is absentGeneration
+	// for a Without, and since e.gen()|0xFFFFFFFF is 0xFFFFFFFF the probe then
+	// compares against the generation a Store writes into a slot it holds
+	// nothing for.
+	//
+	// That is exact rather than approximate, and it rests on an invariant the
+	// storage model already owns: a Store's sparse slot for a **live** Entity
+	// holds either that Entity's generation or absentGeneration, because Set
+	// writes the one and remove writes the other and a despawn is eager and
+	// total. Every Entity a probe ever sees comes out of a driver's owners
+	// array, so every Entity a probe ever sees is live.
+	// TestASparseSlotHoldsOnlyTheOwnersGenerationOrAbsence pins it.
+	//
+	// The alternative was to compare the probe's answer against a per-field
+	// bool, which costs one compare per probed field per Entity and measured
+	// 3% of a ten-thousand-Entity frame — paid by every Query, filters or not.
+	// An or against a register costs nothing measurable.
+	wanted uint32
 	write  bool
 }
 
@@ -104,7 +130,9 @@ const wideShape = 5
 //
 // It panics when a field names a Component no plugin registered, naming the
 // Component and the Query rather than the store type the user never wrote, and
-// the plugin boundary turns that into a composition failure naming the plugin.
+// when nothing in the Query can drive it — a Query of filters alone, or of no
+// fields at all. The plugin boundary turns either into a composition failure
+// naming the plugin.
 func (q *Query[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
 	queryType := reflect.TypeFor[Q]()
 	if queryType.Kind() != reflect.Struct {
@@ -112,17 +140,45 @@ func (q *Query[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
 			queryType, queryType.Kind()))
 	}
 	q.fields = make([]queryField, 0, queryType.NumField())
+	driving := 0
 	for i := range queryType.NumField() {
 		field := queryType.Field(i)
-		componentType, write := field.Type, false
-		if componentType.Kind() == reflect.Pointer {
+		componentType, write, isFilter := field.Type, false, false
+		// wanted is or-ed into the generation the probe looks for. Zero leaves
+		// it as the Entity's own, so a Component field and a With are the same
+		// probe; absentGeneration turns it into the generation a Store writes
+		// into a slot it holds nothing for, which is what a Without matches on.
+		wanted := uint32(0)
+		if component, present, is := filterOf(field.Type); is {
+			componentType, isFilter = component, true
+			if !present {
+				wanted = absentGeneration
+			}
+		} else if componentType.Kind() == reflect.Pointer {
 			componentType, write = componentType.Elem(), true
 		}
 		class := en.classOf(componentType)
 		if class == nil {
 			panic(fmt.Sprintf("ecs: Query %s names unregistered Component %s", queryType, componentType))
 		}
-		planned := queryField{cursor: queryCursor{offset: field.Offset, size: class.size, write: write}}
+		// The fill skips a filter, and skipping it is the point rather than an
+		// optimisation: Go assigns a blank field an offset like any other, and a
+		// trailing zero-size field forces a byte of padding, so a fill that
+		// copied the Component's bytes to that offset would write over the
+		// field beside it. Planning the row width as zero is where the fill
+		// recognises the filter; by the time the loop runs there is nothing
+		// left to recognise, which is what keeps the recognition off the hot
+		// path. A filter always reads: the probe is a read of that Store.
+		width := class.size
+		if isFilter {
+			width = 0
+		} else {
+			driving++
+		}
+		planned := queryField{
+			filter: isFilter,
+			cursor: queryCursor{offset: field.Offset, size: width, wanted: wanted, write: write},
+		}
 		if write {
 			planned.get = class.declareWrite(access)
 		} else {
@@ -130,8 +186,10 @@ func (q *Query[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
 		}
 		q.fields = append(q.fields, planned)
 	}
-	if len(q.fields) == 0 {
-		panic(fmt.Sprintf("ecs: Query %s names no Component, so there is nothing to drive it", queryType))
+	if driving == 0 {
+		panic(fmt.Sprintf(
+			"ecs: Query %s names no present-typed Component, so nothing can drive it: a filter names the Entities to exclude and nothing enumerates the rest, so a Query needs at least one Component or Tag it matches on presence",
+			queryType))
 	}
 	// Unrolled by field count, chosen here and never again.
 	q.shape = uint8(min(len(q.fields), wideShape))
@@ -192,6 +250,12 @@ func (q *Query[Q]) bind() {
 		store := field.get()
 		field.cursor.sparse = store.sparse
 		field.cursor.rows = store.dense.data
+		// A filter is never a driver candidate, however short its Store is.
+		// prepare has already refused a Query that leaves no candidate at all,
+		// so the scan below always finds one.
+		if field.filter {
+			continue
+		}
 		if n := len(store.owners); shortest < 0 || n < shortest {
 			driver, shortest = i, n
 			q.walk = store.owners
@@ -202,10 +266,18 @@ func (q *Query[Q]) bind() {
 	}
 }
 
-// row reports the dense row e's value is in, and whether e has this Component
-// at all. It is one load of the sparse slot and one compare of the generation
-// half: the compare that finds the row is the compare that rejects a stale
-// handle, so liveness is not an extra cost, it is the probe.
+// row reports the dense row e's value is in, and whether e matches this field.
+// It is one load of the sparse slot and one compare of the generation half: the
+// compare that finds the row is the compare that rejects a stale handle, so
+// liveness is not an extra cost, it is the probe.
+//
+// A Without matches through the same compare rather than beside it: the
+// generation the probe looks for is e's own for a Component field and a With,
+// and the absent generation for a Without, which is one or against a
+// register-held mask. So a Without reaches the same `if !ok { continue }` a
+// Component field does, the loop keeps one probe and one branch per field, and
+// the row a Without hands back is never read, because a filter's row width is
+// zero. See queryCursor.wanted for the invariant that makes it exact.
 //
 // It is kept apart from fill, and both are kept small, because the whole point
 // of the unrolled fillers is that the loop contains no call: a probe that
@@ -213,10 +285,12 @@ func (q *Query[Q]) bind() {
 func (c queryCursor) row(e Entity) (uintptr, bool) {
 	index := e.idx()
 	if int(index) >= len(c.sparse) {
-		return 0, false
+		// The Store has never held a row for an Entity this high, so it holds
+		// none for e: absence, which is what a Without wanted.
+		return 0, c.wanted == absentGeneration
 	}
 	slot := c.sparse[index]
-	return uintptr(uint32(slot)), uint32(slot>>32) == e.gen()
+	return uintptr(uint32(slot)), uint32(slot>>32) == e.gen()|c.wanted
 }
 
 // fill writes one Component into the buffer: the address of the stored row for
@@ -247,7 +321,10 @@ func (c queryCursor) fill(row uintptr, buffer unsafe.Pointer) {
 	case 16:
 		*(*[2]uint64)(target) = *(*[2]uint64)(source)
 	case 0:
-		// A Tag carries nothing, and nothing lands in the Query.
+		// A Tag carries nothing, and nothing lands in the Query. A filter is
+		// planned to this width for the same reason and one more: the blank
+		// field it occupies is a byte of padding, not a place to put a
+		// Component.
 	default:
 		copyRow(target, source, c.size)
 	}

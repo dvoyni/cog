@@ -3,12 +3,13 @@
 // A Component is a plain value an Entity either has or has not, addressed by
 // its Go type and held in a Store of its own. A System is a plain Go func whose
 // parameter types say what it touches: a Query over the Components it iterates,
-// whose field pointer-ness is its access mode. ToHandler turns one into the
-// factory an ordinary cog subscription takes, so the ECS contributes no
+// whose field pointer-ness is its access mode, narrowed by Without and With
+// filters that yield nothing and still declare a read. ToHandler turns one into
+// the factory an ordinary cog subscription takes, so the ECS contributes no
 // scheduler, no ordering and no registration API of its own.
 //
-// Filters, spawning, the accessors and the resource handles a binding uses are
-// not here yet; see ecs/docs/specs/ecs.md, which this package is judged against.
+// Spawning, the accessors and the resource handles a binding uses are not here
+// yet; see ecs/docs/specs/ecs.md, which this package is judged against.
 //
 // The two decisions the rest of the design rests on are made here. Storage is
 // sparse sets rather than archetype tables, so one Component type is exactly one

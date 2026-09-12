@@ -34,6 +34,8 @@ type componentsPlugin struct {
 	bodies     *Store[body]
 	velocities *Store[velocity]
 	colliders  *Store[collider]
+	disableds  *Store[disabled]
+	solids     *Store[solid]
 }
 
 func (p *componentsPlugin) Name() kernel.PluginName { return "components" }
@@ -44,6 +46,8 @@ func (p *componentsPlugin) Register(registrar *kernel.Registrar, _ any) error {
 	p.bodies = RegisterComponent[body](registrar, p.world, p.ids)
 	p.velocities = RegisterComponent[velocity](registrar, p.world, p.ids)
 	p.colliders = RegisterComponent[collider](registrar, p.world, p.ids)
+	p.disableds = RegisterComponent[disabled](registrar, p.world, p.ids)
+	p.solids = RegisterComponent[solid](registrar, p.world, p.ids)
 	return nil
 }
 
@@ -92,8 +96,20 @@ func newWorld(t testing.TB, ids uint32, subscribe func(*kernel.Registrar, *Entit
 			&systemsPlugin{world: entities, subscribe: subscribe},
 		)
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	go engine.Run(ctx)
+	// The cleanup waits for Run to return rather than only cancelling it. A
+	// dying engine allocates while it winds down, and several tests here count
+	// allocations with MemStats, which counts every goroutine's — so an engine
+	// still shutting down inside a later test's measurement window is a flake in
+	// a number this package's whole verification strategy rests on.
+	stopped := make(chan struct{})
+	t.Cleanup(func() {
+		cancel()
+		<-stopped
+	})
+	go func() {
+		defer close(stopped)
+		engine.Run(ctx)
+	}()
 	<-engine.Ready()
 	return entities, components, engine
 }

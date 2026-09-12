@@ -51,6 +51,31 @@ func populate(entities *Entities, components *componentsPlugin, n int) {
 	}
 }
 
+// populateFiltered is the same population with a Tag on a third of it, for the
+// Systems that carry a Without. The excluded entities are still in the driver's
+// Store, which is the point: a filter narrows what is yielded and never what is
+// walked.
+func populateFiltered(entities *Entities, components *componentsPlugin, n int) {
+	for i := range n {
+		e := entities.alloc()
+		components.bodies.Set(e, body{})
+		components.velocities.Set(e, velocity{X: 1, Y: 2})
+		if i%3 == 0 {
+			components.disableds.Set(e, disabled{})
+		}
+	}
+}
+
+func subscribeActive(registrar *kernel.Registrar, world *Entities) {
+	registrar.Subscribe[activeSystem](ToHandler[app.UpdateEvent](world,
+		func(q *Query[activeQuery]) {
+			for _, it := range q.All() {
+				it.Body.X += it.Velocity.X
+				it.Body.Y += it.Velocity.Y
+			}
+		}))
+}
+
 // frame publishes one real app.UpdateEvent and waits for it, which is the whole
 // frame: publish, acquire every declared lock, run every System, wait.
 func frame(tb testing.TB, engine *kernel.Engine, dt float64) {
@@ -60,8 +85,14 @@ func frame(tb testing.TB, engine *kernel.Engine, dt float64) {
 }
 
 func benchmarkFrame(b *testing.B, n int, subscribe func(*kernel.Registrar, *Entities)) {
+	benchmarkFrameWith(b, n, subscribe, populate)
+}
+
+func benchmarkFrameWith(b *testing.B, n int, subscribe func(*kernel.Registrar, *Entities),
+	fill func(*Entities, *componentsPlugin, int),
+) {
 	entities, components, engine := newWorld(b, uint32(n), subscribe)
-	populate(entities, components, n)
+	fill(entities, components, n)
 	executioner := engine.Executioner()
 
 	b.ReportAllocs()
@@ -76,8 +107,20 @@ func benchmarkFrame(b *testing.B, n int, subscribe func(*kernel.Registrar, *Enti
 	}
 }
 
-func BenchmarkFrameQuery1k(b *testing.B)       { benchmarkFrame(b, 1_000, subscribeMove) }
-func BenchmarkFrameQuery10k(b *testing.B)      { benchmarkFrame(b, 10_000, subscribeMove) }
+func BenchmarkFrameQuery1k(b *testing.B)  { benchmarkFrame(b, 1_000, subscribeMove) }
+func BenchmarkFrameQuery10k(b *testing.B) { benchmarkFrame(b, 10_000, subscribeMove) }
+
+// BenchmarkFrameFiltered1k and its 10k twin are the two-Component Query with a
+// Without on a third of the population: the same walk, one more probe, and one
+// entity in three yielding nothing.
+func BenchmarkFrameFiltered1k(b *testing.B) {
+	benchmarkFrameWith(b, 1_000, subscribeActive, populateFiltered)
+}
+
+func BenchmarkFrameFiltered10k(b *testing.B) {
+	benchmarkFrameWith(b, 10_000, subscribeActive, populateFiltered)
+}
+
 func BenchmarkFrameHandWritten1k(b *testing.B) { benchmarkFrame(b, 1_000, subscribeHandWritten) }
 func BenchmarkFrameHandWritten10k(b *testing.B) {
 	benchmarkFrame(b, 10_000, subscribeHandWritten)
@@ -96,9 +139,11 @@ func BenchmarkFrameNoSystem(b *testing.B) {
 // count, so identical counts at 1k and 10k are the claim.
 func TestTheFrameSitsOnTheEnginesAllocationLine(t *testing.T) {
 	const frames = 10_000
-	measure := func(n int, subscribe func(*kernel.Registrar, *Entities)) float64 {
+	measure := func(n int, subscribe func(*kernel.Registrar, *Entities),
+		fill func(*Entities, *componentsPlugin, int),
+	) float64 {
 		entities, components, engine := newWorld(t, uint32(n), subscribe)
-		populate(entities, components, n)
+		fill(entities, components, n)
 		executioner := engine.Executioner()
 		// Warm every pool the first frames fill, so what is measured is steady
 		// state and not the first tick.
@@ -115,10 +160,16 @@ func TestTheFrameSitsOnTheEnginesAllocationLine(t *testing.T) {
 		return float64(mallocs) / frames
 	}
 
-	hand := measure(1_000, subscribeHandWritten)
-	query1k := measure(1_000, subscribeMove)
-	query10k := measure(10_000, subscribeMove)
-	t.Logf("objects a frame: hand-written %.3f, Query at 1k %.3f, Query at 10k %.3f", hand, query1k, query10k)
+	hand := measure(1_000, subscribeHandWritten, populate)
+	query1k := measure(1_000, subscribeMove, populate)
+	query10k := measure(10_000, subscribeMove, populate)
+	// A filter is a third Store probed per Entity and a third of the population
+	// yielding nothing, so it is where an allocation would appear if planning a
+	// filter had put one on the iteration path.
+	filtered1k := measure(1_000, subscribeActive, populateFiltered)
+	filtered10k := measure(10_000, subscribeActive, populateFiltered)
+	t.Logf("objects a frame: hand-written %.3f, Query at 1k %.3f, Query at 10k %.3f, filtered Query at 1k %.3f, at 10k %.3f",
+		hand, query1k, query10k, filtered1k, filtered10k)
 
 	if query1k > hand+0.05 {
 		t.Fatalf("the Query costs %.3f objects a frame against the hand-written %.3f", query1k, hand)
@@ -128,5 +179,11 @@ func TestTheFrameSitsOnTheEnginesAllocationLine(t *testing.T) {
 	}
 	if query10k > 6.5 {
 		t.Fatalf("the frame costs %.3f objects, above the engine's 6-per-frame line", query10k)
+	}
+	if filtered1k > hand+0.05 {
+		t.Fatalf("a filtered Query costs %.3f objects a frame against the hand-written %.3f", filtered1k, hand)
+	}
+	if filtered10k > filtered1k+0.05 {
+		t.Fatalf("a filter allocates per Entity: %.3f a frame at 1k, %.3f at 10k", filtered1k, filtered10k)
 	}
 }

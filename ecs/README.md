@@ -4,9 +4,9 @@
 **Entities** carrying **Components**, and describe behaviour as **Systems** —
 plain Go funcs whose parameter types say what they touch.
 
-**A Component moves: the storage, the registration, the Query and the handler
-builder are here.** What is not here yet is filters (`Without`, `With`),
-spawning and despawning, the accessors that reach an Entity a System did not
+**A Component moves, and a Query can be narrowed: the storage, the registration,
+the Query, its filters and the handler builder are here.** What is not here yet
+is spawning and despawning, the accessors that reach an Entity a System did not
 iterate to, and the resource and event handles a binding uses;
 [`docs/specs/ecs.md`](docs/specs/ecs.md) is the specification the whole plugin
 is judged against, and this README covers only what is built.
@@ -17,8 +17,9 @@ is judged against, and this README covers only what is built.
 `PointerFree` rule and `RegisterComponent`; `entities.go` the `Entities`
 authority; `store.go` the `Store`, the type-erased `storeCore` a despawn reaches
 every Store through, and the erased header a Query fills from; `query.go` the
-`Query`, its driver and its fillers; `system.go` the `ToHandler` builder;
-`plugin.go` the plugin that publishes the authority.
+`Query`, its driver and its fillers; `filter.go` the `Without` and `With` field
+types; `system.go` the `ToHandler` builder; `plugin.go` the plugin that
+publishes the authority.
 
 ## Dependencies
 
@@ -273,6 +274,99 @@ index this storage model exists to avoid. Smallest-Store is a heuristic, not an
 optimum: the optimum driver is the smallest *intersection*, unknowable without
 computing it.
 
+#### The known bad case, and its remedy
+
+Being a heuristic, it has a case where it loses badly, and the case is worth
+knowing because an app can hit it without noticing: **two large, mostly disjoint
+Stores**. 5 000 entities with `Body`, 5 000 with `Collider`, 100 with both. The
+driver can only be one of the two five thousands, so it yields 5 000 candidates
+and throws away 4 900 of them:
+
+| driving off | ns/op |
+| --- | --- |
+| a 5 000-entity Store — 5 000 candidates, 100 survive | 3 354 |
+| **a 100-entity Tag on the intersection** | **422 — 7.9x faster** |
+
+0.60 ns per discarded candidate — the two arms differ by 4 900 candidates and
+2 932 ns — so it is real, linear, and cheap enough to be a problem only at this
+ratio. Both arms do identical work per matched entity, and the
+Query differs only by the Tag field.
+
+**The remedy is an app-maintained Tag.** The app puts a `Solid` Tag on exactly
+the entities that have both, maintains it itself, and names it in the Query as
+an ordinary field — a Tag is just another Store, it costs no memory however many
+entities it holds, and it is a very good driver because the scan picks it.
+
+There is deliberately **no ECS mechanism** for this. That road is EnTT's groups,
+shipyard's packs and bevy's sparse-set markers, and **exclusivity is what killed
+all three**: a Store may belong to at most one group, so the second Query that
+wants a different grouping cannot have one, and the cost lands on every
+structural change rather than on the Query that asked. An app-maintained Tag has
+none of those properties — any number of them may overlap, nothing else has to
+know, and the app decides when it is worth maintaining.
+
+### Filters
+
+```go
+type ActiveQuery struct {
+    Body     *Body
+    Velocity Velocity
+    _        ecs.Without[Disabled]   // narrows; yields nothing
+}
+```
+
+A **filter is a blank field**. It narrows which Entities the Query matches and
+puts nothing in the struct: `ecs.Without[T]` matches the Entities that do not
+have `T`, and `ecs.With[T]` those that do, without `T` landing in the buffer.
+
+**A filter contributes a read of its Store**, and this is the part that is easy
+to get wrong. Evaluating `Without[Disabled]` loads `Store[Disabled]`'s sparse
+slot, and a System adding `Disabled` holds `write{Disabled}` and is mutating
+that exact array. A filter reads less *data* than a Component field — nothing
+lands in the struct — but it reads **the same Store**, and the lock set is about
+Stores. So `ActiveQuery` above is `write{Body}`, `read{Velocity}`,
+`read{Disabled}` and `read{*Entities}`, and a System carrying it can never run
+beside one holding `write{Disabled}`. A test asserts that through the kernel's
+own conflict report rather than through a list of types: drop the declaration
+and the pair stops being reported, which is the race.
+
+**The fill skips a filter, and skipping it is the point rather than an
+optimisation.** Go assigns a blank field an offset like any other — a zero-size
+field in the middle of a struct shares the offset of the field after it, and a
+trailing one forces a byte of padding — so a fill that copied the filtered
+Component's bytes there would write over the field beside it or past the end of
+the buffer. The recognition happens at registration, as a planned row width of
+zero; by the time a filler runs there is nothing left to recognise.
+
+A `Without` matches through the same single compare a Component field does. The
+probe looks for the Entity's generation for a Component field and for the
+**absent** generation for a `Without`, which is one `or` against a mask chosen at
+registration. That is exact because a Store's sparse slot for a *live* Entity
+holds either that Entity's generation or the absent one, and every Entity a
+probe sees comes out of a driver's `owners`. The alternative — comparing the
+probe's answer against a per-field bool — costs three instructions instead of
+one and measured **3% of a ten-thousand-Entity frame**, paid by every Query
+whether it has a filter or not.
+
+**A filter can never be the driver, and a Query must name at least one
+present-typed Component or Tag.** `Without[T]`'s `owners` lists exactly the
+Entities to *exclude* and nothing enumerates the complement, so a Query of
+filters alone has nothing to walk and fails at registration:
+
+```
+plugin "systems" panicked in Register: ecs: Query game.FiltersOnlyQuery names
+no present-typed Component, so nothing can drive it: a filter names the
+Entities to exclude and nothing enumerates the rest, so a Query needs at least
+one Component or Tag it matches on presence
+```
+
+`With[T]` does not drive either, although its `owners` would serve. **If you
+want a Tag to drive, name it as an ordinary field** — a Tag yields nothing into
+the struct anyway, so `Solid Solid` costs exactly what `_ ecs.With[Solid]` costs
+and can be chosen as the driver. `With[T]` is for presence you want matched but
+not copied, where `T` is not a Tag.
+
+
 ## System
 
 ```go
@@ -321,27 +415,34 @@ user never wrote.
 ## What it costs
 
 Measured on a real `kernel.Engine` driven by a real `app.UpdateEvent`, AMD Ryzen
-9 7950X3D, go1.27.1 windows/amd64, medians of three:
+9 7950X3D, go1.27.1 windows/amd64, medians of five:
 
 | whole frame | ns/op | allocs/op | B/op |
 | --- | --- | --- | --- |
-| nothing subscribed | 82 | **2** | 160 |
-| hand-written subscription, 1 000 | 5 250 | **6** | 322 |
-| **a System with a two-Component Query, 1 000** | **8 080** | **6** | 322 |
-| hand-written subscription, 10 000 | 19 760 | **6** | 321 |
-| **a System with a two-Component Query, 10 000** | **36 610** | **6** | 322 |
+| nothing subscribed | 81 | **2** | 160 |
+| hand-written subscription, 1 000 | 5 185 | **6** | 322 |
+| **a System with a two-Component Query, 1 000** | **7 949** | **6** | 322 |
+| …the same Query with a `Without`, a third tagged, 1 000 | 8 201 | **6** | 322 |
+| hand-written subscription, 10 000 | 20 142 | **6** | 322 |
+| **a System with a two-Component Query, 10 000** | **38 783** | **6** | 321 |
+| …the same Query with a `Without`, a third tagged, 10 000 | 36 506 | **6** | 322 |
 
 **The engine charges 2 per publication plus 4 per subscriber, and the Query
 lands exactly on that line** — identical at 1 000 and at 10 000 Entities, which
 is the real test, because an allocation in the iteration would scale with the
 Entity count. Over a 10 000-frame steady state, which an average over `b.N`
-could hide amortised growth behind, it is **6.002 objects a frame at 1k and
-6.003 at 10k**, against the hand-written **6.008**. `-gcflags=-m` reports no
-`moved to heap` anywhere on the iteration path, so the zero is explained by the
-compiler rather than merely observed.
+could hide amortised growth behind, it is **6.003 objects a frame at 1k and
+6.003 at 10k**, against the hand-written **6.015** — and **a filter changes
+none of it**: 6.003 at 1k and 6.001 at 10k with a `Without` in the Query.
+`-gcflags=-m` reports no `moved to heap` anywhere on the iteration path, so the
+zero is explained by the compiler rather than merely observed.
 
-From the 1k to 10k slope, so the per-frame floor drops out: **3.17 ns an Entity
-against the hand-written loop's 1.61**.
+From the 1k to 10k slope, so the per-frame floor drops out: **3.43 ns an Entity
+against the hand-written loop's 1.66**. The filtered Query's slope is **3.14**,
+lower than the unfiltered one's rather than higher, because a third of the
+population fails the `Without` probe and never reaches the fill or the loop
+body: **a filter is cheaper than the work it removes**, which is the whole
+reason to reach for one.
 
 Three things the implementation does that those numbers depend on. Each is
 invisible in a microbenchmark and each cost an allocation a tick when it was not
@@ -356,3 +457,14 @@ done:
 - **The fill is unrolled by field count.** A per-field loop costs about 2.4x a
   hand-written walk and per-field binder closures about 5x, and those allocate.
   Queries wider than four Components fall back to the loop.
+
+One more, which costs no allocation and is where filters were nearly paid for
+twice: **a `Without` matches through the probe's existing compare**, by looking
+for the absent generation instead of the Entity's own. Giving each field a bool
+to compare the probe's answer against instead cost **3% of a ten-thousand-Entity
+frame on every Query**, filters or not, because the probe is one compare and a
+second test beside it is a third of its cost. The `or` that replaced it is not
+free either — it is about 0.08 ns a probe, which is 14% of the Driver's
+bad-case walk, where nearly every probe is a rejection and nothing else happens.
+Making it free would mean a second set of unrolled fillers for Queries that
+carry a filter, which is where monomorphised fillers would put it.
