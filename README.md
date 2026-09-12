@@ -52,6 +52,8 @@ error handling.
     apply command, and scripted input.
 - [`anim`](anim/README.md): timelines of eased value tracks and one-tick cues,
     advanced every fixed step.
+- [`ecs`](ecs/README.md): entities, components, and the sparse-set stores they
+    live in. Storage only so far; queries and systems are not built yet.
 - [`storage`](storage/README.md): layered read filesystems and one permanent
     writable filesystem.
 - [`m`](m): immutable vectors, rectangles, colors, matrices, quaternions,
