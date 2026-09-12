@@ -51,6 +51,13 @@ func NewEntities(ids uint32) *Entities {
 // owned by the declaring plugin (cog#240), and bakes the type-specific closures
 // the registration-time reflection will need.
 func RegisterComponent[C any](r *kernel.Registrar, en *Entities, ids uint32) *Store[C] {
+	// The pointer-free rule is enforced here because registration is the only
+	// moment the type is named and nothing has been stored yet, so the failure
+	// lands on the plugin that declared the Component rather than on whatever
+	// later tried to copy it (cog#246).
+	if err := PointerFree(reflect.TypeFor[C]()); err != nil {
+		panic("ecs: " + err.Error())
+	}
 	s := NewStore[C](ids)
 	r.InitResource[*Store[C]](s)
 	en.stores = append(en.stores, &s.storeCore)

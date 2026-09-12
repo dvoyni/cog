@@ -187,6 +187,54 @@ little work is cheaper to run than to schedule.
 - `ecs/handler.go` — `ToHandler` (reflective), `ToHandler1`/`ToHandler2`
   (baked), `ToHandlerHybrid` (the attribution probe), `Spawn[B]`,
   `WriteableEntities`.
+- `ecs/resource.go` — `Read[T]` and `Write[T]`, the System parameters that name
+  a kernel resource, which are the whole of the binding mechanism
+  ([#246](https://github.com/dvoyni/cog/issues/246)).
+- `ecs/component.go` — `PointerFree`, the registration-time walk that enforces
+  [#237](https://github.com/dvoyni/cog/issues/237)'s rule.
 - `world.go` — Components, Queries, Systems and the plugin, on a real engine.
 - `bench_test.go` — whole-frame benchmarks, steady state, correctness.
 - `call_test.go` — the four rejected explanations for the reflected-call gap.
+- `world_test.go` — two Worlds in one process
+  ([#245](https://github.com/dvoyni/cog/issues/245)).
+- `scene_test.go` — the binding, against the **real `scene` package**
+  ([#246](https://github.com/dvoyni/cog/issues/246)).
+
+## Binding: what it costs to draw an Entity
+
+A System recording scene draws out of Components, on a real engine, with a real
+`*scene.OpQueue`. The baseline row is the same two Systems with nothing to
+record, so what the others add over it is the binding.
+
+| entities | ns/op | allocs/op | B/op |
+| --- | --- | --- | --- |
+| 0 | 10 865 | **10** | 611 |
+| 100 | 15 734 | **10** | 611 |
+| 1 000 | 64 556 | **10** | 608 |
+| 5 000 | 276 707 | **10** | 608 |
+
+Flat at 10 across a range where the work grows fiftyfold, and exactly on the
+2-per-publication-plus-4-per-subscriber line above. **The binding allocates
+nothing.** Time is linear at ~53 ns a drawable.
+
+A second System costs ~5.9 µs of scheduling floor, so splitting the recording
+would have to save visiting ~110 entities to break even — and it cannot run
+concurrently anyway, because one `OpQueue` is one write lock.
+
+### Naming a model
+
+A Component cannot hold a string, so it names a model by a dense id interned at
+registration. Per lookup, over 1 000:
+
+| | ns |
+| --- | --- |
+| by interned id (a slice index) | **0.54** |
+| by path, as scene resolves one at flush | **46.9** |
+| — normalising the path | 35.0 |
+| — the map hit | 8.25 |
+
+The app-side table costs 0.54 ns; scene still pays 46.9 ns per recorded model
+draw because `OpQueue.Model` takes a `string`. At 5 000 drawables that is
+~235 µs a frame against ~265 µs for all the recording, three quarters of it
+re-normalising a path validated when it was first loaded. That is a scene
+optimisation, not an ECS one.
