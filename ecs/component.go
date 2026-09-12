@@ -3,6 +3,7 @@ package ecs
 import (
 	"fmt"
 	"reflect"
+	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
 )
@@ -20,6 +21,18 @@ type componentClass struct {
 	size         uintptr
 	declareRead  func(access kernel.ResourceAccess) func() *storeHeader
 	declareWrite func(access kernel.ResourceAccess) func() *storeHeader
+	// declareSet is what a Spawn binds per Bundle field: the same write
+	// declaration declareWrite makes, and the typed setter baked beside it.
+	//
+	// The write it declares is redundant for locking and is kept anyway. A Spawn
+	// already holds write{*Entities}, which excludes every System in the frame,
+	// so naming Store[C] as well adds no exclusion. It is kept as an *ownership*
+	// declaration: it is what makes cog's composition check fire, so a plugin
+	// spawning a Health must declare a dependency on Health's owner. Dropping it
+	// would let any plugin fabricate any other plugin's Components with no
+	// declared relationship, which is a bigger hole than the redundancy is a
+	// cost.
+	declareSet func(access kernel.ResourceAccess) func(e Entity, value unsafe.Pointer)
 }
 
 // RegisterComponent declares that C is a Component of this world, and is the
@@ -63,6 +76,17 @@ func RegisterComponent[C any](registrar *kernel.Registrar, en *Entities, ids uin
 		declareWrite: func(access kernel.ResourceAccess) func() *storeHeader {
 			handle := access.GetWrite[*Store[C]]()
 			return func() *storeHeader { return handle.Get().erase() }
+		},
+		// The value arrives as an address into the spawning handler's staging
+		// buffer rather than as a C, because the caller holds the Bundle only as
+		// bytes at an offset: the deref here is where the Component's type comes
+		// back, and it is sound because the offset was taken from the same
+		// reflect.Type this class was baked for.
+		declareSet: func(access kernel.ResourceAccess) func(e Entity, value unsafe.Pointer) {
+			handle := access.GetWrite[*Store[C]]()
+			return func(e Entity, value unsafe.Pointer) {
+				handle.Get().Set(e, *(*C)(value))
+			}
 		},
 	})
 	return store

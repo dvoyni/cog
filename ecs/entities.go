@@ -10,8 +10,8 @@ import "reflect"
 // It is a kernel resource. Every handler that touches any Store declares
 // read{*Entities}; spawning and despawning take it for write, which is why
 // neither is a method a reader can reach: the authority to change which
-// entities exist arrives through the write-locked promotion of this value and
-// nowhere else.
+// entities exist arrives through the write-locked promotions of this value —
+// Spawn and WriteableEntities — and nowhere else.
 type Entities struct {
 	// gens holds the current generation of each index. An index that has been
 	// allocated is never removed, so len(gens) is the index space in use.

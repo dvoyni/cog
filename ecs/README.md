@@ -4,12 +4,13 @@
 **Entities** carrying **Components**, and describe behaviour as **Systems** —
 plain Go funcs whose parameter types say what they touch.
 
-**A Component moves, and a Query can be narrowed: the storage, the registration,
-the Query, its filters and the handler builder are here.** What is not here yet
-is spawning and despawning, the accessors that reach an Entity a System did not
-iterate to, and the resource and event handles a binding uses;
-[`docs/specs/ecs.md`](docs/specs/ecs.md) is the specification the whole plugin
-is judged against, and this README covers only what is built.
+**A Component moves, a Query can be narrowed, and Entities can be created and
+retired: the storage, the registration, the Query, its filters, structural
+change and the handler builder are here.** What is not here yet is the accessors
+that reach an Entity a System did not iterate to, and the resource and event
+handles a binding uses; [`docs/specs/ecs.md`](docs/specs/ecs.md) is the
+specification the whole plugin is judged against, and this README covers only
+what is built.
 
 ## Files
 
@@ -18,8 +19,8 @@ is judged against, and this README covers only what is built.
 authority; `store.go` the `Store`, the type-erased `storeCore` a despawn reaches
 every Store through, and the erased header a Query fills from; `query.go` the
 `Query`, its driver and its fillers; `filter.go` the `Without` and `With` field
-types; `system.go` the `ToHandler` builder; `plugin.go` the plugin that
-publishes the authority.
+types; `spawn.go` the `Spawn` and `WriteableEntities` handles; `system.go` the
+`ToHandler` builder; `plugin.go` the plugin that publishes the authority.
 
 ## Dependencies
 
@@ -94,9 +95,9 @@ There is no compaction, no shrink and no sweep anywhere in the package.
 
 **Allocating and despawning are not methods a reader can call.** `Entities` is
 held for read by every handler that touches any Store, so the authority to
-change which entities exist arrives only through its write-locked promotion
-(`WriteableEntities`, in a later ticket) and is visible in a System's signature
-and nowhere else. `Alive` is the only question a read may ask, and it is rarely
+change which entities exist arrives only through its write-locked promotion —
+[`Spawn` and `WriteableEntities`](#structural-change) — and is visible in a
+System's signature and nowhere else. `Alive` is the only question a read may ask, and it is rarely
 the one wanted: "is my target still alive" almost always means "does my target
 still have `Health`", which a Store probe answers under a lock the System
 already holds.
@@ -395,8 +396,9 @@ on: a despawn reaches every Store through Go pointers the kernel does not
 police, and holding the authority for write is what excludes every System that
 holds it for read.
 
-What a signature may contain today is a `*ecs.Query[Q]` and, at most once, the
-event value itself. Naming the event is legal but is not the ordinary shape: a
+What a signature may contain today is a `*ecs.Query[Q]`, a `*ecs.Spawn[B]`, a
+`*ecs.WriteableEntities` and, at most once, the event value itself. Naming the
+event is legal but is not the ordinary shape: a
 System that names one can only ever be subscribed to that one, where the same
 gameplay should be drivable by a fixed-step tick, a rollback re-simulation or a
 test harness publishing its own frames. A parameter the builder does not
@@ -411,6 +413,82 @@ unregistered Component game.Guarded
 
 That names the **Component** and the **Query**, rather than the store type the
 user never wrote.
+
+## Structural change
+
+```go
+type Projectile struct {          // a Bundle: the Components one act of creation makes
+    Body     Body
+    Velocity Velocity
+    Collider Collider
+}
+
+func fire(sp *ecs.Spawn[Projectile], we *ecs.WriteableEntities) {
+    e := sp.New(Projectile{Body: Body{X: 1}, Velocity: Velocity{X: 10}})
+    we.Despawn(e)
+}
+```
+
+A **structural change** is a change to which Entities have which Components, as
+against a change to a Component's value. **Nothing here is a Command**, and that
+is the part most likely to be built wrong from habit: `Spawn[B].New` and
+`WriteableEntities.Despawn` are direct calls on handles the System already
+holds, not messages, not a queue and not a deferred buffer. There is no
+exclusion mechanism to build either, because the lock set below already excludes
+everyone.
+
+**Two handles, not one.** Folding `Despawn` onto `Spawn[B]` would force a Bundle
+type on Systems that never spawn, so a System that only retires Entities names
+only `*ecs.WriteableEntities`.
+
+A **Bundle** is a struct type whose field types are the Components, the way a
+Query is — and **a Bundle field simply *is* a Component field**. There is no
+conversion mechanism and none is needed: hashing is pure, so the hash that names
+an engine-side thing can be computed into a package-level `var` and a
+declarative spawn naming a model by name needs nothing from the ECS.
+
+A Bundle is **not a Component set**: it describes one act of creation, and the
+Entity may gain and lose Components afterwards without the Bundle meaning
+anything. A Tag is an ordinary Bundle field.
+
+`Despawn` is **total and eager**: every Store is emptied of the Entity at once
+and the index returns to the free list immediately, so no Store ever holds a dead
+Entity. It reports whether the handle was alive to begin with, so despawning
+twice is false the second time rather than an error.
+
+**You may restructure the Entity you are currently visiting.** Despawning it
+skips nobody and spawning one Entity per visited Entity terminates, both because
+`All()` walks its driver backwards. Changing whether some *other* Entity is in
+the driver Store is undefined, and a spawn that **grows** a Store invalidates the
+pointer fields of the Query iterating it — the standing rule that no dense row
+may be held across a mutation.
+
+### The barrier, and the usage rule that follows
+
+`Spawn` and `WriteableEntities` declare **`write{*Entities}`**, which supersedes
+the read every System takes. `Entities` holds a reference to every Store, so
+that is **one entry in the lock set and not N**, and it is a **total barrier**:
+it excludes every System in the frame. Two consequences worth stating outright.
+
+- A spawn whose Components are chosen at runtime has **exactly** the lock set of
+  one whose Components are spelled in Go. There is nothing to name statically
+  that is not already named.
+- A `Spawn[B]` additionally declares `write{*Store[F]}` **per Bundle field**,
+  which is **redundant for locking and kept anyway, as an *ownership*
+  declaration**. It is what makes cog's composition check fire, so a plugin
+  spawning a `Health` must depend on `Health`'s owner. Dropping it would let any
+  plugin fabricate any other plugin's Components with no declared relationship.
+
+> **Split a rarely-spawning System out.** The `Uses` fold is static, so a System
+> holds `write{*Entities}` for its **entire run**, not for the instant it
+> spawns. A System that queries 5 000 Entities and spawns one projectile on the
+> last of them blocks the whole frame for the duration of the query. **The cost
+> is never the spawn; it is everything around it.**
+
+**No general command buffer**, and the reason is allocation rather than taste: a
+type-erased one costs one allocation per queued command, which at 30 Hz is tens
+of KB a second fed to the collector during frames. What a command buffer would
+buy is **lock duration**, not safety and not allocation.
 
 ## What it costs
 
@@ -457,6 +535,68 @@ done:
 - **The fill is unrolled by field count.** A per-field loop costs about 2.4x a
   hand-written walk and per-field binder closures about 5x, and those allocate.
   Queries wider than four Components fall back to the loop.
+
+### What structural change costs
+
+The spawn itself, on the handles a System holds, in the steady state a game runs
+in — the free list has ids and the Stores have rows, so nothing here is
+measuring growth. Five Component types are enrolled with the authority:
+
+| | ns/op | allocs/op | B/op |
+| --- | --- | --- | --- |
+| the two Stores written directly, by hand | 8.53 | **0** | 0 |
+| **`Spawn[B].New`, a two-field Bundle** | **14.50 — 1.70×** | **0** | 0 |
+| `Spawn[B].New`, a four-field Bundle | 27.59 | **0** | 0 |
+| …the same two-field spawn, bundle staged through the **parameter's address** | 21.21 | **1** | **16** |
+| `WriteableEntities.Despawn`, asking all five Stores | 15.39 | **0** | 0 |
+
+**`Spawn` stages its bundle through a field of the `Spawn`**, and that is the
+fourth thing on the list above rather than a detail: the obvious spelling —
+taking `&bundle` of the parameter and handing it to the cached per-field
+closures — hands the address of a parameter to an opaque func value, so the
+bundle escapes. One allocation the width of the Bundle, **per spawn**, and 46%
+slower with it. A test holds both spellings side by side so the trap stays
+closed.
+
+The barrier, on a real frame: three Systems over 2 000 Entities, the two workers
+writing different Components and the third iterating **its own** Component in
+every arm, differing **only in what it declares**.
+
+| the third System declares | ns/frame | allocs/op |
+| --- | --- | --- |
+| *(absent — two workers only)* | 13 695 | 10 |
+| `read{*Entities}`, an ordinary Query | **14 907** | 11 |
+| `write{*Entities}` — a `Spawn` parameter it never uses | **23 086** | 11 |
+| the same, spawning and despawning one Entity a tick | **23 335** | 11 |
+
+**The barrier costs ~8.2 µs a frame** — one scheduling round, which is what a
+writer draining every reader and then releasing them costs. At 30 Hz that is
+0.025% of a frame, and **it costs no allocation**.
+
+**The spawning itself is free, and the entire cost is the declaration.**
+Declaring a `Spawn` and never using it costs 23 086 ns; actually spawning and
+despawning every tick costs 23 335, a difference of 249 ns which is the spawn and
+the despawn themselves. That is the number behind [the usage
+rule](#the-barrier-and-the-usage-rule-that-follows): the cost is paid at
+registration, for the System's whole run, so the remedy is a smaller System and
+never a cheaper spawn.
+
+A frame containing a structural change stays on the engine's line, over a
+1 000-frame steady state with one subscriber: **6.03 objects a frame spawning
+and despawning one Entity a tick, and 6.01 spawning and despawning ten
+thousand**. Ten thousand structural changes a tick add nothing, because the free
+list recycles the ids and the Store reuses the dense row, so growth stops at the
+high-water mark. `-gcflags=-m` reports no `moved to heap` on the spawn path
+either.
+
+The exclusion is measured with a control, because an observed occupancy of 1
+proves nothing unless a 2 was observable on the same harness. Two Systems
+writing **different** Components:
+
+| | greatest occupancy |
+| --- | --- |
+| two Queries, disjoint writes | **2** |
+| the same pair, the first one spawning | **1** |
 
 One more, which costs no allocation and is where filters were nearly paid for
 twice: **a `Without` matches through the probe's existing compare**, by looking
