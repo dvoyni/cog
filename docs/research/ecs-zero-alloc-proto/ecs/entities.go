@@ -23,6 +23,50 @@ type Entities struct {
 	// from a reflect.Type, so the type-specific work is baked here by
 	// RegisterComponent, which *is* generic, and looked up by type later.
 	ops map[reflect.Type]componentOps
+
+	// conv holds the Bundle-field conversions RegisterConversion baked, keyed by
+	// the type written in the Bundle rather than by the Component it becomes.
+	conv map[reflect.Type]conversion
+}
+
+// conversion turns one Bundle field into one Component at Spawn time. It exists
+// because a Bundle is *not* a Component set -- cog#237 defines it as describing
+// one act of creation -- so a Bundle field is free to be a string even though
+// the Component it becomes may not be. That is what keeps spawning declarative:
+// the author writes the model's name, and the pointer-free handle is derived
+// where the lock is already held.
+type conversion struct {
+	to reflect.Type
+	// apply reads the Bundle field at src and returns a pointer to the
+	// Component it produced. The result points into a cell the closure owns,
+	// allocated once at registration, so a spawn allocates nothing.
+	apply func(src unsafe.Pointer) unsafe.Pointer
+}
+
+// RegisterConversion declares that a Bundle field of type From stands for the
+// Component To, and how to get from one to the other. The convert func runs
+// once per spawned entity, inside the Spawn that already holds write{To}.
+//
+// It is the escape from the one real ergonomic cost of the pointer-free rule.
+// Without it, naming a model in a Bundle means interning the path somewhere
+// else and threading the id to every spawn site; with it, the Bundle still
+// reads as the declarative thing it was.
+func RegisterConversion[From any, To any](en *Entities, convert func(From) To) {
+	from := reflect.TypeFor[From]()
+	if _, taken := en.ops[from]; taken {
+		panic("ecs: " + from.String() + " is a registered Component, so it cannot also be a conversion source")
+	}
+	// cell is allocated once, here, and reused by every spawn. Taking its
+	// address inside apply would heap-allocate per call -- the same hazard
+	// cog#243 found in Spawn.New's bundle staging.
+	cell := new(To)
+	en.conv[from] = conversion{
+		to: reflect.TypeFor[To](),
+		apply: func(src unsafe.Pointer) unsafe.Pointer {
+			*cell = convert(*(*From)(src))
+			return unsafe.Pointer(cell)
+		},
+	}
 }
 
 // componentOps is the per-Component-type work that has to be compiled rather
@@ -44,6 +88,7 @@ func NewEntities(ids uint32) *Entities {
 	return &Entities{
 		gens: make([]uint32, ids),
 		ops:  map[reflect.Type]componentOps{},
+		conv: map[reflect.Type]conversion{},
 	}
 }
 

@@ -35,6 +35,14 @@ type RefBody struct {
 	Name                   string
 }
 
+// NamedBody keeps the text itself, in a fixed-size array. It is pointer-free,
+// so it is a legal Component -- the option a hash cannot offer, because a hash
+// cannot be shown to a player. 80 bytes.
+type NamedBody struct {
+	Px, Py, Pz, Vx, Vy, Vz float64
+	Name                   [32]byte
+}
+
 // gcFloor is the per-collection cost of a forced full GC with live held live.
 //
 // The collections are timed in batches rather than one at a time: the wall
@@ -75,6 +83,17 @@ func fillPod(n int) *ecs.Store[PodBody] {
 // names the same string or its own: the distinction matters because scanning is
 // proportional to pointer *slots*, not to distinct objects, so interning the
 // strings should not help the mark phase at all.
+func fillNamed(n int) *ecs.Store[NamedBody] {
+	en := ecs.NewEntities(uint32(n))
+	s := ecs.NewStore[NamedBody](uint32(n))
+	var name [32]byte
+	copy(name[:], "models/props/crate.glb")
+	for range n {
+		s.Add(en.Alloc(), NamedBody{Px: 1, Vy: 2, Name: name})
+	}
+	return s
+}
+
 func fillRef(n int, shared bool) *ecs.Store[RefBody] {
 	en := ecs.NewEntities(uint32(n))
 	s := ecs.NewStore[RefBody](uint32(n))
@@ -99,6 +118,7 @@ func TestWhatTheGCActuallyScans(t *testing.T) {
 			pod := gcFloor(fillPod(n), rounds)
 			shared := gcFloor(fillRef(n, true), rounds)
 			distinct := gcFloor(fillRef(n, false), rounds)
+			named := gcFloor(fillNamed(n), rounds)
 
 			t.Logf("no store                     %9.4f ms", empty.Seconds()*1e3)
 			t.Logf("pointer-free Component       %9.4f ms  (%+.3f ms)",
@@ -107,6 +127,8 @@ func TestWhatTheGCActuallyScans(t *testing.T) {
 				shared.Seconds()*1e3, (shared-empty).Seconds()*1e3)
 			t.Logf("string Component, distinct   %9.4f ms  (%+.3f ms)",
 				distinct.Seconds()*1e3, (distinct-empty).Seconds()*1e3)
+			t.Logf("[32]byte name Component      %9.4f ms  (%+.3f ms)",
+				named.Seconds()*1e3, (named-empty).Seconds()*1e3)
 
 			// The claim under test: a pointer-free Store is not scanned, so it
 			// costs the collector nothing however large it is. Allow generous
@@ -114,6 +136,11 @@ func TestWhatTheGCActuallyScans(t *testing.T) {
 			// effect being checked is order-of-magnitude, not marginal.
 			if pod > empty+3*time.Millisecond {
 				t.Errorf("a pointer-free Store cost the collector %v over an empty heap", pod-empty)
+			}
+			// The text kept inline is still pointer-free, so it must cost the
+			// collector nothing however wide it is.
+			if named > empty+3*time.Millisecond {
+				t.Errorf("a [32]byte name cost the collector %v over an empty heap", named-empty)
 			}
 			if shared <= pod {
 				t.Errorf("a string Component cost no more than a pointer-free one (%v against %v)", shared, pod)

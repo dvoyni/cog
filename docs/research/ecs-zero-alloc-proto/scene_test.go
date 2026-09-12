@@ -62,6 +62,14 @@ func (t *modelTable) Intern(p string) ModelID {
 // to turn a Component back into what scene's API takes.
 func (t *modelTable) Path(id ModelID) string { return t.paths[id] }
 
+// Lookup resolves a path without interning it, for a reader that must not
+// mutate the table -- a Bundle conversion running inside a Spawn, which holds
+// no lock on the table.
+func (t *modelTable) Lookup(p string) (ModelID, bool) {
+	id, ok := t.byPath[p]
+	return id, ok
+}
+
 // Placement is a pointer-free transform. scene.Transform is not one -- its
 // Matrix field is a *m.Mat4 -- so scene's own placement type cannot itself be a
 // Component, which is the shape of the whole gap.
@@ -362,6 +370,34 @@ func BenchmarkNamingAModel(b *testing.B) {
 			}
 		}
 	})
+	// A 64-bit hash of the name is the third option: pointer-free like the dense
+	// index, but unlike it *stable across processes*, so it survives replication
+	// and a save file where an interning order does not.
+	hashes := make([]uint64, n)
+	byHash := map[uint64]*int{}
+	for i := range n {
+		h := fnv1a(paths[i])
+		hashes[i] = h
+		v := i
+		byHash[h] = &v
+	}
+
+	b.Run("by-hash", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			for i := range n {
+				entrySink = byHash[hashes[i]]
+			}
+		}
+	})
+	b.Run("by-hash/including-hashing", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			for i := range n {
+				entrySink = byHash[fnv1a(paths[i])]
+			}
+		}
+	})
 	b.Run("by-path", func(b *testing.B) {
 		b.ReportAllocs()
 		for range b.N {
@@ -398,6 +434,21 @@ var (
 	sink      string
 	entrySink *int
 )
+
+// fnv1a is FNV-1a over the name's bytes. Any stable 64-bit hash would do; this
+// one is here because it is short enough to read and needs no dependency.
+func fnv1a(s string) uint64 {
+	const (
+		offset = 14695981039346656037
+		prime  = 1099511628211
+	)
+	h := uint64(offset)
+	for i := range len(s) {
+		h ^= uint64(s[i])
+		h *= prime
+	}
+	return h
+}
 
 // modelKeyReplica reproduces scene's validateResourcePath and modelKey, which
 // are unexported. It is here to price them, not to stand in for them.
