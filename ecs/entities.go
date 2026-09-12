@@ -1,5 +1,7 @@
 package ecs
 
+import "reflect"
+
 // Entities is the id authority: it allocates indices, tracks their generations,
 // answers whether a handle is alive, and holds a reference to every Store so a
 // despawn can empty all of them. There is exactly one per Engine, and that is
@@ -24,6 +26,31 @@ type Entities struct {
 	// a despawn empties all of them naming no Component at all, and every
 	// handler that touches any Store holds Entities for read.
 	stores []storeCore
+	// classes is what component registration baked, keyed by the Component's Go
+	// type. It is written during registration and read during registration —
+	// once, while a Query is planned — and never touched while the engine runs.
+	// It is what lets a Query declare a lock on a Store whose type it holds only
+	// as a reflect.Type: a generic cannot be instantiated from one, so the
+	// generic call is made where C is a compile-time type and kept here.
+	classes map[reflect.Type]*componentClass
+}
+
+// declare records what component registration baked for one Component type. The
+// Store's own duplicate-registration diagnostic is the kernel's, which names
+// both plugins, so nothing is refused here.
+func (en *Entities) declare(componentType reflect.Type, class *componentClass) {
+	if en.classes == nil {
+		en.classes = map[reflect.Type]*componentClass{}
+	}
+	en.classes[componentType] = class
+}
+
+// classOf reports what registration baked for a Component type, or nil if no
+// plugin ever registered it. A Query asks this while it is planned, which is
+// what turns "no such Component" into a composition failure naming the
+// Component rather than a missing resource naming a store type nobody wrote.
+func (en *Entities) classOf(componentType reflect.Type) *componentClass {
+	return en.classes[componentType]
 }
 
 // NewEntities creates the authority, reserving room for ids indices. The number

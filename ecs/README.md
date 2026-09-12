@@ -4,26 +4,43 @@
 **Entities** carrying **Components**, and describe behaviour as **Systems** —
 plain Go funcs whose parameter types say what they touch.
 
-**What exists today is the storage the rest of it sits on, and nothing else.**
-This package currently holds the Entity handle, the Store that keeps one
-Component type, the Entities authority that hands out ids and empties every
-Store when one is despawned, and the rule that decides whether a Go type may be
-a Component at all. Component registration, Queries, Systems, spawning and the
-handler builder are not here yet;
+**A Component moves: the storage, the registration, the Query and the handler
+builder are here.** What is not here yet is filters (`Without`, `With`),
+spawning and despawning, the accessors that reach an Entity a System did not
+iterate to, and the resource and event handles a binding uses;
 [`docs/specs/ecs.md`](docs/specs/ecs.md) is the specification the whole plugin
 is judged against, and this README covers only what is built.
 
 ## Files
 
 `contract.go` holds the package documentation and `Entity`; `component.go` the
-`PointerFree` rule; `entities.go` the `Entities` authority; `store.go` the
-`Store` and the type-erased `storeCore` a despawn reaches every Store through.
+`PointerFree` rule and `RegisterComponent`; `entities.go` the `Entities`
+authority; `store.go` the `Store`, the type-erased `storeCore` a despawn reaches
+every Store through, and the erased header a Query fills from; `query.go` the
+`Query`, its driver and its fillers; `system.go` the `ToHandler` builder;
+`plugin.go` the plugin that publishes the authority.
 
 ## Dependencies
 
-- Go packages: the standard library only
-- Plugin dependencies: none — this is not a plugin yet
+- Go packages: the standard library and `kernel`
+- Plugin dependencies: none
 - Configuration: none
+
+## Composing
+
+```go
+world := ecs.NewEntities(maxIDs)
+kernel.New(config).WithPlugins(ecs.Plugin(world), physics.Plugin(world), game.Plugin(world))
+```
+
+The world handle is **a plain Go value threaded through plugin constructors**,
+and it has to be: both component registration and the handler builder need it at
+registration, where no handler is running and no resource value may be read. So
+the binding shape is fixed before `WithPlugins` is called and is visible in the
+composition root. `ecs.Plugin` publishes the authority as the `*Entities`
+resource every System holds for read and every structural change will hold for
+write; it registers nothing else, because Components are registered by the
+plugins that define them and Systems are ordinary subscriptions.
 
 ## Entity
 
@@ -133,7 +150,7 @@ Two consequences of swap-remove are contract:
 - **Iteration order is unspecified.** Direction is not: a forward walk that
   removes as it goes silently skips — measured here at 667 of 1000 — because the
   tail row drops into the hole and the next step goes straight past it. A
-  reverse walk visits everyone, which is what the Query's `All()` will rest on.
+  reverse walk visits everyone, which is what the Query's `All()` rests on.
 
 A **Tag** — a Component with no fields — is an ordinary Store whose rows carry
 nothing, so its dense array costs no memory however many entities it holds.
@@ -167,3 +184,175 @@ itself. Variable-length data has three answers: a child entity with an owning
 reference, a fixed-capacity array where the bound is small and real, or a hash.
 `sync` types are not special-cased — a mutex is pointer-free by this walk and is
 still wrong in a Component, for the same reason `go vet` already says so.
+
+## Component registration
+
+```go
+func RegisterComponent[C any](registrar *kernel.Registrar, en *ecs.Entities, ids uint32) *ecs.Store[C]
+```
+
+A Component type is registered **explicitly, once, by exactly one plugin**.
+`RegisterComponent` checks the pointer-free rule, creates the Store, enrols it
+with the authority, hands it to the kernel as an ordinary resource of type
+`*ecs.Store[C]` — **owned by the calling plugin** — and bakes the per-type
+closures a Query is later planned against. There is no resource factory and
+kernel needs no change.
+
+> **Register a Component in the plugin that defines its Go type.** Shared
+> vocabulary belongs to the lowest plugin that owns it — `physics` declares
+> `Body`, not the game — which is the direction imports already run.
+
+That rule is what keeps the coupling check working on Component data. A System
+in another plugin that locks the Store must declare a dependency on its owner,
+and the Go import graph already forces the same edge, since a System cannot name
+`B.Health` in a Query struct without importing `B`. Ownership by `ecs` would not
+make the check lenient, it would make it **vacuous**. Registering someone else's
+type stays legal as the escape hatch, and the kernel's duplicate-registration
+error names both plugins.
+
+Half of "explicit" is forced rather than chosen: a `Lock` must bind every handle
+it will use, and a declared resource with no initial value fails finalisation —
+so **you cannot lock a Store that does not exist at registration**, and
+discovery-on-first-use is off the table. Registration order already guarantees
+the Store exists first, because plugins are ordered by declared dependency.
+
+`ids` is the peak population the Store reserves for. It is a hint, not a cap.
+
+## Query
+
+```go
+type MoveQuery struct {
+    Body     *Body     // write — yields the stored value itself
+    Velocity Velocity  // read  — yields a copy
+}
+
+func move(q *ecs.Query[MoveQuery]) {
+    for e, it := range q.All() {
+        it.Body.Pos = it.Body.Pos.Add(it.Velocity.V)
+        _ = e
+    }
+}
+```
+
+A **Query** is a struct type whose field types are the Components a System
+touches, and **a field's pointer-ness is its access mode**. Nothing else
+declares the lock set: `MoveQuery` above is `write{Body}`, `read{Velocity}` and
+`read{*Entities}`, derived from the Go types at registration. That is what makes
+**under-declaration unrepresentable** — the only route to a Store is a Query, and
+the field types *are* the declaration.
+
+**A read yields a copy.** A read yielding a pointer would be a data race against
+concurrent readers and Go has no pointer-to-const, so a fat read Component costs
+a copy per Entity — which is evidence the Component is too fat, not a reason for
+a hatch. Fields are **named, not embedded**: two Components with the same base
+name from different packages cannot both be embedded, and two Components each
+having a `Kind` field would make `it.Kind` an ambiguous selector at the use
+site, far from the cause.
+
+`All()` yields `(Entity, *Q)` — the Entity first and always, because the
+driver's owners array is loaded anyway. **The pointer is the Query's own buffer
+and is valid only for the current step**, which is the lifetime rule kernel's
+handles already carry. A Query belongs to one subscription: it is planned once,
+for that System, and refilled for every Entity.
+
+**The walk is backwards, and that is a guarantee**, not an accident. It is the
+whole reason "you may restructure the Entity you are currently visiting" is safe
+under swap-remove: a forward walk skips, silently, and reaches Entities appended
+during the loop. Changing whether some *other* Entity is in the driver Store is
+undefined.
+
+### The driver
+
+A Query picks one Store as its **driver**, walks its owners and probes the rest,
+so it costs what its driver is long rather than what it matches. **The driver is
+chosen per run, by scanning Store lengths, and never cached.** Store lengths
+change on every structural change, so a choice made at registration would walk
+five thousand Entities to find three the moment a Component became rare — and a
+cache would be a table every structural change has to write, which is the global
+index this storage model exists to avoid. Smallest-Store is a heuristic, not an
+optimum: the optimum driver is the smallest *intersection*, unknowable without
+computing it.
+
+## System
+
+```go
+type MoveSystem kernel.Subscription[app.UpdateEvent]
+
+registrar.Subscribe[MoveSystem](ecs.ToHandler[app.UpdateEvent](world, move)).After[GravitySystem]()
+```
+
+A **System** is a plain Go func, called once per tick, that iterates the
+Entities its Queries match itself. `ToHandler[E]` turns one into the
+`func() (kernel.Lock, kernel.Observe[E])` factory an ordinary cog subscription
+already takes, so **the ECS contributes no registration API of its own**:
+`Before`, `After`, `First`, `Last`, ownership, `Describe` and every `Err` kind
+work unchanged, and one subscription per System is what lets the existing
+scheduler run disjoint Systems concurrently with no new machinery.
+
+The lock set is the union of what the parameters declare, computed once by
+walking the func's parameter types. **The reflection runs exactly once and never
+again.** Arity is arbitrary, and **a System returns nothing** — a hard rule
+rather than a style preference, because `reflect.Value.Call` allocates for a
+callee that returns a value, so the builder rejects one at registration.
+
+**Every handler that touches any Store declares `read{*Entities}`,
+unconditionally and first.** That is the invariant the despawn traversal rests
+on: a despawn reaches every Store through Go pointers the kernel does not
+police, and holding the authority for write is what excludes every System that
+holds it for read.
+
+What a signature may contain today is a `*ecs.Query[Q]` and, at most once, the
+event value itself. Naming the event is legal but is not the ordinary shape: a
+System that names one can only ever be subscribed to that one, where the same
+gameplay should be drivable by a fixed-step tick, a rollback re-simulation or a
+test harness publishing its own frames. A parameter the builder does not
+recognise is a registration-time panic, which the plugin boundary reports as
+`ErrPluginPanic` naming the plugin — and so is a Query naming a Component no
+plugin registered:
+
+```
+plugin "systems" panicked in Register: ecs: Query game.GuardedQ names
+unregistered Component game.Guarded
+```
+
+That names the **Component** and the **Query**, rather than the store type the
+user never wrote.
+
+## What it costs
+
+Measured on a real `kernel.Engine` driven by a real `app.UpdateEvent`, AMD Ryzen
+9 7950X3D, go1.27.1 windows/amd64, medians of three:
+
+| whole frame | ns/op | allocs/op | B/op |
+| --- | --- | --- | --- |
+| nothing subscribed | 82 | **2** | 160 |
+| hand-written subscription, 1 000 | 5 250 | **6** | 322 |
+| **a System with a two-Component Query, 1 000** | **8 080** | **6** | 322 |
+| hand-written subscription, 10 000 | 19 760 | **6** | 321 |
+| **a System with a two-Component Query, 10 000** | **36 610** | **6** | 322 |
+
+**The engine charges 2 per publication plus 4 per subscriber, and the Query
+lands exactly on that line** — identical at 1 000 and at 10 000 Entities, which
+is the real test, because an allocation in the iteration would scale with the
+Entity count. Over a 10 000-frame steady state, which an average over `b.N`
+could hide amortised growth behind, it is **6.002 objects a frame at 1k and
+6.003 at 10k**, against the hand-written **6.008**. `-gcflags=-m` reports no
+`moved to heap` anywhere on the iteration path, so the zero is explained by the
+compiler rather than merely observed.
+
+From the 1k to 10k slope, so the per-frame floor drops out: **3.17 ns an Entity
+against the hand-written loop's 1.61**.
+
+Three things the implementation does that those numbers depend on. Each is
+invisible in a microbenchmark and each cost an allocation a tick when it was not
+done:
+
+- **The fill buffer is a field of the `Query`**, not a local in `All()`. As a
+  local its address reaches an opaque `yield` and it escapes.
+- **The filler is reached by a switch on a shape chosen at registration**, not
+  through a func field. An indirect call is opaque to escape analysis, so the
+  range statement's `yield` closure and the loop state it captures escape — two
+  allocations a tick, measured here.
+- **The fill is unrolled by field count.** A per-field loop costs about 2.4x a
+  hand-written walk and per-field binder closures about 5x, and those allocate.
+  Queries wider than four Components fall back to the loop.

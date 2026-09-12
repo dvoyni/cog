@@ -1,5 +1,7 @@
 package ecs
 
+import "unsafe"
+
 // absentSlot is the sparse slot of an entity a Store holds nothing for. Its
 // generation half is all-ones, which no live generation reaches, so membership
 // is one load and one compare with no tombstone branch to predict.
@@ -32,6 +34,32 @@ type Store[T any] struct {
 	owners []Entity
 	dense  []T
 }
+
+// storeHeader is what every *Store[T] looks like once T is forgotten, and it is
+// how a Query reaches a Store whose Component type it knows only as a
+// reflect.Type. The first two arrays are typed the same for every T; the rows
+// become an address and a stride, the stride taken from reflect at registration.
+//
+// This is the sanctioned unsafe in the package and it rests on one property:
+// the layout of Store[T] is three headers in this order, whatever T is.
+// TestTheErasedStoreMatchesTheTypedOne asserts that rather than assuming it.
+type storeHeader struct {
+	sparse []uint64
+	owners []Entity
+	dense  denseRows
+}
+
+// denseRows is the header of dense []T with the element type erased. A row is
+// data + row*size, and size comes from the registered Component type.
+type denseRows struct {
+	data unsafe.Pointer
+	len  int
+	cap  int
+}
+
+// erase views a typed Store as the header a Query fills from. It is a cast and
+// nothing else: the Store keeps its identity, its lock and its owner.
+func (s *Store[T]) erase() *storeHeader { return (*storeHeader)(unsafe.Pointer(s)) }
 
 // NewStore creates a Store and enrols it with the authority, which is what lets
 // a despawn empty it; a Store the authority cannot reach would keep rows for
