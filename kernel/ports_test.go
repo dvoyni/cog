@@ -106,6 +106,113 @@ func TestPorts_DuplicateRequiredAdaptersFailComposition(t *testing.T) {
 	}
 }
 
+// A nil Adapter is refused when it is provided, so a Port requiring the
+// interface fails composition with a named error instead of a binding panic.
+func TestPorts_NilAdapterForRequiredInterfaceFailsComposition(t *testing.T) {
+	port := testPlugin{name: "port", register: func(r *Registrar) error {
+		r.RequireAdapter[testBackend]()
+		return nil
+	}}
+	adapter := testPlugin{name: "adapter", register: func(r *Registrar) error {
+		r.ProvideAdapter[testBackend](nil)
+		return nil
+	}}
+
+	_, err := composeForTest(port, adapter)
+
+	var nilAdapter ErrNilAdapter
+	if !errors.As(err, &nilAdapter) {
+		t.Fatalf("composition error = %v, want ErrNilAdapter", err)
+	}
+	if want := (ErrNilAdapter{Plugin: "adapter", Interface: reflect.TypeFor[testBackend]()}); nilAdapter != want {
+		t.Fatalf("nil adapter = %+v, want %+v", nilAdapter, want)
+	}
+}
+
+// A nil Adapter for a collected interface is refused the same way. The refusal
+// is the only failure: the collecting Port's other contributions bind cleanly.
+func TestPorts_NilAdapterForCollectedInterfaceFailsComposition(t *testing.T) {
+	broker := testPlugin{name: "broker", register: func(r *Registrar) error {
+		r.CollectAdapters[testCapability]()
+		return nil
+	}}
+	contributor := func(name PluginName, adapter testCapability) testPlugin {
+		return testPlugin{name: name, register: func(r *Registrar) error {
+			r.ProvideAdapter[testCapability](adapter)
+			return nil
+		}}
+	}
+
+	_, err := composeForTest(broker, contributor("first", testLabel("first")),
+		contributor("empty", nil), contributor("second", testLabel("second")))
+
+	var nilAdapter ErrNilAdapter
+	if !errors.As(err, &nilAdapter) {
+		t.Fatalf("composition error = %v, want ErrNilAdapter", err)
+	}
+	want := ErrNilAdapter{Plugin: "empty", Interface: reflect.TypeFor[testCapability]()}
+	if nilAdapter != want {
+		t.Fatalf("nil adapter = %+v, want %+v", nilAdapter, want)
+	}
+	if err.Error() != want.Error() {
+		t.Fatalf("composition error = %v, want only %v", err, want)
+	}
+}
+
+// A nil Adapter fails composition even when no Port declares its interface, so
+// the mistake does not lie dormant until one is added.
+func TestPorts_NilAdapterNobodyConsumesFailsComposition(t *testing.T) {
+	adapter := testPlugin{name: "adapter", register: func(r *Registrar) error {
+		r.ProvideAdapter[testCapability](nil)
+		return nil
+	}}
+
+	_, err := composeForTest(adapter)
+
+	var nilAdapter ErrNilAdapter
+	if !errors.As(err, &nilAdapter) {
+		t.Fatalf("composition error = %v, want ErrNilAdapter", err)
+	}
+	if want := (ErrNilAdapter{Plugin: "adapter", Interface: reflect.TypeFor[testCapability]()}); nilAdapter != want {
+		t.Fatalf("nil adapter = %+v, want %+v", nilAdapter, want)
+	}
+}
+
+// nilReceiverLabel implements testBackend on a nil pointer.
+type nilReceiverLabel struct{}
+
+func (l *nilReceiverLabel) Label() string {
+	if l == nil {
+		return "nil receiver"
+	}
+	return "value"
+}
+
+// A typed nil is a valid interface value, not a nil Adapter: it binds and
+// reaches the Port.
+func TestPorts_TypedNilPointerAdapterIsAccepted(t *testing.T) {
+	var got string
+	port := &testPlugin{name: "port"}
+	port.register = func(r *Registrar) error {
+		backend := r.RequireAdapter[testBackend]()
+		port.start = func(Executioner) error {
+			got = backend.Get().Label()
+			return nil
+		}
+		return nil
+	}
+	adapter := testPlugin{name: "adapter", register: func(r *Registrar) error {
+		r.ProvideAdapter[testBackend]((*nilReceiverLabel)(nil))
+		return nil
+	}}
+
+	startEngine(t, port, adapter)
+
+	if got != "nil receiver" {
+		t.Fatalf("Start read adapter %q, want the typed nil's %q", got, "nil receiver")
+	}
+}
+
 // Collected Adapters arrive in plugin order, which is dependency order rather
 // than the order the caller listed plugins in, each with its contributor's name.
 func TestPorts_CollectedAdaptersComeInPluginOrderWithContributors(t *testing.T) {

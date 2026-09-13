@@ -104,9 +104,15 @@ func (r *Registrar) CollectAdapters[T any]() CollectedAdapters[T] {
 
 // ProvideAdapter contributes adapter for the interface T, spelled explicitly so
 // the compiler checks that adapter implements it. An Adapter no plugin requires
-// or collects is not an error. It panics if T is not an interface type.
+// or collects is not an error. A nil adapter is refused with ErrNilAdapter and
+// contributes nothing; a typed nil, such as a nil pointer, is not nil. It panics
+// if T is not an interface type.
 func (r *Registrar) ProvideAdapter[T any](adapter T) {
 	id := adapterInterface[T]("ProvideAdapter")
+	if any(adapter) == nil {
+		r.registry.errs = append(r.registry.errs, ErrNilAdapter{Plugin: r.owner, Interface: id})
+		return
+	}
 	r.registry.adapterContributions[id] = append(r.registry.adapterContributions[id],
 		adapterContribution{plugin: r.owner, adapter: adapter})
 }

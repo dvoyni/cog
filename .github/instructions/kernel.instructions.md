@@ -328,9 +328,11 @@ registrar.ProvideAdapter[mcp.Provider](provider{})
 - **Binding adds no dependency** in either direction. A contributor that also
   uses the Port's commands or resources declares that dependency itself.
 - **Composition checks the count.** A required interface with no Adapter fails
-  with `ErrMissingAdapter` and with several `ErrDuplicateAdapter`. A contribution
-  nobody consumes is fine, which is why every plugin with capabilities provides
-  its `mcp.Provider` unconditionally.
+  with `ErrMissingAdapter` and with several `ErrDuplicateAdapter`. Providing an
+  untyped nil fails with `ErrNilAdapter`, so a Port needs no nil check; a typed
+  nil pointer is a legal Adapter. A contribution nobody consumes is fine, which
+  is why every plugin with capabilities provides its `mcp.Provider`
+  unconditionally.
 - **A test composing a Port composes an Adapter too**: a small fixture plugin
   whose `Register` provides it (the `backendAdapter` in the canvas, scene,
   ecsscene and ui tests).

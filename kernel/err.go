@@ -161,6 +161,18 @@ func (e ErrDuplicateAdapter) Error() string {
 		e.Port, e.Interface, e.Contributors)
 }
 
+// ErrNilAdapter is reported when a plugin provides an untyped nil Adapter for an
+// interface. The contribution is refused, so no Port ever receives it. A typed
+// nil, such as a nil pointer implementing the interface, is not nil.
+type ErrNilAdapter struct {
+	Plugin    PluginName
+	Interface reflect.Type
+}
+
+func (e ErrNilAdapter) Error() string {
+	return fmt.Sprintf("plugin %q provides a nil adapter for %v", e.Plugin, e.Interface)
+}
+
 // ErrSubscriptionCycle is returned when an event's subscriptions have an
 // unsatisfiable before/after ordering.
 type ErrSubscriptionCycle struct {

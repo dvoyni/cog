@@ -428,7 +428,7 @@ capability.
 **One consequence to state rather than discover: the broker collects its own
 Provider.** Harmless — collection is uniform and the broker's own capability
 arrives through the same path as everyone else's, which the kernel permits
-([`ports.md`](../../../../../kernel/docs/specs/ports.md) rule 11) — but it must be
+([`ports.md`](../../../../../kernel/docs/specs/ports.md) rule 12) — but it must be
 written down, because it looks like a bug to anyone reading the loop cold.
 
 ### Why it exists at all

@@ -78,15 +78,23 @@ type ContributedAdapter[T any] struct {
    `ErrMissingAdapter`.
 7. **A required interface with two or more Adapters** fails composition with
    `ErrDuplicateAdapter`, naming every contributor.
-8. **A plugin declares each interface once.** Requiring and collecting the same
+8. **A nil Adapter is refused when it is provided.** `ProvideAdapter[T]` given
+   an untyped nil records `ErrNilAdapter`, naming the providing plugin and `T`,
+   and contributes nothing, so no Port ever binds a nil. The rule is the same
+   whether `T` is required, collected or declared by no plugin at all. If the nil
+   was a required interface's only contribution, that Port also reports
+   `ErrMissingAdapter`. A **typed nil** — a nil pointer, map, func, chan or slice
+   stored in the interface — is a valid interface value and is not nil: it binds
+   like any other Adapter.
+9. **A plugin declares each interface once.** Requiring and collecting the same
    `T` from one plugin, or declaring the same `T` twice, fails composition with
    `ErrDuplicateRegistration` of kind `adapter declaration`.
-9. **An Adapter nobody requires or collects is not an error.** A Bundle may
-   contribute an mcp Provider to an engine composed without mcp.
-10. **Collected Adapters come in plugin order**: the order plugins register in,
+10. **An Adapter nobody requires or collects is not an error.** A Bundle may
+    contribute an mcp Provider to an engine composed without mcp.
+11. **Collected Adapters come in plugin order**: the order plugins register in,
     which is dependency order. Several Adapters from one plugin keep the order
     that plugin provided them in. `Get` returns a fresh slice each call.
-11. **Nothing else is restricted.** Two plugins may each declare the same `T`,
+12. **Nothing else is restricted.** Two plugins may each declare the same `T`,
     and each binding is checked on its own. A Port may contribute an Adapter to
     an interface it collects itself, as the mcp broker does for its own
     capabilities.
@@ -104,10 +112,15 @@ type ErrDuplicateAdapter struct {
     Interface    reflect.Type
     Contributors []PluginName
 }
+
+type ErrNilAdapter struct {
+    Plugin    PluginName // the plugin that provided the nil
+    Interface reflect.Type
+}
 ```
 
-Both join the other finalization errors, so one composition reports every
-unbound Port at once.
+All join the other finalization errors, so one composition reports every
+unbound Port and every nil Adapter at once.
 
 ## Description
 

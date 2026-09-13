@@ -258,6 +258,11 @@ takes a value of type `T`, so the compiler checks it implements the interface.
   interface's business.
 - A required interface with no Adapter fails composition with
   `ErrMissingAdapter`; with several, `ErrDuplicateAdapter`.
+- A nil Adapter is refused when it is provided: `ProvideAdapter[T]` given an
+  untyped nil fails composition with `ErrNilAdapter` and contributes nothing,
+  whether `T` is required, collected or consumed by no plugin. A Port never
+  receives a nil. A typed nil, such as a nil pointer, is a valid interface value
+  and is not nil.
 - A plugin declares each interface once. Requiring and collecting the same `T`,
   or declaring it twice, fails with `ErrDuplicateRegistration` of kind
   `adapter declaration`.
@@ -276,17 +281,22 @@ Exported error types:
 - `ErrConflictingPluginName`: two registered plugins use the same name.
 - `ErrMissingPluginDependency`: a plugin's declared dependency is absent.
 - `ErrPluginDependencyCycle`: plugin dependencies cannot be ordered.
-- `ErrMultipleHosts`: more than one plugin implements `PluginHost`.
+- `ErrMultipleHosts`: more than one plugin is a `kernel.Host`, that is,
+  implements `PluginHost`.
 - `ErrDuplicateRegistration`: a contract or resource has multiple owners.
 - `ErrMissingResource`: a declared resource has no initial value.
 - `ErrUsingUnknownCommand`: a handler declares `Uses` of a command no plugin
   registered.
 - `ErrUsingCommandCycle`: `Uses` declarations form a cycle, so no lock closure
   exists.
+- `ErrUndeclaredDependency`: a handler locks a resource owned by a plugin its
+  own plugin does not declare a dependency on.
 - `ErrMissingAdapter`: a plugin requires an Adapter for an interface no plugin
   provides.
 - `ErrDuplicateAdapter`: a plugin requires exactly one Adapter for an interface
   several plugins provide; it names every contributor.
+- `ErrNilAdapter`: a plugin provides a nil Adapter; it names the plugin and the
+  interface.
 - `ErrUnavailableDependency`: `Dependency` was asked for a resource with no
   initial value or an undeclared owner; it arrives inside `ErrPluginPanic`.
 - `ErrPluginPanic`: a plugin boundary panicked; includes owner and stack.
