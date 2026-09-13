@@ -154,11 +154,11 @@ units (what `ui` rects are in), and window/DIP units (what `input.Pos` is). On a
 1:1 desktop all three coincide, so a wrong choice works in dev and breaks on a
 HiDPI laptop.
 
-`input` **cannot** convert: `app.Viewport` is gfx's resource and
+`input` **cannot** convert: `gfx.Viewport` is gfx's resource and
 `input.Dependencies()` is `nil`. The two routes that would let it are both worse
 than the arithmetic — `input` depending on `gfx` inverts the import graph for a
 debug facility, and having `wgpu` push the window size into an `input` resource
-duplicates `app.Viewport` and puts a new obligation on the driver contract.
+duplicates `gfx.Viewport` and puts a new obligation on the driver contract.
 
 **The agent converts, using numbers it already holds**, and the description says
 the division outright:

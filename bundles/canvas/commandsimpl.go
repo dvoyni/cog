@@ -1,8 +1,8 @@
 package canvas
 
 import (
+	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/app"
 )
 
 // armDrawsCmdImpl installs the tick's one snapshot request and hands back the
@@ -10,9 +10,9 @@ import (
 // itself. The Viewport read is the only lock it needs: the snapshot slot is
 // plugin-owned and carries its own.
 func (p *Plugin) armDrawsCmdImpl() (kernel.Lock, kernel.Execute[ArmDrawsRequest, ArmDrawsResponse]) {
-	var viewport kernel.Read[*app.Viewport]
+	var viewport kernel.Read[*gfx.Viewport]
 	return func(access kernel.ResourceAccess) {
-			viewport = access.GetRead[*app.Viewport]()
+			viewport = access.GetRead[*gfx.Viewport]()
 		}, func(_ kernel.Kernel, request ArmDrawsRequest) (ArmDrawsResponse, error) {
 			live, err := p.snapshots.arm(request)
 			if err != nil {

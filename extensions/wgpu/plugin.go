@@ -4,8 +4,9 @@
 //
 // gogpu's OnUpdate becomes ordered fixed-timestep app.UpdateEvent values through an
 // accumulator, and OnDraw publishes app.RenderEvent{Alpha} as a render-thread
-// barrier. The plugin also implements gfx.Backend, forwards OS input into the
-// input contract, and reports window and framebuffer sizes to the viewport.
+// barrier. The plugin also provides gfx's Backend Adapter, forwards OS input
+// into the input contract, and reports window and framebuffer sizes to the
+// viewport.
 package wgpu
 
 import (
@@ -58,6 +59,8 @@ type Plugin struct {
 	// (main thread), flushed once per frame in onUpdate. Main-thread-only; no lock.
 	pending []input.Change
 
+	// gfxBackend is gfx's Backend adapter: provided at registration, and
+	// attached to the device once the device exists.
 	gfxBackend             *gfxBackend
 	reportedBackendFailure bool
 }
@@ -76,17 +79,26 @@ func (p *Plugin) Name() kernel.PluginName {
 	return Name
 }
 
-// Dependencies reports the plugins wgpu requires: gfx (whose backend and
-// viewport it drives) and input (to which it forwards OS input events).
+// Dependencies reports the plugins wgpu requires: gfx (whose viewport it drives,
+// and whose Backend adapter it provides) and input (to which it forwards OS
+// input events).
 func (p *Plugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{cgfx.Name, input.Name}
 }
 
-// Register resolves the configuration (nil -> DefaultConfig, otherwise the provided
-// wgpu.Config — build it from DefaultConfig via the With* setters), builds the
-// gogpu App, and registers its commands. It does not block; the main loop starts
-// in Run.
+// Register provides gfx's Backend adapter, resolves the configuration (nil ->
+// DefaultConfig, otherwise the provided wgpu.Config — build it from DefaultConfig
+// via the With* setters), builds the gogpu App, and registers its commands. It
+// does not block; the main loop starts in Run.
+//
+// The adapter is provided before the device exists, because a Port's adapter is
+// bound at composition and the device is created asynchronously inside the
+// render loop. It is not Ready until onDraw attaches the device.
 func (p *Plugin) Register(registrar *kernel.Registrar, config any) error {
+	if p.gfxBackend == nil {
+		p.gfxBackend = newGfxBackend()
+	}
+	registrar.ProvideAdapter[cgfx.Backend](p.gfxBackend)
 	cfg := DefaultConfig()
 	if config != nil {
 		c, ok := config.(Config)
@@ -268,27 +280,25 @@ func (p *Plugin) onDraw(k kernel.Executioner, dc *gogpu.Context) {
 		return
 	}
 	fbW, fbH := dc.FramebufferSize()
-	k.ExecuteCommand[app.SetViewportCmd](
-		app.SetViewportRequest{
+	k.ExecuteCommand[cgfx.SetViewportCmd](
+		cgfx.SetViewportRequest{
 			Width: float32(windowW), Height: float32(windowH),
 			FramebufferWidth: float32(fbW), FramebufferHeight: float32(fbH),
 		})
 
 	// Make the surface current on the backend, then publish app.RenderEvent — the
 	// gfx plugin renders in its render-thread handler.
-	if p.gfxBackend == nil {
-		backend, err := newGfxBackend(p.gpu.DeviceProvider(), dc.Backend())
-		if err != nil {
+	if !p.gfxBackend.Ready() {
+		if err := p.gfxBackend.attach(p.gpu.DeviceProvider(), dc.Backend()); err != nil {
 			// The device is created asynchronously, so this is expected until it is
-			// ready; report once so a permanent failure is still visible.
+			// ready; report once so a permanent failure is still visible. The frame
+			// is skipped: nothing is rendered before the backend is Ready.
 			if !p.reportedBackendFailure {
 				p.reportedBackendFailure = true
 				k.ReportError(err)
 			}
 			return
 		}
-		p.gfxBackend = backend
-		k.ExecuteCommand[cgfx.SetBackendCmd](cgfx.SetBackendRequest{Backend: backend})
 	}
 	// A pass the backend declined to encode is reported here rather than on the
 	// render thread, which has no kernel handle. It fires once per run.

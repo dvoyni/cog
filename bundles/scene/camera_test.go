@@ -7,7 +7,6 @@ import (
 
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/app"
 )
 
 const cameraMain CameraID = 0
@@ -309,7 +308,7 @@ func TestAFrameBeforeTheWindowIsKnownIsSkippedSilently(t *testing.T) {
 	// once per camera per frame tells a caller nothing they can act on.
 	var reported []error
 	h := newHarnessWithErrors(t, func(q *OpQueue) { q.Camera(cameraMain, simpleCamera()) }, &reported)
-	h.kernel.ExecuteCommand[app.SetViewportCmd](app.SetViewportRequest{})
+	h.kernel.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{})
 	h.frame()
 
 	if passes := h.passes(); len(passes) != 0 {

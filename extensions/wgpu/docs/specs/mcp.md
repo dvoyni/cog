@@ -118,7 +118,7 @@ What else keeps running while paused, all of it deliberate:
 
 - `flushInput` still dispatches `input.ApplyCmd` (`extensions/wgpu/input.go:98-105`), so
   synthetic input still reaches the seam and banks there.
-- `app.WindowSizeChangeEvent` still publishes, and `app.SetViewportCmd` still
+- `app.WindowSizeChangeEvent` still publishes, and `gfx.SetViewportCmd` still
   fires from `onDraw`.
 - The window stays live, movable and resizable.
 
@@ -302,7 +302,7 @@ capability.**
 
 `app` is contract-only and a driver implements it — the exact precedent is
 `app.QuitCmd`, declared at `slots/app/commands.go:6` and handled by `wgpu` at
-`extensions/wgpu/plugin.go:99`, with `app.SetViewportCmd` handled by `gfx` as the second
+`extensions/wgpu/plugin.go:99`, with `gfx.SetViewportCmd` handled by `gfx` as the second
 instance. Time control is the same shape: **only the host that owns the loop can
 stop it**, and `app` names the contract so gameplay code never imports a driver.
 

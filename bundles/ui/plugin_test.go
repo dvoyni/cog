@@ -11,6 +11,7 @@ import (
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/bundles/input"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
@@ -86,7 +87,8 @@ func TestPluginMapsWindowPointerToLogicalViewport(t *testing.T) {
 	}).WithPlugins(
 		storage.New(),
 		input.New(),
-		gfx.New(),
+		gfximpl.New(),
+		backendAdapter{&detachedBackend{}},
 		canvas.New(),
 		New(),
 		consumer,
@@ -95,10 +97,10 @@ func TestPluginMapsWindowPointerToLogicalViewport(t *testing.T) {
 	<-engine.Ready()
 	k := engine.Executioner()
 
-	k.ExecuteCommand[app.SetDesiredViewportCmd](app.SetDesiredViewportRequest{
-		Mode: app.ViewportFit, Width: 100, Height: 80,
+	k.ExecuteCommand[gfx.SetDesiredViewportCmd](gfx.SetDesiredViewportRequest{
+		Mode: gfx.ViewportFit, Width: 100, Height: 80,
 	})
-	k.ExecuteCommand[app.SetViewportCmd](app.SetViewportRequest{
+	k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
 		Width: 200, Height: 160, FramebufferWidth: 400, FramebufferHeight: 320,
 	})
 	k.ExecuteCommand[input.ApplyCmd](input.ApplyRequest{Changes: []input.Change{
@@ -147,7 +149,8 @@ func TestPluginProcessesAndClearsEveryUpdate(t *testing.T) {
 	}).WithPlugins(
 		storage.New(),
 		input.New(),
-		gfx.New(),
+		gfximpl.New(),
+		backendAdapter{&detachedBackend{}},
 		canvas.New(),
 		New(),
 		consumer,
@@ -156,7 +159,7 @@ func TestPluginProcessesAndClearsEveryUpdate(t *testing.T) {
 	<-engine.Ready()
 	k := engine.Executioner()
 
-	k.ExecuteCommand[app.SetViewportCmd](app.SetViewportRequest{
+	k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
 		Width: 100, Height: 80, FramebufferWidth: 100, FramebufferHeight: 80,
 	})
 	k.ExecuteCommand[input.ApplyCmd](input.ApplyRequest{Changes: []input.Change{
@@ -331,12 +334,12 @@ func TestPluginSeesAScriptedClickAsAClick(t *testing.T) {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storage.New(), input.New(), gfx.New(), canvas.New(), New(), consumer)
+	}).WithPlugins(storage.New(), input.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvas.New(), New(), consumer)
 	go engine.Run(runContext)
 	<-engine.Ready()
 	k := engine.Executioner()
 
-	k.ExecuteCommand[app.SetViewportCmd](app.SetViewportRequest{
+	k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
 		Width: 100, Height: 80, FramebufferWidth: 100, FramebufferHeight: 80,
 	})
 	if _, err := input.Play(k, []input.Action{
@@ -370,12 +373,12 @@ func TestPluginSeesAScriptedDragAsADrag(t *testing.T) {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storage.New(), input.New(), gfx.New(), canvas.New(), New(), consumer)
+	}).WithPlugins(storage.New(), input.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvas.New(), New(), consumer)
 	go engine.Run(runContext)
 	<-engine.Ready()
 	k := engine.Executioner()
 
-	k.ExecuteCommand[app.SetViewportCmd](app.SetViewportRequest{
+	k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
 		Width: 100, Height: 80, FramebufferWidth: 100, FramebufferHeight: 80,
 	})
 	played := make(chan error, 1)

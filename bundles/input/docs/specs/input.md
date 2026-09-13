@@ -78,7 +78,7 @@ shapes, not domain concepts.
   calls publishes `KeyEvent{Mods: 0}` while the modifier is held.
 - **`Key` has no name.** No `String()`, no table anywhere, and the constant
   blocks have deliberate gaps — letters use 1–26 of `[1..31]`.
-- **`input` cannot convert coordinates.** `app.Viewport` is gfx's resource,
+- **`input` cannot convert coordinates.** `gfx.Viewport` is gfx's resource,
   `checkCoupling` demands a declared dependency to lock a foreign one
   (`kernel/registrar.go:211-235`), and `input.Dependencies()` is `nil`.
 - **Nothing in cog consumes `KeyEvent`, `TextEvent` or `State.Text()`**, and

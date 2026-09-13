@@ -10,6 +10,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -241,6 +242,12 @@ func newHarness(t testing.TB) *harness {
 // being bound from, the binding, and a game plugin standing in for the app.
 func newHarnessOver(t testing.TB, files fstest.MapFS, ids uint32) *harness {
 	t.Helper()
+	return newHarnessWith(t, files, ids, &detachedBackend{})
+}
+
+// newHarnessWith is newHarnessOver rendering through backend.
+func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gfx.Backend) *harness {
+	t.Helper()
 	sink := &errorSink{}
 	configs := map[kernel.PluginName]any{
 		storage.Name: storage.DefaultConfig("ecsscene-test").WithReadFS("test", 10, fs.FS(files)),
@@ -249,7 +256,7 @@ func newHarnessOver(t testing.TB, files fstest.MapFS, ids uint32) *harness {
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) bool { sink.add(err); return false }).
-		WithPlugins(storage.New(), gfx.New(), scene.New(),
+		WithPlugins(storage.New(), gfximpl.New(), backendAdapter{backend}, scene.New(),
 			ecs.Plugin(), New(), &gamePlugin{})
 	ctx, cancel := context.WithCancel(context.Background())
 	// The cleanup waits for Run to return rather than only cancelling it: a

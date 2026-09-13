@@ -15,13 +15,6 @@ type AcquireCmd kernel.Command[AcquireRequest, AcquireResponse]
 type AcquireRequest struct{}
 type AcquireResponse struct{ Advanced bool }
 
-// SetBackendCmd installs the Backend the plugin renders through. A driver calls
-// it once, when its GPU device is ready; the backend is installed into all three
-// OpQueue instances, so recording can reserve resource IDs.
-type SetBackendCmd kernel.Command[SetBackendRequest, SetBackendResponse]
-type SetBackendRequest struct{ Backend Backend }
-type SetBackendResponse struct{}
-
 // ReleaseCachedResourceCmd queues release of translator-owned texture and
 // shader caches matching Path. Cleanup runs on the render thread before the
 // latest frame; a later use of the path loads it again.

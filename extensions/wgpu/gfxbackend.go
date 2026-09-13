@@ -26,8 +26,19 @@ const depthFormat = gputypes.TextureFormatDepth32Float
 
 // gfxBackend implements gfx.Backend over gogpu/wgpu. TextureID and BufferID key
 // native textures and buffers directly; backend-minted IDs remain only for
-// shaders, pipelines, and samplers. All methods run on the render thread.
+// shaders, pipelines, and samplers. All methods run on the render thread,
+// except NewTexture, NewBuffer and Ready.
+//
+// It is one stable value for the plugin's whole life. The plugin provides it to
+// gfx at registration, before the GPU device exists - the device is created
+// asynchronously, inside the render loop - and attaches the device to it once
+// the device does. Until then it is not Ready, and gfx calls nothing on it but
+// Ready and the id reservations, which need no device.
 type gfxBackend struct {
+	// ready is set once attach has built everything the render-thread methods
+	// use. It is the one field read across threads besides the id counters.
+	ready atomic.Bool
+
 	device        *wgpu.Device
 	queue         *wgpu.Queue
 	surfaceFormat gputypes.TextureFormat
@@ -253,15 +264,10 @@ func (s *gfxRenderPass) Draw(first, count, instances, firstInstance int, indexed
 
 var _ cgfx.Backend = (*gfxBackend)(nil)
 
-// newGfxBackend builds the shared layouts, default sampler, and white texture. It
-// returns errDeviceNotReady until the GPU device/queue exist (async on browser).
-func newGfxBackend(dp gogpu.DeviceProvider, backend string) (*gfxBackend, error) {
-	b := &gfxBackend{
-		device:             dp.Device(),
-		queue:              dp.Queue(),
-		surfaceFormat:      dp.SurfaceFormat(),
-		backendName:        backend,
-		depthOnlyPasses:    depthOnlyPassesWork(backend),
+// newGfxBackend builds the backend with no device, which is what the plugin
+// provides to gfx at registration.
+func newGfxBackend() *gfxBackend {
+	return &gfxBackend{
 		samplers:           map[cgfx.SamplerID]*wgpu.Sampler{},
 		shaders:            map[cgfx.ShaderID]*gfxbShader{},
 		pipelines:          map[cgfx.PipelineID]*gfxbPipeline{},
@@ -275,9 +281,23 @@ func newGfxBackend(dp gogpu.DeviceProvider, backend string) (*gfxBackend, error)
 		views:              map[gfxbViewKey]*gfxbView{},
 		viewID:             map[cgfx.TextureViewID]*gfxbView{},
 	}
+}
+
+// Ready reports whether a device is attached. It is safe from any goroutine.
+func (b *gfxBackend) Ready() bool { return b.ready.Load() }
+
+// attach builds the shared layouts, default sampler, and white texture on the
+// device, and makes the backend Ready. It returns errDeviceNotReady until the
+// GPU device/queue exist (async on browser), and is retried each frame until it
+// succeeds. It runs on the render thread.
+func (b *gfxBackend) attach(dp gogpu.DeviceProvider, backend string) error {
+	b.device, b.queue = dp.Device(), dp.Queue()
 	if b.device == nil || b.queue == nil {
-		return nil, errDeviceNotReady
+		return errDeviceNotReady
 	}
+	b.surfaceFormat = dp.SurfaceFormat()
+	b.backendName = backend
+	b.depthOnlyPasses = depthOnlyPassesWork(backend)
 	b.bindGroups = newGfxBindGroupCache(
 		func(layout *wgpu.BindGroupLayout, entries []wgpu.BindGroupEntry) (*wgpu.BindGroup, error) {
 			return b.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
@@ -294,16 +314,17 @@ func newGfxBackend(dp gogpu.DeviceProvider, backend string) (*gfxBackend, error)
 		MagFilter: gputypes.FilterModeLinear, MinFilter: gputypes.FilterModeLinear,
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	view, err := createTextureView(b.device, b.queue, 1, 1, []byte{255, 255, 255, 255})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	b.white = &gfxbTexture{tex: view.Texture(), view: view}
 	b.screenID = cgfx.TextureViewID(b.id())
-	return b, nil
+	b.ready.Store(true)
+	return nil
 }
 
 func (b *gfxBackend) id() uint32 { b.nextID++; return b.nextID }

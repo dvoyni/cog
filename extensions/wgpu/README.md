@@ -1,8 +1,9 @@
 # wgpu
 
 `github.com/cog-engine/wgpu` is Cog's window, input, timing, and WebGPU system
-driver built on `gogpu`. It owns the OS main loop, implements the `gfx.Backend`,
-feeds `input`, and drives the `app` update/render contract on desktop and WebAssembly.
+driver built on `gogpu`. It owns the OS main loop, provides gfx's `gfx.Backend`
+Adapter, feeds `input`, and drives the `app` update/render contract on desktop
+and WebAssembly.
 
 ## Plugin
 
@@ -63,7 +64,7 @@ driver implements it.
   sequence and **discards its `dt`**, leaving the accumulator untouched, and
   publishes only the steps somebody asked for. Nothing else changes: the input
   flush at the top of `onUpdate` still runs, and the whole of `onDraw` — the
-  frame clock, `app.WindowSizeChangeEvent`, `app.SetViewportCmd`,
+  frame clock, `app.WindowSizeChangeEvent`, `gfx.SetViewportCmd`,
   `app.RenderEvent` — runs exactly as it does while running. `gfx` replays the
   last completed queue every frame, so the window shows the frozen frame
   rather than going black, and a frame is still submitted.
@@ -146,8 +147,6 @@ The description prose the agent reads is reproduced in full in
   changes into the input plugin before updates.
 - `gfx.SetViewportCmd`: supplies logical-window and physical-framebuffer sizes
   each drawable frame.
-- `gfx.SetBackendCmd`: installs the lazily created WebGPU backend once the
-  device and surface are ready.
 
 ## Events Published
 
@@ -169,7 +168,18 @@ invoke its update, draw, and input bridges directly.
 
 ## Backend Behavior
 
-The private backend implements the public `gfx.Backend` contract. It maps Cog's
+The private backend implements the public `gfx.Backend` contract, and is gfx's
+Adapter. The plugin builds it once and provides it with
+`registrar.ProvideAdapter[gfx.Backend]` at the top of `Register`, before the
+GPU device exists: gfx is a Port, and its Adapter is bound at composition,
+while the device is created asynchronously inside the render loop. `onDraw`
+attaches the device to the same value on the first frame the device is
+available, and retries every frame until then; a failure is reported once.
+Until it is attached the backend is not `Ready`, `NewTexture` and `NewBuffer`
+still reserve ids, and no `app.RenderEvent` is published, so no frame is drawn
+before the device is ready.
+
+It maps Cog's
 opaque IDs to native WebGPU textures and buffers, reflects WGSL bindings, caches
 pipelines/samplers/bind groups, maintains depth targets, performs queued bakes
 and releases, and submits each translated `gfx.GpuQueue` to the current surface.

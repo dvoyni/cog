@@ -12,6 +12,7 @@ import (
 	"github.com/dvoyni/cog/bundles/input"
 	"github.com/dvoyni/cog/bundles/ui"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
@@ -48,6 +49,7 @@ func (p *pairingPlugin) Dependencies() []kernel.PluginName {
 }
 
 func (p *pairingPlugin) Register(registrar *kernel.Registrar, _ any) error {
+	registrar.ProvideAdapter[gfx.Backend](p.rig.backend)
 	registrar.HandleCommand[app.TimeCmd](p.rig.plugin.timeCmdImpl)
 	return nil
 }
@@ -71,7 +73,7 @@ func newPairingRig(t *testing.T) *pairingRig {
 		t: t, plugin: &Plugin{config: tickTestConfig()},
 		caps: map[string]mcp.Capability{}, backend: newPairingBackend(),
 	}
-	gfxPlugin, canvasPlugin, uiPlugin := gfx.New(), canvas.New(), ui.New()
+	gfxPlugin, canvasPlugin, uiPlugin := gfximpl.New(), canvas.New(), ui.New()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(map[kernel.PluginName]any{
@@ -110,8 +112,7 @@ func newPairingRig(t *testing.T) *pairingRig {
 		}
 	}
 
-	rig.k.ExecuteCommand[gfx.SetBackendCmd](gfx.SetBackendRequest{Backend: rig.backend})
-	rig.k.ExecuteCommand[app.SetViewportCmd](app.SetViewportRequest{
+	rig.k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
 		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
 	})
 	return rig
@@ -460,6 +461,7 @@ func (b *pairingBackend) id() gfx.ResourceID {
 	return gfx.ResourceID(b.next)
 }
 
+func (b *pairingBackend) Ready() bool               { return true }
 func (b *pairingBackend) NewTexture() gfx.TextureID { return gfx.TextureID(b.id()) }
 func (b *pairingBackend) NewBuffer() gfx.BufferID   { return gfx.BufferID(b.id()) }
 

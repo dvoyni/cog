@@ -6,11 +6,10 @@ import (
 
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/app"
 )
 
-func testViewport() *app.Viewport {
-	return &app.Viewport{
+func testViewport() *gfx.Viewport {
+	return &gfx.Viewport{
 		Width: 800, Height: 600,
 		WindowWidth: 800, WindowHeight: 600,
 		FramebufferWidth: 1600, FramebufferHeight: 1200,

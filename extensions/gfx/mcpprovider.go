@@ -11,15 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dvoyni/cog/extensions/gfx/internal"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
-
-// gfx offers its capabilities itself rather than through a separate plugin,
-// per the rule that every package hosts its own provider: a capture must live
-// where the Backend internals are, and this is where they are.
-var _ mcp.Provider = (*Plugin)(nil)
 
 // captureName is the capability rendered as the tool gfx_capture, and
 // frameName the one rendered as gfx_frame. They are two tools rather than one
@@ -111,7 +107,7 @@ type CaptureResponse struct {
 // game - a capture writes exactly the file it was told to, and a snapshot
 // under pause costs a step, which its description states rather than its
 // annotation.
-func (p *Plugin) Capabilities() []mcp.Capability {
+func (PluginEdges) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
 		mcp.Func(captureName, captureDescription, captureScreen, mcp.ReadOnly()),
 		mcp.Func(frameName, frameDescription, frameSnapshot, mcp.ReadOnly()),
@@ -512,14 +508,14 @@ func frameRefusal(reason error) error {
 // validateCaptureSpan checks the burst caps. interval is what buys a long
 // window, never amount.
 func validateCaptureSpan(amount, interval int) error {
-	if amount > maxCaptureAmount {
+	if amount > internal.MaxCaptureAmount {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
-			"amount is %d; ask for up to %d stills and space them with interval", amount, maxCaptureAmount)}
+			"amount is %d; ask for up to %d stills and space them with interval", amount, internal.MaxCaptureAmount)}
 	}
-	if amount*interval > maxCaptureSpan {
+	if amount*interval > internal.MaxCaptureSpan {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"amount x interval is %d ticks; one burst may span up to %d — about ten seconds at 60 Hz",
-			amount*interval, maxCaptureSpan)}
+			amount*interval, internal.MaxCaptureSpan)}
 	}
 	return nil
 }

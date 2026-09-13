@@ -17,6 +17,7 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
@@ -92,6 +93,8 @@ var customTriangleVertexLayout = [...]gfx.VertexAttr{
 func (customTriangleVertex) VertexLayout() []gfx.VertexAttr {
 	return customTriangleVertexLayout[:]
 }
+
+func (b *testBackend) Ready() bool { return true }
 
 func (b *testBackend) NewTexture() gfx.TextureID { b.nextTexture++; return b.nextTexture }
 func (b *testBackend) NewBuffer() gfx.BufferID   { b.nextBuffer++; return b.nextBuffer }
@@ -230,11 +233,11 @@ func (b *testBackend) SetParams(params []byte) {
 }
 func (b *testBackend) SetTexture(gfx.TextureID, int, int) {}
 
-func (b *testBackend) SetSampler(gfx.SamplerID, int, int)         {}
-func (b *testBackend) SetVertexBuffer(gfx.BufferID, int)          {}
+func (b *testBackend) SetSampler(gfx.SamplerID, int, int)               {}
+func (b *testBackend) SetVertexBuffer(gfx.BufferID, int)                {}
 func (b *testBackend) SetIndexBuffer(gfx.BufferID, int, gfx.IndexWidth) {}
-func (b *testBackend) SetBuffer(int, int, gfx.BufferID, int, int) {}
-func (b *testBackend) Draw(_, _, _, _ int, _ bool)                { b.draws++ }
+func (b *testBackend) SetBuffer(int, int, gfx.BufferID, int, int)       {}
+func (b *testBackend) Draw(_, _, _, _ int, _ bool)                      { b.draws++ }
 func (b *testBackend) ReleaseBuffer(id gfx.BufferID) {
 	b.releasedBuffers = append(b.releasedBuffers, id)
 }
@@ -363,13 +366,12 @@ func testKernelRecorder(t testing.TB, filesystem fs.FS, config Config, recorder 
 		storage.Name: storage.DefaultConfig("canvas-test").WithReadFS("test", 10, filesystem),
 		Name:         config,
 	}
-	engine := kernel.New(configs).Handler(onError).WithPlugins(storage.New(), gfx.New(), canvasPlugin, recorder)
+	engine := kernel.New(configs).Handler(onError).WithPlugins(storage.New(), gfximpl.New(), backendAdapter{backend}, canvasPlugin, recorder)
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()
 	k.PublishEvent(app.InitEvent{}).Wait()
-	k.ExecuteCommand[gfx.SetBackendCmd](gfx.SetBackendRequest{Backend: backend})
-	k.ExecuteCommand[app.SetViewportCmd](app.SetViewportRequest{
+	k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
 		Width: 100, Height: 100, FramebufferWidth: 200, FramebufferHeight: 200,
 	})
 	return k, canvasPlugin, backend
@@ -634,7 +636,7 @@ func TestClipSnapshotIsPerOperation(t *testing.T) {
 }
 
 func TestLayerTransformAspectModes(t *testing.T) {
-	view := layerSurface(gfx.TargetDescr{}, &app.Viewport{Width: 100, Height: 100})
+	view := layerSurface(gfx.TargetDescr{}, &gfx.Viewport{Width: 100, Height: 100})
 	tests := []struct {
 		name             string
 		aspect           AspectMode

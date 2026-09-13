@@ -163,14 +163,14 @@ have.
 
 > **Amended at implementation ([#253](https://github.com/dvoyni/cog/issues/253)).**
 > The `gfx_frame` row read
-> `.Last().After[canvas.UpdateEventHandler]().Before[gfx.UpdateEventHandler]()`
+> `.Last().After[canvas.UpdateEventHandler]().Before[gfx.PresentOnUpdate]()`
 > until #253 built it. That expression cannot be written from `gfx`: `canvas`
 > imports `gfx`, so `gfx` cannot name `canvas.UpdateEventHandler`, and a second
 > `Last` subscriber would only conflict with canvas's flush on the queue rather
 > than order against it. `gfx` takes the snapshot inside `presentOnUpdate`
 > instead, immediately before the swap — the same point in the frame, reached
 > from the other side, since canvas's own
-> `Before[gfx.UpdateEventHandler]()` already puts the flush ahead of it. See
+> `Before[gfx.PresentOnUpdate]()` already puts the flush ahead of it. See
 > [gfx §Where it sits in the tick](../../../../extensions/gfx/docs/specs/mcp.md#where-it-sits-in-the-tick).
 >
 > **The other two rows are unaffected and stay exactly as written**, because

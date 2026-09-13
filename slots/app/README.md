@@ -3,17 +3,14 @@
 `github.com/cog-engine/app` defines the driver-neutral application-loop and
 display contract. It has no plugin and no implementation. A system driver such as
 `wgpu` publishes lifecycle, update, render, and window-size events and implements
-the quit command; a renderer such as `gfx` owns the `Viewport` resource and
-handles the viewport commands.
+the quit and time commands. `app` is an Open slot, so it declares no Resources:
+the viewport, its resource and its commands belong to `gfx`, which owns them.
 
 ## Files
 
 `contract.go` holds package documentation and shared value types, `events.go` the
 event declarations, `commands.go` the command/request/response declarations plus
-`Paused`, the one caller-side helper over them, and `resources.go` the resource
-contract. Because this package is contract-only,
-`resources.go` declares the resource type directly rather than aliasing a private
-one.
+`Paused` and `HoldRemaining`, the caller-side helpers over them.
 
 ## Dependencies
 
@@ -144,46 +141,6 @@ never comes, and a window somebody deliberately held open is not that, so a
 caller **adds** this to its own deadline rather than replacing it. Zero when
 no hold stands, and zero when the engine cannot be asked — the same safe
 direction `Paused` takes.
-
-### `SetViewportCmd`
-
-```go
-type SetViewportCmd kernel.Command[SetViewportRequest, SetViewportResponse]
-```
-
-Supplies the current device-independent window size and physical framebuffer
-size. A driver runs it whenever either changes. The handler resolves the logical
-viewport against the desired policy and writes the `Viewport` resource.
-
-### `SetDesiredViewportCmd`
-
-```go
-type SetDesiredViewportCmd kernel.Command[SetDesiredViewportRequest, SetDesiredViewportResponse]
-```
-
-Selects the logical world-size policy through `ViewportMode`. `Size` applies to
-`ViewportFixedWidth` and `ViewportFixedHeight`; `Width` and `Height` define the
-desired rectangle for `ViewportFit` and `ViewportCover`. Invalid values fall back
-to `ViewportWindow`. A game normally runs it once during startup.
-
-Package `app` only declares both viewport commands; `gfx.Plugin` implements
-them.
-
-## Resources
-
-### `Viewport`
-
-```go
-type Viewport struct {
-    Width, Height                       float32
-    WindowWidth, WindowHeight           float32
-    FramebufferWidth, FramebufferHeight float32
-}
-```
-
-The resolved logical world size, the device-independent window size, and the
-physical framebuffer size. `gfx.Plugin` registers and writes it; gameplay and UI
-declare `kernel.Read[*app.Viewport]`.
 
 ## Events
 

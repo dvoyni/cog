@@ -716,16 +716,16 @@ more after the draw that triggered it.
 ## Event Subscribed
 
 `UpdateEventHandler` subscribes to `app.UpdateEvent`. It writes the scene
-`*OpQueue` and `*Lookup`, reads `app.Viewport`, and writes `gfx.OpQueue` and
+`*OpQueue` and `*Lookup`, reads `gfx.Viewport`, and writes `gfx.OpQueue` and
 `gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
-`gfx.UpdateEventHandler`, exactly as canvas is: gameplay records first, canvas
+`gfx.PresentOnUpdate`, exactly as canvas is: gameplay records first, canvas
 and scene emit graphics draws second, gfx presents last. It is exported so a
 recorder can order itself before scene.
 
 **Everything scene decides happens in that flush, on the update thread** —
 projection resolve, culling, sorting, instance packing and buffer uploads. Scene
 never runs on the render thread: a frustum needs aspect, not pixel size, and
-`app.Viewport` already carries the exact aspect here. The one cost is that a
+`gfx.Viewport` already carries the exact aspect here. The one cost is that a
 screen-targeted camera's aspect is up to one frame stale during a window resize.
 
 ## Demos

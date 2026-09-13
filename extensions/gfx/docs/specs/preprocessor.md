@@ -919,7 +919,7 @@ loop is unchanged: fix the file, hot-reload evicts, the next frame retries and
 reports afresh.
 
 **The error is reported once, not once a frame**, following
-`p.reportedMissingBackend` (`extensions/gfx/plugin.go:37`) — the existing precedent for a
+`p.reportedNotReady` (`extensions/gfx/gfximpl/plugin.go`) — the existing precedent for a
 condition that is true every frame and worth saying once.
 
 ### Retrieving the flattened source

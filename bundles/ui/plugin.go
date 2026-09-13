@@ -91,7 +91,7 @@ func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var interactionsResource kernel.Write[*Interactions]
 	var processorResource kernel.Write[*processor]
 	var inputResource kernel.Read[*input.State]
-	var viewportResource kernel.Read[*app.Viewport]
+	var viewportResource kernel.Read[*gfx.Viewport]
 	var queueResource kernel.Write[*canvas.OpQueue]
 	var lookupResource kernel.Write[*canvas.Lookup]
 	var filesystem kernel.Read[storage.FileSystem]
@@ -100,7 +100,7 @@ func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			interactionsResource = access.GetWrite[*Interactions]()
 			processorResource = access.GetWrite[*processor]()
 			inputResource = access.GetRead[*input.State]()
-			viewportResource = access.GetRead[*app.Viewport]()
+			viewportResource = access.GetRead[*gfx.Viewport]()
 			queueResource = access.GetWrite[*canvas.OpQueue]()
 			lookupResource = access.GetWrite[*canvas.Lookup]()
 			filesystem = access.GetRead[storage.FileSystem]()
@@ -143,7 +143,7 @@ func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 		}
 }
 
-func pointerToViewport(pointer input.Pos, viewport app.Viewport) input.Pos {
+func pointerToViewport(pointer input.Pos, viewport gfx.Viewport) input.Pos {
 	if viewport.WindowWidth <= 0 || viewport.WindowHeight <= 0 {
 		return input.Pos{}
 	}

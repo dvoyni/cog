@@ -4,20 +4,6 @@
 // and gameplay/render plugins use them without importing any specific driver.
 package app
 
-// ViewportMode selects how the logical viewport responds to window aspect
-// changes. ViewportWindow uses the window dimensions directly; fixed modes keep
-// one dimension constant; Fit shows the full desired rectangle, while Cover
-// fills the viewport from it.
-type ViewportMode uint8
-
-const (
-	ViewportWindow ViewportMode = iota
-	ViewportFixedWidth
-	ViewportFixedHeight
-	ViewportFit
-	ViewportCover
-)
-
 // TimeAction selects what TimeCmd does to the engine's tick source: what
 // decides when an update tick is published.
 type TimeAction uint8

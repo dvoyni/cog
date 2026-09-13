@@ -8,48 +8,61 @@
 // the render thread. The plugin translates high-level commands
 // into a backend-agnostic GpuQueue and hands it to Backend.Execute,
 // so gameplay never touches a GPU API and the plugin never imports one.
+//
+// gfx is a Port. This package is its contract - commands, resource types,
+// descriptors, the Backend interface and its vocabulary, Name and the ordering
+// identities - and declares no plugin. The plugin is gfximpl.New, and it works
+// only once a Backend Adapter is bound to it: a driver such as wgpu provides one
+// with kernel.Registrar.ProvideAdapter, and a composition without one fails
+// with kernel.ErrMissingAdapter.
+//
+// Most contract types are declared in gfx/internal and aliased here, so that
+// they stay concrete while their unexported state stays readable to gfximpl;
+// see that package.
 package gfx
+
+import "github.com/dvoyni/cog/extensions/gfx/internal"
 
 // Opaque GPU handles minted by a Backend. The zero value means "none".
 type (
-	ResourceID uint32
+	ResourceID = internal.ResourceID
 	// TextureID identifies a logical texture. The backend creates its native GPU
 	// object lazily when it executes the first bake op for this ID.
-	TextureID ResourceID
+	TextureID = internal.TextureID
 	// BufferID identifies a logical buffer. The backend creates its native GPU
 	// object lazily when it executes the first bake op for this ID.
-	BufferID ResourceID
+	BufferID = internal.BufferID
 	// SamplerID references a texture sampler.
-	SamplerID ResourceID
+	SamplerID = internal.SamplerID
 	// ShaderID references a compiled shader module.
-	ShaderID ResourceID
+	ShaderID = internal.ShaderID
 	// PipelineID references a render pipeline (shader + vertex layout + state).
-	PipelineID ResourceID
+	PipelineID = internal.PipelineID
 	// TextureViewID references a renderable view (a render target). The screen
 	// framebuffer and offscreen render targets are both TextureViewIDs.
-	TextureViewID ResourceID
+	TextureViewID = internal.TextureViewID
 )
 
 // TextureFormat enumerates the pixel formats the renderer can create. The
 // engine is linear, so the format is what says whether the bytes in a texture
 // are light or a gamma-encoded picker value, and callers name it rather than
 // inherit a default that is wrong half the time.
-type TextureFormat uint8
+type TextureFormat = internal.TextureFormat
 
 const (
 	// FormatRGBA8 is 8-bit-per-channel straight-alpha RGBA holding linear
 	// values: normal, metallic-roughness and occlusion maps.
-	FormatRGBA8 TextureFormat = iota
+	FormatRGBA8 = internal.FormatRGBA8
 	// FormatRGBA8Srgb is the same layout holding gamma-encoded values the
 	// hardware decodes on read: base colour, emissive and the canvas atlas.
-	FormatRGBA8Srgb
+	FormatRGBA8Srgb = internal.FormatRGBA8Srgb
 	// FormatDepth32F is the one depth format, renderable and sampleable. There
 	// is no stencil aspect anywhere in the engine.
-	FormatDepth32F
+	FormatDepth32F = internal.FormatDepth32F
 	// FormatScreen is the sentinel for "whatever the frame buffer is", so a
 	// pipeline can be keyed before the frame buffer exists. It resolves to
 	// FrameBufferFormat.
-	FormatScreen
+	FormatScreen = internal.FormatScreen
 )
 
 // FrameBufferFormat is what every ScreenTarget pass renders into: the frame
@@ -67,154 +80,119 @@ const (
 // whether it applies the sRGB OETF, so the buffer's colour space and the
 // transfer function that puts it on screen stay one decision rather than two
 // that can disagree.
-const FrameBufferFormat = FormatRGBA8Srgb
-
-// Resolve replaces the FormatScreen sentinel with the concrete frame-buffer
-// format and returns every other format unchanged.
-func (f TextureFormat) Resolve() TextureFormat {
-	if f == FormatScreen {
-		return FrameBufferFormat
-	}
-	return f
-}
+const FrameBufferFormat = internal.FrameBufferFormat
 
 // AddressMode selects how texture coordinates outside [0,1] are sampled on one
 // axis. It is an enum rather than a bitmask because mirroring is a third mode,
 // not a combination of the other two, and a flag that reads as a combination is
 // a flag that gets silently reinterpreted.
-type AddressMode uint8
+type AddressMode = internal.AddressMode
 
 const (
-	AddressClamp AddressMode = iota
-	AddressRepeat
-	AddressMirror
+	AddressClamp  = internal.AddressClamp
+	AddressRepeat = internal.AddressRepeat
+	AddressMirror = internal.AddressMirror
 )
 
 // FilterMode selects texture minification/magnification filtering.
-type FilterMode uint8
+type FilterMode = internal.FilterMode
 
 const (
-	FilterLinear FilterMode = iota
-	FilterNearest
+	FilterLinear  = internal.FilterLinear
+	FilterNearest = internal.FilterNearest
 )
 
 // BufferKind tags a buffer's role, which selects its GPU usage flags.
-type BufferKind uint8
+type BufferKind = internal.BufferKind
 
 const (
-	BufferVertex BufferKind = iota
-	BufferIndex
-	BufferUniform
-	BufferStorage
+	BufferVertex  = internal.BufferVertex
+	BufferIndex   = internal.BufferIndex
+	BufferUniform = internal.BufferUniform
+	BufferStorage = internal.BufferStorage
 )
 
 // PrimitiveTopology selects how vertices assemble into primitives.
-type PrimitiveTopology uint8
+type PrimitiveTopology = internal.PrimitiveTopology
 
 const (
-	TopologyTriangleList PrimitiveTopology = iota
-	TopologyTriangleStrip
-	TopologyLineList
+	TopologyTriangleList  = internal.TopologyTriangleList
+	TopologyTriangleStrip = internal.TopologyTriangleStrip
+	TopologyLineList      = internal.TopologyLineList
 )
 
 // BlendMode selects color blending against the render target.
-type BlendMode uint8
+type BlendMode = internal.BlendMode
 
 const (
 	// BlendAlpha is straight-alpha over blending.
-	BlendAlpha BlendMode = iota
+	BlendAlpha = internal.BlendAlpha
 	// BlendOpaque overwrites the target (no blend).
-	BlendOpaque
+	BlendOpaque = internal.BlendOpaque
 	// BlendAdditive adds source color weighted by source alpha.
-	BlendAdditive
+	BlendAdditive = internal.BlendAdditive
 	// BlendMultiply multiplies source and destination color.
-	BlendMultiply
+	BlendMultiply = internal.BlendMultiply
 )
 
 // CompareFunc is a depth or sampler comparison. The zero value passes
 // everything, which is the WebGPU default and what a draw that ignores depth
 // wants. Depth is conventional: near maps to 0, far to 1, so CompareLess keeps
 // the nearer fragment.
-type CompareFunc uint8
+type CompareFunc = internal.CompareFunc
 
 const (
-	CompareAlways CompareFunc = iota
-	CompareNever
-	CompareLess
-	CompareLessEqual
-	CompareGreater
-	CompareGreaterEqual
-	CompareEqual
-	CompareNotEqual
+	CompareAlways       = internal.CompareAlways
+	CompareNever        = internal.CompareNever
+	CompareLess         = internal.CompareLess
+	CompareLessEqual    = internal.CompareLessEqual
+	CompareGreater      = internal.CompareGreater
+	CompareGreaterEqual = internal.CompareGreaterEqual
+	CompareEqual        = internal.CompareEqual
+	CompareNotEqual     = internal.CompareNotEqual
 )
 
 // CullMode selects which faces a pipeline discards.
-type CullMode uint8
+type CullMode = internal.CullMode
 
 const (
-	CullNone CullMode = iota
-	CullFront
-	CullBack
+	CullNone  = internal.CullNone
+	CullFront = internal.CullFront
+	CullBack  = internal.CullBack
 )
 
 // FrontFace selects the winding that counts as the front face. glTF requires
 // the reversed winding on nodes whose transform has a negative determinant.
-type FrontFace uint8
+type FrontFace = internal.FrontFace
 
 const (
-	FrontCCW FrontFace = iota
-	FrontCW
+	FrontCCW = internal.FrontCCW
+	FrontCW  = internal.FrontCW
 )
 
 // Region is a rectangular sub-area of a texture in texels. The json tags are
 // there because a region reaches an agent inside a frame snapshot, and the
 // rest of that document is lowerCamel.
-type Region struct {
-	X      int `json:"x"`
-	Y      int `json:"y"`
-	Width  int `json:"width"`
-	Height int `json:"height"`
-}
+type Region = internal.Region
 
 // TextureDesc describes a texture to create. Layers <= 1 creates a regular 2D
 // texture; larger values create a 2D-array texture. Renderable asks for a
 // texture a render pass can draw into as well as sample.
-type TextureDesc struct {
-	Width, Height int
-	Layers        int
-	Format        TextureFormat
-	Mipmaps       bool
-	Renderable    bool
-	Label         string
-}
+type TextureDesc = internal.TextureDesc
 
 // TextureViewDimension selects the texture view expected by a shader binding.
-type TextureViewDimension uint8
+type TextureViewDimension = internal.TextureViewDimension
 
 const (
-	TextureView2D TextureViewDimension = iota
-	TextureView2DArray
+	TextureView2D      = internal.TextureView2D
+	TextureView2DArray = internal.TextureView2DArray
 )
 
 // SamplerDesc describes a sampler to create. Its zero value clamps both axes
 // and filters linearly at every step, and it stays comparable so the translator
 // can dedup identical samplers - a glTF material with five textures whose
 // samplers happen to match costs one GPU object.
-type SamplerDesc struct {
-	AddressU, AddressV AddressMode
-	// Mag, Min and Mip are separate because glTF specifies magnification,
-	// minification and mip selection independently. Zero is FilterLinear.
-	Mag, Min, Mip FilterMode
-	// Anisotropy is the maximum anisotropic sample count. 0 and 1 both mean
-	// off, and it is clamped to 16. WebGPU requires all three filters linear
-	// whenever it is above 1.
-	Anisotropy uint8
-	// Comparison makes this a comparison sampler, which a shadow map needs and
-	// which cannot be the same object as a colour sampler.
-	Comparison bool
-	Compare    CompareFunc
-	Label      string
-}
+type SamplerDesc = internal.SamplerDesc
 
 // ShaderDesc describes a shader module to create from opaque, backend-specific
 // source bytes (e.g. WGSL for the wgpu backend). The renderer never interprets
@@ -420,4 +398,12 @@ type Backend interface {
 	// carries either the mapped bytes or the reason there are none, so a caller
 	// cannot handle a result and forget a failure.
 	TakeCapture() (GpuCapture, bool)
+
+	// Ready reports whether the backend can render. A driver whose GPU device
+	// arrives asynchronously provides its Backend at registration, before the
+	// device exists, and reports false until it does. NewTexture and NewBuffer
+	// are the only methods gfx calls on a backend that is not ready; a frame
+	// rendered before it is ready is skipped. It must be safe to call from any
+	// goroutine.
+	Ready() bool
 }

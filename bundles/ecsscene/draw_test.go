@@ -9,7 +9,6 @@ import (
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/app"
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
 )
@@ -25,6 +24,8 @@ type stubBackend struct {
 	nextBuffer  gfx.BufferID
 	nextID      uint32
 }
+
+func (b *stubBackend) Ready() bool { return true }
 
 func (b *stubBackend) NewTexture() gfx.TextureID {
 	b.nextTexture++
@@ -106,12 +107,8 @@ func crateModelComponent() *Model {
 func newDrawingHarness(t testing.TB, ids uint32) *harness {
 	t.Helper()
 	files := fstest.MapFS{crateModel: &fstest.MapFile{Data: crateGLB(t)}}
-	h := newHarnessOver(t, files, ids)
-	if _, err := h.kernel.ExecuteCommand[gfx.SetBackendCmd](
-		gfx.SetBackendRequest{Backend: &stubBackend{}}); err != nil {
-		t.Fatalf("setting the backend: %v", err)
-	}
-	if _, err := h.kernel.ExecuteCommand[app.SetViewportCmd](app.SetViewportRequest{
+	h := newHarnessWith(t, files, ids, &stubBackend{})
+	if _, err := h.kernel.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
 		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
 	}); err != nil {
 		t.Fatalf("setting the viewport: %v", err)

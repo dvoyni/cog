@@ -491,9 +491,9 @@ command. Nothing is added to `Capability`, to `mcp`, or to the broker.
 
 What the agent may set today, all of it free:
 
-- **`app.SetDesiredViewportCmd`** — declared in `app`, handled by `gfx`
+- **`gfx.SetDesiredViewportCmd`** — declared and handled by `gfx`
   (`slots/app/commands.go:31`, `extensions/gfx/plugin.go:65`), available as
-  `mcp.Command[app.SetDesiredViewportCmd, …]` with **zero new code**. An agent
+  `mcp.Command[gfx.SetDesiredViewportCmd, …]` with **zero new code**. An agent
   reproducing a layout bug at a named aspect ratio is a standing mutation that
   already exists.
 - **A synthetic key held down** across frames, which persists in `input.State`

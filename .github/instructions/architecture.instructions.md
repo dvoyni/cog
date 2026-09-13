@@ -32,6 +32,18 @@ A Bundle and a Port share one shape:
 - **`internal/…`**: code the root and the `…impl` share, such as the consume
   side of a Resource queue.
 
+A contract type whose unexported state the `…impl` reads is declared in
+`internal/` with its fields unexported, and the root re-exports it as an alias
+plus a wrapper per constructor (`type MeshDescr = internal.MeshDescr`). Its
+methods, the recording methods included, live in `internal/`. It stays a
+concrete type, so nothing goes through an interface. What the root and the
+`…impl` need beyond its exported methods, `internal/` exports as plain
+functions (`internal.OpQueueOps(q)`); only they can import `internal/`, so none
+of it is public API. `internal/` never imports its own root, so anything such a
+type refers to, down to the enums in its fields, is declared there too. Types
+nothing outside the root reads the insides of stay declared in the root.
+`extensions/gfx` is the worked example.
+
 ## Placing New Code
 
 Take the first answer that fits:

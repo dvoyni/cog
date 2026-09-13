@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
@@ -143,6 +144,8 @@ func (b *testBackend) buffersBoundTo(name string) []bufferBinding {
 	}
 	return found
 }
+
+func (b *testBackend) Ready() bool { return true }
 
 func (b *testBackend) NewTexture() gfx.TextureID { b.nextTexture++; return b.nextTexture }
 func (b *testBackend) NewBuffer() gfx.BufferID   { b.nextBuffer++; return b.nextBuffer }
@@ -390,13 +393,12 @@ func newHarnessOver(
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) bool { sink.add(err); *reported = append(*reported, err); return false }).
-		WithPlugins(storage.New(), gfx.New(), New(), recordPlugin{record: record})
+		WithPlugins(storage.New(), gfximpl.New(), backendAdapter{backend}, New(), recordPlugin{record: record})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()
 	k.PublishEvent(app.InitEvent{}).Wait()
-	k.ExecuteCommand[gfx.SetBackendCmd](gfx.SetBackendRequest{Backend: backend})
-	k.ExecuteCommand[app.SetViewportCmd](app.SetViewportRequest{
+	k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
 		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
 	})
 	return &harness{kernel: k, backend: backend, reported: reported, sink: sink}

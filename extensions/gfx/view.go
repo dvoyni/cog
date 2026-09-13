@@ -1,10 +1,6 @@
 package gfx
 
-import (
-	"strconv"
-
-	"github.com/dvoyni/cog/slots/app"
-)
+import "github.com/dvoyni/cog/extensions/gfx/internal"
 
 // The view types are the vocabulary cog's snapshots share. gfx declares them
 // because gfx owns the descriptors they render - a texture, a parameter, a
@@ -80,7 +76,7 @@ type SnapshotView struct {
 // step fields belong to the capability body, which is the only place that
 // knows whether one was performed, and Tick to the snapshot, which is the
 // only thing produced inside the tick it names.
-func SnapshotViewOf(viewport app.Viewport) SnapshotView {
+func SnapshotViewOf(viewport Viewport) SnapshotView {
 	return SnapshotView{
 		PixelWidth:     int(viewport.FramebufferWidth),
 		PixelHeight:    int(viewport.FramebufferHeight),
@@ -117,7 +113,7 @@ type ParameterView struct {
 // than the fields, so a new arm on the union that forgets to answer here
 // serializes as its kind and no value, instead of as somebody else's value.
 func ParameterViewOf(parameter ParameterDescr) ParameterView {
-	view := ParameterView{Name: parameter.Name(), Kind: parameter.kind.String()}
+	view := ParameterView{Name: parameter.Name(), Kind: internal.ParameterKind(&parameter).String()}
 	if value, ok := parameter.ColorValue(); ok {
 		view.Value = []float32{value.R, value.G, value.B, value.A}
 	}
@@ -191,10 +187,10 @@ type TextureView struct {
 // TextureViewOf renders one texture descriptor.
 func TextureViewOf(texture TextureDescr) TextureView {
 	view := TextureView{
-		Source:  textureSourceName(texture.source),
+		Source:  internal.TextureSourceName(internal.TextureSource(&texture)),
 		Path:    texture.Path(),
 		ID:      texture.ID(),
-		Format:  formatName(texture.Format()),
+		Format:  internal.FormatName(texture.Format()),
 		Mipmaps: texture.Mipmaps(),
 		Bytes:   texture.PixelBytes(),
 	}
@@ -222,7 +218,7 @@ type BufferView struct {
 // buffer and is filled in by whatever bound it.
 func BufferViewOf(buffer BufferDescr) BufferView {
 	return BufferView{
-		Source: bufferSourceName(buffer.source),
+		Source: internal.BufferSourceName(internal.BufferSource(&buffer)),
 		ID:     buffer.ID(),
 		Size:   buffer.Size(),
 		Bytes:  buffer.InlineBytes(),
@@ -251,17 +247,17 @@ type SamplerView struct {
 // SamplerViewOf renders one sampler descriptor.
 func SamplerViewOf(sampler SamplerDesc) SamplerView {
 	view := SamplerView{
-		AddressU:   addressModeName(sampler.AddressU),
-		AddressV:   addressModeName(sampler.AddressV),
-		Mag:        filterModeName(sampler.Mag),
-		Min:        filterModeName(sampler.Min),
-		Mip:        filterModeName(sampler.Mip),
+		AddressU:   internal.AddressModeName(sampler.AddressU),
+		AddressV:   internal.AddressModeName(sampler.AddressV),
+		Mag:        internal.FilterModeName(sampler.Mag),
+		Min:        internal.FilterModeName(sampler.Min),
+		Mip:        internal.FilterModeName(sampler.Mip),
 		Anisotropy: sampler.Anisotropy,
 		Comparison: sampler.Comparison,
 		Label:      sampler.Label,
 	}
 	if sampler.Comparison {
-		view.Compare = compareFuncName(sampler.Compare)
+		view.Compare = internal.CompareFuncName(sampler.Compare)
 	}
 	return view
 }
@@ -320,67 +316,12 @@ type MaterialStateView struct {
 // MaterialStateViewOf renders one pipeline state.
 func MaterialStateViewOf(state MaterialState) MaterialStateView {
 	return MaterialStateView{
-		Blend:        blendModeName(state.Blend),
-		DepthCompare: compareFuncName(state.DepthCompare),
+		Blend:        internal.BlendModeName(state.Blend),
+		DepthCompare: internal.CompareFuncName(state.DepthCompare),
 		DepthWrite:   state.DepthWrite,
-		Cull:         cullModeName(state.Cull),
-		FrontFace:    frontFaceName(state.FrontFace),
+		Cull:         internal.CullModeName(state.Cull),
+		FrontFace:    internal.FrontFaceName(state.FrontFace),
 	}
-}
-
-// The name tables. They are unexported on purpose: naming an enum for a debug
-// document is not the same promise as giving every gfx enum a String, which
-// would put a rendering of every member into the package's public surface for
-// the sake of one reader. An unknown value names its ordinal rather than
-// falling back to a legal-looking name, so a member added without touching
-// this file is visible instead of mislabelled.
-
-func textureSourceName(source textureSource) string {
-	switch source {
-	case TextureSourceResource:
-		return "resource"
-	case TextureSourceBytes:
-		return "bytes"
-	case TextureSourceBaked:
-		return "baked"
-	}
-	return unknownName(int(source))
-}
-
-func bufferSourceName(source bufferSource) string {
-	switch source {
-	case BufferSourceBytes:
-		return "bytes"
-	case BufferSourceBaked:
-		return "baked"
-	}
-	return unknownName(int(source))
-}
-
-func bufferKindName(kind BufferKind) string {
-	switch kind {
-	case BufferVertex:
-		return "vertex"
-	case BufferIndex:
-		return "index"
-	case BufferUniform:
-		return "uniform"
-	case BufferStorage:
-		return "storage"
-	}
-	return unknownName(int(kind))
-}
-
-func addressModeName(mode AddressMode) string {
-	switch mode {
-	case AddressClamp:
-		return "clamp"
-	case AddressRepeat:
-		return "repeat"
-	case AddressMirror:
-		return "mirror"
-	}
-	return unknownName(int(mode))
 }
 
 // FilterModeName is the view vocabulary's spelling of a sampler filter. It is
@@ -391,100 +332,4 @@ func addressModeName(mode AddressMode) string {
 // make, that one value reaches an agent in one shape. It is still not
 // FilterMode.String: naming an enum for a debug document is not a commitment to
 // render every gfx enum for every cog app.
-func FilterModeName(mode FilterMode) string { return filterModeName(mode) }
-
-func filterModeName(mode FilterMode) string {
-	switch mode {
-	case FilterLinear:
-		return "linear"
-	case FilterNearest:
-		return "nearest"
-	}
-	return unknownName(int(mode))
-}
-
-func blendModeName(mode BlendMode) string {
-	switch mode {
-	case BlendAlpha:
-		return "alpha"
-	case BlendOpaque:
-		return "opaque"
-	case BlendAdditive:
-		return "additive"
-	case BlendMultiply:
-		return "multiply"
-	}
-	return unknownName(int(mode))
-}
-
-func compareFuncName(compare CompareFunc) string {
-	switch compare {
-	case CompareAlways:
-		return "always"
-	case CompareNever:
-		return "never"
-	case CompareLess:
-		return "less"
-	case CompareLessEqual:
-		return "lessEqual"
-	case CompareGreater:
-		return "greater"
-	case CompareGreaterEqual:
-		return "greaterEqual"
-	case CompareEqual:
-		return "equal"
-	case CompareNotEqual:
-		return "notEqual"
-	}
-	return unknownName(int(compare))
-}
-
-func cullModeName(mode CullMode) string {
-	switch mode {
-	case CullNone:
-		return "none"
-	case CullFront:
-		return "front"
-	case CullBack:
-		return "back"
-	}
-	return unknownName(int(mode))
-}
-
-func frontFaceName(face FrontFace) string {
-	switch face {
-	case FrontCCW:
-		return "ccw"
-	case FrontCW:
-		return "cw"
-	}
-	return unknownName(int(face))
-}
-
-func loadOpName(load LoadOp) string {
-	switch load {
-	case LoadPreserve:
-		return "preserve"
-	case LoadClear:
-		return "clear"
-	case LoadDiscard:
-		return "discard"
-	}
-	return unknownName(int(load))
-}
-
-func storeOpName(store StoreOp) string {
-	switch store {
-	case StoreKeep:
-		return "keep"
-	case StoreDiscard:
-		return "discard"
-	}
-	return unknownName(int(store))
-}
-
-// unknownName spells a value no table names, so an enum that grew reads as
-// unknown rather than as whichever name happened to be last.
-func unknownName(value int) string {
-	return "unknown(" + strconv.Itoa(value) + ")"
-}
+func FilterModeName(mode FilterMode) string { return internal.FilterModeName(mode) }

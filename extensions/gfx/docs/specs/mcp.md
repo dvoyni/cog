@@ -156,9 +156,9 @@ exiting all truncate a burst, and a silent short one reads as *nothing happened
 between frames 12 and 60*.
 
 **The two sizes earn their place for a different reason: the image is
-framebuffer pixels and `input.Pos` is window units.** `app.Viewport` carries
+framebuffer pixels and `input.Pos` is window units.** `gfx.Viewport` carries
 three sizes — logical world, device-independent window, physical framebuffer
-(`slots/app/resources.go:10-14`) — and on any HiDPI display what the agent *sees* and
+(`extensions/gfx/viewportcontract.go`) — and on any HiDPI display what the agent *sees* and
 where it can *click* differ by the scale factor. Together these two are the
 conversion `input_send` needs.
 
@@ -238,13 +238,13 @@ The granularity changed rather than the answer.
 **The gfx queue is reachable without touching `readList`.** The premise that
 only gfx can bind the surviving queue is true and irrelevant: `present` swaps
 the **write** queue into the ready slot during the Last phase
-(`extensions/gfx/plugin.go:82-92`), after canvas's flush. A subscriber ordered between them
+(`extensions/gfx/gfximpl/plugin.go`), after canvas's flush. A subscriber ordered between them
 sees the complete frame through the ordinary exported `Read[*gfx.OpQueue]`.
 
 ### Where it sits in the tick
 
 ```
-.Last().After[canvas.UpdateEventHandler]().Before[gfx.UpdateEventHandler]()
+.Last().After[canvas.UpdateEventHandler]().Before[gfx.PresentOnUpdate]()
 ```
 
 Reads `Read[*gfx.OpQueue]` after canvas has flushed into it and before `present`
@@ -266,11 +266,11 @@ before canvas's flush, `gfx_frame` after it.
 > **The snapshot is therefore taken inside `presentOnUpdate` itself,
 > immediately before the queue swap.** That is the same point in the frame the
 > expression named, reached from the other side: canvas orders its own flush
-> `Before[gfx.UpdateEventHandler]()`, so by the time `present` runs the frame is
+> `Before[gfx.PresentOnUpdate]()`, so by the time `present` runs the frame is
 > complete, and the snapshot is built before `present` swaps it away. The
 > handler gains a `Read[*gfx.ResourceQueue]` alongside its existing writes —
 > see [What it reports](#what-it-reports) — and the arm still binds through a
-> `First()` subscriber of its own, `FrameUpdateEventHandler`, which is what
+> `First()` subscriber of its own, `frameOnUpdate` in gfximpl, which is what
 > makes "a tick that *began* after the request" decidable.
 >
 > **This applies to `gfx_frame` and to nothing else.** The other two links stay

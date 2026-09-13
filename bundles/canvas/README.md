@@ -523,7 +523,7 @@ pages are freed only by the whole-glyph-atlas resize invalidation.
 `UpdateEventHandler` subscribes to `app.UpdateEvent`. It writes the canvas
 `*OpQueue` and `*Lookup`, reads `gfx.Viewport` and `storage.FileSystem`, and writes
 `gfx.OpQueue` and `gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
-`gfx.UpdateEventHandler`, so gameplay records first, canvas emits graphics
+`gfx.PresentOnUpdate`, so gameplay records first, canvas emits graphics
 draws second, and gfx presents last.
 
 `DrawsArmUpdateEventHandler` and `DrawsUpdateEventHandler` are the two halves

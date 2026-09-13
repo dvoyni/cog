@@ -69,7 +69,7 @@ func (p *Plugin) Register(registrar *kernel.Registrar, value any) error {
 	registrar.Subscribe[DrawsUpdateEventHandler](p.snapshotOnUpdate).
 		Last().Before[UpdateEventHandler]()
 	registrar.Subscribe[UpdateEventHandler](p.flush).
-		Last().Before[gfx.UpdateEventHandler]()
+		Last().Before[gfx.PresentOnUpdate]()
 	return nil
 }
 
@@ -136,14 +136,14 @@ func (p *Plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var writeQueue kernel.Write[*OpQueue]
 	var gfxQueue kernel.Write[*gfx.OpQueue]
 	var gfxResourceQueue kernel.Write[*gfx.ResourceQueue]
-	var viewport kernel.Read[*app.Viewport]
+	var viewport kernel.Read[*gfx.Viewport]
 	var filesystem kernel.Read[storage.FileSystem]
 	var lookupResource kernel.Write[*Lookup]
 	return func(access kernel.ResourceAccess) {
 			writeQueue = access.GetWrite[*OpQueue]()
 			gfxQueue = access.GetWrite[*gfx.OpQueue]()
 			gfxResourceQueue = access.GetWrite[*gfx.ResourceQueue]()
-			viewport = access.GetRead[*app.Viewport]()
+			viewport = access.GetRead[*gfx.Viewport]()
 			filesystem = access.GetRead[storage.FileSystem]()
 			lookupResource = access.GetWrite[*Lookup]()
 		}, func(kernel.Kernel, app.UpdateEvent) error {
@@ -154,7 +154,7 @@ func (p *Plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 
 func (p *Plugin) flushFrame(
 	write *OpQueue, gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue,
-	view *app.Viewport, filesystem storage.FileSystem, lookup *Lookup,
+	view *gfx.Viewport, filesystem storage.FileSystem, lookup *Lookup,
 ) error {
 	spriteAtlas := lookup.sprites
 	fontAtlas := lookup.fonts
@@ -283,7 +283,7 @@ type surface struct {
 // one, the viewport otherwise. A screen target cannot answer - its swapchain
 // view is per-frame and sized on the render thread - and the viewport is the
 // number canvas can read on the update thread.
-func layerSurface(target gfx.TargetDescr, view *app.Viewport) surface {
+func layerSurface(target gfx.TargetDescr, view *gfx.Viewport) surface {
 	if width, height, ok := target.Size(); ok && width > 0 && height > 0 {
 		return surface{size: m.Vec2{X: float32(width), Y: float32(height)}, scale: 1}
 	}

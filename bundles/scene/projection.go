@@ -1,8 +1,8 @@
 package scene
 
 import (
+	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/app"
 )
 
 // passAspect resolves the aspect a pass's projection is built from. It is
@@ -16,7 +16,7 @@ import (
 // reaching onto the render thread. The cost is that the aspect is up to one
 // frame stale during a window resize, which can mis-cull only something already
 // touching the frustum edge.
-func passAspect(id CameraID, pass Pass, view *app.Viewport) (float32, error) {
+func passAspect(id CameraID, pass Pass, view *gfx.Viewport) (float32, error) {
 	if pass.Target.IsNone() {
 		if _, clears := pass.ClearColor.Get(); clears {
 			return 0, ErrColourlessPassClearsColour{Camera: id, Tag: pass.tag()}

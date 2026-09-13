@@ -5,6 +5,11 @@ high-level draws into an `OpQueue`; gfx rotates queues through a latest-wins
 triple buffer, resolves resource-backed shaders and textures, translates to a
 `GpuQueue`, and hands that queue to a driver-provided `Backend`.
 
+gfx is a **Port**: it ships its own contract and implementation, and works only
+once a `Backend` **Adapter** is bound to it. The vocabulary is in
+[`CONTEXT.md`](../../CONTEXT.md) and the decision in
+[ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
+
 [`docs/specs/preprocessor.md`](docs/specs/preprocessor.md) is the design record
 for the WGSL shader preprocessor — the `#include` / `#define` / `#const` / `#if`
 language shader sources are written in, and what each rule is and why. It is
@@ -12,20 +17,69 @@ implemented behind `FlattenShader`, which `ensureShader` calls on a cache miss s
 that every backend receives flattened source and none of them knows the
 preprocessor exists; nothing else in this README describes it.
 
+## Packages
+
+gfx has the Port shape: a contract root, an `…impl` and an `internal/`.
+
+- **`extensions/gfx`** is the contract: commands, resource types, descriptors,
+  `Backend` and its vocabulary, `Viewport`, `Name` and the ordering identities
+  `PresentOnUpdate` and `RenderOnRender`. It declares no plugin, and it is what
+  every other package imports.
+- **`extensions/gfx/gfximpl`** is the plugin: `New`, its handlers, the
+  translator, and the capture and frame-snapshot slots. Only composition roots
+  and tests import it.
+- **`extensions/gfx/internal`** holds what the two share and nothing else may
+  reach: the declarations of the contract types whose unexported state the
+  translator reads, their recording methods, the consume side of the queues,
+  and the shader preprocessor.
+
+A contract type whose insides gfximpl reads (`OpQueue`, `ResourceQueue`, the
+descriptors and the enums they carry) is declared in `internal` with its
+fields unexported, and re-exported from the root as an alias
+(`type OpQueue = internal.OpQueue`) plus a wrapper for each constructor. It
+stays a concrete type, and its exported methods are public API through the
+alias. What the root and gfximpl read beyond that goes through plain functions
+`internal` exports, which only they can call. `internal` never imports the
+root. See [`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+
+Two things still sit in the root because they name `storage` or `mcp`, which
+are not Ports yet and which gfximpl may not import: the mcp capability bodies
+(`mcpprovider.go`), and `PluginEdges`, which the plugin embeds for its
+dependency on storage, its read lock on `storage.FileSystem` and its
+`Capabilities`. They move into gfximpl as storage and mcp become Ports.
+
 ## Plugin
 
 - Name: `gfx.Name` (`"gfx"`)
-- Constructor: `gfx.New() *gfx.Plugin`
+- Constructor: `gfximpl.New() *gfximpl.Plugin`
 - Plugin dependency: `storage`
+- Requires: exactly one `gfx.Backend` Adapter
 - Go package dependencies: `app`, `kernel`, `mcp`, `storage`, `x/image`
 - Implements: `mcp.Provider`, `kernel.PluginStopper`
 
 The plugin has no configuration. Register `storage` before it so shader and
 texture resources are available at runtime.
 
+**The Backend Adapter.** The plugin calls
+`registrar.RequireAdapter[gfx.Backend]()` and reads the handle from `Start`
+onwards. A driver provides its backend with
+`registrar.ProvideAdapter[gfx.Backend](backend)` during its own `Register`; a
+composition with no provider fails with `kernel.ErrMissingAdapter`, and one
+with two fails with `kernel.ErrDuplicateAdapter`. No command installs a
+backend.
+
+A driver whose GPU device arrives later (wgpu's is created asynchronously
+inside the render loop) provides a stable value at `Register` and attaches the
+device to it once the device exists. Until then `Backend.Ready` is false.
+`ResourceQueue.Ready` asks the same question, and a frame rendered before the
+backend is ready is skipped: nothing is translated or executed, and
+`ErrBackendNotReady` is reported once. The recording queues reserve ids
+through `NewTexture` and `NewBuffer` at any time, which a backend must answer
+without a device.
+
 `Plugin` implements the kernel lifecycle methods `Name`, `Dependencies`,
-`Init`, and `Stop`. `Stop` exists for one job: completing a capture the engine
-walked away from.
+`Register`, and `Stop`. `Stop` exists for one job: completing a capture the
+engine walked away from.
 
 ## Resources
 
@@ -232,7 +286,7 @@ accessors instead, which the compiler checks. Two rules hold across all of them:
 a tagged union serializes to exactly one value, and bulk bytes never travel —
 inline pixels and raw parameter data are reported as a byte count.
 
-The enum name tables behind the views are unexported, because naming an enum
+The enum name tables behind the views are not in the contract root, because naming an enum
 for a debug document is not a commitment to render every gfx enum for every cog
 app. `FilterModeName` is the one exception, and the rule is narrow: a name
 crosses the package boundary only where a sibling snapshot reports a gfx enum
@@ -248,7 +302,6 @@ specify are implemented.
 | --- | --- | --- |
 | `PresentCmd` | `PresentRequest` / `PresentResponse` | write `*OpQueue` and internal ready queue |
 | `AcquireCmd` | `AcquireRequest` / `AcquireResponse{Advanced}` | write internal read and ready queues |
-| `SetBackendCmd` | `SetBackendRequest{Backend}` / `SetBackendResponse` | write all frame queues and `*ResourceQueue` |
 | `ReleaseCachedResourceCmd` | `ReleaseCachedResourceRequest{Path}` / `ReleaseCachedResourceResponse` | write `*ResourceQueue` |
 | `FreeCachedResourcesCmd` | `FreeCachedResourcesRequest` / `FreeCachedResourcesResponse` | write `*ResourceQueue` |
 | `SetViewportCmd` | `SetViewportRequest` with window/framebuffer dimensions / `SetViewportResponse{Viewport}` | read desired policy, write `*Viewport` |
@@ -271,16 +324,21 @@ not subscribe to this event itself.
 
 ### Subscribed
 
-- `CaptureUpdateEventHandler` handles `app.UpdateEvent` and runs `First()`,
+The two identities other packages order against are declared in the contract
+root: `gfx.PresentOnUpdate` and `gfx.RenderOnRender`. Canvas and scene order
+their flush `Before[gfx.PresentOnUpdate]()`. The two `First()` identities are
+unexported in gfximpl, because nothing outside orders against them.
+
+- `captureOnUpdate` handles `app.UpdateEvent` and runs `First()`,
   ahead of every other subscriber, so a capture armed while a tick is already
   running waits for the next one. It declares no resources: the capture slot is
   plugin-owned and carries its own lock, because shutdown has to complete a
   waiting capture and a stopped scheduler grants none.
-- `FrameUpdateEventHandler` handles `app.UpdateEvent` and runs `First()`, for
+- `frameOnUpdate` handles `app.UpdateEvent` and runs `First()`, for
   the same reason and with the same absence of declared resources: a frame
   snapshot describes a tick that *began* after the request, so an arm landing
   inside a running tick waits for the next one.
-- `UpdateEventHandler` handles `app.UpdateEvent`, writes `*OpQueue` plus the
+- `PresentOnUpdate` handles `app.UpdateEvent`, writes `*OpQueue` plus the
   ready queue, reads `*ResourceQueue`, and runs `Last()` to present the
   completed frame queue. A capture armed before this tick began binds here,
   beside the queue swap, and the frame snapshot is taken here too, immediately
@@ -288,12 +346,17 @@ not subscribe to this event itself.
   orders its flush before this handler) and still alive. The `*ResourceQueue`
   read is the snapshot's: most resource traffic is recorded there and never
   reaches the frame queue.
-- `RenderEventHandler` handles `app.RenderEvent`, writes the read queue, ready
+- `RenderOnRender` handles `app.RenderEvent`, writes the read queue, ready
   queue, and `*ResourceQueue`, reads `storage.FileSystem`, then translates and
   executes the latest queue on the driver's render thread. It drains
-  `Backend.TakeCapture` immediately after `Execute`.
+  `Backend.TakeCapture` immediately after `Execute`. A frame rendered before
+  `Backend.Ready` is skipped.
 
 ## Viewport
+
+`Viewport`, `SetViewportCmd` and `SetDesiredViewportCmd` are gfx's: gfx owns
+the `*Viewport` resource and handles both commands, so they are declared in its
+contract root rather than in `app`, which declares no Resources.
 
 `Viewport` exposes logical `Width`/`Height`, DIP `WindowWidth`/`WindowHeight`,
 and physical `FramebufferWidth`/`FramebufferHeight`.
@@ -491,10 +554,16 @@ type Backend interface {
     FreePipeline(PipelineID)
     ScreenFramebuffer() (TextureViewID, int, int)
     TextureView(TextureID, mip, layer int) TextureViewID
+    Limits() Limits
     Execute(*GpuQueue)
     TakeCapture() (GpuCapture, bool)
+    Ready() bool
 }
 ```
+
+`Ready` reports whether the backend can render. gfx calls nothing but `Ready`,
+`NewTexture` and `NewBuffer` on a backend that is not ready, and `Ready` must
+be safe from any goroutine.
 
 `TakeCapture` is drained once per frame, immediately after `Execute`, and
 never blocks: what it has ready is the copy the *previous* frame encoded,
@@ -559,6 +628,10 @@ Shared value types and operations live in the root `m` package. Graphics APIs
 use `m.Vec*`, `m.Rect`, `m.Color`, and column-major `m.Mat4` directly.
 
 ## Errors
+
+`ErrBackendNotReady{}` is reported the first time a frame is rendered before the
+Backend Adapter is ready, and the frame is skipped. A missing Adapter is not a
+gfx error: composition fails with `kernel.ErrMissingAdapter`.
 
 `ErrShaderNotFound{Name}` is reported through the kernel when a resource-backed
 shader cannot be loaded. Its `Error() string` method implements `error`.

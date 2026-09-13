@@ -16,6 +16,7 @@ import (
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/bundles/input"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
@@ -183,7 +184,7 @@ func newLayoutRig(t *testing.T) *layoutRig {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storage.New(), input.New(), gfx.New(), canvas.New(), New(), fixture)
+	}).WithPlugins(storage.New(), input.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvas.New(), New(), fixture)
 	stopped := make(chan struct{})
 	go func() { engine.Run(ctx); close(stopped) }()
 	<-engine.Ready()
@@ -195,10 +196,10 @@ func newLayoutRig(t *testing.T) *layoutRig {
 	k := engine.Executioner()
 	// A fixed-width policy is what makes the logical viewport differ from the
 	// window, so a response reporting only two of the three sizes is visible.
-	k.ExecuteCommand[app.SetDesiredViewportCmd](app.SetDesiredViewportRequest{
-		Mode: app.ViewportFixedWidth, Size: 400,
+	k.ExecuteCommand[gfx.SetDesiredViewportCmd](gfx.SetDesiredViewportRequest{
+		Mode: gfx.ViewportFixedWidth, Size: 400,
 	})
-	k.ExecuteCommand[app.SetViewportCmd](app.SetViewportRequest{
+	k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
 		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
 	})
 	return &layoutRig{t: t, k: k, fixture: fixture}

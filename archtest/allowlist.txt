@@ -8,13 +8,6 @@
 # One entry per line: "<package> imports <package>" or "<package> declares <type>".
 # Paths are relative to the module root.
 
-# #333 gfx becomes a Port.
-bundles/canvas imports extensions/gfx
-bundles/ecsscene imports extensions/gfx
-bundles/scene imports extensions/gfx
-bundles/ui imports extensions/gfx
-extensions/wgpu imports extensions/gfx
-
 # #334 storage becomes a Port.
 bundles/canvas imports extensions/storage
 bundles/scene imports extensions/storage

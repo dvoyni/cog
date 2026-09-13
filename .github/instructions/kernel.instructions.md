@@ -228,11 +228,11 @@ A handler dispatches a command only through a dispatcher it declared in its
 `Lock`:
 
 ```go
-var setDesiredViewport func(kernel.Kernel, app.SetDesiredViewportRequest) (app.SetDesiredViewportResponse, error)
+var setDesiredViewport func(kernel.Kernel, gfx.SetDesiredViewportRequest) (gfx.SetDesiredViewportResponse, error)
 return func(access kernel.ResourceAccess) {
-		setDesiredViewport = access.Uses[app.SetDesiredViewportCmd]()
+		setDesiredViewport = access.Uses[gfx.SetDesiredViewportCmd]()
 	}, func(k kernel.Kernel, _ app.WindowSizeChangeEvent) error {
-		_, err := setDesiredViewport(k, app.SetDesiredViewportRequest{Width: 100, Height: 100})
+		_, err := setDesiredViewport(k, gfx.SetDesiredViewportRequest{Width: 100, Height: 100})
 		return err
 	}
 ```

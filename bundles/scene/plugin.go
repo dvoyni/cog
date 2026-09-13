@@ -110,7 +110,7 @@ func (p *Plugin) Register(registrar *kernel.Registrar, value any) error {
 	registrar.InitResource(&opQueue{})
 	registrar.InitResource(newLookup(config))
 	registrar.Subscribe[UpdateEventHandler](p.flush).
-		Last().Before[gfx.UpdateEventHandler]()
+		Last().Before[gfx.PresentOnUpdate]()
 	// The load's two hops: the parse, which holds only the filesystem, and the
 	// upload, which holds the Lookup and the resource queue and nothing else.
 	registrar.HandleCommand[loadModelCmd](loadModelCmdImpl)
@@ -133,19 +133,19 @@ func (p *Plugin) Start(k kernel.Executioner) error {
 // sorting, instance packing and buffer uploads. Scene never runs on the render
 // thread — gfx renders from a latest-wins snapshot, so there is no mechanism
 // for it and no need for one, because a frustum needs aspect, not pixel size,
-// and app.Viewport already carries the exact aspect here.
+// and gfx.Viewport already carries the exact aspect here.
 func (p *Plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var writeQueue kernel.Write[*OpQueue]
 	var lookupResource kernel.Write[*Lookup]
 	var gfxQueue kernel.Write[*gfx.OpQueue]
 	var gfxResourceQueue kernel.Write[*gfx.ResourceQueue]
-	var viewport kernel.Read[*app.Viewport]
+	var viewport kernel.Read[*gfx.Viewport]
 	return func(access kernel.ResourceAccess) {
 			writeQueue = access.GetWrite[*OpQueue]()
 			lookupResource = access.GetWrite[*Lookup]()
 			gfxQueue = access.GetWrite[*gfx.OpQueue]()
 			gfxResourceQueue = access.GetWrite[*gfx.ResourceQueue]()
-			viewport = access.GetRead[*app.Viewport]()
+			viewport = access.GetRead[*gfx.Viewport]()
 		}, func(k kernel.Kernel, _ app.UpdateEvent) error {
 			p.flushFrame(k, writeQueue.Get(), lookupResource.Get(),
 				gfxQueue.Get(), gfxResourceQueue.Get(), viewport.Get())
@@ -155,7 +155,7 @@ func (p *Plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 
 func (p *Plugin) flushFrame(
 	k kernel.Kernel, write *OpQueue, lookup *Lookup,
-	gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue, view *app.Viewport,
+	gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue, view *gfx.Viewport,
 ) {
 	cameras := write.beginFlush()
 	defer write.endFlush()
@@ -305,7 +305,7 @@ func (p *Plugin) reportMeshOnce(report func(error), ref MeshRef, err error) {
 // skipped whole: the projection it would get instead is degenerate, and every
 // pass built from it would cull against a volume nobody asked for.
 func (p *Plugin) flushCamera(
-	k kernel.Kernel, write *OpQueue, lookup *Lookup, view *app.Viewport, camera cameraRecord,
+	k kernel.Kernel, write *OpQueue, lookup *Lookup, view *gfx.Viewport, camera cameraRecord,
 ) {
 	if camera.descr.Near == 0 || camera.descr.Far == 0 {
 		k.ReportError(ErrCameraClipPlanesMissing{
@@ -335,7 +335,7 @@ func (p *Plugin) flushCamera(
 // in what order, and packs them. Within a pass, recording order is not
 // preserved - that is the trade the sort makes, and Passes documents it.
 func (p *Plugin) flushPass(
-	k kernel.Kernel, write *OpQueue, lookup *Lookup, view *app.Viewport,
+	k kernel.Kernel, write *OpQueue, lookup *Lookup, view *gfx.Viewport,
 	camera cameraRecord, viewMatrix m.Mat4, pass Pass,
 ) {
 	aspect, err := passAspect(camera.id, pass, view)

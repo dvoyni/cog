@@ -2,17 +2,13 @@ package gfx
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
+
+	"github.com/dvoyni/cog/extensions/gfx/internal"
 )
 
 // ErrShaderNotFound is reported to the kernel when a draw's shader source is
 // unavailable from storage.FileSystem.
-type ErrShaderNotFound struct{ Name string }
-
-func (e ErrShaderNotFound) Error() string {
-	return fmt.Sprintf("gfx: shader source %q unavailable", e.Name)
-}
+type ErrShaderNotFound = internal.ErrShaderNotFound
 
 // ErrShaderExceedsWebLimits reports a shader that fits the device it is running
 // on but not the WebGPU floor every browser guarantees. It is a portability
@@ -164,13 +160,14 @@ func (e ErrIndexBufferLength) Error() string {
 		e.Shader, e.Length, e.Width)
 }
 
-// ErrBackendMissing is reported the first time a frame is rendered without an
-// installed Backend. Without it nothing reaches the GPU, so it distinguishes a
-// missing or failed driver from a scene that legitimately drew nothing.
-type ErrBackendMissing struct{}
+// ErrBackendNotReady is reported the first time a frame is rendered before the
+// Backend adapter is ready. Nothing reaches the GPU until it is, so it
+// distinguishes a driver whose device never arrived from a scene that
+// legitimately drew nothing.
+type ErrBackendNotReady struct{}
 
-func (ErrBackendMissing) Error() string {
-	return "gfx: no Backend installed; a driver must run SetBackendCmd before rendering"
+func (ErrBackendNotReady) Error() string {
+	return "gfx: the Backend is not ready, so the frame was not rendered"
 }
 
 // ErrCaptureBusy reports a capture arm made while one is already live. It is
@@ -203,7 +200,7 @@ func (ErrCaptureAbandoned) Error() string {
 type ErrCaptureUnsupported struct{ Format TextureFormat }
 
 func (e ErrCaptureUnsupported) Error() string {
-	return fmt.Sprintf("gfx: %s cannot be captured; a capture is 8-bit RGBA", formatName(e.Format))
+	return fmt.Sprintf("gfx: %s cannot be captured; a capture is 8-bit RGBA", internal.FormatName(e.Format))
 }
 
 // ErrCaptureNoTarget reports a capture of something the frame never rendered
@@ -267,22 +264,6 @@ func (ErrFrameAbandoned) Error() string {
 	return "gfx: the engine stopped before a frame was recorded"
 }
 
-// formatName names a texture format for a message. TextureFormat is a small
-// closed enum with no String of its own, and giving it one would put a
-// rendering of every member into gfx's public surface for one error.
-func formatName(format TextureFormat) string {
-	switch format.Resolve() {
-	case FormatRGBA8:
-		return "RGBA8"
-	case FormatRGBA8Srgb:
-		return "RGBA8 sRGB"
-	case FormatDepth32F:
-		return "depth"
-	default:
-		return fmt.Sprintf("texture format %d", format)
-	}
-}
-
 // ErrShaderSource reports a shader the preprocessor refused, or one the backend
 // refused after flattening.
 //
@@ -290,46 +271,4 @@ func formatName(format TextureFormat) string {
 // convention earns its keep when a caller might branch on the failure, and
 // nothing can recover from a shader that will not compile - so nothing ever
 // will branch, and a type per directive plus a Kind enum would be pure surface.
-type ErrShaderSource struct {
-	Shader  string           // the label: "path [SUPPLY]"
-	At      []ShaderLocation // where; may be empty
-	Message string
-	Err     error // the backend's error, when it was the backend that refused
-
-	// flattened is the rendered segment table, present when the backend refused
-	// a flattened module. No line number ever crosses the backend boundary as
-	// data - gogpu returns an internal parse error type, so errors.As can never
-	// recover a line, and gfx must not import a backend's parser in any case -
-	// so gfx appends the table and lets the reader subtract.
-	flattened string
-}
-
-func (e ErrShaderSource) Error() string {
-	var b strings.Builder
-	b.WriteString("gfx: shader ")
-	b.WriteString(strconv.Quote(e.Shader))
-	b.WriteString(": ")
-	b.WriteString(e.Message)
-	for i, at := range e.At {
-		if i == 0 {
-			b.WriteString(" (at ")
-		} else {
-			b.WriteString(", ")
-		}
-		b.WriteString(at.String())
-	}
-	if len(e.At) > 0 {
-		b.WriteByte(')')
-	}
-	if e.Err != nil {
-		b.WriteString(":\n")
-		b.WriteString(e.Err.Error())
-	}
-	if e.flattened != "" {
-		b.WriteString("\n  flattened: ")
-		b.WriteString(e.flattened)
-	}
-	return b.String()
-}
-
-func (e ErrShaderSource) Unwrap() error { return e.Err }
+type ErrShaderSource = internal.ErrShaderSource

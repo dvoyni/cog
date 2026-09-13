@@ -11,7 +11,6 @@ import (
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/app"
 )
 
 // FontMetrics reports a font's vertical metrics at a given size, in logical
@@ -93,7 +92,7 @@ func (l *Lookup) unloadFont(path string) {
 
 // invalidateFontsOnResize drops the glyph atlas and baked faces when the
 // framebuffer/logical scale changes, so glyphs re-rasterize at full resolution.
-func (l *Lookup) invalidateFontsOnResize(resources *gfx.ResourceQueue, view *app.Viewport) {
+func (l *Lookup) invalidateFontsOnResize(resources *gfx.ResourceQueue, view *gfx.Viewport) {
 	scale := float32(1)
 	if view.Width > 0 && view.FramebufferWidth > 0 {
 		scale = view.FramebufferWidth / view.Width

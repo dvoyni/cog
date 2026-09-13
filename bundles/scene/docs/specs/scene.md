@@ -99,9 +99,9 @@ writes `*Lookup` to apply deferred bakes and unloads.
 ### Event subscribed
 
 `UpdateEventHandler` subscribes to `app.UpdateEvent`. It writes the scene
-`*OpQueue` and `*Lookup`, reads `app.Viewport`, and writes `gfx.OpQueue` and
+`*OpQueue` and `*Lookup`, reads `gfx.Viewport`, and writes `gfx.OpQueue` and
 `gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
-`gfx.UpdateEventHandler`, exactly as canvas is: gameplay records first, canvas
+`gfx.PresentOnUpdate`, exactly as canvas is: gameplay records first, canvas
 and scene emit graphics draws second, gfx presents last.
 
 **Everything scene decides happens in that flush, on the update thread** —
@@ -109,7 +109,7 @@ projection resolve, frustum culling, light culling, sorting, instance packing,
 buffer uploads. Scene never runs on the render thread: gfx renders on
 `app.RenderEvent` from a latest-wins snapshot taken by `present` on
 `app.UpdateEvent`, so there is no mechanism for it, and no need for one, because
-a frustum needs **aspect**, not pixel size, and `app.Viewport` already carries
+a frustum needs **aspect**, not pixel size, and `gfx.Viewport` already carries
 the exact aspect on the update thread
 ([Draw sorting, culling, and batching](https://github.com/dvoyni/cog/issues/20),
 overturning the render-thread placement in
@@ -454,7 +454,7 @@ the screen — so there is no single camera aspect. Aspect sources:
 
 | pass colour target | aspect from |
 | --- | --- |
-| screen sentinel | `app.Viewport.WindowWidth` / `WindowHeight` |
+| screen sentinel | `gfx.Viewport.WindowWidth` / `WindowHeight` |
 | `TextureTarget` / `TemporaryTarget` | the descriptor's declared `Size()` |
 | `NoTarget()` | the **depth** attachment's size |
 
@@ -2207,7 +2207,7 @@ all for a camera not recorded this frame. `PassView.Frustum` stays an inspection
 and test surface, not a coordinate API.
 
 ```go
-// viewport is the target's size in pixels: app.Viewport.Width/Height for a
+// viewport is the target's size in pixels: gfx.Viewport.Width/Height for a
 // screen camera, the texture size for a TemporaryTarget camera.
 func ViewProjection(camera CameraDescr, viewport m.Vec2) m.Mat4
 func WorldToScreen(camera CameraDescr, viewport m.Vec2, world m.Vec3) (m.Vec3, bool)
@@ -3350,7 +3350,7 @@ The assertions live in **`_test.go` files beside each demo and run with no GPU**
 This is available because culling, sorting and packing happen entirely in the
 update-thread flush and the result is published as `Passes(dst []PassView)`
 including the frustum; `extensions/gfx/plugin_test.go` already has a `fakeBackend`
-implementing the full `Backend` interface; `gfx.SetBackendCmd` installs one
+implementing the full `Backend` interface; `gfx.Backend` is provided to gfx as an Adapter
 without the `wgpu` plugin at all; and a headless engine is already a named
 concept. **`go test ./cmd/scene/...` is the one command the implementation effort
 runs.** Each demo additionally prints its own key numbers on screen through

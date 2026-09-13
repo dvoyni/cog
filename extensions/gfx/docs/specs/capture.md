@@ -283,7 +283,7 @@ drained once per frame. The **shape** is that one; the drain **site** differs,
 and deliberately: `takeRefusal` is drained by the wgpu plugin in `onDraw`
 (`extensions/wgpu/plugin.go:243-245`), whereas `TakeCapture` is drained by **gfx's own
 render handler**, immediately after `list.backend.Execute(ops)`
-(`extensions/gfx/plugin.go:126-138`), which is the handler that holds gfx's resource locks.
+(`extensions/gfx/gfximpl/plugin.go, `renderOnRender``), which is the handler that holds gfx's resource locks.
 **The wgpu plugin never learns that captures exist.**
 
 Rejected: **a channel handed in with the request**, which puts a channel across
@@ -327,7 +327,7 @@ type GpuCapture struct {
 
 **One struct carries success and failure**, so a caller cannot handle one and
 forget the other — which is exactly how a five-minute hang gets shipped.
-Failures are typed structs in cog's style (`ErrBackendMissing{}`,
+Failures are typed structs in cog's style (`ErrBackendNotReady{}`,
 `ErrDepthOnlyPassUnsupported{…}`):
 
 - `ErrCaptureAbandoned{}` — the engine stopped before the map resolved.
@@ -398,7 +398,7 @@ whole guarantee:
 - **the next frame rendered** — the render handler notices a pending flag and
   attaches a capture op to whatever it is about to draw;
 - **the next frame recorded** — the flag is consumed at end of tick by
-  `presentOnUpdate` (`extensions/gfx/plugin.go:71-80`, registered `.Last()`), so the
+  `presentOnUpdate` (`extensions/gfx/gfximpl/plugin.go`, registered `.Last()`), so the
   capture binds to a specific completed `OpQueue`.
 
 **The second.** Under the first, a caller that sends input and then captures can
@@ -411,14 +411,14 @@ That costs one extra tick, about 16 ms at 60 Hz, and it makes press-then-capture
 correct with no composition mechanism at all.
 
 **The capture rides the ready slot, not the queue.** `present()` swaps
-write→ready every tick (`extensions/gfx/plugin.go:82-90`); if two ticks complete before one
+write→ready every tick (`extensions/gfx/gfximpl/plugin.go`, `present`); if two ticks complete before one
 render, the first ready queue is recycled unrendered. If a newer recorded queue
 displaces the pending one before a render, **the capture goes with the newer
 queue**. It is never dropped, and the guarantee only strengthens.
 
 **Under pause the rule applies rather than bending.** A paused engine publishes
 no `app.UpdateEvent`, so no tick can begin at all and the last completed tick
-*is* the present — `renderOnRender` (`extensions/gfx/plugin.go:111`) re-translates the
+*is* the present — `renderOnRender` (`extensions/gfx/gfximpl/plugin.go`) re-translates the
 frozen `readList` every frame, so there is always a render to ride. A capture
 under pause is therefore served from the next render, with **no tick**, and the
 guarantee is satisfied vacuously rather than weakened. The consequence is the
@@ -431,7 +431,7 @@ capture under pause time out.
 ```go
 type ArmCaptureResponse struct {
 	Done     <-chan GpuCapture // buffered, capacity = amount
-	Viewport app.Viewport
+	Viewport gfx.Viewport
 }
 ```
 

@@ -1,5 +1,7 @@
 package gfx
 
+import "github.com/dvoyni/cog/extensions/gfx/internal"
+
 // CheckVertexInterface reports the first way a vertex layout fails the shader
 // about to be drawn with it, and nil when the pair is legal. Three things can
 // be wrong: an @location the layout does not supply at all, one it supplies at
@@ -30,7 +32,7 @@ package gfx
 func CheckVertexInterface(shader string, layout ShaderLayout, attrs []VertexAttr) error {
 	stride := 0
 	for i := range attrs {
-		if end := attrs[i].offset + attrs[i].typ.size(); end > stride {
+		if end := internal.VertexAttrOffset(&(attrs[i])) + internal.VertexTypeSize(internal.VertexAttrTyp(&(attrs[i]))); end > stride {
 			stride = end
 		}
 	}
@@ -48,14 +50,14 @@ func CheckVertexInterface(shader string, layout ShaderLayout, attrs []VertexAttr
 		if input.Location < 0 || input.Location >= len(attrs) {
 			return ErrVertexInputUnsupplied{
 				Shader: shader, Input: input.Name, Location: input.Location,
-				Declared: input.Kind.wgsl(input.Count),
+				Declared: internal.VertexScalarWgsl(input.Kind, input.Count),
 			}
 		}
-		kind, count := attrs[input.Location].typ.decode()
+		kind, count := internal.VertexTypeDecode(internal.VertexAttrTyp(&(attrs[input.Location])))
 		if kind != input.Kind || count != input.Count {
 			return ErrVertexInputMismatch{
 				Shader: shader, Input: input.Name, Location: input.Location,
-				Declared: input.Kind.wgsl(input.Count), Supplied: kind.wgsl(count),
+				Declared: internal.VertexScalarWgsl(input.Kind, input.Count), Supplied: internal.VertexScalarWgsl(kind, count),
 			}
 		}
 	}

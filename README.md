@@ -118,8 +118,8 @@ config := map[kernel.PluginName]any{
 plugins := []kernel.Plugin{
     storage.New(),
     input.New(),
-    gfx.New(),
-    wgpu.New(),
+    gfximpl.New(),
+    wgpu.New(), // provides gfx's Backend Adapter
     ...
 }
 

@@ -78,7 +78,7 @@ type ArmDrawsResponse struct {
 	// Viewport is the window as of the arm, which a capability body cannot read
 	// for itself. A resize between the arm and the tick it binds to is a stated
 	// non-guarantee, exactly as it is for a capture.
-	Viewport app.Viewport
+	Viewport gfx.Viewport
 }
 
 // DrawsSnapshot is one produced snapshot, or the reason there is none. One
