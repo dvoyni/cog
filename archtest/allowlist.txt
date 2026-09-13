@@ -1,0 +1,51 @@
+# Every violation of the tier rules cog carried when the tier test landed.
+#
+# This file only ever shrinks. Nothing is ever added to it: new code follows
+# .github/instructions/architecture.instructions.md. Each Port and Bundle ticket
+# of dvoyni/cog#329 deletes its own entries, and the tier test fails on an entry
+# that is no longer a violation, so an entry cannot outlive its fix.
+#
+# One entry per line: "<package> imports <package>" or "<package> declares <type>".
+# Paths are relative to the module root.
+
+# #333 gfx becomes a Port.
+bundles/canvas imports extensions/gfx
+bundles/ecsscene imports extensions/gfx
+bundles/scene imports extensions/gfx
+bundles/ui imports extensions/gfx
+extensions/wgpu imports extensions/gfx
+
+# #334 storage becomes a Port.
+bundles/canvas imports extensions/storage
+bundles/scene imports extensions/storage
+bundles/ui imports extensions/storage
+extensions/gfx imports extensions/storage
+
+# #335 mcp becomes a Port.
+bundles/canvas imports extensions/mcp
+bundles/input imports extensions/mcp
+bundles/ui imports extensions/mcp
+extensions/gfx imports extensions/mcp
+extensions/mcpserver imports extensions/mcp
+extensions/wgpu imports extensions/mcp
+
+# #336 input: the Plugin moves into inputimpl.
+bundles/input declares Plugin
+
+# #337 anim: the Plugin moves into animimpl.
+bundles/anim declares Plugin
+
+# #338 canvas: the Plugin moves into canvasimpl.
+bundles/canvas declares Plugin
+
+# #339 scene: the Plugin moves into sceneimpl.
+bundles/scene declares Plugin
+
+# #340 ecs: the plugin moves into ecsimpl.
+bundles/ecs declares plugin
+
+# #341 ui: the Plugin moves into uiimpl.
+bundles/ui declares Plugin
+
+# #342 ecsscene: the Plugin moves into ecssceneimpl.
+bundles/ecsscene declares Plugin

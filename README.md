@@ -76,6 +76,27 @@ error handling.
 - [`mcpserver`](extensions/mcpserver/README.md): the broker that collects capabilities from
     every provider and serves them to an agent over MCP.
 
+## Plugin Kinds
+
+Every package is one kind, and its directory says which:
+
+- `kernel` imports nothing else in cog.
+- **Libraries** (`libs/`) define no plugin and import only other Libraries and
+    the kernel.
+- **Open slots** (`slots/`) are contracts shipped without an implementation.
+- **Bundles** (`bundles/X`) ship a slot and its one implementation: the root
+    package is the contract, `Ximpl` holds the plugin, and `internal/` is what
+    the two share.
+- **Ports** (`extensions/P` with a `Pimpl` child) have the same shape, but work
+    only once an **Adapter** is bound to them.
+- Every other `extensions/` directory is an Adapter or an Extension of an Open
+    slot, imported only by composition roots and tests, like every `…impl`.
+
+Games and examples are composition roots and import freely. The kinds, where new
+code goes and the full import table are in
+[`.github/instructions/architecture.instructions.md`](.github/instructions/architecture.instructions.md),
+and `go test ./archtest` enforces them.
+
 ## Plugin Layout
 
 Plugin file layout, handler structure, and resource-scope rules are enforced
