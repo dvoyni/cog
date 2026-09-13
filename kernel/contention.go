@@ -343,7 +343,7 @@ func dumpContention(out *strings.Builder, contention ContentionDescription) {
 	if len(contention.Resources) > 0 {
 		out.WriteString("  resources (most contended first):\n")
 		for _, entry := range contention.Resources {
-			fmt.Fprintf(out, "    %v (%s): %s, %s, %s\n", entry.Type, entry.Owner,
+			fmt.Fprintf(out, "    %s (%s): %s, %s, %s\n", TypeName(entry.Type), entry.Owner,
 				plural(entry.Conflicts, "pair"), plural(len(entry.Writers), "writer"),
 				plural(len(entry.Readers), "reader"))
 		}
@@ -351,8 +351,8 @@ func dumpContention(out *strings.Builder, contention ContentionDescription) {
 	if len(contention.Phases) > 0 {
 		out.WriteString("  phases (most serialised first):\n")
 		for _, phase := range contention.Phases {
-			fmt.Fprintf(out, "    %v %s: %d members, %d/%d pairs serialise",
-				phase.Event, phase.Phase, phase.Members, phase.Conflicts, phasePairs(phase.Members))
+			fmt.Fprintf(out, "    %s %s: %d members, %d/%d pairs serialise",
+				TypeName(phase.Event), phase.Phase, phase.Members, phase.Conflicts, phasePairs(phase.Members))
 			if phase.SingleThreaded {
 				out.WriteString(", single-threaded")
 			}
@@ -366,7 +366,7 @@ func dumpContention(out *strings.Builder, contention ContentionDescription) {
 		out.WriteString("  handler pairs (most shared first):\n")
 		listed := min(len(contention.Handlers), dumpHandlerConflicts)
 		for _, pair := range contention.Handlers[:listed] {
-			fmt.Fprintf(out, "    %v / %v: %v\n", pair.A.Type, pair.B.Type, pair.Resources)
+			fmt.Fprintf(out, "    %s / %s: %v\n", TypeName(pair.A.Type), TypeName(pair.B.Type), typeNames(pair.Resources))
 		}
 		if omitted := len(contention.Handlers) - listed; omitted > 0 {
 			noun := "more pairs"
@@ -379,12 +379,12 @@ func dumpContention(out *strings.Builder, contention ContentionDescription) {
 }
 
 // refNames renders handler references as the identity types a reader greps for.
-func refNames(refs []HandlerRef) []reflect.Type {
-	types := make([]reflect.Type, 0, len(refs))
+func refNames(refs []HandlerRef) []string {
+	names := make([]string, 0, len(refs))
 	for _, ref := range refs {
-		types = append(types, ref.Type)
+		names = append(names, TypeName(ref.Type))
 	}
-	return types
+	return names
 }
 
 func plural(count int, noun string) string {

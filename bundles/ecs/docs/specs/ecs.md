@@ -707,8 +707,9 @@ kernel.New(config).WithPlugins(ecsimpl.New(), physics.New(), game.New())
 > became `ecsimpl.New()` and `ecsimpl.Config{PrewarmEntities: n}`, whose zero
 > field takes the default of 1024. The constructor of the authority lives in
 > `internal`, which only the root and `ecsimpl` can import, and that is what keeps
-> it one per Engine. The kernel's architecture output names the resource
-> `*internal.Entities`, the package it is declared in.
+> it one per Engine. The kernel's architecture output named the resource
+> `*internal.Entities`, the package it is declared in, until
+> [#349](https://github.com/dvoyni/cog/issues/349) rendered it `*ecs.Entities`.
 
 The cost is one requirement a plugin already met: a plugin registering a
 Component or a System declares `ecs`.

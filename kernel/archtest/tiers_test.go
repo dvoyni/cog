@@ -1,6 +1,8 @@
 // Package archtest holds the tier test: the import rules between plugin kinds
 // that .github/instructions/architecture.instructions.md describes, checked over
-// every cog-internal import edge instead of left to prose.
+// every cog-internal import edge instead of left to prose. It also holds the
+// tests of how kernel output names types, which compose every plugin and need a
+// fixture internal package of their own.
 package archtest
 
 import (
@@ -66,7 +68,8 @@ func classify(path string, present func(string) bool) place {
 	parts := strings.Split(path, "/")
 	at := func(t tier, root string) place { return place{path: path, tier: t, root: root} }
 	switch {
-	case path == "kernel/archtest", path == "docs/research", strings.HasPrefix(path, "docs/research/"):
+	case path == "kernel/archtest", strings.HasPrefix(path, "kernel/archtest/"),
+		path == "docs/research", strings.HasPrefix(path, "docs/research/"):
 		return at(tierExempt, "")
 	case path == "kernel":
 		return at(tierKernel, "")

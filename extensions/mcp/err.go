@@ -3,6 +3,8 @@ package mcp
 import (
 	"fmt"
 	"reflect"
+
+	"github.com/dvoyni/cog/kernel"
 )
 
 // Unavailable reports that a capability cannot run right now, in words meant
@@ -37,5 +39,5 @@ type ErrNonStructPayload struct {
 }
 
 func (e ErrNonStructPayload) Error() string {
-	return fmt.Sprintf("capability %q has %s type %v, which is not a struct", e.Capability, e.Role, e.Type)
+	return fmt.Sprintf("capability %q has %s type %s, which is not a struct", e.Capability, e.Role, kernel.TypeName(e.Type))
 }

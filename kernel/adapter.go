@@ -65,7 +65,7 @@ func (h CollectedAdapters[T]) Get() []ContributedAdapter[T] {
 }
 
 func unboundAdapter[T any]() string {
-	return fmt.Sprintf("kernel: adapter handle for %v read before composition bound it", reflect.TypeFor[T]())
+	return fmt.Sprintf("kernel: adapter handle for %s read before composition bound it", TypeName(reflect.TypeFor[T]()))
 }
 
 // RequireAdapter declares that this plugin needs exactly one Adapter for the
@@ -141,7 +141,7 @@ func (r *Registrar) declareAdapter[T any](collects bool, bind func([]adapterCont
 func adapterInterface[T any](declaration string) reflect.Type {
 	id := reflect.TypeFor[T]()
 	if id.Kind() != reflect.Interface {
-		panic(fmt.Sprintf("kernel: %s type argument %v is not an interface type", declaration, id))
+		panic(fmt.Sprintf("kernel: %s type argument %s is not an interface type", declaration, TypeName(id)))
 	}
 	return id
 }

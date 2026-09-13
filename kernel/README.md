@@ -375,6 +375,44 @@ func (e Executioner) Describe() ArchitectureDescription
 It is on `Executioner` rather than `Kernel`, so it is phase-gated for free: only
 the engine mints an `Executioner`, and only once `Run` begins.
 
+### How types are named
+
+Every place the kernel prints a type — `Dump`, the conflict report, each `Err…`
+message, plugin boundaries — renders it with `TypeName`, and so do the tools
+built on `Describe` (`mcpserver_architecture`, `ui_layout`):
+
+```go
+func TypeName(t reflect.Type) string
+```
+
+It is `reflect.Type.String()` with one rule added. A named type declared in a
+package whose import path has an `internal` segment renders under its
+enclosing package, the segment before the last `internal`:
+
+| type | `String()` | `TypeName` |
+| --- | --- | --- |
+| `*OpQueue` declared in `bundles/canvas/internal` | `*internal.OpQueue` | `*canvas.OpQueue` |
+| `*OpQueue` declared in `bundles/scene/internal` | `*internal.OpQueue` | `*scene.OpQueue` |
+| `RenderEvent` declared in `extensions/gfx` | `gfx.RenderEvent` | `gfx.RenderEvent` |
+
+A Bundle or Port that declares a contract type in `internal/` aliases it in its
+contract root, so the rendered name is the alias a caller writes and greps for.
+Go's reflection cannot see aliases, which is why the rule is needed at all:
+`String()` uses the package name, and that is `internal` for every such package.
+
+- The rule applies inside pointers, slices, arrays, maps, channels, functions
+  and generic type arguments: `[]*ui.Frame`, `m.Maybe[*canvas.Font]`. `reflect` spells a type argument by its full import
+  path, and `TypeName` shortens that to the package part as well.
+- It applies to any module's `internal` packages, a game's included.
+- Predeclared types, unnamed structs and interfaces, and types named outside
+  an `internal` package render as `reflect` renders them.
+- An alias declared in an `…impl` names the `internal` declaration too:
+  `canvasimpl.Config`, an alias of `internal.Config`, renders as
+  `canvas.Config`. That is unambiguous, just not the `…impl` spelling.
+
+`ArchitectureDescription` keeps `reflect.Type` fields; only the string form is
+`TypeName`'s.
+
 ## Public API Index
 
 - Composition: `New`, `Engine`, `Engine.Handler`, `Engine.WithPlugins`,
@@ -383,7 +421,7 @@ the engine mints an `Executioner`, and only once `Run` begins.
 - Introspection: `PluginDescription`, `ResourceDescription`,
   `CommandDescription`, `SubscriptionDescription`, `ContentionDescription`,
   `ResourceContention`, `PhaseContention`, `HandlerConflict`, `HandlerRef`,
-  `PortDescription`.
+  `PortDescription`, `TypeName`.
 - Runtime: `Kernel`, `Kernel.Context`, `Kernel.WithContext`,
   `Kernel.ExecuteCommandAsync`, `Kernel.PublishEvent`, `Kernel.ReportError`,
   `Executioner`, `Executioner.ExecuteCommand`, `Executioner.Describe`,

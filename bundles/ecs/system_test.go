@@ -298,7 +298,7 @@ func TestAComponentRegisteredWithoutDependingOnEcsFailsComposition(t *testing.T)
 		t.Fatalf("registering a Component without depending on ecs succeeded")
 	}
 	message := failure.Error()
-	for _, want := range []string{"orphan", entitiesType.String(), `"ecs"`} {
+	for _, want := range []string{"orphan", "*ecs.Entities", `"ecs"`} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("composition failure %q does not name %q", message, want)
 		}

@@ -164,7 +164,7 @@ func subscriptionPhase(value subscription) string {
 	return "ordinary"
 }
 
-// compareTypes orders two types by name. A nil type sorts first, which is how a
+// compareTypes orders two types by TypeName. A nil type sorts first, which is how a
 // command — which names no event — precedes every subscription in the conflict
 // report.
 func compareTypes(a, b reflect.Type) int {
@@ -177,13 +177,7 @@ func compareTypes(a, b reflect.Type) int {
 		}
 		return 1
 	}
-	if a.String() < b.String() {
-		return -1
-	}
-	if a.String() > b.String() {
-		return 1
-	}
-	return 0
+	return strings.Compare(TypeName(a), TypeName(b))
 }
 
 // Dump renders Describe as a readable architecture table. Resource locks are
@@ -208,7 +202,7 @@ func Dump(engine *Engine) string {
 	}
 	out.WriteString("resources:\n")
 	for _, res := range description.Resources {
-		fmt.Fprintf(&out, "  %v (%s)\n", res.Type, res.Owner)
+		fmt.Fprintf(&out, "  %s (%s)\n", TypeName(res.Type), res.Owner)
 	}
 	out.WriteString("ports:\n")
 	for _, port := range description.Ports {
@@ -216,22 +210,22 @@ func Dump(engine *Engine) string {
 		if port.Collects {
 			verb = "collects"
 		}
-		fmt.Fprintf(&out, "  %v (%s) %s %v\n", port.Interface, port.Port, verb, port.Contributors)
+		fmt.Fprintf(&out, "  %s (%s) %s %v\n", TypeName(port.Interface), port.Port, verb, port.Contributors)
 	}
 	out.WriteString("commands:\n")
 	for _, cmd := range description.Commands {
-		fmt.Fprintf(&out, "  %v (%s)%s\n", cmd.Type, cmd.Owner, dumpAccess(cmd.Reads, cmd.Writes, cmd.Uses))
+		fmt.Fprintf(&out, "  %s (%s)%s\n", TypeName(cmd.Type), cmd.Owner, dumpAccess(cmd.Reads, cmd.Writes, cmd.Uses))
 	}
 	out.WriteString("subscriptions:\n")
 	var event reflect.Type
 	for _, sub := range description.Subscriptions {
 		if sub.Event != event {
 			event = sub.Event
-			fmt.Fprintf(&out, "  %v\n", event)
+			fmt.Fprintf(&out, "  %s\n", TypeName(event))
 		}
-		fmt.Fprintf(&out, "    %v (%s, %s)", sub.Type, sub.Owner, sub.Phase)
+		fmt.Fprintf(&out, "    %s (%s, %s)", TypeName(sub.Type), sub.Owner, sub.Phase)
 		if len(sub.DependsOn) > 0 {
-			fmt.Fprintf(&out, " after %v", sub.DependsOn)
+			fmt.Fprintf(&out, " after %v", typeNames(sub.DependsOn))
 		}
 		out.WriteString(dumpAccess(sub.Reads, sub.Writes, sub.Uses))
 		out.WriteString("\n")
@@ -245,13 +239,22 @@ func Dump(engine *Engine) string {
 func dumpAccess(reads, writes, uses []reflect.Type) string {
 	var out strings.Builder
 	if len(reads) > 0 {
-		fmt.Fprintf(&out, " reads %v", reads)
+		fmt.Fprintf(&out, " reads %v", typeNames(reads))
 	}
 	if len(writes) > 0 {
-		fmt.Fprintf(&out, " writes %v", writes)
+		fmt.Fprintf(&out, " writes %v", typeNames(writes))
 	}
 	if len(uses) > 0 {
-		fmt.Fprintf(&out, " uses %v", uses)
+		fmt.Fprintf(&out, " uses %v", typeNames(uses))
 	}
 	return out.String()
+}
+
+// typeNames renders each type with TypeName, for printing as a list.
+func typeNames(types []reflect.Type) []string {
+	names := make([]string, 0, len(types))
+	for _, typ := range types {
+		names = append(names, TypeName(typ))
+	}
+	return names
 }

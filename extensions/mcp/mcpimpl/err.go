@@ -3,6 +3,8 @@ package mcpimpl
 import (
 	"fmt"
 	"reflect"
+
+	"github.com/dvoyni/cog/kernel"
 )
 
 // ErrListen reports that the broker could not bind its address. It terminates
@@ -67,5 +69,5 @@ type ErrNonObjectSchema struct {
 }
 
 func (e ErrNonObjectSchema) Error() string {
-	return fmt.Sprintf("mcpserver: type %v infers a %q schema root, want \"object\"", e.Type, e.Root)
+	return fmt.Sprintf("mcpserver: type %s infers a %q schema root, want \"object\"", kernel.TypeName(e.Type), e.Root)
 }

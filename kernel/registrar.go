@@ -94,7 +94,7 @@ func (r *Registrar) HandleCommand[
 	if lock != nil {
 		lock(*access)
 	}
-	cmd := &command{id: id, owner: r.owner, boundary: "command " + id.String(), resources: access, execute: execute}
+	cmd := &command{id: id, owner: r.owner, boundary: "command " + TypeName(id), resources: access, execute: execute}
 	cmd.invocations.New = func() any { return new(commandContext[TRequest, TResponse]) }
 	r.registry.commands[id] = cmd
 }
@@ -115,7 +115,7 @@ func (r *Registrar) Subscribe[
 	sub := &Ordering[TEvent]{
 		id:        id,
 		owner:     r.owner,
-		boundary:  "subscription " + id.String(),
+		boundary:  "subscription " + TypeName(id),
 		resources: access,
 		observe:   observe,
 	}
@@ -237,7 +237,7 @@ func sortedTypes[T any](values map[reflect.Type]T) []reflect.Type {
 	for id := range values {
 		ids = append(ids, id)
 	}
-	slices.SortFunc(ids, func(a, b reflect.Type) int { return strings.Compare(a.String(), b.String()) })
+	slices.SortFunc(ids, compareTypes)
 	return ids
 }
 

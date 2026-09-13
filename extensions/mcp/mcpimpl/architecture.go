@@ -145,10 +145,11 @@ func checkPath(path string) error {
 }
 
 // describe flattens the kernel's description. A reflect.Type renders as
-// Type.String() — gfx.RenderEvent, package-qualified by short name — because
-// that is the form appearing in the source the agent greps next. The
-// fully-qualified spelling is unambiguous but unsearchable, and where a short
-// name ever collides, the owner disambiguates in the same record.
+// kernel.TypeName renders it — gfx.RenderEvent, package-qualified by short name,
+// and canvas.OpQueue rather than internal.OpQueue for a type declared in
+// canvas's internal package — because that is the form appearing in the source
+// the agent greps next. The fully-qualified spelling is unambiguous but
+// unsearchable.
 func describe(description kernel.ArchitectureDescription) architectureResponse {
 	document := architectureResponse{
 		Plugins:       make([]architecturePlugin, 0, len(description.Plugins)),
@@ -169,7 +170,7 @@ func describe(description kernel.ArchitectureDescription) architectureResponse {
 	}
 	for _, resource := range description.Resources {
 		document.Resources = append(document.Resources, architectureResource{
-			Type: resource.Type.String(), Owner: string(resource.Owner),
+			Type: kernel.TypeName(resource.Type), Owner: string(resource.Owner),
 		})
 	}
 	for _, port := range description.Ports {
@@ -178,20 +179,20 @@ func describe(description kernel.ArchitectureDescription) architectureResponse {
 			contributors = append(contributors, string(contributor))
 		}
 		document.Ports = append(document.Ports, architecturePort{
-			Interface: port.Interface.String(), Port: string(port.Port),
+			Interface: kernel.TypeName(port.Interface), Port: string(port.Port),
 			Collects: port.Collects, Contributors: contributors,
 		})
 	}
 	for _, command := range description.Commands {
 		document.Commands = append(document.Commands, architectureCommand{
-			Type: command.Type.String(), Owner: string(command.Owner),
+			Type: kernel.TypeName(command.Type), Owner: string(command.Owner),
 			Reads: typeNames(command.Reads), Writes: typeNames(command.Writes),
 			Uses: typeNames(command.Uses),
 		})
 	}
 	for _, subscription := range description.Subscriptions {
 		document.Subscriptions = append(document.Subscriptions, architectureSubscription{
-			Event: subscription.Event.String(), Type: subscription.Type.String(),
+			Event: kernel.TypeName(subscription.Event), Type: kernel.TypeName(subscription.Type),
 			Owner: string(subscription.Owner), Phase: subscription.Phase,
 			DependsOn: typeNames(subscription.DependsOn),
 			Reads:     typeNames(subscription.Reads), Writes: typeNames(subscription.Writes),
@@ -204,7 +205,7 @@ func describe(description kernel.ArchitectureDescription) architectureResponse {
 func typeNames(types []reflect.Type) []string {
 	names := make([]string, 0, len(types))
 	for _, value := range types {
-		names = append(names, value.String())
+		names = append(names, kernel.TypeName(value))
 	}
 	return names
 }

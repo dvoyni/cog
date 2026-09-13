@@ -44,9 +44,10 @@ and aliased in the root (`type Entities = internal.Entities`), so they stay
 concrete types: no probe or spawn goes through an interface, a despawn pays the
 one indirect call per Store it always paid, and each friend function inlines. `internal` cannot name the root, so the authority holds
 an enrolled Store as that Store's `remove` and a Component's registration record
-as a value only the root reads back. Because the type is declared there, the
-kernel's architecture output and its diagnostics name the resource
-`*internal.Entities`; it is the same cell as `*ecs.Entities`.
+as a value only the root reads back. The type is declared there, but the
+kernel's architecture output and its diagnostics still name the resource
+`*ecs.Entities`: `kernel.TypeName` renders a type declared in an `internal`
+package under its enclosing package.
 
 ## Files
 

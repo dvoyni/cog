@@ -473,12 +473,17 @@ see
   [#208](https://github.com/dvoyni/cog/issues/208) §6's addressability rule
   satisfied without inventing a scheme — a second confirmation that the rule was
   about addressability rather than about integers.
-- **A `reflect.Type` renders as `Type.String()`** — `gfx.RenderEvent`,
+- **A `reflect.Type` renders as `kernel.TypeName` renders it** — `gfx.RenderEvent`,
   package-qualified by short name. That is the form appearing in the source the
   agent greps next, which is the entire point of handing it a type name.
-  `PkgPath()+"."+Name()` is unambiguous but unsearchable; the short-name
-  collision is theoretical in cog, and where it ever bites, `Owner`
-  disambiguates in the same record.
+  `PkgPath()+"."+Name()` is unambiguous but unsearchable. Amended by
+  [#349](https://github.com/dvoyni/cog/issues/349): this was `Type.String()`
+  until the Bundle and Port splits declared contract types in `internal/`
+  packages, when gfx's, canvas's and scene's OpQueue all rendered as
+  `*internal.OpQueue`. `TypeName` renders a type declared in an `internal`
+  package under its enclosing package (`*canvas.OpQueue`), inside composite and
+  generic types too, and a test composing every cog plugin keeps every rendered
+  name distinct. The kernel README's "How types are named" has the rule.
 - **Optional `path`**, inherited. A subscription DAG is worth grepping.
 - **No filter.** A snapshot's filter exists to bound serialization on the game's
   goroutine inside a tick. Nothing here runs there, and the document is tens of
@@ -651,7 +656,7 @@ written for `extensions/mcpserver` and is updated to the paths and the collectio
 **`extensions/mcp/mcpimpl/architecture.go`**
 
 - The one capability, its request (`{path?}`), its five-array response, and
-  `reflect.Type` rendering via `String()`.
+  `reflect.Type` rendering via `kernel.TypeName`.
 
 **Tests**
 

@@ -60,7 +60,7 @@ type ErrDuplicateRegistration struct {
 }
 
 func (e ErrDuplicateRegistration) Error() string {
-	return fmt.Sprintf("plugin %q registered duplicate %s %v already owned by %q", e.Owner, e.Kind, e.Type, e.Existing)
+	return fmt.Sprintf("plugin %q registered duplicate %s %s already owned by %q", e.Owner, e.Kind, TypeName(e.Type), e.Existing)
 }
 
 type ErrMissingResource struct {
@@ -68,7 +68,7 @@ type ErrMissingResource struct {
 }
 
 func (e ErrMissingResource) Error() string {
-	return fmt.Sprintf("required resource %v has no initial value", e.Type)
+	return fmt.Sprintf("required resource %s has no initial value", TypeName(e.Type))
 }
 
 type ErrPluginPanic struct {
@@ -90,7 +90,7 @@ type ErrUsingUnknownCommand struct {
 }
 
 func (e ErrUsingUnknownCommand) Error() string {
-	return fmt.Sprintf("handler %v declares use of unregistered command %v", e.Declaring, e.Command)
+	return fmt.Sprintf("handler %s declares use of unregistered command %s", TypeName(e.Declaring), TypeName(e.Command))
 }
 
 // ErrUsingCommandCycle is reported when Uses declarations form a cycle, whose
@@ -100,7 +100,7 @@ type ErrUsingCommandCycle struct {
 }
 
 func (e ErrUsingCommandCycle) Error() string {
-	return fmt.Sprintf("cyclic command use among %v", e.Commands)
+	return fmt.Sprintf("cyclic command use among %v", typeNames(e.Commands))
 }
 
 // ErrUndeclaredDependency is reported when a plugin declares a lock on a
@@ -114,8 +114,8 @@ type ErrUndeclaredDependency struct {
 }
 
 func (e ErrUndeclaredDependency) Error() string {
-	return fmt.Sprintf("plugin %q locks resource %v owned by %q without declaring it as a dependency",
-		e.Plugin, e.Resource, e.Owner)
+	return fmt.Sprintf("plugin %q locks resource %s owned by %q without declaring it as a dependency",
+		e.Plugin, TypeName(e.Resource), e.Owner)
 }
 
 // ErrUnavailableDependency is what Dependency panics with when a plugin reads a
@@ -130,11 +130,11 @@ type ErrUnavailableDependency struct {
 
 func (e ErrUnavailableDependency) Error() string {
 	if e.Owner == "" {
-		return fmt.Sprintf("plugin %q reads resource %v at registration, but no plugin it depends on has initialized it",
-			e.Plugin, e.Resource)
+		return fmt.Sprintf("plugin %q reads resource %s at registration, but no plugin it depends on has initialized it",
+			e.Plugin, TypeName(e.Resource))
 	}
-	return fmt.Sprintf("plugin %q reads resource %v at registration, owned by %q without declaring it as a dependency",
-		e.Plugin, e.Resource, e.Owner)
+	return fmt.Sprintf("plugin %q reads resource %s at registration, owned by %q without declaring it as a dependency",
+		e.Plugin, TypeName(e.Resource), e.Owner)
 }
 
 // ErrMissingAdapter is reported when a plugin requires an Adapter for an
@@ -145,7 +145,7 @@ type ErrMissingAdapter struct {
 }
 
 func (e ErrMissingAdapter) Error() string {
-	return fmt.Sprintf("plugin %q requires an adapter for %v, but no plugin provides one", e.Port, e.Interface)
+	return fmt.Sprintf("plugin %q requires an adapter for %s, but no plugin provides one", e.Port, TypeName(e.Interface))
 }
 
 // ErrDuplicateAdapter is reported when a plugin requires exactly one Adapter for
@@ -157,8 +157,8 @@ type ErrDuplicateAdapter struct {
 }
 
 func (e ErrDuplicateAdapter) Error() string {
-	return fmt.Sprintf("plugin %q requires exactly one adapter for %v, but %v each provide one",
-		e.Port, e.Interface, e.Contributors)
+	return fmt.Sprintf("plugin %q requires exactly one adapter for %s, but %v each provide one",
+		e.Port, TypeName(e.Interface), e.Contributors)
 }
 
 // ErrNilAdapter is reported when a plugin provides an untyped nil Adapter for an
@@ -170,7 +170,7 @@ type ErrNilAdapter struct {
 }
 
 func (e ErrNilAdapter) Error() string {
-	return fmt.Sprintf("plugin %q provides a nil adapter for %v", e.Plugin, e.Interface)
+	return fmt.Sprintf("plugin %q provides a nil adapter for %s", e.Plugin, TypeName(e.Interface))
 }
 
 // ErrSubscriptionCycle is returned when an event's subscriptions have an
@@ -181,7 +181,8 @@ type ErrSubscriptionCycle struct {
 }
 
 func (e ErrSubscriptionCycle) Error() string {
-	return fmt.Sprintf("cyclic subscription dependencies for event %v among handler types %v", e.EventType, e.SubscriptionTypes)
+	return fmt.Sprintf("cyclic subscription dependencies for event %s among handler types %v",
+		TypeName(e.EventType), typeNames(e.SubscriptionTypes))
 }
 
 // ErrExecutingUnknownCommand is returned when executing an unregistered command type.
@@ -189,5 +190,5 @@ type ErrExecutingUnknownCommand[TCommand any] struct {
 }
 
 func (e ErrExecutingUnknownCommand[TCommand]) Error() string {
-	return fmt.Sprintf("trying to execute unknown command %v", reflect.TypeFor[TCommand]())
+	return fmt.Sprintf("trying to execute unknown command %s", TypeName(reflect.TypeFor[TCommand]()))
 }

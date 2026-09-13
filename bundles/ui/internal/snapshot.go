@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
-	"strings"
+
+	"github.com/dvoyni/cog/kernel"
 )
 
 // LayoutView is one tick's element tree with what layout resolved it to,
@@ -451,29 +452,17 @@ func visualTypeName(visual Visual) string {
 	return goTypeName(visual)
 }
 
-// goTypeName is the Go type of value as an agent should read it. A type
-// declared in this package - every built-in visual - is named after ui, the
-// package an application imports and the one it was declared in before ui
-// became a Bundle: "internal" names nothing an agent could look up, and
-// ui_layout's output did not change when the declarations moved here.
+// goTypeName is the Go type of value as an agent should read it, rendered by
+// kernel.TypeName like every other type name cog prints. A type declared in
+// this package - every built-in visual - is named after ui, the package an
+// application imports: "internal" names nothing an agent could look up.
 func goTypeName(value any) string {
 	typ := reflect.TypeOf(value)
 	if typ == nil {
 		return ""
 	}
-	name := typ.String()
-	base := typ
-	for base.Kind() == reflect.Pointer {
-		base = base.Elem()
-	}
-	if base.PkgPath() == packagePath {
-		name = strings.Replace(name, "internal.", "ui.", 1)
-	}
-	return name
+	return kernel.TypeName(typ)
 }
-
-// packagePath is this package's import path, read off a type declared here.
-var packagePath = reflect.TypeFor[Element]().PkgPath()
 
 // The name tables. They are unexported for the reason gfx's and canvas's are:
 // naming an enum for a debug document is not the same promise as giving every

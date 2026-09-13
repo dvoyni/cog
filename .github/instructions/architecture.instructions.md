@@ -123,7 +123,7 @@ package orders against is unexported, and stays in the package that subscribes i
 Games and examples (cog-examples, feuds-26, nox) are composition roots. They pick
 the Plugins and Adapters an engine is built from, so they import whatever they
 compose, `…impl` and Adapters included. These rules apply to the cog repo only.
-Inside cog, `kernel/archtest` and `docs/research/**` are outside the tiers.
+Inside cog, `kernel/archtest/**` and `docs/research/**` are outside the tiers.
 
 ## The Tier Test
 
