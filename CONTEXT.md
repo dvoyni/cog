@@ -32,6 +32,34 @@ A statically linked unit of engine functionality selected before startup and fix
 **Plugin dependency**:
 A requirement that another plugin complete registration and any optional startup first.
 
+**Slot**:
+The contract half of a piece of engine functionality: the commands, events, resources and subscription identities other plugins use, with no handler behind any of them.
+_Avoid_: Interface, API, contract package
+
+**Extension**:
+A plugin that implements a Slot. It handles the Slot's commands, owns its resources and registers its subscriptions, and declares no contract of its own.
+_Avoid_: Backend, driver, as the name of the kind
+
+**Bundle**:
+A Slot and the one Extension that implements it, shipped together, so that Extension cannot be replaced by another. It is self-contained: it needs nothing supplied from outside to work, though it may contribute Adapters to a Port that collects them. Most engine functionality is a Bundle.
+_Avoid_: Module, which is a shader module or a Go module; package; feature
+
+**Open slot**:
+A Slot shipped without an Extension, so that whichever Extension an engine is composed with fills it. It declares no Resources, because a Resource needs an owner the Slot cannot name.
+_Avoid_: Abstract bundle, interface
+
+**Port**:
+A plugin that ships its own contract and implementation, as a Bundle does, but works only once it is given an Adapter for an interface it declares. It declares whether it requires exactly one Adapter or collects any number. It is how the platform varies beneath a piece of engine functionality without that functionality being replaced: the renderer and storage stay, and what draws for them and what persists for them changes.
+_Avoid_: Bundle, which needs nothing supplied; Open slot, whose whole implementation is replaced
+
+**Adapter**:
+An implementation of a Port's interface, contributed by a plugin and bound to that Port by the engine during composition. A window driver's GPU backend is an Adapter of the renderer; each Provider's capabilities are an Adapter of the Broker.
+_Avoid_: Backend, driver, as the name of the kind
+
+**Library**:
+Code that is not a plugin and defines none, importing only other Libraries and the kernel.
+_Avoid_: Package, which is every Go directory; util, common
+
 **Registrar**:
 A plugin-scoped capability used only during Registration to declare owned contracts and initial resources.
 
@@ -142,8 +170,8 @@ A Component with no fields. Its presence is the whole of what it says, and its p
 _Avoid_: Flag, marker, label
 
 **Component set**:
-The exact set of Component types one Entity has. It describes an Entity; it is not a structure the engine keeps, and nothing groups Entities by it.
-_Avoid_: Archetype, table, signature
+The exact set of Component types one Entity has. A Spawn names the one a new Entity starts with as a struct type, the way a Query is, whose value carries the Components themselves; from then on the Entity may gain and lose Components and the struct type means nothing. It is not a structure the engine keeps, and nothing groups Entities by it.
+_Avoid_: Archetype, table, signature; Bundle, which is a Slot shipped with its Extension; Prefab and Template, both still unspent
 
 **Component registration**:
 The Registration-phase declaration that one Component type exists, made once per type by exactly one plugin. It is what makes the type's Store exist, so a type no plugin registered cannot be added, read, or locked.
@@ -172,12 +200,8 @@ _Avoid_: System plugin, which is the Host
 Any change to which Entities have which Components — adding or removing a Component, spawning or despawning an Entity — as opposed to a change to a Component's value. A System may make one to the Entity it is currently visiting; changing whether some _other_ Entity is in the Store being iterated is undefined, and so is using any pointer into a Store after that Store has structurally changed.
 
 **Spawn**:
-Creating an Entity together with a complete set of Components, as one Structural change, naming that set as a Bundle. Despawn is its inverse and is total: it removes the Entity from every Store, so nothing anywhere still holds it.
+Creating an Entity with a given Component set and its values, as one Structural change. Despawn is its inverse and is total: it removes the Entity from every Store, so nothing anywhere still holds it.
 _Avoid_: Instantiate, Instance, create
-
-**Bundle**:
-The set of Components one Spawn creates together, named as a struct type the way a Query is. It is not a Component set: it describes one act of creation, not what an Entity has from then on, and the Entity may gain and lose Components afterwards without the Bundle meaning anything.
-_Avoid_: Prefab and Template, both still unspent; archetype
 
 **Reference**:
 An Entity kept inside a Component — a missile's target, a light's owner. Following one is the ordinary way to relate two Entities, and it stays safe when the far Entity is gone: a Reference to a despawned Entity resolves to nothing, because a Despawn empties every Store and a generation cannot match twice. It points one way only. The far Entity does not know it is referenced and nothing anywhere lists what points at a given Entity, so a relation with a many side keeps that side as several References on the one side — the count fixed by whoever declares the Component, never by the engine.
