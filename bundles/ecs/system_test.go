@@ -3,9 +3,11 @@ package ecs
 import (
 	"context"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -108,10 +110,10 @@ func newWorldWith(t testing.TB, ids uint32, subscribe func(*kernel.Registrar),
 ) (*Entities, *componentsPlugin, *kernel.Engine) {
 	t.Helper()
 	components := &componentsPlugin{ids: ids}
-	plugins := []kernel.Plugin{Plugin(), components}
+	plugins := []kernel.Plugin{authority{ids: ids}, components}
 	plugins = append(plugins, bound...)
 	plugins = append(plugins, &systemsPlugin{deps: deps, subscribe: subscribe})
-	engine := kernel.New(map[kernel.PluginName]any{Name: DefaultConfig().WithPrewarmEntities(ids)}).
+	engine := kernel.New(nil).
 		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
 		WithPlugins(plugins...)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -141,7 +143,7 @@ func TestAComponentMoves(t *testing.T) {
 
 	moved := make([]Entity, 4)
 	for i := range moved {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		moved[i] = e
 		components.bodies.Set(e, body{X: float32(i)})
 		components.velocities.Set(e, velocity{X: 1, Y: 2})
@@ -178,7 +180,7 @@ func TestASystemMayNameTheEventItIsDrivenBy(t *testing.T) {
 			}
 		}))
 	})
-	e := entities.alloc()
+	e := internal.EntitiesAlloc(entities)
 	components.bodies.Set(e, body{})
 	components.velocities.Set(e, velocity{X: 10})
 
@@ -195,7 +197,7 @@ func TestASystemMayNameTheEventItIsDrivenBy(t *testing.T) {
 func TestAQueryOnlyVisitsEntitiesHavingEveryComponent(t *testing.T) {
 	entities, components, engine := newWorld(t, 128, subscribeMove)
 
-	both, bodyOnly, velocityOnly := entities.alloc(), entities.alloc(), entities.alloc()
+	both, bodyOnly, velocityOnly := internal.EntitiesAlloc(entities), internal.EntitiesAlloc(entities), internal.EntitiesAlloc(entities)
 	components.bodies.Set(both, body{})
 	components.velocities.Set(both, velocity{X: 1})
 	components.bodies.Set(bodyOnly, body{})
@@ -227,8 +229,8 @@ func TestEveryHandlerTouchingAStoreReadsEntities(t *testing.T) {
 			continue
 		}
 		found = true
-		if !namesType(sub.Reads, "*ecs.Entities") {
-			t.Fatalf("the move System reads %v, which does not include *ecs.Entities", sub.Reads)
+		if !slices.Contains(sub.Reads, entitiesType) {
+			t.Fatalf("the move System reads %v, which does not include *Entities", sub.Reads)
 		}
 		if !namesType(sub.Reads, "velocity]") {
 			t.Fatalf("the move System reads %v, which does not include the velocity Store", sub.Reads)
@@ -252,7 +254,7 @@ func TestAQueryOverAnUnregisteredComponentFailsComposition(t *testing.T) {
 	kernel.New(nil).
 		Handler(func(err error) bool { failure = err; return true }).
 		WithPlugins(
-			Plugin(),
+			authority{ids: 8},
 			&componentsPlugin{ids: 8},
 			&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
 				registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[guardedQuery]) {}))
@@ -290,13 +292,13 @@ func TestAComponentRegisteredWithoutDependingOnEcsFailsComposition(t *testing.T)
 	var failure error
 	kernel.New(nil).
 		Handler(func(err error) bool { failure = err; return true }).
-		WithPlugins(Plugin(), orphanPlugin{})
+		WithPlugins(authority{ids: 8}, orphanPlugin{})
 
 	if failure == nil {
 		t.Fatalf("registering a Component without depending on ecs succeeded")
 	}
 	message := failure.Error()
-	for _, want := range []string{"orphan", "*ecs.Entities", `"ecs"`} {
+	for _, want := range []string{"orphan", entitiesType.String(), `"ecs"`} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("composition failure %q does not name %q", message, want)
 		}
@@ -362,6 +364,10 @@ func TestASystemNamingTheEventTwiceIsRejected(t *testing.T) {
 	}()
 	ToHandler[app.UpdateEvent](nil, func(a app.UpdateEvent, b app.UpdateEvent) {})
 }
+
+// entitiesType is the authority's resource type. Declarations are compared
+// against it rather than against its spelling, which is the internal package's.
+var entitiesType = reflect.TypeFor[*Entities]()
 
 func namesType(types []reflect.Type, want string) bool {
 	for _, t := range types {

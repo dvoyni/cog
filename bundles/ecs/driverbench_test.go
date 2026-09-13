@@ -3,6 +3,7 @@ package ecs
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -47,13 +48,13 @@ func disjointStores(tb testing.TB, n, overlap int, subscribe func(*kernel.Regist
 	tb.Helper()
 	entities, components, engine := newWorld(tb, uint32(2*n), subscribe)
 	for i := range n - overlap {
-		bodied := entities.alloc()
+		bodied := internal.EntitiesAlloc(entities)
 		components.bodies.Set(bodied, body{X: float32(i)})
-		collided := entities.alloc()
+		collided := internal.EntitiesAlloc(entities)
 		components.colliders.Set(collided, collider{Radius: 1})
 	}
 	for range overlap {
-		both := entities.alloc()
+		both := internal.EntitiesAlloc(entities)
 		components.bodies.Set(both, body{})
 		components.colliders.Set(both, collider{Radius: 1})
 		components.solids.Set(both, solid{})

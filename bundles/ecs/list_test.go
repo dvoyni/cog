@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -158,12 +159,12 @@ func TestARemovedRowDoesNotKeepItsValueAlive(t *testing.T) {
 		// asserting the wrong thing.
 		t.Skip("validation mode retains stamped arrays by design")
 	}
-	entities := newEntities(8)
+	entities := internal.NewEntities(8)
 	store := NewStore[inventory](entities, 8)
 
 	collected := make(chan struct{}, 1)
 	func() {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		slots := ListOf([]uint32{1, 2, 3})
 		runtime.SetFinalizer(&slots.data[0], func(*uint32) { collected <- struct{}{} })
 		store.Set(e, inventory{Slots: slots})
@@ -192,7 +193,7 @@ func TestARemovedRowDoesNotKeepItsValueAlive(t *testing.T) {
 // pointer-free row keeps nothing alive and clearing it would be work for no
 // one.
 func TestATrivialRowIsLeftWhereItLies(t *testing.T) {
-	entities := newEntities(8)
+	entities := internal.NewEntities(8)
 	trivial := NewStore[position](entities, 8)
 	if !trivial.trivial {
 		t.Fatal("a pointer-free Component is not marked trivial, so removal would zero rows for nothing")
@@ -249,7 +250,7 @@ func TestANonTrivialQueryTakesTheTypedCopyAndTheWideShape(t *testing.T) {
 			}))
 		}, []kernel.PluginName{Name, "components", "rich"}, rich)
 
-	rich.labels.Set(entities.alloc(), labelled{Name: "a name the fill has to copy properly"})
+	rich.labels.Set(internal.EntitiesAlloc(entities), labelled{Name: "a name the fill has to copy properly"})
 	if err := engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
 		t.Fatalf("publishing the update: %v", err)
 	}

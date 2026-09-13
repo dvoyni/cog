@@ -338,10 +338,13 @@ checks it. The Lock rule's "no resource value" still holds for the **lock set**:
 `ToHandler` reads the authority to plan against registration-time data, and the
 set it declares is still a function of the System's signature.
 
-**Cost.** One method and one error type, no hot-path cost. `ecs.Plugin` takes no
-argument and creates the authority from `ecs.Config`, `NewEntities` is
-unexported, and every plugin registering a Component or System declares `ecs`
-— which each System's `read{*Entities}` already required.
+**Cost.** One method and one error type, no hot-path cost. The ecs plugin takes
+no argument and creates the authority from its config, the authority's
+constructor is out of every other plugin's reach, and every plugin registering a
+Component or System declares `ecs` — which each System's `read{*Entities}`
+already required. (Since [#340](https://github.com/dvoyni/cog/issues/340) the
+plugin is `ecsimpl.New()` with `ecsimpl.Config`, and the constructor is in
+`bundles/ecs/internal`.)
 
 ---
 
@@ -365,7 +368,7 @@ all (`noLocks, noLocks`) and therefore cannot block.**
 The consequence is that **command dispatch is unusable on any per-entity hot
 path**, whoever writes it. It is why the ECS ended up with no commands: a Spawn
 became a handle declared in the System's signature instead, at 26.0 ns for a
-four-Component bundle.
+spawn of four Components.
 
 **If kernel ever wants a fast path here**, the shape the measurement suggests is
 one that skips `scheduler.execute` when the request is empty, and these are the

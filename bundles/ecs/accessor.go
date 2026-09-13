@@ -202,7 +202,7 @@ func (r *Remove[T]) From(e Entity) bool { return r.store.Get().Remove(e) }
 func declareComponent[T any](en *Entities, access kernel.ResourceAccess, accessor string) kernel.Read[*Entities] {
 	entities := access.GetRead[*Entities]()
 	componentType := reflect.TypeFor[T]()
-	if en.classOf(componentType) == nil {
+	if classOf(en, componentType) == nil {
 		panic(fmt.Sprintf("ecs: %s[%s] names unregistered Component %s", accessor, componentType, componentType))
 	}
 	return entities

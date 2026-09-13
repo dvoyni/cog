@@ -3,6 +3,7 @@ package ecs
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -13,9 +14,9 @@ import (
 // scheduling round — paid once per frame, by the declaration, whether the System
 // spawns or not.
 
-// wideBundle is the four-field Bundle, the last of them a Tag: a Component with
-// no fields is an ordinary Store and an ordinary Bundle field.
-type wideBundle struct {
+// wideSet is the four-field Component set, the last of them a Tag: a Component
+// with no fields is an ordinary Store and an ordinary Component set field.
+type wideSet struct {
 	Body     body
 	Velocity velocity
 	Collider collider
@@ -28,34 +29,34 @@ type wideBundle struct {
 const spawnBatch = 4096
 
 func BenchmarkSpawnTwoFields(b *testing.B) {
-	spawn, writeable, _ := handles[spawnBundle](b, spawnBatch)
-	bundle := spawnBundle{Body: body{X: 1}, Velocity: velocity{X: 2}}
-	benchmarkSpawn(b, writeable, func() Entity { return spawn.New(bundle) })
+	spawn, writeable, _ := handles[spawnSet](b, spawnBatch)
+	values := spawnSet{Body: body{X: 1}, Velocity: velocity{X: 2}}
+	benchmarkSpawn(b, writeable, func() Entity { return spawn.New(values) })
 }
 
 func BenchmarkSpawnFourFields(b *testing.B) {
-	spawn, writeable, _ := handles[wideBundle](b, spawnBatch)
-	bundle := wideBundle{Body: body{X: 1}, Velocity: velocity{X: 2}, Collider: collider{Radius: 3}}
-	benchmarkSpawn(b, writeable, func() Entity { return spawn.New(bundle) })
+	spawn, writeable, _ := handles[wideSet](b, spawnBatch)
+	values := wideSet{Body: body{X: 1}, Velocity: velocity{X: 2}, Collider: collider{Radius: 3}}
+	benchmarkSpawn(b, writeable, func() Entity { return spawn.New(values) })
 }
 
 // BenchmarkSpawnTwoFieldsEscaping is the trap priced: the same spawn with the
-// bundle reached through the address of the parameter instead of through the
+// Component set reached through the address of the parameter instead of through the
 // Spawn's own field.
 func BenchmarkSpawnTwoFieldsEscaping(b *testing.B) {
-	spawn, writeable, _ := handles[spawnBundle](b, spawnBatch)
-	bundle := spawnBundle{Body: body{X: 1}, Velocity: velocity{X: 2}}
-	benchmarkSpawn(b, writeable, func() Entity { return spawn.newEscaping(bundle) })
+	spawn, writeable, _ := handles[spawnSet](b, spawnBatch)
+	values := spawnSet{Body: body{X: 1}, Velocity: velocity{X: 2}}
+	benchmarkSpawn(b, writeable, func() Entity { return spawn.newEscaping(values) })
 }
 
 // BenchmarkSpawnTwoFieldsHandWritten is the baseline the others are read
 // against: the same two Stores written directly, which only a test in this
 // package can do.
 func BenchmarkSpawnTwoFieldsHandWritten(b *testing.B) {
-	_, writeable, components := handles[spawnBundle](b, spawnBatch)
+	_, writeable, components := handles[spawnSet](b, spawnBatch)
 	entities := writeable.entities.Get()
 	benchmarkSpawn(b, writeable, func() Entity {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		components.bodies.Set(e, body{X: 1})
 		components.velocities.Set(e, velocity{X: 2})
 		return e
@@ -96,12 +97,12 @@ func benchmarkSpawn(b *testing.B, writeable *WriteableEntities, create func() En
 // enrolled Store, naming no Component, through an interface carrying exactly one
 // method.
 func BenchmarkDespawnOnly(b *testing.B) {
-	spawn, writeable, _ := handles[spawnBundle](b, spawnBatch)
-	bundle := spawnBundle{Body: body{X: 1}, Velocity: velocity{X: 2}}
+	spawn, writeable, _ := handles[spawnSet](b, spawnBatch)
+	values := spawnSet{Body: body{X: 1}, Velocity: velocity{X: 2}}
 	live := make([]Entity, 0, spawnBatch)
 	refill := func() {
 		for len(live) < spawnBatch {
-			live = append(live, spawn.New(bundle))
+			live = append(live, spawn.New(values))
 		}
 	}
 	refill()
@@ -179,7 +180,7 @@ func BenchmarkBarrierReading(b *testing.B) {
 // nothing else.
 func BenchmarkBarrierDeclared(b *testing.B) {
 	benchmarkFrame(b, barrierEntities, subscribeThird(
-		func(q *Query[velocityQuery], sp *Spawn[spawnBundle]) { walk(q) }))
+		func(q *Query[velocityQuery], sp *Spawn[spawnSet]) { walk(q) }))
 }
 
 // BenchmarkBarrierSpawning is the same again, actually spawning and despawning
@@ -187,9 +188,9 @@ func BenchmarkBarrierDeclared(b *testing.B) {
 // change itself, with the declaration already paid for.
 func BenchmarkBarrierSpawning(b *testing.B) {
 	benchmarkFrame(b, barrierEntities, subscribeThird(
-		func(q *Query[velocityQuery], sp *Spawn[spawnBundle], we *WriteableEntities) {
+		func(q *Query[velocityQuery], sp *Spawn[spawnSet], we *WriteableEntities) {
 			walk(q)
-			we.Despawn(sp.New(spawnBundle{Body: body{X: 1}, Velocity: velocity{X: 1}}))
+			we.Despawn(sp.New(spawnSet{Body: body{X: 1}, Velocity: velocity{X: 1}}))
 		}))
 }
 
@@ -208,13 +209,13 @@ func TestStructuralChangeStaysOnTheEnginesAllocationLine(t *testing.T) {
 	measure := func(perTick int, ids uint32, frames int) float64 {
 		live := make([]Entity, 0, perTick)
 		_, _, engine := newWorld(t, ids, func(registrar *kernel.Registrar) {
-			registrar.Subscribe[churnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[spawnBundle], we *WriteableEntities) {
+			registrar.Subscribe[churnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[spawnSet], we *WriteableEntities) {
 				for _, e := range live {
 					we.Despawn(e)
 				}
 				live = live[:0]
 				for range perTick {
-					live = append(live, sp.New(spawnBundle{Body: body{X: 1}, Velocity: velocity{X: 2}}))
+					live = append(live, sp.New(spawnSet{Body: body{X: 1}, Velocity: velocity{X: 2}}))
 				}
 			}))
 		})

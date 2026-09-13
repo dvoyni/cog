@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 )
@@ -51,7 +52,7 @@ type componentClass struct {
 	copyValue    func(dst, src unsafe.Pointer)
 	declareRead  func(access kernel.ResourceAccess) func() *storeHeader
 	declareWrite func(access kernel.ResourceAccess) func() *storeHeader
-	// declareSet is what a Spawn binds per Bundle field: the same write
+	// declareSet is what a Spawn binds per Component set field: the same write
 	// declaration declareWrite makes, and the typed setter baked beside it.
 	//
 	// The write it declares is redundant for locking and is kept anyway. A Spawn
@@ -113,9 +114,9 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 			return func() *storeHeader { return handle.Get().erase() }
 		},
 		// The value arrives as an address into the spawning handler's staging
-		// buffer rather than as a C, because the caller holds the Bundle only as
-		// bytes at an offset: the deref here is where the Component's type comes
-		// back, and it is sound because the offset was taken from the same
+		// buffer rather than as a C, because the caller holds the Component set
+		// only as bytes at an offset: the deref here is where the Component's type
+		// comes back, and it is sound because the offset was taken from the same
 		// reflect.Type this class was baked for.
 		declareSet: func(access kernel.ResourceAccess) func(e Entity, value unsafe.Pointer) {
 			handle := access.GetWrite[*Store[C]]()
@@ -127,7 +128,7 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 	if !trivial {
 		class.copyValue = func(dst, src unsafe.Pointer) { *(*C)(dst) = *(*C)(src) }
 	}
-	en.declare(componentType, class)
+	internal.EntitiesDeclare(en, componentType, class)
 	return store
 }
 

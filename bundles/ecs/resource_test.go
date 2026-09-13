@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -62,7 +63,7 @@ func TestASystemReachesAnotherPluginsResourceThroughItsSignature(t *testing.T) {
 		},
 		boundDeps, &bindingPlugin{log: log, names: names})
 
-	e := entities.alloc()
+	e := internal.EntitiesAlloc(entities)
 	components.bodies.Set(e, body{X: 3})
 	components.velocities.Set(e, velocity{X: 1})
 
@@ -170,7 +171,7 @@ func composeAndFail(t *testing.T, subscribe func(*kernel.Registrar)) string {
 	kernel.New(nil).
 		Handler(func(err error) bool { failure = err; return true }).
 		WithPlugins(
-			Plugin(),
+			authority{ids: 8},
 			&componentsPlugin{ids: 8},
 			&bindingPlugin{log: &drawLog{}, names: &modelNames{}},
 			&systemsPlugin{deps: boundDeps, subscribe: subscribe},

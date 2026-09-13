@@ -40,7 +40,7 @@ and its scratch; `plugin.go` the plugin and its registration.
 kernel.New(config).WithPlugins(
     storageimpl.New(), diskfs.New(diskfs.Config{AppId: "game"}),
     inputimpl.New(), gfximpl.New(), sceneimpl.New(), wgpu.New(),
-    ecs.Plugin(), ecsscene.New(), game.New())
+    ecsimpl.New(), ecsscene.New(), game.New())
 ```
 
 The binding takes no world. It declares `ecs` and `scene` as dependencies, so

@@ -5,11 +5,13 @@ import (
 	"reflect"
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 )
 
-// Spawn creates Entities carrying a complete Component set, named as a Bundle:
-// a struct type whose field types are the Components, the way a Query is.
+// Spawn creates Entities carrying a complete Component set, named as a struct
+// type whose field types are the Components, the way a Query is, and whose value
+// carries the Components themselves.
 //
 //	type Projectile struct {
 //	    Body     Body
@@ -21,13 +23,14 @@ import (
 //	    sp.New(Projectile{Body: Body{X: 1}, Velocity: Velocity{X: 10}})
 //	}
 //
-// A Bundle field simply *is* a Component field: there is no conversion step and
-// none is needed, because everything a Component may hold can be written where
-// the Bundle is declared, so a declarative spawn naming a model needs nothing
-// from the ECS.
-// A Bundle is also not a Component set — it describes one act of creation, and
-// the Entity may gain and lose Components afterwards without the Bundle meaning
-// anything.
+// A field of the struct simply *is* a Component field: there is no conversion
+// step and none is needed, because everything a Component may hold can be
+// written where the struct is declared, so a declarative spawn naming a model
+// needs nothing from the ECS.
+// The struct names the Component set a new Entity starts with and nothing more:
+// the Entity may gain and lose Components afterwards, and from then on the
+// struct type means nothing. It is not a structure the engine keeps, and nothing
+// groups Entities by it.
 //
 // It is a handle the System already holds, and that is the whole of the design:
 // creating an Entity is a direct call on a value in the signature, not a
@@ -45,86 +48,88 @@ import (
 // in Go — there is nothing to name statically that is not already named.
 //
 // Spawn and WriteableEntities are two handles rather than one, because folding
-// Despawn onto Spawn[B] would force a Bundle type on Systems that never spawn.
-type Spawn[B any] struct {
-	// staging is the bundle the current New is writing, and it is a field of the
-	// Spawn rather than the parameter's own address on purpose. The obvious
-	// spelling — taking &bundle of the parameter and handing it to the cached
-	// per-field closures — hands the address of a parameter to an opaque func
-	// value, so the bundle escapes: 48 B and one allocation per spawn, 28.4 ns
-	// against 15.7. Copying into a buffer bound at registration removes it, and
-	// is sound because the handler holds write{*Entities} and therefore runs
-	// alone.
-	staging B
+// Despawn onto Spawn[S] would force a Component set type on Systems that never
+// spawn.
+type Spawn[S any] struct {
+	// staging is the Component set the current New is writing, and it is a field
+	// of the Spawn rather than the parameter's own address on purpose. The
+	// obvious spelling — taking &components of the parameter and handing it to
+	// the cached per-field closures — hands the address of a parameter to an
+	// opaque func value, so the value escapes: 48 B and one allocation per spawn,
+	// 28.4 ns against 15.7. Copying into a buffer bound at registration removes
+	// it, and is sound because the handler holds write{*Entities} and therefore
+	// runs alone.
+	staging S
 	// entities is the write-locked authority. It is the handle rather than the
 	// registration-time value because a handle is what the kernel guards: the
 	// cell it reads is the one the lock covers.
 	entities kernel.Write[*Entities]
-	// fields is the Bundle's field table as registration left it: an offset into
-	// staging and the setter baked for that Component's Store. Reflection runs
-	// exactly once, here, and never again — the mirror of the Query's fill.
-	fields []bundleField
+	// fields is the Component set's field table as registration left it: an
+	// offset into staging and the setter baked for that Component's Store.
+	// Reflection runs exactly once, here, and never again — the mirror of the
+	// Query's fill.
+	fields []spawnField
 }
 
-// bundleField is one Component of a Bundle, as registration left it.
-type bundleField struct {
+// spawnField is one Component of a Component set, as registration left it.
+type spawnField struct {
 	// set writes one Component from the staging buffer into its Store. It is the
 	// one cached closure per field: a generic cannot be instantiated from a
 	// reflect.Type, so the typed call is baked at registration where C is a
 	// compile-time type and reached here through an unsafe.Pointer into staging.
 	set func(e Entity, value unsafe.Pointer)
-	// offset is where this Component sits in the Bundle, which is where it sits
-	// in staging: they are the same type.
+	// offset is where this Component sits in the Component set's struct, which
+	// is where it sits in staging: they are the same type.
 	offset uintptr
 }
 
-// prepare plans the Bundle against the world and declares the locks. It runs
-// once, inside the single registration-time call of the handler's Lock.
+// prepare plans the Component set against the world and declares the locks. It
+// runs once, inside the single registration-time call of the handler's Lock.
 //
 // It panics when a field names a Component no plugin registered, naming the
-// Component and the Bundle; the plugin boundary turns that into a composition
-// failure naming the plugin.
-func (s *Spawn[B]) prepare(en *Entities, access kernel.ResourceAccess) {
-	bundleType := reflect.TypeFor[B]()
-	if bundleType.Kind() != reflect.Struct {
-		panic(fmt.Sprintf("ecs: Bundle %s is a %s; a Bundle is a struct whose field types are the Components",
-			bundleType, bundleType.Kind()))
+// Component and the Component set; the plugin boundary turns that into a
+// composition failure naming the plugin.
+func (s *Spawn[S]) prepare(en *Entities, access kernel.ResourceAccess) {
+	setType := reflect.TypeFor[S]()
+	if setType.Kind() != reflect.Struct {
+		panic(fmt.Sprintf("ecs: Component set %s is a %s; a Component set is a struct whose field types are the Components",
+			setType, setType.Kind()))
 	}
 	s.entities = access.GetWrite[*Entities]()
-	s.fields = make([]bundleField, 0, bundleType.NumField())
-	for i := range bundleType.NumField() {
-		field := bundleType.Field(i)
+	s.fields = make([]spawnField, 0, setType.NumField())
+	for i := range setType.NumField() {
+		field := setType.Field(i)
 		if field.Type.Kind() == reflect.Pointer {
 			panic(fmt.Sprintf(
-				"ecs: Bundle %s field %s is a %s; a Bundle field is a Component value, because a spawn supplies the value rather than reaching one that already exists",
-				bundleType, field.Name, field.Type))
+				"ecs: Component set %s field %s is a %s; a Component set field is a Component value, because a spawn supplies the value rather than reaching one that already exists",
+				setType, field.Name, field.Type))
 		}
-		class := en.classOf(field.Type)
+		class := classOf(en, field.Type)
 		if class == nil {
-			panic(fmt.Sprintf("ecs: Bundle %s names unregistered Component %s", bundleType, field.Type))
+			panic(fmt.Sprintf("ecs: Component set %s names unregistered Component %s", setType, field.Type))
 		}
-		s.fields = append(s.fields, bundleField{
+		s.fields = append(s.fields, spawnField{
 			set:    class.declareSet(access),
 			offset: field.Offset,
 		})
 	}
 }
 
-// New creates an Entity carrying every Component the Bundle names and returns
-// its handle. The Components are written in field order, and the Entity is
-// complete when New returns: there is no command buffer and nothing is deferred,
-// because a type-erased one costs an allocation per queued command and the
-// handler already holds the barrier that would make deferral safe.
+// New creates an Entity carrying every Component the Component set names and
+// returns its handle. The Components are written in field order, and the Entity
+// is complete when New returns: there is no command buffer and nothing is
+// deferred, because a type-erased one costs an allocation per queued command and
+// the handler already holds the barrier that would make deferral safe.
 //
 // Calling it while iterating a Query is safe for the Query being iterated, since
 // All() walks its driver backwards and never reaches a row appended during the
 // loop. What it is not is cheap in lock duration: the barrier is held for the
 // System's whole run, so a System that spawns should be a small System.
-func (s *Spawn[B]) New(bundle B) Entity {
-	// The bundle lands in the Spawn's own buffer before any closure sees an
-	// address, which is what keeps it off the heap. See staging.
-	s.staging = bundle
-	e := s.entities.Get().alloc()
+func (s *Spawn[S]) New(components S) Entity {
+	// The Components land in the Spawn's own buffer before any closure sees an
+	// address, which is what keeps them off the heap. See staging.
+	s.staging = components
+	e := internal.EntitiesAlloc(s.entities.Get())
 	buffer := unsafe.Pointer(&s.staging)
 	for i := range s.fields {
 		field := &s.fields[i]
@@ -159,5 +164,5 @@ func (w *WriteableEntities) prepare(_ *Entities, access kernel.ResourceAccess) {
 // backwards walk buys. Despawning any other Entity in the driver's Store is
 // undefined for that walk.
 func (w *WriteableEntities) Despawn(e Entity) bool {
-	return w.entities.Get().despawn(e)
+	return internal.EntitiesDespawn(w.entities.Get(), e)
 }

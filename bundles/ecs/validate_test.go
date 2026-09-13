@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -74,8 +75,8 @@ func recovered(body func()) (message string) {
 func TestAWriteThroughAReadIsCaught(t *testing.T) {
 	var caught string
 	listWorld(t, func(registrar *kernel.Registrar) {
-		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[readInventory], spawn *Spawn[inventoryBundle]) {
-			spawn.New(inventoryBundle{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[readInventory], spawn *Spawn[inventorySet]) {
+			spawn.New(inventorySet{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
 			for _, it := range q.All() {
 				caught = recovered(func() { it.Inventory.Slots.Set(0, 99) })
 			}
@@ -96,8 +97,8 @@ func TestAWriteThroughAWriteIsAllowed(t *testing.T) {
 	var caught string
 	var seen uint32
 	listWorld(t, func(registrar *kernel.Registrar) {
-		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[writeInventory], spawn *Spawn[inventoryBundle]) {
-			spawn.New(inventoryBundle{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[writeInventory], spawn *Spawn[inventorySet]) {
+			spawn.New(inventorySet{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
 			for _, it := range q.All() {
 				caught = recovered(func() { it.Inventory.Slots.Set(0, 99) })
 				seen = it.Inventory.Slots.At(0)
@@ -119,8 +120,8 @@ func TestAWriteThroughAWriteIsAllowed(t *testing.T) {
 func TestAWriteAfterTheRunIsCaught(t *testing.T) {
 	var caught string
 	listWorld(t, func(registrar *kernel.Registrar) {
-		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[writeInventory], spawn *Spawn[inventoryBundle]) {
-			spawn.New(inventoryBundle{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[writeInventory], spawn *Spawn[inventorySet]) {
+			spawn.New(inventorySet{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
 			var kept List[uint32]
 			for _, it := range q.All() {
 				kept = it.Inventory.Slots
@@ -142,14 +143,14 @@ func TestAWriteAfterTheRunIsCaught(t *testing.T) {
 // share one array and the caller's retained value is a write handle on the
 // world.
 func TestTheCallersOwnCopyIsClosedByStoring(t *testing.T) {
-	entities := newEntities(8)
+	entities := internal.NewEntities(8)
 	store := NewStore[inventory](entities, 8)
 
 	mine := ListOf([]uint32{1, 2, 3})
 	if caught := recovered(func() { mine.Set(0, 7) }); caught != "" {
 		t.Fatalf("writing a List the world has never seen was refused: %s", caught)
 	}
-	store.Set(entities.alloc(), inventory{Slots: mine})
+	store.Set(internal.EntitiesAlloc(entities), inventory{Slots: mine})
 	caught := recovered(func() { mine.Set(0, 9) })
 	if caught == "" {
 		t.Fatal("writing the caller's own alias of a stored List was allowed")
@@ -167,8 +168,8 @@ func TestTheCallersOwnCopyIsClosedByStoring(t *testing.T) {
 func TestAWriteThroughANestedReadIsCaught(t *testing.T) {
 	var caught string
 	listWorld(t, func(registrar *kernel.Registrar) {
-		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[readGrid], spawn *Spawn[gridBundle]) {
-			spawn.New(gridBundle{Grid: twoByTwo()})
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[readGrid], spawn *Spawn[gridSet]) {
+			spawn.New(gridSet{Grid: twoByTwo()})
 			for _, it := range q.All() {
 				caught = recovered(func() { it.Grid.Rows.At(1).Cells.Set(0, 99) })
 			}
@@ -189,8 +190,8 @@ func TestAWriteThroughANestedWriteIsAllowed(t *testing.T) {
 	var caught string
 	var seen uint32
 	listWorld(t, func(registrar *kernel.Registrar) {
-		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[writeGrid], spawn *Spawn[gridBundle]) {
-			spawn.New(gridBundle{Grid: twoByTwo()})
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[writeGrid], spawn *Spawn[gridSet]) {
+			spawn.New(gridSet{Grid: twoByTwo()})
 			for _, it := range q.All() {
 				caught = recovered(func() { it.Grid.Rows.At(1).Cells.Set(0, 99) })
 				seen = it.Grid.Rows.At(1).Cells.At(0)
@@ -209,11 +210,11 @@ func TestAWriteThroughANestedWriteIsAllowed(t *testing.T) {
 // level down: the inner List the caller built is shared with the Store the
 // moment the outer one enters it.
 func TestTheCallersOwnNestedCopyIsClosedByStoring(t *testing.T) {
-	entities := newEntities(8)
+	entities := internal.NewEntities(8)
 	store := NewStore[grid](entities, 8)
 
 	cells := ListOf([]uint32{1, 2})
-	store.Set(entities.alloc(), grid{Rows: NewList(row{Cells: cells})})
+	store.Set(internal.EntitiesAlloc(entities), grid{Rows: NewList(row{Cells: cells})})
 	caught := recovered(func() { cells.Set(0, 9) })
 	if !strings.Contains(caught, "already in the world") {
 		t.Fatalf("writing the caller's own alias of a nested stored List: %q", caught)
@@ -235,11 +236,11 @@ type writeGrid struct {
 	Grid *grid
 }
 
-type gridBundle struct {
+type gridSet struct {
 	Grid grid
 }
 
-// inventoryBundle is the Bundle the tests above spawn with.
-type inventoryBundle struct {
+// inventorySet is the Component set the tests above spawn with.
+type inventorySet struct {
 	Inventory inventory
 }

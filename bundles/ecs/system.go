@@ -171,7 +171,7 @@ func (c *systemCall[E]) call(handle kernel.Kernel, driven E) {
 
 // prepareSystem is the classification, and the classification is contract.
 //
-// A System takes any number of *Query[Q], *Spawn[B], *WriteableEntities,
+// A System takes any number of *Query[Q], *Spawn[S], *WriteableEntities,
 // *Get[T], *Set[T], *Remove[T], *Read[T], *Write[T] and *In[T]; the
 // kernel.Kernel value; at most once the event or request value itself; and, for
 // a command only, at most once the *Resp[Res] it answers through. Anything else

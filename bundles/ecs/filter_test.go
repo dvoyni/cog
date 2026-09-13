@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -35,7 +36,7 @@ func TestWithoutDropsExactlyTheTaggedSet(t *testing.T) {
 	const n = 20
 	live, tagged := make([]Entity, 0, n), make([]Entity, 0, n)
 	for i := range n {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		components.bodies.Set(e, body{})
 		components.velocities.Set(e, velocity{X: 1})
 		// Every third entity is disabled, so the tagged set is neither a prefix
@@ -174,7 +175,7 @@ func TestTheFillSkipsFilterFields(t *testing.T) {
 		}))
 	})
 
-	e := entities.alloc()
+	e := internal.EntitiesAlloc(entities)
 	components.bodies.Set(e, body{})
 	components.velocities.Set(e, velocity{X: 3, Y: 5})
 	// A radius no velocity carries, so a mis-filled field is unmistakable
@@ -243,7 +244,7 @@ func TestAQueryOfFiltersOnlyFailsAtRegistration(t *testing.T) {
 	kernel.New(nil).
 		Handler(func(err error) bool { failure = err; return true }).
 		WithPlugins(
-			Plugin(),
+			authority{ids: 8},
 			&componentsPlugin{ids: 8},
 			&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
 				registrar.Subscribe[filtersOnlySystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[filtersOnlyQuery]) {}))
@@ -274,7 +275,7 @@ func TestAQueryOfNoFieldsAtAllFailsTheSameWay(t *testing.T) {
 	kernel.New(nil).
 		Handler(func(err error) bool { failure = err; return true }).
 		WithPlugins(
-			Plugin(),
+			authority{ids: 8},
 			&componentsPlugin{ids: 8},
 			&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
 				registrar.Subscribe[emptySystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[emptyQuery]) {}))
@@ -300,12 +301,12 @@ func TestAFilterIsNeverTheDriver(t *testing.T) {
 	})
 
 	for range 16 {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		components.bodies.Set(e, body{})
 		components.velocities.Set(e, velocity{X: 1})
 	}
 	// One tagged entity, so the filter's Store is far and away the shortest.
-	tagged := entities.alloc()
+	tagged := internal.EntitiesAlloc(entities)
 	components.bodies.Set(tagged, body{})
 	components.velocities.Set(tagged, velocity{X: 1})
 	components.disableds.Set(tagged, disabled{})
@@ -336,13 +337,13 @@ func TestAFilterIsNeverTheDriver(t *testing.T) {
 // Break it — leave a stale generation behind on a removal, say — and a Without
 // would start matching Entities that do have the Component, silently.
 func TestASparseSlotHoldsOnlyTheOwnersGenerationOrAbsence(t *testing.T) {
-	entities := newEntities(16)
+	entities := internal.NewEntities(16)
 	bodies := NewStore[body](entities, 16)
 	tags := NewStore[disabled](entities, 16)
 
 	live := make([]Entity, 0, 32)
 	for i := range 24 {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		live = append(live, e)
 		if i%2 == 0 {
 			bodies.Set(e, body{X: float32(i)})
@@ -358,11 +359,11 @@ func TestASparseSlotHoldsOnlyTheOwnersGenerationOrAbsence(t *testing.T) {
 		case 1:
 			bodies.Remove(e)
 		case 2:
-			entities.despawn(e)
+			internal.EntitiesDespawn(entities, e)
 		}
 	}
 	for range 12 {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		live = append(live, e)
 		bodies.Set(e, body{})
 	}
@@ -372,10 +373,10 @@ func TestASparseSlotHoldsOnlyTheOwnersGenerationOrAbsence(t *testing.T) {
 			continue
 		}
 		for name, sparse := range map[string][]uint64{"body": bodies.sparse, "disabled": tags.sparse} {
-			if int(e.idx()) >= len(sparse) {
+			if int(internal.EntityIndex(e)) >= len(sparse) {
 				continue
 			}
-			if generation := uint32(sparse[e.idx()] >> 32); generation != e.gen() && generation != absentGeneration {
+			if generation := uint32(sparse[internal.EntityIndex(e)] >> 32); generation != internal.EntityGeneration(e) && generation != absentGeneration {
 				t.Fatalf("the %s Store's slot for the live %v holds generation %d, which is neither its own nor absent",
 					name, e, generation)
 			}
@@ -403,7 +404,7 @@ func TestWithoutMatchesBeyondTheFilteredStoresSparseIndex(t *testing.T) {
 	})
 
 	for range n {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		components.bodies.Set(e, body{})
 		components.velocities.Set(e, velocity{X: 1})
 	}

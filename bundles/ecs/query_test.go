@@ -5,6 +5,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -15,9 +16,9 @@ import (
 // is asserted rather than assumed, because a field added to Store in the wrong
 // place would corrupt silently rather than fail to compile.
 func TestTheErasedStoreMatchesTheTypedOne(t *testing.T) {
-	entities := newEntities(8)
+	entities := internal.NewEntities(8)
 	store := NewStore[position](entities, 8)
-	e := entities.alloc()
+	e := internal.EntitiesAlloc(entities)
 	store.Set(e, position{X: 3, Y: 4})
 
 	erased := store.erase()
@@ -69,10 +70,10 @@ func TestTheDriverIsTheShortestStoreAndIsChosenPerRun(t *testing.T) {
 	query, components, entities, _ := capture(t, 128)
 
 	for range 8 {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		components.velocities.Set(e, velocity{X: 1})
 	}
-	bodied := entities.alloc()
+	bodied := internal.EntitiesAlloc(entities)
 	components.bodies.Set(bodied, body{})
 	components.velocities.Set(bodied, velocity{X: 1})
 
@@ -86,7 +87,7 @@ func TestTheDriverIsTheShortestStoreAndIsChosenPerRun(t *testing.T) {
 	// Make the other Store the shorter one and run again. Nothing was
 	// re-registered and nothing was invalidated: the scan is the mechanism.
 	for range 32 {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		components.bodies.Set(e, body{})
 	}
 	query.bind()
@@ -105,7 +106,7 @@ func TestAllWalksItsDriverBackwards(t *testing.T) {
 	const n = 16
 	order := make([]Entity, 0, n)
 	for range n {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		components.bodies.Set(e, body{})
 		components.velocities.Set(e, velocity{})
 		order = append(order, e)
@@ -132,7 +133,7 @@ func TestAllYieldsOneBufferWhoseLifetimeIsTheStep(t *testing.T) {
 	query, components, entities, _ := capture(t, 128)
 
 	for range 3 {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		components.bodies.Set(e, body{})
 		components.velocities.Set(e, velocity{X: 1})
 	}
@@ -185,7 +186,7 @@ func TestThePopulationIsStableAcrossHundredsOfTicks(t *testing.T) {
 	entities, components, engine := newWorld(t, 64, subscribeMove)
 	moved := make([]Entity, 0, 16)
 	for range 16 {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		components.bodies.Set(e, body{})
 		components.velocities.Set(e, velocity{X: 1, Y: -2})
 		moved = append(moved, e)
@@ -226,7 +227,7 @@ func TestAQueryOfOneComponentNeedsNoProbe(t *testing.T) {
 		}))
 	})
 	for range 5 {
-		components.bodies.Set(entities.alloc(), body{})
+		components.bodies.Set(internal.EntitiesAlloc(entities), body{})
 	}
 	frame(t, engine, 1)
 
@@ -256,7 +257,7 @@ func TestAWiderQueryProbesEveryComponent(t *testing.T) {
 		}))
 	})
 
-	all, two := entities.alloc(), entities.alloc()
+	all, two := internal.EntitiesAlloc(entities), internal.EntitiesAlloc(entities)
 	components.bodies.Set(all, body{})
 	components.velocities.Set(all, velocity{X: 3})
 	components.colliders.Set(all, collider{Radius: 2})

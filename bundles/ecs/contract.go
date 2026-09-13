@@ -4,8 +4,8 @@
 // its Go type and held in a Store of its own. A System is a plain Go func whose
 // parameter types say what it touches: a Query over the Components it iterates,
 // whose field pointer-ness is its access mode, narrowed by Without and With
-// filters that yield nothing and still declare a read; a Spawn over the Bundle
-// it creates; the WriteableEntities that can retire one; the Get, Set and
+// filters that yield nothing and still declare a read; a Spawn over the Component
+// set it creates; the WriteableEntities that can retire one; the Get, Set and
 // Remove accessors that reach one Component of an Entity it did not iterate to;
 // the Read and Write handles that name another plugin's resource; the In that
 // carries a value projected out of the event; and, for a command, the Resp it
@@ -38,46 +38,39 @@
 // rejects a stale handle: liveness is not an extra structure, it is the probe.
 package ecs
 
-import "strconv"
+import (
+	"github.com/dvoyni/cog/bundles/ecs/internal"
+	"github.com/dvoyni/cog/kernel"
+)
+
+// Name is the ecs plugin's name and configuration key. A plugin that registers
+// Components or Systems declares a dependency on it, because that is what
+// registers the authority first.
+const Name kernel.PluginName = "ecs"
 
 // Entity is an opaque handle to one thing. It is comparable, copyable and
 // usable as a map key, and the zero value means no Entity.
 //
 // It is a uint64 with the index in the low 32 bits and the generation in the
 // high 32, and that split is deliberately not public contract: there is no
-// exported Index or Generation, only the unexported accessors below. Both this
-// and a struct of two uint32s are 8 bytes and both are comparable, but the
-// struct leaks its layout into every call site and can never be re-cut.
+// exported Index or Generation. Both this and a struct of two uint32s are 8
+// bytes and both are comparable, but the struct leaks its layout into every
+// call site and can never be re-cut.
 //
 // Generations start at 1, so Entity(0) unambiguously means "no Entity" while
 // index 0 stays an ordinary usable slot. Thirty-two bits of generation is about
 // 4e9 reuses of one slot before a stale handle could alias.
-type Entity uint64
+//
+// String renders one as its index and generation, "Entity(7v2)" being index 7
+// at generation 2, because a log that cannot distinguish a recycled index from
+// the handle that preceded it is useless; reading them back in code is what the
+// type refuses.
+type Entity = internal.Entity
 
 // NoEntity is the absent handle. Compare with ==.
-const NoEntity Entity = 0
+const NoEntity = internal.NoEntity
 
 // absentGeneration is the generation half a Store writes into a sparse slot it
 // holds nothing for. No live entity ever carries it, which is what lets the
 // membership test be one load and one compare with no tombstone branch.
-const absentGeneration uint32 = 0xFFFFFFFF
-
-func newEntity(index, generation uint32) Entity {
-	return Entity(uint64(generation)<<32 | uint64(index))
-}
-
-func (e Entity) idx() uint32 { return uint32(e) }
-
-func (e Entity) gen() uint32 { return uint32(e >> 32) }
-
-// String renders an entity as its index and generation, "Entity(7v2)" being
-// index 7 at generation 2. The halves are shown because a log that cannot
-// distinguish a recycled index from the handle that preceded it is useless;
-// reading them back in code is what the type refuses.
-func (e Entity) String() string {
-	if e == NoEntity {
-		return "NoEntity"
-	}
-	return "Entity(" + strconv.FormatUint(uint64(e.idx()), 10) + "v" +
-		strconv.FormatUint(uint64(e.gen()), 10) + ")"
-}
+const absentGeneration = internal.AbsentGeneration

@@ -8,6 +8,7 @@ import (
 	"testing/fstest"
 
 	"github.com/dvoyni/cog/bundles/ecs"
+	"github.com/dvoyni/cog/bundles/ecs/ecsimpl"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/sceneimpl"
 	"github.com/dvoyni/cog/extensions/gfx"
@@ -55,9 +56,9 @@ type spawnResponse struct {
 	First ecs.Entity
 }
 
-// placed and unplaced are the two Bundles the spawn starts from; every other
-// Component is added after, through its accessor, so one command covers every
-// combination a test names.
+// placed and unplaced are the two Component sets the spawn starts from; every
+// other Component is added after, through its accessor, so one command covers
+// every combination a test names.
 type placed struct {
 	Place Transform
 }
@@ -253,12 +254,12 @@ func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gfx.Ba
 	sink := &errorSink{}
 	configs := map[kernel.PluginName]any{
 		storage.Name: storageimpl.DefaultConfig().WithReadFS("test", 10, fs.FS(files)),
-		ecs.Name:     ecs.DefaultConfig().WithPrewarmEntities(ids),
+		ecs.Name:     ecsimpl.Config{PrewarmEntities: ids},
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) bool { sink.add(err); return false }).
 		WithPlugins(storageimpl.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{backend}, sceneimpl.New(),
-			ecs.Plugin(), New(), &gamePlugin{})
+			ecsimpl.New(), New(), &gamePlugin{})
 	ctx, cancel := context.WithCancel(context.Background())
 	// The cleanup waits for Run to return rather than only cancelling it: a
 	// dying engine allocates while it winds down, and the allocation claims here

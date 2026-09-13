@@ -90,6 +90,9 @@ are retired outright.
   says.
 - **Component set** — the exact set of Component types one Entity has. It
   describes an Entity; nothing groups Entities by it and no structure holds it.
+  A Spawn names the one a new Entity starts with as a struct type. It is not a
+  Bundle, which is a Slot shipped with its Extension — the plugin kind ecs
+  itself is ([#340](https://github.com/dvoyni/cog/issues/340)).
 - **Store** — the holding of every value of one Component type. One per
   registered type, and **the unit a lock is taken on**.
 - **Entities** — the id authority, and the one thing that can reach every Store.
@@ -103,9 +106,9 @@ are retired outright.
   its Queries match itself.
 - **Structural change** — a change to *which* Entities have *which* Components,
   as against a change to a Component's value.
-- **Spawn** — creating an Entity with a complete Component set in one structural
-  change, that set named as a **Bundle**. **Despawn** is its inverse and is
-  total.
+- **Spawn** — creating an Entity with a complete Component set and its values in
+  one structural change, that set named as a struct type. **Despawn** is its
+  inverse and is total.
 - **Reference** — an Entity kept inside a Component. It points one way.
 - **Accessor** — a System's means of reaching one Component of an Entity it did
   not iterate to.
@@ -687,13 +690,25 @@ take the registrar so they can call it. That is sound because dependencies
 register first and nothing runs concurrently with registration, and it fails
 composition with
 `ErrUnavailableDependency` for a resource with no value yet or an undeclared
-owner. The ecs plugin now creates the authority from `ecs.Config` itself, its
-constructor is unexported, and composition takes no world at all:
+owner. The ecs plugin now creates the authority from its config itself, its
+constructor is unreachable from outside the plugin, and composition takes no
+world at all:
 
 ```go
-config[ecs.Name] = ecs.DefaultConfig().WithPrewarmEntities(prewarmEntities)
-kernel.New(config).WithPlugins(ecs.Plugin(), physics.New(), game.New())
+config[ecs.Name] = ecsimpl.Config{PrewarmEntities: prewarmEntities}
+kernel.New(config).WithPlugins(ecsimpl.New(), physics.New(), game.New())
 ```
+
+> **Amended by [#340](https://github.com/dvoyni/cog/issues/340).** ecs is a
+> Bundle: the contract root `bundles/ecs` holds everything a System author uses
+> and declares no plugin, `bundles/ecs/ecsimpl` holds `New` and `Config`, and
+> `bundles/ecs/internal` declares `Entity` and `Entities`, which the root aliases.
+> `ecs.Plugin()`, `ecs.Config` and `ecs.DefaultConfig().WithPrewarmEntities(n)`
+> became `ecsimpl.New()` and `ecsimpl.Config{PrewarmEntities: n}`, whose zero
+> field takes the default of 1024. The constructor of the authority lives in
+> `internal`, which only the root and `ecsimpl` can import, and that is what keeps
+> it one per Engine. The kernel's architecture output names the resource
+> `*internal.Entities`, the package it is declared in.
 
 The cost is one requirement a plugin already met: a plugin registering a
 Component or a System declares `ecs`.
@@ -1134,7 +1149,7 @@ This is contract, not convention. A System takes any number of:
 | parameter | declares | what it is |
 | --- | --- | --- |
 | `*ecs.Query[Q]` | `read{*Entities}` + per-field access | the Components it iterates |
-| `*ecs.Spawn[B]` | `write{*Entities}` + `write{*Store[F]}` per Bundle field | creating Entities |
+| `*ecs.Spawn[S]` | `write{*Entities}` + `write{*Store[F]}` per Component set field | creating Entities |
 | `*ecs.WriteableEntities` | `write{*Entities}` | despawning |
 | `*ecs.Get[T]` | `read{*Store[T]}` | reading one Component of an Entity it did not iterate to |
 | `*ecs.Set[T]` | `write{*Store[T]}` | writing, or inserting, the same |
@@ -1279,7 +1294,7 @@ Components:
 | two Queries, disjoint writes | **2** |
 | the same pair, first one spawning | **1** |
 
-The static `Spawn[Bundle]`'s per-Component `declareWrite` is therefore
+The static `Spawn[S]`'s per-Component `declareWrite` is therefore
 **redundant for locking**, and it is **kept as an ownership declaration**. That
 is what makes cog's composition check fire, so a plugin spawning a `Health` must
 declare a dependency on `Health`'s owner. Dropping it would let any plugin
@@ -1407,14 +1422,14 @@ scheduler has already excluded everyone.
 
 | handle | method | declares |
 | --- | --- | --- |
-| `ecs.Spawn[B]` | `.New(B) Entity` | `write{*Entities}`, plus `write{*Store[F]}` per Bundle field |
+| `ecs.Spawn[S]` | `.New(S) Entity` | `write{*Entities}`, plus `write{*Store[F]}` per Component set field |
 | `ecs.WriteableEntities` | `.Despawn(Entity) bool` | `write{*Entities}` |
 | `ecs.Get[T]` | `.Of(Entity) (T, bool)` | `read{*Store[T]}` |
 | `ecs.Set[T]` | `.Of(Entity) (T, bool)`, `.Ref(Entity) (*T, bool)`, `.UpdateFor(Entity, T)` | `write{*Store[T]}` |
 | `ecs.Remove[T]` | `.From(Entity) bool` | `write{*Store[T]}` |
 
 Spawn and Despawn are **two handles rather than one**, because folding `Despawn`
-onto `Spawn[B]` would force a Bundle type on Systems that never spawn.
+onto `Spawn[S]` would force a Component set type on Systems that never spawn.
 
 `Get[T]` has **no `Ref`**, and that is what stops a read handle being a write in
 disguise. `Set[T].UpdateFor` **inserts when absent** — legal because it already
@@ -1491,6 +1506,10 @@ A Despawn reaches every Store through an interface carrying **exactly one
 method**, `remove(Entity)`. That costs 9%: 85 Stores are 218 ns through the
 interface against 199 ns direct, zero allocations. Driver selection reads
 `len(owners)` through the typed path inside a Query, never through the registry.
+Since [#340](https://github.com/dvoyni/cog/issues/340) the authority is declared
+in `internal`, which cannot name that interface, so a Store enrols its one
+method bound to itself and a Despawn calls that: still one indirect call per
+Store, never per Entity.
 
 **The storm case is recorded, not designed for**: 500 despawns in a tick costs
 109 µs, a third of a 33 ms budget. The answer if a game hits it is
@@ -1512,7 +1531,7 @@ requests no locks and therefore cannot block. At a 16-missile volley that is
 17.8 µs per cast.
 
 A handle declared in the System's signature declares the same lock set through
-its own `Lock`, with no dispatch at all. Bundle fields are reflected **once at
+its own `Lock`, with no dispatch at all. Component set fields are reflected **once at
 registration** into one cached closure per field — the mirror of the Query fill:
 
 | | ns/spawn | vs hand-written | allocs |
@@ -1521,20 +1540,21 @@ registration** into one cached closure per field — the mirror of the Query fil
 | `Spawn[…4 fields]` | **26.0** | 2.11× | 0 |
 
 The same volley costs **416 ns — 43× less**. **The trap, which an implementation
-will hit:** the obvious spelling allocates. Passing the bundle by value and
-taking `&v` hands the address of a parameter to an opaque func value, so the
-bundle escapes — **48 B and one allocation per spawn**, 28.4 against 15.7 ns.
+will hit:** the obvious spelling allocates. Passing the Component set by value
+and taking `&v` hands the address of a parameter to an opaque func value, so the
+value escapes — **48 B and one allocation per spawn**, 28.4 against 15.7 ns.
 Copying into a buffer bound at registration removes it, sound because the
 handler holds `write{*Entities}`.
 
-**A Bundle is not a Component set.** It describes one act of creation; the
-Entity may gain and lose Components afterwards without the Bundle meaning
-anything. A Bundle field simply *is* a Component field — there is no conversion
-step, because everything a Component may hold can be written where the Bundle is
-declared, so a declarative spawn naming a model needs nothing from the ECS:
+**The struct type names a Component set for one act of creation and nothing
+more.** The Entity may gain and lose Components afterwards, and from then on the
+struct type means nothing. A field of it simply *is* a Component field — there is
+no conversion step, because everything a Component may hold can be written where
+the struct is declared, so a declarative spawn naming a model needs nothing from
+the ECS:
 
 ```go
-sp.New(DeclBundle{
+sp.New(DeclSet{
     P: Placement{Scale: 1},
     D: Drawable{Model: "models/crate.glb", Layers: scene.LayersAll},
 })
@@ -1921,8 +1941,8 @@ implementation.
    the stack; across a package boundary with a real callee — how every real
    System will be written — it does not. Nothing changes semantically, since the
    same buffer was already reused for every Entity.
-2. **`Spawn` stages its bundle through a field**, same hazard: taking the
-   address of the bundle parameter and handing it to cached closures
+2. **`Spawn` stages its Component set through a field**, same hazard: taking the
+   address of the parameter and handing it to cached closures
    heap-allocates it per spawn.
 3. **A System returns nothing**, because `reflect.Value.Call` allocates for a
    callee that does. The builder rejects one at registration.
@@ -2071,7 +2091,7 @@ because they are what a future proposal has to beat
    registration because the signature *already is* the out-of-band declaration
    every other engine makes the author write by hand (`Query` including pointer
    fields is safe, since each Entity is visited by exactly one shard; `Set[T]`,
-   `Spawn[B]`, `WriteableEntities`, `Remove[T]` and `kernel.Write[T]` are
+   `Spawn[S]`, `WriteableEntities`, `Remove[T]` and `kernel.Write[T]` are
    disqualifying; `Get[T]` is safe only where `T` is not also written by the
    same System); **the unit being one `All()` loop rather than a System**, since
    a cog System may take several Queries; and an **explicit opt-in**, because
@@ -2173,9 +2193,10 @@ duration.
 cannot be read at package initialisation, it gives different ids in different
 processes, and it has no answer to what empties it.
 
-**`RegisterConversion`, a Bundle-field conversion.** Built and then removed: it
-existed because a dense index could not be written where the Entity was
-declared. Everything a Component may now hold can be, so the Bundle field simply
+**`RegisterConversion`, a Component-set-field conversion.** Built and then
+removed: it existed because a dense index could not be written where the Entity
+was declared. Everything a Component may now hold can be, so the Component set's
+field simply
 *is* the Component field and there is nothing to convert.
 
 **A bare `[]T` as a Component field.** Refused for the lock unit and not for the
@@ -2226,6 +2247,7 @@ remains open is called out at the end of the verification list.
 - `Entity`, `NoEntity`, `fmt.Stringer`, private index/generation accessors.
 - `Entities`: id allocation with a free list, generation tracking, `Alive`, the
   reference to every Store, eager total `Despawn`, created by the plugin from `Config.PrewarmEntities`.
+  Declared in `internal` and aliased in the root since #340.
 - `Store[T]`: the three arrays, the one-load probe, swap-remove, `append`
   doubling, a reserve hint, and the type-erased `storeCore` carrying exactly one
   method.
@@ -2238,7 +2260,8 @@ remains open is called out at the end of the verification list.
 - `RegisterComponent[C]`: `InitResource[*Store[C]]` on the caller's `Registrar`,
   enrolment with `Entities`, the baked per-type closures including the typed
   copy a non-trivial Component takes, and the legality check.
-- `Plugin() kernel.Plugin`, which creates the authority from `Config`.
+- `Plugin() kernel.Plugin`, which creates the authority from `Config`. Since
+  #340 it is `ecsimpl.New()` and `ecsimpl.Config`.
 
 **`ecs` package — Query and System**
 
@@ -2253,7 +2276,7 @@ remains open is called out at the end of the verification list.
   above is the contract; a System returning anything is rejected.
 - `In[T]` and `Feed`.
 - `Read[T]` and `Write[T]`.
-- `Spawn[B]` staging its bundle **through a field**; `WriteableEntities`.
+- `Spawn[S]` staging its Component set **through a field**; `WriteableEntities`.
 - `Get[T]`, `Set[T]` (`Of`, `Ref`, `UpdateFor`), `Remove[T]` — the three the
   prototype did not build.
 - ~~`HashKey`, `HashOf[K]`, `NoHash`, `Names[K, V]` with `Register`, `Lookup`
@@ -2328,8 +2351,8 @@ here so a reader of the spec alone does not re-propose them.
   stays settled.
 - **Data-driven spawning and world serialisation** —
   [#266](https://github.com/dvoyni/cog/issues/266). Includes **a
-  runtime-addressable template**: a template is already just a value of a Bundle
-  type reused at every spawn site, and needs nothing from the ECS. `Template`
+  runtime-addressable template**: a template is already just a value of a
+  Component set's struct type reused at every spawn site, and needs nothing from the ECS. `Template`
   and `Prefab` stay unspent.
 - **Per-entity data a Component cannot hold** —
   [#264](https://github.com/dvoyni/cog/issues/264).

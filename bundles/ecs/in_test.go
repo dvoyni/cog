@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -40,7 +41,7 @@ func TestOneSystemRunsUnderTwoUnrelatedEvents(t *testing.T) {
 			Feed(func(e fixedTick) float64 { return e.Step })))
 	})
 
-	e := entities.alloc()
+	e := internal.EntitiesAlloc(entities)
 	components.bodies.Set(e, body{})
 	components.velocities.Set(e, velocity{X: 10})
 
@@ -126,7 +127,7 @@ func TestASystemMayPublishAnEvent(t *testing.T) {
 	})
 
 	for range 3 {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		components.bodies.Set(e, body{})
 		components.velocities.Set(e, velocity{X: 1})
 	}

@@ -5,6 +5,8 @@ import (
 	"runtime"
 	"testing"
 	"unsafe"
+
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 )
 
 type position struct{ X, Y float32 }
@@ -14,9 +16,9 @@ type position struct{ X, Y float32 }
 type disabled struct{}
 
 func TestAStoreHoldsOneValuePerEntity(t *testing.T) {
-	entities := newEntities(8)
+	entities := internal.NewEntities(8)
 	store := NewStore[position](entities, 8)
-	a, b := entities.alloc(), entities.alloc()
+	a, b := internal.EntitiesAlloc(entities), internal.EntitiesAlloc(entities)
 
 	store.Set(a, position{X: 1})
 	store.Set(b, position{X: 2})
@@ -40,9 +42,9 @@ func TestAStoreHoldsOneValuePerEntity(t *testing.T) {
 }
 
 func TestAWriteThroughRefLands(t *testing.T) {
-	entities := newEntities(8)
+	entities := internal.NewEntities(8)
 	store := NewStore[position](entities, 8)
-	e := entities.alloc()
+	e := internal.EntitiesAlloc(entities)
 	store.Set(e, position{X: 1})
 
 	ref, ok := store.Ref(e)
@@ -60,9 +62,9 @@ func TestAWriteThroughRefLands(t *testing.T) {
 // handle. This store is enrolled with an Entities it never asks anything: there
 // is no liveness structure to consult, because the generation is in the slot.
 func TestAStaleHandleFailsMembershipWithNothingElseConsulted(t *testing.T) {
-	entities := newEntities(8)
+	entities := internal.NewEntities(8)
 	store := NewStore[position](entities, 8)
-	e := entities.alloc()
+	e := internal.EntitiesAlloc(entities)
 	store.Set(e, position{X: 1})
 
 	if !store.Has(e) {
@@ -76,7 +78,7 @@ func TestAStaleHandleFailsMembershipWithNothingElseConsulted(t *testing.T) {
 	// The same index at the next generation is a different entity, and the
 	// store holds nothing for it — the handle that came before does not alias
 	// it in either direction.
-	recycled := newEntity(e.idx(), e.gen()+1)
+	recycled := internal.NewEntity(internal.EntityIndex(e), internal.EntityGeneration(e)+1)
 	if store.Has(recycled) {
 		t.Fatalf("Has(recycled) = true before anything was set for it")
 	}
@@ -93,15 +95,15 @@ func TestAStaleHandleFailsMembershipWithNothingElseConsulted(t *testing.T) {
 // A Query probes candidates it did not produce, so a panic here would be a
 // panic in the middle of a frame.
 func TestTheProbeIsTotal(t *testing.T) {
-	entities := newEntities(8)
+	entities := internal.NewEntities(8)
 	store := NewStore[position](entities, 4)
 	cases := []struct {
 		name string
 		e    Entity
 	}{
 		{"NoEntity", NoEntity},
-		{"an index beyond the sparse index", newEntity(1_000_000, 1)},
-		{"an index inside it that was never set", newEntity(2, 1)},
+		{"an index beyond the sparse index", internal.NewEntity(1_000_000, 1)},
+		{"an index inside it that was never set", internal.NewEntity(2, 1)},
 	}
 	for _, test := range cases {
 		if store.Has(test.e) {
@@ -123,11 +125,11 @@ func TestTheProbeIsTotal(t *testing.T) {
 // holes and len(owners) is exactly the population — which is the number driver
 // selection reads.
 func TestRemoveIsSwapRemoveAndThePopulationStaysExact(t *testing.T) {
-	entities := newEntities(8)
+	entities := internal.NewEntities(8)
 	store := NewStore[position](entities, 8)
 	live := make([]Entity, 4)
 	for i := range live {
-		live[i] = entities.alloc()
+		live[i] = internal.EntitiesAlloc(entities)
 		store.Set(live[i], position{X: float32(i)})
 	}
 
@@ -142,7 +144,7 @@ func TestRemoveIsSwapRemoveAndThePopulationStaysExact(t *testing.T) {
 		t.Fatalf("the relocated entity reads back as %v, %v; want {3 0}, true", value, ok)
 	}
 	for i, e := range store.owners {
-		if value := store.dense[i]; !store.Has(e) || store.sparse[e.idx()] != uint64(e.gen())<<32|uint64(i) {
+		if value := store.dense[i]; !store.Has(e) || store.sparse[internal.EntityIndex(e)] != uint64(internal.EntityGeneration(e))<<32|uint64(i) {
 			t.Fatalf("owners[%d] = %v is not indexed back to row %d (value %v)", i, e, i, value)
 		}
 	}
@@ -154,11 +156,11 @@ func TestRemoveIsSwapRemoveAndThePopulationStaysExact(t *testing.T) {
 // Nothing shrinks: no compaction, no sweep, and no array handed back. A
 // respawn reuses the row rather than buying it again.
 func TestNothingShrinks(t *testing.T) {
-	entities := newEntities(64)
+	entities := internal.NewEntities(64)
 	store := NewStore[position](entities, 0)
 	live := make([]Entity, 64)
 	for i := range live {
-		live[i] = entities.alloc()
+		live[i] = internal.EntitiesAlloc(entities)
 		store.Set(live[i], position{X: float32(i)})
 	}
 	grown := cap(store.dense)
@@ -180,10 +182,10 @@ func TestNothingShrinks(t *testing.T) {
 // fill, against append doubling's repeated regrowth.
 func TestTheReserveHintBuysAnAllocationFreeFill(t *testing.T) {
 	const n = 10000
-	entities := newEntities(n)
+	entities := internal.NewEntities(n)
 	ids := make([]Entity, n)
 	for i := range ids {
-		ids[i] = entities.alloc()
+		ids[i] = internal.EntitiesAlloc(entities)
 	}
 
 	reservedStore := NewStore[position](entities, n)
@@ -234,9 +236,9 @@ func TestStoreCoreCarriesExactlyOneMethod(t *testing.T) {
 // A Tag's Store is its sparse index and its owners: there is nothing to store,
 // so the dense array costs no memory however many entities carry the Tag.
 func TestATagStoreCarriesMembershipAndNoData(t *testing.T) {
-	entities := newEntities(64)
+	entities := internal.NewEntities(64)
 	store := NewStore[disabled](entities, 64)
-	e := entities.alloc()
+	e := internal.EntitiesAlloc(entities)
 	store.Set(e, disabled{})
 
 	if !store.Has(e) {
@@ -288,10 +290,10 @@ func TestAReverseWalkWithSwapRemoveVisitsEveryone(t *testing.T) {
 
 func filledStore(t *testing.T, n int) (*Store[position], *Entities) {
 	t.Helper()
-	entities := newEntities(uint32(n))
+	entities := internal.NewEntities(uint32(n))
 	store := NewStore[position](entities, uint32(n))
 	for i := range n {
-		store.Set(entities.alloc(), position{X: float32(i)})
+		store.Set(internal.EntitiesAlloc(entities), position{X: float32(i)})
 	}
 	return store, entities
 }

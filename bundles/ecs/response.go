@@ -30,7 +30,7 @@ import "reflect"
 // write into, and writing into a cell nobody reads is worse than not compiling.
 //
 // It is T rather than *T on purpose. Every wrapper in this package is X[T] over
-// the domain type — In[T], Get[T], Set[T], Query[Q], Spawn[B] — and Read[T] and
+// the domain type — In[T], Get[T], Set[T], Query[Q], Spawn[S] — and Read[T] and
 // Write[T] take a pointer only because a kernel resource is keyed by its exact
 // Go type, which is the kernel's rule and not this package's. A Resp[*T] would
 // also make the System supply the storage, which is either an allocation per

@@ -3,6 +3,8 @@ package ecs
 import (
 	"reflect"
 	"unsafe"
+
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 )
 
 // absentSlot is the sparse slot of an entity a Store holds nothing for. Its
@@ -13,9 +15,13 @@ const absentSlot = uint64(absentGeneration) << 32
 // storeCore is the type-erased half of a Store, and it carries exactly one
 // method on purpose. A despawn has to empty every Store while naming no
 // Component type, and that is the whole of what type erasure is for here: the
-// 9% an interface call costs is paid once per Store per despawn, never per
+// 9% an indirect call costs is paid once per Store per despawn, never per
 // entity. Everything a Query needs — the population, the owners, the rows —
 // it reaches through the typed *Store[T] instead.
+//
+// NewStore enrols that one method with the authority bound to its Store, since
+// the authority is declared in internal and cannot name this interface; the
+// interface itself is what guardHandle recognises a Store by.
 type storeCore interface {
 	remove(e Entity) bool
 }
@@ -100,7 +106,7 @@ func NewStore[T any](en *Entities, ids uint32) *Store[T] {
 	for i := range s.sparse {
 		s.sparse[i] = absentSlot
 	}
-	en.enrol(s)
+	internal.EntitiesEnrol(en, s.remove)
 	return s
 }
 
@@ -190,14 +196,14 @@ func (s *Store[T]) update(e Entity, value T) bool {
 // It is the structural half of Set: it grows the sparse index if the entity's
 // index has never been seen, appends the row, and points the slot at it.
 func (s *Store[T]) add(e Entity, value T) {
-	index := int(e.idx())
+	index := int(internal.EntityIndex(e))
 	for len(s.sparse) <= index {
 		s.sparse = append(s.sparse, absentSlot)
 	}
 	row := len(s.owners)
 	s.owners = append(s.owners, e)
 	s.dense = append(s.dense, value)
-	s.sparse[index] = uint64(e.gen())<<32 | uint64(row)
+	s.sparse[index] = uint64(internal.EntityGeneration(e))<<32 | uint64(row)
 	if validate {
 		stampStored(unsafe.Pointer(&s.dense[row]), s.lists, s.owner)
 	}
@@ -211,12 +217,12 @@ func (s *Store[T]) Remove(e Entity) bool { return s.remove(e) }
 // it is the probe. owners is not touched at all — a probed Store reads two
 // arrays, not three.
 func (s *Store[T]) probe(e Entity) (uint32, bool) {
-	index := e.idx()
+	index := internal.EntityIndex(e)
 	if int(index) >= len(s.sparse) {
 		return 0, false
 	}
 	slot := s.sparse[index]
-	return uint32(slot), uint32(slot>>32) == e.gen()
+	return uint32(slot), uint32(slot>>32) == internal.EntityGeneration(e)
 }
 
 // remove is swap-remove: the last row moves into the hole. That is what keeps
@@ -232,7 +238,7 @@ func (s *Store[T]) remove(e Entity) bool {
 		moved := s.owners[last]
 		s.owners[row] = moved
 		s.dense[row] = s.dense[last]
-		s.sparse[moved.idx()] = uint64(moved.gen())<<32 | uint64(row)
+		s.sparse[internal.EntityIndex(moved)] = uint64(internal.EntityGeneration(moved))<<32 | uint64(row)
 	}
 	// The arrays are re-sliced, never handed back: a later Set reuses the row.
 	// A pointer-free row is left where it lies, because nothing it holds keeps
@@ -248,6 +254,6 @@ func (s *Store[T]) remove(e Entity) bool {
 	}
 	s.owners = s.owners[:last]
 	s.dense = s.dense[:last]
-	s.sparse[e.idx()] = absentSlot
+	s.sparse[internal.EntityIndex(e)] = absentSlot
 	return true
 }

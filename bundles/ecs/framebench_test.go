@@ -3,6 +3,7 @@ package ecs
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -45,7 +46,7 @@ func subscribeHandWritten(registrar *kernel.Registrar) {
 // spawning is a later ticket's.
 func populate(entities *Entities, components *componentsPlugin, n int) {
 	for range n {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		components.bodies.Set(e, body{})
 		components.velocities.Set(e, velocity{X: 1, Y: 2})
 	}
@@ -57,7 +58,7 @@ func populate(entities *Entities, components *componentsPlugin, n int) {
 // walked.
 func populateFiltered(entities *Entities, components *componentsPlugin, n int) {
 	for i := range n {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		components.bodies.Set(e, body{})
 		components.velocities.Set(e, velocity{X: 1, Y: 2})
 		if i%3 == 0 {

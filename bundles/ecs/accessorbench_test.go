@@ -3,6 +3,7 @@ package ecs
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -22,7 +23,7 @@ import (
 func populateHoming(entities *Entities, components *componentsPlugin, n int) {
 	ids := make([]Entity, n)
 	for i := range ids {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		ids[i] = e
 		components.bodies.Set(e, body{X: float32(i)})
 		components.velocities.Set(e, velocity{X: 1, Y: 2})
@@ -203,7 +204,7 @@ func accessorPopulation(tb testing.TB, n int) (*accessorWorld, []Entity) {
 	world := accessors(tb, uint32(n))
 	ordered := make([]Entity, n)
 	for i := range ordered {
-		e := world.entities.alloc()
+		e := internal.EntitiesAlloc(world.entities)
 		ordered[i] = e
 		world.components.bodies.Set(e, body{X: float32(i)})
 	}

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 )
 
@@ -186,7 +187,7 @@ func (q *Query[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
 		} else if componentType.Kind() == reflect.Pointer {
 			componentType, write = componentType.Elem(), true
 		}
-		class := en.classOf(componentType)
+		class := classOf(en, componentType)
 		if class == nil {
 			panic(fmt.Sprintf("ecs: Query %s names unregistered Component %s", queryType, componentType))
 		}
@@ -338,14 +339,14 @@ func (q *Query[Q]) bind() {
 // of the unrolled fillers is that the loop contains no call: a probe that
 // swallowed the fill grew past the inlining budget and cost 8% a frame.
 func (c queryCursor) row(e Entity) (uintptr, bool) {
-	index := e.idx()
+	index := internal.EntityIndex(e)
 	if int(index) >= len(c.sparse) {
 		// The Store has never held a row for an Entity this high, so it holds
 		// none for e: absence, which is what a Without wanted.
 		return 0, c.wanted == absentGeneration
 	}
 	slot := c.sparse[index]
-	return uintptr(uint32(slot)), uint32(slot>>32) == e.gen()|c.wanted
+	return uintptr(uint32(slot)), uint32(slot>>32) == internal.EntityGeneration(e)|c.wanted
 }
 
 // fill writes one Component into the buffer: the address of the stored row for

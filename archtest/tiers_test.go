@@ -304,7 +304,10 @@ func importViolations(
 }
 
 // pluginViolations finds every type a package declares that has the three
-// methods of kernel.Plugin, on the value or on the pointer.
+// methods of kernel.Plugin, on the value or on the pointer. Acting on a
+// *kernel.Registrar the root is handed is not declaring a Plugin: functions
+// that take one (ecs.RegisterComponent, ecs.ToHandler) and types with fewer
+// than all three methods pass.
 func pluginViolations(pkg *packages.Package, rel string, within func(string) string) []violation {
 	var violations []violation
 	scope := pkg.Types.Scope()

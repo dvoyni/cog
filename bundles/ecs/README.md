@@ -13,38 +13,77 @@ builders are here.**
 [`docs/specs/ecs.md`](docs/specs/ecs.md) is the specification the whole plugin is
 judged against.
 
+ecs is a **Bundle**: a Slot and its one Extension, shipped together. The
+vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
+[ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
+
+## Packages
+
+ecs has the Bundle shape: a contract root, an `…impl` and an `internal/`.
+
+- **`bundles/ecs`** is the contract, and it is the whole library a System author
+  uses: `Entity`, `NoEntity`, `Entities`, `Store`, `RegisterComponent`,
+  `Storable`, `PointerFree`, `Query`, `With` and `Without`, `Spawn` and
+  `WriteableEntities`, the `Get`, `Set` and `Remove` accessors, `List`,
+  `NewList` and `ListOf`, `Read` and `Write`, `In` and `Feed`, `Resp`, the
+  `ToHandler` and `ToExecute` builders, and `Name`. It declares no plugin. It
+  does act on a `*kernel.Registrar` it is handed — `RegisterComponent`,
+  `ToHandler` and `ToExecute` all do — which a contract root may; the tier test
+  checks only that it declares no type implementing `kernel.Plugin`.
+- **`bundles/ecs/ecsimpl`** is the plugin: `New` and `Config`, and a `Register`
+  that publishes the authority and does nothing else. It exports `New` and
+  `Config` and nothing else. Only composition roots and tests import it.
+- **`bundles/ecs/internal`** holds what the two share and nothing else may
+  reach: the declarations of `Entity` and `Entities`, whose construction is the
+  whole of what `ecsimpl` does, with the allocation, despawn, Store enrolment and
+  Component registry the root drives through the friend functions in
+  `friends.go`.
+
+`Entity` and `Entities` are declared in `internal` with their state unexported
+and aliased in the root (`type Entities = internal.Entities`), so they stay
+concrete types: no probe or spawn goes through an interface, a despawn pays the
+one indirect call per Store it always paid, and each friend function inlines. `internal` cannot name the root, so the authority holds
+an enrolled Store as that Store's `remove` and a Component's registration record
+as a value only the root reads back. Because the type is declared there, the
+kernel's architecture output and its diagnostics name the resource
+`*internal.Entities`; it is the same cell as `*ecs.Entities`.
+
 ## Files
 
-`contract.go` holds the package documentation and `Entity`; `component.go` the
-`Storable` and `PointerFree` rules and `RegisterComponent`; `entities.go` the `Entities`
-authority; `store.go` the `Store`, the type-erased `storeCore` a despawn reaches
-every Store through, and the erased header a Query fills from; `query.go` the
-`Query`, its driver and its fillers; `filter.go` the `Without` and `With` field
-types; `spawn.go` the `Spawn` and `WriteableEntities` handles; `accessor.go` the
-`Get`, `Set` and `Remove` accessors; `list.go` the `List` a Component holds
-variable-length data in; `validate.go` and its two build-tagged halves the List
-write check; `resource.go` the `Read` and `Write`
-handles that name another plugin's resource; `in.go` the `In` cell and the
-`Feed` that fills it; `response.go` the `Resp` cell a command answers through;
-`system.go` the `ToHandler` and `ToExecute` builders and the parameter
-classification both share; `plugin.go` the plugin that publishes the authority.
+`contract.go` holds the package documentation, `Name` and the `Entity` alias;
+`component.go` the `Storable` and `PointerFree` rules and `RegisterComponent`;
+`entities.go` the `Entities` alias; `store.go` the `Store`, the type-erased
+`storeCore` a despawn reaches every Store through, and the erased header a Query
+fills from; `query.go` the `Query`, its driver and its fillers; `filter.go` the
+`Without` and `With` field types; `spawn.go` the `Spawn` and
+`WriteableEntities` handles; `accessor.go` the `Get`, `Set` and `Remove`
+accessors; `list.go` the `List` a Component holds variable-length data in;
+`validate.go` and its two build-tagged halves the List write check;
+`resource.go` the `Read` and `Write` handles that name another plugin's
+resource; `in.go` the `In` cell and the `Feed` that fills it; `response.go` the
+`Resp` cell a command answers through; `system.go` the `ToHandler` and
+`ToExecute` builders and the parameter classification both share.
+`internal/entity.go` and `internal/entities.go` declare `Entity` and the
+authority, and `internal/friends.go` the functions the root and `ecsimpl` reach
+their state through. `ecsimpl/plugin.go` is the plugin that publishes the
+authority and `ecsimpl/config.go` its `Config`.
 
 ## Dependencies
 
 - Go packages: the standard library, `kernel`, and `m` for `m.Blob`
 - Plugin dependencies: none
-- Configuration: `ecs.Config`, whose `PrewarmEntities` is how many Entities the
-  authority reserves room for up front — a hint, not a limit; `DefaultConfig()`
-  prewarms 1024
+- Configuration: `ecsimpl.Config`, whose `PrewarmEntities` is how many Entities
+  the authority reserves room for up front — a hint, not a limit; a zero field
+  takes its default, 1024
 
 ## Composing
 
 ```go
-config[ecs.Name] = ecs.DefaultConfig().WithPrewarmEntities(prewarmEntities)
-kernel.New(config).WithPlugins(ecs.Plugin(), physics.New(), game.New())
+config[ecs.Name] = ecsimpl.Config{PrewarmEntities: prewarmEntities}
+kernel.New(config).WithPlugins(ecsimpl.New(), physics.New(), game.New())
 ```
 
-**No plugin constructor takes the world.** `ecs.Plugin` creates the authority
+**No plugin constructor takes the world.** `ecsimpl.New` creates the authority
 from its config and publishes it as the `*Entities` resource every System holds
 for read and every structural change holds for write; it registers nothing else,
 because Components are registered by the plugins that define them and Systems
@@ -56,7 +95,7 @@ registration, before any handler runs. They read it with
 registrar: it is the one registration-time resource read the kernel permits,
 the value of a resource owned by a declared dependency, which has therefore
 already registered. So
-**every plugin that registers a Component or a System declares `ecs` in its
+**every plugin that registers a Component or a System declares `ecs.Name` in its
 `Dependencies`**. It already had to, for the `read{*Entities}` every System
 takes; a plugin that registers Components alone and forgets it fails
 composition with `ErrUnavailableDependency` naming it.
@@ -64,8 +103,8 @@ composition with `ErrUnavailableDependency` naming it.
 ## Entity
 
 ```go
-type Entity uint64
-const NoEntity Entity = 0
+type Entity = internal.Entity   // a uint64
+const NoEntity = internal.NoEntity
 ```
 
 An `Entity` is an opaque handle to one thing. It is comparable, copyable and
@@ -98,8 +137,10 @@ per Engine, and that is what makes an Engine the boundary of one simulation — 
 second simulation is a second Engine. **No identifier in this package contains
 the word `World`**, and a test enforces it.
 
-The ecs plugin creates it, reserving room for `Config.PrewarmEntities` indices, and nothing
-else can: the constructor is unexported, which is what keeps it one per Engine.
+The ecs plugin, `ecsimpl`, creates it, reserving room for
+`Config.PrewarmEntities` indices, and nothing else can: the constructor is in
+`internal`, which only the root and `ecsimpl` can import, and that is what keeps
+it one per Engine.
 The number is the peak concurrent entity count the app expects, **not a cap**:
 exceeding it costs a growth, not an error.
 
@@ -132,7 +173,9 @@ every System that holds an Entity across frames, which is every System that hold
 a target, an owner or a caster.
 
 A despawn is **total**. Nothing records which Stores hold an entity, so every
-Store is asked, through an interface carrying exactly one method. That is also
+Store is asked, through the one method of the type-erased `storeCore`, which a
+Store enrols with the authority bound to itself: one indirect call per Store per
+despawn, never per entity. That is also
 why no per-entity index of "which Stores hold me" may ever be added: the index
 would live in `Entities`, so maintaining it would move every Component addition
 from that Component's lock to the one lock every System holds. **Any global
@@ -557,7 +600,7 @@ holds it for read.
 | parameter | declares | what it is |
 | --- | --- | --- |
 | `*ecs.Query[Q]` | `read{*Entities}` + per-field access | the Components it iterates |
-| `*ecs.Spawn[B]` | `write{*Entities}` + `write{*Store[F]}` per Bundle field | creating Entities |
+| `*ecs.Spawn[S]` | `write{*Entities}` + `write{*Store[F]}` per Component set field | creating Entities |
 | `*ecs.WriteableEntities` | `write{*Entities}` | despawning |
 | `*ecs.Get[T]` | `read{*Store[T]}` + `read{*Entities}` | reading one Component of an Entity it did not iterate to |
 | `*ecs.Set[T]`, `*ecs.Remove[T]` | `write{*Store[T]}` + `read{*Entities}` | writing, inserting or taking away the same |
@@ -700,7 +743,7 @@ which is where the kernel asks for it anyway.
 ## Structural change
 
 ```go
-type Projectile struct {          // a Bundle: the Components one act of creation makes
+type Projectile struct {          // a Component set: the Components a new Entity starts with
     Body     Body
     Velocity Velocity
     Collider Collider
@@ -714,24 +757,27 @@ func fire(sp *ecs.Spawn[Projectile], we *ecs.WriteableEntities) {
 
 A **structural change** is a change to which Entities have which Components, as
 against a change to a Component's value. **Nothing here is a Command**, and that
-is the part most likely to be built wrong from habit: `Spawn[B].New` and
+is the part most likely to be built wrong from habit: `Spawn[S].New` and
 `WriteableEntities.Despawn` are direct calls on handles the System already
 holds, not messages, not a queue and not a deferred buffer. There is no
 exclusion mechanism to build either, because the lock set below already excludes
 everyone.
 
-**Two handles, not one.** Folding `Despawn` onto `Spawn[B]` would force a Bundle
-type on Systems that never spawn, so a System that only retires Entities names
+**Two handles, not one.** Folding `Despawn` onto `Spawn[S]` would force a
+Component set type on Systems that never spawn, so a System that only retires Entities names
 only `*ecs.WriteableEntities`.
 
-A **Bundle** is a struct type whose field types are the Components, the way a
-Query is — and **a Bundle field simply *is* a Component field**. There is no
-conversion mechanism and none is needed: a Component may hold a string, so a
-declarative spawn naming a model by its path needs nothing from the ECS.
+A Spawn names the **Component set** a new Entity starts with as a struct type
+whose field types are the Components, the way a Query is, and its value carries
+the Components themselves — **a field of it simply *is* a Component field**.
+There is no conversion mechanism and none is needed: a Component may hold a
+string, so a declarative spawn naming a model by its path needs nothing from the
+ECS.
 
-A Bundle is **not a Component set**: it describes one act of creation, and the
-Entity may gain and lose Components afterwards without the Bundle meaning
-anything. A Tag is an ordinary Bundle field.
+The struct type names that set for **one act of creation and nothing more**: the
+Entity may gain and lose Components afterwards and from then on the struct type
+means nothing. It is not a structure the engine keeps, and nothing groups
+Entities by it. A Tag is an ordinary field of it.
 
 `Despawn` is **total and eager**: every Store is emptied of the Entity at once
 and the index returns to the free list immediately, so no Store ever holds a dead
@@ -755,7 +801,7 @@ it excludes every System in the frame. Two consequences worth stating outright.
 - A spawn whose Components are chosen at runtime has **exactly** the lock set of
   one whose Components are spelled in Go. There is nothing to name statically
   that is not already named.
-- A `Spawn[B]` additionally declares `write{*Store[F]}` **per Bundle field**,
+- A `Spawn[S]` additionally declares `write{*Store[F]}` **per Component set field**,
   which is **redundant for locking and kept anyway, as an *ownership*
   declaration**. It is what makes cog's composition check fire, so a plugin
   spawning a `Health` must depend on `Health`'s owner. Dropping it would let any
@@ -833,7 +879,7 @@ spawn, and it is large:
 
 | | declares | excludes |
 | --- | --- | --- |
-| `Spawn[B].New`, `WriteableEntities.Despawn` | `write{*Entities}` | **every System in the frame** |
+| `Spawn[S].New`, `WriteableEntities.Despawn` | `write{*Entities}` | **every System in the frame** |
 | `Set[T].UpdateFor`, `Remove[T].From` | `write{*Store[T]}` | only Systems that touch `T` |
 
 **`UpdateFor` is safe on the Entity a Query is currently visiting**, and on any
@@ -1014,16 +1060,16 @@ despawn line is linear in that number, at about 3 ns a Store:
 | | ns/op | allocs/op | B/op |
 | --- | --- | --- | --- |
 | the two Stores written directly, by hand | 8.53 | **0** | 0 |
-| **`Spawn[B].New`, a two-field Bundle** | **14.50 — 1.70×** | **0** | 0 |
-| `Spawn[B].New`, a four-field Bundle | 27.59 | **0** | 0 |
-| …the same two-field spawn, bundle staged through the **parameter's address** | 21.21 | **1** | **16** |
+| **`Spawn[S].New`, a two-field Component set** | **14.50 — 1.70×** | **0** | 0 |
+| `Spawn[S].New`, a four-field Component set | 27.59 | **0** | 0 |
+| …the same two-field spawn, its value staged through the **parameter's address** | 21.21 | **1** | **16** |
 | `WriteableEntities.Despawn`, asking all six Stores | 18.50 | **0** | 0 |
 
-**`Spawn` stages its bundle through a field of the `Spawn`**, and that is the
-fourth thing on the list above rather than a detail: the obvious spelling —
-taking `&bundle` of the parameter and handing it to the cached per-field
-closures — hands the address of a parameter to an opaque func value, so the
-bundle escapes. One allocation the width of the Bundle, **per spawn**, and 46%
+**`Spawn` stages the Component set's value through a field of the `Spawn`**,
+and that is the fourth thing on the list above rather than a detail: the obvious
+spelling — taking `&components` of the parameter and handing it to the cached
+per-field closures — hands the address of a parameter to an opaque func value,
+so the value escapes. One allocation the width of the struct, **per spawn**, and 46%
 slower with it. A test holds both spellings side by side so the trap stays
 closed.
 

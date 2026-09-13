@@ -2,9 +2,11 @@ package ecs
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -38,7 +40,7 @@ func TestASystemIsInvocableAsACommand(t *testing.T) {
 			Feed(func(r nudgeRequest) float32 { return r.By })))
 	})
 
-	e := entities.alloc()
+	e := internal.EntitiesAlloc(entities)
 	components.bodies.Set(e, body{X: 1})
 	components.velocities.Set(e, velocity{})
 
@@ -57,7 +59,7 @@ func TestASystemIsInvocableAsACommand(t *testing.T) {
 		if cmd.Type != reflect.TypeFor[nudgeCmd]() {
 			continue
 		}
-		if !namesType(cmd.Reads, "*ecs.Entities") || !namesType(cmd.Writes, "body]") {
+		if !slices.Contains(cmd.Reads, entitiesType) || !namesType(cmd.Writes, "body]") {
 			t.Fatalf("the command reads %v and writes %v", cmd.Reads, cmd.Writes)
 		}
 		return
@@ -77,7 +79,7 @@ func TestASystemInvokedAsACommandMayNameItsRequest(t *testing.T) {
 		}))
 	})
 
-	e := entities.alloc()
+	e := internal.EntitiesAlloc(entities)
 	components.bodies.Set(e, body{X: 2})
 	components.velocities.Set(e, velocity{})
 
@@ -119,7 +121,7 @@ func TestTheSameSystemIsBothACommandAndASubscription(t *testing.T) {
 			Feed(func(e app.UpdateEvent) float64 { return e.Dt })))
 	})
 
-	e := entities.alloc()
+	e := internal.EntitiesAlloc(entities)
 	components.bodies.Set(e, body{})
 	components.velocities.Set(e, velocity{X: 10})
 
@@ -150,7 +152,7 @@ func TestASystemAnswersThroughItsResponseWrapper(t *testing.T) {
 	})
 
 	for i := range 3 {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		components.bodies.Set(e, body{X: float32(i)})
 		components.velocities.Set(e, velocity{})
 	}

@@ -173,3 +173,28 @@ func (*plugin) Register(registrar *kernel.Registrar, config any) error { return 
 		rulePlugin,
 	)
 }
+
+// A contract root may act on a *kernel.Registrar it is handed, the way ecs's
+// RegisterComponent, ToHandler and ToExecute do: functions that take one, and
+// types that are handed one without being a Plugin, are contract. Only a type
+// with all three kernel.Plugin methods breaks the rule.
+func TestTiers_AContractRootActingOnAHandedRegistrarPasses(t *testing.T) {
+	violations := fixtureViolations(t, "bundles/a/register.go", `package a
+
+import "fixture.test/cog/kernel"
+
+type Store struct{}
+
+func RegisterComponent(registrar *kernel.Registrar) *Store { return &Store{} }
+
+func ToHandler(registrar *kernel.Registrar, system any) func() { return func() {} }
+
+type Planner struct{}
+
+func (Planner) Name() kernel.PluginName                              { return Name }
+func (*Planner) Register(registrar *kernel.Registrar, config any) error { return nil }
+`)
+	if len(violations) != 0 {
+		t.Fatalf("a contract root acting on a handed Registrar has violations:\n%s", joinViolations(violations))
+	}
+}

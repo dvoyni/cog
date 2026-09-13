@@ -3,12 +3,14 @@ package ecs
 import (
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -17,9 +19,9 @@ import (
 // Spawn is a handle the System already holds, so creating an Entity is a direct
 // call and the exclusion was arranged before the frame started.
 
-// spawnBundle is the Component set one act of creation makes. A Bundle field
-// simply is a Component field: there is no conversion step anywhere.
-type spawnBundle struct {
+// spawnSet is the Component set one act of creation makes. A field of it simply
+// is a Component field: there is no conversion step anywhere.
+type spawnSet struct {
 	Body     body
 	Velocity velocity
 }
@@ -27,12 +29,12 @@ type spawnBundle struct {
 type spawnSystem kernel.Subscription[app.UpdateEvent]
 
 // TestASystemSpawns is the tracer bullet: a System whose signature names a
-// Spawn creates an Entity carrying every Component the Bundle names, on a real
+// Spawn creates an Entity carrying every Component the Component set names, on a real
 // engine, driven by a real app.UpdateEvent.
 func TestASystemSpawns(t *testing.T) {
 	entities, components, engine := newWorld(t, 128, func(registrar *kernel.Registrar) {
-		registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[spawnBundle]) {
-			sp.New(spawnBundle{Body: body{X: 1, Y: 2}, Velocity: velocity{X: 3}})
+		registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[spawnSet]) {
+			sp.New(spawnSet{Body: body{X: 1, Y: 2}, Velocity: velocity{X: 3}})
 		}))
 	})
 
@@ -59,7 +61,7 @@ func TestASystemSpawns(t *testing.T) {
 type despawnSystem kernel.Subscription[app.UpdateEvent]
 
 // TestASystemDespawns covers the other handle, and the reason there are two:
-// this System never names a Bundle, because it never creates anything.
+// this System never names a Component set, because it never creates anything.
 func TestASystemDespawns(t *testing.T) {
 	var doomed Entity
 	var reported, secondReport bool
@@ -73,7 +75,7 @@ func TestASystemDespawns(t *testing.T) {
 		}))
 	})
 
-	doomed, bystander := entities.alloc(), entities.alloc()
+	doomed, bystander := internal.EntitiesAlloc(entities), internal.EntitiesAlloc(entities)
 	components.bodies.Set(doomed, body{X: 1})
 	components.velocities.Set(doomed, velocity{X: 1})
 	components.colliders.Set(doomed, collider{Radius: 1})
@@ -119,7 +121,7 @@ func TestPopulationHoldsSteadyAcrossHundredsOfTicks(t *testing.T) {
 	const ticks = 300
 	live := make([]Entity, 0, perTick)
 	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
-		registrar.Subscribe[churnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[spawnBundle], we *WriteableEntities) {
+		registrar.Subscribe[churnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[spawnSet], we *WriteableEntities) {
 			for _, e := range live {
 				if !we.Despawn(e) {
 					t.Errorf("Despawn(%v) reported false for an entity spawned last tick", e)
@@ -127,7 +129,7 @@ func TestPopulationHoldsSteadyAcrossHundredsOfTicks(t *testing.T) {
 			}
 			live = live[:0]
 			for i := range perTick {
-				live = append(live, sp.New(spawnBundle{Body: body{X: float32(i)}}))
+				live = append(live, sp.New(spawnSet{Body: body{X: float32(i)}}))
 			}
 		}))
 	})
@@ -140,7 +142,7 @@ func TestPopulationHoldsSteadyAcrossHundredsOfTicks(t *testing.T) {
 		t.Fatalf("%d ticks of %d spawns and %d despawns left %d bodies, want %d",
 			ticks, perTick, perTick, components.bodies.Len(), perTick)
 	}
-	if used := len(entities.gens); used != perTick {
+	if used := internal.EntitiesIndexSpace(entities); used != perTick {
 		t.Fatalf("%d ticks of churn used %d indices, want %d: the free list bounds the index space by peak population",
 			ticks, used, perTick)
 	}
@@ -157,15 +159,15 @@ func TestPopulationHoldsSteadyAcrossHundredsOfTicks(t *testing.T) {
 // declaration that makes the composition check fire.
 func TestSpawnWritesTheAuthorityAndOwnsItsComponents(t *testing.T) {
 	_, _, engine := newWorld(t, 16, func(registrar *kernel.Registrar) {
-		registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[spawnBundle]) { _ = sp }))
+		registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[spawnSet]) { _ = sp }))
 	})
 
 	subscription := describeSubscription(t, engine, reflect.TypeFor[spawnSystem]())
-	if !namesType(subscription.Writes, "*ecs.Entities") {
-		t.Fatalf("a spawning System writes %v, which does not include *ecs.Entities", subscription.Writes)
+	if !slices.Contains(subscription.Writes, entitiesType) {
+		t.Fatalf("a spawning System writes %v, which does not include *Entities", subscription.Writes)
 	}
-	if namesType(subscription.Reads, "*ecs.Entities") {
-		t.Fatalf("a spawning System still reads *ecs.Entities: the write must supersede the read, not sit beside it")
+	if slices.Contains(subscription.Reads, entitiesType) {
+		t.Fatalf("a spawning System still reads *Entities: the write must supersede the read, not sit beside it")
 	}
 	for _, owned := range []string{"body]", "velocity]"} {
 		if !namesType(subscription.Writes, owned) {
@@ -184,8 +186,8 @@ func TestDespawnNamesNoComponentAtAll(t *testing.T) {
 	})
 
 	subscription := describeSubscription(t, engine, reflect.TypeFor[despawnSystem]())
-	if !namesType(subscription.Writes, "*ecs.Entities") {
-		t.Fatalf("a despawning System writes %v, which does not include *ecs.Entities", subscription.Writes)
+	if !slices.Contains(subscription.Writes, entitiesType) {
+		t.Fatalf("a despawning System writes %v, which does not include *Entities", subscription.Writes)
 	}
 	if len(subscription.Writes) != 1 {
 		t.Fatalf("a despawning System writes %v: a Despawn names no Component, so the barrier is one entry and not N",
@@ -196,10 +198,11 @@ func TestDespawnNamesNoComponentAtAll(t *testing.T) {
 	}
 }
 
-// TestABundleOverAnUnregisteredComponentFailsComposition names the Component and
-// the Bundle, rather than the store type the user never wrote.
-func TestABundleOverAnUnregisteredComponentFailsComposition(t *testing.T) {
-	type unregisteredBundle struct {
+// TestAComponentSetOverAnUnregisteredComponentFailsComposition names the
+// Component and the Component set, rather than the store type the user never
+// wrote.
+func TestAComponentSetOverAnUnregisteredComponentFailsComposition(t *testing.T) {
+	type unregisteredSet struct {
 		Body    body
 		Guarded guarded
 	}
@@ -207,43 +210,44 @@ func TestABundleOverAnUnregisteredComponentFailsComposition(t *testing.T) {
 	kernel.New(nil).
 		Handler(func(err error) bool { failure = err; return true }).
 		WithPlugins(
-			Plugin(),
+			authority{ids: 8},
 			&componentsPlugin{ids: 8},
 			&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
-				registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[unregisteredBundle]) {}))
+				registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[unregisteredSet]) {}))
 			}},
 		)
 
 	if failure == nil {
-		t.Fatalf("composing a Bundle over an unregistered Component succeeded")
+		t.Fatalf("composing a Component set over an unregistered Component succeeded")
 	}
-	for _, want := range []string{"systems", "unregisteredBundle", "guarded"} {
+	for _, want := range []string{"systems", "unregisteredSet", "guarded"} {
 		if !strings.Contains(failure.Error(), want) {
 			t.Fatalf("composition failure %q does not name %q", failure.Error(), want)
 		}
 	}
 }
 
-// TestABundleFieldIsAComponentValue: a Bundle field is not a Query field, and
+// TestAComponentSetFieldIsAComponentValue: a Component set field is not a Query
+// field, and
 // the mistake of copying one is worth a diagnostic of its own, because a spawn
 // supplies the value rather than reaching one that already exists.
-func TestABundleFieldIsAComponentValue(t *testing.T) {
-	type pointerBundle struct{ Body *body }
+func TestAComponentSetFieldIsAComponentValue(t *testing.T) {
+	type pointerSet struct{ Body *body }
 	var failure error
 	kernel.New(nil).
 		Handler(func(err error) bool { failure = err; return true }).
 		WithPlugins(
-			Plugin(),
+			authority{ids: 8},
 			&componentsPlugin{ids: 8},
 			&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
-				registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[pointerBundle]) {}))
+				registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[pointerSet]) {}))
 			}},
 		)
 
 	if failure == nil {
-		t.Fatalf("a Bundle with a pointer field was accepted at composition")
+		t.Fatalf("a Component set with a pointer field was accepted at composition")
 	}
-	for _, want := range []string{"pointerBundle", "Body"} {
+	for _, want := range []string{"pointerSet", "Body"} {
 		if !strings.Contains(failure.Error(), want) {
 			t.Fatalf("composition failure %q does not name %q", failure.Error(), want)
 		}
@@ -296,7 +300,7 @@ func TestWritingTheAuthorityExcludesEveryOtherSystem(t *testing.T) {
 		// declares. Both iterate the same Query and do the same work.
 		var workerA any = func(q *Query[bodyQuery]) { seen.overlap(wait) }
 		if spawning {
-			workerA = func(q *Query[bodyQuery], sp *Spawn[spawnBundle]) { seen.overlap(wait) }
+			workerA = func(q *Query[bodyQuery], sp *Spawn[spawnSet]) { seen.overlap(wait) }
 		}
 		_, _, engine := newWorld(t, 16, func(registrar *kernel.Registrar) {
 			registrar.Subscribe[workerASystem](ToHandler[app.UpdateEvent](registrar, workerA))
@@ -316,22 +320,22 @@ func TestWritingTheAuthorityExcludesEveryOtherSystem(t *testing.T) {
 	}
 }
 
-// TestATagIsAnOrdinaryBundleField is worth a test of its own because a
-// zero-size field is where Go's padding rules bite: the Bundle's field offsets
+// TestATagIsAnOrdinaryComponentSetField is worth a test of its own because a
+// zero-size field is where Go's padding rules bite: the Component set's field offsets
 // are what the spawn writes through, and a Tag carries nothing to write.
-func TestATagIsAnOrdinaryBundleField(t *testing.T) {
-	type taggedBundle struct {
+func TestATagIsAnOrdinaryComponentSetField(t *testing.T) {
+	type taggedSet struct {
 		Body  body
 		Solid solid
 	}
 	_, components, engine := newWorld(t, 16, func(registrar *kernel.Registrar) {
-		registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[taggedBundle]) { sp.New(taggedBundle{Body: body{X: 7}}) }))
+		registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[taggedSet]) { sp.New(taggedSet{Body: body{X: 7}}) }))
 	})
 
 	frame(t, engine, 1)
 
 	if components.solids.Len() != 1 {
-		t.Fatalf("the spawn left %d solids, want 1: a Tag is an ordinary Store and an ordinary Bundle field",
+		t.Fatalf("the spawn left %d solids, want 1: a Tag is an ordinary Store and an ordinary Component set field",
 			components.solids.Len())
 	}
 	spawned := components.solids.owners[0]
@@ -374,10 +378,10 @@ func TestASystemMayRestructureTheEntityItIsVisiting(t *testing.T) {
 	t.Run("spawning one Entity per visited Entity", func(t *testing.T) {
 		visited := 0
 		entities, components, engine := newWorld(t, 4*population, func(registrar *kernel.Registrar) {
-			registrar.Subscribe[restructuringSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], sp *Spawn[spawnBundle]) {
+			registrar.Subscribe[restructuringSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], sp *Spawn[spawnSet]) {
 				for range q.All() {
 					visited++
-					sp.New(spawnBundle{Body: body{X: 1}, Velocity: velocity{X: 1}})
+					sp.New(spawnSet{Body: body{X: 1}, Velocity: velocity{X: 1}})
 				}
 			}))
 		})
@@ -401,25 +405,25 @@ type handleSystem kernel.Subscription[app.UpdateEvent]
 // parameters, so a test can call New and Despawn directly and count what they
 // cost. Only a test in this package can hold them outside a frame; a System's
 // only route to either is its signature.
-func handles[B any](tb testing.TB, ids uint32) (*Spawn[B], *WriteableEntities, *componentsPlugin) {
+func handles[S any](tb testing.TB, ids uint32) (*Spawn[S], *WriteableEntities, *componentsPlugin) {
 	tb.Helper()
-	var spawn *Spawn[B]
+	var spawn *Spawn[S]
 	var writeable *WriteableEntities
 	_, components, engine := newWorld(tb, ids, func(registrar *kernel.Registrar) {
-		registrar.Subscribe[handleSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[B], we *WriteableEntities) { spawn, writeable = sp, we }))
+		registrar.Subscribe[handleSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[S], we *WriteableEntities) { spawn, writeable = sp, we }))
 	})
 	frame(tb, engine, 1)
 	return spawn, writeable, components
 }
 
 // newEscaping is the obvious spelling of New, and it is here as the control for
-// the one the package ships. It takes the address of the bundle parameter and
-// hands it to the same opaque per-field closures, which is what makes the bundle
-// escape: the address of a parameter reaching a func value the compiler cannot
+// the one the package ships. It takes the address of the components parameter
+// and hands it to the same opaque per-field closures, which is what makes the
+// value escape: the address of a parameter reaching a func value the compiler cannot
 // see into is heap-allocated, once per spawn.
-func (s *Spawn[B]) newEscaping(bundle B) Entity {
-	e := s.entities.Get().alloc()
-	buffer := unsafe.Pointer(&bundle)
+func (s *Spawn[S]) newEscaping(components S) Entity {
+	e := internal.EntitiesAlloc(s.entities.Get())
+	buffer := unsafe.Pointer(&components)
 	for i := range s.fields {
 		field := &s.fields[i]
 		field.set(e, unsafe.Add(buffer, field.offset))
@@ -427,19 +431,19 @@ func (s *Spawn[B]) newEscaping(bundle B) Entity {
 	return e
 }
 
-// TestSpawnStagesItsBundleThroughAField is the trap an implementation hits, made
-// a test rather than a comment: the two spellings differ only in where the
-// bundle lives, and one of them allocates per spawn.
-func TestSpawnStagesItsBundleThroughAField(t *testing.T) {
-	spawn, writeable, _ := handles[spawnBundle](t, 64)
-	round := func(create func(spawnBundle) Entity) float64 {
-		bundle := spawnBundle{Body: body{X: 1}, Velocity: velocity{X: 2}}
+// TestSpawnStagesItsComponentSetThroughAField is the trap an implementation
+// hits, made a test rather than a comment: the two spellings differ only in
+// where the Component set's value lives, and one of them allocates per spawn.
+func TestSpawnStagesItsComponentSetThroughAField(t *testing.T) {
+	spawn, writeable, _ := handles[spawnSet](t, 64)
+	round := func(create func(spawnSet) Entity) float64 {
+		values := spawnSet{Body: body{X: 1}, Velocity: velocity{X: 2}}
 		// Warm the free list and the dense rows, so what is measured is the
 		// steady state a game runs in and not the first growth.
 		for range 64 {
-			writeable.Despawn(create(bundle))
+			writeable.Despawn(create(values))
 		}
-		return testing.AllocsPerRun(100, func() { writeable.Despawn(create(bundle)) })
+		return testing.AllocsPerRun(100, func() { writeable.Despawn(create(values)) })
 	}
 
 	staged := round(spawn.New)

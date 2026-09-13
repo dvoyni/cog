@@ -2,9 +2,11 @@ package ecs
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -43,10 +45,10 @@ func TestASystemReachesAnEntityItDidNotIterateTo(t *testing.T) {
 		}))
 	})
 
-	target := entities.alloc()
+	target := internal.EntitiesAlloc(entities)
 	components.bodies.Set(target, body{X: 10, Y: 20})
 
-	missile := entities.alloc()
+	missile := internal.EntitiesAlloc(entities)
 	components.bodies.Set(missile, body{})
 	components.homings.Set(missile, homing{Target: target})
 
@@ -108,9 +110,9 @@ func TestSetWritesTheEntityItReaches(t *testing.T) {
 		}))
 	})
 
-	target := entities.alloc()
+	target := internal.EntitiesAlloc(entities)
 	components.bodies.Set(target, body{X: 10})
-	missile := entities.alloc()
+	missile := internal.EntitiesAlloc(entities)
 	components.bodies.Set(missile, body{})
 	components.homings.Set(missile, homing{Target: target})
 
@@ -126,7 +128,7 @@ func TestSetWritesTheEntityItReaches(t *testing.T) {
 // pointer to a row that is not the Entity's.
 func TestSetRefReportsNothingForAnEntityWithoutTheComponent(t *testing.T) {
 	world := accessors(t, 16)
-	bare := world.entities.alloc()
+	bare := internal.EntitiesAlloc(world.entities)
 
 	if ref, ok := world.bodySet.Ref(bare); ok || ref != nil {
 		t.Fatalf("Ref of an Entity without the Component = %v, %v; want nil, false", ref, ok)
@@ -148,7 +150,7 @@ func TestUpdateForInsertsWhenAbsent(t *testing.T) {
 		}))
 	})
 
-	bare := entities.alloc()
+	bare := internal.EntitiesAlloc(entities)
 	components.bodies.Set(bare, body{X: 3})
 	components.velocities.Set(bare, velocity{})
 
@@ -200,7 +202,7 @@ func TestUpdateForIsSafeOnTheEntityBeingVisited(t *testing.T) {
 
 	populate(entities, components, population)
 	for range population {
-		e := entities.alloc()
+		e := internal.EntitiesAlloc(entities)
 		components.velocities.Set(e, velocity{X: 1})
 		bare = append(bare, e)
 	}
@@ -237,11 +239,11 @@ func TestRemoveTakesAComponentAway(t *testing.T) {
 		}))
 	})
 
-	e := entities.alloc()
+	e := internal.EntitiesAlloc(entities)
 	components.bodies.Set(e, body{})
 	components.velocities.Set(e, velocity{})
 	components.colliders.Set(e, collider{Radius: 1})
-	bystander := entities.alloc()
+	bystander := internal.EntitiesAlloc(entities)
 	components.colliders.Set(bystander, collider{Radius: 2})
 
 	frame(t, engine, 1)
@@ -289,8 +291,8 @@ func TestAnAccessorDeclaresTheAuthorityItselfAndItsStore(t *testing.T) {
 	})
 
 	subscription := describeSubscription(t, engine, reflect.TypeFor[declaringSystem]())
-	if !namesType(subscription.Reads, "*ecs.Entities") {
-		t.Fatalf("three accessors alone read %v, which does not include *ecs.Entities: "+
+	if !slices.Contains(subscription.Reads, entitiesType) {
+		t.Fatalf("three accessors alone read %v, which does not include *Entities: "+
 			"the despawn traversal rests on every route to a Store declaring it", subscription.Reads)
 	}
 	if !namesType(subscription.Reads, "body]") {
@@ -364,7 +366,7 @@ func TestOnlySetReachesTheAuthority(t *testing.T) {
 // row finds absence, and nothing asked whether the Entity exists.
 func TestAReferenceToADespawnedEntityResolvesToNothing(t *testing.T) {
 	world := accessors(t, 16)
-	target := world.entities.alloc()
+	target := internal.EntitiesAlloc(world.entities)
 	world.components.bodies.Set(target, body{X: 5})
 
 	if _, ok := world.bodyGet.Of(target); !ok {
@@ -392,12 +394,12 @@ func TestAReferenceToADespawnedEntityResolvesToNothing(t *testing.T) {
 // addresses the new Entity's data.
 func TestARecycledIndexDoesNotAliasAStaleReference(t *testing.T) {
 	world := accessors(t, 16)
-	stale := world.entities.alloc()
+	stale := internal.EntitiesAlloc(world.entities)
 	world.components.bodies.Set(stale, body{X: 5})
 	world.writeable.Despawn(stale)
 
-	fresh := world.entities.alloc()
-	if fresh.idx() != stale.idx() {
+	fresh := internal.EntitiesAlloc(world.entities)
+	if internal.EntityIndex(fresh) != internal.EntityIndex(stale) {
 		t.Fatalf("the new Entity %v did not recycle %v's index, so nothing aliases and the test is vacuous",
 			fresh, stale)
 	}
@@ -420,7 +422,7 @@ func TestARecycledIndexDoesNotAliasAStaleReference(t *testing.T) {
 // and a pointer taken before the removal addresses a slot that is nobody's.
 func TestAWritePointerIsInvalidatedBySwapRemove(t *testing.T) {
 	world := accessors(t, 16)
-	first, last := world.entities.alloc(), world.entities.alloc()
+	first, last := internal.EntitiesAlloc(world.entities), internal.EntitiesAlloc(world.entities)
 	world.bodySet.UpdateFor(first, body{X: 1})
 	world.bodySet.UpdateFor(last, body{X: 2})
 
@@ -489,7 +491,7 @@ func TestAWritePointerIsInvalidatedByAGrowthDuringIteration(t *testing.T) {
 			}))
 		})
 		populate(entities, components, population)
-		spare = append(spare, entities.alloc())
+		spare = append(spare, internal.EntitiesAlloc(entities))
 		before := &components.bodies.dense[0]
 
 		frame(t, engine, 1)
@@ -540,7 +542,7 @@ func TestAnAccessorOverAnUnregisteredComponentFailsComposition(t *testing.T) {
 			kernel.New(nil).
 				Handler(func(err error) bool { failure = err; return true }).
 				WithPlugins(
-					Plugin(),
+					authority{ids: 8},
 					&componentsPlugin{ids: 8},
 					&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
 						registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](registrar, accessor.system))
@@ -572,7 +574,7 @@ func TestAnAccessorOverAnUnregisteredComponentFailsComposition(t *testing.T) {
 // the reason it declares read{*Entities} in the first place.
 func TestUpdateForRefusesAnEntityThatNoLongerExists(t *testing.T) {
 	world := accessors(t, 16)
-	doomed := world.entities.alloc()
+	doomed := internal.EntitiesAlloc(world.entities)
 	world.bodySet.UpdateFor(doomed, body{X: 1})
 	world.writeable.Despawn(doomed)
 
@@ -588,8 +590,8 @@ func TestUpdateForRefusesAnEntityThatNoLongerExists(t *testing.T) {
 
 	// The index comes back, and it comes back clean: the Entity that recycles it
 	// has no Component, and one removal empties the Store exactly.
-	fresh := world.entities.alloc()
-	if fresh.idx() != doomed.idx() {
+	fresh := internal.EntitiesAlloc(world.entities)
+	if internal.EntityIndex(fresh) != internal.EntityIndex(doomed) {
 		t.Fatalf("%v did not recycle %v's index, so the orphan this guards against is not reachable here",
 			fresh, doomed)
 	}
