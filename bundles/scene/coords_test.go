@@ -256,3 +256,15 @@ func TestViewProjectionIsWhatWorldToScreenProjectsThrough(t *testing.T) {
 		t.Errorf("WorldToScreen = %v, want %v from the published ViewProjection", screen, want)
 	}
 }
+
+func simpleCamera() CameraDescr {
+	return CameraDescr{
+		Transform: LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
+		FovY:      1.0472,
+		Near:      0.1, Far: 100,
+	}
+}
+
+// near reports whether two floats agree to the tolerance the geometry tests
+// assert at.
+func near(a, b float32) bool { return math.Abs(float64(a-b)) < 1e-4 }

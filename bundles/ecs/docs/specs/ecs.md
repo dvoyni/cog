@@ -1765,7 +1765,7 @@ length. **One recording System per bound plugin is the shape.**
 
 ### Ordering needs nothing new
 
-`scene.Plugin` subscribes its flush `.Last().Before[gfx.PresentOnUpdate]()`,
+scene's plugin subscribes its flush, `scene.FlushOnUpdate`, `.Last().Before[gfx.PresentOnUpdate]()`,
 so a recording System that does not ask to be last already runs before it. No
 new ordering vocabulary, demonstrated in the prototype with a `.Last()` stand-in
 for the flush.

@@ -18,6 +18,27 @@ changes it depends on; those are specified here as checklists
 ([Required engine changes](#required-engine-changes)), because scene cannot be
 correct without them.
 
+> **Amended by [#339](https://github.com/dvoyni/cog/issues/339).** scene became
+> a Bundle under
+> [ADR 0001](../../../../docs/adr/0001-bundles-slots-ports-and-adapters.md), shaped
+> as a contract root, `sceneimpl` and `internal/`. The contract this document
+> specifies is unchanged, and so is every name a recorder writes against:
+> `OpQueue` and its recording methods, `Lookup`, `LookupAccess` and its queries,
+> `Transform`, `CameraDescr`, `Pass`, `Material`, `MeshDraw`, `ModelDraw`, the
+> `Err*` types and the coordinate helpers all stay in the root,
+> `bundles/scene`. What moved is where the code lives. The plugin is
+> `sceneimpl.New()`, configured by `sceneimpl.Config`, where a zero field takes
+> its default. Its flush, the cull, the sort, the material table, the light
+> selection, the model expansion and the load handlers are in
+> `bundles/scene/sceneimpl`, and the built-in WGSL is embedded and mounted from
+> `bundles/scene/sceneimpl/builtin/scene/`. `OpQueue` with its recording and
+> consume sides, the `Lookup` with its model table, the glTF loader, the packing
+> and the bundled PBR are declared in `bundles/scene/internal` and aliased or
+> wrapped in the root, concrete as before, so no per-instance call goes through
+> an interface. The flush's subscription identity, `UpdateEventHandler` below, is
+> now `scene.FlushOnUpdate`. The file paths and line numbers cited below are as
+> they were when this was written.
+
 ---
 
 ## Contents
@@ -36,19 +57,21 @@ correct without them.
 ## Plugin
 
 - Name: `scene.Name` (`"scene"`)
-- Constructor: `scene.New() *scene.Plugin`
+- Constructor: `sceneimpl.New() kernel.Plugin` (amended by #339; was `scene.New() *scene.Plugin`)
 - Plugin dependencies: `gfx`, `storage`
 - Go package dependencies: `app`, `gfx`, `kernel`, `m`, `storage`,
   `github.com/qmuntal/gltf`
 - Events declared or published: none
 
 ```go
-cfg := scene.DefaultConfig()
-cfg.PoseSampleRate = 60
+kernel.New(map[kernel.PluginName]any{
+	scene.Name: sceneimpl.Config{PoseSampleRate: 60},
+})
 ```
 
-`Config` is the exported configuration type. `Plugin` implements `Name`,
-`Dependencies`, and `Init` for the kernel lifecycle. During `Init` scene
+`sceneimpl.Config` is the configuration type, and a zero field takes its default
+(amended by #339; was `scene.Config` with `scene.DefaultConfig()`). The plugin
+implements `Name`, `Dependencies`, and `Init` for the kernel lifecycle. During `Init` scene
 executes `storage.SetMountCmd` to mount its embedded shaders, as canvas does.
 Register `storage` before `scene`. A typical order is `storage`, `input`, `gfx`,
 `canvas`, `scene`, then the system driver.
@@ -98,7 +121,7 @@ writes `*Lookup` to apply deferred bakes and unloads.
 
 ### Event subscribed
 
-`UpdateEventHandler` subscribes to `app.UpdateEvent`. It writes the scene
+`scene.FlushOnUpdate` (amended by #339; was `UpdateEventHandler`) subscribes to `app.UpdateEvent`. It writes the scene
 `*OpQueue` and `*Lookup`, reads `gfx.Viewport`, and writes `gfx.OpQueue` and
 `gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
 `gfx.PresentOnUpdate`, exactly as canvas is: gameplay records first, canvas

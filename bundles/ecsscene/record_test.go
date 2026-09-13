@@ -391,7 +391,7 @@ func TestADrawIsInTheFlushOfTheTickThatRecordedItWithNoOrderingDeclared(t *testi
 		switch description.Subscriptions[i].Type {
 		case reflect.TypeFor[UpdateEventHandler]():
 			recorder = &description.Subscriptions[i]
-		case reflect.TypeFor[scene.UpdateEventHandler]():
+		case reflect.TypeFor[scene.FlushOnUpdate]():
 			flush = &description.Subscriptions[i]
 		}
 	}
@@ -407,7 +407,7 @@ func TestADrawIsInTheFlushOfTheTickThatRecordedItWithNoOrderingDeclared(t *testi
 	if !containsType(flush.DependsOn, reflect.TypeFor[UpdateEventHandler]()) {
 		t.Errorf("scene's flush does not wait for the recording System; it depends on %v", flush.DependsOn)
 	}
-	if containsType(recorder.DependsOn, reflect.TypeFor[scene.UpdateEventHandler]()) {
+	if containsType(recorder.DependsOn, reflect.TypeFor[scene.FlushOnUpdate]()) {
 		t.Error("the recording System waits for scene's flush, which is the wrong way round")
 	}
 }

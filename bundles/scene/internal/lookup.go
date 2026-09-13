@@ -1,0 +1,119 @@
+package internal
+
+import (
+	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/kernel"
+)
+
+// Lookup is the single scene-owned persistent resource. It holds everything
+// that outlives a frame — resident models, baked pose and morph buffers, the
+// path-keyed texture cache, buffer-built meshes and scene's own unit meshes —
+// plus the deferred unloads and bakes the flush applies at the frame boundary.
+//
+// It never retains a filesystem or GPU handle of its own. Query and mutate it
+// only through a scoped LookupAccess.
+type Lookup struct {
+	config Config
+	// meshes is the dense mesh table every MeshRef indexes, and a ref's id is
+	// its position in it plus one, so id 0 stays "no mesh". freeMeshes are the
+	// slots ReleaseMesh gave back, reissued newest first.
+	meshes     []MeshRecord
+	freeMeshes []uint32
+	// layouts interns the vertex layouts durable meshes were baked from.
+	layouts layoutCache
+	// staging holds the bytes BakeMesh and UpdateMesh copied out of their
+	// callers, and pendingMeshes the uploads waiting on them. The arena is
+	// handed to gfx wholesale at the flush and a fresh one grown after, rather
+	// than reused: BakeBuffer takes the bytes without copying them, so reusing
+	// the backing would rewrite an upload still in flight.
+	staging       []byte
+	pendingMeshes []pendingMesh
+	// pendingReleases are the buffers ReleaseMesh gave up, freed at the frame
+	// boundary so nothing the frame already recorded draws from a dead buffer.
+	pendingReleases []gfx.BufferDescr
+	// unit holds scene's own meshes - the box, sphere and plane the debug
+	// vocabulary draws - each baked on first use.
+	unit [shapeCount]MeshRef
+	// models is the model table, keyed by the path that is a model's only cache
+	// key, and textures the scene-owned texture cache every resident model's
+	// materials bind out of. Neither is refcounted: nothing unloads
+	// automatically, so there is nothing for a count to drive.
+	models   map[string]*ModelEntry
+	textures map[textureKey]gfx.TextureDescr
+	// defaults are the two 1x1 textures every empty PBR slot binds, baked on
+	// first use. hasDefaults rather than a zero test because a baked descriptor
+	// has no reserved zero value.
+	defaults    PbrDefaults
+	hasDefaults bool
+	// reported suppresses repeated reports for one model or texture path until
+	// it loads successfully or is unloaded - canvas's precedent.
+	reported map[string]struct{}
+	// unloadModels and unloadTextures are the paths UnloadModel and
+	// UnloadTexture gave up, and unloadEverything the flag UnloadAll sets. All
+	// three are applied at the frame boundary rather than at the call, so a
+	// same-frame unload never frees geometry the frame has already recorded a
+	// draw against.
+	unloadModels     []string
+	unloadTextures   []string
+	unloadEverything bool
+	// bundled is the bundled PBR material once per shader variant, built on
+	// first use around the two default textures. It is not a package-level value because those textures
+	// are baked resources: the backend may not be Ready() at startup, and a
+	// texture baked then would either panic or silently not exist.
+	bundled    [VariantCount]Material
+	hasBundled bool
+}
+
+// NewLookup builds an empty Lookup for the given configuration. The plugin
+// creates one internally; this constructor also lets tests and embedders build
+// one to drive a LookupAccess directly.
+func NewLookup(config Config) *Lookup { return &Lookup{config: config} }
+
+// LookupAccess is the scoped facade every query and mutation of a Lookup goes
+// through. Acquire a *Lookup write dependency in a handler, build one with
+// NewLookupAccess, and pass it to consumers for the duration of that handler.
+// Never store the result: the handles behind it are valid only while the
+// handler holds its lock.
+type LookupAccess struct {
+	kernel kernel.Kernel
+	lookup *Lookup
+}
+
+// NewLookupAccess builds a scoped facade. Call it inside a handler that holds
+// the *Lookup write lock.
+//
+// Two dependencies, not three: it takes no storage.FileSystem, unlike canvas's
+// equivalent, because scene's load command opens, parses and bakes the file
+// itself holding no locks. A consumer system therefore declares one fewer
+// resource than canvas's, which reads as an oversight unless it is said out
+// loud.
+func NewLookupAccess(k kernel.Kernel, lookup *Lookup) LookupAccess {
+	return LookupAccess{kernel: k, lookup: lookup}
+}
+
+// Valid reports whether the facade is backed by a live Lookup.
+func (la LookupAccess) Valid() bool { return la.lookup != nil }
+
+// ensureBundled builds the bundled PBR's four variants the first time something
+// draws, baking the two 1x1 default textures they bind into every absent slot,
+// and returns the same materials forever after.
+//
+// 1x1 rather than larger because uploads carry no row-alignment rule and for a
+// constant texel every mip level is identical, so there is nothing to generate.
+// Both are linear-format: 1.0 is a fixed point of the sRGB transfer curve, so
+// the white texel reads 1.0 through an sRGB slot and a linear one alike, and
+// the flat normal is not a picture at all.
+func (l *Lookup) ensureBundled(bake bakeTextureFunc) [VariantCount]Material {
+	if l.hasBundled {
+		return l.bundled
+	}
+	if !l.hasDefaults {
+		l.defaults = PbrDefaults{
+			White:      bake(1, 1, gfx.FormatRGBA8, []byte{0xff, 0xff, 0xff, 0xff}),
+			FlatNormal: bake(1, 1, gfx.FormatRGBA8, []byte{0x80, 0x80, 0xff, 0xff}),
+		}
+		l.hasDefaults = true
+	}
+	l.bundled, l.hasBundled = BundledPbr(l.defaults), true
+	return l.bundled
+}

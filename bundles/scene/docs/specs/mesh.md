@@ -39,6 +39,22 @@ named layouts, and the narrow sparse morph deltas.
 [Required scene changes](#required-scene-changes) is the checklist that work
 ran from, and is kept as the record of what changed rather than as an open list.
 
+> **Amended by [#339](https://github.com/dvoyni/cog/issues/339).** scene became
+> a Bundle under
+> [ADR 0001](../../../../docs/adr/0001-bundles-slots-ports-and-adapters.md), shaped
+> as a contract root, `sceneimpl` and `internal/`. Nothing a mesh stores changed,
+> and neither did any name an app authors a mesh with: `Vertex`, `VertexLayout`,
+> `MeshRef`, `MeshDraw`, `LookupAccess.BakeMesh`, `UpdateMesh`, `ReleaseMesh`,
+> `OpQueue.TemporaryMesh`, `VertexDecodePath` and
+> `ErrMeshCustomLayoutNeedsMaterial` stay in the root, `bundles/scene`. What moved
+> is where the code lives. The mesh table, the minting and staging, the vertex,
+> index and morph-delta packing, the glTF conversion and the bundled PBR are in
+> `bundles/scene/internal`; the flush that resolves a draw's mesh, picks its
+> variant and packs its instance and per-mesh record is in
+> `bundles/scene/sceneimpl`; and the WGSL sources are under
+> `bundles/scene/sceneimpl/builtin/scene/`. The file paths and line numbers
+> cited below are as they were when this was written.
+
 **What remains open is the by-eye confirmation**
 ([#223](https://github.com/dvoyni/cog/issues/223)). The size figures in
 [What all of it is worth](#what-all-of-it-is-worth) have been re-measured by

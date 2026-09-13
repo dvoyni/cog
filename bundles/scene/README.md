@@ -43,25 +43,73 @@ target stores records **only for the span of vertices it moves** — 18.8 KiB of
 deltas over the vendored corpus against 385.8 KiB, because 92% of the float
 store was exactly zero.
 
+scene is a **Bundle**: a Slot and its one Extension, shipped together. The
+vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
+[ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
+
+## Packages
+
+scene has the Bundle shape: a contract root, an `…impl` and an `internal/`.
+
+- **`bundles/scene`** is the contract: the `*OpQueue` and `*Lookup` resources
+  with `LookupAccess` and `NewLookupAccess`, the recording vocabulary
+  (`Transform`, `At`, `LookAt`, `CameraID`, `CameraDescr`, `ProjectionKind`,
+  `Pass`, `PassTag`, `LayerMask`, `Layer`, `Material`, `MaterialTag`, `Vertex`,
+  `VertexLayout`, `MeshRef`, `MeshDraw`, `ModelDraw`, `ClipPlay`, `LightDescr`,
+  …), the model query types (`ModelRef`, `ModelState`, `ModelLight`,
+  `ClipInfo`), the inspection views (`Op`, `PassView`, `BatchView`), the `Err*`
+  types, `VertexDecodePath`, the coordinate helpers (`ViewProjection`,
+  `WorldToScreen`, `ScreenToWorld`, `ScreenToRay`), `Name` and the ordering
+  identity `FlushOnUpdate`. It declares no plugin, and it is what every other
+  package imports.
+- **`bundles/scene/sceneimpl`** is the plugin: `New`, `Config`, the flush that
+  expands model draws, selects lights, culls, sorts, interns materials and packs
+  instances into gfx passes and draws, the frame-build state all of that keeps
+  across frames, the handlers of the two-hop model load, and the `Start` mount
+  of the embedded shaders under `sceneimpl/builtin/scene/`. It exports `New` and
+  `Config` and nothing else. Only composition roots and tests import it.
+- **`bundles/scene/internal`** holds what the two share and nothing else may
+  reach: the declarations of `OpQueue` with its recording methods and the
+  consume side the flush reads, `Lookup` and `LookupAccess` with the model
+  table, residency and unloads, the mesh table and its deferred bakes, the glTF
+  loader and the animation and morph bakes behind them, the vertex packing, the
+  bundled PBR material and the camera maths the flush and the coordinate
+  helpers share. The parse command the Lookup enqueues, `LoadModelCmd`, is
+  declared here; `sceneimpl` handles it.
+
+`OpQueue`, `Lookup`, `LookupAccess` and the vocabulary they carry are declared in
+`internal` with their state unexported, and re-exported from the root as aliases
+(`type OpQueue = internal.OpQueue`) plus a wrapper for each constructor. They
+stay concrete types: recording a draw is a direct method call, with no interface
+anywhere on the per-instance path, and their exported methods (`OpQueue.Model`,
+`LookupAccess.Bounds`, …) are public API through the alias. What sceneimpl needs
+beyond that goes through plain functions `internal` exports, which only the root
+and sceneimpl can call. `internal` never imports the root. See
+[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+
 ## Plugin
 
 - Name: `scene.Name` (`"scene"`)
-- Constructor: `scene.New() *scene.Plugin`
+- Constructor: `sceneimpl.New() kernel.Plugin`
 - Plugin dependencies: `gfx`, `storage`
+- Requires: no Adapter
+- Contributes: none
 - Go package dependencies: `app`, `gfx`, `kernel`, `m`, `storage`,
   `github.com/qmuntal/gltf`
+- Implements: `kernel.PluginStarter`
+- Configuration: `sceneimpl.Config`, optional
 - Events declared or published: none
 
 ```go
-cfg := scene.DefaultConfig()
-cfg.PoseSampleRate = 60
+kernel.New(map[kernel.PluginName]any{
+	scene.Name: sceneimpl.Config{PoseSampleRate: 30},
+})
 ```
 
-`Config` is the exported configuration type, and `PoseSampleRate` — the global
-animation bake rate in Hz, default 60 — is the only number in it. `Plugin`
-implements `Name`, `Dependencies`, `Register` and `Start` for the kernel
-lifecycle; `Start` mounts scene's embedded shader filesystem through
-`storage.SetMountCmd`.
+`PoseSampleRate` — the global animation bake rate in Hz — is the only number in
+`Config`. A zero value takes its default, 60, and giving no configuration at all
+takes it too; a negative rate is refused. `Start` mounts scene's embedded shader
+filesystem through `storage.SetMountCmd`.
 
 **Register `storage` before `scene`.** The order the demos use is `storage`,
 `input`, `gfx`, `canvas`, `scene`, then the driver (`wgpu`), with the app's own
@@ -715,12 +763,13 @@ more after the draw that triggered it.
 
 ## Event Subscribed
 
-`UpdateEventHandler` subscribes to `app.UpdateEvent`. It writes the scene
+`scene.FlushOnUpdate` subscribes to `app.UpdateEvent`. It writes the scene
 `*OpQueue` and `*Lookup`, reads `gfx.Viewport`, and writes `gfx.OpQueue` and
 `gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
 `gfx.PresentOnUpdate`, exactly as canvas is: gameplay records first, canvas
-and scene emit graphics draws second, gfx presents last. It is exported so a
-recorder can order itself before scene.
+and scene emit graphics draws second, gfx presents last. The identity is
+declared in the contract root so a recorder can order itself
+`Before[scene.FlushOnUpdate]()` importing contract and nothing else.
 
 **Everything scene decides happens in that flush, on the update thread** —
 projection resolve, culling, sorting, instance packing and buffer uploads. Scene

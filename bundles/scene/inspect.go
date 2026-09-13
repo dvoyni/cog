@@ -1,63 +1,27 @@
 package scene
 
-import (
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/libs/m"
-)
+import "github.com/dvoyni/cog/bundles/scene/internal"
 
 // OpKind identifies which recording call produced an Op.
-type OpKind uint8
+type OpKind = internal.OpKind
 
 const (
-	OpCamera OpKind = iota
-	OpBox
-	OpSphere
-	OpPlane
-	OpLine3D
-	OpWireBox
-	OpMesh
-	OpPointLight
-	OpSpotLight
-	OpModel
+	OpCamera     = internal.OpCamera
+	OpBox        = internal.OpBox
+	OpSphere     = internal.OpSphere
+	OpPlane      = internal.OpPlane
+	OpLine3D     = internal.OpLine3D
+	OpWireBox    = internal.OpWireBox
+	OpMesh       = internal.OpMesh
+	OpPointLight = internal.OpPointLight
+	OpSpotLight  = internal.OpSpotLight
+	OpModel      = internal.OpModel
 )
 
 // Op is a read-only view of one recorded operation, canvas's shape exactly: it
 // reports the call as the recorder made it, not the draws scene derived from
 // it, so a WireBox is one Op.
-type Op struct {
-	Kind OpKind
-	// Camera and Descr describe an OpCamera. Descr.Passes aliases the queue's
-	// frame arena, like every other borrowed slice scene hands back.
-	Camera CameraID
-	Descr  CameraDescr
-	// Layers and Color describe every recorded draw.
-	Layers LayerMask
-	Color  m.Color
-	// Transform describes an OpBox.
-	Transform Transform
-	// Center describes an OpSphere, OpPlane or OpWireBox; Radius is the
-	// sphere's, and Size the plane's (X and Z) or the wire box's.
-	Center m.Vec3
-	Radius float32
-	Size   m.Vec3
-	// Start and End describe an OpLine3D.
-	Start, End m.Vec3
-	// Thickness describes an OpLine3D or OpWireBox.
-	Thickness float32
-	// Mesh and Draw describe an OpMesh, and carry everything that call said,
-	// including its own Transform. Draw's Transforms and Params alias the
-	// queue's frame arenas, like every other borrowed slice scene hands back.
-	Mesh MeshRef
-	Draw MeshDraw
-	// Light describes an OpPointLight or OpSpotLight, with Kind set by the
-	// call that recorded it. Layers is its layer mask.
-	Light LightDescr
-	// Path and Model describe an OpModel, and carry everything that call
-	// said, including its own Transform. Model's Transforms aliases the
-	// queue's frame arena, like every other borrowed slice scene hands back.
-	Path  string
-	Model ModelDraw
-}
+type Op = internal.Op
 
 // PassView is the flush result for one pass: what scene decided, in numbers a
 // test can assert with no GPU anywhere.
@@ -81,17 +45,7 @@ type Op struct {
 // Lights is how many punctual lights the pass packed after its own frustum
 // culled them and the cap of 16 took the brightest at the eye. The lights
 // dropped past the cap are not counted anywhere: the drop is silent by design.
-type PassView struct {
-	CameraID  CameraID
-	Order     gfx.Order
-	Tag       PassTag
-	Frustum   m.Frustum
-	Recorded  int
-	Culled    int
-	Instances int
-	Lights    int
-	Batches   []BatchView
-}
+type PassView = internal.PassView
 
 // BatchView is one run of instances drawn from one mesh with one material: one
 // gfx draw call, one material record, and InstanceCount contiguous instances of
@@ -102,7 +56,4 @@ type PassView struct {
 // consecutive equal draws recorded separately, which is a deferred
 // optimisation, and not a blended instanced draw, which stays one batch per
 // instance so its entries keep their own depths.
-type BatchView struct {
-	MeshID, MaterialID           uint32
-	FirstInstance, InstanceCount int
-}
+type BatchView = internal.BatchView

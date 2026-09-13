@@ -24,10 +24,19 @@ Register `storage` before `scene`, and put the app's own recording plugin last:
 ```go
 plugins := []kernel.Plugin{
 	storageimpl.New(), diskfs.New(diskfs.Config{AppId: "demo"}),
-	inputimpl.New(), gfximpl.New(), canvasimpl.New(), scene.New(), wgpu.New(),
+	inputimpl.New(), gfximpl.New(), canvasimpl.New(), sceneimpl.New(), wgpu.New(),
 	demo, // records into the queues the plugins above declare
 }
 ```
+
+Only the composition root imports `sceneimpl`. Recording code imports the
+contract root, `scene`, and nothing else: `*scene.OpQueue`, `*scene.Lookup`,
+`scene.NewLookupAccess` and every descriptor are there. A recorder that must run
+before scene's flush in the same tick orders itself
+`Before[scene.FlushOnUpdate]()`; one that asks for no order already runs before
+it, because the flush is registered `Last()`. Configuration, when a caller
+needs any, is `sceneimpl.Config` keyed by `scene.Name`, and a zero field takes
+its default.
 
 Scene reads storage buffers from the vertex stage, so it needs a **WebGPU core
 adapter**. Compatibility mode defaults that limit to zero and the binding cannot

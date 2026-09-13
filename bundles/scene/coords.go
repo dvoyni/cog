@@ -1,6 +1,9 @@
 package scene
 
-import "github.com/dvoyni/cog/libs/m"
+import (
+	"github.com/dvoyni/cog/bundles/scene/internal"
+	"github.com/dvoyni/cog/libs/m"
+)
 
 // The coordinate helpers are pure package-level functions, callable on any
 // thread with no plugin instance. A lookup against last frame's resolved camera
@@ -130,11 +133,11 @@ func viewProjection(camera CameraDescr, viewport m.Vec2) (m.Mat4, bool) {
 	if viewport.X <= 0 || viewport.Y <= 0 {
 		return m.Mat4{}, false
 	}
-	projection, err := projection(0, camera, viewport.X/viewport.Y)
+	projection, err := internal.Projection(0, camera, viewport.X/viewport.Y)
 	if err != nil {
 		return m.Mat4{}, false
 	}
-	view, ok := cameraView(camera.Transform)
+	view, ok := internal.CameraView(camera.Transform)
 	if !ok {
 		return m.Mat4{}, false
 	}

@@ -39,7 +39,7 @@ and its scratch; `plugin.go` the plugin and its registration.
 ```go
 kernel.New(config).WithPlugins(
     storageimpl.New(), diskfs.New(diskfs.Config{AppId: "game"}),
-    inputimpl.New(), gfximpl.New(), scene.New(), wgpu.New(),
+    inputimpl.New(), gfximpl.New(), sceneimpl.New(), wgpu.New(),
     ecs.Plugin(), ecsscene.New(), game.New())
 ```
 
