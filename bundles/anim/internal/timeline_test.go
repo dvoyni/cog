@@ -1,13 +1,31 @@
-package anim
+package internal
 
 import (
 	"slices"
 	"testing"
+
+	"github.com/dvoyni/cog/libs/m"
 )
 
-type floatSeq struct{ Lerp[float32] }
+// lerp mixes two scalars. The anim root's Lerp is not reachable from here, so
+// the tests carry their own sequence of the same shape.
+type lerp struct{ from, to float32 }
 
-type otherSeq struct{ Lerp[float32] }
+func (l lerp) At(progress float32) float32 { return m.Lerp(l.from, l.to, progress) }
+
+func lerpFloat(from, to float32) lerp { return lerp{from: from, to: to} }
+
+func over(duration float32) Params { return Params{Duration: duration} }
+
+// easeOut is a non-linear easing to tell eased progress from linear.
+func easeOut(progress float32) float32 {
+	inverse := 1 - progress
+	return 1 - inverse*inverse
+}
+
+type floatSeq struct{ lerp }
+
+type otherSeq struct{ lerp }
 
 func near(a, b float32) bool {
 	const epsilon = 1e-5
@@ -25,8 +43,8 @@ func queryFloat(t *testing.T, tl *Timeline, id any) (float32, State) {
 
 func TestAddChainsAtChainPoint(t *testing.T) {
 	tl := &Timeline{}
-	tl.Add("a", floatSeq{LerpFloat(0, 1)}, Over(1))
-	tl.Add("b", floatSeq{LerpFloat(0, 1)}, Over(1))
+	tl.Add("a", floatSeq{lerpFloat(0, 1)}, over(1))
+	tl.Add("b", floatSeq{lerpFloat(0, 1)}, over(1))
 
 	if _, state := queryFloat(t, tl, "b"); state != StatePending {
 		t.Fatalf("b before its start: state = %v, want pending", state)
@@ -43,8 +61,8 @@ func TestAddChainsAtChainPoint(t *testing.T) {
 
 func TestAddImmediateStartsNow(t *testing.T) {
 	tl := &Timeline{}
-	tl.Add("a", floatSeq{LerpFloat(0, 1)}, Over(1))
-	tl.Add("b", floatSeq{LerpFloat(0, 1)}, Over(1).WithImmediate())
+	tl.Add("a", floatSeq{lerpFloat(0, 1)}, over(1))
+	tl.Add("b", floatSeq{lerpFloat(0, 1)}, over(1).WithImmediate())
 
 	if _, state := queryFloat(t, tl, "b"); state != StateActive {
 		t.Fatalf("immediate b: state = %v, want active", state)
@@ -56,9 +74,9 @@ func TestAddImmediateStartsNow(t *testing.T) {
 
 func TestRewindOverlaps(t *testing.T) {
 	tl := &Timeline{}
-	tl.Add("a", floatSeq{LerpFloat(0, 1)}, Over(1))
+	tl.Add("a", floatSeq{lerpFloat(0, 1)}, over(1))
 	tl.Rewind(-1)
-	tl.Add("b", floatSeq{LerpFloat(0, 1)}, Over(1))
+	tl.Add("b", floatSeq{lerpFloat(0, 1)}, over(1))
 
 	tl.advance(0.5)
 	a, _ := queryFloat(t, tl, "a")
@@ -70,7 +88,7 @@ func TestRewindOverlaps(t *testing.T) {
 
 func TestLoopLeavesChainPoint(t *testing.T) {
 	tl := &Timeline{}
-	tl.Add("spin", floatSeq{LerpFloat(0, 360)}, Over(2).WithLoop())
+	tl.Add("spin", floatSeq{lerpFloat(0, 360)}, over(2).WithLoop())
 	if tl.chainEnd != 0 {
 		t.Fatalf("chain point = %v, want 0", tl.chainEnd)
 	}
@@ -85,10 +103,10 @@ func TestLoopLeavesChainPoint(t *testing.T) {
 
 func TestQueryPrefersNewestActiveThenEarliestPending(t *testing.T) {
 	tl := &Timeline{}
-	tl.Add("a", floatSeq{LerpFloat(0, 1)}, Over(2))
-	tl.Add("a", floatSeq{LerpFloat(5, 6)}, Over(1).WithImmediate())
+	tl.Add("a", floatSeq{lerpFloat(0, 1)}, over(2))
+	tl.Add("a", floatSeq{lerpFloat(5, 6)}, over(1).WithImmediate())
 	tl.Wait(3)
-	tl.Add("a", floatSeq{LerpFloat(9, 9)}, Over(1))
+	tl.Add("a", floatSeq{lerpFloat(9, 9)}, over(1))
 
 	if value, _ := queryFloat(t, tl, "a"); !near(value, 5) {
 		t.Fatalf("overlapping: value = %v, want the newest active (5)", value)
@@ -110,9 +128,9 @@ func TestQueryPrefersNewestActiveThenEarliestPending(t *testing.T) {
 func TestQueryFallsBackToEarliestPending(t *testing.T) {
 	tl := &Timeline{}
 	tl.Wait(2)
-	tl.Add("a", floatSeq{LerpFloat(7, 8)}, Over(1))
+	tl.Add("a", floatSeq{lerpFloat(7, 8)}, over(1))
 	tl.Wait(5)
-	tl.Add("a", floatSeq{LerpFloat(1, 2)}, Over(1))
+	tl.Add("a", floatSeq{lerpFloat(1, 2)}, over(1))
 
 	value, state := queryFloat(t, tl, "a")
 	if state != StatePending || !near(value, 7) {
@@ -122,16 +140,16 @@ func TestQueryFallsBackToEarliestPending(t *testing.T) {
 
 func TestProgressUsesEasing(t *testing.T) {
 	tl := &Timeline{}
-	tl.Add("a", floatSeq{LerpFloat(0, 1)}, Over(1).WithEasing(EaseCubicOut))
+	tl.Add("a", floatSeq{lerpFloat(0, 1)}, over(1).WithEasing(easeOut))
 	tl.advance(0.5)
-	if value, _ := queryFloat(t, tl, "a"); !near(value, EaseCubicOut(0.5)) {
-		t.Fatalf("value = %v, want %v", value, EaseCubicOut(0.5))
+	if value, _ := queryFloat(t, tl, "a"); !near(value, easeOut(0.5)) {
+		t.Fatalf("value = %v, want %v", value, easeOut(0.5))
 	}
 }
 
 func TestFinishedTrackDroppedAfterEnd(t *testing.T) {
 	tl := &Timeline{}
-	tl.Add("a", floatSeq{LerpFloat(0, 1)}, Over(1))
+	tl.Add("a", floatSeq{lerpFloat(0, 1)}, over(1))
 	tl.advance(1)
 	if value, state := queryFloat(t, tl, "a"); state != StateActive || !near(value, 1) {
 		t.Fatalf("at end: value = %v state = %v, want 1 active", value, state)
@@ -150,8 +168,8 @@ func TestFinishedTrackDroppedAfterEnd(t *testing.T) {
 
 func TestSlotsAreTypedById(t *testing.T) {
 	tl := &Timeline{}
-	tl.Add("a", floatSeq{LerpFloat(1, 1)}, Over(1))
-	tl.Add("a", otherSeq{LerpFloat(2, 2)}, Over(1).WithImmediate())
+	tl.Add("a", floatSeq{lerpFloat(1, 1)}, over(1))
+	tl.Add("a", otherSeq{lerpFloat(2, 2)}, over(1).WithImmediate())
 	if value := tl.Value[floatSeq]("a", -1); !near(value, 1) {
 		t.Fatalf("floatSeq value = %v, want 1", value)
 	}
@@ -162,7 +180,7 @@ func TestSlotsAreTypedById(t *testing.T) {
 
 func TestNilTimelineIsNoOp(t *testing.T) {
 	var tl *Timeline
-	tl.Add("a", floatSeq{LerpFloat(0, 1)}, Over(1))
+	tl.Add("a", floatSeq{lerpFloat(0, 1)}, over(1))
 	tl.Cue("x")
 	tl.Rewind(-1)
 	tl.Wait(1)
@@ -205,7 +223,7 @@ func TestCueFiresOnNextAdvanceForOneTick(t *testing.T) {
 
 func TestCueWaitsForChainPoint(t *testing.T) {
 	tl := &Timeline{}
-	tl.Add("a", floatSeq{LerpFloat(0, 1)}, Over(1))
+	tl.Add("a", floatSeq{lerpFloat(0, 1)}, over(1))
 	tl.Cue("after a")
 	tl.Wait(0.5)
 	tl.Cue("after wait")
@@ -254,7 +272,7 @@ func TestIdle(t *testing.T) {
 	if !tl.Idle() {
 		t.Fatal("wait passed: should be idle")
 	}
-	tl.Add("a", floatSeq{LerpFloat(0, 1)}, Over(1))
+	tl.Add("a", floatSeq{lerpFloat(0, 1)}, over(1))
 	if tl.Idle() {
 		t.Fatal("track queued: should not be idle")
 	}
@@ -265,7 +283,7 @@ func TestIdle(t *testing.T) {
 }
 
 func TestTimelinesGetResetDeleteAdvance(t *testing.T) {
-	timelines := newTimelines()
+	timelines := NewTimelines()
 	if timelines.Lookup("a") != nil {
 		t.Fatal("Lookup should not create")
 	}
@@ -274,7 +292,7 @@ func TestTimelinesGetResetDeleteAdvance(t *testing.T) {
 		t.Fatal("Get should return one timeline per key")
 	}
 	b := timelines.Get("b")
-	a.Add("x", floatSeq{LerpFloat(0, 1)}, Over(1))
+	a.Add("x", floatSeq{lerpFloat(0, 1)}, over(1))
 
 	timelines.advance(0.5)
 	if !near(a.Time(), 0.5) || !near(b.Time(), 0.5) {
@@ -293,20 +311,5 @@ func TestTimelinesGetResetDeleteAdvance(t *testing.T) {
 	}
 	if timelines.Get("b") == b {
 		t.Fatal("Get after Delete should create a fresh timeline")
-	}
-}
-
-func TestEasings(t *testing.T) {
-	for _, easing := range []Easing{Linear, EaseCubicIn, EaseCubicOut, EaseCubicInOut, Hold(0.5, nil), Reverse(EaseCubicOut)} {
-		if !near(easing(0), 0) || !near(easing(1), 1) {
-			t.Fatalf("easing endpoints = %v %v, want 0 1", easing(0), easing(1))
-		}
-	}
-	hold := Hold(0.5, Linear)
-	if hold(0.25) != 0 || !near(hold(0.75), 0.5) {
-		t.Fatalf("Hold(0.5) = %v %v, want 0 0.5", hold(0.25), hold(0.75))
-	}
-	if !near(Reverse(EaseCubicOut)(0.5), EaseCubicIn(0.5)) {
-		t.Fatal("Reverse(EaseCubicOut) should match EaseCubicIn")
 	}
 }

@@ -1,10 +1,11 @@
-package anim
+package animimpl
 
 import (
 	"context"
 	"slices"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/anim"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -17,7 +18,7 @@ type probeCmd kernel.Command[probeRequest, probeResponse]
 type probeRequest struct{}
 type probeResponse struct {
 	Value float32
-	State State
+	State anim.State
 	Idle  bool
 	Fired []string
 }
@@ -29,7 +30,7 @@ type probePlugin struct{}
 func (probePlugin) Name() kernel.PluginName { return "test" }
 
 // Name is the anim plugin's, not this fixture's: the probe locks anim.Timelines.
-func (probePlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
+func (probePlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{anim.Name} }
 func (probePlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[seedCmd](seedCmdImpl)
 	registrar.HandleCommand[probeCmd](probeCmdImpl)
@@ -38,26 +39,26 @@ func (probePlugin) Register(registrar *kernel.Registrar, _ any) error {
 
 // seedCmdImpl queues a cue at the (idle) chain point and a one-second track.
 func seedCmdImpl() (kernel.Lock, kernel.Execute[seedRequest, seedResponse]) {
-	var timelines kernel.Write[*Timelines]
+	var timelines kernel.Write[*anim.Timelines]
 	return func(access kernel.ResourceAccess) {
-			timelines = access.GetWrite[*Timelines]()
+			timelines = access.GetWrite[*anim.Timelines]()
 		}, func(kernel.Kernel, seedRequest) (seedResponse, error) {
 			tl := timelines.Get().Get(probeKey{})
 			tl.Cue("hello")
-			tl.Add("id", LerpFloat(0, 1), Over(1))
+			tl.Add("id", anim.LerpFloat(0, 1), anim.Over(1))
 			return seedResponse{}, nil
 		}
 }
 
 func probeCmdImpl() (kernel.Lock, kernel.Execute[probeRequest, probeResponse]) {
-	var timelines kernel.Read[*Timelines]
+	var timelines kernel.Read[*anim.Timelines]
 	return func(access kernel.ResourceAccess) {
-			timelines = access.GetRead[*Timelines]()
+			timelines = access.GetRead[*anim.Timelines]()
 		}, func(kernel.Kernel, probeRequest) (probeResponse, error) {
 			tl := timelines.Get().Lookup(probeKey{})
-			_, _, state := tl.Query[Lerp[float32]]("id")
+			_, _, state := tl.Query[anim.Lerp[float32]]("id")
 			return probeResponse{
-				Value: tl.Value[Lerp[float32]]("id", -1),
+				Value: tl.Value[anim.Lerp[float32]]("id", -1),
 				State: state,
 				Idle:  tl.Idle(),
 				Fired: slices.Collect(tl.Fired[string]()),
@@ -82,22 +83,22 @@ func TestAnimPluginAdvancesOnUpdate(t *testing.T) {
 	if _, err := k.ExecuteCommand[seedCmd](seedRequest{}); err != nil {
 		t.Fatal(err)
 	}
-	if response := probe(t, k); response.Value != 0 || response.State != StateActive || response.Idle || len(response.Fired) != 0 {
+	if response := probe(t, k); response.Value != 0 || response.State != anim.StateActive || response.Idle || len(response.Fired) != 0 {
 		t.Fatalf("before any tick: %+v, want value 0 active, not idle, no cues", response)
 	}
 
 	k.PublishEvent(app.UpdateEvent{Dt: 0.5}).Wait()
-	if response := probe(t, k); response.Value != 0.5 || response.State != StateActive || !slices.Equal(response.Fired, []string{"hello"}) {
+	if response := probe(t, k); response.Value != 0.5 || response.State != anim.StateActive || !slices.Equal(response.Fired, []string{"hello"}) {
 		t.Fatalf("after 0.5s: %+v, want value 0.5 active with [hello]", response)
 	}
 
 	k.PublishEvent(app.UpdateEvent{Dt: 0.5}).Wait()
-	if response := probe(t, k); response.Value != 1 || response.State != StateActive || len(response.Fired) != 0 {
+	if response := probe(t, k); response.Value != 1 || response.State != anim.StateActive || len(response.Fired) != 0 {
 		t.Fatalf("after 1s: %+v, want value 1 active with no cues", response)
 	}
 
 	k.PublishEvent(app.UpdateEvent{Dt: 0.5}).Wait()
-	if response := probe(t, k); response.Value != -1 || response.State != StateNotFound || !response.Idle {
+	if response := probe(t, k); response.Value != -1 || response.State != anim.StateNotFound || !response.Idle {
 		t.Fatalf("after 1.5s: %+v, want fallback, not found, idle", response)
 	}
 }

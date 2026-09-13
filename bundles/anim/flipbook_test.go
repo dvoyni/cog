@@ -1,6 +1,10 @@
 package anim
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/dvoyni/cog/bundles/anim/internal"
+)
 
 type frameSeq struct{ Flipbook[string] }
 
@@ -39,7 +43,8 @@ func TestFlipbookParamsPlaysEveryFrameOnce(t *testing.T) {
 
 func TestFlipbookLoopsOnTheTimeline(t *testing.T) {
 	book := Flipbook[string]{Frames: []string{"a", "b", "c", "d"}, FPS: 4}
-	tl := &Timeline{}
+	timelines := internal.NewTimelines()
+	tl := timelines.Get("flipbook")
 	tl.Add("flag", frameSeq{book}, book.Params().WithLoop().WithImmediate())
 
 	// One second holds each of the four frames for a quarter of a second, and
@@ -48,7 +53,7 @@ func TestFlipbookLoopsOnTheTimeline(t *testing.T) {
 		if got := tl.Value[frameSeq]("flag", ""); got != want {
 			t.Fatalf("step %d: frame = %q, want %q", step, got, want)
 		}
-		tl.advance(0.25)
+		internal.TimelinesAdvance(timelines, 0.25)
 	}
 	if tl.Idle() != true {
 		t.Fatalf("a looping flipbook must leave the timeline idle")

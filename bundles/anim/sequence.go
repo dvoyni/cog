@@ -1,13 +1,14 @@
 package anim
 
-import "github.com/dvoyni/cog/libs/m"
+import (
+	"github.com/dvoyni/cog/bundles/anim/internal"
+	"github.com/dvoyni/cog/libs/m"
+)
 
 // Sequence produces a value of type T for eased progress in [0, 1]. Any type
 // may implement it; a track stores the sequence value it was added with, so a
 // sequence may carry whatever payload the reader needs at draw time.
-type Sequence[T any] interface {
-	At(progress float32) T
-}
+type Sequence[T any] = internal.Sequence[T]
 
 // Lerp is a Sequence that mixes between two values. Embed it in a named struct
 // to give a track its own slot type and payload fields:

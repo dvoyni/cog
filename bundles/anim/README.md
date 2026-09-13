@@ -5,36 +5,69 @@ one-tick cues. A game declares what a value should do over time (a sequence,
 a duration, an easing) and reads the current value each tick; the plugin
 advances every timeline by the fixed step, so nothing else needs to tick.
 
+anim is a **Bundle**: a Slot and its one Extension, shipped together. The
+vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
+[ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
+
+## Packages
+
+anim has the Bundle shape: a contract root, an `…impl` and an `internal/`.
+
+- **`bundles/anim`** is the contract: the `Timelines` resource, the library
+  that is most of the package (`Timeline`, `Params` and `Over`, `State`, the
+  easings, `Sequence`, `Lerp` and its `Lerp*` constructors, `Flipbook`), `Name`
+  and the ordering identity `AdvanceOnUpdate`. It declares no plugin, and it is
+  what every other package imports.
+- **`bundles/anim/animimpl`** is the plugin: `New` and the handler behind
+  `AdvanceOnUpdate`. It exports `New` and nothing else. Only composition roots
+  and tests import it.
+- **`bundles/anim/internal`** holds what the two share and nothing else may
+  reach: the declarations of `Timelines` and `Timeline`, of what they refer to
+  (`Params`, `State`, `Easing`, `Linear` and `Sequence`), and the consume side
+  of the resource — advancing every timeline by a tick.
+
+`Timelines`, `Timeline` and the vocabulary they carry are declared in
+`internal` with their fields unexported, and re-exported from the root as
+aliases (`type Timelines = internal.Timelines`). They stay concrete types, and
+their exported methods (`Timelines.Get`, `Timeline.Add`, `Params.WithLoop`, …)
+are public API through the alias. What animimpl needs beyond that goes through
+a plain function `internal` exports, which only the root and animimpl can call.
+`internal` never imports the root. See
+[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+
 ## Files
 
-`contract.go` holds the package documentation, `Params`, and `State`;
-`easing.go` the easing curves; `sequence.go` the `Sequence` interface and
-`Lerp`; `flipbook.go` the frame-list sequence; `resources.go` the alias for
-the one resource; `timelines.go` its
-implementation; `timeline.go` the `Timeline` type and its generic timeline
-methods; `plugin.go` the plugin and its tick subscription.
+In the root, `contract.go` holds the package documentation and the `Params`
+and `State` aliases with `Over`; `identities.go` `Name` and `AdvanceOnUpdate`;
+`resources.go` the `Timelines` alias; `timeline.go` the `Timeline` alias;
+`easing.go` the easing curves; `sequence.go` the `Sequence` alias and `Lerp`;
+`flipbook.go` the frame-list sequence.
 
-## Dependencies
+In `internal`, `contract.go` declares `Params`, `State`, `Easing`, `Linear` and
+`Sequence`; `timelines.go` the resource; `timeline.go` the `Timeline` type and
+its generic timeline methods; `friends.go` the function animimpl advances the
+resource through.
 
-- Go packages: `github.com/dvoyni/cog/slots/app`, `github.com/dvoyni/cog/kernel`,
-    `github.com/dvoyni/cog/libs/m`
-- Plugin dependencies: none
-- Configuration: none
+In `animimpl`, `plugin.go` holds the plugin and its tick subscription.
 
 ## Plugin
 
-```go
-anim.New()
-```
+- Name: `anim.Name` (`"anim"`)
+- Constructor: `animimpl.New() kernel.Plugin`
+- Plugin dependencies: none
+- Requires: no Adapter
+- Contributes: no Adapter
+- Go package dependencies: `app`, `kernel`, `m`
+- Configuration: none
 
 `Register` registers the `*Timelines` resource and subscribes
-`UpdateEventHandler` to `app.UpdateEvent` in the First phase. Every tick it
+`AdvanceOnUpdate` to `app.UpdateEvent` in the First phase. Every tick it
 advances each timeline by `Dt`, promotes the cues that came due into their
 fired view, and drops finished tracks.
 
 Handlers that read or write timelines run in the ordinary phase, so they see
 the current tick's values and fired cues. A First-phase handler that needs them
-must order itself `After[anim.UpdateEventHandler]()`.
+must order itself `After[anim.AdvanceOnUpdate]()`.
 
 ## Resources
 

@@ -58,7 +58,7 @@ The hardest-looking question here dissolves on one grep.
 the frame pacer measuring draw-to-draw interval. Nothing else in cog reads
 wall-clock time. `app.UpdateEvent.Dt` is always `p.config.Step.Seconds()`
 (`extensions/wgpu/plugin.go:160`), a **constant**, and `anim` advances timelines by exactly
-that constant (`bundles/anim/plugin.go:43`).
+that constant (`bundles/anim/animimpl/plugin.go:37`).
 
 So there is no engine time to distort, only a driver-local accumulator, and
 pause is the decision to stop feeding it. **No time scaling, no virtual clock,
