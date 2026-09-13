@@ -37,16 +37,14 @@ and its scratch; `plugin.go` the plugin and its registration.
 ## Composing
 
 ```go
-world := ecs.NewEntities(4096)
-
 kernel.New(config).WithPlugins(
     storage.New(), input.New(), gfx.New(), scene.New(), wgpu.New(),
-    ecs.Plugin(world), ecsscene.New(world), game.New(world))
+    ecs.Plugin(), ecsscene.New(), game.New())
 ```
 
-Register `ecs` and `scene` before it. The world handle is threaded through the
-constructor because Component registration needs it at registration, where no
-handler is running and no resource value may be read.
+The binding takes no world. It declares `ecs` and `scene` as dependencies, so
+both register first, and its Components and System reach the ecs plugin's
+`*ecs.Entities` at registration through `kernel.Registrar.Dependency`.
 
 ## Components
 

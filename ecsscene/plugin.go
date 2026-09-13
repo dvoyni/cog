@@ -9,25 +9,16 @@ import (
 	"github.com/dvoyni/cog/scene"
 )
 
-// Plugin is cog's ecs↔scene binding. Register ecs and scene before it.
-type Plugin struct {
-	world *ecs.Entities
-}
+// Plugin is cog's ecs↔scene binding. Register ecs and scene beside it.
+type Plugin struct{}
 
-// New makes the binding for one world. The world handle is threaded through the
-// constructor because Component registration needs it at registration, where no
-// handler is running and no resource value may be read:
+// New makes the binding. Its Components and System belong to the ecs plugin's
+// world, which it reaches at registration through its dependency on ecs:
 //
-//	world := ecs.NewEntities(4096)
 //	kernel.New(config).WithPlugins(
 //	    storage.New(), gfx.New(), scene.New(),
-//	    ecs.Plugin(world), ecsscene.New(world), game.New(world))
-func New(world *ecs.Entities) *Plugin {
-	if world == nil {
-		panic("ecsscene: New needs the Entities its Components belong to")
-	}
-	return &Plugin{world: world}
-}
+//	    ecs.Plugin(), ecsscene.New(), game.New())
+func New() *Plugin { return &Plugin{} }
 
 func (p *Plugin) Name() kernel.PluginName { return Name }
 
@@ -54,15 +45,15 @@ func (p *Plugin) Register(registrar *kernel.Registrar, value any) error {
 			return fmt.Errorf("ecsscene: invalid config %T", value)
 		}
 	}
-	ecs.RegisterComponent[Transform](registrar, p.world, drawableReserve)
-	ecs.RegisterComponent[Model](registrar, p.world, drawableReserve)
-	ecs.RegisterComponent[Mesh](registrar, p.world, drawableReserve)
-	ecs.RegisterComponent[Animation](registrar, p.world, drawableReserve)
-	ecs.RegisterComponent[Params](registrar, p.world, drawableReserve)
-	ecs.RegisterComponent[Material](registrar, p.world, drawableReserve)
-	ecs.RegisterComponent[Light](registrar, p.world, lightReserve)
-	ecs.RegisterComponent[Camera](registrar, p.world, cameraReserve)
+	ecs.RegisterComponent[Transform](registrar, drawableReserve)
+	ecs.RegisterComponent[Model](registrar, drawableReserve)
+	ecs.RegisterComponent[Mesh](registrar, drawableReserve)
+	ecs.RegisterComponent[Animation](registrar, drawableReserve)
+	ecs.RegisterComponent[Params](registrar, drawableReserve)
+	ecs.RegisterComponent[Material](registrar, drawableReserve)
+	ecs.RegisterComponent[Light](registrar, lightReserve)
+	ecs.RegisterComponent[Camera](registrar, cameraReserve)
 	registrar.InitResource(newScratch())
-	registrar.Subscribe[UpdateEventHandler](ecs.ToHandler[app.UpdateEvent](p.world, record))
+	registrar.Subscribe[UpdateEventHandler](ecs.ToHandler[app.UpdateEvent](registrar, record))
 	return nil
 }

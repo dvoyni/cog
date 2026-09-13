@@ -28,14 +28,13 @@ type nudgeResponse struct {
 // instead of Subscribe. The request reaches it through a Feed, so the System is
 // no more welded to the request than it is to an event.
 func TestASystemIsInvocableAsACommand(t *testing.T) {
-	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](world,
-			func(q *Query[moveQuery], by *In[float32]) {
-				amount := by.Get()
-				for _, it := range q.All() {
-					it.Body.X += amount
-				}
-			},
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](registrar, func(q *Query[moveQuery], by *In[float32]) {
+			amount := by.Get()
+			for _, it := range q.All() {
+				it.Body.X += amount
+			}
+		},
 			Feed(func(r nudgeRequest) float32 { return r.By })))
 	})
 
@@ -70,13 +69,12 @@ func TestASystemIsInvocableAsACommand(t *testing.T) {
 // the value is legal and is not the default shape". The diagnostic says
 // "request" rather than "event", because that is what the author wrote.
 func TestASystemInvokedAsACommandMayNameItsRequest(t *testing.T) {
-	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](world,
-			func(request nudgeRequest, q *Query[moveQuery]) {
-				for _, it := range q.All() {
-					it.Body.X += request.By
-				}
-			}))
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](registrar, func(request nudgeRequest, q *Query[moveQuery]) {
+			for _, it := range q.All() {
+				it.Body.X += request.By
+			}
+		}))
 	})
 
 	e := entities.alloc()
@@ -95,7 +93,6 @@ func TestASystemInvokedAsACommandMayNameItsRequest(t *testing.T) {
 // "request value" where a subscription's says "event value": the classification
 // is one contract, and the sentence names the shape the author is actually in.
 func TestACommandSystemRefusesAnUnknownParameterAsARequest(t *testing.T) {
-	entities := NewEntities(8)
 	defer func() {
 		recovered := recover()
 		if recovered == nil {
@@ -108,17 +105,17 @@ func TestACommandSystemRefusesAnUnknownParameterAsARequest(t *testing.T) {
 			}
 		}
 	}()
-	ToExecute[nudgeRequest, nudgeResponse](entities, func(s *Store[body]) {})
+	ToExecute[nudgeRequest, nudgeResponse](nil, func(s *Store[body]) {})
 }
 
 // TestTheSameSystemIsBothACommandAndASubscription is the payoff of one
 // classification serving both builders: the func names neither the event nor the
 // request, so the adapter is free to be either.
 func TestTheSameSystemIsBothACommandAndASubscription(t *testing.T) {
-	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](world, advance,
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](registrar, advance,
 			Feed(func(r nudgeRequest) float64 { return float64(r.By) })))
-		registrar.Subscribe[advanceOnUpdate](ToHandler[app.UpdateEvent](world, advance,
+		registrar.Subscribe[advanceOnUpdate](ToHandler[app.UpdateEvent](registrar, advance,
 			Feed(func(e app.UpdateEvent) float64 { return e.Dt })))
 	})
 
@@ -140,17 +137,16 @@ func TestTheSameSystemIsBothACommandAndASubscription(t *testing.T) {
 // rather than only an instruction: the System still returns nothing, and the
 // answer leaves through a parameter the builder recognises by type.
 func TestASystemAnswersThroughItsResponseWrapper(t *testing.T) {
-	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](world,
-			func(request nudgeRequest, q *Query[moveQuery], answer *Resp[nudgeResponse]) {
-				reply := nudgeResponse{}
-				for _, it := range q.All() {
-					it.Body.X += request.By
-					reply.Moved++
-					reply.Total += it.Body.X
-				}
-				answer.Set(reply)
-			}))
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](registrar, func(request nudgeRequest, q *Query[moveQuery], answer *Resp[nudgeResponse]) {
+			reply := nudgeResponse{}
+			for _, it := range q.All() {
+				it.Body.X += request.By
+				reply.Moved++
+				reply.Total += it.Body.X
+			}
+			answer.Set(reply)
+		}))
 	})
 
 	for i := range 3 {
@@ -174,14 +170,13 @@ func TestASystemAnswersThroughItsResponseWrapper(t *testing.T) {
 // invocation that writes nothing must answer the zero value rather than whatever
 // the invocation before it left there.
 func TestAResponseIsClearedBetweenInvocations(t *testing.T) {
-	_, _, engine := newWorld(t, 8, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](world,
-			func(request nudgeRequest, answer *Resp[nudgeResponse]) {
-				if request.By == 0 {
-					return // answers nothing at all
-				}
-				answer.Set(nudgeResponse{Moved: 1, Total: request.By})
-			}))
+	_, _, engine := newWorld(t, 8, func(registrar *kernel.Registrar) {
+		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](registrar, func(request nudgeRequest, answer *Resp[nudgeResponse]) {
+			if request.By == 0 {
+				return // answers nothing at all
+			}
+			answer.Set(nudgeResponse{Moved: 1, Total: request.By})
+		}))
 	})
 
 	executioner := engine.Executioner()
@@ -205,9 +200,8 @@ func TestAResponseIsClearedBetweenInvocations(t *testing.T) {
 // working: naming the wrapper is optional, and a command that is an order rather
 // than a question needs no answer.
 func TestASystemNamingNoResponseStillAnswersTheZero(t *testing.T) {
-	_, _, engine := newWorld(t, 8, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](world,
-			func(request nudgeRequest) {}))
+	_, _, engine := newWorld(t, 8, func(registrar *kernel.Registrar) {
+		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](registrar, func(request nudgeRequest) {}))
 	})
 	response, err := engine.Executioner().ExecuteCommand[nudgeCmd](nudgeRequest{By: 1})
 	if err != nil {
@@ -223,9 +217,8 @@ func TestASystemNamingNoResponseStillAnswersTheZero(t *testing.T) {
 // System written for one and registered as the other should say so rather than
 // writing into a cell nobody reads.
 func TestASubscriptionMayNotNameAResponse(t *testing.T) {
-	message := composeAndFail(t, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[moveQuery], answer *Resp[nudgeResponse]) {}))
+	message := composeAndFail(t, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], answer *Resp[nudgeResponse]) {}))
 	})
 	for _, want := range []string{"ecs.Resp[", "ToExecute"} {
 		if !strings.Contains(message, want) {
@@ -238,7 +231,6 @@ func TestASubscriptionMayNotNameAResponse(t *testing.T) {
 // always a copied registration line and the useful sentence is which two answers
 // were confused.
 func TestAResponseOfTheWrongTypeIsRejected(t *testing.T) {
-	entities := NewEntities(8)
 	defer func() {
 		recovered := recover()
 		if recovered == nil {
@@ -251,14 +243,13 @@ func TestAResponseOfTheWrongTypeIsRejected(t *testing.T) {
 			}
 		}
 	}()
-	ToExecute[nudgeRequest, nudgeResponse](entities, func(answer *Resp[body]) {})
+	ToExecute[nudgeRequest, nudgeResponse](nil, func(answer *Resp[body]) {})
 }
 
 // TestASystemNamingTheResponseTwiceIsRejected is the "at most once" rule the
 // event and the request already carry: two parameters would be one cell, so the
 // second is never a second answer.
 func TestASystemNamingTheResponseTwiceIsRejected(t *testing.T) {
-	entities := NewEntities(8)
 	defer func() {
 		recovered := recover()
 		if recovered == nil {
@@ -271,7 +262,7 @@ func TestASystemNamingTheResponseTwiceIsRejected(t *testing.T) {
 			}
 		}
 	}()
-	ToExecute[nudgeRequest, nudgeResponse](entities, func(a, b *Resp[nudgeResponse]) {})
+	ToExecute[nudgeRequest, nudgeResponse](nil, func(a, b *Resp[nudgeResponse]) {})
 }
 
 // TestAnsweringThroughTheWrapperAllocatesNothing is where an allocation would
@@ -279,8 +270,8 @@ func TestASystemNamingTheResponseTwiceIsRejected(t *testing.T) {
 // is allocated once at registration and the value is copied out under the lock.
 func TestAnsweringThroughTheWrapperAllocatesNothing(t *testing.T) {
 	measure := func(system any) float64 {
-		_, _, engine := newWorld(t, 8, func(registrar *kernel.Registrar, world *Entities) {
-			registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](world, system))
+		_, _, engine := newWorld(t, 8, func(registrar *kernel.Registrar) {
+			registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](registrar, system))
 		})
 		executioner := engine.Executioner()
 		return testing.AllocsPerRun(1000, func() {

@@ -190,6 +190,13 @@ useFileSystem(k, UseFileSystemRequest{Use: func(filesystem fs.FS) error {
 Handing a value to a helper **called synchronously within the handler** is fine;
 that is ordinary parameter passing. The rule is about outliving the scope.
 
+`Registrar.Dependency[T]` is the one registration-time read. Use it only for a
+value you register against — the `ecs` authority is the case it exists for — and
+keep the result only when it is a pointer its owner never replaces. A `Lock` has
+no such read: anything it or the handler body reaches goes through a handle it
+binds. A builder that needs a dependency's value to plan a `Lock` takes the
+`Registrar`, as `ecs.ToHandler` does.
+
 If a plain object must reach the kernel during one handler pass, give it a field
 and clear it on the way out:
 

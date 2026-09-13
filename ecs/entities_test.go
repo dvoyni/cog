@@ -16,7 +16,7 @@ import (
 // rather than by entities ever created.
 
 func TestEntitiesHandsOutDistinctLiveHandles(t *testing.T) {
-	entities := NewEntities(8)
+	entities := newEntities(8)
 	seen := map[Entity]bool{}
 	for range 100 {
 		e := entities.alloc()
@@ -34,7 +34,7 @@ func TestEntitiesHandsOutDistinctLiveHandles(t *testing.T) {
 }
 
 func TestDespawnRetiresTheHandleAndRecyclesTheIndex(t *testing.T) {
-	entities := NewEntities(8)
+	entities := newEntities(8)
 	first := entities.alloc()
 
 	if !entities.despawn(first) {
@@ -63,7 +63,7 @@ func TestDespawnRetiresTheHandleAndRecyclesTheIndex(t *testing.T) {
 // spawns and despawns for an hour uses as many indices as it ever had alive at
 // once.
 func TestTheIndexSpaceIsBoundedByPeakConcurrentEntities(t *testing.T) {
-	entities := NewEntities(1)
+	entities := newEntities(1)
 	for range 1000 {
 		e := entities.alloc()
 		if !entities.despawn(e) {
@@ -76,7 +76,7 @@ func TestTheIndexSpaceIsBoundedByPeakConcurrentEntities(t *testing.T) {
 }
 
 func TestAliveRejectsNoEntityAndHandlesItNeverIssued(t *testing.T) {
-	entities := NewEntities(8)
+	entities := newEntities(8)
 	entities.alloc()
 	cases := []struct {
 		name string
@@ -101,7 +101,7 @@ func TestAliveRejectsNoEntityAndHandlesItNeverIssued(t *testing.T) {
 // despawn is a push.
 func TestAllocationAndDespawnAreAllocationFreeInSteadyState(t *testing.T) {
 	const n = 256
-	entities := NewEntities(n)
+	entities := newEntities(n)
 	live := make([]Entity, 0, n)
 	for range n {
 		live = append(live, entities.alloc())
@@ -131,7 +131,7 @@ func TestAllocationAndDespawnAreAllocationFreeInSteadyState(t *testing.T) {
 // structural change, and why no per-entity index of "which Stores hold me" may
 // ever be added.
 func TestDespawnEmptiesEveryStore(t *testing.T) {
-	entities := NewEntities(8)
+	entities := newEntities(8)
 	positions := NewStore[position](entities, 8)
 	tags := NewStore[disabled](entities, 8)
 	doomed, bystander := entities.alloc(), entities.alloc()
@@ -162,7 +162,7 @@ func TestDespawnEmptiesEveryStore(t *testing.T) {
 // dense entry — a thousand of them here.
 func TestRecyclingAnIndexLeaksNoDenseEntry(t *testing.T) {
 	const cycles = 1000
-	entities := NewEntities(1)
+	entities := newEntities(1)
 	store := NewStore[position](entities, 1)
 
 	peak := 0

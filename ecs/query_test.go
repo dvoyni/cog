@@ -15,7 +15,7 @@ import (
 // is asserted rather than assumed, because a field added to Store in the wrong
 // place would corrupt silently rather than fail to compile.
 func TestTheErasedStoreMatchesTheTypedOne(t *testing.T) {
-	entities := NewEntities(8)
+	entities := newEntities(8)
 	store := NewStore[position](entities, 8)
 	e := entities.alloc()
 	store.Set(e, position{X: 3, Y: 4})
@@ -51,9 +51,8 @@ func TestTheErasedStoreMatchesTheTypedOne(t *testing.T) {
 func capture(t *testing.T, ids uint32) (*Query[moveQuery], *componentsPlugin, *Entities, *kernel.Engine) {
 	t.Helper()
 	var query *Query[moveQuery]
-	entities, components, engine := newWorld(t, ids, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[moveSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[moveQuery]) { query = q }))
+	entities, components, engine := newWorld(t, ids, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[moveSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery]) { query = q }))
 	})
 	if err := engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
 		t.Fatalf("publishing the update: %v", err)
@@ -218,8 +217,8 @@ func TestAQueryOfOneComponentNeedsNoProbe(t *testing.T) {
 	type soleSystem kernel.Subscription[app.UpdateEvent]
 
 	visited := 0
-	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[soleSystem](ToHandler[app.UpdateEvent](world, func(q *Query[bodyOnly]) {
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[soleSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[bodyOnly]) {
 			for _, it := range q.All() {
 				it.Body.X++
 				visited++
@@ -248,8 +247,8 @@ func TestAWiderQueryProbesEveryComponent(t *testing.T) {
 	type wideSystem kernel.Subscription[app.UpdateEvent]
 
 	visited := 0
-	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[wideSystem](ToHandler[app.UpdateEvent](world, func(q *Query[wideQuery]) {
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[wideSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[wideQuery]) {
 			for _, it := range q.All() {
 				it.Body.X += it.Velocity.X * it.Collider.Radius
 				visited++

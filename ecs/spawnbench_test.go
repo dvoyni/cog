@@ -125,28 +125,26 @@ func BenchmarkDespawnOnly(b *testing.B) {
 
 type workerCSystem kernel.Subscription[app.UpdateEvent]
 
-func subscribeWorkers(registrar *kernel.Registrar, world *Entities) {
-	registrar.Subscribe[workerASystem](ToHandler[app.UpdateEvent](world,
-		func(q *Query[bodyQuery]) {
-			for _, it := range q.All() {
-				it.Body.X++
-			}
-		}))
-	registrar.Subscribe[workerBSystem](ToHandler[app.UpdateEvent](world,
-		func(q *Query[colliderQuery]) {
-			for _, it := range q.All() {
-				it.Collider.Radius++
-			}
-		}))
+func subscribeWorkers(registrar *kernel.Registrar) {
+	registrar.Subscribe[workerASystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[bodyQuery]) {
+		for _, it := range q.All() {
+			it.Body.X++
+		}
+	}))
+	registrar.Subscribe[workerBSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[colliderQuery]) {
+		for _, it := range q.All() {
+			it.Collider.Radius++
+		}
+	}))
 }
 
 // subscribeThird adds the System under test to the two workers. Every arm walks
 // the same Query over the same Entities; what changes is the declaration.
-func subscribeThird(system any) func(*kernel.Registrar, *Entities) {
-	return func(registrar *kernel.Registrar, world *Entities) {
-		subscribeWorkers(registrar, world)
+func subscribeThird(system any) func(*kernel.Registrar) {
+	return func(registrar *kernel.Registrar) {
+		subscribeWorkers(registrar)
 		if system != nil {
-			registrar.Subscribe[workerCSystem](ToHandler[app.UpdateEvent](world, system))
+			registrar.Subscribe[workerCSystem](ToHandler[app.UpdateEvent](registrar, system))
 		}
 	}
 }
@@ -209,17 +207,16 @@ func TestStructuralChangeStaysOnTheEnginesAllocationLine(t *testing.T) {
 	const frames = 1_000
 	measure := func(perTick int, ids uint32, frames int) float64 {
 		live := make([]Entity, 0, perTick)
-		_, _, engine := newWorld(t, ids, func(registrar *kernel.Registrar, world *Entities) {
-			registrar.Subscribe[churnSystem](ToHandler[app.UpdateEvent](world,
-				func(sp *Spawn[spawnBundle], we *WriteableEntities) {
-					for _, e := range live {
-						we.Despawn(e)
-					}
-					live = live[:0]
-					for range perTick {
-						live = append(live, sp.New(spawnBundle{Body: body{X: 1}, Velocity: velocity{X: 2}}))
-					}
-				}))
+		_, _, engine := newWorld(t, ids, func(registrar *kernel.Registrar) {
+			registrar.Subscribe[churnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[spawnBundle], we *WriteableEntities) {
+				for _, e := range live {
+					we.Despawn(e)
+				}
+				live = live[:0]
+				for range perTick {
+					live = append(live, sp.New(spawnBundle{Body: body{X: 1}, Velocity: velocity{X: 2}}))
+				}
+			}))
 		})
 		executioner := engine.Executioner()
 		// Warm every pool the first frames fill, and reach the high-water mark

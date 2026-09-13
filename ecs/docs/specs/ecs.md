@@ -601,7 +601,7 @@ the path included.
 A Component type is registered **explicitly, once, by exactly one plugin**:
 
 ```go
-func RegisterComponent[C any](r *kernel.Registrar, en *Entities, ids uint32) *Store[C]
+func RegisterComponent[C any](r *kernel.Registrar, ids uint32) *Store[C]
 ```
 
 It creates `C`'s Store, hands it to the kernel as an ordinary resource of type
@@ -669,26 +669,37 @@ renders its type argument with the full import path, so the error a developer
 reads is `*ecs.Store[github.com/dvoyni/nox/game.Health]`. Verbose, unambiguous,
 and not worth a kernel change to prettify.
 
-### The world handle is a plain Go value
+### The world arrives through a declared dependency
 
 `*Entities` is a kernel resource — it has to be, since it is what the locks are
 taken on — but that is only the run-time half. Both `RegisterComponent[C]` and
-`ToHandler` need it at **registration**, where no handler is running and no
-resource value may be read. So composition necessarily looks like this, and the
-binding shape is fixed before `WithPlugins` is called and visible in the app's
-composition root:
+`ToHandler` need it at **registration**, before any handler runs.
+
+The first answer was to thread it through every plugin constructor from a value
+built at the composition root (`world := ecs.NewEntities(maxIDs)`, then
+`ecs.Plugin(world), game.Plugin(world)`), because registration could read no
+resource value. That coupled every ECS-using plugin's constructor to the world
+and made the app build a piece of the engine before the engine.
+
+**Settled since:** the kernel gained `Registrar.Dependency[T]`, which returns
+the value of a resource owned by a declared dependency, and the handler builders
+take the registrar so they can call it. That is sound because dependencies
+register first and nothing runs concurrently with registration, and it fails
+composition with
+`ErrUnavailableDependency` for a resource with no value yet or an undeclared
+owner. The ecs plugin now creates the authority from `ecs.Config` itself, its
+constructor is unexported, and composition takes no world at all:
 
 ```go
-world := ecs.NewEntities(maxIDs)
-kernel.New(cfg).WithPlugins(ecs.Plugin(world), physics.Plugin(world), game.Plugin(world))
+config[ecs.Name] = ecs.DefaultConfig().WithPrewarmEntities(prewarmEntities)
+kernel.New(config).WithPlugins(ecs.Plugin(), physics.New(), game.New())
 ```
 
-**Settled here:** the prototype's constructor is called `NewWorld` in two
-tickets' prose and `NewEntities` in the code that actually ran.
+The cost is one requirement a plugin already met: a plugin registering a
+Component or a System declares `ecs`.
 [#245](https://github.com/dvoyni/cog/issues/245) retired `World` from the API
-and `CONTEXT.md` lists it under `_Avoid_`, so **`ecs.NewEntities` is the name**,
-and no exported identifier in `ecs` contains the word `World`.
-
+and `CONTEXT.md` lists it under `_Avoid_`, so no exported identifier in `ecs`
+contains the word `World`.
 ---
 
 ## The Store
@@ -1068,12 +1079,12 @@ func move(q *ecs.Query[MoveQuery], dt *ecs.In[float64]) {
 type MoveSystem kernel.Subscription[app.UpdateEvent]
 
 registrar.Subscribe[MoveSystem](
-    ecs.ToHandler[app.UpdateEvent](world, move,
+    ecs.ToHandler[app.UpdateEvent](registrar, move,
         ecs.Feed(func(e app.UpdateEvent) float64 { return e.Dt })),
 ).After[GravitySystem]()
 ```
 
-`ecs.ToHandler[E](world, system, feeds...)` returns a
+`ecs.ToHandler[E](registrar, system, feeds...)` returns a
 `func() (kernel.Lock, kernel.Observe[E])` — exactly `kernel.Subscription[E]`, the
 factory shape `Subscribe` already takes. `ecs.ToExecute[Req, Res]` is its
 command twin, returning `kernel.Execute[Req, Res]`, which is what makes a System
@@ -1158,8 +1169,8 @@ over it.
 ```go
 func advance(q *ecs.Query[AdvancedQ], dt *ecs.In[float64]) { … }
 
-ecs.ToHandler[app.UpdateEvent](world, advance, ecs.Feed(func(e app.UpdateEvent) float64 { return e.Dt }))
-ecs.ToHandler[FixedTick](world, advance,       ecs.Feed(func(e FixedTick) float64 { return e.Step }))
+ecs.ToHandler[app.UpdateEvent](registrar, advance, ecs.Feed(func(e app.UpdateEvent) float64 { return e.Dt }))
+ecs.ToHandler[FixedTick](registrar, advance,       ecs.Feed(func(e FixedTick) float64 { return e.Step }))
 ```
 
 `In[T]` carries a per-tick value; `Feed` is the projection, resolved at
@@ -2214,7 +2225,7 @@ remains open is called out at the end of the verification list.
 
 - `Entity`, `NoEntity`, `fmt.Stringer`, private index/generation accessors.
 - `Entities`: id allocation with a free list, generation tracking, `Alive`, the
-  reference to every Store, eager total `Despawn`, `NewEntities(ids uint32)`.
+  reference to every Store, eager total `Despawn`, created by the plugin from `Config.PrewarmEntities`.
 - `Store[T]`: the three arrays, the one-load probe, swap-remove, `append`
   doubling, a reserve hint, and the type-erased `storeCore` carrying exactly one
   method.
@@ -2227,7 +2238,7 @@ remains open is called out at the end of the verification list.
 - `RegisterComponent[C]`: `InitResource[*Store[C]]` on the caller's `Registrar`,
   enrolment with `Entities`, the baked per-type closures including the typed
   copy a non-trivial Component takes, and the legality check.
-- `Plugin(world *Entities) kernel.Plugin`.
+- `Plugin() kernel.Plugin`, which creates the authority from `Config`.
 
 **`ecs` package — Query and System**
 

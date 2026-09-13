@@ -33,10 +33,10 @@ func advance(q *Query[moveQuery], dt *In[float64]) {
 // Feed exists to meet: one System func, two unrelated event types, one engine,
 // unchanged.
 func TestOneSystemRunsUnderTwoUnrelatedEvents(t *testing.T) {
-	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[advanceOnUpdate](ToHandler[app.UpdateEvent](world, advance,
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[advanceOnUpdate](ToHandler[app.UpdateEvent](registrar, advance,
 			Feed(func(e app.UpdateEvent) float64 { return e.Dt })))
-		registrar.Subscribe[advanceOnFixedTick](ToHandler[fixedTick](world, advance,
+		registrar.Subscribe[advanceOnFixedTick](ToHandler[fixedTick](registrar, advance,
 			Feed(func(e fixedTick) float64 { return e.Step })))
 	})
 
@@ -57,9 +57,8 @@ func TestOneSystemRunsUnderTwoUnrelatedEvents(t *testing.T) {
 // TestAnInputNamedByNoFeedIsRejected says which Feed is missing rather than
 // leaving the System to read a zero every tick.
 func TestAnInputNamedByNoFeedIsRejected(t *testing.T) {
-	message := composeAndFail(t, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[moveQuery], dt *In[float64]) {}))
+	message := composeAndFail(t, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], dt *In[float64]) {}))
 	})
 	for _, want := range []string{"ecs.In[float64]", "Feed", "app.UpdateEvent"} {
 		if !strings.Contains(message, want) {
@@ -72,9 +71,8 @@ func TestAnInputNamedByNoFeedIsRejected(t *testing.T) {
 // projection computed every tick and thrown away, almost always a Feed whose
 // type does not match the parameter it was written for.
 func TestAFeedNothingConsumesIsRejected(t *testing.T) {
-	message := composeAndFail(t, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[moveQuery], dt *In[float64]) {},
+	message := composeAndFail(t, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], dt *In[float64]) {},
 			Feed(func(e app.UpdateEvent) float64 { return e.Dt }),
 			Feed(func(e app.UpdateEvent) float32 { return float32(e.Dt) })))
 	})
@@ -87,20 +85,14 @@ func TestAFeedNothingConsumesIsRejected(t *testing.T) {
 // variable: the Feeder carries the In instance, so two Systems given the same
 // Feeder would write one cell from two publications that may run concurrently.
 func TestAFeedMayNotBeSharedBetweenSystems(t *testing.T) {
-	entities := NewEntities(8)
 	shared := Feed(func(e app.UpdateEvent) float64 { return e.Dt })
-	ToHandler[app.UpdateEvent](entities, func(dt *In[float64]) {}, shared)
-
-	defer func() {
-		recovered := recover()
-		if recovered == nil {
-			t.Fatalf("one Feed was bound to two Systems")
-		}
-		if message, _ := recovered.(string); !strings.Contains(message, "ecs.Feed") {
-			t.Fatalf("panic %v does not say to call ecs.Feed at each registration site", recovered)
-		}
-	}()
-	ToHandler[app.UpdateEvent](entities, func(dt *In[float64]) {}, shared)
+	message := composeAndFail(t, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[advanceOnUpdate](ToHandler[app.UpdateEvent](registrar, func(dt *In[float64]) {}, shared))
+		registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](registrar, func(dt *In[float64]) {}, shared))
+	})
+	if !strings.Contains(message, "ecs.Feed") {
+		t.Fatalf("composition failure %q does not say to call ecs.Feed at each registration site", message)
+	}
 }
 
 // notice is what a System publishes when it has something to say. Publishing is
@@ -117,22 +109,20 @@ type noticeWatcher kernel.Subscription[notice]
 // no lock of its own.
 func TestASystemMayPublishAnEvent(t *testing.T) {
 	heard := make(chan int, 8)
-	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[noticeSystem](ToHandler[app.UpdateEvent](world,
-			func(k kernel.Kernel, q *Query[moveQuery]) {
-				count := 0
-				for range q.All() {
-					count++
-				}
-				k.PublishEvent(notice{Count: count})
-			}))
-		registrar.Subscribe[noticeWatcher](ToHandler[notice](world,
-			func(seen notice) {
-				select {
-				case heard <- seen.Count:
-				default:
-				}
-			}))
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[noticeSystem](ToHandler[app.UpdateEvent](registrar, func(k kernel.Kernel, q *Query[moveQuery]) {
+			count := 0
+			for range q.All() {
+				count++
+			}
+			k.PublishEvent(notice{Count: count})
+		}))
+		registrar.Subscribe[noticeWatcher](ToHandler[notice](registrar, func(seen notice) {
+			select {
+			case heard <- seen.Count:
+			default:
+			}
+		}))
 	})
 
 	for range 3 {

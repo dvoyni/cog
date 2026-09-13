@@ -29,7 +29,7 @@ type systemParam interface {
 // ToHandler turns a plain Go func into the factory an ordinary cog subscription
 // already takes, so the ECS contributes no registration API of its own:
 //
-//	registrar.Subscribe[MoveSystem](ecs.ToHandler[app.UpdateEvent](world, move,
+//	registrar.Subscribe[MoveSystem](ecs.ToHandler[app.UpdateEvent](registrar, move,
 //	    ecs.Feed(func(e app.UpdateEvent) float64 { return e.Dt }),
 //	)).After[GravitySystem]()
 //
@@ -50,10 +50,16 @@ type systemParam interface {
 // of the event into an In instead, and the event stays with the adapter, which
 // is already generic over it.
 //
+// The registrar is the one the factory is registered with. It is taken for the
+// world the parameters are planned against, read through Registrar.Dependency,
+// which is why the System's plugin declares a dependency on ecs.
+//
 // See prepareSystem for the classification contract and what happens to a
 // signature that breaks it.
-func ToHandler[E any](en *Entities, system any, feeds ...Feeder[E]) func() (kernel.Lock, kernel.Observe[E]) {
-	call := prepareSystem(en, system, feeds, "event", nil)
+func ToHandler[E any](
+	registrar *kernel.Registrar, system any, feeds ...Feeder[E],
+) func() (kernel.Lock, kernel.Observe[E]) {
+	call := prepareSystem(registrar, system, feeds, "event", nil)
 	return func() (kernel.Lock, kernel.Observe[E]) {
 		return call.lock, func(handle kernel.Kernel, event E) error {
 			call.call(handle, event)
@@ -66,7 +72,7 @@ func ToHandler[E any](en *Entities, system any, feeds ...Feeder[E]) func() (kern
 // a command: the same signature, the same classification, the same lock set,
 // registered with HandleCommand instead of Subscribe.
 //
-//	registrar.HandleCommand[ResetCmd](ecs.ToExecute[ResetRequest, ResetResponse](world, reset,
+//	registrar.HandleCommand[ResetCmd](ecs.ToExecute[ResetRequest, ResetResponse](registrar, reset,
 //	    ecs.Feed(func(r ResetRequest) int { return r.Seed })))
 //
 // The request is what the event is to a subscription: it may be named, and Feed
@@ -86,13 +92,13 @@ func ToHandler[E any](en *Entities, system any, feeds ...Feeder[E]) func() (kern
 // a panic is already ErrPluginPanic; expected rejection belongs in the response,
 // which is where the kernel asks for it anyway.
 func ToExecute[Req any, Res any](
-	en *Entities, system any, feeds ...Feeder[Req],
+	registrar *kernel.Registrar, system any, feeds ...Feeder[Req],
 ) func() (kernel.Lock, kernel.Execute[Req, Res]) {
 	// One cell, allocated here and read back on every invocation. It is the only
 	// route a Resp instance reaches a System by, which is what makes the
 	// parameter unambiguous: there is nothing else of that type to inject.
 	answer := new(Resp[Res])
-	call := prepareSystem(en, system, feeds, "request", answer)
+	call := prepareSystem(registrar, system, feeds, "request", answer)
 	return func() (kernel.Lock, kernel.Execute[Req, Res]) {
 		return call.lock, func(handle kernel.Kernel, request Req) (Res, error) {
 			call.call(handle, request)
@@ -106,6 +112,9 @@ func ToExecute[Req any, Res any](
 // event a subscription is driven by or the request a command is invoked with;
 // nothing below distinguishes them, which is why one builder serves both.
 type systemCall[E any] struct {
+	// entities is the authority the parameters are planned against in lock. It
+	// is registration data here and nothing more: the body reaches the world only
+	// through the handles lock binds.
 	entities *Entities
 	fn       reflect.Value
 	// args is built once and reused. Every element either addresses a stable
@@ -187,11 +196,8 @@ func (c *systemCall[E]) call(handle kernel.Kernel, driven E) {
 // is nil for a subscription — which is the whole of what makes naming a Resp a
 // refusal there. Those two arguments are the only things the builders differ by.
 func prepareSystem[E any](
-	en *Entities, system any, feeds []Feeder[E], driven string, answer responseCell,
+	registrar *kernel.Registrar, system any, feeds []Feeder[E], driven string, answer responseCell,
 ) *systemCall[E] {
-	if en == nil {
-		panic("ecs: the handler builder needs the Entities the System runs against")
-	}
 	fn := reflect.ValueOf(system)
 	if fn.Kind() != reflect.Func {
 		panic(fmt.Sprintf("ecs: a System is a func, and %s is a %s", fn.Type(), fn.Kind()))
@@ -203,7 +209,7 @@ func prepareSystem[E any](
 			systemType, systemType.NumOut()))
 	}
 
-	call := &systemCall[E]{entities: en, fn: fn, feeds: feeds}
+	call := &systemCall[E]{fn: fn, feeds: feeds}
 	if len(feeds) > 0 {
 		// The projections and a named event parameter share one cell, which is
 		// the whole of why In costs nothing over naming the event.
@@ -288,6 +294,9 @@ func prepareSystem[E any](
 	}
 
 	call.args = args
+	// Last, so a signature outside the contract is refused before the world is
+	// asked for: the refusal names the System, which is the more useful sentence.
+	call.entities = registrar.Dependency[*Entities]()
 	return call
 }
 

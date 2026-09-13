@@ -30,11 +30,10 @@ type spawnSystem kernel.Subscription[app.UpdateEvent]
 // Spawn creates an Entity carrying every Component the Bundle names, on a real
 // engine, driven by a real app.UpdateEvent.
 func TestASystemSpawns(t *testing.T) {
-	entities, components, engine := newWorld(t, 128, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](world,
-			func(sp *Spawn[spawnBundle]) {
-				sp.New(spawnBundle{Body: body{X: 1, Y: 2}, Velocity: velocity{X: 3}})
-			}))
+	entities, components, engine := newWorld(t, 128, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[spawnBundle]) {
+			sp.New(spawnBundle{Body: body{X: 1, Y: 2}, Velocity: velocity{X: 3}})
+		}))
 	})
 
 	frame(t, engine, 1)
@@ -64,15 +63,14 @@ type despawnSystem kernel.Subscription[app.UpdateEvent]
 func TestASystemDespawns(t *testing.T) {
 	var doomed Entity
 	var reported, secondReport bool
-	entities, components, engine := newWorld(t, 128, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[despawnSystem](ToHandler[app.UpdateEvent](world,
-			func(we *WriteableEntities) {
-				if !reported {
-					reported = we.Despawn(doomed)
-					return
-				}
-				secondReport = we.Despawn(doomed)
-			}))
+	entities, components, engine := newWorld(t, 128, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[despawnSystem](ToHandler[app.UpdateEvent](registrar, func(we *WriteableEntities) {
+			if !reported {
+				reported = we.Despawn(doomed)
+				return
+			}
+			secondReport = we.Despawn(doomed)
+		}))
 	})
 
 	doomed, bystander := entities.alloc(), entities.alloc()
@@ -120,19 +118,18 @@ func TestPopulationHoldsSteadyAcrossHundredsOfTicks(t *testing.T) {
 	const perTick = 16
 	const ticks = 300
 	live := make([]Entity, 0, perTick)
-	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[churnSystem](ToHandler[app.UpdateEvent](world,
-			func(sp *Spawn[spawnBundle], we *WriteableEntities) {
-				for _, e := range live {
-					if !we.Despawn(e) {
-						t.Errorf("Despawn(%v) reported false for an entity spawned last tick", e)
-					}
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[churnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[spawnBundle], we *WriteableEntities) {
+			for _, e := range live {
+				if !we.Despawn(e) {
+					t.Errorf("Despawn(%v) reported false for an entity spawned last tick", e)
 				}
-				live = live[:0]
-				for i := range perTick {
-					live = append(live, sp.New(spawnBundle{Body: body{X: float32(i)}}))
-				}
-			}))
+			}
+			live = live[:0]
+			for i := range perTick {
+				live = append(live, sp.New(spawnBundle{Body: body{X: float32(i)}}))
+			}
+		}))
 	})
 
 	for range ticks {
@@ -159,9 +156,8 @@ func TestPopulationHoldsSteadyAcrossHundredsOfTicks(t *testing.T) {
 // write is still declared — redundant for locking, kept as the ownership
 // declaration that makes the composition check fire.
 func TestSpawnWritesTheAuthorityAndOwnsItsComponents(t *testing.T) {
-	_, _, engine := newWorld(t, 16, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](world,
-			func(sp *Spawn[spawnBundle]) { _ = sp }))
+	_, _, engine := newWorld(t, 16, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[spawnBundle]) { _ = sp }))
 	})
 
 	subscription := describeSubscription(t, engine, reflect.TypeFor[spawnSystem]())
@@ -183,9 +179,8 @@ func TestSpawnWritesTheAuthorityAndOwnsItsComponents(t *testing.T) {
 // possible at all: Entities reaches every Store itself, so the barrier is one
 // entry in the lock set and not N.
 func TestDespawnNamesNoComponentAtAll(t *testing.T) {
-	_, _, engine := newWorld(t, 16, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[despawnSystem](ToHandler[app.UpdateEvent](world,
-			func(we *WriteableEntities) { _ = we }))
+	_, _, engine := newWorld(t, 16, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[despawnSystem](ToHandler[app.UpdateEvent](registrar, func(we *WriteableEntities) { _ = we }))
 	})
 
 	subscription := describeSubscription(t, engine, reflect.TypeFor[despawnSystem]())
@@ -208,16 +203,14 @@ func TestABundleOverAnUnregisteredComponentFailsComposition(t *testing.T) {
 		Body    body
 		Guarded guarded
 	}
-	entities := NewEntities(8)
 	var failure error
 	kernel.New(nil).
 		Handler(func(err error) bool { failure = err; return true }).
 		WithPlugins(
-			Plugin(entities),
-			&componentsPlugin{world: entities, ids: 8},
-			&systemsPlugin{world: entities, subscribe: func(registrar *kernel.Registrar, world *Entities) {
-				registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](world,
-					func(sp *Spawn[unregisteredBundle]) {}))
+			Plugin(),
+			&componentsPlugin{ids: 8},
+			&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
+				registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[unregisteredBundle]) {}))
 			}},
 		)
 
@@ -236,16 +229,14 @@ func TestABundleOverAnUnregisteredComponentFailsComposition(t *testing.T) {
 // supplies the value rather than reaching one that already exists.
 func TestABundleFieldIsAComponentValue(t *testing.T) {
 	type pointerBundle struct{ Body *body }
-	entities := NewEntities(8)
 	var failure error
 	kernel.New(nil).
 		Handler(func(err error) bool { failure = err; return true }).
 		WithPlugins(
-			Plugin(entities),
-			&componentsPlugin{world: entities, ids: 8},
-			&systemsPlugin{world: entities, subscribe: func(registrar *kernel.Registrar, world *Entities) {
-				registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](world,
-					func(sp *Spawn[pointerBundle]) {}))
+			Plugin(),
+			&componentsPlugin{ids: 8},
+			&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
+				registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[pointerBundle]) {}))
 			}},
 		)
 
@@ -307,10 +298,9 @@ func TestWritingTheAuthorityExcludesEveryOtherSystem(t *testing.T) {
 		if spawning {
 			workerA = func(q *Query[bodyQuery], sp *Spawn[spawnBundle]) { seen.overlap(wait) }
 		}
-		_, _, engine := newWorld(t, 16, func(registrar *kernel.Registrar, world *Entities) {
-			registrar.Subscribe[workerASystem](ToHandler[app.UpdateEvent](world, workerA))
-			registrar.Subscribe[workerBSystem](ToHandler[app.UpdateEvent](world,
-				func(q *Query[colliderQuery]) { seen.overlap(wait) }))
+		_, _, engine := newWorld(t, 16, func(registrar *kernel.Registrar) {
+			registrar.Subscribe[workerASystem](ToHandler[app.UpdateEvent](registrar, workerA))
+			registrar.Subscribe[workerBSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[colliderQuery]) { seen.overlap(wait) }))
 		})
 		frame(t, engine, 1)
 		return seen.most.Load()
@@ -334,9 +324,8 @@ func TestATagIsAnOrdinaryBundleField(t *testing.T) {
 		Body  body
 		Solid solid
 	}
-	_, components, engine := newWorld(t, 16, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](world,
-			func(sp *Spawn[taggedBundle]) { sp.New(taggedBundle{Body: body{X: 7}}) }))
+	_, components, engine := newWorld(t, 16, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[taggedBundle]) { sp.New(taggedBundle{Body: body{X: 7}}) }))
 	})
 
 	frame(t, engine, 1)
@@ -362,14 +351,13 @@ func TestASystemMayRestructureTheEntityItIsVisiting(t *testing.T) {
 	const population = 200
 	t.Run("despawning the current Entity", func(t *testing.T) {
 		visited := 0
-		entities, components, engine := newWorld(t, 4*population, func(registrar *kernel.Registrar, world *Entities) {
-			registrar.Subscribe[restructuringSystem](ToHandler[app.UpdateEvent](world,
-				func(q *Query[moveQuery], we *WriteableEntities) {
-					for e := range q.All() {
-						visited++
-						we.Despawn(e)
-					}
-				}))
+		entities, components, engine := newWorld(t, 4*population, func(registrar *kernel.Registrar) {
+			registrar.Subscribe[restructuringSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], we *WriteableEntities) {
+				for e := range q.All() {
+					visited++
+					we.Despawn(e)
+				}
+			}))
 		})
 		populate(entities, components, population)
 
@@ -385,14 +373,13 @@ func TestASystemMayRestructureTheEntityItIsVisiting(t *testing.T) {
 
 	t.Run("spawning one Entity per visited Entity", func(t *testing.T) {
 		visited := 0
-		entities, components, engine := newWorld(t, 4*population, func(registrar *kernel.Registrar, world *Entities) {
-			registrar.Subscribe[restructuringSystem](ToHandler[app.UpdateEvent](world,
-				func(q *Query[moveQuery], sp *Spawn[spawnBundle]) {
-					for range q.All() {
-						visited++
-						sp.New(spawnBundle{Body: body{X: 1}, Velocity: velocity{X: 1}})
-					}
-				}))
+		entities, components, engine := newWorld(t, 4*population, func(registrar *kernel.Registrar) {
+			registrar.Subscribe[restructuringSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], sp *Spawn[spawnBundle]) {
+				for range q.All() {
+					visited++
+					sp.New(spawnBundle{Body: body{X: 1}, Velocity: velocity{X: 1}})
+				}
+			}))
 		})
 		populate(entities, components, population)
 
@@ -418,9 +405,8 @@ func handles[B any](tb testing.TB, ids uint32) (*Spawn[B], *WriteableEntities, *
 	tb.Helper()
 	var spawn *Spawn[B]
 	var writeable *WriteableEntities
-	_, components, engine := newWorld(tb, ids, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[handleSystem](ToHandler[app.UpdateEvent](world,
-			func(sp *Spawn[B], we *WriteableEntities) { spawn, writeable = sp, we }))
+	_, components, engine := newWorld(tb, ids, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[handleSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[B], we *WriteableEntities) { spawn, writeable = sp, we }))
 	})
 	frame(tb, engine, 1)
 	return spawn, writeable, components

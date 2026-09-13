@@ -15,7 +15,6 @@ import (
 // package counts Store lengths to reason about driver selection, and a
 // Component nobody asked for would change what they measure.
 type listsPlugin struct {
-	world      *Entities
 	ids        uint32
 	inventorys *Store[inventory]
 	grids      *Store[grid]
@@ -26,8 +25,8 @@ func (p *listsPlugin) Name() kernel.PluginName { return "lists" }
 func (p *listsPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 
 func (p *listsPlugin) Register(registrar *kernel.Registrar, _ any) error {
-	p.inventorys = RegisterComponent[inventory](registrar, p.world, p.ids)
-	p.grids = RegisterComponent[grid](registrar, p.world, p.ids)
+	p.inventorys = RegisterComponent[inventory](registrar, p.ids)
+	p.grids = RegisterComponent[grid](registrar, p.ids)
 	return nil
 }
 
@@ -43,11 +42,10 @@ type listSystem kernel.Subscription[app.UpdateEvent]
 
 // listWorld runs one System over one Entity carrying an inventory, and hands
 // back whatever that System's body decided to report.
-func listWorld(t *testing.T, subscribe func(*kernel.Registrar, *Entities)) {
+func listWorld(t *testing.T, subscribe func(*kernel.Registrar)) {
 	t.Helper()
-	entities := NewEntities(16)
-	lists := &listsPlugin{world: entities, ids: 16}
-	_, _, engine := newWorldFor(t, entities, 16, subscribe,
+	lists := &listsPlugin{ids: 16}
+	_, _, engine := newWorldWith(t, 16, subscribe,
 		[]kernel.PluginName{Name, "components", "lists"}, lists)
 	if err := engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
 		t.Fatalf("publishing the update: %v", err)
@@ -75,14 +73,13 @@ func recovered(body func()) (message string) {
 // yielded, which no lock anywhere names and which a release build cannot see.
 func TestAWriteThroughAReadIsCaught(t *testing.T) {
 	var caught string
-	listWorld(t, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[readInventory], spawn *Spawn[inventoryBundle]) {
-				spawn.New(inventoryBundle{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
-				for _, it := range q.All() {
-					caught = recovered(func() { it.Inventory.Slots.Set(0, 99) })
-				}
-			}))
+	listWorld(t, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[readInventory], spawn *Spawn[inventoryBundle]) {
+			spawn.New(inventoryBundle{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
+			for _, it := range q.All() {
+				caught = recovered(func() { it.Inventory.Slots.Set(0, 99) })
+			}
+		}))
 	})
 	if caught == "" {
 		t.Fatal("writing a List through a read field was allowed")
@@ -98,15 +95,14 @@ func TestAWriteThroughAReadIsCaught(t *testing.T) {
 func TestAWriteThroughAWriteIsAllowed(t *testing.T) {
 	var caught string
 	var seen uint32
-	listWorld(t, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[writeInventory], spawn *Spawn[inventoryBundle]) {
-				spawn.New(inventoryBundle{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
-				for _, it := range q.All() {
-					caught = recovered(func() { it.Inventory.Slots.Set(0, 99) })
-					seen = it.Inventory.Slots.At(0)
-				}
-			}))
+	listWorld(t, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[writeInventory], spawn *Spawn[inventoryBundle]) {
+			spawn.New(inventoryBundle{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
+			for _, it := range q.All() {
+				caught = recovered(func() { it.Inventory.Slots.Set(0, 99) })
+				seen = it.Inventory.Slots.At(0)
+			}
+		}))
 	})
 	if caught != "" {
 		t.Fatalf("writing a List through a write field was refused: %s", caught)
@@ -122,16 +118,15 @@ func TestAWriteThroughAWriteIsAllowed(t *testing.T) {
 // check fires wherever the write eventually happens.
 func TestAWriteAfterTheRunIsCaught(t *testing.T) {
 	var caught string
-	listWorld(t, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[writeInventory], spawn *Spawn[inventoryBundle]) {
-				spawn.New(inventoryBundle{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
-				var kept List[uint32]
-				for _, it := range q.All() {
-					kept = it.Inventory.Slots
-				}
-				caught = recovered(func() { kept.Set(0, 99) })
-			}))
+	listWorld(t, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[writeInventory], spawn *Spawn[inventoryBundle]) {
+			spawn.New(inventoryBundle{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
+			var kept List[uint32]
+			for _, it := range q.All() {
+				kept = it.Inventory.Slots
+			}
+			caught = recovered(func() { kept.Set(0, 99) })
+		}))
 	})
 	if caught == "" {
 		t.Fatal("writing a List retained past the run that yielded it was allowed")
@@ -147,7 +142,7 @@ func TestAWriteAfterTheRunIsCaught(t *testing.T) {
 // share one array and the caller's retained value is a write handle on the
 // world.
 func TestTheCallersOwnCopyIsClosedByStoring(t *testing.T) {
-	entities := NewEntities(8)
+	entities := newEntities(8)
 	store := NewStore[inventory](entities, 8)
 
 	mine := ListOf([]uint32{1, 2, 3})
@@ -171,14 +166,13 @@ func TestTheCallersOwnCopyIsClosedByStoring(t *testing.T) {
 // does.
 func TestAWriteThroughANestedReadIsCaught(t *testing.T) {
 	var caught string
-	listWorld(t, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[readGrid], spawn *Spawn[gridBundle]) {
-				spawn.New(gridBundle{Grid: twoByTwo()})
-				for _, it := range q.All() {
-					caught = recovered(func() { it.Grid.Rows.At(1).Cells.Set(0, 99) })
-				}
-			}))
+	listWorld(t, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[readGrid], spawn *Spawn[gridBundle]) {
+			spawn.New(gridBundle{Grid: twoByTwo()})
+			for _, it := range q.All() {
+				caught = recovered(func() { it.Grid.Rows.At(1).Cells.Set(0, 99) })
+			}
+		}))
 	})
 	if caught == "" {
 		t.Fatal("writing a nested List through a read field was allowed")
@@ -194,15 +188,14 @@ func TestAWriteThroughANestedReadIsCaught(t *testing.T) {
 func TestAWriteThroughANestedWriteIsAllowed(t *testing.T) {
 	var caught string
 	var seen uint32
-	listWorld(t, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[writeGrid], spawn *Spawn[gridBundle]) {
-				spawn.New(gridBundle{Grid: twoByTwo()})
-				for _, it := range q.All() {
-					caught = recovered(func() { it.Grid.Rows.At(1).Cells.Set(0, 99) })
-					seen = it.Grid.Rows.At(1).Cells.At(0)
-				}
-			}))
+	listWorld(t, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[writeGrid], spawn *Spawn[gridBundle]) {
+			spawn.New(gridBundle{Grid: twoByTwo()})
+			for _, it := range q.All() {
+				caught = recovered(func() { it.Grid.Rows.At(1).Cells.Set(0, 99) })
+				seen = it.Grid.Rows.At(1).Cells.At(0)
+			}
+		}))
 	})
 	if caught != "" {
 		t.Fatalf("writing a nested List through a write field was refused: %s", caught)
@@ -216,7 +209,7 @@ func TestAWriteThroughANestedWriteIsAllowed(t *testing.T) {
 // level down: the inner List the caller built is shared with the Store the
 // moment the outer one enters it.
 func TestTheCallersOwnNestedCopyIsClosedByStoring(t *testing.T) {
-	entities := NewEntities(8)
+	entities := newEntities(8)
 	store := NewStore[grid](entities, 8)
 
 	cells := ListOf([]uint32{1, 2})

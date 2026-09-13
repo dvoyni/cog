@@ -31,8 +31,9 @@ factory-shaped hole. It is not. Component stores are created by **explicit
 generic registration in the owning plugin**:
 
 ```go
-func RegisterComponent[C any](r *kernel.Registrar, en *Entities, ids uint32) *Store[C] {
-	s := NewStore[C](ids)
+func RegisterComponent[C any](r *kernel.Registrar, ids uint32) *Store[C] {
+	en := r.Dependency[*Entities]()   // item 7
+	s := NewStore[C](en, ids)
 	r.InitResource[*Store[C]](s)   // an ordinary resource, with an ordinary owner
 	// … enrol with Entities, bake the per-type closures …
 	return s
@@ -295,6 +296,55 @@ struct is a detached report, so nothing breaks.
 
 ---
 
+## 7. `Dependency`: a declared dependency's resource, read at registration
+
+**A second code addition, made after the six above, and it modifies the
+guarantee that no resource value is read at registration.**
+
+`RegisterComponent[C]` and `ToHandler` need `*Entities` while plugins register.
+With no way to read a resource then, the world was a plain Go value built at the
+composition root and threaded through every ECS-using plugin's constructor:
+`world := ecs.NewEntities(n)`, then `ecs.Plugin(world), game.New(world)`. The
+engine's own state was being built before the engine, in `main`.
+
+The addition is one method:
+
+```go
+func (r *Registrar) Dependency[T any]() T
+```
+
+It returns resource `T`'s value, provided it is initialized and its owner is
+the reader or in the reader's transitive dependency closure. Otherwise it panics
+with `ErrUnavailableDependency`, which the plugin boundary reports as
+`ErrPluginPanic` naming the reader.
+
+**It is on `Registrar` and deliberately not on `ResourceAccess`.** A `Lock`
+reaches a resource only by declaring a lock on it; a lock-free getter on the
+binder would be a hole in exactly the object that exists to close it. So the ECS
+handler builders take the registrar — `ecs.ToHandler[E](registrar, system)` —
+and read the authority while classifying the System, before any Lock runs.
+
+**Why it is sound.** `orderPlugins` registers a plugin strictly after every
+plugin it depends on, so a dependency's resources are initialized by the time
+the reader runs; the ownership check turns "registered earlier by coincidence of
+order" into a failure rather than a latent bug; and registration is
+single-threaded, so the read races nothing.
+
+**What it weakens.** A value read this way is the value as registration left
+it. A plugin that keeps it and the owner later replaces with `Write.Set` holds a
+stale value. That is harmless for a pointer resource the owner never replaces,
+which is what `*Entities` is, and the method's documentation says so; nothing
+checks it. The Lock rule's "no resource value" still holds for the **lock set**:
+`ToHandler` reads the authority to plan against registration-time data, and the
+set it declares is still a function of the System's signature.
+
+**Cost.** One method and one error type, no hot-path cost. `ecs.Plugin` takes no
+argument and creates the authority from `ecs.Config`, `NewEntities` is
+unexported, and every plugin registering a Component or System declares `ecs`
+— which each System's `read{*Entities}` already required.
+
+---
+
 ## Two constants this delta records rather than changes
 
 Both bound what any future kernel affordance in this area may cost, and both say
@@ -375,7 +425,8 @@ does not add them speculatively:
   trivially rather than strained. The alternative that *would* have needed a
   kernel affordance — a handler enumerating 85 registered Stores in its `Lock` —
   is exactly what this replaced.
-- **No new error type**, subject to the Gap above.
+- **No new error type** beyond item 7's `ErrUnavailableDependency`, subject to
+  the Gap above.
 - **No ownership escape hatch.**
 - **No `Describe` change for Component stores** beyond item 6's report;
   `*ecs.Store[C]` is self-describing.

@@ -30,18 +30,17 @@ type homingSystem kernel.Subscription[app.UpdateEvent]
 // follows a Reference out of a Component it iterated to, and reads the far
 // Entity's Component through a Get it declared in its signature.
 func TestASystemReachesAnEntityItDidNotIterateTo(t *testing.T) {
-	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[homingSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[homingQuery], bodies *Get[body]) {
-				for _, it := range q.All() {
-					target, ok := bodies.Of(it.Homing.Target)
-					if !ok {
-						continue
-					}
-					it.Body.X = target.X
-					it.Body.Y = target.Y
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[homingSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[homingQuery], bodies *Get[body]) {
+			for _, it := range q.All() {
+				target, ok := bodies.Of(it.Homing.Target)
+				if !ok {
+					continue
 				}
-			}))
+				it.Body.X = target.X
+				it.Body.Y = target.Y
+			}
+		}))
 	})
 
 	target := entities.alloc()
@@ -79,15 +78,14 @@ type accessorWorld struct {
 func accessors(tb testing.TB, ids uint32) *accessorWorld {
 	tb.Helper()
 	world := &accessorWorld{}
-	entities, components, engine := newWorld(tb, ids, func(registrar *kernel.Registrar, en *Entities) {
-		registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](en,
-			func(g *Get[body], s *Set[body], r *Remove[body],
-				cs *Set[collider], cr *Remove[collider], we *WriteableEntities,
-			) {
-				world.bodyGet, world.bodySet, world.bodyRemove = g, s, r
-				world.colliderSet, world.colliderRemove = cs, cr
-				world.writeable = we
-			}))
+	entities, components, engine := newWorld(tb, ids, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](registrar, func(g *Get[body], s *Set[body], r *Remove[body],
+			cs *Set[collider], cr *Remove[collider], we *WriteableEntities,
+		) {
+			world.bodyGet, world.bodySet, world.bodyRemove = g, s, r
+			world.colliderSet, world.colliderRemove = cs, cr
+			world.writeable = we
+		}))
 	})
 	frame(tb, engine, 1)
 	world.entities, world.components = entities, components
@@ -97,18 +95,17 @@ func accessors(tb testing.TB, ids uint32) *accessorWorld {
 // TestSetWritesTheEntityItReaches is the write half of the same probe: Of reads
 // the copy Get would, and Ref hands out the stored value itself.
 func TestSetWritesTheEntityItReaches(t *testing.T) {
-	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[homingQuery], bodies *Set[body]) {
-				for _, it := range q.All() {
-					value, ok := bodies.Of(it.Homing.Target)
-					if !ok {
-						continue
-					}
-					ref, _ := bodies.Ref(it.Homing.Target)
-					ref.X = value.X + 1
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[homingQuery], bodies *Set[body]) {
+			for _, it := range q.All() {
+				value, ok := bodies.Of(it.Homing.Target)
+				if !ok {
+					continue
 				}
-			}))
+				ref, _ := bodies.Ref(it.Homing.Target)
+				ref.X = value.X + 1
+			}
+		}))
 	})
 
 	target := entities.alloc()
@@ -143,13 +140,12 @@ func TestSetRefReportsNothingForAnEntityWithoutTheComponent(t *testing.T) {
 // is the whole of what adding a Component takes, because nothing else records
 // which Entities have what.
 func TestUpdateForInsertsWhenAbsent(t *testing.T) {
-	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[moveQuery], colliders *Set[collider]) {
-				for e, it := range q.All() {
-					colliders.UpdateFor(e, collider{Radius: it.Body.X})
-				}
-			}))
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], colliders *Set[collider]) {
+			for e, it := range q.All() {
+				colliders.UpdateFor(e, collider{Radius: it.Body.X})
+			}
+		}))
 	})
 
 	bare := entities.alloc()
@@ -187,20 +183,19 @@ func TestUpdateForIsSafeOnTheEntityBeingVisited(t *testing.T) {
 	const population = 200
 	visited := 0
 	bare := make([]Entity, 0, population)
-	entities, components, engine := newWorld(t, 8*population, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[moveQuery], bodies *Set[body], colliders *Set[collider]) {
-				i := 0
-				for e := range q.All() {
-					visited++
-					// The Entity being visited gains a Component it did not have.
-					colliders.UpdateFor(e, collider{Radius: 1})
-					// And an Entity outside the driver is given the driver's own
-					// Component, which appends a row ahead of nothing.
-					bodies.UpdateFor(bare[i], body{X: 2})
-					i++
-				}
-			}))
+	entities, components, engine := newWorld(t, 8*population, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], bodies *Set[body], colliders *Set[collider]) {
+			i := 0
+			for e := range q.All() {
+				visited++
+				// The Entity being visited gains a Component it did not have.
+				colliders.UpdateFor(e, collider{Radius: 1})
+				// And an Entity outside the driver is given the driver's own
+				// Component, which appends a row ahead of nothing.
+				bodies.UpdateFor(bare[i], body{X: 2})
+				i++
+			}
+		}))
 	})
 
 	populate(entities, components, population)
@@ -230,17 +225,16 @@ func TestUpdateForIsSafeOnTheEntityBeingVisited(t *testing.T) {
 // type it does not supply.
 func TestRemoveTakesAComponentAway(t *testing.T) {
 	var reported, secondReport bool
-	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[moveQuery], colliders *Remove[collider]) {
-				for e := range q.All() {
-					if !reported {
-						reported = colliders.From(e)
-						continue
-					}
-					secondReport = colliders.From(e)
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], colliders *Remove[collider]) {
+			for e := range q.All() {
+				if !reported {
+					reported = colliders.From(e)
+					continue
 				}
-			}))
+				secondReport = colliders.From(e)
+			}
+		}))
 	})
 
 	e := entities.alloc()
@@ -283,7 +277,8 @@ type declaringSystem kernel.Subscription[app.UpdateEvent]
 // the accessor declared and nothing ToHandler added on its behalf.
 func TestAnAccessorDeclaresTheAuthorityItselfAndItsStore(t *testing.T) {
 	getter, setter, remover := &Get[body]{}, &Set[collider]{}, &Remove[solid]{}
-	_, _, engine := newWorld(t, 8, func(registrar *kernel.Registrar, entities *Entities) {
+	_, _, engine := newWorld(t, 8, func(registrar *kernel.Registrar) {
+		entities := registrar.Dependency[*Entities]()
 		registrar.Subscribe[declaringSystem](func() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			return func(access kernel.ResourceAccess) {
 				getter.prepare(entities, access)
@@ -479,20 +474,19 @@ func TestAWritePointerIsInvalidatedByAGrowthDuringIteration(t *testing.T) {
 	// the same insertion to land in place.
 	run := func(ids uint32) (written int, grew bool) {
 		var spare []Entity
-		entities, components, engine := newWorld(t, ids, func(registrar *kernel.Registrar, world *Entities) {
-			registrar.Subscribe[growingSystem](ToHandler[app.UpdateEvent](world,
-				func(q *Query[moveQuery], bodies *Set[body]) {
-					inserted := false
-					for _, it := range q.All() {
-						if !inserted {
-							// One insertion, before any write, into the Store the
-							// Query is holding pointers into.
-							bodies.UpdateFor(spare[0], body{})
-							inserted = true
-						}
-						it.Body.X = 1
+		entities, components, engine := newWorld(t, ids, func(registrar *kernel.Registrar) {
+			registrar.Subscribe[growingSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], bodies *Set[body]) {
+				inserted := false
+				for _, it := range q.All() {
+					if !inserted {
+						// One insertion, before any write, into the Store the
+						// Query is holding pointers into.
+						bodies.UpdateFor(spare[0], body{})
+						inserted = true
 					}
-				}))
+					it.Body.X = 1
+				}
+			}))
 		})
 		populate(entities, components, population)
 		spare = append(spare, entities.alloc())
@@ -542,15 +536,14 @@ func TestAnAccessorOverAnUnregisteredComponentFailsComposition(t *testing.T) {
 		{"Remove", func(r *Remove[guarded]) {}},
 	} {
 		t.Run(accessor.name, func(t *testing.T) {
-			entities := NewEntities(8)
 			var failure error
 			kernel.New(nil).
 				Handler(func(err error) bool { failure = err; return true }).
 				WithPlugins(
-					Plugin(entities),
-					&componentsPlugin{world: entities, ids: 8},
-					&systemsPlugin{world: entities, subscribe: func(registrar *kernel.Registrar, world *Entities) {
-						registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](world, accessor.system))
+					Plugin(),
+					&componentsPlugin{ids: 8},
+					&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
+						registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](registrar, accessor.system))
 					}},
 				)
 

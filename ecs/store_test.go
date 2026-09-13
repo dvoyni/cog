@@ -14,7 +14,7 @@ type position struct{ X, Y float32 }
 type disabled struct{}
 
 func TestAStoreHoldsOneValuePerEntity(t *testing.T) {
-	entities := NewEntities(8)
+	entities := newEntities(8)
 	store := NewStore[position](entities, 8)
 	a, b := entities.alloc(), entities.alloc()
 
@@ -40,7 +40,7 @@ func TestAStoreHoldsOneValuePerEntity(t *testing.T) {
 }
 
 func TestAWriteThroughRefLands(t *testing.T) {
-	entities := NewEntities(8)
+	entities := newEntities(8)
 	store := NewStore[position](entities, 8)
 	e := entities.alloc()
 	store.Set(e, position{X: 1})
@@ -60,7 +60,7 @@ func TestAWriteThroughRefLands(t *testing.T) {
 // handle. This store is enrolled with an Entities it never asks anything: there
 // is no liveness structure to consult, because the generation is in the slot.
 func TestAStaleHandleFailsMembershipWithNothingElseConsulted(t *testing.T) {
-	entities := NewEntities(8)
+	entities := newEntities(8)
 	store := NewStore[position](entities, 8)
 	e := entities.alloc()
 	store.Set(e, position{X: 1})
@@ -93,7 +93,7 @@ func TestAStaleHandleFailsMembershipWithNothingElseConsulted(t *testing.T) {
 // A Query probes candidates it did not produce, so a panic here would be a
 // panic in the middle of a frame.
 func TestTheProbeIsTotal(t *testing.T) {
-	entities := NewEntities(8)
+	entities := newEntities(8)
 	store := NewStore[position](entities, 4)
 	cases := []struct {
 		name string
@@ -123,7 +123,7 @@ func TestTheProbeIsTotal(t *testing.T) {
 // holes and len(owners) is exactly the population — which is the number driver
 // selection reads.
 func TestRemoveIsSwapRemoveAndThePopulationStaysExact(t *testing.T) {
-	entities := NewEntities(8)
+	entities := newEntities(8)
 	store := NewStore[position](entities, 8)
 	live := make([]Entity, 4)
 	for i := range live {
@@ -154,7 +154,7 @@ func TestRemoveIsSwapRemoveAndThePopulationStaysExact(t *testing.T) {
 // Nothing shrinks: no compaction, no sweep, and no array handed back. A
 // respawn reuses the row rather than buying it again.
 func TestNothingShrinks(t *testing.T) {
-	entities := NewEntities(64)
+	entities := newEntities(64)
 	store := NewStore[position](entities, 0)
 	live := make([]Entity, 64)
 	for i := range live {
@@ -180,7 +180,7 @@ func TestNothingShrinks(t *testing.T) {
 // fill, against append doubling's repeated regrowth.
 func TestTheReserveHintBuysAnAllocationFreeFill(t *testing.T) {
 	const n = 10000
-	entities := NewEntities(n)
+	entities := newEntities(n)
 	ids := make([]Entity, n)
 	for i := range ids {
 		ids[i] = entities.alloc()
@@ -234,7 +234,7 @@ func TestStoreCoreCarriesExactlyOneMethod(t *testing.T) {
 // A Tag's Store is its sparse index and its owners: there is nothing to store,
 // so the dense array costs no memory however many entities carry the Tag.
 func TestATagStoreCarriesMembershipAndNoData(t *testing.T) {
-	entities := NewEntities(64)
+	entities := newEntities(64)
 	store := NewStore[disabled](entities, 64)
 	e := entities.alloc()
 	store.Set(e, disabled{})
@@ -288,7 +288,7 @@ func TestAReverseWalkWithSwapRemoveVisitsEveryone(t *testing.T) {
 
 func filledStore(t *testing.T, n int) (*Store[position], *Entities) {
 	t.Helper()
-	entities := NewEntities(uint32(n))
+	entities := newEntities(uint32(n))
 	store := NewStore[position](entities, uint32(n))
 	for i := range n {
 		store.Set(entities.alloc(), position{X: float32(i)})

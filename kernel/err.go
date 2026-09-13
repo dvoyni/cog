@@ -118,6 +118,25 @@ func (e ErrUndeclaredDependency) Error() string {
 		e.Plugin, e.Resource, e.Owner)
 }
 
+// ErrUnavailableDependency is what Dependency panics with when a plugin reads a
+// resource at registration that it may not: one with no initial value yet, or
+// one owned by a plugin it did not declare a dependency on. Owner is empty in
+// the first case.
+type ErrUnavailableDependency struct {
+	Plugin   PluginName
+	Resource reflect.Type
+	Owner    PluginName
+}
+
+func (e ErrUnavailableDependency) Error() string {
+	if e.Owner == "" {
+		return fmt.Sprintf("plugin %q reads resource %v at registration, but no plugin it depends on has initialized it",
+			e.Plugin, e.Resource)
+	}
+	return fmt.Sprintf("plugin %q reads resource %v at registration, owned by %q without declaring it as a dependency",
+		e.Plugin, e.Resource, e.Owner)
+}
+
 // ErrSubscriptionCycle is returned when an event's subscriptions have an
 // unsatisfiable before/after ordering.
 type ErrSubscriptionCycle struct {

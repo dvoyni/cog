@@ -24,13 +24,12 @@ type activeSystem kernel.Subscription[app.UpdateEvent]
 // every entity without the Tag is visited, every entity with it is not, and the
 // two halves are checked against each other rather than against a count.
 func TestWithoutDropsExactlyTheTaggedSet(t *testing.T) {
-	entities, components, engine := newWorld(t, 128, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[activeSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[activeQuery]) {
-				for _, it := range q.All() {
-					it.Body.X += it.Velocity.X
-				}
-			}))
+	entities, components, engine := newWorld(t, 128, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[activeSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[activeQuery]) {
+			for _, it := range q.All() {
+				it.Body.X += it.Velocity.X
+			}
+		}))
 	})
 
 	const n = 20
@@ -92,13 +91,10 @@ type disablingSystem kernel.Subscription[app.UpdateEvent]
 // and on nothing else. Drop the declaration from the filter and the pair
 // vanishes from the conflict report, which is the race.
 func TestAFilterContributesAReadOfItsStore(t *testing.T) {
-	_, _, engine := newWorld(t, 32, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[activeSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[activeQuery]) {}))
-		registrar.Subscribe[withSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[withQuery]) {}))
-		registrar.Subscribe[disablingSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[disablingQuery]) {}))
+	_, _, engine := newWorld(t, 32, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[activeSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[activeQuery]) {}))
+		registrar.Subscribe[withSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[withQuery]) {}))
+		registrar.Subscribe[disablingSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[disablingQuery]) {}))
 	})
 
 	description := engine.Describe()
@@ -169,14 +165,13 @@ type paddedSystem kernel.Subscription[app.UpdateEvent]
 func TestTheFillSkipsFilterFields(t *testing.T) {
 	var seen velocity
 	visited := 0
-	entities, components, engine := newWorld(t, 32, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[paddedSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[paddedQuery]) {
-				for _, it := range q.All() {
-					seen = it.Velocity
-					visited++
-				}
-			}))
+	entities, components, engine := newWorld(t, 32, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[paddedSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[paddedQuery]) {
+			for _, it := range q.All() {
+				seen = it.Velocity
+				visited++
+			}
+		}))
 	})
 
 	e := entities.alloc()
@@ -202,9 +197,8 @@ func TestTheFillSkipsFilterFields(t *testing.T) {
 // is what keeps the recognition off the hot path.
 func TestAFilterIsPlannedWithNoWidth(t *testing.T) {
 	var query *Query[paddedQuery]
-	_, _, engine := newWorld(t, 32, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[paddedSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[paddedQuery]) { query = q }))
+	_, _, engine := newWorld(t, 32, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[paddedSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[paddedQuery]) { query = q }))
 	})
 	frame(t, engine, 1)
 	if query == nil {
@@ -245,16 +239,14 @@ type filtersOnlySystem kernel.Subscription[app.UpdateEvent]
 // which would put read{*Entities} into the lock set for that reason rather than
 // by design.
 func TestAQueryOfFiltersOnlyFailsAtRegistration(t *testing.T) {
-	entities := NewEntities(8)
 	var failure error
 	kernel.New(nil).
 		Handler(func(err error) bool { failure = err; return true }).
 		WithPlugins(
-			Plugin(entities),
-			&componentsPlugin{world: entities, ids: 8},
-			&systemsPlugin{world: entities, subscribe: func(registrar *kernel.Registrar, world *Entities) {
-				registrar.Subscribe[filtersOnlySystem](ToHandler[app.UpdateEvent](world,
-					func(q *Query[filtersOnlyQuery]) {}))
+			Plugin(),
+			&componentsPlugin{ids: 8},
+			&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
+				registrar.Subscribe[filtersOnlySystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[filtersOnlyQuery]) {}))
 			}},
 		)
 
@@ -278,16 +270,14 @@ func TestAQueryOfNoFieldsAtAllFailsTheSameWay(t *testing.T) {
 	type emptyQuery struct{}
 	type emptySystem kernel.Subscription[app.UpdateEvent]
 
-	entities := NewEntities(8)
 	var failure error
 	kernel.New(nil).
 		Handler(func(err error) bool { failure = err; return true }).
 		WithPlugins(
-			Plugin(entities),
-			&componentsPlugin{world: entities, ids: 8},
-			&systemsPlugin{world: entities, subscribe: func(registrar *kernel.Registrar, world *Entities) {
-				registrar.Subscribe[emptySystem](ToHandler[app.UpdateEvent](world,
-					func(q *Query[emptyQuery]) {}))
+			Plugin(),
+			&componentsPlugin{ids: 8},
+			&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
+				registrar.Subscribe[emptySystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[emptyQuery]) {}))
 			}},
 		)
 
@@ -305,9 +295,8 @@ func TestAQueryOfNoFieldsAtAllFailsTheSameWay(t *testing.T) {
 // would walk exactly the Entities the Query excludes.
 func TestAFilterIsNeverTheDriver(t *testing.T) {
 	var query *Query[activeQuery]
-	entities, components, engine := newWorld(t, 128, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[activeSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[activeQuery]) { query = q }))
+	entities, components, engine := newWorld(t, 128, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[activeSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[activeQuery]) { query = q }))
 	})
 
 	for range 16 {
@@ -347,7 +336,7 @@ func TestAFilterIsNeverTheDriver(t *testing.T) {
 // Break it — leave a stale generation behind on a removal, say — and a Without
 // would start matching Entities that do have the Component, silently.
 func TestASparseSlotHoldsOnlyTheOwnersGenerationOrAbsence(t *testing.T) {
-	entities := NewEntities(16)
+	entities := newEntities(16)
 	bodies := NewStore[body](entities, 16)
 	tags := NewStore[disabled](entities, 16)
 
@@ -404,14 +393,13 @@ func TestASparseSlotHoldsOnlyTheOwnersGenerationOrAbsence(t *testing.T) {
 func TestWithoutMatchesBeyondTheFilteredStoresSparseIndex(t *testing.T) {
 	const ids, n = 8, 40
 	visited := 0
-	entities, components, engine := newWorld(t, ids, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[activeSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[activeQuery]) {
-				for _, it := range q.All() {
-					it.Body.X += it.Velocity.X
-					visited++
-				}
-			}))
+	entities, components, engine := newWorld(t, ids, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[activeSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[activeQuery]) {
+			for _, it := range q.All() {
+				it.Body.X += it.Velocity.X
+				visited++
+			}
+		}))
 	})
 
 	for range n {

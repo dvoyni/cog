@@ -206,6 +206,16 @@ Most resources are pointers mutated in place; `Set` is for the few reassigned
 wholesale. A handler never declares a lock on behalf of a command it dispatches;
 `ResourceAccess.Uses` does that for it.
 
+`Registrar.Dependency[T]()` returns a resource's value **during registration**,
+from `Register`. It is for a value a plugin registers against rather than runs
+with, such as the ECS authority a Component's Store enrols in. `T` must be owned
+by the reader or a plugin in its transitive dependency closure, which has
+therefore registered first; otherwise it panics with `ErrUnavailableDependency`.
+It declares no lock and is not available to a `Lock`, whose only way to reach a
+resource is a handle it binds. It returns the value as registration left it, so
+keep what it returns only if it is a pointer its owner never replaces with
+`Set`.
+
 Handles are bound once and live for the engine lifetime, but the **value** they
 expose is only valid while the owning handler runs under its locks. Do not read
 or write a handle from a goroutine that outlives the handler, and do not retain
@@ -231,6 +241,8 @@ Exported error types:
   registered.
 - `ErrUsingCommandCycle`: `Uses` declarations form a cycle, so no lock closure
   exists.
+- `ErrUnavailableDependency`: `Dependency` was asked for a resource with no
+  initial value or an undeclared owner; it arrives inside `ErrPluginPanic`.
 - `ErrPluginPanic`: a plugin boundary panicked; includes owner and stack.
 - `ErrSubscriptionCycle`: event ordering contains a cycle; its fields expose
   the event and subscription types.
@@ -328,10 +340,12 @@ for free: only the engine mints an `Executioner`, and only once `Run` begins.
   `Executioner`, `Executioner.ExecuteCommand`, `Executioner.Describe`,
   `Executioner.Plugins`, `Publication`, `Publication.Wait`.
 - Registration: `Registrar`, `Registrar.InitResource`,
-  `Registrar.HandleCommand`, `Registrar.Subscribe`, `Ordering[TEvent]`.
+  `Registrar.Dependency`, `Registrar.HandleCommand`, `Registrar.Subscribe`,
+  `Ordering[TEvent]`.
 - Handlers: `Lock`, `Execute`, `Observe`, `Command`, `Subscription`,
   `CommandConstraint`, `SubscriptionConstraint`.
 - Resources: `ResourceAccess`, `ResourceAccess.GetRead`,
-  `ResourceAccess.GetWrite`, `ResourceAccess.Uses`, `Read[T]`, `Write[T]`.
+  `ResourceAccess.GetWrite`, `ResourceAccess.Uses`, `Read[T]`,
+  `Write[T]`.
 - Contracts: `PluginName`, `Plugin`, `PluginStarter`, `PluginStopper`,
   `PluginHost`, `ErrorHandler`.

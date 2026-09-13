@@ -33,23 +33,33 @@ classification both share; `plugin.go` the plugin that publishes the authority.
 
 - Go packages: the standard library, `kernel`, and `m` for `m.Blob`
 - Plugin dependencies: none
-- Configuration: none
+- Configuration: `ecs.Config`, whose `PrewarmEntities` is how many Entities the
+  authority reserves room for up front — a hint, not a limit; `DefaultConfig()`
+  prewarms 1024
 
 ## Composing
 
 ```go
-world := ecs.NewEntities(maxIDs)
-kernel.New(config).WithPlugins(ecs.Plugin(world), physics.Plugin(world), game.Plugin(world))
+config[ecs.Name] = ecs.DefaultConfig().WithPrewarmEntities(prewarmEntities)
+kernel.New(config).WithPlugins(ecs.Plugin(), physics.New(), game.New())
 ```
 
-The world handle is **a plain Go value threaded through plugin constructors**,
-and it has to be: both component registration and the handler builder need it at
-registration, where no handler is running and no resource value may be read. So
-the binding shape is fixed before `WithPlugins` is called and is visible in the
-composition root. `ecs.Plugin` publishes the authority as the `*Entities`
-resource every System holds for read and every structural change will hold for
-write; it registers nothing else, because Components are registered by the
-plugins that define them and Systems are ordinary subscriptions.
+**No plugin constructor takes the world.** `ecs.Plugin` creates the authority
+from its config and publishes it as the `*Entities` resource every System holds
+for read and every structural change holds for write; it registers nothing else,
+because Components are registered by the plugins that define them and Systems
+are ordinary subscriptions.
+
+Component registration and the handler builder still need the authority at
+registration, before any handler runs. They read it with
+`kernel.Registrar.Dependency`, which is why `ToHandler` and `ToExecute` take the
+registrar: it is the one registration-time resource read the kernel permits,
+the value of a resource owned by a declared dependency, which has therefore
+already registered. So
+**every plugin that registers a Component or a System declares `ecs` in its
+`Dependencies`**. It already had to, for the `read{*Entities}` every System
+takes; a plugin that registers Components alone and forgets it fails
+composition with `ErrUnavailableDependency` naming it.
 
 ## Entity
 
@@ -78,8 +88,8 @@ usable slot.
 ## Entities
 
 ```go
-entities := ecs.NewEntities(maxIDs)   // at the composition root
-entities.Alive(e)                     // does this handle name an entity that exists?
+entities := registrar.Dependency[*ecs.Entities]()   // at registration
+entities.Alive(e)                                   // does this handle name an entity that exists?
 ```
 
 `Entities` is the id authority: it allocates indices, tracks their generations,
@@ -88,11 +98,10 @@ per Engine, and that is what makes an Engine the boundary of one simulation — 
 second simulation is a second Engine. **No identifier in this package contains
 the word `World`**, and a test enforces it.
 
-`NewEntities(ids)` reserves room for `ids` indices. The number is the peak
-concurrent entity count the app expects, **not a cap**: exceeding it costs a
-growth, not an error. It is built at the composition root because both component
-registration and the handler builder need the value at registration, where no
-resource may be read.
+The ecs plugin creates it, reserving room for `Config.PrewarmEntities` indices, and nothing
+else can: the constructor is unexported, which is what keeps it one per Engine.
+The number is the peak concurrent entity count the app expects, **not a cap**:
+exceeding it costs a growth, not an error.
 
 Indices are **recycled through a free list**, which is what bounds every Store's
 flat sparse index by *peak concurrent* entities rather than by entities ever
@@ -335,12 +344,12 @@ string.
 ## Component registration
 
 ```go
-func RegisterComponent[C any](registrar *kernel.Registrar, en *ecs.Entities, ids uint32) *ecs.Store[C]
+func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *ecs.Store[C]
 ```
 
 A Component type is registered **explicitly, once, by exactly one plugin**.
 `RegisterComponent` checks the Component rule, creates the Store, enrols it
-with the authority, hands it to the kernel as an ordinary resource of type
+with the authority it reads through `registrar.Dependency`, hands it to the kernel as an ordinary resource of type
 `*ecs.Store[C]` — **owned by the calling plugin** — and bakes the per-type
 closures a Query is later planned against. There is no resource factory and
 kernel needs no change.
@@ -518,7 +527,7 @@ not copied, where `T` is not a Tag.
 ```go
 type MoveSystem kernel.Subscription[app.UpdateEvent]
 
-registrar.Subscribe[MoveSystem](ecs.ToHandler[app.UpdateEvent](world, move)).After[GravitySystem]()
+registrar.Subscribe[MoveSystem](ecs.ToHandler[app.UpdateEvent](registrar, move)).After[GravitySystem]()
 ```
 
 A **System** is a plain Go func, called once per tick, that iterates the
@@ -598,8 +607,8 @@ func advance(q *ecs.Query[AdvanceQ], dt *ecs.In[float64]) {
     for _, it := range q.All() { … }
 }
 
-ecs.ToHandler[app.UpdateEvent](world, advance, ecs.Feed(func(e app.UpdateEvent) float64 { return e.Dt }))
-ecs.ToHandler[FixedTick](world, advance,       ecs.Feed(func(e FixedTick) float64 { return e.Step }))
+ecs.ToHandler[app.UpdateEvent](registrar, advance, ecs.Feed(func(e app.UpdateEvent) float64 { return e.Dt }))
+ecs.ToHandler[FixedTick](registrar, advance,       ecs.Feed(func(e FixedTick) float64 { return e.Step }))
 ```
 
 A System that names the event **can only ever be subscribed to that event**. The
@@ -651,7 +660,7 @@ func count(request CountRequest, q *ecs.Query[CountQ], answer *ecs.Resp[CountRes
     answer.Set(reply)
 }
 
-registrar.HandleCommand[CountCmd](ecs.ToExecute[CountRequest, CountResponse](world, count))
+registrar.HandleCommand[CountCmd](ecs.ToExecute[CountRequest, CountResponse](registrar, count))
 ```
 
 `ToExecute` is `ToHandler`'s command twin: the same signature, the same

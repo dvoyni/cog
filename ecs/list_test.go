@@ -158,7 +158,7 @@ func TestARemovedRowDoesNotKeepItsValueAlive(t *testing.T) {
 		// asserting the wrong thing.
 		t.Skip("validation mode retains stamped arrays by design")
 	}
-	entities := NewEntities(8)
+	entities := newEntities(8)
 	store := NewStore[inventory](entities, 8)
 
 	collected := make(chan struct{}, 1)
@@ -192,7 +192,7 @@ func TestARemovedRowDoesNotKeepItsValueAlive(t *testing.T) {
 // pointer-free row keeps nothing alive and clearing it would be work for no
 // one.
 func TestATrivialRowIsLeftWhereItLies(t *testing.T) {
-	entities := NewEntities(8)
+	entities := newEntities(8)
 	trivial := NewStore[position](entities, 8)
 	if !trivial.trivial {
 		t.Fatal("a pointer-free Component is not marked trivial, so removal would zero rows for nothing")
@@ -208,7 +208,6 @@ func TestATrivialRowIsLeftWhereItLies(t *testing.T) {
 // in this package counts Store lengths to reason about driver selection, and a
 // Component nobody asked for would change what they measure.
 type richPlugin struct {
-	world       *Entities
 	ids         uint32
 	labels      *Store[labelled]
 	inventories *Store[inventory]
@@ -219,8 +218,8 @@ func (p *richPlugin) Name() kernel.PluginName { return "rich" }
 func (p *richPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 
 func (p *richPlugin) Register(registrar *kernel.Registrar, _ any) error {
-	p.labels = RegisterComponent[labelled](registrar, p.world, p.ids)
-	p.inventories = RegisterComponent[inventory](registrar, p.world, p.ids)
+	p.labels = RegisterComponent[labelled](registrar, p.ids)
+	p.inventories = RegisterComponent[inventory](registrar, p.ids)
 	return nil
 }
 
@@ -239,17 +238,15 @@ type richSystem kernel.Subscription[app.UpdateEvent]
 func TestANonTrivialQueryTakesTheTypedCopyAndTheWideShape(t *testing.T) {
 	var query *Query[labelQuery]
 	var read string
-	entities := NewEntities(16)
-	rich := &richPlugin{world: entities, ids: 16}
-	_, _, engine := newWorldFor(t, entities, 16,
-		func(registrar *kernel.Registrar, world *Entities) {
-			registrar.Subscribe[richSystem](ToHandler[app.UpdateEvent](world,
-				func(q *Query[labelQuery]) {
-					query = q
-					for _, it := range q.All() {
-						read = it.Label.Name
-					}
-				}))
+	rich := &richPlugin{ids: 16}
+	entities, _, engine := newWorldWith(t, 16,
+		func(registrar *kernel.Registrar) {
+			registrar.Subscribe[richSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[labelQuery]) {
+				query = q
+				for _, it := range q.All() {
+					read = it.Label.Name
+				}
+			}))
 		}, []kernel.PluginName{Name, "components", "rich"}, rich)
 
 	rich.labels.Set(entities.alloc(), labelled{Name: "a name the fill has to copy properly"})

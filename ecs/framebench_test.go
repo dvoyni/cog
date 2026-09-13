@@ -36,7 +36,7 @@ func handWritten() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 		}
 }
 
-func subscribeHandWritten(registrar *kernel.Registrar, _ *Entities) {
+func subscribeHandWritten(registrar *kernel.Registrar) {
 	registrar.Subscribe[handSystem](handWritten)
 }
 
@@ -66,14 +66,13 @@ func populateFiltered(entities *Entities, components *componentsPlugin, n int) {
 	}
 }
 
-func subscribeActive(registrar *kernel.Registrar, world *Entities) {
-	registrar.Subscribe[activeSystem](ToHandler[app.UpdateEvent](world,
-		func(q *Query[activeQuery]) {
-			for _, it := range q.All() {
-				it.Body.X += it.Velocity.X
-				it.Body.Y += it.Velocity.Y
-			}
-		}))
+func subscribeActive(registrar *kernel.Registrar) {
+	registrar.Subscribe[activeSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[activeQuery]) {
+		for _, it := range q.All() {
+			it.Body.X += it.Velocity.X
+			it.Body.Y += it.Velocity.Y
+		}
+	}))
 }
 
 // frame publishes one real app.UpdateEvent and waits for it, which is the whole
@@ -84,11 +83,11 @@ func frame(tb testing.TB, engine *kernel.Engine, dt float64) {
 	}
 }
 
-func benchmarkFrame(b *testing.B, n int, subscribe func(*kernel.Registrar, *Entities)) {
+func benchmarkFrame(b *testing.B, n int, subscribe func(*kernel.Registrar)) {
 	benchmarkFrameWith(b, n, subscribe, populate)
 }
 
-func benchmarkFrameWith(b *testing.B, n int, subscribe func(*kernel.Registrar, *Entities),
+func benchmarkFrameWith(b *testing.B, n int, subscribe func(*kernel.Registrar),
 	fill func(*Entities, *componentsPlugin, int),
 ) {
 	entities, components, engine := newWorld(b, uint32(n), subscribe)
@@ -129,7 +128,7 @@ func BenchmarkFrameHandWritten10k(b *testing.B) {
 // BenchmarkFrameNoSystem is the other end of the line: the same publication with
 // nothing subscribed, so the engine's own charge is visible beside the ECS's.
 func BenchmarkFrameNoSystem(b *testing.B) {
-	benchmarkFrame(b, 1_000, func(*kernel.Registrar, *Entities) {})
+	benchmarkFrame(b, 1_000, func(*kernel.Registrar) {})
 }
 
 // TestTheFrameSitsOnTheEnginesAllocationLine measures a steady state rather than
@@ -139,7 +138,7 @@ func BenchmarkFrameNoSystem(b *testing.B) {
 // count, so identical counts at 1k and 10k are the claim.
 func TestTheFrameSitsOnTheEnginesAllocationLine(t *testing.T) {
 	const frames = 10_000
-	measure := func(n int, subscribe func(*kernel.Registrar, *Entities),
+	measure := func(n int, subscribe func(*kernel.Registrar),
 		fill func(*Entities, *componentsPlugin, int),
 	) float64 {
 		entities, components, engine := newWorld(t, uint32(n), subscribe)

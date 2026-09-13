@@ -19,8 +19,8 @@ import (
 //	    for _, it := range q.All() { … }
 //	}
 //
-//	ecs.ToHandler[app.UpdateEvent](world, advance, ecs.Feed(func(e app.UpdateEvent) float64 { return e.Dt }))
-//	ecs.ToHandler[FixedTick](world, advance,       ecs.Feed(func(e FixedTick) float64 { return e.Step }))
+//	ecs.ToHandler[app.UpdateEvent](registrar, advance, ecs.Feed(func(e app.UpdateEvent) float64 { return e.Dt }))
+//	ecs.ToHandler[FixedTick](registrar, advance,       ecs.Feed(func(e FixedTick) float64 { return e.Step }))
 //
 // Get must be read once outside the loop, and that is a usage rule rather than
 // an implementation detail. In is a pointer to a cell the adapter writes, so a

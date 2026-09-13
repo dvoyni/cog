@@ -83,14 +83,15 @@ type componentClass struct {
 // initial value fails finalisation, so a Store that does not exist at
 // registration cannot be locked and discovery-on-first-use is off the table.
 //
+// The world is the ecs plugin's *Entities, read through Registrar.Dependency, so
+// the calling plugin must declare a dependency on ecs.
+//
 // ids is the peak population hint the Store reserves for; it is not a cap.
 //
 // It panics if C names mutable indirection, naming the offending field by path.
 // The plugin boundary turns that into a composition failure naming the plugin.
-func RegisterComponent[C any](registrar *kernel.Registrar, en *Entities, ids uint32) *Store[C] {
-	if en == nil {
-		panic("ecs: RegisterComponent needs the Entities the Component belongs to")
-	}
+func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C] {
+	en := registrar.Dependency[*Entities]()
 	componentType := reflect.TypeFor[C]()
 	if err := Storable(componentType); err != nil {
 		panic("ecs: " + err.Error())

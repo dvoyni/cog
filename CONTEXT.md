@@ -412,8 +412,20 @@ A group of Voices the game declares, sharing one volume. Every Bus sits directly
 _Avoid_: Channel, group, mixer track, category
 
 **Listener**:
-The point a positioned Voice is heard from.
+The place and facing a Positional Voice is heard from. There is one per Engine, and the game puts it where it wants: audio never looks at a Camera, so a Listener follows one only because something copies it across.
 _Avoid_: Camera, ear, microphone
+
+**Positional Voice**:
+A Voice that has been given a position, and so is quieter with distance from the Listener and heard from its side. A Voice without one is heard from nowhere in particular, which is what a UI click is. The first position makes a Voice positional for the rest of its life.
+_Avoid_: 3D sound, spatial sound, as though 2D were a different kind
+
+**Falloff**:
+How a Positional Voice grows quieter with distance from the Listener. Each Voice carries its own.
+_Avoid_: Attenuation curve, rolloff, as the name of the whole
+
+**Cone**:
+The directions a Positional Voice is loud in, when it has a facing as well as a position. Without a facing a Voice is loud in every direction, whatever its Cone says.
+_Avoid_: Directivity, beam
 
 **Fade**:
 A change of volume over time that a game drives itself, from a timeline, by changing a Voice or a Bus each tick. Audio has no word for it and no verb that performs one.

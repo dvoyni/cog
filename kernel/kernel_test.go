@@ -989,6 +989,74 @@ func TestKernel_PluginsInitializeInDependencyOrder(t *testing.T) {
 	}
 }
 
+// A dependency's resource is readable while the dependent registers, because the
+// dependency registered first.
+func TestKernel_DependencyReadsADependencysResourceAtRegistration(t *testing.T) {
+	type authority struct{ name string }
+	published := &authority{name: "world"}
+	var fromRegister *authority
+	provider := testPlugin{name: "provider", register: func(r *Registrar) error {
+		r.InitResource(published)
+		return nil
+	}}
+	dependent := testPlugin{name: "dependent", deps: []PluginName{"provider"}, register: func(r *Registrar) error {
+		fromRegister = r.Dependency[*authority]()
+		return nil
+	}}
+
+	New(nil).Handler(func(err error) bool {
+		t.Errorf("unexpected kernel error: %v", err)
+		return true
+	}).WithPlugins(dependent, provider)
+
+	if fromRegister != published {
+		t.Fatalf("Dependency returned %p, want %p", fromRegister, published)
+	}
+}
+
+// Dependency refuses a resource no dependency has initialized, and one owned by
+// a plugin that registered earlier only by coincidence of order.
+func TestKernel_DependencyRefusesAnUndeclaredOrMissingResource(t *testing.T) {
+	type authority struct{}
+	for _, tc := range []struct {
+		name    string
+		deps    []PluginName
+		provide bool
+		owner   PluginName
+	}{
+		{name: "undeclared owner", provide: true, owner: "provider"},
+		{name: "never initialized", deps: []PluginName{"provider"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := testPlugin{name: "provider", register: func(r *Registrar) error {
+				if tc.provide {
+					r.InitResource(&authority{})
+				}
+				return nil
+			}}
+			dependent := testPlugin{name: "dependent", deps: tc.deps, register: func(r *Registrar) error {
+				r.Dependency[*authority]()
+				return nil
+			}}
+			var handled error
+			New(nil).Handler(func(err error) bool { handled = err; return true }).WithPlugins(provider, dependent)
+
+			var panicked ErrPluginPanic
+			if !errors.As(handled, &panicked) {
+				t.Fatalf("handled error = %v, want ErrPluginPanic", handled)
+			}
+			unavailable, ok := panicked.Recovered.(ErrUnavailableDependency)
+			if !ok {
+				t.Fatalf("recovered = %v, want ErrUnavailableDependency", panicked.Recovered)
+			}
+			want := ErrUnavailableDependency{Plugin: "dependent", Resource: reflect.TypeFor[*authority](), Owner: tc.owner}
+			if unavailable != want {
+				t.Fatalf("unavailable = %+v, want %+v", unavailable, want)
+			}
+		})
+	}
+}
+
 func TestKernel_PluginDependencyCycleIsReportedBeforeInitialization(t *testing.T) {
 	initialized := false
 	first := testPlugin{name: "first", deps: []PluginName{"second"}, register: func(*Registrar) error {

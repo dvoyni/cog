@@ -29,6 +29,8 @@ type moveSystem kernel.Subscription[app.UpdateEvent]
 // registered by the plugin that defines its Go type, and that is what keeps the
 // coupling check working on Component data.
 type componentsPlugin struct {
+	// world is the authority the ecs plugin published, kept so a test can
+	// allocate Entities and fill Stores directly around the engine.
 	world      *Entities
 	ids        uint32
 	bodies     *Store[body]
@@ -44,12 +46,13 @@ func (p *componentsPlugin) Name() kernel.PluginName { return "components" }
 func (p *componentsPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 
 func (p *componentsPlugin) Register(registrar *kernel.Registrar, _ any) error {
-	p.bodies = RegisterComponent[body](registrar, p.world, p.ids)
-	p.velocities = RegisterComponent[velocity](registrar, p.world, p.ids)
-	p.colliders = RegisterComponent[collider](registrar, p.world, p.ids)
-	p.disableds = RegisterComponent[disabled](registrar, p.world, p.ids)
-	p.solids = RegisterComponent[solid](registrar, p.world, p.ids)
-	p.homings = RegisterComponent[homing](registrar, p.world, p.ids)
+	p.world = registrar.Dependency[*Entities]()
+	p.bodies = RegisterComponent[body](registrar, p.ids)
+	p.velocities = RegisterComponent[velocity](registrar, p.ids)
+	p.colliders = RegisterComponent[collider](registrar, p.ids)
+	p.disableds = RegisterComponent[disabled](registrar, p.ids)
+	p.solids = RegisterComponent[solid](registrar, p.ids)
+	p.homings = RegisterComponent[homing](registrar, p.ids)
 	return nil
 }
 
@@ -58,9 +61,8 @@ func (p *componentsPlugin) Register(registrar *kernel.Registrar, _ any) error {
 // that names another plugin's resource locks that plugin's cell too, and the
 // coupling check is exactly what that is supposed to trip.
 type systemsPlugin struct {
-	world     *Entities
 	deps      []kernel.PluginName
-	subscribe func(registrar *kernel.Registrar, world *Entities)
+	subscribe func(registrar *kernel.Registrar)
 }
 
 func (p *systemsPlugin) Name() kernel.PluginName { return "systems" }
@@ -73,7 +75,7 @@ func (p *systemsPlugin) Dependencies() []kernel.PluginName {
 }
 
 func (p *systemsPlugin) Register(registrar *kernel.Registrar, _ any) error {
-	p.subscribe(registrar, p.world)
+	p.subscribe(registrar)
 	return nil
 }
 
@@ -84,13 +86,13 @@ func move(q *Query[moveQuery]) {
 	}
 }
 
-func subscribeMove(registrar *kernel.Registrar, world *Entities) {
-	registrar.Subscribe[moveSystem](ToHandler[app.UpdateEvent](world, move))
+func subscribeMove(registrar *kernel.Registrar) {
+	registrar.Subscribe[moveSystem](ToHandler[app.UpdateEvent](registrar, move))
 }
 
 // world composes a real engine and runs it until the test ends, so every claim
 // below is made against the kernel rather than against a stand-in for it.
-func newWorld(t testing.TB, ids uint32, subscribe func(*kernel.Registrar, *Entities)) (
+func newWorld(t testing.TB, ids uint32, subscribe func(*kernel.Registrar)) (
 	*Entities, *componentsPlugin, *kernel.Engine,
 ) {
 	t.Helper()
@@ -101,26 +103,15 @@ func newWorld(t testing.TB, ids uint32, subscribe func(*kernel.Registrar, *Entit
 // binding necessarily is, publishing the frame-local resource a System reaches
 // through its signature. deps is the systems plugin's dependency list, which has
 // to name the bound plugin for the same reason it names the components one.
-func newWorldWith(t testing.TB, ids uint32, subscribe func(*kernel.Registrar, *Entities),
+func newWorldWith(t testing.TB, ids uint32, subscribe func(*kernel.Registrar),
 	deps []kernel.PluginName, bound ...kernel.Plugin,
 ) (*Entities, *componentsPlugin, *kernel.Engine) {
 	t.Helper()
-	return newWorldFor(t, NewEntities(ids), ids, subscribe, deps, bound...)
-}
-
-// newWorldFor is newWorldWith over an authority the caller already has, which
-// is what a bound plugin registering a Component of its own needs: its Store
-// has to be enrolled with the same Entities every other plugin's is, or a
-// despawn would not reach it and a Query could not find it.
-func newWorldFor(t testing.TB, entities *Entities, ids uint32,
-	subscribe func(*kernel.Registrar, *Entities), deps []kernel.PluginName, bound ...kernel.Plugin,
-) (*Entities, *componentsPlugin, *kernel.Engine) {
-	t.Helper()
-	components := &componentsPlugin{world: entities, ids: ids}
-	plugins := []kernel.Plugin{Plugin(entities), components}
+	components := &componentsPlugin{ids: ids}
+	plugins := []kernel.Plugin{Plugin(), components}
 	plugins = append(plugins, bound...)
-	plugins = append(plugins, &systemsPlugin{world: entities, deps: deps, subscribe: subscribe})
-	engine := kernel.New(nil).
+	plugins = append(plugins, &systemsPlugin{deps: deps, subscribe: subscribe})
+	engine := kernel.New(map[kernel.PluginName]any{Name: DefaultConfig().WithPrewarmEntities(ids)}).
 		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
 		WithPlugins(plugins...)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -139,7 +130,7 @@ func newWorldFor(t testing.TB, entities *Entities, ids uint32,
 		engine.Run(ctx)
 	}()
 	<-engine.Ready()
-	return entities, components, engine
+	return components.world, components, engine
 }
 
 // TestAComponentMoves is the tracer bullet: one System with a two-Component
@@ -179,14 +170,13 @@ func TestAComponentMoves(t *testing.T) {
 func TestASystemMayNameTheEventItIsDrivenBy(t *testing.T) {
 	type tickSystem kernel.Subscription[app.UpdateEvent]
 
-	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[tickSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[moveQuery], tick app.UpdateEvent) {
-				dt := float32(tick.Dt)
-				for _, it := range q.All() {
-					it.Body.X += it.Velocity.X * dt
-				}
-			}))
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[tickSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], tick app.UpdateEvent) {
+			dt := float32(tick.Dt)
+			for _, it := range q.All() {
+				it.Body.X += it.Velocity.X * dt
+			}
+		}))
 	})
 	e := entities.alloc()
 	components.bodies.Set(e, body{})
@@ -258,16 +248,14 @@ func TestEveryHandlerTouchingAStoreReadsEntities(t *testing.T) {
 // TestAQueryOverAnUnregisteredComponentFailsComposition names the Component and
 // the Query, rather than the store type the user never wrote.
 func TestAQueryOverAnUnregisteredComponentFailsComposition(t *testing.T) {
-	entities := NewEntities(8)
 	var failure error
 	kernel.New(nil).
 		Handler(func(err error) bool { failure = err; return true }).
 		WithPlugins(
-			Plugin(entities),
-			&componentsPlugin{world: entities, ids: 8},
-			&systemsPlugin{world: entities, subscribe: func(registrar *kernel.Registrar, world *Entities) {
-				registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](world,
-					func(q *Query[guardedQuery]) {}))
+			Plugin(),
+			&componentsPlugin{ids: 8},
+			&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
+				registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[guardedQuery]) {}))
 			}},
 		)
 
@@ -276,6 +264,39 @@ func TestAQueryOverAnUnregisteredComponentFailsComposition(t *testing.T) {
 	}
 	message := failure.Error()
 	for _, want := range []string{"systems", "guardedQuery", "guarded"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("composition failure %q does not name %q", message, want)
+		}
+	}
+}
+
+// orphanPlugin registers a Component without declaring ecs, which is the one
+// mistake the world arriving through Registrar.Dependency adds.
+type orphanPlugin struct{}
+
+func (orphanPlugin) Name() kernel.PluginName { return "orphan" }
+
+func (orphanPlugin) Dependencies() []kernel.PluginName { return nil }
+
+func (orphanPlugin) Register(registrar *kernel.Registrar, _ any) error {
+	RegisterComponent[guarded](registrar, 8)
+	return nil
+}
+
+// TestAComponentRegisteredWithoutDependingOnEcsFailsComposition names the plugin
+// and the authority it could not reach, so the fix — declare ecs — is in the
+// sentence rather than behind a nil dereference.
+func TestAComponentRegisteredWithoutDependingOnEcsFailsComposition(t *testing.T) {
+	var failure error
+	kernel.New(nil).
+		Handler(func(err error) bool { failure = err; return true }).
+		WithPlugins(Plugin(), orphanPlugin{})
+
+	if failure == nil {
+		t.Fatalf("registering a Component without depending on ecs succeeded")
+	}
+	message := failure.Error()
+	for _, want := range []string{"orphan", "*ecs.Entities", `"ecs"`} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("composition failure %q does not name %q", message, want)
 		}
@@ -294,7 +315,6 @@ type guardSystem kernel.Subscription[app.UpdateEvent]
 // TestASystemReturningAValueIsRejectedAtRegistration is a hard rule and not a
 // style preference: reflect.Value.Call allocates for a callee that returns one.
 func TestASystemReturningAValueIsRejectedAtRegistration(t *testing.T) {
-	entities := NewEntities(8)
 	defer func() {
 		recovered := recover()
 		if recovered == nil {
@@ -304,13 +324,12 @@ func TestASystemReturningAValueIsRejectedAtRegistration(t *testing.T) {
 			t.Fatalf("panic %v does not say the System returns something", recovered)
 		}
 	}()
-	ToHandler[app.UpdateEvent](entities, func(q *Query[moveQuery]) error { return nil })
+	ToHandler[app.UpdateEvent](nil, func(q *Query[moveQuery]) error { return nil })
 }
 
 // TestASystemTakingAnUnknownParameterIsRejected is the mistake every new user
 // makes once, so the diagnostic matters more than the mechanism.
 func TestASystemTakingAnUnknownParameterIsRejected(t *testing.T) {
-	entities := NewEntities(8)
 	defer func() {
 		recovered := recover()
 		if recovered == nil {
@@ -321,7 +340,7 @@ func TestASystemTakingAnUnknownParameterIsRejected(t *testing.T) {
 			t.Fatalf("panic %v does not name the offending parameter type", recovered)
 		}
 	}()
-	ToHandler[app.UpdateEvent](entities, func(s *Store[body]) {})
+	ToHandler[app.UpdateEvent](nil, func(s *Store[body]) {})
 }
 
 // TestASystemNamingTheEventTwiceIsRejected holds the "at most once" half of the
@@ -329,7 +348,6 @@ func TestASystemTakingAnUnknownParameterIsRejected(t *testing.T) {
 // second value — it is always a mistake, and saying so is cheaper than letting
 // it look like it works.
 func TestASystemNamingTheEventTwiceIsRejected(t *testing.T) {
-	entities := NewEntities(8)
 	defer func() {
 		recovered := recover()
 		if recovered == nil {
@@ -342,7 +360,7 @@ func TestASystemNamingTheEventTwiceIsRejected(t *testing.T) {
 			}
 		}
 	}()
-	ToHandler[app.UpdateEvent](entities, func(a app.UpdateEvent, b app.UpdateEvent) {})
+	ToHandler[app.UpdateEvent](nil, func(a app.UpdateEvent, b app.UpdateEvent) {})
 }
 
 func namesType(types []reflect.Type, want string) bool {

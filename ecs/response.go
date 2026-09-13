@@ -18,7 +18,7 @@ import "reflect"
 //	    answer.Set(reply)
 //	}
 //
-//	registrar.HandleCommand[CountCmd](ecs.ToExecute[CountRequest, CountResponse](world, count))
+//	registrar.HandleCommand[CountCmd](ecs.ToExecute[CountRequest, CountResponse](registrar, count))
 //
 // Only *ecs.Resp[Res] is accepted, where Res is the command's own response
 // type: a System naming any other Resp is refused at registration naming both

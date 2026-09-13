@@ -51,15 +51,14 @@ func TestASystemReachesAnotherPluginsResourceThroughItsSignature(t *testing.T) {
 
 	log, names := &drawLog{}, &modelNames{Scale: 10}
 	entities, components, engine := newWorldWith(t, 64,
-		func(registrar *kernel.Registrar, world *Entities) {
-			registrar.Subscribe[recordSystem](ToHandler[app.UpdateEvent](world,
-				func(q *Query[moveQuery], table *Read[*modelNames], out *Write[*drawLog]) {
-					scale, queue := table.Get().Scale, out.Get()
-					queue.Xs = queue.Xs[:0]
-					for _, it := range q.All() {
-						queue.Xs = append(queue.Xs, it.Body.X*scale)
-					}
-				}))
+		func(registrar *kernel.Registrar) {
+			registrar.Subscribe[recordSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], table *Read[*modelNames], out *Write[*drawLog]) {
+				scale, queue := table.Get().Scale, out.Get()
+				queue.Xs = queue.Xs[:0]
+				for _, it := range q.All() {
+					queue.Xs = append(queue.Xs, it.Body.X*scale)
+				}
+			}))
 		},
 		boundDeps, &bindingPlugin{log: log, names: names})
 
@@ -104,17 +103,15 @@ func TestAResourceHandleIsRefreshedPerTick(t *testing.T) {
 	first, second := &modelNames{Scale: 1}, &modelNames{Scale: 2}
 	var seen []float32
 	_, _, engine := newWorldWith(t, 8,
-		func(registrar *kernel.Registrar, world *Entities) {
-			registrar.Subscribe[resetSystem](ToHandler[app.UpdateEvent](world,
-				func(table *Write[*modelNames]) {
-					seen = append(seen, table.Get().Scale)
-				}))
+		func(registrar *kernel.Registrar) {
+			registrar.Subscribe[resetSystem](ToHandler[app.UpdateEvent](registrar, func(table *Write[*modelNames]) {
+				seen = append(seen, table.Get().Scale)
+			}))
 			// The one System that reassigns the cell, and the one place Set
 			// belongs: most resources are pointers mutated in place.
-			registrar.Subscribe[replaceSystem](ToHandler[replaceEvent](world,
-				func(replace replaceEvent, table *Write[*modelNames]) {
-					table.Set(replace.with)
-				}))
+			registrar.Subscribe[replaceSystem](ToHandler[replaceEvent](registrar, func(replace replaceEvent, table *Write[*modelNames]) {
+				table.Set(replace.with)
+			}))
 		},
 		boundDeps, &bindingPlugin{log: &drawLog{}, names: first})
 
@@ -151,8 +148,8 @@ func TestAResourceHandleRefusesTheECSsOwnCells(t *testing.T) {
 		{"write the authority", func(w *Write[*Entities]) {}, "ecs.WriteableEntities"},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
-			message := composeAndFail(t, func(registrar *kernel.Registrar, world *Entities) {
-				registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](world, probe.system))
+			message := composeAndFail(t, func(registrar *kernel.Registrar) {
+				registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](registrar, probe.system))
 			})
 			if !strings.Contains(message, probe.wanted) {
 				t.Fatalf("composition failure %q does not point at %s", message, probe.wanted)
@@ -167,17 +164,16 @@ func TestAResourceHandleRefusesTheECSsOwnCells(t *testing.T) {
 // naming the plugin — the third of the three answers the specs record, taken
 // here because the alternative needs kernel to grow a way for a plugin-side
 // builder to reach its private error list.
-func composeAndFail(t *testing.T, subscribe func(*kernel.Registrar, *Entities)) string {
+func composeAndFail(t *testing.T, subscribe func(*kernel.Registrar)) string {
 	t.Helper()
-	entities := NewEntities(8)
 	var failure error
 	kernel.New(nil).
 		Handler(func(err error) bool { failure = err; return true }).
 		WithPlugins(
-			Plugin(entities),
-			&componentsPlugin{world: entities, ids: 8},
+			Plugin(),
+			&componentsPlugin{ids: 8},
 			&bindingPlugin{log: &drawLog{}, names: &modelNames{}},
-			&systemsPlugin{world: entities, deps: boundDeps, subscribe: subscribe},
+			&systemsPlugin{deps: boundDeps, subscribe: subscribe},
 		)
 	if failure == nil {
 		t.Fatalf("composing the System succeeded")

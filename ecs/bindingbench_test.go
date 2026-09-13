@@ -26,28 +26,26 @@ type publishingSystem kernel.Subscription[app.UpdateEvent]
 
 // subscribeNamedEvent is the baseline: the System names app.UpdateEvent and can
 // therefore only ever be subscribed to app.UpdateEvent.
-func subscribeNamedEvent(registrar *kernel.Registrar, world *Entities) {
-	registrar.Subscribe[namedEventSystem](ToHandler[app.UpdateEvent](world,
-		func(q *Query[moveQuery], tick app.UpdateEvent) {
-			dt := float32(tick.Dt)
-			for _, it := range q.All() {
-				it.Body.X += it.Velocity.X * dt
-				it.Body.Y += it.Velocity.Y * dt
-			}
-		}))
+func subscribeNamedEvent(registrar *kernel.Registrar) {
+	registrar.Subscribe[namedEventSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], tick app.UpdateEvent) {
+		dt := float32(tick.Dt)
+		for _, it := range q.All() {
+			it.Body.X += it.Velocity.X * dt
+			it.Body.Y += it.Velocity.Y * dt
+		}
+	}))
 }
 
 // subscribeFed is the same work reached through In, with Get hoisted out of the
 // loop as the usage rule requires.
-func subscribeFed(registrar *kernel.Registrar, world *Entities) {
-	registrar.Subscribe[fedSystem](ToHandler[app.UpdateEvent](world,
-		func(q *Query[moveQuery], in *In[float32]) {
-			dt := in.Get()
-			for _, it := range q.All() {
-				it.Body.X += it.Velocity.X * dt
-				it.Body.Y += it.Velocity.Y * dt
-			}
-		},
+func subscribeFed(registrar *kernel.Registrar) {
+	registrar.Subscribe[fedSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], in *In[float32]) {
+		dt := in.Get()
+		for _, it := range q.All() {
+			it.Body.X += it.Velocity.X * dt
+			it.Body.Y += it.Velocity.Y * dt
+		}
+	},
 		Feed(func(e app.UpdateEvent) float32 { return float32(e.Dt) })))
 }
 
@@ -55,53 +53,50 @@ func subscribeFed(registrar *kernel.Registrar, world *Entities) {
 // pointer to a cell the adapter writes, so a Get inside the loop is a load the
 // compiler cannot hoist past the Component writes — it cannot prove they do not
 // alias.
-func subscribeUnhoisted(registrar *kernel.Registrar, world *Entities) {
-	registrar.Subscribe[unhoistedSystem](ToHandler[app.UpdateEvent](world,
-		func(q *Query[moveQuery], in *In[float32]) {
-			for _, it := range q.All() {
-				dt := in.Get()
-				it.Body.X += it.Velocity.X * dt
-				it.Body.Y += it.Velocity.Y * dt
-			}
-		},
+func subscribeUnhoisted(registrar *kernel.Registrar) {
+	registrar.Subscribe[unhoistedSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], in *In[float32]) {
+		for _, it := range q.All() {
+			dt := in.Get()
+			it.Body.X += it.Velocity.X * dt
+			it.Body.Y += it.Velocity.Y * dt
+		}
+	},
 		Feed(func(e app.UpdateEvent) float32 { return float32(e.Dt) })))
 }
 
 // subscribeRecording is the scene shape: Components read, a table read, a
 // frame-local queue written, all named in the signature.
-func subscribeRecording(registrar *kernel.Registrar, world *Entities) {
-	registrar.Subscribe[recordingSystem](ToHandler[app.UpdateEvent](world,
-		func(q *Query[moveQuery], table *Read[*modelNames], out *Write[*drawLog]) {
-			scale, queue := table.Get().Scale, out.Get()
-			rows := queue.Xs[:0]
-			for _, it := range q.All() {
-				rows = append(rows, it.Body.X*scale)
-			}
-			queue.Xs = rows
-		}))
+func subscribeRecording(registrar *kernel.Registrar) {
+	registrar.Subscribe[recordingSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], table *Read[*modelNames], out *Write[*drawLog]) {
+		scale, queue := table.Get().Scale, out.Get()
+		rows := queue.Xs[:0]
+		for _, it := range q.All() {
+			rows = append(rows, it.Body.X*scale)
+		}
+		queue.Xs = rows
+	}))
 }
 
 // subscribePublishing is the one place on this ticket where an allocation can
 // legitimately appear: a publication is a goroutine, a completion handle and an
 // event context, and the kernel charges for all three.
-func subscribePublishing(registrar *kernel.Registrar, world *Entities) {
-	registrar.Subscribe[publishingSystem](ToHandler[app.UpdateEvent](world,
-		func(handle kernel.Kernel, q *Query[moveQuery]) {
-			count := 0
-			for _, it := range q.All() {
-				it.Body.X += it.Velocity.X
-				count++
-			}
-			handle.PublishEvent(notice{Count: count})
-		}))
+func subscribePublishing(registrar *kernel.Registrar) {
+	registrar.Subscribe[publishingSystem](ToHandler[app.UpdateEvent](registrar, func(handle kernel.Kernel, q *Query[moveQuery]) {
+		count := 0
+		for _, it := range q.All() {
+			it.Body.X += it.Velocity.X
+			count++
+		}
+		handle.PublishEvent(notice{Count: count})
+	}))
 	// A publication with nobody listening completes immediately and never
 	// reaches the scheduler, so the number would flatter itself without this.
-	registrar.Subscribe[noticeWatcher](ToHandler[notice](world, func(seen notice) {}))
+	registrar.Subscribe[noticeWatcher](ToHandler[notice](registrar, func(seen notice) {}))
 }
 
 // benchmarkBoundFrame is benchmarkFrame with the bound plugin composed beside
 // the world, for the Systems that name its resources.
-func benchmarkBoundFrame(b *testing.B, n int, subscribe func(*kernel.Registrar, *Entities)) {
+func benchmarkBoundFrame(b *testing.B, n int, subscribe func(*kernel.Registrar)) {
 	entities, components, engine := newWorldWith(b, uint32(n), subscribe, boundDeps,
 		&bindingPlugin{log: &drawLog{Xs: make([]float32, 0, n)}, names: &modelNames{Scale: 2}})
 	populate(entities, components, n)
@@ -147,9 +142,8 @@ func boundInput(b *testing.B, n int) (*Query[moveQuery], *In[float32]) {
 	b.Helper()
 	var query *Query[moveQuery]
 	var step *In[float32]
-	entities, components, engine := newWorld(b, uint32(n), func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[hoistSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[moveQuery], dt *In[float32]) { query, step = q, dt },
+	entities, components, engine := newWorld(b, uint32(n), func(registrar *kernel.Registrar) {
+		registrar.Subscribe[hoistSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], dt *In[float32]) { query, step = q, dt },
 			Feed(func(e app.UpdateEvent) float32 { return float32(e.Dt) })))
 	})
 	populate(entities, components, n)
@@ -215,7 +209,7 @@ func BenchmarkStepLocal(b *testing.B) {
 // scales with the entity count, which is what a per-Entity allocation would.
 func TestTheBoundFrameSitsOnTheEnginesAllocationLine(t *testing.T) {
 	const frames = 10_000
-	measure := func(n int, bound bool, subscribe func(*kernel.Registrar, *Entities)) float64 {
+	measure := func(n int, bound bool, subscribe func(*kernel.Registrar)) float64 {
 		var entities *Entities
 		var components *componentsPlugin
 		var engine *kernel.Engine
@@ -275,7 +269,7 @@ func TestTheBoundFrameSitsOnTheEnginesAllocationLine(t *testing.T) {
 // a game will pay it, so the number belongs here.
 func TestWhatPublishingFromASystemCosts(t *testing.T) {
 	const frames = 2_000
-	measure := func(subscribe func(*kernel.Registrar, *Entities)) float64 {
+	measure := func(subscribe func(*kernel.Registrar)) float64 {
 		entities, components, engine := newWorld(t, 1_000, subscribe)
 		populate(entities, components, 1_000)
 		executioner := engine.Executioner()
@@ -302,8 +296,8 @@ func TestWhatPublishingFromASystemCosts(t *testing.T) {
 // that does not. The pair is what says whether the response wrapper costs
 // anything, which is the question a response leaving through a cell raises.
 func benchmarkCommand(b *testing.B, n int, system any) {
-	entities, components, engine := newWorld(b, uint32(n), func(registrar *kernel.Registrar, world *Entities) {
-		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](world, system))
+	entities, components, engine := newWorld(b, uint32(n), func(registrar *kernel.Registrar) {
+		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](registrar, system))
 	})
 	populate(entities, components, n)
 	executioner := engine.Executioner()

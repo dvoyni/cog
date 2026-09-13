@@ -67,8 +67,8 @@ type unplaced struct {
 	Marker unmarked
 }
 
-func spawnCmdImpl(world *ecs.Entities) func() (kernel.Lock, kernel.Execute[spawnRequest, spawnResponse]) {
-	return ecs.ToExecute[spawnRequest, spawnResponse](world, func(
+func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[spawnRequest, spawnResponse]) {
+	return ecs.ToExecute[spawnRequest, spawnResponse](registrar, func(
 		request spawnRequest,
 		withPlace *ecs.Spawn[placed],
 		withoutPlace *ecs.Spawn[unplaced],
@@ -130,8 +130,8 @@ type despawnRequest struct {
 
 type despawnResponse struct{}
 
-func despawnCmdImpl(world *ecs.Entities) func() (kernel.Lock, kernel.Execute[despawnRequest, despawnResponse]) {
-	return ecs.ToExecute[despawnRequest, despawnResponse](world, func(
+func despawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[despawnRequest, despawnResponse]) {
+	return ecs.ToExecute[despawnRequest, despawnResponse](registrar, func(
 		request despawnRequest, world *ecs.WriteableEntities,
 	) {
 		world.Despawn(request.Entity)
@@ -191,9 +191,7 @@ func bakeCmdImpl() (kernel.Lock, kernel.Execute[bakeRequest, bakeResponse]) {
 // would serialise against it on scene's queue, and the kernel's bookkeeping for
 // a blocked request would show up in the allocation figures as noise that
 // scales with frame length.
-type gamePlugin struct {
-	world *ecs.Entities
-}
+type gamePlugin struct{}
 
 func (p *gamePlugin) Name() kernel.PluginName { return "game" }
 
@@ -202,9 +200,9 @@ func (p *gamePlugin) Dependencies() []kernel.PluginName {
 }
 
 func (p *gamePlugin) Register(registrar *kernel.Registrar, _ any) error {
-	ecs.RegisterComponent[unmarked](registrar, p.world, 8)
-	registrar.HandleCommand[spawnCmd](spawnCmdImpl(p.world))
-	registrar.HandleCommand[despawnCmd](despawnCmdImpl(p.world))
+	ecs.RegisterComponent[unmarked](registrar, 8)
+	registrar.HandleCommand[spawnCmd](spawnCmdImpl(registrar))
+	registrar.HandleCommand[despawnCmd](despawnCmdImpl(registrar))
 	registrar.HandleCommand[inspectCmd](inspectCmdImpl)
 	registrar.HandleCommand[bakeCmd](bakeCmdImpl)
 	return nil
@@ -243,16 +241,16 @@ func newHarness(t testing.TB) *harness {
 // being bound from, the binding, and a game plugin standing in for the app.
 func newHarnessOver(t testing.TB, files fstest.MapFS, ids uint32) *harness {
 	t.Helper()
-	world := ecs.NewEntities(ids)
 	sink := &errorSink{}
 	configs := map[kernel.PluginName]any{
 		storage.Name: storage.DefaultConfig("ecsscene-test").WithReadFS("test", 10, fs.FS(files)),
 		scene.Name:   scene.DefaultConfig(),
+		ecs.Name:     ecs.DefaultConfig().WithPrewarmEntities(ids),
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) bool { sink.add(err); return false }).
 		WithPlugins(storage.New(), gfx.New(), scene.New(),
-			ecs.Plugin(world), New(world), &gamePlugin{world: world})
+			ecs.Plugin(), New(), &gamePlugin{})
 	ctx, cancel := context.WithCancel(context.Background())
 	// The cleanup waits for Run to return rather than only cancelling it: a
 	// dying engine allocates while it winds down, and the allocation claims here

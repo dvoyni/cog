@@ -41,7 +41,7 @@ type remedySystem kernel.Subscription[app.UpdateEvent]
 // Collider, both with an intersection of overlap, and the Tag on exactly that
 // intersection. The entities are interleaved rather than laid out in blocks, so
 // the probe hits the other Store's dense array at a realistic distance.
-func disjointStores(tb testing.TB, n, overlap int, subscribe func(*kernel.Registrar, *Entities)) (
+func disjointStores(tb testing.TB, n, overlap int, subscribe func(*kernel.Registrar)) (
 	*Entities, *componentsPlugin, *kernel.Engine,
 ) {
 	tb.Helper()
@@ -67,7 +67,7 @@ func disjointStores(tb testing.TB, n, overlap int, subscribe func(*kernel.Regist
 // because the Query type differs between the two arms; it is called once per
 // op, never per Entity, so the range statement inside it keeps every call in
 // its own chain direct.
-func benchmarkDriver(b *testing.B, n, overlap int, subscribe func(*kernel.Registrar, *Entities), walk func() int) {
+func benchmarkDriver(b *testing.B, n, overlap int, subscribe func(*kernel.Registrar), walk func() int) {
 	_, _, engine := disjointStores(b, n, overlap, subscribe)
 	// One frame, so the System has run and the Query is the one the kernel
 	// bound rather than a Query assembled by the test.
@@ -90,9 +90,8 @@ func benchmarkDriver(b *testing.B, n, overlap int, subscribe func(*kernel.Regist
 func BenchmarkDriverBadCase(b *testing.B) {
 	var query *Query[badCaseQuery]
 	benchmarkDriver(b, 5000, 100,
-		func(registrar *kernel.Registrar, world *Entities) {
-			registrar.Subscribe[badCaseSystem](ToHandler[app.UpdateEvent](world,
-				func(q *Query[badCaseQuery]) { query = q }))
+		func(registrar *kernel.Registrar) {
+			registrar.Subscribe[badCaseSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[badCaseQuery]) { query = q }))
 		},
 		func() int {
 			visited := 0
@@ -110,9 +109,8 @@ func BenchmarkDriverBadCase(b *testing.B) {
 func BenchmarkDriverTagRemedy(b *testing.B) {
 	var query *Query[remedyQuery]
 	benchmarkDriver(b, 5000, 100,
-		func(registrar *kernel.Registrar, world *Entities) {
-			registrar.Subscribe[remedySystem](ToHandler[app.UpdateEvent](world,
-				func(q *Query[remedyQuery]) { query = q }))
+		func(registrar *kernel.Registrar) {
+			registrar.Subscribe[remedySystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[remedyQuery]) { query = q }))
 		},
 		func() int {
 			visited := 0
@@ -131,11 +129,9 @@ func TestTheRemedyTagYieldsTheSameEntities(t *testing.T) {
 	const n, overlap = 500, 20
 	var bad *Query[badCaseQuery]
 	var remedy *Query[remedyQuery]
-	_, _, engine := disjointStores(t, n, overlap, func(registrar *kernel.Registrar, world *Entities) {
-		registrar.Subscribe[badCaseSystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[badCaseQuery]) { bad = q }))
-		registrar.Subscribe[remedySystem](ToHandler[app.UpdateEvent](world,
-			func(q *Query[remedyQuery]) { remedy = q }))
+	_, _, engine := disjointStores(t, n, overlap, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[badCaseSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[badCaseQuery]) { bad = q }))
+		registrar.Subscribe[remedySystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[remedyQuery]) { remedy = q }))
 	})
 	frame(t, engine, 1)
 

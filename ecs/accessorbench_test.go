@@ -34,23 +34,22 @@ func populateHoming(entities *Entities, components *componentsPlugin, n int) {
 
 // subscribeHoming is the real homing shape: a two-Component Query over the near
 // Entity, and one scattered probe per Entity through the Reference it carries.
-func subscribeHoming(registrar *kernel.Registrar, world *Entities) {
-	registrar.Subscribe[homingSystem](ToHandler[app.UpdateEvent](world,
-		func(q *Query[homingQuery], bodies *Get[body]) {
-			for _, it := range q.All() {
-				target, ok := bodies.Of(it.Homing.Target)
-				if !ok {
-					continue
-				}
-				it.Body.Y += target.X
+func subscribeHoming(registrar *kernel.Registrar) {
+	registrar.Subscribe[homingSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[homingQuery], bodies *Get[body]) {
+		for _, it := range q.All() {
+			target, ok := bodies.Of(it.Homing.Target)
+			if !ok {
+				continue
 			}
-		}))
+			it.Body.Y += target.X
+		}
+	}))
 }
 
 // subscribeHomingHandWritten is that shape with the loop and the probe written
 // out, which only a test in this package can do. It is the baseline the accessor
 // is read against: the same walk, the same scattered probe, no handle.
-func subscribeHomingHandWritten(registrar *kernel.Registrar, _ *Entities) {
+func subscribeHomingHandWritten(registrar *kernel.Registrar) {
 	registrar.Subscribe[handSystem](func() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 		var entities kernel.Read[*Entities]
 		var bodies kernel.Write[*Store[body]]
@@ -83,16 +82,15 @@ func subscribeHomingHandWritten(registrar *kernel.Registrar, _ *Entities) {
 // every Entity, every tick, through the two handles that do it. The whole of
 // what it declares is write{*Store[collider]} — there is no barrier here,
 // because adding a Component names one Store and a spawn names the authority.
-func subscribeChurning(registrar *kernel.Registrar, world *Entities) {
-	registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](world,
-		func(q *Query[moveQuery], colliders *Set[collider], strip *Remove[collider]) {
-			for e, it := range q.All() {
-				colliders.UpdateFor(e, collider{Radius: it.Body.X})
-				value, _ := colliders.Of(e)
-				it.Body.Y = value.Radius
-				strip.From(e)
-			}
-		}))
+func subscribeChurning(registrar *kernel.Registrar) {
+	registrar.Subscribe[accessorSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery], colliders *Set[collider], strip *Remove[collider]) {
+		for e, it := range q.All() {
+			colliders.UpdateFor(e, collider{Radius: it.Body.X})
+			value, _ := colliders.Of(e)
+			it.Body.Y = value.Radius
+			strip.From(e)
+		}
+	}))
 }
 
 func BenchmarkFrameHoming1k(b *testing.B) {
@@ -226,7 +224,7 @@ func accessorPopulation(tb testing.TB, n int) (*accessorWorld, []Entity) {
 // over b.N, because an average can hide amortised growth.
 func TestTheAccessorsStayOnTheEnginesAllocationLine(t *testing.T) {
 	const frames = 10_000
-	measure := func(n int, subscribe func(*kernel.Registrar, *Entities),
+	measure := func(n int, subscribe func(*kernel.Registrar),
 		fill func(*Entities, *componentsPlugin, int),
 	) float64 {
 		entities, components, engine := newWorld(t, uint32(n), subscribe)

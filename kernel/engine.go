@@ -108,8 +108,9 @@ func (e *Engine) WithPlugins(plugins ...Plugin) *Engine {
 		e.host = candidate
 	}
 
+	closure := e.dependencyClosure(accepted)
 	for _, plugin := range accepted {
-		registrar := &Registrar{registry: e.registry, owner: plugin.Name()}
+		registrar := &Registrar{registry: e.registry, owner: plugin.Name(), allowed: closure[plugin.Name()]}
 		if err := callPluginBoundary(plugin.Name(), "Register", func() error {
 			return plugin.Register(registrar, e.config[plugin.Name()])
 		}); err != nil {
@@ -117,7 +118,7 @@ func (e *Engine) WithPlugins(plugins ...Plugin) *Engine {
 			return e
 		}
 	}
-	if errs := e.registry.finalize(e.dependencyClosure(accepted)); len(errs) > 0 {
+	if errs := e.registry.finalize(closure); len(errs) > 0 {
 		e.failComposition(errors.Join(errs...))
 		return e
 	}

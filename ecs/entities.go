@@ -53,17 +53,14 @@ func (en *Entities) classOf(componentType reflect.Type) *componentClass {
 	return en.classes[componentType]
 }
 
-// NewEntities creates the authority, reserving room for ids indices. The number
+// newEntities creates the authority, reserving room for ids indices. The number
 // is the peak concurrent entity count the app expects, not a cap: exceeding it
 // costs a growth, not an error.
 //
-// It is called at the composition root and handed to the plugins that register
-// Components, because both component registration and the handler builder need
-// the value at registration, where no resource may be read:
-//
-//	entities := ecs.NewEntities(maxIDs)
-//	kernel.New(cfg).WithPlugins(ecs.Plugin(entities), game.Plugin(entities))
-func NewEntities(ids uint32) *Entities {
+// The ecs plugin is its only caller outside tests, which is what keeps it one
+// per Engine. Component registration and the handler builder reach the value it
+// publishes through kernel.Registrar.Dependency.
+func newEntities(ids uint32) *Entities {
 	return &Entities{
 		gens: make([]uint32, 0, ids),
 		free: make([]uint32, 0, ids),

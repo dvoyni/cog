@@ -21,6 +21,36 @@ type registry struct {
 type Registrar struct {
 	registry *registry
 	owner    PluginName
+	// allowed is the owner's dependency closure: itself and every plugin it
+	// transitively declares. It is what Dependency checks against, so a value is
+	// read only from a plugin already registered by the time the reader is.
+	allowed map[PluginName]struct{}
+}
+
+// Dependency returns the initial value of resource T, owned by this plugin or by
+// a plugin it declares a dependency on. It is the one resource read registration
+// permits, and it exists for values a plugin needs to register against rather
+// than to run with, such as the authority a Component's Store enrols in.
+//
+// It is sound because dependencies register first: when the reader registers,
+// every plugin it declares has already registered and initialised what it owns,
+// and nothing runs concurrently with registration. What it returns is the value
+// as registration left it, so keep what it returns only if it is a pointer the
+// owner never replaces with Write.Set.
+//
+// It panics with ErrUnavailableDependency when T has no initial value yet or its
+// owner is not a declared dependency; the plugin boundary reports that as
+// ErrPluginPanic naming the reader.
+func (r *Registrar) Dependency[T any]() T {
+	id := reflect.TypeFor[T]()
+	cell := r.registry.resources[id]
+	if cell == nil || !cell.initialized {
+		panic(ErrUnavailableDependency{Plugin: r.owner, Resource: id})
+	}
+	if _, ok := r.allowed[cell.owner]; !ok {
+		panic(ErrUnavailableDependency{Plugin: r.owner, Resource: id, Owner: cell.owner})
+	}
+	return cell.value.(T)
 }
 
 // InitResource initializes the resource identified by T and records its owner.
