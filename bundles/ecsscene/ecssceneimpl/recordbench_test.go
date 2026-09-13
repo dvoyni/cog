@@ -1,4 +1,4 @@
-package ecsscene
+package ecssceneimpl
 
 import (
 	"reflect"
@@ -7,6 +7,7 @@ import (
 	"testing/fstest"
 
 	"github.com/dvoyni/cog/bundles/ecs"
+	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
@@ -44,17 +45,17 @@ var (
 	}
 
 	// benchAnimation blends two clips, which is the common walk-into-run case.
-	benchAnimation = Animation{Plays: [MaxPlays]scene.ClipPlay{
+	benchAnimation = ecsscene.Animation{Plays: [ecsscene.MaxPlays]scene.ClipPlay{
 		{Clip: "Walk", Weight: 1, Loop: true}, {Clip: "Run", Weight: 0.25, Loop: true},
 	}}
 	// benchParams is one tint, which is the per-Entity variation case.
-	benchParams = Params{Values: ecs.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}))}
+	benchParams = ecsscene.Params{Values: ecs.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}))}
 	// benchMaterial is two pass tags with one parameter each, so the per-tag
 	// scratch rule is exercised on every draw.
-	benchMaterial = Material{Tags: ecs.NewList(
-		MaterialTag{Shader: gfx.ShaderWithText("forward"), State: gfx.StateOpaque3D,
+	benchMaterial = ecsscene.Material{Tags: ecs.NewList(
+		ecsscene.MaterialTag{Shader: gfx.ShaderWithText("forward"), State: gfx.StateOpaque3D,
 			Params: ecs.NewList(gfx.FloatParam("fade", 1))},
-		MaterialTag{Tag: "shadow", Shader: gfx.ShaderWithText("shadow"), State: gfx.StateOpaque3D,
+		ecsscene.MaterialTag{Tag: "shadow", Shader: gfx.ShaderWithText("shadow"), State: gfx.StateOpaque3D,
 			Params: ecs.NewList(gfx.FloatParam("bias", 0.01))},
 	)}
 )
@@ -68,7 +69,7 @@ func newRecordingHarness(tb testing.TB, arm population) *harness {
 	if arm.n > 0 {
 		request := spawnRequest{
 			Count: arm.n, Step: 0.5,
-			Model: &Model{Ref: scene.ModelRef{Path: crateModel}},
+			Model: &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}},
 		}
 		if arm.animated {
 			request.Animation = &benchAnimation

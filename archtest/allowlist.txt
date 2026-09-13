@@ -7,6 +7,3 @@
 #
 # One entry per line: "<package> imports <package>" or "<package> declares <type>".
 # Paths are relative to the module root.
-
-# #342 ecsscene: the Plugin moves into ecssceneimpl.
-bundles/ecsscene declares Plugin

@@ -1,4 +1,4 @@
-package ecsscene
+package ecssceneimpl
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecs/ecsimpl"
+	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/sceneimpl"
 	"github.com/dvoyni/cog/extensions/gfx"
@@ -38,18 +39,18 @@ type spawnRequest struct {
 	Count int
 	// Place is every Entity's Transform, and Step how far apart along X they
 	// stand, so a test can tell one recorded draw from another.
-	Place Transform
+	Place ecsscene.Transform
 	Step  float32
 	// Unplaced spawns the Entities with no Transform at all.
 	Unplaced bool
 
-	Model     *Model
-	Mesh      *Mesh
-	Animation *Animation
-	Params    *Params
-	Material  *Material
-	Light     *Light
-	Camera    *Camera
+	Model     *ecsscene.Model
+	Mesh      *ecsscene.Mesh
+	Animation *ecsscene.Animation
+	Params    *ecsscene.Params
+	Material  *ecsscene.Material
+	Light     *ecsscene.Light
+	Camera    *ecsscene.Camera
 }
 
 type spawnResponse struct {
@@ -60,7 +61,7 @@ type spawnResponse struct {
 // other Component is added after, through its accessor, so one command covers
 // every combination a test names.
 type placed struct {
-	Place Transform
+	Place ecsscene.Transform
 }
 
 // unmarked is a Tag the game owns, so an Entity can be spawned with nothing of
@@ -76,13 +77,13 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 		request spawnRequest,
 		withPlace *ecs.Spawn[placed],
 		withoutPlace *ecs.Spawn[unplaced],
-		models *ecs.Set[Model],
-		meshes *ecs.Set[Mesh],
-		animations *ecs.Set[Animation],
-		params *ecs.Set[Params],
-		materials *ecs.Set[Material],
-		lights *ecs.Set[Light],
-		cameras *ecs.Set[Camera],
+		models *ecs.Set[ecsscene.Model],
+		meshes *ecs.Set[ecsscene.Mesh],
+		animations *ecs.Set[ecsscene.Animation],
+		params *ecs.Set[ecsscene.Params],
+		materials *ecs.Set[ecsscene.Material],
+		lights *ecs.Set[ecsscene.Light],
+		cameras *ecs.Set[ecsscene.Camera],
 		answer *ecs.Resp[spawnResponse],
 	) {
 		var first ecs.Entity
@@ -200,7 +201,7 @@ type gamePlugin struct{}
 func (p *gamePlugin) Name() kernel.PluginName { return "game" }
 
 func (p *gamePlugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, scene.Name, Name}
+	return []kernel.PluginName{ecs.Name, scene.Name, ecsscene.Name}
 }
 
 func (p *gamePlugin) Register(registrar *kernel.Registrar, _ any) error {

@@ -1,4 +1,4 @@
-package ecsscene
+package ecssceneimpl
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
@@ -98,8 +99,8 @@ func crateGLB(t testing.TB) []byte {
 }
 
 // crateModelComponent is a Model naming the crate file's whole default scene.
-func crateModelComponent() *Model {
-	return &Model{Ref: scene.ModelRef{Path: crateModel}}
+func crateModelComponent() *ecsscene.Model {
+	return &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}}
 }
 
 // newDrawingHarness is the harness with a backend, a viewport and the crate on
@@ -114,8 +115,8 @@ func newDrawingHarness(t testing.TB, ids uint32) *harness {
 		t.Fatalf("setting the viewport: %v", err)
 	}
 	h.spawn(t, spawnRequest{
-		Place:  Transform(scene.LookAt(m.Vec3{Z: 30}, m.Vec3{}, m.Vec3{Y: 1})),
-		Camera: &Camera{FovY: 1.0472, Near: 0.1, Far: 200},
+		Place:  ecsscene.Transform(scene.LookAt(m.Vec3{Z: 30}, m.Vec3{}, m.Vec3{Y: 1})),
+		Camera: &ecsscene.Camera{FovY: 1.0472, Near: 0.1, Far: 200},
 	})
 	return h
 }
@@ -193,10 +194,10 @@ func TestADespawnedDrawableStopsDrawing(t *testing.T) {
 func TestAPresentMaterialWithNoTagsDrawsNothing(t *testing.T) {
 	h := newDrawingHarness(t, 256)
 	ref := h.bake(t)
-	h.spawn(t, spawnRequest{Mesh: &Mesh{Ref: ref, NeverCull: true}})
-	h.spawn(t, spawnRequest{Mesh: &Mesh{Ref: ref, NeverCull: true}, Material: &Material{}})
-	h.spawn(t, spawnRequest{Place: Transform{Position: m.Vec3{X: 2}}, Model: crateModelComponent()})
-	h.spawn(t, spawnRequest{Place: Transform{Position: m.Vec3{X: 4}}, Model: crateModelComponent(), Material: &Material{}})
+	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}})
+	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}, Material: &ecsscene.Material{}})
+	h.spawn(t, spawnRequest{Place: ecsscene.Transform{Position: m.Vec3{X: 2}}, Model: crateModelComponent()})
+	h.spawn(t, spawnRequest{Place: ecsscene.Transform{Position: m.Vec3{X: 4}}, Model: crateModelComponent(), Material: &ecsscene.Material{}})
 
 	h.frameUntil(t, "every draw to reach the pass", func() bool {
 		passes := h.passes(t)

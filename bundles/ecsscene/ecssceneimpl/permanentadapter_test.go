@@ -1,4 +1,4 @@
-package ecsscene
+package ecssceneimpl
 
 import (
 	"errors"

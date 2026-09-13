@@ -19,19 +19,47 @@ documentation, not this one's: [`../scene/README.md`](../scene/README.md).
 record. **[What a binding may not do](#what-a-binding-may-not-do) is the part to
 read before writing a second one.**
 
+ecsscene is a **Bundle**: a Slot and its one Extension, shipped together. The
+vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
+[ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
+
+## Packages
+
+ecsscene has the Bundle shape: a contract root and an `…impl`. The two share
+nothing a consumer must not see, so it has no `internal/`.
+
+- **`bundles/ecsscene`** is the contract: the eight Components a game spawns
+  (`Transform`, `Model`, `Mesh`, `Animation`, `Params`, `Material`, `Light`,
+  `Camera`), `MaterialTag`, `MaxPlays`, `Name` and the ordering identity
+  `RecordOnUpdate`. It declares no plugin, and it is what a game's Systems
+  import.
+- **`bundles/ecsscene/ecssceneimpl`** is the plugin: `New`, the registration of
+  every Component, the recording scratch and the one recording System behind
+  `RecordOnUpdate`. It exports `New` and nothing else: ecsscene has no
+  configuration, so there is no `Config`. Only composition roots and tests
+  import it.
+
+**The Components are still registered by the plugin that defines their Go
+type.** Their types are declared in the contract root, and the plugin that
+registers them is the Extension shipped inside the same Bundle, under
+`ecsscene.Name`. Every Store is owned by `ecsscene`, so a game System that names
+one still has to declare `ecsscene` as a dependency, and the ECS's coupling
+check keeps holding on Component data.
+
 ## Files
 
-`contract.go` holds the package documentation and the vocabulary that is not a
-Component — `Name`, `UpdateEventHandler`, `Config`, `MaxPlays`, `MaterialTag`;
-`components.go` every Component; `systems.go` the recording System, its Queries
-and its scratch; `plugin.go` the plugin and its registration.
+In the root, `contract.go` holds the package documentation and the vocabulary
+that is not a Component — `Name`, `RecordOnUpdate`, `MaxPlays`, `MaterialTag` —
+and `components.go` every Component. In `ecssceneimpl`, `plugin.go` holds the
+plugin and its registration, and `systems.go` the recording System, its Queries
+and its scratch.
 
 ## Dependencies
 
 - Go packages: `app`, `ecs`, `gfx`, `kernel`, `m`, `scene`
 - Plugin dependencies: `ecs`, `scene`
-- Configuration: `ecsscene.Config`, empty for now — every Store reserves an
-  internal default population, which is a hint and not a cap
+- Configuration: none — every Store reserves an internal default population,
+  which is a hint and not a cap
 - Events declared or published: none
 
 ## Composing
@@ -40,8 +68,11 @@ and its scratch; `plugin.go` the plugin and its registration.
 kernel.New(config).WithPlugins(
     storageimpl.New(), diskfs.New(diskfs.Config{AppId: "game"}),
     inputimpl.New(), gfximpl.New(), sceneimpl.New(), wgpu.New(),
-    ecsimpl.New(), ecsscene.New(), game.New())
+    ecsimpl.New(), ecssceneimpl.New(), game.New())
 ```
+
+Only the composition root imports `ecssceneimpl`; a game's Systems import
+`ecsscene`.
 
 The binding takes no world. It declares `ecs` and `scene` as dependencies, so
 both register first, and its Components and System reach the ecs plugin's
@@ -96,9 +127,10 @@ type Camera struct {
 }
 ```
 
-All eight are registered by this plugin, because a Component is registered by the
-plugin that defines its Go type — which is what keeps cog's coupling check
-working on Component data.
+All eight are registered by this Bundle's plugin, in `ecssceneimpl`, because a
+Component is registered by the plugin that defines its Go type — which is what
+keeps cog's coupling check working on Component data. See
+[Packages](#packages).
 
 | Component | reaches scene as | notes |
 | --- | --- | --- |
@@ -140,15 +172,17 @@ func spawnCrates(sp *ecs.Spawn[Crate]) {
 
 ## The recording System
 
+It lives in `ecssceneimpl`, beside its Queries and its scratch:
+
 ```go
 func record(
     models  *ecs.Query[modelQuery],   // Transform + Model
     meshes  *ecs.Query[meshQuery],    // Transform + Mesh
     lights  *ecs.Query[lightQuery],   // Transform + Light
     cameras *ecs.Query[cameraQuery],  // Transform + Camera
-    animations *ecs.Get[Animation],
-    params     *ecs.Get[Params],
-    materials  *ecs.Get[Material],
+    animations *ecs.Get[ecsscene.Animation],
+    params     *ecs.Get[ecsscene.Params],
+    materials  *ecs.Get[ecsscene.Material],
     work *ecs.Write[*scratch],
     out  *ecs.Write[*scene.OpQueue],
 )
@@ -163,11 +197,13 @@ resource, so every recording System serialises against every other whatever
 Components they read. A second one would cost a scheduling slot and could not
 run concurrently anyway.
 
-`UpdateEventHandler` is its subscription identity, named as scene's, gfx's and
-canvas's are. **It declares no ordering.** Scene subscribes its flush `Last`, so
-anything that does not ask to be last already runs before it, and a draw recorded
-in a tick is in what that tick's flush publishes. A game System that moves
-Transforms orders itself `Before[ecsscene.UpdateEventHandler]()`.
+`ecsscene.RecordOnUpdate` is its subscription identity, declared in the contract
+root and named verb plus event as scene's `FlushOnUpdate` and gfx's
+`PresentOnUpdate` are. **It declares no ordering.** Scene subscribes
+`scene.FlushOnUpdate` `Last`, so anything that does not ask to be last already
+runs before it, and a draw recorded in a tick is in what that tick's flush
+publishes. A game System that moves Transforms orders itself
+`Before[ecsscene.RecordOnUpdate]()`.
 
 ## What a binding may not do
 

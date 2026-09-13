@@ -16,11 +16,21 @@
 // scene-side object for an Entity to be a copy of, and the Components are the
 // source of truth because there is no other candidate.
 //
+// ecsscene is a Bundle. This package is its contract root and declares no
+// plugin: the Components a game spawns (Transform, Model, Mesh, Animation,
+// Params, Material, Light, Camera), MaterialTag and MaxPlays, Name, and the
+// ordering identity RecordOnUpdate. The plugin - the Component registrations,
+// the recording scratch and the one System - is in ecssceneimpl, which only
+// composition roots and tests import. The Components are still registered by
+// the plugin that defines their Go type, because that plugin ships in this same
+// Bundle under this package's Name. The root and the plugin share nothing a
+// consumer must not see, so there is no internal package.
+//
 // A game whose drawables are shaped differently writes its own recording
 // System and does not register this plugin. README.md is the API, and its
 // prohibitions are what a second binding has to keep true.
 //
-// The Components are in components.go, the System in systems.go.
+// The Components are in components.go.
 package ecsscene
 
 import (
@@ -31,20 +41,18 @@ import (
 	"github.com/dvoyni/cog/slots/app"
 )
 
-// Name is the binding plugin's kernel name and configuration key.
+// Name is the binding plugin's kernel name, the owner of every Component Store
+// it registers, and the name a plugin whose Systems read those Components
+// declares a dependency on.
 const Name kernel.PluginName = "ecsscene"
 
-// UpdateEventHandler is the recording System's subscription, named as scene,
-// gfx and canvas name theirs. A game System that moves Transforms orders itself
-// Before it.
+// RecordOnUpdate is the subscription type of the binding's recording System on
+// app.UpdateEvent: it copies every matching Entity into scene's op queue. A
+// game System that moves Transforms orders itself Before it.
 //
-// It declares no ordering of its own: scene's flush is subscribed Last, so
-// anything that does not ask to be last already runs before it.
-type UpdateEventHandler kernel.Subscription[app.UpdateEvent]
-
-// Config configures the binding. It is empty for now: every Component Store
-// reserves an internal default population, which is a hint and not a cap.
-type Config struct{}
+// It declares no ordering of its own: scene.FlushOnUpdate is subscribed Last,
+// so anything that does not ask to be last already runs before it.
+type RecordOnUpdate kernel.Subscription[app.UpdateEvent]
 
 // MaxPlays is how many clips one Animation blends. It is scene's own cap:
 // scene drops a fifth play by lowest weight and reports it, so a larger array

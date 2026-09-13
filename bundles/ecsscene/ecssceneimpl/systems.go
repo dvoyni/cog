@@ -1,7 +1,8 @@
-package ecsscene
+package ecssceneimpl
 
 import (
 	"github.com/dvoyni/cog/bundles/ecs"
+	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
@@ -17,20 +18,20 @@ import (
 // accessors instead, at one probe each.
 type (
 	modelQuery struct {
-		Place Transform
-		Model Model
+		Place ecsscene.Transform
+		Model ecsscene.Model
 	}
 	meshQuery struct {
-		Place Transform
-		Mesh  Mesh
+		Place ecsscene.Transform
+		Mesh  ecsscene.Mesh
 	}
 	lightQuery struct {
-		Place Transform
-		Light Light
+		Place ecsscene.Transform
+		Light ecsscene.Light
 	}
 	cameraQuery struct {
-		Place  Transform
-		Camera Camera
+		Place  ecsscene.Transform
+		Camera ecsscene.Camera
 	}
 )
 
@@ -58,7 +59,7 @@ type scratch struct {
 // rather than as nil, which scene reads as no material at all.
 func newScratch() *scratch {
 	return &scratch{
-		plays: make([]scene.ClipPlay, 0, MaxPlays),
+		plays: make([]scene.ClipPlay, 0, ecsscene.MaxPlays),
 		tags:  make(scene.Material, 0, 4),
 	}
 }
@@ -69,15 +70,16 @@ func newScratch() *scratch {
 // Its signature is its whole lock set — the Stores it reads, the scratch and
 // scene's queue it writes — and it declares no ordering: scene's flush is
 // subscribed Last, so an ordinary-phase System already runs before it, and a
-// game System that moves Transforms orders itself Before UpdateEventHandler.
+// game System that moves Transforms orders itself
+// Before[ecsscene.RecordOnUpdate].
 func record(
 	models *ecs.Query[modelQuery],
 	meshes *ecs.Query[meshQuery],
 	lights *ecs.Query[lightQuery],
 	cameras *ecs.Query[cameraQuery],
-	animations *ecs.Get[Animation],
-	params *ecs.Get[Params],
-	materials *ecs.Get[Material],
+	animations *ecs.Get[ecsscene.Animation],
+	params *ecs.Get[ecsscene.Params],
+	materials *ecs.Get[ecsscene.Material],
 	work *ecs.Write[*scratch],
 	out *ecs.Write[*scene.OpQueue],
 ) {
@@ -160,7 +162,7 @@ func record(
 var facing = m.Vec3{Z: -1}
 
 // clipPlays flattens an Animation's used slots into scratch.
-func (s *scratch) clipPlays(animation *Animation) []scene.ClipPlay {
+func (s *scratch) clipPlays(animation *ecsscene.Animation) []scene.ClipPlay {
 	plays := s.plays[:0]
 	for i := range animation.Plays {
 		if animation.Plays[i].Clip != "" {
@@ -173,7 +175,7 @@ func (s *scratch) clipPlays(animation *Animation) []scene.ClipPlay {
 
 // drawParams copies a Params List out through All, which is the only route
 // out of a List and costs no allocation into a reused backing.
-func (s *scratch) drawParams(params *Params) []gfx.ParameterDescr {
+func (s *scratch) drawParams(params *ecsscene.Params) []gfx.ParameterDescr {
 	out := s.params[:0]
 	for _, param := range params.Values.All() {
 		out = append(out, param)
@@ -186,7 +188,7 @@ func (s *scratch) drawParams(params *Params) []gfx.ParameterDescr {
 // Each tag's params are a full-slice-expression window of tagParams, so no tag
 // can append into the next one's, and a growth part-way through a draw leaves
 // the earlier tags on the old backing, which nothing writes again.
-func (s *scratch) material(material *Material) scene.Material {
+func (s *scratch) material(material *ecsscene.Material) scene.Material {
 	tags, params := s.tags[:0], s.tagParams[:0]
 	for _, tag := range material.Tags.All() {
 		start := len(params)
@@ -205,7 +207,7 @@ func (s *scratch) material(material *Material) scene.Material {
 
 // cameraPasses copies a Camera's passes out into scratch. An empty List is an
 // empty slice, which scene reads as its one default pass.
-func (s *scratch) cameraPasses(camera *Camera) []scene.Pass {
+func (s *scratch) cameraPasses(camera *ecsscene.Camera) []scene.Pass {
 	passes := s.passes[:0]
 	for _, pass := range camera.Passes.All() {
 		passes = append(passes, pass)

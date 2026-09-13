@@ -1,10 +1,11 @@
-package ecsscene
+package ecssceneimpl
 
 import (
 	"reflect"
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
+	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/kernel"
@@ -16,12 +17,12 @@ import (
 // registered in advance — no manifest, no hash.
 func TestAModelEntityRecordsWhereItStandsOnItsLayers(t *testing.T) {
 	h := newHarness(t)
-	place := Transform{
+	place := ecsscene.Transform{
 		Position: m.Vec3{X: 1, Y: 2, Z: 3},
 		Rotation: m.Quat{Y: 1},
 		Scale:    m.Vec3{X: 2, Y: 1, Z: 0.5},
 	}
-	h.spawn(t, spawnRequest{Place: place, Model: &Model{
+	h.spawn(t, spawnRequest{Place: place, Model: &ecsscene.Model{
 		Ref: scene.ModelRef{Path: crateModel}, Layers: scene.Layer(3),
 	}})
 
@@ -53,7 +54,7 @@ func TestAModelEntityRecordsWhereItStandsOnItsLayers(t *testing.T) {
 // file is the same Component with two more strings set.
 func TestAModelsSceneAndNodeSelectorsReachTheDraw(t *testing.T) {
 	h := newHarness(t)
-	h.spawn(t, spawnRequest{Model: &Model{
+	h.spawn(t, spawnRequest{Model: &ecsscene.Model{
 		Ref: scene.ModelRef{Path: "models/props.glb", Scene: "props", Node: "crate"},
 	}})
 
@@ -76,14 +77,14 @@ func TestAModelsSceneAndNodeSelectorsReachTheDraw(t *testing.T) {
 func TestAnimationSkipsEmptySlots(t *testing.T) {
 	h := newHarness(t)
 	h.spawn(t, spawnRequest{
-		Model: &Model{Ref: scene.ModelRef{Path: crateModel}},
-		Animation: &Animation{Plays: [MaxPlays]scene.ClipPlay{
+		Model: &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}},
+		Animation: &ecsscene.Animation{Plays: [ecsscene.MaxPlays]scene.ClipPlay{
 			{Clip: "Walk", Time: 0.25, Loop: true, Weight: 1},
 			{},
 			{Clip: "Idle", Time: 2, Weight: 0.5},
 		}},
 	})
-	h.spawn(t, spawnRequest{Step: 1, Model: &Model{Ref: scene.ModelRef{Path: "models/still.glb"}}})
+	h.spawn(t, spawnRequest{Step: 1, Model: &ecsscene.Model{Ref: scene.ModelRef{Path: "models/still.glb"}}})
 
 	h.frame(t)
 
@@ -112,12 +113,12 @@ func TestParamsReachAMeshsParamsAndAModelsOverrides(t *testing.T) {
 	tint := gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1})
 	fade := gfx.FloatParam("fade", 0.5)
 	h.spawn(t, spawnRequest{
-		Mesh:   &Mesh{Ref: ref},
-		Params: &Params{Values: ecs.NewList(tint, fade)},
+		Mesh:   &ecsscene.Mesh{Ref: ref},
+		Params: &ecsscene.Params{Values: ecs.NewList(tint, fade)},
 	})
 	h.spawn(t, spawnRequest{
-		Model:  &Model{Ref: scene.ModelRef{Path: crateModel}},
-		Params: &Params{Values: ecs.NewList(tint)},
+		Model:  &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}},
+		Params: &ecsscene.Params{Values: ecs.NewList(tint)},
 	})
 
 	h.frame(t)
@@ -163,15 +164,15 @@ func TestAMaterialsTagsEachKeepTheirOwnParams(t *testing.T) {
 	ref := h.bake(t)
 	forward := gfx.ShaderWithText("forward")
 	shadow := gfx.ShaderWithText("shadow")
-	h.spawn(t, spawnRequest{Mesh: &Mesh{Ref: ref}, Material: &Material{Tags: ecs.NewList(
-		MaterialTag{Shader: forward, State: gfx.StateOpaque3D, Params: ecs.NewList(
+	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref}, Material: &ecsscene.Material{Tags: ecs.NewList(
+		ecsscene.MaterialTag{Shader: forward, State: gfx.StateOpaque3D, Params: ecs.NewList(
 			gfx.FloatParam("a", 1), gfx.FloatParam("b", 2))},
-		MaterialTag{Tag: "shadow", Shader: shadow, State: gfx.StateTransparent3D, Params: ecs.NewList(
+		ecsscene.MaterialTag{Tag: "shadow", Shader: shadow, State: gfx.StateTransparent3D, Params: ecs.NewList(
 			gfx.FloatParam("c", 3))},
-		MaterialTag{Tag: "outline", Shader: forward},
+		ecsscene.MaterialTag{Tag: "outline", Shader: forward},
 	)}})
-	h.spawn(t, spawnRequest{Mesh: &Mesh{Ref: ref, Layers: scene.Layer(1)}, Material: &Material{Tags: ecs.NewList(
-		MaterialTag{Shader: shadow, Params: ecs.NewList(gfx.FloatParam("d", 4))},
+	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(1)}, Material: &ecsscene.Material{Tags: ecs.NewList(
+		ecsscene.MaterialTag{Shader: shadow, Params: ecs.NewList(gfx.FloatParam("d", 4))},
 	)}})
 
 	h.frame(t)
@@ -218,11 +219,11 @@ func TestAMaterialsTagsEachKeepTheirOwnParams(t *testing.T) {
 func TestAnAbsentMaterialIsNoMaterial(t *testing.T) {
 	h := newHarness(t)
 	ref := h.bake(t)
-	material := &Material{Tags: ecs.NewList(MaterialTag{Shader: gfx.ShaderWithText("flat")})}
-	h.spawn(t, spawnRequest{Mesh: &Mesh{Ref: ref, Layers: scene.Layer(1)}, Material: material})
-	h.spawn(t, spawnRequest{Mesh: &Mesh{Ref: ref}})
-	h.spawn(t, spawnRequest{Model: &Model{Ref: scene.ModelRef{Path: "models/shaded.glb"}}, Material: material})
-	h.spawn(t, spawnRequest{Model: &Model{Ref: scene.ModelRef{Path: crateModel}}})
+	material := &ecsscene.Material{Tags: ecs.NewList(ecsscene.MaterialTag{Shader: gfx.ShaderWithText("flat")})}
+	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(1)}, Material: material})
+	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref}})
+	h.spawn(t, spawnRequest{Model: &ecsscene.Model{Ref: scene.ModelRef{Path: "models/shaded.glb"}}, Material: material})
+	h.spawn(t, spawnRequest{Model: &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}}})
 
 	h.frame(t)
 
@@ -251,14 +252,14 @@ func TestALightIsPlacedAndAimedByItsTransform(t *testing.T) {
 	h := newHarness(t)
 	eye, target := m.Vec3{Y: 5}, m.Vec3{X: 3, Y: 5, Z: 4}
 	h.spawn(t, spawnRequest{
-		Place: Transform(scene.LookAt(eye, target, m.Vec3{Y: 1})),
-		Light: &Light{
+		Place: ecsscene.Transform(scene.LookAt(eye, target, m.Vec3{Y: 1})),
+		Light: &ecsscene.Light{
 			Kind: scene.LightSpot, Color: m.Color{R: 1, G: 0.5, A: 1}, Intensity: 2, Range: 10,
 			InnerCone: 0.1, OuterCone: 0.4, Layers: scene.Layer(2),
 		},
 	})
-	h.spawn(t, spawnRequest{Place: Transform{Position: m.Vec3{Z: 7}}, Light: &Light{Kind: scene.LightSpot}})
-	h.spawn(t, spawnRequest{Place: Transform{Position: m.Vec3{X: -2}}, Light: &Light{Range: 3}})
+	h.spawn(t, spawnRequest{Place: ecsscene.Transform{Position: m.Vec3{Z: 7}}, Light: &ecsscene.Light{Kind: scene.LightSpot}})
+	h.spawn(t, spawnRequest{Place: ecsscene.Transform{Position: m.Vec3{X: -2}}, Light: &ecsscene.Light{Range: 3}})
 
 	h.frame(t)
 
@@ -305,18 +306,18 @@ func near(a, b m.Vec3) bool {
 // Transform, and a Camera whose Passes are empty leaves scene its default pass.
 func TestACameraRecordsItsPassesWithTheirClears(t *testing.T) {
 	h := newHarness(t)
-	place := Transform(scene.LookAt(m.Vec3{Y: 3, Z: 10}, m.Vec3{}, m.Vec3{Y: 1}))
+	place := ecsscene.Transform(scene.LookAt(m.Vec3{Y: 3, Z: 10}, m.Vec3{}, m.Vec3{Y: 1}))
 	passes := []scene.Pass{
 		{ClearColor: m.Some(m.Color{B: 0.25, A: 1}), ClearDepth: m.Some[float32](1)},
 		{Tag: "overlay", Order: 1},
 	}
-	h.spawn(t, spawnRequest{Place: place, Camera: &Camera{
+	h.spawn(t, spawnRequest{Place: place, Camera: &ecsscene.Camera{
 		ID: -2, Projection: scene.Perspective, FovY: 1, Near: 0.1, Far: 100,
 		CullMask: scene.Layer(4), SunDirection: m.Vec3{Y: -1}, SunColor: m.White, SunIntensity: 3,
 		AmbientSky: m.Color{B: 1, A: 1}, AmbientGround: m.Color{G: 1, A: 1}, AmbientIntensity: 0.5,
 		Passes: ecs.ListOf(passes),
 	}})
-	h.spawn(t, spawnRequest{Camera: &Camera{
+	h.spawn(t, spawnRequest{Camera: &ecsscene.Camera{
 		ID: 5, Projection: scene.Oblique, Height: 20, Shear: 0.5, Near: -50, Far: 50,
 	}})
 
@@ -356,10 +357,10 @@ func TestAnEntityWithNoTransformIsNotRecorded(t *testing.T) {
 	h := newHarness(t)
 	ref := h.bake(t)
 	h.spawn(t, spawnRequest{Unplaced: true,
-		Model: &Model{Ref: scene.ModelRef{Path: "models/nowhere.glb"}},
-		Mesh:  &Mesh{Ref: ref}, Light: &Light{}, Camera: &Camera{ID: 1, FovY: 1, Near: 1, Far: 2},
+		Model: &ecsscene.Model{Ref: scene.ModelRef{Path: "models/nowhere.glb"}},
+		Mesh:  &ecsscene.Mesh{Ref: ref}, Light: &ecsscene.Light{}, Camera: &ecsscene.Camera{ID: 1, FovY: 1, Near: 1, Far: 2},
 	})
-	h.spawn(t, spawnRequest{Model: &Model{Ref: scene.ModelRef{Path: crateModel}}})
+	h.spawn(t, spawnRequest{Model: &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}}})
 
 	h.frame(t)
 
@@ -379,7 +380,7 @@ func TestAnEntityWithNoTransformIsNotRecorded(t *testing.T) {
 // without either side declaring it.
 func TestADrawIsInTheFlushOfTheTickThatRecordedItWithNoOrderingDeclared(t *testing.T) {
 	h := newHarness(t)
-	h.spawn(t, spawnRequest{Model: &Model{Ref: scene.ModelRef{Path: crateModel}}})
+	h.spawn(t, spawnRequest{Model: &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}}})
 	h.frame(t)
 	if models := h.ops(t, scene.OpModel); len(models) != 1 {
 		t.Fatalf("the first tick's flush published %d model draws, want the one recorded in it", len(models))
@@ -389,7 +390,7 @@ func TestADrawIsInTheFlushOfTheTickThatRecordedItWithNoOrderingDeclared(t *testi
 	var recorder, flush *kernel.SubscriptionDescription
 	for i := range description.Subscriptions {
 		switch description.Subscriptions[i].Type {
-		case reflect.TypeFor[UpdateEventHandler]():
+		case reflect.TypeFor[ecsscene.RecordOnUpdate]():
 			recorder = &description.Subscriptions[i]
 		case reflect.TypeFor[scene.FlushOnUpdate]():
 			flush = &description.Subscriptions[i]
@@ -404,7 +405,7 @@ func TestADrawIsInTheFlushOfTheTickThatRecordedItWithNoOrderingDeclared(t *testi
 	if flush.Phase != "last" {
 		t.Errorf("scene's flush is in phase %q, want last: the ordering claim rests on it", flush.Phase)
 	}
-	if !containsType(flush.DependsOn, reflect.TypeFor[UpdateEventHandler]()) {
+	if !containsType(flush.DependsOn, reflect.TypeFor[ecsscene.RecordOnUpdate]()) {
 		t.Errorf("scene's flush does not wait for the recording System; it depends on %v", flush.DependsOn)
 	}
 	if containsType(recorder.DependsOn, reflect.TypeFor[scene.FlushOnUpdate]()) {
@@ -419,19 +420,19 @@ func TestADrawIsInTheFlushOfTheTickThatRecordedItWithNoOrderingDeclared(t *testi
 func TestTheRecordingSystemsLockSetIsItsSignature(t *testing.T) {
 	h := newHarness(t)
 	for _, sub := range h.engine.Describe().Subscriptions {
-		if sub.Type != reflect.TypeFor[UpdateEventHandler]() {
+		if sub.Type != reflect.TypeFor[ecsscene.RecordOnUpdate]() {
 			continue
 		}
 		for _, want := range []reflect.Type{
 			reflect.TypeFor[*ecs.Entities](),
-			reflect.TypeFor[*ecs.Store[Transform]](),
-			reflect.TypeFor[*ecs.Store[Model]](),
-			reflect.TypeFor[*ecs.Store[Mesh]](),
-			reflect.TypeFor[*ecs.Store[Light]](),
-			reflect.TypeFor[*ecs.Store[Camera]](),
-			reflect.TypeFor[*ecs.Store[Animation]](),
-			reflect.TypeFor[*ecs.Store[Params]](),
-			reflect.TypeFor[*ecs.Store[Material]](),
+			reflect.TypeFor[*ecs.Store[ecsscene.Transform]](),
+			reflect.TypeFor[*ecs.Store[ecsscene.Model]](),
+			reflect.TypeFor[*ecs.Store[ecsscene.Mesh]](),
+			reflect.TypeFor[*ecs.Store[ecsscene.Light]](),
+			reflect.TypeFor[*ecs.Store[ecsscene.Camera]](),
+			reflect.TypeFor[*ecs.Store[ecsscene.Animation]](),
+			reflect.TypeFor[*ecs.Store[ecsscene.Params]](),
+			reflect.TypeFor[*ecs.Store[ecsscene.Material]](),
 		} {
 			if !containsType(sub.Reads, want) {
 				t.Errorf("the System's read set %v does not name %v", sub.Reads, want)
@@ -471,23 +472,23 @@ func TestEveryComponentRegistersAndMeshAndLightArePointerFree(t *testing.T) {
 		owned[resource.Type] = resource.Owner
 	}
 	for component, store := range map[reflect.Type]reflect.Type{
-		reflect.TypeFor[Transform](): reflect.TypeFor[*ecs.Store[Transform]](),
-		reflect.TypeFor[Model]():     reflect.TypeFor[*ecs.Store[Model]](),
-		reflect.TypeFor[Mesh]():      reflect.TypeFor[*ecs.Store[Mesh]](),
-		reflect.TypeFor[Animation](): reflect.TypeFor[*ecs.Store[Animation]](),
-		reflect.TypeFor[Params]():    reflect.TypeFor[*ecs.Store[Params]](),
-		reflect.TypeFor[Material]():  reflect.TypeFor[*ecs.Store[Material]](),
-		reflect.TypeFor[Light]():     reflect.TypeFor[*ecs.Store[Light]](),
-		reflect.TypeFor[Camera]():    reflect.TypeFor[*ecs.Store[Camera]](),
+		reflect.TypeFor[ecsscene.Transform](): reflect.TypeFor[*ecs.Store[ecsscene.Transform]](),
+		reflect.TypeFor[ecsscene.Model]():     reflect.TypeFor[*ecs.Store[ecsscene.Model]](),
+		reflect.TypeFor[ecsscene.Mesh]():      reflect.TypeFor[*ecs.Store[ecsscene.Mesh]](),
+		reflect.TypeFor[ecsscene.Animation](): reflect.TypeFor[*ecs.Store[ecsscene.Animation]](),
+		reflect.TypeFor[ecsscene.Params]():    reflect.TypeFor[*ecs.Store[ecsscene.Params]](),
+		reflect.TypeFor[ecsscene.Material]():  reflect.TypeFor[*ecs.Store[ecsscene.Material]](),
+		reflect.TypeFor[ecsscene.Light]():     reflect.TypeFor[*ecs.Store[ecsscene.Light]](),
+		reflect.TypeFor[ecsscene.Camera]():    reflect.TypeFor[*ecs.Store[ecsscene.Camera]](),
 	} {
 		if err := ecs.Storable(component); err != nil {
 			t.Errorf("%v is not storable: %v", component, err)
 		}
-		if owner, ok := owned[store]; !ok || owner != Name {
-			t.Errorf("%v is registered by %q (registered: %v), want %q", component, owner, ok, Name)
+		if owner, ok := owned[store]; !ok || owner != ecsscene.Name {
+			t.Errorf("%v is registered by %q (registered: %v), want %q", component, owner, ok, ecsscene.Name)
 		}
 	}
-	for _, component := range []reflect.Type{reflect.TypeFor[Mesh](), reflect.TypeFor[Light]()} {
+	for _, component := range []reflect.Type{reflect.TypeFor[ecsscene.Mesh](), reflect.TypeFor[ecsscene.Light]()} {
 		if err := ecs.PointerFree(component); err != nil {
 			t.Errorf("%v is not pointer-free: %v", component, err)
 		}
