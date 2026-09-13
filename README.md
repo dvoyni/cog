@@ -98,7 +98,7 @@ Every package is one kind, and its directory says which:
 Games and examples are composition roots and import freely. The kinds, where new
 code goes and the full import table are in
 [`.github/instructions/architecture.instructions.md`](.github/instructions/architecture.instructions.md),
-and `go test ./archtest` enforces them.
+and `go test ./kernel/archtest` enforces them.
 
 ## Plugin Layout
 

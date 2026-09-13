@@ -65,7 +65,7 @@ func classify(path string, present func(string) bool) place {
 	parts := strings.Split(path, "/")
 	at := func(t tier, root string) place { return place{path: path, tier: t, root: root} }
 	switch {
-	case path == "archtest", path == "docs/research", strings.HasPrefix(path, "docs/research/"):
+	case path == "kernel/archtest", path == "docs/research", strings.HasPrefix(path, "docs/research/"):
 		return at(tierExempt, "")
 	case path == "kernel":
 		return at(tierKernel, "")
@@ -331,7 +331,7 @@ func pluginViolations(pkg *packages.Package, rel string, within func(string) str
 
 func TestTiers_CogKeepsItsImportRules(t *testing.T) {
 	requireGo(t)
-	for _, v := range check(t, "..") {
+	for _, v := range check(t, "../..") {
 		t.Errorf("%s", v)
 	}
 }

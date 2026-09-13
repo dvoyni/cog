@@ -9,7 +9,7 @@ applyTo: "**/*.go"
 Every package in cog is exactly one kind, and its kind fixes both its directory
 and what it may import. [`docs/adr/0001-bundles-slots-ports-and-adapters.md`](../../docs/adr/0001-bundles-slots-ports-and-adapters.md)
 records why; [`CONTEXT.md`](../../CONTEXT.md) defines each term. The import
-rules are enforced by `archtest/tiers_test.go`, not by review.
+rules are enforced by `kernel/archtest/tiers_test.go`, not by review.
 
 ## The Kinds
 
@@ -117,12 +117,12 @@ package orders against is unexported, and stays in the package that subscribes i
 Games and examples (cog-examples, feuds-26, nox) are composition roots. They pick
 the Plugins and Adapters an engine is built from, so they import whatever they
 compose, `…impl` and Adapters included. These rules apply to the cog repo only.
-Inside cog, `archtest` and `docs/research/**` are outside the tiers.
+Inside cog, `kernel/archtest` and `docs/research/**` are outside the tiers.
 
 ## The Tier Test
 
-`go test ./archtest` checks every cog-internal import edge in every Go file,
+`go test ./kernel/archtest` checks every cog-internal import edge in every Go file,
 whatever its build tags, and every contract root and slot for a Plugin type. A
 failure names the file, the edge and the rule it breaks, and every violation
 fails the test: fix the code to fit the rules. A change to the rules themselves
-changes this file and `archtest/tiers_test.go` together.
+changes this file and `kernel/archtest/tiers_test.go` together.
