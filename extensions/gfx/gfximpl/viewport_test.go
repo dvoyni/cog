@@ -7,7 +7,7 @@ import (
 )
 
 func TestViewportFixedWidth(t *testing.T) {
-	k := newTestKernel(t, New())
+	k := newTestKernel(t, newPlugin())
 	k.ExecuteCommand[gfx.SetDesiredViewportCmd](
 		gfx.SetDesiredViewportRequest{Mode: gfx.ViewportFixedWidth, Size: 1280})
 
@@ -25,7 +25,7 @@ func TestViewportFixedWidth(t *testing.T) {
 }
 
 func TestViewportCarriesFramebufferSizeAcrossPreferenceChanges(t *testing.T) {
-	k := newTestKernel(t, New())
+	k := newTestKernel(t, newPlugin())
 	response, _ := k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
 		Width: 1280, Height: 720, FramebufferWidth: 2560, FramebufferHeight: 1440,
 	})
@@ -41,7 +41,7 @@ func TestViewportCarriesFramebufferSizeAcrossPreferenceChanges(t *testing.T) {
 }
 
 func TestViewportFixedHeight(t *testing.T) {
-	k := newTestKernel(t, New())
+	k := newTestKernel(t, newPlugin())
 	k.ExecuteCommand[gfx.SetDesiredViewportCmd](
 		gfx.SetDesiredViewportRequest{Mode: gfx.ViewportFixedHeight, Size: 720})
 
@@ -67,7 +67,7 @@ func TestViewportFitAndCover(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			k := newTestKernel(t, New())
+			k := newTestKernel(t, newPlugin())
 			k.ExecuteCommand[gfx.SetDesiredViewportCmd](
 				gfx.SetDesiredViewportRequest{Mode: test.mode, Width: 1280, Height: 720})
 

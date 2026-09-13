@@ -384,8 +384,11 @@ In the **`…impl`**:
 - `plugin.go`: the unexported `plugin`, `New`, `Name`, `Dependencies`,
   `Register`, and compact subscription wiring.
 - `commandsimpl.go`: command registration and every command handler.
-- `config.go`: `Config` and resolving it, a zero field taking its default.
-- `mcpprovider.go`: the unexported `provider` and its capabilities.
+- `config.go`: `Config`, `DefaultConfig` if it has one, and resolving it, a
+  zero field taking its default.
+- `err.go`: the exported `Err…` types its configuration and startup report.
+- `mcpprovider.go`: the unexported `provider`, its capabilities and their
+  unexported request and response types.
 
 In **`internal/`**: `doc.go`, `friends.go` for the plain functions giving the
 root and the `…impl` what exported methods do not, and a file per declared type

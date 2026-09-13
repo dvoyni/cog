@@ -1,9 +1,12 @@
 package mcpimpl
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 const (
-	// DefaultAddr is the host:port the broker binds. 127.0.0.1 is spelled
+	// defaultAddr is the host:port the broker binds. 127.0.0.1 is spelled
 	// literally rather than as "localhost", because the IPv4/IPv6 mismatch is
 	// the classic failure here and the SDK's rebinding protection checks the
 	// Host header rather than the bind address.
@@ -13,15 +16,19 @@ const (
 	// by an ephemeral allocation, and clear of the common dev ports. What
 	// matters is that it is stable across runs, so a game can commit a
 	// .mcp.json naming it.
-	DefaultAddr = "127.0.0.1:7654"
-	// DefaultPath is the single HTTP path the streamable transport is served on.
-	DefaultPath = "/mcp"
-	// DefaultTimeout bounds how long an agent waits, not how long the engine
+	defaultAddr = "127.0.0.1:7654"
+	// defaultPath is the single HTTP path the streamable transport is served on.
+	defaultPath = "/mcp"
+	// defaultTimeout bounds how long an agent waits, not how long the engine
 	// works.
-	DefaultTimeout = 30 * time.Second
+	defaultTimeout = 30 * time.Second
 )
 
-// Config configures the broker's transport. The zero value means all defaults.
+// Config configures the broker's transport. It arrives through kernel.New's
+// config map under mcp.Name, and a zero field takes its default, so a caller
+// names only what it changes:
+//
+//	kernel.New(map[kernel.PluginName]any{mcp.Name: mcpimpl.Config{Addr: "127.0.0.1:7655"}})
 //
 // There is no capture output directory, and there will not be one: a field that
 // means something only to one provider is that provider's knowledge arriving
@@ -30,11 +37,11 @@ const (
 // log level: composition is the gate, auth is a different effort, and logging
 // is one line at startup.
 type Config struct {
-	// Addr is the host:port to bind. Empty means DefaultAddr. Binding to
+	// Addr is the host:port to bind. Empty means 127.0.0.1:7654. Binding to
 	// localhost is a default rather than a design; an app that changes it has
 	// left the scope of the broker's specification.
 	Addr string
-	// Path is the HTTP path to serve. Empty means DefaultPath.
+	// Path is the HTTP path to serve. Empty means /mcp.
 	Path string
 	// Timeout bounds the wait, not the work. It is applied as a deadline on the
 	// executioner a capability receives, so it cancels lock acquisition and any
@@ -43,7 +50,7 @@ type Config struct {
 	// handler stays wedged. What the deadline buys is that the agent gets a
 	// clean mcp.Unavailable in 30 seconds instead of burning five minutes of its
 	// session on the client's idle abort. That is a courtesy, not a safety
-	// property. Zero means DefaultTimeout.
+	// property. Zero means 30 seconds.
 	Timeout time.Duration
 }
 
@@ -51,13 +58,26 @@ type Config struct {
 // Config that is already complete.
 func (c Config) withDefaults() Config {
 	if c.Addr == "" {
-		c.Addr = DefaultAddr
+		c.Addr = defaultAddr
 	}
 	if c.Path == "" {
-		c.Path = DefaultPath
+		c.Path = defaultPath
 	}
 	if c.Timeout == 0 {
-		c.Timeout = DefaultTimeout
+		c.Timeout = defaultTimeout
 	}
 	return c
+}
+
+// resolveConfig reads the broker's configuration value: none means every
+// default, and anything but a Config is refused.
+func resolveConfig(value any) (Config, error) {
+	if value == nil {
+		return Config{}.withDefaults(), nil
+	}
+	config, ok := value.(Config)
+	if !ok {
+		return Config{}, fmt.Errorf("mcpserver: invalid config %T", value)
+	}
+	return config.withDefaults(), nil
 }

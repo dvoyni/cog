@@ -67,11 +67,13 @@ import (
 	"fixture.test/cog/kernel"
 )
 
-type Plugin struct{}
+type plugin struct{}
 
-func (Plugin) Name() kernel.PluginName                            { return a.Name }
-func (Plugin) Dependencies() []kernel.PluginName                  { return nil }
-func (Plugin) Register(registrar *kernel.Registrar, config any) error { return nil }
+func New() kernel.Plugin { return plugin{} }
+
+func (plugin) Name() kernel.PluginName                              { return a.Name }
+func (plugin) Dependencies() []kernel.PluginName                    { return nil }
+func (plugin) Register(registrar *kernel.Registrar, config any) error { return nil }
 `,
 	"bundles/b/b.go": `package b
 
@@ -172,6 +174,75 @@ func (*plugin) Register(registrar *kernel.Registrar, config any) error { return 
 		"bundles/a declares plugin",
 		rulePlugin,
 	)
+}
+
+func TestTiers_AnImplExportingAPluginTypeFails(t *testing.T) {
+	violations := fixtureViolations(t, "bundles/b/bimpl/plugin.go", `package bimpl
+
+import "fixture.test/cog/kernel"
+
+type Plugin struct{}
+
+func (Plugin) Name() kernel.PluginName                              { return "b" }
+func (Plugin) Dependencies() []kernel.PluginName                    { return nil }
+func (Plugin) Register(registrar *kernel.Registrar, config any) error { return nil }
+`)
+	requireOne(t, violations,
+		"bundles/b/bimpl/plugin.go:5",
+		"bundles/b/bimpl exports Plugin",
+		ruleImplExports,
+	)
+}
+
+func TestTiers_AnImplWhoseNewReturnsAConcretePointerFails(t *testing.T) {
+	violations := fixtureViolations(t, "bundles/b/bimpl/plugin.go", `package bimpl
+
+import "fixture.test/cog/kernel"
+
+type plugin struct{}
+
+func New() *plugin { return &plugin{} }
+
+func (*plugin) Name() kernel.PluginName                              { return "b" }
+func (*plugin) Dependencies() []kernel.PluginName                    { return nil }
+func (*plugin) Register(registrar *kernel.Registrar, config any) error { return nil }
+`)
+	requireOne(t, violations,
+		"bundles/b/bimpl/plugin.go:7",
+		"bundles/b/bimpl exports New",
+		ruleImplExports,
+	)
+}
+
+// Config may be an alias of an internal type and carry methods, since methods
+// are not package-scope names, and an …impl may export the error types its
+// configuration and startup report.
+func TestTiers_AnImplExportingOnlyNewConfigDefaultConfigAndErrorsPasses(t *testing.T) {
+	violations := fixtureViolations(t, "extensions/p/pimpl/plugin.go", `package pimpl
+
+import "fixture.test/cog/kernel"
+
+type plugin struct{ config Config }
+
+func New() kernel.Plugin { return &plugin{config: DefaultConfig()} }
+
+func (*plugin) Name() kernel.PluginName                              { return "p" }
+func (*plugin) Dependencies() []kernel.PluginName                    { return nil }
+func (*plugin) Register(registrar *kernel.Registrar, config any) error { return nil }
+
+type Config struct{ Path string }
+
+func (c Config) WithPath(path string) Config { c.Path = path; return c }
+
+func DefaultConfig() Config { return Config{Path: "values"} }
+
+type ErrInvalidConfig struct{ Got any }
+
+func (e ErrInvalidConfig) Error() string { return "invalid config" }
+`)
+	if len(violations) != 0 {
+		t.Fatalf("an …impl exporting only what the rule allows has violations:\n%s", joinViolations(violations))
+	}
 }
 
 // A contract root may act on a *kernel.Registrar it is handed, the way ecs's

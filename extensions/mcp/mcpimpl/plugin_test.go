@@ -62,14 +62,24 @@ func echoing(name string, opts ...mcp.Option) mcp.Capability {
 	}, opts...)
 }
 
-// runEngine composes and runs an engine, returning the errors its handler saw.
-// The engine is cancelled and awaited at cleanup, so every test exercises the
-// whole shutdown path.
+// testConfig binds the broker to any free port, so tests never contend for the
+// default one.
+var testConfig = Config{Addr: "127.0.0.1:0"}
+
+// runEngine composes and runs an engine with the broker configured by
+// testConfig, returning the errors its handler saw. The engine is cancelled and
+// awaited at cleanup, so every test exercises the whole shutdown path.
 func runEngine(t *testing.T, plugins ...kernel.Plugin) <-chan error {
+	t.Helper()
+	return runConfigured(t, testConfig, plugins...)
+}
+
+// runConfigured is runEngine with the broker's config-map value named.
+func runConfigured(t *testing.T, config any, plugins ...kernel.Plugin) <-chan error {
 	t.Helper()
 	reported := make(chan error, 8)
 	ctx, cancel := context.WithCancel(context.Background())
-	engine := kernel.New(nil).
+	engine := kernel.New(map[kernel.PluginName]any{mcp.Name: config}).
 		Handler(func(err error) bool { reported <- err; return true }).
 		WithPlugins(plugins...)
 	stopped := make(chan struct{})
@@ -89,8 +99,8 @@ func runEngine(t *testing.T, plugins ...kernel.Plugin) <-chan error {
 	return reported
 }
 
-func testBroker() *Plugin {
-	return New(Config{Addr: "127.0.0.1:0"}).(*Plugin)
+func testBroker() *plugin {
+	return New().(*plugin)
 }
 
 func firstError(t *testing.T, reported <-chan error) error {
@@ -104,7 +114,7 @@ func firstError(t *testing.T, reported <-chan error) error {
 	}
 }
 
-func attach(t *testing.T, broker *Plugin) *sdk.ClientSession {
+func attach(t *testing.T, broker *plugin) *sdk.ClientSession {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
@@ -288,7 +298,7 @@ func TestStart_BindFailureTerminatesTheEngine(t *testing.T) {
 	defer held.Close()
 
 	addr := held.Addr().String()
-	reported := runEngine(t, New(Config{Addr: addr}))
+	reported := runConfigured(t, Config{Addr: addr}, New())
 
 	var listenErr ErrListen
 	if err := firstError(t, reported); !errors.As(err, &listenErr) {
@@ -296,6 +306,34 @@ func TestStart_BindFailureTerminatesTheEngine(t *testing.T) {
 	}
 	if listenErr.Addr != addr || !strings.Contains(listenErr.Error(), addr) {
 		t.Fatalf("ErrListen = %v, want the address in the error", listenErr)
+	}
+}
+
+// The broker reads its Config from the config map under mcp.Name, like every
+// other plugin, and a field left zero keeps its default.
+func TestRegister_ReadsConfigFromTheConfigMap(t *testing.T) {
+	broker := New().(*plugin)
+	runConfigured(t, Config{Addr: "127.0.0.1:0", Path: "/agent"}, broker)
+
+	endpoint := broker.endpoint()
+	if !strings.HasSuffix(endpoint, "/agent") || strings.HasSuffix(endpoint, ":7654/agent") {
+		t.Fatalf("endpoint = %s, want the configured address and path", endpoint)
+	}
+	if broker.config.Timeout != 30*time.Second {
+		t.Fatalf("timeout = %s, want the 30s default for a zero field", broker.config.Timeout)
+	}
+	session := attach(t, broker)
+	if _, err := session.ListTools(t.Context(), nil); err != nil {
+		t.Fatalf("tools/list at the configured path: %v", err)
+	}
+}
+
+// A config-map value that is not a Config is a registration error rather than
+// a silent fall back to the defaults.
+func TestRegister_RefusesAConfigOfTheWrongType(t *testing.T) {
+	reported := runConfigured(t, "127.0.0.1:0", New())
+	if err := firstError(t, reported); err == nil || !strings.Contains(err.Error(), "string") {
+		t.Fatalf("reported %v, want a registration error naming the wrong type", err)
 	}
 }
 
@@ -331,7 +369,7 @@ func TestBroker_ShutsDownBeforeAnyProviderStops(t *testing.T) {
 	}}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	engine := kernel.New(nil).
+	engine := kernel.New(map[kernel.PluginName]any{mcp.Name: testConfig}).
 		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
 		WithPlugins(broker, provider)
 	stopped := make(chan struct{})
@@ -353,7 +391,7 @@ func TestBroker_ShutsDownBeforeAnyProviderStops(t *testing.T) {
 	}
 	<-stopped
 
-	if _, err := net.DialTimeout("tcp", strings.TrimPrefix(strings.TrimSuffix(endpoint, DefaultPath), "http://"), time.Second); err == nil {
+	if _, err := net.DialTimeout("tcp", strings.TrimPrefix(strings.TrimSuffix(endpoint, defaultPath), "http://"), time.Second); err == nil {
 		t.Fatal("the listener is still accepting connections after shutdown")
 	}
 }

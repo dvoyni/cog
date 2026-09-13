@@ -17,7 +17,7 @@ import (
 // by the resources they lock, so the broker imposes no limit of its own —
 // serializing here would break the parallel arms that let an agent pair a
 // moment.
-func (p *Plugin) handle(capability mcp.Capability) sdk.ToolHandler {
+func (p *plugin) handle(capability mcp.Capability) sdk.ToolHandler {
 	return func(ctx context.Context, request *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 		payload := reflect.New(capability.RequestType())
 		if arguments := request.Params.Arguments; len(arguments) > 0 {
@@ -63,7 +63,7 @@ func (p *Plugin) handle(capability mcp.Capability) sdk.ToolHandler {
 // Shutdown is the case worth naming: a dispatch cancelled because the game is
 // closing would otherwise be reported as a system fault on the way out, which
 // is both wrong and noisy. A game exiting is the normal case here.
-func (p *Plugin) classify(err error) (mcp.Unavailable, bool) {
+func (p *plugin) classify(err error) (mcp.Unavailable, bool) {
 	var unavailable mcp.Unavailable
 	if errors.As(err, &unavailable) {
 		return unavailable, true

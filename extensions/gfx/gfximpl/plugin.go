@@ -31,11 +31,11 @@ type readyList struct {
 	pending bool
 }
 
-// Plugin implements renderer v2: a triple-buffered OpQueue pipeline plus a
+// plugin implements renderer v2: a triple-buffered OpQueue pipeline plus a
 // translator that turns high-level draw commands into a backend-agnostic GpuQueue
 // stream. It owns the translator (render-thread-only caches and dynamic buffers);
 // the three queues live in kernel resources.
-type Plugin struct {
+type plugin struct {
 	translator *translator
 	// backend is the bound Backend adapter, valid from Start onwards.
 	backend kernel.RequiredAdapter[gfx.Backend]
@@ -52,19 +52,23 @@ type Plugin struct {
 }
 
 // New creates the gfx plugin.
-func New() *Plugin { return &Plugin{translator: newTranslator()} }
+func New() kernel.Plugin { return newPlugin() }
+
+// newPlugin creates the gfx plugin as its own type, for the tests that reach
+// its translator and capture slots.
+func newPlugin() *plugin { return &plugin{translator: newTranslator()} }
 
 // Name reports the plugin name.
-func (p *Plugin) Name() kernel.PluginName { return gfx.Name }
+func (p *plugin) Name() kernel.PluginName { return gfx.Name }
 
 // Dependencies reports the plugins gfx requires: storage, from which it loads
 // shader and texture resources.
-func (p *Plugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{storage.Name} }
+func (p *plugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{storage.Name} }
 
 // Register requires the Backend adapter, and registers the three command-list
 // buffers, the Present/Acquire/Consume commands, and the end-of-tick present
 // subscription on app.UpdateEvent.
-func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
+func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	p.backend = registrar.RequireAdapter[gfx.Backend]()
 	ids := func() internal.IDMinter { return p.backend.Get() }
 	registrar.InitResource(internal.NewOpQueue(ids))
@@ -97,7 +101,7 @@ func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
 // It touches the capture slot directly because by Stop the scheduler has
 // stopped and grants no locks, which is also why nothing else can be touching
 // it: the host loop has returned and every handler is done.
-func (p *Plugin) Stop(kernel.Executioner) error {
+func (p *plugin) Stop(kernel.Executioner) error {
 	p.captures.abandon()
 	p.snapshots.abandon()
 	return nil
@@ -105,7 +109,7 @@ func (p *Plugin) Stop(kernel.Executioner) error {
 
 // admitCapture admits a waiting capture to the tick that has just begun. It
 // declares no resources: the capture slot carries its own lock.
-func (p *Plugin) admitCapture() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
+func (p *plugin) admitCapture() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	return nil, func(kernel.Kernel, app.UpdateEvent) error {
 		p.captures.beginTick()
 		return nil
@@ -114,7 +118,7 @@ func (p *Plugin) admitCapture() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 
 // admitFrame admits a waiting frame snapshot to the tick that has just
 // begun. It declares no resources: the snapshot slot carries its own lock.
-func (p *Plugin) admitFrame() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
+func (p *plugin) admitFrame() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	return nil, func(kernel.Kernel, app.UpdateEvent) error {
 		p.snapshots.beginTick()
 		return nil
@@ -139,7 +143,7 @@ func (p *Plugin) admitFrame() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 // durable bakes, allocations, uploads, releases - is recorded there and never
 // reaches the frame queue. Read conflicts only with a writer, and every writer
 // of it in a tick already orders itself before present.
-func (p *Plugin) presentOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
+func (p *plugin) presentOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var write kernel.Write[*gfx.OpQueue]
 	var ready kernel.Write[*readyList]
 	var resources kernel.Read[*gfx.ResourceQueue]
@@ -185,7 +189,7 @@ func acquire(read kernel.Write[*readList], ready kernel.Write[*readyList]) bool 
 // translates it against the installed Backend, and executes the resulting op
 // stream into the backend's screen framebuffer. It runs on the driver's render
 // thread (where the driver publishes app.RenderEvent).
-func (p *Plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent]) {
+func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent]) {
 	var read kernel.Write[*readList]
 	var ready kernel.Write[*readyList]
 	var resources kernel.Write[*gfx.ResourceQueue]

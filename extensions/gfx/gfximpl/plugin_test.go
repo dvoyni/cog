@@ -368,11 +368,11 @@ func recordResourcesCmdImpl() (kernel.Lock, kernel.Execute[recordResourcesReques
 			return recordResourcesResponse{}, nil
 		}
 }
-func newTestKernel(t *testing.T, p *Plugin) kernel.Executioner {
+func newTestKernel(t *testing.T, p *plugin) kernel.Executioner {
 	return newTestKernelWithFS(t, p, fstest.MapFS{})
 }
 
-func newTestKernelWithFS(t *testing.T, p *Plugin, filesystem fs.FS) kernel.Executioner {
+func newTestKernelWithFS(t *testing.T, p *plugin, filesystem fs.FS) kernel.Executioner {
 	t.Helper()
 	return newTestKernelWith(t, p, filesystem, func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
@@ -384,7 +384,7 @@ func newTestKernelWithFS(t *testing.T, p *Plugin, filesystem fs.FS) kernel.Execu
 // instead of failing the test, for the paths that report one on purpose. Its
 // handler keeps the engine running, so a reported error does not end the frames
 // that follow it.
-func newTestKernelWithErrors(t *testing.T, p *Plugin, report func(error)) kernel.Executioner {
+func newTestKernelWithErrors(t *testing.T, p *plugin, report func(error)) kernel.Executioner {
 	t.Helper()
 	return newTestKernelWith(t, p, fstest.MapFS{}, func(err error) bool {
 		report(err)
@@ -392,7 +392,7 @@ func newTestKernelWithErrors(t *testing.T, p *Plugin, report func(error)) kernel
 	})
 }
 
-func newTestKernelWith(t *testing.T, p *Plugin, filesystem fs.FS, handler kernel.ErrorHandler) kernel.Executioner {
+func newTestKernelWith(t *testing.T, p *plugin, filesystem fs.FS, handler kernel.ErrorHandler) kernel.Executioner {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -656,7 +656,7 @@ func TestBakeTextureCopyDataControlsOwnership(t *testing.T) {
 }
 
 func TestTextureArrayAllocationAndLayerUpdateTranslate(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -693,7 +693,7 @@ func TestPersistentResourceTextureSurvivesDroppedFrame(t *testing.T) {
 	filesystem := &countingFS{FS: fstest.MapFS{
 		"persistent.png": &fstest.MapFile{Data: testPNG(t)},
 	}}
-	p := New()
+	p := newPlugin()
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -724,7 +724,7 @@ func TestPersistentResourceTextureSurvivesDroppedFrame(t *testing.T) {
 }
 
 func TestPersistentBakeRebakeAndReleaseSurviveDroppedFrame(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -761,7 +761,7 @@ func TestPersistentBakeRebakeAndReleaseSurviveDroppedFrame(t *testing.T) {
 }
 
 func TestDroppedFrameDiscardsTemporaryUploads(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -914,7 +914,7 @@ func TestOpQueueBakesInlineMaterialAndDrawParameters(t *testing.T) {
 	filesystem := &countingFS{FS: fstest.MapFS{
 		"shared.png": &fstest.MapFile{Data: testPNG(t)},
 	}}
-	p := New()
+	p := newPlugin()
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -973,7 +973,7 @@ func TestOpQueueTemporaryTexturePool(t *testing.T) {
 }
 
 func TestBakedResourcesTranslateToBakedBindings(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	layout := gfx.ShaderLayout{
 		UniformSize: 80, UniformGroup: 0, UniformBinding: 0,
 		Uniforms: []gfx.UniformMember{{Name: "mvp", Offset: 0}},
@@ -1078,7 +1078,7 @@ func TestBakedResourcesTranslateToBakedBindings(t *testing.T) {
 }
 
 func TestConsumeTranslatesDraws(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -1133,7 +1133,7 @@ func TestConsumeTranslatesDraws(t *testing.T) {
 }
 
 func TestConsumeCachesShaderAndPipeline(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -1154,7 +1154,7 @@ func TestConsumeCachesShaderAndPipeline(t *testing.T) {
 }
 
 func TestPipelineCacheDistinguishesEqualStrideLayouts(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -1222,7 +1222,7 @@ func TestVertexLayoutKeyRejectsUnsupportedLayouts(t *testing.T) {
 }
 
 func TestDrawParamsPackByNameAndOverrideMaterial(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	layout := gfx.ShaderLayout{
 		UniformSize: 80, UniformGroup: 0, UniformBinding: 0,
@@ -1269,7 +1269,7 @@ func TestStorageResolvesMaterialTexture(t *testing.T) {
 	filesystem := &countingFS{FS: fstest.MapFS{
 		"hero.png": &fstest.MapFile{Data: testPNG(t)},
 	}}
-	p := New()
+	p := newPlugin()
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -1300,7 +1300,7 @@ func TestStorageResolvesShaderResource(t *testing.T) {
 	filesystem := &countingFS{FS: fstest.MapFS{
 		"shader.wgsl": &fstest.MapFile{Data: []byte(source)},
 	}}
-	p := New()
+	p := newPlugin()
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -1327,7 +1327,7 @@ func TestReleaseCachedResourceReleasesPathAndAllowsReload(t *testing.T) {
 		"hero.png":    &fstest.MapFile{Data: testPNG(t)},
 		"shader.wgsl": &fstest.MapFile{Data: []byte("// storage shader")},
 	}}
-	p := New()
+	p := newPlugin()
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -1371,7 +1371,7 @@ func TestReleaseCachedResourceReleasesPathAndAllowsReload(t *testing.T) {
 
 func TestFreeCachedResourcesClearsTranslatorOwnedCachesOnly(t *testing.T) {
 	filesystem := fstest.MapFS{"hero.png": &fstest.MapFile{Data: testPNG(t)}}
-	p := New()
+	p := newPlugin()
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -1414,7 +1414,7 @@ func TestFreeCachedResourcesClearsTranslatorOwnedCachesOnly(t *testing.T) {
 func TestFailedTextureResourceLoadIsRetried(t *testing.T) {
 	files := fstest.MapFS{}
 	filesystem := &countingFS{FS: files}
-	p := New()
+	p := newPlugin()
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -1445,7 +1445,7 @@ func TestFailedTextureResourceLoadIsRetried(t *testing.T) {
 func TestFailedShaderIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	files := fstest.MapFS{}
 	filesystem := &countingFS{FS: files}
-	p := New()
+	p := newPlugin()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	errorsReported := 0
@@ -1503,7 +1503,7 @@ func TestEvictionScansTheForwardIncludeSet(t *testing.T) {
 		"root.wgsl":   &fstest.MapFile{Data: []byte("#include ./shared.wgsl\nconst root = 1;")},
 		"shared.wgsl": &fstest.MapFile{Data: []byte("const shared = 1;")},
 	}}
-	p := New()
+	p := newPlugin()
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -1538,7 +1538,7 @@ func TestEvictionScansTheForwardIncludeSet(t *testing.T) {
 }
 
 func TestTextureWithBytesReuploadsEveryFrame(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -1565,7 +1565,7 @@ func TestTextureWithBytesReuploadsEveryFrame(t *testing.T) {
 }
 
 func TestBufferWithBytesReuploadsEveryFrame(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	layout := gfx.ShaderLayout{
 		UniformSize: 80, UniformGroup: 0, UniformBinding: 0,
 		Uniforms:  []gfx.UniformMember{{Name: "mvp", Offset: 0}},
@@ -1673,7 +1673,7 @@ func TestTemporaryBufferUploadsOnceForEveryDrawThatBindsIt(t *testing.T) {
 // puts an entry in group 0 that the pipeline layout does not have, which fails
 // CreateBindGroup and takes the whole frame's command buffer down.
 func TestAShaderWithoutAUniformBlockGetsNoUniformBinding(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{layout: &gfx.ShaderLayout{Resources: []gfx.ShaderResource{
 		{Name: "records", StorageBuffer: true, Group: 0, Binding: 0},
@@ -1705,7 +1705,7 @@ func TestEachVariantIsItsOwnModuleUnderItsOwnLabel(t *testing.T) {
 	filesystem := &countingFS{FS: fstest.MapFS{
 		"scene.wgsl": &fstest.MapFile{Data: []byte("//#if SKIN\nconst skin = 1;\n//#endif\nconst always = 1;")},
 	}}
-	p := New()
+	p := newPlugin()
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -1753,7 +1753,7 @@ func TestABackendCompileFailureCarriesTheSegmentTable(t *testing.T) {
 		"root.wgsl": &fstest.MapFile{Data: []byte("#include ./part.wgsl\nconst root = 1;")},
 		"part.wgsl": &fstest.MapFile{Data: []byte("const part = 1;\nconst more = 2;")},
 	}}
-	p := New()
+	p := newPlugin()
 	var reported []error
 	k := newTestKernelWith(t, p, filesystem, func(err error) bool {
 		reported = append(reported, err)

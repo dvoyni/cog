@@ -15,7 +15,7 @@ import (
 
 // callTool runs one tool handler the way the transport would, without a client
 // in the way.
-func callTool(t *testing.T, broker *Plugin, capability mcp.Capability, arguments string) *sdk.CallToolResult {
+func callTool(t *testing.T, broker *plugin, capability mcp.Capability, arguments string) *sdk.CallToolResult {
 	t.Helper()
 	result, err := broker.handle(capability)(t.Context(), &sdk.CallToolRequest{
 		Params: &sdk.CallToolParamsRaw{Name: capability.Name(), Arguments: json.RawMessage(arguments)},
@@ -132,9 +132,9 @@ func TestInvoke_TimeoutRefusesInWords(t *testing.T) {
 		<-k.Context().Done()
 		return echoResponse{}, k.Context().Err()
 	})
-	broker := New(Config{Addr: "127.0.0.1:0", Timeout: 20 * time.Millisecond}).(*Plugin)
-	reported := runEngine(t, &testProvider{name: "probe",
-		capabilities: []mcp.Capability{capability}}, broker)
+	broker := testBroker()
+	reported := runConfigured(t, Config{Addr: "127.0.0.1:0", Timeout: 20 * time.Millisecond},
+		&testProvider{name: "probe", capabilities: []mcp.Capability{capability}}, broker)
 
 	result := callTool(t, broker, capability, `{}`)
 	if !result.IsError || !strings.Contains(resultText(t, result), "did not answer within") {

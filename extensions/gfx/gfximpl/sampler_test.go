@@ -40,7 +40,7 @@ func samplerOps(backend *fakeBackend) [][2]int {
 }
 
 func TestEveryReflectedSamplerBindsIndependentlyByName(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	// A material with a tiling texture beside a clamped one: two samplers, two
 	// textures, all in one bind group.

@@ -29,30 +29,30 @@ const architectureDescription = "What this engine is actually composed of: the p
 	"see who owns behaviour; you cannot call them from here, and there is no tool that takes a " +
 	"command name. Pass `path` to write the JSON to a file instead of returning it inline."
 
-// ArchitectureRequest asks for the finalized architecture.
-type ArchitectureRequest struct {
+// architectureRequest asks for the finalized architecture.
+type architectureRequest struct {
 	// Path, when given, receives the JSON instead of the agent receiving it
 	// inline. It is absolute because a relative path would silently resolve
 	// against the game's working directory, which need not be the agent's.
 	Path string `json:"path,omitempty" jsonschema:"absolute path of a .json file to write the description to instead of returning it inline; parent directories are created and an existing file is overwritten"`
 }
 
-// ArchitectureResponse is the finalized architecture as five flat arrays, or
+// architectureResponse is the finalized architecture as five flat arrays, or
 // just the path when one was given. There is no index: the type string is the
 // address, and uses, dependsOn, reads and writes are all joins on it.
-type ArchitectureResponse struct {
+type architectureResponse struct {
 	// Path is set, and the arrays empty, when the description was written to a
 	// file instead.
 	Path          string                     `json:"path,omitempty"`
-	Plugins       []ArchitecturePlugin       `json:"plugins,omitempty"`
-	Resources     []ArchitectureResource     `json:"resources,omitempty"`
-	Ports         []ArchitecturePort         `json:"ports,omitempty"`
-	Commands      []ArchitectureCommand      `json:"commands,omitempty"`
-	Subscriptions []ArchitectureSubscription `json:"subscriptions,omitempty"`
+	Plugins       []architecturePlugin       `json:"plugins,omitempty"`
+	Resources     []architectureResource     `json:"resources,omitempty"`
+	Ports         []architecturePort         `json:"ports,omitempty"`
+	Commands      []architectureCommand      `json:"commands,omitempty"`
+	Subscriptions []architectureSubscription `json:"subscriptions,omitempty"`
 }
 
-// ArchitecturePlugin is one plugin in start order.
-type ArchitecturePlugin struct {
+// architecturePlugin is one plugin in start order.
+type architecturePlugin struct {
 	Name         string   `json:"name"`
 	Dependencies []string `json:"dependencies,omitempty"`
 	Host         bool     `json:"host,omitempty"`
@@ -60,25 +60,25 @@ type ArchitecturePlugin struct {
 	Stops        bool     `json:"stops,omitempty"`
 }
 
-// ArchitectureResource is one resource and the plugin that owns it.
-type ArchitectureResource struct {
+// architectureResource is one resource and the plugin that owns it.
+type architectureResource struct {
 	Type  string `json:"type"`
 	Owner string `json:"owner"`
 }
 
-// ArchitecturePort is one plugin's declaration of an Adapter interface: the
+// architecturePort is one plugin's declaration of an Adapter interface: the
 // Port, whether it collects any number of Adapters or requires exactly one, and
 // the plugins that contributed one, in plugin order.
-type ArchitecturePort struct {
+type architecturePort struct {
 	Interface    string   `json:"interface"`
 	Port         string   `json:"port"`
 	Collects     bool     `json:"collects,omitempty"`
 	Contributors []string `json:"contributors,omitempty"`
 }
 
-// ArchitectureCommand is one command, its owner, and the resolved lock set its
+// architectureCommand is one command, its owner, and the resolved lock set its
 // handler ends up holding once the commands it uses are folded in.
-type ArchitectureCommand struct {
+type architectureCommand struct {
 	Type   string   `json:"type"`
 	Owner  string   `json:"owner"`
 	Reads  []string `json:"reads,omitempty"`
@@ -86,9 +86,9 @@ type ArchitectureCommand struct {
 	Uses   []string `json:"uses,omitempty"`
 }
 
-// ArchitectureSubscription is one subscription, its place in its event's
+// architectureSubscription is one subscription, its place in its event's
 // dependency graph, and the same resolved lock set.
-type ArchitectureSubscription struct {
+type architectureSubscription struct {
 	Event     string   `json:"event"`
 	Type      string   `json:"type"`
 	Owner     string   `json:"owner"`
@@ -103,29 +103,29 @@ type ArchitectureSubscription struct {
 // registry state that is immutable after finalization and returns a detached
 // value, which is the narrow exception the capability-body rule names: no
 // handle, no lock, no tick and no scheduler.
-func architecture(k kernel.Executioner, request ArchitectureRequest) (ArchitectureResponse, error) {
+func architecture(k kernel.Executioner, request architectureRequest) (architectureResponse, error) {
 	document := describe(k.Describe())
 	if request.Path == "" {
 		return document, nil
 	}
 	if err := checkPath(request.Path); err != nil {
-		return ArchitectureResponse{}, err
+		return architectureResponse{}, err
 	}
 	encoded, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
-		return ArchitectureResponse{}, err
+		return architectureResponse{}, err
 	}
 	if err := os.MkdirAll(filepath.Dir(request.Path), 0o755); err != nil {
-		return ArchitectureResponse{}, mcp.Unavailable{
+		return architectureResponse{}, mcp.Unavailable{
 			Reason: fmt.Sprintf("cannot create the directory for %s: %v", request.Path, err),
 		}
 	}
 	if err := os.WriteFile(request.Path, encoded, 0o644); err != nil {
-		return ArchitectureResponse{}, mcp.Unavailable{
+		return architectureResponse{}, mcp.Unavailable{
 			Reason: fmt.Sprintf("cannot write %s: %v", request.Path, err),
 		}
 	}
-	return ArchitectureResponse{Path: request.Path}, nil
+	return architectureResponse{Path: request.Path}, nil
 }
 
 // checkPath applies the delivery contract every capability that produces a
@@ -149,26 +149,26 @@ func checkPath(path string) error {
 // that is the form appearing in the source the agent greps next. The
 // fully-qualified spelling is unambiguous but unsearchable, and where a short
 // name ever collides, the owner disambiguates in the same record.
-func describe(description kernel.ArchitectureDescription) ArchitectureResponse {
-	document := ArchitectureResponse{
-		Plugins:       make([]ArchitecturePlugin, 0, len(description.Plugins)),
-		Resources:     make([]ArchitectureResource, 0, len(description.Resources)),
-		Ports:         make([]ArchitecturePort, 0, len(description.Ports)),
-		Commands:      make([]ArchitectureCommand, 0, len(description.Commands)),
-		Subscriptions: make([]ArchitectureSubscription, 0, len(description.Subscriptions)),
+func describe(description kernel.ArchitectureDescription) architectureResponse {
+	document := architectureResponse{
+		Plugins:       make([]architecturePlugin, 0, len(description.Plugins)),
+		Resources:     make([]architectureResource, 0, len(description.Resources)),
+		Ports:         make([]architecturePort, 0, len(description.Ports)),
+		Commands:      make([]architectureCommand, 0, len(description.Commands)),
+		Subscriptions: make([]architectureSubscription, 0, len(description.Subscriptions)),
 	}
 	for _, plugin := range description.Plugins {
 		dependencies := make([]string, 0, len(plugin.Dependencies))
 		for _, dependency := range plugin.Dependencies {
 			dependencies = append(dependencies, string(dependency))
 		}
-		document.Plugins = append(document.Plugins, ArchitecturePlugin{
+		document.Plugins = append(document.Plugins, architecturePlugin{
 			Name: string(plugin.Name), Dependencies: dependencies,
 			Host: plugin.Host, Starts: plugin.Starts, Stops: plugin.Stops,
 		})
 	}
 	for _, resource := range description.Resources {
-		document.Resources = append(document.Resources, ArchitectureResource{
+		document.Resources = append(document.Resources, architectureResource{
 			Type: resource.Type.String(), Owner: string(resource.Owner),
 		})
 	}
@@ -177,20 +177,20 @@ func describe(description kernel.ArchitectureDescription) ArchitectureResponse {
 		for _, contributor := range port.Contributors {
 			contributors = append(contributors, string(contributor))
 		}
-		document.Ports = append(document.Ports, ArchitecturePort{
+		document.Ports = append(document.Ports, architecturePort{
 			Interface: port.Interface.String(), Port: string(port.Port),
 			Collects: port.Collects, Contributors: contributors,
 		})
 	}
 	for _, command := range description.Commands {
-		document.Commands = append(document.Commands, ArchitectureCommand{
+		document.Commands = append(document.Commands, architectureCommand{
 			Type: command.Type.String(), Owner: string(command.Owner),
 			Reads: typeNames(command.Reads), Writes: typeNames(command.Writes),
 			Uses: typeNames(command.Uses),
 		})
 	}
 	for _, subscription := range description.Subscriptions {
-		document.Subscriptions = append(document.Subscriptions, ArchitectureSubscription{
+		document.Subscriptions = append(document.Subscriptions, architectureSubscription{
 			Event: subscription.Event.String(), Type: subscription.Type.String(),
 			Owner: string(subscription.Owner), Phase: subscription.Phase,
 			DependsOn: typeNames(subscription.DependsOn),

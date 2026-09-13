@@ -22,10 +22,11 @@ import (
 // The rules, as a failure names them. The instructions file states the same
 // rules in prose; change both together.
 const (
-	ruleImpl      = "nothing in cog imports an …impl package, except from _test.go files"
-	ruleExtension = "nothing in cog imports an extensions/* directory that is not a Port, except from _test.go files"
-	rulePlugin    = "contract roots and slots/* declare no type that implements kernel.Plugin"
-	ruleNoTier    = "every package in cog belongs to a tier in architecture.instructions.md"
+	ruleImpl        = "nothing in cog imports an …impl package, except from _test.go files"
+	ruleExtension   = "nothing in cog imports an extensions/* directory that is not a Port, except from _test.go files"
+	rulePlugin      = "contract roots and slots/* declare no type that implements kernel.Plugin"
+	ruleNoTier      = "every package in cog belongs to a tier in architecture.instructions.md"
+	ruleImplExports = "an …impl exports only New() kernel.Plugin, Config, DefaultConfig() Config and Err… types"
 
 	ruleKernel    = "kernel imports nothing else in cog"
 	ruleLib       = "libs/* import only libs and kernel"
@@ -250,6 +251,9 @@ func violationsIn(dir string) ([]violation, error) {
 		if from.tier == tierRoot || from.tier == tierSlot {
 			violations = append(violations, pluginViolations(pkg, rel, within)...)
 		}
+		if from.tier == tierImpl {
+			violations = append(violations, exportViolations(pkg, rel, module.Path+"/kernel", within)...)
+		}
 	}
 	slices.SortFunc(violations, func(a, b violation) int {
 		return cmp.Or(strings.Compare(a.file, b.file), cmp.Compare(a.line, b.line), strings.Compare(a.key, b.key))
@@ -325,6 +329,58 @@ func pluginViolations(pkg *packages.Package, rel string, within func(string) str
 				rule: rulePlugin,
 			})
 		}
+	}
+	return violations
+}
+
+// exportViolations finds every exported package-scope name of an …impl that the
+// rule does not allow: anything but New taking nothing and returning exactly
+// kernel.Plugin, the type Config, DefaultConfig taking nothing and returning
+// Config, and types and vars named Err…. Methods are not package-scope names,
+// so Config's With… methods pass, and _test.go files are not loaded, so test
+// exports pass too.
+func exportViolations(pkg *packages.Package, rel, kernelPath string, within func(string) string) []violation {
+	var violations []violation
+	scope := pkg.Types.Scope()
+	returnsOnly := func(object types.Object, want func(types.Type) bool) bool {
+		function, ok := object.(*types.Func)
+		if !ok {
+			return false
+		}
+		signature := function.Type().(*types.Signature)
+		return signature.Params().Len() == 0 && signature.Results().Len() == 1 &&
+			want(signature.Results().At(0).Type())
+	}
+	isPlugin := func(t types.Type) bool {
+		named, ok := types.Unalias(t).(*types.Named)
+		return ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == kernelPath &&
+			named.Obj().Name() == "Plugin"
+	}
+	isConfig := func(t types.Type) bool {
+		config, ok := scope.Lookup("Config").(*types.TypeName)
+		return ok && types.Identical(t, config.Type())
+	}
+	for _, name := range scope.Names() {
+		object := scope.Lookup(name)
+		if !object.Exported() {
+			continue
+		}
+		_, isType := object.(*types.TypeName)
+		_, isVar := object.(*types.Var)
+		switch {
+		case name == "New" && returnsOnly(object, isPlugin),
+			name == "Config" && isType,
+			name == "DefaultConfig" && returnsOnly(object, isConfig),
+			strings.HasPrefix(name, "Err") && (isType || isVar):
+			continue
+		}
+		at := pkg.Fset.Position(object.Pos())
+		violations = append(violations, violation{
+			file: within(at.Filename),
+			line: at.Line,
+			key:  rel + " exports " + name,
+			rule: ruleImplExports,
+		})
 	}
 	return violations
 }

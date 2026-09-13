@@ -54,9 +54,9 @@ import (
 // what the person attaching is looking at.
 const serverName = "cog"
 
-// Plugin is the broker. It owns the HTTP listener, the rendered tool set, and
+// plugin is the broker. It owns the HTTP listener, the rendered tool set, and
 // the executioner every capability body dispatches through.
-type Plugin struct {
+type plugin struct {
 	config      Config
 	providers   kernel.CollectedAdapters[mcp.Provider]
 	executioner kernel.Executioner
@@ -72,30 +72,28 @@ type Plugin struct {
 	closeOnce sync.Once
 }
 
-// New creates the broker. The optional Config overrides the transport
-// defaults; its zero value means all of them.
-func New(config ...Config) kernel.Plugin {
-	var resolved Config
-	if len(config) > 0 {
-		resolved = config[0]
-	}
-	return &Plugin{config: resolved.withDefaults()}
-}
+// New creates the broker. Configure its transport with a Config under mcp.Name.
+func New() kernel.Plugin { return &plugin{} }
 
 // Name reports the plugin name.
-func (p *Plugin) Name() kernel.PluginName { return mcp.Name }
+func (p *plugin) Name() kernel.PluginName { return mcp.Name }
 
 // Dependencies reports the plugins the broker requires; it has none, so an app
 // listing it never has to also list every provider it might serve.
-func (p *Plugin) Dependencies() []kernel.PluginName { return nil }
+func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 
-// Register collects every mcp.Provider Adapter and contributes the broker's
-// own. The broker owns no command, event or resource.
+// Register resolves the Config, collects every mcp.Provider Adapter and
+// contributes the broker's own. The broker owns no command, event or resource.
 //
 // Collection is uniform, so the broker's own Provider is bound among everyone
 // else's and its capability arrives through the same path. That looks like a
 // bug when read cold, and is not.
-func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
+func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
+	resolved, err := resolveConfig(config)
+	if err != nil {
+		return err
+	}
+	p.config = resolved
 	p.providers = registrar.CollectAdapters[mcp.Provider]()
 	registrar.ProvideAdapter[mcp.Provider](provider{})
 	return nil
@@ -127,7 +125,7 @@ func (provider) Capabilities() []mcp.Capability {
 // practice; subscribing to a host's init event would close it entirely, at the
 // cost of never serving a headless engine, which is exactly the shape a test or
 // a CI-driven agent composes.
-func (p *Plugin) Start(k kernel.Executioner) error {
+func (p *plugin) Start(k kernel.Executioner) error {
 	p.executioner = k
 
 	offers, err := collect(p.providers.Get())
@@ -182,13 +180,13 @@ func (p *Plugin) Start(k kernel.Executioner) error {
 // endpoint is the URL an agent's client attaches to. It reports the bound
 // address rather than the configured one, so a game that asked for port 0 still
 // prints something a person can paste.
-func (p *Plugin) endpoint() string {
+func (p *plugin) endpoint() string {
 	return "http://" + p.listener.Addr().String() + p.config.Path
 }
 
 // Stop waits for the drain the cancellation watcher is already performing, then
 // closes the listener as a belt-and-braces second call.
-func (p *Plugin) Stop(kernel.Executioner) error {
+func (p *plugin) Stop(kernel.Executioner) error {
 	if p.drained == nil {
 		return nil
 	}
@@ -208,7 +206,7 @@ func (p *Plugin) Stop(kernel.Executioner) error {
 // order is reverse start order, so a dependency-less broker listed first stops
 // last. And app has no plugin, so nothing can declare a dependency on it to
 // force the ordering.
-func (p *Plugin) watch(engine context.Context) {
+func (p *plugin) watch(engine context.Context) {
 	defer close(p.drained)
 	select {
 	case <-engine.Done():
@@ -226,7 +224,7 @@ func (p *Plugin) watch(engine context.Context) {
 // time cancellation fires, so a call waiting for the next frame waits for a
 // frame that will never come. That is a second, independent reason every
 // blocking capability needs a deadline of its own.
-func (p *Plugin) close() {
+func (p *plugin) close() {
 	p.closeOnce.Do(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), p.config.Timeout)
 		defer cancel()

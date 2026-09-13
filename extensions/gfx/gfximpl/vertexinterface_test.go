@@ -180,7 +180,7 @@ func TestVertexInterfaceAcceptsAnEmptyLayout(t *testing.T) {
 // is under test is which error path a mismatch takes and how often it is taken.
 func pipelineErrFrames(t *testing.T, backend *fakeBackend, mesh gfx.MeshDescr, frames int) []error {
 	t.Helper()
-	p := New()
+	p := newPlugin()
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})

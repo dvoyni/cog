@@ -18,12 +18,13 @@ schema library appears in any other package's import graph.
 - Name: `mcp.Name` (`"mcpserver"`), declared in the contract root. The plugin
   kept the name it had as the `mcpserver` package, so its tool is still
   `mcpserver_architecture`.
-- Constructor: `mcpimpl.New(cfg ...Config) kernel.Plugin`
+- Constructor: `mcpimpl.New() kernel.Plugin`
 - Port: collects `mcp.Provider` Adapters, and contributes its own
 - Plugin dependencies: **none**
 - Go package dependencies: `kernel`, `mcp`,
   `github.com/modelcontextprotocol/go-sdk`, `github.com/google/jsonschema-go`
-- Configuration: the optional `Config` passed to `New`
+- Configuration: an optional `Config` under `mcp.Name` in `kernel.New`'s config
+  map
 
 Declaring no dependencies is what makes this an extension point: an app
 composes exactly the providers it has and the broker serves exactly what it
@@ -55,7 +56,14 @@ type Config struct {
 }
 ```
 
-The zero value means all defaults. `127.0.0.1` is spelled literally, never
+A zero field takes its default, and no value at all means every default; a
+value that is not a `Config` fails registration.
+
+```go
+kernel.New(map[kernel.PluginName]any{mcp.Name: mcpimpl.Config{Addr: "127.0.0.1:7655"}})
+```
+
+`127.0.0.1` is spelled literally, never
 `localhost`: the IPv4/IPv6 mismatch is the classic failure here. The port is
 arbitrary within a band — below the OS ephemeral range and clear of common dev
 ports — and what matters is that it is stable across runs, so a game can commit

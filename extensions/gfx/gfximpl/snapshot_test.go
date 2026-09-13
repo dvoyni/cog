@@ -70,10 +70,10 @@ func (f *flushPlugin) on(record func(*gfx.OpQueue)) {
 // runSnapshot calls the capability body on its own goroutine and drives ticks
 // until it answers, recording what the test asked for into each one. That is
 // what an agent's call looks like from the engine's side.
-func (r *captureRig) runSnapshot(request FrameRequest, record func(*gfx.OpQueue)) (FrameResponse, error) {
+func (r *captureRig) runSnapshot(request frameSnapshotRequest, record func(*gfx.OpQueue)) (frameSnapshotResponse, error) {
 	r.t.Helper()
 	type answer struct {
-		response FrameResponse
+		response frameSnapshotResponse
 		err      error
 	}
 	done := make(chan answer, 1)
@@ -115,7 +115,7 @@ func twoPasses(q *gfx.OpQueue) {
 func TestAFrameSnapshotReportsPassesInRunOrderWithTheirCounts(t *testing.T) {
 	rig := newCaptureRig(t)
 
-	response, err := rig.runSnapshot(FrameRequest{}, twoPasses)
+	response, err := rig.runSnapshot(frameSnapshotRequest{}, twoPasses)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -173,11 +173,11 @@ func TestAFrameSnapshotReportsPassesInRunOrderWithTheirCounts(t *testing.T) {
 func TestAFilteredSnapshotKeepsSourceIndicesAndNamesWhatItDropped(t *testing.T) {
 	rig := newCaptureRig(t)
 
-	whole, err := rig.runSnapshot(FrameRequest{}, twoPasses)
+	whole, err := rig.runSnapshot(frameSnapshotRequest{}, twoPasses)
 	if err != nil {
 		t.Fatalf("unfiltered snapshot: %v", err)
 	}
-	filtered, err := rig.runSnapshot(FrameRequest{Pass: "world"}, twoPasses)
+	filtered, err := rig.runSnapshot(frameSnapshotRequest{Pass: "world"}, twoPasses)
 	if err != nil {
 		t.Fatalf("filtered snapshot: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 		q.ReleaseTexture(q.BakeTexture(8, 8, gfx.FormatRGBA8Srgb, make([]byte, 256), true, true))
 	})
 
-	response, err := rig.runSnapshot(FrameRequest{}, func(q *gfx.OpQueue) {
+	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *gfx.OpQueue) {
 		q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Label: "screen"})
 		// An inline texture is baked into the frame queue, which is the other
 		// place resource traffic comes from.
@@ -334,7 +334,7 @@ func TestASecondFrameSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 		t.Fatalf("first arm: %v", err)
 	}
 
-	_, err := callFrame(rig.k, FrameRequest{})
+	_, err := callFrame(rig.k, frameSnapshotRequest{})
 	var refusal mcp.Unavailable
 	if !errors.As(err, &refusal) {
 		t.Fatalf("a second snapshot answered %v, want words an agent can act on", err)
@@ -365,7 +365,7 @@ func TestAFrameSnapshotUnderPausePerformsOneStepAndSaysSo(t *testing.T) {
 	frozen.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Label: "frozen"})
 	drawInto(frozen)
 
-	response, err := callFrame(rig.k, FrameRequest{})
+	response, err := callFrame(rig.k, frameSnapshotRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestAFrameSnapshotJoiningAPendingStepSaysThatToo(t *testing.T) {
 	frozen := recordRaw(t, rig.k)
 	frozen.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Label: "shared"})
 
-	response, err := callFrame(rig.k, FrameRequest{})
+	response, err := callFrame(rig.k, frameSnapshotRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -426,7 +426,7 @@ func TestAFrameSnapshotNamesTheTickItDescribes(t *testing.T) {
 	frozen := recordRaw(t, rig.k)
 	frozen.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Label: "shared"})
 
-	response, err := callFrame(rig.k, FrameRequest{})
+	response, err := callFrame(rig.k, frameSnapshotRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -440,7 +440,7 @@ func TestAFrameSnapshotIsWrittenToThePathTheAgentNames(t *testing.T) {
 	rig := newCaptureRig(t)
 	path := filepath.Join(t.TempDir(), "nested", "frame.json")
 
-	response, err := rig.runSnapshot(FrameRequest{Path: path}, twoPasses)
+	response, err := rig.runSnapshot(frameSnapshotRequest{Path: path}, twoPasses)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -461,7 +461,7 @@ func TestAFrameSnapshotIsWrittenToThePathTheAgentNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the written snapshot: %v", err)
 	}
-	var written FrameResponse
+	var written frameSnapshotResponse
 	if err := json.Unmarshal(document, &written); err != nil {
 		t.Fatalf("the written snapshot is not JSON: %v", err)
 	}
@@ -480,7 +480,7 @@ func TestAFrameSnapshotRefusesAPathItCannotHonour(t *testing.T) {
 		{"wrong extension", filepath.Join(t.TempDir(), "frame.txt"), ".json"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := callFrame(rig.k, FrameRequest{Path: test.path})
+			_, err := callFrame(rig.k, frameSnapshotRequest{Path: test.path})
 			var refusal mcp.Unavailable
 			if !errors.As(err, &refusal) {
 				t.Fatalf("answered %v, want words an agent can act on", err)
@@ -494,7 +494,7 @@ func TestAFrameSnapshotRefusesAPathItCannotHonour(t *testing.T) {
 
 func TestAFrameSnapshotIsOneFlatDocument(t *testing.T) {
 	rig := newCaptureRig(t)
-	response, err := rig.runSnapshot(FrameRequest{}, twoPasses)
+	response, err := rig.runSnapshot(frameSnapshotRequest{}, twoPasses)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -519,7 +519,7 @@ func TestAFrameSnapshotIsOneFlatDocument(t *testing.T) {
 
 func TestAFrameSnapshotNamesDrawsThatBelongToNoPass(t *testing.T) {
 	rig := newCaptureRig(t)
-	response, err := rig.runSnapshot(FrameRequest{}, func(q *gfx.OpQueue) {
+	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *gfx.OpQueue) {
 		// A draw recorded before any pass is dropped by the renderer and
 		// reported as ErrDrawWithoutPass. It is also one of the reasons a
 		// frame is black, so the snapshot says it rather than counting to
@@ -555,7 +555,7 @@ func TestAFrameSnapshotSeesWhatALateRecorderFlushedIntoTheQueue(t *testing.T) {
 	})
 	t.Cleanup(func() { rig.flush.on(nil) })
 
-	response, err := rig.runSnapshot(FrameRequest{}, func(q *gfx.OpQueue) {
+	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *gfx.OpQueue) {
 		q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Order: 10, Label: "world"})
 		drawInto(q)
 	})
@@ -620,7 +620,7 @@ func TestTheNewAccessorsAnswerOutsideTheAgentPath(t *testing.T) {
 
 func TestAFrameSnapshotDescribesAPassDrawingSomewhereOtherThanTheScreen(t *testing.T) {
 	rig := newCaptureRig(t)
-	response, err := rig.runSnapshot(FrameRequest{}, func(q *gfx.OpQueue) {
+	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *gfx.OpQueue) {
 		target, _ := q.TemporaryTarget(128, 64, gfx.FormatRGBA8)
 		q.Pass(gfx.PassDescr{Target: target, Depth: gfx.DepthNone(), Label: "offscreen", Load: gfx.LoadClear})
 		drawInto(q)

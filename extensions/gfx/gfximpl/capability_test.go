@@ -7,12 +7,12 @@ import (
 // callCapture and callFrame call gfx's two capabilities the way the broker
 // does: found by name among the ones gfx's Provider offers, and invoked with a
 // pointer to the request.
-func callCapture(k kernel.Executioner, request CaptureRequest) (CaptureResponse, error) {
-	return invokeCapability[CaptureResponse](k, "capture", &request)
+func callCapture(k kernel.Executioner, request captureScreenRequest) (captureScreenResponse, error) {
+	return invokeCapability[captureScreenResponse](k, "capture", &request)
 }
 
-func callFrame(k kernel.Executioner, request FrameRequest) (FrameResponse, error) {
-	return invokeCapability[FrameResponse](k, "frame", &request)
+func callFrame(k kernel.Executioner, request frameSnapshotRequest) (frameSnapshotResponse, error) {
+	return invokeCapability[frameSnapshotResponse](k, "frame", &request)
 }
 
 func invokeCapability[TResponse any](k kernel.Executioner, name string, request any) (TResponse, error) {

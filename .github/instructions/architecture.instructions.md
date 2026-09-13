@@ -29,11 +29,17 @@ A Bundle and a Port share one shape:
   may act on a `*kernel.Registrar` it is handed, and it declares no type that
   implements `kernel.Plugin`.
 - **`Ximpl`** / **`Pimpl`**: the unexported Plugin, its handlers, and any
-  Adapter it contributes. It exports `func New() kernel.Plugin`, plus `Config`
-  when the Plugin has real configuration (keyed by the root's `Name`; a zero
-  field takes its default), and nothing else. The Bundles are the worked
-  examples; `gfximpl`, `storageimpl` and `mcpimpl` still export their Plugin
-  type from before this settled.
+  Adapter it contributes. It exports only:
+  - `func New() kernel.Plugin`, taking no arguments;
+  - optionally `Config`, a type or an alias of an `internal/` type, with any
+    methods (`WithReadFS`), read from the config map under the root's `Name`,
+    a zero field taking its default;
+  - optionally `func DefaultConfig() Config`;
+  - optionally `Err…` types for its configuration and startup errors.
+
+  Nothing else: no Plugin type, no capability request or response types, no
+  constants. A capability's wire schema is its only public contract.
+  `canvasimpl` and `storageimpl` are the worked examples.
 - **`internal/…`**: code the root and the `…impl` share, such as the consume
   side of a Resource queue. A root with nothing to hide has none (ecsscene,
   mcp).
@@ -122,7 +128,8 @@ Inside cog, `kernel/archtest` and `docs/research/**` are outside the tiers.
 ## The Tier Test
 
 `go test ./kernel/archtest` checks every cog-internal import edge in every Go file,
-whatever its build tags, and every contract root and slot for a Plugin type. A
+whatever its build tags, every contract root and slot for a Plugin type, and
+every `…impl` for an export the rule above does not allow. A
 failure names the file, the edge and the rule it breaks, and every violation
 fails the test: fix the code to fit the rules. A change to the rules themselves
 changes this file and `kernel/archtest/tiers_test.go` together.

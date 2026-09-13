@@ -81,9 +81,9 @@ generality is right for `gfx` — but nothing lists textures to an agent and
 ### The request
 
 ```go
-// CaptureRequest asks for one or more screenshots, written to files the agent
+// captureScreenRequest asks for one or more screenshots, written to files the agent
 // names.
-type CaptureRequest struct {
+type captureScreenRequest struct {
 	Path     string `json:"path"`               // absolute, ending in .png
 	Amount   int    `json:"amount,omitempty"`   // stills, default 1, max 60
 	Interval int    `json:"interval,omitempty"` // ticks between them, default 1
@@ -138,7 +138,7 @@ complaint. A write failure *after* a successful capture — disk full, permissio
 ### The response
 
 ```go
-type CaptureResponse struct {
+type captureScreenResponse struct {
 	Path         string  `json:"path"`         // absolute, as written
 	Indices      []int   `json:"indices"`      // ordinals actually written
 	PixelWidth   int     `json:"pixelWidth"`
@@ -166,7 +166,7 @@ between frames 12 and 60*.
 **The two sizes earn their place for a different reason: the image is
 framebuffer pixels and `input.Pos` is window units.** `gfx.Viewport` carries
 three sizes — logical world, device-independent window, physical framebuffer
-(`extensions/gfx/viewportcontract.go`) — and on any HiDPI display what the agent *sees* and
+(`extensions/gfx/resources.go`) — and on any HiDPI display what the agent *sees* and
 where it can *click* differ by the scale factor. Together these two are the
 conversion `input_send` needs.
 
@@ -485,7 +485,9 @@ The readback and arming halves are in
 
 - A `provider` value whose `Capabilities()` returns the two capabilities above,
   contributed with `ProvideAdapter[mcp.Provider]` in `Register`.
-- `CaptureRequest`/`CaptureResponse`, `FrameRequest`/`FrameResponse`.
+- `captureScreenRequest`/`captureScreenResponse`,
+  `frameSnapshotRequest`/`frameSnapshotResponse`, unexported: the wire schema
+  is the contract.
 - The two `Func` bodies: validate, dispatch the arm, wait on the channel with
   the capability's own deadline, encode and write on this goroutine.
 - Both description strings, kept beside the types and reproduced in this

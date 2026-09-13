@@ -45,7 +45,7 @@ root. See [`architecture.instructions.md`](../../.github/instructions/architectu
 ## Plugin
 
 - Name: `gfx.Name` (`"gfx"`)
-- Constructor: `gfximpl.New() *gfximpl.Plugin`
+- Constructor: `gfximpl.New() kernel.Plugin`
 - Plugin dependency: `storage`
 - Requires: exactly one `gfx.Backend` Adapter
 - Go package dependencies: `app`, `kernel`, `mcp`, `storage`, `x/image`

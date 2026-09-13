@@ -56,25 +56,26 @@ const captureDescription = "Take a screenshot of what the game is drawing and wr
 	"While the game is paused a single capture costs no tick and two captures are identical; " +
 	"`amount` above 1 is refused, because there would be nothing new to photograph."
 
-// CaptureRequest asks for one or more screenshots, written to files the agent
-// names. There is no default directory and no fallback: a default is a guess
-// at a directory the agent may not be able to see, and the agent already holds
-// an unrestricted write tool, so naming the path grants it nothing it did not
-// have. What it buys is that the game's working directory and the agent's need
-// not coincide, and that files get meaningful names.
-type CaptureRequest struct {
+// captureScreenRequest asks for one or more screenshots, written to files the
+// agent names. There is no default directory and no fallback: a default is a
+// guess at a directory the agent may not be able to see, and the agent already
+// holds an unrestricted write tool, so naming the path grants it nothing it did
+// not have. What it buys is that the game's working directory and the agent's
+// need not coincide, and that files get meaningful names.
+type captureScreenRequest struct {
 	Path     string `json:"path" jsonschema:"absolute path ending in .png; put %04d in it for a burst"`
 	Amount   int    `json:"amount,omitempty" jsonschema:"how many stills to take; default 1, maximum 60"`
 	Interval int    `json:"interval,omitempty" jsonschema:"ticks between stills; default 1"`
 }
 
-// CaptureResponse reports what was written and how to read a point off it.
+// captureScreenResponse reports what was written and how to read a point off
+// it.
 //
 // There is no frame number, because cog has none to give and inventing a
 // public one for a debug response is the wrong direction; no timestamp and no
 // format, because the format is always PNG; and no account of what was
 // captured, because it is always the screen.
-type CaptureResponse struct {
+type captureScreenResponse struct {
 	// Path is the file with the lowest ordinal actually written, so it always
 	// names a file that exists. The rest follow the template that was asked
 	// for, at the ordinals in Indices.
@@ -127,25 +128,25 @@ func (provider) Capabilities() []mcp.Capability {
 // It is a package function rather than a method to keep the capability-body
 // rule visible at the call site: the plugin is one pointer away and the body
 // still reaches gfx only by dispatch.
-func captureScreen(k kernel.Executioner, request CaptureRequest) (CaptureResponse, error) {
+func captureScreen(k kernel.Executioner, request captureScreenRequest) (captureScreenResponse, error) {
 	amount, interval := max(request.Amount, 1), max(request.Interval, 1)
 	// Every check, the numbering verb included, happens before a frame is
 	// spent, so a typo costs microseconds rather than three frames and a
 	// burst is refused whole or armed whole.
 	numbered, err := validateCapturePath(request.Path, amount)
 	if err != nil {
-		return CaptureResponse{}, err
+		return captureScreenResponse{}, err
 	}
 	if err := validateCaptureSpan(amount, interval); err != nil {
-		return CaptureResponse{}, err
+		return captureScreenResponse{}, err
 	}
 	paused := app.Paused(k)
 	if amount > 1 && paused {
-		return CaptureResponse{}, mcp.Unavailable{Reason: "the game is paused, so a burst would " +
+		return captureScreenResponse{}, mcp.Unavailable{Reason: "the game is paused, so a burst would " +
 			"write identical files; resume it, or ask for a single capture"}
 	}
 	if err := os.MkdirAll(filepath.Dir(request.Path), 0o755); err != nil {
-		return CaptureResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+		return captureScreenResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
 			"the directory for %s could not be created: %v", request.Path, err)}
 	}
 
@@ -153,7 +154,7 @@ func captureScreen(k kernel.Executioner, request CaptureRequest) (CaptureRespons
 		Target: gfx.GpuCaptureDesc{Screen: true}, Amount: amount, Interval: interval, Paused: paused,
 	})
 	if err != nil {
-		return CaptureResponse{}, captureRefusal(err, amount, interval)
+		return captureScreenResponse{}, captureRefusal(err, amount, interval)
 	}
 	return collectCapture(k, armed, request.Path, numbered, amount, interval)
 }
@@ -164,11 +165,11 @@ func captureScreen(k kernel.Executioner, request CaptureRequest) (CaptureRespons
 func collectCapture(
 	k kernel.Executioner, armed gfx.ArmCaptureResponse,
 	template string, numbered bool, amount, interval int,
-) (CaptureResponse, error) {
+) (captureScreenResponse, error) {
 	deadline := time.NewTimer(captureFloorDeadline + time.Duration(amount*interval)*captureTick)
 	defer deadline.Stop()
 
-	response := CaptureResponse{
+	response := captureScreenResponse{
 		WindowWidth: armed.Viewport.WindowWidth, WindowHeight: armed.Viewport.WindowHeight,
 	}
 	var refused error
@@ -184,7 +185,7 @@ func collectCapture(
 					path = fmt.Sprintf(template, ordinal)
 				}
 				if err := writeCapturePNG(path, capture); err != nil {
-					return CaptureResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+					return captureScreenResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
 						"the capture could not be written to %s: %v", path, err)}
 				}
 				if ordinal == 0 {
@@ -201,7 +202,7 @@ func collectCapture(
 		break
 	}
 	if len(response.Indices) == 0 {
-		return CaptureResponse{}, captureRefusal(refused, amount, interval)
+		return captureScreenResponse{}, captureRefusal(refused, amount, interval)
 	}
 	return response, nil
 }
@@ -340,8 +341,8 @@ const frameDescription = "What the renderer was told to do for one frame: every 
 	"that one step; they paired only if all three report the same `tick`. Take `gfx_capture` " +
 	"last, because it costs no tick and so shows whatever that step produced."
 
-// FrameRequest asks what the renderer was told to do for one tick.
-type FrameRequest struct {
+// frameSnapshotRequest asks what the renderer was told to do for one tick.
+type frameSnapshotRequest struct {
 	// Path is optional, per the family's delivery contract: omit it and the
 	// JSON comes back inline, supply it and a greppable file is written and
 	// the path returned. A large dump becomes a file either way - an oversized
@@ -353,12 +354,13 @@ type FrameRequest struct {
 	Pass string `json:"pass,omitempty" jsonschema:"keep only passes with exactly this label; omit for every pass"`
 }
 
-// FrameResponse is one tick's renderer declarations, the three coordinate
-// sizes they are to be read against, and whether producing them cost a step.
+// frameSnapshotResponse is one tick's renderer declarations, the three
+// coordinate sizes they are to be read against, and whether producing them cost
+// a step.
 //
 // It is flat: FrameView and SnapshotView are embedded rather than nested, so
 // an agent reads one object rather than reaching through two.
-type FrameResponse struct {
+type frameSnapshotResponse struct {
 	// Path is the file the JSON was written to, when one was asked for. The
 	// file holds the whole document; what comes back inline then carries the
 	// counts and the viewport but not the two arrays, so the reply says what
@@ -374,15 +376,15 @@ type FrameResponse struct {
 //
 // It is a package function rather than a method for the reason captureScreen
 // is: the capability-body rule stays visible at the call site.
-func frameSnapshot(k kernel.Executioner, request FrameRequest) (FrameResponse, error) {
+func frameSnapshot(k kernel.Executioner, request frameSnapshotRequest) (frameSnapshotResponse, error) {
 	// Every check happens before anything is armed, so a typo costs
 	// microseconds rather than a tick.
 	if err := validateSnapshotPath(request.Path); err != nil {
-		return FrameResponse{}, err
+		return frameSnapshotResponse{}, err
 	}
 	if request.Path != "" {
 		if err := os.MkdirAll(filepath.Dir(request.Path), 0o755); err != nil {
-			return FrameResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+			return frameSnapshotResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
 				"the directory for %s could not be created: %v", request.Path, err)}
 		}
 	}
@@ -390,15 +392,15 @@ func frameSnapshot(k kernel.Executioner, request FrameRequest) (FrameResponse, e
 
 	armed, err := k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{Pass: request.Pass})
 	if err != nil {
-		return FrameResponse{}, frameRefusal(err)
+		return frameSnapshotResponse{}, frameRefusal(err)
 	}
-	response := FrameResponse{SnapshotView: gfx.SnapshotViewOf(armed.Viewport)}
+	response := frameSnapshotResponse{SnapshotView: gfx.SnapshotViewOf(armed.Viewport)}
 	// The arm is placed first so that the tick the step produces is one that
 	// began after it. Joining a step another arm already raised is what makes
 	// three snapshots armed together describe one tick instead of three.
 	if paused {
 		if response.Stepped, response.Joined, err = stepForSnapshot(k, snapshotWait(k)); err != nil {
-			return FrameResponse{}, err
+			return frameSnapshotResponse{}, err
 		}
 	}
 
@@ -407,19 +409,19 @@ func frameSnapshot(k kernel.Executioner, request FrameRequest) (FrameResponse, e
 	select {
 	case snapshot := <-armed.Done:
 		if snapshot.Err != nil {
-			return FrameResponse{}, frameRefusal(snapshot.Err)
+			return frameSnapshotResponse{}, frameRefusal(snapshot.Err)
 		}
 		response.FrameView, response.Tick = snapshot.Frame, snapshot.Tick
 	case <-deadline.C:
-		return FrameResponse{}, frameRefusal(nil)
+		return frameSnapshotResponse{}, frameRefusal(nil)
 	case <-k.Context().Done():
-		return FrameResponse{}, frameRefusal(k.Context().Err())
+		return frameSnapshotResponse{}, frameRefusal(k.Context().Err())
 	}
 
 	if request.Path != "" {
 		response.Path = request.Path
 		if err := writeSnapshotJSON(request.Path, response); err != nil {
-			return FrameResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+			return frameSnapshotResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
 				"the snapshot could not be written to %s: %v", request.Path, err)}
 		}
 		response.Passes, response.ResourceOps = nil, nil
@@ -462,7 +464,7 @@ func stepForSnapshot(k kernel.Executioner, wait time.Duration) (stepped, joined 
 // point of a file is that a person or a grep can read it. An existing file is
 // overwritten without complaint: re-writing the same name is the
 // iterate-and-look loop.
-func writeSnapshotJSON(path string, response FrameResponse) error {
+func writeSnapshotJSON(path string, response frameSnapshotResponse) error {
 	document, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		return err

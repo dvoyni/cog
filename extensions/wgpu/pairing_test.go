@@ -179,6 +179,13 @@ func (r *pairingRig) time(request TimeRequest) TimeResponse {
 	return answer.(TimeResponse)
 }
 
+// request is a pointer to a zero request for one capability, built from its
+// RequestType. The request types behind gfx, canvas and ui are unexported, so
+// the rig reaches them the way the broker does: through the capability.
+func (r *pairingRig) request(name string) reflect.Value {
+	return reflect.New(r.caps[name].RequestType())
+}
+
 // invoke calls one capability on its own goroutine and hands back the wait,
 // which is what three parallel tool calls look like from the engine's side.
 func (r *pairingRig) invoke(name string, request any) <-chan pairingAnswer {
@@ -199,7 +206,7 @@ type pairingAnswer struct {
 // snapshotView pulls out the block every snapshot response embeds. The embedded
 // field is the point: one view, three capabilities, so an agent reads one tick
 // number whichever tool answered. It is read by field rather than by type
-// because canvasimpl and uiimpl keep their response types unexported.
+// because gfximpl, canvasimpl and uiimpl keep their response types unexported.
 func (a pairingAnswer) snapshotView(t *testing.T) gfx.SnapshotView {
 	t.Helper()
 	response := reflect.ValueOf(a.response)
@@ -218,9 +225,9 @@ func (a pairingAnswer) snapshotView(t *testing.T) gfx.SnapshotView {
 // each need a tick, armed together.
 func (r *pairingRig) snapshotArms() []<-chan pairingAnswer {
 	return []<-chan pairingAnswer{
-		r.invoke("gfx_frame", &gfximpl.FrameRequest{}),
-		r.invoke("canvas_draws", reflect.New(r.caps["canvas_draws"].RequestType()).Interface()),
-		r.invoke("ui_layout", reflect.New(r.caps["ui_layout"].RequestType()).Interface()),
+		r.invoke("gfx_frame", r.request("gfx_frame").Interface()),
+		r.invoke("canvas_draws", r.request("canvas_draws").Interface()),
+		r.invoke("ui_layout", r.request("ui_layout").Interface()),
 	}
 }
 
@@ -367,9 +374,10 @@ func TestPairing_TheWholeRecipeDescribesOneTick(t *testing.T) {
 			t.Fatalf("round %d: the engine is at tick %d and the snapshots describe %d",
 				round, before.Tick, tick)
 		}
-		answer := <-rig.invoke("gfx_capture", &gfximpl.CaptureRequest{
-			Path: filepath.Join(directory, fmt.Sprintf("round-%02d.png", round)),
-		})
+		capture := rig.request("gfx_capture")
+		capture.Elem().FieldByName("Path").SetString(
+			filepath.Join(directory, fmt.Sprintf("round-%02d.png", round)))
+		answer := <-rig.invoke("gfx_capture", capture.Interface())
 		if answer.err != nil {
 			t.Fatalf("round %d: gfx_capture: %v", round, answer.err)
 		}

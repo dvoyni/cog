@@ -101,7 +101,7 @@ func TestACompositionWithoutABackendAdapterFails(t *testing.T) {
 	}).Handler(func(err error) bool {
 		reported = append(reported, err)
 		return true
-	}).WithPlugins(storageimpl.New(), permanentAdapter{}, New())
+	}).WithPlugins(storageimpl.New(), permanentAdapter{}, newPlugin())
 
 	var missing kernel.ErrMissingAdapter
 	if !errors.As(errors.Join(reported...), &missing) {
@@ -118,7 +118,7 @@ func TestACompositionWithoutABackendAdapterFails(t *testing.T) {
 // rate, and the first frame after the backend becomes ready renders.
 func TestAFrameBeforeTheBackendIsReadyIsSkipped(t *testing.T) {
 	var reported []error
-	k := newTestKernelWithErrors(t, New(), func(err error) { reported = append(reported, err) })
+	k := newTestKernelWithErrors(t, newPlugin(), func(err error) { reported = append(reported, err) })
 	backend := &fakeBackend{}
 
 	w := recordList(t, k)

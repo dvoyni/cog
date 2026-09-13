@@ -27,7 +27,7 @@ func TestDefaultLimitsAreTheBrowserFloor(t *testing.T) {
 }
 
 func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	layout := gfx.ShaderLayout{
@@ -94,7 +94,7 @@ func TestCheckWebLimitsMeasuresAgainstTheFloorNotTheDevice(t *testing.T) {
 }
 
 func TestBufferRangeParamBindsItsOwnSlice(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{layout: &gfx.ShaderLayout{
 		UniformSize: 64, UniformGroup: 0, UniformBinding: 0,
@@ -128,7 +128,7 @@ func TestBufferRangeParamBindsItsOwnSlice(t *testing.T) {
 }
 
 func TestFirstInstanceReachesTheDraw(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})

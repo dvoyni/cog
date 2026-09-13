@@ -55,13 +55,13 @@ func (archPlugin) Register(registrar *kernel.Registrar, _ any) error {
 	return nil
 }
 
-func describeEngine(t *testing.T, broker *Plugin, arguments string) ArchitectureResponse {
+func describeEngine(t *testing.T, broker *plugin, arguments string) architectureResponse {
 	t.Helper()
 	result := callTool(t, broker, provider{}.Capabilities()[0], arguments)
 	if result.IsError {
 		t.Fatalf("mcpserver_architecture refused: %s", resultText(t, result))
 	}
-	var document ArchitectureResponse
+	var document architectureResponse
 	if err := json.Unmarshal([]byte(resultText(t, result)), &document); err != nil {
 		t.Fatalf("decode the answer: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestArchitecture_ReportsTheResolvedLockClosure(t *testing.T) {
 		t.Fatalf("resource = %+v, want the type string as its address", document.Resources[0])
 	}
 
-	var outer ArchitectureCommand
+	var outer architectureCommand
 	for _, command := range document.Commands {
 		if command.Type == "mcpimpl.archOuterCmd" {
 			outer = command
@@ -123,7 +123,7 @@ func TestArchitecture_WritesAFileWhenGivenAPath(t *testing.T) {
 	runEngine(t, archPlugin{}, broker)
 
 	path := filepath.Join(t.TempDir(), "nested", "architecture.json")
-	arguments, err := json.Marshal(ArchitectureRequest{Path: path})
+	arguments, err := json.Marshal(architectureRequest{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestArchitecture_WritesAFileWhenGivenAPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the tool reported a path it did not write: %v", err)
 	}
-	var onDisk ArchitectureResponse
+	var onDisk architectureResponse
 	if err := json.Unmarshal(written, &onDisk); err != nil {
 		t.Fatalf("the written file is not the document: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestArchitecture_RejectsAPathItCannotHonour(t *testing.T) {
 	broker := testBroker()
 	reported := runEngine(t, archPlugin{}, broker)
 
-	for name, request := range map[string]ArchitectureRequest{
+	for name, request := range map[string]architectureRequest{
 		"relative":        {Path: filepath.Join("relative", "architecture.json")},
 		"wrong extension": {Path: filepath.Join(t.TempDir(), "architecture.txt")},
 	} {

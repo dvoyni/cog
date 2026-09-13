@@ -14,8 +14,8 @@ import (
 	"github.com/dvoyni/cog/kernel"
 )
 
-// Plugin registers the FileSystem and Values resources and storage commands.
-type Plugin struct {
+// plugin registers the FileSystem and Values resources and storage commands.
+type plugin struct {
 	// permanent is the bound PermanentFS Adapter. The resources read it through
 	// its Get, which is valid from Start onwards.
 	permanent kernel.RequiredAdapter[storage.PermanentFS]
@@ -23,18 +23,18 @@ type Plugin struct {
 
 // New creates a storage plugin. Its Config arrives through kernel.New's config
 // map under storage.Name.
-func New() *Plugin { return &Plugin{} }
+func New() kernel.Plugin { return &plugin{} }
 
 // Name reports the plugin name.
-func (p *Plugin) Name() kernel.PluginName { return storage.Name }
+func (p *plugin) Name() kernel.PluginName { return storage.Name }
 
 // Dependencies reports the plugins storage requires; it has none. The Adapter
 // it requires is bound at composition and adds no dependency.
-func (p *Plugin) Dependencies() []kernel.PluginName { return nil }
+func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 
 // Register requires the PermanentFS Adapter, resolves the configuration and
 // registers the storage resources and commands.
-func (p *Plugin) Register(registrar *kernel.Registrar, config any) error {
+func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	p.permanent = registrar.RequireAdapter[storage.PermanentFS]()
 	cfg := DefaultConfig()
 	if config != nil {

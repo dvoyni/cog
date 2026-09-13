@@ -36,7 +36,7 @@ func bakedTextureFormats(backend *fakeBackend) []gfx.TextureFormat {
 
 func TestResourceTextureAlwaysBakesSrgb(t *testing.T) {
 	filesystem := fstest.MapFS{"normal.png": &fstest.MapFile{Data: testPNG(t)}}
-	p := New()
+	p := newPlugin()
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -56,7 +56,7 @@ func TestSameResourcePathBakesOnce(t *testing.T) {
 	filesystem := &countingFS{FS: fstest.MapFS{
 		"hero.png": &fstest.MapFile{Data: testPNG(t)},
 	}}
-	p := New()
+	p := newPlugin()
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -83,7 +83,7 @@ func TestSameResourcePathBakesOnce(t *testing.T) {
 // usage it never uses, and on some backends a wider usage costs a compression
 // format.
 func TestOnlyAllocateRenderTargetAsksForARenderableTexture(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -117,7 +117,7 @@ func TestOnlyAllocateRenderTargetAsksForARenderableTexture(t *testing.T) {
 // anything cached across frames (a canvas layer baked into a scene material, a
 // shadow map, a UI panel drawn once) needs this allocator.
 func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})

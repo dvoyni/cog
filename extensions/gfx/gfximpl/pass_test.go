@@ -15,7 +15,7 @@ import (
 // backend was asked to encode.
 func passFrame(t *testing.T, record func(*gfx.OpQueue)) (*fakeBackend, kernel.Executioner) {
 	t.Helper()
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -53,7 +53,7 @@ func TestAPassCarriesItsTargetAndClearToTheBackend(t *testing.T) {
 }
 
 func TestDrawsOutsideAnyPassAreDroppedAndReported(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	backend := &fakeBackend{}
@@ -171,7 +171,7 @@ func TestScreenPassesAreFollowedByOnePresentPass(t *testing.T) {
 }
 
 func TestAFrameThatNeverTouchesTheScreenDoesNotPresent(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -208,7 +208,7 @@ func TestAScreenPassThatIsDroppedDoesNotPresent(t *testing.T) {
 }
 
 func TestDrawSamplingItsOwnAttachmentIsRejected(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	backend := &fakeBackend{}
@@ -309,7 +309,7 @@ func TestALaterPassSamplesWhatAnEarlierPassRenderedIntoATemporaryTarget(t *testi
 		q.Draw(triangle(), testMaterial(gfx.TextureParam("MainTexture", texture)), gfx.MatParam("mvp", m.NewMat4()))
 	}
 
-	p := New()
+	p := newPlugin()
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -334,7 +334,7 @@ func TestALaterPassSamplesWhatAnEarlierPassRenderedIntoATemporaryTarget(t *testi
 func TestADrawStillCannotSampleTheTemporaryTargetItsOwnPassRendersInto(t *testing.T) {
 	// Handing the texture back is only safe because this guard survives it.
 	backend := &fakeBackend{}
-	p := New()
+	p := newPlugin()
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})

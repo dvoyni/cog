@@ -34,7 +34,7 @@ import (
 type captureRig struct {
 	t       *testing.T
 	k       kernel.Executioner
-	plugin  *Plugin
+	plugin  *plugin
 	backend *fakeBackend
 	clock   *timePlugin
 	gate    *gatePlugin
@@ -44,13 +44,13 @@ type captureRig struct {
 func newCaptureRig(t *testing.T) *captureRig {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	plugin, clock, gate, flush := New(), &timePlugin{}, &gatePlugin{}, &flushPlugin{}
+	renderer, clock, gate, flush := newPlugin(), &timePlugin{}, &gatePlugin{}, &flushPlugin{}
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storageimpl.DefaultConfig(),
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageimpl.New(), permanentAdapter{}, plugin, clock, gate, flush, testPlugin{})
+	}).WithPlugins(storageimpl.New(), permanentAdapter{}, renderer, clock, gate, flush, testPlugin{})
 	stopped := make(chan struct{})
 	go func() { engine.Run(ctx); close(stopped) }()
 	<-engine.Ready()
@@ -60,7 +60,7 @@ func newCaptureRig(t *testing.T) *captureRig {
 	})
 
 	rig := &captureRig{
-		t: t, k: engine.Executioner(), plugin: plugin,
+		t: t, k: engine.Executioner(), plugin: renderer,
 		backend: &fakeBackend{}, clock: clock, gate: gate, flush: flush,
 	}
 	rig.k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: rig.backend})
@@ -100,10 +100,10 @@ func (r *captureRig) frame(label string) {
 // runCapture calls the capability body on its own goroutine and drives frames
 // until it answers, which is what an agent's call looks like from the engine's
 // side.
-func (r *captureRig) runCapture(request CaptureRequest) (CaptureResponse, error) {
+func (r *captureRig) runCapture(request captureScreenRequest) (captureScreenResponse, error) {
 	r.t.Helper()
 	type answer struct {
-		response CaptureResponse
+		response captureScreenResponse
 		err      error
 	}
 	done := make(chan answer, 1)
@@ -229,7 +229,7 @@ func TestACaptureIsWrittenAsAPNGWithNoShear(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "shot.png")
 
-	response, err := rig.runCapture(CaptureRequest{Path: path})
+	response, err := rig.runCapture(captureScreenRequest{Path: path})
 	if err != nil {
 		t.Fatalf("capture: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestACaptureReportsThePixelSizeAndTheWindowSize(t *testing.T) {
 		return paddedCapture(64, 48, func(int, int) color.NRGBA { return color.NRGBA{A: 255} })
 	}
 
-	response, err := rig.runCapture(CaptureRequest{Path: filepath.Join(t.TempDir(), "sizes.png")})
+	response, err := rig.runCapture(captureScreenRequest{Path: filepath.Join(t.TempDir(), "sizes.png")})
 	if err != nil {
 		t.Fatalf("capture: %v", err)
 	}
@@ -365,13 +365,13 @@ func TestASecondCaptureWhileOneIsInFlightIsRefused(t *testing.T) {
 
 func TestACaptureAbandonedByShutdownArrivesOnItsChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	plugin := New()
+	renderer := newPlugin()
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storageimpl.DefaultConfig(),
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageimpl.New(), permanentAdapter{}, plugin, testPlugin{})
+	}).WithPlugins(storageimpl.New(), permanentAdapter{}, renderer, testPlugin{})
 	stopped := make(chan struct{})
 	go func() { engine.Run(ctx); close(stopped) }()
 	<-engine.Ready()
@@ -399,7 +399,7 @@ func TestABurstWritesNumberedStillsAndReportsTheOrdinals(t *testing.T) {
 	rig := newCaptureRig(t)
 	directory := t.TempDir()
 
-	response, err := rig.runCapture(CaptureRequest{
+	response, err := rig.runCapture(captureScreenRequest{
 		Path: filepath.Join(directory, "frame-%04d.png"), Amount: 3, Interval: 2,
 	})
 	if err != nil {
@@ -430,7 +430,7 @@ func TestABurstTruncatesRatherThanFailing(t *testing.T) {
 	}
 	directory := t.TempDir()
 
-	response, err := rig.runCapture(CaptureRequest{
+	response, err := rig.runCapture(captureScreenRequest{
 		Path: filepath.Join(directory, "burst-%04d.png"), Amount: 5,
 	})
 	if err != nil {
@@ -447,7 +447,7 @@ func TestACaptureThatWritesNothingIsAnError(t *testing.T) {
 		return gfx.GpuCapture{Err: gfx.ErrCaptureNoTarget{}}
 	}
 
-	_, err := rig.runCapture(CaptureRequest{Path: filepath.Join(t.TempDir(), "none.png")})
+	_, err := rig.runCapture(captureScreenRequest{Path: filepath.Join(t.TempDir(), "none.png")})
 	var unavailable mcp.Unavailable
 	if !errors.As(err, &unavailable) {
 		t.Fatalf("zero frames = %v, want words rather than a short success", err)
@@ -458,16 +458,16 @@ func TestThePathIsCheckedBeforeAFrameIsSpent(t *testing.T) {
 	absolute := t.TempDir()
 	cases := []struct {
 		name    string
-		request CaptureRequest
+		request captureScreenRequest
 	}{
-		{"empty", CaptureRequest{}},
-		{"relative", CaptureRequest{Path: filepath.Join("shots", "a.png")}},
-		{"not a png", CaptureRequest{Path: filepath.Join(absolute, "a.jpg")}},
-		{"wrong verb", CaptureRequest{Path: filepath.Join(absolute, "a-%s.png"), Amount: 2}},
-		{"two verbs", CaptureRequest{Path: filepath.Join(absolute, "a-%d-%d.png"), Amount: 2}},
-		{"burst with no verb", CaptureRequest{Path: filepath.Join(absolute, "a.png"), Amount: 2}},
-		{"too many stills", CaptureRequest{Path: filepath.Join(absolute, "a-%04d.png"), Amount: 61}},
-		{"too long a span", CaptureRequest{
+		{"empty", captureScreenRequest{}},
+		{"relative", captureScreenRequest{Path: filepath.Join("shots", "a.png")}},
+		{"not a png", captureScreenRequest{Path: filepath.Join(absolute, "a.jpg")}},
+		{"wrong verb", captureScreenRequest{Path: filepath.Join(absolute, "a-%s.png"), Amount: 2}},
+		{"two verbs", captureScreenRequest{Path: filepath.Join(absolute, "a-%d-%d.png"), Amount: 2}},
+		{"burst with no verb", captureScreenRequest{Path: filepath.Join(absolute, "a.png"), Amount: 2}},
+		{"too many stills", captureScreenRequest{Path: filepath.Join(absolute, "a-%04d.png"), Amount: 61}},
+		{"too long a span", captureScreenRequest{
 			Path: filepath.Join(absolute, "a-%04d.png"), Amount: 60, Interval: 20,
 		}},
 	}
@@ -502,8 +502,8 @@ func TestASingleCaptureUnderPauseCostsNoTick(t *testing.T) {
 	rig.backend.captureResult = pixels
 	directory := t.TempDir()
 
-	first := rig.pausedCapture(CaptureRequest{Path: filepath.Join(directory, "a.png")})
-	second := rig.pausedCapture(CaptureRequest{Path: filepath.Join(directory, "b.png")})
+	first := rig.pausedCapture(captureScreenRequest{Path: filepath.Join(directory, "a.png")})
+	second := rig.pausedCapture(captureScreenRequest{Path: filepath.Join(directory, "b.png")})
 	if !slices.Equal(first.Indices, []int{0}) || !slices.Equal(second.Indices, []int{0}) {
 		t.Fatalf("paused captures wrote %v and %v, want one still each", first.Indices, second.Indices)
 	}
@@ -523,10 +523,10 @@ func TestASingleCaptureUnderPauseCostsNoTick(t *testing.T) {
 // pausedCapture runs one capture while driving renders only, which is what a
 // paused engine does: no tick can begin, and the capture is served from the
 // next render.
-func (r *captureRig) pausedCapture(request CaptureRequest) CaptureResponse {
+func (r *captureRig) pausedCapture(request captureScreenRequest) captureScreenResponse {
 	r.t.Helper()
 	type answer struct {
-		response CaptureResponse
+		response captureScreenResponse
 		err      error
 	}
 	done := make(chan answer, 1)
@@ -555,7 +555,7 @@ func TestABurstUnderPauseIsRefusedInWords(t *testing.T) {
 	rig := newCaptureRig(t)
 	rig.clock.paused.Store(true)
 
-	_, err := callCapture(rig.k, CaptureRequest{
+	_, err := callCapture(rig.k, captureScreenRequest{
 		Path: filepath.Join(t.TempDir(), "burst-%04d.png"), Amount: 4,
 	})
 	var unavailable mcp.Unavailable

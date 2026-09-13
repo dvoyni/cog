@@ -44,7 +44,7 @@ func TestNamed3DStatesSpellOutTheirPasses(t *testing.T) {
 }
 
 func TestPipelineDescCarriesStateAndTargetFormats(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -70,7 +70,7 @@ func TestPipelineDescCarriesStateAndTargetFormats(t *testing.T) {
 }
 
 func TestPipelineCacheDistinguishesDepthState(t *testing.T) {
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})

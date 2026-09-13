@@ -9,7 +9,7 @@ import (
 )
 
 // presentCmdImpl swaps the recorded OpQueue into the ready slot (latest-wins).
-func (p *Plugin) presentCmdImpl() (kernel.Lock, kernel.Execute[gfx.PresentRequest, gfx.PresentResponse]) {
+func (p *plugin) presentCmdImpl() (kernel.Lock, kernel.Execute[gfx.PresentRequest, gfx.PresentResponse]) {
 	var write kernel.Write[*gfx.OpQueue]
 	var ready kernel.Write[*readyList]
 	return func(access kernel.ResourceAccess) {
@@ -22,7 +22,7 @@ func (p *Plugin) presentCmdImpl() (kernel.Lock, kernel.Execute[gfx.PresentReques
 }
 
 // acquireCmdImpl advances the internal read queue, reporting whether it moved.
-func (p *Plugin) acquireCmdImpl() (kernel.Lock, kernel.Execute[gfx.AcquireRequest, gfx.AcquireResponse]) {
+func (p *plugin) acquireCmdImpl() (kernel.Lock, kernel.Execute[gfx.AcquireRequest, gfx.AcquireResponse]) {
 	var read kernel.Write[*readList]
 	var ready kernel.Write[*readyList]
 	return func(access kernel.ResourceAccess) {
@@ -33,7 +33,7 @@ func (p *Plugin) acquireCmdImpl() (kernel.Lock, kernel.Execute[gfx.AcquireReques
 		}
 }
 
-func (p *Plugin) releaseCachedResourceCmdImpl() (kernel.Lock, kernel.Execute[gfx.ReleaseCachedResourceRequest, gfx.ReleaseCachedResourceResponse]) {
+func (p *plugin) releaseCachedResourceCmdImpl() (kernel.Lock, kernel.Execute[gfx.ReleaseCachedResourceRequest, gfx.ReleaseCachedResourceResponse]) {
 	var resources kernel.Write[*gfx.ResourceQueue]
 	return func(access kernel.ResourceAccess) {
 			resources = access.GetWrite[*gfx.ResourceQueue]()
@@ -43,7 +43,7 @@ func (p *Plugin) releaseCachedResourceCmdImpl() (kernel.Lock, kernel.Execute[gfx
 		}
 }
 
-func (p *Plugin) freeCachedResourcesCmdImpl() (kernel.Lock, kernel.Execute[gfx.FreeCachedResourcesRequest, gfx.FreeCachedResourcesResponse]) {
+func (p *plugin) freeCachedResourcesCmdImpl() (kernel.Lock, kernel.Execute[gfx.FreeCachedResourcesRequest, gfx.FreeCachedResourcesResponse]) {
 	var resources kernel.Write[*gfx.ResourceQueue]
 	return func(access kernel.ResourceAccess) {
 			resources = access.GetWrite[*gfx.ResourceQueue]()
@@ -57,7 +57,7 @@ func (p *Plugin) freeCachedResourcesCmdImpl() (kernel.Lock, kernel.Execute[gfx.F
 // the channel its stills arrive on, plus the window size the caller cannot
 // read for itself. The Viewport read is the only lock it needs: the capture
 // slot is plugin-owned and carries its own.
-func (p *Plugin) armCaptureCmdImpl() (kernel.Lock, kernel.Execute[gfx.ArmCaptureRequest, gfx.ArmCaptureResponse]) {
+func (p *plugin) armCaptureCmdImpl() (kernel.Lock, kernel.Execute[gfx.ArmCaptureRequest, gfx.ArmCaptureResponse]) {
 	var viewport kernel.Read[*gfx.Viewport]
 	return func(access kernel.ResourceAccess) {
 			viewport = access.GetRead[*gfx.Viewport]()
@@ -74,7 +74,7 @@ func (p *Plugin) armCaptureCmdImpl() (kernel.Lock, kernel.Execute[gfx.ArmCapture
 // the channel the result arrives on, plus the viewport the caller cannot read
 // for itself. The Viewport read is the only lock it needs: the snapshot slot
 // is plugin-owned and carries its own.
-func (p *Plugin) armFrameCmdImpl() (kernel.Lock, kernel.Execute[gfx.ArmFrameRequest, gfx.ArmFrameResponse]) {
+func (p *plugin) armFrameCmdImpl() (kernel.Lock, kernel.Execute[gfx.ArmFrameRequest, gfx.ArmFrameResponse]) {
 	var viewport kernel.Read[*gfx.Viewport]
 	return func(access kernel.ResourceAccess) {
 			viewport = access.GetRead[*gfx.Viewport]()

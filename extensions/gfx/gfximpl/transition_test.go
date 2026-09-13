@@ -14,7 +14,7 @@ import (
 // needs it.
 func transitionFrame(t *testing.T, record func(*gfx.OpQueue)) *fakeBackend {
 	t.Helper()
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -121,7 +121,7 @@ func TestADepthAttachmentSampledLaterGetsABarrier(t *testing.T) {
 	// write-then-read pair has to be found on the depth attachment too and not
 	// only on the colour one.
 	var shadow gfx.TextureDescr
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -181,7 +181,7 @@ func TestAnOrdinaryTextureIsNeverTransitioned(t *testing.T) {
 	// would declare RenderAttachment as its old usage, which it never was - and
 	// a layout transition naming the wrong old layout is undefined behaviour,
 	// not a wasted instruction.
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})

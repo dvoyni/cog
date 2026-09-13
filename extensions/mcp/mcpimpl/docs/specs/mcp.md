@@ -57,7 +57,7 @@ settle it.
 ```go
 package mcpimpl
 
-func New(cfg ...Config) kernel.Plugin
+func New() kernel.Plugin
 ```
 
 An ordinary plugin with **no dependencies**, one `Register` that collects every
@@ -98,6 +98,10 @@ type Config struct {
 	Timeout time.Duration // default 30s
 }
 ```
+
+It arrives the way every plugin's configuration does, through `kernel.New`'s
+config map under `mcp.Name`. A zero field takes its default, no value means all
+of them, and a value that is not a `Config` fails registration.
 
 Three fields, and the absences matter as much as the presences.
 
@@ -620,7 +624,7 @@ written for `extensions/mcpserver` and is updated to the paths and the collectio
 
 **`extensions/mcp/mcpimpl/plugin.go`**
 
-- `New(cfg ...Config) kernel.Plugin`; `Name() mcp.Name`; `Dependencies() nil`.
+- `New() kernel.Plugin`; `Name() mcp.Name`; `Dependencies() nil`.
 - `Register`: `CollectAdapters[mcp.Provider]()`, and contribute the broker's own
   Provider, returning `mcpserver_architecture`.
 - `Start`: read the bound providers, collect and validate capabilities, build
@@ -629,8 +633,8 @@ written for `extensions/mcpserver` and is updated to the paths and the collectio
 
 **`extensions/mcp/mcpimpl/config.go`**
 
-- `Config{Addr, Path, Timeout}` with the defaults above, and a `Config` zero
-  value that means "all defaults".
+- `Config{Addr, Path, Timeout}` with the defaults above, read from the config
+  map under `mcp.Name`, a zero field taking its default.
 
 **`extensions/mcp/mcpimpl/render.go`**
 

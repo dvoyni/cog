@@ -18,7 +18,7 @@ import (
 
 func TestADrawInADepthOnlyPassBuildsAPipelineWithNoColourTarget(t *testing.T) {
 	var shadow gfx.TextureDescr
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -45,7 +45,7 @@ func TestOneShaderInAColourPassAndADepthPassBuildsTwoPipelines(t *testing.T) {
 	// a key that ignored the difference would hand the second pass whichever
 	// one the first pass happened to build.
 	var shadow gfx.TextureDescr
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})

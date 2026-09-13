@@ -115,7 +115,7 @@ func TestAStripIsKeyedByItsIndexWidth(t *testing.T) {
 	narrow := indexedMesh(gfx.TopologyTriangleStrip, gfx.IndexUint16, 12)
 	wide := indexedMesh(gfx.TopologyTriangleStrip, gfx.IndexUint32, 12)
 
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	w := recordList(t, k)
@@ -143,7 +143,7 @@ func TestATriangleListIsNotKeyedByItsIndexWidth(t *testing.T) {
 	narrow := indexedMesh(gfx.TopologyTriangleList, gfx.IndexUint16, 12)
 	wide := indexedMesh(gfx.TopologyTriangleList, gfx.IndexUint32, 12)
 
-	p := New()
+	p := newPlugin()
 	k := newTestKernel(t, p)
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	w := recordList(t, k)

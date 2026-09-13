@@ -56,7 +56,7 @@ id belongs to the Adapter that uses it.
 ## Plugin
 
 - Name: `storage.Name` (`"storage"`)
-- Constructor: `storageimpl.New() *storageimpl.Plugin`
+- Constructor: `storageimpl.New() kernel.Plugin`
 - Plugin dependencies: none
 - Requires: exactly one `storage.PermanentFS` Adapter
 - Go package dependencies: `kernel` and the standard library
