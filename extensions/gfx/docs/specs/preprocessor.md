@@ -225,7 +225,7 @@ verbatim. The `./` prefix *is* the marker, so the two forms can never be
 confused and the storage root has exactly one spelling.
 
 There is no leading-`/` form. Storage names are `fs.ValidPath` — unrooted,
-slash-separated (`extensions/storage/disk.go:64`) — so a rooted name is unopenable, and
+slash-separated (every `storage.PermanentFS` Adapter checks `fs.ValidPath`) — so a rooted name is unopenable, and
 inventing one would give the root a second spelling.
 
 `fs.ValidPath` also forbids `.` and `..` **elements outright**, so
@@ -274,7 +274,7 @@ frame's command buffer vanishing without a word, the default here is loud.
 ### Storage layering: unpinned, and that is the feature
 
 An included path resolves through the **full mount overlay**, exactly like the
-root source (`extensions/storage/resourcesimpl.go:24` searches mounts by descending
+root source (`FileSystem.Open` in `extensions/storage/internal/filesystem.go` searches mounts by descending
 priority, per file). A game that mounts its own `builtin/scene/pbr.wgsl` at
 higher priority replaces that one source inside cog's module and keeps the rest.
 

@@ -3443,7 +3443,7 @@ exactly one animation clip, so it cannot demonstrate a crossfade, while Fox has
 three over 24 joints.
 
 Assets are **vendored** under `cog-examples/assets/<ModelName>/`, reachable
-through `storage.DefaultConfig("cog-examples")` and tarred by the ported web
+through the storage read mount `internal/assets` adds and tarred by the ported web
 build. `assets/ATTRIBUTION.md` lists every asset with its exact licence string,
 its required attribution line, and any legal-mark entry. `cmd/prepare-assets`
 carries the **source commit SHA per asset** — the Khronos repo has no releases

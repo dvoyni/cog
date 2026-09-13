@@ -11,6 +11,7 @@ import (
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -388,12 +389,12 @@ func newHarnessOver(
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	configs := map[kernel.PluginName]any{
-		storage.Name: storage.DefaultConfig("scene-test").WithReadFS("test", 10, fs.FS(files)),
+		storage.Name: storageimpl.DefaultConfig().WithReadFS("test", 10, fs.FS(files)),
 		Name:         DefaultConfig(),
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) bool { sink.add(err); *reported = append(*reported, err); return false }).
-		WithPlugins(storage.New(), gfximpl.New(), backendAdapter{backend}, New(), recordPlugin{record: record})
+		WithPlugins(storageimpl.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{backend}, New(), recordPlugin{record: record})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()

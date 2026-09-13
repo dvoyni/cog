@@ -1,6 +1,36 @@
-package storage
+package internal
 
 import "encoding/json"
+
+// AccessValuesRequest is one operation on the key-value store, built with
+// GetValue, SetValue, SetValueNoFlush, DeleteValue, DeleteValueNoFlush or
+// FlushValues. Its zero value names no operation.
+type AccessValuesRequest struct{ op valueOp }
+
+// AccessValuesResponse reports whether the operation found its key.
+type AccessValuesResponse struct{ Found bool }
+
+// ApplyValues runs request against store: it validates, applies, and flushes
+// the result through filesystem's permanent filesystem when the operation
+// flushes. The caller holds write locks on both resources. It returns the store
+// to cache even on failure: apply returns whatever it managed to load, and a
+// failed flush leaves changes pending for the next one.
+func ApplyValues(request AccessValuesRequest, store Values, filesystem FileSystem) (Values, AccessValuesResponse, error) {
+	if request.op == nil {
+		return store, AccessValuesResponse{}, ErrInvalidValueRequest{}
+	}
+	if err := request.op.validate(); err != nil {
+		return store, AccessValuesResponse{}, err
+	}
+	store, response, err := request.op.apply(store, filesystem)
+	if err == nil && request.op.flushes() {
+		store, err = store.flush(WriteAccess(filesystem))
+	}
+	if err != nil {
+		return store, AccessValuesResponse{}, err
+	}
+	return store, response, nil
+}
 
 // valueOp is one member of the union. Every operation owns its own validation
 // and its own effect on the cached store, which keeps the handler a single
@@ -11,7 +41,7 @@ type valueOp interface {
 	// apply runs the operation against the cached store, loading the values file
 	// through filesystem when it needs the entries. It returns the store to cache
 	// even on failure, so a load that succeeded is never thrown away.
-	apply(store valueStore, filesystem FileSystem) (valueStore, AccessValuesResponse, error)
+	apply(store Values, filesystem FileSystem) (Values, AccessValuesResponse, error)
 	// flushes reports whether the result must reach disk before the command returns.
 	flushes() bool
 }
@@ -84,8 +114,8 @@ func (o getValueOp) validate() error {
 }
 
 func (o getValueOp) apply(
-	store valueStore, filesystem FileSystem,
-) (valueStore, AccessValuesResponse, error) {
+	store Values, filesystem FileSystem,
+) (Values, AccessValuesResponse, error) {
 	store, err := store.load(filesystem)
 	if err != nil {
 		return store, AccessValuesResponse{}, err
@@ -113,8 +143,8 @@ func (o setValueOp) validate() error {
 }
 
 func (o setValueOp) apply(
-	store valueStore, filesystem FileSystem,
-) (valueStore, AccessValuesResponse, error) {
+	store Values, filesystem FileSystem,
+) (Values, AccessValuesResponse, error) {
 	raw, err := o.marshal()
 	if err != nil {
 		return store, AccessValuesResponse{}, err
@@ -145,8 +175,8 @@ func (o deleteValueOp) validate() error {
 }
 
 func (o deleteValueOp) apply(
-	store valueStore, filesystem FileSystem,
-) (valueStore, AccessValuesResponse, error) {
+	store Values, filesystem FileSystem,
+) (Values, AccessValuesResponse, error) {
 	store, err := store.load(filesystem)
 	if err != nil {
 		return store, AccessValuesResponse{}, err
@@ -168,8 +198,8 @@ type flushValuesOp struct{}
 func (flushValuesOp) validate() error { return nil }
 
 func (flushValuesOp) apply(
-	store valueStore, _ FileSystem,
-) (valueStore, AccessValuesResponse, error) {
+	store Values, _ FileSystem,
+) (Values, AccessValuesResponse, error) {
 	return store, AccessValuesResponse{}, nil
 }
 

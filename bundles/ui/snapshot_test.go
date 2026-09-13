@@ -19,6 +19,7 @@ import (
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -180,11 +181,11 @@ func newLayoutRig(t *testing.T) *layoutRig {
 	ctx, cancel := stdcontext.WithCancel(stdcontext.Background())
 	fixture := &layoutFixture{}
 	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storage.DefaultConfig("ui-layout-test"),
+		storage.Name: storageimpl.DefaultConfig(),
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storage.New(), input.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvas.New(), New(), fixture)
+	}).WithPlugins(storageimpl.New(), permanentAdapter{}, input.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvas.New(), New(), fixture)
 	stopped := make(chan struct{})
 	go func() { engine.Run(ctx); close(stopped) }()
 	<-engine.Ready()

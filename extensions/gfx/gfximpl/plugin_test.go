@@ -18,6 +18,7 @@ import (
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/internal"
 	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -396,9 +397,9 @@ func newTestKernelWith(t *testing.T, p *Plugin, filesystem fs.FS, handler kernel
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	config := map[kernel.PluginName]any{
-		storage.Name: storage.DefaultConfig("gfx-test").WithReadFS("test", 10, filesystem),
+		storage.Name: storageimpl.DefaultConfig().WithReadFS("test", 10, filesystem),
 	}
-	engine := kernel.New(config).Handler(handler).WithPlugins(storage.New(), p, testPlugin{})
+	engine := kernel.New(config).Handler(handler).WithPlugins(storageimpl.New(), permanentAdapter{}, p, testPlugin{})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	return engine.Executioner()
@@ -1449,12 +1450,12 @@ func TestFailedShaderIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	t.Cleanup(cancel)
 	errorsReported := 0
 	config := map[kernel.PluginName]any{
-		storage.Name: storage.DefaultConfig("gfx-test").WithReadFS("test", 10, filesystem),
+		storage.Name: storageimpl.DefaultConfig().WithReadFS("test", 10, filesystem),
 	}
 	engine := kernel.New(config).Handler(func(error) bool {
 		errorsReported++
 		return false
-	}).WithPlugins(storage.New(), p, testPlugin{})
+	}).WithPlugins(storageimpl.New(), permanentAdapter{}, p, testPlugin{})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()

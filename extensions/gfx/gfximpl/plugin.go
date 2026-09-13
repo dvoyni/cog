@@ -5,6 +5,7 @@ import (
 
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/internal"
+	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -34,9 +35,8 @@ type readyList struct {
 // stream. It owns the translator (render-thread-only caches and dynamic buffers);
 // the three queues live in kernel resources.
 type Plugin struct {
-	// PluginEdges carries what the plugin still reaches in storage and mcp:
-	// its dependency on storage, the read lock on storage's FileSystem, and
-	// its mcp capabilities.
+	// PluginEdges carries what the plugin still reaches in mcp: its
+	// capabilities.
 	gfx.PluginEdges
 
 	translator *translator
@@ -59,6 +59,10 @@ func New() *Plugin { return &Plugin{translator: newTranslator()} }
 
 // Name reports the plugin name.
 func (p *Plugin) Name() kernel.PluginName { return gfx.Name }
+
+// Dependencies reports the plugins gfx requires: storage, from which it loads
+// shader and texture resources.
+func (p *Plugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{storage.Name} }
 
 // Register requires the Backend adapter, and registers the three command-list
 // buffers, the Present/Acquire/Consume commands, and the end-of-tick present
@@ -192,7 +196,7 @@ func (p *Plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 			read = access.GetWrite[*readList]()
 			ready = access.GetWrite[*readyList]()
 			resources = access.GetWrite[*gfx.ResourceQueue]()
-			files = p.ReadFiles(access)
+			files = readFiles(access)
 		}, func(k kernel.Kernel, _ app.RenderEvent) error {
 			acquire(read, ready)
 			list := read.Get()
@@ -224,4 +228,12 @@ func (p *Plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 			internal.ResourceQueueReset(queue)
 			return nil
 		}
+}
+
+// readFiles declares a read lock on storage's FileSystem inside a handler's
+// lock, and returns what reads it. The read happens only when called, so a
+// frame that loads nothing boxes nothing.
+func readFiles(access kernel.ResourceAccess) func() fs.FS {
+	filesystem := access.GetRead[storage.FileSystem]()
+	return func() fs.FS { return filesystem.Get() }
 }

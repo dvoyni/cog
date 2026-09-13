@@ -1,81 +1,32 @@
 //go:build !js
 
-package storage
+package diskfs
 
 import (
 	"fmt"
 	"io/fs"
-	"math"
 	"os"
 	"path/filepath"
-	"runtime"
+
+	"github.com/dvoyni/cog/extensions/storage"
 )
 
-func defaultReadMount() (ReadMount, bool, error) {
-	executable, err := os.Executable()
-	if err != nil {
-		return ReadMount{}, false, fmt.Errorf("storage: resolve executable: %w", err)
-	}
-	executable, err = filepath.EvalSymlinks(executable)
-	if err != nil {
-		return ReadMount{}, false, fmt.Errorf("storage: resolve executable symlinks: %w", err)
-	}
-	return ReadMount{
-		Id:       ExecutableMount,
-		Priority: math.MinInt,
-		FS:       os.DirFS(filepath.Dir(executable)),
-	}, true, nil
-}
-
-func defaultPermanentFS(appId string) (PermanentFS, error) {
-	path, err := permanentDir(appId)
-	if err != nil {
-		return nil, err
-	}
-	return OpenDiskFS(path)
-}
-
-func permanentDir(appId string) (string, error) {
-	var base string
-	if runtime.GOOS == "windows" {
-		base = os.Getenv("LOCALAPPDATA")
-	}
-	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
-		base = os.Getenv("XDG_DATA_HOME")
-		if base == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return "", fmt.Errorf("storage: resolve user data directory: %w", err)
-			}
-			base = filepath.Join(home, ".local", "share")
-		}
-	}
-	if base == "" {
-		var err error
-		base, err = os.UserConfigDir()
-		if err != nil {
-			return "", fmt.Errorf("storage: resolve user data directory: %w", err)
-		}
-	}
-	return filepath.Join(base, appId), nil
-}
-
-// OpenDiskFS creates path if needed and returns a confined writable filesystem
+// openDiskFS creates path if needed and returns a confined writable filesystem
 // rooted there. Names accepted by its methods use fs.ValidPath form.
-func OpenDiskFS(path string) (PermanentFS, error) {
+func openDiskFS(path string) (storage.PermanentFS, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
-		return nil, fmt.Errorf("storage: resolve permanent directory %q: %w", path, err)
+		return nil, fmt.Errorf("diskfs: resolve permanent directory %q: %w", path, err)
 	}
 	if err := os.MkdirAll(absolute, 0o700); err != nil {
-		return nil, fmt.Errorf("storage: create permanent directory %q: %w", absolute, err)
+		return nil, fmt.Errorf("diskfs: create permanent directory %q: %w", absolute, err)
 	}
 	root, err := os.OpenRoot(absolute)
 	if err != nil {
-		return nil, fmt.Errorf("storage: open permanent directory %q: %w", absolute, err)
+		return nil, fmt.Errorf("diskfs: open permanent directory %q: %w", absolute, err)
 	}
 	if err := root.Close(); err != nil {
-		return nil, fmt.Errorf("storage: close permanent directory %q: %w", absolute, err)
+		return nil, fmt.Errorf("diskfs: close permanent directory %q: %w", absolute, err)
 	}
 	return diskFS{path: absolute}, nil
 }
@@ -146,4 +97,11 @@ func (d diskFS) withRoot(operation func(*os.Root) error) error {
 	return closeErr
 }
 
-var _ PermanentFS = diskFS{}
+func validatePath(operation, path string) error {
+	if fs.ValidPath(path) {
+		return nil
+	}
+	return &fs.PathError{Op: operation, Path: path, Err: fs.ErrInvalid}
+}
+
+var _ storage.PermanentFS = diskFS{}

@@ -42,11 +42,10 @@ alias. What the root and gfximpl read beyond that goes through plain functions
 `internal` exports, which only they can call. `internal` never imports the
 root. See [`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
 
-Two things still sit in the root because they name `storage` or `mcp`, which
-are not Ports yet and which gfximpl may not import: the mcp capability bodies
+Two things still sit in the root because they name `mcp`, which is not a Port
+yet and which gfximpl may not import: the mcp capability bodies
 (`mcpprovider.go`), and `PluginEdges`, which the plugin embeds for its
-dependency on storage, its read lock on `storage.FileSystem` and its
-`Capabilities`. They move into gfximpl as storage and mcp become Ports.
+`Capabilities`. They move into gfximpl when mcp becomes a Port.
 
 ## Plugin
 

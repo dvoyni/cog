@@ -55,7 +55,10 @@ error handling.
 - [`ecs`](bundles/ecs/README.md): entities, components, the sparse-set stores they live
     in, and systems as plain funcs whose parameter types are their lock set.
 - [`storage`](extensions/storage/README.md): layered read filesystems and one permanent
-    writable filesystem.
+    writable filesystem, which a platform Adapter provides.
+- [`diskfs`](extensions/diskfs) and [`jsfs`](extensions/jsfs): storage's permanent
+    filesystem Adapters, a directory under the user's data directory on desktop
+    and localStorage in a browser.
 - [`m`](libs/m): immutable vectors, rectangles, colors, matrices, quaternions,
     scalar helpers, and splines. Angles use radians.
 - [`gfx`](extensions/gfx/README.md): driver-neutral rendering queues, resources, viewport,
@@ -111,12 +114,14 @@ covering one focused mechanism takes that mechanism's name.
 
 ```go
 config := map[kernel.PluginName]any{
-    storage.Name: storage.DefaultConfig("my-app").WithReadDiskFS("res"),
-    wgpu.Name:    wgpu.DefaultConfig().WithTitle("My App"),
+    storage.Name: storageimpl.DefaultConfig().
+        WithReadFS("res", storage.DefaultReadPriority, os.DirFS("res")),
+    wgpu.Name: wgpu.DefaultConfig().WithTitle("My App"),
 }
 
 plugins := []kernel.Plugin{
-    storage.New(),
+    storageimpl.New(),
+    diskfs.New(diskfs.Config{AppId: "my-app"}), // provides storage's PermanentFS Adapter
     input.New(),
     gfximpl.New(),
     wgpu.New(), // provides gfx's Backend Adapter

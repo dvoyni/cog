@@ -10,6 +10,7 @@ import (
 
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -96,11 +97,11 @@ func noFiles() fs.FS { return fstest.MapFS{} }
 func TestACompositionWithoutABackendAdapterFails(t *testing.T) {
 	var reported []error
 	kernel.New(map[kernel.PluginName]any{
-		storage.Name: storage.DefaultConfig("gfx-no-adapter"),
+		storage.Name: storageimpl.DefaultConfig(),
 	}).Handler(func(err error) bool {
 		reported = append(reported, err)
 		return true
-	}).WithPlugins(storage.New(), New())
+	}).WithPlugins(storageimpl.New(), permanentAdapter{}, New())
 
 	var missing kernel.ErrMissingAdapter
 	if !errors.As(errors.Join(reported...), &missing) {

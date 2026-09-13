@@ -15,6 +15,7 @@ import (
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -77,12 +78,12 @@ func newPairingRig(t *testing.T) *pairingRig {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storage.DefaultConfig("cog-pairing-test"),
+		storage.Name: storageimpl.DefaultConfig(),
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
 	}).WithPlugins(
-		storage.New(), input.New(), gfxPlugin, canvasPlugin, uiPlugin,
+		storageimpl.New(), permanentAdapter{}, input.New(), gfxPlugin, canvasPlugin, uiPlugin,
 		&pairingPlugin{rig: rig},
 	)
 	stopped := make(chan struct{})

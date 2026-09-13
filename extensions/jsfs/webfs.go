@@ -1,6 +1,6 @@
 //go:build js
 
-package storage
+package jsfs
 
 import (
 	"bytes"
@@ -14,28 +14,13 @@ import (
 	"strings"
 	"syscall/js"
 	"time"
+
+	"github.com/dvoyni/cog/extensions/storage"
 )
 
-const webStoragePrefix = "cog.storage."
-
-func defaultReadMount() (ReadMount, bool, error) {
-	return ReadMount{}, false, nil
-}
-
-func defaultPermanentFS(appId string) (PermanentFS, error) {
-	localStorage := js.Global().Get("localStorage")
-	if localStorage.IsUndefined() || localStorage.IsNull() {
-		return nil, errors.New("storage: browser localStorage is unavailable")
-	}
-	return &webFS{key: webStoragePrefix + appId, storage: localStorage}, nil
-}
-
-// OpenDiskFS is unavailable in a browser; use the default localStorage backend
-// or provide a PermanentFS through Config.WithPermanentFS.
-func OpenDiskFS(path string) (PermanentFS, error) {
-	return nil, fmt.Errorf("storage: disk filesystem %q is unavailable in a browser", path)
-}
-
+// webFS keeps the whole permanent filesystem as one JSON document under one
+// localStorage key. Every operation loads the document and every mutation
+// writes it back, so what one engine wrote survives a page reload.
 type webFS struct {
 	key     string
 	storage js.Value
@@ -179,7 +164,7 @@ func (w *webFS) load() (webFSState, error) {
 		return state, nil
 	}
 	if err := json.Unmarshal([]byte(raw.String()), &state); err != nil {
-		return webFSState{}, fmt.Errorf("storage: decode browser data: %w", err)
+		return webFSState{}, fmt.Errorf("jsfs: decode browser data: %w", err)
 	}
 	if state.Files == nil {
 		state.Files = map[string]webFile{}
@@ -193,7 +178,7 @@ func (w *webFS) load() (webFSState, error) {
 func (w *webFS) save(state webFSState) error {
 	data, err := json.Marshal(state)
 	if err != nil {
-		return fmt.Errorf("storage: encode browser data: %w", err)
+		return fmt.Errorf("jsfs: encode browser data: %w", err)
 	}
 	w.storage.Call("setItem", w.key, string(data))
 	return nil
@@ -299,5 +284,12 @@ func (e webDirEntry) IsDir() bool                { return e.info.IsDir() }
 func (e webDirEntry) Type() fs.FileMode          { return e.info.Mode().Type() }
 func (e webDirEntry) Info() (fs.FileInfo, error) { return e.info, nil }
 
-var _ PermanentFS = (*webFS)(nil)
+var _ storage.PermanentFS = (*webFS)(nil)
 var _ fs.ReadDirFile = (*webOpenDir)(nil)
+
+func validatePath(operation, name string) error {
+	if fs.ValidPath(name) {
+		return nil
+	}
+	return &fs.PathError{Op: operation, Path: name, Err: fs.ErrInvalid}
+}

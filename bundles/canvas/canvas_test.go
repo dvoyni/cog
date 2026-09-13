@@ -19,6 +19,7 @@ import (
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/gogpu/naga"
@@ -363,10 +364,10 @@ func testKernelRecorder(t testing.TB, filesystem fs.FS, config Config, recorder 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	configs := map[kernel.PluginName]any{
-		storage.Name: storage.DefaultConfig("canvas-test").WithReadFS("test", 10, filesystem),
+		storage.Name: storageimpl.DefaultConfig().WithReadFS("test", 10, filesystem),
 		Name:         config,
 	}
-	engine := kernel.New(configs).Handler(onError).WithPlugins(storage.New(), gfximpl.New(), backendAdapter{backend}, canvasPlugin, recorder)
+	engine := kernel.New(configs).Handler(onError).WithPlugins(storageimpl.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{backend}, canvasPlugin, recorder)
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()

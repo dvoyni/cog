@@ -12,6 +12,7 @@ import (
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -250,13 +251,13 @@ func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gfx.Ba
 	t.Helper()
 	sink := &errorSink{}
 	configs := map[kernel.PluginName]any{
-		storage.Name: storage.DefaultConfig("ecsscene-test").WithReadFS("test", 10, fs.FS(files)),
+		storage.Name: storageimpl.DefaultConfig().WithReadFS("test", 10, fs.FS(files)),
 		scene.Name:   scene.DefaultConfig(),
 		ecs.Name:     ecs.DefaultConfig().WithPrewarmEntities(ids),
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) bool { sink.add(err); return false }).
-		WithPlugins(storage.New(), gfximpl.New(), backendAdapter{backend}, scene.New(),
+		WithPlugins(storageimpl.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{backend}, scene.New(),
 			ecs.Plugin(), New(), &gamePlugin{})
 	ctx, cancel := context.WithCancel(context.Background())
 	// The cleanup waits for Run to return rather than only cancelling it: a

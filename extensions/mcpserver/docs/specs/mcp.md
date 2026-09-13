@@ -280,7 +280,7 @@ still holding the port — is exactly the case where a loud failure saves the mo
 time.
 
 **js/wasm is the same answer.** `net.Listen` does not work in a browser, and cog
-does target it (`extensions/storage/disk_js.go`). An app that composed `mcpserver.New()`
+does target it (`extensions/jsfs`). An app that composed `mcpserver.New()`
 into a browser build made a composition mistake, and cog fails composition
 loudly. This is deliberately **not** a build tag: excluding the plugin on `js`
 would break a `main.go` shared between desktop and web builds at *compile* time,
