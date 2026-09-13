@@ -39,7 +39,7 @@ Register dependencies before UI, typically in this order: `storage`, `input`,
 `gfx`, `canvas`, then `ui`.
 
 UI processing subscribes to `app.UpdateEvent` after
-`input.UpdateEventHandler` and before `canvas.UpdateEventHandler`. It runs on
+`input.AdvanceOnUpdate` and before `canvas.UpdateEventHandler`. It runs on
 every update tick, including intermediate fixed-step catch-up ticks.
 
 ## Declaring A Frame

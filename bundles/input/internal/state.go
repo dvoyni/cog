@@ -1,13 +1,13 @@
-package input
+package internal
 
 import "slices"
 
-// state is the polled input state. It is registered as *state; gameplay reads
+// State is the polled input state. It is registered as *State; gameplay reads
 // it under a read lock and queries it. The "just pressed/released", scroll, and
 // text values are per-tick: a driver's Apply folds changes into pending
 // accumulators, and the tick-boundary subscription promotes them to the current
 // tick's view via advance. The pressed set and pointer are live (always current).
-type state struct {
+type State struct {
 	down map[Key]struct{}
 
 	// current tick view (read by gameplay)
@@ -27,8 +27,8 @@ type state struct {
 	pointer Pos
 }
 
-func newState() *state {
-	return &state{
+func NewState() *State {
+	return &State{
 		down:         map[Key]struct{}{},
 		justPressed:  map[Key]struct{}{},
 		justReleased: map[Key]struct{}{},
@@ -38,9 +38,9 @@ func newState() *state {
 }
 
 // apply folds one change into the live state and the pending per-tick accumulators.
-func (s *state) apply(c Change) {
+func (s *State) apply(c Change) {
 	switch c.kind {
-	case changeKey:
+	case ChangeKindKey:
 		if c.down {
 			if _, ok := s.down[c.key]; !ok {
 				s.down[c.key] = struct{}{}
@@ -52,19 +52,19 @@ func (s *state) apply(c Change) {
 				s.pendReleased[c.key] = struct{}{}
 			}
 		}
-	case changePointer:
+	case ChangeKindPointer:
 		s.pointer = c.pos
-	case changeScroll:
+	case ChangeKindScroll:
 		s.pendScrollDx += c.dx
 		s.pendScrollDy += c.dy
-	case changeText:
+	case ChangeKindText:
 		s.pendText = append(s.pendText, c.r)
 	}
 }
 
 // advance promotes the pending accumulators to the current-tick view and resets
 // them. Called once per tick, before gameplay reads the state.
-func (s *state) advance() {
+func (s *State) advance() {
 	s.justPressed = s.pendPressed
 	s.justReleased = s.pendReleased
 	s.scrollDx, s.scrollDy = s.pendScrollDx, s.pendScrollDy
@@ -77,34 +77,35 @@ func (s *state) advance() {
 }
 
 // Pressed reports whether k is currently held down.
-func (s *state) Pressed(k Key) bool { _, ok := s.down[k]; return ok }
+func (s *State) Pressed(k Key) bool { _, ok := s.down[k]; return ok }
 
 // JustPressed reports whether k transitioned to down during the current tick.
-func (s *state) JustPressed(k Key) bool { _, ok := s.justPressed[k]; return ok }
+func (s *State) JustPressed(k Key) bool { _, ok := s.justPressed[k]; return ok }
 
 // JustReleased reports whether k transitioned to up during the current tick.
-func (s *state) JustReleased(k Key) bool { _, ok := s.justReleased[k]; return ok }
+func (s *State) JustReleased(k Key) bool { _, ok := s.justReleased[k]; return ok }
 
 // Pointer returns the current pointer position (live).
-func (s *state) Pointer() Pos { return s.pointer }
+func (s *State) Pointer() Pos { return s.pointer }
 
 // Scroll returns the scroll delta accumulated for the current tick.
-func (s *state) Scroll() (dx, dy float64) { return s.scrollDx, s.scrollDy }
+func (s *State) Scroll() (dx, dy float64) { return s.scrollDx, s.scrollDy }
 
 // Text returns the runes typed during the current tick.
-func (s *state) Text() []rune { return s.text }
+func (s *State) Text() []rune { return s.text }
 
-// snapshot is the picture of the seam every input capability answers with: the
-// live down-set, sorted because map iteration is not, and the live pointer. The
-// slice is always non-nil, so "nothing is held" reads as an empty list rather
-// than as a missing answer.
-func (s *state) snapshot() StateResponse {
+// held is the down-set of the picture of the seam every input capability
+// answers with (input.StateResponse), which pairs it with the live pointer:
+// the live down-set, sorted because map iteration is not. The slice is always
+// non-nil, so "nothing is held" reads as an empty list rather than as a missing
+// answer.
+func (s *State) held() []Key {
 	down := make([]Key, 0, len(s.down))
 	for key := range s.down {
 		down = append(down, key)
 	}
 	slices.Sort(down)
-	return StateResponse{Down: down, Pointer: s.pointer}
+	return down
 }
 
 // modifiers derives the modifier bitmask from the live down-set. A driver
@@ -116,7 +117,7 @@ func (s *state) snapshot() StateResponse {
 // active, not a key being held, and nothing in the state knows which locks are
 // on. Reporting them from a held key would be a lie in the one direction that
 // matters — a caller comparing Pressed against Mods.
-func (s *state) modifiers() Mods {
+func (s *State) modifiers() Mods {
 	var mods Mods
 	for key, mod := range modifierKeys {
 		if _, held := s.down[key]; held {

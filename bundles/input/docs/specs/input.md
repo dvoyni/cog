@@ -18,6 +18,19 @@ resolved on the map
 Nothing is decided here — where a claim rests on something unverified, it is
 marked **Gap** and says what would settle it.
 
+> **Amended by [#336](https://github.com/dvoyni/cog/issues/336).** input became
+> a Bundle under
+> [ADR 0001](../../../../docs/adr/0001-bundles-slots-ports-and-adapters.md), shaped
+> as a contract root, `inputimpl` and `internal/`. `Action`, `SynthesizeCmd`,
+> `StateCmd`, `Play` and `ParseKey` stay in the root, `bundles/input`. The
+> plugin and every handler (`applyCmdImpl`, `synthesizeCmdImpl`, `stateCmdImpl`)
+> moved to `bundles/input/inputimpl`. `Key` with its name table, `Mods`, `Pos`,
+> `Change` and `State` are declared in `bundles/input/internal` and aliased in the
+> root, and folding a change into `State` and advancing its edges live there too.
+> The tick-boundary handler is `advanceOnUpdate` in `inputimpl`, and its ordering
+> identity `input.UpdateEventHandler` is now `input.AdvanceOnUpdate`. The file
+> paths and line numbers cited below are as they were when this was written.
+
 ---
 
 ## Contents

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dvoyni/cog/bundles/input"
+	"github.com/dvoyni/cog/bundles/input/inputimpl"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
@@ -70,7 +70,7 @@ func TestPluginInitRejectsWrongConfigType(t *testing.T) {
 			err = got
 			return true
 		}).
-		WithPlugins(storageimpl.New(), permanentAdapter{}, gfximpl.New(), input.New(), New()).
+		WithPlugins(storageimpl.New(), permanentAdapter{}, gfximpl.New(), inputimpl.New(), New()).
 		Run(context.Background())
 	var invalid ErrInvalidConfig
 	if !errors.As(err, &invalid) {

@@ -4,19 +4,54 @@
 raw changes through one command; gameplay can poll the `State` resource or
 subscribe to discrete events without depending on a windowing implementation.
 
+input is a **Bundle**: a Slot and its one Extension, shipped together. The
+vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
+[ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
+
+## Packages
+
+input has the Bundle shape: a contract root, an `…impl` and an `internal/`.
+
+- **`bundles/input`** is the contract: `ApplyCmd`, `SynthesizeCmd` and
+  `StateCmd` with their requests and responses, the four events, the `State`
+  resource, the `Key`, `Mods`, `Pos` and `Change` vocabulary, `Action`,
+  `ParseKey`, `Play`, `Name` and the ordering identity `AdvanceOnUpdate`. It
+  declares no plugin, and it is what every other package imports.
+- **`bundles/input/inputimpl`** is the plugin: `New`, the handlers behind the
+  three commands and `AdvanceOnUpdate`, and the mcp Provider with its two
+  capabilities. It exports `New` and nothing else. Only composition roots and
+  tests import it.
+- **`bundles/input/internal`** holds what the two share and nothing else may
+  reach: the declarations of `Key` (with its name table), `Mods`, `Pos`,
+  `Change` and `State`, and the consume side of `State` — folding a change in
+  and advancing the per-tick edges.
+
+`State`, `Change` and the vocabulary they carry are declared in `internal` with
+their fields unexported, and re-exported from the root as aliases
+(`type State = internal.State`) plus a wrapper for each constructor. They stay
+concrete types, and their exported methods (`State.Pressed`, `Key.String`, …)
+are public API through the alias. What inputimpl needs beyond that goes through
+plain functions `internal` exports, which only the root and inputimpl can call.
+`internal` never imports the root. See
+[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+
 ## Plugin
 
 - Name: `input.Name` (`"input"`)
-- Constructor: `input.New() *input.Plugin`
+- Constructor: `inputimpl.New() kernel.Plugin`
 - Plugin dependencies: none
+- Requires: no Adapter
+- Contributes: one `mcp.Provider` Adapter
 - Go package dependencies: `app`, `kernel`, `mcp`
 - Configuration: none
 
-`Plugin.Register` registers `*State`, implements `ApplyCmd`, `SynthesizeCmd`
-and `StateCmd`, and subscribes first to `app.UpdateEvent`.
+`Register` registers `*State`, implements `ApplyCmd`, `SynthesizeCmd` and
+`StateCmd`, subscribes `AdvanceOnUpdate` first to `app.UpdateEvent`, and
+contributes the Provider.
 
-`Plugin` implements the kernel lifecycle methods `Name`, `Dependencies`, and
-`Init`, and contributes one `mcp.Provider` Adapter from `Register`.
+Compose it with `inputimpl.New()`. A driver such as wgpu, or a test harness,
+does not compose anything of its own for input: it is a caller that dispatches
+`input.ApplyCmd`.
 
 ## Commands Implemented
 
@@ -115,19 +150,23 @@ What to expect at the edges:
 - `ScrollEvent{Dx, Dy}` for scroll deltas.
 - `TextEvent{Rune}` for each text-input rune.
 
-The package declares and publishes all four event types. It does not subscribe
-to them itself.
+The contract root declares all four event types and inputimpl publishes them.
+Neither subscribes to them.
 
 ## Event Subscribed
 
-`UpdateEventHandler` handles `app.UpdateEvent`. It is registered with `First()`
-and writes `*State`, promoting pending presses, releases, scroll, and text into
-the current tick before gameplay runs.
+`input.AdvanceOnUpdate` is the ordering identity of the handler on
+`app.UpdateEvent`. It is registered with `First()` and writes `*State`, promoting
+pending presses, releases, scroll, and text into the current tick before
+gameplay runs, so a key just pressed last tick is only held now. A subscriber
+that reads those edges and wants the ordering stated orders
+`After[input.AdvanceOnUpdate]()`, as ui does.
 
 ## State Resource
 
-`State` is a public alias for the plugin's private resource implementation.
-Subscribers should bind `access.GetRead[*input.State]()` and query:
+`State` is a concrete type, declared in `internal` and aliased in the root; only
+inputimpl folds changes into it and advances it. Subscribers should bind
+`access.GetRead[*input.State]()` and query:
 
 - `Pressed(Key) bool`: whether the key or button is currently held.
 - `JustPressed(Key) bool`: transitioned down during this tick.
@@ -202,8 +241,9 @@ included.
 
 ## Offered To An Agent
 
-`input` contributes an `mcp.Provider` from `Register` and offers two capabilities, rendered as the
-tools `input_send` and `input_state`.
+`inputimpl` contributes an `mcp.Provider` from `Register` and offers two
+capabilities, rendered as the tools `input_send` and `input_state`. The Provider
+and both capability bodies live in `inputimpl`.
 
 - **`input_send`** is an `mcp.Func` over `Play` — it cannot be an `mcp.Command`,
   because the wait between batches must happen outside every lock. It is

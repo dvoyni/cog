@@ -36,7 +36,7 @@ func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.InitResource(&processor{})
 	p.registerCommands(registrar)
 	registrar.Subscribe[UpdateEventHandler](processUpdate).
-		After[input.UpdateEventHandler]().
+		After[input.AdvanceOnUpdate]().
 		Before[canvas.UpdateEventHandler]()
 	registrar.Subscribe[SnapshotArmUpdateEventHandler](p.armSnapshotOnUpdate).First()
 	registrar.Subscribe[SnapshotUpdateEventHandler](p.snapshotOnUpdate).

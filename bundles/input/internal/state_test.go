@@ -1,11 +1,11 @@
-package input
+package internal
 
 import "testing"
 
 // A key press is live immediately; JustPressed appears only for the tick after
 // advance, then clears; the key stays held until released.
 func TestStateKeyPressEdges(t *testing.T) {
-	s := newState()
+	s := NewState()
 
 	s.apply(KeyChange(KeyA, 0, true))
 	if !s.Pressed(KeyA) {
@@ -40,7 +40,7 @@ func TestStateKeyPressEdges(t *testing.T) {
 
 // Mouse buttons live in the same Key space and behave like any key.
 func TestStateMouseButtonUnified(t *testing.T) {
-	s := newState()
+	s := NewState()
 	s.apply(KeyChange(KeyMouseLeft, 0, true))
 	s.advance()
 	if !s.Pressed(KeyMouseLeft) || !s.JustPressed(KeyMouseLeft) {
@@ -50,7 +50,7 @@ func TestStateMouseButtonUnified(t *testing.T) {
 
 // Scroll and text accumulate per tick and are visible only after advance, then clear.
 func TestStateScrollAndText(t *testing.T) {
-	s := newState()
+	s := NewState()
 	s.apply(ScrollChange(1, 2))
 	s.apply(ScrollChange(0, 3))
 	s.apply(TextChange('h'))
@@ -77,7 +77,7 @@ func TestStateScrollAndText(t *testing.T) {
 
 // Pointer is live: it updates immediately, not per tick.
 func TestStatePointerLive(t *testing.T) {
-	s := newState()
+	s := NewState()
 	s.apply(PointerChange(Pos{X: 3, Y: 4}))
 	if s.Pointer() != (Pos{X: 3, Y: 4}) {
 		t.Fatalf("pointer = %+v want {3 4}", s.Pointer())
@@ -86,7 +86,7 @@ func TestStatePointerLive(t *testing.T) {
 
 // A press+release within one tick gap surfaces both edges on the next advance.
 func TestStateTransientPressAndRelease(t *testing.T) {
-	s := newState()
+	s := NewState()
 	s.apply(KeyChange(KeySpace, 0, true))
 	s.apply(KeyChange(KeySpace, 0, false))
 	s.advance()

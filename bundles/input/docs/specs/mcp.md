@@ -17,6 +17,15 @@ resolved tickets of
 Nothing is decided here — where a claim rests on something unverified, it is
 marked **Gap** and says what would settle it.
 
+> **Amended by [#336](https://github.com/dvoyni/cog/issues/336).** input became
+> a Bundle under
+> [ADR 0001](../../../../docs/adr/0001-bundles-slots-ports-and-adapters.md). The
+> Provider, both capability bodies and the description strings moved from
+> `bundles/input/mcpprovider.go` to `bundles/input/inputimpl/mcpprovider.go`, where
+> the plugin now lives. `input.Play`, `SynthesizeCmd`, `StateCmd` and the types
+> they carry stay in the contract root, and the tool names are unchanged. The
+> file paths and line numbers cited below are as they were when this was written.
+
 ---
 
 ## Contents
@@ -33,16 +42,16 @@ marked **Gap** and says what would settle it.
 
 ## The provider
 
-`input` contributes an `mcp.Provider` itself, from its own `Register`. The
+`input` contributes an `mcp.Provider` itself, from `inputimpl`'s `Register`. The
 Provider is an unexported value holding nothing: input's state is a resource.
 
 ```go
-registrar.ProvideAdapter[mcp.Provider](provider{}) // in Register
+registrar.ProvideAdapter[mcp.Provider](provider{}) // in inputimpl's Register
 
 func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
 		mcp.Func("send", sendDescription, send),
-		mcp.Command[StateCmd, StateRequest, StateResponse]("state", stateDescription, mcp.ReadOnly()),
+		mcp.Command[input.StateCmd, input.StateRequest, input.StateResponse]("state", stateDescription, mcp.ReadOnly()),
 	}
 }
 ```

@@ -15,6 +15,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/bundles/input"
+	"github.com/dvoyni/cog/bundles/input/inputimpl"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/mcp"
@@ -185,7 +186,7 @@ func newLayoutRig(t *testing.T) *layoutRig {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageimpl.New(), permanentAdapter{}, input.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvas.New(), New(), fixture)
+	}).WithPlugins(storageimpl.New(), permanentAdapter{}, inputimpl.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvas.New(), New(), fixture)
 	stopped := make(chan struct{})
 	go func() { engine.Run(ctx); close(stopped) }()
 	<-engine.Ready()
