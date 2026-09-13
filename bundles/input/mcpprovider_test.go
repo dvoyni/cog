@@ -14,7 +14,7 @@ import (
 // annotates a tool rather than an argument, so looking cheaply and often needs
 // a capability of its own.
 func TestCapabilities_OneActsAndOneLooks(t *testing.T) {
-	capabilities := New().Capabilities()
+	capabilities := (provider{}).Capabilities()
 	if len(capabilities) != 2 {
 		t.Fatalf("input offers %d capabilities, want 2", len(capabilities))
 	}
@@ -53,12 +53,12 @@ func TestCapabilities_OneActsAndOneLooks(t *testing.T) {
 // be told are the batching rule, that coordinates are not image pixels, and
 // that nothing releases a key for them.
 func TestCapabilities_TheDescriptionsCarryWhatACallerGetsWrong(t *testing.T) {
-	for _, one := range New().Capabilities() {
+	for _, one := range (provider{}).Capabilities() {
 		if one.Description() == "" {
 			t.Fatalf("capability %q has no description", one.Name())
 		}
 	}
-	send := New().Capabilities()[0]
+	send := (provider{}).Capabilities()[0]
 	for _, wanted := range []string{
 		"same tick", "complete click", "drag", "window units", "mouse_left",
 		"does **not** press keys", "stays down until something releases it", "paused",
@@ -67,7 +67,7 @@ func TestCapabilities_TheDescriptionsCarryWhatACallerGetsWrong(t *testing.T) {
 			t.Errorf("the send description never says %q", wanted)
 		}
 	}
-	state := New().Capabilities()[1]
+	state := (provider{}).Capabilities()[1]
 	for _, wanted := range []string{"Changes nothing", "window units", "left down by an earlier call"} {
 		if !strings.Contains(state.Description(), wanted) {
 			t.Errorf("the state description never says %q", wanted)
@@ -79,7 +79,7 @@ func TestCapabilities_TheDescriptionsCarryWhatACallerGetsWrong(t *testing.T) {
 // capability an agent would use to check rather than through internals.
 func TestSend_ARefusedSequenceLeavesTheDownSetUnchanged(t *testing.T) {
 	harness := newPlayHarness(t)
-	capabilities := New().Capabilities()
+	capabilities := (provider{}).Capabilities()
 	send, state := capabilities[0], capabilities[1]
 
 	pressed, err := send.Invoke(harness.k, &SynthesizeRequest{Actions: []Action{
@@ -122,7 +122,7 @@ func TestSend_ARefusedSequenceLeavesTheDownSetUnchanged(t *testing.T) {
 // without pressing anything.
 func TestState_AnswersTheSameQuestionWithoutPressingAnything(t *testing.T) {
 	harness := newPlayHarness(t)
-	capabilities := New().Capabilities()
+	capabilities := (provider{}).Capabilities()
 	send, state := capabilities[0], capabilities[1]
 
 	pressed, err := send.Invoke(harness.k, &SynthesizeRequest{Actions: []Action{

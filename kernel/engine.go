@@ -164,8 +164,8 @@ func (e *Engine) markReady() { e.readyOnce.Do(func() { close(e.ready) }) }
 
 // pluginsOf yields every plugin satisfying T, in registration order, paired
 // with its index in plugins. It is the engine's only filtered plugin lookup:
-// the host, start and stop passes all ask it, and Executioner.Plugins exposes
-// it. The index is what lets Run cut the list at a plugin whose Start failed.
+// the host, start and stop passes all ask it, and nothing outside the engine
+// can. The index is what lets Run cut the list at a plugin whose Start failed.
 func pluginsOf[T any](plugins []Plugin) iter.Seq2[int, T] {
 	return func(yield func(int, T) bool) {
 		for index, plugin := range plugins {

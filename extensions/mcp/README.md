@@ -2,12 +2,12 @@
 
 `github.com/dvoyni/cog/extensions/mcp` declares the agent-facing extension point: how a
 plugin offers typed **capabilities** to an **agent**, and nothing about how
-those capabilities reach one. It is a contract-only leaf in the same sense `app`
-is — it imports `kernel` and the standard library, and the plugins that
-implement it live elsewhere.
+those capabilities reach one. It is the contract root of a **Port** that
+collects Adapters — it imports `kernel` and the standard library, and the
+plugins that contribute to it live elsewhere.
 
 The broker that collects capabilities and serves them over the Model Context
-Protocol is a different package, [`mcpserver`](../mcpserver/README.md). The
+Protocol is the Port's implementation, [`mcpimpl`](mcpimpl/README.md). The
 split is load-bearing: `mcp` must never learn protocol vocabulary, and nothing
 importing `gfx` should acquire an HTTP server and a JSON-schema library in its
 module graph.
@@ -15,11 +15,13 @@ module graph.
 ## Dependencies
 
 - Go package: `kernel`, standard library
-- Plugin dependencies: none; this package declares no plugin.
+- Plugin dependencies: none; this package declares no plugin. `Name`
+  (`"mcpserver"`) is the name of the broker plugin in `mcpimpl`.
 
 ## Files
 
-`provider.go` declares the provider interface, `capability.go` the capability
+`identities.go` declares the broker's `Name`, `provider.go` the provider
+interface, `capability.go` the capability
 value and its two constructors, `option.go` the construction options, `text.go`
 the one optional interface a payload type may implement, `err.go` the errors,
 and `doc.go` the package documentation, which carries the capability-body rule
@@ -29,20 +31,32 @@ in full.
 
 ```go
 type Provider interface {
-    kernel.Plugin
     Capabilities() []Capability
 }
 ```
 
+`Provider` is the Adapter the broker collects. A plugin contributes one from its
+`Register`, usually a small unexported value:
+
+```go
+registrar.ProvideAdapter[mcp.Provider](provider{})
+```
+
 One interface, not one per kind of capability, so adding a kind edits neither
-this package nor the broker. The broker discovers providers with
-`k.Plugins[mcp.Provider]()` at its own `Start` and calls `Capabilities()`
-exactly once.
+this package nor the broker. The broker declares
+`CollectAdapters[mcp.Provider]()` in its `Register`, reads the bound set at its
+own `Start`, and calls `Capabilities()` on each exactly once. It namespaces tool
+names by the `PluginName` of the plugin that contributed each Provider, which
+the engine records when it binds the Adapter; a provider carries no name of its
+own.
+
+An engine composed without the broker still runs: an Adapter nobody collects is
+not an error.
 
 Capabilities are static for the engine lifetime. A provider with nothing to
 offer right now says so **inside** its capability — an empty list, or an
-`Unavailable` from a call — never by ceasing to satisfy the interface. Empty,
-not absent.
+`Unavailable` from a call — never by withdrawing its Adapter. Empty, not
+absent.
 
 ## `Capability`
 

@@ -35,18 +35,26 @@ settle it.
 
 ## The provider
 
-`gfx` implements `mcp.Provider` itself — no separate plugin, per the rule that
-every package hosts its own provider. Capture must live where the `Backend`
-internals are, and `gfx` is where they are.
+`gfx` contributes an `mcp.Provider` itself, from its own `Register` — no
+separate plugin, per the rule that every package hosts its own provider. Capture
+must live where the `Backend` internals are, and `gfx` is where they are.
 
 ```go
-func (p *Plugin) Capabilities() []mcp.Capability {
+registrar.ProvideAdapter[mcp.Provider](provider{}) // in gfximpl's Register
+
+func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
-		mcp.Func("capture", captureDescription, p.capture, mcp.ReadOnly()),
-		mcp.Func("frame", frameDescription, p.frame, mcp.ReadOnly()),
+		mcp.Func("capture", captureDescription, captureScreen, mcp.ReadOnly()),
+		mcp.Func("frame", frameDescription, frameSnapshot, mcp.ReadOnly()),
 	}
 }
 ```
+
+> **Amended by [#335](https://github.com/dvoyni/cog/issues/335).** The plugin
+> satisfied `mcp.Provider` itself until `mcp` became a Port. The Provider is now
+> an unexported value holding nothing, and it lives in `gfximpl` with the two
+> capability bodies and their request and response types, since `gfximpl` may
+> import the `mcp` contract root.
 
 Both are `mcp.Func` rather than `mcp.Command`, and for the same reason: each
 arms a flag and then waits for the engine, which cannot be one dispatch. Both
@@ -473,9 +481,10 @@ and ui's are reset outright. See
 The readback and arming halves are in
 [capture.md](./capture.md#required-gfx-changes); these are the provider's own.
 
-**`extensions/gfx/mcpprovider.go`** (new)
+**`extensions/gfx/gfximpl/mcpprovider.go`** (new)
 
-- `Capabilities()` returning the two capabilities above.
+- A `provider` value whose `Capabilities()` returns the two capabilities above,
+  contributed with `ProvideAdapter[mcp.Provider]` in `Register`.
 - `CaptureRequest`/`CaptureResponse`, `FrameRequest`/`FrameResponse`.
 - The two `Func` bodies: validate, dispatch the arm, wait on the channel with
   the capability's own deadline, encode and write on this goroutine.

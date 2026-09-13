@@ -32,7 +32,8 @@ declarations on the next tick instead of retaining and mutating a submitted tree
 - Constructor: `ui.New() *ui.Plugin`
 - Dependencies: `input`, `gfx`, and `canvas`
 - Configuration: none
-- Implements: `mcp.Provider`, `kernel.PluginStopper`
+- Contributes: one `mcp.Provider` Adapter
+- Implements: `kernel.PluginStopper`
 
 Register dependencies before UI, typically in this order: `storage`, `input`,
 `gfx`, `canvas`, then `ui`.
@@ -458,7 +459,7 @@ reports as hovered and cannot carry a tooltip.
 
 ## Offered To An Agent
 
-ui implements `mcp.Provider` and offers one capability, `layout`, rendered as
+ui contributes an `mcp.Provider` from `Register` and offers one capability, `layout`, rendered as
 the tool `ui_layout`: one tick's element tree, flattened, with what layout
 actually resolved each element to — its rect, content rect, clip, layer and
 draw order, whether it is active, which visual it uses, and its id and user

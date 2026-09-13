@@ -75,8 +75,8 @@ error handling.
     that makes several observations describe one tick, and WebGPU system
     driver.
 - [`mcp`](extensions/mcp/README.md): the agent-facing extension point — typed capabilities
-    a plugin offers. No implementation.
-- [`mcpserver`](extensions/mcpserver/README.md): the broker that collects capabilities from
+    a plugin offers, as a Port that collects every plugin's Provider.
+- [`mcpimpl`](extensions/mcp/mcpimpl/README.md): the broker that collects capabilities from
     every provider and serves them to an agent over MCP.
 
 ## Plugin Kinds

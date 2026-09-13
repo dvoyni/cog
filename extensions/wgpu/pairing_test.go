@@ -3,7 +3,9 @@ package wgpu
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -51,6 +53,7 @@ func (p *pairingPlugin) Dependencies() []kernel.PluginName {
 
 func (p *pairingPlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.ProvideAdapter[gfx.Backend](p.rig.backend)
+	p.rig.providers = registrar.CollectAdapters[mcp.Provider]()
 	registrar.HandleCommand[app.TimeCmd](p.rig.plugin.timeCmdImpl)
 	return nil
 }
@@ -64,6 +67,9 @@ type pairingRig struct {
 	k       kernel.Executioner
 	caps    map[string]mcp.Capability
 	backend *pairingBackend
+	// providers collects every mcp.Provider the composed plugins contribute,
+	// the way the broker does.
+	providers kernel.CollectedAdapters[mcp.Provider]
 
 	stopLoop func()
 }
@@ -74,8 +80,6 @@ func newPairingRig(t *testing.T) *pairingRig {
 		t: t, plugin: &Plugin{config: tickTestConfig()},
 		caps: map[string]mcp.Capability{}, backend: newPairingBackend(),
 	}
-	gfxPlugin, canvasPlugin, uiPlugin := gfximpl.New(), canvas.New(), ui.New()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storageimpl.DefaultConfig(),
@@ -83,7 +87,7 @@ func newPairingRig(t *testing.T) *pairingRig {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
 	}).WithPlugins(
-		storageimpl.New(), permanentAdapter{}, input.New(), gfxPlugin, canvasPlugin, uiPlugin,
+		storageimpl.New(), permanentAdapter{}, input.New(), gfximpl.New(), canvas.New(), ui.New(),
 		&pairingPlugin{rig: rig},
 	)
 	stopped := make(chan struct{})
@@ -103,13 +107,23 @@ func newPairingRig(t *testing.T) *pairingRig {
 	rig.k = engine.Executioner()
 
 	// The capabilities are collected exactly as the broker collects them, so
-	// what the test calls is what an agent calls.
-	for _, provider := range []mcp.Provider{gfxPlugin, canvasPlugin, uiPlugin, rig.plugin} {
-		for _, capability := range provider.Capabilities() {
+	// what the test calls is what an agent calls. The driver's own Register
+	// needs a window, so its Provider is added under its name by hand.
+	contributed := append(rig.providers.Get(),
+		kernel.ContributedAdapter[mcp.Provider]{Plugin: Name, Adapter: provider{}})
+	for _, one := range contributed {
+		for _, capability := range one.Adapter.Capabilities() {
 			if err := capability.Err(); err != nil {
 				t.Fatalf("capability %s: %v", capability.Name(), err)
 			}
-			rig.caps[string(provider.Name())+"_"+capability.Name()] = capability
+			rig.caps[string(one.Plugin)+"_"+capability.Name()] = capability
+		}
+	}
+	for _, tool := range []string{
+		"gfx_capture", "gfx_frame", "canvas_draws", "ui_layout", "input_send", "input_state", "wgpu_time",
+	} {
+		if _, offered := rig.caps[tool]; !offered {
+			t.Fatalf("no Provider contributed %s; collected %v", tool, slices.Collect(maps.Keys(rig.caps)))
 		}
 	}
 
@@ -185,7 +199,7 @@ type pairingAnswer struct {
 func (a pairingAnswer) snapshotView(t *testing.T) gfx.SnapshotView {
 	t.Helper()
 	switch response := a.response.(type) {
-	case gfx.FrameResponse:
+	case gfximpl.FrameResponse:
 		return response.SnapshotView
 	case canvas.DrawsResponse:
 		return response.SnapshotView
@@ -200,7 +214,7 @@ func (a pairingAnswer) snapshotView(t *testing.T) gfx.SnapshotView {
 // each need a tick, armed together.
 func (r *pairingRig) snapshotArms() []<-chan pairingAnswer {
 	return []<-chan pairingAnswer{
-		r.invoke("gfx_frame", &gfx.FrameRequest{}),
+		r.invoke("gfx_frame", &gfximpl.FrameRequest{}),
 		r.invoke("canvas_draws", &canvas.DrawsRequest{}),
 		r.invoke("ui_layout", &ui.LayoutRequest{}),
 	}
@@ -349,7 +363,7 @@ func TestPairing_TheWholeRecipeDescribesOneTick(t *testing.T) {
 			t.Fatalf("round %d: the engine is at tick %d and the snapshots describe %d",
 				round, before.Tick, tick)
 		}
-		answer := <-rig.invoke("gfx_capture", &gfx.CaptureRequest{
+		answer := <-rig.invoke("gfx_capture", &gfximpl.CaptureRequest{
 			Path: filepath.Join(directory, fmt.Sprintf("round-%02d.png", round)),
 		})
 		if answer.err != nil {

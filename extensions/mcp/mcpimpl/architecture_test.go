@@ -1,4 +1,4 @@
-package mcpserver
+package mcpimpl
 
 import (
 	"encoding/json"
@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/kernel"
 )
 
@@ -56,7 +57,7 @@ func (archPlugin) Register(registrar *kernel.Registrar, _ any) error {
 
 func describeEngine(t *testing.T, broker *Plugin, arguments string) ArchitectureResponse {
 	t.Helper()
-	result := callTool(t, broker, broker.Capabilities()[0], arguments)
+	result := callTool(t, broker, provider{}.Capabilities()[0], arguments)
 	if result.IsError {
 		t.Fatalf("mcpserver_architecture refused: %s", resultText(t, result))
 	}
@@ -67,31 +68,52 @@ func describeEngine(t *testing.T, broker *Plugin, arguments string) Architecture
 	return document
 }
 
-// The description ships four flat arrays, and the part that earns the tool is
+// The description ships five flat arrays, and the part that earns the tool is
 // the resolved lock closure: a write the outer command never named.
 func TestArchitecture_ReportsTheResolvedLockClosure(t *testing.T) {
 	broker := testBroker()
 	runEngine(t, archPlugin{}, broker)
 
 	document := describeEngine(t, broker, `{}`)
-	if len(document.Plugins) != 2 || len(document.Resources) != 1 || len(document.Commands) != 2 {
-		t.Fatalf("document = %+v, want the four arrays filled", document)
+	if len(document.Plugins) != 2 || len(document.Resources) != 1 || len(document.Ports) != 1 ||
+		len(document.Commands) != 2 {
+		t.Fatalf("document = %+v, want the arrays filled", document)
 	}
-	if document.Resources[0].Type != "mcpserver.archCounter" || document.Resources[0].Owner != "arch" {
+	if document.Resources[0].Type != "mcpimpl.archCounter" || document.Resources[0].Owner != "arch" {
 		t.Fatalf("resource = %+v, want the type string as its address", document.Resources[0])
 	}
 
 	var outer ArchitectureCommand
 	for _, command := range document.Commands {
-		if command.Type == "mcpserver.archOuterCmd" {
+		if command.Type == "mcpimpl.archOuterCmd" {
 			outer = command
 		}
 	}
-	if len(outer.Writes) != 1 || outer.Writes[0] != "mcpserver.archCounter" {
+	if len(outer.Writes) != 1 || outer.Writes[0] != "mcpimpl.archCounter" {
 		t.Fatalf("outer writes = %v, want the lock it never named", outer.Writes)
 	}
-	if len(outer.Uses) != 1 || outer.Uses[0] != "mcpserver.archInnerCmd" {
+	if len(outer.Uses) != 1 || outer.Uses[0] != "mcpimpl.archInnerCmd" {
 		t.Fatalf("outer uses = %v, want the edge that explains the write", outer.Uses)
+	}
+}
+
+// The Ports array is the kernel's: the broker collects mcp.Provider and is
+// itself among the contributors, beside every other plugin that provided one.
+func TestArchitecture_ReportsEveryPortAndItsContributors(t *testing.T) {
+	broker := testBroker()
+	provider := &testProvider{name: "probe", capabilities: []mcp.Capability{echoing("echo")}}
+	runEngine(t, archPlugin{}, provider, broker)
+
+	document := describeEngine(t, broker, `{}`)
+	if len(document.Ports) != 1 {
+		t.Fatalf("ports = %+v, want the broker's one declaration", document.Ports)
+	}
+	port := document.Ports[0]
+	if port.Interface != "mcp.Provider" || port.Port != "mcpserver" || !port.Collects {
+		t.Fatalf("port = %+v, want mcp.Provider collected by mcpserver", port)
+	}
+	if len(port.Contributors) != 2 || port.Contributors[0] != "probe" || port.Contributors[1] != "mcpserver" {
+		t.Fatalf("contributors = %v, want [probe mcpserver] in plugin order", port.Contributors)
 	}
 }
 
@@ -119,7 +141,7 @@ func TestArchitecture_WritesAFileWhenGivenAPath(t *testing.T) {
 		t.Fatalf("the written file is not the document: %v", err)
 	}
 	if len(onDisk.Commands) != 2 {
-		t.Fatalf("written document = %+v, want the four arrays", onDisk)
+		t.Fatalf("written document = %+v, want the whole document", onDisk)
 	}
 
 	// Re-writing the same name is the iterate-and-look loop, so an existing
@@ -144,7 +166,7 @@ func TestArchitecture_RejectsAPathItCannotHonour(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result := callTool(t, broker, broker.Capabilities()[0], string(arguments))
+			result := callTool(t, broker, provider{}.Capabilities()[0], string(arguments))
 			if !result.IsError || !strings.Contains(resultText(t, result), request.Path) {
 				t.Fatalf("result = %q (error %v), want a refusal naming the path",
 					resultText(t, result), result.IsError)

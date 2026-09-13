@@ -1,4 +1,4 @@
-package mcpserver
+package mcpimpl
 
 import (
 	"bytes"
@@ -23,18 +23,31 @@ type echoResponse struct {
 	Text string `json:"text"`
 }
 
-// testProvider is a plugin that offers whatever the test hands it. It is also a
+// testProvider is a plugin that contributes a Provider offering whatever the
+// test hands it, or one Provider per list in extra as well. It is also a
 // PluginStopper, which is how the shutdown-ordering test observes the Stop loop.
 type testProvider struct {
 	name         kernel.PluginName
 	capabilities []mcp.Capability
+	extra        [][]mcp.Capability
 	stop         func()
 }
 
-func (p *testProvider) Name() kernel.PluginName               { return p.name }
-func (p *testProvider) Dependencies() []kernel.PluginName     { return nil }
-func (p *testProvider) Register(*kernel.Registrar, any) error { return nil }
-func (p *testProvider) Capabilities() []mcp.Capability        { return p.capabilities }
+func (p *testProvider) Name() kernel.PluginName           { return p.name }
+func (p *testProvider) Dependencies() []kernel.PluginName { return nil }
+
+func (p *testProvider) Register(registrar *kernel.Registrar, _ any) error {
+	registrar.ProvideAdapter[mcp.Provider](offering(p.capabilities))
+	for _, more := range p.extra {
+		registrar.ProvideAdapter[mcp.Provider](offering(more))
+	}
+	return nil
+}
+
+// offering is the smallest Provider: a fixed list.
+type offering []mcp.Capability
+
+func (o offering) Capabilities() []mcp.Capability { return o }
 
 func (p *testProvider) Stop(kernel.Executioner) error {
 	if p.stop != nil {
@@ -193,6 +206,59 @@ func TestStart_DuplicateCapabilityWithinOneProviderFailsComposition(t *testing.T
 
 // A malformed capability fails composition rather than being skipped: a
 // silently absent tool is close to undebuggable from the agent's side.
+// A plugin may contribute several Providers, and every tool they render carries
+// its one prefix, so the same name across two of them is the same failure as
+// the same name twice in one.
+func TestStart_DuplicateCapabilityAcrossOnePluginsProvidersFailsComposition(t *testing.T) {
+	provider := &testProvider{name: "split",
+		capabilities: []mcp.Capability{echoing("echo")},
+		extra:        [][]mcp.Capability{{echoing("echo")}},
+	}
+	reported := runEngine(t, provider, testBroker())
+
+	var duplicate ErrDuplicateCapability
+	if err := firstError(t, reported); !errors.As(err, &duplicate) ||
+		duplicate.Provider != "split" || duplicate.Capability != "echo" {
+		t.Fatalf("reported %v, want ErrDuplicateCapability", err)
+	}
+}
+
+// Every Provider a plugin contributes is served under that plugin's name.
+func TestBroker_ServesEveryProviderAPluginContributes(t *testing.T) {
+	broker := testBroker()
+	provider := &testProvider{name: "probe",
+		capabilities: []mcp.Capability{echoing("first")},
+		extra:        [][]mcp.Capability{{echoing("second")}},
+	}
+	runEngine(t, provider, broker)
+
+	tools, err := attach(t, broker).ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("tools/list: %v", err)
+	}
+	names := make([]string, 0, len(tools.Tools))
+	for _, tool := range tools.Tools {
+		names = append(names, tool.Name)
+	}
+	if !contains(names, "probe_first") || !contains(names, "probe_second") {
+		t.Fatalf("tools/list = %v, want both of the plugin's Providers", names)
+	}
+}
+
+// A Provider nobody collects is not an error: an engine composed without the
+// broker runs with every provider still contributing.
+func TestComposition_WithoutTheBrokerRunsWithEveryProviderContributed(t *testing.T) {
+	reported := runEngine(t,
+		&testProvider{name: "first", capabilities: []mcp.Capability{echoing("echo")}},
+		&testProvider{name: "second", capabilities: []mcp.Capability{echoing("echo")}},
+	)
+	select {
+	case err := <-reported:
+		t.Fatalf("an engine without the broker reported %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestStart_MalformedCapabilityFailsComposition(t *testing.T) {
 	provider := &testProvider{name: "bad", capabilities: []mcp.Capability{
 		mcp.Func("bare", "not describable", func(kernel.Executioner, string) (echoResponse, error) {

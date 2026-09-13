@@ -5,11 +5,12 @@ import (
 	"github.com/dvoyni/cog/kernel"
 )
 
-// input offers its capabilities itself rather than through a separate plugin,
-// per the rule that every package hosts its own provider. The alternative — a
-// broker dispatching input.ApplyCmd itself — means the broker importing input,
-// which is the knower the whole extension point keeps out.
-var _ mcp.Provider = (*Plugin)(nil)
+// provider is what input contributes to the mcp Port, from its own Register
+// rather than through a separate plugin, per the rule that every package hosts
+// its own provider. The alternative — a broker dispatching input.ApplyCmd
+// itself — means the broker importing input, which is the knower the whole
+// extension point keeps out. It holds nothing: input's state is a resource.
+type provider struct{}
 
 // Key crosses the wire as the string it prints as, not as the integer its Go
 // kind implies, and says which strings it accepts. That is what turns a
@@ -60,7 +61,7 @@ const stateDescription = "What the input seam holds right now: every key and mou
 // glue, and it is the read-only one: several clients auto-approve read-only
 // tools, and "is W actually down?" is worth asking cheaply and often. send is
 // not read-only, because changing the game is its entire purpose.
-func (p *Plugin) Capabilities() []mcp.Capability {
+func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
 		mcp.Func(sendName, sendDescription, send),
 		mcp.Command[StateCmd, StateRequest, StateResponse](stateName, stateDescription, mcp.ReadOnly()),

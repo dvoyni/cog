@@ -1,4 +1,4 @@
-package gfx
+package gfximpl
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/internal"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/kernel"
@@ -94,6 +95,10 @@ type CaptureResponse struct {
 	WindowHeight float32 `json:"windowHeight"`
 }
 
+// provider is what gfx contributes to the mcp Port. It holds nothing: every
+// capability body reaches gfx by dispatch.
+type provider struct{}
+
 // Capabilities reports what gfx offers an agent: the pixels, and the passes
 // and resource traffic that produced them.
 //
@@ -107,7 +112,7 @@ type CaptureResponse struct {
 // game - a capture writes exactly the file it was told to, and a snapshot
 // under pause costs a step, which its description states rather than its
 // annotation.
-func (PluginEdges) Capabilities() []mcp.Capability {
+func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
 		mcp.Func(captureName, captureDescription, captureScreen, mcp.ReadOnly()),
 		mcp.Func(frameName, frameDescription, frameSnapshot, mcp.ReadOnly()),
@@ -144,8 +149,8 @@ func captureScreen(k kernel.Executioner, request CaptureRequest) (CaptureRespons
 			"the directory for %s could not be created: %v", request.Path, err)}
 	}
 
-	armed, err := k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
-		Target: GpuCaptureDesc{Screen: true}, Amount: amount, Interval: interval, Paused: paused,
+	armed, err := k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
+		Target: gfx.GpuCaptureDesc{Screen: true}, Amount: amount, Interval: interval, Paused: paused,
 	})
 	if err != nil {
 		return CaptureResponse{}, captureRefusal(err, amount, interval)
@@ -157,7 +162,7 @@ func captureScreen(k kernel.Executioner, request CaptureRequest) (CaptureRespons
 // reached disk. Expiry truncates rather than failing: zero frames is an error,
 // one or more is a short success, and shutdown mid-burst behaves the same way.
 func collectCapture(
-	k kernel.Executioner, armed ArmCaptureResponse,
+	k kernel.Executioner, armed gfx.ArmCaptureResponse,
 	template string, numbered bool, amount, interval int,
 ) (CaptureResponse, error) {
 	deadline := time.NewTimer(captureFloorDeadline + time.Duration(amount*interval)*captureTick)
@@ -204,10 +209,10 @@ func collectCapture(
 // writeCapturePNG un-strides one readback and puts it on disk. An existing
 // file is overwritten without complaint: re-writing the same name is the
 // iterate-and-look loop.
-func writeCapturePNG(path string, capture GpuCapture) error {
+func writeCapturePNG(path string, capture gfx.GpuCapture) error {
 	picture := capture.Image()
 	if picture == nil {
-		return ErrCaptureUnsupported{Format: capture.Format}
+		return gfx.ErrCaptureUnsupported{Format: capture.Format}
 	}
 	file, err := os.Create(path)
 	if err != nil {
@@ -230,17 +235,17 @@ func captureRefusal(reason error, amount, interval int) error {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"no frame was rendered within %s — the game may be paused, minimised, or not rendering",
 			captureFloorDeadline+time.Duration(amount*interval)*captureTick)}
-	case errors.Is(reason, ErrCaptureBusy{}):
+	case errors.Is(reason, gfx.ErrCaptureBusy{}):
 		return mcp.Unavailable{Reason: "a capture is already in flight; ask again"}
-	case errors.Is(reason, ErrCaptureAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
+	case errors.Is(reason, gfx.ErrCaptureAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
 		errors.Is(reason, context.Canceled):
 		// A game exiting is the normal case, not a fault: an engine that
 		// terminated while shutting down normally would be the worse answer.
 		return mcp.Unavailable{Reason: "the game is shutting down"}
-	case errors.Is(reason, ErrCaptureNoTarget{}):
+	case errors.Is(reason, gfx.ErrCaptureNoTarget{}):
 		return mcp.Unavailable{Reason: "the game drew nothing to the screen in that frame"}
 	}
-	var unsupported ErrCaptureUnsupported
+	var unsupported gfx.ErrCaptureUnsupported
 	if errors.As(reason, &unsupported) {
 		return mcp.Unavailable{Reason: unsupported.Error()}
 	}
@@ -359,8 +364,8 @@ type FrameResponse struct {
 	// counts and the viewport but not the two arrays, so the reply says what
 	// the frame was without repeating it.
 	Path string `json:"path,omitempty"`
-	FrameView
-	SnapshotView
+	gfx.FrameView
+	gfx.SnapshotView
 }
 
 // frameSnapshot is the gfx_frame body: validate, arm, step if the engine is
@@ -383,11 +388,11 @@ func frameSnapshot(k kernel.Executioner, request FrameRequest) (FrameResponse, e
 	}
 	paused := app.Paused(k)
 
-	armed, err := k.ExecuteCommand[ArmFrameCmd](ArmFrameRequest{Pass: request.Pass})
+	armed, err := k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{Pass: request.Pass})
 	if err != nil {
 		return FrameResponse{}, frameRefusal(err)
 	}
-	response := FrameResponse{SnapshotView: SnapshotViewOf(armed.Viewport)}
+	response := FrameResponse{SnapshotView: gfx.SnapshotViewOf(armed.Viewport)}
 	// The arm is placed first so that the tick the step produces is one that
 	// began after it. Joining a step another arm already raised is what makes
 	// three snapshots armed together describe one tick instead of three.
@@ -493,11 +498,11 @@ func frameRefusal(reason error) error {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"no tick was recorded within %s — the game may be paused with nothing stepping it, "+
 				"minimised, or not updating", frameDeadline)}
-	case errors.Is(reason, ErrFrameBusy{}):
+	case errors.Is(reason, gfx.ErrFrameBusy{}):
 		return mcp.Unavailable{Reason: "a frame snapshot is already in flight; ask again. A " +
 			"capture and the other snapshots may run alongside it, and arming them together is " +
 			"how they describe one tick."}
-	case errors.Is(reason, ErrFrameAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
+	case errors.Is(reason, gfx.ErrFrameAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
 		errors.Is(reason, context.Canceled):
 		// A game exiting is the normal case, not a fault.
 		return mcp.Unavailable{Reason: "the game is shutting down"}

@@ -12,7 +12,8 @@ and WebAssembly.
 - Plugin dependencies: `gfx`, `input`
 - Go package dependencies: `app`, `gfx`, `input`, `kernel`, `mcp`, `gogpu`,
   WebGPU implementation packages
-- Implements: `kernel.Host`, `mcp.Provider`, `kernel.PluginStopper`
+- Contributes: one `gfx.Backend` Adapter and one `mcp.Provider` Adapter
+- Implements: `kernel.Host`, `kernel.PluginStopper`
 - Subscribed kernel events: none
 
 Register dependencies before the driver. `Run(ctx)` owns the calling thread and
@@ -110,7 +111,7 @@ driver implements it.
 
 ## Offered To An Agent
 
-`wgpu` implements `mcp.Provider` and offers one capability, rendered as the
+`wgpu` contributes an `mcp.Provider` from `Register` and offers one capability, rendered as the
 tool `wgpu_time`: `pause`, `resume`, `step`, `hold`, `release` and `status`
 over `app.TimeCmd`, with the resulting state on every answer. It is an
 `mcp.Func` rather than an `mcp.Command` because a step waits for a frame and

@@ -36,13 +36,17 @@ settle it.
 
 ## The provider
 
-`ui` implements `mcp.Provider` itself — no separate plugin, per the rule that
-every package hosts its own provider.
+`ui` contributes an `mcp.Provider` itself, from its own `Register` — no
+separate plugin, per the rule that every package hosts its own provider. The
+Provider is an unexported value holding nothing, because the capability body
+reaches ui by dispatch.
 
 ```go
-func (p *Plugin) Capabilities() []mcp.Capability {
+registrar.ProvideAdapter[mcp.Provider](provider{}) // in Register
+
+func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
-		mcp.Func("layout", layoutDescription, p.layout, mcp.ReadOnly()),
+		mcp.Func("layout", layoutDescription, layoutSnapshot, mcp.ReadOnly()),
 	}
 }
 ```
@@ -381,7 +385,8 @@ A checklist for an implementation session.
 
 **`bundles/ui/mcpprovider.go`** (new)
 
-- `Capabilities()` returning the one capability.
+- A `provider` value whose `Capabilities()` returns the one capability,
+  contributed with `ProvideAdapter[mcp.Provider]` in `Register`.
 - `LayoutRequest`/`LayoutResponse`, and the `Func` body: validate, dispatch the
   arm, wait with the capability's own **2s** deadline, then marshal and write on
   **this** goroutine.

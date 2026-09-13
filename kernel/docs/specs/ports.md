@@ -132,8 +132,3 @@ ports:
 ```
 
 An Adapter nobody consumes is not listed, because it binds to nothing.
-
-## Not in this change
-
-`Executioner.Plugins[T]` stays. The mcp broker still uses it, and its removal
-comes with the broker moving to `CollectAdapters`.

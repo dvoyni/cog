@@ -5,5 +5,5 @@
 //
 // The plugin requires exactly one gfx.Backend Adapter. It reads the Adapter
 // from Start onwards, and a frame rendered before the Backend is Ready is
-// skipped.
+// skipped. It contributes one mcp.Provider, offering gfx_capture and gfx_frame.
 package gfximpl

@@ -100,15 +100,15 @@ func (r *captureRig) frame(label string) {
 // runCapture calls the capability body on its own goroutine and drives frames
 // until it answers, which is what an agent's call looks like from the engine's
 // side.
-func (r *captureRig) runCapture(request gfx.CaptureRequest) (gfx.CaptureResponse, error) {
+func (r *captureRig) runCapture(request CaptureRequest) (CaptureResponse, error) {
 	r.t.Helper()
 	type answer struct {
-		response gfx.CaptureResponse
+		response CaptureResponse
 		err      error
 	}
 	done := make(chan answer, 1)
 	go func() {
-		response, err := captureScreen(r.k, request)
+		response, err := callCapture(r.k, request)
 		done <- answer{response, err}
 	}()
 	expiry := time.After(10 * time.Second)
@@ -229,7 +229,7 @@ func TestACaptureIsWrittenAsAPNGWithNoShear(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "shot.png")
 
-	response, err := rig.runCapture(gfx.CaptureRequest{Path: path})
+	response, err := rig.runCapture(CaptureRequest{Path: path})
 	if err != nil {
 		t.Fatalf("capture: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestACaptureReportsThePixelSizeAndTheWindowSize(t *testing.T) {
 		return paddedCapture(64, 48, func(int, int) color.NRGBA { return color.NRGBA{A: 255} })
 	}
 
-	response, err := rig.runCapture(gfx.CaptureRequest{Path: filepath.Join(t.TempDir(), "sizes.png")})
+	response, err := rig.runCapture(CaptureRequest{Path: filepath.Join(t.TempDir(), "sizes.png")})
 	if err != nil {
 		t.Fatalf("capture: %v", err)
 	}
@@ -399,7 +399,7 @@ func TestABurstWritesNumberedStillsAndReportsTheOrdinals(t *testing.T) {
 	rig := newCaptureRig(t)
 	directory := t.TempDir()
 
-	response, err := rig.runCapture(gfx.CaptureRequest{
+	response, err := rig.runCapture(CaptureRequest{
 		Path: filepath.Join(directory, "frame-%04d.png"), Amount: 3, Interval: 2,
 	})
 	if err != nil {
@@ -430,7 +430,7 @@ func TestABurstTruncatesRatherThanFailing(t *testing.T) {
 	}
 	directory := t.TempDir()
 
-	response, err := rig.runCapture(gfx.CaptureRequest{
+	response, err := rig.runCapture(CaptureRequest{
 		Path: filepath.Join(directory, "burst-%04d.png"), Amount: 5,
 	})
 	if err != nil {
@@ -447,7 +447,7 @@ func TestACaptureThatWritesNothingIsAnError(t *testing.T) {
 		return gfx.GpuCapture{Err: gfx.ErrCaptureNoTarget{}}
 	}
 
-	_, err := rig.runCapture(gfx.CaptureRequest{Path: filepath.Join(t.TempDir(), "none.png")})
+	_, err := rig.runCapture(CaptureRequest{Path: filepath.Join(t.TempDir(), "none.png")})
 	var unavailable mcp.Unavailable
 	if !errors.As(err, &unavailable) {
 		t.Fatalf("zero frames = %v, want words rather than a short success", err)
@@ -458,23 +458,23 @@ func TestThePathIsCheckedBeforeAFrameIsSpent(t *testing.T) {
 	absolute := t.TempDir()
 	cases := []struct {
 		name    string
-		request gfx.CaptureRequest
+		request CaptureRequest
 	}{
-		{"empty", gfx.CaptureRequest{}},
-		{"relative", gfx.CaptureRequest{Path: filepath.Join("shots", "a.png")}},
-		{"not a png", gfx.CaptureRequest{Path: filepath.Join(absolute, "a.jpg")}},
-		{"wrong verb", gfx.CaptureRequest{Path: filepath.Join(absolute, "a-%s.png"), Amount: 2}},
-		{"two verbs", gfx.CaptureRequest{Path: filepath.Join(absolute, "a-%d-%d.png"), Amount: 2}},
-		{"burst with no verb", gfx.CaptureRequest{Path: filepath.Join(absolute, "a.png"), Amount: 2}},
-		{"too many stills", gfx.CaptureRequest{Path: filepath.Join(absolute, "a-%04d.png"), Amount: 61}},
-		{"too long a span", gfx.CaptureRequest{
+		{"empty", CaptureRequest{}},
+		{"relative", CaptureRequest{Path: filepath.Join("shots", "a.png")}},
+		{"not a png", CaptureRequest{Path: filepath.Join(absolute, "a.jpg")}},
+		{"wrong verb", CaptureRequest{Path: filepath.Join(absolute, "a-%s.png"), Amount: 2}},
+		{"two verbs", CaptureRequest{Path: filepath.Join(absolute, "a-%d-%d.png"), Amount: 2}},
+		{"burst with no verb", CaptureRequest{Path: filepath.Join(absolute, "a.png"), Amount: 2}},
+		{"too many stills", CaptureRequest{Path: filepath.Join(absolute, "a-%04d.png"), Amount: 61}},
+		{"too long a span", CaptureRequest{
 			Path: filepath.Join(absolute, "a-%04d.png"), Amount: 60, Interval: 20,
 		}},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			rig := newCaptureRig(t)
-			_, err := captureScreen(rig.k, testCase.request)
+			_, err := callCapture(rig.k, testCase.request)
 			var unavailable mcp.Unavailable
 			if !errors.As(err, &unavailable) {
 				t.Fatalf("%v was accepted, got %v", testCase.request, err)
@@ -502,8 +502,8 @@ func TestASingleCaptureUnderPauseCostsNoTick(t *testing.T) {
 	rig.backend.captureResult = pixels
 	directory := t.TempDir()
 
-	first := rig.pausedCapture(gfx.CaptureRequest{Path: filepath.Join(directory, "a.png")})
-	second := rig.pausedCapture(gfx.CaptureRequest{Path: filepath.Join(directory, "b.png")})
+	first := rig.pausedCapture(CaptureRequest{Path: filepath.Join(directory, "a.png")})
+	second := rig.pausedCapture(CaptureRequest{Path: filepath.Join(directory, "b.png")})
 	if !slices.Equal(first.Indices, []int{0}) || !slices.Equal(second.Indices, []int{0}) {
 		t.Fatalf("paused captures wrote %v and %v, want one still each", first.Indices, second.Indices)
 	}
@@ -523,15 +523,15 @@ func TestASingleCaptureUnderPauseCostsNoTick(t *testing.T) {
 // pausedCapture runs one capture while driving renders only, which is what a
 // paused engine does: no tick can begin, and the capture is served from the
 // next render.
-func (r *captureRig) pausedCapture(request gfx.CaptureRequest) gfx.CaptureResponse {
+func (r *captureRig) pausedCapture(request CaptureRequest) CaptureResponse {
 	r.t.Helper()
 	type answer struct {
-		response gfx.CaptureResponse
+		response CaptureResponse
 		err      error
 	}
 	done := make(chan answer, 1)
 	go func() {
-		response, err := captureScreen(r.k, request)
+		response, err := callCapture(r.k, request)
 		done <- answer{response, err}
 	}()
 	expiry := time.After(10 * time.Second)
@@ -555,7 +555,7 @@ func TestABurstUnderPauseIsRefusedInWords(t *testing.T) {
 	rig := newCaptureRig(t)
 	rig.clock.paused.Store(true)
 
-	_, err := captureScreen(rig.k, gfx.CaptureRequest{
+	_, err := callCapture(rig.k, CaptureRequest{
 		Path: filepath.Join(t.TempDir(), "burst-%04d.png"), Amount: 4,
 	})
 	var unavailable mcp.Unavailable

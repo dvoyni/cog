@@ -1,4 +1,4 @@
-package mcpserver
+package mcpimpl
 
 import (
 	"reflect"
@@ -9,8 +9,8 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// offered is one capability and the provider that offered it. The provider name
-// is all the broker ever learns about where a capability came from.
+// offered is one capability and the plugin that contributed its provider. The
+// plugin name is all the broker ever learns about where a capability came from.
 type offered struct {
 	provider   kernel.PluginName
 	capability mcp.Capability
@@ -18,30 +18,37 @@ type offered struct {
 
 // toolName renders the protocol name for this capability: <plugin>_<capability>.
 // Underscore, because the MCP name charset is conservative and it is the one
-// separator no client rejects. Uniqueness across providers is inherited from
-// the engine's own rejection of duplicate plugin names.
+// separator no client rejects. Uniqueness across plugins is inherited from the
+// engine's own rejection of duplicate plugin names.
 func (o offered) toolName() string { return string(o.provider) + "_" + o.capability.Name() }
 
 // collect asks every provider for its capabilities, exactly once, and rejects
 // the two failures a provider can hand over: a deferred construction error, and
-// the same name twice within one provider.
-func collect(providers []mcp.Provider) ([]offered, error) {
+// the same name twice from one plugin. A plugin may contribute more than one
+// Provider, and every tool name they render shares its prefix, so names are
+// unique per plugin rather than per Provider.
+func collect(providers []kernel.ContributedAdapter[mcp.Provider]) ([]offered, error) {
 	all := make([]offered, 0, len(providers))
-	for _, provider := range providers {
-		seen := map[string]struct{}{}
-		for _, capability := range provider.Capabilities() {
+	seen := map[kernel.PluginName]map[string]struct{}{}
+	for _, contributed := range providers {
+		names := seen[contributed.Plugin]
+		if names == nil {
+			names = map[string]struct{}{}
+			seen[contributed.Plugin] = names
+		}
+		for _, capability := range contributed.Adapter.Capabilities() {
 			if err := capability.Err(); err != nil {
 				return nil, ErrMalformedCapability{
-					Provider: string(provider.Name()), Capability: capability.Name(), Err: err,
+					Provider: string(contributed.Plugin), Capability: capability.Name(), Err: err,
 				}
 			}
-			if _, duplicate := seen[capability.Name()]; duplicate {
+			if _, duplicate := names[capability.Name()]; duplicate {
 				return nil, ErrDuplicateCapability{
-					Provider: string(provider.Name()), Capability: capability.Name(),
+					Provider: string(contributed.Plugin), Capability: capability.Name(),
 				}
 			}
-			seen[capability.Name()] = struct{}{}
-			all = append(all, offered{provider: provider.Name(), capability: capability})
+			names[capability.Name()] = struct{}{}
+			all = append(all, offered{provider: contributed.Plugin, capability: capability})
 		}
 	}
 	return all, nil

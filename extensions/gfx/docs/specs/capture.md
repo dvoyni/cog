@@ -600,7 +600,7 @@ A checklist for an implementation session, in dependency order.
   tick and binds it to the ready slot; the burst re-arms here.
 - The render handler drains `TakeCapture()` immediately after
   `list.backend.Execute(ops)` (`:126-138`) and does one non-blocking send.
-- gfx implements `mcp.Provider`; see [extensions/gfx/docs/specs/mcp.md](./mcp.md).
+- gfx contributes an `mcp.Provider`; see [extensions/gfx/docs/specs/mcp.md](./mcp.md).
 
 **`extensions/gfx/README.md`**
 

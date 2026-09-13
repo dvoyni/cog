@@ -52,12 +52,16 @@ the guarantee does.
 
 ## The provider
 
-`canvas` implements `mcp.Provider` itself.
+`canvas` contributes an `mcp.Provider` itself, from its own `Register`. The
+Provider is an unexported value holding nothing, because the capability body
+reaches canvas by dispatch.
 
 ```go
-func (p *Plugin) Capabilities() []mcp.Capability {
+registrar.ProvideAdapter[mcp.Provider](provider{}) // in Register
+
+func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
-		mcp.Func("draws", drawsDescription, p.draws, mcp.ReadOnly()),
+		mcp.Func("draws", drawsDescription, drawsSnapshot, mcp.ReadOnly()),
 	}
 }
 ```
@@ -392,7 +396,8 @@ A checklist for an implementation session.
 
 **`bundles/canvas/mcpprovider.go`** (new)
 
-- `Capabilities()` returning the one capability.
+- A `provider` value whose `Capabilities()` returns the one capability,
+  contributed with `ProvideAdapter[mcp.Provider]` in `Register`.
 - `DrawsRequest`/`DrawsResponse`, and the `Func` body: validate, dispatch the
   arm, wait with the capability's own **2s** deadline, then marshal and write on
   **this** goroutine.

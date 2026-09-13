@@ -1530,45 +1530,6 @@ func TestKernel_PluginReceivesConfig(t *testing.T) {
 	}
 }
 
-// testTagged is a plugin-satisfiable interface the engine attaches no meaning
-// to: exactly the shape Executioner.Plugins exists to find.
-type testTagged interface {
-	Plugin
-	tag() string
-}
-
-type testTaggedPlugin struct {
-	testPlugin
-	label string
-}
-
-func (p testTaggedPlugin) tag() string { return p.label }
-
-// Plugins answers with the plugins satisfying T in the engine's registration
-// order, which is dependency order rather than the order the app listed them.
-func TestExecutioner_PluginsFiltersByTypeInRegistrationOrder(t *testing.T) {
-	later := testTaggedPlugin{testPlugin{name: "later", deps: []PluginName{"earlier"}}, "later"}
-	earlier := testTaggedPlugin{testPlugin{name: "earlier"}, "earlier"}
-	plain := testPlugin{name: "plain"}
-
-	e := startEngine(t, later, plain, earlier)
-
-	tagged := e.Executioner().Plugins[testTagged]()
-	labels := make([]string, 0, len(tagged))
-	for _, plugin := range tagged {
-		labels = append(labels, plugin.tag())
-	}
-	if !slices.Equal(labels, []string{"earlier", "later"}) {
-		t.Fatalf("Plugins[testTagged] = %v, want [earlier later]", labels)
-	}
-	if all := e.Executioner().Plugins[Plugin](); len(all) != 3 {
-		t.Fatalf("Plugins[Plugin] returned %d plugins, want every one", len(all))
-	}
-	if none := e.Executioner().Plugins[PluginHost](); len(none) != 0 {
-		t.Fatalf("Plugins[PluginHost] = %v, want none", none)
-	}
-}
-
 // The lock columns are the one fact in a description that no source file
 // states: a handler names the command it dispatches, never the resources
 // behind it, so the write below is asserted two Uses hops from where it was

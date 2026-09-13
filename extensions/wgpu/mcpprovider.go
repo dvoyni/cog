@@ -11,11 +11,12 @@ import (
 	"github.com/dvoyni/cog/slots/app"
 )
 
-// The driver offers its one capability through the agent-facing extension
-// point. It is the provider because mcp.Provider embeds kernel.Plugin and app
-// has no plugin at all: only the host that owns the loop can stop it, so a
-// different host would offer its own sdl_time with its own answer.
-var _ mcp.Provider = (*Plugin)(nil)
+// provider is what the driver contributes to the mcp Port: its one capability.
+// The driver is the one to contribute it because app has no plugin at all, and
+// only the host that owns the loop can stop it, so a different host would
+// contribute its own sdl_time with its own answer. It holds nothing: the
+// capability body reaches the driver by dispatch.
+type provider struct{}
 
 // timeName is the driver's one capability, rendered as the tool wgpu_time.
 const timeName = "time"
@@ -93,7 +94,7 @@ type TimeResponse struct {
 // source, and nothing else. It is an engine feature the extension point
 // happens to want, so the contract is app.TimeCmd and a test harness or a
 // frame-step debugger reaches it on the same terms.
-func (p *Plugin) Capabilities() []mcp.Capability {
+func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{mcp.Func(timeName, timeDescription, timeControl)}
 }
 

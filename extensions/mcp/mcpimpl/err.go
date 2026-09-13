@@ -1,4 +1,4 @@
-package mcpserver
+package mcpimpl
 
 import (
 	"fmt"
@@ -44,9 +44,10 @@ func (e ErrMalformedCapability) Error() string {
 
 func (e ErrMalformedCapability) Unwrap() error { return e.Err }
 
-// ErrDuplicateCapability reports one provider offering the same capability name
-// twice. A duplicate across providers cannot happen: the tool name carries the
-// plugin prefix, and the engine already rejects duplicate plugin names.
+// ErrDuplicateCapability reports one plugin offering the same capability name
+// twice, from one Provider or across several it contributed. A duplicate across
+// plugins cannot happen: the tool name carries the plugin prefix, and the
+// engine already rejects duplicate plugin names.
 type ErrDuplicateCapability struct {
 	Provider   string
 	Capability string

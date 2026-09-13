@@ -1,4 +1,4 @@
-package mcpserver
+package mcpimpl
 
 import (
 	"encoding/json"
@@ -18,10 +18,11 @@ import (
 const architectureName = "architecture"
 
 // architectureDescription is prompt text, and it is reproduced in
-// extensions/mcpserver/docs/specs/mcp.md so it is reviewed as prompt text rather than
+// extensions/mcp/mcpimpl/docs/specs/mcp.md so it is reviewed as prompt text rather than
 // buried as a string literal.
 const architectureDescription = "What this engine is actually composed of: the plugins in start " +
-	"order, who owns which command, event and resource, the subscription dependency graph, and — " +
+	"order, who owns which command, event and resource, which plugins contributed the Adapters " +
+	"each Port is bound to, the subscription dependency graph, and — " +
 	"the part you cannot get by reading source — the full set of resources each handler ends up " +
 	"locking once the commands it declares are folded in. Use it when you need to know what a " +
 	"dispatch really touches, or why one handler waits for another. Commands are listed so you can " +
@@ -36,7 +37,7 @@ type ArchitectureRequest struct {
 	Path string `json:"path,omitempty" jsonschema:"absolute path of a .json file to write the description to instead of returning it inline; parent directories are created and an existing file is overwritten"`
 }
 
-// ArchitectureResponse is the finalized architecture as four flat arrays, or
+// ArchitectureResponse is the finalized architecture as five flat arrays, or
 // just the path when one was given. There is no index: the type string is the
 // address, and uses, dependsOn, reads and writes are all joins on it.
 type ArchitectureResponse struct {
@@ -45,6 +46,7 @@ type ArchitectureResponse struct {
 	Path          string                     `json:"path,omitempty"`
 	Plugins       []ArchitecturePlugin       `json:"plugins,omitempty"`
 	Resources     []ArchitectureResource     `json:"resources,omitempty"`
+	Ports         []ArchitecturePort         `json:"ports,omitempty"`
 	Commands      []ArchitectureCommand      `json:"commands,omitempty"`
 	Subscriptions []ArchitectureSubscription `json:"subscriptions,omitempty"`
 }
@@ -62,6 +64,16 @@ type ArchitecturePlugin struct {
 type ArchitectureResource struct {
 	Type  string `json:"type"`
 	Owner string `json:"owner"`
+}
+
+// ArchitecturePort is one plugin's declaration of an Adapter interface: the
+// Port, whether it collects any number of Adapters or requires exactly one, and
+// the plugins that contributed one, in plugin order.
+type ArchitecturePort struct {
+	Interface    string   `json:"interface"`
+	Port         string   `json:"port"`
+	Collects     bool     `json:"collects,omitempty"`
+	Contributors []string `json:"contributors,omitempty"`
 }
 
 // ArchitectureCommand is one command, its owner, and the resolved lock set its
@@ -91,7 +103,7 @@ type ArchitectureSubscription struct {
 // registry state that is immutable after finalization and returns a detached
 // value, which is the narrow exception the capability-body rule names: no
 // handle, no lock, no tick and no scheduler.
-func (p *Plugin) architecture(k kernel.Executioner, request ArchitectureRequest) (ArchitectureResponse, error) {
+func architecture(k kernel.Executioner, request ArchitectureRequest) (ArchitectureResponse, error) {
 	document := describe(k.Describe())
 	if request.Path == "" {
 		return document, nil
@@ -141,6 +153,7 @@ func describe(description kernel.ArchitectureDescription) ArchitectureResponse {
 	document := ArchitectureResponse{
 		Plugins:       make([]ArchitecturePlugin, 0, len(description.Plugins)),
 		Resources:     make([]ArchitectureResource, 0, len(description.Resources)),
+		Ports:         make([]ArchitecturePort, 0, len(description.Ports)),
 		Commands:      make([]ArchitectureCommand, 0, len(description.Commands)),
 		Subscriptions: make([]ArchitectureSubscription, 0, len(description.Subscriptions)),
 	}
@@ -157,6 +170,16 @@ func describe(description kernel.ArchitectureDescription) ArchitectureResponse {
 	for _, resource := range description.Resources {
 		document.Resources = append(document.Resources, ArchitectureResource{
 			Type: resource.Type.String(), Owner: string(resource.Owner),
+		})
+	}
+	for _, port := range description.Ports {
+		contributors := make([]string, 0, len(port.Contributors))
+		for _, contributor := range port.Contributors {
+			contributors = append(contributors, string(contributor))
+		}
+		document.Ports = append(document.Ports, ArchitecturePort{
+			Interface: port.Interface.String(), Port: string(port.Port),
+			Collects: port.Collects, Contributors: contributors,
 		})
 	}
 	for _, command := range description.Commands {

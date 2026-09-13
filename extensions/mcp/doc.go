@@ -1,14 +1,13 @@
-// Package mcp declares how a plugin offers typed capabilities to an agent, and
-// nothing about how those capabilities reach one. It is a contract-only leaf in
-// the same sense app is: it imports kernel and the standard library, and the
-// plugins that implement it live elsewhere.
+// Package mcp is the contract root of the agent-facing Port: how a plugin
+// offers typed capabilities to an agent, and nothing about how those
+// capabilities reach one. It imports kernel and the standard library.
 //
-// A Provider is a plugin that offers Capabilities. A Capability is a named,
-// described, typed dispatch, built with either Command or Func. The broker that
-// collects capabilities from every provider and serves them over the Model
-// Context Protocol is a different package, mcpserver; this one must never learn
-// protocol vocabulary, so a provider writes no schema, no tool name and no
-// annotation.
+// A Provider is the Adapter a plugin contributes to offer Capabilities. A
+// Capability is a named, described, typed dispatch, built with either Command
+// or Func. The broker that collects every Provider and serves the capabilities
+// over the Model Context Protocol is the Port's implementation, mcpimpl; this
+// package must never learn protocol vocabulary, so a provider writes no schema,
+// no tool name and no annotation.
 //
 // # The capability-body rule
 //
@@ -33,5 +32,6 @@
 // # Specification
 //
 // The full design, including the reasoning behind every rule here, is in
-// extensions/mcp/docs/specs/mcp.md; the broker's half is in extensions/mcpserver/docs/specs/mcp.md.
+// extensions/mcp/docs/specs/mcp.md; the broker's half is in
+// extensions/mcp/mcpimpl/docs/specs/mcp.md.
 package mcp

@@ -306,9 +306,9 @@ capability.**
 instance. Time control is the same shape: **only the host that owns the loop can
 stop it**, and `app` names the contract so gameplay code never imports a driver.
 
-**The provider must be `wgpu`**, because `mcp.Provider` embeds `kernel.Plugin`
-and **`app` has no plugin at all**. There is no `app`-side thing that could
-provide. This makes `wgpu` the first `wgpu_` provider and puts this file in the
+**The provider must be `wgpu`'s**, because an `mcp.Provider` is an Adapter a
+plugin contributes, the tool is prefixed with that plugin's name, and **`app`
+has no plugin at all**. There is no `app`-side thing that could provide. This makes `wgpu` the first `wgpu_` provider and puts this file in the
 spec family.
 
 The tool is therefore named **`wgpu_time`**, and a different host driver would
@@ -509,7 +509,8 @@ The mechanism is one branch inside a function that already exists.
 
 **`extensions/wgpu/mcpprovider.go`** (new)
 
-- `wgpu` implements `mcp.Provider`, returning the one capability.
+- A `provider` value whose `Capabilities()` returns the one capability,
+  contributed with `ProvideAdapter[mcp.Provider]` in `Register`.
 - `TimeRequest`/`TimeResponse`, the `Func` body with its own deadline, and the
   description string reproduced above.
 

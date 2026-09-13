@@ -16,7 +16,7 @@ subscribe to discrete events without depending on a windowing implementation.
 and `StateCmd`, and subscribes first to `app.UpdateEvent`.
 
 `Plugin` implements the kernel lifecycle methods `Name`, `Dependencies`, and
-`Init`, and `mcp.Provider`.
+`Init`, and contributes one `mcp.Provider` Adapter from `Register`.
 
 ## Commands Implemented
 
@@ -202,7 +202,7 @@ included.
 
 ## Offered To An Agent
 
-`input` implements `mcp.Provider` and offers two capabilities, rendered as the
+`input` contributes an `mcp.Provider` from `Register` and offers two capabilities, rendered as the
 tools `input_send` and `input_state`.
 
 - **`input_send`** is an `mcp.Func` over `Play` — it cannot be an `mcp.Command`,

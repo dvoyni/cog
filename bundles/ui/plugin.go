@@ -4,6 +4,7 @@ import (
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/bundles/input"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
@@ -40,6 +41,7 @@ func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.Subscribe[SnapshotArmUpdateEventHandler](p.armSnapshotOnUpdate).First()
 	registrar.Subscribe[SnapshotUpdateEventHandler](p.snapshotOnUpdate).
 		After[UpdateEventHandler]()
+	registrar.ProvideAdapter[mcp.Provider](provider{})
 	return nil
 }
 

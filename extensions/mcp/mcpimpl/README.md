@@ -1,8 +1,9 @@
-# mcpserver
+# mcpimpl
 
-`github.com/dvoyni/cog/extensions/mcpserver` is the **broker**: the one plugin that
-collects capabilities from every [`mcp.Provider`](../mcp/README.md) in the
-engine and serves them to an agent over the Model Context Protocol. It imports
+`github.com/dvoyni/cog/extensions/mcp/mcpimpl` is the **broker**: the one plugin that
+collects every [`mcp.Provider`](../README.md) Adapter in the engine and serves
+their capabilities to an agent over the Model Context Protocol. It is the
+implementation of the `mcp` Port. It imports
 `kernel`, `mcp`, the official Go MCP SDK and a JSON-schema library, and it
 imports **no provider**.
 
@@ -14,8 +15,11 @@ schema library appears in any other package's import graph.
 
 ## Plugin
 
-- Name: `mcpserver.Name` (`"mcpserver"`)
-- Constructor: `mcpserver.New(cfg ...Config) kernel.Plugin`
+- Name: `mcp.Name` (`"mcpserver"`), declared in the contract root. The plugin
+  kept the name it had as the `mcpserver` package, so its tool is still
+  `mcpserver_architecture`.
+- Constructor: `mcpimpl.New(cfg ...Config) kernel.Plugin`
+- Port: collects `mcp.Provider` Adapters, and contributes its own
 - Plugin dependencies: **none**
 - Go package dependencies: `kernel`, `mcp`,
   `github.com/modelcontextprotocol/go-sdk`, `github.com/google/jsonschema-go`
@@ -26,12 +30,13 @@ composes exactly the providers it has and the broker serves exactly what it
 finds. Declaring them would make the broker name every provider it might ever
 serve, and force every app listing `New()` to also list all of them.
 
-**Composition is the gate.** An app that does not list `mcpserver.New()` has no
-agent interface, which is a stronger guarantee than any flag.
+**Composition is the gate.** An app that does not list `mcpimpl.New()` has no
+agent interface, which is a stronger guarantee than any flag. Its providers
+still contribute their Adapters, which bind to nothing, and the engine runs.
 
-The plugin implements `mcp.Provider` over itself, so
-`k.Plugins[mcp.Provider]()` finds the broker among the providers and its own
-capability arrives through the same path as everyone else's.
+The broker contributes an `mcp.Provider` to the interface it collects, so its
+own capability is bound among everyone else's and arrives through the same
+path.
 
 ## Files
 
@@ -69,8 +74,9 @@ auth is a different effort; logging is one line at startup.
 
 ## Lifecycle
 
-At `Start` the broker caches `k.Plugins[mcp.Provider]()`, calls `Capabilities()`
-on each exactly once, validates and renders every capability as a tool, retains
+In `Register` the broker declares `CollectAdapters[mcp.Provider]()` and
+provides its own. At `Start` it reads the bound set, which the engine completed
+during composition, calls `Capabilities()` on each exactly once, validates and renders every capability as a tool, retains
 the `Start` executioner, listens, and starts one goroutine waiting on
 `k.Context().Done()`.
 
@@ -113,9 +119,11 @@ desktop and web builds at compile time.
 The broker owns names, schemas, annotations and the result envelope. A provider
 owns the description prose and nothing else that reaches the wire.
 
-- **Tool name** is `<plugin>_<capability>`. Uniqueness across providers is
-  inherited from the engine's own rejection of duplicate plugin names; a
-  duplicate *within* one provider fails composition.
+- **Tool name** is `<plugin>_<capability>`, where `<plugin>` is the
+  `PluginName` `CollectAdapters` records for the contributor. Uniqueness across
+  plugins is inherited from the engine's own rejection of duplicate plugin
+  names; a duplicate *within* one plugin, from one Provider or across several it
+  contributed, fails composition.
 - **Schemas** are inferred from the request and response types, with
   `mcp.TextValued` types overridden by the string schema they actually cross the
   wire as.
@@ -162,8 +170,11 @@ What earns it is the resolved, transitive lock closure each handler ends up
 holding once the commands it declares are folded in, plus the `uses` edges that
 explain it — the one thing an agent cannot compute by reading source, because a
 handler deliberately never names the resources behind a command it uses. It
-returns flat JSON in four arrays, addressed by type string, and writes a file
-instead when given an absolute `.json` path.
+returns flat JSON in five arrays — plugins, resources, ports, commands and
+subscriptions — addressed by type string, and writes a file instead when given
+an absolute `.json` path. A port entry names the Adapter interface, the Port
+plugin, whether it collects or requires one, and the contributors in plugin
+order.
 
 ## Attaching
 

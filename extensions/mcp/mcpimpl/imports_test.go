@@ -1,4 +1,4 @@
-package mcpserver
+package mcpimpl
 
 import (
 	"os"
@@ -18,7 +18,7 @@ var brokerOnlyModules = []string{
 }
 
 // Nothing outside the broker may acquire the MCP SDK or the schema library.
-// That absence is the whole reason mcp and mcpserver are two packages: an app
+// That absence is the whole reason mcp and mcpimpl are two packages: an app
 // importing gfx should not end up with an HTTP server and a JSON-schema
 // library in its module graph.
 func TestImports_BrokerDependenciesReachNoOtherPackage(t *testing.T) {
@@ -26,7 +26,7 @@ func TestImports_BrokerDependenciesReachNoOtherPackage(t *testing.T) {
 		t.Skip("the go tool is needed to resolve the import graph")
 	}
 	others := slices.DeleteFunc(goList(t, "./..."), func(pkg string) bool {
-		return pkg == "github.com/dvoyni/cog/extensions/mcpserver"
+		return pkg == "github.com/dvoyni/cog/extensions/mcp/mcpimpl"
 	})
 	if len(others) < 2 {
 		t.Fatalf("go list found %d packages besides the broker", len(others))
@@ -57,7 +57,7 @@ func clean(deps []string) bool {
 func goList(t *testing.T, args ...string) []string {
 	t.Helper()
 	command := exec.Command("go", append([]string{"list"}, args...)...)
-	command.Dir = "../.."
+	command.Dir = "../../.."
 	out, err := command.Output()
 	if err != nil {
 		t.Fatalf("go list %v: %v", args, err)

@@ -1,6 +1,7 @@
 package input
 
 import (
+	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -30,6 +31,7 @@ func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[SynthesizeCmd](synthesizeCmdImpl)
 	registrar.HandleCommand[StateCmd](stateCmdImpl)
 	registrar.Subscribe[UpdateEventHandler](handleUpdateEvent).First()
+	registrar.ProvideAdapter[mcp.Provider](provider{})
 	return nil
 }
 

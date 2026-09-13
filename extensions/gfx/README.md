@@ -26,8 +26,8 @@ gfx has the Port shape: a contract root, an `…impl` and an `internal/`.
   `PresentOnUpdate` and `RenderOnRender`. It declares no plugin, and it is what
   every other package imports.
 - **`extensions/gfx/gfximpl`** is the plugin: `New`, its handlers, the
-  translator, and the capture and frame-snapshot slots. Only composition roots
-  and tests import it.
+  translator, the capture and frame-snapshot slots, and the mcp Provider with
+  its two capabilities. Only composition roots and tests import it.
 - **`extensions/gfx/internal`** holds what the two share and nothing else may
   reach: the declarations of the contract types whose unexported state the
   translator reads, their recording methods, the consume side of the queues,
@@ -42,11 +42,6 @@ alias. What the root and gfximpl read beyond that goes through plain functions
 `internal` exports, which only they can call. `internal` never imports the
 root. See [`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
 
-Two things still sit in the root because they name `mcp`, which is not a Port
-yet and which gfximpl may not import: the mcp capability bodies
-(`mcpprovider.go`), and `PluginEdges`, which the plugin embeds for its
-`Capabilities`. They move into gfximpl when mcp becomes a Port.
-
 ## Plugin
 
 - Name: `gfx.Name` (`"gfx"`)
@@ -54,7 +49,8 @@ yet and which gfximpl may not import: the mcp capability bodies
 - Plugin dependency: `storage`
 - Requires: exactly one `gfx.Backend` Adapter
 - Go package dependencies: `app`, `kernel`, `mcp`, `storage`, `x/image`
-- Implements: `mcp.Provider`, `kernel.PluginStopper`
+- Contributes: one `mcp.Provider` Adapter
+- Implements: `kernel.PluginStopper`
 
 The plugin has no configuration. Register `storage` before it so shader and
 texture resources are available at runtime.
@@ -225,7 +221,7 @@ on that texture, and it is paid whether or not a capture ever happens.
 
 ## Offered To An Agent
 
-gfx implements `mcp.Provider` and offers two capabilities, `capture` and
+gfx contributes an `mcp.Provider` from `Register` and offers two capabilities, `capture` and
 `frame`, rendered as the tools `gfx_capture` and `gfx_frame`. They are the two
 halves of one question — what did the frame actually do — and they are separate
 tools because "nothing is on screen" and "this looks wrong" are different

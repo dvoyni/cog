@@ -1,4 +1,4 @@
-package mcpserver
+package mcpimpl
 
 import (
 	"errors"

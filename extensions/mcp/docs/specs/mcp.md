@@ -1,14 +1,14 @@
 # mcp extension point — specification
 
-`github.com/dvoyni/cog/extensions/mcp` is a contract-only leaf package, in the same sense
-`app` is one: it declares types that *other* plugins implement, and imports
-nothing but `kernel` and the standard library. It declares how a plugin offers
-typed **capabilities** to an **agent**, and nothing about how those capabilities
-reach one.
+`github.com/dvoyni/cog/extensions/mcp` is the contract root of a **Port**: it
+declares types that *other* plugins implement, and imports nothing but `kernel`
+and the standard library. It declares how a plugin offers typed
+**capabilities** to an **agent**, and nothing about how those capabilities reach
+one.
 
-The broker that collects them and serves them over MCP is a different package,
-`mcpserver`, specified in
-[extensions/mcpserver/docs/specs/mcp.md](../../../mcpserver/docs/specs/mcp.md). The split
+The broker that collects them and serves them over MCP is the Port's
+implementation, `mcpimpl`, specified in
+[extensions/mcp/mcpimpl/docs/specs/mcp.md](../../mcpimpl/docs/specs/mcp.md). The split
 is load-bearing: `mcp` must never learn protocol vocabulary, and nothing that
 imports `gfx` should acquire an HTTP server and a JSON-schema library in its
 module graph.
@@ -87,17 +87,24 @@ From
 [The provider contract, and where the mcp package sits](https://github.com/dvoyni/cog/issues/204)
 §4.
 
-|                     | `mcp/`                          | `mcpserver/`                  |
+|                     | `mcp/`                          | `mcp/mcpimpl/`                |
 | ------------------- | ------------------------------- | ----------------------------- |
-| what it is          | contract leaf                   | broker plugin                 |
+| what it is          | contract root                   | broker plugin                 |
 | imports             | `kernel`, stdlib                | `kernel`, `mcp`, the MCP SDK  |
 | a provider writes   | `mcp.Capability`                | —                             |
-| an app writes       | —                               | `mcpserver.New()`             |
+| an app writes       | —                               | `mcpimpl.New()`               |
 
 `app` is the precedent the map picked, and it is exact: `app` is the contract,
 named for what it is about, while `wgpu` — its single implementor — is named for
 itself. Providers name `mcp` on every capability they add; an app names
-`mcpserver` once, in its plugin list. The good name goes to the many.
+`mcpimpl` once, in its plugin list. The good name goes to the many.
+
+> **Amended by [#335](https://github.com/dvoyni/cog/issues/335).** The broker
+> was a package of its own, `mcpserver`, until
+> [ADR 0001](../../../../docs/adr/0001-bundles-slots-ports-and-adapters.md) made
+> `mcp` a Port: the contract stays at `extensions/mcp` and the broker moved to
+> `extensions/mcp/mcpimpl`. The plugin is still named `mcpserver` (`mcp.Name`),
+> so its tool is still `mcpserver_architecture` and no tool name changed.
 
 One package was rejected. It would put the MCP SDK and
 `github.com/google/jsonschema-go` in the module graph of anything importing
@@ -105,12 +112,13 @@ One package was rejected. It would put the MCP SDK and
 an HTTP server.
 
 **Every package hosts its own provider.** There are no `mcp`-only packages
-beyond these two: `gfx`, `canvas`, `ui`, `input` and `wgpu` each implement
-`mcp.Provider` themselves
+beyond these two: `gfx`, `canvas`, `ui`, `input` and `wgpu` each contribute an
+`mcp.Provider` from their own `Register`
 ([#205](https://github.com/dvoyni/cog/issues/205) §3). A separate plugin per
 capability was rejected — it is buildable, but its only advantage was a finer
-composition gate, and `mcpserver`'s own presence is already the gate. An app
-that does not list `mcpserver.New()` has no agent interface at all.
+composition gate, and the broker's own presence is already the gate. An app
+that does not list `mcpimpl.New()` has no agent interface at all, and its
+providers' Adapters bind to nothing, which is not an error.
 
 ---
 
@@ -119,11 +127,18 @@ that does not list `mcpserver.New()` has no agent interface at all.
 ```go
 package mcp
 
-// Provider is a plugin that offers capabilities to an agent.
+// Provider is the Adapter the broker collects: a value that offers
+// capabilities to an agent.
 type Provider interface {
-	kernel.Plugin
 	Capabilities() []Capability
 }
+```
+
+A plugin contributes one from its `Register`, and the broker collects every one:
+
+```go
+registrar.ProvideAdapter[mcp.Provider](provider{})       // in each provider
+providers := registrar.CollectAdapters[mcp.Provider]()  // in the broker
 ```
 
 **One interface, not one per kind.** `PluginWithCapture`, `PluginWithSnapshot`
@@ -133,25 +148,35 @@ set at the type level, so adding a kind edits `mcp` and touches every provider;
 and they would have killed the app-escape-hatch question before it could be
 asked (see [Out of scope](#out-of-scope)).
 
-Embedding `kernel.Plugin` gives `Name()`, which is what the broker namespaces
-tool names with, without a second lookup.
+The Provider carries no name. The name the broker namespaces tool names with is
+the `PluginName` of the plugin that contributed it, which `CollectAdapters`
+records beside each Adapter, so a provider cannot choose its own prefix. The
+Provider may be a small unexported value; every one in cog holds nothing,
+because a capability body reaches its plugin by dispatch.
 
-**Discovery is `k.Plugins[mcp.Provider]()` at broker `Start`, cached.** That is
-the one method
-[What kernel exposes so one plugin can find another](https://github.com/dvoyni/cog/issues/200)
-added for this — see [Required kernel changes](#required-kernel-changes). The
-list is complete and final by then regardless of start order, because
-`e.plugins` is set inside `WithPlugins`, long before the `Start` loop runs
-(`kernel/engine.go:122`, `:223`).
+**Discovery is `CollectAdapters[mcp.Provider]()` in broker `Register`, read at
+broker `Start`.** The list is complete and final by then regardless of start
+order, because the engine binds Adapters during composition, after every
+`Register` and before any `Start`
+([`kernel/docs/specs/ports.md`](../../../../kernel/docs/specs/ports.md)).
 
-**Capabilities are static for the engine lifetime.** A type assertion is static,
-and that is fixed as the rule rather than tolerated as a limitation: a plugin
+> **Amended by [#335](https://github.com/dvoyni/cog/issues/335).** `Provider`
+> embedded `kernel.Plugin`, and the broker found providers with
+> `k.Plugins[mcp.Provider]()`, the one method
+> [What kernel exposes so one plugin can find another](https://github.com/dvoyni/cog/issues/200)
+> added for this. That lookup was the one place a plugin reached another other
+> than through a command, an event or a resource. ADR 0001 made `mcp` a Port
+> that collects Adapters, and `Executioner.Plugins[T]` was deleted — see
+> [Required kernel changes](#required-kernel-changes).
+
+**Capabilities are static for the engine lifetime.** A binding is static, and
+that is fixed as the rule rather than tolerated as a limitation: a plugin
 provides or it does not, for the whole engine lifetime. A provider with nothing
 to offer *right now* says so **inside** its capability — an empty capability
-list, or an `Unavailable` from a call — never by ceasing to satisfy the
-interface. **Empty, not absent.**
+list, or an `Unavailable` from a call — never by withdrawing its Adapter.
+**Empty, not absent.**
 
-Dynamic capability would make an interface assertion the wrong instrument and
+Dynamic capability would make a composition-time binding the wrong instrument and
 would change every answer in this document. It is also the door to a plugin set
 that changes at runtime, which cog does not have and whose absence is
 load-bearing: `WithPlugins` validates the complete graph once and `finalize`
@@ -395,7 +420,7 @@ nobody can tune.
 **cog needs no writable directory of its own, and has none by design.** The
 agent names every path it wants written. This deletes a capture directory, a
 retention rule, a numbering scheme and a startup wipe, and it is why
-`mcpserver.Config` has no output directory
+`mcpimpl.Config` has no output directory
 ([#206](https://github.com/dvoyni/cog/issues/206) §8) and `gfx` has no config at
 all ([#207](https://github.com/dvoyni/cog/issues/207) §2). It also means
 `storage` is not in this picture anywhere: `storage.PermanentFS` exposes no OS
@@ -692,7 +717,7 @@ local exception** to a `kernel` rule that remains in force everywhere else, and
 it is written here rather than in `kernel/README.md` for exactly that reason.
 
 `kernel`'s rule stands as written: a handle is scoped to the dispatch that
-received it, and retaining it is a bug. **`mcpserver` retains the `Executioner`
+received it, and retaining it is a bug. **The broker retains the `Executioner`
 it was handed at `Start`**, past the return of `Start`, because reaching a
 provider correctly means dispatching a command and `ExecuteCommand` is a method
 on an `Executioner` value (`kernel/kernel.go:131`) — there is no package-level
@@ -719,7 +744,7 @@ the stack the whole time it is used. The broker's `Start` returns immediately
 and the handle outlives it. Different move, correctly treated differently.
 
 The obligations this places on the broker are in
-[extensions/mcpserver/docs/specs/mcp.md](../../../mcpserver/docs/specs/mcp.md).
+[extensions/mcp/mcpimpl/docs/specs/mcp.md](../../mcpimpl/docs/specs/mcp.md).
 
 ---
 
@@ -779,9 +804,9 @@ Two findings that shape what descriptions must *not* do:
 
 ## The capability set
 
-Fixed at `Start`, in `Plugins[T]` registration order, which is dependency order —
-so `tools/list` is deterministic, and that matters because it is the order the
-agent reads them in.
+Fixed at `Start`, in the plugin order `CollectAdapters` binds them in, which is
+dependency order — so `tools/list` is deterministic, and that matters because it
+is the order the agent reads them in.
 
 | tool | provider | shape | frame-bound | read-only |
 | --- | --- | --- | --- | --- |
@@ -825,7 +850,8 @@ client rejects. Plugin names are already bare lowercase words, so nothing needs
 mangling, and **uniqueness is inherited rather than re-enforced**: the engine
 already rejects duplicate plugin names (`ErrConflictingPluginName`,
 `kernel/engine.go:77`), so a collision across providers cannot happen. A
-duplicate *within* a provider is a construction failure.
+duplicate *within* a plugin is a construction failure, whether it comes from one
+Provider or from two the same plugin contributed.
 
 The rule survives one case that looks like an exception and is not.
 `wgpu_time`'s subject is the engine's tick source, not the driver — but `app`
@@ -848,7 +874,9 @@ the whole package.
 
 **`extensions/mcp/provider.go`**
 
-- `Provider interface { kernel.Plugin; Capabilities() []Capability }`.
+- `Provider interface { Capabilities() []Capability }`, the Adapter the broker
+  collects.
+- `Name`, the broker plugin's name, `"mcpserver"`.
 
 **`extensions/mcp/capability.go`**
 
@@ -900,6 +928,14 @@ existence.
 ---
 
 ## Required kernel changes
+
+> **Amended by [#335](https://github.com/dvoyni/cog/issues/335).**
+> `Executioner.Plugins[T]` is gone, and with it the encapsulation cost described
+> below. The broker declares `CollectAdapters[mcp.Provider]()` instead
+> ([`kernel/docs/specs/ports.md`](../../../../kernel/docs/specs/ports.md)), so a
+> plugin again reaches another only through a command, an event, a resource or
+> a bound Adapter. `Describe` stays, and its `Ports` reach the agent through
+> `mcpserver_architecture`. The rest of this section is the original record.
 
 Two methods, and nothing else about the engine's encapsulation is relaxed. From
 [#200](https://github.com/dvoyni/cog/issues/200) §§1–2 and
@@ -988,11 +1024,11 @@ the full list; these are the ones that bear on the contract.
   this well, not a destination.
 
 One thing that is emphatically **in** scope and looks like it should not be: **a
-game's own plugin may be a provider.** It implements `mcp.Provider` and returns
-`mcp.Command[BattleStateCmd, …]("battle_state", "…")`. The broker never knows
+game's own plugin may be a provider.** It contributes an `mcp.Provider` whose
+capabilities are `mcp.Command[BattleStateCmd, …]("battle_state", "…")`. The broker never knows
 the difference and no mechanism is added. This is what makes the design an
 extension point rather than a fixed integration, and it is the reason
-`mcpserver` declares no plugin dependencies.
+the broker declares no plugin dependencies.
 
 ---
 

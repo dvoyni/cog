@@ -1,29 +1,23 @@
 package gfximpl
 
 import (
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/kernel"
 )
 
-// The plugin offers gfx's capabilities through the PluginEdges it embeds, so
-// the broker finds it among the providers.
-var _ mcp.Provider = (*Plugin)(nil)
-
-// captureScreen and frameSnapshot call gfx's two capabilities the way the
-// broker does: found by name among the plugin's, and invoked with a pointer to
-// the request.
-func captureScreen(k kernel.Executioner, request gfx.CaptureRequest) (gfx.CaptureResponse, error) {
-	return invokeCapability[gfx.CaptureResponse](k, "capture", &request)
+// callCapture and callFrame call gfx's two capabilities the way the broker
+// does: found by name among the ones gfx's Provider offers, and invoked with a
+// pointer to the request.
+func callCapture(k kernel.Executioner, request CaptureRequest) (CaptureResponse, error) {
+	return invokeCapability[CaptureResponse](k, "capture", &request)
 }
 
-func frameSnapshot(k kernel.Executioner, request gfx.FrameRequest) (gfx.FrameResponse, error) {
-	return invokeCapability[gfx.FrameResponse](k, "frame", &request)
+func callFrame(k kernel.Executioner, request FrameRequest) (FrameResponse, error) {
+	return invokeCapability[FrameResponse](k, "frame", &request)
 }
 
 func invokeCapability[TResponse any](k kernel.Executioner, name string, request any) (TResponse, error) {
 	var zero TResponse
-	for _, capability := range New().Capabilities() {
+	for _, capability := range (provider{}).Capabilities() {
 		if capability.Name() != name {
 			continue
 		}

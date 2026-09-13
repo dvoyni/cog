@@ -5,6 +5,7 @@ import (
 
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/internal"
+	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
@@ -35,10 +36,6 @@ type readyList struct {
 // stream. It owns the translator (render-thread-only caches and dynamic buffers);
 // the three queues live in kernel resources.
 type Plugin struct {
-	// PluginEdges carries what the plugin still reaches in mcp: its
-	// capabilities.
-	gfx.PluginEdges
-
 	translator *translator
 	// backend is the bound Backend adapter, valid from Start onwards.
 	backend kernel.RequiredAdapter[gfx.Backend]
@@ -88,6 +85,7 @@ func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.Subscribe[frameOnUpdate](p.admitFrame).First()
 	registrar.Subscribe[gfx.PresentOnUpdate](p.presentOnUpdate).Last()
 	registrar.Subscribe[gfx.RenderOnRender](p.renderOnRender)
+	registrar.ProvideAdapter[mcp.Provider](provider{})
 	return nil
 }
 

@@ -1,7 +1,8 @@
-// Package mcpserver is the broker: the one plugin that collects capabilities
-// from every mcp.Provider in the engine and serves them to an agent over the
-// Model Context Protocol. It imports kernel, mcp, the official Go MCP SDK and a
-// JSON-schema library, and it imports no provider.
+// Package mcpimpl is the broker: the one plugin that collects every
+// mcp.Provider Adapter in the engine and serves their capabilities to an agent
+// over the Model Context Protocol. It is the implementation of the mcp Port. It
+// imports kernel, mcp, the official Go MCP SDK and a JSON-schema library, and it
+// imports no provider.
 //
 // That absence is the design. The broker renders; it does not know. Everything
 // it can say about a capability it learned from an mcp.Capability value, and
@@ -11,9 +12,10 @@
 // # Composition is the gate
 //
 // The broker declares no plugin dependencies, which is what makes this an
-// extension point: an app composes exactly the providers it has and the broker
-// serves exactly what it finds. An app that does not list New() has no agent
-// interface at all, which is a stronger guarantee than any flag.
+// extension point: it collects mcp.Provider Adapters, an app composes exactly
+// the providers it has, and the broker serves exactly what was contributed. An
+// app that does not list New() has no agent interface at all, which is a
+// stronger guarantee than any flag.
 //
 // # The retained executioner
 //
@@ -32,8 +34,8 @@
 // that point fails on a cancelled context rather than reaching a stopped
 // plugin.
 //
-// The full design is in extensions/mcpserver/docs/specs/mcp.md.
-package mcpserver
+// The full design is in extensions/mcp/mcpimpl/docs/specs/mcp.md.
+package mcpimpl
 
 import (
 	"context"
@@ -47,9 +49,6 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Name is the broker plugin's name, and therefore the prefix on its own tool.
-const Name kernel.PluginName = "mcpserver"
-
 // serverName is how the engine introduces itself to a client during
 // initialization. It names the engine rather than the plugin, because that is
 // what the person attaching is looking at.
@@ -59,6 +58,7 @@ const serverName = "cog"
 // the executioner every capability body dispatches through.
 type Plugin struct {
 	config      Config
+	providers   kernel.CollectedAdapters[mcp.Provider]
 	executioner kernel.Executioner
 	listener    net.Listener
 	server      *http.Server
@@ -83,32 +83,41 @@ func New(config ...Config) kernel.Plugin {
 }
 
 // Name reports the plugin name.
-func (p *Plugin) Name() kernel.PluginName { return Name }
+func (p *Plugin) Name() kernel.PluginName { return mcp.Name }
 
 // Dependencies reports the plugins the broker requires; it has none, so an app
 // listing it never has to also list every provider it might serve.
 func (p *Plugin) Dependencies() []kernel.PluginName { return nil }
 
-// Register declares nothing: the broker owns no command, event or resource.
-func (p *Plugin) Register(*kernel.Registrar, any) error { return nil }
-
-// Capabilities reports what the broker offers an agent itself. Collection is
-// uniform, so k.Plugins[mcp.Provider] finds the broker among the providers and
-// its own capability arrives through the same path as everyone else's. That
-// looks like a bug when read cold, and is not.
+// Register collects every mcp.Provider Adapter and contributes the broker's
+// own. The broker owns no command, event or resource.
 //
-// The set is closed at one. The broker provides a capability of its own only
-// for facts about composition; anything that invokes another provider's
-// capability would be the knower, whatever it was called.
-func (p *Plugin) Capabilities() []mcp.Capability {
+// Collection is uniform, so the broker's own Provider is bound among everyone
+// else's and its capability arrives through the same path. That looks like a
+// bug when read cold, and is not.
+func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
+	p.providers = registrar.CollectAdapters[mcp.Provider]()
+	registrar.ProvideAdapter[mcp.Provider](provider{})
+	return nil
+}
+
+// provider is what the broker offers an agent itself.
+type provider struct{}
+
+// Capabilities reports the broker's own capability. The set is closed at one.
+// The broker provides a capability of its own only for facts about
+// composition; anything that invokes another provider's capability would be
+// the knower, whatever it was called.
+func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
-		mcp.Func(architectureName, architectureDescription, p.architecture, mcp.ReadOnly()),
+		mcp.Func(architectureName, architectureDescription, architecture, mcp.ReadOnly()),
 	}
 }
 
 // Start collects every provider's capabilities, renders them as tools, and
 // serves them. The provider list is complete and final here regardless of start
-// order, because the engine fixes it during composition.
+// order, because the engine binds Adapters during composition, after every
+// Register and before any Start.
 //
 // A known flaw, stated rather than left to be found: the broker declares no
 // dependencies and plugin ordering is stable in the app author's listing order,
@@ -121,7 +130,7 @@ func (p *Plugin) Capabilities() []mcp.Capability {
 func (p *Plugin) Start(k kernel.Executioner) error {
 	p.executioner = k
 
-	offers, err := collect(k.Plugins[mcp.Provider]())
+	offers, err := collect(p.providers.Get())
 	if err != nil {
 		return err
 	}

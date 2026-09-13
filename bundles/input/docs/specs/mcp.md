@@ -33,19 +33,22 @@ marked **Gap** and says what would settle it.
 
 ## The provider
 
-`input` implements `mcp.Provider` itself.
+`input` contributes an `mcp.Provider` itself, from its own `Register`. The
+Provider is an unexported value holding nothing: input's state is a resource.
 
 ```go
-func (p *Plugin) Capabilities() []mcp.Capability {
+registrar.ProvideAdapter[mcp.Provider](provider{}) // in Register
+
+func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
-		mcp.Func("send", sendDescription, p.send),
+		mcp.Func("send", sendDescription, send),
 		mcp.Command[StateCmd, StateRequest, StateResponse]("state", stateDescription, mcp.ReadOnly()),
 	}
 }
 ```
 
 The alternative — the broker dispatching `input.ApplyCmd` itself — means
-`mcpserver` importing `input`, which is the knower the whole design keeps out.
+the broker importing `input`, which is the knower the whole design keeps out.
 Every package hosts its own provider.
 
 **`input_send` is `mcp.Func`** over `input.Play`, a one-line adapter. It cannot
@@ -301,7 +304,8 @@ The feature half is in
 
 **`bundles/input/mcpprovider.go`** (new)
 
-- `Capabilities()` returning the two capabilities above.
+- A `provider` value whose `Capabilities()` returns the two capabilities above,
+  contributed with `ProvideAdapter[mcp.Provider]` in `Register`.
 - The `input_send` body: `input.Play(k, req.Actions)`, and nothing else.
 - Both description strings, kept beside the types and reproduced above.
 

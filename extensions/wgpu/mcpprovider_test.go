@@ -22,7 +22,7 @@ func unavailable(t *testing.T, err error) mcp.Unavailable {
 
 // The driver offers exactly one capability, and it is the tick source.
 func TestTimeCapability_IsTheDriversOneCapability(t *testing.T) {
-	capabilities := New().Capabilities()
+	capabilities := (provider{}).Capabilities()
 
 	if len(capabilities) != 1 {
 		t.Fatalf("wgpu offers %d capabilities, want 1", len(capabilities))

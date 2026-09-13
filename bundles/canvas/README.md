@@ -18,7 +18,8 @@ before proposing a change to any of it.
 - Constructor: `canvas.New() *canvas.Plugin`
 - Plugin dependencies: `gfx`, `storage`
 - Go package dependencies: `app`, `gfx`, `kernel`, `mcp`, `storage`, `x/image`
-- Implements: `mcp.Provider`, `kernel.PluginStopper`
+- Contributes: one `mcp.Provider` Adapter
+- Implements: `kernel.PluginStopper`
 - Events declared or published: none
 
 ```go
@@ -438,7 +439,7 @@ instead of rendered pixels:
 
 ## Offered To An Agent
 
-canvas implements `mcp.Provider` and offers one capability, `draws`, rendered
+canvas contributes an `mcp.Provider` from `Register` and offers one capability, `draws`, rendered
 as the tool `canvas_draws`: one tick's recorded operations in flush order, with
 each layer's world window, aspect mode, target and clear. It answers *nothing
 is on screen; was it even recorded, and on which layer* — and it answers it

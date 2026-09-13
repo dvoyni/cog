@@ -16,14 +16,15 @@ import (
 	"github.com/dvoyni/cog/slots/app"
 )
 
-// ui offers its capability itself rather than through a separate plugin, per
-// the rule that every package hosts its own provider: the snapshot is taken
-// from a subscriber on ui's own processor, and this is where that processor
-// is.
+// provider is what ui contributes to the mcp Port, from its own Register
+// rather than through a separate plugin, per the rule that every package hosts
+// its own provider: the snapshot is taken from a subscriber on ui's own
+// processor, and this is where that processor is. It holds nothing: the
+// capability body reaches ui by dispatch.
 //
 // It is the only agent-facing surface ui has. There is no overlay and nothing
 // here writes content into the game's frame; see docs/specs/mcp.md.
-var _ mcp.Provider = (*Plugin)(nil)
+type provider struct{}
 
 // layoutCapabilityName is the capability rendered as the tool ui_layout. It
 // is spelled out rather than named layoutName because that name already
@@ -101,7 +102,7 @@ type LayoutResponse struct {
 // reading means the capability does not change the game - with the one
 // asterisk that under pause it costs a step, which its description states
 // rather than its annotation.
-func (p *Plugin) Capabilities() []mcp.Capability {
+func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
 		mcp.Func(layoutCapabilityName, layoutDescription, layoutSnapshot, mcp.ReadOnly()),
 	}

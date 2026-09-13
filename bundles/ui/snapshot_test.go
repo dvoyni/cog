@@ -866,7 +866,7 @@ func marshalLayout(t *testing.T, response LayoutResponse) string {
 }
 
 func TestUILayoutIsOfferedAsOneReadOnlyFunc(t *testing.T) {
-	offered := New().Capabilities()
+	offered := (provider{}).Capabilities()
 	if len(offered) != 1 {
 		t.Fatalf("capabilities = %d, want the one ui implements", len(offered))
 	}

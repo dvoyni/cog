@@ -8,6 +8,7 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
@@ -70,6 +71,7 @@ func (p *Plugin) Register(registrar *kernel.Registrar, value any) error {
 		Last().Before[UpdateEventHandler]()
 	registrar.Subscribe[UpdateEventHandler](p.flush).
 		Last().Before[gfx.PresentOnUpdate]()
+	registrar.ProvideAdapter[mcp.Provider](provider{})
 	return nil
 }
 

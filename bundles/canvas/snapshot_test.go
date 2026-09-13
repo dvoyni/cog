@@ -802,7 +802,7 @@ func TestADrawsSnapshotIsOneFlatDocument(t *testing.T) {
 }
 
 func TestCanvasOffersOneReadOnlyCapability(t *testing.T) {
-	offered := New().Capabilities()
+	offered := (provider{}).Capabilities()
 	if len(offered) != 1 {
 		t.Fatalf("capabilities = %d, want the one canvas implements", len(offered))
 	}
