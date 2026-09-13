@@ -1,4 +1,4 @@
-package ui
+package internal
 
 import (
 	"reflect"
@@ -45,8 +45,8 @@ func TestProcessResolvesPivotsAndClipsChildren(t *testing.T) {
 		Children(child)
 	roots := []Element{root}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, roots, nil, globalState{Screen: Rect{Width: 200, Height: 200}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, roots, nil, GlobalState{Screen: Rect{Width: 200, Height: 200}}, nil)
 
 	assertRect(t, rootVisual.states[0].Rect, Rect{X: 10, Y: 25, Width: 100, Height: 80})
 	assertRect(t, childVisual.states[0].Rect, Rect{X: 100, Y: 25, Width: 20, Height: 10})
@@ -69,8 +69,8 @@ func TestProcessDistributesHorizontalStretch(t *testing.T) {
 		ChildrenAlignment(AlignCenter).
 		Children(children...)}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, roots, nil, globalState{Screen: Rect{Width: 100, Height: 20}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, roots, nil, GlobalState{Screen: Rect{Width: 100, Height: 20}}, nil)
 
 	assertRect(t, leftVisual.states[0].Rect, Rect{X: 0, Y: 5, Width: 30, Height: 10})
 	assertRect(t, rightVisual.states[0].Rect, Rect{X: 30, Y: 5, Width: 70, Height: 10})
@@ -93,8 +93,8 @@ func TestProcessAppliesPaddingGapAndCrossAxisStretch(t *testing.T) {
 		Visual(rootVisual, nil).
 		Children(children...)}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, roots, nil, globalState{Screen: Rect{Width: 100, Height: 40}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, roots, nil, GlobalState{Screen: Rect{Width: 100, Height: 40}}, nil)
 
 	assertRect(t, rootVisual.states[0].ContentRect, Rect{X: 10, Y: 5, Width: 80, Height: 30})
 	assertRect(t, leftVisual.states[0].Rect, Rect{X: 10, Y: 5, Width: 30, Height: 30})
@@ -110,8 +110,8 @@ func TestProcessDefiniteCrossAxisStretchPreservesVisualAspectRatio(t *testing.T)
 			ChildrenAlignment(AlignStretch).
 			Children(NewElement().Visual(visual, nil).PreserveAspectRatio())
 
-		var context processor
-		context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 30}}, nil)
+		var context Processor
+		context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 200, Height: 30}}, nil)
 
 		assertRect(t, visual.states[0].Rect, Rect{Width: 60, Height: 30})
 	})
@@ -124,8 +124,8 @@ func TestProcessDefiniteCrossAxisStretchPreservesVisualAspectRatio(t *testing.T)
 			ChildrenAlignment(AlignStretch).
 			Children(NewElement().Visual(visual, nil).PreserveAspectRatio())
 
-		var context processor
-		context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 30, Height: 200}}, nil)
+		var context Processor
+		context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 30, Height: 200}}, nil)
 
 		assertRect(t, visual.states[0].Rect, Rect{Width: 30, Height: 15})
 	})
@@ -137,8 +137,8 @@ func TestProcessIntrinsicCrossAxisStretchKeepsVisualIntrinsicSize(t *testing.T) 
 		ChildrenAlignment(AlignStretch).
 		Children(NewElement().Visual(visual, nil).PreserveAspectRatio())
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 100}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 200, Height: 100}}, nil)
 
 	assertRect(t, visual.states[0].Rect, Rect{Width: 40, Height: 20})
 }
@@ -151,8 +151,8 @@ func TestProcessDefiniteCrossAxisStretchDoesNotPreserveAspectRatioByDefault(t *t
 		ChildrenAlignment(AlignStretch).
 		Children(NewElement().Visual(visual, nil))
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 30}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 200, Height: 30}}, nil)
 
 	assertRect(t, visual.states[0].Rect, Rect{Width: 40, Height: 30})
 }
@@ -165,8 +165,8 @@ func TestProcessDefiniteStretchRespectsExplicitMainAxis(t *testing.T) {
 		ChildrenAlignment(AlignStretch).
 		Children(NewElement().Width(25).Visual(visual, nil).PreserveAspectRatio())
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 30}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 200, Height: 30}}, nil)
 
 	assertRect(t, visual.states[0].Rect, Rect{Width: 25, Height: 30})
 }
@@ -184,8 +184,8 @@ func TestProcessRowReservesWidthForRelativeHeightAspectChild(t *testing.T) {
 		NewElement().Visual(textVisual, nil),
 	).Gap(8).Visual(rowVisual, nil)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 800, Height: 600}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 800, Height: 600}}, nil)
 
 	assertRect(t, rowVisual.states[0].Rect, Rect{Width: 354, Height: 23})
 	assertRect(t, iconVisual.states[0].Rect, Rect{Width: 46, Height: 23})
@@ -201,8 +201,8 @@ func TestProcessColumnReservesHeightForRelativeWidthAspectChild(t *testing.T) {
 		NewElement().Visual(textVisual, nil),
 	).Gap(8).Visual(columnVisual, nil)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 800, Height: 600}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 800, Height: 600}}, nil)
 
 	assertRect(t, columnVisual.states[0].Rect, Rect{Width: 23, Height: 354})
 	assertRect(t, iconVisual.states[0].Rect, Rect{Width: 23, Height: 46})
@@ -218,8 +218,8 @@ func TestProcessRelativeCrossChildMeasuresAgainstOwnRowHeight(t *testing.T) {
 		NewElement().Visual(iconVisual, nil).PreserveAspectRatio().HeightRel(1),
 	).Height(50).Padding(5, 4).Visual(rowVisual, nil)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 800, Height: 600}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 800, Height: 600}}, nil)
 
 	assertRect(t, rowVisual.states[0].Rect, Rect{Width: 88, Height: 50})
 	assertRect(t, iconVisual.states[0].Rect, Rect{X: 4, Y: 5, Width: 80, Height: 40})
@@ -237,8 +237,8 @@ func TestLayoutNoneFillUsesContentUnlessChildIgnoresLayout(t *testing.T) {
 			NewElement().Fill().IgnoreLayout().Visual(parentVisual, nil),
 		)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 100, Height: 40}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 100, Height: 40}}, nil)
 
 	assertRect(t, contentVisual.states[0].Rect, Rect{X: 10, Y: 5, Width: 80, Height: 30})
 	assertRect(t, parentVisual.states[0].Rect, Rect{Width: 100, Height: 40})
@@ -257,8 +257,8 @@ func TestProcessNegativeGapOverlapsChildren(t *testing.T) {
 		Visual(rootVisual, nil).
 		Children(children...)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 100, Height: 100}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 100, Height: 100}}, nil)
 
 	assertRect(t, rootVisual.states[0].Rect, Rect{Width: 18, Height: 10})
 	assertRect(t, leftVisual.states[0].Rect, Rect{Width: 10, Height: 10})
@@ -269,8 +269,8 @@ func TestProcessAddsPaddingToVisualIntrinsicSize(t *testing.T) {
 	visual := &recordingVisual{defaultSize: m.Vec2{X: 20, Y: 10}}
 	roots := []Element{NewElement().Padding(1, 2, 3, 4).Visual(visual, nil)}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, roots, nil, globalState{Screen: Rect{Width: 100, Height: 100}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, roots, nil, GlobalState{Screen: Rect{Width: 100, Height: 100}}, nil)
 
 	assertRect(t, visual.states[0].Rect, Rect{Width: 26, Height: 14})
 	assertRect(t, visual.states[0].ContentRect, Rect{X: 4, Y: 1, Width: 20, Height: 10})
@@ -295,8 +295,8 @@ func TestProcessPreservesVisualAspectRatioWithOneSpecifiedAxis(t *testing.T) {
 			visual := &recordingVisual{defaultSize: m.Vec2{X: 40, Y: 20}}
 			element := test.element.Visual(visual, nil).PreserveAspectRatio()
 
-			var context processor
-			context.process(canvas.LookupAccess{}, []Element{element}, nil, globalState{Screen: Rect{Width: 200, Height: 120}}, nil)
+			var context Processor
+			context.Process(canvas.LookupAccess{}, []Element{element}, nil, GlobalState{Screen: Rect{Width: 200, Height: 120}}, nil)
 
 			assertRect(t, visual.states[0].Rect, test.want)
 		})
@@ -314,8 +314,8 @@ func TestOverlayButtonKeepsBackgroundAndBorderOutsideLabelPadding(t *testing.T) 
 	}
 	root := Button(ButtonParams{ID: "button"}).Width(100).Height(40).Children(children...)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 100, Height: 100}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 100, Height: 100}}, nil)
 
 	wantOuter := Rect{Width: 100, Height: 40}
 	assertRect(t, backgroundVisual.states[0].Rect, wantOuter)
@@ -330,8 +330,8 @@ func TestProcessMeasuresAbsoluteChildrenFromPixelAnchors(t *testing.T) {
 	child := NewElement().Left(5).Right(7).Top(3).Bottom(4).Visual(childVisual, nil)
 	roots := []Element{NewElement().Visual(parentVisual, nil).Children(child)}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, roots, nil, globalState{Screen: Rect{Width: 100, Height: 100}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, roots, nil, GlobalState{Screen: Rect{Width: 100, Height: 100}}, nil)
 
 	assertRect(t, parentVisual.states[0].Rect, Rect{Width: 32, Height: 17})
 	assertRect(t, childVisual.states[0].Rect, Rect{X: 5, Y: 3, Width: 20, Height: 10})
@@ -345,8 +345,8 @@ func TestProcessSupportsNegativeEdgesAndLayer(t *testing.T) {
 		Visual(childVisual, nil)
 	root := NewElement().Width(100).Height(80).Children(child)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, []canvas.Layer{10}, globalState{Screen: Rect{Width: 100, Height: 80}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, []canvas.Layer{10}, GlobalState{Screen: Rect{Width: 100, Height: 80}}, nil)
 
 	assertRect(t, childVisual.states[0].Rect, Rect{X: -10, Y: -5, Width: 130, Height: 100})
 	if got, want := childVisual.states[0].Layer, canvas.Layer(9); got != want {
@@ -378,8 +378,8 @@ func TestProcessEdgeFillMatchesDimensionFillInIntrinsicParent(t *testing.T) {
 				NewElement().Visual(contentVisual, nil),
 			)
 
-			var context processor
-			context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 200}}, nil)
+			var context Processor
+			context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 200, Height: 200}}, nil)
 
 			assertRect(t, parentVisual.states[0].Rect, Rect{Width: 20, Height: 10})
 			assertRect(t, backgroundVisual.states[0].Rect, Rect{Width: 20, Height: 10})
@@ -409,8 +409,8 @@ func TestProcessInfersSquareGridAndDropsFixedOverflow(t *testing.T) {
 	}
 	roots := []Element{Grid(children...)}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, roots, nil, globalState{Screen: Rect{Width: 100, Height: 100}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, roots, nil, GlobalState{Screen: Rect{Width: 100, Height: 100}}, nil)
 
 	want := []Rect{
 		{X: 0, Y: 0, Width: 10, Height: 10},
@@ -433,7 +433,7 @@ func TestProcessInfersSquareGridAndDropsFixedOverflow(t *testing.T) {
 		Columns(1).
 		Rows(2).
 		Children(fixedChildren...)}
-	context.process(canvas.LookupAccess{}, fixed, nil, globalState{Screen: Rect{Width: 100, Height: 100}}, nil)
+	context.Process(canvas.LookupAccess{}, fixed, nil, GlobalState{Screen: Rect{Width: 100, Height: 100}}, nil)
 	if len(fixedVisuals[0].states) != 1 || len(fixedVisuals[1].states) != 1 || len(fixedVisuals[2].states) != 0 {
 		t.Fatalf("fixed grid draw counts = %d, %d, %d; want 1, 1, 0",
 			len(fixedVisuals[0].states), len(fixedVisuals[1].states), len(fixedVisuals[2].states))
@@ -460,8 +460,8 @@ func TestProcessGridSizesEachTrackFromItsLargestElement(t *testing.T) {
 		Visual(rootVisual, nil).
 		Children(children...)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 100, Height: 100}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 100, Height: 100}}, nil)
 
 	assertRect(t, rootVisual.states[0].Rect, Rect{Width: 52, Height: 22})
 	assertRect(t, visuals[0].states[0].Rect, Rect{Width: 30, Height: 7})
@@ -491,8 +491,8 @@ func TestProcessGridExpandsTracksToDefiniteSize(t *testing.T) {
 		ChildrenAlignment(AlignCenter).
 		Children(children...)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 100, Height: 60}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 100, Height: 60}}, nil)
 
 	assertRect(t, visuals[0].states[0].Rect, Rect{X: 22, Y: 10.5, Width: 10, Height: 5})
 	assertRect(t, visuals[1].states[0].Rect, Rect{X: 68, Y: 9.5, Width: 20, Height: 7})
@@ -509,13 +509,13 @@ func TestProcessGivesOverlappingInteractionsToTopmostOnly(t *testing.T) {
 		NewElement().ID("high").Visual(highVisual, nil),
 	}
 	layers := []canvas.Layer{3, 7}
-	state := globalState{
+	state := GlobalState{
 		Screen:  Rect{Width: 100, Height: 100},
-		Pointer: pointerState{X: 5, Y: 5, Events: []pointerEvent{{X: 5, Y: 5, Button: 0, Kind: pointerEventDown}}},
+		Pointer: PointerState{X: 5, Y: 5, Events: []PointerEvent{{X: 5, Y: 5, Button: 0, Kind: PointerEventDown}}},
 	}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, roots, layers, state, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, roots, layers, state, nil)
 	if !reflect.DeepEqual(drawOrder, []ID{"low", "high"}) {
 		t.Fatalf("draw order = %v, want [low high]", drawOrder)
 	}
@@ -532,8 +532,8 @@ func TestProcessGivesOverlappingInteractionsToTopmostOnly(t *testing.T) {
 	}
 
 	drawOrder = drawOrder[:0]
-	state.Pointer.Events = []pointerEvent{{X: 5, Y: 5, Button: 0, Kind: pointerEventUp}}
-	context.process(canvas.LookupAccess{}, roots, layers, state, nil)
+	state.Pointer.Events = []PointerEvent{{X: 5, Y: 5, Button: 0, Kind: PointerEventUp}}
+	context.Process(canvas.LookupAccess{}, roots, layers, state, nil)
 	assertInteractions(t, context.interactions, []Interaction{
 		{ID: "high", Kind: InteractionUp, Button: 0},
 		{ID: "high", Kind: InteractionClick, Button: 0},
@@ -552,13 +552,13 @@ func TestProcessIgnoreHitTestFallsThroughToElementBelow(t *testing.T) {
 		),
 	}
 	layers := []canvas.Layer{0, 1}
-	state := globalState{
+	state := GlobalState{
 		Screen:  Rect{Width: 20, Height: 20},
-		Pointer: pointerState{X: 10, Y: 10, Events: []pointerEvent{{X: 10, Y: 10, Button: 0, Kind: pointerEventDown}}},
+		Pointer: PointerState{X: 10, Y: 10, Events: []PointerEvent{{X: 10, Y: 10, Button: 0, Kind: PointerEventDown}}},
 	}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, roots, layers, state, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, roots, layers, state, nil)
 	assertInteractions(t, context.interactions, []Interaction{
 		{ID: "below", Kind: InteractionDown, Button: 0},
 		{ID: "below", Kind: InteractionIn, Button: -1},
@@ -566,8 +566,8 @@ func TestProcessIgnoreHitTestFallsThroughToElementBelow(t *testing.T) {
 	})
 
 	state.Pointer.X, state.Pointer.Y = 2, 2
-	state.Pointer.Events = []pointerEvent{{X: 2, Y: 2, Button: 0, Kind: pointerEventDown}}
-	context.process(canvas.LookupAccess{}, roots, layers, state, nil)
+	state.Pointer.Events = []PointerEvent{{X: 2, Y: 2, Button: 0, Kind: PointerEventDown}}
+	context.Process(canvas.LookupAccess{}, roots, layers, state, nil)
 	assertInteractions(t, context.interactions, []Interaction{
 		{ID: "close", Kind: InteractionDown, Button: 0},
 		{ID: "close", Kind: InteractionIn, Button: -1},
@@ -578,15 +578,15 @@ func TestProcessIgnoreHitTestFallsThroughToElementBelow(t *testing.T) {
 
 func TestProcessReturnsCapturedElementUserData(t *testing.T) {
 	root := NewElement().ID("target").UserData("unit data").Width(20).Height(20)
-	state := globalState{
+	state := GlobalState{
 		Screen:  Rect{Width: 20, Height: 20},
-		Pointer: pointerState{X: 5, Y: 5, Events: []pointerEvent{{X: 5, Y: 5, Button: 0, Kind: pointerEventDown}}},
+		Pointer: PointerState{X: 5, Y: 5, Events: []PointerEvent{{X: 5, Y: 5, Button: 0, Kind: PointerEventDown}}},
 	}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, state, nil)
-	state.Pointer.Events = []pointerEvent{{X: 5, Y: 5, Button: 0, Kind: pointerEventUp}}
-	context.process(canvas.LookupAccess{}, []Element{root.UserData("changed data")}, nil, state, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, state, nil)
+	state.Pointer.Events = []PointerEvent{{X: 5, Y: 5, Button: 0, Kind: PointerEventUp}}
+	context.Process(canvas.LookupAccess{}, []Element{root.UserData("changed data")}, nil, state, nil)
 
 	interactions := Interactions{values: context.interactions}
 	found, userData := interactions.Has("target", InteractionClick, 0, false)
@@ -598,13 +598,13 @@ func TestProcessReturnsCapturedElementUserData(t *testing.T) {
 func TestProcessGivesNestedInteractionsToInnermostID(t *testing.T) {
 	child := NewElement().ID("child").Width(20).Height(20)
 	parent := NewElement().ID("parent").Width(20).Height(20).Children(child)
-	state := globalState{
+	state := GlobalState{
 		Screen:  Rect{Width: 20, Height: 20},
-		Pointer: pointerState{X: 5, Y: 5, Events: []pointerEvent{{X: 5, Y: 5, Button: 0, Kind: pointerEventDown}}},
+		Pointer: PointerState{X: 5, Y: 5, Events: []PointerEvent{{X: 5, Y: 5, Button: 0, Kind: PointerEventDown}}},
 	}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{parent}, nil, state, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{parent}, nil, state, nil)
 	assertInteractions(t, context.interactions, []Interaction{
 		{ID: "child", Kind: InteractionDown, Button: 0},
 		{ID: "child", Kind: InteractionIn, Button: -1},
@@ -616,13 +616,13 @@ func TestAnonymousElementDerivesInteractionToNearestIDedAncestor(t *testing.T) {
 	leaf := NewElement().Width(20).Height(20)
 	anonymous := NewElement().Width(20).Height(20).Children(leaf)
 	parent := NewElement().ID("parent").Width(20).Height(20).Children(anonymous)
-	state := globalState{
+	state := GlobalState{
 		Screen:  Rect{Width: 20, Height: 20},
-		Pointer: pointerState{X: 5, Y: 5, Events: []pointerEvent{{X: 5, Y: 5, Button: 0, Kind: pointerEventDown}}},
+		Pointer: PointerState{X: 5, Y: 5, Events: []PointerEvent{{X: 5, Y: 5, Button: 0, Kind: PointerEventDown}}},
 	}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{parent}, nil, state, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{parent}, nil, state, nil)
 	assertInteractions(t, context.interactions, []Interaction{
 		{ID: "parent", Kind: InteractionDown, Button: 0},
 		{ID: "parent", Kind: InteractionIn, Button: -1},
@@ -635,16 +635,16 @@ func TestAnonymousElementWithoutIDedAncestorBlocksEverythingBelow(t *testing.T) 
 	shade := NewElement().Fill().Children(NewElement().Fill())
 	roots := []Element{button, shade}
 	layers := []canvas.Layer{1, 2}
-	state := globalState{
+	state := GlobalState{
 		Screen: Rect{Width: 20, Height: 20},
-		Pointer: pointerState{X: 5, Y: 5, Events: []pointerEvent{
-			{X: 5, Y: 5, Button: 0, Kind: pointerEventDown},
-			{X: 5, Y: 5, Button: 0, Kind: pointerEventUp},
+		Pointer: PointerState{X: 5, Y: 5, Events: []PointerEvent{
+			{X: 5, Y: 5, Button: 0, Kind: PointerEventDown},
+			{X: 5, Y: 5, Button: 0, Kind: PointerEventUp},
 		}},
 	}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, roots, layers, state, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, roots, layers, state, nil)
 	if len(context.interactions) != 0 {
 		t.Fatalf("blocked interactions = %+v, want none", context.interactions)
 	}
@@ -653,13 +653,13 @@ func TestAnonymousElementWithoutIDedAncestorBlocksEverythingBelow(t *testing.T) 
 func TestProcessUsesLayerBeforeNestingForInteractionOrder(t *testing.T) {
 	child := NewElement().ID("child").Layer(-1).Width(20).Height(20)
 	parent := NewElement().ID("parent").Width(20).Height(20).Children(child)
-	state := globalState{
+	state := GlobalState{
 		Screen:  Rect{Width: 20, Height: 20},
-		Pointer: pointerState{X: 5, Y: 5, Events: []pointerEvent{{X: 5, Y: 5, Button: 0, Kind: pointerEventDown}}},
+		Pointer: PointerState{X: 5, Y: 5, Events: []PointerEvent{{X: 5, Y: 5, Button: 0, Kind: PointerEventDown}}},
 	}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{parent}, nil, state, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{parent}, nil, state, nil)
 	assertInteractions(t, context.interactions, []Interaction{
 		{ID: "parent", Kind: InteractionDown, Button: 0},
 		{ID: "parent", Kind: InteractionIn, Button: -1},
@@ -674,13 +674,13 @@ func TestAnonymousChildrenInheritInteractiveContainerState(t *testing.T) {
 		Width(20).
 		Height(20).
 		Children(child)
-	state := globalState{
+	state := GlobalState{
 		Screen:  Rect{Width: 20, Height: 20},
-		Pointer: pointerState{X: 5, Y: 5, Events: []pointerEvent{{X: 5, Y: 5, Button: 0, Kind: pointerEventDown}}},
+		Pointer: PointerState{X: 5, Y: 5, Events: []PointerEvent{{X: 5, Y: 5, Button: 0, Kind: PointerEventDown}}},
 	}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, state, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, state, nil)
 	if len(childVisual.states) != 1 || !childVisual.states[0].Has(VisualHovered|VisualPressed) {
 		t.Fatalf("child state = %+v, want hovered and pressed", childVisual.states)
 	}
@@ -696,8 +696,8 @@ func TestVisualStateTransformsPropagateThroughSubtree(t *testing.T) {
 		Visual(parentVisual, nil).
 		Children(child)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{parent}, nil, globalState{Screen: Rect{Width: 20, Height: 20}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{parent}, nil, GlobalState{Screen: Rect{Width: 20, Height: 20}}, nil)
 	if !parentVisual.states[0].Has(VisualActive) {
 		t.Fatalf("parent state = %v, want active", parentVisual.states[0].VisualState)
 	}
@@ -710,8 +710,8 @@ func TestVisualStateAdditionWinsOverRemoval(t *testing.T) {
 	visual := &recordingVisual{defaultSize: m.Vec2{X: 10, Y: 10}}
 	root := NewElement().State(VisualActive, VisualActive).Visual(visual, nil)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 10, Height: 10}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 10, Height: 10}}, nil)
 	if !visual.states[0].Has(VisualActive) {
 		t.Fatalf("state = %v, want active", visual.states[0].VisualState)
 	}
@@ -719,16 +719,16 @@ func TestVisualStateAdditionWinsOverRemoval(t *testing.T) {
 
 func TestDisabledElementSuppressesHoverDownAndClick(t *testing.T) {
 	root := Button(ButtonParams{ID: "button", Disabled: true}).Width(20).Height(20)
-	state := globalState{
+	state := GlobalState{
 		Screen: Rect{Width: 20, Height: 20},
-		Pointer: pointerState{X: 5, Y: 5, Events: []pointerEvent{
-			{X: 5, Y: 5, Button: 0, Kind: pointerEventDown},
-			{X: 5, Y: 5, Button: 0, Kind: pointerEventUp},
+		Pointer: PointerState{X: 5, Y: 5, Events: []PointerEvent{
+			{X: 5, Y: 5, Button: 0, Kind: PointerEventDown},
+			{X: 5, Y: 5, Button: 0, Kind: PointerEventUp},
 		}},
 	}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, state, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, state, nil)
 	if len(context.interactions) != 0 {
 		t.Fatalf("disabled interactions = %+v, want none", context.interactions)
 	}
@@ -737,15 +737,15 @@ func TestDisabledElementSuppressesHoverDownAndClick(t *testing.T) {
 func TestCaptureReleasedAfterElementBecomesDisabled(t *testing.T) {
 	enabled := Button(ButtonParams{ID: "button"}).Width(20).Height(20)
 	disabled := Button(ButtonParams{ID: "button", Disabled: true}).Width(20).Height(20)
-	state := globalState{
+	state := GlobalState{
 		Screen:  Rect{Width: 20, Height: 20},
-		Pointer: pointerState{X: 5, Y: 5, Events: []pointerEvent{{X: 5, Y: 5, Button: 0, Kind: pointerEventDown}}},
+		Pointer: PointerState{X: 5, Y: 5, Events: []PointerEvent{{X: 5, Y: 5, Button: 0, Kind: PointerEventDown}}},
 	}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{enabled}, nil, state, nil)
-	state.Pointer.Events = []pointerEvent{{X: 5, Y: 5, Button: 0, Kind: pointerEventUp}}
-	context.process(canvas.LookupAccess{}, []Element{disabled}, nil, state, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{enabled}, nil, state, nil)
+	state.Pointer.Events = []PointerEvent{{X: 5, Y: 5, Button: 0, Kind: PointerEventUp}}
+	context.Process(canvas.LookupAccess{}, []Element{disabled}, nil, state, nil)
 	assertInteractions(t, context.interactions, []Interaction{
 		{ID: "button", Kind: InteractionUp, Button: 0},
 		{ID: "button", Kind: InteractionOut, Button: -1},
@@ -757,16 +757,16 @@ func TestCoveringElementBlocksElementsBelowIt(t *testing.T) {
 	shade := NewElement().ID("shade").Fill()
 	roots := []Element{button, shade}
 	layers := []canvas.Layer{1, 2}
-	state := globalState{
+	state := GlobalState{
 		Screen: Rect{Width: 20, Height: 20},
-		Pointer: pointerState{X: 5, Y: 5, Events: []pointerEvent{
-			{X: 5, Y: 5, Button: 0, Kind: pointerEventDown},
-			{X: 5, Y: 5, Button: 0, Kind: pointerEventUp},
+		Pointer: PointerState{X: 5, Y: 5, Events: []PointerEvent{
+			{X: 5, Y: 5, Button: 0, Kind: PointerEventDown},
+			{X: 5, Y: 5, Button: 0, Kind: PointerEventUp},
 		}},
 	}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, roots, layers, state, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, roots, layers, state, nil)
 	if hasInteraction(context.interactions, "button", InteractionDown) ||
 		hasInteraction(context.interactions, "button", InteractionClick) ||
 		hasInteraction(context.interactions, "button", InteractionHover) {
@@ -782,13 +782,13 @@ func TestCoveringElementOnlyBlocksInsideItsRect(t *testing.T) {
 	shade := NewElement().ID("shade").Width(10).Height(10)
 	roots := []Element{button, shade}
 	layers := []canvas.Layer{1, 2}
-	state := globalState{
+	state := GlobalState{
 		Screen:  Rect{Width: 40, Height: 40},
-		Pointer: pointerState{X: 25, Y: 25, Events: []pointerEvent{{X: 25, Y: 25, Button: 0, Kind: pointerEventDown}}},
+		Pointer: PointerState{X: 25, Y: 25, Events: []PointerEvent{{X: 25, Y: 25, Button: 0, Kind: PointerEventDown}}},
 	}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, roots, layers, state, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, roots, layers, state, nil)
 	if !hasInteraction(context.interactions, "button", InteractionDown) {
 		t.Fatalf("interactions = %+v, want button down outside the consuming rect", context.interactions)
 	}
@@ -801,14 +801,14 @@ func TestIgnoreClipLetsPopupEscapeParent(t *testing.T) {
 	clipped := []Element{NewElement().Width(10).Height(10).Children(clippedChild)}
 	popupChild := NewElement().ID("popup").Left(8).IgnoreClip().Visual(popupVisual, nil)
 	popup := []Element{NewElement().Width(10).Height(10).Children(popupChild)}
-	state := globalState{Screen: Rect{Width: 100, Height: 100}, Pointer: pointerState{X: 12, Y: 5}}
+	state := GlobalState{Screen: Rect{Width: 100, Height: 100}, Pointer: PointerState{X: 12, Y: 5}}
 
-	var context processor
-	context.process(canvas.LookupAccess{}, clipped, nil, state, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, clipped, nil, state, nil)
 	if hasInteraction(context.interactions, "child", InteractionHover) {
 		t.Fatal("clipped child unexpectedly received hover")
 	}
-	context.process(canvas.LookupAccess{}, popup, nil, state, nil)
+	context.Process(canvas.LookupAccess{}, popup, nil, state, nil)
 	if !hasInteraction(context.interactions, "popup", InteractionHover) {
 		t.Fatal("popup did not receive hover outside its parent")
 	}
@@ -817,12 +817,12 @@ func TestIgnoreClipLetsPopupEscapeParent(t *testing.T) {
 
 func TestProcessDoesNotAllocateAfterWarmup(t *testing.T) {
 	roots := benchmarkTree(1000)
-	state := globalState{Screen: Rect{Width: 1000, Height: 1000}}
-	var context processor
-	context.process(canvas.LookupAccess{}, roots, nil, state, nil)
+	state := GlobalState{Screen: Rect{Width: 1000, Height: 1000}}
+	var context Processor
+	context.Process(canvas.LookupAccess{}, roots, nil, state, nil)
 
 	allocations := testing.AllocsPerRun(50, func() {
-		context.process(canvas.LookupAccess{}, roots, nil, state, nil)
+		context.Process(canvas.LookupAccess{}, roots, nil, state, nil)
 	})
 	if allocations != 0 {
 		t.Fatalf("allocations per warmed Process = %v, want 0", allocations)
@@ -833,13 +833,13 @@ func BenchmarkProcess(b *testing.B) {
 	for _, count := range []int{1000, 10000} {
 		b.Run(integerName(count), func(b *testing.B) {
 			roots := benchmarkTree(count)
-			state := globalState{Screen: Rect{Width: 1000, Height: 1000}}
-			var context processor
-			context.process(canvas.LookupAccess{}, roots, nil, state, nil)
+			state := GlobalState{Screen: Rect{Width: 1000, Height: 1000}}
+			var context Processor
+			context.Process(canvas.LookupAccess{}, roots, nil, state, nil)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				context.process(canvas.LookupAccess{}, roots, nil, state, nil)
+				context.Process(canvas.LookupAccess{}, roots, nil, state, nil)
 			}
 		})
 	}
@@ -890,8 +890,8 @@ func TestStayOnScreenClampsOverflowBackInsideViewport(t *testing.T) {
 			visual := &recordingVisual{defaultSize: m.Vec2{X: 40, Y: 20}}
 			root := test.element.StayOnScreen().Visual(visual, nil)
 
-			var context processor
-			context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 100, Height: 50}}, nil)
+			var context Processor
+			context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 100, Height: 50}}, nil)
 
 			assertRect(t, visual.states[0].Rect, test.want)
 		})
@@ -902,8 +902,8 @@ func TestStayOnScreenPinsStartEdgeWhenLargerThanViewport(t *testing.T) {
 	visual := &recordingVisual{}
 	root := NewElement().Left(30).Top(10).Width(160).Height(80).StayOnScreen().Visual(visual, nil)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 100, Height: 50}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 100, Height: 50}}, nil)
 
 	assertRect(t, visual.states[0].Rect, Rect{X: 0, Y: 0, Width: 160, Height: 80})
 }
@@ -915,8 +915,8 @@ func TestStayOnScreenShiftsDescendantsWithIt(t *testing.T) {
 	root := NewElement().Left(-30).Width(40).Height(20).StayOnScreen().
 		Visual(parentVisual, nil).Children(child)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 100, Height: 50}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 100, Height: 50}}, nil)
 
 	assertRect(t, parentVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 40, Height: 20})
 	assertRect(t, childVisual.states[0].Rect, Rect{X: 5, Y: 5, Width: 10, Height: 10})
@@ -934,8 +934,8 @@ func TestStayOnScreenImpliesIgnoreLayout(t *testing.T) {
 		NewElement().Top(-40).StayOnScreen().Visual(pinnedVisual, nil),
 	)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 100, Height: 50}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 100, Height: 50}}, nil)
 
 	assertRect(t, flowVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 20, Height: 10})
 	assertRect(t, pinnedVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 20, Height: 10})
@@ -953,8 +953,8 @@ func TestOverlayMeasuresToChildPinnedWithPixelEdgesOnly(t *testing.T) {
 		Overlay(NewElement().Fill().Visual(relativeVisual, nil)),
 	)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 100}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 200, Height: 100}}, nil)
 
 	assertRect(t, pinnedVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 40, Height: 20})
 	if len(relativeVisual.states) != 0 {
@@ -984,8 +984,8 @@ func TestIgnoreLayoutChildResolvesAgainstPaddedParentRect(t *testing.T) {
 				NewElement().Left(0).Top(0).IgnoreLayout().Visual(pinnedVisual, nil),
 			).Padding(8).Left(0).Top(0)
 
-			var context processor
-			context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 100}}, nil)
+			var context Processor
+			context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 200, Height: 100}}, nil)
 
 			assertRect(t, pinnedVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 10, Height: 10})
 		})
@@ -1005,8 +1005,8 @@ func TestWithFloatingStretchesAnchorAndUnclipsFloating(t *testing.T) {
 		),
 	).ChildrenAlignment(AlignStretch).Width(100).Height(50).Left(0).Top(0)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 200}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 200, Height: 200}}, nil)
 
 	assertRect(t, anchorVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 30, Height: 50})
 	assertRect(t, floatingVisual.states[0].Rect, Rect{X: 0, Y: 50, Width: 60, Height: 40})
@@ -1027,8 +1027,8 @@ func TestWithFloatingKeepsAnchorAspectRatioInFlow(t *testing.T) {
 		),
 	).ChildrenAlignment(AlignStretch).Width(500).Height(40).Left(0).Top(0)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 600, Height: 600}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 600, Height: 600}}, nil)
 
 	assertRect(t, plainVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 40, Height: 40})
 	assertRect(t, anchorVisual.states[0].Rect, Rect{X: 40, Y: 0, Width: 40, Height: 40})
@@ -1049,8 +1049,8 @@ func TestWithFloatingUnderAFlowAnchorStaysOutOfTheFlow(t *testing.T) {
 		NewElement().TopRel(1).Visual(floatingVisual, nil),
 	).Left(0).Top(0)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 200}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 200, Height: 200}}, nil)
 
 	assertRect(t, firstVisual.states[0].Rect, Rect{X: 0, Y: 0, Width: 20, Height: 10})
 	assertRect(t, secondVisual.states[0].Rect, Rect{X: 24, Y: 0, Width: 20, Height: 10})
@@ -1069,8 +1069,8 @@ func TestWithFloatingDoesNotInheritTheAnchorsState(t *testing.T) {
 		NewElement().TopRel(1).Visual(floatingVisual, nil),
 	).Left(0).Top(0)
 
-	var context processor
-	context.process(canvas.LookupAccess{}, []Element{root}, nil, globalState{Screen: Rect{Width: 200, Height: 200}}, nil)
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 200, Height: 200}}, nil)
 
 	if !anchorVisual.states[0].Has(VisualHovered | VisualActive) {
 		t.Fatalf("anchor state = %v, want the state it was given", anchorVisual.states[0].VisualState)

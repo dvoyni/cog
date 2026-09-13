@@ -19,6 +19,33 @@ every section cites the tickets it came from. Nothing is decided here — where 
 claim rests on something unverified, it is marked **Gap** and says what would
 settle it.
 
+> **Amended by [#341](https://github.com/dvoyni/cog/issues/341).** ui became a
+> Bundle under
+> [ADR 0001](../../../../docs/adr/0001-bundles-slots-ports-and-adapters.md), shaped
+> as a contract root, `uiimpl` and `internal/`. `ArmLayoutCmd`, its request and
+> response, `LayoutSnapshot`, the view types (`LayoutView`, `ElementView`,
+> `DeclaredView`, `SizeView`, `RectView`) and the three `ErrLayout…` errors stay
+> in the root, `bundles/ui`; the views and `ErrLayoutNoSuchElement` are aliases
+> of `internal` types. The Provider, the `ui_layout` body and its description
+> string moved to `bundles/ui/uiimpl/mcpprovider.go`, where the capability's
+> request and response types are now the unexported `layoutRequest` and
+> `layoutResponse`. The snapshot slot, `ArmLayoutCmd`'s handler and both
+> snapshot subscriptions moved to `bundles/ui/uiimpl`, alongside `processor`,
+> which is now uiimpl's private resource wrapping the layout engine
+> `internal.Processor`. The in-tick serialization over the engine's nodes,
+> `userData`'s guarded marshal and the `visualNamer` seam moved to
+> `bundles/ui/internal/snapshot.go` as `internal.LayoutViewOf`, beside the nodes
+> it reads, so nothing outside `internal` - uiimpl included - reads a node.
+> A visual declared there, every built-in, is still reported under `ui`
+> (`ui.spriteVisual`), the package an application imports.
+> ui's processing identity `ui.UpdateEventHandler` is now `ui.ProcessOnUpdate`,
+> and the snapshot identities `SnapshotUpdateEventHandler` and
+> `SnapshotArmUpdateEventHandler` are now `layoutOnUpdate` and
+> `armLayoutOnUpdate`, unexported in `uiimpl` because nothing outside orders
+> against them. The tool name, its schema and its behaviour are unchanged. The
+> file paths, line numbers and names cited below are as they were when this was
+> written.
+
 ---
 
 ## Contents

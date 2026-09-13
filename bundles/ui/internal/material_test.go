@@ -1,4 +1,4 @@
-package ui
+package internal
 
 import (
 	"testing"
@@ -34,8 +34,8 @@ func probeElement(seen *canvas.MaterialSet) Element {
 // state it inherited.
 func runTree(t *testing.T, frameDefault canvas.MaterialSet, root Element) {
 	t.Helper()
-	context := processor{}
-	context.process(testLookup(fstest.MapFS{}), []Element{root}, []canvas.Layer{0}, globalState{
+	context := Processor{}
+	context.Process(testLookup(fstest.MapFS{}), []Element{root}, []canvas.Layer{0}, GlobalState{
 		Screen:    Rect{Width: 200, Height: 200},
 		Materials: frameDefault,
 	}, &canvas.OpQueue{})

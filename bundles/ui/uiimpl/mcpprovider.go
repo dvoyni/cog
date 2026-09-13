@@ -1,4 +1,4 @@
-package ui
+package uiimpl
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dvoyni/cog/bundles/ui"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/kernel"
@@ -23,7 +24,7 @@ import (
 // capability body reaches ui by dispatch.
 //
 // It is the only agent-facing surface ui has. There is no overlay and nothing
-// here writes content into the game's frame; see docs/specs/mcp.md.
+// here writes content into the game's frame; see bundles/ui/docs/specs/mcp.md.
 type provider struct{}
 
 // layoutCapabilityName is the capability rendered as the tool ui_layout. It
@@ -61,8 +62,8 @@ const layoutDescription = "The UI element tree for one tick, flattened, with wha
 	"only if all three report the same `tick`. Take `gfx_capture` last, because it costs no " +
 	"tick and so shows whatever that step produced."
 
-// LayoutRequest asks what one tick's layout resolved the element tree to.
-type LayoutRequest struct {
+// layoutRequest asks what one tick's layout resolved the element tree to.
+type layoutRequest struct {
 	// Path is optional, per the family's delivery contract: omit it and the
 	// JSON comes back inline, supply it and a greppable file is written and
 	// the path returned. A small ui frame with a dozen elements is better
@@ -75,12 +76,12 @@ type LayoutRequest struct {
 	MaxDepth *int `json:"maxDepth,omitempty" jsonschema:"how many levels below the reported root to keep; 0 is that element alone"`
 }
 
-// LayoutResponse is one tick's resolved element tree, the three coordinate
+// layoutResponse is one tick's resolved element tree, the three coordinate
 // sizes it is to be read against, and whether producing it cost a step.
 //
-// It is flat: LayoutView and gfx.SnapshotView are embedded rather than nested,
+// It is flat: ui.LayoutView and gfx.SnapshotView are embedded rather than nested,
 // so an agent reads one object rather than reaching through two.
-type LayoutResponse struct {
+type layoutResponse struct {
 	// Path is the file the JSON was written to, when one was asked for. The
 	// file holds the whole document; what comes back inline then carries the
 	// counts, the filter and the viewport but not the element array.
@@ -90,7 +91,7 @@ type LayoutResponse struct {
 	// is the viewport block, which is in every response already, and there is
 	// no second small array to keep - the tree is the payload.
 	Path string `json:"path,omitempty"`
-	LayoutView
+	ui.LayoutView
 	gfx.SnapshotView
 }
 
@@ -115,7 +116,7 @@ func (provider) Capabilities() []mcp.Capability {
 // It is a package function rather than a method to keep the capability-body
 // rule visible at the call site: the plugin is one pointer away and the body
 // still reaches ui only by dispatch.
-func layoutSnapshot(k kernel.Executioner, request LayoutRequest) (LayoutResponse, error) {
+func layoutSnapshot(k kernel.Executioner, request layoutRequest) (layoutResponse, error) {
 	// Every check that can be made without the engine happens before anything
 	// is armed, so a typo costs microseconds rather than a tick. A subtree
 	// index is not one of them: the tree is declared afresh every tick and
@@ -123,27 +124,27 @@ func layoutSnapshot(k kernel.Executioner, request LayoutRequest) (LayoutResponse
 	// the tick and travels the delivery channel.
 	armRequest, err := validateLayoutRequest(request)
 	if err != nil {
-		return LayoutResponse{}, err
+		return layoutResponse{}, err
 	}
 	if request.Path != "" {
 		if err := os.MkdirAll(filepath.Dir(request.Path), 0o755); err != nil {
-			return LayoutResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+			return layoutResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
 				"the directory for %s could not be created: %v", request.Path, err)}
 		}
 	}
 	paused := app.Paused(k)
 
-	armed, err := k.ExecuteCommand[ArmLayoutCmd](armRequest)
+	armed, err := k.ExecuteCommand[ui.ArmLayoutCmd](armRequest)
 	if err != nil {
-		return LayoutResponse{}, layoutRefusal(err)
+		return layoutResponse{}, layoutRefusal(err)
 	}
-	response := LayoutResponse{SnapshotView: gfx.SnapshotViewOf(armed.Viewport)}
+	response := layoutResponse{SnapshotView: gfx.SnapshotViewOf(armed.Viewport)}
 	// The arm is placed first so that the tick the step produces is one that
 	// began after it. Joining a step another arm already raised is what makes
 	// three snapshots armed together describe one tick instead of three.
 	if paused {
 		if response.Stepped, response.Joined, err = stepForSnapshot(k, snapshotWait(k)); err != nil {
-			return LayoutResponse{}, err
+			return layoutResponse{}, err
 		}
 	}
 
@@ -152,19 +153,19 @@ func layoutSnapshot(k kernel.Executioner, request LayoutRequest) (LayoutResponse
 	select {
 	case snapshot := <-armed.Done:
 		if snapshot.Err != nil {
-			return LayoutResponse{}, layoutRefusal(snapshot.Err)
+			return layoutResponse{}, layoutRefusal(snapshot.Err)
 		}
 		response.LayoutView, response.Tick = snapshot.Layout, snapshot.Tick
 	case <-deadline.C:
-		return LayoutResponse{}, layoutRefusal(nil)
+		return layoutResponse{}, layoutRefusal(nil)
 	case <-k.Context().Done():
-		return LayoutResponse{}, layoutRefusal(k.Context().Err())
+		return layoutResponse{}, layoutRefusal(k.Context().Err())
 	}
 
 	if request.Path != "" {
 		response.Path = request.Path
 		if err := writeSnapshotJSON(request.Path, response); err != nil {
-			return LayoutResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+			return layoutResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
 				"the snapshot could not be written to %s: %v", request.Path, err)}
 		}
 		response.Elements = nil
@@ -210,7 +211,7 @@ func stepForSnapshot(k kernel.Executioner, wait time.Duration) (stepped, joined 
 // point of a file is that a person or a grep can read it. An existing file is
 // overwritten without complaint: re-writing the same name is the
 // iterate-and-look loop.
-func writeSnapshotJSON(path string, response LayoutResponse) error {
+func writeSnapshotJSON(path string, response layoutResponse) error {
 	document, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		return err
@@ -219,21 +220,21 @@ func writeSnapshotJSON(path string, response LayoutResponse) error {
 }
 
 // validateLayoutRequest checks what the agent named and turns it into the arm.
-func validateLayoutRequest(request LayoutRequest) (ArmLayoutRequest, error) {
+func validateLayoutRequest(request layoutRequest) (ui.ArmLayoutRequest, error) {
 	if err := validateSnapshotPath(request.Path); err != nil {
-		return ArmLayoutRequest{}, err
+		return ui.ArmLayoutRequest{}, err
 	}
 	if request.Subtree != nil && *request.Subtree < 0 {
-		return ArmLayoutRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
+		return ui.ArmLayoutRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
 			"subtree %d is negative; an element index is its position in the tree, counted from 0",
 			*request.Subtree)}
 	}
 	if request.MaxDepth != nil && *request.MaxDepth < 0 {
-		return ArmLayoutRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
+		return ui.ArmLayoutRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
 			"maxDepth %d is negative, which keeps no element at all; 0 keeps the root alone",
 			*request.MaxDepth)}
 	}
-	return ArmLayoutRequest{Subtree: request.Subtree, MaxDepth: request.MaxDepth}, nil
+	return ui.ArmLayoutRequest{Subtree: request.Subtree, MaxDepth: request.MaxDepth}, nil
 }
 
 // validateSnapshotPath checks what the agent named. The path is optional,
@@ -259,13 +260,13 @@ func validateSnapshotPath(path string) error {
 // a paused engine nothing steps, or a window that has stopped updating,
 // produces no tick at all and reports nothing about it.
 func layoutRefusal(reason error) error {
-	var missing ErrLayoutNoSuchElement
+	var missing ui.ErrLayoutNoSuchElement
 	switch {
 	case reason == nil:
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"no tick was processed within %s — the game may be paused with nothing stepping it, "+
 				"minimised, or not updating", layoutDeadline)}
-	case errors.Is(reason, ErrLayoutBusy{}):
+	case errors.Is(reason, ui.ErrLayoutBusy{}):
 		return mcp.Unavailable{Reason: "a layout snapshot is already in flight; ask again. A " +
 			"capture and the other snapshots may run alongside it, and arming them together is " +
 			"how they describe one tick."}
@@ -273,7 +274,7 @@ func layoutRefusal(reason error) error {
 		return mcp.Unavailable{Reason: missing.Error() +
 			". The tree is declared afresh every tick, so an index from an older snapshot may " +
 			"name nothing; take one without a subtree filter to see what is there."}
-	case errors.Is(reason, ErrLayoutAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
+	case errors.Is(reason, ui.ErrLayoutAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
 		errors.Is(reason, context.Canceled):
 		// A game exiting is the normal case, not a fault.
 		return mcp.Unavailable{Reason: "the game is shutting down"}

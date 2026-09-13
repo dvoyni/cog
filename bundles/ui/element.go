@@ -1,172 +1,94 @@
 package ui
 
 import (
-	"github.com/dvoyni/cog/bundles/canvas"
+	"github.com/dvoyni/cog/bundles/ui/internal"
 	"github.com/dvoyni/cog/libs/m"
 )
 
-type ID string
+// ID names an element for hit testing. IDs are hierarchical strings, and
+// Interactions.Has matches them by prefix.
+type ID = internal.ID
 
-type opt[T any] struct {
-	v   T
-	set bool
-}
-
-type size struct {
-	value    float32
-	relative bool
-}
-
-type Layout uint8
+// Layout is how an element arranges its children.
+type Layout = internal.Layout
 
 const (
-	LayoutNone Layout = iota
-	LayoutHorizontal
-	LayoutVertical
-	LayoutGrid
+	LayoutNone       = internal.LayoutNone
+	LayoutHorizontal = internal.LayoutHorizontal
+	LayoutVertical   = internal.LayoutVertical
+	LayoutGrid       = internal.LayoutGrid
 )
 
-type Alignment uint8
+// Alignment places an element across its parent's main axis.
+type Alignment = internal.Alignment
 
 const (
-	AlignStart Alignment = iota
-	AlignCenter
-	AlignEnd
-	AlignStretch
+	AlignStart   = internal.AlignStart
+	AlignCenter  = internal.AlignCenter
+	AlignEnd     = internal.AlignEnd
+	AlignStretch = internal.AlignStretch
 
-	AlignTop    = AlignStart
-	AlignMiddle = AlignCenter
-	AlignBottom = AlignEnd
+	AlignTop    = internal.AlignTop
+	AlignMiddle = internal.AlignMiddle
+	AlignBottom = internal.AlignBottom
 
-	AlignLeft  = AlignStart
-	AlignRight = AlignEnd
+	AlignLeft  = internal.AlignLeft
+	AlignRight = internal.AlignRight
 )
 
-type Arrangement uint8
+// Arrangement distributes a container's children along its main axis.
+type Arrangement = internal.Arrangement
 
 const (
-	ArrangeStart Arrangement = iota
-	ArrangeCenter
-	ArrangeEnd
-	ArrangeSpaceBetween
-	ArrangeSpaceAround
+	ArrangeStart        = internal.ArrangeStart
+	ArrangeCenter       = internal.ArrangeCenter
+	ArrangeEnd          = internal.ArrangeEnd
+	ArrangeSpaceBetween = internal.ArrangeSpaceBetween
+	ArrangeSpaceAround  = internal.ArrangeSpaceAround
 
-	ArrangeTop    = ArrangeStart
-	ArrangeMiddle = ArrangeCenter
-	ArrangeBottom = ArrangeEnd
+	ArrangeTop    = internal.ArrangeTop
+	ArrangeMiddle = internal.ArrangeMiddle
+	ArrangeBottom = internal.ArrangeBottom
 
-	ArrangeLeft  = ArrangeStart
-	ArrangeRight = ArrangeEnd
+	ArrangeLeft  = internal.ArrangeLeft
+	ArrangeRight = internal.ArrangeRight
 )
 
+// Rect is a rectangle in logical viewport units.
 type Rect = m.Rect
 
-type VisualState uint16
+// VisualState is the mask of presentation states an element resolved to,
+// inherited through the tree. Bits below VisualUserDefinedBase are ui's own.
+type VisualState = internal.VisualState
 
 const (
-	VisualDisabled VisualState = 1 << iota
-	VisualActive
-	VisualHovered
-	VisualPressed
+	VisualDisabled = internal.VisualDisabled
+	VisualActive   = internal.VisualActive
+	VisualHovered  = internal.VisualHovered
+	VisualPressed  = internal.VisualPressed
 )
 
-const VisualUserDefinedBase VisualState = 1 << 4
-
-// visualInteractionStates is every state layout derives for itself, from the
-// pointer or from a control being switched off, as opposed to the states an
-// application defines for itself above VisualUserDefinedBase.
-const visualInteractionStates = VisualDisabled | VisualActive | VisualHovered | VisualPressed
-
-func (state VisualState) Has(mask VisualState) bool {
-	return state&mask == mask
-}
+// VisualUserDefinedBase is the first bit an application may define a
+// presentation state of its own on.
+const VisualUserDefinedBase = internal.VisualUserDefinedBase
 
 // Visual is what an Element stores: its params are already bound, so the layout
 // pass measures and draws without knowing their type.
-type Visual interface {
-	DefaultSize(lookup canvas.LookupAccess) m.Vec2
-	Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, state State)
-}
+type Visual = internal.Visual
 
 // ParamVisual produces output from typed params. Implementations are stateless
 // and shared between elements; Element.Visual binds one to the params of a single
 // element.
-type ParamVisual[T any] interface {
-	DefaultSize(lookup canvas.LookupAccess, params T) m.Vec2
-	Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, state State, params T)
-}
+type ParamVisual[T any] = internal.ParamVisual[T]
 
-// boundVisual pairs a stateless ParamVisual with one element's params. It is the
-// only place the params are type-erased, and it erases them without asserting.
-type boundVisual[T any] struct {
-	visual ParamVisual[T]
-	params T
-}
+// Element is a frame-local value describing layout, interaction and visual
+// intent. Its Modifiers return a changed copy, so declarations compose
+// fluently. The zero value is a valid empty declaration.
+type Element = internal.Element
 
-func (b boundVisual[T]) DefaultSize(lookup canvas.LookupAccess) m.Vec2 {
-	return b.visual.DefaultSize(lookup, b.params)
-}
+// State is what a Visual draws with: the element's resolved visual state,
+// rects, clip, layer and inherited material set.
+type State = internal.State
 
-func (b boundVisual[T]) Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, state State) {
-	b.visual.Draw(lookup, queue, state, b.params)
-}
-
-type Element struct {
-	id                                           ID
-	userData                                     any
-	width, minWidth, maxWidth                    opt[size]
-	height, minHeight, maxHeight                 opt[size]
-	left, right, top, bottom                     opt[size]
-	pivotLeft, pivotRight, pivotTop, pivotBottom opt[size]
-	paddingLeft, paddingRight                    opt[size]
-	paddingTop, paddingBottom                    opt[size]
-	stretch, shrink                              opt[float32]
-	align                                        opt[Alignment]
-	layer                                        opt[int]
-	material                                     opt[canvas.MaterialSet]
-	ignoreLayout                                 bool
-	ignoreClip                                   bool
-	ignoreHitTest                                bool
-	stayOnScreen                                 bool
-	preserveAspectRatio                          bool
-	addState, removeState                        VisualState
-
-	children            []Element
-	layout              Layout
-	childrenArrangement opt[Arrangement]
-	childrenAlignment   opt[Alignment]
-	gap                 opt[size]
-	wrap                bool
-	columns, rows       opt[int]
-
-	visual Visual
-
-	intermediate intermediate
-}
-
-type State struct {
-	VisualState
-	Rect, ContentRect, ClipRect Rect
-	Layer                       canvas.Layer
-	// Materials is the material set this element inherited: the frame's default,
-	// overridden by the nearest ancestor that named one, overridden by this
-	// element's own. A Visual picks the slot for the family it draws - the sprite
-	// slot for a sprite, a nine-slice, a glyph run or a fill, all of which are
-	// sprite draws - and passes it as the draw's material, which is what makes
-	// the whole mechanism record time and leaves the batch key untouched.
-	//
-	// A set's Params are here for a Visual that wants them; the built-in visuals
-	// pass the slot alone. A parameter named at a sprite draw is per sprite and
-	// becomes a storage array, so a per-scope value belongs on the material or on
-	// canvas.OpQueue.SetLayerMaterial, where it is per batch by construction.
-	Materials canvas.MaterialSet
-}
-
-type intermediate struct {
-	state          State
-	measured       m.Vec2
-	contentMinimum m.Vec2
-	aspectRatio    float32
-	layer          canvas.Layer
-	active         bool
-}
+// NewElement returns an empty element declaration.
+func NewElement() Element { return internal.NewElement() }

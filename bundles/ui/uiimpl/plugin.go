@@ -1,8 +1,10 @@
-package ui
+package uiimpl
 
 import (
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/bundles/input"
+	"github.com/dvoyni/cog/bundles/ui"
+	"github.com/dvoyni/cog/bundles/ui/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/extensions/storage"
@@ -10,37 +12,45 @@ import (
 	"github.com/dvoyni/cog/slots/app"
 )
 
-const Name kernel.PluginName = "ui"
-
-// UpdateEventHandler identifies the UI plugin's per-tick processing subscription.
-type UpdateEventHandler kernel.Subscription[app.UpdateEvent]
-
-type Plugin struct {
+// plugin registers ui's Frame and Interactions resources, its private layout
+// resource, ArmLayoutCmd, the processing subscription and the two
+// layout-snapshot subscriptions, and contributes ui's mcp Provider.
+type plugin struct {
 	// snapshots is ui's one layout-snapshot slot, plugin-owned and
 	// self-synchronizing. See snapshotState for why it is not a kernel
 	// resource.
 	snapshots snapshotState
 }
 
-func New() *Plugin { return &Plugin{} }
+// processor is ui's private resource: the layout engine and the scratch it
+// keeps across ticks, so a warmed tick allocates nothing. It is a resource
+// rather than plugin state so that the snapshot subscriber's Read is ordered
+// against processUpdate's Write.
+type processor struct{ internal.Processor }
 
-func (*Plugin) Name() kernel.PluginName { return Name }
+// New creates the ui plugin. ui has no configuration.
+func New() kernel.Plugin { return &plugin{} }
 
-func (*Plugin) Dependencies() []kernel.PluginName {
+// Name reports the plugin name.
+func (*plugin) Name() kernel.PluginName { return ui.Name }
+
+// Dependencies reports the plugins ui requires: input for the pointer, gfx for
+// the viewport, and canvas, which it records into.
+func (*plugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{input.Name, gfx.Name, canvas.Name}
 }
 
-func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.InitResource(&Frame{})
-	registrar.InitResource(&Interactions{})
+func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
+	registrar.InitResource(&ui.Frame{})
+	registrar.InitResource(&ui.Interactions{})
 	registrar.InitResource(&processor{})
 	p.registerCommands(registrar)
-	registrar.Subscribe[UpdateEventHandler](processUpdate).
+	registrar.Subscribe[ui.ProcessOnUpdate](processUpdate).
 		After[input.AdvanceOnUpdate]().
 		Before[canvas.FlushOnUpdate]()
-	registrar.Subscribe[SnapshotArmUpdateEventHandler](p.armSnapshotOnUpdate).First()
-	registrar.Subscribe[SnapshotUpdateEventHandler](p.snapshotOnUpdate).
-		After[UpdateEventHandler]()
+	registrar.Subscribe[armLayoutOnUpdate](p.armSnapshotOnUpdate).First()
+	registrar.Subscribe[layoutOnUpdate](p.snapshotOnUpdate).
+		After[ui.ProcessOnUpdate]()
 	registrar.ProvideAdapter[mcp.Provider](provider{})
 	return nil
 }
@@ -53,14 +63,14 @@ func (p *Plugin) Register(registrar *kernel.Registrar, _ any) error {
 // It touches the snapshot slot directly because by Stop the scheduler has
 // stopped and grants no locks, which is also why nothing else can be touching
 // it: the host loop has returned and every handler is done.
-func (p *Plugin) Stop(kernel.Executioner) error {
+func (p *plugin) Stop(kernel.Executioner) error {
 	p.snapshots.abandon()
 	return nil
 }
 
 // armSnapshotOnUpdate admits a waiting snapshot to the tick that has just
 // begun. It declares no resources: the snapshot slot carries its own lock.
-func (p *Plugin) armSnapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
+func (p *plugin) armSnapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	return nil, func(kernel.Kernel, app.UpdateEvent) error {
 		p.snapshots.beginTick()
 		return nil
@@ -70,15 +80,15 @@ func (p *Plugin) armSnapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEv
 // snapshotOnUpdate renders the tick's resolved tree for whoever armed a
 // snapshot, from a subscriber ordered after ui's own processing.
 //
-// That is the only window in which the tree can be read. processor.nodes
-// keeps its geometry until the next flatten, but layoutNode.element points
-// into the app's borrowed child storage, which Frame.clear releases at the end
+// That is the only window in which the tree can be read. The Processor's nodes
+// keep their geometry until the next flatten, but each node's element points
+// into the app's borrowed child storage, which the frame releases at the end
 // of processUpdate - so afterwards the id, the visual and userData are
 // unreadable while the numbers beside them still look right.
 //
 // A Read conflicts only with a writer, and processUpdate's write is ordered
 // ahead of this by the link above.
-func (p *Plugin) snapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
+func (p *plugin) snapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var processorResource kernel.Read[*processor]
 	return func(access kernel.ResourceAccess) {
 			processorResource = access.GetRead[*processor]()
@@ -88,9 +98,12 @@ func (p *Plugin) snapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent
 		}
 }
 
+// processUpdate is ui.ProcessOnUpdate: it lays out the tick's frame against
+// the viewport, resolves the pointer's edges against it, records every visual
+// into canvas, publishes the interactions and consumes the frame.
 func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var frameResource kernel.Write[*Frame]
-	var interactionsResource kernel.Write[*Interactions]
+	var frameResource kernel.Write[*ui.Frame]
+	var interactionsResource kernel.Write[*ui.Interactions]
 	var processorResource kernel.Write[*processor]
 	var inputResource kernel.Read[*input.State]
 	var viewportResource kernel.Read[*gfx.Viewport]
@@ -98,8 +111,8 @@ func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var lookupResource kernel.Write[*canvas.Lookup]
 	var filesystem kernel.Read[storage.FileSystem]
 	return func(access kernel.ResourceAccess) {
-			frameResource = access.GetWrite[*Frame]()
-			interactionsResource = access.GetWrite[*Interactions]()
+			frameResource = access.GetWrite[*ui.Frame]()
+			interactionsResource = access.GetWrite[*ui.Interactions]()
 			processorResource = access.GetWrite[*processor]()
 			inputResource = access.GetRead[*input.State]()
 			viewportResource = access.GetRead[*gfx.Viewport]()
@@ -114,33 +127,33 @@ func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			viewport := viewportResource.Get()
 			queue := queueResource.Get()
 			access := canvas.NewLookupAccess(k, lookupResource.Get(), filesystem.Get())
-			defer frame.clear()
+			defer internal.ClearFrame(frame)
 
 			pointer := pointerToViewport(inputState.Pointer(), *viewport)
-			var eventBuffer [10]pointerEvent
+			var eventBuffer [10]internal.PointerEvent
 			events := eventBuffer[:0]
 			for button, key := range mouseButtons {
 				if inputState.JustPressed(key) {
-					events = append(events, pointerEvent{X: float32(pointer.X), Y: float32(pointer.Y), Button: button, Kind: pointerEventDown})
+					events = append(events, internal.PointerEvent{X: float32(pointer.X), Y: float32(pointer.Y), Button: button, Kind: internal.PointerEventDown})
 				}
 			}
 			for button, key := range mouseButtons {
 				if inputState.JustReleased(key) {
-					events = append(events, pointerEvent{X: float32(pointer.X), Y: float32(pointer.Y), Button: button, Kind: pointerEventUp})
+					events = append(events, internal.PointerEvent{X: float32(pointer.X), Y: float32(pointer.Y), Button: button, Kind: internal.PointerEventUp})
 				}
 			}
 
-			processor.process(access, frame.roots, frame.layers, globalState{
-				Screen: Rect{Width: viewport.Width, Height: viewport.Height},
-				Pointer: pointerState{
+			processor.Process(access, internal.FrameRoots(frame), internal.FrameLayers(frame), internal.GlobalState{
+				Screen: ui.Rect{Width: viewport.Width, Height: viewport.Height},
+				Pointer: internal.PointerState{
 					X:      float32(pointer.X),
 					Y:      float32(pointer.Y),
 					Events: events,
 				},
-				Materials: frame.materials,
+				Materials: internal.FrameMaterials(frame),
 			}, queue)
 
-			interactions.values, processor.interactions = processor.interactions, interactions.values
+			internal.PublishInteractions(&processor.Processor, interactions)
 			return nil
 		}
 }

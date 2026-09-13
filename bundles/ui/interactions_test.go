@@ -3,14 +3,27 @@ package ui
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/canvas"
+	"github.com/dvoyni/cog/bundles/ui/internal"
 	"github.com/dvoyni/cog/libs/m"
 )
 
+// hoverFrame is the Interactions a tick publishes with the pointer resting on
+// the element id, or on nothing when id is empty. It is produced the way the
+// plugin produces it, by laying out a frame under the pointer, because the
+// resource's values are not the root's to set.
 func hoverFrame(id ID) *Interactions {
+	interactions := &Interactions{}
 	if id == "" {
-		return &Interactions{}
+		return interactions
 	}
-	return &Interactions{values: []Interaction{{ID: id, Kind: InteractionHover, Button: -1}}}
+	var frame Frame
+	frame.Add(0, NewElement().ID(id).Width(10).Height(10))
+	var processor internal.Processor
+	processor.Process(canvas.LookupAccess{}, internal.FrameRoots(&frame), internal.FrameLayers(&frame),
+		internal.GlobalState{Screen: Rect{Width: 10, Height: 10}, Pointer: internal.PointerState{X: 5, Y: 5}}, nil)
+	internal.PublishInteractions(&processor, interactions)
+	return interactions
 }
 
 func TestHoverTrackerReportsImmediatelyWithoutDwell(t *testing.T) {

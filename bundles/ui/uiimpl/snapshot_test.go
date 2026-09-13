@@ -1,4 +1,4 @@
-package ui
+package uiimpl
 
 import (
 	stdcontext "context"
@@ -17,6 +17,7 @@ import (
 	"github.com/dvoyni/cog/bundles/canvas/canvasimpl"
 	"github.com/dvoyni/cog/bundles/input"
 	"github.com/dvoyni/cog/bundles/input/inputimpl"
+	"github.com/dvoyni/cog/bundles/ui"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/mcp"
@@ -44,7 +45,7 @@ func (*snapshotTestVisual) DefaultSize(canvas.LookupAccess, any) m.Vec2 {
 	return m.Vec2{X: 10, Y: 10}
 }
 
-func (*snapshotTestVisual) Draw(canvas.LookupAccess, *canvas.OpQueue, State, any) {}
+func (*snapshotTestVisual) Draw(canvas.LookupAccess, *canvas.OpQueue, ui.State, any) {}
 
 // liveUserData reports whether it was marshalled while the tick that declared
 // it was still running. That is the whole of the in-tick criterion made
@@ -85,7 +86,7 @@ type layoutLastHandler kernel.Subscription[app.UpdateEvent]
 // answers whether the engine is paused and publishes the tick a step owes.
 type layoutFixture struct {
 	mu       sync.Mutex
-	declare  func(*Frame)
+	declare  func(*ui.Frame)
 	step     func(kernel.Kernel, app.TimeRequest) (app.TimeResponse, error)
 	requests []app.TimeRequest
 
@@ -101,20 +102,20 @@ func (*layoutFixture) Name() kernel.PluginName { return "ui-snapshot-test" }
 // Dependencies names ui, whose Frame the producer locks, and the packages ui
 // itself needs so the fixture may be registered beside them.
 func (*layoutFixture) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{Name, canvas.Name, gfx.Name, input.Name, storage.Name}
+	return []kernel.PluginName{ui.Name, canvas.Name, gfx.Name, input.Name, storage.Name}
 }
 
 func (f *layoutFixture) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.Subscribe[layoutBuildHandler](f.buildOnUpdate).Before[UpdateEventHandler]()
+	registrar.Subscribe[layoutBuildHandler](f.buildOnUpdate).Before[ui.ProcessOnUpdate]()
 	registrar.Subscribe[layoutLastHandler](f.endOnUpdate).Last()
 	registrar.HandleCommand[app.TimeCmd](f.timeCmdImpl)
 	return nil
 }
 
 func (f *layoutFixture) buildOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var frame kernel.Write[*Frame]
+	var frame kernel.Write[*ui.Frame]
 	return func(access kernel.ResourceAccess) {
-			frame = access.GetWrite[*Frame]()
+			frame = access.GetWrite[*ui.Frame]()
 		}, func(kernel.Kernel, app.UpdateEvent) error {
 			f.live.Store(true)
 			f.mu.Lock()
@@ -129,7 +130,7 @@ func (f *layoutFixture) buildOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateE
 
 // endOnUpdate lowers the live flag from the Last phase, which every
 // default-phase subscriber precedes. The snapshot handler is ordered
-// After[UpdateEventHandler] and stays in the default phase, so a marshal that
+// After[ui.ProcessOnUpdate] and stays in the default phase, so a marshal that
 // saw the flag up ran inside the window the tree is valid in.
 func (f *layoutFixture) endOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	return nil, func(kernel.Kernel, app.UpdateEvent) error {
@@ -151,7 +152,7 @@ func (f *layoutFixture) timeCmdImpl() (kernel.Lock, kernel.Execute[app.TimeReque
 	}
 }
 
-func (f *layoutFixture) on(declare func(*Frame)) {
+func (f *layoutFixture) on(declare func(*ui.Frame)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.declare = declare
@@ -217,10 +218,10 @@ func (r *layoutRig) tick() {
 // until it answers, which is what an agent's call looks like from the engine's
 // side. What the producer declares in each tick is whatever the test
 // installed.
-func (r *layoutRig) runLayout(request LayoutRequest) (LayoutResponse, error) {
+func (r *layoutRig) runLayout(request layoutRequest) (layoutResponse, error) {
 	r.t.Helper()
 	type answer struct {
-		response LayoutResponse
+		response layoutResponse
 		err      error
 	}
 	done := make(chan answer, 1)
@@ -251,29 +252,29 @@ func (r *layoutRig) runLayout(request LayoutRequest) (LayoutResponse, error) {
 //	3 c        a declared width
 //	4 d        nothing declared at all
 //	5 e      nothing declared at all
-func aSmallTree(userData any) func(*Frame) {
-	return func(frame *Frame) {
-		frame.Add(10, NewElement().
+func aSmallTree(userData any) func(*ui.Frame) {
+	return func(frame *ui.Frame) {
+		frame.Add(10, ui.NewElement().
 			ID("root").
 			Width(200).Height(100).
 			Padding(10).
-			Layout(LayoutVertical).
+			Layout(ui.LayoutVertical).
 			Children(
-				NewElement().
+				ui.NewElement().
 					ID("a").
 					Stretch(1).
 					Height(20).
 					Layer(3).
 					UserData(userData).
 					Visual(&snapshotTestVisual{}, nil),
-				NewElement().
+				ui.NewElement().
 					ID("b").
-					Layout(LayoutHorizontal).
+					Layout(ui.LayoutHorizontal).
 					Children(
-						NewElement().ID("c").Width(30),
-						NewElement().ID("d"),
+						ui.NewElement().ID("c").Width(30),
+						ui.NewElement().ID("d"),
 					),
-				NewElement(),
+				ui.NewElement(),
 			))
 	}
 }
@@ -285,7 +286,7 @@ func TestALayoutSnapshotReportsWhatResolvedBesideWhatWasDeclared(t *testing.T) {
 		Name: "hero", live: &rig.fixture.live, sawLive: sawLive,
 	}))
 
-	response, err := rig.runLayout(LayoutRequest{})
+	response, err := rig.runLayout(layoutRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -322,13 +323,13 @@ func TestALayoutSnapshotReportsWhatResolvedBesideWhatWasDeclared(t *testing.T) {
 	}
 	// ContentRect is the rect less this element's own padding, and is where
 	// the children were arranged.
-	want := RectView{X: root.Rect.X + 10, Y: root.Rect.Y + 10, Width: 180, Height: 80}
+	want := ui.RectView{X: root.Rect.X + 10, Y: root.Rect.Y + 10, Width: 180, Height: 80}
 	if root.ContentRect != want {
 		t.Errorf("root contentRect = %+v, want %+v", root.ContentRect, want)
 	}
 	// The clip a root is visible through is the logical viewport, which is the
 	// space every rect here is in.
-	if (root.ClipRect != RectView{Width: 400, Height: 300}) {
+	if (root.ClipRect != ui.RectView{Width: 400, Height: 300}) {
 		t.Errorf("root clipRect = %+v, want the 400x300 logical viewport", root.ClipRect)
 	}
 	if !root.Active {
@@ -363,7 +364,7 @@ func TestALayoutSnapshotReportsWhatResolvedBesideWhatWasDeclared(t *testing.T) {
 		t.Errorf("a resolved layer = %d, want its root's base 10 plus the 3 it declared",
 			child.Layer)
 	}
-	if child.Visual != "*ui.snapshotTestVisual" {
+	if child.Visual != "*uiimpl.snapshotTestVisual" {
 		t.Errorf("a visual = %q, want the application's own visual type", child.Visual)
 	}
 	if string(child.UserData) != `{"name":"hero"}` {
@@ -420,7 +421,7 @@ func TestASubtreeFilterIsAContiguousRangeWhoseParentLinksResolve(t *testing.T) {
 	rig.fixture.on(aSmallTree(nil))
 	subtree := 2
 
-	response, err := rig.runLayout(LayoutRequest{Subtree: &subtree})
+	response, err := rig.runLayout(layoutRequest{Subtree: &subtree})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -462,7 +463,7 @@ func TestAMaxDepthFilterKeepsWholeAncestriesAndSaysWhatItDropped(t *testing.T) {
 	rig.fixture.on(aSmallTree(nil))
 	depth := 1
 
-	response, err := rig.runLayout(LayoutRequest{MaxDepth: &depth})
+	response, err := rig.runLayout(layoutRequest{MaxDepth: &depth})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -486,14 +487,14 @@ func TestAMaxDepthFilterKeepsWholeAncestriesAndSaysWhatItDropped(t *testing.T) {
 
 func TestUserDataThatCannotMarshalDegradesToItsTypeNameAndNothingElse(t *testing.T) {
 	rig := newLayoutRig(t)
-	rig.fixture.on(func(frame *Frame) {
-		frame.Add(0, NewElement().ID("before").UserData("plain"),
-			NewElement().ID("panics").UserData(panickingUserData{}),
-			NewElement().ID("channel").UserData(make(chan int)),
-			NewElement().ID("after").UserData(7))
+	rig.fixture.on(func(frame *ui.Frame) {
+		frame.Add(0, ui.NewElement().ID("before").UserData("plain"),
+			ui.NewElement().ID("panics").UserData(panickingUserData{}),
+			ui.NewElement().ID("channel").UserData(make(chan int)),
+			ui.NewElement().ID("after").UserData(7))
 	})
 
-	response, err := rig.runLayout(LayoutRequest{})
+	response, err := rig.runLayout(layoutRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -536,7 +537,7 @@ func TestUserDataThatCannotMarshalDegradesToItsTypeNameAndNothingElse(t *testing
 			t.Errorf("element %d degraded without naming its type", at)
 		}
 	}
-	if got := userDataTypeName(t, response.Elements[1]); got != "ui.panickingUserData" {
+	if got := userDataTypeName(t, response.Elements[1]); got != "uiimpl.panickingUserData" {
 		t.Errorf("the panicking payload named itself %q, want its Go type", got)
 	}
 	if got := userDataTypeName(t, response.Elements[2]); got != "chan int" {
@@ -551,7 +552,7 @@ func TestUserDataThatCannotMarshalDegradesToItsTypeNameAndNothingElse(t *testing
 	}
 }
 
-func userDataTypeName(t *testing.T, element ElementView) string {
+func userDataTypeName(t *testing.T, element ui.ElementView) string {
 	t.Helper()
 	var degraded struct {
 		Type string `json:"$type"`
@@ -564,16 +565,16 @@ func userDataTypeName(t *testing.T, element ElementView) string {
 
 func TestAnElementLayoutDroppedIsReportedInactiveRatherThanLeftOut(t *testing.T) {
 	rig := newLayoutRig(t)
-	rig.fixture.on(func(frame *Frame) {
-		frame.Add(0, NewElement().
+	rig.fixture.on(func(frame *ui.Frame) {
+		frame.Add(0, ui.NewElement().
 			ID("grid").
-			Layout(LayoutGrid).
+			Layout(ui.LayoutGrid).
 			Columns(1).
 			Rows(1).
-			Children(NewElement().ID("kept"), NewElement().ID("overflowed")))
+			Children(ui.NewElement().ID("kept"), ui.NewElement().ID("overflowed")))
 	})
 
-	response, err := rig.runLayout(LayoutRequest{})
+	response, err := rig.runLayout(layoutRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -600,10 +601,10 @@ func TestAnElementLayoutDroppedIsReportedInactiveRatherThanLeftOut(t *testing.T)
 
 func TestALayoutSnapshotDescribesATickThatBeganAfterTheRequest(t *testing.T) {
 	rig := newLayoutRig(t)
-	rig.fixture.on(func(frame *Frame) { frame.Add(0, NewElement().ID("before")) })
+	rig.fixture.on(func(frame *ui.Frame) { frame.Add(0, ui.NewElement().ID("before")) })
 	rig.tick()
 
-	armed, err := rig.k.ExecuteCommand[ArmLayoutCmd](ArmLayoutRequest{})
+	armed, err := rig.k.ExecuteCommand[ui.ArmLayoutCmd](ui.ArmLayoutRequest{})
 	if err != nil {
 		t.Fatalf("arm: %v", err)
 	}
@@ -613,7 +614,7 @@ func TestALayoutSnapshotDescribesATickThatBeganAfterTheRequest(t *testing.T) {
 	default:
 	}
 
-	rig.fixture.on(func(frame *Frame) { frame.Add(0, NewElement().ID("after")) })
+	rig.fixture.on(func(frame *ui.Frame) { frame.Add(0, ui.NewElement().ID("after")) })
 	rig.tick()
 
 	select {
@@ -632,11 +633,11 @@ func TestALayoutSnapshotDescribesATickThatBeganAfterTheRequest(t *testing.T) {
 
 func TestASecondLayoutSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 	rig := newLayoutRig(t)
-	if _, err := rig.k.ExecuteCommand[ArmLayoutCmd](ArmLayoutRequest{}); err != nil {
+	if _, err := rig.k.ExecuteCommand[ui.ArmLayoutCmd](ui.ArmLayoutRequest{}); err != nil {
 		t.Fatalf("first arm: %v", err)
 	}
 
-	_, err := layoutSnapshot(rig.k, LayoutRequest{})
+	_, err := layoutSnapshot(rig.k, layoutRequest{})
 	var refusal mcp.Unavailable
 	if !errors.As(err, &refusal) {
 		t.Fatalf("a second snapshot answered %v, want words an agent can act on", err)
@@ -665,7 +666,7 @@ func TestASecondLayoutSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 func TestALayoutSnapshotUnderPausePerformsOneStepAndSaysSo(t *testing.T) {
 	rig := newLayoutRig(t)
 	rig.fixture.paused.Store(true)
-	rig.fixture.on(func(frame *Frame) { frame.Add(0, NewElement().ID("frozen")) })
+	rig.fixture.on(func(frame *ui.Frame) { frame.Add(0, ui.NewElement().ID("frozen")) })
 	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
 		k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
 		return app.TimeResponse{Paused: true, Stepped: 1}, nil
@@ -674,7 +675,7 @@ func TestALayoutSnapshotUnderPausePerformsOneStepAndSaysSo(t *testing.T) {
 	// No tick is driven here: a paused engine runs none of its own, so the
 	// step the capability raises is the only one, and the ui frame between
 	// ticks is empty rather than stale.
-	response, err := layoutSnapshot(rig.k, LayoutRequest{})
+	response, err := layoutSnapshot(rig.k, layoutRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -703,13 +704,13 @@ func TestALayoutSnapshotUnderPausePerformsOneStepAndSaysSo(t *testing.T) {
 func TestALayoutSnapshotJoiningAPendingStepSaysThatToo(t *testing.T) {
 	rig := newLayoutRig(t)
 	rig.fixture.paused.Store(true)
-	rig.fixture.on(func(frame *Frame) { frame.Add(0, NewElement().ID("shared")) })
+	rig.fixture.on(func(frame *ui.Frame) { frame.Add(0, ui.NewElement().ID("shared")) })
 	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
 		k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
 		return app.TimeResponse{Paused: true, Stepped: 1, Joined: true}, nil
 	})
 
-	response, err := layoutSnapshot(rig.k, LayoutRequest{})
+	response, err := layoutSnapshot(rig.k, layoutRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -727,13 +728,13 @@ func TestALayoutSnapshotJoiningAPendingStepSaysThatToo(t *testing.T) {
 func TestALayoutSnapshotNamesTheTickItDescribes(t *testing.T) {
 	rig := newLayoutRig(t)
 	rig.fixture.paused.Store(true)
-	rig.fixture.on(func(frame *Frame) { frame.Add(0, NewElement().ID("shared")) })
+	rig.fixture.on(func(frame *ui.Frame) { frame.Add(0, ui.NewElement().ID("shared")) })
 	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
 		k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60, Tick: 97}).Wait()
 		return app.TimeResponse{Paused: true, Stepped: 1}, nil
 	})
 
-	response, err := layoutSnapshot(rig.k, LayoutRequest{})
+	response, err := layoutSnapshot(rig.k, layoutRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -748,7 +749,7 @@ func TestALayoutSnapshotIsWrittenToThePathTheAgentNames(t *testing.T) {
 	rig.fixture.on(aSmallTree(nil))
 	path := filepath.Join(t.TempDir(), "nested", "layout.json")
 
-	response, err := rig.runLayout(LayoutRequest{Path: path})
+	response, err := rig.runLayout(layoutRequest{Path: path})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -770,7 +771,7 @@ func TestALayoutSnapshotIsWrittenToThePathTheAgentNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the written snapshot: %v", err)
 	}
-	var written LayoutResponse
+	var written layoutResponse
 	if err := json.Unmarshal(document, &written); err != nil {
 		t.Fatalf("the written snapshot is not JSON: %v", err)
 	}
@@ -788,13 +789,13 @@ func TestALayoutSnapshotRefusesARequestItCannotHonour(t *testing.T) {
 	negative, deep, missing := -1, -2, 99
 	for _, test := range []struct {
 		name    string
-		request LayoutRequest
+		request layoutRequest
 		wants   string
 	}{
-		{"relative path", LayoutRequest{Path: filepath.Join("ui", "one.json")}, "absolute"},
-		{"wrong extension", LayoutRequest{Path: filepath.Join(t.TempDir(), "ui.txt")}, ".json"},
-		{"negative subtree", LayoutRequest{Subtree: &negative}, "negative"},
-		{"negative depth", LayoutRequest{MaxDepth: &deep}, "keeps no element"},
+		{"relative path", layoutRequest{Path: filepath.Join("ui", "one.json")}, "absolute"},
+		{"wrong extension", layoutRequest{Path: filepath.Join(t.TempDir(), "ui.txt")}, ".json"},
+		{"negative subtree", layoutRequest{Subtree: &negative}, "negative"},
+		{"negative depth", layoutRequest{MaxDepth: &deep}, "keeps no element"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := layoutSnapshot(rig.k, test.request)
@@ -813,7 +814,7 @@ func TestALayoutSnapshotRefusesARequestItCannotHonour(t *testing.T) {
 	// knows how large it is. It still comes back as words rather than as an
 	// empty array reading as a subtree that laid out nothing.
 	t.Run("subtree past the end", func(t *testing.T) {
-		_, err := rig.runLayout(LayoutRequest{Subtree: &missing})
+		_, err := rig.runLayout(layoutRequest{Subtree: &missing})
 		var refusal mcp.Unavailable
 		if !errors.As(err, &refusal) {
 			t.Fatalf("answered %v, want words an agent can act on", err)
@@ -828,7 +829,7 @@ func TestALayoutSnapshotHoldsNothingThatAliasesTheTree(t *testing.T) {
 	rig := newLayoutRig(t)
 	rig.fixture.on(aSmallTree("carried"))
 
-	response, err := rig.runLayout(LayoutRequest{})
+	response, err := rig.runLayout(layoutRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -839,13 +840,13 @@ func TestALayoutSnapshotHoldsNothingThatAliasesTheTree(t *testing.T) {
 	// the frame releases at the end of each processUpdate. A view still
 	// pointing into either - an id, a declared constraint, a userData - reads
 	// as whatever the next frames declared.
-	rig.fixture.on(func(frame *Frame) {
+	rig.fixture.on(func(frame *ui.Frame) {
 		for i := range 20 {
-			frame.Add(canvas.Layer(i), NewElement().
-				ID(ID("other")).
+			frame.Add(canvas.Layer(i), ui.NewElement().
+				ID(ui.ID("other")).
 				Width(float32(i)*3).
 				UserData(i).
-				Children(NewElement().ID("otherchild").Height(float32(i))))
+				Children(ui.NewElement().ID("otherchild").Height(float32(i))))
 		}
 	})
 	for range 3 {
@@ -858,7 +859,7 @@ func TestALayoutSnapshotHoldsNothingThatAliasesTheTree(t *testing.T) {
 	}
 }
 
-func marshalLayout(t *testing.T, response LayoutResponse) string {
+func marshalLayout(t *testing.T, response layoutResponse) string {
 	t.Helper()
 	document, err := json.Marshal(response)
 	if err != nil {

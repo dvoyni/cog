@@ -1,7 +1,8 @@
-package ui
+package uiimpl
 
 import (
 	stdcontext "context"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -12,6 +13,8 @@ import (
 	"github.com/dvoyni/cog/bundles/canvas/canvasimpl"
 	"github.com/dvoyni/cog/bundles/input"
 	"github.com/dvoyni/cog/bundles/input/inputimpl"
+	"github.com/dvoyni/cog/bundles/ui"
+	"github.com/dvoyni/cog/bundles/ui/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/storage"
@@ -21,7 +24,7 @@ import (
 )
 
 type pluginTestVisual struct {
-	states   []State
+	states   []ui.State
 	sawQueue bool
 }
 
@@ -29,7 +32,7 @@ func (*pluginTestVisual) DefaultSize(canvas.LookupAccess, any) m.Vec2 {
 	return m.Vec2{X: 20, Y: 20}
 }
 
-func (visual *pluginTestVisual) Draw(_ canvas.LookupAccess, queue *canvas.OpQueue, state State, _ any) {
+func (visual *pluginTestVisual) Draw(_ canvas.LookupAccess, queue *canvas.OpQueue, state ui.State, _ any) {
 	visual.sawQueue = queue != nil
 	visual.states = append(visual.states, state)
 	queue.FillRect(state.Layer, state.Rect, canvas.ShapeDraw{Material: state.Materials.Sprite})
@@ -42,30 +45,30 @@ type pluginTestConsumer struct {
 	visual       *pluginTestVisual
 	tick         int
 	left, top    float32
-	observed     [][]Interaction
+	observed     [][]ui.Interaction
 	frameLengths []int
 }
 
 func (*pluginTestConsumer) Name() kernel.PluginName { return "ui-test-consumer" }
 
-func (*pluginTestConsumer) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
+func (*pluginTestConsumer) Dependencies() []kernel.PluginName { return []kernel.PluginName{ui.Name} }
 
 func (consumer *pluginTestConsumer) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.Subscribe[pluginTestBuildHandler](consumer.build).
-		Before[UpdateEventHandler]()
+		Before[ui.ProcessOnUpdate]()
 	registrar.Subscribe[pluginTestObserveHandler](consumer.observe).
-		After[UpdateEventHandler]().
+		After[ui.ProcessOnUpdate]().
 		Before[canvas.FlushOnUpdate]()
 	return nil
 }
 func (consumer *pluginTestConsumer) build() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var frameResource kernel.Write[*Frame]
+	var frameResource kernel.Write[*ui.Frame]
 	return func(access kernel.ResourceAccess) {
-			frameResource = access.GetWrite[*Frame]()
+			frameResource = access.GetWrite[*ui.Frame]()
 		}, func(_ kernel.Kernel, _ app.UpdateEvent) error {
 			frame := frameResource.Get()
 			if consumer.tick == 0 {
-				frame.Add(10, NewElement().
+				frame.Add(10, ui.NewElement().
 					ID("button").
 					Left(consumer.left).
 					Top(consumer.top).
@@ -112,28 +115,28 @@ func TestPluginMapsWindowPointerToLogicalViewport(t *testing.T) {
 	}})
 	k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
 
-	assertInteractions(t, consumer.observed[0], []Interaction{
-		{ID: "button", Kind: InteractionDown, Button: 0},
-		{ID: "button", Kind: InteractionIn, Button: -1},
-		{ID: "button", Kind: InteractionHover, Button: -1},
+	assertInteractions(t, consumer.observed[0], []ui.Interaction{
+		{ID: "button", Kind: ui.InteractionDown, Button: 0},
+		{ID: "button", Kind: ui.InteractionIn, Button: -1},
+		{ID: "button", Kind: ui.InteractionHover, Button: -1},
 	})
 }
 
 func (consumer *pluginTestConsumer) observe() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var frameResource kernel.Read[*Frame]
-	var interactionsResource kernel.Read[*Interactions]
+	var frameResource kernel.Read[*ui.Frame]
+	var interactionsResource kernel.Read[*ui.Interactions]
 	return func(access kernel.ResourceAccess) {
-			frameResource = access.GetRead[*Frame]()
-			interactionsResource = access.GetRead[*Interactions]()
+			frameResource = access.GetRead[*ui.Frame]()
+			interactionsResource = access.GetRead[*ui.Interactions]()
 		}, func(_ kernel.Kernel, _ app.UpdateEvent) error {
 			frame := frameResource.Get()
 			interactions := interactionsResource.Get()
-			values := make([]Interaction, 0)
+			values := make([]ui.Interaction, 0)
 			for interaction := range interactions.All() {
 				values = append(values, interaction)
 			}
 			consumer.observed = append(consumer.observed, values)
-			consumer.frameLengths = append(consumer.frameLengths, len(frame.roots))
+			consumer.frameLengths = append(consumer.frameLengths, len(internal.FrameRoots(frame)))
 			return nil
 		}
 }
@@ -178,16 +181,16 @@ func TestPluginProcessesAndClearsEveryUpdate(t *testing.T) {
 	if state.Layer != 13 {
 		t.Fatalf("visual layer = %d, want 13", state.Layer)
 	}
-	if state.ClipRect != (Rect{Width: 100, Height: 80}) {
+	if state.ClipRect != (ui.Rect{Width: 100, Height: 80}) {
 		t.Fatalf("visual clip = %+v, want screen", state.ClipRect)
 	}
-	if !state.Has(VisualHovered | VisualPressed) {
+	if !state.Has(ui.VisualHovered | ui.VisualPressed) {
 		t.Fatalf("visual state = %+v, want hovered and pressed", state)
 	}
-	assertInteractions(t, consumer.observed[0], []Interaction{
-		{ID: "button", Kind: InteractionDown, Button: 0},
-		{ID: "button", Kind: InteractionIn, Button: -1},
-		{ID: "button", Kind: InteractionHover, Button: -1},
+	assertInteractions(t, consumer.observed[0], []ui.Interaction{
+		{ID: "button", Kind: ui.InteractionDown, Button: 0},
+		{ID: "button", Kind: ui.InteractionIn, Button: -1},
+		{ID: "button", Kind: ui.InteractionHover, Button: -1},
 	})
 	if consumer.frameLengths[0] != 0 {
 		t.Fatalf("frame length after processing = %d, want 0", consumer.frameLengths[0])
@@ -201,126 +204,10 @@ func TestPluginProcessesAndClearsEveryUpdate(t *testing.T) {
 	if len(visual.states) != 1 {
 		t.Fatalf("draw count after empty frame = %d, want 1", len(visual.states))
 	}
-	assertInteractions(t, consumer.observed[1], []Interaction{
-		{ID: "button", Kind: InteractionUp, Button: 0},
-		{ID: "button", Kind: InteractionOut, Button: -1},
+	assertInteractions(t, consumer.observed[1], []ui.Interaction{
+		{ID: "button", Kind: ui.InteractionUp, Button: 0},
+		{ID: "button", Kind: ui.InteractionOut, Button: -1},
 	})
-}
-
-func TestChildrenDoesNotCopyTheFirstSequence(t *testing.T) {
-	children := []Element{NewElement(), NewElement(), NewElement()}
-	var sink Element
-	allocations := testing.AllocsPerRun(100, func() {
-		sink = NewElement().Children(children...)
-	})
-	_ = sink
-	if allocations != 0 {
-		t.Fatalf("first Children allocations = %v, want 0", allocations)
-	}
-}
-
-// A second Children call must append into fresh storage rather than the borrowed
-// array, so independent branches off one element cannot overwrite each other or
-// the callers spare capacity.
-func TestChildrenBranchesDoNotShareBorrowedStorage(t *testing.T) {
-	shared := make([]Element, 2, 8)
-	shared[0] = NewElement().ID("a")
-	shared[1] = NewElement().ID("b")
-
-	base := NewElement().Children(shared...)
-	first := base.Children(NewElement().ID("first"))
-	second := base.Children(NewElement().ID("second"))
-
-	if got := first.children[2].id; got != "first" {
-		t.Errorf("first branch third child = %q, want first", got)
-	}
-	if got := second.children[2].id; got != "second" {
-		t.Errorf("second branch third child = %q, want second", got)
-	}
-	for index, child := range shared[:cap(shared)][2:] {
-		if child.id != "" {
-			t.Errorf("caller spare capacity slot %d written: %q", index, child.id)
-		}
-	}
-}
-
-var interactionSum int
-
-func TestInteractionsIterationDoesNotAllocate(t *testing.T) {
-	interactions := Interactions{values: []Interaction{
-		{ID: "first", Kind: InteractionHover, Button: -1},
-		{ID: "second", Kind: InteractionClick, Button: 0},
-	}}
-	if found, _ := interactions.Has("second", InteractionClick, 0, false); !found {
-		t.Fatal("Has did not find interaction")
-	}
-
-	allocations := testing.AllocsPerRun(100, func() {
-		total := 0
-		for interaction := range interactions.All() {
-			total += interaction.Button
-		}
-		interactionSum = total
-	})
-	if allocations != 0 {
-		t.Fatalf("All allocations = %v, want 0", allocations)
-	}
-}
-
-func TestInteractionsHasUsesAndConsumesTopmostKind(t *testing.T) {
-	interactions := Interactions{values: []Interaction{
-		{ID: "bottom", Kind: InteractionClick, Button: 0},
-		{ID: "hovered", Kind: InteractionHover, Button: -1},
-		{ID: "top", Kind: InteractionClick, Button: 0},
-	}}
-
-	if found, _ := interactions.Has("bottom", InteractionClick, 0, true); found {
-		t.Fatal("Has found a click below the topmost click")
-	}
-	if len(interactions.values) != 3 {
-		t.Fatalf("failed Has consumed interactions: got %d values, want 3", len(interactions.values))
-	}
-	if found, _ := interactions.Has("top", InteractionClick, 0, true); !found {
-		t.Fatal("Has did not find the topmost click")
-	}
-	if len(interactions.values) != 1 || interactions.values[0].Kind != InteractionHover {
-		t.Fatalf("consumed interactions = %v, want only hover", interactions.values)
-	}
-}
-
-func TestInteractionsHasReturnsTopmostUserData(t *testing.T) {
-	interactions := Interactions{values: []Interaction{
-		{ID: "bottom", Kind: InteractionClick, Button: 0},
-		{ID: "top", Kind: InteractionClick, Button: 0, userData: "top data"},
-	}}
-
-	found, userData := interactions.Has("top", InteractionClick, 0, false)
-	if !found || userData != "top data" {
-		t.Fatalf("Has result = %v, %q; want true, %q", found, userData, "top data")
-	}
-}
-
-func TestInteractionsClearLeavesNothingToFindAndKeepsTheBuffer(t *testing.T) {
-	interactions := Interactions{values: []Interaction{
-		{ID: "clicked", Kind: InteractionClick, Button: 0},
-		{ID: "hovered", Kind: InteractionHover, Button: -1},
-	}}
-	buffer := interactions.values
-
-	interactions.Clear()
-
-	if len(interactions.values) != 0 {
-		t.Fatalf("cleared interactions = %v, want none", interactions.values)
-	}
-	if interactions.Clicked("clicked") {
-		t.Fatal("Clicked found a click after Clear")
-	}
-	for range interactions.All() {
-		t.Fatal("All yielded an interaction after Clear")
-	}
-	if cap(interactions.values) != cap(buffer) {
-		t.Fatalf("Clear replaced the buffer: cap = %d, want %d", cap(interactions.values), cap(buffer))
-	}
 }
 
 // A scripted move, press and release in one call is a complete click. The
@@ -354,11 +241,11 @@ func TestPluginSeesAScriptedClickAsAClick(t *testing.T) {
 	}
 	k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
 
-	if !hasInteraction(consumer.observed[0], "button", InteractionClick) {
+	if !hasInteraction(consumer.observed[0], "button", ui.InteractionClick) {
 		t.Fatalf("interactions = %+v, want a click", consumer.observed[0])
 	}
-	if !hasInteraction(consumer.observed[0], "button", InteractionDown) ||
-		!hasInteraction(consumer.observed[0], "button", InteractionUp) {
+	if !hasInteraction(consumer.observed[0], "button", ui.InteractionDown) ||
+		!hasInteraction(consumer.observed[0], "button", ui.InteractionUp) {
 		t.Fatalf("interactions = %+v, want both edges of the click", consumer.observed[0])
 	}
 }
@@ -412,16 +299,16 @@ func TestPluginSeesAScriptedDragAsADrag(t *testing.T) {
 	}
 	k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
 
-	if !hasInteraction(consumer.observed[0], "button", InteractionDown) {
+	if !hasInteraction(consumer.observed[0], "button", ui.InteractionDown) {
 		t.Fatalf("the press tick saw %+v, want a down", consumer.observed[0])
 	}
-	if hasInteraction(consumer.observed[0], "button", InteractionUp) {
+	if hasInteraction(consumer.observed[0], "button", ui.InteractionUp) {
 		t.Fatalf("the press tick saw %+v; the delay did not hold the button", consumer.observed[0])
 	}
-	if !hasInteraction(consumer.observed[1], "button", InteractionUp) {
+	if !hasInteraction(consumer.observed[1], "button", ui.InteractionUp) {
 		t.Fatalf("the release tick saw %+v, want an up", consumer.observed[1])
 	}
-	if hasInteraction(consumer.observed[1], "button", InteractionClick) {
+	if hasInteraction(consumer.observed[1], "button", ui.InteractionClick) {
 		t.Fatalf("the release tick saw %+v; a drag off the target is not a click",
 			consumer.observed[1])
 	}
@@ -436,4 +323,20 @@ func scriptedButtonHeld(t *testing.T, k kernel.Executioner) bool {
 		t.Fatalf("state: %v", err)
 	}
 	return slices.Contains(seam.Down, input.KeyMouseLeft)
+}
+
+func assertInteractions(t *testing.T, got, want []ui.Interaction) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("interactions = %+v, want %+v", got, want)
+	}
+}
+
+func hasInteraction(interactions []ui.Interaction, id ui.ID, kind ui.InteractionKind) bool {
+	for index := range interactions {
+		if interactions[index].ID == id && interactions[index].Kind == kind {
+			return true
+		}
+	}
+	return false
 }

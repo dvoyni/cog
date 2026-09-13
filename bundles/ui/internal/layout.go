@@ -1,4 +1,4 @@
-package ui
+package internal
 
 import (
 	"math"
@@ -9,7 +9,13 @@ import (
 	"github.com/dvoyni/cog/bundles/canvas"
 )
 
-type processor struct {
+// Processor is ui's layout engine and the scratch it keeps across ticks, so a
+// warmed tick allocates nothing: it flattens a tick's roots, measures and
+// arranges them, resolves clips, draw order and interactions, and records every
+// visual into canvas. uiimpl holds one as its private resource; Measure builds a
+// throwaway one. It is not part of ui's public API, so what uiimpl calls on it is
+// exported here directly rather than through a friend function.
+type Processor struct {
 	interactions      []Interaction
 	nodes             []layoutNode
 	walk              []walkItem
@@ -25,7 +31,11 @@ type processor struct {
 	capturedSet       map[ID]struct{}
 }
 
-func (context *processor) process(lookup canvas.LookupAccess, roots []Element, layers []canvas.Layer, state globalState, queue *canvas.OpQueue) {
+// Process runs one tick of layout over roots, each on the base layer at the same
+// index of layers, against state, and records into queue, which may be nil.
+// The interactions it resolves are held until PublishInteractions hands them to
+// the Interactions resource.
+func (context *Processor) Process(lookup canvas.LookupAccess, roots []Element, layers []canvas.Layer, state GlobalState, queue *canvas.OpQueue) {
 	context.interactions = context.interactions[:0]
 	context.flatten(roots, layers, state.Materials)
 	context.disableGridOverflow()
@@ -37,30 +47,36 @@ func (context *processor) process(lookup canvas.LookupAccess, roots []Element, l
 	context.draw(lookup, queue, state.Screen)
 }
 
-type globalState struct {
+// GlobalState is what one tick of layout is resolved against: the logical
+// viewport, the pointer, and the frame's default material set.
+type GlobalState struct {
 	Screen  Rect
-	Pointer pointerState
+	Pointer PointerState
 	// Materials is the frame's default material set, seeding every root.
 	Materials canvas.MaterialSet
 }
 
-type pointerState struct {
+// PointerState is the pointer in logical viewport units, and the button edges
+// this tick delivered at it.
+type PointerState struct {
 	X, Y   float32
-	Events []pointerEvent
+	Events []PointerEvent
 }
 
-type pointerEvent struct {
+// PointerEvent is one button edge: a press or a release of Button at X, Y.
+type PointerEvent struct {
 	X, Y   float32
 	Button int
-	Kind   pointerEventKind
+	Kind   PointerEventKind
 }
 
-type pointerEventKind uint8
+// PointerEventKind is whether a PointerEvent is a press or a release.
+type PointerEventKind uint8
 
 const (
-	pointerEventNone pointerEventKind = iota
-	pointerEventDown
-	pointerEventUp
+	PointerEventNone PointerEventKind = iota
+	PointerEventDown
+	PointerEventUp
 )
 
 type Interaction struct {
@@ -126,7 +142,7 @@ type interactionTarget struct {
 // Measure resolves element against the available area and returns its arranged
 // size without drawing or processing interactions.
 func Measure(element Element, available m.Vec2) m.Vec2 {
-	context := processor{}
+	context := Processor{}
 	roots := []Element{element}
 	context.flatten(roots, nil, canvas.MaterialSet{})
 	context.measure(canvas.LookupAccess{})
@@ -137,7 +153,7 @@ func Measure(element Element, available m.Vec2) m.Vec2 {
 	return m.Vec2{X: context.nodes[0].rect.Width, Y: context.nodes[0].rect.Height}
 }
 
-func (context *processor) flatten(roots []Element, layers []canvas.Layer, materials canvas.MaterialSet) {
+func (context *Processor) flatten(roots []Element, layers []canvas.Layer, materials canvas.MaterialSet) {
 	context.nodes = context.nodes[:0]
 	context.walk = context.walk[:0]
 	for index := len(roots) - 1; index >= 0; index-- {
@@ -209,7 +225,7 @@ func (context *processor) flatten(roots []Element, layers []canvas.Layer, materi
 	}
 }
 
-func (context *processor) disableGridOverflow() {
+func (context *Processor) disableGridOverflow() {
 	for nodeIndex := range context.nodes {
 		node := &context.nodes[nodeIndex]
 		element := node.element
@@ -238,7 +254,7 @@ func (context *processor) disableGridOverflow() {
 	}
 }
 
-func (context *processor) measure(lookup canvas.LookupAccess) {
+func (context *Processor) measure(lookup canvas.LookupAccess) {
 	for nodeIndex := len(context.nodes) - 1; nodeIndex >= 0; nodeIndex-- {
 		node := &context.nodes[nodeIndex]
 		element := node.element
@@ -279,7 +295,7 @@ func (context *processor) measure(lookup canvas.LookupAccess) {
 	}
 }
 
-func (context *processor) measureContent(nodeIndex int) m.Vec2 {
+func (context *Processor) measureContent(nodeIndex int) m.Vec2 {
 	node := &context.nodes[nodeIndex]
 	element := node.element
 	switch element.layout {
@@ -403,7 +419,7 @@ func crossBasis(element *Element, contentCross float32, horizontal bool) float32
 // the box and clipped. Resolving those children against the cross the rest of
 // the row has settled costs one more pass over the children and reserves what
 // each of them will take.
-func (context *processor) mainFromCross(nodeIndex int, cross float32, horizontal bool) float32 {
+func (context *Processor) mainFromCross(nodeIndex int, cross float32, horizontal bool) float32 {
 	if cross <= 0 {
 		return 0
 	}
@@ -435,7 +451,7 @@ func (context *processor) mainFromCross(nodeIndex int, cross float32, horizontal
 	return reserved
 }
 
-func (context *processor) arrange(screen Rect) {
+func (context *Processor) arrange(screen Rect) {
 	for nodeIndex := range context.nodes {
 		node := &context.nodes[nodeIndex]
 		if !node.active {
@@ -451,7 +467,7 @@ func (context *processor) arrange(screen Rect) {
 	}
 }
 
-func (context *processor) arrangeChildren(nodeIndex int) {
+func (context *Processor) arrangeChildren(nodeIndex int) {
 	node := &context.nodes[nodeIndex]
 	content := elementContentRect(node.element, node.rect)
 	switch node.element.layout {
@@ -476,7 +492,7 @@ func (context *processor) arrangeChildren(nodeIndex int) {
 	}
 }
 
-func (context *processor) arrangeAbsolute(nodeIndex int, parent Rect) {
+func (context *Processor) arrangeAbsolute(nodeIndex int, parent Rect) {
 	node := &context.nodes[nodeIndex]
 	element := node.element
 	natural := arrangedSize(element, parent)
@@ -489,7 +505,7 @@ func (context *processor) arrangeAbsolute(nodeIndex int, parent Rect) {
 	node.definiteHeight = definiteHeight
 }
 
-func (context *processor) arrangeFlow(nodeIndex int, horizontal bool) {
+func (context *Processor) arrangeFlow(nodeIndex int, horizontal bool) {
 	node := &context.nodes[nodeIndex]
 	element := node.element
 	content := elementContentRect(element, node.rect)
@@ -616,7 +632,7 @@ func sizeFromStretchedCross(element *Element, size m.Vec2, cross float32, horizo
 	return size
 }
 
-func (context *processor) distribute(items []flowItem, available float32, horizontal bool) {
+func (context *Processor) distribute(items []flowItem, available float32, horizontal bool) {
 	var used float32
 	for index := range items {
 		used += items[index].main
@@ -668,7 +684,7 @@ func (context *processor) distribute(items []flowItem, available float32, horizo
 	}
 }
 
-func (context *processor) arrangeGrid(nodeIndex int) {
+func (context *Processor) arrangeGrid(nodeIndex int) {
 	node := &context.nodes[nodeIndex]
 	element := node.element
 	content := elementContentRect(element, node.rect)
@@ -759,14 +775,14 @@ func (context *processor) arrangeGrid(nodeIndex int) {
 	}
 }
 
-func (context *processor) prepareGridTracks(columns, rows int) {
+func (context *Processor) prepareGridTracks(columns, rows int) {
 	context.gridColumns = resizeAndClear(context.gridColumns, columns)
 	context.gridRows = resizeAndClear(context.gridRows, rows)
 	context.gridColumnOffsets = resizeAndClear(context.gridColumnOffsets, columns)
 	context.gridRowOffsets = resizeAndClear(context.gridRowOffsets, rows)
 }
 
-func (context *processor) prepareGridOffsets(gap float32) {
+func (context *Processor) prepareGridOffsets(gap float32) {
 	for index := 1; index < len(context.gridColumns); index++ {
 		context.gridColumnOffsets[index] = context.gridColumnOffsets[index-1] + context.gridColumns[index-1] + gap
 	}
@@ -810,7 +826,7 @@ func sumTracks(tracks []float32) float32 {
 	return total
 }
 
-func (context *processor) resolveClips(screen Rect) {
+func (context *Processor) resolveClips(screen Rect) {
 	for nodeIndex := range context.nodes {
 		node := &context.nodes[nodeIndex]
 		element := node.element
@@ -842,7 +858,7 @@ func (context *processor) resolveClips(screen Rect) {
 	}
 }
 
-func (context *processor) orderNodes() {
+func (context *Processor) orderNodes() {
 	context.ordered = context.ordered[:0]
 	for nodeIndex := range context.nodes {
 		if context.nodes[nodeIndex].active {
@@ -868,12 +884,12 @@ func (context *processor) orderNodes() {
 	})
 }
 
-func (context *processor) processInteractions(pointer pointerState) {
+func (context *Processor) processInteractions(pointer PointerState) {
 	context.ensureInteractionSets()
 	for eventIndex := range pointer.Events {
 		event := pointer.Events[eventIndex]
 		switch event.Kind {
-		case pointerEventDown:
+		case PointerEventDown:
 			context.removeCaptures(event.Button)
 			target := context.hitTarget(event.X, event.Y)
 			if target.id == "" {
@@ -882,7 +898,7 @@ func (context *processor) processInteractions(pointer pointerState) {
 			context.interactions = append(context.interactions, Interaction{ID: target.id, Kind: InteractionDown, Button: event.Button, userData: target.userData})
 			context.captures = append(context.captures, capture{interactionTarget: target, button: event.Button})
 
-		case pointerEventUp:
+		case PointerEventUp:
 			target := context.hitTarget(event.X, event.Y)
 			for captureIndex := range context.captures {
 				captured := context.captures[captureIndex]
@@ -936,13 +952,13 @@ func (context *processor) processInteractions(pointer pointerState) {
 	}
 }
 
-func (context *processor) ensureInteractionSets() {
+func (context *Processor) ensureInteractionSets() {
 	if context.capturedSet == nil {
 		context.capturedSet = make(map[ID]struct{})
 	}
 }
 
-func (context *processor) removeCaptures(button int) {
+func (context *Processor) removeCaptures(button int) {
 	kept := context.captures[:0]
 	for captureIndex := range context.captures {
 		if context.captures[captureIndex].button != button {
@@ -961,7 +977,7 @@ func (context *processor) removeCaptures(button int) {
 // the input on its ancestors' behalf either; reaching one while walking up
 // without having found an ID lets the pointer fall through to whatever is
 // drawn beneath, instead of stopping the search there.
-func (context *processor) hitTarget(x, y float32) interactionTarget {
+func (context *Processor) hitTarget(x, y float32) interactionTarget {
 outer:
 	for orderIndex := len(context.ordered) - 1; orderIndex >= 0; orderIndex-- {
 		nodeIndex := context.ordered[orderIndex]
@@ -990,7 +1006,7 @@ func transformVisualState(state VisualState, element *Element) VisualState {
 	return state&^element.removeState | element.addState
 }
 
-func (context *processor) draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, screen Rect) {
+func (context *Processor) draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, screen Rect) {
 	var previousLayer canvas.Layer
 	hasLayer := false
 	for orderIndex := range context.ordered {

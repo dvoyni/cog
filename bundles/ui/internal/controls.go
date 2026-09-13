@@ -1,4 +1,4 @@
-package ui
+package internal
 
 type ButtonParams struct {
 	ID       ID

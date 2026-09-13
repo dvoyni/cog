@@ -8,8 +8,5 @@
 # One entry per line: "<package> imports <package>" or "<package> declares <type>".
 # Paths are relative to the module root.
 
-# #341 ui: the Plugin moves into uiimpl.
-bundles/ui declares Plugin
-
 # #342 ecsscene: the Plugin moves into ecssceneimpl.
 bundles/ecsscene declares Plugin

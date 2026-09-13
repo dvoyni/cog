@@ -16,6 +16,26 @@ Use the highest-level `ui` abstraction that fully expresses the behavior:
 
 Establish why one level cannot express the behavior before moving to the next. Existing low-level code is not, by itself, a reason to use a lower level. Follow these rules in new and changed code without expanding a focused task into unrelated cleanup.
 
+## Wiring
+
+Compose the plugin in the composition root after `input`, `gfx` and `canvas`:
+
+```go
+plugins := []kernel.Plugin{
+	storageimpl.New(), diskfs.New(diskfs.Config{AppId: "demo"}),
+	inputimpl.New(), gfximpl.New(), canvasimpl.New(), uiimpl.New(), wgpu.New(),
+	game, // declares the frame and reads the interactions
+}
+```
+
+Only the composition root imports `uiimpl`, and ui has no configuration. UI code
+imports the contract root, `ui`, and nothing else: `*ui.Frame`,
+`*ui.Interactions`, every element, modifier, container and visual, `Measure` and
+`HoverTracker` are there. A handler declaring the frame orders itself
+`Before[ui.ProcessOnUpdate]()`; one reading this tick's interactions orders
+itself `After[ui.ProcessOnUpdate]()` and `Before[canvas.FlushOnUpdate]()` if it
+also records.
+
 ## Compose Declaratively
 
 - Represent spatial relationships with layout containers. Use `Grid` for two-dimensional placement, `Horizontal` or `Vertical` for one-dimensional flow, and `Overlay` for shared bounds.

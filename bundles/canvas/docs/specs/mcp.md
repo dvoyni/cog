@@ -176,7 +176,7 @@ derived rather than chosen:
 
 | capability | ordering | reads |
 | --- | --- | --- |
-| `ui_layout` | `.After[ui.UpdateEventHandler]()` | `processor.nodes` |
+| `ui_layout` | `.After[ui.ProcessOnUpdate]()` | `processor.nodes` |
 | `canvas_draws` | `.Last().Before[canvas.FlushOnUpdate]()` | `Read[*canvas.OpQueue]` |
 | `gfx_frame` | inside `gfx`'s own `present`, before the queue swap — see below | `*gfx.OpQueue`, `Read[*gfx.ResourceQueue]` |
 

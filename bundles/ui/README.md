@@ -5,6 +5,41 @@ Consumers submit a complete element tree every update tick. The plugin measures
 and arranges that tree, hit-tests current input, records visuals into canvas,
 publishes interaction results, and consumes the declaration.
 
+## Packages
+
+ui has the Bundle shape: a contract root, an `…impl` and an `internal/`.
+
+- **`bundles/ui`** is the contract: the `*Frame` and `*Interactions`
+  resources with `Interaction` and its kinds, the whole Element and Modifier
+  vocabulary (`Element`, `NewElement`, `State`, `VisualState`, `Visual`,
+  `ParamVisual`, `Layout`, `Alignment`, `Arrangement`, `ID`), the containers
+  (`Horizontal`, `Vertical`, `Grid`, `Overlay`, `WithFloating`, `Spacer`) and
+  `Button`, the built-in visuals and their params (`Image`, `Label`,
+  `ColorPanel`, the nine-slices and the interactive variants), `Measure`,
+  `HoverTracker`, `ArmLayoutCmd` with `LayoutSnapshot` and its view types, the
+  layout errors, `Name` and the ordering identity `ProcessOnUpdate`. It declares
+  no plugin, and it is what every other package imports.
+- **`bundles/ui/uiimpl`** is the plugin: `New`, the processing behind
+  `ProcessOnUpdate`, the private layout resource it keeps across ticks, the
+  layout-snapshot slot behind `ArmLayoutCmd` and its two subscriptions, and the
+  mcp Provider. It exports `New` and nothing else: ui has no configuration, so
+  there is no `Config`. Only composition roots and tests import it.
+- **`bundles/ui/internal`** holds what the two share and nothing else may
+  reach: the declarations of the Element vocabulary with every Modifier, the
+  containers and built-in visuals, `Frame` and its consume side, `Interactions`,
+  the layout engine that both `Measure` and the plugin run, and the rendering of
+  a resolved tree into the snapshot views.
+
+`Element`, `Frame`, `Interactions` and the vocabulary they carry are declared
+in `internal` with their fields unexported, and re-exported from the root as
+aliases (`type Element = internal.Element`) plus a wrapper for each
+constructor. They stay concrete types, and their exported methods
+(`Element.Width`, `Frame.Add`, `Interactions.Has`, …) are public API through
+the alias. What uiimpl needs beyond that goes through plain functions
+`internal` exports, which only the root and uiimpl can call. `internal` never
+imports the root. See
+[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+
 ## Package Model
 
 An `Element` is a frame-local value describing layout, interaction, and visual
@@ -29,7 +64,7 @@ declarations on the next tick instead of retaining and mutating a submitted tree
 ## Plugin
 
 - Name: `ui.Name` (`"ui"`)
-- Constructor: `ui.New() *ui.Plugin`
+- Constructor: `uiimpl.New() kernel.Plugin`
 - Dependencies: `input`, `gfx`, and `canvas`
 - Configuration: none
 - Contributes: one `mcp.Provider` Adapter
@@ -38,9 +73,10 @@ declarations on the next tick instead of retaining and mutating a submitted tree
 Register dependencies before UI, typically in this order: `storage`, `input`,
 `gfx`, `canvas`, then `ui`.
 
-UI processing subscribes to `app.UpdateEvent` after
-`input.AdvanceOnUpdate` and before `canvas.FlushOnUpdate`. It runs on
-every update tick, including intermediate fixed-step catch-up ticks.
+UI processing subscribes to `app.UpdateEvent` as `ui.ProcessOnUpdate`, after
+`input.AdvanceOnUpdate` and before `canvas.FlushOnUpdate`. It lays out the
+frame, resolves interactions and records into canvas. It runs on every update
+tick, including intermediate fixed-step catch-up ticks.
 
 ## Declaring A Frame
 
@@ -61,7 +97,7 @@ func buildUI() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 }
 
 registry.Subscribe[buildUIHandler](buildUI).
-    Before[ui.UpdateEventHandler]()
+    Before[ui.ProcessOnUpdate]()
 ```
 
 Submit each root with its base canvas layer:
@@ -334,7 +370,7 @@ current tick registers after UI and before canvas:
 ```go
 registry.Subscribe[reactUIHandler](reactUI).
     Reads[*ui.Interactions]().
-    After[ui.UpdateEventHandler]().
+    After[ui.ProcessOnUpdate]().
     Before[canvas.FlushOnUpdate]()
 ```
 
@@ -478,10 +514,10 @@ otherwise: `processUpdate` ends in `defer frame.clear()`, so between ticks the
 frame is *empty* rather than stale and producing a snapshot without running a
 tick is not a thing that exists.
 
-The tree is **serialized inside the tick**, from `SnapshotUpdateEventHandler`,
-ordered `After[UpdateEventHandler]()`. That is the only window in which it can
-be read at all. `processor.nodes` keeps its geometry until the next flatten,
-but `layoutNode.element` points into the app's borrowed child storage, which
+The tree is **serialized inside the tick**, from uiimpl's unexported
+`layoutOnUpdate` subscription, ordered `After[ui.ProcessOnUpdate]()`. That is
+the only window in which it can be read at all. The layout engine's nodes keep
+their geometry until the next flatten, but each node's element points into the app's borrowed child storage, which
 the frame releases at the end of `processUpdate` — so a read taken afterwards
 compiles, runs, and returns plausible nonsense for the id, the visual and the
 user data while the numbers beside them still look right. `userData` is
@@ -490,15 +526,15 @@ marshalled there too, per element and inside a `recover`: an app's own
 one. A payload that will not marshal degrades to `{"$type": …, "$opaque":
 true}` with the reason, which is usually the whole answer anyway.
 
-`SnapshotArmUpdateEventHandler` is the other half, ordered `First()` and
+`armLayoutOnUpdate` is the other half, ordered `First()` and
 declaring no resources: it admits a waiting request to the tick that has just
 begun, which is what makes "a tick that *began* after the request" decidable.
 Both handlers are a mutex-guarded no-op when nothing is armed. Anything
 holding a kernel handle can take the same snapshot through `ArmLayoutCmd`; the
 capability is one caller among them.
 
-Every index in the response is a **source index** — a position in
-`processor.nodes`, never a position in the emitted array — and the only other
+Every index in the response is a **source index** — a position in the layout
+engine's flattened nodes, never a position in the emitted array — and the only other
 structural field is `parent`. Flatten is depth-first pre-order, so a subtree is
 a contiguous range of indices, `subtree` is a slice rather than a traversal,
 and a filtered reply's parent links still resolve. `maxDepth` caps how far

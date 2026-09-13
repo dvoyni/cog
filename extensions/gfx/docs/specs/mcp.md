@@ -284,7 +284,7 @@ before canvas's flush, `gfx_frame` after it.
 > **This applies to `gfx_frame` and to nothing else.** The other two links stay
 > writable exactly as specified, because each names a handler type its own
 > package declares: `canvas_draws` is `.Last().Before[canvas.FlushOnUpdate]()`
-> inside `canvas`, and `ui_layout` is `.After[ui.UpdateEventHandler]()` inside
+> inside `canvas`, and `ui_layout` is `.After[ui.ProcessOnUpdate]()` inside
 > `ui`. Only the gfx link crossed a package boundary in the forbidden
 > direction.
 
