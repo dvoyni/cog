@@ -53,7 +53,7 @@ A plugin that ships its own contract and implementation, as a Bundle does, but w
 _Avoid_: Bundle, which needs nothing supplied; Open slot, whose whole implementation is replaced
 
 **Adapter**:
-An implementation of a Port's interface, contributed by a plugin and bound to that Port by the engine during composition. A window driver's GPU backend is an Adapter of the renderer; each Provider's capabilities are an Adapter of the Broker.
+An implementation of a Port's interface, contributed by a plugin and bound to that Port by the engine during composition. It is a plain value rather than a Resource, so reaching it takes no lock. A window driver's GPU backend is an Adapter of the renderer; each plugin's Provider is an Adapter of the Broker.
 _Avoid_: Backend, driver, as the name of the kind
 
 **Library**:
@@ -61,10 +61,10 @@ Code that is not a plugin and defines none, importing only other Libraries and t
 _Avoid_: Package, which is every Go directory; util, common
 
 **Registrar**:
-A plugin-scoped capability used only during Registration to declare owned contracts and initial resources.
+A plugin-scoped capability used only during Registration to declare owned contracts and initial resources, and the Adapters the plugin requires, collects or contributes.
 
 **Registration**:
-The lifecycle phase in which a plugin declares the contracts and initial resources it provides.
+The lifecycle phase in which a plugin declares the contracts and initial resources it provides and the Adapters it requires, collects or contributes. Adapters are bound once every plugin has registered, before Startup.
 
 **Startup**:
 The optional lifecycle phase in which a plugin begins operating after all registrations have been finalized.
@@ -128,7 +128,7 @@ Scheduler fairness in which later work may pass an earlier request only when it 
 A command executed by another handler using only resource access already held by that handler.
 
 **Architecture description**:
-A read-only account of finalized plugin order, contract ownership, subscription dependency graphs, and the lock set each handler ends up holding once its declared dispatches are folded in. It states what composition produced, which no single source file does.
+A read-only account of finalized plugin order, contract ownership, the Adapters each Port was bound to, subscription dependency graphs, and the lock set each handler ends up holding once its declared dispatches are folded in. It states what composition produced, which no single source file does.
 
 **Headless engine**:
 An engine without a Host. It remains running until its context is canceled.
@@ -230,7 +230,7 @@ A named, described, typed unit of engine functionality a Provider offers to an A
 _Avoid_: Tool, action, endpoint
 
 **Provider**:
-A plugin that offers capabilities. It speaks cog contracts only; it never emits protocol vocabulary.
+A plugin's capabilities, contributed to the Broker as an Adapter. It speaks cog contracts only; it never emits protocol vocabulary.
 
 **Broker**:
 The single plugin that collects capabilities from every provider and serves them to an agent. It holds no knowledge of what any capability does.

@@ -1,9 +1,0 @@
-# Every violation of the tier rules cog carried when the tier test landed.
-#
-# This file only ever shrinks. Nothing is ever added to it: new code follows
-# .github/instructions/architecture.instructions.md. Each Port and Bundle ticket
-# of dvoyni/cog#329 deletes its own entries, and the tier test fails on an entry
-# that is no longer a violation, so an entry cannot outlive its fix.
-#
-# One entry per line: "<package> imports <package>" or "<package> declares <type>".
-# Paths are relative to the module root.

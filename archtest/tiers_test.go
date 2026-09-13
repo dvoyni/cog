@@ -4,7 +4,6 @@
 package archtest
 
 import (
-	"bufio"
 	"cmp"
 	"fmt"
 	"go/parser"
@@ -15,7 +14,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 
 	"golang.org/x/tools/go/packages"
@@ -146,8 +144,8 @@ func allowed(from, to place, testFile bool) (bool, string) {
 	return false, ruleNoTier
 }
 
-// violation is one broken rule. key is what the allowlist names it by, so one
-// entry covers every file that repeats the same package edge.
+// violation is one broken rule. key names the package edge or declaration that
+// breaks it, independent of the file.
 type violation struct {
 	file string // module-relative, with the line when there is one
 	line int
@@ -331,84 +329,9 @@ func pluginViolations(pkg *packages.Package, rel string, within func(string) str
 	return violations
 }
 
-// allowlistFile names every violation cog carried when the tier test landed.
-const allowlistFile = "allowlist.txt"
-
-func readAllowlist(t *testing.T) []string {
-	t.Helper()
-	file, err := os.Open(allowlistFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	var entries []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		entries = append(entries, line)
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatal(err)
-	}
-	return entries
-}
-
-// reconcile splits violations into those no entry allows, and entries into
-// those no violation needs.
-func reconcile(violations []violation, entries []string) (unallowed []violation, stale []string) {
-	used := map[string]bool{}
-	for _, v := range violations {
-		if slices.Contains(entries, v.key) {
-			used[v.key] = true
-		} else {
-			unallowed = append(unallowed, v)
-		}
-	}
-	for _, entry := range entries {
-		if !used[entry] {
-			stale = append(stale, entry)
-		}
-	}
-	return unallowed, stale
-}
-
-// cogViolations loads cog once for both tests that need it.
-var cogViolations = sync.OnceValues(func() ([]violation, error) { return violationsIn("..") })
-
-func requireCogViolations(t *testing.T) []violation {
-	t.Helper()
-	requireGo(t)
-	violations, err := cogViolations()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return violations
-}
-
 func TestTiers_CogKeepsItsImportRules(t *testing.T) {
-	violations := requireCogViolations(t)
-	unallowed, stale := reconcile(violations, readAllowlist(t))
-	for _, v := range unallowed {
+	requireGo(t)
+	for _, v := range check(t, "..") {
 		t.Errorf("%s", v)
-	}
-	for _, entry := range stale {
-		t.Errorf("%s: %q is no longer a violation; delete it, since the allowlist only ever shrinks", allowlistFile, entry)
-	}
-}
-
-func TestTiers_EveryAllowlistEntryIsNeeded(t *testing.T) {
-	violations := requireCogViolations(t)
-	entries := readAllowlist(t)
-	for i, entry := range entries {
-		if slices.Contains(entries[:i], entry) {
-			t.Errorf("%s: %q is listed twice", allowlistFile, entry)
-			continue
-		}
-		if unallowed, _ := reconcile(violations, slices.Delete(slices.Clone(entries), i, i+1)); len(unallowed) == 0 {
-			t.Errorf("%s: removing %q fails nothing", allowlistFile, entry)
-		}
 	}
 }

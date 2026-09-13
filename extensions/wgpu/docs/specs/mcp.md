@@ -232,7 +232,7 @@ depending on whether several requests fit inside one frame's gap.
 It is **one mechanism, spelled as two actions on the capability that already
 owns pause and step**, which is where the state it acts on already lives.
 No new capability, no package learning about another, and `mcp` and
-`mcpserver` learn nothing: a hold is a tick-source behaviour with an
+`mcpimpl` learn nothing: a hold is a tick-source behaviour with an
 agent-facing spelling, exactly as a step is.
 
 Four properties, each load-bearing:
@@ -300,7 +300,7 @@ which is precisely what was measured.
 **`app` declares the contract; `wgpu` implements it and provides the
 capability.**
 
-`app` is contract-only and a driver implements it — the exact precedent is
+`app` is an Open slot and a driver implements it — the exact precedent is
 `app.QuitCmd`, declared at `slots/app/commands.go:6` and handled by `wgpu` at
 `extensions/wgpu/plugin.go:99`, with `gfx.SetViewportCmd` handled by `gfx` as the second
 instance. Time control is the same shape: **only the host that owns the loop can

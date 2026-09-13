@@ -1,6 +1,6 @@
 # ui
 
-`github.com/cog-engine/ui` is an immediate-mode layout and interaction plugin.
+`github.com/dvoyni/cog/bundles/ui` is an immediate-mode layout and interaction plugin.
 Consumers submit a complete element tree every update tick. The plugin measures
 and arranges that tree, hit-tests current input, records visuals into canvas,
 publishes interaction results, and consumes the declaration.

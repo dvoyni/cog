@@ -1,6 +1,6 @@
 # canvas
 
-`github.com/cog-engine/canvas` records layered 2D sprites, text, primitives, and
+`github.com/dvoyni/cog/bundles/canvas` records layered 2D sprites, text, primitives, and
 custom triangles, then translates them into `gfx` draws at the end of each
 simulation update.
 

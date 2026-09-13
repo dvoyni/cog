@@ -28,9 +28,15 @@ A Bundle and a Port share one shape:
   Resource types, `Name`, and the ordering identities others order against. It
   may act on a `*kernel.Registrar` it is handed, and it declares no type that
   implements `kernel.Plugin`.
-- **`Ximpl`** / **`Pimpl`**: `New`, `Config`, the Plugin and its handlers.
+- **`Ximpl`** / **`Pimpl`**: the unexported Plugin, its handlers, and any
+  Adapter it contributes. It exports `func New() kernel.Plugin`, plus `Config`
+  when the Plugin has real configuration (keyed by the root's `Name`; a zero
+  field takes its default), and nothing else. The Bundles are the worked
+  examples; `gfximpl`, `storageimpl` and `mcpimpl` still export their Plugin
+  type from before this settled.
 - **`internal/…`**: code the root and the `…impl` share, such as the consume
-  side of a Resource queue.
+  side of a Resource queue. A root with nothing to hide has none (ecsscene,
+  mcp).
 
 A contract type whose unexported state the `…impl` reads is declared in
 `internal/` with its fields unexported, and the root re-exports it as an alias
@@ -117,10 +123,6 @@ Inside cog, `archtest` and `docs/research/**` are outside the tiers.
 
 `go test ./archtest` checks every cog-internal import edge in every Go file,
 whatever its build tags, and every contract root and slot for a Plugin type. A
-failure names the file, the edge and the rule it breaks.
-
-`archtest/allowlist.txt` lists the violations cog carried when the test landed,
-and it only ever shrinks: new code follows the rules above. When a change fixes
-an entry, delete that entry; the test fails on an entry that is no longer a
-violation. A change to these rules changes this file and `archtest/tiers_test.go`
-together.
+failure names the file, the edge and the rule it breaks, and every violation
+fails the test: fix the code to fit the rules. A change to the rules themselves
+changes this file and `archtest/tiers_test.go` together.

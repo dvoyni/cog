@@ -1,6 +1,6 @@
 # gfx
 
-`github.com/cog-engine/gfx` is Cog's driver-neutral renderer. Gameplay records
+`github.com/dvoyni/cog/extensions/gfx` is Cog's driver-neutral renderer. Gameplay records
 high-level draws into an `OpQueue`; gfx rotates queues through a latest-wins
 triple buffer, resolves resource-backed shaders and textures, translates to a
 `GpuQueue`, and hands that queue to a driver-provided `Backend`.

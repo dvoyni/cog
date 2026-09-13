@@ -1,6 +1,6 @@
 # input
 
-`github.com/cog-engine/input` is the driver-neutral input plugin. Drivers feed
+`github.com/dvoyni/cog/bundles/input` is the driver-neutral input plugin. Drivers feed
 raw changes through one command; gameplay can poll the `State` resource or
 subscribe to discrete events without depending on a windowing implementation.
 

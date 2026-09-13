@@ -64,9 +64,10 @@ type Observe[TEvent any] func(kernel Kernel, event TEvent) error
 //	func loadCmdImpl() (kernel.Lock, kernel.Execute[LoadRequest, LoadResponse])
 type Command[TRequest any, TResponse any] = func() (Lock, Execute[TRequest, TResponse])
 
-// Subscription is the shape of a subscription factory, named the same way:
+// Subscription is the shape of a subscription factory, declared the same way and
+// named verb plus event, for what the handler does on which event:
 //
-//	type UpdateEventHandler kernel.Subscription[app.UpdateEvent]
+//	type FlushOnUpdate kernel.Subscription[app.UpdateEvent]
 type Subscription[TEvent any] = func() (Lock, Observe[TEvent])
 
 // CommandConstraint identifies a command by its distinct defined factory type.

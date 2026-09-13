@@ -19,7 +19,9 @@ correct picture.
 
 ## Wiring
 
-Register `storage` before `scene`, and put the app's own recording plugin last:
+Compose scene with what it depends on — storage and its `PermanentFS` Adapter,
+gfx and its `Backend` Adapter, which wgpu provides — and the app's own recording
+plugin. The kernel orders them by their dependencies:
 
 ```go
 plugins := []kernel.Plugin{
@@ -59,14 +61,14 @@ default the hard way.
 
 | Field | Zero means | The trap |
 | --- | --- | --- |
-| `Pass.ClearDepth` | preserve | Depth is conventional: near → 0, far → 1. `&zero` clears to the **near plane and hides the whole scene**. `1.0` is the useful value. |
+| `Pass.ClearDepth` | preserve | Depth is conventional: near → 0, far → 1. `m.Some[float32](0)` clears to the **near plane and hides the whole scene**. `m.Some[float32](1)` is the useful value. |
 | `Pass.ClearColor` | preserve | A defaulted colour clear would let a second camera erase the first. Clear colour deliberately, once, on the lowest pass. |
 | `CameraDescr.Passes` | one default pass | Writing any pass replaces the default outright, including its `ClearDepth: 1.0`. Carry the clear into the first pass you write. |
 | `CameraDescr.CullMask` | `LayersAll` | So does a recorded item's own zero `LayerMask`. Zero reads as *all* on **both sides**, so a mask only ever excludes once both ends write one. |
 | `LightDescr.Range` | infinite | glTF's own default. A forgotten `Range` is a light that reaches too far — visible immediately — rather than a light silently dropped. |
 | `LightDescr.OuterCone` | π/4 | `InnerCone` zero is a **real value**, not a default: falloff straight from the axis. |
 | `CameraDescr.Shear` | `0`, i.e. plain `Orthographic` | Only `Oblique` reads it. Setting it on a `Perspective` or `Orthographic` camera does nothing, the way `FovY` does nothing under `Orthographic`. |
-| `Transform.Scale` | 1 | Scalar. Non-uniform scale goes through `Matrix`, which replaces the whole transform. |
+| `Transform.Scale` | 1 on every axis | Only an **all-zero** scale reads as the identity. A partly zero scale is taken literally: `m.Vec3{X: 2}` collapses the draw onto the X axis. `WithScale` is the uniform spelling. |
 | `Material` (nil) | the bundled PBR | Every draw literal that omits the field gets lit PBR and needs no shader. |
 | `ModelDraw.Scene` / `.Node` | the default scene / the whole scene | A **non-empty** selector that matches nothing skips the draw and never falls back. |
 
@@ -171,7 +173,7 @@ the frame that recorded it.
 
 `MorphWeights` is **positional** over the model's whole flattened target list —
 one entry per target of every morphed node, in depth-first node order, which is
-exactly what `MorphTargets(path)` returns. Resolve names to indices once at
+exactly what `MorphTargets(path, dst)` returns. Resolve names to indices once at
 startup and index from there; the recording path is a memcpy on purpose. A short
 slice leaves the rest at zero and is not an error, and a long one drops its tail
 and reports once.

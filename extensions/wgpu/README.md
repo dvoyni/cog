@@ -1,6 +1,6 @@
 # wgpu
 
-`github.com/cog-engine/wgpu` is Cog's window, input, timing, and WebGPU system
+`github.com/dvoyni/cog/extensions/wgpu` is Cog's window, input, timing, and WebGPU system
 driver built on `gogpu`. It owns the OS main loop, provides gfx's `gfx.Backend`
 Adapter, feeds `input`, and drives the `app` update/render contract on desktop
 and WebAssembly.

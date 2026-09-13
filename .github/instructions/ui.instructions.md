@@ -18,7 +18,9 @@ Establish why one level cannot express the behavior before moving to the next. E
 
 ## Wiring
 
-Compose the plugin in the composition root after `input`, `gfx` and `canvas`:
+Compose ui in the composition root with the plugins it depends on — `input`,
+`gfx` and `canvas`, and what they need in turn. The kernel orders them by their
+dependencies:
 
 ```go
 plugins := []kernel.Plugin{

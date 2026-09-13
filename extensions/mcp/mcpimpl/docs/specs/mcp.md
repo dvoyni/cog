@@ -606,9 +606,8 @@ issue attaching a real client to a real game.
 
 ## Required mcpimpl changes
 
-A checklist for an implementation session. `mcpserver/` does not exist yet; this
-is the whole package. It was written for `extensions/mcpserver` and is updated to
-the paths and the collection mechanism
+A checklist for the implementation session that built the package. It was
+written for `extensions/mcpserver` and is updated to the paths and the collection mechanism
 [#335](https://github.com/dvoyni/cog/issues/335) moved it to.
 
 **Module**

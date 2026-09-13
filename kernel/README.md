@@ -1,6 +1,6 @@
 # kernel
 
-`github.com/cog-engine/kernel` is Cog's typed plugin microkernel. Plugins
+`github.com/dvoyni/cog/kernel` is Cog's typed plugin microkernel. Plugins
 register resources, synchronous commands, and ordered event subscriptions. The
 kernel orders plugin lifecycles, validates ownership, schedules resource locks,
 centralizes boundary errors, and runs an optional host.

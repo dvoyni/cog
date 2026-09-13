@@ -1,6 +1,6 @@
 # app
 
-`github.com/cog-engine/app` defines the driver-neutral application-loop and
+`github.com/dvoyni/cog/slots/app` defines the driver-neutral application-loop and
 display contract. It has no plugin and no implementation. A system driver such as
 `wgpu` publishes lifecycle, update, render, and window-size events and implements
 the quit and time commands. `app` is an Open slot, so it declares no Resources:
@@ -14,7 +14,7 @@ event declarations, `commands.go` the command/request/response declarations plus
 
 ## Dependencies
 
-- Go package: `github.com/cog-engine/kernel`
+- Go package: `github.com/dvoyni/cog/kernel`
 - Plugin dependencies: none; this package does not register a plugin.
 
 ## Commands
@@ -191,7 +191,7 @@ Known publishers and subscribers:
 - `input.AdvanceOnUpdate` subscribes first to advance per-tick input edges.
 - `anim.AdvanceOnUpdate` subscribes first to advance timelines.
 - canvas's `FlushOnUpdate` subscribes last, before `gfx`, to flush 2D operations.
-- `gfx.Plugin` subscribes last to present the completed graphics queue.
+- `gfx.PresentOnUpdate` subscribes last to present the completed graphics queue.
 
 ### `RenderEvent`
 
@@ -208,7 +208,7 @@ drawn frame on its render thread after making the target current.
 Known publishers and subscribers:
 
 - `wgpu.Plugin` publishes it synchronously on the render thread.
-- `gfx.Plugin` subscribes to translate and execute the latest queue.
+- `gfx.RenderOnRender` subscribes to translate and execute the latest queue.
 
 ### `WindowSizeChangeEvent`
 
