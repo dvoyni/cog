@@ -454,3 +454,52 @@ _Avoid_: Directivity, beam
 **Fade**:
 A change of volume over time that a game drives itself, from a timeline, by changing a Voice or a Bus each tick. Audio has no word for it and no verb that performs one.
 _Avoid_: Ramp, crossfade, tween, as names for anything audio does
+
+## Physics
+
+**Body**:
+An Entity that physics moves or collides with: it has a position on the plane, and a Shape or a velocity. Every Body is exactly one of the three kinds below, and which one is said by the Components it has rather than by a flag. A Body stands on a 2D plane; placing it in 3D is a Transform's job, written by whoever draws it.
+_Avoid_: Collider, rigid body (nothing rotates), physics object, actor
+
+**Static body**:
+A Body that never moves and is never pushed, and whose Shape and position never change in place: moving one means replacing the Entity. It pushes Dynamic bodies.
+_Avoid_: Wall, level geometry, as the name of the kind
+
+**Kinematic body**:
+A Body the game moves by setting its velocity. It pushes Dynamic bodies and nothing pushes it, which is what infinite mass means here.
+_Avoid_: Immobile, as a kind of its own
+
+**Dynamic body**:
+A Body with a mass and a Drag, moved by the forces on it and pushed by what it touches.
+
+**Shape**:
+The one region a Body occupies: a circle, an axis-aligned box, or a segment. A point is a circle of radius 0. A Body has at most one.
+_Avoid_: Collider, fixture, hull
+
+**Contact force**:
+The force contact response writes into a Dynamic body and integration consumes, rebuilt from nothing every sub-step rather than summed across a tick.
+_Avoid_: Contact accumulator, penetration spring, as names for what a Body carries
+
+**Drag**:
+How fast a Dynamic body's velocity decays, as a rate per second. It is what makes a pushed thing stop, where friction would elsewhere.
+_Avoid_: Damping, friction
+
+**Sweep**:
+Moving a circle, possibly of radius 0, in a straight line from one position to another, and finding what it touches on the way. Line of sight is one use of a Sweep, not another operation.
+_Avoid_: Ray cast, shape cast, segment query, trace
+
+**Hit**:
+What a Sweep reports about one thing it touched: the Entity, how far along the Sweep, where, and the surface normal.
+_Avoid_: Contact (that is between Bodies, and is what response acts on), intersection
+
+**Overlap**:
+Asking which Entities a Shape at a position touches. It counts as touching exactly what contact would.
+_Avoid_: Shape query, area query
+
+**Static index**:
+The plugin's index over Static bodies, asked when only what stands still matters.
+_Avoid_: Space, world, broadphase
+
+**Body index**:
+The plugin's index over every Body with a Shape that is not static. Which index a query asks is the caller's choice.
+_Avoid_: Space, world, broadphase
