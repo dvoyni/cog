@@ -503,7 +503,7 @@ it occupies. Presence-only and base-type-compatible were both rejected because
 both let the real mismatch through: a two-component unorm decodes to `f32`, and
 `vec3<f32>` is `f32`. WebGPU's legal widening and narrowing are forbidden as a
 result, and that costs nothing — every `@location` in `bundles/scene/builtin` and
-`bundles/canvas/builtin` is already an exact match.
+`bundles/canvas/canvasimpl/builtin` is already an exact match.
 
 **The check is one-directional.** A layout supplying an attribute the shader
 does not read is legal and common: scene's bundled vertex struct declares six of

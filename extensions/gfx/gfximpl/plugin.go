@@ -127,7 +127,7 @@ func (p *Plugin) admitFrame() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 // The snapshot is taken here rather than from a subscriber of its own because
 // this is the only place the ordering it needs can be expressed. It has to run
 // after canvas has flushed into the queue and before present swaps it away -
-// but canvas.UpdateEventHandler is a type gfx cannot name, since canvas
+// but canvas.FlushOnUpdate is a type gfx cannot name, since canvas
 // imports gfx and not the other way round. A second Last subscriber would
 // carry no order relative to canvas's flush at all, and would see the frame
 // half recorded half the time. Present already sits exactly where the snapshot

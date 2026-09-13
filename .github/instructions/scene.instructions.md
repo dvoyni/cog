@@ -24,7 +24,7 @@ Register `storage` before `scene`, and put the app's own recording plugin last:
 ```go
 plugins := []kernel.Plugin{
 	storageimpl.New(), diskfs.New(diskfs.Config{AppId: "demo"}),
-	inputimpl.New(), gfximpl.New(), canvas.New(), scene.New(), wgpu.New(),
+	inputimpl.New(), gfximpl.New(), canvasimpl.New(), scene.New(), wgpu.New(),
 	demo, // records into the queues the plugins above declare
 }
 ```

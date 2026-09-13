@@ -1,4 +1,4 @@
-package canvas
+package internal
 
 import (
 	"image"
@@ -22,13 +22,15 @@ const (
 	atlasGenerated
 )
 
-type atlasEntry struct {
-	texture   gfx.TextureDescr
-	uv        m.Vec4
-	texelSize float32
-	layer     int
-	width     int
-	height    int
+// AtlasEntry is one image placed in an atlas: the texture array it lives in,
+// its uv rectangle and layer there, and its pixel size.
+type AtlasEntry struct {
+	Texture   gfx.TextureDescr
+	UV        m.Vec4
+	TexelSize float32
+	Layer     int
+	Width     int
+	Height    int
 	category  atlasCategory
 	// arrayIndex and slot (the padded rectangle stored as X, Y, Z=width,
 	// W=height) let an entry be reclaimed into the free list when its path is
@@ -75,41 +77,47 @@ type freeSlot struct {
 	pos        m.Vec2i
 }
 
-// standaloneEntry is a full-image texture kept outside the atlas so it can be
+// StandaloneEntry is a full-image texture kept outside the atlas so it can be
 // sampled with repeat addressing for tiled sprites.
-type standaloneEntry struct {
-	texture gfx.TextureDescr
-	width   int
-	height  int
+type StandaloneEntry struct {
+	Texture gfx.TextureDescr
+	Width   int
+	Height  int
 }
 
-type atlas struct {
+// Atlas packs sprites or glyphs into texture arrays, and keeps the standalone
+// textures tiled sprites sample. The Lookup resource holds two: one for
+// sprites, one for glyphs.
+type Atlas struct {
 	config     Config
 	arrays     []atlasArray
-	entries    map[string]atlasEntry
-	standalone map[string]standaloneEntry
+	entries    map[string]AtlasEntry
+	standalone map[string]StandaloneEntry
 	failed     map[string]struct{}
 	free       map[m.Vec2i][]freeSlot
 	bytes      int64
 }
 
-func newAtlas(config Config) *atlas {
-	return &atlas{
+// NewAtlas builds an empty atlas sized by config.
+func NewAtlas(config Config) *Atlas {
+	return &Atlas{
 		config:     config,
-		entries:    map[string]atlasEntry{},
-		standalone: map[string]standaloneEntry{},
+		entries:    map[string]AtlasEntry{},
+		standalone: map[string]StandaloneEntry{},
 		failed:     map[string]struct{}{},
 		free:       map[m.Vec2i][]freeSlot{},
 	}
 }
 
-func (a *atlas) beginFrame() { clear(a.failed) }
+// BeginFrame forgets which paths failed to load last frame, so a file that has
+// since appeared is tried again.
+func (a *Atlas) BeginFrame() { clear(a.failed) }
 
-func (a *atlas) arrayBytes() int64 {
+func (a *Atlas) arrayBytes() int64 {
 	return int64(a.config.AtlasSize) * int64(a.config.AtlasSize) * 4 * int64(a.config.LayersPerArray)
 }
 
-func (a *atlas) releasePath(path string, resources *gfx.ResourceQueue) {
+func (a *Atlas) releasePath(path string, resources *gfx.ResourceQueue) {
 	if path == "" {
 		return
 	}
@@ -119,14 +127,14 @@ func (a *atlas) releasePath(path string, resources *gfx.ResourceQueue) {
 	}
 	delete(a.failed, path)
 	if entry, ok := a.standalone[path]; ok {
-		resources.ReleaseTexture(entry.texture)
+		resources.ReleaseTexture(entry.Texture)
 		delete(a.standalone, path)
 	}
 }
 
 // freeEntry returns an entry's slot to the free list and releases its backing
 // array once the array becomes empty.
-func (a *atlas) freeEntry(entry atlasEntry, resources *gfx.ResourceQueue) {
+func (a *Atlas) freeEntry(entry AtlasEntry, resources *gfx.ResourceQueue) {
 	if entry.arrayIndex < 0 || entry.arrayIndex >= len(a.arrays) {
 		return
 	}
@@ -135,7 +143,7 @@ func (a *atlas) freeEntry(entry atlasEntry, resources *gfx.ResourceQueue) {
 		return
 	}
 	size := m.Vec2i{X: entry.slot.Z, Y: entry.slot.W}
-	a.free[size] = append(a.free[size], freeSlot{arrayIndex: entry.arrayIndex, layer: entry.layer, pos: m.Vec2i{X: entry.slot.X, Y: entry.slot.Y}})
+	a.free[size] = append(a.free[size], freeSlot{arrayIndex: entry.arrayIndex, layer: entry.Layer, pos: m.Vec2i{X: entry.slot.X, Y: entry.slot.Y}})
 	array.live--
 	if array.live <= 0 {
 		a.releaseArray(entry.arrayIndex, resources)
@@ -144,7 +152,7 @@ func (a *atlas) freeEntry(entry atlasEntry, resources *gfx.ResourceQueue) {
 
 // releaseArray frees an empty array's GPU texture, tombstones its index for
 // reuse, and purges any free slots that referenced it.
-func (a *atlas) releaseArray(index int, resources *gfx.ResourceQueue) {
+func (a *Atlas) releaseArray(index int, resources *gfx.ResourceQueue) {
 	array := &a.arrays[index]
 	if array.released {
 		return
@@ -170,14 +178,14 @@ func (a *atlas) releaseArray(index int, resources *gfx.ResourceQueue) {
 	}
 }
 
-func (a *atlas) releaseAll(resources *gfx.ResourceQueue) {
+func (a *Atlas) releaseAll(resources *gfx.ResourceQueue) {
 	for i := range a.arrays {
 		if !a.arrays[i].released {
 			resources.ReleaseTexture(a.arrays[i].texture)
 		}
 	}
 	for _, entry := range a.standalone {
-		resources.ReleaseTexture(entry.texture)
+		resources.ReleaseTexture(entry.Texture)
 	}
 	clear(a.entries)
 	clear(a.standalone)
@@ -187,35 +195,37 @@ func (a *atlas) releaseAll(resources *gfx.ResourceQueue) {
 	a.bytes = 0
 }
 
-// resolveStandalone decodes an image into a full-image texture kept outside the
+// ResolveStandalone decodes an image into a full-image texture kept outside the
 // atlas, caching it by path. Tiled sprites sample it with repeat addressing.
-func (a *atlas) resolveStandalone(path string, filesystem storage.FileSystem, resources *gfx.ResourceQueue) (standaloneEntry, bool) {
+func (a *Atlas) ResolveStandalone(path string, filesystem storage.FileSystem, resources *gfx.ResourceQueue) (StandaloneEntry, bool) {
 	if path == "" {
-		return standaloneEntry{}, false
+		return StandaloneEntry{}, false
 	}
 	if entry, ok := a.standalone[path]; ok {
 		return entry, true
 	}
 	if _, failed := a.failed[path]; failed {
-		return standaloneEntry{}, false
+		return StandaloneEntry{}, false
 	}
 	width, height, pixels, ok := decodeResourceImage(filesystem, path)
 	if !ok {
 		a.failed[path] = struct{}{}
-		return standaloneEntry{}, false
+		return StandaloneEntry{}, false
 	}
-	entry := standaloneEntry{
+	entry := StandaloneEntry{
 		// A decoded image is sRGB by definition, and there is no caller to say
 		// otherwise: canvas draws pictures, never data maps.
-		texture: resources.BakeTexture(width, height, gfx.FormatRGBA8Srgb, pixels, true, false),
-		width:   width,
-		height:  height,
+		Texture: resources.BakeTexture(width, height, gfx.FormatRGBA8Srgb, pixels, true, false),
+		Width:   width,
+		Height:  height,
 	}
 	a.standalone[path] = entry
 	return entry, true
 }
 
-func (a *atlas) resolveSprite(path string, filesystem storage.FileSystem, resources *gfx.ResourceQueue) (atlasEntry, bool) {
+// ResolveSprite returns the atlas entry for a sprite path, decoding and packing
+// it on first use. The empty path is the white texel solid fills draw with.
+func (a *Atlas) ResolveSprite(path string, filesystem storage.FileSystem, resources *gfx.ResourceQueue) (AtlasEntry, bool) {
 	key := path
 	if key == "" {
 		key = whiteAtlasKey
@@ -224,7 +234,7 @@ func (a *atlas) resolveSprite(path string, filesystem storage.FileSystem, resour
 		return entry, true
 	}
 	if _, failed := a.failed[key]; failed {
-		return atlasEntry{}, false
+		return AtlasEntry{}, false
 	}
 	if key == whiteAtlasKey {
 		return a.insert(key, atlasGenerated, 1, 1, []byte{255, 255, 255, 255}, 0, false, resources)
@@ -232,17 +242,17 @@ func (a *atlas) resolveSprite(path string, filesystem storage.FileSystem, resour
 	width, height, pixels, ok := decodeResourceImage(filesystem, path)
 	if !ok {
 		a.failed[key] = struct{}{}
-		return atlasEntry{}, false
+		return AtlasEntry{}, false
 	}
 	return a.insert(key, atlasSprite, width, height, pixels, 2, true, resources)
 }
 
-func (a *atlas) insert(key string, category atlasCategory, width, height int, pixels []byte, padding int, extrude bool, resources *gfx.ResourceQueue) (atlasEntry, bool) {
+func (a *Atlas) insert(key string, category atlasCategory, width, height int, pixels []byte, padding int, extrude bool, resources *gfx.ResourceQueue) (AtlasEntry, bool) {
 	// Reserve the white texel for solid fills; glyph-only atlases never need it.
 	if key != whiteAtlasKey && category != atlasGlyph {
 		if _, ok := a.entries[whiteAtlasKey]; !ok {
 			if _, placed := a.insert(whiteAtlasKey, atlasGenerated, 1, 1, []byte{255, 255, 255, 255}, 0, false, resources); !placed {
-				return atlasEntry{}, false
+				return AtlasEntry{}, false
 			}
 		}
 	}
@@ -250,25 +260,25 @@ func (a *atlas) insert(key string, category atlasCategory, width, height int, pi
 	arrayIndex, layer, x, y, ok := a.place(slotWidth, slotHeight, resources)
 	if !ok {
 		a.failed[key] = struct{}{}
-		return atlasEntry{}, false
+		return AtlasEntry{}, false
 	}
 	upload := paddedRGBA(pixels, width, height, padding, extrude)
 	array := &a.arrays[arrayIndex]
 	resources.UpdateTexture(array.texture, layer, gfx.Region{
 		X: x, Y: y, Width: slotWidth, Height: slotHeight,
 	}, upload, false)
-	entry := atlasEntry{
-		texture: array.texture,
-		uv: m.Vec4{
+	entry := AtlasEntry{
+		Texture: array.texture,
+		UV: m.Vec4{
 			X: float32(x+padding) / float32(a.config.AtlasSize),
 			Y: float32(y+padding) / float32(a.config.AtlasSize),
 			Z: float32(x+padding+width) / float32(a.config.AtlasSize),
 			W: float32(y+padding+height) / float32(a.config.AtlasSize),
 		},
-		texelSize:  1 / float32(a.config.AtlasSize),
-		layer:      layer,
-		width:      width,
-		height:     height,
+		TexelSize:  1 / float32(a.config.AtlasSize),
+		Layer:      layer,
+		Width:      width,
+		Height:     height,
 		category:   category,
 		arrayIndex: arrayIndex,
 		slot:       m.Vec4i{X: x, Y: y, Z: slotWidth, W: slotHeight},
@@ -276,13 +286,13 @@ func (a *atlas) insert(key string, category atlasCategory, width, height int, pi
 	if key == whiteAtlasKey {
 		centerX := (float32(x) + 0.5) / float32(a.config.AtlasSize)
 		centerY := (float32(y) + 0.5) / float32(a.config.AtlasSize)
-		entry.uv = m.Vec4{X: centerX, Y: centerY, Z: centerX, W: centerY}
+		entry.UV = m.Vec4{X: centerX, Y: centerY, Z: centerX, W: centerY}
 	}
 	a.entries[key] = entry
 	return entry, true
 }
 
-func (a *atlas) place(width, height int, resources *gfx.ResourceQueue) (arrayIndex, layer, x, y int, ok bool) {
+func (a *Atlas) place(width, height int, resources *gfx.ResourceQueue) (arrayIndex, layer, x, y int, ok bool) {
 	// Reuse a previously freed slot of the exact same padded size first.
 	sizeKey := m.Vec2i{X: width, Y: height}
 	if list := a.free[sizeKey]; len(list) > 0 {

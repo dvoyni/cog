@@ -252,7 +252,7 @@ sees the complete frame through the ordinary exported `Read[*gfx.OpQueue]`.
 ### Where it sits in the tick
 
 ```
-.Last().After[canvas.UpdateEventHandler]().Before[gfx.PresentOnUpdate]()
+.Last().After[canvas.FlushOnUpdate]().Before[gfx.PresentOnUpdate]()
 ```
 
 Reads `Read[*gfx.OpQueue]` after canvas has flushed into it and before `present`
@@ -265,7 +265,7 @@ before canvas's flush, `gfx_frame` after it.
 
 > **Amended at implementation ([#253](https://github.com/dvoyni/cog/issues/253)).**
 > That expression cannot be written from `gfx`. `canvas` imports `gfx`, so
-> `gfx` cannot name `canvas.UpdateEventHandler` at all, and the subscriber
+> `gfx` cannot name `canvas.FlushOnUpdate` at all, and the subscriber
 > `gfx` *can* write — a second `Last` — carries no order against canvas's flush
 > whatsoever: the two would merely conflict on `*gfx.OpQueue` and be serialized
 > in whichever order the scheduler's conflict-aware FIFO happened to produce,
@@ -283,7 +283,7 @@ before canvas's flush, `gfx_frame` after it.
 >
 > **This applies to `gfx_frame` and to nothing else.** The other two links stay
 > writable exactly as specified, because each names a handler type its own
-> package declares: `canvas_draws` is `.Last().Before[canvas.UpdateEventHandler]()`
+> package declares: `canvas_draws` is `.Last().Before[canvas.FlushOnUpdate]()`
 > inside `canvas`, and `ui_layout` is `.After[ui.UpdateEventHandler]()` inside
 > `ui`. Only the gfx link crossed a package boundary in the forbidden
 > direction.

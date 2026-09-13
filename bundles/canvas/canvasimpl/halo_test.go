@@ -1,4 +1,4 @@
-package canvas
+package canvasimpl
 
 import (
 	"bytes"
@@ -9,6 +9,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/dvoyni/cog/bundles/canvas"
+	"github.com/dvoyni/cog/bundles/canvas/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/gogpu/naga/ir"
@@ -31,8 +33,8 @@ const (
 // linearly. These three numbers are that measurement, and a caller edits the
 // filled struct rather than assembling one from zeroes.
 func TestDefaultHaloProfileIsTheProfileMeasuredOffTheArt(t *testing.T) {
-	want := HaloProfile{Reach: 6, Plateau: 0.18, Exponent: 1}
-	if got := DefaultHaloProfile(); got != want {
+	want := canvas.HaloProfile{Reach: 6, Plateau: 0.18, Exponent: 1}
+	if got := canvas.DefaultHaloProfile(); got != want {
 		t.Fatalf("DefaultHaloProfile() = %+v, want %+v", got, want)
 	}
 }
@@ -43,7 +45,7 @@ func TestDefaultHaloProfileIsTheProfileMeasuredOffTheArt(t *testing.T) {
 // the per-sprite arrays while appending a scope's to shared. Two reaches are two
 // scopes.
 func TestTheHaloSetCarriesTheWholeProfilePerBatch(t *testing.T) {
-	set := HaloMaterialSet(HaloProfile{Reach: 12, Plateau: 0.25, Exponent: 2})
+	set := canvas.HaloMaterialSet(canvas.HaloProfile{Reach: 12, Plateau: 0.25, Exponent: 2})
 	want := map[string]float32{"haloReach": 12, "haloPlateau": 0.25, "haloExponent": 2}
 	got := map[string]float32{}
 	for _, param := range set.Params {
@@ -65,7 +67,7 @@ func TestTheHaloSetCarriesTheWholeProfilePerBatch(t *testing.T) {
 // Plateau 0 is a legitimate value - no plateau, pure falloff - that a sentinel
 // would read as the default.
 func TestAZeroPlateauReachesTheShaderAsZero(t *testing.T) {
-	set := HaloMaterialSet(HaloProfile{Reach: 6, Plateau: 0, Exponent: 1})
+	set := canvas.HaloMaterialSet(canvas.HaloProfile{Reach: 6, Plateau: 0, Exponent: 1})
 	for _, param := range set.Params {
 		if param.Name() != "haloPlateau" {
 			continue
@@ -82,7 +84,7 @@ func TestAZeroPlateauReachesTheShaderAsZero(t *testing.T) {
 // paints as itself rather than as a band. The layer is meant to be dedicated to
 // the marks being haloed, and a nil slot is what says so.
 func TestTheHaloSetLeavesTheOtherTwoFamiliesAlone(t *testing.T) {
-	set := HaloMaterialSet(DefaultHaloProfile())
+	set := canvas.HaloMaterialSet(canvas.DefaultHaloProfile())
 	if set.Sprite == nil {
 		t.Fatal("the halo set names no sprite material")
 	}
@@ -96,8 +98,8 @@ func TestTheHaloSetLeavesTheOtherTwoFamiliesAlone(t *testing.T) {
 // must therefore name the same material and differ only in their scope
 // parameters - otherwise every profile would be a second pipeline.
 func TestEveryHaloSetNamesOneMaterialAtOneFingerprint(t *testing.T) {
-	wide := HaloMaterialSet(HaloProfile{Reach: 30, Plateau: 0.5, Exponent: 3})
-	narrow := HaloMaterialSet(DefaultHaloProfile())
+	wide := canvas.HaloMaterialSet(canvas.HaloProfile{Reach: 30, Plateau: 0.5, Exponent: 3})
+	narrow := canvas.HaloMaterialSet(canvas.DefaultHaloProfile())
 	if wide.Sprite != narrow.Sprite {
 		t.Fatal("two profiles produced two materials; the profile rides the scope, not the material")
 	}
@@ -111,29 +113,29 @@ func TestEveryHaloSetNamesOneMaterialAtOneFingerprint(t *testing.T) {
 // defaults a scope overrides by name. This is what makes a hand-assembled set
 // with no parameters render at reach 6 rather than rendering nothing.
 func TestAHandAssembledHaloSetRendersAtTheMaterialsOwnDefaults(t *testing.T) {
-	bare := MaterialSet{Sprite: HaloMaterialSet(DefaultHaloProfile()).Sprite}
-	k, _, backend := testKernel(t, fstest.MapFS{}, haloConfig(), func(write *OpQueue) {
-		write.FillRect(0, m.Rect{Width: 8, Height: 8}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
+	bare := canvas.MaterialSet{Sprite: canvas.HaloMaterialSet(canvas.DefaultHaloProfile()).Sprite}
+	k, _, backend := testKernel(t, fstest.MapFS{}, haloConfig(), func(write *canvas.OpQueue) {
+		write.FillRect(0, m.Rect{Width: 8, Height: 8}, canvas.ShapeDraw{Color: m.Color{R: 1, A: 1}})
 		write.SetLayerMaterial(0, bare)
 	})
 	runFrame(k)
 	if len(backend.drawParams) != 1 {
 		t.Fatalf("draws = %d, want 1", len(backend.drawParams))
 	}
-	if got := floatAt(backend.drawParams[0], testHaloReachOffset); got != defaultHaloReach {
-		t.Fatalf("haloReach = %v, want the material's own default %v", got, defaultHaloReach)
+	if got := floatAt(backend.drawParams[0], testHaloReachOffset); got != internal.DefaultHaloReach {
+		t.Fatalf("haloReach = %v, want the material's own default %v", got, internal.DefaultHaloReach)
 	}
-	if got := floatAt(backend.drawParams[0], testHaloPlateauOffset); got != defaultHaloPlateau {
-		t.Fatalf("haloPlateau = %v, want %v", got, defaultHaloPlateau)
+	if got := floatAt(backend.drawParams[0], testHaloPlateauOffset); got != internal.DefaultHaloPlateau {
+		t.Fatalf("haloPlateau = %v, want %v", got, internal.DefaultHaloPlateau)
 	}
 }
 
 // And a scope that names a profile overrides those defaults by name, which is
 // the whole of how a caller says how wide the band is.
 func TestAScopesProfileOverridesTheMaterialsDefaults(t *testing.T) {
-	k, _, backend := testKernel(t, fstest.MapFS{}, haloConfig(), func(write *OpQueue) {
-		write.FillRect(0, m.Rect{Width: 8, Height: 8}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
-		write.SetLayerMaterial(0, HaloMaterialSet(HaloProfile{Reach: 12, Plateau: 0.25, Exponent: 2}))
+	k, _, backend := testKernel(t, fstest.MapFS{}, haloConfig(), func(write *canvas.OpQueue) {
+		write.FillRect(0, m.Rect{Width: 8, Height: 8}, canvas.ShapeDraw{Color: m.Color{R: 1, A: 1}})
+		write.SetLayerMaterial(0, canvas.HaloMaterialSet(canvas.HaloProfile{Reach: 12, Plateau: 0.25, Exponent: 2}))
 	})
 	runFrame(k)
 	if len(backend.drawParams) != 1 {
@@ -154,14 +156,14 @@ func TestAScopesProfileOverridesTheMaterialsDefaults(t *testing.T) {
 // which is what "together" means here.
 func TestOneLayerSetHaloesEveryShapeInTheSpriteFamily(t *testing.T) {
 	ink := m.Color{R: 0.68, G: 0.62, B: 0.55, A: 0.85}
-	k, _, backend := testKernel(t, fstest.MapFS{}, DefaultConfig(), func(write *OpQueue) {
-		write.Text(0, "", "42", TextDraw{Position: m.Vec2{X: 10, Y: 40}, Size: 16, Color: ink})
-		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil,
-			gfx.ColorParam(TintSlot, ink))
-		write.FillRect(0, m.Rect{X: 20, Width: 8, Height: 8}, ShapeDraw{Color: ink})
-		write.StrokeRect(0, m.Rect{X: 40, Width: 8, Height: 8}, ShapeDraw{Color: ink, Thickness: 1})
-		write.Line(0, m.Vec2{X: 60}, m.Vec2{X: 68, Y: 8}, ShapeDraw{Color: ink, Thickness: 1})
-		write.SetLayerMaterial(0, HaloMaterialSet(DefaultHaloProfile()))
+	k, _, backend := testKernel(t, fstest.MapFS{}, internal.DefaultConfig(), func(write *canvas.OpQueue) {
+		write.Text(0, "", "42", canvas.TextDraw{Position: m.Vec2{X: 10, Y: 40}, Size: 16, Color: ink})
+		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil,
+			gfx.ColorParam(canvas.TintSlot, ink))
+		write.FillRect(0, m.Rect{X: 20, Width: 8, Height: 8}, canvas.ShapeDraw{Color: ink})
+		write.StrokeRect(0, m.Rect{X: 40, Width: 8, Height: 8}, canvas.ShapeDraw{Color: ink, Thickness: 1})
+		write.Line(0, m.Vec2{X: 60}, m.Vec2{X: 68, Y: 8}, canvas.ShapeDraw{Color: ink, Thickness: 1})
+		write.SetLayerMaterial(0, canvas.HaloMaterialSet(canvas.DefaultHaloProfile()))
 	})
 	runFrame(k)
 	if len(backend.pipelines) == 0 {
@@ -199,9 +201,9 @@ func TestOneLayerSetHaloesEveryShapeInTheSpriteFamily(t *testing.T) {
 // ordinary one. This is the record the expansion is computed from, so a
 // divergence would move the band rather than fail.
 func TestTheHaloBatchesTheOrdinaryInstanceRecord(t *testing.T) {
-	k, _, backend := testKernel(t, fstest.MapFS{}, haloConfig(), func(write *OpQueue) {
-		write.FillRect(0, m.Rect{X: 4, Y: 6, Width: 8, Height: 10}, ShapeDraw{Color: m.Color{A: 1}})
-		write.SetLayerMaterial(0, HaloMaterialSet(DefaultHaloProfile()))
+	k, _, backend := testKernel(t, fstest.MapFS{}, haloConfig(), func(write *canvas.OpQueue) {
+		write.FillRect(0, m.Rect{X: 4, Y: 6, Width: 8, Height: 10}, canvas.ShapeDraw{Color: m.Color{A: 1}})
+		write.SetLayerMaterial(0, canvas.HaloMaterialSet(canvas.DefaultHaloProfile()))
 	})
 	runFrame(k)
 	instances := spriteInstances(backend)
@@ -221,7 +223,7 @@ func TestTheHaloBatchesTheOrdinaryInstanceRecord(t *testing.T) {
 }
 
 func TestHaloShaderParses(t *testing.T) {
-	assertBuiltinShaderLowers(t, haloShaderPath)
+	assertBuiltinShaderLowers(t, internal.HaloShaderPath)
 }
 
 // The halo extends the uniform block with its three knobs, which is the
@@ -236,7 +238,7 @@ func TestTheHaloBlockIsThePublishedPrefixPlusThreeKnobs(t *testing.T) {
 		{"canvasViewport", 0}, {"canvasLayer", 16}, {"canvasClip", 80},
 		{"haloReach", 96}, {"haloPlateau", 100}, {"haloExponent", 104},
 	}
-	members := uniformBlockMembers(t, lowerBuiltinShader(t, haloShaderPath))
+	members := uniformBlockMembers(t, lowerBuiltinShader(t, internal.HaloShaderPath))
 	if len(members) != len(want) {
 		t.Fatalf("the halo block has %d members, want %d: %+v", len(members), len(want), members)
 	}
@@ -255,7 +257,7 @@ func TestTheHaloBlockIsThePublishedPrefixPlusThreeKnobs(t *testing.T) {
 // web.
 func TestTheHaloInterStageStructFitsTheWebGPUFloor(t *testing.T) {
 	const maxLocations, maxComponents = 16, 60
-	module := lowerBuiltinShader(t, haloShaderPath)
+	module := lowerBuiltinShader(t, internal.HaloShaderPath)
 	var record ir.StructType
 	for _, typ := range module.Types {
 		if structure, ok := typ.Inner.(ir.StructType); ok && typ.Name == "HaloVertexOut" {
@@ -296,9 +298,9 @@ func TestTheHaloInterStageStructFitsTheWebGPUFloor(t *testing.T) {
 // directive before a fixed naga is released and the halo stops compiling here,
 // loudly, rather than on the one machine that runs Vulkan.
 func TestTheHaloVectorComparisonsReachTheSPIRVBinary(t *testing.T) {
-	blob, err := spirv.NewBackend(spirv.DefaultOptions()).Compile(lowerBuiltinShader(t, haloShaderPath))
+	blob, err := spirv.NewBackend(spirv.DefaultOptions()).Compile(lowerBuiltinShader(t, internal.HaloShaderPath))
 	if err != nil {
-		t.Fatalf("compile %q to SPIR-V: %v", haloShaderPath, err)
+		t.Fatalf("compile %q to SPIR-V: %v", internal.HaloShaderPath, err)
 	}
 
 	// OpAny reduces the frame rejection, OpAll the silhouette test underneath it.
@@ -341,10 +343,10 @@ func spirvCarriesOpcode(blob []byte, opcode uint32) bool {
 // copy of the FROZEN SpriteInstance record, which only
 // TestSpriteInstanceMatchesTheShaderRecord guards and only inside cog.
 func TestTheHaloDeclaresNoCopyOfTheFrozenRecord(t *testing.T) {
-	if strings.Contains(builtinSourceCode(t, haloShaderPath), "struct SpriteInstance") {
-		t.Fatalf("%s declares its own SpriteInstance; include %s and read the published one", haloShaderPath, SpriteBindingsPath)
+	if strings.Contains(builtinSourceCode(t, internal.HaloShaderPath), "struct SpriteInstance") {
+		t.Fatalf("%s declares its own SpriteInstance; include %s and read the published one", internal.HaloShaderPath, canvas.SpriteBindingsPath)
 	}
-	if got := strings.Count(flattenBuiltinShader(t, haloShaderPath), "struct SpriteInstance"); got != 1 {
+	if got := strings.Count(flattenBuiltinShader(t, internal.HaloShaderPath), "struct SpriteInstance"); got != 1 {
 		t.Fatalf("the halo flattens to %d SpriteInstance declarations, want 1", got)
 	}
 }
@@ -352,14 +354,14 @@ func TestTheHaloDeclaresNoCopyOfTheFrozenRecord(t *testing.T) {
 // It replaces both entry points, so it must include the bindings without
 // spritevertex.wgsl - which declares a vs_main that does not expand the quad.
 func TestTheHaloDeclaresItsOwnVertexStage(t *testing.T) {
-	code := builtinSourceCode(t, haloShaderPath)
-	if strings.Contains(code, SpriteVertexPath) {
-		t.Fatalf("%s includes %s; a material that expands the quad writes its own vs_main", haloShaderPath, SpriteVertexPath)
+	code := builtinSourceCode(t, internal.HaloShaderPath)
+	if strings.Contains(code, canvas.SpriteVertexPath) {
+		t.Fatalf("%s includes %s; a material that expands the quad writes its own vs_main", internal.HaloShaderPath, canvas.SpriteVertexPath)
 	}
-	if !strings.Contains(code, SpriteBindingsPath) {
-		t.Fatalf("%s does not include %s", haloShaderPath, SpriteBindingsPath)
+	if !strings.Contains(code, canvas.SpriteBindingsPath) {
+		t.Fatalf("%s does not include %s", internal.HaloShaderPath, canvas.SpriteBindingsPath)
 	}
-	if got := strings.Count(flattenBuiltinShader(t, haloShaderPath), "fn vs_main"); got != 1 {
+	if got := strings.Count(flattenBuiltinShader(t, internal.HaloShaderPath), "fn vs_main"); got != 1 {
 		t.Fatalf("the halo flattens to %d vs_main declarations, want 1", got)
 	}
 }
@@ -369,8 +371,8 @@ func TestTheHaloDeclaresItsOwnVertexStage(t *testing.T) {
 // key-colour ramp, and carrying it would cost a location in the inter-stage
 // struct for nothing.
 func TestTheHaloDoesNotIncludeTheKeyColourRamp(t *testing.T) {
-	if strings.Contains(builtinSourceCode(t, haloShaderPath), "keycolor.wgsl") {
-		t.Fatalf("%s includes the ramp; the halo paints a band in one colour and never reads the mark's", haloShaderPath)
+	if strings.Contains(builtinSourceCode(t, internal.HaloShaderPath), "keycolor.wgsl") {
+		t.Fatalf("%s includes the ramp; the halo paints a band in one colour and never reads the mark's", internal.HaloShaderPath)
 	}
 }
 
@@ -382,7 +384,7 @@ func TestTheHaloNumbersItsGroupsByKind(t *testing.T) {
 		"u": {0, 0}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1}, "instances": {2, 0},
 	}
 	seen := map[string][2]uint32{}
-	for _, variable := range lowerBuiltinShader(t, haloShaderPath).GlobalVariables {
+	for _, variable := range lowerBuiltinShader(t, internal.HaloShaderPath).GlobalVariables {
 		if variable.Binding == nil {
 			continue
 		}
@@ -399,10 +401,10 @@ func TestTheHaloNumbersItsGroupsByKind(t *testing.T) {
 // halo. This is the test that the source is mounted for canvas's own use and
 // named by no exported constant.
 func TestTheHaloSourceIsMountedButNotPublished(t *testing.T) {
-	k, _, _ := testKernel(t, fstest.MapFS{}, DefaultConfig(), func(*OpQueue) {})
-	got, _ := k.ExecuteCommand[readFileProbeCmd](readFileProbeRequest{Name: haloShaderPath})
-	if !bytes.Equal(got.Data, readBuiltinSource(t, haloShaderPath)) {
-		t.Fatalf("%s is not mounted; the material's own shader would not resolve", haloShaderPath)
+	k, _, _ := testKernel(t, fstest.MapFS{}, internal.DefaultConfig(), func(*canvas.OpQueue) {})
+	got, _ := k.ExecuteCommand[readFileProbeCmd](readFileProbeRequest{Name: internal.HaloShaderPath})
+	if !bytes.Equal(got.Data, readBuiltinSource(t, internal.HaloShaderPath)) {
+		t.Fatalf("%s is not mounted; the material's own shader would not resolve", internal.HaloShaderPath)
 	}
 }
 

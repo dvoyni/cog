@@ -190,7 +190,7 @@ Known publishers and subscribers:
 - `wgpu.Plugin` publishes it synchronously from the main thread.
 - `input.AdvanceOnUpdate` subscribes first to advance per-tick input edges.
 - `anim.AdvanceOnUpdate` subscribes first to advance timelines.
-- `canvas.Plugin` subscribes last, before `gfx`, to flush 2D operations.
+- canvas's `FlushOnUpdate` subscribes last, before `gfx`, to flush 2D operations.
 - `gfx.Plugin` subscribes last to present the completed graphics queue.
 
 ### `RenderEvent`

@@ -1,30 +1,8 @@
 package canvas
 
-import "embed"
+import "github.com/dvoyni/cog/bundles/canvas/internal"
 
 const (
-	builtinMountID = "builtin:canvas"
-
-	// The three entry-point sources: the roots a material names, one per family.
-	// They are not includable - an app that wants their pieces includes the
-	// published sources below instead - and there is one sprite path, which is
-	// instanced, a lone sprite being its degenerate one-instance case.
-	spriteShaderPath    = "builtin/canvas/sprite.wgsl"
-	trianglesShaderPath = "builtin/canvas/triangles.wgsl"
-	textureShaderPath   = "builtin/canvas/texture.wgsl"
-
-	// The fourth entry point, and the one that is not a default: the halo, which
-	// paints a soft outward band and no mark at all. It is a sprite-family root
-	// like sprite.wgsl and reached only through HaloMaterialSet - unexported
-	// because the material is, and the material is because a draw naming it
-	// would take none of its scope's parameters and render at the material's own
-	// defaults, silently ignoring every profile named above it.
-	//
-	// Its WGSL is not published either. keycolor.wgsl is, because a custom
-	// triangles material must reproduce the key-colour ramp or key every texel
-	// against black; nothing has to reproduce a halo.
-	haloShaderPath = "builtin/canvas/halo.wgsl"
-
 	// The seven published sources: the WGSL an app includes when it writes a
 	// canvas material, so it declares six lines and three includes instead of
 	// copying seventy lines of contract it would then have to keep in sync by
@@ -91,14 +69,5 @@ const (
 	//
 	// Its programming ligatures never fire here: opentype lays glyphs out rune by
 	// rune with no GSUB shaping, so debug output is never silently rewritten.
-	DefaultFontPath = "builtin/canvas/jetbrainsmono.ttf"
-
-	// defaultFontLicensePath is embedded and mounted beside the font because
-	// OFL-1.1 requires the licence to travel with the font software. JetBrains
-	// Mono carries no Reserved Font Name, so it may be embedded, and later
-	// subset, under its own name.
-	defaultFontLicensePath = "builtin/canvas/jetbrainsmono-OFL.txt"
+	DefaultFontPath = internal.DefaultFontPath
 )
-
-//go:embed builtin/canvas/*.wgsl builtin/canvas/*.ttf builtin/canvas/*.txt
-var builtinFS embed.FS

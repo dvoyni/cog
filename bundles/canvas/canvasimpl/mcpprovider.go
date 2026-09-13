@@ -1,4 +1,4 @@
-package canvas
+package canvasimpl
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/dvoyni/cog/bundles/canvas"
 
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/mcp"
@@ -55,8 +57,8 @@ const drawsDescription = "Everything drawn into the 2D canvas during one tick, i
 	"one step; they paired only if all three report the same `tick`. Take `gfx_capture` last, " +
 	"because it costs no tick and so shows whatever that step produced."
 
-// DrawsRequest asks what one tick recorded into the canvas queue.
-type DrawsRequest struct {
+// drawsRequest asks what one tick recorded into the canvas queue.
+type drawsRequest struct {
 	// Path is optional, per the family's delivery contract: omit it and the
 	// JSON comes back inline, supply it and a greppable file is written and the
 	// path returned. A large dump becomes a file either way - an oversized text
@@ -72,12 +74,12 @@ type DrawsRequest struct {
 	Vertices []int    `json:"vertices,omitempty" jsonschema:"record indices of triangle ops whose vertices to return in full"`
 }
 
-// DrawsResponse is one tick's recorded canvas operations, the three coordinate
+// drawsResponse is one tick's recorded canvas operations, the three coordinate
 // sizes they are to be read against, and whether producing them cost a step.
 //
 // It is flat: DrawsView and gfx.SnapshotView are embedded rather than nested,
 // so an agent reads one object rather than reaching through two.
-type DrawsResponse struct {
+type drawsResponse struct {
 	// Path is the file the JSON was written to, when one was asked for. The
 	// file holds the whole document; what comes back inline then carries the
 	// counts, the layers and the viewport but not the op array, so the reply
@@ -85,7 +87,7 @@ type DrawsResponse struct {
 	// they are one entry per layer, and they are the coordinate frame the file
 	// is to be read in.
 	Path string `json:"path,omitempty"`
-	DrawsView
+	canvas.DrawsView
 	gfx.SnapshotView
 }
 
@@ -110,33 +112,33 @@ func (provider) Capabilities() []mcp.Capability {
 // It is a package function rather than a method to keep the capability-body
 // rule visible at the call site: the plugin is one pointer away and the body
 // still reaches canvas only by dispatch.
-func drawsSnapshot(k kernel.Executioner, request DrawsRequest) (DrawsResponse, error) {
+func drawsSnapshot(k kernel.Executioner, request drawsRequest) (drawsResponse, error) {
 	// Every check happens before anything is armed, so a typo costs
 	// microseconds rather than a tick and an empty array an agent reads as a
 	// game that drew nothing.
 	armRequest, err := validateDrawsRequest(request)
 	if err != nil {
-		return DrawsResponse{}, err
+		return drawsResponse{}, err
 	}
 	if request.Path != "" {
 		if err := os.MkdirAll(filepath.Dir(request.Path), 0o755); err != nil {
-			return DrawsResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+			return drawsResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
 				"the directory for %s could not be created: %v", request.Path, err)}
 		}
 	}
 	paused := app.Paused(k)
 
-	armed, err := k.ExecuteCommand[ArmDrawsCmd](armRequest)
+	armed, err := k.ExecuteCommand[canvas.ArmDrawsCmd](armRequest)
 	if err != nil {
-		return DrawsResponse{}, drawsRefusal(err)
+		return drawsResponse{}, drawsRefusal(err)
 	}
-	response := DrawsResponse{SnapshotView: gfx.SnapshotViewOf(armed.Viewport)}
+	response := drawsResponse{SnapshotView: gfx.SnapshotViewOf(armed.Viewport)}
 	// The arm is placed first so that the tick the step produces is one that
 	// began after it. Joining a step another arm already raised is what makes
 	// three snapshots armed together describe one tick instead of three.
 	if paused {
 		if response.Stepped, response.Joined, err = stepForSnapshot(k, snapshotWait(k)); err != nil {
-			return DrawsResponse{}, err
+			return drawsResponse{}, err
 		}
 	}
 
@@ -145,19 +147,19 @@ func drawsSnapshot(k kernel.Executioner, request DrawsRequest) (DrawsResponse, e
 	select {
 	case snapshot := <-armed.Done:
 		if snapshot.Err != nil {
-			return DrawsResponse{}, drawsRefusal(snapshot.Err)
+			return drawsResponse{}, drawsRefusal(snapshot.Err)
 		}
 		response.DrawsView, response.Tick = snapshot.Draws, snapshot.Tick
 	case <-deadline.C:
-		return DrawsResponse{}, drawsRefusal(nil)
+		return drawsResponse{}, drawsRefusal(nil)
 	case <-k.Context().Done():
-		return DrawsResponse{}, drawsRefusal(k.Context().Err())
+		return drawsResponse{}, drawsRefusal(k.Context().Err())
 	}
 
 	if request.Path != "" {
 		response.Path = request.Path
 		if err := writeSnapshotJSON(request.Path, response); err != nil {
-			return DrawsResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+			return drawsResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
 				"the snapshot could not be written to %s: %v", request.Path, err)}
 		}
 		response.Ops = nil
@@ -202,7 +204,7 @@ func stepForSnapshot(k kernel.Executioner, wait time.Duration) (stepped, joined 
 // point of a file is that a person or a grep can read it. An existing file is
 // overwritten without complaint: re-writing the same name is the
 // iterate-and-look loop.
-func writeSnapshotJSON(path string, response DrawsResponse) error {
+func writeSnapshotJSON(path string, response drawsResponse) error {
 	document, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		return err
@@ -214,22 +216,22 @@ func writeSnapshotJSON(path string, response DrawsResponse) error {
 // The kinds are resolved to their enum here rather than in the tick, so a typo
 // is words the agent can act on instead of an empty array, and the in-tick
 // filter compares integers.
-func validateDrawsRequest(request DrawsRequest) (ArmDrawsRequest, error) {
+func validateDrawsRequest(request drawsRequest) (canvas.ArmDrawsRequest, error) {
 	if err := validateSnapshotPath(request.Path); err != nil {
-		return ArmDrawsRequest{}, err
+		return canvas.ArmDrawsRequest{}, err
 	}
 	if request.FromLayer != nil && request.ToLayer != nil && *request.FromLayer > *request.ToLayer {
-		return ArmDrawsRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
+		return canvas.ArmDrawsRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
 			"fromLayer %d is above toLayer %d, which keeps no layer at all",
 			*request.FromLayer, *request.ToLayer)}
 	}
-	arm := ArmDrawsRequest{
+	arm := canvas.ArmDrawsRequest{
 		FromLayer: request.FromLayer, ToLayer: request.ToLayer, Vertices: request.Vertices,
 	}
 	for _, name := range request.Kinds {
 		kind, ok := opKindFor(name)
 		if !ok {
-			return ArmDrawsRequest{}, mcp.Unavailable{Reason: ErrDrawsUnknownKind{Kind: name}.Error()}
+			return canvas.ArmDrawsRequest{}, mcp.Unavailable{Reason: canvas.ErrDrawsUnknownKind{Kind: name}.Error()}
 		}
 		arm.Kinds = append(arm.Kinds, kind)
 	}
@@ -264,11 +266,11 @@ func drawsRefusal(reason error) error {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"no tick was recorded within %s — the game may be paused with nothing stepping it, "+
 				"minimised, or not updating", drawsDeadline)}
-	case errors.Is(reason, ErrDrawsBusy{}):
+	case errors.Is(reason, canvas.ErrDrawsBusy{}):
 		return mcp.Unavailable{Reason: "a draw snapshot is already in flight; ask again. A " +
 			"capture and the other snapshots may run alongside it, and arming them together is " +
 			"how they describe one tick."}
-	case errors.Is(reason, ErrDrawsAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
+	case errors.Is(reason, canvas.ErrDrawsAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
 		errors.Is(reason, context.Canceled):
 		// A game exiting is the normal case, not a fault.
 		return mcp.Unavailable{Reason: "the game is shutting down"}

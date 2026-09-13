@@ -1,4 +1,4 @@
-package canvas
+package canvasimpl
 
 import (
 	"bytes"
@@ -6,6 +6,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/dvoyni/cog/bundles/canvas"
+	"github.com/dvoyni/cog/bundles/canvas/internal"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -13,8 +15,8 @@ import (
 // storage through the same built-in mount as the shaders, so no caller has to
 // vendor or mount anything to draw text.
 func TestTheDefaultFontIsMountedWithItsLicence(t *testing.T) {
-	k, _, _ := testKernel(t, fstest.MapFS{}, DefaultConfig(), func(*OpQueue) {})
-	for _, path := range []string{DefaultFontPath, defaultFontLicensePath} {
+	k, _, _ := testKernel(t, fstest.MapFS{}, internal.DefaultConfig(), func(*canvas.OpQueue) {})
+	for _, path := range []string{canvas.DefaultFontPath, defaultFontLicensePath} {
 		want, err := fs.ReadFile(builtinFS, path)
 		if err != nil {
 			t.Fatalf("read embedded file %q: %v", path, err)
@@ -29,15 +31,15 @@ func TestTheDefaultFontIsMountedWithItsLicence(t *testing.T) {
 // TestNoFontPathDrawsWithTheDefaultFont is the ticket's headline: Text with an
 // empty path must render, and render exactly what naming the default renders.
 func TestNoFontPathDrawsWithTheDefaultFont(t *testing.T) {
-	draw := TextDraw{Position: m.Vec2{X: 10, Y: 40}, Size: 16, Color: m.Color{R: 1, G: 1, B: 1, A: 1}}
+	draw := canvas.TextDraw{Position: m.Vec2{X: 10, Y: 40}, Size: 16, Color: m.Color{R: 1, G: 1, B: 1, A: 1}}
 
-	implicit, _, implicitBackend := testKernel(t, fstest.MapFS{}, DefaultConfig(), func(write *OpQueue) {
+	implicit, _, implicitBackend := testKernel(t, fstest.MapFS{}, internal.DefaultConfig(), func(write *canvas.OpQueue) {
 		write.Text(0, "", "Ag", draw)
 	})
 	runFrame(implicit)
 
-	explicit, _, explicitBackend := testKernel(t, fstest.MapFS{}, DefaultConfig(), func(write *OpQueue) {
-		write.Text(0, DefaultFontPath, "Ag", draw)
+	explicit, _, explicitBackend := testKernel(t, fstest.MapFS{}, internal.DefaultConfig(), func(write *canvas.OpQueue) {
+		write.Text(0, canvas.DefaultFontPath, "Ag", draw)
 	})
 	runFrame(explicit)
 
@@ -64,10 +66,10 @@ func TestNoFontPathDrawsWithTheDefaultFont(t *testing.T) {
 // TestNoFontPathMeasuresWithTheDefaultFont covers the measurement half of the
 // same rule: ui sizes labels through Lookup, so a zero-value Font must measure.
 func TestNoFontPathMeasuresWithTheDefaultFont(t *testing.T) {
-	k, _, _ := testKernel(t, fstest.MapFS{}, DefaultConfig(), func(*OpQueue) {})
-	probeLookup(k, func(lookup LookupAccess) {
+	k, _, _ := testKernel(t, fstest.MapFS{}, internal.DefaultConfig(), func(*canvas.OpQueue) {})
+	probeLookup(k, func(lookup canvas.LookupAccess) {
 		implicit := lookup.MeasureTextSize("", 16, "Ag")
-		explicit := lookup.MeasureTextSize(DefaultFontPath, 16, "Ag")
+		explicit := lookup.MeasureTextSize(canvas.DefaultFontPath, 16, "Ag")
 		if implicit.X <= 0 || implicit.Y <= 0 {
 			t.Errorf("measured %+v with no font path, want a real size", implicit)
 		}
@@ -85,12 +87,12 @@ func TestNoFontPathMeasuresWithTheDefaultFont(t *testing.T) {
 // asks for the default; a named path that cannot be loaded must keep failing,
 // so a missing asset stays visible instead of rendering in another typeface.
 func TestAMissingFontIsNotSubstituted(t *testing.T) {
-	k, errs := testKernelCapturing(t, fstest.MapFS{}, DefaultConfig(), func(write *OpQueue) {
-		write.Text(0, "fonts/absent.ttf", "Ag", TextDraw{Position: m.Vec2{Y: 40}, Size: 16})
+	k, errs := testKernelCapturing(t, fstest.MapFS{}, internal.DefaultConfig(), func(write *canvas.OpQueue) {
+		write.Text(0, "fonts/absent.ttf", "Ag", canvas.TextDraw{Position: m.Vec2{Y: 40}, Size: 16})
 	})
 	runFrame(k)
 
-	probeLookup(k, func(lookup LookupAccess) {
+	probeLookup(k, func(lookup canvas.LookupAccess) {
 		if got := lookup.MeasureTextSize("fonts/absent.ttf", 16, "Ag"); got != (m.Vec2{}) {
 			t.Errorf("measured %+v for a missing font, want zero rather than the default's size", got)
 		}

@@ -123,7 +123,7 @@ one specific window.
 > exactly as written: `ui.SnapshotUpdateEventHandler`,
 > `.After[UpdateEventHandler]()`, reading `Read[*processor]`. #253 had to
 > deviate from its own prescribed ordering because `gfx` cannot name
-> `canvas.UpdateEventHandler`; this row names a handler type `ui` itself
+> `canvas.FlushOnUpdate`; this row names a handler type `ui` itself
 > declares, and was unaffected.
 >
 > It is not the only subscription the capability needs. Arming inherits

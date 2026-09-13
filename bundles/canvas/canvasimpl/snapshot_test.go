@@ -1,4 +1,4 @@
-package canvas
+package canvasimpl
 
 import (
 	"context"
@@ -14,6 +14,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/dvoyni/cog/bundles/canvas"
+	"github.com/dvoyni/cog/bundles/canvas/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/mcp"
@@ -43,7 +45,7 @@ type snapshotFixture struct {
 	// separate subscriptions, ordered as the app's and ui's are, so a test
 	// asserting that both reach the snapshot is asserting about the ordering
 	// rather than about one callback writing twice.
-	record, recordUI func(*OpQueue)
+	record, recordUI func(*canvas.OpQueue)
 	step             func(kernel.Kernel, app.TimeRequest) (app.TimeResponse, error)
 	requests         []app.TimeRequest
 
@@ -61,21 +63,21 @@ func (*snapshotFixture) Name() kernel.PluginName { return "canvas-snapshot-test"
 // Dependencies names canvas, whose OpQueue both recorders lock, and gfx, whose
 // resource queue the render-target probe does.
 func (*snapshotFixture) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{Name, gfx.Name, storage.Name}
+	return []kernel.PluginName{canvas.Name, gfx.Name, storage.Name}
 }
 
 func (f *snapshotFixture) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.Subscribe[appRecordHandler](f.recordOnUpdate)
-	registrar.Subscribe[uiRecordHandler](f.recordUIOnUpdate).Before[UpdateEventHandler]()
+	registrar.Subscribe[uiRecordHandler](f.recordUIOnUpdate).Before[canvas.FlushOnUpdate]()
 	registrar.HandleCommand[app.TimeCmd](f.timeCmdImpl)
 	registrar.HandleCommand[gfxResourceProbeCmd](gfxResourceProbeCmdImpl)
 	return nil
 }
 
 func (f *snapshotFixture) recordOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var queue kernel.Write[*OpQueue]
+	var queue kernel.Write[*canvas.OpQueue]
 	return func(access kernel.ResourceAccess) {
-			queue = access.GetWrite[*OpQueue]()
+			queue = access.GetWrite[*canvas.OpQueue]()
 		}, func(kernel.Kernel, app.UpdateEvent) error {
 			f.mu.Lock()
 			record := f.record
@@ -88,9 +90,9 @@ func (f *snapshotFixture) recordOnUpdate() (kernel.Lock, kernel.Observe[app.Upda
 }
 
 func (f *snapshotFixture) recordUIOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var queue kernel.Write[*OpQueue]
+	var queue kernel.Write[*canvas.OpQueue]
 	return func(access kernel.ResourceAccess) {
-			queue = access.GetWrite[*OpQueue]()
+			queue = access.GetWrite[*canvas.OpQueue]()
 		}, func(kernel.Kernel, app.UpdateEvent) error {
 			f.mu.Lock()
 			record := f.recordUI
@@ -115,10 +117,10 @@ func (f *snapshotFixture) timeCmdImpl() (kernel.Lock, kernel.Execute[app.TimeReq
 	}
 }
 
-func (f *snapshotFixture) on(record func(*OpQueue))   { f.set(&f.record, record) }
-func (f *snapshotFixture) onUI(record func(*OpQueue)) { f.set(&f.recordUI, record) }
+func (f *snapshotFixture) on(record func(*canvas.OpQueue))   { f.set(&f.record, record) }
+func (f *snapshotFixture) onUI(record func(*canvas.OpQueue)) { f.set(&f.recordUI, record) }
 
-func (f *snapshotFixture) set(slot *func(*OpQueue), record func(*OpQueue)) {
+func (f *snapshotFixture) set(slot *func(*canvas.OpQueue), record func(*canvas.OpQueue)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	*slot = record
@@ -152,7 +154,7 @@ func newDrawsRig(t *testing.T) *drawsRig {
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storageimpl.DefaultConfig().
 			WithReadFS("test", 10, fstest.MapFS{}),
-		Name: DefaultConfig(),
+		canvas.Name: internal.DefaultConfig(),
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
@@ -186,10 +188,10 @@ func (r *drawsRig) tick() {
 // runDraws calls the capability body on its own goroutine and drives ticks
 // until it answers, which is what an agent's call looks like from the engine's
 // side. What the recorders put in each tick is whatever the test installed.
-func (r *drawsRig) runDraws(request DrawsRequest) (DrawsResponse, error) {
+func (r *drawsRig) runDraws(request drawsRequest) (drawsResponse, error) {
 	r.t.Helper()
 	type answer struct {
-		response DrawsResponse
+		response drawsResponse
 		err      error
 	}
 	done := make(chan answer, 1)
@@ -213,20 +215,20 @@ func (r *drawsRig) runDraws(request DrawsRequest) (DrawsResponse, error) {
 
 // aSpriteAndTriangles is one recorder's frame: a sprite and a text on the
 // lower layer, a triangle list on the upper one.
-func aSpriteAndTriangles(queue *OpQueue) {
-	queue.Sprite(1, "images/hero.png", SpriteTransform{
+func aSpriteAndTriangles(queue *canvas.OpQueue) {
+	queue.Sprite(1, "images/hero.png", canvas.SpriteTransform{
 		Position: m.Vec2{X: 10, Y: 20}, Size: m.Vec2{X: 32, Y: 48},
 		Filter: gfx.FilterNearest,
-	}, nil, gfx.ColorParam(TintSlot, m.Color{R: 1, A: 1}))
-	queue.Text(1, "fonts/body.ttf", "score", TextDraw{
-		Position: m.Vec2{X: 4, Y: 6}, Size: 12, Color: m.Color{G: 1, A: 1}, Align: AlignCenter,
+	}, nil, gfx.ColorParam(canvas.TintSlot, m.Color{R: 1, A: 1}))
+	queue.Text(1, "fonts/body.ttf", "score", canvas.TextDraw{
+		Position: m.Vec2{X: 4, Y: 6}, Size: 12, Color: m.Color{G: 1, A: 1}, Align: canvas.AlignCenter,
 	})
 	queue.DrawTriangles(3, triangleFan(), nil)
 }
 
 // triangleFan is six built-in vertices whose positions span a known box.
-func triangleFan() []Vertex {
-	return []Vertex{
+func triangleFan() []canvas.Vertex {
+	return []canvas.Vertex{
 		{Position: m.Vec2{X: -5, Y: -5}, Color: m.Color{R: 1, A: 1}},
 		{Position: m.Vec2{X: 15, Y: -5}, Color: m.Color{G: 1, A: 1}},
 		{Position: m.Vec2{X: 15, Y: 25}, Color: m.Color{B: 1, A: 1}},
@@ -243,12 +245,12 @@ func TestADrawsSnapshotCarriesTheAppsRecordingAndTheUIsFromOneTick(t *testing.T)
 	// earlier. That is what makes canvas_draws and ui_layout complementary
 	// rather than redundant, so a snapshot missing it is answering the wrong
 	// question.
-	rig.fixture.onUI(func(queue *OpQueue) {
+	rig.fixture.onUI(func(queue *canvas.OpQueue) {
 		queue.FillRect(2, m.Rect{X: 1, Y: 2, Width: 3, Height: 4},
-			ShapeDraw{Color: m.Color{B: 1, A: 1}})
+			canvas.ShapeDraw{Color: m.Color{B: 1, A: 1}})
 	})
 
-	response, err := rig.runDraws(DrawsRequest{})
+	response, err := rig.runDraws(drawsRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -279,7 +281,7 @@ func TestADrawsSnapshotCarriesTheAppsRecordingAndTheUIsFromOneTick(t *testing.T)
 	if sprite.Transform.Filter != "nearest" {
 		t.Errorf("filter = %q, want the enum named rather than numbered", sprite.Transform.Filter)
 	}
-	if len(sprite.Params) != 1 || sprite.Params[0].Name != TintSlot {
+	if len(sprite.Params) != 1 || sprite.Params[0].Name != canvas.TintSlot {
 		t.Errorf("params = %+v, want the recorded tint", sprite.Params)
 	}
 	text := response.Ops[1]
@@ -307,12 +309,12 @@ func TestADrawsSnapshotReportsEachLayersWindowTargetAndClear(t *testing.T) {
 	rig := newDrawsRig(t)
 	var target gfx.TargetDescr
 	var texture gfx.TextureDescr
-	rig.fixture.on(func(queue *OpQueue) {
-		queue.SetLayerTransform(1, m.Rect{X: -8, Y: -6, Width: 16, Height: 12}, AspectOverlap)
+	rig.fixture.on(func(queue *canvas.OpQueue) {
+		queue.SetLayerTransform(1, m.Rect{X: -8, Y: -6, Width: 16, Height: 12}, canvas.AspectOverlap)
 		queue.Clear(1, m.Color{R: 0.25, A: 1})
-		queue.Sprite(1, "images/hero.png", SpriteTransform{Size: m.Vec2{X: 1, Y: 1}}, nil)
+		queue.Sprite(1, "images/hero.png", canvas.SpriteTransform{Size: m.Vec2{X: 1, Y: 1}}, nil)
 		queue.SetLayerTarget(2, target)
-		queue.Sprite(2, "images/hero.png", SpriteTransform{Size: m.Vec2{X: 1, Y: 1}}, nil)
+		queue.Sprite(2, "images/hero.png", canvas.SpriteTransform{Size: m.Vec2{X: 1, Y: 1}}, nil)
 	})
 	// The target is a gfx handle the caller allocated: canvas mints nothing
 	// here and passes it through untouched, so reporting where a layer draws
@@ -322,7 +324,7 @@ func TestADrawsSnapshotReportsEachLayersWindowTargetAndClear(t *testing.T) {
 		target = gfx.TextureTarget(texture, 0, 0)
 	})
 
-	response, err := rig.runDraws(DrawsRequest{})
+	response, err := rig.runDraws(drawsRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -335,7 +337,7 @@ func TestADrawsSnapshotReportsEachLayersWindowTargetAndClear(t *testing.T) {
 	}
 	// Without the window an op's coordinates mean nothing: they are in the
 	// layer's own world space, not the viewport's.
-	if world.Window == nil || *world.Window != (RectView{X: -8, Y: -6, Width: 16, Height: 12}) {
+	if world.Window == nil || *world.Window != (canvas.RectView{X: -8, Y: -6, Width: 16, Height: 12}) {
 		t.Errorf("window = %+v, want the rectangle SetLayerTransform was given", world.Window)
 	}
 	if world.Aspect != "overlap" {
@@ -366,7 +368,7 @@ func TestTriangleVerticesAreSummarisedUntilAnOpIsNamed(t *testing.T) {
 	rig := newDrawsRig(t)
 	rig.fixture.on(aSpriteAndTriangles)
 
-	summary, err := rig.runDraws(DrawsRequest{})
+	summary, err := rig.runDraws(drawsRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -381,7 +383,7 @@ func TestTriangleVerticesAreSummarisedUntilAnOpIsNamed(t *testing.T) {
 	if triangles.VertexCount != 6 {
 		t.Errorf("vertexCount = %d, want the six recorded", triangles.VertexCount)
 	}
-	want := RectView{X: -5, Y: -5, Width: 20, Height: 30}
+	want := canvas.RectView{X: -5, Y: -5, Width: 20, Height: 30}
 	if triangles.Bounds == nil || *triangles.Bounds != want {
 		t.Errorf("bounds = %+v, want %+v", triangles.Bounds, want)
 	}
@@ -393,7 +395,7 @@ func TestTriangleVerticesAreSummarisedUntilAnOpIsNamed(t *testing.T) {
 	if index != 2 {
 		t.Fatalf("the triangle op is at index %d, want its position in record order", index)
 	}
-	full, err := rig.runDraws(DrawsRequest{Kinds: []string{"triangles"}, Vertices: []int{index}})
+	full, err := rig.runDraws(drawsRequest{Kinds: []string{"triangles"}, Vertices: []int{index}})
 	if err != nil {
 		t.Fatalf("drill-down: %v", err)
 	}
@@ -415,12 +417,12 @@ func TestAFilteredDrawsSnapshotKeepsSourceIndicesAndNamesWhatItDropped(t *testin
 	rig := newDrawsRig(t)
 	rig.fixture.on(aSpriteAndTriangles)
 
-	whole, err := rig.runDraws(DrawsRequest{})
+	whole, err := rig.runDraws(drawsRequest{})
 	if err != nil {
 		t.Fatalf("unfiltered snapshot: %v", err)
 	}
 	upper := 3
-	filtered, err := rig.runDraws(DrawsRequest{FromLayer: &upper})
+	filtered, err := rig.runDraws(drawsRequest{FromLayer: &upper})
 	if err != nil {
 		t.Fatalf("filtered snapshot: %v", err)
 	}
@@ -450,7 +452,7 @@ func TestAFilteredDrawsSnapshotKeepsSourceIndicesAndNamesWhatItDropped(t *testin
 			filtered.FromLayer)
 	}
 
-	byKind, err := rig.runDraws(DrawsRequest{Kinds: []string{"text"}})
+	byKind, err := rig.runDraws(drawsRequest{Kinds: []string{"text"}})
 	if err != nil {
 		t.Fatalf("kind-filtered snapshot: %v", err)
 	}
@@ -475,8 +477,8 @@ func TestADrawsSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 	// cannot produce and the one a naive implementation gets wrong.
 	release := make(chan struct{})
 	entered := make(chan struct{}, 1)
-	rig.fixture.on(func(queue *OpQueue) {
-		queue.Text(1, "fonts/body.ttf", "before", TextDraw{Size: 10})
+	rig.fixture.on(func(queue *canvas.OpQueue) {
+		queue.Text(1, "fonts/body.ttf", "before", canvas.TextDraw{Size: 10})
 		entered <- struct{}{}
 		<-release
 	})
@@ -487,7 +489,7 @@ func TestADrawsSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 		close(ticked)
 	}()
 	<-entered
-	armed, err := rig.k.ExecuteCommand[ArmDrawsCmd](ArmDrawsRequest{})
+	armed, err := rig.k.ExecuteCommand[canvas.ArmDrawsCmd](canvas.ArmDrawsRequest{})
 	if err != nil {
 		t.Fatalf("arm: %v", err)
 	}
@@ -500,8 +502,8 @@ func TestADrawsSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 	default:
 	}
 
-	rig.fixture.on(func(queue *OpQueue) {
-		queue.Text(1, "fonts/body.ttf", "after", TextDraw{Size: 10})
+	rig.fixture.on(func(queue *canvas.OpQueue) {
+		queue.Text(1, "fonts/body.ttf", "after", canvas.TextDraw{Size: 10})
 	})
 	rig.tick()
 
@@ -521,11 +523,11 @@ func TestADrawsSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 
 func TestASecondDrawsSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 	rig := newDrawsRig(t)
-	if _, err := rig.k.ExecuteCommand[ArmDrawsCmd](ArmDrawsRequest{}); err != nil {
+	if _, err := rig.k.ExecuteCommand[canvas.ArmDrawsCmd](canvas.ArmDrawsRequest{}); err != nil {
 		t.Fatalf("first arm: %v", err)
 	}
 
-	_, err := drawsSnapshot(rig.k, DrawsRequest{})
+	_, err := drawsSnapshot(rig.k, drawsRequest{})
 	var refusal mcp.Unavailable
 	if !errors.As(err, &refusal) {
 		t.Fatalf("a second snapshot answered %v, want words an agent can act on", err)
@@ -549,8 +551,8 @@ func TestASecondDrawsSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 func TestADrawsSnapshotUnderPausePerformsOneStepAndSaysSo(t *testing.T) {
 	rig := newDrawsRig(t)
 	rig.fixture.paused.Store(true)
-	rig.fixture.on(func(queue *OpQueue) {
-		queue.Text(1, "fonts/body.ttf", "frozen", TextDraw{Size: 10})
+	rig.fixture.on(func(queue *canvas.OpQueue) {
+		queue.Text(1, "fonts/body.ttf", "frozen", canvas.TextDraw{Size: 10})
 	})
 	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
 		k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
@@ -560,7 +562,7 @@ func TestADrawsSnapshotUnderPausePerformsOneStepAndSaysSo(t *testing.T) {
 	// No tick is driven here: a paused engine runs none of its own, so the step
 	// the capability raises is the only one, and the queue between ticks is
 	// empty rather than stale.
-	response, err := drawsSnapshot(rig.k, DrawsRequest{})
+	response, err := drawsSnapshot(rig.k, drawsRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -589,15 +591,15 @@ func TestADrawsSnapshotUnderPausePerformsOneStepAndSaysSo(t *testing.T) {
 func TestADrawsSnapshotJoiningAPendingStepSaysThatToo(t *testing.T) {
 	rig := newDrawsRig(t)
 	rig.fixture.paused.Store(true)
-	rig.fixture.on(func(queue *OpQueue) {
-		queue.Text(1, "fonts/body.ttf", "shared", TextDraw{Size: 10})
+	rig.fixture.on(func(queue *canvas.OpQueue) {
+		queue.Text(1, "fonts/body.ttf", "shared", canvas.TextDraw{Size: 10})
 	})
 	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
 		k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
 		return app.TimeResponse{Paused: true, Stepped: 1, Joined: true}, nil
 	})
 
-	response, err := drawsSnapshot(rig.k, DrawsRequest{})
+	response, err := drawsSnapshot(rig.k, drawsRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -615,15 +617,15 @@ func TestADrawsSnapshotJoiningAPendingStepSaysThatToo(t *testing.T) {
 func TestADrawsSnapshotNamesTheTickItDescribes(t *testing.T) {
 	rig := newDrawsRig(t)
 	rig.fixture.paused.Store(true)
-	rig.fixture.on(func(queue *OpQueue) {
-		queue.Text(1, "fonts/body.ttf", "shared", TextDraw{Size: 10})
+	rig.fixture.on(func(queue *canvas.OpQueue) {
+		queue.Text(1, "fonts/body.ttf", "shared", canvas.TextDraw{Size: 10})
 	})
 	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
 		k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60, Tick: 97}).Wait()
 		return app.TimeResponse{Paused: true, Stepped: 1}, nil
 	})
 
-	response, err := drawsSnapshot(rig.k, DrawsRequest{})
+	response, err := drawsSnapshot(rig.k, drawsRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -638,7 +640,7 @@ func TestADrawsSnapshotIsWrittenToThePathTheAgentNames(t *testing.T) {
 	rig.fixture.on(aSpriteAndTriangles)
 	path := filepath.Join(t.TempDir(), "nested", "draws.json")
 
-	response, err := rig.runDraws(DrawsRequest{Path: path})
+	response, err := rig.runDraws(drawsRequest{Path: path})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -660,7 +662,7 @@ func TestADrawsSnapshotIsWrittenToThePathTheAgentNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the written snapshot: %v", err)
 	}
-	var written DrawsResponse
+	var written drawsResponse
 	if err := json.Unmarshal(document, &written); err != nil {
 		t.Fatalf("the written snapshot is not JSON: %v", err)
 	}
@@ -677,13 +679,13 @@ func TestADrawsSnapshotRefusesARequestItCannotHonour(t *testing.T) {
 	from, to := 4, 2
 	for _, test := range []struct {
 		name    string
-		request DrawsRequest
+		request drawsRequest
 		wants   string
 	}{
-		{"relative path", DrawsRequest{Path: filepath.Join("draws", "one.json")}, "absolute"},
-		{"wrong extension", DrawsRequest{Path: filepath.Join(t.TempDir(), "draws.txt")}, ".json"},
-		{"unknown kind", DrawsRequest{Kinds: []string{"sprites"}}, "not a draw kind"},
-		{"inverted range", DrawsRequest{FromLayer: &from, ToLayer: &to}, "keeps no layer"},
+		{"relative path", drawsRequest{Path: filepath.Join("draws", "one.json")}, "absolute"},
+		{"wrong extension", drawsRequest{Path: filepath.Join(t.TempDir(), "draws.txt")}, ".json"},
+		{"unknown kind", drawsRequest{Kinds: []string{"sprites"}}, "not a draw kind"},
+		{"inverted range", drawsRequest{FromLayer: &from, ToLayer: &to}, "keeps no layer"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := drawsSnapshot(rig.k, test.request)
@@ -704,7 +706,7 @@ func TestADrawsSnapshotHoldsNothingThatAliasesTheQueue(t *testing.T) {
 
 	// The vertex drill-down is what puts the queue's own vertex arena in the
 	// reply, so it is the case worth pinning here.
-	response, err := rig.runDraws(DrawsRequest{Vertices: []int{2}})
+	response, err := rig.runDraws(drawsRequest{Vertices: []int{2}})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -715,12 +717,12 @@ func TestADrawsSnapshotHoldsNothingThatAliasesTheQueue(t *testing.T) {
 	// reads as whatever the next frames recorded. Ops documents the aliasing
 	// (canvas/inspect.go), which is exactly why the snapshot renders into
 	// owned values inside the tick rather than keeping what it was handed.
-	rig.fixture.on(func(queue *OpQueue) {
+	rig.fixture.on(func(queue *canvas.OpQueue) {
 		for i := range 20 {
-			queue.Sprite(Layer(i), "images/other.png", SpriteTransform{
+			queue.Sprite(canvas.Layer(i), "images/other.png", canvas.SpriteTransform{
 				Position: m.Vec2{X: float32(i) * 3, Y: 7}, Scale: 2,
 			}, nil, gfx.FloatParam("noise", float32(i)))
-			queue.DrawTriangles(Layer(i), triangleFan(), nil)
+			queue.DrawTriangles(canvas.Layer(i), triangleFan(), nil)
 		}
 	})
 	for range 3 {
@@ -736,13 +738,13 @@ func TestADrawsSnapshotHoldsNothingThatAliasesTheQueue(t *testing.T) {
 func TestADrawsSnapshotReportsATextureParameterWithoutItsPixels(t *testing.T) {
 	rig := newDrawsRig(t)
 	pixels := make([]byte, 16*16*4)
-	rig.fixture.on(func(queue *OpQueue) {
+	rig.fixture.on(func(queue *canvas.OpQueue) {
 		texture := gfx.TextureWithBytes(16, 16, gfx.FormatRGBA8, pixels, false, false)
-		queue.SpriteTexture(1, texture, SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil,
+		queue.SpriteTexture(1, texture, canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil,
 			gfx.TextureParam("mask", texture))
 	})
 
-	response, err := rig.runDraws(DrawsRequest{})
+	response, err := rig.runDraws(drawsRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -775,7 +777,7 @@ func TestADrawsSnapshotReportsATextureParameterWithoutItsPixels(t *testing.T) {
 func TestADrawsSnapshotIsOneFlatDocument(t *testing.T) {
 	rig := newDrawsRig(t)
 	rig.fixture.on(aSpriteAndTriangles)
-	response, err := rig.runDraws(DrawsRequest{})
+	response, err := rig.runDraws(drawsRequest{})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -846,7 +848,7 @@ func gfxResourceProbeCmdImpl() (kernel.Lock, kernel.Execute[gfxResourceProbeRequ
 		}
 }
 
-func marshalDraws(t *testing.T, response DrawsResponse) string {
+func marshalDraws(t *testing.T, response drawsResponse) string {
 	t.Helper()
 	document, err := json.Marshal(response)
 	if err != nil {

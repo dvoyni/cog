@@ -34,6 +34,26 @@ engine unchanged — and the measurements below come from the throwaway branch
 [`proto/sprite-collapse`](https://github.com/dvoyni/cog/tree/proto/sprite-collapse),
 which is not to be merged.
 
+> **Amended by [#338](https://github.com/dvoyni/cog/issues/338).** canvas became
+> a Bundle under
+> [ADR 0001](../../../../docs/adr/0001-bundles-slots-ports-and-adapters.md), shaped
+> as a contract root, `canvasimpl` and `internal/`. The contract this document
+> specifies is unchanged, and so is every name an app writes a material
+> against: `MaterialSet`, `HaloMaterialSet`, `DefaultMaterial`,
+> `DefaultTrianglesMaterial`, `TextureMaterial`, `DefaultKeyColor`, the four
+> reserved slot names, the seven published path constants and `SpriteInstance`
+> all stay in the root, `bundles/canvas`. What moved is where the code lives.
+> The built-in WGSL is embedded and mounted by `canvasimpl`, from
+> `bundles/canvas/canvasimpl/builtin/canvas/`. The batchers, the flush with
+> `shadeSprite` and `shadeTriangles`, and the plugin are in
+> `bundles/canvas/canvasimpl`. `MaterialSet` and the scope resolution, the
+> built-in and halo materials, and `OpQueue` with its recording methods are
+> declared in `bundles/canvas/internal` and aliased or wrapped in the root,
+> concrete as before, so no draw goes through an interface. canvas's
+> configuration is `canvasimpl.Config`, and a zero field takes its default. The
+> file paths and line numbers cited below are as they were when this was
+> written.
+
 ---
 
 ## Contents
@@ -999,7 +1019,7 @@ for it. Aligning them would have meant twenty-four call sites gaining a `nil`.
 
 - **`Frame.SetMaterial(canvas.MaterialSet)`** on the per-tick frame resource,
   which is cleared every tick and so is the natural home for a value that changes
-  per frame. `canvas.Config` is construction-time and cannot hold it.
+  per frame. `canvasimpl.Config` is construction-time and cannot hold it.
 - **`Element.Material(canvas.MaterialSet) Element`**, a **Modifier** in
   `CONTEXT.md`'s exact sense — "a value transformation that derives one Element
   declaration from another" — inherited down the tree precisely as `layer` is

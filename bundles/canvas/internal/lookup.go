@@ -1,4 +1,4 @@
-package canvas
+package internal
 
 import (
 	"fmt"
@@ -6,11 +6,10 @@ import (
 	pathpkg "path"
 	"strings"
 
-	"github.com/dvoyni/cog/libs/m"
-
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 )
 
 // FontMetrics reports a font's vertical metrics at a given size, in logical
@@ -30,9 +29,9 @@ type FontMetrics struct {
 // handles. Deferred unloads are applied by the Canvas flush at the frame boundary.
 type Lookup struct {
 	config      Config
-	sprites     *atlas
-	fonts       *atlas
-	fontStore   *fontStore
+	sprites     *Atlas
+	fonts       *Atlas
+	fontStore   *FontStore
 	spriteSizes map[string]m.Vec2i
 	// reported suppresses repeated error reports for the same resource until it
 	// next loads successfully or is unloaded.
@@ -42,21 +41,17 @@ type Lookup struct {
 	lastFramebufferScale float32
 }
 
-func newLookup(config Config) *Lookup {
+// NewLookup builds an empty Lookup resource sized by config.
+func NewLookup(config Config) *Lookup {
 	return &Lookup{
 		config:      config,
-		sprites:     newAtlas(config),
-		fonts:       newAtlas(config),
-		fontStore:   newFontStore(),
+		sprites:     NewAtlas(config),
+		fonts:       NewAtlas(config),
+		fontStore:   NewFontStore(),
 		spriteSizes: map[string]m.Vec2i{},
 		reported:    map[string]struct{}{},
 	}
 }
-
-// NewLookup builds an empty Lookup resource for the given configuration. The
-// Canvas plugin creates one internally; this constructor also lets tests and
-// embedders build a Lookup to drive a LookupAccess directly.
-func NewLookup(config Config) *Lookup { return newLookup(config) }
 
 // applyUnloads evicts sprites and fonts queued for release since the last frame.
 // It runs at the Canvas flush boundary, after any draw ops recorded this frame
@@ -83,7 +78,7 @@ func (l *Lookup) applyUnloads(resources *gfx.ResourceQueue) {
 func (l *Lookup) unloadFont(path string) {
 	for key, cached := range l.fontStore.fonts {
 		if key.path == path {
-			_ = cached.face.Close()
+			_ = cached.Face.Close()
 			delete(l.fontStore.fonts, key)
 		}
 	}
@@ -99,7 +94,7 @@ func (l *Lookup) invalidateFontsOnResize(resources *gfx.ResourceQueue, view *gfx
 	}
 	if l.lastFramebufferScale != 0 && scale != l.lastFramebufferScale {
 		l.fonts.releaseAll(resources)
-		clearFontFaces(l.fontStore)
+		ClearFontFaces(l.fontStore)
 	}
 	l.lastFramebufferScale = scale
 }
@@ -160,7 +155,7 @@ func (la LookupAccess) SpriteSize(path string) m.Vec2 {
 	// so layout tracks the pixels actually drawn even if the file changed.
 	if entry, ok := la.lookup.sprites.entries[clean]; ok {
 		la.clearReport(spriteReportKey(clean))
-		return m.Vec2{X: float32(entry.width), Y: float32(entry.height)}
+		return m.Vec2{X: float32(entry.Width), Y: float32(entry.Height)}
 	}
 	if meta, ok := la.lookup.spriteSizes[clean]; ok {
 		return m.Vec2{X: float32(meta.X), Y: float32(meta.Y)}
@@ -183,7 +178,7 @@ func (la LookupAccess) FontMetrics(path string, size int) FontMetrics {
 	if face == nil {
 		return FontMetrics{}
 	}
-	metrics := face.face.Metrics()
+	metrics := face.Face.Metrics()
 	return FontMetrics{
 		Ascent:     float32(metrics.Ascent) / 64,
 		Descent:    float32(metrics.Descent) / 64,
@@ -210,17 +205,17 @@ func (la LookupAccess) measureTextSize(path string, size int, text string, width
 	if face == nil {
 		return m.Vec2{}
 	}
-	lineHeight := face.lineHeight
+	lineHeight := face.LineHeight
 	if text == "" {
 		return m.Vec2{Y: lineHeight}
 	}
-	capHeight := float32(face.face.Metrics().CapHeight) / 64
-	measure := func(line []inlineSegment) float32 {
+	capHeight := float32(face.Face.Metrics().CapHeight) / 64
+	measure := func(line []InlineSegment) float32 {
 		return la.measureInlineLine(face, line, capHeight)
 	}
-	lines := parseInlineText(text)
-	if validWrapWidth(width) {
-		lines = wrapInlineText(lines, width, measure)
+	lines := ParseInlineText(text)
+	if ValidWrapWidth(width) {
+		lines = WrapInlineText(lines, width, measure)
 	}
 	var maxWidth float32
 	for _, line := range lines {
@@ -229,14 +224,14 @@ func (la LookupAccess) measureTextSize(path string, size int, text string, width
 	return m.Vec2{X: maxWidth, Y: float32(len(lines)) * lineHeight}
 }
 
-func (la LookupAccess) measureInlineLine(face *canvasFont, line []inlineSegment, capHeight float32) float32 {
+func (la LookupAccess) measureInlineLine(face *Font, line []InlineSegment, capHeight float32) float32 {
 	var width float32
 	for _, segment := range line {
-		if segment.icon {
-			width += la.iconWidth(segment.text, capHeight)
+		if segment.Icon {
+			width += la.iconWidth(segment.Text, capHeight)
 			continue
 		}
-		width += measureLine(face, segment.text)
+		width += MeasureLine(face, segment.Text)
 	}
 	return width
 }
@@ -273,7 +268,7 @@ func (la LookupAccess) UnloadFont(path string) {
 	if la.lookup == nil {
 		return
 	}
-	path = resolveFontPath(path)
+	path = ResolveFontPath(path)
 	clean, ok := validateResourcePath(path)
 	if !ok {
 		la.report(fontReportKey(path), fmt.Errorf("canvas: invalid font path %q", path))
@@ -285,17 +280,17 @@ func (la LookupAccess) UnloadFont(path string) {
 // face bakes (or reuses) a font face at the given logical size, reporting once on
 // failure. It needs only the filesystem, never the GPU queue. An empty path bakes
 // the built-in default font, so measurement matches what Text will draw.
-func (la LookupAccess) face(path string, size int) *canvasFont {
+func (la LookupAccess) face(path string, size int) *Font {
 	if la.lookup == nil {
 		return nil
 	}
-	path = resolveFontPath(path)
+	path = ResolveFontPath(path)
 	clean, ok := validateResourcePath(path)
 	if !ok || size <= 0 {
 		la.report(fontReportKey(path), fmt.Errorf("canvas: invalid font path %q or size %d", path, size))
 		return nil
 	}
-	face := la.lookup.fontStore.face(la.fs, clean, size)
+	face := la.lookup.fontStore.Face(la.fs, clean, size)
 	if face == nil {
 		la.report(fontReportKey(clean), fmt.Errorf("canvas: font %q could not be loaded", clean))
 		return nil
@@ -304,16 +299,16 @@ func (la LookupAccess) face(path string, size int) *canvasFont {
 	return face
 }
 
-// measureLine returns the logical advance width of one line (kerning included).
-func measureLine(face *canvasFont, text string) float32 {
+// MeasureLine returns the logical advance width of one line (kerning included).
+func MeasureLine(face *Font, text string) float32 {
 	var width float32
 	var previous rune
 	first := true
 	for _, character := range text {
 		if !first {
-			width += float32(face.face.Kern(previous, character)) / 64
+			width += float32(face.Face.Kern(previous, character)) / 64
 		}
-		if advance, ok := face.face.GlyphAdvance(character); ok {
+		if advance, ok := face.Face.GlyphAdvance(character); ok {
 			width += float32(advance) / 64
 		}
 		previous = character

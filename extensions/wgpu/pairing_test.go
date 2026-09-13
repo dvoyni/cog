@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/dvoyni/cog/bundles/canvas"
+	"github.com/dvoyni/cog/bundles/canvas/canvasimpl"
 	"github.com/dvoyni/cog/bundles/input/inputimpl"
 	"github.com/dvoyni/cog/bundles/ui"
 	"github.com/dvoyni/cog/extensions/gfx"
@@ -87,7 +89,7 @@ func newPairingRig(t *testing.T) *pairingRig {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
 	}).WithPlugins(
-		storageimpl.New(), permanentAdapter{}, inputimpl.New(), gfximpl.New(), canvas.New(), ui.New(),
+		storageimpl.New(), permanentAdapter{}, inputimpl.New(), gfximpl.New(), canvasimpl.New(), ui.New(),
 		&pairingPlugin{rig: rig},
 	)
 	stopped := make(chan struct{})
@@ -193,18 +195,19 @@ type pairingAnswer struct {
 	err      error
 }
 
-// snapshotView pulls out the block every snapshot response embeds. The type
-// switch is the point: one view, three capabilities, so an agent reads one
-// tick number whichever tool answered.
+// snapshotView pulls out the block every snapshot response embeds. The embedded
+// field is the point: one view, three capabilities, so an agent reads one tick
+// number whichever tool answered. It is read by field rather than by type
+// because canvasimpl keeps its response type unexported.
 func (a pairingAnswer) snapshotView(t *testing.T) gfx.SnapshotView {
 	t.Helper()
-	switch response := a.response.(type) {
-	case gfximpl.FrameResponse:
-		return response.SnapshotView
-	case canvas.DrawsResponse:
-		return response.SnapshotView
-	case ui.LayoutResponse:
-		return response.SnapshotView
+	response := reflect.ValueOf(a.response)
+	if response.Kind() == reflect.Struct {
+		if field := response.FieldByName("SnapshotView"); field.IsValid() {
+			if view, ok := field.Interface().(gfx.SnapshotView); ok {
+				return view
+			}
+		}
 	}
 	t.Fatalf("%s answered with %T, which carries no snapshot view", a.name, a.response)
 	return gfx.SnapshotView{}
@@ -215,7 +218,7 @@ func (a pairingAnswer) snapshotView(t *testing.T) gfx.SnapshotView {
 func (r *pairingRig) snapshotArms() []<-chan pairingAnswer {
 	return []<-chan pairingAnswer{
 		r.invoke("gfx_frame", &gfximpl.FrameRequest{}),
-		r.invoke("canvas_draws", &canvas.DrawsRequest{}),
+		r.invoke("canvas_draws", reflect.New(r.caps["canvas_draws"].RequestType()).Interface()),
 		r.invoke("ui_layout", &ui.LayoutRequest{}),
 	}
 }

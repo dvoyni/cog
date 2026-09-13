@@ -1,4 +1,4 @@
-package canvas
+package canvasimpl
 
 import (
 	"github.com/dvoyni/cog/extensions/gfx"

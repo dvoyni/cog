@@ -39,7 +39,7 @@ Register dependencies before UI, typically in this order: `storage`, `input`,
 `gfx`, `canvas`, then `ui`.
 
 UI processing subscribes to `app.UpdateEvent` after
-`input.AdvanceOnUpdate` and before `canvas.UpdateEventHandler`. It runs on
+`input.AdvanceOnUpdate` and before `canvas.FlushOnUpdate`. It runs on
 every update tick, including intermediate fixed-step catch-up ticks.
 
 ## Declaring A Frame
@@ -95,7 +95,7 @@ only `Sprite` leaves everything else alone.
 `Element.Material(canvas.MaterialSet)` is a Modifier and inherits down the tree
 exactly as `Layer` does. `Frame.SetMaterial(canvas.MaterialSet)` seeds every root
 of a tick, and like everything else on the frame it is cleared each tick â€” which
-is what a value that changes per frame wants, and why `canvas.Config`, which is
+is what a value that changes per frame wants, and why `canvasimpl.Config`, which is
 construction time, cannot hold it. A child naming an **empty** set stops
 inheriting.
 
@@ -335,7 +335,7 @@ current tick registers after UI and before canvas:
 registry.Subscribe[reactUIHandler](reactUI).
     Reads[*ui.Interactions]().
     After[ui.UpdateEventHandler]().
-    Before[canvas.UpdateEventHandler]()
+    Before[canvas.FlushOnUpdate]()
 ```
 
 Use `Has` for lookup, `HasF` to decode an ID while matching, or range over

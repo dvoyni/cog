@@ -824,7 +824,7 @@ func TestAnUnmigratedShaderFlattensUnchanged(t *testing.T) {
 // least one of them exists.
 func unmigratedShaderNames(t *testing.T) []string {
 	t.Helper()
-	globbed, err := filepath.Glob(filepath.Join("..", "..", "..", "bundles", "canvas", "builtin", "canvas", "*.wgsl"))
+	globbed, err := filepath.Glob(filepath.Join("..", "..", "..", "bundles", "canvas", "canvasimpl", "builtin", "canvas", "*.wgsl"))
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}

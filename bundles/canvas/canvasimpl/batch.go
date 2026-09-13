@@ -1,6 +1,8 @@
-package canvas
+package canvasimpl
 
 import (
+	"github.com/dvoyni/cog/bundles/canvas"
+	"github.com/dvoyni/cog/bundles/canvas/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
 )
@@ -36,7 +38,7 @@ type spriteBatch struct {
 	hasClip   bool
 	filter    gfx.FilterMode
 	viewport  m.Vec2
-	instances []SpriteInstance
+	instances []canvas.SpriteInstance
 
 	// material is what every sprite in the batch resolved to, and fingerprint is
 	// what it contributes to the key. Whether the caller named a material is not
@@ -111,7 +113,7 @@ func (b *spriteBatch) add(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr, texture gfx
 		b.shared = append(b.shared[:0], shading.shared...)
 		b.startArrays(shading.arrays)
 	}
-	b.instances = append(b.instances, SpriteInstance{
+	b.instances = append(b.instances, canvas.SpriteInstance{
 		Transform0: t0, Transform1: t1, Frame: frame, Tint: tint, Misc: misc, KeyColor: keyColor,
 	})
 	for i := range shading.arrays {
@@ -153,8 +155,8 @@ func (b *spriteBatch) flush(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr) {
 		gfx.MatParam("canvasLayer", b.layer),
 		gfx.VecParam("canvasClip", m.Vec4{X: b.clip.X, Y: b.clip.Y, Z: b.clip.X + b.clip.Width, W: b.clip.Y + b.clip.Height}),
 		gfx.BufferParam("instances", buffer),
-		gfx.TextureParam(TextureSlot, b.texture),
-		gfx.SamplerParam(SamplerSlot, canvasSampler(gfx.AddressClamp, gfx.AddressClamp, b.filter)),
+		gfx.TextureParam(canvas.TextureSlot, b.texture),
+		gfx.SamplerParam(canvas.SamplerSlot, canvasSampler(gfx.AddressClamp, gfx.AddressClamp, b.filter)),
 	)
 	for i := range b.arrayNames {
 		b.params = append(b.params, gfx.BufferParam(b.arrayNames[i], gfx.BufferWithBytes(b.arrayBytes[i], true)))
@@ -166,7 +168,7 @@ func (b *spriteBatch) flush(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr) {
 }
 
 // batchEntry computes one sprite/glyph instance and adds it to the batcher.
-func (p *Plugin) batchEntry(gfxWrite *gfx.OpQueue, surf surface, entry atlasEntry, transform SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, shading *spriteShading, tint m.Color, keyColor m.Color) {
+func (p *plugin) batchEntry(gfxWrite *gfx.OpQueue, surf surface, entry internal.AtlasEntry, transform canvas.SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, shading *spriteShading, tint m.Color, keyColor m.Color) {
 	size := entrySize(entry, transform)
 	if size.X == 0 || size.Y == 0 {
 		return
@@ -181,8 +183,8 @@ func (p *Plugin) batchEntry(gfxWrite *gfx.OpQueue, surf surface, entry atlasEntr
 	sine, cosine := sincos(transform.Rotation)
 	t0 := m.Vec4{X: transform.Position.X, Y: transform.Position.Y, Z: size.X, W: size.Y}
 	t1 := m.Vec4{X: transform.Origin.X, Y: transform.Origin.Y, Z: sine, W: cosine}
-	misc := m.Vec4{X: float32(entry.layer)}
-	p.batch.add(gfxWrite, p.quad, entry.texture, layerTransform, clip, hasClip, transform.Filter,
+	misc := m.Vec4{X: float32(entry.Layer)}
+	p.batch.add(gfxWrite, p.quad, entry.Texture, layerTransform, clip, hasClip, transform.Filter,
 		surf.size, shading, t0, t1, uv, colorVec(tint), misc, colorVec(keyColor))
 }
 

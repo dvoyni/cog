@@ -17,6 +17,25 @@ every section cites the tickets it came from. Nothing is decided here — where 
 claim rests on something unverified, it is marked **Gap** and says what would
 settle it.
 
+> **Amended by [#338](https://github.com/dvoyni/cog/issues/338).** canvas became
+> a Bundle under
+> [ADR 0001](../../../../docs/adr/0001-bundles-slots-ports-and-adapters.md), shaped
+> as a contract root, `canvasimpl` and `internal/`. `ArmDrawsCmd`, its request
+> and response, `DrawsSnapshot` and the view types (`DrawsView`, `LayerView`,
+> `OpView` and the rest) stay in the root, `bundles/canvas`. The Provider, the
+> `canvas_draws` body and its description string moved to
+> `bundles/canvas/canvasimpl/mcpprovider.go`, where the capability's request and
+> response types are now the unexported `drawsRequest` and `drawsResponse`. The
+> snapshot slot, the in-tick serialization and both snapshot subscriptions moved
+> to `bundles/canvas/canvasimpl/snapshot.go`. canvas's flush identity
+> `canvas.UpdateEventHandler` is now `canvas.FlushOnUpdate`, and the snapshot
+> identities `DrawsUpdateEventHandler` and `DrawsArmUpdateEventHandler` are now
+> `drawsOnUpdate` and `armDrawsOnUpdate`, unexported in `canvasimpl` because
+> nothing outside orders against them. The consume side of the queue, including
+> the op inspection the snapshot walks, is in `bundles/canvas/internal`. The
+> tool name, its schema and its behaviour are unchanged. The file paths and line
+> numbers cited below are as they were when this was written.
+
 ---
 
 ## Contents
@@ -146,7 +165,7 @@ goroutine, never here.**
 ## Where it sits in the tick
 
 ```
-.Last().Before[canvas.UpdateEventHandler]()
+.Last().Before[canvas.FlushOnUpdate]()
 ```
 
 Reads `Read[*canvas.OpQueue]` before `flushFrame`'s `defer write.reset()`. It
@@ -158,7 +177,7 @@ derived rather than chosen:
 | capability | ordering | reads |
 | --- | --- | --- |
 | `ui_layout` | `.After[ui.UpdateEventHandler]()` | `processor.nodes` |
-| `canvas_draws` | `.Last().Before[canvas.UpdateEventHandler]()` | `Read[*canvas.OpQueue]` |
+| `canvas_draws` | `.Last().Before[canvas.FlushOnUpdate]()` | `Read[*canvas.OpQueue]` |
 | `gfx_frame` | inside `gfx`'s own `present`, before the queue swap — see below | `*gfx.OpQueue`, `Read[*gfx.ResourceQueue]` |
 
 Each is a `Read` handle against a resource its own package already owns or
@@ -167,9 +186,9 @@ have.
 
 > **Amended at implementation ([#253](https://github.com/dvoyni/cog/issues/253)).**
 > The `gfx_frame` row read
-> `.Last().After[canvas.UpdateEventHandler]().Before[gfx.PresentOnUpdate]()`
+> `.Last().After[canvas.FlushOnUpdate]().Before[gfx.PresentOnUpdate]()`
 > until #253 built it. That expression cannot be written from `gfx`: `canvas`
-> imports `gfx`, so `gfx` cannot name `canvas.UpdateEventHandler`, and a second
+> imports `gfx`, so `gfx` cannot name `canvas.FlushOnUpdate`, and a second
 > `Last` subscriber would only conflict with canvas's flush on the queue rather
 > than order against it. `gfx` takes the snapshot inside `presentOnUpdate`
 > instead, immediately before the swap — the same point in the frame, reached
@@ -182,15 +201,15 @@ have.
 
 > **Amended at implementation ([#254](https://github.com/dvoyni/cog/issues/254)).**
 > The row above is the link that *takes* the snapshot, and it is implemented
-> exactly as written — `canvas.DrawsUpdateEventHandler`, `.Last()`,
-> `.Before[canvas.UpdateEventHandler]()`, reading `Read[*canvas.OpQueue]`.
+> exactly as written — `canvasimpl`'s `drawsOnUpdate`, `.Last()`,
+> `.Before[canvas.FlushOnUpdate]()`, reading `Read[*canvas.OpQueue]`.
 >
 > It is not the only subscription the capability needs. Arming inherits
 > [mcp §Arm-then-wait](../../../../extensions/mcp/docs/specs/mcp.md#arm-then-wait) verbatim —
 > *a snapshot shows the game as of a tick that began after the request* — and a
 > request landing inside a tick that has already recorded cannot be told from
 > one that arrived between ticks by anything running at the end of the tick. So
-> canvas also registers `DrawsArmUpdateEventHandler`, ordered `First()` and
+> canvas also registers `armDrawsOnUpdate`, ordered `First()` and
 > declaring no resources, which admits a waiting request to the tick that has
 > just begun. It is the same two-stage slot `gfx` builds for the same reason
 > (`extensions/gfx/snapshot.go`), and it is a mutex-guarded no-op when nothing is armed.

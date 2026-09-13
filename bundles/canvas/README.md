@@ -12,32 +12,74 @@ as includable WGSL, how draws merge into batches, and how a material reaches
 the reasoning behind each rule, and this README is the API surface. Go there
 before proposing a change to any of it.
 
+canvas is a **Bundle**: a Slot and its one Extension, shipped together. The
+vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
+[ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
+
+## Packages
+
+canvas has the Bundle shape: a contract root, an `…impl` and an `internal/`.
+
+- **`bundles/canvas`** is the contract: the `*OpQueue` and `*Lookup` resources
+  with `LookupAccess` and its measurements, the recording vocabulary (`Layer`,
+  `SpriteTransform`, `SpriteFrame`, `TextDraw`, `ShapeDraw`, `Vertex`,
+  `VertexLayout`, `AspectMode`, `TextAlign`), `MaterialSet`,
+  `HaloMaterialSet` and the built-in material constructors, the reserved slot
+  names and published WGSL paths, `SpriteInstance`, `Op`, the coordinate helpers
+  (`LayerTransform`, `WorldToScreen`, `ScreenToWorld`), `ArmDrawsCmd` with
+  `DrawsSnapshot` and its view types, `Name` and the ordering identity
+  `FlushOnUpdate`. It declares no plugin, and it is what every other package
+  imports.
+- **`bundles/canvas/canvasimpl`** is the plugin: `New`, `Config`, the flush that
+  turns a recording into gfx draws, the sprite and triangle batchers and their
+  scratch, the draw-snapshot slot and its two subscriptions, the `Start` mount
+  of the embedded shaders and default font, and the mcp Provider. It exports
+  `New` and `Config` and nothing else. Only composition roots and tests import
+  it.
+- **`bundles/canvas/internal`** holds what the two share and nothing else may
+  reach: the declarations of `OpQueue` with its recording methods and the
+  consume side the flush reads, `Lookup` and `LookupAccess` with the sprite and
+  glyph atlases, the font store and the sprite-size cache behind them, inline
+  text parsing, the recording vocabulary, and the built-in and halo materials.
+
+`OpQueue`, `Lookup`, `LookupAccess` and the vocabulary they carry are declared in
+`internal` with their resource state unexported, and re-exported from the root as
+aliases (`type OpQueue = internal.OpQueue`) plus a wrapper for each constructor.
+They stay concrete types: recording a sprite is a direct method call, with no
+interface anywhere on the per-sprite path, and their exported methods
+(`OpQueue.Sprite`, `LookupAccess.MeasureTextSize`, …) are public API through the
+alias. What canvasimpl needs beyond that goes through plain functions `internal`
+exports, which only the root and canvasimpl can call. `internal` never imports
+the root. See
+[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+
 ## Plugin
 
 - Name: `canvas.Name` (`"canvas"`)
-- Constructor: `canvas.New() *canvas.Plugin`
+- Constructor: `canvasimpl.New() kernel.Plugin`
 - Plugin dependencies: `gfx`, `storage`
-- Go package dependencies: `app`, `gfx`, `kernel`, `mcp`, `storage`, `x/image`
+- Requires: no Adapter
 - Contributes: one `mcp.Provider` Adapter
-- Implements: `kernel.PluginStopper`
+- Go package dependencies: `app`, `gfx`, `kernel`, `mcp`, `storage`, `x/image`
+- Implements: `kernel.PluginStarter`, `kernel.PluginStopper`
+- Configuration: `canvasimpl.Config`, optional
 - Events declared or published: none
 
 ```go
-cfg := canvas.DefaultConfig()
-cfg.AtlasSize = 4096
-cfg.LayersPerArray = 2
-cfg.MaxAtlasBytes = 256 << 20
+kernel.New(map[kernel.PluginName]any{
+	canvas.Name: canvasimpl.Config{AtlasSize: 2048},
+})
 ```
 
-`Config` is the exported configuration type. `Plugin` implements `Name`,
-`Dependencies`, and `Init` for the kernel lifecycle.
-
-`LayersPerArray` must be at least two. Atlas dimensions and the memory budget
-must be positive, and one array must fit within `MaxAtlasBytes`.
+`Config` has `AtlasSize`, `LayersPerArray` and `MaxAtlasBytes`. A zero field
+takes its default — 4096, 2 and 256 MiB — and giving no configuration at all
+takes all three. `LayersPerArray` must be at least two. Atlas dimensions and the
+memory budget must be positive, and one array must fit within `MaxAtlasBytes`.
 
 During `Start`, canvas executes `storage.SetMountCmd` to mount its embedded
-shaders. Register `storage` before `canvas`. A typical order is `storage`,
-`input`, `gfx`, `canvas`, then the system driver.
+shaders and default font. Register `storage` before `canvas`. A typical order is
+`storage`, `input`, `gfx`, `canvas`, then the system driver. Compose it with
+`canvasimpl.New()`.
 
 ## Resources
 
@@ -457,7 +499,7 @@ otherwise: the canvas queue is *empty* between ticks rather than stale, so
 producing a snapshot without running a tick is not a thing that exists.
 
 The snapshot is **serialized inside the tick**, from a subscriber ordered
-`Last()` and `Before[UpdateEventHandler]()` — after ui and the app have
+`Last()` and `Before[FlushOnUpdate]()` — after ui and the app have
 recorded, before the flush's deferred reset. Nothing that outlives the tick
 aliases the queue: `Ops` hands out slices that die at the next reset, which is
 why the snapshot renders each op into owned values as it walks the queue rather
@@ -498,6 +540,10 @@ scope, callers acquire a handler-scoped facade instead:
 la := canvas.NewLookupAccess(kernel, lookup, filesystem)
 ```
 
+`canvas.NewLookup()` builds a free-standing `*Lookup` at the default atlas sizes,
+for a test or an embedder that drives a `LookupAccess` without composing the
+plugin.
+
 Bind `access.GetWrite[*canvas.Lookup]()` and `access.GetRead[storage.FileSystem]()`
 in the handler's `Lock`, then use:
 
@@ -521,16 +567,20 @@ pages are freed only by the whole-glyph-atlas resize invalidation.
 
 ## Event Subscribed
 
-`UpdateEventHandler` subscribes to `app.UpdateEvent`. It writes the canvas
+`FlushOnUpdate` subscribes to `app.UpdateEvent`. It writes the canvas
 `*OpQueue` and `*Lookup`, reads `gfx.Viewport` and `storage.FileSystem`, and writes
 `gfx.OpQueue` and `gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
 `gfx.PresentOnUpdate`, so gameplay records first, canvas emits graphics
 draws second, and gfx presents last.
 
-`DrawsArmUpdateEventHandler` and `DrawsUpdateEventHandler` are the two halves
-of the agent snapshot and are inert when none is armed. The first is ordered
-`First()` and declares no resources: it admits a waiting request to the tick
-that has just begun, which is what makes "a tick that *began* after the
-request" decidable. The second reads `*OpQueue` from `Last()`, ordered
-`Before[UpdateEventHandler]()`, and renders the frame between ui's recording
-and the flush's reset.
+A recorder that must land in this tick's frame orders
+`Before[canvas.FlushOnUpdate]()`; ui does.
+
+The two halves of the agent snapshot are subscriptions nothing outside orders
+against, so their identities are unexported in canvasimpl, and both are inert
+when no snapshot is armed. `armDrawsOnUpdate` is ordered `First()` and declares
+no resources: it admits a waiting request to the tick that has just begun,
+which is what makes "a tick that *began* after the request" decidable.
+`drawsOnUpdate` reads `*OpQueue` from `Last()`, ordered
+`Before[FlushOnUpdate]()`, and renders the frame between ui's recording and the
+flush's reset.

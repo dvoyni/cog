@@ -16,7 +16,7 @@ import "github.com/dvoyni/cog/extensions/gfx/internal"
 // base-type-compatible were both considered and both let exactly that case
 // through, because a two-component unorm decodes to f32 and `vec3<f32>` is f32.
 // The cost of forbidding WebGPU's legal widening and narrowing is zero against
-// the tree: every @location in bundles/scene/builtin and bundles/canvas/builtin is an exact
+// the tree: every @location in bundles/scene/builtin and bundles/canvas/canvasimpl/builtin is an exact
 // match already.
 //
 // **The check is one-directional.** A layout supplying an attribute the shader

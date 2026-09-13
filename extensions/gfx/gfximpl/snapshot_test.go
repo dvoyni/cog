@@ -28,7 +28,7 @@ import (
 // flushPlugin stands in for canvas: it records into the gfx queue from the
 // Last phase, ordered Before gfx's own present handler, which is exactly where
 // canvas puts its flush (canvas/plugin.go). gfx cannot name
-// canvas.UpdateEventHandler - canvas imports gfx, not the other way round - so
+// canvas.FlushOnUpdate - canvas imports gfx, not the other way round - so
 // this fixture is how the ordering claim the snapshot rests on gets asserted
 // in gfx's own tests. It is inert until a test gives it something to record.
 type flushPlugin struct {
