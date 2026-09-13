@@ -1,7 +1,7 @@
 # kernel support for `ecs` — specification
 
 This document specifies what `github.com/dvoyni/cog/kernel` gains so that
-[the `ecs` plugin](../../../ecs/docs/specs/ecs.md) can exist, and what each
+[the `ecs` plugin](../../../bundles/ecs/docs/specs/ecs.md) can exist, and what each
 addition costs the guarantees kernel makes today.
 
 **The answer is one code addition and one documentation correction.** That is a

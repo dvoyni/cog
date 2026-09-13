@@ -6,7 +6,7 @@ applyTo: "**/*.go"
 
 # Scene Recording
 
-`scene/README.md` documents the API and `scene/docs/specs/scene.md` records why each rule is
+`bundles/scene/README.md` documents the API and `bundles/scene/docs/specs/scene.md` records why each rule is
 what it is. These are the traps a caller hits that neither the compiler nor a
 plausible-looking zero value warns about. Follow them in new and changed code
 without expanding a focused task into unrelated cleanup.
@@ -243,7 +243,7 @@ attachment, so two adjacent auto-depth passes into one target never merge.
 
 **A depth-only pass may be written, but its output may not be depended on in the
 same frame unless the backend is known to encode it.** Vulkan and a browser do;
-GLES does not, and neither does anything `cog/wgpu` does not recognise — it
+GLES does not, and neither does anything `cog/extensions/wgpu` does not recognise — it
 declines a `NoTarget()` pass and reports `wgpu.ErrDepthOnlyPassUnsupported`. It
 is the backend that decides, not the platform. A later pass loading that depth
 with `ClearDepth: nil` therefore renders against undefined depth wherever the

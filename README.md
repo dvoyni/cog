@@ -46,34 +46,34 @@ error handling.
 
 - [`kernel`](kernel/README.md): plugin lifecycle, typed registry, scheduler,
     resources, and errors.
-- [`app`](app/README.md): driver-neutral update, render, time-control, and quit
+- [`app`](slots/app/README.md): driver-neutral update, render, time-control, and quit
     contracts. No implementation.
-- [`input`](input/README.md): input state, discrete events, the driver-facing
+- [`input`](bundles/input/README.md): input state, discrete events, the driver-facing
     apply command, and scripted input.
-- [`anim`](anim/README.md): timelines of eased value tracks and one-tick cues,
+- [`anim`](bundles/anim/README.md): timelines of eased value tracks and one-tick cues,
     advanced every fixed step.
-- [`ecs`](ecs/README.md): entities, components, the sparse-set stores they live
+- [`ecs`](bundles/ecs/README.md): entities, components, the sparse-set stores they live
     in, and systems as plain funcs whose parameter types are their lock set.
-- [`storage`](storage/README.md): layered read filesystems and one permanent
+- [`storage`](extensions/storage/README.md): layered read filesystems and one permanent
     writable filesystem.
-- [`m`](m): immutable vectors, rectangles, colors, matrices, quaternions,
+- [`m`](libs/m): immutable vectors, rectangles, colors, matrices, quaternions,
     scalar helpers, and splines. Angles use radians.
-- [`gfx`](gfx/README.md): driver-neutral rendering queues, resources, viewport,
+- [`gfx`](extensions/gfx/README.md): driver-neutral rendering queues, resources, viewport,
     backend contract, frame capture, and per-tick snapshots.
-- [`canvas`](canvas/README.md): layered 2D sprites, text, primitives, and custom
+- [`canvas`](bundles/canvas/README.md): layered 2D sprites, text, primitives, and custom
     triangles over gfx, with a snapshot of what a tick recorded.
-- [`scene`](scene/README.md): declarative 3D cameras, glTF models, buffer-built
+- [`scene`](bundles/scene/README.md): declarative 3D cameras, glTF models, buffer-built
     meshes, punctual lights, and debug shapes over gfx.
-- [`ecsscene`](ecsscene/README.md): the ecs↔scene binding — components holding
+- [`ecsscene`](bundles/ecsscene/README.md): the ecs↔scene binding — components holding
     scene's own types, and the one system that records them into scene.
-- [`ui`](ui/README.md): immediate-mode layout, interaction, canvas-backed visual
+- [`ui`](bundles/ui/README.md): immediate-mode layout, interaction, canvas-backed visual
     processing, and a snapshot of what layout resolved.
-- [`wgpu`](wgpu/README.md): window, input, timing with pause, step and a hold
+- [`wgpu`](extensions/wgpu/README.md): window, input, timing with pause, step and a hold
     that makes several observations describe one tick, and WebGPU system
     driver.
-- [`mcp`](mcp/README.md): the agent-facing extension point — typed capabilities
+- [`mcp`](extensions/mcp/README.md): the agent-facing extension point — typed capabilities
     a plugin offers. No implementation.
-- [`mcpserver`](mcpserver/README.md): the broker that collects capabilities from
+- [`mcpserver`](extensions/mcpserver/README.md): the broker that collects capabilities from
     every provider and serves them to an agent over MCP.
 
 ## Plugin Layout
@@ -83,7 +83,7 @@ conventions; see [`.github/instructions/kernel.instructions.md`](.github/instruc
 
 Each package's `README.md` is its API. Design records live under
 `<package>/docs/specs/`: the package's general spec is `<package>.md` (for
-example [`scene/docs/specs/scene.md`](scene/docs/specs/scene.md)) and a spec
+example [`bundles/scene/docs/specs/scene.md`](bundles/scene/docs/specs/scene.md)) and a spec
 covering one focused mechanism takes that mechanism's name.
 
 ## Lifecycle
