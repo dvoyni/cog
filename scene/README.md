@@ -134,7 +134,10 @@ func (q *OpQueue) Passes(dst []PassView) []PassView
 
 **Every slice field on every descriptor is borrowed for the duration of the
 call.** Scene copies into its frame arena before returning, so a hot-loop caller
-reuses one backing array.
+reuses one backing array. A draw's `Material` is copied too — its tag entries
+and each entry's parameters, though not the `m.Blob` bytes a parameter carries,
+which are static by contract — so a material may be rebuilt or rewritten the
+moment the call returns.
 
 ### Transform
 
@@ -142,8 +145,7 @@ reuses one backing array.
 type Transform struct {
 	Position m.Vec3
 	Rotation m.Quat
-	Scale    float32 // zero means 1
-	Matrix   *m.Mat4 // non-nil replaces the whole transform
+	Scale    m.Vec3 // all zero means (1,1,1); otherwise literal
 }
 
 func At(x, y, z float32) Transform
@@ -153,9 +155,13 @@ func (t Transform) WithRotation(q m.Quat) Transform
 func (t Transform) Mat4() m.Mat4
 ```
 
-The zero value is the identity. `Scale` is **scalar**; non-uniform scale goes
-through `Matrix`, which replaces the transform whole and is what puts the draw
-on the inverse-transpose normal path.
+The zero value is the identity. `Scale` is **per axis**, and only an all-zero
+`Scale` reads as `(1,1,1)`: a partly zero one is taken literally, so
+`m.Vec3{X: 2}` collapses the draw onto X and a flattened scale is expressible.
+`WithScale(s)` is the uniform spelling. A non-uniform scale puts that instance,
+and only that instance, on the inverse-transpose normal path. There is no matrix
+override: a `Transform` is plain values, which is what lets an ECS Component
+hold one.
 
 ### Layers
 
@@ -256,13 +262,15 @@ type Pass struct {
 	Tag        PassTag         // zero reads as TagForward
 	Target     gfx.TargetDescr // zero is the screen; gfx.NoTarget() for depth-only
 	Depth      gfx.DepthDescr  // zero is gfx.DepthAuto(), pooled by size and shared
-	ClearColor *m.Color        // nil preserves
-	ClearDepth *float32        // nil preserves; 1.0 is the useful value
+	ClearColor m.Maybe[m.Color] // absent preserves
+	ClearDepth m.Maybe[float32] // absent preserves; 1.0 is the useful value
 	Order      gfx.Order       // offset from the camera id, not an absolute
 }
 ```
 
-The zero `Pass` is the default pass: forward tag, screen target, pooled depth,
+A clear is an `m.Maybe` — `ClearDepth: m.Some[float32](1)` — whose zero value is
+absent, so **a zero `Pass` clears nothing**: colour and depth are both preserved.
+An empty `Passes` is the default pass: forward tag, screen target, pooled depth,
 **colour preserved and depth cleared to 1.0**. The asymmetry is deliberate — a
 defaulted colour clear would let a second camera silently erase the first, while
 a pooled depth texture shared with every other same-size pass in the frame must
@@ -277,7 +285,7 @@ its own — that takes the gfx queue, which a scene recorder does not hold — s
 render-to-texture camera calls `gfx.OpQueue.TemporaryTarget(w, h, format)`,
 which returns the target to render into and the texture to sample back, and
 hands the target across. A pass with `NoTarget()` takes its size from an
-explicit depth texture; one with neither, or with `NoTarget()` and a
+explicit depth texture; one with neither, or with `NoTarget()` and a present
 `ClearColor`, is reported.
 
 A pass with zero surviving draws is still emitted, so a camera's clear does not
@@ -305,6 +313,8 @@ control.
 
 A nil `Material` is the bundled PBR, so every draw literal that omits the field
 is untouched. The hand-written one-entry case is `scene.Material{{Descr: descr}}`.
+Materials are keyed by content, so two equal ones batch together however each
+was built, and each recording call copies the one it names.
 A duplicate tag in one `Material` is reported and the first entry wins.
 
 An entry is a whole `gfx.MaterialDescr` rather than a shader, because pipeline
@@ -794,4 +804,4 @@ absorbed quietly. The ones a caller can observe:
   axis-aligned box is an eigenvector of an axis-aligned scale, rotation
   included, so the spec's motivating examples — `Line3D` and `WireBox` — are
   exactly the cases where the flag cannot be seen. Only a curved surface under a
-  caller's `Matrix` shows it.
+  caller's non-uniform `Scale` shows it.

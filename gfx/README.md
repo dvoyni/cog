@@ -342,6 +342,13 @@ and physical `FramebufferWidth`/`FramebufferHeight`.
   value accessor returns `(value, ok)` keyed on the parameter's own kind, so a
   reader can never take one arm of the union for another.
 
+**`BufferDescr`, `TextureDescr` and `ParameterDescr` are storable**: an ECS
+Component may hold one as it stands. Every byte run they carry — a buffer's
+inline bytes, a texture's pixels, a raw parameter's layout — is an `m.Blob`,
+which the ECS admits on the contract that nothing writes the bytes after the
+descriptor is built. The constructors still take a `[]byte`, and converting is
+free; the contract is the caller's to keep, and nothing checks it.
+
 `HasValue` separates a value a shader reads out of its uniform block from a
 binding it attaches to a bind group, and `AppendValue(dst)` appends the value's
 bytes in the layout the shader reads them at. Together they let a recorder pack

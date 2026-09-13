@@ -27,6 +27,11 @@ type MeshDraw struct {
 	// Material is the scene material to draw with; nil is the bundled PBR. A
 	// mesh built from a custom vertex layout must name one, because the bundled
 	// PBR's vertex stage reads scene.Vertex's eight attributes and nothing else.
+	//
+	// It is copied into the frame's own arenas at record - its tag entries and
+	// each entry's parameters - so a caller may reuse or change it the moment
+	// the call returns. The bytes a parameter carries are not copied: they are
+	// m.Blobs, static by contract.
 	Material Material
 	// Params are extra gfx parameters bound to every instance of this draw, on
 	// top of the three ranges scene binds itself. They are for what a custom
@@ -72,6 +77,7 @@ func (q *opQueue) Mesh(layers LayerMask, ref MeshRef, draw MeshDraw) {
 		q.meshes.params = append(q.meshes.params, params...)
 		params = q.meshes.params[start:len(q.meshes.params):len(q.meshes.params)]
 	}
+	draw.Material = q.meshes.copyMaterial(draw.Material)
 	draw.Transforms, draw.Params = transforms, params
 	q.calls = append(q.calls, Op{Kind: OpMesh, Layers: layers, Mesh: ref, Draw: draw})
 	record := drawRecord{
@@ -156,9 +162,9 @@ type temporaryMesh struct {
 }
 
 // meshRecording is everything the frame's mesh calls own: the temporary meshes
-// minted into it, the bytes behind them, the transforms and parameters each
-// MeshDraw and ModelDraw borrowed into it, and the mint errors the flush
-// reports.
+// minted into it, the bytes behind them, the transforms, parameters and
+// materials each MeshDraw and ModelDraw copied into it, and the mint errors the
+// flush reports.
 //
 // It swaps with its published twin at the frame boundary along with the rest of
 // the recording, so a published Op's borrowed slices stay valid while the next
@@ -170,8 +176,11 @@ type meshRecording struct {
 	arena       []byte
 	transforms  []Transform
 	params      []gfx.ParameterDescr
-	reports     []error
-	layouts     layoutCache
+	// materials holds the tag entries of every Material a draw named; each
+	// entry's parameters are copied into params beside the draw's own.
+	materials []MaterialTag
+	reports   []error
+	layouts   layoutCache
 }
 
 func (r *meshRecording) reset() {
@@ -180,7 +189,34 @@ func (r *meshRecording) reset() {
 	r.transforms = r.transforms[:0]
 	clear(r.params)
 	r.params = r.params[:0]
+	clear(r.materials)
+	r.materials = r.materials[:0]
 	r.reports = r.reports[:0]
+}
+
+// copyMaterial copies a caller's Material into the recording's arenas - its tag
+// entries into materials, each entry's parameters into params - and returns the
+// copy, which aliases the arenas for exactly as long as a draw's copied
+// Transforms and Params do.
+//
+// It is what takes away the obligation the flush used to put on every caller:
+// reading the caller's slices at flush meant a material had to be kept alive
+// and unchanged until then, with nothing saying so. Batching does not notice
+// the difference, because a material is keyed by content and never by where
+// its bytes live.
+//
+// A nil Material stays nil, because nil is the bundled PBR and an empty
+// non-nil Material is a different answer - a material serving no pass.
+func (r *meshRecording) copyMaterial(material Material) Material {
+	if material == nil {
+		return nil
+	}
+	start := len(r.materials)
+	for _, entry := range material {
+		entry.Descr, r.params = entry.Descr.CloneTo(r.params)
+		r.materials = append(r.materials, entry)
+	}
+	return r.materials[start:len(r.materials):len(r.materials)]
 }
 
 // record builds the mesh record one temporary draws from. Its buffers are

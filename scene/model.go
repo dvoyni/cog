@@ -84,6 +84,10 @@ type ModelDraw struct {
 	// under a shader that never heard of them would be a wrong picture with
 	// nothing in the frame to explain it.
 	//
+	// It is copied into the frame's own arenas at record, exactly as a
+	// MeshDraw's Material is, so a caller may reuse or change it the moment
+	// the call returns.
+	//
 	// It does not overlap with OverrideParams. This one replaces and that one
 	// merges, and a draw may still use both: the replacement takes glTF's own
 	// defaults for its record and the overrides merge over those.
@@ -155,8 +159,9 @@ type modelDrawRecord struct {
 	morphWeights []float32
 	overridden   bool
 	// material is the caller's replacement for the file's own, nil when the
-	// draw takes the file's, and overrides aliases the recording's parameter
-	// arena for the same reason plays and morphWeights alias theirs.
+	// draw takes the file's. It and overrides alias the recording's material
+	// and parameter arenas for the same reason plays and morphWeights alias
+	// theirs.
 	material  Material
 	overrides []gfx.ParameterDescr
 }
@@ -202,6 +207,7 @@ func (q *opQueue) Model(layers LayerMask, path string, draw ModelDraw) {
 		q.meshes.params = append(q.meshes.params, overrides...)
 		overrides = q.meshes.params[start:len(q.meshes.params):len(q.meshes.params)]
 	}
+	draw.Material = q.meshes.copyMaterial(draw.Material)
 	draw.Transforms, draw.Plays, draw.MorphWeights = transforms, plays, weights
 	draw.OverrideParams = overrides
 	q.calls = append(q.calls, Op{Kind: OpModel, Layers: layers, Path: path, Model: draw})
@@ -328,11 +334,11 @@ func (p *Plugin) expandModels(
 				}
 				p.modelWorlds[at] = world.Mul(primitive.local)
 				write.appendFlushDraw(drawRecord{
-					layers:    model.layers,
-					transform: Transform{Matrix: &p.modelWorlds[at]},
-					material:  material,
-					mesh:      primitive.mesh,
-					pbr:       record,
+					layers:   model.layers,
+					matrix:   &p.modelWorlds[at],
+					material: material,
+					mesh:     primitive.mesh,
+					pbr:      record,
 					// The overrides ride on the draw's gfx parameters, which
 					// is where every name the entry's shader declares is
 					// resolved, and are marked as also addressing the record,

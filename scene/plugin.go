@@ -488,11 +488,11 @@ func (p *Plugin) passDescr(id CameraID, pass Pass, order gfx.Order) gfx.PassDesc
 	if pass.Depth.IsTexture() {
 		desc.DepthStore = gfx.StoreKeep
 	}
-	if pass.ClearColor != nil {
-		desc.Load, desc.Clear = gfx.LoadClear, *pass.ClearColor
+	if color, ok := pass.ClearColor.Get(); ok {
+		desc.Load, desc.Clear = gfx.LoadClear, color
 	}
-	if pass.ClearDepth != nil {
-		desc.DepthLoad, desc.DepthClear = gfx.LoadClear, *pass.ClearDepth
+	if depth, ok := pass.ClearDepth.Get(); ok {
+		desc.DepthLoad, desc.DepthClear = gfx.LoadClear, depth
 	}
 	return desc
 }

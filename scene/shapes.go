@@ -33,7 +33,7 @@ func (q *opQueue) Sphere(layers LayerMask, center m.Vec3, radius float32, color 
 	}
 	q.draw(drawRecord{
 		shape: shapeSphere, layers: layers, color: color,
-		transform: Transform{Position: center, Scale: radius},
+		transform: Transform{Position: center}.WithScale(radius),
 	})
 }
 
@@ -62,8 +62,8 @@ func (q *opQueue) Plane(layers LayerMask, center m.Vec3, size m.Vec2, color m.Co
 // distant line thins out on screen the way any object does; a line that must
 // stay a fixed number of pixels wide is not this call.
 //
-// Scene builds the non-uniform matrix itself, so the scalar Scale on Transform
-// is untouched at the API surface, and the packed instance carries
+// Scene builds the non-uniform scale itself, on top of whatever Scale the
+// transform carries, and the packed instance carries
 // SCENE_NONUNIFORM for the shader's inverse-transpose normal path.
 func (q *opQueue) Line3D(layers LayerMask, start, end m.Vec3, thickness float32, color m.Color) {
 	q.calls = append(q.calls, Op{Kind: OpLine3D, Layers: layers, Start: start, End: end, Thickness: thickness, Color: color})

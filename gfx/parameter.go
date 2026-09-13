@@ -27,7 +27,8 @@ type ParameterDescr struct {
 	// raw is the byte copy a RawParameter carries, already laid out the way the
 	// shader reads it. It is validated against WGSL's alignment rules once per
 	// type at construction, so nothing downstream re-derives a layout from it.
-	raw []byte
+	// It is static, for the reason BufferDescr.bytes gives.
+	raw m.Blob
 }
 
 // paramKind tags the variant stored in a ParameterDescr.

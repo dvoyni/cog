@@ -1,12 +1,17 @@
 package gfx
 
+import "github.com/dvoyni/cog/m"
+
 // BufferDescr describes a GPU buffer from inline bytes (BufferWithBytes) or a
 // baked storage buffer returned by ResourceQueue.BakeBuffer.
 type BufferDescr struct {
-	source   bufferSource
-	id       BufferID
-	size     int
-	bytes    []byte
+	source bufferSource
+	id     BufferID
+	size   int
+	// bytes is static: the descriptor never writes it, and a caller who built
+	// it from a slice they still hold must not either. That is what lets a
+	// Component hold one; see m.Blob.
+	bytes    m.Blob
 	copyData bool
 }
 

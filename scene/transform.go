@@ -5,16 +5,23 @@ import "github.com/dvoyni/cog/m"
 // Transform places one recorded thing in the world. Its zero value is the
 // identity, so a caller who cares about none of it writes none of it.
 //
-// Scale is scalar, following canvas.SpriteTransform.Scale. An m.Vec3 scale
-// reads as "twice as wide" for m.Vec3{X: 2} but has to silently become (2,1,1),
-// a legitimately flattened scale is inexpressible either way, and it forces the
-// inverse-transpose normal path onto every draw. Non-uniform scale goes through
-// Matrix, which replaces the transform whole.
+// Scale is per axis. Only an all-zero Scale reads as the identity, which is
+// what keeps the zero Transform the identity; a partly zero Scale is taken
+// literally, so m.Vec3{X: 2} collapses the draw onto the X axis rather than
+// silently becoming (2,1,1), and a flattened scale - m.Vec3{X: 1, Y: 1} - is
+// expressible. WithScale is the uniform spelling.
+//
+// A non-uniform scale costs its draw the inverse-transpose normal path in the
+// shader, and only its draw: the packer flags the instances whose basis does
+// not scale uniformly, and every other instance keeps the plain one.
+//
+// There is no matrix override. A Transform is plain values, which is what lets
+// an ECS Component hold one; anything a matrix said that position, rotation and
+// per-axis scale cannot - a shear - is not something scene draws.
 type Transform struct {
 	Position m.Vec3
 	Rotation m.Quat
-	Scale    float32 // zero means 1
-	Matrix   *m.Mat4 // non-nil replaces the whole transform
+	Scale    m.Vec3 // all zero means (1,1,1); otherwise literal
 }
 
 // At is the transform of a thing standing at a point, unrotated and unscaled.
@@ -22,8 +29,10 @@ func At(x, y, z float32) Transform {
 	return Transform{Position: m.Vec3{X: x, Y: y, Z: z}}
 }
 
+// WithScale scales the transform uniformly by s. Zero is the identity, as an
+// all-zero Scale is.
 func (t Transform) WithScale(s float32) Transform {
-	t.Scale = s
+	t.Scale = m.Vec3{X: s, Y: s, Z: s}
 	return t
 }
 
@@ -46,14 +55,15 @@ func LookAt(eye, target, up m.Vec3) Transform {
 
 // Mat4 resolves the transform to a model matrix.
 func (t Transform) Mat4() m.Mat4 {
-	if t.Matrix != nil {
-		return *t.Matrix
+	return m.TRS4(t.Position, t.rotation(), t.scale())
+}
+
+// scale reads an all-zero Scale as the identity, and any other as written.
+func (t Transform) scale() m.Vec3 {
+	if t.Scale == (m.Vec3{}) {
+		return m.Vec3{X: 1, Y: 1, Z: 1}
 	}
-	scale := t.Scale
-	if scale == 0 {
-		scale = 1
-	}
-	return m.TRS4(t.Position, t.rotation(), m.Vec3{X: scale, Y: scale, Z: scale})
+	return t.Scale
 }
 
 // rotation reads Rotation as the identity when it was never written. The zero
@@ -73,18 +83,14 @@ func cameraView(t Transform) (m.Mat4, bool) {
 	return cameraBasis(t).InverseAffine()
 }
 
-// cameraBasis is the world matrix a camera is read through: its own, with a TRS
-// camera's scale dropped, because a scaled camera scales the world instead. A
-// Matrix override is taken verbatim - a caller handing in a whole matrix has
-// said what they mean.
+// cameraBasis is the world matrix a camera is read through: its own, with the
+// scale dropped, because a scaled camera scales the world instead.
 //
 // It exists so cameraView and viewDirection cannot disagree about which matrix
 // the camera is. They resolve the same rotation from it, one inverted and one
 // not, and a scale applied to one but not the other would tilt every
 // view-dependent shading term against the geometry it shades.
 func cameraBasis(t Transform) m.Mat4 {
-	if t.Matrix == nil {
-		t.Scale = 1
-	}
+	t.Scale = m.Vec3{}
 	return t.Mat4()
 }

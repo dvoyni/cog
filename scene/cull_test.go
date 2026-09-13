@@ -36,7 +36,7 @@ func TestBoundsResolveNeverCullThenExplicitThenBakedThenNever(t *testing.T) {
 }
 
 // A draw's world sphere scales by the largest axis of its matrix: exact under
-// scalar Scale, conservative under a non-uniform Matrix.
+// a uniform Scale, conservative under a non-uniform one.
 func TestWorldRadiusIsTheLocalRadiusTimesTheLargestAxisScale(t *testing.T) {
 	scaled := prepareDraw(drawRecord{transform: At(1, 2, 3).WithScale(2)}, boxSphere)
 	if !scaled.cullable {
@@ -49,10 +49,9 @@ func TestWorldRadiusIsTheLocalRadiusTimesTheLargestAxisScale(t *testing.T) {
 		t.Fatalf("scale 2 gave radius %v, want %v", scaled.sphere.Radius, want)
 	}
 
-	stretched := m.Scaling4(1, 5, 2)
-	stretchedDraw := prepareDraw(drawRecord{transform: Transform{Matrix: &stretched}}, boxSphere)
+	stretchedDraw := prepareDraw(drawRecord{transform: Transform{Scale: m.Vec3{X: 1, Y: 5, Z: 2}}}, boxSphere)
 	if want := 5 * boxSphere.bounds.Radius; !near(stretchedDraw.sphere.Radius, want) {
-		t.Fatalf("a (1,5,2) matrix gave radius %v, want the largest axis' %v", stretchedDraw.sphere.Radius, want)
+		t.Fatalf("a (1,5,2) scale gave radius %v, want the largest axis' %v", stretchedDraw.sphere.Radius, want)
 	}
 }
 

@@ -41,9 +41,9 @@ type Store[T any] struct {
 	// erased header can mirror it and the two layouts stay identical.
 	trivial bool
 	// lists and owner are what validation mode needs and what a release build
-	// never reads: the offsets of the List backing pointers in a row, and the
+	// never reads: the Lists in a row and the Lists within their elements, and the
 	// Component's name for the diagnostic.
-	lists []uintptr
+	lists []listSite
 	owner string
 }
 
@@ -60,7 +60,7 @@ type storeHeader struct {
 	owners  []Entity
 	dense   denseRows
 	trivial bool
-	lists   []uintptr
+	lists   []listSite
 	owner   string
 }
 
@@ -94,7 +94,7 @@ func NewStore[T any](en *Entities, ids uint32) *Store[T] {
 		owners:  make([]Entity, 0, ids),
 		dense:   make([]T, 0, ids),
 		trivial: PointerFree(rowType) == nil,
-		lists:   listOffsets(rowType),
+		lists:   listSites(rowType),
 		owner:   rowType.String(),
 	}
 	for i := range s.sparse {

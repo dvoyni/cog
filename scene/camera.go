@@ -70,12 +70,12 @@ const TagForward PassTag = "forward"
 // colour is always kept, and LoadDiscard on colour is not offered, since it
 // only pays for a pass that provably covers its whole target.
 type Pass struct {
-	Tag        PassTag         // zero reads as TagForward
-	Target     gfx.TargetDescr // zero is the screen sentinel; gfx.NoTarget() for depth-only
-	Depth      gfx.DepthDescr  // zero is gfx.DepthAuto(), pooled by size and shared
-	ClearColor *m.Color        // nil preserves
-	ClearDepth *float32        // nil preserves; 1.0 is the useful value
-	Order      gfx.Order       // offset from the camera id, not an absolute
+	Tag        PassTag          // zero reads as TagForward
+	Target     gfx.TargetDescr  // zero is the screen sentinel; gfx.NoTarget() for depth-only
+	Depth      gfx.DepthDescr   // zero is gfx.DepthAuto(), pooled by size and shared
+	ClearColor m.Maybe[m.Color] // absent preserves
+	ClearDepth m.Maybe[float32] // absent preserves; 1.0 is the useful value
+	Order      gfx.Order        // offset from the camera id, not an absolute
 }
 
 // CameraDescr is everything a camera is. Clears live on its passes, not here:
@@ -128,8 +128,8 @@ func (d CameraDescr) shear() float32 {
 
 // depthClearFar is the depth a pass clears to. Depth is conventional — near
 // maps to 0, far to 1, compare Less — so the useful clear is the far plane. The
-// naive ClearDepth: &zero clears to the near plane and hides the whole scene.
-var depthClearFar float32 = 1
+// naive ClearDepth: m.Some(0) clears to the near plane and hides the whole scene.
+const depthClearFar float32 = 1
 
 // defaultPass is the single pass a camera with no declared passes emits: the
 // forward tag, the screen, at the camera's own order, colour preserved and
@@ -140,7 +140,7 @@ var depthClearFar float32 = 1
 // texture with every other same-size DepthAuto pass in the frame, so it must
 // clear depth or render against whatever the previous pass left there.
 func defaultPass() Pass {
-	return Pass{Tag: TagForward, ClearDepth: &depthClearFar}
+	return Pass{Tag: TagForward, ClearDepth: m.Some(depthClearFar)}
 }
 
 // tag reads an unwritten tag as the forward pass.

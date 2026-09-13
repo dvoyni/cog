@@ -191,8 +191,8 @@ and it is what makes [the Store's flat index](#the-store) affordable.
 pointer it holds, it holds to memory nothing can write. That is
 **mechanically checkable**: a `reflect.Type` walk at registration, where cost is
 irrelevant. It permits numerics, bools, fixed-size arrays, `Entity`, structs of
-those, **`string`**, and **`ecs.List[T]`**. It refuses pointers, bare slices,
-maps, channels, funcs, interfaces and `sync` types.
+those, **`string`**, **`m.Blob`** and **`ecs.List[T]`**. It refuses pointers,
+bare slices, maps, channels, funcs, interfaces and `sync` types.
 
 The check reports the offending field **by path**, because the field that fails
 is usually several structs down and naming only the Component is useless:
@@ -220,6 +220,7 @@ company, and the split is sharp rather than a matter of degree:
 | --- | --- |
 | a `float32`, an `Entity`, a `[32]byte` | no — it is a copy of the bytes |
 | a **`string`** | **no** — the header is a copy and the bytes are immutable |
+| an **`m.Blob`** | **no, by contract** — the bytes are never written after construction, and nothing checks that |
 | a `[]T` | **yes** — the header is a copy and the array is shared |
 | an **`ecs.List[T]`** | only through `Set`, which validation mode checks |
 
@@ -227,7 +228,9 @@ A System holding nothing but `read{C}` writing the Store through a shared
 backing array is a data race **no lock anywhere names**, and it would make the
 claim this document opens with — that under-declaration is unrepresentable —
 false. So `string` is admitted outright, for a property rather than as an
-exception, and a variable-length run is admitted only as a [List](#the-list).
+exception, static bytes are admitted as an [`m.Blob`](#mblob-static-bytes-on-trust)
+on a contract rather than a property, and a variable-length run is admitted
+only as a [List](#the-list).
 
 **Copying.** A Component is copied into and out of a Store by value and must
 stay meaningful after the thing it was copied from is gone. Every refused kind
@@ -346,9 +349,28 @@ List written into the Component under an ordinary write lock. Where the length
 changes every frame the answer is unchanged — a fixed-capacity array with a live
 count, a child Entity, or a side store keyed by Entity.
 
-**`List[T]` where `T` itself contains a List is refused.** Validation stamps the
-arrays a Component row names and cannot reach one a List's elements name, so
-allowing it would ship a check with a silent hole in it.
+**`List[T]` where `T` itself contains a List is admitted**, and validation
+reaches it. This was refused at first, because validation stamped List backing
+arrays at fixed offsets within a row and an array a List's *elements* name sits
+at no fixed offset — allowing it would have shipped a check with a silent hole
+in it. The hole is closed instead: registration records, for each List, its
+element stride and the Lists within one element, and every stamp walks each
+outer List's elements and stamps every nested backing array with the same mode
+and owner as the List holding it. A `Set` on a nested List reached through a read
+handle therefore panics exactly as a flat one does. Release builds are unchanged:
+the walk lives in the validating file and nowhere else.
+
+The trade is stated because it is a real one. **A nested row stamps n+1 arrays
+where a flat one stamps one**, so it fills the bounded stamp table n+1 times as
+fast, and the table's oldest-first eviction forgets sooner — a write through a
+nested List stamped long ago is likelier to go undiagnosed than the same write
+through a flat one.
+
+**There is no `List.Raw()`.** A read-only view of the backing array would be a
+`[]T` nothing can check, and the only argument for one is copy-out cost, which
+was measured rather than assumed: copying four 328 B elements out through `All()`
+into reused scratch costs **60 ns and 0 allocations** (reproduced at 51 ns), because
+the iterator inlines. A view is added if a benchmark asks for it, not before.
 
 **Deep-copying on the way into the Store was considered and does not work.** It
 fixes ownership and not access: after a copy-in, the header a *read* yields
@@ -356,6 +378,30 @@ still points at Store-owned memory, so the read-lock holder can still write
 through it. The hazard is on the read-out side, and closing it there means a
 deep copy per entity per frame — an allocation on the hot path. Copying at the
 boundary cannot manufacture immutability.
+
+### `m.Blob`: static bytes, on trust
+
+**`m.Blob` is admitted by type identity, and it is the one kind admitted on a
+contract rather than a property.** A Blob is a `[]byte` whose documented contract
+is that the bytes a Component holds are never written after construction. A Blob
+that honours it is exactly as safe to hand a reader as a string is. Nothing
+enforces it: a write through a Blob is an ordinary slice write with no method in
+front of it, so **validation mode cannot detect one** — the stamp table watches
+`List.Set`, and there is no `Blob.Set` to watch.
+
+It is admitted anyway because the bytes engine types carry — a texture's pixels,
+a buffer's contents, a material parameter's raw layout — are static in practice,
+and the alternatives each cost something nothing downstream uses. A `List[byte]`
+would copy megabytes on construction and could not adopt an arena. A `string`
+would copy on the way in and again on the way out to every API that takes bytes,
+where a `Blob` converts to and from `[]byte` for free. So `gfx`'s descriptors
+hold Blobs and are Components as they stand. Recognition is by identity, so a
+caller's own named `[]byte` type is still a slice and is still refused; `ecs`
+imports `m` for the identity, which is a leaf package and makes no cycle.
+
+**`PointerFree` still refuses a Blob**, so a Store holding one is scanned, takes
+the typed copy, and zeroes a vacated row — the same three mechanisms a string or
+a List costs.
 
 ### Validation mode
 
@@ -367,7 +413,8 @@ it. This is ark's own pattern (`//go:build ark_debug`) and Unity DOTS's
 builds).
 
 The check stamps each List backing array with the last handle it was reached
-through, and `Set` consults the stamp. Four cases, all tested:
+through, and `Set` consults the stamp. Four cases, all tested flat, and the
+read, write and stored cases tested again one List further in:
 
 | what the code does | validating build |
 | --- | --- |
@@ -375,6 +422,7 @@ through, and `Set` consults the stamp. Four cases, all tested:
 | `Set` through a `C` read field, or a `Get[C]` | **panics**, naming the Component and the mode |
 | `Set` through a value retained past the `All()` that yielded it | **panics**, naming the run |
 | `Set` through the caller's own copy, after the value entered a Store | **panics** — `ListOf` copies, but `Set` shares |
+| any of the above, on a List inside another List's elements | the same as the flat case — the stamp walks nested Lists |
 
 **This is detection and not prevention, and that is a weaker guarantee than
 anything else in this document.** `string` is sound by construction; a List is
@@ -387,7 +435,9 @@ environment](#what-the-numbers-are-and-what-they-are-not), would not.
 What it does not catch is stated in `validate_on.go` rather than left to be
 discovered: a write through `unsafe`; a write by a callee the value was passed
 to, which is reported against whoever called `Set`; a List whose array was
-evicted from the bounded table; and anything a run never executes. Its cost is a
+evicted from the bounded table, which a nested List fills faster; a write
+through an `m.Blob`, which has no method to check; and anything a run never
+executes. Its cost is a
 map write per List field per stamped row per run under one mutex, so a
 validating build serialises where a release build runs concurrently. That cost
 is confined to a build nobody ships, which is the whole reason it is a tag.

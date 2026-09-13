@@ -210,12 +210,17 @@ type drawRecord struct {
 	layers    LayerMask
 	transform Transform
 	// stretch is the non-uniform scale scene applied itself, on top of the
-	// transform's scalar Scale, to turn a unit mesh into a line, an edge or a
-	// plane of the requested size. Zero means none. It lives here rather than
-	// in Transform.Matrix so the recording API's scalar-Scale decision stays
-	// exactly as stated and no record points into a growing arena.
+	// transform's own Scale, to turn a unit mesh into a line, an edge or a
+	// plane of the requested size. Zero means none.
 	stretch m.Vec3
-	color   m.Color
+	// matrix, when non-nil, is the whole world matrix and the transform is not
+	// consulted. It is how a model expansion places a primitive at its
+	// flattened node world, which no position, rotation and scale can spell in
+	// general; it points into the flush's world arena, which is sized before
+	// the first record points into it, so it never moves under one. Nothing a
+	// caller records sets it.
+	matrix *m.Mat4
+	color  m.Color
 	// selfLit draws the shape as black with color as its emissive, so it
 	// reads the same in a frame with no lights at all.
 	selfLit bool
@@ -277,14 +282,13 @@ type drawRecord struct {
 // world resolves the draw's model matrix: its transform, with the internal
 // stretch folded into the scale when there is one.
 func (r drawRecord) world() m.Mat4 {
+	if r.matrix != nil {
+		return *r.matrix
+	}
 	if r.stretch == (m.Vec3{}) {
 		return r.transform.Mat4()
 	}
-	scale := r.transform.Scale
-	if scale == 0 {
-		scale = 1
-	}
-	return m.TRS4(r.transform.Position, r.transform.rotation(), r.stretch.MulS(scale))
+	return m.TRS4(r.transform.Position, r.transform.rotation(), r.stretch.Mul(r.transform.scale()))
 }
 
 // pbrRecord builds the bundled PBR record one recorded draw binds.

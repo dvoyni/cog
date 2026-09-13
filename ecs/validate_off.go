@@ -26,6 +26,6 @@ func newRunToken(string) *runToken { return nil }
 func (*runToken) begin() {}
 func (*runToken) end()   {}
 
-func stampStored(unsafe.Pointer, []uintptr, string)                   {}
-func stampRun(unsafe.Pointer, []uintptr, string, *runToken, listMode) {}
-func checkListWritable(unsafe.Pointer)                                {}
+func stampStored(unsafe.Pointer, []listSite, string)                   {}
+func stampRun(unsafe.Pointer, []listSite, string, *runToken, listMode) {}
+func checkListWritable(unsafe.Pointer)                                 {}

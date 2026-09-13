@@ -84,7 +84,7 @@ type queryField struct {
 	// registers per Entity, and widening it would make a release build pay for
 	// a check it does not contain. Reaching these costs a memory load, which is
 	// affordable in the only build that reads them.
-	lists []uintptr
+	lists []listSite
 	owner string
 	// copy is the typed copy this field takes instead of fill's sized moves,
 	// and it is nil for every pointer-free Component — which is every Component

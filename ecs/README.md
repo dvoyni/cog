@@ -31,7 +31,7 @@ classification both share; `plugin.go` the plugin that publishes the authority.
 
 ## Dependencies
 
-- Go packages: the standard library and `kernel`
+- Go packages: the standard library, `kernel`, and `m` for `m.Blob`
 - Plugin dependencies: none
 - Configuration: none
 
@@ -187,9 +187,9 @@ func PointerFree(t reflect.Type) error // the fast-path property
 **A Component type contains no mutable indirection, transitively** — every
 pointer it holds, it holds to memory nothing can write. That is mechanically
 checkable: one walk, run once when the type is registered. It permits numerics,
-bools, fixed-size arrays, `Entity`, structs of those, **`string`** and
-**`ecs.List[T]`**; it refuses pointers, bare slices, maps, channels, funcs and
-interfaces.
+bools, fixed-size arrays, `Entity`, structs of those, **`string`**,
+**`m.Blob`** and **`ecs.List[T]`**; it refuses pointers, bare slices, maps,
+channels, funcs and interfaces.
 
 **The rule is about the lock unit, not the collector.** A read yields a copy,
 and that is what makes `read{C}` sound for concurrent readers — but only where
@@ -199,11 +199,22 @@ the copy is not itself a write handle:
 | --- | --- |
 | a number, an `Entity`, a `[32]byte` | no |
 | a **`string`** | **no** — the header is a copy and the bytes are immutable |
+| an **`m.Blob`** | **no, by contract** — its bytes are never written after construction |
 | a `[]T` | **yes** — refused for exactly this |
 | an **`ecs.List[T]`** | only through `Set`, which validation mode checks |
 
 Copying and serialisation come second, and a string satisfies both: it stays
 meaningful after the thing it was copied from is gone, and it encodes trivially.
+
+**`m.Blob` is admitted on trust.** It is a `[]byte` whose contract is that the
+bytes a Component holds are never written after construction, recognised by
+type identity — a named `[]byte` of your own is still refused. Nothing checks
+the contract, and validation mode cannot see a write through a Blob, because a
+Blob has no method to watch. It is admitted because the bytes engine types carry
+— a texture's pixels, a buffer's contents, a parameter's raw layout — are static
+in practice, and a `List[byte]` would copy them for a guarantee nothing uses.
+That is what makes `gfx.ParameterDescr`, `TextureDescr` and `BufferDescr`
+Components as they stand. `PointerFree` still refuses one.
 
 The error names the offending field **by path**, because the field that fails is
 usually several structs down and naming only the Component is useless:
@@ -215,7 +226,7 @@ ecs.PathedDrawable.Deep.Inner.Handle is a ptr, which is mutable indirection
 `PointerFree` is still here and still means what it meant. It is no longer the
 gate but the **fast path**: a pointer-free Component is copied by sized moves,
 left where it lies by a swap-remove, kept in a span the mark phase never walks,
-and iterated by an unrolled filler. A Component holding a string or a List gives
+and iterated by an unrolled filler. A Component holding a string, a Blob or a List gives
 all four up, for its own Store only — so prefer `[32]byte` wherever the bound is
 real.
 
@@ -250,6 +261,16 @@ allocation, and a List whose length changes is a new List written into the
 Component under a write lock. Where the length changes every frame, prefer a
 fixed-capacity array with a live count, or a child Entity.
 
+**A List may hold elements that hold Lists.** Validation walks each outer List's
+elements and stamps every nested backing array exactly as it stamps the outer
+one, so a nested `Set` through a read panics as a flat one does. The cost lands
+only in a validating build: a nested row fills the bounded stamp table faster, so
+its oldest-first eviction forgets sooner.
+
+**There is no `Raw()`.** Copy out through `All()` into scratch you reuse: four
+328 B elements cost about 60 ns and no allocation, because the iterator inlines.
+A read-only view nothing can check waits for a benchmark that asks for it.
+
 In preference order, variable-length data has four answers: **a child Entity**
 with an owning reference; **a fixed-capacity array** where the bound is small
 and real; **a `List`** where the bound is not real but the contents are set at
@@ -275,7 +296,9 @@ concurrent reader holds read{game.Inventory}. Name the Component as
 
 It catches a write through a read field or a `Get`, a write through a value
 retained past the `All()` that yielded it, and a write through the caller's own
-copy after that value entered a Store. Without the tag `validate` is a constant
+copy after that value entered a Store — and each of those one List further in,
+for a List whose elements hold Lists. It does not see a write through an
+`m.Blob`. Without the tag `validate` is a constant
 `false`, so a release build contains no branch, no table and no load for any of
 it.
 

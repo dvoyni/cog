@@ -173,7 +173,10 @@ q.Box(0, scene.At(0, 0, 0), m.NewColorSrgb(0.42, 0.71, 0.94, 1))
 
 **Every slice field on every descriptor is borrowed for the duration of the
 call.** Scene copies into its frame arena before returning, so a hot-loop caller
-reuses one backing array.
+reuses one backing array. That includes a draw's `Material` — its tag entries
+and each entry's parameters — but not the bytes a parameter carries, which are
+`m.Blob`s and static by contract; see [Materials are copied at
+record](#materials-are-copied-at-record).
 
 ### Transform
 
@@ -181,8 +184,7 @@ reuses one backing array.
 type Transform struct {
     Position m.Vec3
     Rotation m.Quat
-    Scale    float32 // zero means 1
-    Matrix   *m.Mat4 // non-nil replaces the whole transform
+    Scale    m.Vec3 // all zero means (1,1,1); otherwise literal
 }
 
 func At(x, y, z float32) Transform
@@ -191,13 +193,25 @@ func (t Transform) WithRotation(q m.Quat) Transform
 func LookAt(eye, target, up m.Vec3) Transform
 ```
 
-The zero value is the identity. `Scale` is **scalar**, following
-`canvas.SpriteTransform.Scale`: an `m.Vec3` scale reads as "twice as wide" for
-`m.Vec3{X: 2}` but must silently become `(2,1,1)`, a legitimately flattened
-scale is inexpressible, and it forces the inverse-transpose normal path on every
-draw. Non-uniform scale goes through `Matrix`, which replaces the transform
-whole and is what sets `SCENE_NONUNIFORM` at pack time
-(see [Sorting, culling, and batching](#sorting-culling-and-batching)).
+The zero value is the identity. `Scale` is **per axis**, and only an all-zero
+`Scale` reads as the identity; **a partly zero scale is taken literally**. So
+`m.Vec3{X: 2}` collapses the draw onto the X axis rather than silently becoming
+`(2,1,1)`, and a legitimately flattened scale — `m.Vec3{X: 1, Y: 1}` — is
+expressible. `WithScale(s)` is the uniform spelling, and `WithScale(0)` is the
+identity, as the zero value is.
+
+**A non-uniform scale does not force the inverse-transpose onto every draw.**
+That was the argument for a scalar `Scale` with a `Matrix *m.Mat4` escape hatch,
+and it never held: the packer flags `SCENE_NONUNIFORM` per instance from the
+packed matrix itself (see [The instance record](#the-instance-record)), so only
+an instance whose basis does not scale uniformly pays for the cofactors, however
+its scale was spelled.
+
+**There is no `Matrix`.** A pointer field made `Transform` mutable indirection,
+which an ECS Component cannot hold, and everything it spelled that a position, a
+rotation and a per-axis scale cannot — a shear — is not something scene draws. A
+model primitive's flattened node world is a whole matrix, and scene carries that
+on its own draw record, where no caller sees it.
 
 ### Layers
 
@@ -224,8 +238,8 @@ precisely the frame being debugged.
 line-width control at all, so GPU lines rasterise one physical pixel wide and
 effectively vanish on a hidpi display. A stretched box has caller-controlled
 thickness and keeps scene to one built-in shader and one topology, batching with
-everything else. Scene builds the non-uniform matrix internally, so the scalar
-`Scale` decision is untouched at the API surface. The cost is that thickness is
+everything else. Scene builds the stretch internally, on top of whatever `Scale`
+the transform carries. The cost is that thickness is
 world-space, so a distant line thins out.
 
 The unit box, sphere and plane are three durable `MeshRef`s baked **lazily on
@@ -296,8 +310,8 @@ type Pass struct {
     Tag        PassTag
     Target     gfx.TargetDescr // zero is the screen sentinel; NoTarget() for depth-only
     Depth      gfx.DepthDescr  // zero is DepthAuto
-    ClearColor *m.Color        // nil preserves
-    ClearDepth *float32        // nil preserves; 1.0 is the useful value
+    ClearColor m.Maybe[m.Color] // absent preserves
+    ClearDepth m.Maybe[float32] // absent preserves; 1.0 is the useful value
     Order      gfx.Order       // offset from the camera id
 }
 
@@ -480,16 +494,22 @@ demo scale.
 hide a real caller bug behind a degenerate projection.
 
 **Spec trap worth stating out loud:** under conventional depth the useful
-`ClearDepth` is **1.0**. The naive `ClearDepth: &zero` clears to the *near*
+`ClearDepth` is **1.0**. The naive `ClearDepth: m.Some[float32](0)` clears to the *near*
 plane and hides the entire scene.
 
 ### Passes
 
 ```go
 func defaultPass(id CameraID) Pass {
-    return Pass{Tag: TagForward, ClearDepth: &one, Order: gfx.Order(id)}
+    return Pass{Tag: TagForward, ClearDepth: m.Some[float32](1), Order: gfx.Order(id)}
 }
 ```
+
+**A clear is an `m.Maybe`, not a pointer**, and its zero value is absent — so a
+zero `Pass` preserves colour and depth exactly as the nil pointers it replaced
+did, and a present zero (a clear to transparent black) stays distinct from an
+absent one. The pointers made `Pass` mutable indirection, which kept a camera's
+pass list out of an ECS Component for no reason a clear value has.
 
 An empty `Passes` means exactly one pass: tag `forward`, screen target, `Order`
 at the camera id, **colour preserved and depth cleared to 1.0**.
@@ -501,7 +521,7 @@ clear depth or it inherits garbage** — which would make the simplest possible
 scene render against garbage depth. Two cameras compositing into one target
 almost always want independent depth; the exception (a weapon view depth-tested
 against the world) is exactly the case that should have to write an explicit
-`Pass` with `ClearDepth: nil`.
+`Pass` with no `ClearDepth`.
 
 **Clears live only on passes.** `CameraDescr` carries no clear fields; having
 them on both with "the camera's are ignored when `Passes` is non-empty" is a
@@ -518,7 +538,7 @@ whole target, which scene cannot know.
 `Pass.Target` takes the gfx target handle **directly** — the screen sentinel, a
 durable `ResourceQueue` texture, or a frame-local `q.TemporaryTarget` — passed
 through untouched. Scene wraps it in no name registry shared with canvas. A pass
-with `NoTarget()` and no explicit depth, or with `NoTarget()` and a non-nil
+with `NoTarget()` and no explicit depth, or with `NoTarget()` and a present
 `ClearColor`, is a reported error.
 
 **A `NoTarget()` pass does not reach the GPU on the desktop backend, and that is
@@ -535,7 +555,7 @@ it is deliberately arranged so the skip costs nothing: its prepass writes into a
 depth texture **nothing else reads**.
 
 That arrangement is the rule to carry, not an accident of one demo. **A pass
-whose depth another pass loads with `ClearDepth: nil` renders against undefined
+whose depth another pass loads with no `ClearDepth` renders against undefined
 depth wherever the depth-only pass is skipped** — the whole minimap, not the one
 draw. A depth-only pass may be *written* on any backend but its output may be
 *depended on* only where the backend encodes it, which is exactly the constraint
@@ -648,6 +668,91 @@ In v1 the only tag is `forward`, and the bundled PBR is a `Material` with one
 `forward` entry. The shape is paid for now rather than broken later: when
 shadows land they add a `shadow` entry to that same value, and every draw that
 passed nil gains shadow casting **with no call-site change**.
+
+### Materials are copied at record
+
+**`Mesh` and `Model` copy a draw's `Material` into the frame's arenas when the
+call is made** — its tag entries into one arena, each entry's parameters into the
+parameter arena `Params` and `OverrideParams` already use — exactly as every other
+slice on those calls is copied. The flush reads the copy. It used to read the
+caller's slices, which obliged every caller to keep a material alive and
+unchanged until the flush, with nothing anywhere saying so; that obligation is
+gone, and a caller may reuse or rewrite a material the moment the call returns.
+A nil `Material` stays nil, because nil is the bundled PBR.
+
+**The bytes a parameter carries are not copied.** A texture's pixels, a buffer's
+contents and a raw parameter's layout are `m.Blob`s, static by contract, so the
+copy is of descriptors and never of megabytes.
+
+**Batching is unchanged.** A caller material is interned per frame by content
+(see [The sort key](#the-sort-key)), and the content key never depended on where
+the descriptors live, so a copied material batches with its equals exactly as
+the original did.
+
+**What it replaced, and what it costs.** Two alternatives were measured first
+and refused, and their per-draw numbers are what the frame benchmark below is
+checked against. Both come from a throwaway microbenchmark over a
+four-parameter PBR material (one texture, one colour, two floats), 2 000 000
+iterations, medians of five, AMD Ryzen 9 7950X3D, Go 1.27.1, windows/amd64:
+
+| per draw | ns | allocs | at 5 000 draws |
+| --- | --- | --- | --- |
+| `Material.key()`, the content key the flush pays per draw naming a material | **106** | 0 | 0.53 ms |
+| rebuilding a whole material into a frame arena that keeps its backing | **62** | 0 | 0.31 ms |
+
+A durable `MaterialRef` — a handle baked once, whose key is computed at bake —
+would have skipped the key. It was refused for one route instead of two: a bake
+step and a durable table for something a draw can say by value
+([#307](https://github.com/dvoyni/cog/issues/307)); it is reopened only if the
+frame benchmark asks ([#311](https://github.com/dvoyni/cog/issues/311)).
+
+### The frame benchmark
+
+`BenchmarkFrame` in `framebench_test.go` records and flushes **5 000 separately
+recorded `Mesh` draws** — the shape of an ECS System recording one draw per
+Entity — through the kernel, the flush, gfx's translation and a backend that
+draws nothing. The three cases differ only in the material each draw names:
+**none** (the bundled PBR); **shared** (one caller `Material` built once and named
+by every draw: the bundled PBR's own eleven parameters over scene's baked
+defaults, plus one float); and **override** (that material plus a one-float
+`Params` override, the same value on every draw).
+
+Measured before and after the record-time copy, both test binaries built first
+and ten runs of each interleaved, 60 frames a run, medians; AMD Ryzen 9 7950X3D,
+Go 1.27.1, windows/amd64:
+
+| per frame | before: ms | after: ms | Δ per draw | B | allocs | batches |
+| --- | --- | --- | --- | --- | --- | --- |
+| none | 12.75 | 12.39 | −71 ns (noise) | 15.0 MB | 5 028 | 5 000 |
+| shared | 13.71 | 15.16 | **+291 ns** | 14.7 MB | 27 | 5 000 |
+| override | 14.56 | 16.46 | **+380 ns** | 14.7 MB | 27 | 5 000 |
+
+Four things are worth carrying out of it.
+
+- **The copy is not free, and it costs more than the arena-rebuild row
+  predicted.** A `gfx.ParameterDescr` is 328 B, so the shared material's eleven
+  parameters are 3.6 KB of descriptors per draw — 18 MB a frame of copying at
+  5 000 draws, against the four-parameter material the 62 ns row measured. The
+  run ranges do not overlap, so +10.6% and +13.1% of a frame are real rather than
+  run order. Copying a shared material once per frame instead of once per draw
+  is [#314](https://github.com/dvoyni/cog/issues/314).
+- **The content key is not where a material's frame cost is.** Before the copy,
+  naming a shared material cost 192 ns a draw over the bundled PBR, against the
+  106 ns the key alone was predicted at — key, intern and a material record per
+  batch together.
+- **Allocation is flat.** The copy lands in arenas that keep their backing
+  across frames, so it adds no allocation in either case. (The bundled-PBR case's
+  5 028 allocations a frame predate this work and are not the material path.)
+- **Every draw is its own batch** in all three cases, before and after: separately
+  recorded draws are not merged, which is the deferred automatic collapse
+  ([#49](https://github.com/dvoyni/cog/issues/49)), and the copy changes nothing
+  about batching.
+
+**One trap in writing such a benchmark.** A material whose textures are inline
+bytes measures gfx rather than scene: gfx bakes an inline texture into a
+temporary per draw, and deduplicating 25 000 of those per frame took two thirds
+of a first attempt's CPU samples and ran the shared case to 80 ms. The shared
+material binds baked textures for that reason.
 
 ---
 
@@ -1134,9 +1239,9 @@ Two rejected alternatives, both worth recording because each looks cheaper:
 - **A 32 B record** with scalar scale packed into translation's `w` would cut
   pose memory and per-vertex loads by a third — the single largest cost in this
   design. It is rejected because **squash-and-stretch is animated non-uniform
-  scale**, a mainstream idiom, and unlike `Transform` there is no `Matrix`
-  escape hatch to fix it at, so a stretched bone would be silently averaged away
-  with no call site to correct.
+  scale**, a mainstream idiom, and unlike a draw's `Transform` a pose has no
+  call site where a per-axis scale could be written, so a stretched bone would
+  be silently averaged away with nothing to correct.
 
 **Normals and tangents use a precomputed normal matrix, never a shader inverse.**
 Because the inverse bind can be non-orthonormal, so can the composed skinning
@@ -1774,8 +1879,8 @@ large mesh, but `Node` re-rooting is already the answer to "split this file
 apart".
 
 **World radius is the local radius times `max(|sx|,|sy|,|sz|)`** of the packed
-matrix — exact under scalar `Scale`, conservative under the `Matrix` escape
-hatch, since a sphere under non-uniform scale is not a sphere.
+matrix — exact under a uniform scale, conservative under a non-uniform one,
+since a sphere under non-uniform scale is not a sphere.
 
 Bounds resolution, in order:
 
@@ -1864,8 +1969,8 @@ stretched `Line3D`, a `WireBox` edge and a slab-shaped `Box` therefore shade
 *identically* with the flag and without it, however non-uniform they are — and a
 rotation does not change that, since `R·S·n ∝ R·n ∝ R·S⁻¹·n` for an eigenvector
 `n`. Setting the flag for them is still right; it is simply not observable
-there. What is observable is a **curved** surface under a caller's `Matrix`: a
-bottle squashed through the escape hatch loses its specular highlight outright
+there. What is observable is a **curved** surface under a caller's non-uniform
+`Scale`: a squashed bottle loses its specular highlight outright
 when the flag does not reach the shader, which is what `instancing` shows
 ([demo: instancing](https://github.com/dvoyni/cog/issues/96)).
 
@@ -2571,6 +2676,12 @@ Additions:
   `w <= eps` — and `Unproject(inverseViewProjection, ndc) Vec3`
 - `Ray{Origin, Dir}` with `NewRay` (normalises), `At`, `Transform`,
   `Mat4.TransformRay`, `IntersectSphere`, `IntersectPlane`, `IntersectBox3`
+- `Maybe[T]` — an inline optional whose zero value is absent, which is what a
+  `Pass` clear is, so a pass holds no pointer
+  ([#308](https://github.com/dvoyni/cog/issues/308))
+- `Blob` — a `[]byte` static by contract, which is what gfx's descriptors hold
+  their pixels, buffer bytes and raw parameter layouts in, so the ECS can admit
+  them ([#308](https://github.com/dvoyni/cog/issues/308))
 
 Fixes:
 
@@ -3033,7 +3144,7 @@ q.Camera(shadowCameraID, scene.CameraDescr{
         Tag:        "shadow",
         Target:     gfx.NoTarget(),
         Depth:      gfx.DepthTarget(shadowTex),
-        ClearDepth: &one,
+        ClearDepth: m.Some[float32](1),
         Order:      -1000, // ahead of every camera that samples it
     }},
 })
@@ -3203,12 +3314,12 @@ set.
 
 | Demo | Assets | Contracts |
 | --- | --- | --- |
-| `box` | **none** | debug vocabulary; `Transform` TRS and scalar `Scale`; `LookAt`; empty `Passes` → implicit forward pass at the camera id; sun and hemispheric ambient; the linear pipeline and present pass; every-zero-value-is-the-default; the `m` additions |
-| `pbr` | WaterBottle, AlphaBlendModeTest, BoxVertexColors, CompareBaseColor, EmissiveStrengthTest, PointLightIntensityTest | the whole material contract (glTF names, five slots, two 1×1 defaults, Khronos BRDF, `EnvBRDFApprox`, `COLOR_0`, flat `KHR_texture_transform` members); `alphaMode`→state and `Cull`; the back-to-front blend bucket; a rotated non-uniform basis through the lit path, via `Transform.Matrix`; point and spot lights, `Range` zero-means-infinite, the 16 cap and its silent drop; `emissive_strength`, `lights_punctual` as data |
+| `box` | **none** | debug vocabulary; `Transform` TRS and `WithScale`; `LookAt`; empty `Passes` → implicit forward pass at the camera id; sun and hemispheric ambient; the linear pipeline and present pass; every-zero-value-is-the-default; the `m` additions |
+| `pbr` | WaterBottle, AlphaBlendModeTest, BoxVertexColors, CompareBaseColor, EmissiveStrengthTest, PointLightIntensityTest | the whole material contract (glTF names, five slots, two 1×1 defaults, Khronos BRDF, `EnvBRDFApprox`, `COLOR_0`, flat `KHR_texture_transform` members); `alphaMode`→state and `Cull`; the back-to-front blend bucket; a rotated non-uniform basis through the lit path, via a per-axis `Transform.Scale`; point and spot lights, `Range` zero-means-infinite, the 16 cap and its silent drop; `emissive_strength`, `lights_punctual` as data |
 | `cameras` | reuses `box` + `pbr` | multi-camera, orthographic, `CullMask`, no `Viewport` → `TemporaryTarget` composited by canvas, negative ids, duplicate-id error; targets, `DepthAuto`/`DepthTarget`, `Order` sorting and pass merging; layer masks; multi-tag material and a `NoTarget()` depth-only pass; `WorldToScreen`/`ScreenToRay`, per-target `viewport m.Vec2`, behind-camera `ok`, `m.Ray.IntersectSphere` |
 | `animated` | Fox, AnimatedMorphCube **and its glTF-Quantized twin**, MorphStressTest, InterpolationTest | baked poses, `ClipPlay` crossfade, the 4-play cap, the rest frame, `PoseBytes`; sparse morph weights, `MorphWeights` override, the attribute mask; degenerate single-joint skins; u8 index widening. **The web canary.** The quantized twin is shared with `loading` and is not optional here: the attribute mask is *intersected with what the base primitive authored*, and the plain cube's authored `TANGENT` against the quantized one's absence is the only pair in the vendored set that can tell that rule from a mask read off the targets alone. |
 | `procedural` | none (custom WGSL) | `TemporaryMesh` vs `BakeMesh`, the generic `VertexLayout`, `UpdateMesh`, `ReleaseMesh` generations, `NeverCull`, the null skin and `SCENE_NOSKIN`; `BakeBuffer`/`ReBakeBuffer`/`BufferWithBytes`; a caller-supplied material with a custom layout |
-| `instancing` | reuses `box` + `pbr` | explicit `Transforms`, per-instance culling, the `materialID`/`meshID` sort key, `SCENE_NONUNIFORM` via the `Matrix` escape hatch, `Passes(dst)`; `firstInstance`, the per-batch material record, one instance arena bound by range |
+| `instancing` | reuses `box` + `pbr` | explicit `Transforms`, per-instance culling, the `materialID`/`meshID` sort key, `SCENE_NONUNIFORM` via a per-axis `Scale` per instance, `Passes(dst)`; `firstInstance`, the per-batch material record, one instance arena bound by range |
 | `loading` | CesiumMilkTruck, MultipleScenes, TextureSettingsTest, MeshPrimitiveModes, AnimatedMorphCube glTF-Quantized, InterpolationTest, `broken/truncated.glb`, `broken/does-not-exist.glb` | `Node` views and re-rooting; `Scene` naming a file's only scene (six vendored assets name theirs `Scene`, `CesiumMilkTruck` among them) and its unmatched report — but **no asset has a nameable *non-default* scene**: `MultipleScenes`, the set's only multi-scene file, leaves both of its unnamed, so a matched `Scene` here always resolves to the same draw the default would, async skip-never-substitute, `Preload`, `Material` replace vs `OverrideParams` merge, explicit unload with no texture cascade; `(value, ok)`, `State`, `Nodes`/`Bounds`/`AABB`, unmatched-node-reports-once; the four WebGPU papering-over gaps — **`InterpolationTest` is here for the u8-index one**, which none of the other five files in this set carries, and `does-not-exist.glb` for the absent-file failure, which is a *third* mode beside the truncated file and the invalid path. Sixteen stations on a grid, each drawn whether or not it can be, so **a bare pad is what skip-never-substitute looks like**. |
 
 `custom-shader` is **merged into `procedural`**, not dropped: a custom vertex

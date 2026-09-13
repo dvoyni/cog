@@ -76,7 +76,7 @@ func TestAColourlessPassThatClearsColourIsReported(t *testing.T) {
 	black := m.Color{A: 1}
 	pass := Pass{
 		Tag: "shadow", Target: gfx.NoTarget(),
-		Depth: gfx.DepthTarget(sizedTexture(1024, 1024)), ClearColor: &black,
+		Depth: gfx.DepthTarget(sizedTexture(1024, 1024)), ClearColor: m.Some(black),
 	}
 	if _, err := passAspect(1, pass, testViewport()); err == nil {
 		t.Error("a colourless pass was allowed to clear a colour it has no target for")
@@ -305,9 +305,9 @@ func TestObliqueViewDirectionIsTheProjectionRayNotTheCameraAxis(t *testing.T) {
 
 func TestViewDirectionIsUnitLengthUnderAScaledCamera(t *testing.T) {
 	// The view matrix ignores a TRS camera's scale, so the view direction must
-	// too, and a Matrix override that carries one must still come back unit.
+	// too, and a non-uniform one must still come back unit.
 	scaled := CameraDescr{
-		Transform:  Transform{Rotation: m.QuatAxisAngle(m.Vec3{Y: 1}, 0.4), Scale: 8},
+		Transform:  Transform{Rotation: m.QuatAxisAngle(m.Vec3{Y: 1}, 0.4), Scale: m.NewVec3(8)},
 		Projection: Oblique, Height: 10, Shear: 0.5, Near: -50, Far: 50,
 	}
 	if got := scaled.Transform.Mat4(); got[0] == 0 {
@@ -316,11 +316,10 @@ func TestViewDirectionIsUnitLengthUnderAScaledCamera(t *testing.T) {
 	if got := viewDirection(scaled).Vec3().Length(); !near(got, 1) {
 		t.Errorf("view direction length under a scaled camera = %v, want 1", got)
 	}
-	override := m.Translation4(3, 4, 5).Mul(m.Scaling4(2, 2, 2))
-	overridden := scaled
-	overridden.Transform = Transform{Matrix: &override}
-	if got := viewDirection(overridden).Vec3().Length(); !near(got, 1) {
-		t.Errorf("view direction length under a matrix override = %v, want 1", got)
+	stretched := scaled
+	stretched.Transform.Scale = m.Vec3{X: 2, Y: 3, Z: 4}
+	if got := viewDirection(stretched).Vec3().Length(); !near(got, 1) {
+		t.Errorf("view direction length under a non-uniformly scaled camera = %v, want 1", got)
 	}
 }
 

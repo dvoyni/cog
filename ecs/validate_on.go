@@ -114,31 +114,51 @@ func stamp(data unsafe.Pointer, entry listStamp) {
 // stampStored records that a value has entered a Store, so every alias of its
 // arrays — including the one the caller who built it still holds — becomes
 // writable only through a write-locked handle.
-func stampStored(row unsafe.Pointer, lists []uintptr, owner string) {
-	for _, offset := range lists {
-		stamp(listData(row, offset), listStamp{mode: modeStored, owner: owner})
-	}
+func stampStored(row unsafe.Pointer, lists []listSite, owner string) {
+	stampSites(row, lists, listStamp{mode: modeStored, owner: owner})
 }
 
 // stampRun records what a run handed out. A write field stamps modeWrite and a
 // read field modeRead, and both are stamped rather than only the read: a write
 // that left the previous read's stamp in place would report the next legal
 // write as an illegal one.
-func stampRun(row unsafe.Pointer, lists []uintptr, owner string, run *runToken, mode listMode) {
-	for _, offset := range lists {
-		entry := listStamp{run: run, mode: mode, owner: owner}
-		if run != nil {
-			entry.gen = run.gen.Load()
+func stampRun(row unsafe.Pointer, lists []listSite, owner string, run *runToken, mode listMode) {
+	entry := listStamp{run: run, mode: mode, owner: owner}
+	if run != nil {
+		entry.gen = run.gen.Load()
+	}
+	stampSites(row, lists, entry)
+}
+
+// stampSites stamps every List a row names, and every List those Lists'
+// elements name, with one entry: a nested backing array is reached through the
+// same handle as the List holding it, so it takes the same mode and owner.
+//
+// The walk is what makes a List of Lists checkable, and it is also what makes
+// one expensive to validate: a row holding a List of n elements, each with a
+// List of its own, stamps n+1 arrays rather than one, and they fill the table
+// below n+1 times as fast - so the oldest-first eviction forgets sooner, and a
+// write through a List stamped long ago is likelier to go undiagnosed.
+func stampSites(row unsafe.Pointer, lists []listSite, entry listStamp) {
+	for i := range lists {
+		site := &lists[i]
+		header := (*sliceHeader)(unsafe.Add(row, site.offset))
+		stamp(header.data, entry)
+		if len(site.nested) == 0 {
+			continue
 		}
-		stamp(listData(row, offset), entry)
+		for element := range header.len {
+			stampSites(unsafe.Add(header.data, uintptr(element)*site.stride), site.nested, entry)
+		}
 	}
 }
 
-// listData reads the backing-array pointer of the List at offset within a row.
+// sliceHeader is the layout of a List's slice field, read at a site's offset.
 // A List's slice header sits at the List's own offset, because the marker in
 // front of it is zero-size.
-func listData(row unsafe.Pointer, offset uintptr) unsafe.Pointer {
-	return *(*unsafe.Pointer)(unsafe.Add(row, offset))
+type sliceHeader struct {
+	data     unsafe.Pointer
+	len, cap int
 }
 
 // checkListWritable is the check List.Set makes. A backing array the table does

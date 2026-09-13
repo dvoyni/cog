@@ -18,7 +18,7 @@ import (
 // touching the frustum edge.
 func passAspect(id CameraID, pass Pass, view *app.Viewport) (float32, error) {
 	if pass.Target.IsNone() {
-		if pass.ClearColor != nil {
+		if _, clears := pass.ClearColor.Get(); clears {
 			return 0, ErrColourlessPassClearsColour{Camera: id, Tag: pass.tag()}
 		}
 		// A depth-only pass has no colour attachment to take a size from, and

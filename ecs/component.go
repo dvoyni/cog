@@ -6,6 +6,7 @@ import (
 	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/m"
 )
 
 // componentClass is one Component type as registration left it: how wide one
@@ -26,10 +27,11 @@ type componentClass struct {
 	// is zeroed on removal, and both of those are correctness rather than
 	// tuning: see copyValue.
 	trivial bool
-	// lists is every offset within the Component at which a List's backing
-	// array pointer sits, found once here. It is what validation mode stamps
-	// from, and it is nil for the overwhelming majority of Components.
-	lists []uintptr
+	// lists is every List within the Component, found once here: the offset
+	// its backing array pointer sits at, and the Lists within its elements. It
+	// is what validation mode stamps from, and it is nil for the overwhelming
+	// majority of Components.
+	lists []listSite
 	// owner is the Component type's name, kept because the only place it is
 	// wanted is a diagnostic and reaching back for a reflect.Type there would
 	// mean keeping one on the hot struct.
@@ -99,7 +101,7 @@ func RegisterComponent[C any](registrar *kernel.Registrar, en *Entities, ids uin
 	class := &componentClass{
 		size:    componentType.Size(),
 		trivial: trivial,
-		lists:   listOffsets(componentType),
+		lists:   listSites(componentType),
 		owner:   componentType.String(),
 		declareRead: func(access kernel.ResourceAccess) func() *storeHeader {
 			handle := access.GetRead[*Store[C]]()
@@ -135,8 +137,8 @@ func RegisterComponent[C any](registrar *kernel.Registrar, en *Entities, ids uin
 //
 // Every pointer a Component holds, it holds to memory nothing can write. That
 // admits numerics, bools, fixed-size arrays, Entity, structs of those, string,
-// and List[T]; it refuses pointers, slices, maps, channels, funcs, interfaces
-// and sync types.
+// m.Blob and List[T]; it refuses pointers, slices, maps, channels, funcs,
+// interfaces and sync types.
 //
 // The rule it replaced was "a Component contains no pointers, transitively",
 // which is a stronger statement than the design ever needed. Two of the three
@@ -156,6 +158,18 @@ func RegisterComponent[C any](registrar *kernel.Registrar, en *Entities, ids uin
 // and a slice is admitted only as a List, whose backing array is unexported and
 // whose one mutator is checked. See list.go.
 //
+// m.Blob is the one exception to that, and it is admitted on trust rather than
+// on a property. A Blob is a []byte whose contract is that nothing writes it
+// after construction, which is exactly the property a string has by
+// construction - so a Blob honouring its contract is as safe to hand a reader
+// as a string is. Nothing here can check the contract: a write through a Blob
+// is an ordinary slice write with no method in front of it, and validation mode
+// does not see it. It is admitted anyway because the engine's bytes - a
+// texture's pixels, a buffer's contents, a parameter's raw layout - are static
+// in practice, and a List would copy them on construction for a guarantee
+// nothing downstream uses. It is recognised by type identity, so a caller's own
+// named []byte is still a slice and is still refused.
+//
 // The error names the offending field by path, because the field that fails is
 // usually several structs down and naming only the Component is useless:
 //
@@ -167,13 +181,15 @@ func RegisterComponent[C any](registrar *kernel.Registrar, en *Entities, ids uin
 // does not.
 func Storable(t reflect.Type) error { return storable(t, t.String()) }
 
+// blobType is m.Blob, the static byte run Storable admits by identity.
+var blobType = reflect.TypeFor[m.Blob]()
+
 func storable(t reflect.Type, path string) error {
+	if t == blobType {
+		return nil
+	}
 	if isList(t) {
-		elem := listElem(t)
-		if listsWithin(elem) {
-			return refuseNestedList(elem, path)
-		}
-		return storable(elem, path+"[_]")
+		return storable(listElem(t), path+"[_]")
 	}
 	switch t.Kind() {
 	case reflect.String:
@@ -200,7 +216,7 @@ func storable(t reflect.Type, path string) error {
 		return nil
 	default:
 		return fmt.Errorf(
-			"%s is a %s, which is mutable indirection: a Component may hold a pointer only to memory nothing can write, so a string is admitted, a variable-length run belongs in an ecs.List, and everything else is a child Entity",
+			"%s is a %s, which is mutable indirection: a Component may hold a pointer only to memory nothing can write, so a string is admitted, static bytes belong in an m.Blob, a variable-length run belongs in an ecs.List, and everything else is a child Entity",
 			path, t.Kind())
 	}
 }

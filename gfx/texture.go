@@ -1,5 +1,7 @@
 package gfx
 
+import "github.com/dvoyni/cog/m"
+
 // TextureDescr describes a texture by resource path (TextureWithResource),
 // inline pixel bytes (TextureWithBytes), or a texture returned by
 // ResourceQueue.BakeTexture.
@@ -8,10 +10,11 @@ type TextureDescr struct {
 	path          string
 	width, height int
 	format        TextureFormat
-	pixels        []byte
-	copyData      bool
-	mipmaps       bool
-	id            TextureID
+	// pixels is static, for the reason BufferDescr.bytes gives.
+	pixels   m.Blob
+	copyData bool
+	mipmaps  bool
+	id       TextureID
 }
 
 // ID returns the baked texture identifier, or 0 when the descriptor is not baked.

@@ -231,8 +231,8 @@ func TestALineIsAStretchedBoxFromStartToEnd(t *testing.T) {
 				t.Fatalf("recorded %d draws, want 1", len(q.draws))
 			}
 			record := q.draws[0]
-			if record.transform.Matrix != nil {
-				t.Fatal("the line went through the Matrix escape hatch; scene builds its stretch internally")
+			if record.matrix != nil {
+				t.Fatal("the line went through a whole-matrix override; scene builds its stretch from the transform")
 			}
 			world := record.world()
 			if got := world.TransformPoint(m.Vec3{X: -0.5}); !nearVec3(got, test.start) {

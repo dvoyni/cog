@@ -176,7 +176,9 @@ func TestAModelDrawWithAMaterialReplacesTheFilesWholesale(t *testing.T) {
 		t.Fatalf("expanded to %d draws, want one per primitive", len(records))
 	}
 	for i := range records {
-		if &records[i].material[0] != &replacement[0] {
+		// The draw binds the recording's copy of the caller's material, so the
+		// two are one material by content rather than by address.
+		if len(records[i].material) != 1 || records[i].material.key() != replacement.key() {
 			t.Errorf("draw %d binds a material other than the caller's", i)
 		}
 		if records[i].pbr != nil {

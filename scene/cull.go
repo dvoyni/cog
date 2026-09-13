@@ -45,8 +45,9 @@ func resolveBounds(neverCull bool, explicit m.Sphere, mesh meshRecord) (m.Sphere
 
 // prepareDraw resolves one recorded draw's world matrix and world sphere. The
 // world radius is the local radius times the largest axis scale of the matrix -
-// exact under scalar Scale, conservative under the Matrix escape hatch, since a
-// sphere under non-uniform scale is not a sphere.
+// exact under a uniform scale, conservative under a non-uniform one - a per-axis
+// Scale, a shape's stretch, or a model primitive's flattened node world - since
+// a sphere under non-uniform scale is not a sphere.
 func prepareDraw(record drawRecord, mesh meshRecord) preparedDraw {
 	world := record.world()
 	prepared := preparedDraw{world: world, anim: record.anim}

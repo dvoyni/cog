@@ -18,6 +18,7 @@ type listsPlugin struct {
 	world      *Entities
 	ids        uint32
 	inventorys *Store[inventory]
+	grids      *Store[grid]
 }
 
 func (p *listsPlugin) Name() kernel.PluginName { return "lists" }
@@ -26,6 +27,7 @@ func (p *listsPlugin) Dependencies() []kernel.PluginName { return []kernel.Plugi
 
 func (p *listsPlugin) Register(registrar *kernel.Registrar, _ any) error {
 	p.inventorys = RegisterComponent[inventory](registrar, p.world, p.ids)
+	p.grids = RegisterComponent[grid](registrar, p.world, p.ids)
 	return nil
 }
 
@@ -160,6 +162,88 @@ func TestTheCallersOwnCopyIsClosedByStoring(t *testing.T) {
 	if !strings.Contains(caught, "already in the world") {
 		t.Fatalf("the panic does not say the value had entered a Store: %q", caught)
 	}
+}
+
+// TestAWriteThroughANestedReadIsCaught is the read case one List further out:
+// the List a read yielded holds elements that name backing arrays of their
+// own, and a write into one of those is the same write into the Store. The
+// stamp walks the outer List's elements, so it panics exactly as the flat case
+// does.
+func TestAWriteThroughANestedReadIsCaught(t *testing.T) {
+	var caught string
+	listWorld(t, func(registrar *kernel.Registrar, world *Entities) {
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](world,
+			func(q *Query[readGrid], spawn *Spawn[gridBundle]) {
+				spawn.New(gridBundle{Grid: twoByTwo()})
+				for _, it := range q.All() {
+					caught = recovered(func() { it.Grid.Rows.At(1).Cells.Set(0, 99) })
+				}
+			}))
+	})
+	if caught == "" {
+		t.Fatal("writing a nested List through a read field was allowed")
+	}
+	if !strings.Contains(caught, "read of ecs.grid") {
+		t.Fatalf("the panic does not name the Component and the mode: %q", caught)
+	}
+}
+
+// TestAWriteThroughANestedWriteIsAllowed is the other half for nested Lists:
+// a walk that stamped the outer backing and left the inner ones at the stamp
+// they entered the Store with would refuse the legal write.
+func TestAWriteThroughANestedWriteIsAllowed(t *testing.T) {
+	var caught string
+	var seen uint32
+	listWorld(t, func(registrar *kernel.Registrar, world *Entities) {
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](world,
+			func(q *Query[writeGrid], spawn *Spawn[gridBundle]) {
+				spawn.New(gridBundle{Grid: twoByTwo()})
+				for _, it := range q.All() {
+					caught = recovered(func() { it.Grid.Rows.At(1).Cells.Set(0, 99) })
+					seen = it.Grid.Rows.At(1).Cells.At(0)
+				}
+			}))
+	})
+	if caught != "" {
+		t.Fatalf("writing a nested List through a write field was refused: %s", caught)
+	}
+	if seen != 99 {
+		t.Fatalf("the write did not land: element 0 is %d, want 99", seen)
+	}
+}
+
+// TestTheCallersOwnNestedCopyIsClosedByStoring is the constructor alias one
+// level down: the inner List the caller built is shared with the Store the
+// moment the outer one enters it.
+func TestTheCallersOwnNestedCopyIsClosedByStoring(t *testing.T) {
+	entities := NewEntities(8)
+	store := NewStore[grid](entities, 8)
+
+	cells := ListOf([]uint32{1, 2})
+	store.Set(entities.alloc(), grid{Rows: NewList(row{Cells: cells})})
+	caught := recovered(func() { cells.Set(0, 9) })
+	if !strings.Contains(caught, "already in the world") {
+		t.Fatalf("writing the caller's own alias of a nested stored List: %q", caught)
+	}
+}
+
+func twoByTwo() grid {
+	return grid{Rows: NewList(
+		row{Cells: NewList[uint32](1, 2)},
+		row{Cells: NewList[uint32](3, 4)},
+	)}
+}
+
+type readGrid struct {
+	Grid grid
+}
+
+type writeGrid struct {
+	Grid *grid
+}
+
+type gridBundle struct {
+	Grid grid
 }
 
 // inventoryBundle is the Bundle the tests above spawn with.

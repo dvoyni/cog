@@ -1,7 +1,6 @@
 package ecs
 
 import (
-	"fmt"
 	"iter"
 	"reflect"
 	"unsafe"
@@ -133,46 +132,48 @@ func isList(t reflect.Type) bool {
 // order to recurse into it.
 func listElem(t reflect.Type) reflect.Type { return t.Field(1).Type.Elem() }
 
-// listOffsets is every offset within t at which a List's slice header sits,
-// found once at registration. It is what validation mode stamps from, and it is
-// computed whether or not validation is built, because registration-time cost
-// is irrelevant and a class that carries the answer is simpler than one that
-// carries a build tag.
+// listSite is one List within a type, as validation mode needs to find it: the
+// offset its slice header sits at, and - for a List whose element type holds
+// Lists of its own - the element stride and the sites within one element.
+//
+// nested is what lets a List of Lists be checked. A Component row names its own
+// Lists' backing arrays at fixed offsets, but the arrays an element names are
+// one indirection further out, at offsets that exist only once the outer List
+// has elements; so a site carries the element layout and the stamp walks the
+// outer List's elements at stamp time.
+type listSite struct {
+	offset uintptr
+	stride uintptr
+	nested []listSite
+}
+
+// listSites is every List within t, found once at registration. It is what
+// validation mode stamps from, and it is computed whether or not validation is
+// built, because registration-time cost is irrelevant and a class that carries
+// the answer is simpler than one that carries a build tag.
 //
 // A List's header sits at the List's own offset: the marker in front of it is
 // zero-size, so the slice field starts where the List does.
-func listOffsets(t reflect.Type) []uintptr {
-	return appendListOffsets(nil, t, 0)
+func listSites(t reflect.Type) []listSite {
+	return appendListSites(nil, t, 0)
 }
 
-func appendListOffsets(into []uintptr, t reflect.Type, base uintptr) []uintptr {
+func appendListSites(into []listSite, t reflect.Type, base uintptr) []listSite {
 	if isList(t) {
-		return append(into, base)
+		elem := listElem(t)
+		return append(into, listSite{offset: base, stride: elem.Size(), nested: listSites(elem)})
 	}
 	switch t.Kind() {
 	case reflect.Struct:
 		for i := range t.NumField() {
 			field := t.Field(i)
-			into = appendListOffsets(into, field.Type, base+field.Offset)
+			into = appendListSites(into, field.Type, base+field.Offset)
 		}
 	case reflect.Array:
 		stride := t.Elem().Size()
 		for i := range t.Len() {
-			into = appendListOffsets(into, t.Elem(), base+uintptr(i)*stride)
+			into = appendListSites(into, t.Elem(), base+uintptr(i)*stride)
 		}
 	}
 	return into
-}
-
-// listsWithin reports whether t contains a List anywhere, which is the question
-// the legality walk asks of a List's own element type. A List inside a List is
-// refused: validation stamps the backing arrays a Component row names, and the
-// arrays a List's elements name are one indirection further out than that walk
-// reaches, so allowing them would ship a check with a silent hole in it.
-func listsWithin(t reflect.Type) bool { return len(listOffsets(t)) > 0 }
-
-func refuseNestedList(t reflect.Type, path string) error {
-	return fmt.Errorf(
-		"%s is a List whose element type %s contains a List: validation stamps the arrays a Component row names and cannot reach one a List's elements name, so a List of Lists would be unchecked",
-		path, t)
 }

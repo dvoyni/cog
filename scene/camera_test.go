@@ -183,7 +183,7 @@ func TestAPassNamingItsOwnDepthTextureKeepsIt(t *testing.T) {
 		descr := simpleCamera()
 		descr.Passes = []Pass{{
 			Tag: "shadow", Target: gfx.NoTarget(),
-			Depth: gfx.DepthTarget(sizedTexture(1024, 1024)), ClearDepth: &depthClearFar,
+			Depth: gfx.DepthTarget(sizedTexture(1024, 1024)), ClearDepth: m.Some(depthClearFar),
 		}}
 		q.Camera(cameraMain, descr)
 	})
@@ -329,8 +329,8 @@ func TestColourIsAlwaysKeptAndAutomaticDepthDiscarded(t *testing.T) {
 	h := newHarness(t, func(q *OpQueue) {
 		descr := simpleCamera()
 		descr.Passes = []Pass{
-			{Tag: "offscreen", Target: gfx.TextureTarget(sizedTexture(256, 256), 0, 0), ClearDepth: &depthClearFar},
-			{ClearDepth: &depthClearFar},
+			{Tag: "offscreen", Target: gfx.TextureTarget(sizedTexture(256, 256), 0, 0), ClearDepth: m.Some(depthClearFar)},
+			{ClearDepth: m.Some(depthClearFar)},
 		}
 		q.Camera(cameraMain, descr)
 	})
@@ -357,7 +357,7 @@ func TestATemporaryTargetPassTakesItsAspectFromItsSize(t *testing.T) {
 		descr := CameraDescr{FovY: math.Pi / 2, Near: 1, Far: 10}
 		black := m.Color{A: 1}
 		target, _ := g.TemporaryTarget(400, 100, gfx.FormatRGBA8Srgb)
-		descr.Passes = []Pass{{Target: target, ClearColor: &black}}
+		descr.Passes = []Pass{{Target: target, ClearColor: m.Some(black)}}
 		q.Camera(cameraMain, descr)
 	})
 	h.frame()
@@ -386,8 +386,8 @@ func TestPassLabelsNameTheCameraAndTag(t *testing.T) {
 	h := newHarness(t, func(q *OpQueue) {
 		descr := simpleCamera()
 		descr.Passes = []Pass{
-			{Tag: "shadow", Order: -1000, Target: gfx.NoTarget(), Depth: gfx.DepthTarget(sizedTexture(1024, 1024)), ClearDepth: &depthClearFar},
-			{ClearDepth: &depthClearFar},
+			{Tag: "shadow", Order: -1000, Target: gfx.NoTarget(), Depth: gfx.DepthTarget(sizedTexture(1024, 1024)), ClearDepth: m.Some(depthClearFar)},
+			{ClearDepth: m.Some(depthClearFar)},
 		}
 		q.Camera(id, descr)
 	})

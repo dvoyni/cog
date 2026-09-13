@@ -122,12 +122,20 @@ _Avoid_: World, Registry
 The promotion of a write-locked Entities into the thing that can Spawn and Despawn. A System gets one only by declaring the write, so the authority to change which Entities exist is visible in its signature and nowhere else.
 
 **Component**:
-A plain value an Entity either has or has not, addressed by its Go type. It contains no _mutable_ indirection, transitively — every pointer it holds, it holds to memory nothing can write — which is checked when the type is registered. That admits numerics, bools, fixed-size arrays, an Entity, a string and a List, and refuses pointers, bare slices, maps, channels, funcs and interfaces. The rule is about the lock unit rather than the collector: a read yields a copy, and a copy of a slice header is a write handle on the Store that no lock names, where a copy of a string is not. An Entity holds at most one Component of a given type.
+A plain value an Entity either has or has not, addressed by its Go type. It contains no _mutable_ indirection, transitively — every pointer it holds, it holds to memory nothing can write — which is checked when the type is registered. That admits numerics, bools, fixed-size arrays, an Entity, a string, a Blob and a List, and refuses pointers, bare slices, maps, channels, funcs and interfaces. The rule is about the lock unit rather than the collector: a read yields a copy, and a copy of a slice header is a write handle on the Store that no lock names, where a copy of a string is not. An Entity holds at most one Component of a given type.
 _Avoid_: Attribute, property, field
 
 **List**:
-A fixed-length run of values a Component may hold, and the only way a Component holds variable-length data at all. Its backing array is unexported and its constructors copy, so reading one hands out no way to write the Store; its one element mutator is legal under a write lock and is checked in a validating build. Its length is fixed at construction, because growing means allocating, so a List whose length changes is a new List written into the Component.
+A fixed-length run of values a Component may hold, and the only way a Component holds variable-length data at all. Its backing array is unexported and its constructors copy, so reading one hands out no way to write the Store; its one element mutator is legal under a write lock and is checked in a validating build. Its length is fixed at construction, because growing means allocating, so a List whose length changes is a new List written into the Component. Its elements may hold Lists of their own, and those are checked the same way.
 _Avoid_: Slice, array, vector, buffer. A bare slice in a Component is refused, and the word for the fixed-size Go array a Component may also hold is just an array.
+
+**Blob**:
+A run of bytes treated as static: once the value holding it is built, nothing writes the bytes again. It is how an engine value carrying pixels, a buffer's contents or a parameter's raw layout says so, and the one slice a Component may hold outright. The ECS admits it on that contract rather than on a property it can check, and Validation mode cannot see a write through one.
+_Avoid_: Buffer, which is a GPU object; bytes, for a run that is still being written
+
+**Maybe**:
+A value that may be absent, held inline with no pointer. Its zero value is absent, so an optional field nobody wrote reads as unset, and a present zero stays distinct from it. It is what an optional field of a storable value uses where a pointer would make the value mutable indirection.
+_Avoid_: Option, nullable, pointer-to-mean-optional
 
 **Tag**:
 A Component with no fields. Its presence is the whole of what it says, and its purpose is to narrow a Query. It is not a place to keep a boolean: a fact the Entity carries data about belongs in that data's Component, and no fact is encoded twice.
@@ -184,7 +192,7 @@ _Retired._ The ECS supplied a 64-bit name hash and the table a consumer resolved
 _Avoid_: reintroducing either word in the ECS. A consumer that wants a process-stable name is free to hash in its own package, where it is that package's vocabulary.
 
 **Validation mode**:
-A build tag that compiles in the check that nobody writes a List through a read. It is on under `-tags ecs_validate` and absent otherwise, so a release build carries no branch and no table for it. It is detection rather than prevention, and its coverage is whatever a run executes — which is a weaker guarantee than the rest of the design offers and is the price of a Component holding mutable data at all.
+A build tag that compiles in the check that nobody writes a List through a read. It is on under `-tags ecs_validate` and absent otherwise, so a release build carries no branch and no table for it. It is detection rather than prevention, and its coverage is whatever a run executes — which is a weaker guarantee than the rest of the design offers and is the price of a Component holding mutable data at all. It does not see a write through a Blob, which has no mutator to check.
 _Avoid_: Debug mode, safety checks, assertions.
 
 ## Agent Interface
@@ -259,7 +267,7 @@ _Avoid_: Retained UI, scene
 A declaration of a viewpoint and of the passes drawn from it. Its identity is also its place in the frame's ordering space, so declaring one twice is an error.
 
 **Pass**:
-One render pass a Camera emits, carrying the tag that selects materials for it, its target, and its clears.
+One render pass a Camera emits, carrying the tag that selects materials for it, its target, and its clears. Each clear is a Maybe: an absent one preserves what the target holds, so a zero Pass clears nothing.
 _Avoid_: Render step, stage
 
 **Pass tag**:
@@ -267,8 +275,12 @@ The name of what a Pass is for, and the key that selects which of a Scene materi
 _Avoid_: Queue, light mode
 
 **Scene material**:
-The set of graphics materials one recorded thing offers, one per Pass tag. A Pass whose tag it has no entry for does not draw that thing.
+The set of graphics materials one recorded thing offers, one per Pass tag. A Pass whose tag it has no entry for does not draw that thing. A recording call copies it — its entries and each entry's parameters, but not their Blobs — so the caller may change it the moment the call returns; two equal ones batch together however each was built, because a Scene material is keyed by content.
 _Avoid_: Shader
+
+**Transform**:
+Where one recorded thing stands: a position, a rotation and a per-axis scale, and nothing else. Its zero value is the identity, and so is an all-zero scale; a scale with only some axes zero is taken literally, which is what makes a flattened scale expressible. A non-uniform scale sends that thing's normals through the inverse-transpose and costs nothing to anything else.
+_Avoid_: Matrix, model matrix. A Transform has no matrix to override it; a model's flattened node world is Scene's own business.
 
 **Layer mask**:
 A selection of which Cameras see a recorded item. Both a Camera and an item carry one, and an empty mask on either side means every layer.

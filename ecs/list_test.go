@@ -8,6 +8,7 @@ import (
 
 	"github.com/dvoyni/cog/app"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/m"
 )
 
 type labelled struct {
@@ -34,6 +35,8 @@ func TestStorableAdmitsImmutableIndirectionAndNothingElse(t *testing.T) {
 		{"a list", reflect.TypeFor[inventory]()},
 		{"strings and lists several structs down", reflect.TypeFor[deep]()},
 		{"everything the pointer-free rule already allowed", reflect.TypeFor[position]()},
+		{"a static blob", reflect.TypeFor[pixels]()},
+		{"a list of a struct holding a list", reflect.TypeFor[grid]()},
 	}
 	for _, test := range legal {
 		if err := Storable(test.t); err != nil {
@@ -47,6 +50,8 @@ func TestStorableAdmitsImmutableIndirectionAndNothingElse(t *testing.T) {
 	}{
 		{"a pointer", reflect.TypeFor[*inner]()},
 		{"a bare slice", reflect.TypeFor[[]uint32]()},
+		{"a bare byte slice", reflect.TypeFor[[]byte]()},
+		{"a pointer to a blob", reflect.TypeFor[*m.Blob]()},
 		{"a map", reflect.TypeFor[map[string]int]()},
 		{"an interface", reflect.TypeFor[any]()},
 		{"a channel", reflect.TypeFor[chan int]()},
@@ -78,26 +83,31 @@ func TestABareSliceIsRefusedForTheLockUnitAndSaysSo(t *testing.T) {
 	}
 }
 
-// TestAListOfListsIsRefused pins the one shape the validation stamp cannot
-// reach. It is refused rather than silently unchecked, because a check with a
-// hole in it is worse than a rule that says where it stops.
-func TestAListOfListsIsRefused(t *testing.T) {
-	type row struct {
-		Cells List[uint32]
-	}
-	type grid struct {
-		Rows List[row]
-	}
-	if err := Storable(reflect.TypeFor[grid]()); err == nil {
-		t.Fatal("a List whose elements contain a List was accepted")
-	}
+// pixels holds a Blob, which is the one slice a Component may hold outright:
+// it is admitted by type identity, on the contract that its bytes are never
+// written after construction.
+type pixels struct {
+	Width, Height int32
+	Bytes         m.Blob
+}
+
+// row and grid are a List whose element type holds a List, which validation
+// reaches by walking the outer List's elements.
+type row struct {
+	Cells List[uint32]
+}
+
+type grid struct {
+	Rows List[row]
 }
 
 // TestPointerFreeStillMeansWhatItMeant is what keeps the relaxation from
 // quietly widening the fast path: a string and a List are legal Components and
 // are not pointer-free, and everything downstream keys off that distinction.
 func TestPointerFreeStillMeansWhatItMeant(t *testing.T) {
-	for _, tp := range []reflect.Type{reflect.TypeFor[labelled](), reflect.TypeFor[inventory]()} {
+	for _, tp := range []reflect.Type{
+		reflect.TypeFor[labelled](), reflect.TypeFor[inventory](), reflect.TypeFor[pixels](),
+	} {
 		if err := Storable(tp); err != nil {
 			t.Fatalf("%s is not storable: %v", tp, err)
 		}
