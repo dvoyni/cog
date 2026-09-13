@@ -221,6 +221,42 @@ expose is only valid while the owning handler runs under its locks. Do not read
 or write a handle from a goroutine that outlives the handler, and do not retain
 values derived from one. This is a contract, not a checked invariant.
 
+## Ports and Adapters
+
+A **Port** is a plugin that works only once it is given an **Adapter**: a plain
+value implementing an interface the Port declares, contributed by another plugin
+and bound by the engine during composition. The full rules are in
+[`docs/specs/ports.md`](docs/specs/ports.md).
+
+Three declarations on `Registrar`, each keyed by the Go type of an interface:
+
+```go
+backend := registrar.RequireAdapter[gfx.Backend]()     // exactly one
+providers := registrar.CollectAdapters[mcp.Provider]() // any number, zero included
+registrar.ProvideAdapter[gfx.Backend](device)          // contribute one
+```
+
+`RequireAdapter[T]` returns a `RequiredAdapter[T]` whose `Get()` yields the one
+bound Adapter. `CollectAdapters[T]` returns a `CollectedAdapters[T]` whose
+`Get()` yields a fresh `[]ContributedAdapter[T]`: each Adapter with the
+`PluginName` of the plugin that provided it, in plugin order. `ProvideAdapter[T]`
+takes a value of type `T`, so the compiler checks it implements the interface.
+
+- `T` must be an interface type. Anything else, to any of the three, panics at
+  registration and arrives as `ErrPluginPanic`.
+- Binding happens at finalization: after every `Register`, before any `Start`.
+  It adds no plugin-dependency edge in either direction and does not depend on
+  registration order.
+- `Get` panics before finalization and is valid from `Start` onwards. An Adapter
+  is not a Resource: reading it takes no lock, and its thread rules are the Port
+  interface's business.
+- A required interface with no Adapter fails composition with
+  `ErrMissingAdapter`; with several, `ErrDuplicateAdapter`.
+- A plugin declares each interface once. Requiring and collecting the same `T`,
+  or declaring it twice, fails with `ErrDuplicateRegistration` of kind
+  `adapter declaration`.
+- An Adapter nobody requires or collects is not an error.
+
 ## Errors
 
 `ErrorHandler func(error) bool` receives serialized errors. Returning true
@@ -241,6 +277,10 @@ Exported error types:
   registered.
 - `ErrUsingCommandCycle`: `Uses` declarations form a cycle, so no lock closure
   exists.
+- `ErrMissingAdapter`: a plugin requires an Adapter for an interface no plugin
+  provides.
+- `ErrDuplicateAdapter`: a plugin requires exactly one Adapter for an interface
+  several plugins provide; it names every contributor.
 - `ErrUnavailableDependency`: `Dependency` was asked for a resource with no
   initial value or an undeclared owner; it arrives inside `ErrPluginPanic`.
 - `ErrPluginPanic`: a plugin boundary panicked; includes owner and stack.
@@ -255,8 +295,15 @@ Each exported error type implements `Error() string`.
 
 `Engine.Describe` returns a detached `ArchitectureDescription` of the finalized
 architecture: plugins and their dependencies, resources and commands with their
-owners, every subscription with its event, phase, and ordering dependencies, and
+owners, every required or collected Adapter interface with its Port and
+contributing plugins, every subscription with its event, phase, and ordering dependencies, and
 the conflict report described below. `Dump` renders it as a readable table.
+
+`ArchitectureDescription.Ports` holds one `PortDescription` per `RequireAdapter`
+or `CollectAdapters` declaration: its `Interface`, its `Port`, whether it
+`Collects`, and its `Contributors` in plugin order. `Dump` prints them in a
+`ports:` section, as `gfx.Backend (gfx) requires [wgpu]`. An Adapter nobody
+consumes binds to nothing and is not listed.
 
 `CommandDescription` and `SubscriptionDescription` also carry `Reads`, `Writes`
 and `Uses`. `Reads` and `Writes` are the **resolved, transitive** lock sets —
@@ -322,7 +369,8 @@ loop by hand. What the engine gives up is the property that a plugin reaches
 another plugin only through a typed command, a published event, or a locked
 resource. It gives that up knowingly, once, in exchange for making available a
 lookup it already performs privately for `PluginHost`, `PluginStarter` and
-`PluginStopper`.
+`PluginStopper`. `CollectAdapters` is the declared way to find contributors, and
+`Plugins[T]` goes once the mcp broker no longer uses it.
 
 Both methods are on `Executioner` rather than `Kernel`, so both are phase-gated
 for free: only the engine mints an `Executioner`, and only once `Run` begins.
@@ -334,7 +382,8 @@ for free: only the engine mints an `Executioner`, and only once `Run` begins.
   `ArchitectureDescription`.
 - Introspection: `PluginDescription`, `ResourceDescription`,
   `CommandDescription`, `SubscriptionDescription`, `ContentionDescription`,
-  `ResourceContention`, `PhaseContention`, `HandlerConflict`, `HandlerRef`.
+  `ResourceContention`, `PhaseContention`, `HandlerConflict`, `HandlerRef`,
+  `PortDescription`.
 - Runtime: `Kernel`, `Kernel.Context`, `Kernel.WithContext`,
   `Kernel.ExecuteCommandAsync`, `Kernel.PublishEvent`, `Kernel.ReportError`,
   `Executioner`, `Executioner.ExecuteCommand`, `Executioner.Describe`,
@@ -342,6 +391,9 @@ for free: only the engine mints an `Executioner`, and only once `Run` begins.
 - Registration: `Registrar`, `Registrar.InitResource`,
   `Registrar.Dependency`, `Registrar.HandleCommand`, `Registrar.Subscribe`,
   `Ordering[TEvent]`.
+- Ports and Adapters: `Registrar.RequireAdapter`, `Registrar.CollectAdapters`,
+  `Registrar.ProvideAdapter`, `RequiredAdapter[T]`, `RequiredAdapter.Get`,
+  `CollectedAdapters[T]`, `CollectedAdapters.Get`, `ContributedAdapter[T]`.
 - Handlers: `Lock`, `Execute`, `Observe`, `Command`, `Subscription`,
   `CommandConstraint`, `SubscriptionConstraint`.
 - Resources: `ResourceAccess`, `ResourceAccess.GetRead`,

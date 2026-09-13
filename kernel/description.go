@@ -10,6 +10,7 @@ import (
 type ArchitectureDescription struct {
 	Plugins       []PluginDescription
 	Resources     []ResourceDescription
+	Ports         []PortDescription
 	Commands      []CommandDescription
 	Subscriptions []SubscriptionDescription
 	// Contention is the conflict report derived from the lock sets above: which
@@ -29,6 +30,17 @@ type PluginDescription struct {
 type ResourceDescription struct {
 	Type  reflect.Type
 	Owner PluginName
+}
+
+// PortDescription reports one plugin's declaration of an Adapter interface:
+// which plugin is the Port for it, whether it requires exactly one Adapter or
+// collects any number, and which plugins contributed one, in plugin order. An
+// Adapter nobody requires or collects binds to nothing and has no entry.
+type PortDescription struct {
+	Interface    reflect.Type
+	Port         PluginName
+	Collects     bool
+	Contributors []PluginName
 }
 
 // CommandDescription reports one registered command and the lock set its
@@ -64,6 +76,7 @@ func (e *Engine) Describe() ArchitectureDescription {
 	description := ArchitectureDescription{
 		Plugins:       make([]PluginDescription, 0, len(e.plugins)),
 		Resources:     make([]ResourceDescription, 0, len(e.registry.resources)),
+		Ports:         make([]PortDescription, 0, len(e.registry.adapterDeclarations)),
 		Commands:      make([]CommandDescription, 0, len(e.registry.commands)),
 		Subscriptions: make([]SubscriptionDescription, 0),
 	}
@@ -78,6 +91,12 @@ func (e *Engine) Describe() ArchitectureDescription {
 	}
 	for resourceType, resource := range e.registry.resources {
 		description.Resources = append(description.Resources, ResourceDescription{Type: resourceType, Owner: resource.owner})
+	}
+	for _, declaration := range e.registry.adapterDeclarations {
+		description.Ports = append(description.Ports, PortDescription{
+			Interface: declaration.iface, Port: declaration.port, Collects: declaration.collects,
+			Contributors: contributors(e.registry.adapterContributions[declaration.iface]),
+		})
 	}
 	for commandType, command := range e.registry.commands {
 		reads, writes, uses := describeAccess(command.resources)
@@ -103,6 +122,12 @@ func (e *Engine) Describe() ArchitectureDescription {
 		}
 	}
 	slices.SortFunc(description.Resources, func(a, b ResourceDescription) int { return compareTypes(a.Type, b.Type) })
+	slices.SortStableFunc(description.Ports, func(a, b PortDescription) int {
+		if interfaceOrder := compareTypes(a.Interface, b.Interface); interfaceOrder != 0 {
+			return interfaceOrder
+		}
+		return strings.Compare(string(a.Port), string(b.Port))
+	})
 	slices.SortFunc(description.Commands, func(a, b CommandDescription) int { return compareTypes(a.Type, b.Type) })
 	slices.SortFunc(description.Subscriptions, func(a, b SubscriptionDescription) int {
 		if eventOrder := compareTypes(a.Event, b.Event); eventOrder != 0 {
@@ -184,6 +209,14 @@ func Dump(engine *Engine) string {
 	out.WriteString("resources:\n")
 	for _, res := range description.Resources {
 		fmt.Fprintf(&out, "  %v (%s)\n", res.Type, res.Owner)
+	}
+	out.WriteString("ports:\n")
+	for _, port := range description.Ports {
+		verb := "requires"
+		if port.Collects {
+			verb = "collects"
+		}
+		fmt.Fprintf(&out, "  %v (%s) %s %v\n", port.Interface, port.Port, verb, port.Contributors)
 	}
 	out.WriteString("commands:\n")
 	for _, cmd := range description.Commands {

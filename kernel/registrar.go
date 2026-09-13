@@ -14,7 +14,11 @@ type registry struct {
 	commands      map[reflect.Type]*command
 	subscriptions map[reflect.Type][]subscription
 	publications  map[reflect.Type]*publicationPlan
-	errs          []error
+	// adapterDeclarations and adapterContributions are appended in registration
+	// order, which is plugin order, and bound by finalize.
+	adapterDeclarations  []*adapterDeclaration
+	adapterContributions map[reflect.Type][]adapterContribution
+	errs                 []error
 }
 
 // Registrar is a plugin-scoped capability used only during registration.
@@ -132,7 +136,8 @@ func (r *Registrar) Subscribe[
 
 // finalize validates resources, checks that every declared lock is owned by the
 // locking plugin or one of its declared dependencies, resolves Uses declarations,
-// and compiles each event's subscription DAG.
+// binds Adapters to the Ports that declared them, and compiles each event's
+// subscription DAG.
 func (r *registry) finalize(dependencies map[PluginName]map[PluginName]struct{}) []error {
 	errs := append([]error(nil), r.errs...)
 	for resourceType, cell := range r.resources {
@@ -152,6 +157,7 @@ func (r *registry) finalize(dependencies map[PluginName]map[PluginName]struct{})
 		}
 	}
 	errs = append(errs, r.resolveUses()...)
+	errs = append(errs, r.bindAdapters()...)
 	for eventType, tasks := range r.subscriptions {
 		plan, cycle := buildPublicationPlan(tasks)
 		if cycle != nil {

@@ -53,6 +53,8 @@ func New(config map[PluginName]any) *Engine {
 		commands:      map[reflect.Type]*command{},
 		subscriptions: map[reflect.Type][]subscription{},
 		publications:  map[reflect.Type]*publicationPlan{},
+
+		adapterContributions: map[reflect.Type][]adapterContribution{},
 	}
 	return e
 }

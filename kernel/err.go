@@ -137,6 +137,30 @@ func (e ErrUnavailableDependency) Error() string {
 		e.Plugin, e.Resource, e.Owner)
 }
 
+// ErrMissingAdapter is reported when a plugin requires an Adapter for an
+// interface and no plugin provides one.
+type ErrMissingAdapter struct {
+	Port      PluginName
+	Interface reflect.Type
+}
+
+func (e ErrMissingAdapter) Error() string {
+	return fmt.Sprintf("plugin %q requires an adapter for %v, but no plugin provides one", e.Port, e.Interface)
+}
+
+// ErrDuplicateAdapter is reported when a plugin requires exactly one Adapter for
+// an interface and several plugins provide one. Contributors are in plugin order.
+type ErrDuplicateAdapter struct {
+	Port         PluginName
+	Interface    reflect.Type
+	Contributors []PluginName
+}
+
+func (e ErrDuplicateAdapter) Error() string {
+	return fmt.Sprintf("plugin %q requires exactly one adapter for %v, but %v each provide one",
+		e.Port, e.Interface, e.Contributors)
+}
+
 // ErrSubscriptionCycle is returned when an event's subscriptions have an
 // unsatisfiable before/after ordering.
 type ErrSubscriptionCycle struct {
