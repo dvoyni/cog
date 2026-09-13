@@ -14,13 +14,13 @@ import (
 // frame-local resource the plugin already publishes — scene's *scene.OpQueue,
 // gfx's *gfx.OpQueue — and the ECS contributes nothing else.
 //
-//	func recordDraws(
-//	    q      *ecs.Query[DrawQ],                  // the Components
-//	    models *ecs.Read[*scene.Names],            // a resource, read
-//	    out    *ecs.Write[*scene.OpQueue],         // a resource, written
+//	func record(
+//	    models *ecs.Query[modelQuery],             // the Components
+//	    work   *ecs.Write[*scratch],               // the binding's own resource
+//	    out    *ecs.Write[*scene.OpQueue],         // the bound plugin's resource
 //	) {
-//	    table, queue := models.Get(), out.Get()
-//	    for _, it := range q.All() { … }
+//	    s, queue := work.Get(), out.Get()
+//	    for e, it := range models.All() { … }
 //	}
 //
 // The lock they declare is the kernel's own, taken at registration like every

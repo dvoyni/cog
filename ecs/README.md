@@ -328,8 +328,9 @@ assigned index is not, so it survives a save file or a wire; and producing one
 needs nothing, so a System renames what an Entity points at holding only the
 lock it already had. Neither needs the *ECS* to own it.
 
-`ecsscene` was built on `ModelHash`, `ClipHash`, `ecs.Names` and `ecs.NoHash`
-and does not compile against this package until it is reworked.
+`ecsscene` was built on `ModelHash`, `ClipHash`, `ecs.Names` and `ecs.NoHash`,
+and was rebuilt without them: its `Model` Component holds the glTF path as a
+string.
 
 ## Component registration
 
@@ -716,9 +717,8 @@ only `*ecs.WriteableEntities`.
 
 A **Bundle** is a struct type whose field types are the Components, the way a
 Query is — and **a Bundle field simply *is* a Component field**. There is no
-conversion mechanism and none is needed: hashing is pure, so the hash that names
-an engine-side thing can be computed into a package-level `var` and a
-declarative spawn naming a model by name needs nothing from the ECS.
+conversion mechanism and none is needed: a Component may hold a string, so a
+declarative spawn naming a model by its path needs nothing from the ECS.
 
 A Bundle is **not a Component set**: it describes one act of creation, and the
 Entity may gain and lose Components afterwards without the Bundle meaning
@@ -896,15 +896,19 @@ reverse index refused above: **any global index is a global lock.**
 ## Binding: how another plugin attaches
 
 ```go
-func recordDraws(
-    q      *ecs.Query[DrawQ],                  // the Components
-    models *ecs.Read[*scene.Names],            // a resource, read
-    out    *ecs.Write[*scene.OpQueue],         // a resource, written
+func record(
+    models *ecs.Query[modelQuery],             // the Components
+    plays  *ecs.Get[Animation],                // an optional Component, probed
+    work   *ecs.Write[*scratch],               // the binding's own resource
+    out    *ecs.Write[*scene.OpQueue],         // the bound plugin's resource
 ) {
-    table, queue := models.Get(), out.Get()
-    for _, it := range q.All() {
-        path, _ := table.Lookup(it.D.Model)
-        queue.Model(it.D.Layers, path, scene.ModelDraw{ /* … */ })
+    s, queue := work.Get(), out.Get()
+    for e, it := range models.All() {
+        draw := scene.ModelDraw{Transform: scene.Transform(it.Place)}
+        if animation, ok := plays.Of(e); ok {
+            draw.Plays = s.clipPlays(&animation)
+        }
+        queue.Model(it.Model.Layers, it.Model.Ref.Path, draw)
     }
 }
 ```
@@ -920,7 +924,7 @@ System's lock set beside the Query's Stores, at registration, **as visible in th
 signature as a Component is**. No binding type, no adapter, no registration call
 of the ECS's own.
 
-**The binding is necessarily a third plugin.** `ecs` imports only `kernel`, and
+**The binding is necessarily a third plugin.** `ecs` imports only `kernel` and `m`, and
 a plugin like `scene` imports nothing of `ecs`, so neither can know about the
 other. That is what "no binding mechanism" means in practice — and a project not
 using the ECS simply does not register that plugin and schedules no Systems.

@@ -576,20 +576,23 @@ recording vocabulary:
 
 | type | verdict |
 | --- | --- |
-| `scene.Transform` | rejected — `.Matrix` is a pointer |
-| `scene.ModelDraw`, `scene.MeshDraw` | rejected — `.Transform.Matrix` is a pointer |
-| `scene.Material` | rejected — is a slice |
+| **`scene.Transform`** | **legal** — plain values since its `Matrix` pointer was removed |
+| `scene.ModelDraw`, `scene.MeshDraw`, `scene.CameraDescr` | rejected — `Transforms`, `Plays`, `Params`, `Passes` are bare slices |
+| `scene.Material`, `gfx.MaterialDescr` | rejected — a slice, and a descriptor holding one |
 | `scene.ClipPlay` | **legal** — `.Clip` is a `string` |
 | `scene.ModelRef` | **legal** — `.Path` is a `string` |
+| `scene.Pass`, `gfx.ParameterDescr` | **legal** — clears are `m.Maybe`, bytes are `m.Blob` |
 | **`scene.MeshRef`** | **legal Component** — already a dense id and a generation |
 | **`scene.LayerMask`, `scene.CameraID`** | **legal Component** |
 
-The two rejections that remain are pointers to mutable memory, which is the line
-the rule draws. The two that moved were refused only for holding a name, and
-holding a name is now ordinary. **`ecsscene` was built on the removed
-vocabulary** — `ModelHash`, `ClipHash`, `ecs.Names`, `ecs.NoHash` — and does not
-compile against this package until it is reworked, which is deliberate and is
-that package's own decision to make.
+The rejections that remain are slices, which are mutable indirection and the
+line the rule draws: a binding spells those descriptors out as Component fields
+holding `ecs.List`s and rebuilds them per draw. The rows that moved were refused
+for holding a name, a matrix pointer or byte slices, and scene changed each of
+those. **`ecsscene` was built on the removed
+vocabulary** — `ModelHash`, `ClipHash`, `ecs.Names`, `ecs.NoHash` — and has
+since been rebuilt as a thin binding whose Components hold scene's own types,
+the path included.
 
 ---
 
@@ -1659,15 +1662,19 @@ and audio, which do not exist and therefore cannot answer it. Scene is also the
 case a game reaches for first.
 
 ```go
-func recordDraws(
-    q      *ecs.Query[DrawQ],                  // the Components
-    models *ecs.Read[*scene.Names],            // a resource, read
-    out    *ecs.Write[*scene.OpQueue],         // a resource, written
+func record(
+    models *ecs.Query[modelQuery],             // the Components
+    plays  *ecs.Get[Animation],                // an optional Component, probed
+    work   *ecs.Write[*scratch],               // the binding's own resource
+    out    *ecs.Write[*scene.OpQueue],         // the bound plugin's resource
 ) {
-    table, queue := models.Get(), out.Get()
-    for _, it := range q.All() {
-        path, _ := table.Lookup(it.D.Model)
-        queue.Model(it.D.Layers, path, scene.ModelDraw{ /* … */ })
+    s, queue := work.Get(), out.Get()
+    for e, it := range models.All() {
+        draw := scene.ModelDraw{Transform: scene.Transform(it.Place)}
+        if animation, ok := plays.Of(e); ok {
+            draw.Plays = s.clipPlays(&animation)
+        }
+        queue.Model(it.Model.Layers, it.Model.Ref.Path, draw)
     }
 }
 ```
@@ -1685,7 +1692,7 @@ value read from a handle lives only as long as the handler holds its lock.
 
 ### The binding is necessarily a third plugin
 
-`ecs` imports only `kernel`; `scene` imports nothing of `ecs`. **Neither can
+`ecs` imports only `kernel` and `m`; `scene` imports nothing of `ecs`. **Neither can
 know about the other**, so a binding is necessarily a third plugin that imports
 both. That is what "there is no binding mechanism" means in practice, and it has
 a consequence worth stating: **a project not using the ECS schedules no ECS
@@ -1719,22 +1726,31 @@ the recording side** — that is a property of the bound plugin's API. Scene
 publishes one queue, so scene recording is one lock wide.
 
 Which is fine, because splitting it would lose anyway. Whole-frame, publish →
-locks → Systems → wait:
+locks → Systems → wait, measured on `ecsscene` itself with `storage`, `gfx`,
+`scene`, `ecs` and a game plugin composed beside it — five subscribers to the
+tick — and 5 000 `Model` Entities per row; the binary it replaced was built
+first and run alternately, ten rounds, medians:
 
-| entities | ns/op | allocs/op |
+| whole frame | ns/op | allocs/op |
 | --- | --- | --- |
-| 0 (baseline: the same two Systems, nothing to record) | 10 700 | **10** |
-| 100 | 17 202 | **10** |
-| 1 000 | 72 553 | **10** |
-| 5 000 | 313 249 | **10** |
+| nothing to record | 19 931 | **14** |
+| 5 000 | 413 928 | **14** |
+| 5 000, each blending two clips | 456 584 | **14** |
+| 5 000, each with one-colour `Params` | 570 824 | **14** |
+| 5 000, each with a two-tag `Material` | 1 116 624 | **14** |
 
-**Zero allocations from the binding**: identical at 0 and at 5 000 Entities, and
-sitting exactly on the 2-per-publication-plus-4-per-subscriber line. Time is
-linear at ~60 ns a drawable. Against that, a second System costs about **5.9 µs**
-of scheduling floor, so a second recording System would have to save visiting
-~110 Entities to pay for itself — and it still could not run concurrently,
-because both hold the queue for write. **One recording System per bound plugin
-is the shape.**
+**Zero allocations from the binding**: over a 3 000-frame steady state the five
+rows are 14.08, 14.02, 14.03, 14.03 and 14.05 objects a frame, the engine's own
+charge, and a profile with every allocation sampled finds none in `ecsscene`,
+`ecs`, `scene` or `gfx`. Time is linear at ~79 ns an Entity; the material row is
+mostly scene copying the material into its arenas once per draw
+([#314](https://github.com/dvoyni/cog/issues/314)). Against that, a second System
+costs about **5.9 µs** of scheduling floor, so a second recording System would
+have to save visiting ~75 Entities to pay for itself — and it still could not
+run concurrently, because both hold the queue for write. Worse, a recorder
+blocked behind another costs the kernel's scheduler an allocation per blocked
+dispatch, which shows up as a fraction of an object a frame growing with frame
+length. **One recording System per bound plugin is the shape.**
 
 ### Ordering needs nothing new
 
@@ -1748,19 +1764,21 @@ for the flush.
 Stated as prohibitions, because a backend adopted from outside cog will not have
 been written with them in mind.
 
-- **A Component holds no pointer, transitively** — enforced at registration,
-  where the type is named and nothing has been stored yet.
-- **Never hand the bound plugin a pointer into a Store.** `ModelDraw.Transform.Matrix`
-  is a `*m.Mat4` **retained by value** in scene's record until the flush — and
-  the flush is a *different* System, running after the recording System's locks
-  are gone. A matrix pointing into a Component Store would be read unlocked. Use
-  a TRS form, or point into scratch that outlives the frame.
-- **Variable-length draw data is not a Component.** Play lists, morph weights
-  and override params are built in System-owned scratch and rebuilt each frame;
-  scene copies each into its own arena at record time and says so, so the caller
-  may reuse the backing the moment the call returns. **Scratch captured in a
-  closure is safe for one System only** — two Systems sharing it have no lock
-  between them. If in doubt make it a resource, which puts it in the lock set.
+- **A Component holds no mutable indirection, transitively** — enforced at
+  registration, where the type is named and nothing has been stored yet.
+- **Never hand the bound plugin a view of a Store's memory.** Scene reads what a
+  draw names at its flush, which is a *different* System running after the
+  recording System's locks are gone. Copy a `List` out through `All()` into
+  scratch; there is no `Raw()` to get this wrong with.
+- **Draw data a bound plugin takes as a slice is rebuilt, not stored.** Play
+  lists, params, material tags and passes are copied out of the Components into
+  scratch each frame; scene copies each into its own arena at record time, so
+  the next draw may reuse the backing the moment the call returns. Scratch comes
+  from backings allocated once, never from a stack array a recording call would
+  let escape.
+- **Anything a System keeps between calls is a resource.** Scratch captured in a
+  closure has no lock anywhere naming it; as a resource in the signature it is in
+  the lock set, and the kernel rather than a comment keeps two holders apart.
 - **Do not cache an Entity without checking liveness, and do not restructure the
   world from inside another Entity's iteration.**
 

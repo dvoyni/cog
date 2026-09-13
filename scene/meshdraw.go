@@ -206,10 +206,16 @@ func (r *meshRecording) reset() {
 // its bytes live.
 //
 // A nil Material stays nil, because nil is the bundled PBR and an empty
-// non-nil Material is a different answer - a material serving no pass.
+// non-nil Material is a different answer - a material serving no pass. An empty
+// one is returned as a zero-capacity window of itself rather than sliced out of
+// the arena, because an arena that has never held an entry is nil and would
+// turn the empty material into the bundled PBR.
 func (r *meshRecording) copyMaterial(material Material) Material {
 	if material == nil {
 		return nil
+	}
+	if len(material) == 0 {
+		return material[:0:0]
 	}
 	start := len(r.materials)
 	for _, entry := range material {

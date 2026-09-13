@@ -17,87 +17,100 @@ import (
 )
 
 // Everything here runs against a real kernel.Engine with the real ecs and the
-// real scene plugin composed beside the binding. That is the point of the
-// ticket: the binding shape was settled against a prototype standing in for
-// scene, and what it has to survive is scene itself.
+// real scene plugin composed beside the binding, and reads back what scene's
+// own flush published. The binding is judged by what reaches scene, not by
+// what its System looks like.
 
-const (
-	crateName  = "crate"
-	crateModel = "models/crate.glb"
-	walkName   = "walk"
-	walkClip   = "Walk"
-	idleName   = "idle"
-	idleClip   = "Idle"
-)
+const crateModel = "models/crate.glb"
 
-var (
-	crate = ecs.HashOf[ModelHash](crateName)
-	walk  = ecs.HashOf[ClipHash](walkName)
-	idle  = ecs.HashOf[ClipHash](idleName)
-)
-
-// testConfig is the manifest every test below draws from.
-func testConfig() Config {
-	return DefaultConfig().
-		WithModel(crateName, crateModel).
-		WithClip(walkName, walkClip).
-		WithClip(idleName, idleClip)
-}
-
-// staticDrawable and animatedDrawable are the two Bundles the game plugin
-// spawns. A Bundle is not a Component set: it describes one act of creation,
-// and an Entity spawned without an Animation is an ordinary drawable rather
-// than an incomplete one.
-type staticDrawable struct {
-	Place Transform
-	Draw  Drawable
-}
-
-type animatedDrawable struct {
-	Place Transform
-	Draw  Drawable
-	Anim  Animation
-}
-
-// spawnCmd creates drawables. It is a System registered as a command, which is
-// how a test reaches a structural change from outside a tick: the barrier a
-// spawn takes is the same one either way.
+// spawnCmd creates Entities. It is a System registered as a command, which is
+// how a test reaches a structural change from outside a tick.
 type spawnCmd kernel.Command[spawnRequest, spawnResponse]
 
+// spawnRequest describes Count Entities, each carrying the Components whose
+// fields are set. A nil field is a Component the Entity does not have, which is
+// the difference the binding has to see: absent is not zero.
 type spawnRequest struct {
 	Count int
-	Model ModelHash
-	// Step is how far apart along X the spawned drawables stand, so a test can
-	// tell one recorded draw from another.
-	Step float32
-	// Animation is given to every spawned drawable when Animated is set. A
-	// Bundle field is a Component value, so the two Bundles differ by whether
-	// this Component exists at all.
-	Animated  bool
-	Animation Animation
+	// Place is every Entity's Transform, and Step how far apart along X they
+	// stand, so a test can tell one recorded draw from another.
+	Place Transform
+	Step  float32
+	// Unplaced spawns the Entities with no Transform at all.
+	Unplaced bool
+
+	Model     *Model
+	Mesh      *Mesh
+	Animation *Animation
+	Params    *Params
+	Material  *Material
+	Light     *Light
+	Camera    *Camera
 }
 
 type spawnResponse struct {
 	First ecs.Entity
 }
 
+// placed and unplaced are the two Bundles the spawn starts from; every other
+// Component is added after, through its accessor, so one command covers every
+// combination a test names.
+type placed struct {
+	Place Transform
+}
+
+// unmarked is a Tag the game owns, so an Entity can be spawned with nothing of
+// the binding's on it.
+type unmarked struct{}
+
+type unplaced struct {
+	Marker unmarked
+}
+
 func spawnCmdImpl(world *ecs.Entities) func() (kernel.Lock, kernel.Execute[spawnRequest, spawnResponse]) {
 	return ecs.ToExecute[spawnRequest, spawnResponse](world, func(
 		request spawnRequest,
-		static *ecs.Spawn[staticDrawable],
-		animated *ecs.Spawn[animatedDrawable],
+		withPlace *ecs.Spawn[placed],
+		withoutPlace *ecs.Spawn[unplaced],
+		models *ecs.Set[Model],
+		meshes *ecs.Set[Mesh],
+		animations *ecs.Set[Animation],
+		params *ecs.Set[Params],
+		materials *ecs.Set[Material],
+		lights *ecs.Set[Light],
+		cameras *ecs.Set[Camera],
 		answer *ecs.Resp[spawnResponse],
 	) {
 		var first ecs.Entity
 		for i := range request.Count {
-			place := Transform{}
-			place.Position.X = float32(i) * request.Step
-			draw := Drawable{Model: request.Model}
 			var e ecs.Entity
-			if request.Animated {
-				e = animated.New(animatedDrawable{Place: place, Draw: draw, Anim: request.Animation})
+			if request.Unplaced {
+				e = withoutPlace.New(unplaced{})
 			} else {
-				e = static.New(staticDrawable{Place: place, Draw: draw})
+				place := request.Place
+				place.Position.X += float32(i) * request.Step
+				e = withPlace.New(placed{Place: place})
+			}
+			if request.Model != nil {
+				models.UpdateFor(e, *request.Model)
+			}
+			if request.Mesh != nil {
+				meshes.UpdateFor(e, *request.Mesh)
+			}
+			if request.Animation != nil {
+				animations.UpdateFor(e, *request.Animation)
+			}
+			if request.Params != nil {
+				params.UpdateFor(e, *request.Params)
+			}
+			if request.Material != nil {
+				materials.UpdateFor(e, *request.Material)
+			}
+			if request.Light != nil {
+				lights.UpdateFor(e, *request.Light)
+			}
+			if request.Camera != nil {
+				cameras.UpdateFor(e, *request.Camera)
 			}
 			if i == 0 {
 				first = e
@@ -107,8 +120,26 @@ func spawnCmdImpl(world *ecs.Entities) func() (kernel.Lock, kernel.Execute[spawn
 	})
 }
 
+// despawnCmd retires one Entity, which is the only way a drawable stops
+// drawing: scene keeps no per-entity state, so nothing has to be told.
+type despawnCmd kernel.Command[despawnRequest, despawnResponse]
+
+type despawnRequest struct {
+	Entity ecs.Entity
+}
+
+type despawnResponse struct{}
+
+func despawnCmdImpl(world *ecs.Entities) func() (kernel.Lock, kernel.Execute[despawnRequest, despawnResponse]) {
+	return ecs.ToExecute[despawnRequest, despawnResponse](world, func(
+		request despawnRequest, world *ecs.WriteableEntities,
+	) {
+		world.Despawn(request.Entity)
+	})
+}
+
 // inspectCmd runs a callback under scene's queue lock, which is the only way to
-// read what a frame recorded from outside scene.
+// read what a frame published from outside scene.
 type inspectCmd kernel.Command[inspectRequest, inspectResponse]
 
 type inspectRequest struct {
@@ -127,25 +158,41 @@ func inspectCmdImpl() (kernel.Lock, kernel.Execute[inspectRequest, inspectRespon
 		}
 }
 
-// cameraCmd records one camera into the next frame, for the tests that want
-// scene to actually decide something. It is a second recorder, which the spec
-// says is the shape to avoid in production and is exactly right for a test: it
-// shows that the binding's System is an ordinary recorder beside any other.
-type cameraCmd kernel.Command[cameraRequest, cameraResponse]
+// bakeCmd bakes a mesh through scene's own lookup, which is where a MeshRef a
+// game stores in a Mesh Component comes from.
+type bakeCmd kernel.Command[bakeRequest, bakeResponse]
 
-type cameraRequest struct {
-	Descr scene.CameraDescr
+type bakeRequest struct{}
+
+type bakeResponse struct {
+	Ref scene.MeshRef
 }
 
-type cameraResponse struct{}
+func bakeCmdImpl() (kernel.Lock, kernel.Execute[bakeRequest, bakeResponse]) {
+	var lookup kernel.Write[*scene.Lookup]
+	return func(access kernel.ResourceAccess) {
+			lookup = access.GetWrite[*scene.Lookup]()
+		}, func(k kernel.Kernel, _ bakeRequest) (bakeResponse, error) {
+			vertices := []scene.Vertex{
+				{Position: m.Vec3{X: -1, Y: -1}, Normal: m.Vec3{Z: 1}},
+				{Position: m.Vec3{X: 1, Y: -1}, Normal: m.Vec3{Z: 1}},
+				{Position: m.Vec3{Y: 1}, Normal: m.Vec3{Z: 1}},
+			}
+			la := scene.NewLookupAccess(k, lookup.Get())
+			return bakeResponse{Ref: la.BakeMesh(vertices, []uint32{0, 1, 2}, gfx.TopologyTriangleList)}, nil
+		}
+}
 
 // gamePlugin stands in for the game: it spawns the world's Entities and reads
 // back what the frame recorded. It declares the binding because it names the
-// binding's Components, and scene because it locks scene's queue.
+// binding's Components, and scene because it locks scene's resources.
+//
+// It subscribes nothing to the tick. A second recorder beside the binding's
+// would serialise against it on scene's queue, and the kernel's bookkeeping for
+// a blocked request would show up in the allocation figures as noise that
+// scales with frame length.
 type gamePlugin struct {
-	world  *ecs.Entities
-	camera scene.CameraDescr
-	mu     sync.Mutex
+	world *ecs.Entities
 }
 
 func (p *gamePlugin) Name() kernel.PluginName { return "game" }
@@ -155,43 +202,12 @@ func (p *gamePlugin) Dependencies() []kernel.PluginName {
 }
 
 func (p *gamePlugin) Register(registrar *kernel.Registrar, _ any) error {
+	ecs.RegisterComponent[unmarked](registrar, p.world, 8)
 	registrar.HandleCommand[spawnCmd](spawnCmdImpl(p.world))
-	registrar.HandleCommand[inspectCmd](inspectCmdImpl)
-	registrar.HandleCommand[cameraCmd](p.cameraCmdImpl)
-	registrar.HandleCommand[layerCmd](layerCmdImpl(p.world))
 	registrar.HandleCommand[despawnCmd](despawnCmdImpl(p.world))
-	registrar.Subscribe[cameraHandler](p.recordCamera)
+	registrar.HandleCommand[inspectCmd](inspectCmdImpl)
+	registrar.HandleCommand[bakeCmd](bakeCmdImpl)
 	return nil
-}
-
-type cameraHandler kernel.Subscription[app.UpdateEvent]
-
-func (p *gamePlugin) cameraCmdImpl() (kernel.Lock, kernel.Execute[cameraRequest, cameraResponse]) {
-	return func(kernel.ResourceAccess) {}, func(_ kernel.Kernel, request cameraRequest) (cameraResponse, error) {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		p.camera = request.Descr
-		return cameraResponse{}, nil
-	}
-}
-
-// recordCamera is the game's own recorder, and it declares no ordering either:
-// two recorders both hold scene's one queue for write, so the scheduler
-// serialises them and both land before the flush.
-func (p *gamePlugin) recordCamera() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var queue kernel.Write[*scene.OpQueue]
-	return func(access kernel.ResourceAccess) {
-			queue = access.GetWrite[*scene.OpQueue]()
-		}, func(_ kernel.Kernel, _ app.UpdateEvent) error {
-			p.mu.Lock()
-			descr := p.camera
-			p.mu.Unlock()
-			if descr.Near == 0 {
-				return nil
-			}
-			queue.Get().Camera(0, descr)
-			return nil
-		}
 }
 
 type harness struct {
@@ -217,22 +233,21 @@ func (s *errorSink) snapshot() []error {
 	return append([]error(nil), s.errs...)
 }
 
-func newHarness(t testing.TB, config Config) *harness {
+func newHarness(t testing.TB) *harness {
 	t.Helper()
-	return newHarnessOver(t, fstest.MapFS{}, config, 256)
+	return newHarnessOver(t, fstest.MapFS{}, 256)
 }
 
 // newHarnessOver composes the whole engine: storage and gfx because scene needs
 // them, scene because it is what is being bound to, ecs because it is what is
 // being bound from, the binding, and a game plugin standing in for the app.
-func newHarnessOver(t testing.TB, files fstest.MapFS, config Config, ids uint32) *harness {
+func newHarnessOver(t testing.TB, files fstest.MapFS, ids uint32) *harness {
 	t.Helper()
 	world := ecs.NewEntities(ids)
 	sink := &errorSink{}
 	configs := map[kernel.PluginName]any{
 		storage.Name: storage.DefaultConfig("ecsscene-test").WithReadFS("test", 10, fs.FS(files)),
 		scene.Name:   scene.DefaultConfig(),
-		Name:         config,
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) bool { sink.add(err); return false }).
@@ -268,61 +283,62 @@ func (h *harness) frame(t testing.TB) {
 
 func (h *harness) spawn(t testing.TB, request spawnRequest) ecs.Entity {
 	t.Helper()
+	if request.Count == 0 {
+		request.Count = 1
+	}
 	response, err := h.kernel.ExecuteCommand[spawnCmd](request)
 	if err != nil {
-		t.Fatalf("spawning %d drawables: %v", request.Count, err)
+		t.Fatalf("spawning %d Entities: %v", request.Count, err)
 	}
 	return response.First
 }
 
-// ops reads back what the last flush published, copied out under the lock: the
-// slices scene hands back alias its own storage and are valid only until the
-// next flush.
-func (h *harness) ops(t testing.TB) []scene.Op {
+func (h *harness) despawn(t testing.TB, e ecs.Entity) {
 	t.Helper()
-	var out []scene.Op
-	_, err := h.kernel.ExecuteCommand[inspectCmd](inspectRequest{Run: func(q *scene.OpQueue) {
-		out = q.Ops(nil)
-	}})
-	if err != nil {
+	if _, err := h.kernel.ExecuteCommand[despawnCmd](despawnRequest{Entity: e}); err != nil {
+		t.Fatalf("despawning: %v", err)
+	}
+}
+
+func (h *harness) bake(t testing.TB) scene.MeshRef {
+	t.Helper()
+	response, err := h.kernel.ExecuteCommand[bakeCmd](bakeRequest{})
+	if err != nil || response.Ref.ID() == 0 {
+		t.Fatalf("baking a mesh: ref %v, %v", response.Ref, err)
+	}
+	return response.Ref
+}
+
+// ops reads back what the last flush published, narrowed to one kind. The
+// slices inside alias scene's frame arenas, which stay put until the next
+// flush; every test reads them before publishing another frame.
+func (h *harness) ops(t testing.TB, kinds ...scene.OpKind) []scene.Op {
+	t.Helper()
+	var all []scene.Op
+	if _, err := h.kernel.ExecuteCommand[inspectCmd](inspectRequest{Run: func(q *scene.OpQueue) {
+		all = q.Ops(nil)
+	}}); err != nil {
 		t.Fatalf("inspecting the queue: %v", err)
+	}
+	var out []scene.Op
+	for _, op := range all {
+		for _, kind := range kinds {
+			if op.Kind == kind {
+				out = append(out, op)
+			}
+		}
 	}
 	return out
 }
 
-// modelOps is ops narrowed to the model draws the binding recorded, with every
-// borrowed slice copied so the result survives the next flush.
-func (h *harness) modelOps(t testing.TB) []scene.Op {
+// passes reads back what the last flush decided.
+func (h *harness) passes(t testing.TB) []scene.PassView {
 	t.Helper()
-	var models []scene.Op
-	for _, op := range h.ops(t) {
-		if op.Kind != scene.OpModel {
-			continue
-		}
-		op.Model.Plays = append([]scene.ClipPlay(nil), op.Model.Plays...)
-		models = append(models, op)
+	var out []scene.PassView
+	if _, err := h.kernel.ExecuteCommand[inspectCmd](inspectRequest{Run: func(q *scene.OpQueue) {
+		out = q.Passes(nil)
+	}}); err != nil {
+		t.Fatalf("inspecting the queue: %v", err)
 	}
-	return models
-}
-
-// TestADrawableEntityRecordsAModelDraw is the tracer bullet: three Components,
-// one System nobody wrote a Lock for, and a real scene.OpQueue with the draw in
-// it. Nothing in ecs knows about scene, nothing in scene knows about ecs, and
-// the binding between them is an ordinary plugin.
-func TestADrawableEntityRecordsAModelDraw(t *testing.T) {
-	h := newHarness(t, testConfig())
-	h.spawn(t, spawnRequest{Count: 1, Model: crate})
-
-	h.frame(t)
-
-	models := h.modelOps(t)
-	if len(models) != 1 {
-		t.Fatalf("the frame recorded %d model draws, want 1", len(models))
-	}
-	if models[0].Path != crateModel {
-		t.Errorf("the draw named %q, want the manifest's %q", models[0].Path, crateModel)
-	}
-	if got := models[0].Model.Transform.Position; got != (m.Vec3{}) {
-		t.Errorf("the draw stands at %v, want the origin", got)
-	}
+	return out
 }

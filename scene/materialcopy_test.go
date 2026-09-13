@@ -73,3 +73,21 @@ func TestMutatingAModelMaterialAfterRecordingChangesNothingDrawn(t *testing.T) {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 2
 	})
 }
+
+// An empty non-nil Material serves no pass, and the copy keeps it that way. The
+// first frame's material arena has never held an entry, which is where a copy
+// that slices the arena would hand back nil - and nil is the bundled PBR, which
+// serves the forward pass and draws the mesh.
+func TestAnEmptyMaterialStillServesNoPassAfterTheCopy(t *testing.T) {
+	var ref MeshRef
+	h := newHarness(t, func(q *OpQueue) {
+		q.Camera(testCamera, testCameraDescr())
+		q.Mesh(0, ref, MeshDraw{Material: Material{}, NeverCull: true})
+	})
+	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
+	h.frame()
+
+	if pass := h.passes()[0]; pass.Instances != 0 {
+		t.Fatalf("packed %d instances, want none: an empty material serves no pass", pass.Instances)
+	}
+}

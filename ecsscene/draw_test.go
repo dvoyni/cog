@@ -77,7 +77,7 @@ func (b *stubBackend) TakeCapture() (gfx.GpuCapture, bool) { return gfx.GpuCaptu
 
 // crateGLB is the smallest drawable file: one triangle, one node, one scene. It
 // is built rather than read, because this package has no testdata and the point
-// is that the path the manifest names is a file scene really loads.
+// is that the path a Model Component holds is a file scene really loads.
 func crateGLB(t testing.TB) []byte {
 	t.Helper()
 	doc := &gltf.Document{Asset: gltf.Asset{Version: "2.0"}}
@@ -96,12 +96,17 @@ func crateGLB(t testing.TB) []byte {
 	return buffer.Bytes()
 }
 
+// crateModelComponent is a Model naming the crate file's whole default scene.
+func crateModelComponent() *Model {
+	return &Model{Ref: scene.ModelRef{Path: crateModel}}
+}
+
 // newDrawingHarness is the harness with a backend, a viewport and the crate on
 // disk: the whole engine, able to decide a frame.
 func newDrawingHarness(t testing.TB, ids uint32) *harness {
 	t.Helper()
 	files := fstest.MapFS{crateModel: &fstest.MapFile{Data: crateGLB(t)}}
-	h := newHarnessOver(t, files, testConfig(), ids)
+	h := newHarnessOver(t, files, ids)
 	if _, err := h.kernel.ExecuteCommand[gfx.SetBackendCmd](
 		gfx.SetBackendRequest{Backend: &stubBackend{}}); err != nil {
 		t.Fatalf("setting the backend: %v", err)
@@ -111,26 +116,11 @@ func newDrawingHarness(t testing.TB, ids uint32) *harness {
 	}); err != nil {
 		t.Fatalf("setting the viewport: %v", err)
 	}
-	if _, err := h.kernel.ExecuteCommand[cameraCmd](cameraRequest{Descr: scene.CameraDescr{
-		Transform: scene.LookAt(m.Vec3{Z: 30}, m.Vec3{}, m.Vec3{Y: 1}),
-		FovY:      1.0472,
-		Near:      0.1, Far: 200,
-	}}); err != nil {
-		t.Fatalf("recording the camera: %v", err)
-	}
+	h.spawn(t, spawnRequest{
+		Place:  Transform(scene.LookAt(m.Vec3{Z: 30}, m.Vec3{}, m.Vec3{Y: 1})),
+		Camera: &Camera{FovY: 1.0472, Near: 0.1, Far: 200},
+	})
 	return h
-}
-
-// passes reads back what the last flush decided.
-func (h *harness) passes(t testing.TB) []scene.PassView {
-	t.Helper()
-	var out []scene.PassView
-	if _, err := h.kernel.ExecuteCommand[inspectCmd](inspectRequest{Run: func(q *scene.OpQueue) {
-		out = q.Passes(nil)
-	}}); err != nil {
-		t.Fatalf("inspecting the queue: %v", err)
-	}
-	return out
 }
 
 // frameUntil runs frames until ready. A model load is two commands on their own
@@ -152,12 +142,12 @@ func (h *harness) frameUntil(t testing.TB, what string, ready func() bool) {
 
 // TestDrawableEntitiesBecomeInstancesInAPass is the end-to-end: Components on a
 // real world, through the binding's one System, into the real scene plugin,
-// which loads the file the manifest named and packs the drawables into a pass.
+// which loads the file a Model names and packs the Entities into a pass.
 //
 // Nothing between the Component and the instance was written for this test.
 func TestDrawableEntitiesBecomeInstancesInAPass(t *testing.T) {
 	h := newDrawingHarness(t, 256)
-	h.spawn(t, spawnRequest{Count: 3, Model: crate, Step: 2})
+	h.spawn(t, spawnRequest{Count: 3, Step: 2, Model: crateModelComponent()})
 
 	h.frameUntil(t, "the crate to become resident", func() bool {
 		passes := h.passes(t)
@@ -169,9 +159,8 @@ func TestDrawableEntitiesBecomeInstancesInAPass(t *testing.T) {
 		t.Fatalf("the pass recorded %d draws and culled %d, want 3 and 0",
 			passes[0].Recorded, passes[0].Culled)
 	}
-	// One primitive drawn at three transforms is one batch of three: the draws
-	// the binding recorded were three separate Model calls, so this is scene
-	// collapsing what it decided, not the binding batching anything.
+	// Three separate Model calls are three batches: the binding records one
+	// call per Entity and batches nothing, and scene does not merge calls.
 	if len(passes[0].Batches) != 3 {
 		t.Fatalf("the pass emitted %d batches for three separate calls", len(passes[0].Batches))
 	}
@@ -185,7 +174,7 @@ func TestDrawableEntitiesBecomeInstancesInAPass(t *testing.T) {
 // the source of truth, and a frame records what is there when it runs.
 func TestADespawnedDrawableStopsDrawing(t *testing.T) {
 	h := newDrawingHarness(t, 256)
-	first := h.spawn(t, spawnRequest{Count: 2, Model: crate, Step: 2})
+	first := h.spawn(t, spawnRequest{Count: 2, Step: 2, Model: crateModelComponent()})
 
 	h.frameUntil(t, "the crate to become resident", func() bool {
 		passes := h.passes(t)
@@ -197,5 +186,27 @@ func TestADespawnedDrawableStopsDrawing(t *testing.T) {
 
 	if passes := h.passes(t); len(passes) != 1 || passes[0].Instances != 1 {
 		t.Fatalf("after the despawn the pass packed %v, want one instance", passes)
+	}
+}
+
+// TestAPresentMaterialWithNoTagsDrawsNothing is presence meaning what scene's
+// empty material means: a material serving no pass. Every Entity here reaches
+// the pass, and only the two with no Material are packed — the bundled PBR for
+// the mesh and the file's own material for the model.
+func TestAPresentMaterialWithNoTagsDrawsNothing(t *testing.T) {
+	h := newDrawingHarness(t, 256)
+	ref := h.bake(t)
+	h.spawn(t, spawnRequest{Mesh: &Mesh{Ref: ref, NeverCull: true}})
+	h.spawn(t, spawnRequest{Mesh: &Mesh{Ref: ref, NeverCull: true}, Material: &Material{}})
+	h.spawn(t, spawnRequest{Place: Transform{Position: m.Vec3{X: 2}}, Model: crateModelComponent()})
+	h.spawn(t, spawnRequest{Place: Transform{Position: m.Vec3{X: 4}}, Model: crateModelComponent(), Material: &Material{}})
+
+	h.frameUntil(t, "every draw to reach the pass", func() bool {
+		passes := h.passes(t)
+		return len(passes) == 1 && passes[0].Recorded == 4
+	})
+
+	if pass := h.passes(t)[0]; pass.Instances != 2 {
+		t.Fatalf("the pass packed %d instances of 4 recorded draws, want the 2 without a Material", pass.Instances)
 	}
 }

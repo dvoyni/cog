@@ -1,48 +1,43 @@
 # ecsscene
 
-`github.com/dvoyni/cog/ecsscene` draws the world: it records every Entity
-carrying a `Transform` and a `Drawable` into `scene`'s frame-local queue, once a
-tick, in one System.
+`github.com/dvoyni/cog/ecsscene` records Entities into `scene`. A game spawns an
+Entity with a `Transform` and a `Model` naming a glTF path, and it is drawn —
+nothing registered in advance, no manifest, no hash.
 
 **It is a binding, and a binding is necessarily a third plugin.** `ecs` imports
-only `kernel`; `scene` imports nothing of `ecs`. Neither can know about the
-other, so what attaches them is an ordinary plugin that imports both — and that
-is what "there is no binding mechanism" means in practice. The consequence worth
-stating: **a project not using the ECS schedules no ECS Systems**, because it
-simply does not register this plugin.
+nothing of `scene` and `scene` imports nothing of `ecs`, so what attaches them
+is an ordinary plugin that imports both. A project not using the ECS does not
+register it and schedules no ECS Systems.
+
+**It is thin on purpose.** Its Components hold scene's own types — a
+`scene.Transform`, a `scene.ModelRef`, a `scene.MeshRef`, `scene.ClipPlay`s,
+`gfx.ParameterDescr`s, `scene.Pass`es — and its one System copies every matching
+Entity into scene's op queue once a tick. What each field means is scene's
+documentation, not this one's: [`../scene/README.md`](../scene/README.md).
 
 [`../ecs/docs/specs/ecs.md`](../ecs/docs/specs/ecs.md) §Binding is the design
-record. This README is the API, and **[What this plugin may not do](#what-this-plugin-may-not-do)
-is the part to read before writing a second binding**: a backend adopted from
-outside cog will not have been written with those rules in mind.
+record. **[What a binding may not do](#what-a-binding-may-not-do) is the part to
+read before writing a second one.**
 
 ## Files
 
-`contract.go` holds the package documentation, the two hash types and the three
-Components; `config.go` the manifest and its `With*` setters; `resources.go` the
-public `Manifest` alias; `resourcesimpl.go` the two name tables behind it and the
-play scratch builder; `plugin.go` the plugin, the Query and the one recording
-System.
+`contract.go` holds the package documentation and the vocabulary that is not a
+Component — `Name`, `UpdateEventHandler`, `Config`, `MaxPlays`, `MaterialTag`;
+`components.go` every Component; `systems.go` the recording System, its Queries
+and its scratch; `plugin.go` the plugin and its registration.
 
 ## Dependencies
 
-- Go packages: `app`, `ecs`, `kernel`, `m`, `scene`
+- Go packages: `app`, `ecs`, `gfx`, `kernel`, `m`, `scene`
 - Plugin dependencies: `ecs`, `scene`
-- Configuration: `ecsscene.Config` — the manifest, and the Store population hint
+- Configuration: `ecsscene.Config`, empty for now — every Store reserves an
+  internal default population, which is a hint and not a cap
 - Events declared or published: none
 
 ## Composing
 
 ```go
 world := ecs.NewEntities(4096)
-
-config := map[kernel.PluginName]any{
-    storage.Name: storage.DefaultConfig("my-game").WithReadDiskFS("res"),
-    ecsscene.Name: ecsscene.DefaultConfig().
-        WithModel("crate", "models/props/crate.glb").
-        WithClip("walk", "Walk").
-        WithDrawables(4096),
-}
 
 kernel.New(config).WithPlugins(
     storage.New(), input.New(), gfx.New(), scene.New(), wgpu.New(),
@@ -56,183 +51,202 @@ handler is running and no resource value may be read.
 ## Components
 
 ```go
-type Transform struct {
-    Position m.Vec3
-    Rotation m.Quat
-    Scale    float32 // zero means 1
+type Transform scene.Transform                 // required
+
+type Model struct {
+    Ref    scene.ModelRef                      // Path, Scene, Node
+    Layers scene.LayerMask
 }
 
-type Drawable struct {
-    Model  ModelHash
-    Layers scene.LayerMask // zero reads as every layer
+type Mesh struct {                             // pointer-free
+    Ref       scene.MeshRef
+    Bounds    m.Vec4
+    Layers    scene.LayerMask
+    NeverCull bool
 }
 
-type Animation struct {
-    Plays [MaxPlays]Play  // MaxPlays is 4, which is scene's own cap
+type Animation struct{ Plays [MaxPlays]scene.ClipPlay } // MaxPlays is 4
+type Params    struct{ Values ecs.List[gfx.ParameterDescr] }
+type Material  struct{ Tags ecs.List[MaterialTag] }
+
+type MaterialTag struct {
+    Tag    scene.PassTag
+    Shader gfx.ShaderDescr
+    State  gfx.MaterialState
+    Params ecs.List[gfx.ParameterDescr]
 }
 
-type Play struct {
-    Clip   ClipHash
-    Time   float32
-    Weight float32
-    Loop   bool
+type Light struct {                            // pointer-free
+    Kind                                  scene.LightKind
+    Color                                 m.Color
+    Intensity, Range, InnerCone, OuterCone float32
+    Layers                                scene.LayerMask
+}
+
+type Camera struct {
+    ID                                      scene.CameraID
+    Projection                              scene.ProjectionKind
+    FovY, Height, Shear, Near, Far          float32
+    CullMask                                scene.LayerMask
+    SunDirection                            m.Vec3
+    SunColor                                m.Color
+    SunIntensity                            float32
+    AmbientSky, AmbientGround               m.Color
+    AmbientIntensity                        float32
+    Passes                                  ecs.List[scene.Pass]
 }
 ```
 
-The three are registered by this plugin, because a Component is registered by the
+All eight are registered by this plugin, because a Component is registered by the
 plugin that defines its Go type — which is what keeps cog's coupling check
 working on Component data.
 
-`Transform` is `scene.Transform` **without the one field that would break the
-binding**: `scene.Transform.Matrix` is a `*m.Mat4`, and a matrix pointing into a
-Component Store would be read after this System's locks are gone. The
-prohibition is therefore structural rather than remembered, and the pointer-free
-rule the ECS checks at registration would have refused the field anyway.
-Non-uniform scale is not expressible for the same reason — that is scene's trade,
-not the binding's.
+| Component | reaches scene as | notes |
+| --- | --- | --- |
+| `Transform` | the draw's, light's or camera's placement | **Required**: an Entity without one is not recorded. Defined *from* `scene.Transform`, not aliased, so the Store's Go type is this package's and a System naming it imports `ecsscene`. Convert with `scene.Transform(t)`. |
+| `Model` | `OpQueue.Model(Layers, Ref.Path, …)` with `Ref.Scene` and `Ref.Node` | The path is a string. Loading, residency and a bad path's report are scene's. |
+| `Mesh` | `OpQueue.Mesh(Layers, Ref, …)` | The ref comes from `LookupAccess.BakeMesh`. |
+| `Animation` | `ModelDraw.Plays` | Optional. A play with an empty `Clip` is an unused slot. **Nothing here advances clip time**; that is the game's. |
+| `Params` | `MeshDraw.Params`, `ModelDraw.OverrideParams` | Optional. On a model they merge by name over the file's materials, so `gfx.ColorParam("baseColorFactor", c)` tints it. |
+| `Material` | `MeshDraw.Material`, `ModelDraw.Material` | Optional, any number of tags. **Absent is no material**: the bundled PBR for a mesh, the file's own for a model. Present with no tags is an empty non-nil material. |
+| `Light` | `OpQueue.PointLight` or `SpotLight` | Position is the Transform's; a spot's direction is the Transform's rotation applied to −Z, the way `scene.LookAt` faces. |
+| `Camera` | `OpQueue.Camera(ID, …)` | Placement is the Transform's; its scale is ignored, as scene ignores it. An empty `Passes` is scene's default pass. Two Cameras with one ID are scene's duplicate report. |
 
-`Animation` is **optional**, and is reached through an Accessor rather than named
-in the Query: a Query matches an Entity having *at least* the Components it
-names, so naming `Animation` there would drop every unanimated drawable out of
-the walk. A second System for those would serialise against this one anyway.
+`Model`, `Mesh`, `Light` and `Camera` are what the System queries, each beside
+`Transform`. `Animation`, `Params` and `Material` are **optional** and reached
+through accessors, so an Entity without them pays one probe each: a Query
+matches an Entity having *at least* the Components it names, so naming an
+optional one would drop every Entity without it out of the walk.
 
-A spawn names whichever of them it means:
+`Mesh` and `Light` are pointer-free and keep the ECS's fast path. The rest hold a
+string, a `List` or a `Blob` and give it up for their own Store only.
+
+A spawn names whichever it means:
 
 ```go
 type Crate struct {
     Place ecsscene.Transform
-    Draw  ecsscene.Drawable
+    Model ecsscene.Model
+    Tint  ecsscene.Params
 }
-
-var crate = ecs.HashOf[ecsscene.ModelHash]("crate")   // package level, at init
 
 func spawnCrates(sp *ecs.Spawn[Crate]) {
-    sp.New(Crate{Place: ecsscene.Transform{Scale: 1}, Draw: ecsscene.Drawable{Model: crate}})
+    sp.New(Crate{
+        Place: ecsscene.Transform(scene.At(0, 0, -5)),
+        Model: ecsscene.Model{Ref: scene.ModelRef{Path: "models/crate.glb"}},
+        Tint:  ecsscene.Params{Values: ecs.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}))},
+    })
 }
 ```
-
-## The manifest
-
-```go
-func (c Config) WithModel(name, path string) Config
-func (c Config) WithClip(name, clip string) Config
-func (c Config) WithDrawables(count int) Config
-
-func (m *Manifest) Model(name ModelHash) (string, bool)
-func (m *Manifest) Clip(name ClipHash) (string, bool)
-func (m *Manifest) ModelText(name ModelHash) (string, bool)
-func (m *Manifest) ClipText(name ClipHash) (string, bool)
-```
-
-A Component names a model by the **hash of a name**, never by the path: a path is
-a string and a Component holds no pointers, and a hash is the same number in
-every process and every run. `Manifest` is the reverse half, and **where it lives
-is the whole point** — it belongs to the plugin that resolves names, is read once
-per draw under a lock the recording System holds anyway, and has no lock of its
-own. One System declares it, rather than every System that ever assigns a model
-to an Entity.
-
-It is **filled from `Config` during Registration and never again**, which is why
-nothing here mutates it: a mutator would be reachable through a read handle, and
-a read-locked System holding a mutator is a race the kernel cannot see. A game
-that discovers its assets at runtime builds the `Config` before `kernel.New`,
-which is where the plugin set is fixed anyway.
-
-A name nobody registered resolves to nothing, draws nothing and is not reported:
-an unset Component field is `ecs.NoHash`, which is the ordinary state of a
-drawable being assembled. A **collision** — two names on one hash — fails
-composition rather than silently drawing the wrong model.
 
 ## The recording System
 
 ```go
-func(q *ecs.Query[drawQuery], animations *ecs.Get[Animation],
-     names *ecs.Read[*Manifest], out *ecs.Write[*scene.OpQueue])
+func record(
+    models  *ecs.Query[modelQuery],   // Transform + Model
+    meshes  *ecs.Query[meshQuery],    // Transform + Mesh
+    lights  *ecs.Query[lightQuery],   // Transform + Light
+    cameras *ecs.Query[cameraQuery],  // Transform + Camera
+    animations *ecs.Get[Animation],
+    params     *ecs.Get[Params],
+    materials  *ecs.Get[Material],
+    work *ecs.Write[*scratch],
+    out  *ecs.Write[*scene.OpQueue],
+)
 ```
 
-That signature is the whole binding: the Components, an Accessor for the optional
-one, the manifest read, and scene's queue written. Nothing declares a lock
-anywhere — the parameter types are the declaration, derived once at
-registration. `RecordEventHandler` is the subscription's identity type, exported
-so a System that moves drawables can order itself `Before` it.
+That signature is the whole binding and its whole lock set: every Store read,
+the scratch and scene's queue written, and nothing declared in a `Lock` func
+anywhere.
 
 **One recording System per bound plugin is the shape.** `*scene.OpQueue` is one
 resource, so every recording System serialises against every other whatever
-Components they read — the ECS's per-Store granularity buys nothing there, and
-that is a property of scene's API rather than of the ECS. A second System would
-cost a scheduling slot and could not run concurrently anyway.
+Components they read. A second one would cost a scheduling slot and could not
+run concurrently anyway.
 
-### Ordering needs nothing new
+`UpdateEventHandler` is its subscription identity, named as scene's, gfx's and
+canvas's are. **It declares no ordering.** Scene subscribes its flush `Last`, so
+anything that does not ask to be last already runs before it, and a draw recorded
+in a tick is in what that tick's flush publishes. A game System that moves
+Transforms orders itself `Before[ecsscene.UpdateEventHandler]()`.
 
-The System declares **no** `First`, `Last`, `Before` or `After`. Scene subscribes
-its flush `.Last().Before[gfx.UpdateEventHandler]()`, so anything that does not
-ask to be last is in the ordinary phase and already runs before it. A draw
-recorded in a tick is in the recording that same tick's flush publishes, and
-`TestTheRecordingSystemNeedsNoOrderingVocabulary` asserts the edge the engine
-derived without either side declaring it.
-
-## What this plugin may not do
+## What a binding may not do
 
 Stated as prohibitions, because they are what a second binding — physics, audio,
 or a backend adopted from outside cog — has to keep true, and none of them has a
 compiler behind it.
 
-- **A Component holds no pointer, transitively.** Enforced at registration, where
-  the type is named and nothing has been stored yet.
-- **Never hand the bound plugin a pointer into a Store.**
-  `scene.ModelDraw.Transform.Matrix` is a `*m.Mat4` retained by value in scene's
-  record until the flush — and the flush is a *different* System, running after
-  the recording System's locks are gone, so such a matrix would be read
-  unlocked. Use the TRS form, or point into scratch that outlives the frame.
-- **Variable-length draw data is not a Component.** Play lists, morph weights and
-  override params are built in System-owned scratch and rebuilt each frame;
-  scene copies each into its own arena at record time and says so, so the caller
-  may reuse the backing the moment the call returns. **Scratch captured in a
-  closure is safe for one System only** — two Systems sharing it have no lock
-  between them. This one is safe because it has a single holder and because the
-  System takes scene's queue for write, so the lock that orders the queue orders
-  the scratch with it. If in doubt make it a resource, which puts it in the lock
-  set.
+- **A Component holds no mutable indirection, transitively.** Enforced at
+  registration. A string, an `m.Blob` and an `ecs.List` are admitted; a bare
+  slice is not. Scene's descriptors that keep a slice — `gfx.MaterialDescr`'s
+  params, `CameraDescr.Passes` — are therefore spelled out as Component fields
+  and rebuilt per draw, which is what `MaterialTag` is.
+- **Copy a List out through `All()`; never hand the bound plugin its backing.**
+  There is no `Raw()`, and a view of a Store's memory would be read by scene's
+  flush after this System's locks are gone. The copy into reused scratch costs no
+  allocation.
+- **Anything a System keeps between calls is a resource.** The scratch is one,
+  owned by this plugin and named in the signature, so it is in the lock set and
+  the kernel keeps two holders apart. Nothing is captured in a closure.
+- **Per-draw slices come from scratch allocated once, never from a stack
+  array.** Scene's recording calls let their argument escape, so a local
+  `[4]scene.ClipPlay` handed to one is a heap allocation per draw.
+- **Reset scratch per draw, but not per material tag.** `gfx` keeps the params
+  slice a descriptor is built around, so within one draw each tag's params are
+  appended after the previous tag's and windowed with a full slice expression.
+  Scene copies the whole material into its frame arenas at record, so the next
+  draw may reuse everything.
+- **Release what the scratch held once the frame is recorded.** It holds copies
+  of Components — names, and `Blob` bytes that may be a texture's pixels — and a
+  stale slot would keep a despawned Entity's data reachable.
 - **Do not cache an Entity without checking liveness, and do not restructure the
-  world from inside another Entity's iteration.** Recording does neither: it
-  holds `*Entities` for read, which is not the authority to retire anything.
+  world from a recording System.** Recording holds `*Entities` for read, which is
+  not the authority to retire anything.
 
 ## What it costs
 
 Measured on a real `kernel.Engine` driven by a real `app.UpdateEvent`, with
-`storage`, `gfx`, `scene`, `ecs`, this plugin and a recorder composed beside it —
-six subscribers to the tick. AMD Ryzen 9 7950X3D, go1.27.1 windows/amd64.
+`storage`, `gfx`, `scene`, `ecs`, this plugin and a game plugin composed beside
+it — five subscribers to the tick. The frame has no camera and no resident
+model: scene records a `Model` call, copying its plays, overrides and material
+into its arenas, before it knows whether the path is resident, so this is the
+binding's cost and not scene's decide-cull-pack. Every arm is 5 000 `Model`
+Entities; *animated* blends two clips, *Params* is one colour, *Material* is two
+pass tags with one float parameter each.
 
-| whole frame | ns/op | allocs/op |
-| --- | --- | --- |
-| nothing to record | 22 378 | **15** |
-| 100 drawables | 30 331 | **15** |
-| 1 000 drawables | 97 578 | **15** |
-| 5 000 drawables | 384 654 | **15** |
-| 1 000 drawables, each blending two clips | 116 232 | **15** |
-| 5 000 drawables, each blending two clips | 478 851 | **15** |
+Both test binaries — this binding, and the manifest binding it replaces at
+`d3631ff` — were built first and run alternately, ten rounds, medians.
+AMD Ryzen 9 7950X3D, go1.27.1 windows/amd64.
 
-**Allocation-free**: the count is identical with nothing to record and with five
-thousand drawables, and identical again with every one of them animated, so
-nothing in the binding scales with the entity count. Measured as a steady state
-over 10 000 frames rather than as `allocs/op`, which rounds:
-**15.07 / 15.03 / 15.02** objects a frame at 0, 5 000 and 5 000 animated. The
-figure is the engine's own per-publication and per-subscriber charge; the binding
-adds nothing to it.
+| whole frame | ns/op | allocs/op | per Entity | manifest binding, ns/op |
+| --- | --- | --- | --- | --- |
+| nothing to record | 19 931 | **14** | — | 21 071 |
+| 5 000 | 413 928 | **14** | 78.8 ns | 359 604 |
+| 5 000 animated | 456 584 | **14** | +8.5 ns | 463 337 |
+| 5 000 with `Params` | 570 824 | **14** | +31.4 ns | — |
+| 5 000 with `Material` | 1 116 624 | **14** | +140.5 ns | — |
 
-Time is **linear at about 72 ns a drawable** — 73.9 ns at 500 and 71.5 ns at
-5 000, measured against the same frame with nothing to record. Blending two
-clips adds about 19 ns a drawable, which is the accessor probe, the two clip
-lookups and the scratch rebuild.
+**Allocation-free.** Measured as a steady state over 3 000 frames rather than as
+`allocs/op`, which rounds: **14.08, 14.02, 14.03, 14.03 and 14.05** objects a
+frame for the five rows, so nothing scales with the Entity count. The figure is
+the kernel's own per-publication and per-subscriber charge; a profile of the
+steady state with every allocation sampled finds none in `ecsscene`, `ecs`,
+`scene` or `gfx`. (The manifest binding's harness subscribed a second recorder
+to scene's queue, which is why it sat at 15: a request blocked behind another
+costs the kernel's scheduler a map entry.)
 
-The frame above records but does not draw: what a resident model costs once
-scene decides, culls, sorts and packs it is scene's number, and it is large —
-**1.60 ms at 1 000 and 10.26 ms at 5 000** drawables, still at 15 allocations.
-Three quarters of the per-draw part of that is scene re-resolving a model path
-per draw per frame, 46.9 ns against 0.54 ns for a dense index. That is
-[#263](https://github.com/dvoyni/cog/issues/263), it is scene's own hot path, and
-the binding is correct and allocation-free without it.
+**Time is about 79 ns an Entity**, against the manifest binding's 68. The
+difference is the price of the shape rather than of a lookup: a `Model` holds
+strings, so its Query takes the ECS's per-field fill instead of the unrolled
+one, and every Entity pays three accessor probes for `Animation`, `Params` and
+`Material` whether it has them or not. Animation is cheaper than it was, because
+there is no clip name to resolve.
 
-`-gcflags=-m` reports exactly one `moved to heap` in this package: the play
-scratch, which is allocated once at registration and is the point. The System
-body inlines the manifest lookup, the play rebuild and the Query's `All`.
+**A `Material` costs 140 ns a draw**, most of it scene copying the tags and their
+params into its arenas at record — copied once per draw, even when five thousand
+Entities share one material, which is
+[#314](https://github.com/dvoyni/cog/issues/314).
+
+`-gcflags=-m` reports no `moved to heap` in this package's recording path; its
+`append`s escape only when they grow a scratch backing, which the steady state
+above never does.

@@ -396,3 +396,25 @@ _Avoid_: Built-in parameter
 **Halo**:
 A soft outward fade in a named colour, drawn by a Canvas material that paints the band and no mark, so a caller records the same marks on a halo layer and on the ink layer above it.
 _Avoid_: Glow, outline, shadow
+
+## Audio
+
+**Clip**:
+A sound a Voice plays, named by its path or by a Blob of encoded bytes the caller holds. A caller never loads, holds or releases one: naming it is the whole relationship, so two plays of one path, or of one Blob, play the same Clip — and two Blobs with equal bytes are still two Clips.
+_Avoid_: Sound, sample, asset, audio file. Also Buffer, which is a GPU object.
+
+**Voice**:
+One playing instance of a Clip, begun by a play and addressed afterwards by what that play handed back. Any number may play one Clip at once, and a Voice that has ended is addressed by nothing.
+_Avoid_: Sound, source, channel, instance
+
+**Bus**:
+A group of Voices the game declares, sharing one volume. Every Bus sits directly under Master, Buses do not nest, and a Voice that names none plays on Master.
+_Avoid_: Channel, group, mixer track, category
+
+**Listener**:
+The point a positioned Voice is heard from.
+_Avoid_: Camera, ear, microphone
+
+**Fade**:
+A change of volume over time that a game drives itself, from a timeline, by changing a Voice or a Bus each tick. Audio has no word for it and no verb that performs one.
+_Avoid_: Ramp, crossfade, tween, as names for anything audio does

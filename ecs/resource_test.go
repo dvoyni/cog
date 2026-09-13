@@ -15,8 +15,8 @@ import (
 // Components are the source of truth and there is nothing to mirror.
 type drawLog struct{ Xs []float32 }
 
-// modelNames stands in for scene's *scene.Names: a table a recording System
-// reads and never writes.
+// modelNames stands in for a table a recording System reads and never writes —
+// a bound plugin's read-only resource, as against the queue it appends to.
 type modelNames struct{ Scale float32 }
 
 // bindingPlugin is the third plugin a binding necessarily is. ecs imports only
