@@ -6,7 +6,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal"
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -81,8 +81,8 @@ func TestArenaAlignsEveryRecordToTheStorageAlignment(t *testing.T) {
 	if first != 0 {
 		t.Fatalf("first record is at %d, want 0", first)
 	}
-	if second%gfx.StorageAlignment != 0 {
-		t.Fatalf("second record is at %d, which is not %d-aligned", second, gfx.StorageAlignment)
+	if second%gpu.StorageAlignment != 0 {
+		t.Fatalf("second record is at %d, which is not %d-aligned", second, gpu.StorageAlignment)
 	}
 	if len(a.bytes()) < second+int(unsafe.Sizeof(sceneFrameBlock{})) {
 		t.Fatalf("arena is %d bytes, too short for the record at %d", len(a.bytes()), second)

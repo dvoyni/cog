@@ -14,22 +14,6 @@ func (e ErrShaderNotFound) Error() string {
 	return fmt.Sprintf("gfx: shader source %q unavailable", e.Name)
 }
 
-// FormatName names a texture format for a message. TextureFormat is a small
-// closed enum with no String of its own, and giving it one would put a
-// rendering of every member into gfx's public surface for one error.
-func FormatName(format TextureFormat) string {
-	switch format.Resolve() {
-	case FormatRGBA8:
-		return "RGBA8"
-	case FormatRGBA8Srgb:
-		return "RGBA8 sRGB"
-	case FormatDepth32F:
-		return "depth"
-	default:
-		return fmt.Sprintf("texture format %d", format)
-	}
-}
-
 // ErrShaderSource reports a shader the preprocessor refused, or one the backend
 // refused after flattening.
 //

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	cgfx "github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 )
 
 // A depth-only render pass - no colour attachment, one depth texture - is the
@@ -83,7 +83,7 @@ func (e ErrDepthOnlyPassUnsupported) Error() string {
 
 // hasDepthAttachment reports whether a pass names a depth attachment, either
 // the pooled automatic one or a texture of its own.
-func hasDepthAttachment(desc cgfx.GpuPassDesc) bool {
+func hasDepthAttachment(desc gpu.PassDesc) bool {
 	return desc.DepthAuto || desc.Depth != 0
 }
 
@@ -100,7 +100,7 @@ func hasDepthAttachment(desc cgfx.GpuPassDesc) bool {
 //
 // A pass with neither attachment is not this case either: it is nothing at all,
 // and BeginPass already returns nil for it.
-func isDepthOnly(desc cgfx.GpuPassDesc) bool {
+func isDepthOnly(desc gpu.PassDesc) bool {
 	return desc.NoColor && hasDepthAttachment(desc)
 }
 

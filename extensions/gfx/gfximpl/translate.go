@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/gfx/internal"
 )
 
@@ -19,11 +20,11 @@ const uniformMax = 256
 // whole so that adding a state field cannot silently return a pipeline built
 // for the old one.
 type pipelineKey struct {
-	shader      gfx.ShaderID
-	topology    gfx.PrimitiveTopology
-	state       gfx.MaterialState
-	colorFormat gfx.TextureFormat
-	depthFormat gfx.TextureFormat
+	shader      gpu.ShaderID
+	topology    gpu.PrimitiveTopology
+	state       gpu.MaterialState
+	colorFormat gpu.TextureFormat
+	depthFormat gpu.TextureFormat
 	// noColor separates the pipeline a shader needs in a depth-only pass from
 	// the one it needs in a colour pass. Without it in the key, a shader drawn
 	// in both gets whichever pass reached it first, which is a validation
@@ -48,29 +49,29 @@ const (
 	stripIndexUint32
 )
 
-func stripIndexKeyOf(topology gfx.PrimitiveTopology, width gfx.IndexWidth) stripIndexKey {
-	if topology != gfx.TopologyTriangleStrip {
+func stripIndexKeyOf(topology gpu.PrimitiveTopology, width gpu.IndexWidth) stripIndexKey {
+	if topology != gpu.TopologyTriangleStrip {
 		return stripIndexNone
 	}
-	if width == gfx.IndexUint16 {
+	if width == gpu.IndexUint16 {
 		return stripIndexUint16
 	}
 	return stripIndexUint32
 }
 
-// translator turns an OpQueue into a GpuQueue, lazily creating and caching
+// translator turns an OpQueue into a gpu.Queue, lazily creating and caching
 // backend shaders/pipelines/samplers and resolves every texture and buffer to a
 // baked resource ID. It is owned by the plugin and used only on the driver's
 // render thread inside ConsumeCmd.
 type translator struct {
 	shaders        map[gfx.ShaderDescr]*cachedShader
-	pipelines      map[pipelineKey]gfx.PipelineID
-	samplers       map[gfx.SamplerDesc]gfx.SamplerID
+	pipelines      map[pipelineKey]gpu.PipelineID
+	samplers       map[gpu.SamplerDesc]gpu.SamplerID
 	uarena         []byte
-	layouts        map[gfx.ShaderID]gfx.ShaderLayout
+	layouts        map[gpu.ShaderID]gpu.ShaderLayout
 	textures       map[string]gfx.TextureDescr
 	parameterPlans map[parameterPlanBucketKey][]cachedParameterPlan
-	ops            gfx.GpuQueue
+	ops            gpu.Queue
 	// Pass bookkeeping, reused each frame: the run order of the frame's passes
 	// and its draws bucketed behind the pass that recorded them.
 	passOrder  []int
@@ -83,10 +84,10 @@ type translator struct {
 	// the frame so far. A transition has to name the usage the texture is
 	// actually in, so this is tracked rather than assumed; a texture absent
 	// from the map has never been an attachment and needs no barrier.
-	textureUsage map[gfx.TextureID]gfx.TextureUsage
+	textureUsage map[gpu.TextureID]gpu.TextureUsage
 	// runSampled is the scratch set of textures one merged run samples, reused
 	// across runs so a frame allocates nothing per pass.
-	runSampled []gfx.TextureID
+	runSampled []gpu.TextureID
 	// diagnostic holds a report that does not stop the frame - a shader over the
 	// web floor still renders here - until translate surfaces it.
 	diagnostic error
@@ -105,12 +106,12 @@ type translator struct {
 func newTranslator() *translator {
 	return &translator{
 		shaders:         map[gfx.ShaderDescr]*cachedShader{},
-		pipelines:       map[pipelineKey]gfx.PipelineID{},
-		samplers:        map[gfx.SamplerDesc]gfx.SamplerID{},
-		layouts:         map[gfx.ShaderID]gfx.ShaderLayout{},
+		pipelines:       map[pipelineKey]gpu.PipelineID{},
+		samplers:        map[gpu.SamplerDesc]gpu.SamplerID{},
+		layouts:         map[gpu.ShaderID]gpu.ShaderLayout{},
 		textures:        map[string]gfx.TextureDescr{},
 		parameterPlans:  map[parameterPlanBucketKey][]cachedParameterPlan{},
-		textureUsage:    map[gfx.TextureID]gfx.TextureUsage{},
+		textureUsage:    map[gpu.TextureID]gpu.TextureUsage{},
 		badIndexLengths: map[indexLengthKey]struct{}{},
 	}
 }
@@ -120,9 +121,9 @@ func newTranslator() *translator {
 // the next translate call. It returns the first error encountered; valid draws
 // are still translated.
 func (t *translator) translate(
-	queue *gfx.OpQueue, persistent []internal.Op, backend gfx.Backend, files func() fs.FS,
-	capture gfx.GpuCaptureDesc, capturing bool,
-) (*gfx.GpuQueue, error) {
+	queue *gfx.OpQueue, persistent []internal.Op, backend gpu.Backend, files func() fs.FS,
+	capture gpu.CaptureDesc, capturing bool,
+) (*gpu.Queue, error) {
 	t.ops.Reset()
 
 	need := len(internal.OpQueueOps(queue)) * uniformMax
@@ -167,7 +168,7 @@ func (t *translator) translate(
 				continue
 			}
 			if op.Kind == internal.OpAllocateTexture {
-				t.ops.AllocateTexture(op.TextureID, gfx.TextureDesc{
+				t.ops.AllocateTexture(op.TextureID, gpu.TextureDesc{
 					Width: op.TexW, Height: op.TexH, Layers: op.TexLayers, Format: op.Format,
 					Renderable: op.Renderable,
 				})
@@ -197,8 +198,8 @@ func (t *translator) translate(
 // translatePasses runs the frame's passes in Order, merging the runs that are
 // indistinguishable from one longer pass, and emits each one's draws.
 func (t *translator) translatePasses(
-	queue *gfx.OpQueue, backend gfx.Backend, files func() fs.FS, uoff *int, firstErr *error,
-	capture gfx.GpuCaptureDesc, capturing bool,
+	queue *gfx.OpQueue, backend gpu.Backend, files func() fs.FS, uoff *int, firstErr *error,
+	capture gpu.CaptureDesc, capturing bool,
 ) {
 	passes, ops := internal.OpQueuePasses(queue), internal.OpQueueOps(queue)
 	t.planPasses(queue)
@@ -256,7 +257,7 @@ func (t *translator) translatePasses(
 		// capture declares none: the frame buffer is the one attachment gfx
 		// never names, and the backend places that transition itself.
 		if !capture.Screen {
-			t.transitionTo(capture.Texture, gfx.TextureUsageCopySrc)
+			t.transitionTo(capture.Texture, gpu.TextureUsageCopySrc)
 		}
 		t.ops.Capture(capture)
 	}
@@ -284,15 +285,15 @@ func (t *translator) transitionRun(queue *gfx.OpQueue, head gfx.PassDescr, first
 		}
 	}
 	for _, texture := range t.runSampled {
-		t.transitionTo(texture, gfx.TextureUsageTextureBinding)
+		t.transitionTo(texture, gpu.TextureUsageTextureBinding)
 	}
 	// Then writes: this run's own attachments. A texture that was sampled
 	// earlier in the frame is transitioned back before it is written again.
 	if internal.TargetKindOf(&head.Target) == internal.TargetTexture {
-		t.transitionTo(internal.TargetTextureOf(&head.Target), gfx.TextureUsageRenderAttachment)
+		t.transitionTo(internal.TargetTextureOf(&head.Target), gpu.TextureUsageRenderAttachment)
 	}
 	if internal.DepthKindOf(&head.Depth) == internal.DepthKindTexture {
-		t.transitionTo(internal.DepthTexture(&head.Depth), gfx.TextureUsageRenderAttachment)
+		t.transitionTo(internal.DepthTexture(&head.Depth), gpu.TextureUsageRenderAttachment)
 	}
 }
 
@@ -324,7 +325,7 @@ func (t *translator) collectSampled(params []gfx.ParameterDescr) {
 // that is a change from a role the frame has already put it in. A texture that
 // has never been an attachment this frame has no writes to order against, and
 // one already in the usage is a no-op the backend should not pay for.
-func (t *translator) transitionTo(texture gfx.TextureID, to gfx.TextureUsage) {
+func (t *translator) transitionTo(texture gpu.TextureID, to gpu.TextureUsage) {
 	if texture == 0 {
 		return
 	}
@@ -339,14 +340,14 @@ func (t *translator) transitionTo(texture gfx.TextureID, to gfx.TextureUsage) {
 	if from == to {
 		return
 	}
-	t.ops.TransitionTexture(gfx.TextureTransition{Texture: texture, From: from, To: to})
+	t.ops.TransitionTexture(gpu.TextureTransition{Texture: texture, From: from, To: to})
 	t.textureUsage[texture] = to
 }
 
 // gpuPassDesc resolves a merged run's attachments: it loads like the pass that
 // opened the run and stores like the one that closed it.
-func (t *translator) gpuPassDesc(backend gfx.Backend, head, tail gfx.PassDescr) gfx.GpuPassDesc {
-	desc := gfx.GpuPassDesc{
+func (t *translator) gpuPassDesc(backend gpu.Backend, head, tail gfx.PassDescr) gpu.PassDesc {
+	desc := gpu.PassDesc{
 		Load: head.Load, Clear: head.Clear, Store: tail.Store,
 		DepthLoad: head.DepthLoad, DepthClear: head.DepthClear, DepthStore: tail.DepthStore,
 		Label: head.Label,
@@ -374,7 +375,7 @@ func (t *translator) gpuPassDesc(backend gfx.Backend, head, tail gfx.PassDescr) 
 }
 
 // translateDraw emits one draw into the currently open pass.
-func (t *translator) translateDraw(op *internal.Op, pass gfx.PassDescr, backend gfx.Backend, files func() fs.FS, uoff *int, firstErr *error) {
+func (t *translator) translateDraw(op *internal.Op, pass gfx.PassDescr, backend gpu.Backend, files func() fs.FS, uoff *int, firstErr *error) {
 	m := &op.Mesh
 	stride := internal.MeshStride(m)
 	vertices, indices := internal.MeshVertices(m), internal.MeshIndices(m)
@@ -457,7 +458,7 @@ func (t *translator) translateDraw(op *internal.Op, pass gfx.PassDescr, backend 
 // did not divide, and the width it was declared at.
 type indexLengthKey struct {
 	length int
-	width  gfx.IndexWidth
+	width  gpu.IndexWidth
 }
 
 // reportIndexLength returns the report for a malformed index buffer the first
@@ -477,7 +478,7 @@ func (t *translator) reportIndexLength(m *gfx.MeshDescr, label string) error {
 // own pass renders into. Only a baked texture can be an attachment, so this
 // resolves nothing and costs a comparison per binding.
 func sampledAttachment(plan *parameterPlan, drawParams, materialParams []gfx.ParameterDescr, pass gfx.PassDescr) (string, bool) {
-	attachment := func(id gfx.TextureID) bool {
+	attachment := func(id gpu.TextureID) bool {
 		if id == 0 {
 			return false
 		}
@@ -551,12 +552,12 @@ func (t *translator) passDrawCount(pass int) int {
 // emitResources binds each reflected texture/sampler resource, matching its name
 // to a material parameter (defaulting to the white texture / a clamp+linear
 // sampler when unset), so every binding the shader declares is provided.
-func (t *translator) emitResources(backend gfx.Backend, files func() fs.FS, drawParams, materialParams []gfx.ParameterDescr, plan *parameterPlan) {
+func (t *translator) emitResources(backend gpu.Backend, files func() fs.FS, drawParams, materialParams []gfx.ParameterDescr, plan *parameterPlan) {
 	// Each reflected sampler is filled by the parameter of its own name, and
 	// falls back to the zero descriptor - clamp and linear - when unset.
 	for i := range plan.samplers {
 		sampler := &plan.samplers[i]
-		var desc gfx.SamplerDesc
+		var desc gpu.SamplerDesc
 		if p := sampler.param.value(materialParams, drawParams); p != nil && internal.ParameterKind(p) == internal.ParamSampler {
 			desc = internal.ParameterSampler(p)
 		}
@@ -573,7 +574,7 @@ func (t *translator) emitResources(backend gfx.Backend, files func() fs.FS, draw
 			}
 			continue
 		}
-		textureID := gfx.TextureID(0)
+		textureID := gpu.TextureID(0)
 		if p != nil && internal.ParameterKind(p) == internal.ParamTexture {
 			textureID = t.ensureTexture(backend, files, internal.ParameterTexture(p))
 		}
@@ -581,7 +582,7 @@ func (t *translator) emitResources(backend gfx.Backend, files func() fs.FS, draw
 	}
 }
 
-func (t *translator) ensureTexture(backend gfx.Backend, files func() fs.FS, descr gfx.TextureDescr) gfx.TextureID {
+func (t *translator) ensureTexture(backend gpu.Backend, files func() fs.FS, descr gfx.TextureDescr) gpu.TextureID {
 	if internal.TextureSource(&descr) == gfx.TextureSourceBaked {
 		return descr.ID()
 	}
@@ -609,7 +610,7 @@ func (t *translator) ensureTexture(backend gfx.Backend, files func() fs.FS, desc
 // that, the next frame re-reads every source, re-flattens, re-fails and
 // re-reports - at the frame rate.
 type cachedShader struct {
-	id       gfx.ShaderID
+	id       gpu.ShaderID
 	err      error
 	sources  []string
 	reported bool
@@ -627,7 +628,7 @@ func (c *cachedShader) report() error {
 	return c.err
 }
 
-func (t *translator) ensureShader(backend gfx.Backend, files func() fs.FS, descr gfx.ShaderDescr) (gfx.ShaderID, error) {
+func (t *translator) ensureShader(backend gpu.Backend, files func() fs.FS, descr gfx.ShaderDescr) (gpu.ShaderID, error) {
 	if cached, ok := t.shaders[descr]; ok {
 		return cached.id, cached.report()
 	}
@@ -647,7 +648,7 @@ func (t *translator) ensureShader(backend gfx.Backend, files func() fs.FS, descr
 		cached.err = err
 		return 0, cached.report()
 	}
-	id, err := backend.NewShader(gfx.ShaderDesc{Code: []byte(flattened.Text), Label: label})
+	id, err := backend.NewShader(gpu.ShaderDesc{Code: []byte(flattened.Text), Label: label})
 	if err != nil {
 		// Nothing the backend said is rewritten and no line number is parsed out
 		// of its message: gfx appends the rendered segment table and lets the
@@ -665,7 +666,7 @@ func (t *translator) ensureShader(backend gfx.Backend, files func() fs.FS, descr
 	return id, nil
 }
 
-func (t *translator) releaseCachedResource(backend gfx.Backend, path string) {
+func (t *translator) releaseCachedResource(backend gpu.Backend, path string) {
 	if texture, ok := t.textures[path]; ok {
 		t.ops.ReleaseTexture(texture.ID())
 		delete(t.textures, path)
@@ -686,7 +687,7 @@ func (t *translator) releaseCachedResource(backend gfx.Backend, path string) {
 	}
 }
 
-func (t *translator) releaseShader(backend gfx.Backend, descr gfx.ShaderDescr, cached *cachedShader) {
+func (t *translator) releaseShader(backend gpu.Backend, descr gfx.ShaderDescr, cached *cachedShader) {
 	delete(t.shaders, descr)
 	if cached.id == 0 {
 		return
@@ -711,7 +712,7 @@ func (t *translator) releaseShader(backend gfx.Backend, descr gfx.ShaderDescr, c
 	backend.FreeShader(cached.id)
 }
 
-func (t *translator) freeCachedResources(backend gfx.Backend) {
+func (t *translator) freeCachedResources(backend gpu.Backend) {
 	for _, texture := range t.textures {
 		t.ops.ReleaseTexture(texture.ID())
 	}
@@ -738,7 +739,7 @@ func (t *translator) freeCachedResources(backend gfx.Backend) {
 }
 
 // shaderLayout returns the backend's reflected layout for a shader, cached by id.
-func (t *translator) shaderLayout(backend gfx.Backend, id gfx.ShaderID) gfx.ShaderLayout {
+func (t *translator) shaderLayout(backend gpu.Backend, id gpu.ShaderID) gpu.ShaderLayout {
 	if l, ok := t.layouts[id]; ok {
 		return l
 	}
@@ -807,8 +808,8 @@ func writeParamAt(buf []byte, off int, p *gfx.ParameterDescr) {
 // returns zero and no error, and the caller drops the draw on the zero id
 // exactly as it did before.
 func (t *translator) ensurePipeline(
-	backend gfx.Backend, shader gfx.ShaderID, label string, m *gfx.MeshDescr, state gfx.MaterialState, pass gfx.PassDescr,
-) (gfx.PipelineID, error) {
+	backend gpu.Backend, shader gpu.ShaderID, label string, m *gfx.MeshDescr, state gpu.MaterialState, pass gfx.PassDescr,
+) (gpu.PipelineID, error) {
 	stride := internal.MeshStride(m)
 	layout, ok := internal.VertexLayoutKeyOf(internal.MeshLayout(m))
 	if !ok {
@@ -820,7 +821,7 @@ func (t *translator) ensurePipeline(
 	// interchangeable is having one: a depth-only pass has no colour
 	// attachment, and a pipeline that declares a target it will never be given
 	// is rejected at setPipeline.
-	const colorFormat, depthFormat = gfx.FormatScreen, gfx.FormatDepth32F
+	const colorFormat, depthFormat = gpu.FormatScreen, gpu.FormatDepth32F
 	noColor := pass.Target.IsNone()
 	k := pipelineKey{
 		shader: shader, topology: m.Topology(), state: state,
@@ -839,11 +840,11 @@ func (t *translator) ensurePipeline(
 		t.pipelines[k] = 0
 		return 0, err
 	}
-	attrs := make([]gfx.VertexAttribute, len(internal.MeshLayout(m)))
+	attrs := make([]gpu.VertexAttribute, len(internal.MeshLayout(m)))
 	for i := range internal.MeshLayout(m) {
-		attrs[i] = gfx.VertexAttribute{Offset: internal.VertexAttrOffset(&(internal.MeshLayout(m)[i])), Type: internal.VertexAttrTyp(&(internal.MeshLayout(m)[i])), Location: i}
+		attrs[i] = gpu.VertexAttribute{Offset: internal.VertexAttrOffset(&(internal.MeshLayout(m)[i])), Type: internal.VertexAttrTyp(&(internal.MeshLayout(m)[i])), Location: i}
 	}
-	id, err := backend.NewPipeline(gfx.PipelineDesc{
+	id, err := backend.NewPipeline(gpu.PipelineDesc{
 		Shader:        shader,
 		Topology:      m.Topology(),
 		State:         state,
@@ -863,7 +864,7 @@ func (t *translator) ensurePipeline(
 	return id, nil
 }
 
-func (t *translator) ensureSampler(backend gfx.Backend, desc gfx.SamplerDesc) gfx.SamplerID {
+func (t *translator) ensureSampler(backend gpu.Backend, desc gpu.SamplerDesc) gpu.SamplerID {
 	if id, ok := t.samplers[desc]; ok {
 		return id
 	}

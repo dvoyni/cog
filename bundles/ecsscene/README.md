@@ -102,7 +102,7 @@ type Material  struct{ Tags ecs.List[MaterialTag] }
 type MaterialTag struct {
     Tag    scene.PassTag
     Shader gfx.ShaderDescr
-    State  gfx.MaterialState
+    State  gpu.MaterialState
     Params ecs.List[gfx.ParameterDescr]
 }
 

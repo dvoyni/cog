@@ -6,6 +6,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 	"golang.org/x/image/font/gofont/goregular"
 )
@@ -43,7 +44,7 @@ func runTree(t *testing.T, frameDefault canvas.MaterialSet, root Element) {
 
 // One modifier on a root reaches every visual beneath it, however deep.
 func TestAMaterialModifierReachesEveryVisualBeneathIt(t *testing.T) {
-	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn markSprite() {}"), gfx.StateOverlay2D)
+	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn markSprite() {}"), gpu.StateOverlay2D)
 	var near, deep canvas.MaterialSet
 	runTree(t, canvas.MaterialSet{}, NewElement().
 		Material(canvas.MaterialSet{Sprite: &sprite}).
@@ -58,8 +59,8 @@ func TestAMaterialModifierReachesEveryVisualBeneathIt(t *testing.T) {
 
 // The frame default seeds every root, and any element replaces it.
 func TestTheFrameDefaultSeedsRootsAndAnElementReplacesIt(t *testing.T) {
-	fromFrame := gfx.MaterialWithState(gfx.ShaderWithText("fn markFrame() {}"), gfx.StateOverlay2D)
-	fromElement := gfx.MaterialWithState(gfx.ShaderWithText("fn markElement() {}"), gfx.StateOverlay2D)
+	fromFrame := gfx.MaterialWithState(gfx.ShaderWithText("fn markFrame() {}"), gpu.StateOverlay2D)
+	fromElement := gfx.MaterialWithState(gfx.ShaderWithText("fn markElement() {}"), gpu.StateOverlay2D)
 	var seeded, replaced canvas.MaterialSet
 	runTree(t, canvas.MaterialSet{Sprite: &fromFrame}, NewElement().Children(
 		probeElement(&seeded),
@@ -76,7 +77,7 @@ func TestTheFrameDefaultSeedsRootsAndAnElementReplacesIt(t *testing.T) {
 // A child naming an empty set stops inheriting. The opt-out costs nothing to
 // have and is what an element that must draw with the built-ins uses.
 func TestAnEmptySetStopsInheriting(t *testing.T) {
-	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn markSprite() {}"), gfx.StateOverlay2D)
+	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn markSprite() {}"), gpu.StateOverlay2D)
 	var optedOut canvas.MaterialSet
 	runTree(t, canvas.MaterialSet{}, NewElement().
 		Material(canvas.MaterialSet{Sprite: &sprite}).
@@ -89,7 +90,7 @@ func TestAnEmptySetStopsInheriting(t *testing.T) {
 // Every built-in visual passes the sprite slot, because a sprite, a nine-slice,
 // a glyph run and a fill are all sprite draws.
 func TestEveryBuiltInVisualPassesTheSpriteSlot(t *testing.T) {
-	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn markSprite() {}"), gfx.StateOverlay2D)
+	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn markSprite() {}"), gpu.StateOverlay2D)
 	files := testAssets(t, 8, 8)
 	// A real face, so the text visual's measurement resolves rather than
 	// reporting through a kernel this test does not have.

@@ -1,6 +1,9 @@
 package gfx
 
-import "github.com/dvoyni/cog/extensions/gfx/internal"
+import (
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/extensions/gfx/internal"
+)
 
 // CheckVertexInterface reports the first way a vertex layout fails the shader
 // about to be drawn with it, and nil when the pair is legal. Three things can
@@ -29,10 +32,10 @@ import "github.com/dvoyni/cog/extensions/gfx/internal"
 // backend, and a package that owns both halves of a pair - scene holds its
 // layout and its shader - can ask the same question gfx will ask at draw time,
 // through the same call.
-func CheckVertexInterface(shader string, layout ShaderLayout, attrs []VertexAttr) error {
+func CheckVertexInterface(shader string, layout gpu.ShaderLayout, attrs []VertexAttr) error {
 	stride := 0
 	for i := range attrs {
-		if end := internal.VertexAttrOffset(&(attrs[i])) + internal.VertexTypeSize(internal.VertexAttrTyp(&(attrs[i]))); end > stride {
+		if end := internal.VertexAttrOffset(&(attrs[i])) + internal.VertexAttrTyp(&(attrs[i])).Size(); end > stride {
 			stride = end
 		}
 	}
@@ -50,14 +53,14 @@ func CheckVertexInterface(shader string, layout ShaderLayout, attrs []VertexAttr
 		if input.Location < 0 || input.Location >= len(attrs) {
 			return ErrVertexInputUnsupplied{
 				Shader: shader, Input: input.Name, Location: input.Location,
-				Declared: internal.VertexScalarWgsl(input.Kind, input.Count),
+				Declared: input.Kind.WGSL(input.Count),
 			}
 		}
-		kind, count := internal.VertexTypeDecode(internal.VertexAttrTyp(&(attrs[input.Location])))
+		kind, count := internal.VertexAttrTyp(&(attrs[input.Location])).Decode()
 		if kind != input.Kind || count != input.Count {
 			return ErrVertexInputMismatch{
 				Shader: shader, Input: input.Name, Location: input.Location,
-				Declared: internal.VertexScalarWgsl(input.Kind, input.Count), Supplied: internal.VertexScalarWgsl(kind, count),
+				Declared: input.Kind.WGSL(input.Count), Supplied: kind.WGSL(count),
 			}
 		}
 	}

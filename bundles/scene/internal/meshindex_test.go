@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 )
 
 // The whole of scene's index-width rule, at the boundary that matters. The
@@ -14,13 +14,13 @@ import (
 func TestIndexWidthFollowsTheVertexCount(t *testing.T) {
 	for _, c := range []struct {
 		vertices int
-		want     gfx.IndexWidth
+		want     gpu.IndexWidth
 	}{
-		{1, gfx.IndexUint16},
-		{3, gfx.IndexUint16},
-		{65535, gfx.IndexUint16},
-		{65536, gfx.IndexUint32},
-		{200000, gfx.IndexUint32},
+		{1, gpu.IndexUint16},
+		{3, gpu.IndexUint16},
+		{65535, gpu.IndexUint16},
+		{65536, gpu.IndexUint32},
+		{200000, gpu.IndexUint32},
 	} {
 		if got := indexWidthFor(c.vertices); got != c.want {
 			t.Errorf("indexWidthFor(%d) = %v, want %v", c.vertices, got, c.want)
@@ -30,7 +30,7 @@ func TestIndexWidthFollowsTheVertexCount(t *testing.T) {
 
 // The narrowed bytes are the same indices, not a reinterpret of half of them.
 func TestNarrowedIndexBytesAreTheSameIndices(t *testing.T) {
-	bytes := indexBytes([]uint32{0, 1, 65534}, gfx.IndexUint16)
+	bytes := indexBytes([]uint32{0, 1, 65534}, gpu.IndexUint16)
 	if len(bytes) != 6 {
 		t.Fatalf("three uint16 indices are %d bytes, want 6", len(bytes))
 	}
@@ -39,7 +39,7 @@ func TestNarrowedIndexBytesAreTheSameIndices(t *testing.T) {
 			t.Errorf("index %d = %d, want %d", i, got, want)
 		}
 	}
-	wide := indexBytes([]uint32{0, 1, 2}, gfx.IndexUint32)
+	wide := indexBytes([]uint32{0, 1, 2}, gpu.IndexUint32)
 	if len(wide) != 12 {
 		t.Fatalf("three uint32 indices are %d bytes, want 12", len(wide))
 	}

@@ -1,6 +1,7 @@
 package gfx
 
 import (
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/gfx/internal"
 	"github.com/dvoyni/cog/libs/m"
 )
@@ -37,7 +38,7 @@ func TextureParam(name string, tex TextureDescr) ParameterDescr {
 
 // SamplerParam creates a sampler parameter. The zero SamplerDesc clamps and
 // filters linearly.
-func SamplerParam(name string, desc SamplerDesc) ParameterDescr {
+func SamplerParam(name string, desc gpu.SamplerDesc) ParameterDescr {
 	return internal.SamplerParam(name, desc)
 }
 

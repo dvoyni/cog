@@ -43,6 +43,15 @@ A Bundle and a Port share one shape:
 - **`internal/…`**: code the root and the `…impl` share, such as the consume
   side of a Resource queue. A root with nothing to hide has none (ecsscene,
   mcp).
+- **A Port's vocabulary**, `extensions/P/V` for any `V` but `Pimpl` and
+  `internal`: the contract the Port's Adapters implement, and every ID, format
+  and enum the Port's recording API and its Adapters both speak. It is declared
+  there, never aliased from the root, so each of its types has one name.
+  A Port that needs none has none (storage, mcp). Its Adapter author reads only
+  this package, and a recorder imports it beside the root. `extensions/gfx/gpu`
+  is the worked example: `gpu.Backend`, `gpu.Queue` and its sinks, the
+  descriptors a backend creates GPU objects from, `gpu.TextureID`,
+  `gpu.FormatRGBA8Srgb`, `gpu.MaterialState`.
 
 A contract type whose unexported state the `…impl` reads is declared in
 `internal/` with its fields unexported, and the root re-exports it as an alias
@@ -52,7 +61,8 @@ concrete type, so nothing goes through an interface. What the root and the
 `…impl` need beyond its exported methods, `internal/` exports as plain
 functions (`internal.OpQueueOps(q)`); only they can import `internal/`, so none
 of it is public API. `internal/` never imports its own root, so anything such a
-type refers to, down to the enums in its fields, is declared there too. Types
+type refers to, down to the enums in its fields, is declared there too, or in
+the Port's vocabulary package, which `internal/` may import. Types
 nothing outside the root reads the insides of stay declared in the root.
 `extensions/gfx` is the worked example.
 
@@ -66,14 +76,18 @@ Take the first answer that fits:
 3. It implements a contract some other package owns, and ships none of its own
    → a directory in `extensions/` with no `…impl` child.
 4. It needs something supplied from outside, an Adapter, before it works → a
-   **Port**: `extensions/P`, `extensions/P/Pimpl`, `extensions/P/internal/…`.
+   **Port**: `extensions/P`, `extensions/P/Pimpl`, `extensions/P/internal/…`,
+   and optionally a vocabulary `extensions/P/V` for the contract its Adapters
+   implement.
 5. Otherwise it is a **Bundle**: `bundles/X`, `bundles/X/Ximpl`,
    `bundles/X/internal/…`.
 
-New code goes in the root, the `…impl` or `internal/` by what it is: contract in
-the root, the Plugin and its handlers in the `…impl`, anything both need in
-`internal/`. A subpackage anywhere else under `bundles/X` or `extensions/P`
-matches no tier and fails the test.
+New code goes in the root, the `…impl`, `internal/` or a Port's vocabulary by
+what it is: recording contract in the root, the Plugin and its handlers in the
+`…impl`, anything both need in `internal/`, and what an Adapter implements or
+both halves name in the vocabulary. A subpackage anywhere else under
+`bundles/X` or `extensions/P` (below a vocabulary, say) matches no tier and
+fails the test.
 
 ## The `extensions/` Rule
 
@@ -89,14 +103,27 @@ and tests, and so is every `…impl`, in `bundles/` and `extensions/` alike.
 | `kernel` | nothing else in cog |
 | `libs/*` | `libs`, `kernel` |
 | `slots/*` | `libs`, `kernel`, `slots/*`, contract roots |
-| contract root: `bundles/X`, or `extensions/P` when `P` has a `Pimpl` child | `libs`, `kernel`, `slots/*`, other contract roots, its own `internal/…` |
-| `bundles/X/internal/…`, `extensions/P/internal/…` | `libs`, `kernel`, `slots/*`, other contract roots |
+| contract root: `bundles/X`, or `extensions/P` when `P` has a `Pimpl` child | `libs`, `kernel`, `slots/*`, other contract roots, Port vocabularies, its own `internal/…` |
+| `bundles/X/internal/…`, `extensions/P/internal/…` | `libs`, `kernel`, `slots/*`, other contract roots, Port vocabularies |
 | `bundles/X/Ximpl`, `extensions/P/Pimpl` | anything its contract root may, plus that root |
-| other `extensions/*` (wgpu, diskfs, jsfs) | `libs`, `kernel`, `slots/*`, contract roots |
+| Port vocabulary: `extensions/P/V` when `P` has a `Pimpl` child | `libs` only |
+| other `extensions/*` (wgpu, diskfs, jsfs) | `libs`, `kernel`, `slots/*`, contract roots, Port vocabularies |
 
 - Nothing in cog imports an `…impl` package or an `extensions/*` directory that
   is not a Port, except from `_test.go` files. A test composing an engine may
   import both; every other row holds for tests too.
+- A Port's vocabulary imports no kernel, no root and no Bundle, its own Port's
+  root and `internal/` included, so the split between the recording half and the
+  Adapter's contract cannot erode. Contract roots, `internal/…`, `…impl`s and
+  other `extensions/*` may import it, and so may anything outside cog; `kernel`,
+  `libs/*` and `slots/*` may not.
+- Within an Adapter that is also a Plugin depending on its Port, the files
+  that implement the vocabulary's interface import the vocabulary and not the
+  Port's root; only the Plugin wiring may import the root, for its `Name`, the
+  Adapter it provides, or a command it drives. wgpu is the worked example: its
+  `gfx*.go` backend files import `gfx/gpu`, and `plugin.go` also imports `gfx`
+  for `gfx.Name` and `gfx.SetViewportCmd`. The tier test works per package, so
+  this rule is kept by review.
 - Contract roots and `slots/*` declare no type that implements `kernel.Plugin`,
   meaning no type with `Name`, `Dependencies` and `Register` methods.
 

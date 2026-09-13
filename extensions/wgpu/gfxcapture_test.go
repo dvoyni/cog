@@ -6,7 +6,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 
-	cgfx "github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 )
 
 // The readback's bookkeeping, without a device. No test in this repository has
@@ -40,12 +40,12 @@ func TestARowIsPaddedToTheCopyAlignment(t *testing.T) {
 }
 
 func TestOnly8BitRGBACanBeCaptured(t *testing.T) {
-	for _, format := range []cgfx.TextureFormat{cgfx.FormatRGBA8, cgfx.FormatRGBA8Srgb, cgfx.FormatScreen} {
+	for _, format := range []gpu.TextureFormat{gpu.FormatRGBA8, gpu.FormatRGBA8Srgb, gpu.FormatScreen} {
 		if !captureSupported(format) {
 			t.Errorf("%v was refused, and it is 8-bit RGBA", format)
 		}
 	}
-	if captureSupported(cgfx.FormatDepth32F) {
+	if captureSupported(gpu.FormatDepth32F) {
 		t.Error("depth was accepted; a depth capture is a float field, not an image")
 	}
 }
@@ -54,8 +54,8 @@ func TestTheRingHandsBackTheOldestResolvedReadback(t *testing.T) {
 	first := &fakeStaging{ready: true, pixels: []byte{1, 2, 3, 4}}
 	second := &fakeStaging{ready: true, pixels: []byte{5, 6, 7, 8}}
 	var ring captureRing
-	ring.push(captureReadback{staging: first, width: 1, height: 1, rowBytes: 256, format: cgfx.FormatRGBA8})
-	ring.push(captureReadback{staging: second, width: 1, height: 1, rowBytes: 256, format: cgfx.FormatRGBA8})
+	ring.push(captureReadback{staging: first, width: 1, height: 1, rowBytes: 256, format: gpu.FormatRGBA8})
+	ring.push(captureReadback{staging: second, width: 1, height: 1, rowBytes: 256, format: gpu.FormatRGBA8})
 
 	got, ok := ring.take()
 	if !ok || got.Pixels[0] != 1 {
@@ -91,7 +91,7 @@ func TestAThirdReadbackIsRefusedRatherThanQueued(t *testing.T) {
 	if !ring.full() {
 		t.Fatal("two outstanding readbacks should be as many as the backend keeps live")
 	}
-	ring.refuse(cgfx.ErrCaptureBusy{})
+	ring.refuse(gpu.ErrCaptureBusy{})
 	if ring.full() != true {
 		t.Fatal("a refusal changed how many readbacks are live")
 	}
@@ -99,13 +99,13 @@ func TestAThirdReadbackIsRefusedRatherThanQueued(t *testing.T) {
 
 func TestARefusalTravelsTheSameSeamAsAResult(t *testing.T) {
 	var ring captureRing
-	ring.refuse(cgfx.ErrCaptureUnsupported{Format: cgfx.FormatDepth32F})
+	ring.refuse(gpu.ErrCaptureUnsupported{Format: gpu.FormatDepth32F})
 
 	got, ok := ring.take()
 	if !ok {
 		t.Fatal("the refusal never arrived")
 	}
-	var unsupported cgfx.ErrCaptureUnsupported
+	var unsupported gpu.ErrCaptureUnsupported
 	if !errors.As(got.Err, &unsupported) {
 		t.Fatalf("refusal = %v, want the unsupported format named", got.Err)
 	}
@@ -121,17 +121,17 @@ func TestShutdownReleasesEveryReadbackAndLeavesTheReason(t *testing.T) {
 		t.Fatalf("the abandoned staging buffer was released %d times, want once", staging.released)
 	}
 	got, ok := ring.take()
-	if !ok || !errors.Is(got.Err, cgfx.ErrCaptureAbandoned{}) {
+	if !ok || !errors.Is(got.Err, gpu.ErrCaptureAbandoned{}) {
 		t.Fatalf("after shutdown take = (%v, %v), want the abandonment", got.Err, ok)
 	}
 }
 
 func TestRenderableTexturesCanBeCopiedFrom(t *testing.T) {
-	renderable := textureUsage(cgfx.TextureDesc{Width: 8, Height: 8, Format: cgfx.FormatRGBA8, Renderable: true})
+	renderable := textureUsage(gpu.TextureDesc{Width: 8, Height: 8, Format: gpu.FormatRGBA8, Renderable: true})
 	if renderable&gputypes.TextureUsageCopySrc == 0 {
 		t.Error("a renderable texture cannot be copied from, so nothing can be captured")
 	}
-	sampled := textureUsage(cgfx.TextureDesc{Width: 8, Height: 8, Format: cgfx.FormatRGBA8})
+	sampled := textureUsage(gpu.TextureDesc{Width: 8, Height: 8, Format: gpu.FormatRGBA8})
 	if sampled&gputypes.TextureUsageCopySrc != 0 {
 		t.Error("an ordinary texture pays for CopySrc, which can cost it framebuffer compression")
 	}

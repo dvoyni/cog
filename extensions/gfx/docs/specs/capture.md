@@ -1,9 +1,17 @@
 # gfx capture — specification
 
+> **Amended by #344.** The backend contract this document specifies now lives in
+> its own package, `extensions/gfx/gpu`, and the names below are its names:
+> `GpuCapture` is `gpu.Capture`, `GpuCaptureDesc` `gpu.CaptureDesc`,
+> `GpuPassSink` `gpu.PassSink`, `GpuQueue` `gpu.Queue`, and the backend-reported
+> `ErrCaptureBusy`, `ErrCaptureAbandoned`, `ErrCaptureUnsupported` and
+> `ErrCaptureNoTarget` are declared there too. File and line references predate
+> the split.
+
 `github.com/dvoyni/cog/extensions/gfx` cannot read a rendered pixel back today. `MapAsync`,
 `CopyTextureToBuffer`, `MapRead` and `GetMappedRange` return **zero hits across
-the whole module**, and `gfx.Backend` (`extensions/gfx/contract.go:343-382`) has no readback
-method — its only exit is `Execute(queue *GpuQueue)`.
+the whole module**, and `gpu.Backend` (`extensions/gfx/contract.go:343-382`) has no readback
+method — its only exit is `Execute(queue *gpu.Queue)`.
 
 This document specifies the mechanism that changes that: **a capture is an op in
 the frame's own queue**, encoded into the frame's one encoder after the present
@@ -65,10 +73,10 @@ leans on them throughout. From
 [gfx capture: the readback contract](https://github.com/dvoyni/cog/issues/203).
 
 - **The seam already exists, and it is not `Backend`.** `Present()` is not a
-  `Backend` method — it is an op in the frame's `GpuQueue`, appended by the
+  `Backend` method — it is an op in the frame's `gpu.Queue`, appended by the
   translator (`extensions/gfx/translate.go:203`) and replayed inside `Execute`
-  (`extensions/gfx/gpuqueue.go:332`). `GpuPassSink` (`extensions/gfx/gpuqueue.go:105-122`) is where
-  *do a thing to the frame buffer* already lives, and `GpuPassDesc` already
+  (`extensions/gfx/gpuqueue.go:332`). `gpu.PassSink` (`extensions/gfx/gpuqueue.go:105-122`) is where
+  *do a thing to the frame buffer* already lives, and `gpu.PassDesc` already
   carries `Screen bool` beside `Target TextureViewID` — the exact addressing
   split a capture needs.
 - **Nothing in cog is copyable off the GPU today.** `textureUsage`
@@ -76,7 +84,7 @@ leans on them throughout. From
   and never `CopySrc`, so as the code stands `CopyTextureToBuffer` on the frame
   buffer fails validation. This is the one genuinely blocking change, and it is
   a one-line one.
-- **`gfx.TextureUsage` has exactly two values, on purpose** — "deliberately just
+- **`gpu.TextureUsage` has exactly two values, on purpose** — "deliberately just
   the two roles gfx can put a texture in" (`extensions/gfx/gpuqueue.go:41-52`). Since "a
   layout transition that names the wrong old layout is undefined behaviour"
   (`:65`), readback's third role cannot be faked with the two that exist.
@@ -102,18 +110,18 @@ leans on them throughout. From
 
 ## The seam: an op in the frame's queue
 
-`GpuPassSink` gains one method, shaped exactly like `Present`:
+`gpu.PassSink` gains one method, shaped exactly like `Present`:
 
 ```go
 // Capture copies one colour target into CPU-visible memory. Like Present it is
 // a whole-frame action rather than a pass, so it carries no commands; unlike
 // Present its result arrives later, through Backend.TakeCapture.
-Capture(GpuCaptureDesc)
+Capture(gpu.CaptureDesc)
 ```
 
 Two alternatives were rejected:
 
-- **A method on `gfx.Backend`.** An out-of-band call has no encoder to write
+- **A method on `gpu.Backend`.** An out-of-band call has no encoder to write
   into and would have to open a second one, breaking `Execute`'s contract that
   it encodes every pass into one command encoder and submits once
   (`extensions/wgpu/gfxbackend.go:737-763`).
@@ -129,10 +137,10 @@ something happens to the frame; the backend owns *how*.**
 ## What may be captured
 
 ```go
-// GpuCaptureDesc names one colour target to read back. Screen selects the frame
+// CaptureDesc names one colour target to read back. Screen selects the frame
 // buffer, which only the backend can resolve; Texture names any other colour
-// texture, and zero means none. It mirrors GpuPassDesc's addressing exactly.
-type GpuCaptureDesc struct {
+// texture, and zero means none. It mirrors PassDesc's addressing exactly.
+type CaptureDesc struct {
 	Screen  bool
 	Texture TextureID
 }
@@ -163,7 +171,7 @@ problem) but it is a *visualization* question, not a readback one.
 **You can only capture what something rendered into, so `Renderable` already
 names exactly the capturable set.** It needs no new field and no prediction.
 
-- Rejected: **a `Readable bool` on `gfx.TextureDesc`**, which would make app
+- Rejected: **a `Readable bool` on `gpu.TextureDesc`**, which would make app
   authors predict at texture-creation time whether anyone will ever want to
   look. They cannot, and a capture that fails because a flag was missing is the
   worst available failure.
@@ -175,7 +183,7 @@ names exactly the capturable set.** It needs no new field and no prediction.
 `CopySrc` disables lossless framebuffer compression on that texture. It is
 bounded to render targets, and it is paid whether or not a capture ever happens.
 
-### `gfx.TextureUsage` grows a third value
+### `gpu.TextureUsage` grows a third value
 
 ```go
 // TextureUsageCopySrc is a texture being read back into CPU-visible memory.
@@ -264,7 +272,7 @@ resolve. That is why pause cannot mean "no submits" — see
 ## The result seam
 
 The request rides the op stream; **the result cannot.** It arrives a frame
-later, by which time that queue has been recycled and cleared (`GpuQueue.Reset`,
+later, by which time that queue has been recycled and cleared (`gpu.Queue.Reset`,
 `extensions/gfx/gpuqueue.go:150-165`). A callback stored in a capture op is a dangling
 promise by construction.
 
@@ -274,7 +282,7 @@ promise by construction.
 // TakeCapture returns a completed capture, if one is ready, and clears it.
 // Called once per frame after Execute; a capture armed in the previous frame
 // is normally ready by the time the current frame's submit has triaged it.
-TakeCapture() (GpuCapture, bool)
+TakeCapture() (gpu.Capture, bool)
 ```
 
 The precedent is `takeRefusal()` (`extensions/wgpu/gfxdepthonly.go:107-113`) — backend
@@ -289,8 +297,8 @@ render handler**, immediately after `list.backend.Execute(ops)`
 Rejected: **a channel handed in with the request**, which puts a channel across
 the render-thread boundary for no gain.
 
-**Singular, no id.** `TakeCapture() (GpuCapture, bool)`, not
-`TakeCaptures() []GpuCapture`. With at most one capture in flight the answer is
+**Singular, no id.** `TakeCapture() (gpu.Capture, bool)`, not
+`TakeCaptures() []gpu.Capture`. With at most one capture in flight the answer is
 unambiguously about the one request outstanding, so no id is needed to
 correlate; a slice would imply plurality and drag an id in with it. If the
 one-in-flight rule is ever relaxed it becomes a slice *then*, with an id *then*
@@ -298,7 +306,7 @@ one-in-flight rule is ever relaxed it becomes a slice *then*, with an id *then*
 facility does not have.
 
 This spends the breaking change on `Backend` that was flagged as cheap now:
-`Capture` on `GpuPassSink` and `TakeCapture` on `Backend`, two additions in one
+`Capture` on `gpu.PassSink` and `TakeCapture` on `Backend`, two additions in one
 moment, while the implementor count is one.
 
 ---
@@ -313,10 +321,10 @@ gfx wants pixels rather than strides. The un-stride is a row-copy loop and
 nothing else: no conversion, no colour management, no precision loss.
 
 ```go
-// GpuCapture is one completed readback: either the mapped bytes or the reason
+// Capture is one completed readback: either the mapped bytes or the reason
 // there are none. Pixels carries the GPU's own row padding, which BytesPerRow
 // describes; gfx removes it. A backend never sees an image.Image.
-type GpuCapture struct {
+type Capture struct {
 	Pixels        []byte
 	Width, Height int
 	Format        TextureFormat
@@ -339,7 +347,7 @@ documented "straight-alpha RGBA" (`extensions/gfx/contract.go:38-40`). gogpu's o
 uses `image.RGBA` (`renderer.go:1885`) and is **wrong** for straight-alpha
 content; cog must not copy that.
 
-`gfx` also exports `GpuCapture.Image() image.Image`, so its non-agent users get
+`gpu` also exports `Capture.Image() image.Image`, so its non-agent users get
 the same convenience the provider does.
 
 **PNG encoding and the file on disk stop at gfx's edge** in the sense that they
@@ -377,7 +385,7 @@ five-minute idle abort.
 failure.** The trigger already exists: the engine cancels `e.ctx` before any
 `Stop` (`kernel/engine.go:247-250`). What this contract adds is the obligation
 that abandonment is *delivered*, through the same channel a result would have
-used — which is why `GpuCapture` carries `Err` rather than the delivery
+used — which is why `gpu.Capture` carries `Err` rather than the delivery
 mechanism carrying a second path.
 
 ---
@@ -430,7 +438,7 @@ capture under pause time out.
 
 ```go
 type ArmCaptureResponse struct {
-	Done     <-chan GpuCapture // buffered, capacity = amount
+	Done     <-chan gpu.Capture // buffered, capacity = amount
 	Viewport gfx.Viewport
 }
 ```
@@ -438,13 +446,13 @@ type ArmCaptureResponse struct {
 gfx's render handler, having drained `TakeCapture()`, does one **non-blocking
 send** and clears its pending slot. The render thread therefore never blocks on
 a waiter that has walked away, and a value nobody receives is simply collected.
-Refusals travel the same channel, because `GpuCapture` carries `Err`.
+Refusals travel the same channel, because `gpu.Capture` carries `Err`.
 
 Rejected: **a channel passed in with the request** — gfx then cannot refuse a
 second arm synchronously. Rejected: **polling with a second command** — a sleep
 loop racing a 16 ms frame.
 
-**The channel carries `GpuCapture` — padded bytes and a descriptor — not an
+**The channel carries `gpu.Capture` — padded bytes and a descriptor — not an
 `image.Image`.** The render thread's entire added cost is the one `copy` out of
 the mapped range it must do before `Unmap` anyway. Un-striding (~8 MiB of row
 copies at 1080p), PNG encoding and the disk write all happen on the caller's
@@ -463,7 +471,7 @@ There are two refusal sites and both are wanted:
 
 - **gfx refuses a second pending request synchronously at arm**, as an ordinary
   command error.
-- **The backend refuses a second in-flight map** through `GpuCapture.Err`
+- **The backend refuses a second in-flight map** through `gpu.Capture.Err`
   (`ErrCaptureBusy{}`), which still happens, because capture is a public gfx
   feature and the game's own code may arm one.
 
@@ -569,16 +577,16 @@ A checklist for an implementation session, in dependency order.
 **`extensions/gfx/gpuqueue.go`**
 
 - `TextureUsageCopySrc` as the third `TextureUsage`, with the doc comment above.
-- `GpuCaptureDesc{Screen bool, Texture TextureID}`.
-- `Capture(GpuCaptureDesc)` on `GpuPassSink`, and its replay inside the queue's
+- `gpu.CaptureDesc{Screen bool, Texture TextureID}`.
+- `Capture(gpu.CaptureDesc)` on `gpu.PassSink`, and its replay inside the queue's
   op switch beside `Present`.
 - `gpuPass` gains a `capture` flag and a desc beside `present`, with its own
   `transStart`/`transEnd` range.
 
 **`extensions/gfx/contract.go`**
 
-- `TakeCapture() (GpuCapture, bool)` on `Backend`.
-- `GpuCapture{Pixels, Width, Height, Format, BytesPerRow, Err}` and the three
+- `TakeCapture() (gpu.Capture, bool)` on `Backend`.
+- `gpu.Capture{Pixels, Width, Height, Format, BytesPerRow, Err}` and the three
   typed errors.
 
 **`extensions/gfx/translate.go`**
@@ -589,7 +597,7 @@ A checklist for an implementation session, in dependency order.
 **`extensions/gfx/capture.go`** (new)
 
 - The pending-request slot, the arm command and `ArmCaptureResponse`, the burst
-  counter and its re-arm, `GpuCapture.Image()`, and the un-stride into
+  counter and its re-arm, `gpu.Capture.Image()`, and the un-stride into
   `image.NRGBA`.
 - Validation — path, extension, `%d` verb, caps — all **before the first arm**,
   so a burst is refused whole or armed whole.

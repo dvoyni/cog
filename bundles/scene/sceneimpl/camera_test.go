@@ -8,6 +8,7 @@ import (
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -67,13 +68,13 @@ func TestTheDefaultPassPreservesColourAndClearsDepthToFar(t *testing.T) {
 	if !pass.Screen || !pass.DepthAuto {
 		t.Errorf("pass = %+v, want the screen target with automatic depth", pass)
 	}
-	if pass.Load != gfx.LoadPreserve {
+	if pass.Load != gpu.LoadPreserve {
 		t.Errorf("colour load = %v, want LoadPreserve", pass.Load)
 	}
-	if pass.DepthLoad != gfx.LoadClear || pass.DepthClear != 1 {
+	if pass.DepthLoad != gpu.LoadClear || pass.DepthClear != 1 {
 		t.Errorf("depth load = %v clear = %v, want LoadClear at 1.0", pass.DepthLoad, pass.DepthClear)
 	}
-	if pass.DepthStore != gfx.StoreDiscard {
+	if pass.DepthStore != gpu.StoreDiscard {
 		t.Errorf("depth store = %v, want StoreDiscard for a pass that named no depth texture", pass.DepthStore)
 	}
 }
@@ -193,7 +194,7 @@ func TestAPassNamingItsOwnDepthTextureKeepsIt(t *testing.T) {
 	if len(h.backend.passes) != 1 {
 		t.Fatalf("gfx passes = %d, want 1", len(h.backend.passes))
 	}
-	if store := h.backend.passes[0].DepthStore; store != gfx.StoreKeep {
+	if store := h.backend.passes[0].DepthStore; store != gpu.StoreKeep {
 		t.Errorf("depth store = %v, want StoreKeep", store)
 	}
 }
@@ -341,10 +342,10 @@ func TestColourIsAlwaysKeptAndAutomaticDepthDiscarded(t *testing.T) {
 		t.Fatalf("gfx passes = %d, want 2", len(h.backend.passes))
 	}
 	for i, pass := range h.backend.passes {
-		if pass.Store != gfx.StoreKeep {
+		if pass.Store != gpu.StoreKeep {
 			t.Errorf("pass %d colour store = %v, want StoreKeep", i, pass.Store)
 		}
-		if pass.DepthStore != gfx.StoreDiscard {
+		if pass.DepthStore != gpu.StoreDiscard {
 			t.Errorf("pass %d depth store = %v, want StoreDiscard for automatic depth", i, pass.DepthStore)
 		}
 	}
@@ -357,7 +358,7 @@ func TestATemporaryTargetPassTakesItsAspectFromItsSize(t *testing.T) {
 	h := newHarnessWithGfx(t, func(q *scene.OpQueue, g *gfx.OpQueue) {
 		descr := scene.CameraDescr{FovY: math.Pi / 2, Near: 1, Far: 10}
 		black := m.Color{A: 1}
-		target, _ := g.TemporaryTarget(400, 100, gfx.FormatRGBA8Srgb)
+		target, _ := g.TemporaryTarget(400, 100, gpu.FormatRGBA8Srgb)
 		descr.Passes = []scene.Pass{{Target: target, ClearColor: m.Some(black)}}
 		q.Camera(cameraMain, descr)
 	})

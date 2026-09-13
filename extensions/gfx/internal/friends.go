@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/dvoyni/cog/libs/m"
+import (
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/libs/m"
+)
 
 // The friend functions: what the gfx root and gfximpl read from a public
 // type's unexported state. Only the root and gfximpl can import this package,
@@ -16,16 +19,7 @@ func BufferSource(v *BufferDescr) bufferSource { return v.source }
 func DepthKindOf(v *DepthDescr) DepthKind { return v.kind }
 
 // DepthTexture reads DepthDescr.texture for the gfx root and gfximpl.
-func DepthTexture(v *DepthDescr) TextureID { return v.texture }
-
-// GpuQueueBakes reads GpuQueue.bakes for the gfx root and gfximpl.
-func GpuQueueBakes(v *GpuQueue) []GpuOp { return v.bakes }
-
-// GpuQueueReleases reads GpuQueue.releases for the gfx root and gfximpl.
-func GpuQueueReleases(v *GpuQueue) []GpuOp { return v.releases }
-
-// GpuQueueRender reads GpuQueue.render for the gfx root and gfximpl.
-func GpuQueueRender(v *GpuQueue) []GpuOp { return v.render }
+func DepthTexture(v *DepthDescr) gpu.TextureID { return v.texture }
 
 // MeshIndices reads MeshDescr.indices for the gfx root and gfximpl.
 func MeshIndices(v *MeshDescr) BufferDescr { return v.indices }
@@ -60,7 +54,7 @@ func OpQueuePasses(v *OpQueue) []passRecord { return v.passes }
 func OpQueueSelectedPass(v *OpQueue) int { return v.selectedPass() }
 
 // OpQueueTemporaryBuffer calls OpQueue.temporaryBuffer for the gfx root and gfximpl.
-func OpQueueTemporaryBuffer(v *OpQueue, a0 BufferKind, a1 []byte, a2 bool) BufferDescr {
+func OpQueueTemporaryBuffer(v *OpQueue, a0 gpu.BufferKind, a1 []byte, a2 bool) BufferDescr {
 	return v.temporaryBuffer(a0, a1, a2)
 }
 
@@ -95,7 +89,7 @@ func ParameterNum(v *ParameterDescr) float32 { return v.num }
 func ParameterRaw(v *ParameterDescr) m.Blob { return v.raw }
 
 // ParameterSampler reads ParameterDescr.sampler for the gfx root and gfximpl.
-func ParameterSampler(v *ParameterDescr) SamplerDesc { return v.sampler }
+func ParameterSampler(v *ParameterDescr) gpu.SamplerDesc { return v.sampler }
 
 // ParameterTexture reads ParameterDescr.texture for the gfx root and gfximpl.
 func ParameterTexture(v *ParameterDescr) TextureDescr { return v.texture }
@@ -131,7 +125,7 @@ func TargetLayer(v *TargetDescr) int { return v.layer }
 func TargetMip(v *TargetDescr) int { return v.mip }
 
 // TargetTextureOf reads TargetDescr.texture for the gfx root and gfximpl.
-func TargetTextureOf(v *TargetDescr) TextureID { return v.texture }
+func TargetTextureOf(v *TargetDescr) gpu.TextureID { return v.texture }
 
 // TexturePixels reads TextureDescr.pixels for the gfx root and gfximpl.
 func TexturePixels(v *TextureDescr) m.Blob { return v.pixels }
@@ -143,13 +137,4 @@ func TextureSource(v *TextureDescr) textureSource { return v.source }
 func VertexAttrOffset(v *VertexAttr) int { return v.offset }
 
 // VertexAttrTyp reads VertexAttr.typ for the gfx root and gfximpl.
-func VertexAttrTyp(v *VertexAttr) VertexType { return v.typ }
-
-// VertexScalarWgsl calls VertexScalar.wgsl for the gfx root and gfximpl.
-func VertexScalarWgsl(v VertexScalar, a0 int) string { return v.wgsl(a0) }
-
-// VertexTypeDecode calls VertexType.decode for the gfx root and gfximpl.
-func VertexTypeDecode(v VertexType) (VertexScalar, int) { return v.decode() }
-
-// VertexTypeSize calls VertexType.size for the gfx root and gfximpl.
-func VertexTypeSize(v VertexType) int { return v.size() }
+func VertexAttrTyp(v *VertexAttr) gpu.VertexType { return v.typ }

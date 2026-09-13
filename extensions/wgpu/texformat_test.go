@@ -3,19 +3,19 @@ package wgpu
 import (
 	"testing"
 
-	cgfx "github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/gogpu/gputypes"
 )
 
 func TestTextureFormatMapsEveryGfxFormat(t *testing.T) {
 	cases := []struct {
-		format cgfx.TextureFormat
+		format gpu.TextureFormat
 		want   gputypes.TextureFormat
 	}{
-		{cgfx.FormatRGBA8, gputypes.TextureFormatRGBA8Unorm},
-		{cgfx.FormatRGBA8Srgb, gputypes.TextureFormatRGBA8UnormSrgb},
-		{cgfx.FormatDepth32F, gputypes.TextureFormatDepth32Float},
-		{cgfx.FormatScreen, textureFormat(cgfx.FrameBufferFormat)},
+		{gpu.FormatRGBA8, gputypes.TextureFormatRGBA8Unorm},
+		{gpu.FormatRGBA8Srgb, gputypes.TextureFormatRGBA8UnormSrgb},
+		{gpu.FormatDepth32F, gputypes.TextureFormatDepth32Float},
+		{gpu.FormatScreen, textureFormat(gpu.FrameBufferFormat)},
 	}
 	for _, c := range cases {
 		if got := textureFormat(c.format); got != c.want {
@@ -25,7 +25,7 @@ func TestTextureFormatMapsEveryGfxFormat(t *testing.T) {
 }
 
 func TestBytesPerTexelComesFromTheFormat(t *testing.T) {
-	for _, format := range []cgfx.TextureFormat{cgfx.FormatRGBA8, cgfx.FormatRGBA8Srgb, cgfx.FormatDepth32F, cgfx.FormatScreen} {
+	for _, format := range []gpu.TextureFormat{gpu.FormatRGBA8, gpu.FormatRGBA8Srgb, gpu.FormatDepth32F, gpu.FormatScreen} {
 		if got := bytesPerTexel(format); got != 4 {
 			t.Errorf("bytesPerTexel(%v) = %d, want 4", format, got)
 		}
@@ -33,7 +33,7 @@ func TestBytesPerTexelComesFromTheFormat(t *testing.T) {
 }
 
 func TestRenderableAndDepthTexturesCarryRenderAttachmentUsage(t *testing.T) {
-	sampled := textureUsage(cgfx.TextureDesc{Format: cgfx.FormatRGBA8Srgb})
+	sampled := textureUsage(gpu.TextureDesc{Format: gpu.FormatRGBA8Srgb})
 	if sampled&gputypes.TextureUsageRenderAttachment != 0 {
 		t.Errorf("sampled texture usage = %v, want no RenderAttachment", sampled)
 	}
@@ -41,14 +41,14 @@ func TestRenderableAndDepthTexturesCarryRenderAttachmentUsage(t *testing.T) {
 		t.Errorf("sampled texture usage = %v, want TextureBinding and CopyDst", sampled)
 	}
 
-	renderable := textureUsage(cgfx.TextureDesc{Format: cgfx.FormatRGBA8Srgb, Renderable: true})
+	renderable := textureUsage(gpu.TextureDesc{Format: gpu.FormatRGBA8Srgb, Renderable: true})
 	if renderable&gputypes.TextureUsageRenderAttachment == 0 {
 		t.Errorf("renderable texture usage = %v, want RenderAttachment", renderable)
 	}
 
 	// Depth is renderable and sampleable, but WebGPU forbids writing texels into
 	// a depth32float texture, so it must not ask for CopyDst.
-	depth := textureUsage(cgfx.TextureDesc{Format: cgfx.FormatDepth32F})
+	depth := textureUsage(gpu.TextureDesc{Format: gpu.FormatDepth32F})
 	if depth&gputypes.TextureUsageRenderAttachment == 0 || depth&gputypes.TextureUsageTextureBinding == 0 {
 		t.Errorf("depth texture usage = %v, want RenderAttachment and TextureBinding", depth)
 	}
@@ -58,10 +58,10 @@ func TestRenderableAndDepthTexturesCarryRenderAttachmentUsage(t *testing.T) {
 }
 
 func TestMipmapsAreRefusedForDepth(t *testing.T) {
-	if mipmapsSupported(cgfx.FormatDepth32F) {
+	if mipmapsSupported(gpu.FormatDepth32F) {
 		t.Error("mipmapsSupported(FormatDepth32F) = true, want false: a box filter over depth is meaningless")
 	}
-	for _, format := range []cgfx.TextureFormat{cgfx.FormatRGBA8, cgfx.FormatRGBA8Srgb, cgfx.FormatScreen} {
+	for _, format := range []gpu.TextureFormat{gpu.FormatRGBA8, gpu.FormatRGBA8Srgb, gpu.FormatScreen} {
 		if !mipmapsSupported(format) {
 			t.Errorf("mipmapsSupported(%v) = false, want true", format)
 		}
@@ -71,7 +71,7 @@ func TestMipmapsAreRefusedForDepth(t *testing.T) {
 func TestSrgbMipsFilterInLinearLight(t *testing.T) {
 	// A black texel beside a mid-grey one, gamma-encoded, with alpha 0 and 255.
 	src := []byte{0, 0, 0, 0, 128, 128, 128, 255}
-	dst, dw, dh := downsampleTexels(src, 2, 1, cgfx.FormatRGBA8Srgb)
+	dst, dw, dh := downsampleTexels(src, 2, 1, gpu.FormatRGBA8Srgb)
 	if dw != 1 || dh != 1 {
 		t.Fatalf("downsample size = %dx%d, want 1x1", dw, dh)
 	}
@@ -89,7 +89,7 @@ func TestSrgbMipsFilterInLinearLight(t *testing.T) {
 
 func TestLinearMipsStayOnThePlainBoxFilter(t *testing.T) {
 	src := []byte{0, 0, 0, 0, 128, 128, 128, 255}
-	dst, _, _ := downsampleTexels(src, 2, 1, cgfx.FormatRGBA8)
+	dst, _, _ := downsampleTexels(src, 2, 1, gpu.FormatRGBA8)
 	if dst[0] != 64 {
 		t.Errorf("linear mip texel = %d, want the plain average 64", dst[0])
 	}

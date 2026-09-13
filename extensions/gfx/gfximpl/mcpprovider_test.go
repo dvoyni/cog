@@ -5,8 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/internal"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/mcp"
 )
 
@@ -40,15 +39,15 @@ func TestGfxOffersItsTwoCapabilitiesAsReadOnly(t *testing.T) {
 }
 
 func TestDepthAndOtherFormatsAreNotAnImage(t *testing.T) {
-	for _, format := range []gfx.TextureFormat{gfx.FormatDepth32F, gfx.TextureFormat(99)} {
-		capture := gfx.GpuCapture{
+	for _, format := range []gpu.TextureFormat{gpu.FormatDepth32F, gpu.TextureFormat(99)} {
+		capture := gpu.Capture{
 			Pixels: make([]byte, 256), Width: 2, Height: 2, Format: format, BytesPerRow: 256,
 		}
 		if capture.Image() != nil {
-			t.Fatalf("%s produced an image; only 8-bit RGBA can be one", internal.FormatName(format))
+			t.Fatalf("%s produced an image; only 8-bit RGBA can be one", format.Name())
 		}
 	}
-	words := captureRefusal(gfx.ErrCaptureUnsupported{Format: gfx.FormatDepth32F}, 1, 1)
+	words := captureRefusal(gpu.ErrCaptureUnsupported{Format: gpu.FormatDepth32F}, 1, 1)
 	var unavailable mcp.Unavailable
 	if !errors.As(words, &unavailable) {
 		t.Fatalf("depth refusal = %T, want words an agent can act on", words)
@@ -60,7 +59,7 @@ func TestDepthAndOtherFormatsAreNotAnImage(t *testing.T) {
 
 // A refusal reaches an agent as words it can act on rather than as a fault.
 func TestACaptureRefusalReadsAsWords(t *testing.T) {
-	refusal := captureRefusal(gfx.ErrCaptureBusy{}, 1, 1)
+	refusal := captureRefusal(gpu.ErrCaptureBusy{}, 1, 1)
 	var unavailable mcp.Unavailable
 	if !errors.As(refusal, &unavailable) {
 		t.Fatalf("refusal = %T, want words an agent can act on", refusal)

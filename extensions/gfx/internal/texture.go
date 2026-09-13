@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/dvoyni/cog/libs/m"
+import (
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/libs/m"
+)
 
 // TextureDescr describes a texture by resource path (TextureWithResource),
 // inline pixel bytes (TextureWithBytes), or a texture returned by
@@ -9,16 +12,16 @@ type TextureDescr struct {
 	source        textureSource
 	path          string
 	width, height int
-	format        TextureFormat
+	format        gpu.TextureFormat
 	// pixels is static, for the reason BufferDescr.bytes gives.
 	pixels   m.Blob
 	copyData bool
 	mipmaps  bool
-	id       TextureID
+	id       gpu.TextureID
 }
 
 // ID returns the baked texture identifier, or 0 when the descriptor is not baked.
-func (t TextureDescr) ID() TextureID { return t.id }
+func (t TextureDescr) ID() gpu.TextureID { return t.id }
 
 // Path returns the resource path for a TextureWithResource descriptor (empty otherwise).
 func (t TextureDescr) Path() string { return t.path }
@@ -30,7 +33,7 @@ func (t TextureDescr) Size() (width, height int) { return t.width, t.height }
 // Format returns the texture's pixel format. A texture loaded from a resource
 // path is always sRGB, because the loader decodes PNG and JPEG and both are
 // gamma-encoded by definition.
-func (t TextureDescr) Format() TextureFormat { return t.format }
+func (t TextureDescr) Format() gpu.TextureFormat { return t.format }
 
 // Mipmaps reports whether a full mip chain is generated when the texture is
 // baked.
@@ -52,7 +55,7 @@ const (
 )
 
 // BakedTexture is the descriptor of a texture already baked under id.
-func BakedTexture(id TextureID, width, height int) TextureDescr {
+func BakedTexture(id gpu.TextureID, width, height int) TextureDescr {
 	return TextureDescr{source: TextureSourceBaked, id: id, width: width, height: height}
 }
 
@@ -63,14 +66,14 @@ func BakedTexture(id TextureID, width, height int) TextureDescr {
 // metallic-roughness, occlusion - is not a picture and does not come through
 // here; it comes through TextureWithBytes, which does take a format.
 func TextureWithResource(path string) TextureDescr {
-	return TextureDescr{source: TextureSourceResource, path: path, format: FormatRGBA8Srgb}
+	return TextureDescr{source: TextureSourceResource, path: path, format: gpu.FormatRGBA8Srgb}
 }
 
 // TextureWithBytes describes a texture from inline pixel bytes. copyData
 // snapshots pixels when true; when false, the caller must keep them unchanged
 // until the recorded frame is consumed or dropped. mipmaps generates a full mip
 // chain at bake time for smoother minification.
-func TextureWithBytes(width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
+func TextureWithBytes(width, height int, format gpu.TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
 	return TextureDescr{
 		source: TextureSourceBytes, width: width, height: height, format: format,
 		pixels: pixels, copyData: copyData, mipmaps: mipmaps,

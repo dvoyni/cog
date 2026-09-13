@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/internal"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -29,11 +29,11 @@ func TestAParameterSerializesToExactlyOneValue(t *testing.T) {
 		{"color", gfx.ColorParam("tint", m.Color{R: 1, A: 1}), "color", "value"},
 		{"vec4", gfx.VecParam("offset", m.Vec4{X: 1, Y: 2}), "vec4", "value"},
 		{"mat4", gfx.MatParam("mvp", m.NewMat4()), "mat4", "value"},
-		{"sampler", gfx.SamplerParam("smp", gfx.SamplerDesc{}), "sampler", "sampler"},
+		{"sampler", gfx.SamplerParam("smp", gpu.SamplerDesc{}), "sampler", "sampler"},
 		{"buffer", gfx.BufferParam("items", gfx.BufferWithBytes([]byte{1, 2, 3, 4}, false)), "buffer", "buffer"},
 		{
 			"texture",
-			gfx.TextureParam("albedo", gfx.TextureWithBytes(2, 1, gfx.FormatRGBA8, pixels, false, false)),
+			gfx.TextureParam("albedo", gfx.TextureWithBytes(2, 1, gpu.FormatRGBA8, pixels, false, false)),
 			"texture", "texture",
 		},
 		{"none", gfx.ParameterDescr{}, "none", ""},
@@ -87,7 +87,7 @@ func TestATextureWithInlinePixelsReportsTheirSizeAndNotThem(t *testing.T) {
 	for i := range pixels {
 		pixels[i] = byte(i + 1)
 	}
-	parameter := gfx.TextureParam("albedo", gfx.TextureWithBytes(4, 4, gfx.FormatRGBA8, pixels, false, true))
+	parameter := gfx.TextureParam("albedo", gfx.TextureWithBytes(4, 4, gpu.FormatRGBA8, pixels, false, true))
 
 	document, err := json.Marshal(gfx.ParameterViewOf(parameter))
 	if err != nil {
@@ -103,7 +103,7 @@ func TestATextureWithInlinePixelsReportsTheirSizeAndNotThem(t *testing.T) {
 	if view.Texture.Width != 4 || view.Texture.Height != 4 {
 		t.Errorf("size = %dx%d, want 4x4", view.Texture.Width, view.Texture.Height)
 	}
-	if !view.Texture.Mipmaps || view.Texture.Format != internal.FormatName(gfx.FormatRGBA8) {
+	if !view.Texture.Mipmaps || view.Texture.Format != gpu.FormatRGBA8.Name() {
 		t.Errorf("texture = %+v, want the format and mipmap flag it was built with", view.Texture)
 	}
 	// base64 of the run, and the run itself, both absent: a whole texture in a
@@ -156,7 +156,7 @@ func TestABufferParameterCarriesTheRangeItBinds(t *testing.T) {
 func TestAMaterialViewNamesItsShaderVariantAndState(t *testing.T) {
 	material := gfx.MaterialWithState(
 		gfx.ShaderWithResource("shaders/pbr.wgsl", gfx.ShaderDefine("SKINNED"), gfx.ShaderConst("LIGHTS", "4")),
-		gfx.StateOpaque3D,
+		gpu.StateOpaque3D,
 		gfx.ColorParam("tint", m.White),
 	)
 	view := gfx.MaterialViewOf(material)

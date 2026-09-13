@@ -1,6 +1,8 @@
 package gfx
 
-import "github.com/dvoyni/cog/extensions/gfx/internal"
+import (
+	"github.com/dvoyni/cog/extensions/gfx/internal"
+)
 
 // Order places a pass in the frame's shared ordering space. gfx defines no
 // conventions and reserves no ranges: recorders that must interleave - canvas
@@ -8,27 +10,6 @@ import "github.com/dvoyni/cog/extensions/gfx/internal"
 // record from separate update subscriptions and stream order between them is
 // not defined.
 type Order = internal.Order
-
-// LoadOp says what a pass does with an attachment's existing contents.
-type LoadOp = internal.LoadOp
-
-const (
-	// LoadPreserve keeps what is already in the attachment.
-	LoadPreserve = internal.LoadPreserve
-	// LoadClear overwrites it with the pass's clear value.
-	LoadClear = internal.LoadClear
-	// LoadDiscard declares the contents irrelevant, which lets the driver skip
-	// reading them back in.
-	LoadDiscard = internal.LoadDiscard
-)
-
-// StoreOp says whether a pass's results survive it.
-type StoreOp = internal.StoreOp
-
-const (
-	StoreKeep    = internal.StoreKeep
-	StoreDiscard = internal.StoreDiscard
-)
 
 // TargetDescr names a pass's colour attachment.
 type TargetDescr = internal.TargetDescr

@@ -3,7 +3,7 @@ package wgpu
 import (
 	"testing"
 
-	cgfx "github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 )
 
 func TestOnlyAPassWithDepthAndNoColourIsDeclined(t *testing.T) {
@@ -13,22 +13,22 @@ func TestOnlyAPassWithDepthAndNoColourIsDeclined(t *testing.T) {
 	// error anything can catch.
 	cases := []struct {
 		name string
-		desc cgfx.GpuPassDesc
+		desc gpu.PassDesc
 		want bool
 	}{
-		{"the screen", cgfx.GpuPassDesc{Screen: true, DepthAuto: true}, false},
-		{"a texture target with pooled depth", cgfx.GpuPassDesc{Target: 7, DepthAuto: true}, false},
-		{"a texture target with its own depth", cgfx.GpuPassDesc{Target: 7, Depth: 9}, false},
-		{"a colour pass with no depth", cgfx.GpuPassDesc{Target: 7}, false},
-		{"a depth-only pass", cgfx.GpuPassDesc{NoColor: true, Depth: 9}, true},
-		{"a depth-only pass on the pooled texture", cgfx.GpuPassDesc{NoColor: true, DepthAuto: true}, true},
-		{"no attachments at all", cgfx.GpuPassDesc{NoColor: true}, false},
+		{"the screen", gpu.PassDesc{Screen: true, DepthAuto: true}, false},
+		{"a texture target with pooled depth", gpu.PassDesc{Target: 7, DepthAuto: true}, false},
+		{"a texture target with its own depth", gpu.PassDesc{Target: 7, Depth: 9}, false},
+		{"a colour pass with no depth", gpu.PassDesc{Target: 7}, false},
+		{"a depth-only pass", gpu.PassDesc{NoColor: true, Depth: 9}, true},
+		{"a depth-only pass on the pooled texture", gpu.PassDesc{NoColor: true, DepthAuto: true}, true},
+		{"no attachments at all", gpu.PassDesc{NoColor: true}, false},
 		// The case NoColor exists for: a temporary target on its first frame
 		// has no view yet, so its id is zero exactly as a colourless pass's is.
 		// It is a colour pass with nothing to render into, not a depth-only
 		// pass, and reporting it would fire on the first frame of every app
 		// that uses a render target.
-		{"a texture target whose view is not created yet", cgfx.GpuPassDesc{DepthAuto: true}, false},
+		{"a texture target whose view is not created yet", gpu.PassDesc{DepthAuto: true}, false},
 	}
 	for _, c := range cases {
 		if got := isDepthOnly(c.desc); got != c.want {

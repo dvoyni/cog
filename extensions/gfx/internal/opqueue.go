@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -38,15 +39,15 @@ type Op struct {
 	FirstInstance int
 	color         m.Color
 	depth         float32
-	BufferID      BufferID
-	BufferKind    BufferKind
+	BufferID      gpu.BufferID
+	BufferKind    gpu.BufferKind
 	BufferSize    int
-	TextureID     TextureID
+	TextureID     gpu.TextureID
 	TexW, TexH    int
 	TexLayers     int
 	TexLayer      int
-	Region        Region
-	Format        TextureFormat
+	Region        gpu.Region
+	Format        gpu.TextureFormat
 	Mipmaps       bool
 	Renderable    bool
 	Bytes         []byte
@@ -54,22 +55,22 @@ type Op struct {
 }
 
 type temporaryBuffer struct {
-	id   BufferID
-	kind BufferKind
+	id   gpu.BufferID
+	kind gpu.BufferKind
 	Size int
 	Used bool
 }
 
 type temporaryTexture struct {
 	key  temporaryTextureKey
-	id   TextureID
+	id   gpu.TextureID
 	used bool
 }
 
 type temporaryTextureKey struct {
 	width      int
 	height     int
-	format     TextureFormat
+	format     gpu.TextureFormat
 	mipmaps    bool
 	renderable bool
 }
@@ -102,8 +103,8 @@ func NewOpQueue(ids IDSource) *OpQueue {
 // IDMinter is the half of the Backend a recording queue calls: it reserves
 // logical resource ids, which is CPU-only and safe from the recording thread.
 type IDMinter interface {
-	NewTexture() TextureID
-	NewBuffer() BufferID
+	NewTexture() gpu.TextureID
+	NewBuffer() gpu.BufferID
 	Ready() bool
 }
 
@@ -190,8 +191,8 @@ func (q *OpQueue) draw(mesh MeshDescr, material MaterialDescr, firstInstance, in
 		FirstInstance: firstInstance,
 	}
 	o.Mesh.layout = q.copyVertexAttrs(mesh.layout)
-	o.Mesh.vertices = q.bakeBufferIfNeeded(mesh.vertices, BufferVertex)
-	o.Mesh.indices = q.bakeBufferIfNeeded(mesh.indices, BufferIndex)
+	o.Mesh.vertices = q.bakeBufferIfNeeded(mesh.vertices, gpu.BufferVertex)
+	o.Mesh.indices = q.bakeBufferIfNeeded(mesh.indices, gpu.BufferIndex)
 	q.ops = append(q.ops, o)
 }
 
@@ -225,14 +226,14 @@ func (q *OpQueue) copyUpload(data []byte) []byte {
 func (q *OpQueue) bakeParameterIfNeeded(param ParameterDescr) ParameterDescr {
 	switch param.kind {
 	case ParamBuffer:
-		param.buffer = q.bakeBufferIfNeeded(param.buffer, BufferStorage)
+		param.buffer = q.bakeBufferIfNeeded(param.buffer, gpu.BufferStorage)
 	case ParamTexture:
 		param.texture = q.bakeTextureIfNeeded(param.texture)
 	}
 	return param
 }
 
-func (q *OpQueue) bakeBufferIfNeeded(buffer BufferDescr, kind BufferKind) BufferDescr {
+func (q *OpQueue) bakeBufferIfNeeded(buffer BufferDescr, kind gpu.BufferKind) BufferDescr {
 	if buffer.source == BufferSourceBaked || len(buffer.bytes) == 0 {
 		return buffer
 	}
@@ -249,7 +250,7 @@ func (q *OpQueue) bakeTextureIfNeeded(texture TextureDescr) TextureDescr {
 	return q.temporaryTexture(texture.width, texture.height, texture.format, texture.pixels, texture.copyData, texture.mipmaps)
 }
 
-func (q *OpQueue) temporaryBuffer(kind BufferKind, data []byte, copyData bool) BufferDescr {
+func (q *OpQueue) temporaryBuffer(kind gpu.BufferKind, data []byte, copyData bool) BufferDescr {
 	start := sort.Search(q.temporarySorted, func(i int) bool {
 		buffer := &q.temporaryBuffers[i]
 		return buffer.kind > kind || (buffer.kind == kind && buffer.Size >= len(data))
@@ -291,7 +292,7 @@ func (q *OpQueue) nextTemporaryBuffer(index int) int {
 	return q.temporaryNext[index]
 }
 
-func (q *OpQueue) temporaryTexture(width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
+func (q *OpQueue) temporaryTexture(width, height int, format gpu.TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
 	key := temporaryTextureKey{width: width, height: height, format: format, mipmaps: mipmaps}
 	return q.bakeTexture(q.acquireTemporaryTexture(key), width, height, format, pixels, copyData, mipmaps)
 }
@@ -309,7 +310,7 @@ func (q *OpQueue) temporaryTexture(width, height int, format TextureFormat, pixe
 // A draw still may not sample the target its own pass renders into; that is
 // ErrDrawSamplesAttachment, and it is the guard that makes handing the texture
 // back safe.
-func (q *OpQueue) TemporaryTarget(width, height int, format TextureFormat) (TargetDescr, TextureDescr) {
+func (q *OpQueue) TemporaryTarget(width, height int, format gpu.TextureFormat) (TargetDescr, TextureDescr) {
 	key := temporaryTextureKey{width: width, height: height, format: format, renderable: true}
 	id := q.acquireTemporaryTexture(key)
 	q.ops = append(q.ops, Op{
@@ -325,7 +326,7 @@ func (q *OpQueue) TemporaryTarget(width, height int, format TextureFormat) (Targ
 
 // acquireTemporaryTexture takes a matching texture from the frame pool, minting
 // one when the pool has none free.
-func (q *OpQueue) acquireTemporaryTexture(key temporaryTextureKey) TextureID {
+func (q *OpQueue) acquireTemporaryTexture(key temporaryTextureKey) gpu.TextureID {
 	free := q.temporaryTextureFree[key]
 	best := -1
 	if len(free) > 0 {
@@ -340,7 +341,7 @@ func (q *OpQueue) acquireTemporaryTexture(key temporaryTextureKey) TextureID {
 	return q.temporaryTextures[best].id
 }
 
-func (q *OpQueue) bakeBuffer(id BufferID, kind BufferKind, size int, data []byte, copyData bool) BufferDescr {
+func (q *OpQueue) bakeBuffer(id gpu.BufferID, kind gpu.BufferKind, size int, data []byte, copyData bool) BufferDescr {
 	if copyData {
 		data = q.copyUpload(data)
 	}
@@ -352,7 +353,7 @@ func (q *OpQueue) bakeBuffer(id BufferID, kind BufferKind, size int, data []byte
 	return BakedBuffer(id, len(data))
 }
 
-func (q *OpQueue) bakeTexture(id TextureID, width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
+func (q *OpQueue) bakeTexture(id gpu.TextureID, width, height int, format gpu.TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
 	if copyData {
 		pixels = q.copyUpload(pixels)
 	}

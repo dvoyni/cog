@@ -18,6 +18,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ui/uiimpl"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/extensions/storage/storageimpl"
@@ -55,7 +56,7 @@ func (p *pairingPlugin) Dependencies() []kernel.PluginName {
 }
 
 func (p *pairingPlugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.ProvideAdapter[gfx.Backend](p.rig.backend)
+	registrar.ProvideAdapter[gpu.Backend](p.rig.backend)
 	p.rig.providers = registrar.CollectAdapters[mcp.Provider]()
 	registrar.HandleCommand[app.TimeCmd](p.rig.plugin.timeCmdImpl)
 	return nil
@@ -475,50 +476,50 @@ func TestPairing_AHoldIsNotChargedAgainstASnapshotDeadline(t *testing.T) {
 type pairingBackend struct {
 	mu      sync.Mutex
 	next    uint32
-	pending *gfx.GpuCapture
-	ready   *gfx.GpuCapture
+	pending *gpu.Capture
+	ready   *gpu.Capture
 }
 
 func newPairingBackend() *pairingBackend { return &pairingBackend{} }
 
-func (b *pairingBackend) id() gfx.ResourceID {
+func (b *pairingBackend) id() gpu.ResourceID {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.next++
-	return gfx.ResourceID(b.next)
+	return gpu.ResourceID(b.next)
 }
 
 func (b *pairingBackend) Ready() bool               { return true }
-func (b *pairingBackend) NewTexture() gfx.TextureID { return gfx.TextureID(b.id()) }
-func (b *pairingBackend) NewBuffer() gfx.BufferID   { return gfx.BufferID(b.id()) }
+func (b *pairingBackend) NewTexture() gpu.TextureID { return gpu.TextureID(b.id()) }
+func (b *pairingBackend) NewBuffer() gpu.BufferID   { return gpu.BufferID(b.id()) }
 
-func (b *pairingBackend) NewSampler(gfx.SamplerDesc) (gfx.SamplerID, error) {
-	return gfx.SamplerID(b.id()), nil
+func (b *pairingBackend) NewSampler(gpu.SamplerDesc) (gpu.SamplerID, error) {
+	return gpu.SamplerID(b.id()), nil
 }
-func (b *pairingBackend) FreeSampler(gfx.SamplerID) {}
+func (b *pairingBackend) FreeSampler(gpu.SamplerID) {}
 
-func (b *pairingBackend) NewShader(gfx.ShaderDesc) (gfx.ShaderID, error) {
-	return gfx.ShaderID(b.id()), nil
+func (b *pairingBackend) NewShader(gpu.ShaderDesc) (gpu.ShaderID, error) {
+	return gpu.ShaderID(b.id()), nil
 }
-func (b *pairingBackend) FreeShader(gfx.ShaderID)                    {}
-func (b *pairingBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout { return gfx.ShaderLayout{} }
-func (b *pairingBackend) FreePipeline(gfx.PipelineID)                {}
-func (b *pairingBackend) Limits() gfx.Limits                         { return gfx.DefaultLimits }
-func (b *pairingBackend) TransitionTextures([]gfx.TextureTransition) {}
-func (b *pairingBackend) EndPass(gfx.RenderPass)                     {}
+func (b *pairingBackend) FreeShader(gpu.ShaderID)                    {}
+func (b *pairingBackend) ShaderLayout(gpu.ShaderID) gpu.ShaderLayout { return gpu.ShaderLayout{} }
+func (b *pairingBackend) FreePipeline(gpu.PipelineID)                {}
+func (b *pairingBackend) Limits() gpu.Limits                         { return gpu.DefaultLimits }
+func (b *pairingBackend) TransitionTextures([]gpu.TextureTransition) {}
+func (b *pairingBackend) EndPass(gpu.RenderPass)                     {}
 func (b *pairingBackend) Present()                                   {}
-func (b *pairingBackend) BeginPass(gfx.GpuPassDesc) gfx.RenderPass   { return nil }
+func (b *pairingBackend) BeginPass(gpu.PassDesc) gpu.RenderPass      { return nil }
 
-func (b *pairingBackend) NewPipeline(gfx.PipelineDesc) (gfx.PipelineID, error) {
-	return gfx.PipelineID(b.id()), nil
+func (b *pairingBackend) NewPipeline(gpu.PipelineDesc) (gpu.PipelineID, error) {
+	return gpu.PipelineID(b.id()), nil
 }
 
-func (b *pairingBackend) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
-	return gfx.TextureViewID(1), 1600, 1200
+func (b *pairingBackend) ScreenFramebuffer() (gpu.TextureViewID, int, int) {
+	return gpu.TextureViewID(1), 1600, 1200
 }
 
-func (b *pairingBackend) TextureView(gfx.TextureID, int, int) gfx.TextureViewID {
-	return gfx.TextureViewID(b.id())
+func (b *pairingBackend) TextureView(gpu.TextureID, int, int) gpu.TextureViewID {
+	return gpu.TextureViewID(b.id())
 }
 
 // Execute promotes what the previous frame staged and then replays this
@@ -527,16 +528,16 @@ func (b *pairingBackend) TextureView(gfx.TextureID, int, int) gfx.TextureViewID 
 // map resolves on the submit after the copy - and gfx counts on it: it drains
 // before it marks the copy encoded, so a capture handed back inside its own
 // frame is dropped as one nobody is waiting for.
-func (b *pairingBackend) Execute(queue *gfx.GpuQueue) {
+func (b *pairingBackend) Execute(queue *gpu.Queue) {
 	b.mu.Lock()
 	b.ready, b.pending = b.pending, nil
 	b.mu.Unlock()
 	queue.ReplayPasses(b)
 }
 
-func (b *pairingBackend) Capture(gfx.GpuCaptureDesc) {
-	picture := gfx.GpuCapture{
-		Width: 2, Height: 2, Format: gfx.FormatRGBA8, BytesPerRow: 256,
+func (b *pairingBackend) Capture(gpu.CaptureDesc) {
+	picture := gpu.Capture{
+		Width: 2, Height: 2, Format: gpu.FormatRGBA8, BytesPerRow: 256,
 		Pixels: make([]byte, 256*2),
 	}
 	b.mu.Lock()
@@ -544,11 +545,11 @@ func (b *pairingBackend) Capture(gfx.GpuCaptureDesc) {
 	b.pending = &picture
 }
 
-func (b *pairingBackend) TakeCapture() (gfx.GpuCapture, bool) {
+func (b *pairingBackend) TakeCapture() (gpu.Capture, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.ready == nil {
-		return gfx.GpuCapture{}, false
+		return gpu.Capture{}, false
 	}
 	done := *b.ready
 	b.ready = nil

@@ -18,6 +18,7 @@ import (
 	"github.com/dvoyni/cog/bundles/canvas/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/extensions/storage/storageimpl"
@@ -218,7 +219,7 @@ func (r *drawsRig) runDraws(request drawsRequest) (drawsResponse, error) {
 func aSpriteAndTriangles(queue *canvas.OpQueue) {
 	queue.Sprite(1, "images/hero.png", canvas.SpriteTransform{
 		Position: m.Vec2{X: 10, Y: 20}, Size: m.Vec2{X: 32, Y: 48},
-		Filter: gfx.FilterNearest,
+		Filter: gpu.FilterNearest,
 	}, nil, gfx.ColorParam(canvas.TintSlot, m.Color{R: 1, A: 1}))
 	queue.Text(1, "fonts/body.ttf", "score", canvas.TextDraw{
 		Position: m.Vec2{X: 4, Y: 6}, Size: 12, Color: m.Color{G: 1, A: 1}, Align: canvas.AlignCenter,
@@ -320,7 +321,7 @@ func TestADrawsSnapshotReportsEachLayersWindowTargetAndClear(t *testing.T) {
 	// here and passes it through untouched, so reporting where a layer draws
 	// means reading it back out of the descriptor.
 	withGfxResources(t, rig.k, func(resources *gfx.ResourceQueue) {
-		texture = resources.AllocateRenderTarget(64, 32, 1, gfx.FormatRGBA8)
+		texture = resources.AllocateRenderTarget(64, 32, 1, gpu.FormatRGBA8)
 		target = gfx.TextureTarget(texture, 0, 0)
 	})
 
@@ -542,7 +543,7 @@ func TestASecondDrawsSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 		t.Fatalf("a frame snapshot was refused while a draw snapshot was in flight: %v", err)
 	}
 	if _, err := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
-		Target: gfx.GpuCaptureDesc{Screen: true},
+		Target: gpu.CaptureDesc{Screen: true},
 	}); err != nil {
 		t.Fatalf("a capture was refused while a draw snapshot was in flight: %v", err)
 	}
@@ -739,7 +740,7 @@ func TestADrawsSnapshotReportsATextureParameterWithoutItsPixels(t *testing.T) {
 	rig := newDrawsRig(t)
 	pixels := make([]byte, 16*16*4)
 	rig.fixture.on(func(queue *canvas.OpQueue) {
-		texture := gfx.TextureWithBytes(16, 16, gfx.FormatRGBA8, pixels, false, false)
+		texture := gfx.TextureWithBytes(16, 16, gpu.FormatRGBA8, pixels, false, false)
 		queue.SpriteTexture(1, texture, canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil,
 			gfx.TextureParam("mask", texture))
 	})

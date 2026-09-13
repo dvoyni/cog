@@ -9,6 +9,7 @@ import (
 	"testing/fstest"
 
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
@@ -20,12 +21,12 @@ import (
 // one - which is the shape of a driver whose device arrives after the engine
 // has started, and what lets a test render a frame before it is ready.
 type testAdapter struct {
-	backend atomic.Pointer[gfx.Backend]
+	backend atomic.Pointer[gpu.Backend]
 }
 
 // attachBackendCmd hands the adapter the fake a test renders through.
 type attachBackendCmd kernel.Command[attachBackendRequest, attachBackendResponse]
-type attachBackendRequest struct{ Backend gfx.Backend }
+type attachBackendRequest struct{ Backend gpu.Backend }
 type attachBackendResponse struct{}
 
 func (a *testAdapter) attachBackendCmdImpl() (kernel.Lock, kernel.Execute[attachBackendRequest, attachBackendResponse]) {
@@ -35,7 +36,7 @@ func (a *testAdapter) attachBackendCmdImpl() (kernel.Lock, kernel.Execute[attach
 	}
 }
 
-func (a *testAdapter) get() gfx.Backend {
+func (a *testAdapter) get() gpu.Backend {
 	if backend := a.backend.Load(); backend != nil {
 		return *backend
 	}
@@ -51,40 +52,40 @@ func (a *testAdapter) Ready() bool {
 // resource ids the moment the engine starts, as a driver's stable backend does.
 var detachedIDs atomic.Uint32
 
-func (a *testAdapter) NewTexture() gfx.TextureID {
+func (a *testAdapter) NewTexture() gpu.TextureID {
 	if backend := a.get(); backend != nil {
 		return backend.NewTexture()
 	}
-	return gfx.TextureID(detachedIDs.Add(1))
+	return gpu.TextureID(detachedIDs.Add(1))
 }
 
-func (a *testAdapter) NewBuffer() gfx.BufferID {
+func (a *testAdapter) NewBuffer() gpu.BufferID {
 	if backend := a.get(); backend != nil {
 		return backend.NewBuffer()
 	}
-	return gfx.BufferID(detachedIDs.Add(1))
+	return gpu.BufferID(detachedIDs.Add(1))
 }
 
-func (a *testAdapter) NewSampler(desc gfx.SamplerDesc) (gfx.SamplerID, error) {
+func (a *testAdapter) NewSampler(desc gpu.SamplerDesc) (gpu.SamplerID, error) {
 	return a.get().NewSampler(desc)
 }
-func (a *testAdapter) FreeSampler(id gfx.SamplerID) { a.get().FreeSampler(id) }
-func (a *testAdapter) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
+func (a *testAdapter) FreeSampler(id gpu.SamplerID) { a.get().FreeSampler(id) }
+func (a *testAdapter) NewShader(desc gpu.ShaderDesc) (gpu.ShaderID, error) {
 	return a.get().NewShader(desc)
 }
-func (a *testAdapter) FreeShader(id gfx.ShaderID)                    { a.get().FreeShader(id) }
-func (a *testAdapter) ShaderLayout(id gfx.ShaderID) gfx.ShaderLayout { return a.get().ShaderLayout(id) }
-func (a *testAdapter) FreePipeline(id gfx.PipelineID)                { a.get().FreePipeline(id) }
-func (a *testAdapter) Limits() gfx.Limits                            { return a.get().Limits() }
-func (a *testAdapter) Execute(queue *gfx.GpuQueue)                   { a.get().Execute(queue) }
-func (a *testAdapter) TakeCapture() (gfx.GpuCapture, bool)           { return a.get().TakeCapture() }
-func (a *testAdapter) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
+func (a *testAdapter) FreeShader(id gpu.ShaderID)                    { a.get().FreeShader(id) }
+func (a *testAdapter) ShaderLayout(id gpu.ShaderID) gpu.ShaderLayout { return a.get().ShaderLayout(id) }
+func (a *testAdapter) FreePipeline(id gpu.PipelineID)                { a.get().FreePipeline(id) }
+func (a *testAdapter) Limits() gpu.Limits                            { return a.get().Limits() }
+func (a *testAdapter) Execute(queue *gpu.Queue)                      { a.get().Execute(queue) }
+func (a *testAdapter) TakeCapture() (gpu.Capture, bool)              { return a.get().TakeCapture() }
+func (a *testAdapter) ScreenFramebuffer() (gpu.TextureViewID, int, int) {
 	return a.get().ScreenFramebuffer()
 }
-func (a *testAdapter) NewPipeline(desc gfx.PipelineDesc) (gfx.PipelineID, error) {
+func (a *testAdapter) NewPipeline(desc gpu.PipelineDesc) (gpu.PipelineID, error) {
 	return a.get().NewPipeline(desc)
 }
-func (a *testAdapter) TextureView(texture gfx.TextureID, mip, layer int) gfx.TextureViewID {
+func (a *testAdapter) TextureView(texture gpu.TextureID, mip, layer int) gpu.TextureViewID {
 	return a.get().TextureView(texture, mip, layer)
 }
 
@@ -107,7 +108,7 @@ func TestACompositionWithoutABackendAdapterFails(t *testing.T) {
 	if !errors.As(errors.Join(reported...), &missing) {
 		t.Fatalf("composition reported %v, want ErrMissingAdapter", reported)
 	}
-	if missing.Port != gfx.Name || missing.Interface != reflect.TypeFor[gfx.Backend]() {
+	if missing.Port != gfx.Name || missing.Interface != reflect.TypeFor[gpu.Backend]() {
 		t.Fatalf("missing adapter = %+v, want gfx's Backend", missing)
 	}
 }

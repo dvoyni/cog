@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/dvoyni/cog/libs/m"
+import (
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/libs/m"
+)
 
 // Order places a pass in the frame's shared ordering space. gfx defines no
 // conventions and reserves no ranges: recorders that must interleave - canvas
@@ -8,27 +11,6 @@ import "github.com/dvoyni/cog/libs/m"
 // record from separate update subscriptions and stream order between them is
 // not defined.
 type Order int
-
-// LoadOp says what a pass does with an attachment's existing contents.
-type LoadOp uint8
-
-const (
-	// LoadPreserve keeps what is already in the attachment.
-	LoadPreserve LoadOp = iota
-	// LoadClear overwrites it with the pass's clear value.
-	LoadClear
-	// LoadDiscard declares the contents irrelevant, which lets the driver skip
-	// reading them back in.
-	LoadDiscard
-)
-
-// StoreOp says whether a pass's results survive it.
-type StoreOp uint8
-
-const (
-	StoreKeep StoreOp = iota
-	StoreDiscard
-)
 
 type TargetKind uint8
 
@@ -45,7 +27,7 @@ const (
 // TargetDescr names a pass's colour attachment.
 type TargetDescr struct {
 	kind          TargetKind
-	texture       TextureID
+	texture       gpu.TextureID
 	mip, layer    int
 	width, height int
 }
@@ -66,7 +48,7 @@ func (t TargetDescr) Size() (width, height int, ok bool) {
 // It is the read side of TextureTarget, for a caller holding a TargetDescr
 // somebody else built - canvas hands one to SetLayerTarget untouched, so
 // reporting where a layer draws means reading it back out.
-func (t TargetDescr) Texture() (texture TextureID, mip, layer int, ok bool) {
+func (t TargetDescr) Texture() (texture gpu.TextureID, mip, layer int, ok bool) {
 	if t.kind != TargetTexture {
 		return 0, 0, 0, false
 	}
@@ -110,7 +92,7 @@ const (
 // DepthDescr names a pass's depth attachment.
 type DepthDescr struct {
 	kind          DepthKind
-	texture       TextureID
+	texture       gpu.TextureID
 	width, height int
 }
 
@@ -148,12 +130,12 @@ type PassDescr struct {
 	Order      Order
 	Target     TargetDescr
 	Depth      DepthDescr
-	Load       LoadOp
+	Load       gpu.LoadOp
 	Clear      m.Color
-	Store      StoreOp
-	DepthLoad  LoadOp
+	Store      gpu.StoreOp
+	DepthLoad  gpu.LoadOp
 	DepthClear float32
-	DepthStore StoreOp
+	DepthStore gpu.StoreOp
 	Label      string
 }
 
@@ -221,14 +203,14 @@ func (d DepthDescr) sameAs(other DepthDescr) bool {
 // layer cost one GPU pass.
 func MergesInto(successor, predecessor PassDescr) bool {
 	return sameAttachments(successor, predecessor) &&
-		successor.Load == LoadPreserve && successor.DepthLoad == LoadPreserve &&
-		predecessor.Store == StoreKeep && predecessor.DepthStore == StoreKeep
+		successor.Load == gpu.LoadPreserve && successor.DepthLoad == gpu.LoadPreserve &&
+		predecessor.Store == gpu.StoreKeep && predecessor.DepthStore == gpu.StoreKeep
 }
 
 // hasEffect reports whether a pass is observable. Draws make it observable, and
 // so does any attachment that loads: "clear this target and nothing else" and a
 // camera that culled everything are both legitimate frames.
 func (p PassDescr) hasEffect(draws int) bool {
-	loads := func(op LoadOp) bool { return op == LoadClear || op == LoadDiscard }
+	loads := func(op gpu.LoadOp) bool { return op == gpu.LoadClear || op == gpu.LoadDiscard }
 	return draws > 0 || loads(p.Load) || loads(p.DepthLoad)
 }

@@ -1,6 +1,9 @@
 package gfx
 
-import "github.com/dvoyni/cog/extensions/gfx/internal"
+import (
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/extensions/gfx/internal"
+)
 
 // The view types are the vocabulary cog's snapshots share. gfx declares them
 // because gfx owns the descriptors they render - a texture, a parameter, a
@@ -172,10 +175,10 @@ type TextureView struct {
 	Path string `json:"path,omitempty"`
 	// ID is the baked handle. It is opaque - nothing lists textures to an agent
 	// - but it is how two ops naming one texture are recognised as doing so.
-	ID     TextureID `json:"id,omitempty"`
-	Width  int       `json:"width,omitempty"`
-	Height int       `json:"height,omitempty"`
-	Format string    `json:"format,omitempty"`
+	ID     gpu.TextureID `json:"id,omitempty"`
+	Width  int           `json:"width,omitempty"`
+	Height int           `json:"height,omitempty"`
+	Format string        `json:"format,omitempty"`
 	// Mipmaps reports that a full mip chain is generated at bake.
 	Mipmaps bool `json:"mipmaps,omitempty"`
 	// Bytes is the size of the inline upload the descriptor carries. An inline
@@ -190,7 +193,7 @@ func TextureViewOf(texture TextureDescr) TextureView {
 		Source:  internal.TextureSourceName(internal.TextureSource(&texture)),
 		Path:    texture.Path(),
 		ID:      texture.ID(),
-		Format:  internal.FormatName(texture.Format()),
+		Format:  texture.Format().Name(),
 		Mipmaps: texture.Mipmaps(),
 		Bytes:   texture.PixelBytes(),
 	}
@@ -202,9 +205,9 @@ func TextureViewOf(texture TextureDescr) TextureView {
 // parameter binds when a parameter is what produced the view.
 type BufferView struct {
 	// Source is how the buffer resolves: bytes or baked.
-	Source string   `json:"source"`
-	ID     BufferID `json:"id,omitempty"`
-	Size   int      `json:"size,omitempty"`
+	Source string       `json:"source"`
+	ID     gpu.BufferID `json:"id,omitempty"`
+	Size   int          `json:"size,omitempty"`
 	// Offset and Range are the bound slice. A zero Range means the whole buffer
 	// from Offset, which is how a draw that binds all of one says so.
 	Offset int `json:"offset,omitempty"`
@@ -245,19 +248,19 @@ type SamplerView struct {
 }
 
 // SamplerViewOf renders one sampler descriptor.
-func SamplerViewOf(sampler SamplerDesc) SamplerView {
+func SamplerViewOf(sampler gpu.SamplerDesc) SamplerView {
 	view := SamplerView{
-		AddressU:   internal.AddressModeName(sampler.AddressU),
-		AddressV:   internal.AddressModeName(sampler.AddressV),
-		Mag:        internal.FilterModeName(sampler.Mag),
-		Min:        internal.FilterModeName(sampler.Min),
-		Mip:        internal.FilterModeName(sampler.Mip),
+		AddressU:   sampler.AddressU.Name(),
+		AddressV:   sampler.AddressV.Name(),
+		Mag:        sampler.Mag.Name(),
+		Min:        sampler.Min.Name(),
+		Mip:        sampler.Mip.Name(),
 		Anisotropy: sampler.Anisotropy,
 		Comparison: sampler.Comparison,
 		Label:      sampler.Label,
 	}
 	if sampler.Comparison {
-		view.Compare = internal.CompareFuncName(sampler.Compare)
+		view.Compare = sampler.Compare.Name()
 	}
 	return view
 }
@@ -314,22 +317,12 @@ type MaterialStateView struct {
 }
 
 // MaterialStateViewOf renders one pipeline state.
-func MaterialStateViewOf(state MaterialState) MaterialStateView {
+func MaterialStateViewOf(state gpu.MaterialState) MaterialStateView {
 	return MaterialStateView{
-		Blend:        internal.BlendModeName(state.Blend),
-		DepthCompare: internal.CompareFuncName(state.DepthCompare),
+		Blend:        state.Blend.Name(),
+		DepthCompare: state.DepthCompare.Name(),
 		DepthWrite:   state.DepthWrite,
-		Cull:         internal.CullModeName(state.Cull),
-		FrontFace:    internal.FrontFaceName(state.FrontFace),
+		Cull:         state.Cull.Name(),
+		FrontFace:    state.FrontFace.Name(),
 	}
 }
-
-// FilterModeName is the view vocabulary's spelling of a sampler filter. It is
-// the one name table that is exported, and the rule is narrow: a name crosses
-// the package boundary only where a sibling snapshot reports a gfx enum of its
-// own - canvas records a FilterMode on every sprite transform. Exporting it
-// rather than letting canvas keep a second table is the same promise the views
-// make, that one value reaches an agent in one shape. It is still not
-// FilterMode.String: naming an enum for a debug document is not a commitment to
-// render every gfx enum for every cog app.
-func FilterModeName(mode FilterMode) string { return internal.FilterModeName(mode) }

@@ -5,7 +5,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal"
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
 )
@@ -13,9 +13,9 @@ import (
 // indexWidthOf reads back the width and the uploaded byte length of one
 // durable mesh, which is the only place either is observable: everything
 // downstream of the record is a buffer id and a size.
-func indexWidthOf(t testing.TB, h *harness, ref scene.MeshRef) (gfx.IndexWidth, int) {
+func indexWidthOf(t testing.TB, h *harness, ref scene.MeshRef) (gpu.IndexWidth, int) {
 	t.Helper()
-	var width gfx.IndexWidth
+	var width gpu.IndexWidth
 	var size int
 	found := false
 	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
@@ -33,11 +33,11 @@ func indexWidthOf(t testing.TB, h *harness, ref scene.MeshRef) (gfx.IndexWidth, 
 // it: the width follows from the vertex count.
 func TestADurableMeshNarrowsItsIndices(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) { q.Camera(testCamera, testCameraDescr()) })
-	ref := h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
+	ref := h.bake(triangle(), []uint32{0, 1, 2}, gpu.TopologyTriangleList)
 	h.frame()
 
 	width, size := indexWidthOf(t, h, ref)
-	if width != gfx.IndexUint16 {
+	if width != gpu.IndexUint16 {
 		t.Fatalf("a 3-vertex mesh indexes at %v, want uint16", width)
 	}
 	if size != 6 {
@@ -52,11 +52,11 @@ func TestADurableMeshNarrowsItsIndices(t *testing.T) {
 // a zero-copy reinterpret into an allocating O(n) pass every frame rather than
 // once. It keeps uint32.
 func TestATemporaryMeshKeepsUint32Indices(t *testing.T) {
-	var width gfx.IndexWidth
+	var width gpu.IndexWidth
 	var size int
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		ref := q.TemporaryMesh(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
+		ref := q.TemporaryMesh(triangle(), []uint32{0, 1, 2}, gpu.TopologyTriangleList)
 		q.Mesh(0, ref, scene.MeshDraw{NeverCull: true})
 		mesh := internal.OpQueueRecordedMeshes(q).Temporaries[len(internal.OpQueueRecordedMeshes(q).Temporaries)-1]
 		record := mesh.Record(internal.OpQueueRecordedMeshes(q).Arena)
@@ -64,7 +64,7 @@ func TestATemporaryMeshKeepsUint32Indices(t *testing.T) {
 	})
 	h.frame()
 
-	if width != gfx.IndexUint32 {
+	if width != gpu.IndexUint32 {
 		t.Fatalf("a temporary mesh indexes at %v, want uint32", width)
 	}
 	if size != 12 {
@@ -77,9 +77,9 @@ func TestATemporaryMeshKeepsUint32Indices(t *testing.T) {
 // pipeline at all, so a mesh updated past the threshold simply widens.
 func TestUpdateMeshRederivesTheIndexWidth(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) { q.Camera(testCamera, testCameraDescr()) })
-	ref := h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
+	ref := h.bake(triangle(), []uint32{0, 1, 2}, gpu.TopologyTriangleList)
 	h.frame()
-	if width, _ := indexWidthOf(t, h, ref); width != gfx.IndexUint16 {
+	if width, _ := indexWidthOf(t, h, ref); width != gpu.IndexUint16 {
 		t.Fatalf("the baked mesh indexes at %v, want uint16", width)
 	}
 
@@ -90,7 +90,7 @@ func TestUpdateMeshRederivesTheIndexWidth(t *testing.T) {
 		}
 	})
 	h.frame()
-	if width, size := indexWidthOf(t, h, ref); width != gfx.IndexUint32 || size != 12 {
+	if width, size := indexWidthOf(t, h, ref); width != gpu.IndexUint32 || size != 12 {
 		t.Fatalf("after growing to 65536 vertices the mesh indexes at %v in %d bytes, want uint32 in 12", width, size)
 	}
 
@@ -100,7 +100,7 @@ func TestUpdateMeshRederivesTheIndexWidth(t *testing.T) {
 		}
 	})
 	h.frame()
-	if width, size := indexWidthOf(t, h, ref); width != gfx.IndexUint16 || size != 6 {
+	if width, size := indexWidthOf(t, h, ref); width != gpu.IndexUint16 || size != 6 {
 		t.Fatalf("back at 65535 vertices the mesh indexes at %v in %d bytes, want uint16 in 6", width, size)
 	}
 	if len(*h.reported) != 0 {
@@ -136,7 +136,7 @@ func TestAModelPrimitiveNarrowsItsIndices(t *testing.T) {
 		return len(passes) == 1 && passes[0].Instances == 1
 	})
 
-	var widths []gfx.IndexWidth
+	var widths []gpu.IndexWidth
 	var sizes []int
 	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
 		for i := range internal.LookupMeshes(lookup) {
@@ -149,7 +149,7 @@ func TestAModelPrimitiveNarrowsItsIndices(t *testing.T) {
 	if len(widths) != 1 {
 		t.Fatalf("the load left %d indexed meshes, want 1", len(widths))
 	}
-	if widths[0] != gfx.IndexUint16 || sizes[0] != 6 {
+	if widths[0] != gpu.IndexUint16 || sizes[0] != 6 {
 		t.Fatalf("the loaded primitive indexes at %v in %d bytes, want uint16 in 6", widths[0], sizes[0])
 	}
 }
@@ -164,7 +164,7 @@ func TestAUnitMeshNarrowsItsIndices(t *testing.T) {
 	})
 	h.frame()
 
-	var width gfx.IndexWidth
+	var width gpu.IndexWidth
 	var size int
 	found := 0
 	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
@@ -178,7 +178,7 @@ func TestAUnitMeshNarrowsItsIndices(t *testing.T) {
 	if found != 1 {
 		t.Fatalf("the frame left %d indexed meshes, want the unit box alone", found)
 	}
-	if width != gfx.IndexUint16 || size != 72 {
+	if width != gpu.IndexUint16 || size != 72 {
 		t.Fatalf("the unit box indexes at %v in %d bytes, want uint16 in 72", width, size)
 	}
 }
@@ -191,13 +191,13 @@ func TestTheNarrowedWidthReachesTheRenderPass(t *testing.T) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, ref, scene.MeshDraw{})
 	})
-	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
+	ref = h.bake(triangle(), []uint32{0, 1, 2}, gpu.TopologyTriangleList)
 	h.frame()
 
 	if len(h.backend.indexBinds) != 1 {
 		t.Fatalf("%d index buffers were bound, want 1", len(h.backend.indexBinds))
 	}
-	if got := h.backend.indexBinds[0]; got != gfx.IndexUint16 {
+	if got := h.backend.indexBinds[0]; got != gpu.IndexUint16 {
 		t.Fatalf("the pass bound the index buffer at %v, want uint16", got)
 	}
 }

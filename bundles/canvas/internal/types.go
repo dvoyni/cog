@@ -2,6 +2,7 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -72,7 +73,7 @@ type SpriteTransform struct {
 	TileY bool
 	// Filter selects sampler minification/magnification filtering. Its zero value
 	// is linear; set FilterNearest for crisp pixel art.
-	Filter gfx.FilterMode
+	Filter gpu.FilterMode
 }
 
 type TextAlign uint8

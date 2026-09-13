@@ -1,6 +1,9 @@
 package gfximpl
 
-import "github.com/dvoyni/cog/extensions/gfx"
+import (
+	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
+)
 
 // checkWebLimits measures a reflected shader against the browser spec floor,
 // never against the device it happens to be running on: a desktop adapter
@@ -10,8 +13,8 @@ import "github.com/dvoyni/cog/extensions/gfx"
 //
 // Every reflected binding is emitted for both shader stages, so the per-stage
 // storage limit is counted once over the whole shader.
-func checkWebLimits(shader string, layout gfx.ShaderLayout, device gfx.Limits) error {
-	floor := gfx.DefaultLimits
+func checkWebLimits(shader string, layout gpu.ShaderLayout, device gpu.Limits) error {
+	floor := gpu.DefaultLimits
 	storage, groups := 0, 0
 	for _, resource := range layout.Resources {
 		if resource.StorageBuffer {

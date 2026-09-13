@@ -1,5 +1,7 @@
 package internal
 
+import "github.com/dvoyni/cog/extensions/gfx/gpu"
+
 // ResourceQueue records persistent GPU resource operations. Unlike OpQueue,
 // it is not triple-buffered or latest-wins: operations remain queued until the
 // render thread executes them.
@@ -20,17 +22,17 @@ func (q *ResourceQueue) Ready() bool { return q.ids != nil && q.ids().Ready() }
 // copyData snapshots bytes when true; when false, the caller must keep them
 // unchanged until the resource queue is consumed by the render thread.
 func (q *ResourceQueue) BakeBuffer(data []byte, copyData bool) BufferDescr {
-	return q.bakeBuffer(q.ids().NewBuffer(), BufferStorage, len(data), data, copyData)
+	return q.bakeBuffer(q.ids().NewBuffer(), gpu.BufferStorage, len(data), data, copyData)
 }
 
 // ReBakeBuffer queues a durable rebake while preserving the buffer descriptor.
 // copyData snapshots bytes when true; when false, the caller must keep them
 // unchanged until consumed.
 func (q *ResourceQueue) ReBakeBuffer(buffer BufferDescr, data []byte, copyData bool) BufferDescr {
-	return q.bakeBuffer(buffer.id, BufferStorage, len(data), data, copyData)
+	return q.bakeBuffer(buffer.id, gpu.BufferStorage, len(data), data, copyData)
 }
 
-func (q *ResourceQueue) bakeBuffer(id BufferID, kind BufferKind, size int, data []byte, copyData bool) BufferDescr {
+func (q *ResourceQueue) bakeBuffer(id gpu.BufferID, kind gpu.BufferKind, size int, data []byte, copyData bool) BufferDescr {
 	if copyData {
 		data = append([]byte(nil), data...)
 	}
@@ -50,14 +52,14 @@ func (q *ResourceQueue) ReleaseBuffer(buffer BufferDescr) {
 // copyData snapshots pixels when true; when false, the caller must keep them
 // unchanged until the resource queue is consumed by the render thread. mipmaps
 // generates a full mip chain at bake time.
-func (q *ResourceQueue) BakeTexture(width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
+func (q *ResourceQueue) BakeTexture(width, height int, format gpu.TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
 	return q.bakeTexture(q.ids().NewTexture(), width, height, format, pixels, copyData, mipmaps)
 }
 
 // AllocateTexture queues allocation of an empty texture to sample from. More
 // than one layer creates a 2D-array texture. No pass can render into it: ask
 // AllocateRenderTarget for that.
-func (q *ResourceQueue) AllocateTexture(width, height, layers int, format TextureFormat) TextureDescr {
+func (q *ResourceQueue) AllocateTexture(width, height, layers int, format gpu.TextureFormat) TextureDescr {
 	return q.allocateTexture(width, height, layers, format, false)
 }
 
@@ -78,11 +80,11 @@ func (q *ResourceQueue) AllocateTexture(width, height, layers int, format Textur
 // shadow map held across frames. When they need only live until the frame ends,
 // TemporaryTarget pools its textures and this one does not: what this returns is
 // caller-owned and must be released.
-func (q *ResourceQueue) AllocateRenderTarget(width, height, layers int, format TextureFormat) TextureDescr {
+func (q *ResourceQueue) AllocateRenderTarget(width, height, layers int, format gpu.TextureFormat) TextureDescr {
 	return q.allocateTexture(width, height, layers, format, true)
 }
 
-func (q *ResourceQueue) allocateTexture(width, height, layers int, format TextureFormat, renderable bool) TextureDescr {
+func (q *ResourceQueue) allocateTexture(width, height, layers int, format gpu.TextureFormat, renderable bool) TextureDescr {
 	id := q.ids().NewTexture()
 	q.ops = append(q.ops, Op{
 		Kind: OpAllocateTexture, TextureID: id,
@@ -96,7 +98,7 @@ func (q *ResourceQueue) allocateTexture(width, height, layers int, format Textur
 }
 
 // UpdateTexture queues a pixel upload into one texture layer and region.
-func (q *ResourceQueue) UpdateTexture(texture TextureDescr, layer int, region Region, pixels []byte, copyData bool) {
+func (q *ResourceQueue) UpdateTexture(texture TextureDescr, layer int, region gpu.Region, pixels []byte, copyData bool) {
 	if copyData {
 		pixels = append([]byte(nil), pixels...)
 	}
@@ -109,11 +111,11 @@ func (q *ResourceQueue) UpdateTexture(texture TextureDescr, layer int, region Re
 // ReBakeTexture queues a durable rebake while preserving the texture descriptor.
 // copyData snapshots pixels when true; when false, the caller must keep them
 // unchanged until consumed. mipmaps generates a full mip chain at bake time.
-func (q *ResourceQueue) ReBakeTexture(texture TextureDescr, width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
+func (q *ResourceQueue) ReBakeTexture(texture TextureDescr, width, height int, format gpu.TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
 	return q.bakeTexture(texture.id, width, height, format, pixels, copyData, mipmaps)
 }
 
-func (q *ResourceQueue) bakeTexture(id TextureID, width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
+func (q *ResourceQueue) bakeTexture(id gpu.TextureID, width, height int, format gpu.TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
 	if copyData {
 		pixels = append([]byte(nil), pixels...)
 	}

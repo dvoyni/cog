@@ -267,7 +267,7 @@ descriptors, plus their resolutions**:
 > The third bullet is false, and it is false in the two ways the view types
 > exist to prevent.
 >
-> `SpriteTransform.Filter` is a `gfx.FilterMode` and `TextDraw.Align` a
+> `SpriteTransform.Filter` is a `gpu.FilterMode` and `TextDraw.Align` a
 > `TextAlign`; marshalled directly, each is an **ordinal** — an enum reported
 > as `1` is a lookup an agent cannot perform, and every enum in this family is
 > a name. Worse, `TextDraw` carries `Material *gfx.MaterialDescr` and

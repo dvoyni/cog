@@ -7,6 +7,7 @@ import (
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -172,7 +173,7 @@ func (p *plugin) flushFrame(
 	// write-locks, which is why the Lookup never holds a gfx handle of its own:
 	// a mesh baked and drawn in the same update uploads in that same frame.
 	bake := func(data []byte) gfx.BufferDescr { return gfxResources.BakeBuffer(data, true) }
-	bakeTexture := func(width, height int, format gfx.TextureFormat, pixels []byte) gfx.TextureDescr {
+	bakeTexture := func(width, height int, format gpu.TextureFormat, pixels []byte) gfx.TextureDescr {
 		return gfxResources.BakeTexture(width, height, format, pixels, true, false)
 	}
 	report := func(err error) { k.ReportError(err) }
@@ -483,17 +484,17 @@ func (p *plugin) passDescr(id scene.CameraID, pass scene.Pass, order gfx.Order) 
 		Order:      order,
 		Target:     pass.Target,
 		Depth:      pass.Depth,
-		DepthStore: gfx.StoreDiscard,
+		DepthStore: gpu.StoreDiscard,
 		Label:      p.label(id, internal.PassTagOf(pass)),
 	}
 	if pass.Depth.IsTexture() {
-		desc.DepthStore = gfx.StoreKeep
+		desc.DepthStore = gpu.StoreKeep
 	}
 	if color, ok := pass.ClearColor.Get(); ok {
-		desc.Load, desc.Clear = gfx.LoadClear, color
+		desc.Load, desc.Clear = gpu.LoadClear, color
 	}
 	if depth, ok := pass.ClearDepth.Get(); ok {
-		desc.DepthLoad, desc.DepthClear = gfx.LoadClear, depth
+		desc.DepthLoad, desc.DepthClear = gpu.LoadClear, depth
 	}
 	return desc
 }

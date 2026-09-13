@@ -6,7 +6,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal"
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -133,8 +133,8 @@ func TestEveryPassBindsItsOwnInstanceSliceAndCountsFromZero(t *testing.T) {
 		t.Fatal("both passes bound the same instance slice")
 	}
 	for _, binding := range instances {
-		if binding.offset%gfx.StorageAlignment != 0 {
-			t.Fatalf("a storage range starts at %d, which is not %d-aligned", binding.offset, gfx.StorageAlignment)
+		if binding.offset%gpu.StorageAlignment != 0 {
+			t.Fatalf("a storage range starts at %d, which is not %d-aligned", binding.offset, gpu.StorageAlignment)
 		}
 		if binding.size != 2*int(unsafe.Sizeof(sceneInstance{})) {
 			t.Fatalf("a pass bound %d bytes of instances, want its own two records", binding.size)
@@ -170,8 +170,8 @@ func TestEveryDrawBindsTheFrameAndItsMaterialRecord(t *testing.T) {
 		t.Fatal("two differently coloured boxes bound one material record")
 	}
 	for _, binding := range materials {
-		if binding.offset%gfx.StorageAlignment != 0 {
-			t.Fatalf("a material record is at %d, which is not %d-aligned", binding.offset, gfx.StorageAlignment)
+		if binding.offset%gpu.StorageAlignment != 0 {
+			t.Fatalf("a material record is at %d, which is not %d-aligned", binding.offset, gpu.StorageAlignment)
 		}
 	}
 }
@@ -238,7 +238,7 @@ func TestEveryDrawBindsAllFivePbrSlots(t *testing.T) {
 	})
 	h.frame()
 
-	var white []gfx.TextureID
+	var white []gpu.TextureID
 	for _, slot := range []string{"baseColor", "metallicRoughness", "occlusion", "emissive"} {
 		textures := h.backend.texturesBoundTo(slot + "Texture")
 		if len(textures) != 1 || textures[0] == 0 {

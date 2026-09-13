@@ -11,4 +11,8 @@
 // exports, which only they can call: Go allows nothing outside
 // extensions/gfx to import it. Nothing declared here imports the root, which
 // is what keeps the arrangement acyclic.
+//
+// The IDs, formats and enums those types carry in their fields are not
+// declared here: they are the GPU vocabulary, declared in gpu, which this
+// package, the root and gfximpl all import.
 package internal

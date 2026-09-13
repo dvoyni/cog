@@ -2,6 +2,7 @@ package gfximpl
 
 import (
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/gfx/internal"
 )
 
@@ -68,7 +69,7 @@ type parameterPlan struct {
 }
 
 type parameterPlanBucketKey struct {
-	shader gfx.ShaderID
+	shader gpu.ShaderID
 	hash   uint64
 }
 
@@ -78,7 +79,7 @@ type cachedParameterPlan struct {
 	plan          parameterPlan
 }
 
-func (t *translator) prepareParameterPlan(shader gfx.ShaderID, label string, layout gfx.ShaderLayout, material, draw []gfx.ParameterDescr) *parameterPlan {
+func (t *translator) prepareParameterPlan(shader gpu.ShaderID, label string, layout gpu.ShaderLayout, material, draw []gfx.ParameterDescr) *parameterPlan {
 	key := parameterPlanBucketKey{shader: shader, hash: parameterShapeHash(material, draw)}
 	bucket := t.parameterPlans[key]
 	for i := range bucket {

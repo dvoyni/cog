@@ -17,8 +17,8 @@ import (
 	"github.com/dvoyni/cog/bundles/input/inputimpl"
 	"github.com/dvoyni/cog/bundles/scene/sceneimpl"
 	"github.com/dvoyni/cog/bundles/ui/uiimpl"
-	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/mcp/mcpimpl"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/extensions/storage/storageimpl"
@@ -97,26 +97,26 @@ func describedTypes(description kernel.ArchitectureDescription) []reflect.Type {
 
 // backendAdapter provides a Backend to gfx, the way a driver provides its own:
 // gfx is a Port, and a composition without one fails.
-type backendAdapter struct{ backend gfx.Backend }
+type backendAdapter struct{ backend gpu.Backend }
 
 func (backendAdapter) Name() kernel.PluginName           { return "gfxbackendtest" }
 func (backendAdapter) Dependencies() []kernel.PluginName { return nil }
 
 func (a backendAdapter) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.ProvideAdapter[gfx.Backend](a.backend)
+	registrar.ProvideAdapter[gpu.Backend](a.backend)
 	return nil
 }
 
 // detachedBackend is a Backend whose device never arrives. Nothing here runs,
 // so only the ids a plugin may take at registration are implemented.
 type detachedBackend struct {
-	gfx.Backend
+	gpu.Backend
 	next atomic.Uint32
 }
 
 func (*detachedBackend) Ready() bool                 { return false }
-func (b *detachedBackend) NewTexture() gfx.TextureID { return gfx.TextureID(b.next.Add(1)) }
-func (b *detachedBackend) NewBuffer() gfx.BufferID   { return gfx.BufferID(b.next.Add(1)) }
+func (b *detachedBackend) NewTexture() gpu.TextureID { return gpu.TextureID(b.next.Add(1)) }
+func (b *detachedBackend) NewBuffer() gpu.BufferID   { return gpu.BufferID(b.next.Add(1)) }
 
 // permanentAdapter provides storage's PermanentFS: an empty filesystem that
 // reads nothing and refuses writes.

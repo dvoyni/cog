@@ -89,13 +89,21 @@ import _ "fixture.test/cog/bundles/b"
 `,
 	"extensions/p/pimpl/pimpl.go": `package pimpl
 
-import _ "fixture.test/cog/extensions/p"
+import (
+	_ "fixture.test/cog/extensions/p"
+	_ "fixture.test/cog/extensions/p/v"
+)
+`,
+	"extensions/p/v/v.go": `package v
+
+import _ "fixture.test/cog/libs/l"
 `,
 	"extensions/w/w.go": `package w
 
 import (
 	_ "fixture.test/cog/bundles/b"
 	_ "fixture.test/cog/extensions/p"
+	_ "fixture.test/cog/extensions/p/v"
 )
 `,
 }
@@ -212,6 +220,33 @@ func (*plugin) Register(registrar *kernel.Registrar, config any) error { return 
 		"bundles/b/bimpl exports New",
 		ruleImplExports,
 	)
+}
+
+// A Port's vocabulary is what its Adapters implement against, so it may not
+// reach back into the Port's recording half: importing its own root is the edge
+// that would erode the split.
+func TestTiers_AVocabularyImportingItsPortRootFails(t *testing.T) {
+	violations := fixtureViolations(t, "extensions/p/v/reach.go", `package v
+
+import _ "fixture.test/cog/extensions/p"
+`)
+	requireOne(t, violations,
+		"extensions/p/v/reach.go:3",
+		"extensions/p/v imports extensions/p",
+		ruleVocabulary,
+	)
+}
+
+// A Bundle names the Port's IDs, formats and descriptors from the vocabulary
+// directly, the way it would from the Port's root.
+func TestTiers_ABundleImportingAPortVocabularyPasses(t *testing.T) {
+	violations := fixtureViolations(t, "bundles/a/vocabulary.go", `package a
+
+import _ "fixture.test/cog/extensions/p/v"
+`)
+	if len(violations) != 0 {
+		t.Fatalf("a Bundle importing a Port's vocabulary has violations:\n%s", joinViolations(violations))
+	}
 }
 
 // Config may be an alias of an internal type and carry methods, since methods

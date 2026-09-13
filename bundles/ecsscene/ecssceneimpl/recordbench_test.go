@@ -10,6 +10,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -53,9 +54,9 @@ var (
 	// benchMaterial is two pass tags with one parameter each, so the per-tag
 	// scratch rule is exercised on every draw.
 	benchMaterial = ecsscene.Material{Tags: ecs.NewList(
-		ecsscene.MaterialTag{Shader: gfx.ShaderWithText("forward"), State: gfx.StateOpaque3D,
+		ecsscene.MaterialTag{Shader: gfx.ShaderWithText("forward"), State: gpu.StateOpaque3D,
 			Params: ecs.NewList(gfx.FloatParam("fade", 1))},
-		ecsscene.MaterialTag{Tag: "shadow", Shader: gfx.ShaderWithText("shadow"), State: gfx.StateOpaque3D,
+		ecsscene.MaterialTag{Tag: "shadow", Shader: gfx.ShaderWithText("shadow"), State: gpu.StateOpaque3D,
 			Params: ecs.NewList(gfx.FloatParam("bias", 0.01))},
 	)}
 )

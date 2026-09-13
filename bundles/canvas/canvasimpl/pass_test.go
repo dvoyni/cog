@@ -5,7 +5,7 @@ import (
 	"testing/fstest"
 
 	"github.com/dvoyni/cog/bundles/canvas"
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -31,14 +31,14 @@ func TestCanvasLayersCollapseToOneGpuPass(t *testing.T) {
 	}
 	// The clear belongs to the layer it was recorded at, which is the lowest
 	// here, so the merged run opens with it.
-	if pass.Load != gfx.LoadClear || pass.Clear != (m.Color{A: 1}) {
+	if pass.Load != gpu.LoadClear || pass.Clear != (m.Color{A: 1}) {
 		t.Errorf("pass load = (%v, %+v), want LoadClear with the recorded colour", pass.Load, pass.Clear)
 	}
 	// Depth clears once at the bottom of the run and is thrown away at the top.
-	if pass.DepthLoad != gfx.LoadClear || pass.DepthClear != 1 {
+	if pass.DepthLoad != gpu.LoadClear || pass.DepthClear != 1 {
 		t.Errorf("depth load = (%v, %v), want LoadClear at 1", pass.DepthLoad, pass.DepthClear)
 	}
-	if pass.DepthStore != gfx.StoreDiscard || pass.Store != gfx.StoreKeep {
+	if pass.DepthStore != gpu.StoreDiscard || pass.Store != gpu.StoreKeep {
 		t.Errorf("stores = (colour %v, depth %v), want keep and discard", pass.Store, pass.DepthStore)
 	}
 }
@@ -56,7 +56,7 @@ func TestClearStaysOnItsLayerWhenThatLayerIsEmpty(t *testing.T) {
 	if len(backend.passes) != 1 {
 		t.Fatalf("GPU passes = %d, want the empty clearing pass merged with the drawing one", len(backend.passes))
 	}
-	if backend.passes[0].Load != gfx.LoadClear || backend.passes[0].Clear != (m.Color{R: 1, A: 1}) {
+	if backend.passes[0].Load != gpu.LoadClear || backend.passes[0].Clear != (m.Color{R: 1, A: 1}) {
 		t.Errorf("pass load = (%v, %+v), want the clear from the empty layer below", backend.passes[0].Load, backend.passes[0].Clear)
 	}
 }

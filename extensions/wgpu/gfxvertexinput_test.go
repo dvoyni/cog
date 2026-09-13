@@ -7,6 +7,7 @@ import (
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/bundles/scene"
 	cgfx "github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/storage"
 )
 
@@ -44,19 +45,19 @@ func TestBundledSceneShaderReflectsItsVertexStageInputs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("reflect the bundled scene shader: %v", err)
 			}
-			want := []cgfx.ShaderVertexInput{
-				{Name: "position", Location: 0, Kind: cgfx.VertexScalarFloat, Count: 3},
+			want := []gpu.ShaderVertexInput{
+				{Name: "position", Location: 0, Kind: gpu.VertexScalarFloat, Count: 3},
 				// The two encoded attributes: the normal is oct32 in a
 				// two-component unorm and the tangent is one word of oct 15/15
 				// plus handedness, so what the stage declares is a vec2<f32>
 				// and a u32 and vertexdecode.wgsl makes directions of them.
-				{Name: "normal", Location: 1, Kind: cgfx.VertexScalarFloat, Count: 2},
-				{Name: "tangent", Location: 2, Kind: cgfx.VertexScalarUint, Count: 1},
-				{Name: "uv0", Location: 3, Kind: cgfx.VertexScalarFloat, Count: 2},
-				{Name: "uv1", Location: 4, Kind: cgfx.VertexScalarFloat, Count: 2},
-				{Name: "color", Location: 5, Kind: cgfx.VertexScalarFloat, Count: 4},
-				{Name: "joints", Location: 6, Kind: cgfx.VertexScalarUint, Count: 4},
-				{Name: "weights", Location: 7, Kind: cgfx.VertexScalarFloat, Count: 4},
+				{Name: "normal", Location: 1, Kind: gpu.VertexScalarFloat, Count: 2},
+				{Name: "tangent", Location: 2, Kind: gpu.VertexScalarUint, Count: 1},
+				{Name: "uv0", Location: 3, Kind: gpu.VertexScalarFloat, Count: 2},
+				{Name: "uv1", Location: 4, Kind: gpu.VertexScalarFloat, Count: 2},
+				{Name: "color", Location: 5, Kind: gpu.VertexScalarFloat, Count: 4},
+				{Name: "joints", Location: 6, Kind: gpu.VertexScalarUint, Count: 4},
+				{Name: "weights", Location: 7, Kind: gpu.VertexScalarFloat, Count: 4},
 			}[:variant.count]
 			if len(layout.VertexInputs) != len(want) {
 				t.Fatalf("reflected %d vertex inputs, want %d: %+v",
@@ -79,7 +80,7 @@ func TestBundledSceneShaderReflectsItsVertexStageInputs(t *testing.T) {
 func TestEveryBundledShaderAndLayoutPairPassesTheVertexInterfaceCheck(t *testing.T) {
 	// The quad is canvas's own, declared at bundles/canvas/canvasimpl/plugin.go where the sprite
 	// mesh is built: one vec2 corner, instanced.
-	quad := []cgfx.VertexAttr{cgfx.Attr(0, cgfx.Float32x2)}
+	quad := []cgfx.VertexAttr{cgfx.Attr(0, gpu.Float32x2)}
 	for _, pair := range []struct {
 		name   string
 		source string
@@ -126,8 +127,8 @@ func sceneSkinnedLayout(t *testing.T) []cgfx.VertexAttr {
 		t.Fatalf("the standard layout has %d attributes, want the six it shares", len(standard))
 	}
 	return append(append([]cgfx.VertexAttr(nil), standard...),
-		cgfx.Attr(32, cgfx.Uint8x4),  // joints
-		cgfx.Attr(36, cgfx.Unorm8x4), // weights
+		cgfx.Attr(32, gpu.Uint8x4),  // joints
+		cgfx.Attr(36, gpu.Unorm8x4), // weights
 	)
 }
 

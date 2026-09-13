@@ -2,6 +2,7 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -127,7 +128,7 @@ func (q *OpQueue) Mesh(layers LayerMask, ref MeshRef, draw MeshDraw) {
 // for the same reason: narrowing them would turn a zero-copy reinterpret into
 // an allocating pass paid every frame rather than once.
 func (q *OpQueue) TemporaryMesh[TVertex VertexLayout](
-	vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology,
+	vertices []TVertex, indices []uint32, topology gpu.PrimitiveTopology,
 ) MeshRef {
 	input, err := mintMesh[TVertex](
 		&q.meshes.layouts, &q.meshes.Arena, vertices, indices, topology, false)
@@ -153,7 +154,7 @@ type temporaryMesh struct {
 	indices     Span
 	vertexCount int
 	indexCount  int
-	topology    gfx.PrimitiveTopology
+	topology    gpu.PrimitiveTopology
 	layout      []gfx.VertexAttr
 	standard    bool
 	// uv is the per-mesh record this frame's pack quantised the UVs against,

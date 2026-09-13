@@ -11,6 +11,7 @@ import (
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
@@ -21,10 +22,10 @@ import (
 // to encode. Everything scene decides is decided before this is reached, which
 // is what makes the whole ticket assertable with no GPU.
 type testBackend struct {
-	nextTexture gfx.TextureID
-	nextBuffer  gfx.BufferID
+	nextTexture gpu.TextureID
+	nextBuffer  gpu.BufferID
 	nextID      uint32
-	passes      []gfx.GpuPassDesc
+	passes      []gpu.PassDesc
 	presents    int
 	// draws, bindings and bakes are what the frame actually asked the GPU to
 	// do, which is where the pass-relative instance slices and the one upload
@@ -33,14 +34,14 @@ type testBackend struct {
 	// indexBinds is the width each of the frame's index buffers was bound at.
 	// A draw call carries a count and not a format, so this is the only place
 	// the width scene derived is observable from outside the package.
-	indexBinds []gfx.IndexWidth
+	indexBinds []gpu.IndexWidth
 	bindings   []bufferBinding
 	textures   []textureBinding
 	samplers   []samplerBinding
 	bakes      int
 	// baked keeps every uploaded buffer's bytes, so a test can read back the
 	// records scene packed rather than only their offsets.
-	baked map[gfx.BufferID][]byte
+	baked map[gpu.BufferID][]byte
 }
 
 // drawCall is one recorded draw, so a test can assert the arguments that reach
@@ -53,7 +54,7 @@ type drawCall struct {
 // bufferBinding is one storage range bound into a bind group.
 type bufferBinding struct {
 	group, binding int
-	buffer         gfx.BufferID
+	buffer         gpu.BufferID
 	offset, size   int
 }
 
@@ -61,19 +62,19 @@ type bufferBinding struct {
 // bound, which is what makes "all five slots, always" assertable with no GPU.
 type textureBinding struct {
 	group, binding int
-	texture        gfx.TextureID
+	texture        gpu.TextureID
 }
 
 type samplerBinding struct {
 	group, binding int
-	sampler        gfx.SamplerID
+	sampler        gpu.SamplerID
 }
 
 // testShaderLayout is what reflection reports for the bundled scene shader. The
 // real source is reflected and asserted in the wgpu package, the only tree with
 // a WGSL front end; here it stands in so that scene's bindings reach the
 // backend and can be read back by name.
-var testShaderLayout = gfx.ShaderLayout{Resources: []gfx.ShaderResource{
+var testShaderLayout = gpu.ShaderLayout{Resources: []gpu.ShaderResource{
 	{Name: "sceneFrame", StorageBuffer: true, Group: 0, Binding: 0},
 	{Name: "sceneInstances", StorageBuffer: true, Group: 0, Binding: 1},
 	{Name: "sceneAnim", StorageBuffer: true, Group: 0, Binding: 2},
@@ -97,9 +98,9 @@ var testShaderLayout = gfx.ShaderLayout{Resources: []gfx.ShaderResource{
 // texturesBoundTo reports the texture bound to one reflected binding on each
 // draw, in the order the frame bound them. A slot nobody bound reports nothing,
 // which is the failure that takes the whole frame's command buffer down.
-func (b *testBackend) texturesBoundTo(name string) []gfx.TextureID {
+func (b *testBackend) texturesBoundTo(name string) []gpu.TextureID {
 	group, binding := bindingOf(name)
-	var found []gfx.TextureID
+	var found []gpu.TextureID
 	for _, bound := range b.textures {
 		if bound.group == group && bound.binding == binding {
 			found = append(found, bound.texture)
@@ -109,9 +110,9 @@ func (b *testBackend) texturesBoundTo(name string) []gfx.TextureID {
 }
 
 // samplersBoundTo reports the sampler bound to one reflected binding per draw.
-func (b *testBackend) samplersBoundTo(name string) []gfx.SamplerID {
+func (b *testBackend) samplersBoundTo(name string) []gpu.SamplerID {
 	group, binding := bindingOf(name)
-	var found []gfx.SamplerID
+	var found []gpu.SamplerID
 	for _, bound := range b.samplers {
 		if bound.group == group && bound.binding == binding {
 			found = append(found, bound.sampler)
@@ -149,79 +150,79 @@ func (b *testBackend) buffersBoundTo(name string) []bufferBinding {
 
 func (b *testBackend) Ready() bool { return true }
 
-func (b *testBackend) NewTexture() gfx.TextureID { b.nextTexture++; return b.nextTexture }
-func (b *testBackend) NewBuffer() gfx.BufferID   { b.nextBuffer++; return b.nextBuffer }
-func (b *testBackend) NewSampler(gfx.SamplerDesc) (gfx.SamplerID, error) {
+func (b *testBackend) NewTexture() gpu.TextureID { b.nextTexture++; return b.nextTexture }
+func (b *testBackend) NewBuffer() gpu.BufferID   { b.nextBuffer++; return b.nextBuffer }
+func (b *testBackend) NewSampler(gpu.SamplerDesc) (gpu.SamplerID, error) {
 	b.nextID++
-	return gfx.SamplerID(b.nextID), nil
+	return gpu.SamplerID(b.nextID), nil
 }
-func (b *testBackend) FreeSampler(gfx.SamplerID) {}
-func (b *testBackend) NewShader(gfx.ShaderDesc) (gfx.ShaderID, error) {
+func (b *testBackend) FreeSampler(gpu.SamplerID) {}
+func (b *testBackend) NewShader(gpu.ShaderDesc) (gpu.ShaderID, error) {
 	b.nextID++
-	return gfx.ShaderID(b.nextID), nil
+	return gpu.ShaderID(b.nextID), nil
 }
-func (b *testBackend) FreeShader(gfx.ShaderID)                    {}
-func (b *testBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout { return testShaderLayout }
-func (b *testBackend) NewPipeline(gfx.PipelineDesc) (gfx.PipelineID, error) {
+func (b *testBackend) FreeShader(gpu.ShaderID)                    {}
+func (b *testBackend) ShaderLayout(gpu.ShaderID) gpu.ShaderLayout { return testShaderLayout }
+func (b *testBackend) NewPipeline(gpu.PipelineDesc) (gpu.PipelineID, error) {
 	b.nextID++
-	return gfx.PipelineID(b.nextID), nil
+	return gpu.PipelineID(b.nextID), nil
 }
-func (b *testBackend) FreePipeline(gfx.PipelineID) {}
-func (b *testBackend) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
+func (b *testBackend) FreePipeline(gpu.PipelineID) {}
+func (b *testBackend) ScreenFramebuffer() (gpu.TextureViewID, int, int) {
 	return 1, 1600, 1200
 }
-func (b *testBackend) Limits() gfx.Limits { return gfx.DefaultLimits }
-func (b *testBackend) TextureView(gfx.TextureID, int, int) gfx.TextureViewID {
+func (b *testBackend) Limits() gpu.Limits { return gpu.DefaultLimits }
+func (b *testBackend) TextureView(gpu.TextureID, int, int) gpu.TextureViewID {
 	b.nextID++
-	return gfx.TextureViewID(b.nextID)
+	return gpu.TextureViewID(b.nextID)
 }
-func (b *testBackend) Execute(queue *gfx.GpuQueue) {
+func (b *testBackend) Execute(queue *gpu.Queue) {
 	queue.ReplayBakes(b)
 	queue.ReplayPasses(b)
 	queue.ReplayReleases(b)
 }
-func (b *testBackend) BeginPass(desc gfx.GpuPassDesc) gfx.RenderPass {
+func (b *testBackend) BeginPass(desc gpu.PassDesc) gpu.RenderPass {
 	b.passes = append(b.passes, desc)
 	return b
 }
-func (b *testBackend) EndPass(gfx.RenderPass) {}
+func (b *testBackend) EndPass(gpu.RenderPass) {}
 func (b *testBackend) Present()               { b.presents++ }
 
 // Capture is the readback seam; nothing here reads a frame back.
-func (b *testBackend) Capture(gfx.GpuCaptureDesc) {}
+func (b *testBackend) Capture(gpu.CaptureDesc) {}
 
-func (b *testBackend) TakeCapture() (gfx.GpuCapture, bool) { return gfx.GpuCapture{}, false }
+func (b *testBackend) TakeCapture() (gpu.Capture, bool) { return gpu.Capture{}, false }
 
-func (b *testBackend) TransitionTextures([]gfx.TextureTransition) {}
+func (b *testBackend) TransitionTextures([]gpu.TextureTransition) {}
 
 // BakeBuffer keeps the bytes as well as counting the upload, because the
 // records scene packs are only readable here: everything downstream of the
 // arena is an offset and a size, and a flag written into the wrong instance is
 // exactly the failure that reads as a plausible wrong picture.
-func (b *testBackend) BakeBuffer(id gfx.BufferID, _ gfx.BufferKind, _ int, data []byte) {
+func (b *testBackend) BakeBuffer(id gpu.BufferID, _ gpu.BufferKind, _ int, data []byte) {
 	b.bakes++
 	if b.baked == nil {
-		b.baked = map[gfx.BufferID][]byte{}
+		b.baked = map[gpu.BufferID][]byte{}
 	}
 	b.baked[id] = append([]byte(nil), data...)
 }
-func (b *testBackend) BakeTexture(gfx.TextureID, int, int, gfx.TextureFormat, []byte, bool) {}
-func (b *testBackend) AllocateTexture(gfx.TextureID, gfx.TextureDesc)                       {}
-func (b *testBackend) UpdateTexture(gfx.TextureID, int, gfx.Region, []byte)                 {}
-func (b *testBackend) SetPipeline(gfx.PipelineID)                                           {}
+func (b *testBackend) BakeTexture(gpu.TextureID, int, int, gpu.TextureFormat, []byte, bool) {}
+func (b *testBackend) AllocateTexture(gpu.TextureID, gpu.TextureDesc)                       {}
+func (b *testBackend) UpdateTexture(gpu.TextureID, int, gpu.Region, []byte)                 {}
+func (b *testBackend) SetPipeline(gpu.PipelineID)                                           {}
 func (b *testBackend) SetParams([]byte)                                                     {}
-func (b *testBackend) SetTexture(texture gfx.TextureID, group, binding int) {
+func (b *testBackend) SetTexture(texture gpu.TextureID, group, binding int) {
 	b.textures = append(b.textures, textureBinding{group: group, binding: binding, texture: texture})
 }
 
-func (b *testBackend) SetSampler(sampler gfx.SamplerID, group, binding int) {
+func (b *testBackend) SetSampler(sampler gpu.SamplerID, group, binding int) {
 	b.samplers = append(b.samplers, samplerBinding{group: group, binding: binding, sampler: sampler})
 }
-func (b *testBackend) SetVertexBuffer(gfx.BufferID, int) {}
-func (b *testBackend) SetIndexBuffer(_ gfx.BufferID, _ int, width gfx.IndexWidth) {
+func (b *testBackend) SetVertexBuffer(gpu.BufferID, int) {}
+func (b *testBackend) SetIndexBuffer(_ gpu.BufferID, _ int, width gpu.IndexWidth) {
 	b.indexBinds = append(b.indexBinds, width)
 }
-func (b *testBackend) SetBuffer(group, binding int, buffer gfx.BufferID, offset, size int) {
+func (b *testBackend) SetBuffer(group, binding int, buffer gpu.BufferID, offset, size int) {
 	b.bindings = append(b.bindings, bufferBinding{
 		group: group, binding: binding, buffer: buffer, offset: offset, size: size,
 	})
@@ -232,8 +233,8 @@ func (b *testBackend) Draw(first, count, instances, firstInstance int, indexed b
 		first: first, count: count, instances: instances, firstInstance: firstInstance, indexed: indexed,
 	})
 }
-func (b *testBackend) ReleaseBuffer(gfx.BufferID)   {}
-func (b *testBackend) ReleaseTexture(gfx.TextureID) {}
+func (b *testBackend) ReleaseBuffer(gpu.BufferID)   {}
+func (b *testBackend) ReleaseTexture(gpu.TextureID) {}
 
 // recordPlugin is the gameplay side of the harness: a separate plugin that
 // locks scene's OpQueue, exactly as a real recorder does. It holds the gfx

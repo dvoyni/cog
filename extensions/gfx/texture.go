@@ -1,6 +1,9 @@
 package gfx
 
-import "github.com/dvoyni/cog/extensions/gfx/internal"
+import (
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/extensions/gfx/internal"
+)
 
 // TextureDescr describes a texture by resource path (TextureWithResource),
 // inline pixel bytes (TextureWithBytes), or a texture returned by
@@ -27,6 +30,6 @@ func TextureWithResource(path string) TextureDescr {
 // snapshots pixels when true; when false, the caller must keep them unchanged
 // until the recorded frame is consumed or dropped. mipmaps generates a full mip
 // chain at bake time for smoother minification.
-func TextureWithBytes(width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
+func TextureWithBytes(width, height int, format gpu.TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
 	return internal.TextureWithBytes(width, height, format, pixels, copyData, mipmaps)
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ui"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/extensions/storage/storageimpl"
@@ -657,7 +658,7 @@ func TestASecondLayoutSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 		t.Errorf("a frame snapshot was refused while a layout snapshot was in flight: %v", err)
 	}
 	if _, err := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
-		Target: gfx.GpuCaptureDesc{Screen: true},
+		Target: gpu.CaptureDesc{Screen: true},
 	}); err != nil {
 		t.Errorf("a capture was refused while a layout snapshot was in flight: %v", err)
 	}

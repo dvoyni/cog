@@ -4,6 +4,7 @@ import (
 	"io/fs"
 
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/gfx/internal"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/extensions/storage"
@@ -32,13 +33,13 @@ type readyList struct {
 }
 
 // plugin implements renderer v2: a triple-buffered OpQueue pipeline plus a
-// translator that turns high-level draw commands into a backend-agnostic GpuQueue
+// translator that turns high-level draw commands into a backend-agnostic gpu.Queue
 // stream. It owns the translator (render-thread-only caches and dynamic buffers);
 // the three queues live in kernel resources.
 type plugin struct {
 	translator *translator
 	// backend is the bound Backend adapter, valid from Start onwards.
-	backend kernel.RequiredAdapter[gfx.Backend]
+	backend kernel.RequiredAdapter[gpu.Backend]
 	// reportedNotReady is render-thread-only, like the translator caches.
 	reportedNotReady bool
 	// captures is gfx's one capture slot, plugin-owned and self-synchronizing.
@@ -69,7 +70,7 @@ func (p *plugin) Dependencies() []kernel.PluginName { return []kernel.PluginName
 // buffers, the Present/Acquire/Consume commands, and the end-of-tick present
 // subscription on app.UpdateEvent.
 func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
-	p.backend = registrar.RequireAdapter[gfx.Backend]()
+	p.backend = registrar.RequireAdapter[gpu.Backend]()
 	ids := func() internal.IDMinter { return p.backend.Get() }
 	registrar.InitResource(internal.NewOpQueue(ids))
 	registrar.InitResource(&readList{OpQueue: internal.NewOpQueue(ids)})

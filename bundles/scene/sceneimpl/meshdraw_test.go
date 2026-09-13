@@ -7,6 +7,7 @@ import (
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -16,7 +17,7 @@ import (
 type customVertex struct{ Position m.Vec3 }
 
 func (customVertex) VertexLayout() []gfx.VertexAttr {
-	return []gfx.VertexAttr{gfx.Attr(0, gfx.Float32x3)}
+	return []gfx.VertexAttr{gfx.Attr(0, gpu.Float32x3)}
 }
 
 // triangle is the smallest valid standard-layout mesh: one counter-clockwise
@@ -31,7 +32,7 @@ func triangle() []scene.Vertex {
 
 // bake runs one BakeMesh through a scoped LookupAccess, the way a real caller
 // would from a handler holding the Lookup write lock.
-func (h *harness) bake(vertices []scene.Vertex, indices []uint32, topology gfx.PrimitiveTopology) scene.MeshRef {
+func (h *harness) bake(vertices []scene.Vertex, indices []uint32, topology gpu.PrimitiveTopology) scene.MeshRef {
 	var ref scene.MeshRef
 	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{run: func(la scene.LookupAccess) {
 		ref = la.BakeMesh(vertices, indices, topology)
@@ -63,7 +64,7 @@ func TestABakedMeshDrawsInTheFrameItWasBakedIn(t *testing.T) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, ref, scene.MeshDraw{})
 	})
-	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
+	ref = h.bake(triangle(), []uint32{0, 1, 2}, gpu.TopologyTriangleList)
 	if ref.ID() == 0 {
 		t.Fatal("BakeMesh returned no ref")
 	}
@@ -88,7 +89,7 @@ func TestABakedMeshDrawsInTheFrameItWasBakedIn(t *testing.T) {
 func TestATemporaryMeshDrawsWithoutBaking(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		ref := q.TemporaryMesh(triangle(), nil, gfx.TopologyTriangleList)
+		ref := q.TemporaryMesh(triangle(), nil, gpu.TopologyTriangleList)
 		if ref.ID()&internal.TemporaryMeshID == 0 {
 			t.Errorf("a temporary ref's id %d does not carry the temporary bit", ref.ID())
 		}
@@ -112,11 +113,11 @@ func TestDurableAndTemporaryIdsDoNotCollide(t *testing.T) {
 	var temporary scene.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		temporary = q.TemporaryMesh(triangle(), nil, gfx.TopologyTriangleList)
+		temporary = q.TemporaryMesh(triangle(), nil, gpu.TopologyTriangleList)
 		q.Mesh(0, durable, scene.MeshDraw{NeverCull: true})
 		q.Mesh(0, temporary, scene.MeshDraw{NeverCull: true})
 	})
-	durable = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	durable = h.bake(triangle(), nil, gpu.TopologyTriangleList)
 	h.frame()
 
 	if durable.ID() == temporary.ID() {
@@ -138,8 +139,8 @@ func TestABakedStandardMeshCullsByItsOwnSphere(t *testing.T) {
 		q.Mesh(0, near, scene.MeshDraw{Transform: scene.At(0, 0, -5)})
 		q.Mesh(0, far, scene.MeshDraw{Transform: scene.At(0, 0, 5)})
 	})
-	near = h.bake(triangle(), nil, gfx.TopologyTriangleList)
-	far = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	near = h.bake(triangle(), nil, gpu.TopologyTriangleList)
+	far = h.bake(triangle(), nil, gpu.TopologyTriangleList)
 	h.frame()
 
 	if pass := h.passes()[0]; pass.Recorded != 2 || pass.Culled != 1 || pass.Instances != 1 {
@@ -154,7 +155,7 @@ func TestABakedStandardMeshCullsByItsOwnSphere(t *testing.T) {
 func TestATemporaryMeshIsNeverCulledUnlessItSaysSo(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
-		behind := q.TemporaryMesh(triangle(), nil, gfx.TopologyTriangleList)
+		behind := q.TemporaryMesh(triangle(), nil, gpu.TopologyTriangleList)
 		q.Mesh(0, behind, scene.MeshDraw{Transform: scene.At(0, 0, 5)})
 	})
 	h.frame()
@@ -164,7 +165,7 @@ func TestATemporaryMeshIsNeverCulledUnlessItSaysSo(t *testing.T) {
 
 	bounded := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
-		behind := q.TemporaryMesh(triangle(), nil, gfx.TopologyTriangleList)
+		behind := q.TemporaryMesh(triangle(), nil, gpu.TopologyTriangleList)
 		q.Mesh(0, behind, scene.MeshDraw{Transform: scene.At(0, 0, 5), Bounds: m.Vec4{W: 1}})
 	})
 	bounded.frame()
@@ -181,9 +182,9 @@ func TestInvalidGeometryIsReportedAndYieldsNoRef(t *testing.T) {
 		name     string
 		vertices []scene.Vertex
 		indices  []uint32
-		topology gfx.PrimitiveTopology
+		topology gpu.PrimitiveTopology
 	}{
-		{name: "no vertices", topology: gfx.TopologyTriangleList},
+		{name: "no vertices", topology: gpu.TopologyTriangleList},
 		{name: "index out of range", vertices: triangle(), indices: []uint32{0, 1, 3}},
 		{name: "indices not a multiple of three", vertices: triangle(), indices: []uint32{0, 1}},
 		{name: "vertices not a multiple of three", vertices: triangle()[:2]},
@@ -211,7 +212,7 @@ func TestDrawingARejectedMintIsSilent(t *testing.T) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, ref, scene.MeshDraw{})
 	})
-	ref = h.bake(nil, nil, gfx.TopologyTriangleList)
+	ref = h.bake(nil, nil, gpu.TopologyTriangleList)
 	*h.reported = (*h.reported)[:0]
 	h.frame()
 
@@ -230,7 +231,7 @@ func TestACustomLayoutWithTheBundledMaterialIsReportedAndSkipped(t *testing.T) {
 	custom := []customVertex{{Position: m.Vec3{X: -1, Y: -1}}, {Position: m.Vec3{X: 1, Y: -1}}, {}}
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		ref := q.TemporaryMesh(custom, nil, gfx.TopologyTriangleList)
+		ref := q.TemporaryMesh(custom, nil, gpu.TopologyTriangleList)
 		// Three draws of the one ref, because the report is keyed by ref.
 		q.Mesh(0, ref, scene.MeshDraw{NeverCull: true})
 		q.Mesh(0, ref, scene.MeshDraw{NeverCull: true})
@@ -254,7 +255,7 @@ func TestACustomLayoutDrawsWithACustomMaterial(t *testing.T) {
 	custom := []customVertex{{Position: m.Vec3{X: -1, Y: -1}}, {Position: m.Vec3{X: 1, Y: -1}}, {}}
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		ref := q.TemporaryMesh(custom, nil, gfx.TopologyTriangleList)
+		ref := q.TemporaryMesh(custom, nil, gpu.TopologyTriangleList)
 		q.Mesh(0, ref, scene.MeshDraw{Material: opaqueMaterial(7), NeverCull: true})
 	})
 	h.frame()
@@ -276,7 +277,7 @@ func TestUpdateMeshRebakesAtAnySizeAndRecomputesTheSphere(t *testing.T) {
 		q.Camera(testCamera, forwardCamera())
 		q.Mesh(0, ref, scene.MeshDraw{Transform: scene.At(0, 0, -110)})
 	})
-	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	ref = h.bake(triangle(), nil, gpu.TopologyTriangleList)
 	h.frame()
 	if pass := h.passes()[0]; pass.Culled != 1 {
 		t.Fatalf("a small mesh past Far: culled %d, want 1", pass.Culled)
@@ -307,10 +308,10 @@ func TestUpdateMeshRebakesAtAnySizeAndRecomputesTheSphere(t *testing.T) {
 func TestUpdateMeshRefusesALayoutChangeAndATemporaryRef(t *testing.T) {
 	var temporary scene.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
-		temporary = q.TemporaryMesh(triangle(), nil, gfx.TopologyTriangleList)
+		temporary = q.TemporaryMesh(triangle(), nil, gpu.TopologyTriangleList)
 	})
 	h.frame()
-	ref := h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	ref := h.bake(triangle(), nil, gpu.TopologyTriangleList)
 
 	h.lookup(func(la scene.LookupAccess) {
 		custom := []customVertex{{Position: m.Vec3{X: -1}}, {Position: m.Vec3{X: 1}}, {}}
@@ -343,7 +344,7 @@ func TestDrawingAReleasedMeshIsReportedOnceAndSkipped(t *testing.T) {
 		q.Mesh(0, ref, scene.MeshDraw{NeverCull: true})
 		q.Mesh(0, ref, scene.MeshDraw{NeverCull: true})
 	})
-	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	ref = h.bake(triangle(), nil, gpu.TopologyTriangleList)
 	h.frame()
 	h.lookup(func(la scene.LookupAccess) { la.ReleaseMesh(ref) })
 	*h.reported = (*h.reported)[:0]
@@ -368,10 +369,10 @@ func TestAStaleRefDoesNotDrawTheMeshThatReusedItsSlot(t *testing.T) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, stale, scene.MeshDraw{NeverCull: true})
 	})
-	stale = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	stale = h.bake(triangle(), nil, gpu.TopologyTriangleList)
 	h.frame()
 	h.lookup(func(la scene.LookupAccess) { la.ReleaseMesh(stale) })
-	reused = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	reused = h.bake(triangle(), nil, gpu.TopologyTriangleList)
 	if internal.MeshRefIndex(reused) != internal.MeshRefIndex(stale) {
 		t.Fatalf("the released slot %d was not reissued, got %d", internal.MeshRefIndex(stale), internal.MeshRefIndex(reused))
 	}
@@ -396,7 +397,7 @@ func TestATemporaryRefFromAnEarlierFrameIsReportedAndSkipped(t *testing.T) {
 		frames++
 		// Every frame mints a temporary, so the kept ref's slot is occupied in
 		// the later frame too: only the frame stamp can tell them apart.
-		fresh := q.TemporaryMesh(triangle(), nil, gfx.TopologyTriangleList)
+		fresh := q.TemporaryMesh(triangle(), nil, gpu.TopologyTriangleList)
 		if frames == 1 {
 			kept = fresh
 		}
@@ -424,14 +425,14 @@ func TestATemporaryRefFromAnEarlierFrameIsReportedAndSkipped(t *testing.T) {
 // list. A line list is not checked for a multiple of three.
 func TestTopologyPassesThroughAndOnlyTriangleListsDivideByThree(t *testing.T) {
 	h := newHarness(t, func(*scene.OpQueue) {})
-	ref := h.bake(triangle()[:2], nil, gfx.TopologyLineList)
+	ref := h.bake(triangle()[:2], nil, gpu.TopologyLineList)
 	if ref.ID() == 0 {
 		t.Fatalf("a two-vertex line list was rejected: %v", *h.reported)
 	}
 	h.lookup(func(la scene.LookupAccess) {
 		var record internal.MeshRecord
 		record = internal.LookupMeshes(internal.LookupAccessLookup(la))[internal.MeshRefIndex(ref)-1]
-		if record.Topology != gfx.TopologyLineList {
+		if record.Topology != gpu.TopologyLineList {
 			t.Errorf("recorded topology %v, want the line list", record.Topology)
 		}
 	})
@@ -448,7 +449,7 @@ func TestTransformsPlaceOneInstanceEachAndCullIndependently(t *testing.T) {
 			Transforms: []scene.Transform{scene.At(0, 0, -5), scene.At(2, 0, -5), scene.At(0, 0, 5)},
 		})
 	})
-	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	ref = h.bake(triangle(), nil, gpu.TopologyTriangleList)
 	h.frame()
 
 	if pass := h.passes()[0]; pass.Recorded != 3 || pass.Culled != 1 || pass.Instances != 2 {
@@ -469,7 +470,7 @@ func TestTransformsPlaceOneInstanceEachAndCullIndependently(t *testing.T) {
 func TestMeshDrawParamsReachTheBackend(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		ref := q.TemporaryMesh(triangle(), nil, gfx.TopologyTriangleList)
+		ref := q.TemporaryMesh(triangle(), nil, gpu.TopologyTriangleList)
 		q.Mesh(0, ref, scene.MeshDraw{
 			Material:  opaqueMaterial(3),
 			Params:    []gfx.ParameterDescr{gfx.FloatParam("key", 9)},
@@ -497,7 +498,7 @@ func TestAnInstancedOpaqueDrawIsOneBatchOfItsSurvivors(t *testing.T) {
 			scene.At(0, 0, -5), scene.At(0, 0, 5), scene.At(2, 0, -5), scene.At(-2, 0, -5),
 		}})
 	})
-	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	ref = h.bake(triangle(), nil, gpu.TopologyTriangleList)
 	h.frame()
 
 	pass := h.passes()[0]
@@ -536,7 +537,7 @@ func TestAnInstancedBlendDrawStaysOneBatchPerInstance(t *testing.T) {
 			Transforms: []scene.Transform{scene.At(0, 0, -2), scene.At(0, 0, -20), scene.At(0, 0, -8)},
 		})
 	})
-	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	ref = h.bake(triangle(), nil, gpu.TopologyTriangleList)
 	h.frame()
 
 	pass := h.passes()[0]
@@ -564,7 +565,7 @@ func TestTwoInstancedCallsStayTwoBatches(t *testing.T) {
 		q.Mesh(0, ref, scene.MeshDraw{Transforms: []scene.Transform{scene.At(0, 0, -5), scene.At(1, 0, -5)}})
 		q.Mesh(0, ref, scene.MeshDraw{Transforms: []scene.Transform{scene.At(2, 0, -5), scene.At(3, 0, -5)}})
 	})
-	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	ref = h.bake(triangle(), nil, gpu.TopologyTriangleList)
 	h.frame()
 
 	batches := h.passes()[0].Batches
@@ -587,7 +588,7 @@ func TestAnInstancedDrawIsPackedOncePerPass(t *testing.T) {
 		q.Camera(testCamera+1, forwardCamera())
 		q.Mesh(0, ref, scene.MeshDraw{Transforms: []scene.Transform{scene.At(0, 0, -5), scene.At(1, 0, -5)}})
 	})
-	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
+	ref = h.bake(triangle(), nil, gpu.TopologyTriangleList)
 	h.frame()
 
 	passes := h.passes()

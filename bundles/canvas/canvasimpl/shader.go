@@ -6,14 +6,14 @@ import (
 	"unsafe"
 
 	"github.com/dvoyni/cog/bundles/canvas"
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
 // canvasSampler is the sampler a 2D draw wants: one filter for magnification,
 // minification and mip selection alike, since canvas never generates mipmaps.
-func canvasSampler(u, v gfx.AddressMode, filter gfx.FilterMode) gfx.SamplerDesc {
-	return gfx.SamplerDesc{AddressU: u, AddressV: v, Mag: filter, Min: filter, Mip: filter}
+func canvasSampler(u, v gpu.AddressMode, filter gpu.FilterMode) gpu.SamplerDesc {
+	return gpu.SamplerDesc{AddressU: u, AddressV: v, Mag: filter, Min: filter, Mip: filter}
 }
 
 // reservedName reports whether canvas consumes a parameter name itself.

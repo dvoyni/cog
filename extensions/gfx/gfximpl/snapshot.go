@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/gfx/internal"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
@@ -179,11 +180,11 @@ func passViewOf(index, run int, desc gfx.PassDescr, draws, instances int) gfx.Pa
 		Index: index, Run: run, Label: desc.Label, Order: int(desc.Order),
 		Target:     targetKindName(internal.TargetKindOf(&desc.Target)),
 		Depth:      depthKindName(internal.DepthKindOf(&desc.Depth)),
-		Load:       internal.LoadOpName(desc.Load),
-		Store:      internal.StoreOpName(desc.Store),
-		DepthLoad:  internal.LoadOpName(desc.DepthLoad),
+		Load:       desc.Load.Name(),
+		Store:      desc.Store.Name(),
+		DepthLoad:  desc.DepthLoad.Name(),
 		DepthClear: desc.DepthClear,
-		DepthStore: internal.StoreOpName(desc.DepthStore),
+		DepthStore: desc.DepthStore.Name(),
 		Draws:      draws, Instances: instances,
 		Runs: internal.PassHasEffect(&desc, draws),
 	}
@@ -195,7 +196,7 @@ func passViewOf(index, run int, desc gfx.PassDescr, draws, instances int) gfx.Pa
 	if desc.Depth.IsTexture() {
 		view.DepthTexture = internal.DepthTexture(&desc.Depth)
 	}
-	if desc.Load == gfx.LoadClear {
+	if desc.Load == gpu.LoadClear {
 		view.Clear = []float32{desc.Clear.R, desc.Clear.G, desc.Clear.B, desc.Clear.A}
 	}
 	return view
@@ -222,18 +223,18 @@ func resourceOpViewOf(queue string, index int, o *internal.Op) gfx.ResourceOpVie
 	view := gfx.ResourceOpView{Queue: queue, Index: index, Kind: opKindName(o.Kind)}
 	switch o.Kind {
 	case internal.OpBakeBuffer:
-		view.Buffer, view.BufferKind = o.BufferID, internal.BufferKindName(o.BufferKind)
+		view.Buffer, view.BufferKind = o.BufferID, o.BufferKind.Name()
 		view.Size, view.Bytes = o.BufferSize, len(o.Bytes)
 	case internal.OpReleaseBuffer:
 		view.Buffer = o.BufferID
 	case internal.OpBakeTexture:
 		view.Texture, view.Width, view.Height = o.TextureID, o.TexW, o.TexH
-		view.Format, view.Mipmaps, view.Bytes = internal.FormatName(o.Format), o.Mipmaps, len(o.Bytes)
+		view.Format, view.Mipmaps, view.Bytes = o.Format.Name(), o.Mipmaps, len(o.Bytes)
 	case internal.OpReleaseTexture:
 		view.Texture = o.TextureID
 	case internal.OpAllocateTexture:
 		view.Texture, view.Width, view.Height = o.TextureID, o.TexW, o.TexH
-		view.Layers, view.Format, view.Renderable = o.TexLayers, internal.FormatName(o.Format), o.Renderable
+		view.Layers, view.Format, view.Renderable = o.TexLayers, o.Format.Name(), o.Renderable
 	case internal.OpUpdateTexture:
 		region := o.Region
 		view.Texture, view.Layer, view.Region, view.Bytes = o.TextureID, o.TexLayer, &region, len(o.Bytes)

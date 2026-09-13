@@ -23,9 +23,9 @@ func (r *Registrar) ProvideAdapter[T any](adapter T)
 ```
 
 ```go
-backend := registrar.RequireAdapter[gfx.Backend]()     // in gfx
+backend := registrar.RequireAdapter[gpu.Backend]()     // in gfx
 providers := registrar.CollectAdapters[mcp.Provider]() // in the mcp broker
-registrar.ProvideAdapter[gfx.Backend](device)          // in wgpu
+registrar.ProvideAdapter[gpu.Backend](device)          // in wgpu
 ```
 
 - **`RequireAdapter[T]`** declares that the calling plugin needs exactly one
@@ -140,7 +140,7 @@ type PortDescription struct {
 
 ```
 ports:
-  gfx.Backend (gfx) requires [wgpu]
+  gpu.Backend (gfx) requires [wgpu]
   mcp.Provider (mcpserver) collects [input mcpserver scene]
 ```
 

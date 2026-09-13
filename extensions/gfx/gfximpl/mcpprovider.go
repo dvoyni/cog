@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/gfx/internal"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/kernel"
@@ -103,7 +104,7 @@ type provider struct{}
 // Capabilities reports what gfx offers an agent: the pixels, and the passes
 // and resource traffic that produced them.
 //
-// Capture is screen-only: GpuCaptureDesc addresses any colour texture and that
+// Capture is screen-only: gpu.CaptureDesc addresses any colour texture and that
 // generality is right for gfx, but nothing lists textures to an agent and a
 // TextureID is an opaque handle it has no way to obtain.
 //
@@ -151,7 +152,7 @@ func captureScreen(k kernel.Executioner, request captureScreenRequest) (captureS
 	}
 
 	armed, err := k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
-		Target: gfx.GpuCaptureDesc{Screen: true}, Amount: amount, Interval: interval, Paused: paused,
+		Target: gpu.CaptureDesc{Screen: true}, Amount: amount, Interval: interval, Paused: paused,
 	})
 	if err != nil {
 		return captureScreenResponse{}, captureRefusal(err, amount, interval)
@@ -210,10 +211,10 @@ func collectCapture(
 // writeCapturePNG un-strides one readback and puts it on disk. An existing
 // file is overwritten without complaint: re-writing the same name is the
 // iterate-and-look loop.
-func writeCapturePNG(path string, capture gfx.GpuCapture) error {
+func writeCapturePNG(path string, capture gpu.Capture) error {
 	picture := capture.Image()
 	if picture == nil {
-		return gfx.ErrCaptureUnsupported{Format: capture.Format}
+		return gpu.ErrCaptureUnsupported{Format: capture.Format}
 	}
 	file, err := os.Create(path)
 	if err != nil {
@@ -236,17 +237,17 @@ func captureRefusal(reason error, amount, interval int) error {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"no frame was rendered within %s — the game may be paused, minimised, or not rendering",
 			captureFloorDeadline+time.Duration(amount*interval)*captureTick)}
-	case errors.Is(reason, gfx.ErrCaptureBusy{}):
+	case errors.Is(reason, gpu.ErrCaptureBusy{}):
 		return mcp.Unavailable{Reason: "a capture is already in flight; ask again"}
-	case errors.Is(reason, gfx.ErrCaptureAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
+	case errors.Is(reason, gpu.ErrCaptureAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
 		errors.Is(reason, context.Canceled):
 		// A game exiting is the normal case, not a fault: an engine that
 		// terminated while shutting down normally would be the worse answer.
 		return mcp.Unavailable{Reason: "the game is shutting down"}
-	case errors.Is(reason, gfx.ErrCaptureNoTarget{}):
+	case errors.Is(reason, gpu.ErrCaptureNoTarget{}):
 		return mcp.Unavailable{Reason: "the game drew nothing to the screen in that frame"}
 	}
-	var unsupported gfx.ErrCaptureUnsupported
+	var unsupported gpu.ErrCaptureUnsupported
 	if errors.As(reason, &unsupported) {
 		return mcp.Unavailable{Reason: unsupported.Error()}
 	}

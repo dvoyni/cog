@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -23,10 +24,10 @@ func TestADrawInADepthOnlyPassBuildsAPipelineWithNoColourTarget(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	withResourceQueue(t, k, func(resources *gfx.ResourceQueue) {
-		shadow = resources.AllocateTexture(64, 64, 1, gfx.FormatDepth32F)
+		shadow = resources.AllocateTexture(64, 64, 1, gpu.FormatDepth32F)
 	})
 	q := recordRaw(t, k)
-	q.Pass(gfx.PassDescr{Target: gfx.NoTarget(), Depth: gfx.DepthTarget(shadow), DepthLoad: gfx.LoadClear, Label: "shadow"})
+	q.Pass(gfx.PassDescr{Target: gfx.NoTarget(), Depth: gfx.DepthTarget(shadow), DepthLoad: gpu.LoadClear, Label: "shadow"})
 	drawInto(q)
 	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -50,12 +51,12 @@ func TestOneShaderInAColourPassAndADepthPassBuildsTwoPipelines(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	withResourceQueue(t, k, func(resources *gfx.ResourceQueue) {
-		shadow = resources.AllocateTexture(64, 64, 1, gfx.FormatDepth32F)
+		shadow = resources.AllocateTexture(64, 64, 1, gpu.FormatDepth32F)
 	})
 	q := recordRaw(t, k)
-	q.Pass(gfx.PassDescr{Target: gfx.NoTarget(), Depth: gfx.DepthTarget(shadow), DepthLoad: gfx.LoadClear, Order: 0, Label: "shadow"})
+	q.Pass(gfx.PassDescr{Target: gfx.NoTarget(), Depth: gfx.DepthTarget(shadow), DepthLoad: gpu.LoadClear, Order: 0, Label: "shadow"})
 	drawInto(q)
-	q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Load: gfx.LoadClear, Order: 1, Label: "lit"})
+	q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Load: gpu.LoadClear, Order: 1, Label: "lit"})
 	drawInto(q)
 	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -80,7 +81,7 @@ func TestAScreenDrawStillDeclaresTheFrameBufferAsItsColourTarget(t *testing.T) {
 	// The flag is additive: an ordinary pass has to be untouched by it, and its
 	// pipeline has to keep naming the frame buffer's format.
 	backend, _ := passFrame(t, func(q *gfx.OpQueue) {
-		q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Load: gfx.LoadClear, Label: "screen"})
+		q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Load: gpu.LoadClear, Label: "screen"})
 		q.Draw(triangle(), testMaterial(), gfx.MatParam("mvp", m.NewMat4()))
 	})
 	if len(backend.lastPipelines) != 1 {
@@ -90,7 +91,7 @@ func TestAScreenDrawStillDeclaresTheFrameBufferAsItsColourTarget(t *testing.T) {
 	if desc.NoColorTarget {
 		t.Error("a screen pass built a pipeline with no colour target")
 	}
-	if desc.ColorFormat != gfx.FormatScreen {
+	if desc.ColorFormat != gpu.FormatScreen {
 		t.Errorf("colour format = %v, want FormatScreen", desc.ColorFormat)
 	}
 }

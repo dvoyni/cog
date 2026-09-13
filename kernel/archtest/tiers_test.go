@@ -30,13 +30,14 @@ const (
 	ruleNoTier      = "every package in cog belongs to a tier in architecture.instructions.md"
 	ruleImplExports = "an …impl exports only New() kernel.Plugin, Config, DefaultConfig() Config and Err… types"
 
-	ruleKernel    = "kernel imports nothing else in cog"
-	ruleLib       = "libs/* import only libs and kernel"
-	ruleSlot      = "slots/* import only libs, kernel, slots/* and contract roots"
-	ruleRoot      = "a contract root imports only libs, kernel, slots/*, other contract roots and its own internal/…"
-	ruleInternal  = "internal/… imports only libs, kernel, slots/* and other contract roots"
-	ruleImplTable = "…impl imports only what its contract root may, plus that root"
-	ruleOther     = "an extensions/* directory that is not a Port imports only libs, kernel, slots/* and contract roots"
+	ruleKernel     = "kernel imports nothing else in cog"
+	ruleLib        = "libs/* import only libs and kernel"
+	ruleSlot       = "slots/* import only libs, kernel, slots/* and contract roots"
+	ruleRoot       = "a contract root imports only libs, kernel, slots/*, other contract roots, Port vocabularies and its own internal/…"
+	ruleInternal   = "internal/… imports only libs, kernel, slots/*, other contract roots and Port vocabularies"
+	ruleImplTable  = "…impl imports only what its contract root may, plus that root"
+	ruleOther      = "an extensions/* directory that is not a Port imports only libs, kernel, slots/*, contract roots and Port vocabularies"
+	ruleVocabulary = "a Port's vocabulary package imports only libs"
 )
 
 type tier int
@@ -51,10 +52,13 @@ const (
 	tierInternal // bundles/X/internal/…, extensions/P/internal/…
 	tierImpl     // bundles/X/Ximpl, extensions/P/Pimpl
 	tierOther    // any other extensions/* directory: wgpu, diskfs, jsfs
+	// tierVocabulary is extensions/P/V for any V but Pimpl and internal, when P
+	// has a Pimpl child: the contract a Port's Adapters implement (gfx/gpu).
+	tierVocabulary
 )
 
-// place is a package's tier. For internal/… and …impl, root is the
-// module-relative path of the contract root they belong to.
+// place is a package's tier. For internal/…, …impl and a vocabulary, root is
+// the module-relative path of the contract root they belong to.
 type place struct {
 	path string
 	tier tier
@@ -86,6 +90,9 @@ func classify(path string, present func(string) bool) place {
 				return at(tierOther, "")
 			}
 			return at(tierNone, "")
+		}
+		if len(parts) == 3 && parts[2] != parts[1]+"impl" && parts[2] != "internal" {
+			return at(tierVocabulary, root)
 		}
 		return nested(path, parts)
 	}
@@ -127,6 +134,10 @@ func allowed(from, to place, testFile bool) (bool, string) {
 		return false, ruleExtension
 	}
 	base := func(t tier) bool { return t == tierLib || t == tierKernel || t == tierSlot }
+	// A Port's vocabulary is imported by its own Port, by Bundles, and by other
+	// Ports and extensions: every tier that may import a contract root, except
+	// slots/*.
+	vocabulary := to.tier == tierVocabulary
 	switch from.tier {
 	case tierKernel:
 		return false, ruleKernel
@@ -135,15 +146,17 @@ func allowed(from, to place, testFile bool) (bool, string) {
 	case tierSlot:
 		return base(to.tier) || to.tier == tierRoot, ruleSlot
 	case tierRoot:
-		return base(to.tier) || to.tier == tierRoot ||
+		return base(to.tier) || to.tier == tierRoot || vocabulary ||
 			to.tier == tierInternal && to.root == from.path, ruleRoot
 	case tierInternal:
-		return base(to.tier) || to.tier == tierRoot && to.path != from.root, ruleInternal
+		return base(to.tier) || to.tier == tierRoot && to.path != from.root || vocabulary, ruleInternal
 	case tierImpl:
-		return base(to.tier) || to.tier == tierRoot ||
+		return base(to.tier) || to.tier == tierRoot || vocabulary ||
 			to.tier == tierInternal && to.root == from.root, ruleImplTable
 	case tierOther:
-		return base(to.tier) || to.tier == tierRoot, ruleOther
+		return base(to.tier) || to.tier == tierRoot || vocabulary, ruleOther
+	case tierVocabulary:
+		return to.tier == tierLib, ruleVocabulary
 	}
 	return false, ruleNoTier
 }

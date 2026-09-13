@@ -7,7 +7,7 @@ import (
 	"io/fs"
 	"math"
 
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/ext/lightspunctual"
@@ -201,12 +201,12 @@ type geometryKey struct {
 // sampler each of the five slots binds.
 type loadedMaterial struct {
 	record ScenePbrRecord
-	state  gfx.MaterialState
+	state  gpu.MaterialState
 	// slots index LoadedModel.textures, or missingTexture for a slot the file
 	// left empty or whose image could not be decoded. Both bind the same 1x1
 	// default, which is what makes a partial failure a resident model.
 	slots    [pbrSlotCount]int
-	samplers [pbrSlotCount]gfx.SamplerDesc
+	samplers [pbrSlotCount]gpu.SamplerDesc
 }
 
 // materialVariant keys the material table of one load. A flattened matrix with
@@ -685,7 +685,7 @@ func (c *modelConverter) convertMaterial(index int, frontCW bool) loadedMaterial
 		converted.samplers[slot] = defaultModelSampler
 	}
 	if frontCW {
-		converted.state.FrontFace = gfx.FrontCW
+		converted.state.FrontFace = gpu.FrontCW
 	}
 	if index < 0 || index >= len(c.doc.Materials) || c.doc.Materials[index] == nil {
 		return converted
@@ -693,7 +693,7 @@ func (c *modelConverter) convertMaterial(index int, frontCW bool) loadedMaterial
 	material := c.doc.Materials[index]
 	converted.state = PbrState(alphaModeOf(material.AlphaMode), material.DoubleSided)
 	if frontCW {
-		converted.state.FrontFace = gfx.FrontCW
+		converted.state.FrontFace = gpu.FrontCW
 	}
 	if material.AlphaMode == gltf.AlphaMask {
 		converted.record.AlphaCutoff = float32(material.AlphaCutoffOrDefault())

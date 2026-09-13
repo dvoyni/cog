@@ -4,13 +4,14 @@ import (
 	"sync"
 
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/gfx/internal"
 )
 
 // captureRequest is one live capture or burst: where its stills go, and how far
 // through them the engine has got.
 type captureRequest struct {
-	target   gfx.GpuCaptureDesc
+	target   gpu.CaptureDesc
 	amount   int
 	interval int
 	// bounds counts the stills bound to a tick so far, and delivered the ones
@@ -20,7 +21,7 @@ type captureRequest struct {
 	delivered int
 	// ticks is how many more ticks must begin before the next still binds.
 	ticks int
-	done  chan gfx.GpuCapture
+	done  chan gpu.Capture
 }
 
 // captureState is gfx's one capture slot. A still moves through it in four
@@ -55,7 +56,7 @@ func (s *captureState) arm(request gfx.ArmCaptureRequest) (*captureRequest, erro
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request != nil {
-		return nil, gfx.ErrCaptureBusy{}
+		return nil, gpu.ErrCaptureBusy{}
 	}
 	amount := max(request.Amount, 1)
 	interval := max(request.Interval, 1)
@@ -69,7 +70,7 @@ func (s *captureState) arm(request gfx.ArmCaptureRequest) (*captureRequest, erro
 	}
 	live := &captureRequest{
 		target: request.Target, amount: amount, interval: interval,
-		done: make(chan gfx.GpuCapture, amount),
+		done: make(chan gpu.Capture, amount),
 	}
 	s.request = live
 	// A paused engine will complete no further tick, so the last one already is
@@ -117,11 +118,11 @@ func (s *captureState) endTick() {
 }
 
 // target reports what the frame about to be rendered should read back.
-func (s *captureState) target() (gfx.GpuCaptureDesc, bool) {
+func (s *captureState) target() (gpu.CaptureDesc, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request == nil || !s.bound {
-		return gfx.GpuCaptureDesc{}, false
+		return gpu.CaptureDesc{}, false
 	}
 	return s.request.target, true
 }
@@ -144,7 +145,7 @@ func (s *captureState) encoded() {
 //
 // A failure ends the request wherever it lands. A burst truncates rather than
 // failing, and the ordinals already delivered are the short success.
-func (s *captureState) deliver(capture gfx.GpuCapture) {
+func (s *captureState) deliver(capture gpu.Capture) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request == nil || !s.inflight {
@@ -172,7 +173,7 @@ func (s *captureState) abandon() {
 		return
 	}
 	select {
-	case s.request.done <- gfx.GpuCapture{Err: gfx.ErrCaptureAbandoned{}}:
+	case s.request.done <- gpu.Capture{Err: gpu.ErrCaptureAbandoned{}}:
 	default:
 	}
 	s.clear()

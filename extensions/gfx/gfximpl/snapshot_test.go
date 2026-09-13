@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/internal"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -101,12 +101,12 @@ func (r *captureRig) runSnapshot(request frameSnapshotRequest, record func(*gfx.
 func twoPasses(q *gfx.OpQueue) {
 	q.Pass(gfx.PassDescr{
 		Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Order: 20, Label: "overlay",
-		Load: gfx.LoadPreserve, Store: gfx.StoreKeep,
+		Load: gpu.LoadPreserve, Store: gpu.StoreKeep,
 	})
 	drawInto(q)
 	q.Pass(gfx.PassDescr{
 		Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Order: 10, Label: "world",
-		Load: gfx.LoadClear, Clear: m.Color{R: 0.25, A: 1}, Store: gfx.StoreKeep,
+		Load: gpu.LoadClear, Clear: m.Color{R: 0.25, A: 1}, Store: gpu.StoreKeep,
 	})
 	drawInto(q)
 	q.DrawInstanced(triangle(), testMaterial(), 7, gfx.MatParam("mvp", m.NewMat4()))
@@ -211,9 +211,9 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 	rig := newCaptureRig(t)
 	var durable gfx.TextureDescr
 	withResourceQueue(t, rig.k, func(q *gfx.ResourceQueue) {
-		durable = q.AllocateTexture(64, 32, 2, gfx.FormatRGBA8)
-		q.UpdateTexture(durable, 1, gfx.Region{X: 1, Y: 2, Width: 3, Height: 4}, make([]byte, 48), true)
-		q.ReleaseTexture(q.BakeTexture(8, 8, gfx.FormatRGBA8Srgb, make([]byte, 256), true, true))
+		durable = q.AllocateTexture(64, 32, 2, gpu.FormatRGBA8)
+		q.UpdateTexture(durable, 1, gpu.Region{X: 1, Y: 2, Width: 3, Height: 4}, make([]byte, 48), true)
+		q.ReleaseTexture(q.BakeTexture(8, 8, gpu.FormatRGBA8Srgb, make([]byte, 256), true, true))
 	})
 
 	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *gfx.OpQueue) {
@@ -222,7 +222,7 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 		// place resource traffic comes from.
 		q.Draw(triangle(), testMaterial(),
 			gfx.MatParam("mvp", m.NewMat4()),
-			gfx.TextureParam("albedo", gfx.TextureWithBytes(4, 4, gfx.FormatRGBA8, make([]byte, 64), true, false)))
+			gfx.TextureParam("albedo", gfx.TextureWithBytes(4, 4, gpu.FormatRGBA8, make([]byte, 64), true, false)))
 	})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
@@ -247,7 +247,7 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 	if len(update) != 1 || update[0].Region == nil {
 		t.Fatalf("updateTexture ops = %+v, want the one with its region", update)
 	}
-	if *update[0].Region != (gfx.Region{X: 1, Y: 2, Width: 3, Height: 4}) || update[0].Layer != 1 {
+	if *update[0].Region != (gpu.Region{X: 1, Y: 2, Width: 3, Height: 4}) || update[0].Layer != 1 {
 		t.Errorf("update = %+v, want the layer and region it was given", update[0])
 	}
 	if update[0].Bytes != 48 {
@@ -265,7 +265,7 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 		t.Errorf("bake queues = %q then %q, want durable first, which is the order they execute in",
 			bakes[0].Queue, bakes[1].Queue)
 	}
-	if !bakes[0].Mipmaps || bakes[0].Format != internal.FormatName(gfx.FormatRGBA8Srgb) {
+	if !bakes[0].Mipmaps || bakes[0].Format != gpu.FormatRGBA8Srgb.Name() {
 		t.Errorf("durable bake = %+v, want its format and mipmap flag", bakes[0])
 	}
 	if bakes[1].Bytes != 64 || bakes[1].Width != 4 {
@@ -346,7 +346,7 @@ func TestASecondFrameSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 	// A capture and the other packages' snapshots are separate slots. Refusing
 	// across kinds would destroy the pairing arming them together is for.
 	if _, err := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
-		Target: gfx.GpuCaptureDesc{Screen: true},
+		Target: gpu.CaptureDesc{Screen: true},
 	}); err != nil {
 		t.Fatalf("a capture was refused while a frame snapshot was in flight: %v", err)
 	}
@@ -579,13 +579,13 @@ func TestTheNewAccessorsAnswerOutsideTheAgentPath(t *testing.T) {
 	// a view, a capability or a JSON document.
 	vertices := gfx.BufferWithBytes(make([]byte, 3*32), false)
 	indices := gfx.BufferWithBytes(make([]byte, 6*4), false)
-	mesh := gfx.MeshIndexed(vertices, indices, gfx.IndexUint32, gfx.TopologyTriangleList,
-		gfx.Attr(0, gfx.Float32x4), gfx.Attr(16, gfx.Float32x4))
+	mesh := gfx.MeshIndexed(vertices, indices, gpu.IndexUint32, gpu.TopologyTriangleList,
+		gfx.Attr(0, gpu.Float32x4), gfx.Attr(16, gpu.Float32x4))
 	if mesh.VertexCount() != 3 || mesh.IndexCount() != 6 {
 		t.Errorf("counts = %d vertices / %d indices, want 3 and 6",
 			mesh.VertexCount(), mesh.IndexCount())
 	}
-	if !mesh.Indexed() || mesh.Topology() != gfx.TopologyTriangleList {
+	if !mesh.Indexed() || mesh.Topology() != gpu.TopologyTriangleList {
 		t.Errorf("mesh = indexed %v / topology %v, want an indexed triangle list",
 			mesh.Indexed(), mesh.Topology())
 	}
@@ -594,8 +594,8 @@ func TestTheNewAccessorsAnswerOutsideTheAgentPath(t *testing.T) {
 			vertices.Size(), vertices.InlineBytes(), vertices.ID())
 	}
 
-	texture := gfx.TextureWithBytes(8, 4, gfx.FormatRGBA8Srgb, make([]byte, 128), false, true)
-	if texture.Format() != gfx.FormatRGBA8Srgb || !texture.Mipmaps() || texture.PixelBytes() != 128 {
+	texture := gfx.TextureWithBytes(8, 4, gpu.FormatRGBA8Srgb, make([]byte, 128), false, true)
+	if texture.Format() != gpu.FormatRGBA8Srgb || !texture.Mipmaps() || texture.PixelBytes() != 128 {
 		t.Errorf("texture = format %v / mipmaps %v / %d bytes, want what it was built with",
 			texture.Format(), texture.Mipmaps(), texture.PixelBytes())
 	}
@@ -621,8 +621,8 @@ func TestTheNewAccessorsAnswerOutsideTheAgentPath(t *testing.T) {
 func TestAFrameSnapshotDescribesAPassDrawingSomewhereOtherThanTheScreen(t *testing.T) {
 	rig := newCaptureRig(t)
 	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *gfx.OpQueue) {
-		target, _ := q.TemporaryTarget(128, 64, gfx.FormatRGBA8)
-		q.Pass(gfx.PassDescr{Target: target, Depth: gfx.DepthNone(), Label: "offscreen", Load: gfx.LoadClear})
+		target, _ := q.TemporaryTarget(128, 64, gpu.FormatRGBA8)
+		q.Pass(gfx.PassDescr{Target: target, Depth: gfx.DepthNone(), Label: "offscreen", Load: gpu.LoadClear})
 		drawInto(q)
 	})
 	if err != nil {

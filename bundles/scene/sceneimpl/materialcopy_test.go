@@ -7,6 +7,7 @@ import (
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 )
 
 // A Mesh call copies its Material at record, so a caller who changes a pass tag
@@ -20,7 +21,7 @@ func TestMutatingAMeshMaterialTagAfterRecordingChangesNothingDrawn(t *testing.T)
 		q.Mesh(0, ref, scene.MeshDraw{Material: material, NeverCull: true})
 		material[0].Tag = "shadow"
 	})
-	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
+	ref = h.bake(triangle(), []uint32{0, 1, 2}, gpu.TopologyTriangleList)
 	h.frame()
 
 	if pass := h.passes()[0]; pass.Instances != 1 {
@@ -43,14 +44,14 @@ func TestMutatingAMeshMaterialParameterAfterRecordingChangesNothingDrawn(t *test
 		original := slices.Clone(params)
 		material := func(params []gfx.ParameterDescr) scene.Material {
 			return scene.Material{{Descr: gfx.MaterialWithState(
-				gfx.ShaderWithResource(internal.SceneShaderPath), gfx.StateOpaque3D, params...,
+				gfx.ShaderWithResource(internal.SceneShaderPath), gpu.StateOpaque3D, params...,
 			)}}
 		}
 		q.Mesh(0, ref, scene.MeshDraw{Material: material(params), NeverCull: true})
 		params[0] = gfx.FloatParam("key", 9)
 		q.Mesh(0, ref, scene.MeshDraw{Material: material(original), NeverCull: true})
 	})
-	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
+	ref = h.bake(triangle(), []uint32{0, 1, 2}, gpu.TopologyTriangleList)
 	h.frame()
 
 	batches := h.passes()[0].Batches
@@ -86,7 +87,7 @@ func TestAnEmptyMaterialStillServesNoPassAfterTheCopy(t *testing.T) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, ref, scene.MeshDraw{Material: scene.Material{}, NeverCull: true})
 	})
-	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
+	ref = h.bake(triangle(), []uint32{0, 1, 2}, gpu.TopologyTriangleList)
 	h.frame()
 
 	if pass := h.passes()[0]; pass.Instances != 0 {

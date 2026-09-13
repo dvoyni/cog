@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/internal"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -14,15 +14,15 @@ func TestDefaultLimitsAreTheBrowserFloor(t *testing.T) {
 	// These are the WebGPU spec floor, not any device's numbers: a desktop
 	// adapter reports hardware limits, and checking against those passes a build
 	// that cannot run in a browser.
-	want := gfx.Limits{
+	want := gpu.Limits{
 		MaxBindGroups:                   4,
 		MaxStorageBuffersPerShaderStage: 8,
 		MaxStorageBufferBindingSize:     128 << 20,
 		MaxUniformBufferBindingSize:     64 << 10,
 		MaxBufferSize:                   256 << 20,
 	}
-	if gfx.DefaultLimits != want {
-		t.Errorf("DefaultLimits = %+v, want the web floor %+v", gfx.DefaultLimits, want)
+	if gpu.DefaultLimits != want {
+		t.Errorf("DefaultLimits = %+v, want the web floor %+v", gpu.DefaultLimits, want)
 	}
 }
 
@@ -30,12 +30,12 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 	p := newPlugin()
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
-	layout := gfx.ShaderLayout{
+	layout := gpu.ShaderLayout{
 		UniformSize: 64, UniformGroup: 0, UniformBinding: 0,
-		Uniforms: []gfx.UniformMember{{Name: "mvp", Offset: 0}},
+		Uniforms: []gpu.UniformMember{{Name: "mvp", Offset: 0}},
 	}
 	for i := range 9 {
-		layout.Resources = append(layout.Resources, gfx.ShaderResource{
+		layout.Resources = append(layout.Resources, gpu.ShaderResource{
 			Name: "records", StorageBuffer: true, Group: 1, Binding: i,
 		})
 	}
@@ -65,8 +65,8 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 	if found != 1 {
 		t.Fatalf("reports = %d over two frames, want exactly 1: %v", found, reported)
 	}
-	if exceeded.Declared != 9 || exceeded.Floor != gfx.DefaultLimits.MaxStorageBuffersPerShaderStage {
-		t.Errorf("report = %+v, want 9 declared against the floor of %d", exceeded, gfx.DefaultLimits.MaxStorageBuffersPerShaderStage)
+	if exceeded.Declared != 9 || exceeded.Floor != gpu.DefaultLimits.MaxStorageBuffersPerShaderStage {
+		t.Errorf("report = %+v, want 9 declared against the floor of %d", exceeded, gpu.DefaultLimits.MaxStorageBuffersPerShaderStage)
 	}
 	if exceeded.Device != backend.Limits().MaxStorageBuffersPerShaderStage {
 		t.Errorf("report device limit = %d, want the backend's %d", exceeded.Device, backend.Limits().MaxStorageBuffersPerShaderStage)
@@ -76,18 +76,18 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 func TestCheckWebLimitsMeasuresAgainstTheFloorNotTheDevice(t *testing.T) {
 	// A desktop adapter reports far more than the web floor, so a check against
 	// the device would pass a shader no browser can run.
-	device := gfx.Limits{MaxStorageBuffersPerShaderStage: 200, MaxBindGroups: 8, MaxUniformBufferBindingSize: 1 << 20}
-	within := gfx.ShaderLayout{UniformSize: 256, Resources: []gfx.ShaderResource{{StorageBuffer: true, Group: 1}}}
+	device := gpu.Limits{MaxStorageBuffersPerShaderStage: 200, MaxBindGroups: 8, MaxUniformBufferBindingSize: 1 << 20}
+	within := gpu.ShaderLayout{UniformSize: 256, Resources: []gpu.ShaderResource{{StorageBuffer: true, Group: 1}}}
 	if err := checkWebLimits("canvas.sprite", within, device); err != nil {
 		t.Errorf("a shader within the floor was rejected: %v", err)
 	}
 
-	groups := gfx.ShaderLayout{Resources: []gfx.ShaderResource{{Group: 7}}}
+	groups := gpu.ShaderLayout{Resources: []gpu.ShaderResource{{Group: 7}}}
 	if err := checkWebLimits("scene.pbr", groups, device); err == nil {
 		t.Error("eight bind groups were accepted, want an error")
 	}
 
-	uniform := gfx.ShaderLayout{UniformSize: gfx.DefaultLimits.MaxUniformBufferBindingSize + 1}
+	uniform := gpu.ShaderLayout{UniformSize: gpu.DefaultLimits.MaxUniformBufferBindingSize + 1}
 	if err := checkWebLimits("scene.pbr", uniform, device); err == nil {
 		t.Error("an oversized uniform block was accepted, want an error")
 	}
@@ -96,10 +96,10 @@ func TestCheckWebLimitsMeasuresAgainstTheFloorNotTheDevice(t *testing.T) {
 func TestBufferRangeParamBindsItsOwnSlice(t *testing.T) {
 	p := newPlugin()
 	k := newTestKernel(t, p)
-	backend := &fakeBackend{layout: &gfx.ShaderLayout{
+	backend := &fakeBackend{layout: &gpu.ShaderLayout{
 		UniformSize: 64, UniformGroup: 0, UniformBinding: 0,
-		Uniforms:  []gfx.UniformMember{{Name: "mvp", Offset: 0}},
-		Resources: []gfx.ShaderResource{{Name: "records", StorageBuffer: true, Group: 1, Binding: 0}},
+		Uniforms:  []gpu.UniformMember{{Name: "mvp", Offset: 0}},
+		Resources: []gpu.ShaderResource{{Name: "records", StorageBuffer: true, Group: 1, Binding: 0}},
 	}}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
@@ -114,12 +114,12 @@ func TestBufferRangeParamBindsItsOwnSlice(t *testing.T) {
 
 	found := false
 	for _, op := range backend.lastOps {
-		if op.Kind != internal.GpuSetBakedBuffer {
+		if op.kind != opSetBuffer {
 			continue
 		}
 		found = true
-		if int(op.Arg0) != 256 || int(op.Arg1) != 512 {
-			t.Errorf("buffer binding = (offset %d, size %d), want (256, 512)", op.Arg0, op.Arg1)
+		if op.offset != 256 || op.size != 512 {
+			t.Errorf("buffer binding = (offset %d, size %d), want (256, 512)", op.offset, op.size)
 		}
 	}
 	if !found {

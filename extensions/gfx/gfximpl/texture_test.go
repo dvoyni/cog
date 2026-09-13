@@ -6,16 +6,16 @@ import (
 	"testing/fstest"
 
 	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/internal"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
 func TestFormatScreenResolvesToTheFrameBufferFormat(t *testing.T) {
-	if got := gfx.FormatScreen.Resolve(); got != gfx.FrameBufferFormat {
-		t.Errorf("FormatScreen.Resolve() = %v, want the frame buffer's %v", got, gfx.FrameBufferFormat)
+	if got := gpu.FormatScreen.Resolve(); got != gpu.FrameBufferFormat {
+		t.Errorf("FormatScreen.Resolve() = %v, want the frame buffer's %v", got, gpu.FrameBufferFormat)
 	}
-	for _, format := range []gfx.TextureFormat{gfx.FormatRGBA8, gfx.FormatRGBA8Srgb, gfx.FormatDepth32F} {
+	for _, format := range []gpu.TextureFormat{gpu.FormatRGBA8, gpu.FormatRGBA8Srgb, gpu.FormatDepth32F} {
 		if got := format.Resolve(); got != format {
 			t.Errorf("%v.Resolve() = %v, want itself", format, got)
 		}
@@ -24,11 +24,11 @@ func TestFormatScreenResolvesToTheFrameBufferFormat(t *testing.T) {
 
 // bakedTextureFormats reports the format of every texture bake the backend saw,
 // in recording order.
-func bakedTextureFormats(backend *fakeBackend) []gfx.TextureFormat {
-	var formats []gfx.TextureFormat
+func bakedTextureFormats(backend *fakeBackend) []gpu.TextureFormat {
+	var formats []gpu.TextureFormat
 	for _, op := range backend.lastOps {
-		if op.Kind == internal.GpuBakeTexture {
-			formats = append(formats, gfx.TextureFormat(op.Arg2))
+		if op.kind == opBakeTexture {
+			formats = append(formats, op.format)
 		}
 	}
 	return formats
@@ -47,7 +47,7 @@ func TestResourceTextureAlwaysBakesSrgb(t *testing.T) {
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	got := bakedTextureFormats(backend)
-	if len(got) != 1 || got[0] != gfx.FormatRGBA8Srgb {
+	if len(got) != 1 || got[0] != gpu.FormatRGBA8Srgb {
 		t.Fatalf("baked formats = %v, want one FormatRGBA8Srgb: a decoded image is sRGB whatever it is named", got)
 	}
 }
@@ -68,7 +68,7 @@ func TestSameResourcePathBakesOnce(t *testing.T) {
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	got := bakedTextureFormats(backend)
-	if len(got) != 1 || got[0] != gfx.FormatRGBA8Srgb {
+	if len(got) != 1 || got[0] != gpu.FormatRGBA8Srgb {
 		t.Fatalf("baked formats = %v, want one FormatRGBA8Srgb: a path has one colour space, so it bakes once", got)
 	}
 	if filesystem.opens != 1 {
@@ -89,15 +89,15 @@ func TestOnlyAllocateRenderTargetAsksForARenderableTexture(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	withResourceQueue(t, k, func(resources *gfx.ResourceQueue) {
-		resources.AllocateTexture(64, 64, 1, gfx.FormatRGBA8Srgb)
-		resources.AllocateRenderTarget(64, 64, 1, gfx.FormatRGBA8Srgb)
+		resources.AllocateTexture(64, 64, 1, gpu.FormatRGBA8Srgb)
+		resources.AllocateRenderTarget(64, 64, 1, gpu.FormatRGBA8Srgb)
 	})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	var renderable []bool
 	for _, op := range backend.lastOps {
-		if op.Kind == internal.GpuAllocateTexture {
-			renderable = append(renderable, op.Arg4 != 0)
+		if op.kind == opAllocateTexture {
+			renderable = append(renderable, op.renderable)
 		}
 	}
 	if len(renderable) != 2 {
@@ -124,10 +124,10 @@ func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
 
 	var texture gfx.TextureDescr
 	withResourceQueue(t, k, func(resources *gfx.ResourceQueue) {
-		texture = resources.AllocateRenderTarget(64, 64, 1, gfx.FormatRGBA8Srgb)
+		texture = resources.AllocateRenderTarget(64, 64, 1, gpu.FormatRGBA8Srgb)
 	})
 	q := recordRaw(t, k)
-	q.Pass(gfx.PassDescr{Target: gfx.TextureTarget(texture, 0, 0), Depth: gfx.DepthNone(), Load: gfx.LoadClear, Label: "bake"})
+	q.Pass(gfx.PassDescr{Target: gfx.TextureTarget(texture, 0, 0), Depth: gfx.DepthNone(), Load: gpu.LoadClear, Label: "bake"})
 	drawInto(q)
 	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -137,7 +137,7 @@ func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
 	}
 
 	q = recordRaw(t, k)
-	q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthNone(), Load: gfx.LoadClear, Label: "use"})
+	q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthNone(), Load: gpu.LoadClear, Label: "use"})
 	q.Draw(triangle(), testMaterial(gfx.TextureParam("MainTexture", texture)), gfx.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()

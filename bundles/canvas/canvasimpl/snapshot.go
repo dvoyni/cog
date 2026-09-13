@@ -272,7 +272,7 @@ func spriteTransformViewOf(transform canvas.SpriteTransform) canvas.SpriteTransf
 		NineSliceScale: transform.NineSliceScale, NineSliceNoCenter: transform.NineSliceNoCenter,
 		FlipX: transform.FlipX, FlipY: transform.FlipY,
 		TileX: transform.TileX, TileY: transform.TileY,
-		Filter: gfx.FilterModeName(transform.Filter),
+		Filter: transform.Filter.Name(),
 	}
 	if transform.Size != (m.Vec2{}) {
 		view.Size = vec2Components(transform.Size)

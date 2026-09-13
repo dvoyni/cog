@@ -56,6 +56,10 @@ _Avoid_: Bundle, which needs nothing supplied; Open slot, whose whole implementa
 An implementation of a Port's interface, contributed by a plugin and bound to that Port by the engine during composition. It is a plain value rather than a Resource, so reaching it takes no lock. A window driver's GPU backend is an Adapter of the renderer; each plugin's Provider is an Adapter of the Broker.
 _Avoid_: Backend, driver, as the name of the kind
 
+**Vocabulary package**:
+The package beneath a Port that declares the contract its Adapters implement and every ID, format and enum the Port's recording API and those Adapters both speak. It imports nothing but Libraries, and the Port's root aliases none of it, so each of its types has one name. An Adapter author reads only it; a recorder imports it beside the Port's root. gfx's is `gpu`.
+_Avoid_: Types package, common, shared; Slot, which is a Plugin's whole contract rather than the half an Adapter implements
+
 **Library**:
 Code that is not a plugin and defines none, importing only other Libraries and the kernel.
 _Avoid_: Package, which is every Go directory; util, common

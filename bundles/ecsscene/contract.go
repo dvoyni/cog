@@ -37,6 +37,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -70,6 +71,6 @@ type MaterialTag struct {
 	// Tag is the pass this entry serves; zero reads as scene.TagForward.
 	Tag    scene.PassTag
 	Shader gfx.ShaderDescr
-	State  gfx.MaterialState
+	State  gpu.MaterialState
 	Params ecs.List[gfx.ParameterDescr]
 }

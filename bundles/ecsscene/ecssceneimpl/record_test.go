@@ -8,6 +8,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 )
@@ -165,9 +166,9 @@ func TestAMaterialsTagsEachKeepTheirOwnParams(t *testing.T) {
 	forward := gfx.ShaderWithText("forward")
 	shadow := gfx.ShaderWithText("shadow")
 	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref}, Material: &ecsscene.Material{Tags: ecs.NewList(
-		ecsscene.MaterialTag{Shader: forward, State: gfx.StateOpaque3D, Params: ecs.NewList(
+		ecsscene.MaterialTag{Shader: forward, State: gpu.StateOpaque3D, Params: ecs.NewList(
 			gfx.FloatParam("a", 1), gfx.FloatParam("b", 2))},
-		ecsscene.MaterialTag{Tag: "shadow", Shader: shadow, State: gfx.StateTransparent3D, Params: ecs.NewList(
+		ecsscene.MaterialTag{Tag: "shadow", Shader: shadow, State: gpu.StateTransparent3D, Params: ecs.NewList(
 			gfx.FloatParam("c", 3))},
 		ecsscene.MaterialTag{Tag: "outline", Shader: forward},
 	)}})
@@ -184,7 +185,7 @@ func TestAMaterialsTagsEachKeepTheirOwnParams(t *testing.T) {
 	type tagView struct {
 		Tag    scene.PassTag
 		Shader gfx.ShaderDescr
-		State  gfx.MaterialState
+		State  gpu.MaterialState
 		Params map[string]float32
 	}
 	view := func(material scene.Material) []tagView {
@@ -199,14 +200,14 @@ func TestAMaterialsTagsEachKeepTheirOwnParams(t *testing.T) {
 		return out
 	}
 	want := []tagView{
-		{"", forward, gfx.StateOpaque3D, map[string]float32{"a": 1, "b": 2}},
-		{"shadow", shadow, gfx.StateTransparent3D, map[string]float32{"c": 3}},
-		{"outline", forward, gfx.MaterialState{}, map[string]float32{}},
+		{"", forward, gpu.StateOpaque3D, map[string]float32{"a": 1, "b": 2}},
+		{"shadow", shadow, gpu.StateTransparent3D, map[string]float32{"c": 3}},
+		{"outline", forward, gpu.MaterialState{}, map[string]float32{}},
 	}
 	if got := view(byLayers[0]); !reflect.DeepEqual(got, want) {
 		t.Errorf("the three-tag material reached scene as\n%+v\nwant\n%+v", got, want)
 	}
-	wantOther := []tagView{{"", shadow, gfx.MaterialState{}, map[string]float32{"d": 4}}}
+	wantOther := []tagView{{"", shadow, gpu.MaterialState{}, map[string]float32{"d": 4}}}
 	if got := view(byLayers[scene.Layer(1)]); !reflect.DeepEqual(got, wantOther) {
 		t.Errorf("the second Entity's material reached scene as %+v, want %+v", got, wantOther)
 	}

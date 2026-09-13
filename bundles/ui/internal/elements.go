@@ -3,6 +3,7 @@ package internal
 import (
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -18,7 +19,7 @@ type SpriteParams struct {
 	Path     string
 	Scale    float32
 	Tint     m.Color
-	Filter   gfx.FilterMode
+	Filter   gpu.FilterMode
 	Fit      SpriteFit
 	Frame    canvas.SpriteFrame
 	Rotation float32
@@ -46,7 +47,7 @@ type Sprite9SlicedParams struct {
 	Insets   canvas.SpriteFrame
 	Scale    float32
 	Tint     m.Color
-	Filter   gfx.FilterMode
+	Filter   gpu.FilterMode
 	NoCenter bool
 }
 
@@ -72,7 +73,7 @@ type Sprite9SliceTiledParams struct {
 	Insets Insets
 	Scale  float32
 	Tint   m.Color
-	Filter gfx.FilterMode
+	Filter gpu.FilterMode
 }
 
 type InteractiveSprite9SliceTiledParams struct {

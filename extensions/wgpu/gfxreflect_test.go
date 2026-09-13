@@ -3,7 +3,7 @@ package wgpu
 import (
 	"testing"
 
-	cgfx "github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 )
 
 const testUnlitWGSL = `
@@ -72,7 +72,7 @@ fn fs_main() -> @location(0) vec4<f32> {
 	if err != nil {
 		t.Fatalf("reflect: %v", err)
 	}
-	resources := map[string]cgfx.ShaderResource{}
+	resources := map[string]gpu.ShaderResource{}
 	for _, resource := range layout.Resources {
 		resources[resource.Name] = resource
 	}
@@ -97,14 +97,14 @@ fn fs_main() -> @location(0) vec4<f32> { return vec4<f32>(); }
 	if err != nil {
 		t.Fatalf("reflect: %v", err)
 	}
-	resources := map[string]cgfx.ShaderResource{}
+	resources := map[string]gpu.ShaderResource{}
 	for _, resource := range layout.Resources {
 		resources[resource.Name] = resource
 	}
-	if got := resources["regular"].TextureView; got != cgfx.TextureView2D {
+	if got := resources["regular"].TextureView; got != gpu.TextureView2D {
 		t.Fatalf("regular texture view = %v, want 2D", got)
 	}
-	if got := resources["atlas"].TextureView; got != cgfx.TextureView2DArray {
+	if got := resources["atlas"].TextureView; got != gpu.TextureView2DArray {
 		t.Fatalf("atlas texture view = %v, want 2D array", got)
 	}
 }

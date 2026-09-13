@@ -3,7 +3,7 @@ package internal
 import (
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/qmuntal/gltf"
 )
 
@@ -16,18 +16,18 @@ func TestModelSamplerMapsWrapAndFilter(t *testing.T) {
 		MagFilter: gltf.MagNearest, MinFilter: gltf.MinLinearMipMapNearest,
 	}}
 	sampler := modelSampler(doc, 0)
-	if sampler.AddressU != gfx.AddressMirror || sampler.AddressV != gfx.AddressClamp {
+	if sampler.AddressU != gpu.AddressMirror || sampler.AddressV != gpu.AddressClamp {
 		t.Errorf("address = %v/%v, want mirror/clamp", sampler.AddressU, sampler.AddressV)
 	}
-	if sampler.Mag != gfx.FilterNearest {
+	if sampler.Mag != gpu.FilterNearest {
 		t.Errorf("mag = %v, want nearest", sampler.Mag)
 	}
-	if sampler.Min != gfx.FilterLinear || sampler.Mip != gfx.FilterNearest {
+	if sampler.Min != gpu.FilterLinear || sampler.Mip != gpu.FilterNearest {
 		t.Errorf("min/mip = %v/%v, want linear/nearest", sampler.Min, sampler.Mip)
 	}
 	// A texture that names no sampler takes glTF's own default, which is repeat
 	// filtered linearly - not SamplerDesc's zero value, which clamps.
-	if defaultModelSampler.AddressU != gfx.AddressRepeat {
+	if defaultModelSampler.AddressU != gpu.AddressRepeat {
 		t.Error("glTF's default wrap is repeat")
 	}
 }

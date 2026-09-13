@@ -1,6 +1,9 @@
 package gfx
 
-import "github.com/dvoyni/cog/kernel"
+import (
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/kernel"
+)
 
 // ArmFrameCmd arms one frame snapshot and hands back the wait. It is ordinary
 // gfx API: anything holding a kernel handle may ask what the renderer was told
@@ -98,16 +101,16 @@ type PassView struct {
 	// Target is screen, texture or none. A pass drawing into something that is
 	// not the screen, and nothing compositing it afterwards, is one of the
 	// ways a frame ends up black.
-	Target        string    `json:"target"`
-	TargetTexture TextureID `json:"targetTexture,omitempty"`
-	TargetWidth   int       `json:"targetWidth,omitempty"`
-	TargetHeight  int       `json:"targetHeight,omitempty"`
-	TargetMip     int       `json:"targetMip,omitempty"`
-	TargetLayer   int       `json:"targetLayer,omitempty"`
+	Target        string        `json:"target"`
+	TargetTexture gpu.TextureID `json:"targetTexture,omitempty"`
+	TargetWidth   int           `json:"targetWidth,omitempty"`
+	TargetHeight  int           `json:"targetHeight,omitempty"`
+	TargetMip     int           `json:"targetMip,omitempty"`
+	TargetLayer   int           `json:"targetLayer,omitempty"`
 	// Depth is auto, texture or none.
-	Depth        string    `json:"depth"`
-	DepthTexture TextureID `json:"depthTexture,omitempty"`
-	Load         string    `json:"load"`
+	Depth        string        `json:"depth"`
+	DepthTexture gpu.TextureID `json:"depthTexture,omitempty"`
+	Load         string        `json:"load"`
 	// Clear is the colour the pass clears to - r, g, b, a - and is present
 	// only when Load is clear.
 	Clear      []float32 `json:"clear,omitempty"`
@@ -140,19 +143,19 @@ type ResourceOpView struct {
 	// Path is the resource path, for the operations that name one.
 	Path string `json:"path,omitempty"`
 	// Buffer, BufferKind and Size describe a buffer operation.
-	Buffer     BufferID `json:"buffer,omitempty"`
-	BufferKind string   `json:"bufferKind,omitempty"`
-	Size       int      `json:"size,omitempty"`
+	Buffer     gpu.BufferID `json:"buffer,omitempty"`
+	BufferKind string       `json:"bufferKind,omitempty"`
+	Size       int          `json:"size,omitempty"`
 	// Texture and the fields after it describe a texture operation.
-	Texture    TextureID `json:"texture,omitempty"`
-	Width      int       `json:"width,omitempty"`
-	Height     int       `json:"height,omitempty"`
-	Layers     int       `json:"layers,omitempty"`
-	Layer      int       `json:"layer,omitempty"`
-	Region     *Region   `json:"region,omitempty"`
-	Format     string    `json:"format,omitempty"`
-	Mipmaps    bool      `json:"mipmaps,omitempty"`
-	Renderable bool      `json:"renderable,omitempty"`
+	Texture    gpu.TextureID `json:"texture,omitempty"`
+	Width      int           `json:"width,omitempty"`
+	Height     int           `json:"height,omitempty"`
+	Layers     int           `json:"layers,omitempty"`
+	Layer      int           `json:"layer,omitempty"`
+	Region     *gpu.Region   `json:"region,omitempty"`
+	Format     string        `json:"format,omitempty"`
+	Mipmaps    bool          `json:"mipmaps,omitempty"`
+	Renderable bool          `json:"renderable,omitempty"`
 	// Bytes is how much data the operation uploads. The data itself does not
 	// travel: a baked texture in a response is a base64 megabyte nobody asked
 	// for.

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	cgfx "github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/storage"
 )
 
@@ -51,7 +52,7 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 	if layout.UniformSize != 0 {
 		t.Fatalf("the scene shader declares a %d-byte uniform block; all scene data is storage", layout.UniformSize)
 	}
-	resources := map[string]cgfx.ShaderResource{}
+	resources := map[string]gpu.ShaderResource{}
 	for _, resource := range layout.Resources {
 		resources[resource.Name] = resource
 	}
@@ -202,7 +203,7 @@ func TestBundledSceneShaderRecordsMatchTheirPackedOffsets(t *testing.T) {
 	}
 }
 
-func membersOf(t *testing.T, layout cgfx.ShaderLayout, name string) []cgfx.StorageMember {
+func membersOf(t *testing.T, layout gpu.ShaderLayout, name string) []gpu.StorageMember {
 	t.Helper()
 	for _, resource := range layout.Resources {
 		if resource.Name == name {
@@ -227,7 +228,7 @@ func TestBundledSceneShaderFitsTheWebStorageBudget(t *testing.T) {
 			storage++
 		}
 	}
-	if floor := cgfx.DefaultLimits.MaxStorageBuffersPerShaderStage; storage > floor {
+	if floor := gpu.DefaultLimits.MaxStorageBuffersPerShaderStage; storage > floor {
 		t.Fatalf("the bundled scene shader declares %d storage buffers, past the web floor of %d", storage, floor)
 	}
 }

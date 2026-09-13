@@ -1,7 +1,7 @@
 package wgpu
 
 import (
-	cgfx "github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -28,7 +28,7 @@ import (
 // plain unorm frame buffer arrives exactly as it was written and is passed
 // through, because encoding it here would encode a second time what the
 // recorders already gamma-encoded themselves.
-func presentSource(format cgfx.TextureFormat) string {
+func presentSource(format gpu.TextureFormat) string {
 	const header = `
 @group(0) @binding(0) var frameTexture: texture_2d<f32>;
 @group(0) @binding(1) var frameSampler: sampler;
@@ -67,7 +67,7 @@ fn fs_main(in: Vertex) -> @location(0) vec4<f32> {
     return vec4<f32>(encoded, light.a);
 }
 `
-	if format.Resolve() == cgfx.FormatRGBA8Srgb {
+	if format.Resolve() == gpu.FormatRGBA8Srgb {
 		return header + encode
 	}
 	return header + passthrough
@@ -84,9 +84,9 @@ func (b *gfxBackend) frameBuffer() *gfxbTexture {
 	if b.screenW <= 0 || b.screenH <= 0 {
 		return nil
 	}
-	frame, err := b.newTexture(cgfx.TextureDesc{
+	frame, err := b.newTexture(gpu.TextureDesc{
 		Width: b.screenW, Height: b.screenH, Layers: 1,
-		Format: cgfx.FrameBufferFormat, Renderable: true, Label: "gfx.framebuffer",
+		Format: gpu.FrameBufferFormat, Renderable: true, Label: "gfx.framebuffer",
 	})
 	if err != nil {
 		return nil
@@ -187,7 +187,7 @@ func (b *gfxBackend) presentPipeline() *wgpu.RenderPipeline {
 	// it is recorded rather than retried every frame.
 	b.presentFailed = true
 	module, err := b.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
-		Label: "gfx.present", WGSL: presentSource(cgfx.FrameBufferFormat),
+		Label: "gfx.present", WGSL: presentSource(gpu.FrameBufferFormat),
 	})
 	if err != nil {
 		return nil

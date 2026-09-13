@@ -1,12 +1,15 @@
 package internal
 
-import "github.com/dvoyni/cog/libs/m"
+import (
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/libs/m"
+)
 
 // BufferDescr describes a GPU buffer from inline bytes (BufferWithBytes) or a
 // baked storage buffer returned by ResourceQueue.BakeBuffer.
 type BufferDescr struct {
 	source bufferSource
-	id     BufferID
+	id     gpu.BufferID
 	size   int
 	// bytes is static: the descriptor never writes it, and a caller who built
 	// it from a slice they still hold must not either. That is what lets a
@@ -17,7 +20,7 @@ type BufferDescr struct {
 
 // ID returns the baked buffer identifier, or 0 when the descriptor is not
 // baked.
-func (b BufferDescr) ID() BufferID { return b.id }
+func (b BufferDescr) ID() gpu.BufferID { return b.id }
 
 // Size returns the buffer's size in bytes: what was uploaded for an inline
 // descriptor, and what the baked buffer holds for a baked one.
@@ -37,7 +40,7 @@ const (
 )
 
 // BakedBuffer is the descriptor of a buffer already baked under id.
-func BakedBuffer(id BufferID, size int) BufferDescr {
+func BakedBuffer(id gpu.BufferID, size int) BufferDescr {
 	return BufferDescr{source: BufferSourceBaked, id: id, size: size}
 }
 
@@ -67,5 +70,5 @@ func (q *OpQueue) TemporaryBuffer(data []byte, copyData bool) BufferDescr {
 	if len(data) == 0 {
 		return BufferDescr{}
 	}
-	return q.temporaryBuffer(BufferStorage, data, copyData)
+	return q.temporaryBuffer(gpu.BufferStorage, data, copyData)
 }

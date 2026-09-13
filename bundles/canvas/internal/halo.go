@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/dvoyni/cog/extensions/gfx"
+import (
+	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
+)
 
 // The shape of the band, defined once and used both by
 // canvas.DefaultHaloProfile and by the material's own parameters, so the value a
@@ -52,7 +55,7 @@ const (
 // silently re-key every batch that named it.
 var HaloSpriteMaterial = gfx.MaterialWithState(
 	gfx.ShaderWithResource(HaloShaderPath),
-	gfx.StateOverlay2D,
+	gpu.StateOverlay2D,
 	gfx.FloatParam(HaloReachSlot, DefaultHaloReach),
 	gfx.FloatParam(HaloPlateauSlot, DefaultHaloPlateau),
 	gfx.FloatParam(HaloExponentSlot, DefaultHaloExponent),

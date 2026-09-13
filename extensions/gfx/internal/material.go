@@ -5,6 +5,8 @@ import (
 	"hash/maphash"
 	"math"
 	"unsafe"
+
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 )
 
 // MaterialDescr describes how to shade a mesh: a shader plus named parameters.
@@ -13,39 +15,18 @@ import (
 type MaterialDescr struct {
 	shader ShaderDescr
 	params []ParameterDescr
-	state  MaterialState
+	state  gpu.MaterialState
 }
-
-// MaterialState controls fixed render-pipeline state. Depth compare and depth
-// write are independent because the states 3D needs most - test but do not
-// write, or test with another compare - are inexpressible as one flag. Every
-// zero value is both the WebGPU default and what the backend did before the
-// field existed, so MaterialState{} renders as it always has.
-type MaterialState struct {
-	Blend        BlendMode
-	DepthCompare CompareFunc
-	DepthWrite   bool
-	Cull         CullMode
-	FrontFace    FrontFace
-}
-
-// The states the engine's three passes are made of: opaque geometry, then
-// transparent geometry over it, then 2D on top of everything.
-var (
-	StateOpaque3D      = MaterialState{Blend: BlendOpaque, DepthCompare: CompareLess, DepthWrite: true, Cull: CullBack}
-	StateTransparent3D = MaterialState{Blend: BlendAlpha, DepthCompare: CompareLess}
-	StateOverlay2D     = MaterialState{}
-)
 
 // Material describes a material from a shader and its named parameters. It
 // depth-tests and writes, which is what an opaque draw wants; a draw that wants
 // anything else names its state through MaterialWithState.
 func Material(shader ShaderDescr, params ...ParameterDescr) MaterialDescr {
-	return MaterialWithState(shader, MaterialState{Blend: BlendAlpha, DepthCompare: CompareLess, DepthWrite: true}, params...)
+	return MaterialWithState(shader, gpu.MaterialState{Blend: gpu.BlendAlpha, DepthCompare: gpu.CompareLess, DepthWrite: true}, params...)
 }
 
 // MaterialWithState describes a material with explicit fixed pipeline state.
-func MaterialWithState(shader ShaderDescr, state MaterialState, params ...ParameterDescr) MaterialDescr {
+func MaterialWithState(shader ShaderDescr, state gpu.MaterialState, params ...ParameterDescr) MaterialDescr {
 	return MaterialDescr{shader: shader, params: params, state: state}
 }
 
@@ -67,7 +48,7 @@ func (m MaterialDescr) CloneTo(arena []ParameterDescr) (MaterialDescr, []Paramet
 }
 
 // State reports the material's fixed pipeline state.
-func (m MaterialDescr) State() MaterialState { return m.state }
+func (m MaterialDescr) State() gpu.MaterialState { return m.state }
 
 // Shader reports the shader the material shades with, supply included: one
 // path under two supplies is two shaders, so the descriptor answers rather

@@ -73,7 +73,7 @@ restates it.
 
 Tool name `gfx_capture`. **Screen only.**
 
-`GpuCaptureDesc` addresses any colour texture by `TextureID`, and that
+`gpu.CaptureDesc` addresses any colour texture by `TextureID`, and that
 generality is right for `gfx` — but nothing lists textures to an agent and
 `TextureID` is an opaque handle it has no way to obtain. Texture capture stays a
 `gfx` feature the game's own code can use.

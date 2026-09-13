@@ -2,6 +2,7 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 )
 
 // Span locates one stretch of the staging arena. Offsets rather than a slice
@@ -57,7 +58,7 @@ type MeshBaker struct {
 // count that is not a multiple of three under TriangleList - is reported and
 // yields a zero MeshRef, which draws nothing.
 func (la LookupAccess) BakeMesh[TVertex VertexLayout](
-	vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology,
+	vertices []TVertex, indices []uint32, topology gpu.PrimitiveTopology,
 ) MeshRef {
 	if !la.Valid() {
 		return MeshRef{}

@@ -3,7 +3,7 @@ package internal
 import (
 	"math"
 
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -67,7 +67,7 @@ func (l *Lookup) ensureUnit(shape unitShape, bake BakeFunc) MeshRef {
 	l.unit[shape] = l.bakeMeshNow(meshInput{
 		vertices: vertexSpan, indices: indexSpan,
 		vertexCount: len(vertices), indexCount: len(indices),
-		topology: gfx.TopologyTriangleList, indexWidth: width, layout: layout,
+		topology: gpu.TopologyTriangleList, indexWidth: width, layout: layout,
 		layoutID: layoutID, standard: true, bounds: bounds, uv: uv,
 	}, arena, bake)
 	return l.unit[shape]

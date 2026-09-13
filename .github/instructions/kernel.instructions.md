@@ -295,7 +295,8 @@ An identity nothing outside orders against stays unexported in the `…impl`
 ## Adapters
 
 An Adapter is a plain value implementing an interface a Port declares in its
-contract root (`gfx.Backend`, `storage.PermanentFS`, `mcp.Provider`), contributed
+contract root or its vocabulary package (`gpu.Backend` in gfx's `gpu`,
+`storage.PermanentFS`, `mcp.Provider`), contributed
 by a plugin and bound to the Port during composition.
 [`kernel/docs/specs/ports.md`](../../kernel/docs/specs/ports.md) has the full
 rules.
@@ -306,7 +307,7 @@ a handle, unlike a resource value, is safe to keep — then read it from `Start`
 onwards; `Get` panics before composition binds it:
 
 ```go
-p.backend = registrar.RequireAdapter[gfx.Backend]()       // exactly one
+p.backend = registrar.RequireAdapter[gpu.Backend]()       // exactly one
 p.providers = registrar.CollectAdapters[mcp.Provider]()   // any number, zero included
 ```
 
@@ -320,7 +321,7 @@ registrar.ProvideAdapter[mcp.Provider](provider{})
 ```
 
 - **The value exists by `Register`.** Something that becomes usable later says
-  so through the interface: wgpu provides one stable `gfx.Backend` at `Register`
+  so through the interface: wgpu provides one stable `gpu.Backend` at `Register`
   and reports `Ready()` once its device arrives.
 - **An Adapter takes no lock.** Reading it is not a resource access, so which
   goroutines may call it is the interface's contract, and it holds no resource

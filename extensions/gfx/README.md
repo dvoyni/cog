@@ -3,10 +3,10 @@
 `github.com/dvoyni/cog/extensions/gfx` is Cog's driver-neutral renderer. Gameplay records
 high-level draws into an `OpQueue`; gfx rotates queues through a latest-wins
 triple buffer, resolves resource-backed shaders and textures, translates to a
-`GpuQueue`, and hands that queue to a driver-provided `Backend`.
+`gpu.Queue`, and hands that queue to a driver-provided `gpu.Backend`.
 
 gfx is a **Port**: it ships its own contract and implementation, and works only
-once a `Backend` **Adapter** is bound to it. The vocabulary is in
+once a `gpu.Backend` **Adapter** is bound to it. The vocabulary is in
 [`CONTEXT.md`](../../CONTEXT.md) and the decision in
 [ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
 
@@ -19,22 +19,52 @@ preprocessor exists; nothing else in this README describes it.
 
 ## Packages
 
-gfx has the Port shape: a contract root, an `…impl` and an `internal/`.
+gfx has the Port shape: a contract root, an `…impl` and an `internal/`, plus a
+vocabulary package, `gpu`, holding the contract its Adapter implements.
 
-- **`extensions/gfx`** is the contract: commands, resource types, descriptors,
-  `Backend` and its vocabulary, `Viewport`, `Name` and the ordering identities
-  `PresentOnUpdate` and `RenderOnRender`. It declares no plugin, and it is what
-  every other package imports.
+- **`extensions/gfx`** is the recording contract: `OpQueue`, `ResourceQueue`,
+  the descriptors and their constructors, commands (`PresentCmd` and the rest),
+  the `Viewport` resource, the view types, `Name` and the ordering identities
+  `PresentOnUpdate` and `RenderOnRender`. It declares no plugin. Recorders
+  (canvas, scene, ui, ecsscene and games) import it to draw.
+- **`extensions/gfx/gpu`** is the GPU contract and the vocabulary both halves
+  speak: `Backend`, `Queue` and its sinks, `RenderPass`, `Capture`, the shader,
+  pipeline, texture, sampler and buffer descriptors, `Limits`, and every ID,
+  format and enum. It imports nothing in cog but `libs/m`. An Adapter author
+  reads only this package; a recorder imports it beside the root for the IDs,
+  formats and states it passes to gfx.
 - **`extensions/gfx/gfximpl`** is the plugin: `New`, its handlers, the
   translator, the capture and frame-snapshot slots, and the mcp Provider with
   its two capabilities. Only composition roots and tests import it.
-- **`extensions/gfx/internal`** holds what the two share and nothing else may
-  reach: the declarations of the contract types whose unexported state the
-  translator reads, their recording methods, the consume side of the queues,
-  and the shader preprocessor.
+- **`extensions/gfx/internal`** holds what the root and gfximpl share and
+  nothing else may reach: the declarations of the recording types whose
+  unexported state the translator reads, their recording methods, the consume
+  side of the queues, and the shader preprocessor.
 
-A contract type whose insides gfximpl reads (`OpQueue`, `ResourceQueue`, the
-descriptors and the enums they carry) is declared in `internal` with its
+Who imports which:
+
+| package | imports `gfx` | imports `gpu` |
+| --- | --- | --- |
+| recorders: canvas, scene, ui, ecsscene, games | yes, to record | yes, for IDs, formats, states and descriptors |
+| gfximpl | yes | yes; it requires the Adapter as `gpu.Backend` |
+| `gfx/internal` | never | yes |
+| an Adapter's backend (wgpu's `gfx*.go` backend files, cog-examples' headless `Backend`) | no | yes, and nothing else in cog |
+| an Adapter's plugin wiring (wgpu's `plugin.go`) | yes, for `gfx.Name`, and to drive `SetViewportCmd` | yes, to provide the `gpu.Backend` |
+| `gpu` itself | never | — |
+
+The root aliases no `gpu` type. Every ID, format, enum and backend descriptor
+has exactly one name, `gpu.X`, in code, docs and error messages alike, and
+gfx's recording API takes and returns those types directly
+(`ResourceQueue.BakeTexture(w, h, gpu.FormatRGBA8Srgb, …)`,
+`gfx.MaterialWithState(shader, gpu.StateOpaque3D, …)`). The tier test enforces
+`gpu`'s side: it may import only libs, and the gfx root, `gfx/internal`, the
+kernel and every Bundle are out of its reach. The split between an Adapter's
+backend files and its plugin wiring is a rule of this README and
+`architecture.instructions.md`; the tier test works per package and does not
+check it file by file.
+
+A recording type whose insides gfximpl reads (`OpQueue`, `ResourceQueue`, the
+descriptors) is declared in `internal` with its
 fields unexported, and re-exported from the root as an alias
 (`type OpQueue = internal.OpQueue`) plus a wrapper for each constructor. It
 stays a concrete type, and its exported methods are public API through the
@@ -47,7 +77,7 @@ root. See [`architecture.instructions.md`](../../.github/instructions/architectu
 - Name: `gfx.Name` (`"gfx"`)
 - Constructor: `gfximpl.New() kernel.Plugin`
 - Plugin dependency: `storage`
-- Requires: exactly one `gfx.Backend` Adapter
+- Requires: exactly one `gpu.Backend` Adapter
 - Go package dependencies: `app`, `kernel`, `mcp`, `storage`, `x/image`
 - Contributes: one `mcp.Provider` Adapter
 - Implements: `kernel.PluginStopper`
@@ -56,9 +86,9 @@ The plugin has no configuration. Register `storage` before it so shader and
 texture resources are available at runtime.
 
 **The Backend Adapter.** The plugin calls
-`registrar.RequireAdapter[gfx.Backend]()` and reads the handle from `Start`
+`registrar.RequireAdapter[gpu.Backend]()` and reads the handle from `Start`
 onwards. A driver provides its backend with
-`registrar.ProvideAdapter[gfx.Backend](backend)` during its own `Register`; a
+`registrar.ProvideAdapter[gpu.Backend](backend)` during its own `Register`; a
 composition with no provider fails with `kernel.ErrMissingAdapter`, and one
 with two fails with `kernel.ErrDuplicateAdapter`. No command installs a
 backend.
@@ -142,7 +172,7 @@ Explicit resources returned by `Bake*` are caller-owned and must be released.
 ## The frame buffer and the present pass
 
 `ScreenTarget()` does not mean the swapchain. It means a frame-sized colour
-buffer in `gfx.FrameBufferFormat` that the backend allocates on first use, and
+buffer in `gpu.FrameBufferFormat` that the backend allocates on first use, and
 gfx appends one implicit full-screen **present pass** after every declared pass
 to put it on the surface. A frame that renders only into its own textures never
 allocates the buffer and never presents.
@@ -170,14 +200,14 @@ one caller among them.
 
 `ArmCaptureCmd` takes an `ArmCaptureRequest{Target, Amount, Interval, Paused}`
 and answers with `ArmCaptureResponse{Done, Viewport}`. `Done` is a buffered
-channel carrying one `GpuCapture` per still; `GpuCapture` carries either the
+channel carrying one `gpu.Capture` per still; `gpu.Capture` carries either the
 mapped bytes or the reason there are none, so a caller cannot handle a result
-and forget a failure. `GpuCapture.Image()` un-strides the padded rows into an
+and forget a failure. `gpu.Capture.Image()` un-strides the padded rows into an
 `image.NRGBA` — straight-alpha, because `image.RGBA` is premultiplied and
 `FormatRGBA8` is not.
 
-`Target` is a `GpuCaptureDesc{Screen bool, Texture TextureID}`, mirroring
-`GpuPassDesc`'s addressing. A capture always reads mip 0, layer 0. Depth is
+`Target` is a `gpu.CaptureDesc{Screen bool, Texture TextureID}`, mirroring
+`gpu.PassDesc`'s addressing. A capture always reads mip 0, layer 0. Depth is
 refused, and so is any format that is not 8-bit RGBA.
 
 **The moment a capture names.** The still binds to a tick that *began* after
@@ -207,10 +237,10 @@ taken under one pause are byte-identical, and a burst while paused is refused.
 moments on purpose. A burst truncates rather than failing: the caller sees the
 stills that landed.
 
-**One at a time.** A second arm while one is live is `ErrCaptureBusy`, refused
+**One at a time.** A second arm while one is live is `gpu.ErrCaptureBusy`, refused
 rather than queued or coalesced. The backend refuses a second in-flight map the
-same way, through `GpuCapture.Err`, because a game's own code may arm one.
-Shutdown completes a live capture with `ErrCaptureAbandoned` on the channel a
+same way, through `gpu.Capture.Err`, because a game's own code may arm one.
+Shutdown completes a live capture with `gpu.ErrCaptureAbandoned` on the channel a
 result would have used.
 
 `Renderable` now implies copy-source. You can only read back what something
@@ -228,7 +258,7 @@ tools because "nothing is on screen" and "this looks wrong" are different
 sentences. Both are `mcp.ReadOnly()`, which in cog's reading means the
 capability does not change the game.
 
-`gfx_capture` is screen-only: `GpuCaptureDesc` addresses any colour texture and
+`gfx_capture` is screen-only: `gpu.CaptureDesc` addresses any colour texture and
 that generality is right for gfx, but nothing lists textures to an agent and a
 `TextureID` is an opaque handle it has no way to obtain.
 
@@ -281,11 +311,13 @@ accessors instead, which the compiler checks. Two rules hold across all of them:
 a tagged union serializes to exactly one value, and bulk bytes never travel —
 inline pixels and raw parameter data are reported as a byte count.
 
-The enum name tables behind the views are not in the contract root, because naming an enum
-for a debug document is not a commitment to render every gfx enum for every cog
-app. `FilterModeName` is the one exception, and the rule is narrow: a name
-crosses the package boundary only where a sibling snapshot reports a gfx enum
-of its own, which `canvas` does on every sprite transform.
+The views spell every enum by name. The GPU vocabulary's enums spell themselves
+through `Name()` methods in `gpu` (`gpu.FilterMode.Name()`, which `canvas` also
+reads for every sprite transform, so one filter reaches an agent in one
+spelling whichever tool showed it). They are `Name` rather than `String`, so
+formatting an enum with `%v` still prints its number. The tables for gfx's own
+recording enums stay in `internal`, because naming them for a debug document
+is not a commitment to render them for every cog app.
 
 The full contract is in [docs/specs/capture.md](docs/specs/capture.md) and
 [docs/specs/mcp.md](docs/specs/mcp.md); both capabilities those documents
@@ -371,7 +403,7 @@ and physical `FramebufferWidth`/`FramebufferHeight`.
 - `TextureDescr`: build with `TextureWithResource` or `TextureWithBytes`, or use
   `ResourceQueue`; inspect with `ID()`, `Path()`, `Size()`, `Format()`,
   `Mipmaps()` and `PixelBytes()`. Both constructors take a
-  `TextureFormat`, which says whether the texels are light or a gamma-encoded
+  `gpu.TextureFormat`, which says whether the texels are light or a gamma-encoded
   picker value; the same path in two formats is two textures.
 - `ShaderDescr`: build with `ShaderWithResource` or `ShaderWithText`; inspect
   with `Path()` and `Supply()`. One path under two supplies is two shaders, so
@@ -379,8 +411,8 @@ and physical `FramebufferWidth`/`FramebufferHeight`.
 - `MeshDescr`: build with `Mesh` or `MeshIndexed` from buffer descriptors,
   topology, and `VertexAttr` values created by `Attr`; inspect with
   `VertexCount()`, `IndexCount()`, `Indexed()`, `IndexWidth()` and `Topology()`.
-  `MeshIndexed` also takes an `IndexWidth` - `IndexUint32` (the zero value) or
-  `IndexUint16`, the only two WebGPU has - which describes how the caller wrote
+  `MeshIndexed` also takes a `gpu.IndexWidth` - `gpu.IndexUint32` (the zero value)
+  or `gpu.IndexUint16`, the only two WebGPU has - which describes how the caller wrote
   its index bytes rather than asking gfx to convert them. A buffer whose length
   does not divide by its declared width is reported once and its draw dropped;
   checking that every index is below the vertex count belongs to whoever built
@@ -444,17 +476,20 @@ gfx drops a parameter no shader declared, which is ordinary.
 `BufferRangeParam(name, buf, offset, size)` binds one slice of a buffer, which
 is how a draw addresses its own record in a shared arena: the binding is the
 addressing, so no index has to be agreed on between the recording thread and the
-render thread. Storage offsets are 256-aligned (`gfx.StorageAlignment`), so a
+render thread. Storage offsets are 256-aligned (`gpu.StorageAlignment`), so a
 record pads up to a multiple of it — a pad, not a cap on what it may hold.
 
-`gfx.DefaultLimits` is the WebGPU spec floor: 4 bind groups, 8 storage buffers
+`gpu.DefaultLimits` is the WebGPU spec floor: 4 bind groups, 8 storage buffers
 per shader stage, a 128 MiB storage binding, a 64 KiB uniform binding, and a
 256 MiB buffer. Every shader gfx reflects is checked against it, and never
 against the device's own limits — a desktop adapter reports hardware numbers, so
 checking those passes a build that cannot run in a browser. The device's limits
 appear in the message instead.
 
-`MaterialState` contains `Blend`, `DepthCompare`, `DepthWrite`, `Cull`, and
+The pipeline-state vocabulary below is declared in `gpu`, and so are
+`VertexType` and `SamplerDesc`; a recorder names it as `gpu.X`.
+
+`gpu.MaterialState` contains `Blend`, `DepthCompare`, `DepthWrite`, `Cull`, and
 `FrontFace`. Its zero value is both the WebGPU default and what the backend
 always did: alpha over, `CompareAlways`, no depth write, `CullNone`, `FrontCCW`.
 The named states are `StateOpaque3D`, `StateTransparent3D`, and
@@ -469,7 +504,7 @@ The named states are `StateOpaque3D`, `StateTransparent3D`, and
 `AddressMirror`, chosen per axis. `FilterMode` is `FilterLinear` or
 `FilterNearest`.
 
-`SamplerParam(name, SamplerDesc)` takes the descriptor whole: per-axis
+`SamplerParam(name, gpu.SamplerDesc)` takes the descriptor whole: per-axis
 `AddressU`/`AddressV`, separate `Mag`/`Min`/`Mip` filters, `Anisotropy` (0 and 1
 mean off, clamped to 16, and rejected unless all three filters are linear), and
 `Comparison` plus `Compare` for a shadow-style comparison sampler. The zero
@@ -529,12 +564,57 @@ from the second frame on, the caller drops the draw on the zero id exactly as it
 did before, and report-once-drop-always falls out of the cache that already
 exists.
 
-## Backend API
+## The GPU Contract: package gpu
 
-`Backend` is implemented by a system driver. It reserves logical texture and
-buffer IDs, creates and frees samplers/shaders/pipelines, reflects
-`ShaderLayout`, reports the surface it presents to, and executes a
-translated queue. Its methods are:
+`github.com/dvoyni/cog/extensions/gfx/gpu` is what a system driver implements
+and everything gfx and a backend both name. It imports nothing in cog but
+`libs/m`, so a backend builds neither the kernel nor any recorder, and it
+aliases nothing: its types are declared there and have no second name in the
+gfx root.
+
+Its names do not repeat the package. Where the declaration used to live in
+the gfx root as `Gpu…`, the prefix is gone:
+
+| was | is |
+| --- | --- |
+| `gfx.GpuQueue` | `gpu.Queue` |
+| `gfx.GpuPassSink`, `gfx.GpuBakeSink`, `gfx.GpuReleaseSink` | `gpu.PassSink`, `gpu.BakeSink`, `gpu.ReleaseSink` |
+| `gfx.GpuPassDesc`, `gfx.GpuCaptureDesc` | `gpu.PassDesc`, `gpu.CaptureDesc` |
+| `gfx.GpuCapture` | `gpu.Capture` |
+| `gfx.GpuOp`, `gfx/internal.GpuOpKind` | unexported: nothing outside `gpu` reads an op but through replay |
+
+Every other name moved unchanged:
+
+- **The backend:** `Backend`, `Queue`, `PassSink`, `BakeSink`, `ReleaseSink`,
+  `RenderPass`, `PassDesc`, `CaptureDesc`, `Capture` (with `Image()`),
+  `TextureUsage` (`TextureUsageRenderAttachment`, `TextureUsageTextureBinding`,
+  `TextureUsageCopySrc`) and `TextureTransition`.
+- **Descriptors:** `ShaderDesc`, `ShaderLayout`, `ShaderVertexInput`,
+  `UniformMember`, `StorageMember`, `ShaderResource`, `PipelineDesc`,
+  `VertexAttribute`, `TextureDesc`, `SamplerDesc`, `BufferDesc`, `Region`,
+  `Limits` and `DefaultLimits`.
+- **IDs:** `ResourceID`, `TextureID`, `BufferID`, `SamplerID`, `ShaderID`,
+  `PipelineID`, `TextureViewID`.
+- **Formats and enums:** `TextureFormat` with `FrameBufferFormat`,
+  `TextureViewDimension`, `AddressMode`, `FilterMode`, `BufferKind`,
+  `PrimitiveTopology`, `BlendMode`, `CompareFunc`, `CullMode`, `FrontFace`,
+  `MaterialState` with `StateOpaque3D`, `StateTransparent3D` and
+  `StateOverlay2D`, `VertexType`, `VertexScalar`, `IndexWidth`, `LoadOp`,
+  `StoreOp`, and `StorageAlignment`.
+- **Errors a backend reports:** `ErrCaptureBusy`, `ErrCaptureAbandoned`,
+  `ErrCaptureUnsupported` and `ErrCaptureNoTarget`. The burst refusals
+  (`ErrCaptureAmount`, `ErrCaptureSpan`, `ErrCaptureBurstPaused`) validate an
+  `ArmCaptureRequest` and stay in the gfx root.
+- **Helpers that moved with their enums, as methods:** `TextureFormat.Name()`,
+  and `Name()` on `AddressMode`, `FilterMode`, `BlendMode`, `CompareFunc`,
+  `CullMode`, `FrontFace`, `BufferKind`, `LoadOp` and `StoreOp`, which spell a
+  value for a debug document and replace the `internal.…Name` tables and
+  `gfx.FilterModeName`; `VertexType.Decode()` and `VertexType.Size()`, and
+  `VertexScalar.WGSL(count)`, which `gfx.CheckVertexInterface` compares with.
+
+`Backend` reserves logical texture and buffer IDs, creates and frees
+samplers/shaders/pipelines, reflects `ShaderLayout`, reports the surface it
+presents to, and executes a translated queue. Its methods are:
 
 ```go
 type Backend interface {
@@ -550,8 +630,8 @@ type Backend interface {
     ScreenFramebuffer() (TextureViewID, int, int)
     TextureView(TextureID, mip, layer int) TextureViewID
     Limits() Limits
-    Execute(*GpuQueue)
-    TakeCapture() (GpuCapture, bool)
+    Execute(*Queue)
+    TakeCapture() (Capture, bool)
     Ready() bool
 }
 ```
@@ -589,13 +669,13 @@ depth.
 Opaque handles are based on `ResourceID`: `TextureID`, `BufferID`, `SamplerID`,
 `ShaderID`, `PipelineID`, and `TextureViewID`. Zero means no resource.
 
-`GpuQueue` records through `BakeBuffer`, `BakeTexture`, `AllocateTexture`,
+`Queue` records through `BakeBuffer`, `BakeTexture`, `AllocateTexture`,
 `UpdateTexture`, `BeginPass`, `EndPass`, `SetPipeline`, `SetParams`,
 `SetTexture`, `SetSampler`, `SetVertexBuffer`, `SetIndexBuffer`, `SetBuffer`,
-`Draw`, `Present`, `Capture`, `ReleaseBuffer`, and `ReleaseTexture`. `ReplayBakes(GpuBakeSink)`,
-`ReplayPasses(GpuPassSink)`, and `ReplayReleases(GpuReleaseSink)` send each
-phase to a backend; `Reset` reuses the queue. Bakes are hoisted ahead of every
-pass, so a pass can read anything the frame uploaded. The sink interfaces define
+`Draw`, `Present`, `Capture`, `ReleaseBuffer`, and `ReleaseTexture`. `ReplayBakes(BakeSink)`, `ReplayPasses(PassSink)`, and
+`ReplayReleases(ReleaseSink)` send each phase to a backend, and they are the
+whole of the queue's read side; `Reset` reuses the queue. Bakes are hoisted
+ahead of every pass, so a pass can read anything the frame uploaded. The sink interfaces define
 the backend-facing replay contracts, and `BeginPass` returns the `RenderPass`
 its commands go to, so the backend owns encoder and pass lifetime. `Present`
 takes no arguments: the frame buffer, the full-screen triangle, the transfer
@@ -656,9 +736,10 @@ whoever built the geometry, where a pass over the indices already runs.
 
 
 The capture errors are typed for the same reason: a caller reads them, and a
-burst branches on them. `ErrCaptureBusy{}` is a second arm while one is live;
-`ErrCaptureAbandoned{}` a capture the engine stopped before its readback
-resolved; `ErrCaptureUnsupported{Format}` depth or anything else that is not
-8-bit RGBA; `ErrCaptureNoTarget{}` a target the frame never rendered into; and
-`ErrCaptureAmount{Amount, Max}`, `ErrCaptureSpan{Ticks, Max}` and
-`ErrCaptureBurstPaused{}` the three ways a burst is asked for and refused.
+burst branches on them. The four a backend also reports are declared in `gpu`:
+`gpu.ErrCaptureBusy{}` is a second arm while one is live;
+`gpu.ErrCaptureAbandoned{}` a capture the engine stopped before its readback
+resolved; `gpu.ErrCaptureUnsupported{Format}` depth or anything else that is
+not 8-bit RGBA; and `gpu.ErrCaptureNoTarget{}` a target the frame never
+rendered into. The root declares `ErrCaptureAmount{Amount, Max}`,
+`ErrCaptureSpan{Ticks, Max}` and `ErrCaptureBurstPaused{}`, the three ways a burst is asked for and refused.

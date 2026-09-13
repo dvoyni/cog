@@ -8,6 +8,7 @@ import (
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/bundles/canvas/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
@@ -245,15 +246,15 @@ func canvasPass(layerID canvas.Layer, value internal.LayerOps, first, last bool)
 		Label:  "canvas.layer",
 	}
 	if first {
-		desc.DepthLoad, desc.DepthClear = gfx.LoadClear, 1
+		desc.DepthLoad, desc.DepthClear = gpu.LoadClear, 1
 	}
 	if last {
 		// Nothing reads canvas's depth after the run, and discarding saves a
 		// tiled GPU the writeback.
-		desc.DepthStore = gfx.StoreDiscard
+		desc.DepthStore = gpu.StoreDiscard
 	}
 	if value.HasColor {
-		desc.Load, desc.Clear = gfx.LoadClear, value.ClearColor
+		desc.Load, desc.Clear = gpu.LoadClear, value.ClearColor
 	}
 	return desc
 }
@@ -316,8 +317,8 @@ func (p *plugin) ensureQuad(resources *gfx.ResourceQueue) bool {
 	// declares. Four vertices would fit in uint16 twice over; canvas's index
 	// buffer is six indices long once for the life of the plugin, so there is
 	// nothing there to halve.
-	p.quad = gfx.MeshIndexed(p.quadVertices, p.quadIndices, gfx.IndexUint32,
-		gfx.TopologyTriangleList, gfx.Attr(0, gfx.Float32x2))
+	p.quad = gfx.MeshIndexed(p.quadVertices, p.quadIndices, gpu.IndexUint32,
+		gpu.TopologyTriangleList, gfx.Attr(0, gpu.Float32x2))
 	p.quadReady = true
 	return true
 }
@@ -486,7 +487,7 @@ func (p *plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *internal.Atlas, g
 	p.params = append(p.params, op.Params...)
 	material, _, scope := materials.Resolve(internal.FamilyTriangles, nil, 0)
 	p.params = append(p.params, scope...)
-	mesh := gfx.Mesh(gfx.BufferWithBytes(p.tileVertices, true), gfx.TopologyTriangleList, canvas.Vertex{}.VertexLayout()...)
+	mesh := gfx.Mesh(gfx.BufferWithBytes(p.tileVertices, true), gpu.TopologyTriangleList, canvas.Vertex{}.VertexLayout()...)
 	gfxWrite.Draw(mesh, *material, p.params...)
 }
 
@@ -562,7 +563,7 @@ func (p *plugin) emitTextureQuad(gfxWrite *gfx.OpQueue, surf surface, layerTrans
 	)
 	p.params = append(p.params, op.Params...)
 	p.params = append(p.params, scope...)
-	mesh := gfx.Mesh(gfx.BufferWithBytes(p.tileVertices, true), gfx.TopologyTriangleList, canvas.Vertex{}.VertexLayout()...)
+	mesh := gfx.Mesh(gfx.BufferWithBytes(p.tileVertices, true), gpu.TopologyTriangleList, canvas.Vertex{}.VertexLayout()...)
 	gfxWrite.Draw(mesh, *material, p.params...)
 }
 
@@ -611,12 +612,12 @@ func textureUV(width, height int, t canvas.SpriteTransform, size m.Vec2) (m.Vec4
 
 // tileSampler repeats only the axes the transform tiles, so the non-tiled axis
 // clamps at its edges instead of wrapping.
-func tileSampler(t canvas.SpriteTransform) gfx.SamplerDesc {
-	address := func(tile bool) gfx.AddressMode {
+func tileSampler(t canvas.SpriteTransform) gpu.SamplerDesc {
+	address := func(tile bool) gpu.AddressMode {
 		if tile {
-			return gfx.AddressRepeat
+			return gpu.AddressRepeat
 		}
-		return gfx.AddressClamp
+		return gpu.AddressClamp
 	}
 	return canvasSampler(address(t.TileX), address(t.TileY), t.Filter)
 }

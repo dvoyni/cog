@@ -7,6 +7,7 @@ import (
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -104,13 +105,13 @@ func TestNeverCullAndExplicitBoundsOverrideTheBakedSphere(t *testing.T) {
 // its one parameter, so two of them are two material ids.
 func opaqueMaterial(key float32) scene.Material {
 	return scene.Material{{Descr: gfx.MaterialWithState(
-		gfx.ShaderWithResource(internal.SceneShaderPath), gfx.StateOpaque3D, pbrTestParams(key)...,
+		gfx.ShaderWithResource(internal.SceneShaderPath), gpu.StateOpaque3D, pbrTestParams(key)...,
 	)}}
 }
 
 func blendMaterial(key float32) scene.Material {
 	return scene.Material{{Descr: gfx.MaterialWithState(
-		gfx.ShaderWithResource(internal.SceneShaderPath), gfx.StateTransparent3D, pbrTestParams(key)...,
+		gfx.ShaderWithResource(internal.SceneShaderPath), gpu.StateTransparent3D, pbrTestParams(key)...,
 	)}}
 }
 
@@ -121,7 +122,7 @@ func pbrTestParams(key float32) []gfx.ParameterDescr {
 	params := []gfx.ParameterDescr{gfx.FloatParam("key", key)}
 	for _, slot := range internal.PbrSlots {
 		params = append(params,
-			gfx.TextureParam(slot.Texture, gfx.TextureWithBytes(1, 1, gfx.FormatRGBA8, []byte{255, 255, 255, 255}, true, false)),
+			gfx.TextureParam(slot.Texture, gfx.TextureWithBytes(1, 1, gpu.FormatRGBA8, []byte{255, 255, 255, 255}, true, false)),
 			gfx.SamplerParam(slot.Sampler, internal.PbrSampler),
 		)
 	}

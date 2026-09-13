@@ -1,18 +1,18 @@
 package wgpu
 
 import (
-	cgfx "github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/gogpu/gputypes"
 )
 
 // textureFormat maps a gfx format onto the backend format. FormatScreen is
 // resolved first, so the sentinel never reaches a texture descriptor.
-func textureFormat(format cgfx.TextureFormat) gputypes.TextureFormat {
+func textureFormat(format gpu.TextureFormat) gputypes.TextureFormat {
 	switch format.Resolve() {
-	case cgfx.FormatRGBA8Srgb:
+	case gpu.FormatRGBA8Srgb:
 		return gputypes.TextureFormatRGBA8UnormSrgb
-	case cgfx.FormatDepth32F:
+	case gpu.FormatDepth32F:
 		return gputypes.TextureFormatDepth32Float
 	default:
 		return gputypes.TextureFormatRGBA8Unorm
@@ -21,7 +21,7 @@ func textureFormat(format cgfx.TextureFormat) gputypes.TextureFormat {
 
 // bytesPerTexel is the row stride per texel of a format, which every upload
 // derives its BytesPerRow from.
-func bytesPerTexel(format cgfx.TextureFormat) int {
+func bytesPerTexel(format gpu.TextureFormat) int {
 	return int(textureFormat(format).BlockCopySize())
 }
 
@@ -37,9 +37,9 @@ func bytesPerTexel(format cgfx.TextureFormat) int {
 // whether or not a capture ever happens. It is bounded to render targets,
 // which is why the alternative - granting it to every non-depth texture - was
 // not taken: that pays on every atlas and material map in the scene.
-func textureUsage(desc cgfx.TextureDesc) gputypes.TextureUsage {
+func textureUsage(desc gpu.TextureDesc) gputypes.TextureUsage {
 	usage := gputypes.TextureUsageTextureBinding
-	if desc.Format.Resolve() == cgfx.FormatDepth32F {
+	if desc.Format.Resolve() == gpu.FormatDepth32F {
 		return usage | gputypes.TextureUsageRenderAttachment
 	}
 	usage |= gputypes.TextureUsageCopyDst
@@ -51,14 +51,14 @@ func textureUsage(desc cgfx.TextureDesc) gputypes.TextureUsage {
 
 // mipmapsSupported reports whether a mip chain can be generated for a format.
 // Box-filtering depth is meaningless, so it is refused rather than approximated.
-func mipmapsSupported(format cgfx.TextureFormat) bool {
-	return format.Resolve() != cgfx.FormatDepth32F
+func mipmapsSupported(format gpu.TextureFormat) bool {
+	return format.Resolve() != gpu.FormatDepth32F
 }
 
 // downsampleTexels halves an image for the next mip level, filtering in the
 // space the format says its texels are in.
-func downsampleTexels(src []byte, width, height int, format cgfx.TextureFormat) (dst []byte, dw, dh int) {
-	if format.Resolve() == cgfx.FormatRGBA8Srgb {
+func downsampleTexels(src []byte, width, height int, format gpu.TextureFormat) (dst []byte, dw, dh int) {
+	if format.Resolve() == gpu.FormatRGBA8Srgb {
 		return downsampleSrgb(src, width, height)
 	}
 	return downsampleRGBA(src, width, height)

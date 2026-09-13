@@ -237,9 +237,9 @@ and bound by the engine during composition. The full rules are in
 Three declarations on `Registrar`, each keyed by the Go type of an interface:
 
 ```go
-backend := registrar.RequireAdapter[gfx.Backend]()     // exactly one
+backend := registrar.RequireAdapter[gpu.Backend]()     // exactly one
 providers := registrar.CollectAdapters[mcp.Provider]() // any number, zero included
-registrar.ProvideAdapter[gfx.Backend](device)          // contribute one
+registrar.ProvideAdapter[gpu.Backend](device)          // contribute one
 ```
 
 `RequireAdapter[T]` returns a `RequiredAdapter[T]` whose `Get()` yields the one
@@ -318,7 +318,7 @@ the conflict report described below. `Dump` renders it as a readable table.
 `ArchitectureDescription.Ports` holds one `PortDescription` per `RequireAdapter`
 or `CollectAdapters` declaration: its `Interface`, its `Port`, whether it
 `Collects`, and its `Contributors` in plugin order. `Dump` prints them in a
-`ports:` section, as `gfx.Backend (gfx) requires [wgpu]`. An Adapter nobody
+`ports:` section, as `gpu.Backend (gfx) requires [wgpu]`. An Adapter nobody
 consumes binds to nothing and is not listed.
 
 `CommandDescription` and `SubscriptionDescription` also carry `Reads`, `Writes`

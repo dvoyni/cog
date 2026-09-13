@@ -2,6 +2,7 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 )
 
 // MaterialTag binds one pass tag to the gfx material that serves it.
@@ -64,7 +65,7 @@ type PbrDefaults struct {
 // PbrSampler is the sampler every default slot binds: glTF's own default wrap,
 // which is repeat, filtered linearly. SamplerDesc stays comparable so
 // gfx dedupes the five identical descriptors down to one GPU object.
-var PbrSampler = gfx.SamplerDesc{AddressU: gfx.AddressRepeat, AddressV: gfx.AddressRepeat}
+var PbrSampler = gpu.SamplerDesc{AddressU: gpu.AddressRepeat, AddressV: gpu.AddressRepeat}
 
 // PbrSlot is one texture slot of the bundled material: the glTF-verbatim
 // parameter names of its texture and of the two record members that place it,
@@ -214,15 +215,15 @@ const (
 // concern: the shader discards against alphaCutoff, which is zero for an opaque
 // material and therefore a no-op there. It cannot be alpha-to-coverage, which
 // needs MSAA.
-func PbrState(alpha AlphaMode, doubleSided bool) gfx.MaterialState {
-	state := gfx.StateOpaque3D
+func PbrState(alpha AlphaMode, doubleSided bool) gpu.MaterialState {
+	state := gpu.StateOpaque3D
 	if alpha == AlphaBlend {
-		state = gfx.StateTransparent3D
+		state = gpu.StateTransparent3D
 	}
 	if doubleSided {
-		state.Cull = gfx.CullNone
+		state.Cull = gpu.CullNone
 	} else {
-		state.Cull = gfx.CullBack
+		state.Cull = gpu.CullBack
 	}
 	return state
 }

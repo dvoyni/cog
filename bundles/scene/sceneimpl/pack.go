@@ -5,7 +5,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal"
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -215,11 +215,11 @@ func (a *arena) reset() { a.data = a.data[:0] }
 func (a *arena) bytes() []byte { return a.data }
 
 // beginRange pads the arena up to a bindable offset and returns it. A storage
-// binding's offset must be a multiple of gfx.StorageAlignment, so anything
+// binding's offset must be a multiple of gpu.StorageAlignment, so anything
 // bound as its own range starts here.
 func (a *arena) beginRange() int {
-	if remainder := len(a.data) % gfx.StorageAlignment; remainder != 0 {
-		a.data = append(a.data, make([]byte, gfx.StorageAlignment-remainder)...)
+	if remainder := len(a.data) % gpu.StorageAlignment; remainder != 0 {
+		a.data = append(a.data, make([]byte, gpu.StorageAlignment-remainder)...)
 	}
 	return len(a.data)
 }

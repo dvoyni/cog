@@ -2,6 +2,7 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/kernel"
 )
 
@@ -109,8 +110,8 @@ func (l *Lookup) ensureBundled(bake bakeTextureFunc) [VariantCount]Material {
 	}
 	if !l.hasDefaults {
 		l.defaults = PbrDefaults{
-			White:      bake(1, 1, gfx.FormatRGBA8, []byte{0xff, 0xff, 0xff, 0xff}),
-			FlatNormal: bake(1, 1, gfx.FormatRGBA8, []byte{0x80, 0x80, 0xff, 0xff}),
+			White:      bake(1, 1, gpu.FormatRGBA8, []byte{0xff, 0xff, 0xff, 0xff}),
+			FlatNormal: bake(1, 1, gpu.FormatRGBA8, []byte{0x80, 0x80, 0xff, 0xff}),
 		}
 		l.hasDefaults = true
 	}

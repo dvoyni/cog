@@ -7,7 +7,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal"
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -57,7 +57,7 @@ func readInstanceMesh(data []byte, index int) uint32 {
 func TestAMeshWithAUVRangeNamesItsOwnSlotAfterTheIdentity(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		ref := q.TemporaryMesh(uvTriangle(), nil, gfx.TopologyTriangleList)
+		ref := q.TemporaryMesh(uvTriangle(), nil, gpu.TopologyTriangleList)
 		q.Mesh(0, ref, scene.MeshDraw{NeverCull: true})
 	})
 	h.frame()
@@ -86,7 +86,7 @@ func TestACustomLayoutMeshNamesTheIdentitySlot(t *testing.T) {
 	custom := []customVertex{{Position: m.Vec3{X: -1, Y: -1}}, {Position: m.Vec3{X: 1, Y: -1}}, {}}
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		ref := q.TemporaryMesh(custom, nil, gfx.TopologyTriangleList)
+		ref := q.TemporaryMesh(custom, nil, gpu.TopologyTriangleList)
 		q.Mesh(0, ref, scene.MeshDraw{Material: opaqueMaterial(7), NeverCull: true})
 	})
 	h.frame()

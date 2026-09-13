@@ -2,6 +2,7 @@ package canvas
 
 import (
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/kernel"
 )
 
@@ -108,7 +109,7 @@ type LayerView struct {
 	// screen, and a layer drawing into a texture nothing composites afterwards
 	// is one of the ways a frame ends up empty.
 	Target        string        `json:"target"`
-	TargetTexture gfx.TextureID `json:"targetTexture,omitempty"`
+	TargetTexture gpu.TextureID `json:"targetTexture,omitempty"`
 	TargetWidth   int           `json:"targetWidth,omitempty"`
 	TargetHeight  int           `json:"targetHeight,omitempty"`
 	TargetMip     int           `json:"targetMip,omitempty"`

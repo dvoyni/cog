@@ -261,7 +261,7 @@ and [#195](https://github.com/dvoyni/cog/issues/195).
 
 Every narrow format used here is already wired end to end: `Unorm1010102`,
 `Float16x2`, `Unorm16x2` and the rest map to `gputypes` at
-`extensions/wgpu/gfxbackend.go:1018-1071`, and `gfx.VertexType.size()` knows their widths
+`extensions/wgpu/gfxbackend.go:1018-1071`, and `gpu.VertexType.Size()` knows their widths
 (`extensions/gfx/mesh.go:56-66`). `scene.Vertex` uses **none** of them today except
 `Unorm8x4` for `Color`. **Nothing has to be built in the backend for this axis.**
 
@@ -320,7 +320,7 @@ The honest form of the finding is a **frequency threshold**, not a blanket no:
 2° environment structure is destroyed outright, 4–16° structure loses only its
 edges, and a smooth gradient shows almost nothing. The panorama used was
 deliberately harsher than a real one can be inside eight bits, since
-`gfx.TextureFormat` has no float member (`extensions/gfx/contract.go:40`).
+`gpu.TextureFormat` has no float member (`extensions/gfx/contract.go:40`).
 
 `oct22` is **not** recorded as a rejected alternative: four bytes for worse
 accuracy than `oct32`'s four was never a candidate for the stride.
