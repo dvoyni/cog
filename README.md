@@ -81,22 +81,45 @@ error handling.
 
 ## Plugin Kinds
 
-Every package is one kind, and its directory says which:
+Every plugin is one kind, and its directory says which:
 
-- `kernel` imports nothing else in cog.
+- **Slots** (`slots/`) cannot work until an **Adapter** fills a **Port** they
+    require, and composition fails without one: app, gfx, storage.
+- **Extensions** (`extensions/`) provide Adapters for Slots and declare no API:
+    wgpu, diskfs, jsfs.
+- **Bundles** (`bundles/`) are every other plugin. They require no Port, and
+    may collect Adapters or contribute them.
 - **Libraries** (`libs/`) define no plugin and import only other Libraries and
-    the kernel.
-- **Open slots** (`slots/`) are contracts shipped without an implementation.
-- **Bundles** (`bundles/X`) ship a slot and its one implementation: the root
-    package is the contract, `Ximpl` holds the plugin, and `internal/` is what
-    the two share.
-- **Ports** (`extensions/P` with a `Pimpl` child) have the same shape, but work
-    only once an **Adapter** is bound to them.
-- Every other `extensions/` directory is an Adapter or an Extension of an Open
-    slot, imported only by composition roots and tests, like every `…impl`.
+    the kernel, and `kernel` imports nothing else in cog.
 
-Games and examples are composition roots and import freely. The kinds, where new
-code goes and the full import table are in
+Every plugin `X` has one shape:
+
+- **The root, `X/`, holds declarations only**: commands, events, resources,
+    Ports, Adapters, types, config, errors and `Name`, each in its own fixed
+    file. An Extension's root holds only `Name`, config, its Adapters and
+    errors.
+- **Its functions are forwarders.** They live in `utils.go`, and each one is a
+    single call into `X/internal/types` passing its parameters through. A
+    Slot's forwarders name no other plugin's types.
+- **`X/internal/types`** holds the concrete types the root aliases for
+    performance, and **`X/internal/`** holds the implementation.
+- **The constructor package, `X/Xplugin`,** exports only `New()`.
+
+| package | may import |
+| --- | --- |
+| root | libs, kernel, other plugins' roots, its own `internal/types` |
+| `internal/types` | libs, kernel, other plugins' roots |
+| `internal/` | libs, kernel, any root, its own `internal/` and `internal/types` |
+| constructor | kernel, its own `internal/` |
+
+Nothing in cog imports a constructor package or another plugin's internals,
+except tests. Games and examples are composition roots and import freely.
+
+The plugins are moving to this shape one at a time. Until each moves, it keeps
+the contract root, `…impl` and `internal/` shape of
+[ADR 0001](docs/adr/0001-bundles-slots-ports-and-adapters.md), and the paths
+and constructors below are its current ones. The kinds, the file allowlists,
+where new code goes, the full import table and the plugins not yet moved are in
 [`.github/instructions/architecture.instructions.md`](.github/instructions/architecture.instructions.md),
 and `go test ./kernel/archtest` enforces them.
 

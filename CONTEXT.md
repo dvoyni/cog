@@ -27,38 +27,34 @@ The Handler implementing one Command. It is always private: the command type is 
 A handler's statement, made in its `Lock`, that it dispatches a given command. Composition folds that command's lock closure into the handler's own set, so the handler never names the resources behind it.
 
 **Plugin**:
-A statically linked unit of engine functionality selected before startup and fixed for the engine lifetime.
+A statically linked unit of engine functionality selected before startup and fixed for the engine lifetime. Every Plugin is exactly one of a Slot, an Extension or a Bundle, and what it offers other plugins is declared apart from how it works.
 
 **Plugin dependency**:
 A requirement that another plugin complete registration and any optional startup first.
 
 **Slot**:
-The contract half of a piece of engine functionality: the commands, events, resources and subscription identities other plugins use, with no handler behind any of them.
-_Avoid_: Interface, API, contract package
+A Plugin that cannot work until an Adapter fills a Port it requires, and that composition refuses to start without one. It is how the platform varies beneath a piece of engine functionality without that functionality being replaced: the renderer, storage and the application loop stay, and what draws, persists and drives for them changes. What it offers names only its own types.
+_Avoid_: Interface, contract half; Open slot, which is retired
 
 **Extension**:
-A plugin that implements a Slot. It handles the Slot's commands, owns its resources and registers its subscriptions, and declares no contract of its own.
-_Avoid_: Backend, driver, as the name of the kind
+A Plugin that fills Slots' required Ports with Adapters and offers no API of its own. It may also contribute to a collected Port. A plugin that would need both is two plugins.
+_Avoid_: Backend, driver, as the name of the kind; implementation of a Slot, its retired meaning
 
 **Bundle**:
-A Slot and the one Extension that implements it, shipped together, so that Extension cannot be replaced by another. It is self-contained: it needs nothing supplied from outside to work, though it may contribute Adapters to a Port that collects them. Most engine functionality is a Bundle.
+Every Plugin that is neither a Slot nor an Extension: it requires no Port, though it may collect Adapters through a Port of its own or contribute them to another plugin's. Most engine functionality is a Bundle.
 _Avoid_: Module, which is a shader module or a Go module; package; feature
 
-**Open slot**:
-A Slot shipped without an Extension, so that whichever Extension an engine is composed with fills it. It declares no Resources, because a Resource needs an owner the Slot cannot name.
-_Avoid_: Abstract bundle, interface
-
 **Port**:
-A plugin that ships its own contract and implementation, as a Bundle does, but works only once it is given an Adapter for an interface it declares. It declares whether it requires exactly one Adapter or collects any number. It is how the platform varies beneath a piece of engine functionality without that functionality being replaced: the renderer and storage stay, and what draws for them and what persists for them changes.
-_Avoid_: Bundle, which needs nothing supplied; Open slot, whose whole implementation is replaced
+A declared point at which a plugin takes Adapters from other plugins, identified by its own type and typed by the interface its Adapters implement. A required Port takes exactly one, and declaring one is what makes a plugin a Slot; a collected Port takes any number, zero included.
+_Avoid_: Plugin, as the name of a kind; the interface alone, which is what a Port carries rather than what it is
 
 **Adapter**:
-An implementation of a Port's interface, contributed by a plugin and bound to that Port by the engine during composition. It is a plain value rather than a Resource, so reaching it takes no lock. A window driver's GPU backend is an Adapter of the renderer; each plugin's Provider is an Adapter of the Broker.
+A plugin's implementation of another plugin's Port, identified by its own type and bound to that Port by the engine during composition. It is a plain value rather than a Resource, so reaching it takes no lock. A window driver's GPU backend is an Adapter of the renderer's backend Port; each plugin's Provider is an Adapter of the Broker's Port.
 _Avoid_: Backend, driver, as the name of the kind
 
-**Vocabulary package**:
-The package beneath a Port that declares the contract its Adapters implement and every ID, format and enum the Port's recording API and those Adapters both speak. It imports nothing but Libraries, and the Port's root aliases none of it, so each of its types has one name. An Adapter author reads only it; a recorder imports it beside the Port's root. gfx's is `gpu`.
-_Avoid_: Types package, common, shared; Slot, which is a Plugin's whole contract rather than the half an Adapter implements
+**Open slot**, **Vocabulary package**, **Contract root**:
+_Retired._ An Open slot was a contract shipped with no implementation, filled by whichever Extension an engine was composed with; a Slot now ships its own implementation and requires an Adapter instead. A Vocabulary package held a Port's Adapter contract beneath it, apart from its recording API; a Slot now declares both together. A contract root was the package holding a plugin's API beside the logic that API needed; a plugin's root now holds declarations only.
+_Avoid_: all three.
 
 **Library**:
 Code that is not a plugin and defines none, importing only other Libraries and the kernel.
@@ -74,7 +70,7 @@ The lifecycle phase in which a plugin declares the contracts and initial resourc
 The optional lifecycle phase in which a plugin begins operating after all registrations have been finalized.
 
 **Host**:
-The single plugin that owns the application's blocking runtime loop.
+The single plugin that owns the application's blocking runtime loop, which the engine runs on the calling thread. It is a role the kernel gives one plugin, not a kind: the plugin playing it is still a Slot, an Extension or a Bundle.
 _Avoid_: System plugin. A System is the ECS's term for a func run over matching Entities, and has nothing to do with the Host.
 
 **Tick source**:
@@ -175,7 +171,7 @@ _Avoid_: Flag, marker, label
 
 **Component set**:
 The exact set of Component types one Entity has. A Spawn names the one a new Entity starts with as a struct type, the way a Query is, whose value carries the Components themselves; from then on the Entity may gain and lose Components and the struct type means nothing. It is not a structure the engine keeps, and nothing groups Entities by it.
-_Avoid_: Archetype, table, signature; Bundle, which is a Slot shipped with its Extension; Prefab and Template, both still unspent
+_Avoid_: Archetype, table, signature; Bundle, which is a kind of Plugin; Prefab and Template, both still unspent
 
 **Component registration**:
 The Registration-phase declaration that one Component type exists, made once per type by exactly one plugin. It is what makes the type's Store exist, so a type no plugin registered cannot be added, read, or locked.

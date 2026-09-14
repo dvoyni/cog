@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: superseded by ADR-0002
 ---
 
 # Bundles, Slots, Ports and Adapters
+
+> **Superseded** by [ADR 0002](0002-slots-extensions-and-bundles-as-declaration-roots.md). It changes what Slot, Extension and Bundle mean, retires Open slot and the Port's vocabulary package, and replaces the contract root, `…impl` and `internal/` with a declaration root, `internal/types`, `internal/` and a constructor package. This record stays as it was decided. Plugins on the tier test's migration list still follow it until they move.
 
 Cog's top-level packages had mixed contract and implementation in one package, so a plugin that wanted another's contract imported its implementation as well. Plugins also named each other: through `Name` constants, through ordering identities declared next to handlers, and through `Executioner.Plugins[T]`. We sort every plugin into exactly one kind, each with its own directory and its own import rules, and enforce those rules with a test instead of prose:
 
