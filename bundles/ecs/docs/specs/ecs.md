@@ -695,8 +695,8 @@ constructor is unreachable from outside the plugin, and composition takes no
 world at all:
 
 ```go
-config[ecs.Name] = ecsimpl.Config{PrewarmEntities: prewarmEntities}
-kernel.New(config).WithPlugins(ecsimpl.New(), physics.New(), game.New())
+config[ecs.Name] = ecs.Config{PrewarmEntities: prewarmEntities}
+kernel.New(config).WithPlugins(ecsplugin.New(), physics.New(), game.New())
 ```
 
 > **Amended by [#340](https://github.com/dvoyni/cog/issues/340).** ecs is a
@@ -710,6 +710,21 @@ kernel.New(config).WithPlugins(ecsimpl.New(), physics.New(), game.New())
 > it one per Engine. The kernel's architecture output named the resource
 > `*internal.Entities`, the package it is declared in, until
 > [#349](https://github.com/dvoyni/cog/issues/349) rendered it `*ecs.Entities`.
+
+> **Amended by [#358](https://github.com/dvoyni/cog/issues/358).** ecs moved to
+> the declaration-root shape of
+> [ADR 0002](../../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+> The root, `bundles/ecs`, holds declarations only: every type above is declared
+> in `bundles/ecs/internal/types` and aliased in the root, `Config` is declared
+> in the root, and `RegisterComponent`, `NewStore`, `Storable`, `PointerFree`,
+> `ToHandler`, `ToExecute`, `Feed`, `NewList` and `ListOf` are forwarders in its
+> `utils.go`, so every name here is still spelled `ecs.X`. The plugin moved from
+> `ecsimpl` to `bundles/ecs/internal`; it is constructed with `ecsplugin.New()`
+> and configured with `ecs.Config{PrewarmEntities: n}`. The authority's
+> constructor is in `internal/types`, which nothing outside `bundles/ecs` can
+> import. The files this document cites, such as `validate_on.go`, are in
+> `internal/types`, and every ecs diagnostic names a type through
+> `kernel.TypeName`, so a Store still reads `*ecs.Store[…]`.
 
 The cost is one requirement a plugin already met: a plugin registering a
 Component or a System declares `ecs`.
@@ -2262,7 +2277,8 @@ remains open is called out at the end of the verification list.
   enrolment with `Entities`, the baked per-type closures including the typed
   copy a non-trivial Component takes, and the legality check.
 - `Plugin() kernel.Plugin`, which creates the authority from `Config`. Since
-  #340 it is `ecsimpl.New()` and `ecsimpl.Config`.
+  #340 it is `ecsimpl.New()` and `ecsimpl.Config`, and since #358
+  `ecsplugin.New()` and `ecs.Config`.
 
 **`ecs` package — Query and System**
 

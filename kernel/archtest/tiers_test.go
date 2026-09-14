@@ -26,7 +26,6 @@ import (
 // holds no package fails the test, so the list only shrinks.
 var unmoved = []string{
 	"bundles/canvas",
-	"bundles/ecs",
 	"bundles/ecsscene",
 	"bundles/scene",
 	"bundles/ui",

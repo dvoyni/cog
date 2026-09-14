@@ -17,7 +17,7 @@ type plugin struct{}
 //	kernel.New(config).WithPlugins(
 //	    storageplugin.New(), diskfs.New(diskfs.Config{AppId: "game"}),
 //	    gfximpl.New(), sceneimpl.New(),
-//	    ecsimpl.New(), ecssceneimpl.New(), game.New())
+//	    ecsplugin.New(), ecssceneimpl.New(), game.New())
 //
 // ecsscene has no configuration, so there is no Config.
 func New() kernel.Plugin { return plugin{} }

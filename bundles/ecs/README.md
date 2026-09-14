@@ -13,78 +13,64 @@ builders are here.**
 [`docs/specs/ecs.md`](docs/specs/ecs.md) is the specification the whole plugin is
 judged against.
 
-ecs is a **Bundle**: a Slot and its one Extension, shipped together. The
+ecs is a **Bundle**: it requires no Adapter and contributes none. The
 vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
+[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
-ecs has the Bundle shape: a contract root, an `…impl` and an `internal/`.
+ecs has the declaration-root shape of
+[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
 
-- **`bundles/ecs`** is the contract, and it is the whole library a System author
-  uses: `Entity`, `NoEntity`, `Entities`, `Store`, `RegisterComponent`,
-  `Storable`, `PointerFree`, `Query`, `With` and `Without`, `Spawn` and
-  `WriteableEntities`, the `Get`, `Set` and `Remove` accessors, `List`,
-  `NewList` and `ListOf`, `Read` and `Write`, `In` and `Feed`, `Resp`, the
-  `ToHandler` and `ToExecute` builders, and `Name`. It declares no plugin. It
-  does act on a `*kernel.Registrar` it is handed — `RegisterComponent`,
-  `ToHandler` and `ToExecute` all do — which a contract root may; the tier test
-  checks only that it declares no type implementing `kernel.Plugin`.
-- **`bundles/ecs/ecsimpl`** is the plugin: `New` and `Config`, and a `Register`
-  that publishes the authority and does nothing else. It exports `New` and
-  `Config` and nothing else. Only composition roots and tests import it.
-- **`bundles/ecs/internal`** holds what the two share and nothing else may
-  reach: the declarations of `Entity` and `Entities`, whose construction is the
-  whole of what `ecsimpl` does, with the allocation, despawn, Store enrolment and
-  Component registry the root drives through the friend functions in
-  `friends.go`.
+- **`bundles/ecs`** is the root, and holds declarations only, which are the
+  whole library a System author uses: `Entity`, `NoEntity`, the `Entities` and
+  `Store` resources, `Query`, `With` and `Without`, `Spawn` and
+  `WriteableEntities`, the `Get`, `Set` and `Remove` accessors, `List`, `Read`
+  and `Write`, `In` and `Feeder`, `Resp`, `Config` and `Name`. Its functions,
+  `RegisterComponent`, `NewStore`, `Storable`, `PointerFree`, `ToHandler`,
+  `ToExecute`, `Feed`, `NewList` and `ListOf`, are forwarders in `utils.go`. It
+  declares no plugin, and it is what every other package imports.
+- **`bundles/ecs/internal/types`** declares every one of those types and holds
+  the machinery behind them: the authority's allocation, despawn, Store
+  enrolment and Component registry, the Store and its type-erased header,
+  registration, the Query with its driver and fillers, the filters, structural
+  change, the accessors, `List` and its write check, the resource and event
+  handles, and both handler builders with the parameter classification they
+  share. The root aliases every type and forwards every function to it.
+- **`bundles/ecs/internal`** is the plugin: its `New`, the resolution of
+  `ecs.Config`, and a `Register` that publishes the authority and does nothing
+  else.
+- **`bundles/ecs/ecsplugin`** exports only `New() kernel.Plugin`. Only
+  composition roots and tests import it.
 
-`Entity` and `Entities` are declared in `internal` with their state unexported
-and aliased in the root (`type Entities = internal.Entities`), so they stay
-concrete types: no probe or spawn goes through an interface, a despawn pays the
-one indirect call per Store it always paid, and each friend function inlines. `internal` cannot name the root, so the authority holds
-an enrolled Store as that Store's `remove` and a Component's registration record
-as a value only the root reads back. The type is declared there, but the
-kernel's architecture output and its diagnostics still name the resource
-`*ecs.Entities`: `kernel.TypeName` renders a type declared in an `internal`
-package under its enclosing package.
-
-## Files
-
-`contract.go` holds the package documentation, `Name` and the `Entity` alias;
-`component.go` the `Storable` and `PointerFree` rules and `RegisterComponent`;
-`entities.go` the `Entities` alias; `store.go` the `Store`, the type-erased
-`storeCore` a despawn reaches every Store through, and the erased header a Query
-fills from; `query.go` the `Query`, its driver and its fillers; `filter.go` the
-`Without` and `With` field types; `spawn.go` the `Spawn` and
-`WriteableEntities` handles; `accessor.go` the `Get`, `Set` and `Remove`
-accessors; `list.go` the `List` a Component holds variable-length data in;
-`validate.go` and its two build-tagged halves the List write check;
-`resource.go` the `Read` and `Write` handles that name another plugin's
-resource; `in.go` the `In` cell and the `Feed` that fills it; `response.go` the
-`Resp` cell a command answers through; `system.go` the `ToHandler` and
-`ToExecute` builders and the parameter classification both share.
-`internal/entity.go` and `internal/entities.go` declare `Entity` and the
-authority, and `internal/friends.go` the functions the root and `ecsimpl` reach
-their state through. `ecsimpl/plugin.go` is the plugin that publishes the
-authority and `ecsimpl/config.go` its `Config`.
+The aliased types stay concrete types (`type Entities = types.Entities`,
+`type Query[Q any] = types.Query[Q]`): no probe, fill or spawn goes through an
+interface, and a despawn pays the one indirect call per Store it always paid.
+Their exported methods (`Entities.Alive`, `Query.All`, `Store.Get`, …) are
+public API through the alias. What the plugin needs beyond that is the one
+function `internal/types` exports in `friends.go`, which nothing outside
+`bundles/ecs` can call. `internal/types` never imports the root. The types are
+declared there, but the kernel's architecture output and every ecs diagnostic
+still name them `ecs.X` — the resource is `*ecs.Entities`, a Store
+`*ecs.Store[game.Health]` — because `kernel.TypeName` renders a type declared in
+an `internal` package under its enclosing package.
 
 ## Dependencies
 
 - Go packages: the standard library, `kernel`, and `m` for `m.Blob`
 - Plugin dependencies: none
-- Configuration: `ecsimpl.Config`, whose `PrewarmEntities` is how many Entities
+- Configuration: `ecs.Config`, whose `PrewarmEntities` is how many Entities
   the authority reserves room for up front — a hint, not a limit; a zero field
   takes its default, 1024
 
 ## Composing
 
 ```go
-config[ecs.Name] = ecsimpl.Config{PrewarmEntities: prewarmEntities}
-kernel.New(config).WithPlugins(ecsimpl.New(), physics.New(), game.New())
+config[ecs.Name] = ecs.Config{PrewarmEntities: prewarmEntities}
+kernel.New(config).WithPlugins(ecsplugin.New(), physics.New(), game.New())
 ```
 
-**No plugin constructor takes the world.** `ecsimpl.New` creates the authority
+**No plugin constructor takes the world.** `ecsplugin.New` creates the authority
 from its config and publishes it as the `*Entities` resource every System holds
 for read and every structural change holds for write; it registers nothing else,
 because Components are registered by the plugins that define them and Systems
@@ -104,8 +90,8 @@ composition with `ErrUnavailableDependency` naming it.
 ## Entity
 
 ```go
-type Entity = internal.Entity   // a uint64
-const NoEntity = internal.NoEntity
+type Entity = types.Entity   // a uint64
+const NoEntity = types.NoEntity
 ```
 
 An `Entity` is an opaque handle to one thing. It is comparable, copyable and
@@ -138,10 +124,10 @@ per Engine, and that is what makes an Engine the boundary of one simulation — 
 second simulation is a second Engine. **No identifier in this package contains
 the word `World`**, and a test enforces it.
 
-The ecs plugin, `ecsimpl`, creates it, reserving room for
+The ecs plugin, built by `ecsplugin.New`, creates it, reserving room for
 `Config.PrewarmEntities` indices, and nothing else can: the constructor is in
-`internal`, which only the root and `ecsimpl` can import, and that is what keeps
-it one per Engine.
+`internal/types`, which nothing outside `bundles/ecs` can import, and that is
+what keeps it one per Engine.
 The number is the peak concurrent entity count the app expects, **not a cap**:
 exceeding it costs a growth, not an error.
 

@@ -344,7 +344,9 @@ constructor is out of every other plugin's reach, and every plugin registering a
 Component or System declares `ecs` — which each System's `read{*Entities}`
 already required. (Since [#340](https://github.com/dvoyni/cog/issues/340) the
 plugin is `ecsimpl.New()` with `ecsimpl.Config`, and the constructor is in
-`bundles/ecs/internal`.)
+`bundles/ecs/internal`. Since [#358](https://github.com/dvoyni/cog/issues/358)
+it is `ecsplugin.New()` with `ecs.Config`, and the constructor is in
+`bundles/ecs/internal/types`.)
 
 ---
 
