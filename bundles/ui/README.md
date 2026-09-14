@@ -7,38 +7,40 @@ publishes interaction results, and consumes the declaration.
 
 ## Packages
 
-ui has the Bundle shape: a contract root, an `…impl` and an `internal/`.
+ui is a **Bundle**: it requires no Adapter and contributes one `McpProvider`.
+The vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
+[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+ui has the declaration-root shape of
+[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
 
-- **`bundles/ui`** is the contract: the `*Frame` and `*Interactions`
-  resources with `Interaction` and its kinds, the whole Element and Modifier
-  vocabulary (`Element`, `NewElement`, `State`, `VisualState`, `Visual`,
-  `ParamVisual`, `Layout`, `Alignment`, `Arrangement`, `ID`), the containers
-  (`Horizontal`, `Vertical`, `Grid`, `Overlay`, `WithFloating`, `Spacer`) and
-  `Button`, the built-in visuals and their params (`Image`, `Label`,
-  `ColorPanel`, the nine-slices and the interactive variants), `Measure`,
-  `HoverTracker`, `ArmLayoutCmd` with `LayoutSnapshot` and its view types, the
-  layout errors, `Name` and the ordering identity `ProcessOnUpdate`. It declares
-  no plugin, and it is what every other package imports.
-- **`bundles/ui/uiimpl`** is the plugin: `New`, the processing behind
+- **`bundles/ui`** is the root, and holds declarations only: the `*Frame` and
+  `*Interactions` resources, `Interaction` and its kinds, the whole Element and
+  Modifier vocabulary (`Element`, `State`, `VisualState`, `Visual`,
+  `ParamVisual`, `Layout`, `Alignment`, `Arrangement`, `ID`), the built-in
+  visuals' params, `HoverTracker`, `ArmLayoutCmd` with `LayoutSnapshot` and its
+  view types, the layout errors, the `McpProvider` Adapter, `Name` and the
+  ordering identity `ProcessOnUpdate`. Its functions — `NewElement`, `Measure`,
+  the containers (`Horizontal`, `Vertical`, `Grid`, `Overlay`, `WithFloating`,
+  `Spacer`), `Button` and the built-in visuals (`Image`, `Label`, `ColorPanel`,
+  the nine-slices and the interactive variants) — are forwarders in `utils.go`.
+  It declares no plugin, and it is what every other package imports.
+- **`bundles/ui/internal/types`** declares the Element vocabulary with every
+  Modifier, the containers and built-in visuals, `Frame` and its consume side,
+  `Interactions`, `HoverTracker`, the layout engine that both `Measure` and the
+  plugin run, and the rendering of a resolved tree into the snapshot views. The
+  root aliases what it exposes.
+- **`bundles/ui/internal`** is the plugin: its `New`, the processing behind
   `ProcessOnUpdate`, the private layout resource it keeps across ticks, the
   layout-snapshot slot behind `ArmLayoutCmd` and its two subscriptions, and the
-  mcp Provider. It exports `New` and nothing else: ui has no configuration, so
-  there is no `Config`. Only composition roots and tests import it.
-- **`bundles/ui/internal`** holds what the two share and nothing else may
-  reach: the declarations of the Element vocabulary with every Modifier, the
-  containers and built-in visuals, `Frame` and its consume side, `Interactions`,
-  the layout engine that both `Measure` and the plugin run, and the rendering of
-  a resolved tree into the snapshot views.
+  mcp Provider. ui has no configuration, so there is no `Config`.
+- **`bundles/ui/uiplugin`** exports only `New() kernel.Plugin`. Only
+  composition roots and tests import it.
 
-`Element`, `Frame`, `Interactions` and the vocabulary they carry are declared
-in `internal` with their fields unexported, and re-exported from the root as
-aliases (`type Element = internal.Element`) plus a wrapper for each
-constructor. They stay concrete types, and their exported methods
-(`Element.Width`, `Frame.Add`, `Interactions.Has`, …) are public API through
-the alias. What uiimpl needs beyond that goes through plain functions
-`internal` exports, which only the root and uiimpl can call. `internal` never
-imports the root. See
-[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+The aliased types stay concrete types (`type Element = types.Element`), and
+their exported methods (`Element.Width`, `Frame.Add`, `Interactions.Has`, …)
+are public API through the alias. What the plugin needs beyond that goes
+through plain functions `internal/types` exports, which nothing outside
+`bundles/ui` can call. `internal/types` never imports the root.
 
 ## Package Model
 
@@ -64,7 +66,7 @@ declarations on the next tick instead of retaining and mutating a submitted tree
 ## Plugin
 
 - Name: `ui.Name` (`"ui"`)
-- Constructor: `uiimpl.New() kernel.Plugin`
+- Constructor: `uiplugin.New() kernel.Plugin`
 - Dependencies: `input`, `gfx`, and `canvas`
 - Configuration: none
 - Contributes: one `mcp.Provider` Adapter
@@ -514,7 +516,7 @@ otherwise: `processUpdate` ends in `defer frame.clear()`, so between ticks the
 frame is *empty* rather than stale and producing a snapshot without running a
 tick is not a thing that exists.
 
-The tree is **serialized inside the tick**, from uiimpl's unexported
+The tree is **serialized inside the tick**, from the plugin's unexported
 `layoutOnUpdate` subscription, ordered `After[ui.ProcessOnUpdate]()`. That is
 the only window in which it can be read at all. The layout engine's nodes keep
 their geometry until the next flatten, but each node's element points into the app's borrowed child storage, which

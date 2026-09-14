@@ -16,7 +16,7 @@ import (
 	"github.com/dvoyni/cog/bundles/input/inputplugin"
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/bundles/ui"
-	"github.com/dvoyni/cog/bundles/ui/uiimpl"
+	"github.com/dvoyni/cog/bundles/ui/uiplugin"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
@@ -94,7 +94,7 @@ func newPairingRig(t *testing.T) *pairingRig {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
 	}).WithPlugins(
-		storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfximpl.New(), canvasplugin.New(), uiimpl.New(),
+		storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfximpl.New(), canvasplugin.New(), uiplugin.New(),
 		&pairingPlugin{rig: rig},
 	)
 	stopped := make(chan struct{})
@@ -210,7 +210,7 @@ type pairingAnswer struct {
 // snapshotView pulls out the block every snapshot response embeds. The embedded
 // field is the point: one view, three capabilities, so an agent reads one tick
 // number whichever tool answered. It is read by field rather than by type
-// because gfximpl, canvas's internal and uiimpl keep their response types unexported.
+// because gfximpl, canvas's internal and ui's internal keep their response types unexported.
 func (a pairingAnswer) snapshotView(t *testing.T) gfx.SnapshotView {
 	t.Helper()
 	response := reflect.ValueOf(a.response)

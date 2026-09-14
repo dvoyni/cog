@@ -26,7 +26,6 @@ import (
 // holds no package fails the test, so the list only shrinks.
 var unmoved = []string{
 	"bundles/ecsscene",
-	"bundles/ui",
 	"extensions/diskfs",
 	"extensions/gfx",
 	"extensions/jsfs",

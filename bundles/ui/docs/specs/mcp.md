@@ -45,6 +45,22 @@ settle it.
 > against them. The tool name, its schema and its behaviour are unchanged. The
 > file paths, line numbers and names cited below are as they were when this was
 > written.
+>
+> **Amended by [#362](https://github.com/dvoyni/cog/issues/362).** ui moved to
+> the declaration-root shape of
+> [ADR 0002](../../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+> Every name an application or a caller writes is still spelled `ui.X`:
+> `ArmLayoutCmd` with its request and response is in the root's `commands.go`,
+> `LayoutSnapshot` and the view aliases in its `types.go`, and the three
+> `ErrLayout…` errors in its `err.go`, `ErrLayoutNoSuchElement` still an alias.
+> What `bundles/ui/internal` held — the Element vocabulary, `Frame`,
+> `Interactions`, the layout engine and `LayoutViewOf` with the `visualNamer`
+> seam — moved to `bundles/ui/internal/types`, and so did `HoverTracker`. The
+> plugin — the Provider and the `ui_layout` body in `mcpprovider.go`, the
+> snapshot slot, `ArmLayoutCmd`'s handler, both snapshot subscriptions and
+> `processor` — moved from `uiimpl` to `bundles/ui/internal`, and is constructed
+> with `uiplugin.New()`. A built-in visual is still reported as
+> `ui.spriteVisual`. The tool name, its schema and its behaviour are unchanged.
 
 ---
 

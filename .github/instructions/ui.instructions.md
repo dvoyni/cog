@@ -25,13 +25,13 @@ dependencies:
 ```go
 plugins := []kernel.Plugin{
 	storageplugin.New(), diskfs.New(diskfs.Config{AppId: "demo"}),
-	inputplugin.New(), gfximpl.New(), canvasplugin.New(), uiimpl.New(), wgpu.New(),
+	inputplugin.New(), gfximpl.New(), canvasplugin.New(), uiplugin.New(), wgpu.New(),
 	game, // declares the frame and reads the interactions
 }
 ```
 
-Only the composition root imports `uiimpl`, and ui has no configuration. UI code
-imports the contract root, `ui`, and nothing else: `*ui.Frame`,
+Only the composition root imports `uiplugin`, and ui has no configuration. UI code
+imports the root, `ui`, and nothing else: `*ui.Frame`,
 `*ui.Interactions`, every element, modifier, container and visual, `Measure` and
 `HoverTracker` are there. A handler declaring the frame orders itself
 `Before[ui.ProcessOnUpdate]()`; one reading this tick's interactions orders
