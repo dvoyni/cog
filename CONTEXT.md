@@ -200,8 +200,8 @@ _Avoid_: System plugin, which is the Host
 Any change to which Entities have which Components — adding or removing a Component, spawning or despawning an Entity — as opposed to a change to a Component's value. A System may make one to the Entity it is currently visiting; changing whether some _other_ Entity is in the Store being iterated is undefined, and so is using any pointer into a Store after that Store has structurally changed.
 
 **Hook**:
-The record of what happened to one Component type — which Entities gained it, which lost it together with the value they lost, and whose value changed — kept so that Systems read it later through a Query, each at its own scheduled time, rather than being told at the moment of change. A Structural change and a change of value are recorded in the same form and read the same way. Nothing runs on a Hook's behalf at the moment of change.
-_Avoid_: Callback, observer, listener, trigger, `OnAdd`/`OnRemove`, and Event, which is a kernel term for something published rather than read.
+One record of something that happened to an Entity's match of a Query — it was spawned or despawned, it entered or exited the match, or a value the Query names changed — carrying the values of the Query's fields at that moment, the last ones before an exit included. A System reads the Hooks for a Query in the order they happened, each System its own copy, gathered since the end of its own last run; a Structural change and a change of value are recorded in the same form and read the same way. Nothing runs on a Hook's behalf at the moment of change.
+_Avoid_: Callback, observer, listener, trigger, `OnAdd`/`OnRemove`, Added/Removed (an Entity can exit a match by gaining a Component), and Event, which is a kernel term for something published rather than read.
 
 **Spawn**:
 Creating an Entity with a given Component set and its values, as one Structural change. Despawn is its inverse and is total: it removes the Entity from every Store, so nothing anywhere still holds it.

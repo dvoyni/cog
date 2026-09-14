@@ -163,7 +163,7 @@ type captureScreenResponse struct {
 ```
 
 **No frame number** — cog has none to give. `wgpu` counts frames privately
-(`frameSeq atomic.Uint64`, `extensions/wgpu/plugin.go:47`) and exposes nothing; returning
+(`frameSeq atomic.Uint64`, `extensions/wgpu/internal/plugin.go:47`) and exposes nothing; returning
 one would mean inventing a public concept for a debug response. **No timestamp
 and no format field** — the format is always PNG. **No "what was captured"** —
 it is always the screen.
@@ -202,7 +202,7 @@ the map to resolve — about 50 ms at 60 Hz.
 **The deadline is `2s + amount × interval × Dt`**, the capability's own. The
 ceilings are known: five minutes at the client, thirty seconds at the broker. A
 minimised window renders nothing at all with no shutdown to report
-(`onDraw` returns early when `dc.SurfaceView()` is nil, `extensions/wgpu/plugin.go:221-223`),
+(`onDraw` returns early when `dc.SurfaceView()` is nil, `extensions/wgpu/internal/plugin.go:221-223`),
 so the wait is genuinely unbounded without an own deadline. Two seconds is 120
 frames at 60 Hz; anything slower is not *slow*, it is *not rendering*, and
 saying so in two seconds beats a generic broker timeout at thirty. It sits

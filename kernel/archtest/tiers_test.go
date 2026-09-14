@@ -25,7 +25,6 @@ import (
 // that moves a plugin deletes its entry, and an entry naming a directory that
 // holds no package fails the test, so the list only shrinks.
 var unmoved = []string{
-	"extensions/wgpu",
 	"slots/app",
 }
 
@@ -101,7 +100,7 @@ const (
 	tierLegacyRoot     // bundles/X, or extensions/P when P has a Pimpl child
 	tierLegacyInternal // bundles/X/internal/…, extensions/P/internal/…
 	tierLegacyImpl     // bundles/X/Ximpl, extensions/P/Pimpl
-	tierLegacyOther    // any other extensions/* directory: wgpu
+	tierLegacyOther    // any other extensions/* directory, as wgpu was
 	// tierLegacyVocabulary is extensions/P/V for any V but Pimpl and internal,
 	// when P has a Pimpl child: the contract a Port's Adapters implement, as gfx/gpu was.
 	tierLegacyVocabulary

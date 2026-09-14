@@ -108,7 +108,7 @@ shapes, not domain concepts.
 - **Nothing in cog consumes `KeyEvent`, `TextEvent` or `State.Text()`**, and
   nothing consumes `ScrollChange`. `ui` reads pointer state only.
 - **The input seam has no owner token.** `wgpu` is the only dispatcher today,
-  once per frame at the start of `onUpdate` (`extensions/wgpu/input.go:98-105`), and there
+  once per frame at the start of `onUpdate` (`extensions/wgpu/internal/input.go:98-105`), and there
   is no once-per-frame guard and no rejection path. `Uses[input.ApplyCmd]`
   couples a caller to the command but **not** to input's resources
   (`kernel/registrar.go:113-116`), so two sources serialize rather than
@@ -372,7 +372,7 @@ see
 ## `text` is text, not keys
 
 A real keyboard fires both `OnKeyPress(KeyA)` and `OnTextInput("a")`
-(`extensions/wgpu/input.go:14-26`), so a faithful `text` step would emit both. **It does
+(`extensions/wgpu/internal/input.go:14-26`), so a faithful `text` step would emit both. **It does
 not.**
 
 `!` is Shift+1 on one layout and Shift+8 on another, and faithfulness here is a
@@ -383,7 +383,7 @@ built on `KeyEvent` will not see typed text**, and a game that reads keys wants
 `key_down`/`key_up`.
 
 Scroll gets the same honesty: `ScrollChange(dx, dy)` carries whatever the driver
-passed through (`extensions/wgpu/input.go:48`), nothing in cog consumes it, and cog has no
+passed through (`extensions/wgpu/internal/input.go:48`), nothing in cog consumes it, and cog has no
 unit to promise.
 
 **Gap.** Typing and scrolling have **no consumer in cog** and cannot be

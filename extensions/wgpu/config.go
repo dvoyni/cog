@@ -1,55 +1,40 @@
 package wgpu
 
-import (
-	"time"
+import "time"
 
-	"github.com/gogpu/gogpu"
-	"github.com/gogpu/gputypes"
-)
-
-// Config configures the wgpu driver. Build it from DefaultConfig and the With*
-// setters (each returns a modified copy), mirroring gogpu's config style:
+// Config configures the wgpu driver. It is supplied under Name, and its zero
+// value is the default: a zero field takes the default its comment names, so a
+// caller sets only what it changes, directly or with the With* builders (each
+// returns a modified copy):
 //
-//	cfg := wgpu.DefaultConfig().WithTitle("Feuds").WithSize(1600, 900)
+//	cfg := wgpu.Config{}.WithTitle("Feuds").WithSize(1600, 900)
 //
-// It is delivered through kernel.New's config map, keyed by Name.
-// Fields are exported so a Config can be serialized.
+// Fields are exported so a Config can be serialized. The switches that default
+// to on are spelled as their negation (NoResize, NoVSync), so that off is the
+// zero value too.
 type Config struct {
-	// Step is the fixed simulation interval (the update rate). Default: 1/60s.
+	// Step is the fixed simulation interval (the update rate). Zero means 1/60s.
 	Step time.Duration
 	// MaxFrame clamps the elapsed time absorbed in a single frame, bounding
-	// catch-up work after a stall (anti spiral-of-death). Default: 250ms.
+	// catch-up work after a stall (anti spiral-of-death). Zero means 250ms.
 	MaxFrame time.Duration
 	// MaxPending bounds how many catch-up steps may queue before extras are
-	// dropped. Default: 4.
+	// dropped. Zero means 4.
 	MaxPending int
 
-	// Title is the window title. Default: "cog".
+	// Title is the window title. Empty means "cog".
 	Title string
-	// Width and Height are the initial logical window size (DIP). Default: 1280x720.
+	// Width and Height are the initial logical window size (DIP). Zero means
+	// 1280x720; each is defaulted on its own.
 	Width, Height int
-	// Resizable allows the window to be resized. Default: true.
-	Resizable bool
-	// VSync enables vertical sync. Default: true.
-	VSync bool
+	// NoResize fixes the window's size. Default: false, a resizable window.
+	NoResize bool
+	// NoVSync disables vertical sync. Default: false, vsync on.
+	NoVSync bool
 	// Fullscreen starts the window fullscreen. Default: false.
 	Fullscreen bool
 	// AppName is the application/menu name (macOS). Default: empty (gogpu default).
 	AppName string
-}
-
-// DefaultConfig returns the default configuration. Chain With* setters to override.
-func DefaultConfig() Config {
-	return Config{
-		Step:       time.Second / 60,
-		MaxFrame:   250 * time.Millisecond,
-		MaxPending: 4,
-		Title:      "cog",
-		Width:      1280,
-		Height:     720,
-		Resizable:  true,
-		VSync:      true,
-	}
 }
 
 // WithStep sets the fixed simulation interval.
@@ -84,13 +69,13 @@ func (c Config) WithSize(width, height int) Config {
 
 // WithResizable sets whether the window can be resized.
 func (c Config) WithResizable(resizable bool) Config {
-	c.Resizable = resizable
+	c.NoResize = !resizable
 	return c
 }
 
 // WithVSync sets whether vertical sync is enabled.
 func (c Config) WithVSync(vsync bool) Config {
-	c.VSync = vsync
+	c.NoVSync = !vsync
 	return c
 }
 
@@ -104,34 +89,4 @@ func (c Config) WithFullscreen(fullscreen bool) Config {
 func (c Config) WithAppName(name string) Config {
 	c.AppName = name
 	return c
-}
-
-// requiredFeatures are the optional GPU features the driver cannot render
-// without, requested by name at device creation.
-//
-// IndirectFirstInstance is what lets a draw name a non-zero firstInstance.
-// Scene gives every batch its own slice of the pass's instance buffer and
-// offsets into it that way, so without the feature every scene draw is
-// rejected, the encoder never finishes, and nothing reaches the screen. It is
-// requested rather than hoped for because the alternative failure is a black
-// window: a device that lacks it fails here, by name.
-const requiredFeatures = gputypes.Features(gputypes.FeatureIndirectFirstInstance)
-
-// gogpuConfig maps a Config onto a gogpu.Config. Continuous render
-// is forced on: wgpu is a game-loop driver, not an idle UI app.
-func (c Config) gogpuConfig() gogpu.Config {
-	g := gogpu.DefaultConfig().
-		WithTitle(c.Title).
-		WithSize(c.Width, c.Height).
-		WithContinuousRender(true).
-		WithResizable(c.Resizable).
-		WithVSync(c.VSync).
-		WithRequiredFeatures(requiredFeatures)
-	if c.Fullscreen {
-		g = g.WithFullscreen()
-	}
-	if c.AppName != "" {
-		g = g.WithAppName(c.AppName)
-	}
-	return g
 }

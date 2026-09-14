@@ -27,7 +27,7 @@ type QuitCmd kernel.Command[QuitRequest, QuitResponse]
 
 Requests that the active system driver stop its main loop. `QuitRequest` and
 `QuitResponse` are empty structs. Package `app` only declares this command;
-`wgpu.Plugin` implements it.
+the wgpu plugin implements it.
 
 ```go
 quit := access.Uses[app.QuitCmd]()   // in the handler's Lock
@@ -187,7 +187,7 @@ not number ticks at all.
 
 Known publishers and subscribers:
 
-- `wgpu.Plugin` publishes it synchronously from the main thread.
+- The wgpu plugin publishes it synchronously from the main thread.
 - `input.AdvanceOnUpdate` subscribes first to advance per-tick input edges.
 - `anim.AdvanceOnUpdate` subscribes first to advance timelines.
 - canvas's `FlushOnUpdate` subscribes last, before `gfx`, to flush 2D operations.
@@ -207,7 +207,7 @@ drawn frame on its render thread after making the target current.
 
 Known publishers and subscribers:
 
-- `wgpu.Plugin` publishes it synchronously on the render thread.
+- The wgpu plugin publishes it synchronously on the render thread.
 - `gfx.RenderOnRender` subscribes to translate and execute the latest queue.
 
 ### `WindowSizeChangeEvent`
@@ -223,4 +223,4 @@ desired policy for the new aspect (for example landscape versus portrait).
 ## Registration
 
 There is no `app.Plugin`. Register a driver that realizes this contract, for
-example `wgpu.New()`, together with the driver's dependencies.
+example `wgpuplugin.New()`, together with the driver's dependencies.

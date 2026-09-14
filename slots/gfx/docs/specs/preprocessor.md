@@ -391,7 +391,7 @@ flattened module. Nothing else in the text is touched.
 - **The line count is preserved exactly.** No synthetic prologue for the source
   map to account for.
 - **Module-scope order is not significant** (measured against `naga.Parse` +
-  `wgsl.Lower` from `github.com/gogpu/naga`, the pair `extensions/wgpu/gfxreflect.go`
+  `wgsl.Lower` from `github.com/gogpu/naga`, the pair `extensions/wgpu/internal/gfxreflect.go`
   uses): a `const` declared *after* the `array<vec4<f32>, N>` that uses it
   lowers fine, and a `const` used in a function body above its declaration
   lowers fine. So a `const` emitted near the bottom of the flattened text serves
@@ -1030,7 +1030,7 @@ and the split confirmed `#ifdef` is what a C habit actually reaches for.
   `hal/software.CreateShaderModule` returns `sm, nil` when `naga.Compile` fails
   — "compilation failure is non-fatal". What actually rejects bad WGSL on the
   backend developers work against is **cog's own** `reflectShaderLayout` call in
-  `extensions/wgpu/gfxbackend.go`. So these diagnostics reach a developer only through the
+  `extensions/wgpu/internal/gfxbackend.go`. So these diagnostics reach a developer only through the
   reflection path, and anything that path accepts compiles silently into a
   module that draws nothing.
 - **A `requires` parse error is not softened.** Pre-empting the gogpu gap in the
@@ -1046,7 +1046,7 @@ From [prototype: split scene.wgsl with the language](https://github.com/dvoyni/c
 This section is the evidence the language is sufficient for the one shader that
 actually needs it. Every number below was produced by flattening with a
 throwaway implementation of this language and lowering through `naga.Parse` →
-`wgsl.Lower`, the same path `extensions/wgpu/gfxreflect.go` reflects with.
+`wgsl.Lower`, the same path `extensions/wgpu/internal/gfxreflect.go` reflects with.
 
 ### Ten sources, two defines
 

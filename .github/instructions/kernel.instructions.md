@@ -11,8 +11,8 @@ Follow them in new and changed code without expanding a focused task into
 unrelated cleanup. Which package a declaration belongs in — the root,
 `internal/types`, `internal/` or the constructor package — and what a root may
 hold is [`architecture.instructions.md`](architecture.instructions.md); this
-file assumes it. The plugins still on the tier test's migration list, app and
-wgpu, keep their single-package layout until they move.
+file assumes it. The plugin still on the tier test's migration list, app, keeps
+its old layout until it moves.
 
 ## Handler Structure
 
@@ -437,8 +437,7 @@ list of what the plugin offers. A root takes only the files it needs: an
 Extension has no `commands.go` even when it handles another plugin's commands.
 
 A plugin on the migration list keeps its old layout until it moves: `slots/app`
-is a contract with no implementation, and wgpu is one package holding its
-plugin, its backend and its declarations together.
+is a contract with no implementation.
 
 ## Validation
 

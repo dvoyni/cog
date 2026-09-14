@@ -42,3 +42,16 @@ type ErrHoldTooLong struct {
 func (e ErrHoldTooLong) Error() string {
 	return fmt.Sprintf("wgpu: hold of %s exceeds the maximum of %s", e.For, e.Max)
 }
+
+// ErrDepthOnlyPassUnsupported reports a pass this backend declined to encode.
+type ErrDepthOnlyPassUnsupported struct {
+	Pass    string
+	Backend string
+}
+
+func (e ErrDepthOnlyPassUnsupported) Error() string {
+	return fmt.Sprintf(
+		"wgpu: pass %q has a depth attachment and no colour attachment, which the %s backend cannot encode. "+
+			"The pass is skipped and its depth texture is left untouched",
+		e.Pass, e.Backend)
+}

@@ -751,8 +751,8 @@ What makes the exception safe is mechanical rather than a promise:
   after that point fails on a cancelled context rather than reaching a stopped
   plugin.
 
-**`wgpu` is not precedent for this.** `wgpu.Plugin.Run` captures its
-`Executioner` into the gogpu callbacks (`extensions/wgpu/plugin.go:109-114`), but `Run`
+**`wgpu` is not precedent for this.** the wgpu plugin's `Run` captures its
+`Executioner` into the gogpu callbacks (`extensions/wgpu/internal/plugin.go:109-114`), but `Run`
 never returns until shutdown: the handler that received the handle is still on
 the stack the whole time it is used. The broker's `Start` returns immediately
 and the handle outlives it. Different move, correctly treated differently.
