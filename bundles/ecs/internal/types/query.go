@@ -67,6 +67,9 @@ type Query[Q any] struct {
 	// stay on the caller's stack. Measured in situ; invisible in a
 	// microbenchmark, where the whole iterator inlines at the range site.
 	shape uint8
+	// snaps is PROTOTYPE (proto/ecs-hooks): one per write field on a Store some
+	// reader watches for Changed, taken whole at the run's first bind.
+	snaps []*rowSnapshot
 }
 
 // queryField is one Component of a Query, as registration left it.
@@ -218,6 +221,9 @@ func (q *Query[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
 		}
 		if write {
 			planned.get = class.declareWrite(access)
+			if snap := snapshotOfClass(en, class); snap != nil {
+				q.snaps = append(q.snaps, snap)
+			}
 		} else {
 			planned.get = class.declareRead(access)
 		}
@@ -240,6 +246,14 @@ func (q *Query[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
 		}
 	}
 	q.run = newRunToken(kernel.TypeName(queryType))
+}
+
+func (q *Query[Q]) needsRunEnd() bool { return q.snaps != nil }
+
+func (q *Query[Q]) endRun() {
+	for _, snap := range q.snaps {
+		snap.finish()
+	}
 }
 
 // All iterates the Entities having every Component the Query names, yielding
@@ -299,6 +313,9 @@ func (q *Query[Q]) iterate(yield func(Entity, *Q) bool) {
 // The driver is moved to index 0 so the fillers need no per-Entity branch to
 // find it. Field order is not observable: an offset travels with its field.
 func (q *Query[Q]) bind() {
+	for _, snap := range q.snaps {
+		snap.takeAll()
+	}
 	driver, shortest := 0, -1
 	for i := range q.fields {
 		field := &q.fields[i]

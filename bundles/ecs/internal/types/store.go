@@ -45,6 +45,10 @@ type Store[T any] struct {
 	// is whether a vacated row is zeroed. It sits after the three arrays so the
 	// erased header can mirror it and the two layouts stay identical.
 	trivial bool
+	// hooks is PROTOTYPE (proto/ecs-hooks): nil unless some Hooks[Q] names this
+	// Store, which is the nil check an unobserved Store pays. It sits beside
+	// trivial, which remove already loads, so the check touches no new line.
+	hooks *storeHooks
 	// lists and owner are what validation mode needs and what a release build
 	// never reads: the Lists in a row and the Lists within their elements, and the
 	// Component's name for the diagnostic.
@@ -65,6 +69,7 @@ type storeHeader struct {
 	owners  []Entity
 	dense   denseRows
 	trivial bool
+	hooks   *storeHooks
 	lists   []listSite
 	owner   string
 }
@@ -174,6 +179,19 @@ func (s *Store[T]) Set(e Entity, value T) {
 		return
 	}
 	s.add(e, value)
+	if s.hooks != nil {
+		s.hooks.gained(e)
+	}
+}
+
+// set is Set inside a whole act (a Spawn), which records once for the act:
+// PROTOTYPE (proto/ecs-hooks). add and remove stay leaf functions, because a
+// call inside them measured 0.6-2.8 ns on every structural path, observed or not.
+func (s *Store[T]) set(e Entity, value T) {
+	if s.update(e, value) {
+		return
+	}
+	s.add(e, value)
 }
 
 // update replaces e's stored value and reports whether e had one. It is the half
@@ -209,7 +227,12 @@ func (s *Store[T]) add(e Entity, value T) {
 }
 
 // Remove takes this Component away from e and reports whether it had one.
-func (s *Store[T]) Remove(e Entity) bool { return s.remove(e) }
+func (s *Store[T]) Remove(e Entity) bool {
+	if s.hooks != nil && s.Has(e) {
+		s.hooks.losing(e)
+	}
+	return s.remove(e)
+}
 
 // probe reports the dense row e's value is in. The compare that finds the row
 // is the compare that rejects a stale handle, so liveness is not an extra cost;

@@ -128,11 +128,15 @@ func (s *Spawn[S]) New(components S) Entity {
 	// The Components land in the Spawn's own buffer before any closure sees an
 	// address, which is what keeps them off the heap. See staging.
 	s.staging = components
-	e := s.entities.Get().alloc()
+	en := s.entities.Get()
+	e := en.alloc()
 	buffer := unsafe.Pointer(&s.staging)
 	for i := range s.fields {
 		field := &s.fields[i]
 		field.set(e, unsafe.Add(buffer, field.offset))
+	}
+	if en.hooks != nil {
+		en.hooks.spawned(e)
 	}
 	return e
 }

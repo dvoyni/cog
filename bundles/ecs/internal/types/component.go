@@ -19,7 +19,10 @@ import (
 // reflection looks it up by reflect.Type afterwards and never needs the
 // instantiation at all.
 type componentClass struct {
-	size uintptr
+	// header is PROTOTYPE (proto/ecs-hooks): the Store itself, erased, which a
+	// Hook log probes and copies from under locks the act already holds.
+	header *storeHeader
+	size   uintptr
 	// trivial is the pointer-free answer for this Component type, and it is a
 	// fast-path selector rather than a gate. A trivial row is copied by the
 	// sized moves in fill, is left where it lies by a swap-remove, and sits in
@@ -98,8 +101,17 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 	}
 	store := NewStore[C](en, ids)
 	registrar.InitResource(store)
+	en.declare(componentType, newComponentClass(store))
+	return store
+}
+
+// newComponentClass is PROTOTYPE (proto/ecs-hooks): RegisterComponent's class,
+// split out so a benchmark can build a world without a registrar.
+func newComponentClass[C any](store *Store[C]) *componentClass {
+	componentType := reflect.TypeFor[C]()
 	trivial := PointerFree(componentType) == nil
 	class := &componentClass{
+		header:  store.erase(),
 		size:    componentType.Size(),
 		trivial: trivial,
 		lists:   listSites(componentType),
@@ -120,15 +132,14 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 		declareSet: func(access kernel.ResourceAccess) func(e Entity, value unsafe.Pointer) {
 			handle := access.GetWrite[*Store[C]]()
 			return func(e Entity, value unsafe.Pointer) {
-				handle.Get().Set(e, *(*C)(value))
+				handle.Get().set(e, *(*C)(value))
 			}
 		},
 	}
 	if !trivial {
 		class.copyValue = func(dst, src unsafe.Pointer) { *(*C)(dst) = *(*C)(src) }
 	}
-	en.declare(componentType, class)
-	return store
+	return class
 }
 
 // Storable reports whether a type may be a Component. It is the registration

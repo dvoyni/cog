@@ -37,6 +37,8 @@ type Entities struct {
 	// as a reflect.Type: a generic cannot be instantiated from one, so the
 	// generic call is made where C is a compile-time type and kept here.
 	classes map[reflect.Type]*componentClass
+	// hooks is PROTOTYPE (proto/ecs-hooks): nil until a Hooks[Q] is planned.
+	hooks *hookHub
 }
 
 // newEntities creates the authority, reserving room for ids indices. The number
@@ -122,8 +124,12 @@ func (en *Entities) despawn(e Entity) bool {
 	if !en.Alive(e) {
 		return false
 	}
-	for _, remove := range en.stores {
-		remove(e)
+	if en.hooks != nil {
+		en.despawnObserved(e)
+	} else {
+		for _, remove := range en.stores {
+			remove(e)
+		}
 	}
 	index := e.idx()
 	en.gens[index] = nextGeneration(en.gens[index])
@@ -140,4 +146,15 @@ func nextGeneration(g uint32) uint32 {
 		return 1
 	}
 	return g
+}
+
+// despawnObserved is PROTOTYPE (proto/ecs-hooks): a despawn some Hooks[Q] may
+// see, kept out of the unobserved path so that path is unchanged.
+//
+//go:noinline
+func (en *Entities) despawnObserved(e Entity) {
+	en.hooks.despawning(e)
+	for _, remove := range en.stores {
+		remove(e)
+	}
 }

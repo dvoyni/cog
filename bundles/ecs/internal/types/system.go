@@ -130,6 +130,10 @@ type systemCall[E any] struct {
 	// handle is the stable cell the kernel value is written into, nil unless the
 	// signature names it.
 	handle *kernel.Kernel
+	// PROTOTYPE (proto/ecs-hooks): the parameters with work at the edges of a
+	// run — a Hooks reader fixing its records, a watched writer comparing rows.
+	beginners []runBeginner
+	enders    []runEnder
 }
 
 // lock is the System's kernel.Lock: it runs once, at registration, and declares
@@ -148,8 +152,18 @@ func (c *systemCall[E]) lock(access kernel.ResourceAccess) {
 	// this read rather than sitting beside it — which is what makes a structural
 	// change a total barrier.
 	access.GetRead[*Entities]()
+	if w := c.entities.hooks; w != nil {
+		w.nextWriter++
+		w.preparing = w.nextWriter
+	}
 	for _, param := range c.params {
 		param.prepare(c.entities, access)
+		if b, ok := param.(runBeginner); ok && b.needsRunBegin() {
+			c.beginners = append(c.beginners, b)
+		}
+		if e, ok := param.(runEnder); ok && e.needsRunEnd() {
+			c.enders = append(c.enders, e)
+		}
 	}
 }
 
@@ -166,7 +180,13 @@ func (c *systemCall[E]) call(handle kernel.Kernel, driven E) {
 	if c.handle != nil {
 		*c.handle = handle
 	}
+	for _, b := range c.beginners {
+		b.beginRun()
+	}
 	c.fn.Call(c.args)
+	for _, e := range c.enders {
+		e.endRun()
+	}
 }
 
 // prepareSystem is the classification, and the classification is contract.

@@ -81,13 +81,21 @@ type Set[T any] struct {
 	// insertion names still exists. See UpdateFor for why that question has to be
 	// asked here and cannot be left to the System.
 	entities kernel.Read[*Entities]
+	// snap is PROTOTYPE (proto/ecs-hooks): the rows this System was handed with
+	// write access on a Store some reader watches for Changed. Nil otherwise.
+	snap *rowSnapshot
 }
 
 // prepare declares the locks and binds the Store. It runs once, at registration.
 func (s *Set[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 	s.entities = declareComponent[T](en, access, "Set")
 	s.store = access.GetWrite[*Store[T]]()
+	widenForHooks[T](en, access)
+	s.snap = snapshotFor[T](en)
 }
+
+func (s *Set[T]) needsRunEnd() bool { return s.snap != nil }
+func (s *Set[T]) endRun()           { s.snap.finish() }
 
 // Of reports e's Component, and whether e has one — the same copy Get yields,
 // available here because a write authorises a read.
@@ -113,7 +121,14 @@ func (s *Set[T]) Ref(e Entity) (*T, bool) {
 	if validate {
 		store.stampFor(e, modeWrite)
 	}
-	return store.Ref(e)
+	row, ok := store.probe(e)
+	if !ok {
+		return nil, false
+	}
+	if s.snap != nil {
+		s.snap.take(e, row)
+	}
+	return &store.dense[row], true
 }
 
 // UpdateFor gives e this Component, replacing the value if it already has one.
@@ -150,6 +165,11 @@ func (s *Set[T]) Ref(e Entity) (*T, bool) {
 // that same answer.
 func (s *Set[T]) UpdateFor(e Entity, value T) {
 	store := s.store.Get()
+	if s.snap != nil {
+		if row, ok := store.probe(e); ok {
+			s.snap.take(e, row)
+		}
+	}
 	if store.update(e, value) {
 		return
 	}
@@ -157,6 +177,9 @@ func (s *Set[T]) UpdateFor(e Entity, value T) {
 		return
 	}
 	store.add(e, value)
+	if store.hooks != nil {
+		store.hooks.gained(e)
+	}
 }
 
 // Remove takes a Component away from an Entity and is the inverse of
@@ -172,6 +195,7 @@ type Remove[T any] struct {
 func (r *Remove[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 	_ = declareComponent[T](en, access, "Remove")
 	r.store = access.GetWrite[*Store[T]]()
+	widenForHooks[T](en, access)
 }
 
 // From takes this Component away from e and reports whether e had one. It is
