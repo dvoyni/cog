@@ -32,15 +32,24 @@ type ResourceDescription struct {
 	Owner PluginName
 }
 
-// PortDescription reports one plugin's declaration of an Adapter interface:
-// which plugin is the Port for it, whether it requires exactly one Adapter or
-// collects any number, and which plugins contributed one, in plugin order. An
-// Adapter nobody requires or collects binds to nothing and has no entry.
+// PortDescription reports one plugin's declaration of a Port: the Port type and
+// the interface it is built on, the plugin that declared it, whether it collects
+// any number of Adapters or requires exactly one, and the Adapters bound to it,
+// in plugin order. An Adapter for a Port nobody requires or collects binds to
+// nothing and has no entry.
 type PortDescription struct {
-	Interface    reflect.Type
-	Port         PluginName
-	Collects     bool
-	Contributors []PluginName
+	Type      reflect.Type
+	Interface reflect.Type
+	Owner     PluginName
+	Collects  bool
+	Adapters  []AdapterDescription
+}
+
+// AdapterDescription names one contribution to a Port: the Adapter type it was
+// provided as, and the plugin that provided it.
+type AdapterDescription struct {
+	Type   reflect.Type
+	Plugin PluginName
 }
 
 // CommandDescription reports one registered command and the lock set its
@@ -94,8 +103,9 @@ func (e *Engine) Describe() ArchitectureDescription {
 	}
 	for _, declaration := range e.registry.adapterDeclarations {
 		description.Ports = append(description.Ports, PortDescription{
-			Interface: declaration.iface, Port: declaration.port, Collects: declaration.collects,
-			Contributors: contributors(e.registry.adapterContributions[declaration.iface]),
+			Type: declaration.port, Interface: declaration.iface, Owner: declaration.owner,
+			Collects: declaration.collects,
+			Adapters: describeAdapters(e.registry.adapterContributions[declaration.port]),
 		})
 	}
 	for commandType, command := range e.registry.commands {
@@ -123,10 +133,10 @@ func (e *Engine) Describe() ArchitectureDescription {
 	}
 	slices.SortFunc(description.Resources, func(a, b ResourceDescription) int { return compareTypes(a.Type, b.Type) })
 	slices.SortStableFunc(description.Ports, func(a, b PortDescription) int {
-		if interfaceOrder := compareTypes(a.Interface, b.Interface); interfaceOrder != 0 {
-			return interfaceOrder
+		if portOrder := compareTypes(a.Type, b.Type); portOrder != 0 {
+			return portOrder
 		}
-		return strings.Compare(string(a.Port), string(b.Port))
+		return strings.Compare(string(a.Owner), string(b.Owner))
 	})
 	slices.SortFunc(description.Commands, func(a, b CommandDescription) int { return compareTypes(a.Type, b.Type) })
 	slices.SortFunc(description.Subscriptions, func(a, b SubscriptionDescription) int {
@@ -210,7 +220,7 @@ func Dump(engine *Engine) string {
 		if port.Collects {
 			verb = "collects"
 		}
-		fmt.Fprintf(&out, "  %s (%s) %s %v\n", TypeName(port.Interface), port.Port, verb, port.Contributors)
+		fmt.Fprintf(&out, "  %s (%s) %s %s\n", TypeName(port.Type), port.Owner, verb, adapterList(port.Adapters))
 	}
 	out.WriteString("commands:\n")
 	for _, cmd := range description.Commands {

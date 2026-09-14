@@ -70,7 +70,7 @@ func (p *plugin) Dependencies() []kernel.PluginName { return []kernel.PluginName
 // buffers, the Present/Acquire/Consume commands, and the end-of-tick present
 // subscription on app.UpdateEvent.
 func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
-	p.backend = registrar.RequireAdapter[gpu.Backend]()
+	p.backend = registrar.RequireAdapter[gfx.BackendPort]()
 	ids := func() internal.IDMinter { return p.backend.Get() }
 	registrar.InitResource(internal.NewOpQueue(ids))
 	registrar.InitResource(&readList{OpQueue: internal.NewOpQueue(ids)})
@@ -90,7 +90,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.Subscribe[frameOnUpdate](p.admitFrame).First()
 	registrar.Subscribe[gfx.PresentOnUpdate](p.presentOnUpdate).Last()
 	registrar.Subscribe[gfx.RenderOnRender](p.renderOnRender)
-	registrar.ProvideAdapter[mcp.Provider](provider{})
+	registrar.ProvideAdapter[gfx.McpProvider](mcp.Provider(provider{}))
 	return nil
 }
 

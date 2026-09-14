@@ -94,8 +94,8 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 		return err
 	}
 	p.config = resolved
-	p.providers = registrar.CollectAdapters[mcp.Provider]()
-	registrar.ProvideAdapter[mcp.Provider](provider{})
+	p.providers = registrar.CollectAdapters[mcp.ProviderPort]()
+	registrar.ProvideAdapter[mcp.McpProvider](mcp.Provider(provider{}))
 	return nil
 }
 

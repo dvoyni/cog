@@ -4,9 +4,10 @@ package mcp
 // capabilities to an agent. It speaks cog contracts only; it never emits
 // protocol vocabulary.
 //
-// A plugin contributes one from Register:
+// A plugin declares its McpProvider Adapter type for ProviderPort and
+// contributes one from Register:
 //
-//	registrar.ProvideAdapter[mcp.Provider](provider{})
+//	registrar.ProvideAdapter[McpProvider](mcp.Provider(provider{}))
 //
 // There is one interface rather than one per kind of capability, so adding a
 // kind edits neither this package nor the broker. It carries no name: the

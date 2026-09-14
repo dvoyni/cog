@@ -40,7 +40,7 @@ separate plugin, per the rule that every package hosts its own provider. Capture
 must live where the `Backend` internals are, and `gfx` is where they are.
 
 ```go
-registrar.ProvideAdapter[mcp.Provider](provider{}) // in gfximpl's Register
+registrar.ProvideAdapter[gfx.McpProvider](mcp.Provider(provider{})) // in gfximpl's Register
 
 func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
@@ -484,7 +484,7 @@ The readback and arming halves are in
 **`extensions/gfx/gfximpl/mcpprovider.go`** (new)
 
 - A `provider` value whose `Capabilities()` returns the two capabilities above,
-  contributed with `ProvideAdapter[mcp.Provider]` in `Register`.
+  contributed with `ProvideAdapter[gfx.McpProvider]` in `Register`.
 - `captureScreenRequest`/`captureScreenResponse`,
   `frameSnapshotRequest`/`frameSnapshotResponse`, unexported: the wire schema
   is the contract.

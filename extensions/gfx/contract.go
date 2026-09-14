@@ -14,9 +14,9 @@
 // declares no plugin. The GPU contract an Adapter implements, and every ID,
 // format and enum both halves speak, is package gpu; this package aliases
 // none of it, so each of those types has the one name gpu gives it. The plugin
-// is gfximpl.New, and it works only once a gpu.Backend Adapter is bound to it:
-// a driver such as wgpu provides one with kernel.Registrar.ProvideAdapter, and a
-// composition without one fails with kernel.ErrMissingAdapter.
+// is gfximpl.New, and it works only once an Adapter for BackendPort is bound to
+// it: a driver such as wgpu provides one with kernel.Registrar.ProvideAdapter,
+// and a composition without one fails with kernel.ErrMissingAdapter.
 //
 // Most recording types are declared in gfx/internal and aliased here, so that
 // they stay concrete while their unexported state stays readable to gfximpl;

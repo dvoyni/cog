@@ -137,8 +137,8 @@ type Provider interface {
 A plugin contributes one from its `Register`, and the broker collects every one:
 
 ```go
-registrar.ProvideAdapter[mcp.Provider](provider{})       // in each provider
-providers := registrar.CollectAdapters[mcp.Provider]()  // in the broker
+registrar.ProvideAdapter[canvas.McpProvider](mcp.Provider(provider{})) // in each provider
+providers := registrar.CollectAdapters[mcp.ProviderPort]()             // in the broker
 ```
 
 **One interface, not one per kind.** `PluginWithCapture`, `PluginWithSnapshot`
@@ -154,7 +154,7 @@ records beside each Adapter, so a provider cannot choose its own prefix. The
 Provider may be a small unexported value; every one in cog holds nothing,
 because a capability body reaches its plugin by dispatch.
 
-**Discovery is `CollectAdapters[mcp.Provider]()` in broker `Register`, read at
+**Discovery is `CollectAdapters[mcp.ProviderPort]()` in broker `Register`, read at
 broker `Start`.** The list is complete and final by then regardless of start
 order, because the engine binds Adapters during composition, after every
 `Register` and before any `Start`

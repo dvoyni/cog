@@ -57,7 +57,7 @@ shutdown context, which outlives engine cancellation.
 A plugin reaches another plugin only through a typed command, a published
 event, a locked resource, or an Adapter bound to it at composition. The engine
 hands out no plugin value: there is no lookup by plugin type, and a plugin that
-wants the contributors of an interface it defines declares that with
+wants the contributors to a Port it declares collects them with
 `CollectAdapters`.
 
 ## Handlers: Lock and Execute
@@ -229,43 +229,55 @@ values derived from one. This is a contract, not a checked invariant.
 
 ## Ports and Adapters
 
-A **Port** is a plugin that works only once it is given an **Adapter**: a plain
-value implementing an interface the Port declares, contributed by another plugin
-and bound by the engine during composition. The full rules are in
-[`docs/specs/ports.md`](docs/specs/ports.md).
+A **Port** is a declared identity type naming an interface a plugin needs filled;
+an **Adapter** is a declared identity type naming one way of filling it, under
+which a plugin provides a plain value that the engine binds during composition.
+The full rules are in [`docs/specs/ports.md`](docs/specs/ports.md).
 
-Three declarations on `Registrar`, each keyed by the Go type of an interface:
+Both are declared like commands, as defined types built from a kernel shape:
 
 ```go
-backend := registrar.RequireAdapter[gpu.Backend]()     // exactly one
-providers := registrar.CollectAdapters[mcp.Provider]() // any number, zero included
-registrar.ProvideAdapter[gpu.Backend](device)          // contribute one
+type BackendPort kernel.RequiredPort[gpu.Backend]  // gfx: exactly one Adapter
+type ProviderPort kernel.CollectedPort[Provider]   // mcp: any number, zero included
+type GfxBackend kernel.Adapter[gfx.BackendPort]    // wgpu: fills gfx.BackendPort
 ```
 
-`RequireAdapter[T]` returns a `RequiredAdapter[T]` whose `Get()` yields the one
-bound Adapter. `CollectAdapters[T]` returns a `CollectedAdapters[T]` whose
-`Get()` yields a fresh `[]ContributedAdapter[T]`: each Adapter with the
-`PluginName` of the plugin that provided it, in plugin order. `ProvideAdapter[T]`
-takes a value of type `T`, so the compiler checks it implements the interface.
+Three declarations on `Registrar` take those types:
 
-- `T` must be an interface type. Anything else, to any of the three, panics at
-  registration and arrives as `ErrPluginPanic`.
+```go
+backend := registrar.RequireAdapter[gfx.BackendPort]()           // exactly one
+providers := registrar.CollectAdapters[mcp.ProviderPort]()       // any number, zero included
+registrar.ProvideAdapter[GfxBackend](gpu.Backend(device))        // contribute one
+```
+
+`RequireAdapter[P]` returns a `RequiredAdapter[I]` whose `Get()` yields the one
+bound Adapter, typed as the Port's interface `I`. `CollectAdapters[P]` returns a
+`CollectedAdapters[I]` whose `Get()` yields a fresh `[]ContributedAdapter[I]`:
+each Adapter with the `PluginName` of the plugin that provided it, in plugin
+order. `ProvideAdapter[A]` takes a value of the Port's interface type, so the
+compiler checks it implements the interface. Go infers type parameters from
+arguments before constraints, so a concrete value is converted to the interface
+first. Requiring a collected Port, collecting a required one, or providing
+anything but an Adapter type does not compile.
+
+- A Port must be built on an interface type. Anything else, to any of the
+  three, panics at registration and arrives as `ErrPluginPanic`.
+- Bindings are keyed by the Port type: two Ports on one interface are distinct.
 - Binding happens at finalization: after every `Register`, before any `Start`.
   It adds no plugin-dependency edge in either direction and does not depend on
   registration order.
 - `Get` panics before finalization and is valid from `Start` onwards. An Adapter
   is not a Resource: reading it takes no lock, and its thread rules are the Port
   interface's business.
-- A required interface with no Adapter fails composition with
-  `ErrMissingAdapter`; with several, `ErrDuplicateAdapter`.
-- A nil Adapter is refused when it is provided: `ProvideAdapter[T]` given an
+- A required Port with no Adapter fails composition with `ErrMissingAdapter`;
+  with several, `ErrDuplicateAdapter`.
+- A nil Adapter is refused when it is provided: `ProvideAdapter[A]` given an
   untyped nil fails composition with `ErrNilAdapter` and contributes nothing,
-  whether `T` is required, collected or consumed by no plugin. A Port never
-  receives a nil. A typed nil, such as a nil pointer, is a valid interface value
-  and is not nil.
-- A plugin declares each interface once. Requiring and collecting the same `T`,
-  or declaring it twice, fails with `ErrDuplicateRegistration` of kind
-  `adapter declaration`.
+  whether its Port is required, collected or declared by no plugin. No plugin
+  ever receives a nil. A typed nil, such as a nil pointer, is a valid interface
+  value and is not nil.
+- A plugin declares each Port once. Declaring it twice fails with
+  `ErrDuplicateRegistration` of kind `port declaration`.
 - An Adapter nobody requires or collects is not an error.
 
 ## Errors
@@ -291,12 +303,12 @@ Exported error types:
   exists.
 - `ErrUndeclaredDependency`: a handler locks a resource owned by a plugin its
   own plugin does not declare a dependency on.
-- `ErrMissingAdapter`: a plugin requires an Adapter for an interface no plugin
-  provides.
-- `ErrDuplicateAdapter`: a plugin requires exactly one Adapter for an interface
-  several plugins provide; it names every contributor.
+- `ErrMissingAdapter`: a plugin requires a Port no plugin provides an Adapter
+  for; it names the plugin and the Port type.
+- `ErrDuplicateAdapter`: a plugin requires a Port several Adapters are provided
+  for; it names every Adapter type and its contributor.
 - `ErrNilAdapter`: a plugin provides a nil Adapter; it names the plugin and the
-  interface.
+  Adapter type.
 - `ErrUnavailableDependency`: `Dependency` was asked for a resource with no
   initial value or an undeclared owner; it arrives inside `ErrPluginPanic`.
 - `ErrPluginPanic`: a plugin boundary panicked; includes owner and stack.
@@ -311,14 +323,16 @@ Each exported error type implements `Error() string`.
 
 `Engine.Describe` returns a detached `ArchitectureDescription` of the finalized
 architecture: plugins and their dependencies, resources and commands with their
-owners, every required or collected Adapter interface with its Port and
-contributing plugins, every subscription with its event, phase, and ordering dependencies, and
+owners, every required or collected Port with the plugin declaring it and the
+Adapters bound to it, every subscription with its event, phase, and ordering dependencies, and
 the conflict report described below. `Dump` renders it as a readable table.
 
 `ArchitectureDescription.Ports` holds one `PortDescription` per `RequireAdapter`
-or `CollectAdapters` declaration: its `Interface`, its `Port`, whether it
-`Collects`, and its `Contributors` in plugin order. `Dump` prints them in a
-`ports:` section, as `gpu.Backend (gfx) requires [wgpu]`. An Adapter nobody
+or `CollectAdapters` declaration: the Port `Type`, the `Interface` it is built
+on, its declaring `Owner`, whether it `Collects`, and its `Adapters` in plugin
+order, each an `AdapterDescription` of the Adapter `Type` and the `Plugin` that
+provided it. `Dump` prints them in a `ports:` section, as
+`gfx.BackendPort (gfx) requires [wgpu.GfxBackend (wgpu)]`. An Adapter nobody
 consumes binds to nothing and is not listed.
 
 `CommandDescription` and `SubscriptionDescription` also carry `Reads`, `Writes`
@@ -421,7 +435,7 @@ Go's reflection cannot see aliases, which is why the rule is needed at all:
 - Introspection: `PluginDescription`, `ResourceDescription`,
   `CommandDescription`, `SubscriptionDescription`, `ContentionDescription`,
   `ResourceContention`, `PhaseContention`, `HandlerConflict`, `HandlerRef`,
-  `PortDescription`, `TypeName`.
+  `PortDescription`, `AdapterDescription`, `TypeName`.
 - Runtime: `Kernel`, `Kernel.Context`, `Kernel.WithContext`,
   `Kernel.ExecuteCommandAsync`, `Kernel.PublishEvent`, `Kernel.ReportError`,
   `Executioner`, `Executioner.ExecuteCommand`, `Executioner.Describe`,
@@ -429,9 +443,11 @@ Go's reflection cannot see aliases, which is why the rule is needed at all:
 - Registration: `Registrar`, `Registrar.InitResource`,
   `Registrar.Dependency`, `Registrar.HandleCommand`, `Registrar.Subscribe`,
   `Ordering[TEvent]`.
-- Ports and Adapters: `Registrar.RequireAdapter`, `Registrar.CollectAdapters`,
-  `Registrar.ProvideAdapter`, `RequiredAdapter[T]`, `RequiredAdapter.Get`,
-  `CollectedAdapters[T]`, `CollectedAdapters.Get`, `ContributedAdapter[T]`.
+- Ports and Adapters: `RequiredPort`, `CollectedPort`, `Adapter`,
+  `RequiredPortConstraint`, `CollectedPortConstraint`, `AdapterConstraint`,
+  `Registrar.RequireAdapter`, `Registrar.CollectAdapters`,
+  `Registrar.ProvideAdapter`, `RequiredAdapter[I]`, `RequiredAdapter.Get`,
+  `CollectedAdapters[I]`, `CollectedAdapters.Get`, `ContributedAdapter[I]`.
 - Handlers: `Lock`, `Execute`, `Observe`, `Command`, `Subscription`,
   `CommandConstraint`, `SubscriptionConstraint`.
 - Resources: `ResourceAccess`, `ResourceAccess.GetRead`,

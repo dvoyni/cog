@@ -35,16 +35,19 @@ type Provider interface {
 }
 ```
 
-`Provider` is the Adapter the broker collects. A plugin contributes one from its
-`Register`, usually a small unexported value:
+`Provider` is the interface of `ProviderPort`, the Port the broker collects. A
+plugin declares its Adapter type in its root's `adapters.go` and contributes one
+from its `Register`, usually a small unexported value:
 
 ```go
-registrar.ProvideAdapter[mcp.Provider](provider{})
+type McpProvider kernel.Adapter[mcp.ProviderPort]
+
+registrar.ProvideAdapter[canvas.McpProvider](mcp.Provider(provider{}))
 ```
 
 One interface, not one per kind of capability, so adding a kind edits neither
 this package nor the broker. The broker declares
-`CollectAdapters[mcp.Provider]()` in its `Register`, reads the bound set at its
+`CollectAdapters[mcp.ProviderPort]()` in its `Register`, reads the bound set at its
 own `Start`, and calls `Capabilities()` on each exactly once. It namespaces tool
 names by the `PluginName` of the plugin that contributed each Provider, which
 the engine records when it binds the Adapter; a provider carries no name of its

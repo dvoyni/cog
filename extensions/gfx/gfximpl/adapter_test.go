@@ -108,8 +108,8 @@ func TestACompositionWithoutABackendAdapterFails(t *testing.T) {
 	if !errors.As(errors.Join(reported...), &missing) {
 		t.Fatalf("composition reported %v, want ErrMissingAdapter", reported)
 	}
-	if missing.Port != gfx.Name || missing.Interface != reflect.TypeFor[gpu.Backend]() {
-		t.Fatalf("missing adapter = %+v, want gfx's Backend", missing)
+	if missing.Plugin != gfx.Name || missing.Port != reflect.TypeFor[gfx.BackendPort]() {
+		t.Fatalf("missing adapter = %+v, want gfx's BackendPort", missing)
 	}
 }
 

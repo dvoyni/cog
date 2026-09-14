@@ -1,6 +1,7 @@
 package canvasimpl
 
 import (
+	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/kernel"
 )
@@ -13,6 +14,9 @@ func (backendAdapter) Name() kernel.PluginName           { return "gfxbackendtes
 func (backendAdapter) Dependencies() []kernel.PluginName { return nil }
 
 func (a backendAdapter) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.ProvideAdapter[gpu.Backend](a.backend)
+	registrar.ProvideAdapter[testGfxBackend](a.backend)
 	return nil
 }
+
+// testGfxBackend is the Adapter this fixture fills gfx's backend Port as.
+type testGfxBackend kernel.Adapter[gfx.BackendPort]

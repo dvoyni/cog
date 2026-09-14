@@ -510,7 +510,7 @@ The mechanism is one branch inside a function that already exists.
 **`extensions/wgpu/mcpprovider.go`** (new)
 
 - A `provider` value whose `Capabilities()` returns the one capability,
-  contributed with `ProvideAdapter[mcp.Provider]` in `Register`.
+  contributed with `ProvideAdapter[McpProvider]` in `Register`.
 - `TimeRequest`/`TimeResponse`, the `Func` body with its own deadline, and the
   description string reproduced above.
 

@@ -100,8 +100,8 @@ func (p *Plugin) Register(registrar *kernel.Registrar, config any) error {
 	if p.gfxBackend == nil {
 		p.gfxBackend = newGfxBackend()
 	}
-	registrar.ProvideAdapter[gpu.Backend](p.gfxBackend)
-	registrar.ProvideAdapter[mcp.Provider](provider{})
+	registrar.ProvideAdapter[GfxBackend](gpu.Backend(p.gfxBackend))
+	registrar.ProvideAdapter[McpProvider](mcp.Provider(provider{}))
 	cfg := DefaultConfig()
 	if config != nil {
 		c, ok := config.(Config)

@@ -76,7 +76,7 @@ Provider is an unexported value holding nothing, because the capability body
 reaches canvas by dispatch.
 
 ```go
-registrar.ProvideAdapter[mcp.Provider](provider{}) // in Register
+registrar.ProvideAdapter[canvas.McpProvider](mcp.Provider(provider{})) // in Register
 
 func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
@@ -416,7 +416,7 @@ A checklist for an implementation session.
 **`bundles/canvas/mcpprovider.go`** (new)
 
 - A `provider` value whose `Capabilities()` returns the one capability,
-  contributed with `ProvideAdapter[mcp.Provider]` in `Register`.
+  contributed with `ProvideAdapter[canvas.McpProvider]` in `Register`.
 - `DrawsRequest`/`DrawsResponse`, and the `Func` body: validate, dispatch the
   arm, wait with the capability's own **2s** deadline, then marshal and write on
   **this** goroutine.

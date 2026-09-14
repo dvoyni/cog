@@ -51,7 +51,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.Subscribe[armLayoutOnUpdate](p.armSnapshotOnUpdate).First()
 	registrar.Subscribe[layoutOnUpdate](p.snapshotOnUpdate).
 		After[ui.ProcessOnUpdate]()
-	registrar.ProvideAdapter[mcp.Provider](provider{})
+	registrar.ProvideAdapter[ui.McpProvider](mcp.Provider(provider{}))
 	return nil
 }
 

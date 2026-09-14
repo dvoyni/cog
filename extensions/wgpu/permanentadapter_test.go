@@ -17,9 +17,13 @@ type permanentAdapter struct{}
 func (permanentAdapter) Name() kernel.PluginName           { return "test-permanent-fs" }
 func (permanentAdapter) Dependencies() []kernel.PluginName { return nil }
 func (permanentAdapter) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.ProvideAdapter[storage.PermanentFS](emptyPermanentFS{})
+	registrar.ProvideAdapter[testPermanentFS](storage.PermanentFS(emptyPermanentFS{}))
 	return nil
 }
+
+// testPermanentFS is the Adapter this fixture fills storage's permanent
+// filesystem Port as.
+type testPermanentFS kernel.Adapter[storage.PermanentFSPort]
 
 type emptyPermanentFS struct{ fstest.MapFS }
 

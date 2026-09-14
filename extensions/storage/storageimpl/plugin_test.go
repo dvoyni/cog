@@ -26,8 +26,8 @@ func TestStorageWithoutAnAdapterFailsWithErrMissingAdapter(t *testing.T) {
 	if !errors.As(errors.Join(reported...), &missing) {
 		t.Fatalf("composition reported %v, want ErrMissingAdapter", reported)
 	}
-	if missing.Port != storage.Name || missing.Interface != reflect.TypeFor[storage.PermanentFS]() {
-		t.Fatalf("missing adapter = %+v, want storage's PermanentFS", missing)
+	if missing.Plugin != storage.Name || missing.Port != reflect.TypeFor[storage.PermanentFSPort]() {
+		t.Fatalf("missing adapter = %+v, want storage's PermanentFSPort", missing)
 	}
 }
 
@@ -130,9 +130,13 @@ type adapterPlugin struct{ permanent storage.PermanentFS }
 func (adapterPlugin) Name() kernel.PluginName           { return "storage-test-adapter" }
 func (adapterPlugin) Dependencies() []kernel.PluginName { return nil }
 func (a adapterPlugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.ProvideAdapter[storage.PermanentFS](a.permanent)
+	registrar.ProvideAdapter[testPermanentFS](a.permanent)
 	return nil
 }
+
+// testPermanentFS is the Adapter this fixture fills storage's permanent
+// filesystem Port as.
+type testPermanentFS kernel.Adapter[storage.PermanentFSPort]
 
 // readFileCmd reads the FileSystem resource under a read lock.
 type readFileCmd kernel.Command[readFileRequest, readFileResponse]

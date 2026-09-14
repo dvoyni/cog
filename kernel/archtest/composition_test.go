@@ -2,6 +2,7 @@ package archtest
 
 import (
 	"errors"
+	"github.com/dvoyni/cog/extensions/gfx"
 	"io/fs"
 	"reflect"
 	"slices"
@@ -26,8 +27,8 @@ import (
 )
 
 // Every Bundle and Port in cog, composed with the test Adapters gfx and storage
-// require, so the description names every Resource, Port interface, command and
-// subscription cog declares. Nothing runs: composition is what Describe reads.
+// require, so the description names every Resource, Port type and interface,
+// Adapter type, command and subscription cog declares. Nothing runs: composition is what Describe reads.
 func TestTypeName_NamesEveryTypeInAFullCogCompositionUniquely(t *testing.T) {
 	var failure error
 	engine := kernel.New(map[kernel.PluginName]any{storage.Name: storageimpl.DefaultConfig()}).
@@ -77,7 +78,10 @@ func describedTypes(description kernel.ArchitectureDescription) []reflect.Type {
 		types = append(types, resource.Type)
 	}
 	for _, port := range description.Ports {
-		types = append(types, port.Interface)
+		types = append(types, port.Type, port.Interface)
+		for _, adapter := range port.Adapters {
+			types = append(types, adapter.Type)
+		}
 	}
 	for _, command := range description.Commands {
 		types = append(types, command.Type)
@@ -103,9 +107,12 @@ func (backendAdapter) Name() kernel.PluginName           { return "gfxbackendtes
 func (backendAdapter) Dependencies() []kernel.PluginName { return nil }
 
 func (a backendAdapter) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.ProvideAdapter[gpu.Backend](a.backend)
+	registrar.ProvideAdapter[testGfxBackend](a.backend)
 	return nil
 }
+
+// testGfxBackend is the Adapter this fixture fills gfx's backend Port as.
+type testGfxBackend kernel.Adapter[gfx.BackendPort]
 
 // detachedBackend is a Backend whose device never arrives. Nothing here runs,
 // so only the ids a plugin may take at registration are implemented.
@@ -126,9 +133,13 @@ func (permanentAdapter) Name() kernel.PluginName           { return "test-perman
 func (permanentAdapter) Dependencies() []kernel.PluginName { return nil }
 
 func (permanentAdapter) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.ProvideAdapter[storage.PermanentFS](emptyPermanentFS{})
+	registrar.ProvideAdapter[testPermanentFS](storage.PermanentFS(emptyPermanentFS{}))
 	return nil
 }
+
+// testPermanentFS is the Adapter this fixture fills storage's permanent
+// filesystem Port as.
+type testPermanentFS kernel.Adapter[storage.PermanentFSPort]
 
 type emptyPermanentFS struct{ fstest.MapFS }
 

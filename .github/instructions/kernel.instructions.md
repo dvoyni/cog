@@ -1,6 +1,6 @@
 ---
 name: "Kernel Usage"
-description: "Use when creating or changing Go code that registers plugins, commands, subscriptions, resources or Adapters with the kernel, or that runs inside a kernel handler. Covers handler structure, resource handles, scope discipline, ordering, Adapters, dependencies, and which file in a contract root or …impl a declaration goes in."
+description: "Use when creating or changing Go code that registers plugins, commands, subscriptions, resources, Ports or Adapters with the kernel, or that runs inside a kernel handler. Covers handler structure, resource handles, scope discipline, ordering, Ports and Adapters, dependencies, and which file in a contract root or …impl a declaration goes in."
 applyTo: "**/*.go"
 ---
 
@@ -292,32 +292,52 @@ registrar.Subscribe[recordOnUpdate](record).Before[canvas.FlushOnUpdate]()
 An identity nothing outside orders against stays unexported in the `…impl`
 (`canvasimpl`'s `drawsOnUpdate`).
 
-## Adapters
+## Ports and Adapters
 
-An Adapter is a plain value implementing an interface a Port declares in its
-contract root or its vocabulary package (`gpu.Backend` in gfx's `gpu`,
-`storage.PermanentFS`, `mcp.Provider`), contributed
-by a plugin and bound to the Port during composition.
+A Port and an Adapter are declared identity types, like commands.
 [`kernel/docs/specs/ports.md`](../../kernel/docs/specs/ports.md) has the full
 rules.
 
-**Requiring or collecting** makes a plugin a Port, so it happens only in an
-`extensions/P/Pimpl`. Declare in `Register` and keep the handle on the plugin —
-a handle, unlike a resource value, is safe to keep — then read it from `Start`
+**A Port** is a defined type built from `kernel.RequiredPort[I]` (exactly one
+Adapter) or `kernel.CollectedPort[I]` (any number, zero included), where `I` is
+the interface its Adapters implement. The plugin declaring it puts it in its
+contract root's `ports.go`:
+
+```go
+type BackendPort kernel.RequiredPort[gpu.Backend] // gfx/ports.go
+type PermanentFSPort kernel.RequiredPort[PermanentFS] // storage/ports.go
+type ProviderPort kernel.CollectedPort[Provider]  // mcp/ports.go
+```
+
+**An Adapter** is a defined type built from `kernel.Adapter[P]`, where `P` is the
+Port it fills, named for the Port's plugin and interface. The providing plugin
+puts it in its root's `adapters.go` (for wgpu, diskfs and jsfs, the package
+itself):
+
+```go
+type GfxBackend kernel.Adapter[gfx.BackendPort]          // wgpu/adapters.go
+type StoragePermanentFS kernel.Adapter[storage.PermanentFSPort] // diskfs, jsfs
+type McpProvider kernel.Adapter[mcp.ProviderPort]        // every plugin with capabilities
+```
+
+**Requiring or collecting** a Port happens only in the `…impl` of the plugin
+that declares it. Declare in `Register` and keep the handle on the plugin — a
+handle, unlike a resource value, is safe to keep — then read it from `Start`
 onwards; `Get` panics before composition binds it:
 
 ```go
-p.backend = registrar.RequireAdapter[gpu.Backend]()       // exactly one
-p.providers = registrar.CollectAdapters[mcp.Provider]()   // any number, zero included
+p.backend = registrar.RequireAdapter[gfx.BackendPort]()      // RequiredAdapter[gpu.Backend]
+p.providers = registrar.CollectAdapters[mcp.ProviderPort]()  // CollectedAdapters[mcp.Provider]
 ```
 
-**Providing** is open to any plugin, a Bundle included. Always spell the
-interface as the type argument; inferred from the value, it is the concrete type,
-which panics:
+**Providing** is open to any plugin, a Bundle included, and always names the
+plugin's own Adapter type. The value has the Port's interface type, so the
+compiler checks it; Go infers type arguments from the value before the
+constraints, so convert a concrete value to the interface:
 
 ```go
-registrar.ProvideAdapter[storage.PermanentFS](permanent)
-registrar.ProvideAdapter[mcp.Provider](provider{})
+registrar.ProvideAdapter[StoragePermanentFS](permanent)          // already a storage.PermanentFS
+registrar.ProvideAdapter[canvas.McpProvider](mcp.Provider(provider{}))
 ```
 
 - **The value exists by `Register`.** Something that becomes usable later says
@@ -327,15 +347,17 @@ registrar.ProvideAdapter[mcp.Provider](provider{})
   goroutines may call it is the interface's contract, and it holds no resource
   value (see above).
 - **Binding adds no dependency** in either direction. A contributor that also
-  uses the Port's commands or resources declares that dependency itself.
-- **Composition checks the count.** A required interface with no Adapter fails
-  with `ErrMissingAdapter` and with several `ErrDuplicateAdapter`. Providing an
-  untyped nil fails with `ErrNilAdapter`, so a Port needs no nil check; a typed
-  nil pointer is a legal Adapter. A contribution nobody consumes is fine, which
-  is why every plugin with capabilities provides its `mcp.Provider`
-  unconditionally.
-- **A test composing a Port composes an Adapter too**: a small fixture plugin
-  whose `Register` provides it (the `backendAdapter` in the canvas, scene,
+  uses the declaring plugin's commands or resources declares that dependency
+  itself.
+- **Composition checks the count.** A required Port with no Adapter fails with
+  `ErrMissingAdapter` and with several `ErrDuplicateAdapter`. Providing an
+  untyped nil fails with `ErrNilAdapter`, so a plugin requiring a Port needs no
+  nil check; a typed nil pointer is a legal Adapter. A contribution nobody
+  consumes is fine, which is why every plugin with capabilities provides its
+  `McpProvider` unconditionally.
+- **A test composing a plugin that requires a Port composes an Adapter too**: a
+  small fixture plugin whose `Register` provides it under a test-local Adapter
+  type (the `backendAdapter` providing `testGfxBackend` in the canvas, scene,
   ecsscene and ui tests).
 
 A plugin's mcp capabilities are an unexported `provider{}` in its own package's
@@ -376,6 +398,8 @@ In a **contract root** (`bundles/X`, `extensions/P`, `slots/*`):
 - `resources.go`: the documented Resource types: an alias of the `internal/`
   declaration (`type State = internal.State`) when the `…impl` reads its
   unexported state, as every Resource queue's consume side does.
+- `ports.go`: the Port types the plugin declares.
+- `adapters.go`: the Adapter types the plugin provides.
 - `err.go`: exported error types and their `Error` methods.
 
 In the **`…impl`**:

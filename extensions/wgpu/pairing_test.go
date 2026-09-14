@@ -51,13 +51,16 @@ type pairingPlugin struct{ rig *pairingRig }
 
 func (p *pairingPlugin) Name() kernel.PluginName { return "pairingtest" }
 
+// testGfxBackend is the Adapter this fixture fills gfx's backend Port as.
+type testGfxBackend kernel.Adapter[gfx.BackendPort]
+
 func (p *pairingPlugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{gfx.Name, canvas.Name, ui.Name}
 }
 
 func (p *pairingPlugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.ProvideAdapter[gpu.Backend](p.rig.backend)
-	p.rig.providers = registrar.CollectAdapters[mcp.Provider]()
+	registrar.ProvideAdapter[testGfxBackend](gpu.Backend(p.rig.backend))
+	p.rig.providers = registrar.CollectAdapters[mcp.ProviderPort]()
 	registrar.HandleCommand[app.TimeCmd](p.rig.plugin.timeCmdImpl)
 	return nil
 }

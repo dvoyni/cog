@@ -46,7 +46,7 @@ marked **Gap** and says what would settle it.
 Provider is an unexported value holding nothing: input's state is a resource.
 
 ```go
-registrar.ProvideAdapter[mcp.Provider](provider{}) // in inputimpl's Register
+registrar.ProvideAdapter[input.McpProvider](mcp.Provider(provider{})) // in inputimpl's Register
 
 func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
@@ -314,7 +314,7 @@ The feature half is in
 **`bundles/input/mcpprovider.go`** (new)
 
 - A `provider` value whose `Capabilities()` returns the two capabilities above,
-  contributed with `ProvideAdapter[mcp.Provider]` in `Register`.
+  contributed with `ProvideAdapter[input.McpProvider]` in `Register`.
 - The `input_send` body: `input.Play(k, req.Actions)`, and nothing else.
 - Both description strings, kept beside the types and reproduced above.
 
