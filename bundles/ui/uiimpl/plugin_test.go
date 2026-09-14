@@ -10,7 +10,7 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 
 	"github.com/dvoyni/cog/bundles/canvas"
-	"github.com/dvoyni/cog/bundles/canvas/canvasimpl"
+	"github.com/dvoyni/cog/bundles/canvas/canvasplugin"
 	"github.com/dvoyni/cog/bundles/input"
 	"github.com/dvoyni/cog/bundles/input/inputplugin"
 	"github.com/dvoyni/cog/bundles/ui"
@@ -95,7 +95,7 @@ func TestPluginMapsWindowPointerToLogicalViewport(t *testing.T) {
 		inputplugin.New(),
 		gfximpl.New(),
 		backendAdapter{&detachedBackend{}},
-		canvasimpl.New(),
+		canvasplugin.New(),
 		New(),
 		consumer,
 	)
@@ -157,7 +157,7 @@ func TestPluginProcessesAndClearsEveryUpdate(t *testing.T) {
 		inputplugin.New(),
 		gfximpl.New(),
 		backendAdapter{&detachedBackend{}},
-		canvasimpl.New(),
+		canvasplugin.New(),
 		New(),
 		consumer,
 	)
@@ -224,7 +224,7 @@ func TestPluginSeesAScriptedClickAsAClick(t *testing.T) {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvasimpl.New(), New(), consumer)
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
 	go engine.Run(runContext)
 	<-engine.Ready()
 	k := engine.Executioner()
@@ -263,7 +263,7 @@ func TestPluginSeesAScriptedDragAsADrag(t *testing.T) {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvasimpl.New(), New(), consumer)
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
 	go engine.Run(runContext)
 	<-engine.Ready()
 	k := engine.Executioner()

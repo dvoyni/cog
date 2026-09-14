@@ -53,6 +53,22 @@ which is not to be merged.
 > configuration is `canvasimpl.Config`, and a zero field takes its default. The
 > file paths and line numbers cited below are as they were when this was
 > written.
+>
+> **Amended by [#360](https://github.com/dvoyni/cog/issues/360).** canvas moved
+> to the declaration-root shape of
+> [ADR 0002](../../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+> Every name an app writes a material against is still spelled `canvas.X`:
+> `MaterialSet` and `HaloProfile` are declared in `bundles/canvas/internal/types`
+> and aliased in the root, and `HaloMaterialSet`, `DefaultHaloProfile`,
+> `DefaultMaterial`, `DefaultTrianglesMaterial`, `TextureMaterial` and
+> `DefaultKeyColor` are forwarders in its `utils.go`. The scope resolution, the
+> built-in and halo materials, and `OpQueue` with its recording methods are in
+> `bundles/canvas/internal/types`. The plugin — the batchers, the flush with
+> `shadeSprite` and `shadeTriangles`, and the mount of the built-in WGSL, now
+> embedded from `bundles/canvas/internal/builtin/canvas/` — moved from
+> `canvasimpl` to `bundles/canvas/internal`. It is constructed with
+> `canvasplugin.New()` and configured with `canvas.Config`, whose zero value is
+> the default.
 
 ---
 
@@ -1019,7 +1035,8 @@ for it. Aligning them would have meant twenty-four call sites gaining a `nil`.
 
 - **`Frame.SetMaterial(canvas.MaterialSet)`** on the per-tick frame resource,
   which is cleared every tick and so is the natural home for a value that changes
-  per frame. `canvasimpl.Config` is construction-time and cannot hold it.
+  per frame. `canvasimpl.Config` (since #360 `canvas.Config`) is
+  construction-time and cannot hold it.
 - **`Element.Material(canvas.MaterialSet) Element`**, a **Modifier** in
   `CONTEXT.md`'s exact sense — "a value transformation that derives one Element
   declaration from another" — inherited down the tree precisely as `layer` is

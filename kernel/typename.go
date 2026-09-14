@@ -13,10 +13,10 @@ import (
 // A named type declared in a package whose import path has an internal segment
 // renders under its enclosing package, the path segment before the last
 // internal. The package name alone would be internal for every Bundle and Port
-// that splits its declarations, so bundles/canvas/internal.OpQueue renders as
-// canvas.OpQueue, the name of the alias a caller writes and greps for. An alias
-// declared in an …impl renders the same way: canvasimpl.Config, an alias of
-// internal.Config, reads canvas.Config.
+// that splits its declarations, so bundles/canvas/internal/types.OpQueue renders
+// as canvas.OpQueue, the name of the alias a caller writes and greps for. An
+// alias declared in an …impl renders the same way: sceneimpl.Config, an alias of
+// internal.Config, reads scene.Config.
 //
 // The rule applies inside pointers, slices, arrays, maps, channels, functions
 // and generic type arguments. reflect spells a type argument by its full import
@@ -126,7 +126,7 @@ func packagePart(path string) string {
 
 // shortenQualified rewrites every import-path-qualified name in a type's name,
 // which reflect produces only inside an instantiated generic's brackets:
-// Maybe[*github.com/dvoyni/cog/bundles/canvas/internal.Font] becomes
+// Maybe[*github.com/dvoyni/cog/bundles/canvas/internal/types.Font] becomes
 // Maybe[*canvas.Font]. A quoted struct tag is copied untouched.
 func shortenQualified(name string) string {
 	if !strings.Contains(name, "[") {

@@ -405,7 +405,7 @@ enclosing package, the segment before the last `internal`:
 
 | type | `String()` | `TypeName` |
 | --- | --- | --- |
-| `*OpQueue` declared in `bundles/canvas/internal` | `*internal.OpQueue` | `*canvas.OpQueue` |
+| `*OpQueue` declared in `bundles/canvas/internal/types` | `*types.OpQueue` | `*canvas.OpQueue` |
 | `*OpQueue` declared in `bundles/scene/internal` | `*internal.OpQueue` | `*scene.OpQueue` |
 | `RenderEvent` declared in `extensions/gfx` | `gfx.RenderEvent` | `gfx.RenderEvent` |
 
@@ -421,8 +421,8 @@ Go's reflection cannot see aliases, which is why the rule is needed at all:
 - Predeclared types, unnamed structs and interfaces, and types named outside
   an `internal` package render as `reflect` renders them.
 - An alias declared in an `…impl` names the `internal` declaration too:
-  `canvasimpl.Config`, an alias of `internal.Config`, renders as
-  `canvas.Config`. That is unambiguous, just not the `…impl` spelling.
+  `sceneimpl.Config`, an alias of `internal.Config`, renders as
+  `scene.Config`. That is unambiguous, just not the `…impl` spelling.
 
 `ArchitectureDescription` keeps `reflect.Type` fields; only the string form is
 `TypeName`'s.

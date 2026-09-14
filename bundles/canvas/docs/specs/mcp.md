@@ -35,6 +35,22 @@ settle it.
 > the op inspection the snapshot walks, is in `bundles/canvas/internal`. The
 > tool name, its schema and its behaviour are unchanged. The file paths and line
 > numbers cited below are as they were when this was written.
+>
+> **Amended by [#360](https://github.com/dvoyni/cog/issues/360).** canvas moved
+> to the declaration-root shape of
+> [ADR 0002](../../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+> `ArmDrawsCmd` with its request and response is in the root's `commands.go`,
+> `DrawsSnapshot` and the view types are in its `types.go`, and the `ErrDraws…`
+> errors stay in its `err.go`, all still spelled `canvas.X`. The plugin moved
+> from `canvasimpl` to `bundles/canvas/internal`: the Provider and the
+> `canvas_draws` body are in `bundles/canvas/internal/mcpprovider.go`, the
+> snapshot slot and both snapshot subscriptions in
+> `bundles/canvas/internal/snapshot.go`, where `drawsOnUpdate` and
+> `armDrawsOnUpdate` stay unexported. The consume side of the queue and the op
+> inspection moved from `bundles/canvas/internal` to
+> `bundles/canvas/internal/types`. The plugin is constructed with
+> `canvasplugin.New()`. The tool name, its schema and its behaviour are
+> unchanged.
 
 ---
 

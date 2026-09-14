@@ -424,8 +424,8 @@ _Avoid_: Glow, outline, shadow
 ## Audio
 
 **Clip**:
-A sound a Voice plays, named by its path or by a Blob of encoded bytes the caller holds. A caller never loads, holds or releases one: naming it is the whole relationship, so two plays of one path, or of one Blob, play the same Clip — and two Blobs with equal bytes are still two Clips.
-_Avoid_: Sound, sample, asset, audio file. Also Buffer, which is a GPU object.
+A sound a Voice plays, loaded from a path or from a Blob of encoded bytes and kept until it is released. What named it is what finds it again, so two plays of one path, or of one Blob, play the same Clip — and two Blobs with equal bytes are still two Clips. Releasing is optional: a game that drives sound through Components names Clips and never releases one, and a Voice already playing keeps its Clip whatever is released.
+_Avoid_: Sound, sample, audio file. Also Buffer, which is a GPU object.
 
 **Voice**:
 One playing instance of a Clip, begun by a play and addressed afterwards by what that play handed back. Any number may play one Clip at once, and a Voice that has ended is addressed by nothing.

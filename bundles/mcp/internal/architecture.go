@@ -146,8 +146,8 @@ func checkPath(path string) error {
 
 // describe flattens the kernel's description. A reflect.Type renders as
 // kernel.TypeName renders it — gfx.RenderEvent, package-qualified by short name,
-// and canvas.OpQueue rather than internal.OpQueue for a type declared in
-// canvas's internal package — because that is the form appearing in the source
+// and canvas.OpQueue rather than types.OpQueue for a type declared in
+// canvas's internal/types package — because that is the form appearing in the source
 // the agent greps next. The fully-qualified spelling is unambiguous but
 // unsearchable.
 func describe(description kernel.ArchitectureDescription) architectureResponse {

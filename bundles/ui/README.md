@@ -131,7 +131,7 @@ only `Sprite` leaves everything else alone.
 `Element.Material(canvas.MaterialSet)` is a Modifier and inherits down the tree
 exactly as `Layer` does. `Frame.SetMaterial(canvas.MaterialSet)` seeds every root
 of a tick, and like everything else on the frame it is cleared each tick â€” which
-is what a value that changes per frame wants, and why `canvasimpl.Config`, which is
+is what a value that changes per frame wants, and why `canvas.Config`, which is
 construction time, cannot hold it. A child naming an **empty** set stops
 inheriting.
 
