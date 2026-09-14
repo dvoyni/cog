@@ -3,7 +3,7 @@ package types
 import (
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // modelPath is the path the unload tests name.

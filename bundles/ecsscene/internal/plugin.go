@@ -16,7 +16,7 @@ type plugin struct{}
 //
 //	kernel.New(config).WithPlugins(
 //	    storageplugin.New(), diskfsplugin.New(),
-//	    gfximpl.New(), sceneplugin.New(),
+//	    gfxplugin.New(), sceneplugin.New(),
 //	    ecsplugin.New(), ecssceneplugin.New(), game.New())
 //
 // ecsscene has no configuration, so there is no Config.

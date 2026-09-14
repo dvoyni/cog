@@ -8,8 +8,7 @@ import (
 
 	"github.com/dvoyni/cog/libs/m"
 
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/storage"
 )
 
@@ -216,7 +215,7 @@ func (a *Atlas) ResolveStandalone(path string, filesystem storage.FileSystem, re
 	entry := StandaloneEntry{
 		// A decoded image is sRGB by definition, and there is no caller to say
 		// otherwise: canvas draws pictures, never data maps.
-		Texture: resources.BakeTexture(width, height, gpu.FormatRGBA8Srgb, pixels, true, false),
+		Texture: resources.BakeTexture(width, height, gfx.FormatRGBA8Srgb, pixels, true, false),
 		Width:   width,
 		Height:  height,
 	}
@@ -265,7 +264,7 @@ func (a *Atlas) insert(key string, category atlasCategory, width, height int, pi
 	}
 	upload := paddedRGBA(pixels, width, height, padding, extrude)
 	array := &a.arrays[arrayIndex]
-	resources.UpdateTexture(array.texture, layer, gpu.Region{
+	resources.UpdateTexture(array.texture, layer, gfx.Region{
 		X: x, Y: y, Width: slotWidth, Height: slotHeight,
 	}, upload, false)
 	entry := AtlasEntry{
@@ -336,7 +335,7 @@ func (a *Atlas) place(width, height int, resources *gfx.ResourceQueue) (arrayInd
 	// the sprites, correct for the glyphs (they are RGB=255 with coverage in
 	// alpha, and 1.0 is a fixed point of the transfer function), and correct
 	// for the white texel for the same reason.
-	texture := resources.AllocateTexture(a.config.AtlasSize, a.config.AtlasSize, a.config.LayersPerArray, gpu.FormatRGBA8Srgb)
+	texture := resources.AllocateTexture(a.config.AtlasSize, a.config.AtlasSize, a.config.LayersPerArray, gfx.FormatRGBA8Srgb)
 	if index < 0 {
 		a.arrays = append(a.arrays, atlasArray{texture: texture, layers: make([]atlasShelf, a.config.LayersPerArray)})
 		index = len(a.arrays) - 1

@@ -8,33 +8,32 @@ import (
 
 	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
 )
 
-// stubBackend is a gpu.Backend that mints ids and does nothing else. Everything
+// stubBackend is a gfx.Backend that mints ids and does nothing else. Everything
 // this file asserts — residency, expansion, culling, packing — scene decides
 // before a backend is reached, which is what makes the whole path assertable
 // with no GPU. It declares no shader layout, so gfx drops every parameter the
 // frame binds, which is also fine: what a draw binds is scene's business and is
 // tested there.
 type stubBackend struct {
-	nextTexture gpu.TextureID
-	nextBuffer  gpu.BufferID
+	nextTexture gfx.TextureID
+	nextBuffer  gfx.BufferID
 	nextID      uint32
 }
 
 func (b *stubBackend) Ready() bool { return true }
 
-func (b *stubBackend) NewTexture() gpu.TextureID {
+func (b *stubBackend) NewTexture() gfx.TextureID {
 	b.nextTexture++
 	return b.nextTexture
 }
 
-func (b *stubBackend) NewBuffer() gpu.BufferID {
+func (b *stubBackend) NewBuffer() gfx.BufferID {
 	b.nextBuffer++
 	return b.nextBuffer
 }
@@ -44,39 +43,39 @@ func (b *stubBackend) next() uint32 {
 	return b.nextID
 }
 
-func (b *stubBackend) NewSampler(gpu.SamplerDesc) (gpu.SamplerID, error) {
-	return gpu.SamplerID(b.next()), nil
+func (b *stubBackend) NewSampler(gfx.SamplerDesc) (gfx.SamplerID, error) {
+	return gfx.SamplerID(b.next()), nil
 }
 
-func (b *stubBackend) FreeSampler(gpu.SamplerID) {}
+func (b *stubBackend) FreeSampler(gfx.SamplerID) {}
 
-func (b *stubBackend) NewShader(gpu.ShaderDesc) (gpu.ShaderID, error) {
-	return gpu.ShaderID(b.next()), nil
+func (b *stubBackend) NewShader(gfx.ShaderDesc) (gfx.ShaderID, error) {
+	return gfx.ShaderID(b.next()), nil
 }
 
-func (b *stubBackend) FreeShader(gpu.ShaderID) {}
+func (b *stubBackend) FreeShader(gfx.ShaderID) {}
 
-func (b *stubBackend) ShaderLayout(gpu.ShaderID) gpu.ShaderLayout { return gpu.ShaderLayout{} }
+func (b *stubBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout { return gfx.ShaderLayout{} }
 
-func (b *stubBackend) NewPipeline(gpu.PipelineDesc) (gpu.PipelineID, error) {
-	return gpu.PipelineID(b.next()), nil
+func (b *stubBackend) NewPipeline(gfx.PipelineDesc) (gfx.PipelineID, error) {
+	return gfx.PipelineID(b.next()), nil
 }
 
-func (b *stubBackend) FreePipeline(gpu.PipelineID) {}
+func (b *stubBackend) FreePipeline(gfx.PipelineID) {}
 
-func (b *stubBackend) ScreenFramebuffer() (gpu.TextureViewID, int, int) {
-	return gpu.TextureViewID(1), 1600, 1200
+func (b *stubBackend) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
+	return gfx.TextureViewID(1), 1600, 1200
 }
 
-func (b *stubBackend) TextureView(gpu.TextureID, int, int) gpu.TextureViewID {
-	return gpu.TextureViewID(b.next())
+func (b *stubBackend) TextureView(gfx.TextureID, int, int) gfx.TextureViewID {
+	return gfx.TextureViewID(b.next())
 }
 
-func (b *stubBackend) Limits() gpu.Limits { return gpu.DefaultLimits }
+func (b *stubBackend) Limits() gfx.Limits { return gfx.DefaultLimits() }
 
-func (b *stubBackend) Execute(*gpu.Queue) {}
+func (b *stubBackend) Execute(*gfx.Queue) {}
 
-func (b *stubBackend) TakeCapture() (gpu.Capture, bool) { return gpu.Capture{}, false }
+func (b *stubBackend) TakeCapture() (gfx.Capture, bool) { return gfx.Capture{}, false }
 
 // crateGLB is the smallest drawable file: one triangle, one node, one scene. It
 // is built rather than read, because this package has no testdata and the point

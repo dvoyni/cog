@@ -417,7 +417,7 @@ rendered into is the one a later layer, another camera, or a `scene.Material`
 samples - there is no canvas-owned target type and no name registry.
 
 ```go
-target, texture := gfxQueue.TemporaryTarget(512, 512, gpu.FormatRGBA8Srgb)
+target, texture := gfxQueue.TemporaryTarget(512, 512, gfx.FormatRGBA8Srgb)
 q.SetLayerTarget(0, target)
 q.Clear(0, m.Transparent)
 q.Text(0, "", "PANEL", canvas.TextDraw{Size: 48})

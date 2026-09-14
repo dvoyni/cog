@@ -1,8 +1,8 @@
 package canvas
 
 import (
-	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // ArmDrawsCmd arms one draw snapshot and hands back the wait. It is ordinary

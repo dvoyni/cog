@@ -37,3 +37,4 @@ This applies to the cog repo. Games and examples are composition roots and stay 
 - Helpers that dispatch commands leave the API, so every caller dispatches and handles the answer itself.
 - The time tool moves from wgpu to app and is renamed `app_time`. No other tool name or schema changes.
 - `FlattenShader` leaves gfx's API, since its signature names `storage.FileSystem`.
+- A root that aliases types with hot accessors may hold one kind of code: an unexported, never-called inline anchor calling those accessors. Go inlines a method of a package its caller does not import only when a package the caller imports references it, and a root of aliases and forwarders references none; gfx's move lost per-sprite and per-draw inlining in canvas and scene until its root anchored them (#366).

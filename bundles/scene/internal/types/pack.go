@@ -3,8 +3,8 @@ package types
 import (
 	"unsafe"
 
-	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // SceneNoAnim is the animOffset of an instance that animates nothing.

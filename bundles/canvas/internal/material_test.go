@@ -6,9 +6,8 @@ import (
 	"testing/fstest"
 
 	"github.com/dvoyni/cog/bundles/canvas"
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 func triangle(x float32) [3]canvas.Vertex {
@@ -27,7 +26,7 @@ func trianglesConfig() canvas.Config {
 // custom-material draws were two draws. One rule now serves both batchers: the
 // material joins the key by fingerprint and the parameters join it by value.
 func TestTrianglesSharingAMaterialAndValuesMerge(t *testing.T) {
-	custom := gfx.MaterialWithState(gfx.ShaderWithText("fn customMark() {}"), gpu.StateOverlay2D)
+	custom := gfx.MaterialWithState(gfx.ShaderWithText("fn customMark() {}"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
 		first, second := triangle(0), triangle(8)
 		write.DrawTriangles(0, first[:], &custom, gfx.FloatParam("amount", 0.5))
@@ -43,7 +42,7 @@ func TestTrianglesSharingAMaterialAndValuesMerge(t *testing.T) {
 // triangle batch is concatenated vertices with no instance index, so there is
 // nothing to hang a per-item array on and two values really are two draws.
 func TestTrianglesDifferingInAParameterValueSplit(t *testing.T) {
-	custom := gfx.MaterialWithState(gfx.ShaderWithText("fn customMark() {}"), gpu.StateOverlay2D)
+	custom := gfx.MaterialWithState(gfx.ShaderWithText("fn customMark() {}"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
 		first, second := triangle(0), triangle(8)
 		write.DrawTriangles(0, first[:], &custom, gfx.FloatParam("amount", 0.5))
@@ -74,8 +73,8 @@ func TestTrianglesWithAnUnrecognisedParameterStillBatch(t *testing.T) {
 // mechanism exists for - a navigator running after every screen's update
 // handler.
 func TestSetLayerMaterialReachesDrawsAlreadyRecorded(t *testing.T) {
-	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn layerSpriteMark() {}"), gpu.StateOverlay2D)
-	triangles := gfx.MaterialWithState(gfx.ShaderWithText("fn layerTrianglesMark() {}"), gpu.StateOverlay2D)
+	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn layerSpriteMark() {}"), gfx.StateOverlay2D())
+	triangles := gfx.MaterialWithState(gfx.ShaderWithText("fn layerTrianglesMark() {}"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
 		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 		verts := triangle(0)
@@ -96,7 +95,7 @@ func TestSetLayerMaterialReachesDrawsAlreadyRecorded(t *testing.T) {
 // A nil slot keeps its built-in, so a set is an override rather than a
 // whole-cloth requirement.
 func TestANilSlotKeepsItsBuiltIn(t *testing.T) {
-	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn layerSpriteMark() {}"), gpu.StateOverlay2D)
+	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn layerSpriteMark() {}"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
 		verts := triangle(0)
 		write.DrawTriangles(0, verts[:], nil)
@@ -115,8 +114,8 @@ func TestANilSlotKeepsItsBuiltIn(t *testing.T) {
 // neither the scope's slot nor the scope's parameters: a scope's material and
 // its parameters are one unit.
 func TestADrawNamingItsOwnMaterialIgnoresTheLayerSet(t *testing.T) {
-	own := gfx.MaterialWithState(gfx.ShaderWithText("fn ownMark() {}"), gpu.StateOverlay2D)
-	layerSprite := gfx.MaterialWithState(gfx.ShaderWithText("fn layersMark() {}"), gpu.StateOverlay2D)
+	own := gfx.MaterialWithState(gfx.ShaderWithText("fn ownMark() {}"), gfx.StateOverlay2D())
+	layerSprite := gfx.MaterialWithState(gfx.ShaderWithText("fn layersMark() {}"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
 		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, &own)
 		write.SetLayerMaterial(0, canvas.MaterialSet{
@@ -137,7 +136,7 @@ func TestADrawNamingItsOwnMaterialIgnoresTheLayerSet(t *testing.T) {
 // block, which is what a custom material extends, rather than becoming a storage
 // array the shader never declared.
 func TestTheLayerSetsParametersAreAppliedPerBatch(t *testing.T) {
-	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn layerSpriteMark() {}"), gpu.StateOverlay2D)
+	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn layerSpriteMark() {}"), gfx.StateOverlay2D())
 	k, errs := testKernelCapturing(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
 		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 		write.SetLayerMaterial(0, canvas.MaterialSet{
@@ -155,8 +154,8 @@ func TestTheLayerSetsParametersAreAppliedPerBatch(t *testing.T) {
 // clones into the queue's arena at call time, so mutating the material
 // afterwards does not retroactively change what was recorded.
 func TestTheLastLayerMaterialInATickWins(t *testing.T) {
-	first := gfx.MaterialWithState(gfx.ShaderWithText("fn firstMark() {}"), gpu.StateOverlay2D)
-	second := gfx.MaterialWithState(gfx.ShaderWithText("fn secondMark() {}"), gpu.StateOverlay2D)
+	first := gfx.MaterialWithState(gfx.ShaderWithText("fn firstMark() {}"), gfx.StateOverlay2D())
+	second := gfx.MaterialWithState(gfx.ShaderWithText("fn secondMark() {}"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
 		write.SetLayerMaterial(0, canvas.MaterialSet{Sprite: &first})
 		write.SetLayerMaterial(0, canvas.MaterialSet{Sprite: &second})
@@ -171,7 +170,7 @@ func TestTheLastLayerMaterialInATickWins(t *testing.T) {
 // A layer set is per-frame state and is cleared with the rest of it, so a set
 // named on one tick does not leak into the next.
 func TestALayerMaterialDoesNotSurviveTheFrame(t *testing.T) {
-	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn layerSpriteMark() {}"), gpu.StateOverlay2D)
+	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn layerSpriteMark() {}"), gfx.StateOverlay2D())
 	first := true
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
 		if first {
@@ -211,7 +210,7 @@ func TestOneArrayNameAtTwoKindsSplitsTheBatch(t *testing.T) {
 // draws already recorded - including ones on layers the caller never heard of,
 // which is the reason it exists.
 func TestTheQueueSetReachesEveryLayerThatNamedNone(t *testing.T) {
-	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn queueSpriteMark() {}"), gpu.StateOverlay2D)
+	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn queueSpriteMark() {}"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
 		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 		write.Sprite(7, "", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
@@ -230,8 +229,8 @@ func TestTheQueueSetReachesEveryLayerThatNamedNone(t *testing.T) {
 // Scopes nest: a layer that names a set of its own is not reached by the
 // queue's, because the nearer scope is the one that spoke last about that layer.
 func TestALayerSetOverridesTheQueueSet(t *testing.T) {
-	queueSprite := gfx.MaterialWithState(gfx.ShaderWithText("fn queueSpriteMark() {}"), gpu.StateOverlay2D)
-	layerSprite := gfx.MaterialWithState(gfx.ShaderWithText("fn layerSpriteMark() {}"), gpu.StateOverlay2D)
+	queueSprite := gfx.MaterialWithState(gfx.ShaderWithText("fn queueSpriteMark() {}"), gfx.StateOverlay2D())
+	layerSprite := gfx.MaterialWithState(gfx.ShaderWithText("fn layerSpriteMark() {}"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
 		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 		write.SetLayerMaterial(0, canvas.MaterialSet{Sprite: &layerSprite})
@@ -247,7 +246,7 @@ func TestALayerSetOverridesTheQueueSet(t *testing.T) {
 // what stops the outer one, and a set of nil slots keeps the built-ins. This is
 // the backdrop that must not fade and the layer rendering into a texture.
 func TestAnEmptyLayerSetOptsOutOfTheQueueSet(t *testing.T) {
-	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn queueSpriteMark() {}"), gpu.StateOverlay2D)
+	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn queueSpriteMark() {}"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
 		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 		write.SetLayerMaterial(0, canvas.MaterialSet{})
@@ -265,7 +264,7 @@ func TestAnEmptyLayerSetOptsOutOfTheQueueSet(t *testing.T) {
 // The queue's set is per-frame state like the layer's, so a set named on one
 // tick does not leak into the next.
 func TestTheQueueSetDoesNotSurviveTheFrame(t *testing.T) {
-	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn queueSpriteMark() {}"), gpu.StateOverlay2D)
+	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn queueSpriteMark() {}"), gfx.StateOverlay2D())
 	first := true
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
 		if first {

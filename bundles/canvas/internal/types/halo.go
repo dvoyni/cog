@@ -1,8 +1,7 @@
 package types
 
 import (
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // The shape of the band, defined once and used both by
@@ -55,7 +54,7 @@ const (
 // silently re-key every batch that named it.
 var haloSpriteMaterial = gfx.MaterialWithState(
 	gfx.ShaderWithResource(HaloShaderPath),
-	gpu.StateOverlay2D,
+	gfx.StateOverlay2D(),
 	gfx.FloatParam(HaloReachSlot, DefaultHaloReach),
 	gfx.FloatParam(HaloPlateauSlot, DefaultHaloPlateau),
 	gfx.FloatParam(HaloExponentSlot, DefaultHaloExponent),

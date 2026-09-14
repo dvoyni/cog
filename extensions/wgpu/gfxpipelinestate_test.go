@@ -3,23 +3,23 @@ package wgpu
 import (
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/gputypes"
 )
 
 func TestCompareFuncMapsTheWholeSet(t *testing.T) {
 	cases := []struct {
-		from gpu.CompareFunc
+		from gfx.CompareFunc
 		want gputypes.CompareFunction
 	}{
-		{gpu.CompareAlways, gputypes.CompareFunctionAlways},
-		{gpu.CompareNever, gputypes.CompareFunctionNever},
-		{gpu.CompareLess, gputypes.CompareFunctionLess},
-		{gpu.CompareLessEqual, gputypes.CompareFunctionLessEqual},
-		{gpu.CompareGreater, gputypes.CompareFunctionGreater},
-		{gpu.CompareGreaterEqual, gputypes.CompareFunctionGreaterEqual},
-		{gpu.CompareEqual, gputypes.CompareFunctionEqual},
-		{gpu.CompareNotEqual, gputypes.CompareFunctionNotEqual},
+		{gfx.CompareAlways, gputypes.CompareFunctionAlways},
+		{gfx.CompareNever, gputypes.CompareFunctionNever},
+		{gfx.CompareLess, gputypes.CompareFunctionLess},
+		{gfx.CompareLessEqual, gputypes.CompareFunctionLessEqual},
+		{gfx.CompareGreater, gputypes.CompareFunctionGreater},
+		{gfx.CompareGreaterEqual, gputypes.CompareFunctionGreaterEqual},
+		{gfx.CompareEqual, gputypes.CompareFunctionEqual},
+		{gfx.CompareNotEqual, gputypes.CompareFunctionNotEqual},
 	}
 	for _, c := range cases {
 		if got := compareFunc(c.from); got != c.want {
@@ -29,19 +29,19 @@ func TestCompareFuncMapsTheWholeSet(t *testing.T) {
 }
 
 func TestCullAndWindingZeroValuesAreTheWebGPUDefaults(t *testing.T) {
-	if got := cullMode(gpu.CullNone); got != gputypes.CullModeNone {
+	if got := cullMode(gfx.CullNone); got != gputypes.CullModeNone {
 		t.Errorf("cullMode(CullNone) = %v, want CullModeNone", got)
 	}
-	if got := cullMode(gpu.CullBack); got != gputypes.CullModeBack {
+	if got := cullMode(gfx.CullBack); got != gputypes.CullModeBack {
 		t.Errorf("cullMode(CullBack) = %v, want CullModeBack", got)
 	}
-	if got := cullMode(gpu.CullFront); got != gputypes.CullModeFront {
+	if got := cullMode(gfx.CullFront); got != gputypes.CullModeFront {
 		t.Errorf("cullMode(CullFront) = %v, want CullModeFront", got)
 	}
-	if got := frontFace(gpu.FrontCCW); got != gputypes.FrontFaceCCW {
+	if got := frontFace(gfx.FrontCCW); got != gputypes.FrontFaceCCW {
 		t.Errorf("frontFace(FrontCCW) = %v, want FrontFaceCCW", got)
 	}
-	if got := frontFace(gpu.FrontCW); got != gputypes.FrontFaceCW {
+	if got := frontFace(gfx.FrontCW); got != gputypes.FrontFaceCW {
 		t.Errorf("frontFace(FrontCW) = %v, want FrontFaceCW", got)
 	}
 }
@@ -51,21 +51,21 @@ func TestStripTopologiesDeclareTheirIndexFormat(t *testing.T) {
 	// which index format cuts the strip, and with two widths in the engine the
 	// format a strip declares is the mesh's own.
 	for _, c := range []struct {
-		width gpu.IndexWidth
+		width gfx.IndexWidth
 		want  gputypes.IndexFormat
 	}{
-		{gpu.IndexUint16, gputypes.IndexFormatUint16},
-		{gpu.IndexUint32, gputypes.IndexFormatUint32},
+		{gfx.IndexUint16, gputypes.IndexFormatUint16},
+		{gfx.IndexUint32, gputypes.IndexFormatUint32},
 	} {
-		strip := stripIndexFormat(gpu.TopologyTriangleStrip, c.width)
+		strip := stripIndexFormat(gfx.TopologyTriangleStrip, c.width)
 		if strip == nil || *strip != c.want {
 			t.Fatalf("stripIndexFormat(TriangleStrip, %v) = %v, want %v", c.width, strip, c.want)
 		}
 	}
 	// Every other topology has no strip to cut, and WebGPU forbids declaring a
 	// format for one - whatever width the mesh's own indices happen to be.
-	for _, topology := range []gpu.PrimitiveTopology{gpu.TopologyTriangleList, gpu.TopologyLineList} {
-		for _, width := range []gpu.IndexWidth{gpu.IndexUint16, gpu.IndexUint32} {
+	for _, topology := range []gfx.PrimitiveTopology{gfx.TopologyTriangleList, gfx.TopologyLineList} {
+		for _, width := range []gfx.IndexWidth{gfx.IndexUint16, gfx.IndexUint32} {
 			if got := stripIndexFormat(topology, width); got != nil {
 				t.Errorf("stripIndexFormat(%v, %v) = %v, want nil for a non-strip topology", topology, width, got)
 			}

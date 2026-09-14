@@ -14,7 +14,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
 )
 
@@ -53,7 +53,7 @@ const externalImage = -1
 type loadedTexture struct {
 	key           textureKey
 	width, height int
-	format        gpu.TextureFormat
+	format        gfx.TextureFormat
 	pixels        []byte
 }
 
@@ -89,7 +89,7 @@ func newTextureLoader(doc *gltf.Document, fsys fs.FS, modelPath string) *texture
 // texture resolves one glTF texture reference into a decoded image and the
 // sampler that reads it, or reports missingTexture. srgb selects the colour
 // space the slot binds it in.
-func (l *textureLoader) texture(index int, srgb bool) (int, gpu.SamplerDesc) {
+func (l *textureLoader) texture(index int, srgb bool) (int, gfx.SamplerDesc) {
 	sampler := defaultModelSampler
 	if index < 0 || index >= len(l.doc.Textures) || l.doc.Textures[index] == nil {
 		l.reports = append(l.reports, ErrModelTextureUnavailable{
@@ -215,9 +215,9 @@ func decodeTexture(key textureKey, encoded []byte) (loadedTexture, error) {
 	bounds := decoded.Bounds()
 	rgba := image.NewNRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
 	draw.Draw(rgba, rgba.Bounds(), decoded, bounds.Min, draw.Src)
-	format := gpu.FormatRGBA8
+	format := gfx.FormatRGBA8
 	if key.srgb {
-		format = gpu.FormatRGBA8Srgb
+		format = gfx.FormatRGBA8Srgb
 	}
 	return loadedTexture{
 		key: key, width: bounds.Dx(), height: bounds.Dy(), format: format, pixels: rgba.Pix,
@@ -236,7 +236,7 @@ func textureReportPath(key textureKey) string {
 
 // defaultModelSampler is glTF's own default for a texture that names no
 // sampler: repeat on both axes, filtered linearly at every step.
-var defaultModelSampler = gpu.SamplerDesc{AddressU: gpu.AddressRepeat, AddressV: gpu.AddressRepeat}
+var defaultModelSampler = gfx.SamplerDesc{AddressU: gfx.AddressRepeat, AddressV: gfx.AddressRepeat}
 
 // modelSampler maps one glTF sampler onto gfx's. glTF specifies magnification,
 // minification and mip selection independently, which is exactly the shape
@@ -246,37 +246,37 @@ var defaultModelSampler = gpu.SamplerDesc{AddressU: gpu.AddressRepeat, AddressV:
 // Anisotropy is left off: glTF has no field for it, and turning it on for every
 // model texture would be scene deciding a quality/bandwidth trade on the app's
 // behalf with nothing in the file to justify it.
-func modelSampler(doc *gltf.Document, index int) gpu.SamplerDesc {
+func modelSampler(doc *gltf.Document, index int) gfx.SamplerDesc {
 	if index < 0 || index >= len(doc.Samplers) || doc.Samplers[index] == nil {
 		return defaultModelSampler
 	}
 	sampler := doc.Samplers[index]
-	desc := gpu.SamplerDesc{
+	desc := gfx.SamplerDesc{
 		AddressU: addressMode(sampler.WrapS),
 		AddressV: addressMode(sampler.WrapT),
 	}
 	if sampler.MagFilter == gltf.MagNearest {
-		desc.Mag = gpu.FilterNearest
+		desc.Mag = gfx.FilterNearest
 	}
 	switch sampler.MinFilter {
 	case gltf.MinNearest:
-		desc.Min = gpu.FilterNearest
+		desc.Min = gfx.FilterNearest
 	case gltf.MinNearestMipMapNearest:
-		desc.Min, desc.Mip = gpu.FilterNearest, gpu.FilterNearest
+		desc.Min, desc.Mip = gfx.FilterNearest, gfx.FilterNearest
 	case gltf.MinNearestMipMapLinear:
-		desc.Min = gpu.FilterNearest
+		desc.Min = gfx.FilterNearest
 	case gltf.MinLinearMipMapNearest:
-		desc.Mip = gpu.FilterNearest
+		desc.Mip = gfx.FilterNearest
 	}
 	return desc
 }
 
-func addressMode(wrap gltf.WrappingMode) gpu.AddressMode {
+func addressMode(wrap gltf.WrappingMode) gfx.AddressMode {
 	switch wrap {
 	case gltf.WrapClampToEdge:
-		return gpu.AddressClamp
+		return gfx.AddressClamp
 	case gltf.WrapMirroredRepeat:
-		return gpu.AddressMirror
+		return gfx.AddressMirror
 	}
-	return gpu.AddressRepeat
+	return gfx.AddressRepeat
 }

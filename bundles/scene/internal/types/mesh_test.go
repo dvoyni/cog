@@ -5,9 +5,8 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // The authoring struct is 72 bytes of float and the layout it reports is the
@@ -28,12 +27,12 @@ func TestVertexAuthorsInFloatsAndStoresInThirtyTwoBytes(t *testing.T) {
 	}
 	layout := Vertex{}.VertexLayout()
 	want := []gfx.VertexAttr{
-		gfx.Attr(0, gpu.Float32x3),  // POSITION
-		gfx.Attr(12, gpu.Unorm16x2), // NORMAL     - oct32
-		gfx.Attr(16, gpu.Uint32),    // TANGENT    - oct 15/15 + handedness
-		gfx.Attr(20, gpu.Unorm16x2), // TEXCOORD_0 - against the mesh record
-		gfx.Attr(24, gpu.Unorm16x2), // TEXCOORD_1 - against the mesh record
-		gfx.Attr(28, gpu.Unorm8x4),  // COLOR_0
+		gfx.Attr(0, gfx.Float32x3),  // POSITION
+		gfx.Attr(12, gfx.Unorm16x2), // NORMAL     - oct32
+		gfx.Attr(16, gfx.Uint32),    // TANGENT    - oct 15/15 + handedness
+		gfx.Attr(20, gfx.Unorm16x2), // TEXCOORD_0 - against the mesh record
+		gfx.Attr(24, gfx.Unorm16x2), // TEXCOORD_1 - against the mesh record
+		gfx.Attr(28, gfx.Unorm8x4),  // COLOR_0
 	}
 	if len(layout) != len(want) {
 		t.Fatalf("layout has %d attributes, want %d", len(layout), len(want))

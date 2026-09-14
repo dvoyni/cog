@@ -18,11 +18,10 @@ import (
 	"github.com/dvoyni/cog/bundles/canvas/internal/types"
 	"github.com/dvoyni/cog/libs/m"
 
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/gfx"
+	"github.com/dvoyni/cog/slots/gfx/gfxplugin"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
 	"github.com/gogpu/naga"
@@ -42,24 +41,24 @@ func (f *testFS) Open(name string) (fs.File, error) {
 }
 
 type testBackend struct {
-	nextTexture      gpu.TextureID
-	nextBuffer       gpu.BufferID
+	nextTexture      gfx.TextureID
+	nextBuffer       gfx.BufferID
 	nextID           uint32
 	allocations      []textureAllocation
 	updates          []textureUpdate
 	drawParams       [][]byte
 	draws            int
-	pipelines        []gpu.PipelineDesc
-	passes           []gpu.PassDesc
-	releasedTextures []gpu.TextureID
-	releasedBuffers  []gpu.BufferID
+	pipelines        []gfx.PipelineDesc
+	passes           []gfx.PassDesc
+	releasedTextures []gfx.TextureID
+	releasedBuffers  []gfx.BufferID
 	buffers          []bufferBake
-	samplers         []gpu.SamplerDesc
+	samplers         []gfx.SamplerDesc
 	presents         int
 	capture          bool
 	// shaderSources maps each shader the backend was handed to its source, so a
 	// test can tell which built-in shader a pipeline was built from.
-	shaderSources map[gpu.ShaderID]string
+	shaderSources map[gfx.ShaderID]string
 }
 
 // pipelineShader returns the source of the shader pipeline i was built from.
@@ -68,19 +67,19 @@ func (b *testBackend) pipelineShader(i int) string {
 }
 
 type textureAllocation struct {
-	id   gpu.TextureID
-	desc gpu.TextureDesc
+	id   gfx.TextureID
+	desc gfx.TextureDesc
 }
 
 type textureUpdate struct {
-	id     gpu.TextureID
+	id     gfx.TextureID
 	layer  int
-	region gpu.Region
+	region gfx.Region
 	pixels []byte
 }
 
 type bufferBake struct {
-	kind gpu.BufferKind
+	kind gfx.BufferKind
 	data []byte
 }
 
@@ -90,8 +89,8 @@ type customTriangleVertex struct {
 }
 
 var customTriangleVertexLayout = [...]gfx.VertexAttr{
-	gfx.Attr(0, gpu.Float32x2),
-	gfx.Attr(8, gpu.Float32x4),
+	gfx.Attr(0, gfx.Float32x2),
+	gfx.Attr(8, gfx.Float32x4),
 }
 
 func (customTriangleVertex) VertexLayout() []gfx.VertexAttr {
@@ -100,26 +99,26 @@ func (customTriangleVertex) VertexLayout() []gfx.VertexAttr {
 
 func (b *testBackend) Ready() bool { return true }
 
-func (b *testBackend) NewTexture() gpu.TextureID { b.nextTexture++; return b.nextTexture }
-func (b *testBackend) NewBuffer() gpu.BufferID   { b.nextBuffer++; return b.nextBuffer }
-func (b *testBackend) NewSampler(desc gpu.SamplerDesc) (gpu.SamplerID, error) {
+func (b *testBackend) NewTexture() gfx.TextureID { b.nextTexture++; return b.nextTexture }
+func (b *testBackend) NewBuffer() gfx.BufferID   { b.nextBuffer++; return b.nextBuffer }
+func (b *testBackend) NewSampler(desc gfx.SamplerDesc) (gfx.SamplerID, error) {
 	b.nextID++
 	if b.capture {
 		b.samplers = append(b.samplers, desc)
 	}
-	return gpu.SamplerID(b.nextID), nil
+	return gfx.SamplerID(b.nextID), nil
 }
-func (b *testBackend) FreeSampler(gpu.SamplerID) {}
-func (b *testBackend) NewShader(desc gpu.ShaderDesc) (gpu.ShaderID, error) {
+func (b *testBackend) FreeSampler(gfx.SamplerID) {}
+func (b *testBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 	b.nextID++
-	id := gpu.ShaderID(b.nextID)
+	id := gfx.ShaderID(b.nextID)
 	if b.shaderSources == nil {
-		b.shaderSources = map[gpu.ShaderID]string{}
+		b.shaderSources = map[gfx.ShaderID]string{}
 	}
 	b.shaderSources[id] = string(desc.Code)
 	return id, nil
 }
-func (b *testBackend) FreeShader(gpu.ShaderID) {}
+func (b *testBackend) FreeShader(gfx.ShaderID) {}
 
 // ShaderLayout is one hand-written union standing in for every shader, so it
 // puts bindings and offsets where the real shaders do not. Anything asserting
@@ -130,10 +129,10 @@ func (b *testBackend) FreeShader(gpu.ShaderID) {}
 // batch supplies it as one vec4, so its .z lands on the union's clipEnabled
 // slot. wobble is here so a per-instance parameter array has a binding to
 // resolve against.
-func (b *testBackend) ShaderLayout(gpu.ShaderID) gpu.ShaderLayout {
-	return gpu.ShaderLayout{
+func (b *testBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout {
+	return gfx.ShaderLayout{
 		UniformSize: 208, UniformGroup: 0, UniformBinding: 0,
-		Uniforms: []gpu.UniformMember{
+		Uniforms: []gfx.UniformMember{
 			{Name: "canvasViewport", Offset: 48},
 			{Name: "canvasLayer", Offset: 64},
 			{Name: "canvasClip", Offset: 128},
@@ -145,9 +144,9 @@ func (b *testBackend) ShaderLayout(gpu.ShaderID) gpu.ShaderLayout {
 			{Name: "haloPlateau", Offset: testHaloPlateauOffset},
 			{Name: "haloExponent", Offset: testHaloExponentOffset},
 		},
-		Resources: []gpu.ShaderResource{
+		Resources: []gfx.ShaderResource{
 			{Name: "canvasSampler", Sampler: true, Group: 1, Binding: 0},
-			{Name: "canvasTexture", TextureView: gpu.TextureView2DArray, Group: 1, Binding: 1},
+			{Name: "canvasTexture", TextureView: gfx.TextureView2DArray, Group: 1, Binding: 1},
 			{Name: "instances", StorageBuffer: true, Group: 2, Binding: 0},
 			{Name: "wobble", StorageBuffer: true, Group: 2, Binding: 1},
 		},
@@ -182,70 +181,70 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 }
 `
 
-func (b *testBackend) NewPipeline(desc gpu.PipelineDesc) (gpu.PipelineID, error) {
+func (b *testBackend) NewPipeline(desc gfx.PipelineDesc) (gfx.PipelineID, error) {
 	b.nextID++
 	if b.capture {
 		b.pipelines = append(b.pipelines, desc)
 	}
-	return gpu.PipelineID(b.nextID), nil
+	return gfx.PipelineID(b.nextID), nil
 }
-func (b *testBackend) FreePipeline(gpu.PipelineID) {}
-func (b *testBackend) ScreenFramebuffer() (gpu.TextureViewID, int, int) {
+func (b *testBackend) FreePipeline(gfx.PipelineID) {}
+func (b *testBackend) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
 	return 1, 100, 100
 }
-func (b *testBackend) Limits() gpu.Limits { return gpu.DefaultLimits }
-func (b *testBackend) TextureView(texture gpu.TextureID, mip, layer int) gpu.TextureViewID {
+func (b *testBackend) Limits() gfx.Limits { return gfx.DefaultLimits() }
+func (b *testBackend) TextureView(texture gfx.TextureID, mip, layer int) gfx.TextureViewID {
 	b.nextID++
-	return gpu.TextureViewID(b.nextID)
+	return gfx.TextureViewID(b.nextID)
 }
-func (b *testBackend) Execute(queue *gpu.Queue) {
+func (b *testBackend) Execute(queue *gfx.Queue) {
 	queue.ReplayBakes(b)
 	queue.ReplayPasses(b)
 	queue.ReplayReleases(b)
 }
-func (b *testBackend) BeginPass(desc gpu.PassDesc) gpu.RenderPass {
+func (b *testBackend) BeginPass(desc gfx.PassDesc) gfx.RenderPass {
 	b.passes = append(b.passes, desc)
 	return b
 }
-func (b *testBackend) EndPass(gpu.RenderPass) {}
+func (b *testBackend) EndPass(gfx.RenderPass) {}
 func (b *testBackend) Present()               { b.presents++ }
 
 // Capture is the readback seam; nothing here reads a frame back.
-func (b *testBackend) Capture(gpu.CaptureDesc) {}
+func (b *testBackend) Capture(gfx.CaptureDesc) {}
 
-func (b *testBackend) TakeCapture() (gpu.Capture, bool) { return gpu.Capture{}, false }
+func (b *testBackend) TakeCapture() (gfx.Capture, bool) { return gfx.Capture{}, false }
 
-func (b *testBackend) TransitionTextures([]gpu.TextureTransition) {}
-func (b *testBackend) BakeBuffer(_ gpu.BufferID, kind gpu.BufferKind, _ int, data []byte) {
+func (b *testBackend) TransitionTextures([]gfx.TextureTransition) {}
+func (b *testBackend) BakeBuffer(_ gfx.BufferID, kind gfx.BufferKind, _ int, data []byte) {
 	if b.capture {
 		b.buffers = append(b.buffers, bufferBake{kind: kind, data: append([]byte(nil), data...)})
 	}
 }
-func (b *testBackend) BakeTexture(gpu.TextureID, int, int, gpu.TextureFormat, []byte, bool) {
+func (b *testBackend) BakeTexture(gfx.TextureID, int, int, gfx.TextureFormat, []byte, bool) {
 }
-func (b *testBackend) AllocateTexture(id gpu.TextureID, desc gpu.TextureDesc) {
+func (b *testBackend) AllocateTexture(id gfx.TextureID, desc gfx.TextureDesc) {
 	b.allocations = append(b.allocations, textureAllocation{id: id, desc: desc})
 }
-func (b *testBackend) UpdateTexture(id gpu.TextureID, layer int, region gpu.Region, pixels []byte) {
+func (b *testBackend) UpdateTexture(id gfx.TextureID, layer int, region gfx.Region, pixels []byte) {
 	b.updates = append(b.updates, textureUpdate{id: id, layer: layer, region: region, pixels: append([]byte(nil), pixels...)})
 }
-func (b *testBackend) SetPipeline(gpu.PipelineID) {}
+func (b *testBackend) SetPipeline(gfx.PipelineID) {}
 func (b *testBackend) SetParams(params []byte) {
 	if b.capture {
 		b.drawParams = append(b.drawParams, append([]byte(nil), params...))
 	}
 }
-func (b *testBackend) SetTexture(gpu.TextureID, int, int) {}
+func (b *testBackend) SetTexture(gfx.TextureID, int, int) {}
 
-func (b *testBackend) SetSampler(gpu.SamplerID, int, int)               {}
-func (b *testBackend) SetVertexBuffer(gpu.BufferID, int)                {}
-func (b *testBackend) SetIndexBuffer(gpu.BufferID, int, gpu.IndexWidth) {}
-func (b *testBackend) SetBuffer(int, int, gpu.BufferID, int, int)       {}
+func (b *testBackend) SetSampler(gfx.SamplerID, int, int)               {}
+func (b *testBackend) SetVertexBuffer(gfx.BufferID, int)                {}
+func (b *testBackend) SetIndexBuffer(gfx.BufferID, int, gfx.IndexWidth) {}
+func (b *testBackend) SetBuffer(int, int, gfx.BufferID, int, int)       {}
 func (b *testBackend) Draw(_, _, _, _ int, _ bool)                      { b.draws++ }
-func (b *testBackend) ReleaseBuffer(id gpu.BufferID) {
+func (b *testBackend) ReleaseBuffer(id gfx.BufferID) {
 	b.releasedBuffers = append(b.releasedBuffers, id)
 }
-func (b *testBackend) ReleaseTexture(id gpu.TextureID) {
+func (b *testBackend) ReleaseTexture(id gfx.TextureID) {
 	b.releasedTextures = append(b.releasedTextures, id)
 }
 
@@ -370,7 +369,7 @@ func testKernelRecorder(t testing.TB, filesystem fs.FS, config canvas.Config, re
 		storage.Name: storage.Config{}.WithReadFS("test", 10, filesystem),
 		canvas.Name:  config,
 	}
-	engine := kernel.New(configs).Handler(onError).WithPlugins(storageplugin.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{backend}, canvasPlugin, recorder)
+	engine := kernel.New(configs).Handler(onError).WithPlugins(storageplugin.New(), permanentAdapter{}, gfxplugin.New(), backendAdapter{backend}, canvasPlugin, recorder)
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()
@@ -484,7 +483,7 @@ func BenchmarkCanvasFlushTexturedTriangles(b *testing.B) {
 		for i := 0; i < 300; i++ {
 			write.DrawTriangles(canvas.Layer(i%6), verts, nil,
 				gfx.TextureParam(canvas.TextureSlot, gfx.TextureWithResource(paths[i%len(paths)])),
-				gfx.SamplerParam(canvas.SamplerSlot, gpu.SamplerDesc{}))
+				gfx.SamplerParam(canvas.SamplerSlot, gfx.SamplerDesc{}))
 		}
 	})
 	runFrame(k)
@@ -545,7 +544,7 @@ func TestEmptyPathUsesWhiteAtlasAndLayersAreOrdered(t *testing.T) {
 	if width, height := floatAt(backend.drawParams[0], 48), floatAt(backend.drawParams[0], 52); width != 100 || height != 100 {
 		t.Fatalf("Canvas viewport = %vx%v, want logical 100x100", width, height)
 	}
-	if len(backend.pipelines) != 1 || backend.pipelines[0].State != gpu.StateOverlay2D {
+	if len(backend.pipelines) != 1 || backend.pipelines[0].State != gfx.StateOverlay2D() {
 		t.Fatalf("default pipeline state = %+v, want alpha with depth disabled", backend.pipelines)
 	}
 }
@@ -562,7 +561,7 @@ func TestLogicalAtlasPagesShareOneTextureArrayAndBatch(t *testing.T) {
 	})
 	runFrame(k)
 
-	if len(backend.allocations) != 1 || backend.allocations[0].desc != (gpu.TextureDesc{Width: 16, Height: 16, Layers: 2, Format: gpu.FormatRGBA8Srgb}) {
+	if len(backend.allocations) != 1 || backend.allocations[0].desc != (gfx.TextureDesc{Width: 16, Height: 16, Layers: 2, Format: gfx.FormatRGBA8Srgb}) {
 		t.Fatalf("atlas allocations = %+v, want one 16x16x2 texture array", backend.allocations)
 	}
 	if len(backend.updates) != 3 {
@@ -701,14 +700,14 @@ func TestDrawTrianglesSnapshotsStandardVerticesAndUsesLayerTransform(t *testing.
 	}
 	pipeline := backend.pipelines[0]
 	if pipeline.Stride != 32 || len(pipeline.Attributes) != 3 ||
-		pipeline.Attributes[0] != (gpu.VertexAttribute{Offset: 0, Type: gpu.Float32x2, Location: 0}) ||
-		pipeline.Attributes[1] != (gpu.VertexAttribute{Offset: 8, Type: gpu.Float32x4, Location: 1}) ||
-		pipeline.Attributes[2] != (gpu.VertexAttribute{Offset: 24, Type: gpu.Float32x2, Location: 2}) {
+		pipeline.Attributes[0] != (gfx.VertexAttribute{Offset: 0, Type: gfx.Float32x2, Location: 0}) ||
+		pipeline.Attributes[1] != (gfx.VertexAttribute{Offset: 8, Type: gfx.Float32x4, Location: 1}) ||
+		pipeline.Attributes[2] != (gfx.VertexAttribute{Offset: 24, Type: gfx.Float32x2, Location: 2}) {
 		t.Fatalf("triangle vertex pipeline = %+v", pipeline)
 	}
 	var uploaded []byte
 	for _, buffer := range backend.buffers {
-		if buffer.kind == gpu.BufferVertex && len(buffer.data) == len(vertices)*32 {
+		if buffer.kind == gfx.BufferVertex && len(buffer.data) == len(vertices)*32 {
 			uploaded = buffer.data
 		}
 	}
@@ -730,8 +729,8 @@ func TestDrawTrianglesBindsTextureViaSlotParams(t *testing.T) {
 			{Position: m.Vec2{X: 4}, Color: white, UV: m.Vec2{X: 2}},
 			{Position: m.Vec2{Y: 4}, Color: white, UV: m.Vec2{Y: 2}},
 		}, nil,
-			gfx.TextureParam(canvas.TextureSlot, gfx.TextureWithBytes(2, 2, gpu.FormatRGBA8, make([]byte, 16), true, false)),
-			gfx.SamplerParam(canvas.SamplerSlot, gpu.SamplerDesc{AddressU: gpu.AddressRepeat, AddressV: gpu.AddressRepeat, Mag: gpu.FilterNearest, Min: gpu.FilterNearest, Mip: gpu.FilterNearest}),
+			gfx.TextureParam(canvas.TextureSlot, gfx.TextureWithBytes(2, 2, gfx.FormatRGBA8, make([]byte, 16), true, false)),
+			gfx.SamplerParam(canvas.SamplerSlot, gfx.SamplerDesc{AddressU: gfx.AddressRepeat, AddressV: gfx.AddressRepeat, Mag: gfx.FilterNearest, Min: gfx.FilterNearest, Mip: gfx.FilterNearest}),
 		)
 	})
 	runFrame(k)
@@ -748,29 +747,29 @@ func TestDrawTrianglesSupportsCustomVertexLayout(t *testing.T) {
 	}
 	material := gfx.MaterialWithState(
 		gfx.ShaderWithText("// custom triangle shader"),
-		gpu.MaterialState{Blend: gpu.BlendOpaque},
+		gfx.MaterialState{Blend: gfx.BlendOpaque},
 	)
 	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
 		write.DrawTriangles(1, vertices, &material)
 		vertices[0].Position.X = 99
-		customTriangleVertexLayout[0] = gfx.Attr(4, gpu.Float32)
+		customTriangleVertexLayout[0] = gfx.Attr(4, gfx.Float32)
 	})
-	t.Cleanup(func() { customTriangleVertexLayout[0] = gfx.Attr(0, gpu.Float32x2) })
+	t.Cleanup(func() { customTriangleVertexLayout[0] = gfx.Attr(0, gfx.Float32x2) })
 	runFrame(k)
 	if len(backend.pipelines) != 1 {
 		t.Fatalf("pipelines = %d, want 1", len(backend.pipelines))
 	}
 	pipeline := backend.pipelines[0]
 	if pipeline.Stride != 24 || len(pipeline.Attributes) != 2 ||
-		pipeline.Attributes[0] != (gpu.VertexAttribute{Offset: 0, Type: gpu.Float32x2, Location: 0}) ||
-		pipeline.Attributes[1] != (gpu.VertexAttribute{Offset: 8, Type: gpu.Float32x4, Location: 1}) ||
-		pipeline.State.Blend != gpu.BlendOpaque {
+		pipeline.Attributes[0] != (gfx.VertexAttribute{Offset: 0, Type: gfx.Float32x2, Location: 0}) ||
+		pipeline.Attributes[1] != (gfx.VertexAttribute{Offset: 8, Type: gfx.Float32x4, Location: 1}) ||
+		pipeline.State.Blend != gfx.BlendOpaque {
 		t.Fatalf("custom triangle pipeline = %+v", pipeline)
 	}
 	var uploaded []byte
 	for _, buffer := range backend.buffers {
-		if buffer.kind == gpu.BufferVertex && len(buffer.data) == len(vertices)*24 {
+		if buffer.kind == gfx.BufferVertex && len(buffer.data) == len(vertices)*24 {
 			uploaded = buffer.data
 		}
 	}
@@ -788,7 +787,7 @@ func TestCustomMaterialKeepsItsStateAndCannotReclaimTint(t *testing.T) {
 	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 	custom := gfx.MaterialWithState(
 		gfx.ShaderWithText("// custom canvas shader"),
-		gpu.MaterialState{Blend: gpu.BlendOpaque},
+		gfx.MaterialState{Blend: gfx.BlendOpaque},
 		gfx.FloatParam("customValue", 1),
 	)
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
@@ -822,7 +821,7 @@ func TestCustomMaterialKeepsItsStateAndCannotReclaimTint(t *testing.T) {
 	if got := floatAt(record, 48); got != 0.25 {
 		t.Fatalf("instance tint red = %v, want the caller's 0.25", got)
 	}
-	if len(backend.pipelines) != 1 || backend.pipelines[0].State != (gpu.MaterialState{Blend: gpu.BlendOpaque}) {
+	if len(backend.pipelines) != 1 || backend.pipelines[0].State != (gfx.MaterialState{Blend: gfx.BlendOpaque}) {
 		t.Fatalf("custom pipeline state = %+v", backend.pipelines)
 	}
 }
@@ -832,8 +831,8 @@ func TestCustomMaterialKeepsItsStateAndCannotReclaimTint(t *testing.T) {
 // the fact that one was named.
 func TestSpritesSharingAMaterialBatchAndDefaultMaterialBatchesWithNil(t *testing.T) {
 	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
-	custom := gfx.MaterialWithState(gfx.ShaderWithText("// custom"), gpu.StateOverlay2D)
-	other := gfx.MaterialWithState(gfx.ShaderWithText("// other"), gpu.StateOverlay2D)
+	custom := gfx.MaterialWithState(gfx.ShaderWithText("// custom"), gfx.StateOverlay2D())
+	other := gfx.MaterialWithState(gfx.ShaderWithText("// other"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
 		at := func(x float32) canvas.SpriteTransform {
 			return canvas.SpriteTransform{Position: m.Vec2{X: x}, Size: m.Vec2{X: 4, Y: 4}}
@@ -912,7 +911,7 @@ func TestAPerSpriteParameterBecomesOneArrayAndItsNameSplitsTheBatch(t *testing.T
 // so they batch with each other exactly as any other sprite does.
 func TestAFillAndAGlyphCarryingAMaterialAreSpriteDraws(t *testing.T) {
 	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
-	custom := gfx.MaterialWithState(gfx.ShaderWithText("// custom"), gpu.StateOverlay2D)
+	custom := gfx.MaterialWithState(gfx.ShaderWithText("// custom"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
 		write.FillRect(0, m.Rect{Width: 4, Height: 4}, canvas.ShapeDraw{Color: m.Color{R: 1, A: 1}, Material: &custom})
 		write.FillRect(0, m.Rect{X: 8, Width: 4, Height: 4}, canvas.ShapeDraw{Color: m.Color{G: 1, A: 1}, Material: &custom})
@@ -941,7 +940,7 @@ func TestAZeroShapeColourIsOpaqueWhite(t *testing.T) {
 // instance buffer is a multiple of 96 and the quad buffers are not storage.
 func namedStorageBuffer(b *testBackend, size int) []byte {
 	for i := range b.buffers {
-		if b.buffers[i].kind == gpu.BufferStorage && len(b.buffers[i].data) == size {
+		if b.buffers[i].kind == gfx.BufferStorage && len(b.buffers[i].data) == size {
 			return b.buffers[i].data
 		}
 	}
@@ -1129,7 +1128,7 @@ func TestTiledSpriteRepeatsAcrossSizeViaStandaloneTexture(t *testing.T) {
 	}
 	var vertices []byte
 	for _, buffer := range backend.buffers {
-		if buffer.kind == gpu.BufferVertex && len(buffer.data) == 6*32 {
+		if buffer.kind == gfx.BufferVertex && len(buffer.data) == 6*32 {
 			vertices = buffer.data
 		}
 	}
@@ -1152,12 +1151,12 @@ func TestTiledSpriteRepeatsOnlyTiledAxes(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"wave.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}}
 	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "wave.png", canvas.SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true, Filter: gpu.FilterNearest}, nil)
+		write.Sprite(0, "wave.png", canvas.SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true, Filter: gfx.FilterNearest}, nil)
 	})
 	runFrame(k)
 	found := false
 	for _, sampler := range backend.samplers {
-		if sampler.AddressU == gpu.AddressRepeat && sampler.AddressV == gpu.AddressClamp && sampler.Mag == gpu.FilterNearest {
+		if sampler.AddressU == gfx.AddressRepeat && sampler.AddressV == gfx.AddressClamp && sampler.Mag == gfx.FilterNearest {
 			found = true
 		}
 	}
@@ -1280,7 +1279,7 @@ func TestCanvasNumbersItsGroupsByKind(t *testing.T) {
 // hand-writes the block and includes the rest - and that has to compile.
 func TestAMaterialExtendingTheUniformBlockCompiles(t *testing.T) {
 	source := extendingSpriteMaterialSource
-	text, _, err := gfx.FlattenShader(storage.NewFileSystem(builtinMountID, builtinFS), gfx.ShaderWithText(source))
+	text, err := flattenShader(t, builtinMountID, builtinFS, gfx.ShaderWithText(source))
 	if err != nil {
 		t.Fatalf("flatten the extending material: %v", err)
 	}
@@ -1346,8 +1345,8 @@ func TestAtlasArrayIsAllocatedSrgb(t *testing.T) {
 	if len(backend.allocations) != 1 {
 		t.Fatalf("atlas allocations = %d, want 1", len(backend.allocations))
 	}
-	if format := backend.allocations[0].desc.Format; format != gpu.FormatRGBA8Srgb {
-		t.Fatalf("atlas format = %v, want gpu.FormatRGBA8Srgb", format)
+	if format := backend.allocations[0].desc.Format; format != gfx.FormatRGBA8Srgb {
+		t.Fatalf("atlas format = %v, want gfx.FormatRGBA8Srgb", format)
 	}
 }
 
@@ -1357,7 +1356,7 @@ func TestAtlasArrayIsAllocatedSrgb(t *testing.T) {
 // and no single source is a whole module.
 func flattenBuiltinShader(t *testing.T, path string) string {
 	t.Helper()
-	text, _, err := gfx.FlattenShader(storage.NewFileSystem(builtinMountID, builtinFS), gfx.ShaderWithResource(path))
+	text, err := flattenShader(t, builtinMountID, builtinFS, gfx.ShaderWithResource(path))
 	if err != nil {
 		t.Fatalf("flatten %q: %v", path, err)
 	}
@@ -1403,7 +1402,7 @@ func TestTrianglesShaderParses(t *testing.T) {
 
 // The include has to resolve on the real path too: through the mount the plugin
 // installs, inside the translate step the backend drives, not only through a
-// filesystem a test hands to FlattenShader. If it did not, the pipeline would be
+// filesystem a test hands to flattenShader. If it did not, the pipeline would be
 // built from a module missing keyColorRamp.
 func TestASpriteDrawReachesTheBackendWithTheRampIncluded(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 2, 2)}}}
@@ -1454,7 +1453,7 @@ fn fs_main() -> @location(0) vec4<f32> {
 `
 	filesystem := fstest.MapFS{"app.wgsl": &fstest.MapFile{Data: []byte(appShader)}}
 	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
-	material := gfx.MaterialWithState(gfx.ShaderWithResource("app.wgsl"), gpu.StateOverlay2D)
+	material := gfx.MaterialWithState(gfx.ShaderWithResource("app.wgsl"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
 		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, &material)
 	})
@@ -1554,7 +1553,7 @@ const testInstanceSize = 96
 func spriteInstances(b *testBackend) [][]byte {
 	var out [][]byte
 	for i := range b.buffers {
-		if b.buffers[i].kind == gpu.BufferStorage && len(b.buffers[i].data) > 0 && len(b.buffers[i].data)%testInstanceSize == 0 {
+		if b.buffers[i].kind == gfx.BufferStorage && len(b.buffers[i].data) > 0 && len(b.buffers[i].data)%testInstanceSize == 0 {
 			out = append(out, b.buffers[i].data)
 		}
 	}

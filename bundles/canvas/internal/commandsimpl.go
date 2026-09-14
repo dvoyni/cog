@@ -2,8 +2,8 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/canvas"
-	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // armDrawsCmdImpl installs the tick's one snapshot request and hands back the

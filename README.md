@@ -61,7 +61,7 @@ error handling.
     and localStorage in a browser.
 - [`m`](libs/m): immutable vectors, rectangles, colors, matrices, quaternions,
     scalar helpers, and splines. Angles use radians.
-- [`gfx`](extensions/gfx/README.md): driver-neutral rendering queues, resources, viewport,
+- [`gfx`](slots/gfx/README.md): driver-neutral rendering queues, resources, viewport,
     backend contract, frame capture, and per-tick snapshots.
 - [`canvas`](bundles/canvas/README.md): layered 2D sprites, text, primitives, and custom
     triangles over gfx, with a snapshot of what a tick recorded.
@@ -146,7 +146,7 @@ plugins := []kernel.Plugin{
     storageplugin.New(),
     diskfsplugin.New(), // provides storage's PermanentFS Adapter
     inputplugin.New(),
-    gfximpl.New(),
+    gfxplugin.New(),
     wgpu.New(), // provides gfx's Backend Adapter
     ...
 }

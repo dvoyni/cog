@@ -17,10 +17,9 @@ import (
 
 	"github.com/dvoyni/cog/bundles/input"
 	"github.com/dvoyni/cog/bundles/mcp"
-	cgfx "github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
+	cgfx "github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/gogpu"
 )
 
@@ -100,7 +99,7 @@ func (p *Plugin) Register(registrar *kernel.Registrar, config any) error {
 	if p.gfxBackend == nil {
 		p.gfxBackend = newGfxBackend()
 	}
-	registrar.ProvideAdapter[GfxBackend](gpu.Backend(p.gfxBackend))
+	registrar.ProvideAdapter[GfxBackend](cgfx.Backend(p.gfxBackend))
 	registrar.ProvideAdapter[McpProvider](mcp.Provider(provider{}))
 	cfg := DefaultConfig()
 	if config != nil {

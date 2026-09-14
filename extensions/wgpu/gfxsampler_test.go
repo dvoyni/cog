@@ -3,14 +3,14 @@ package wgpu
 import (
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/gputypes"
 )
 
 func TestSamplerDescriptorMapsEveryAxisAndFilter(t *testing.T) {
-	got := samplerDescriptor(gpu.SamplerDesc{
-		AddressU: gpu.AddressRepeat, AddressV: gpu.AddressMirror,
-		Mag: gpu.FilterNearest, Min: gpu.FilterLinear, Mip: gpu.FilterNearest,
+	got := samplerDescriptor(gfx.SamplerDesc{
+		AddressU: gfx.AddressRepeat, AddressV: gfx.AddressMirror,
+		Mag: gfx.FilterNearest, Min: gfx.FilterLinear, Mip: gfx.FilterNearest,
 		Label: "test",
 	})
 	if got.AddressModeU != gputypes.AddressModeRepeat {
@@ -31,12 +31,12 @@ func TestSamplerDescriptorMapsEveryAxisAndFilter(t *testing.T) {
 }
 
 func TestComparisonSamplersCarryTheirCompare(t *testing.T) {
-	got := samplerDescriptor(gpu.SamplerDesc{Comparison: true, Compare: gpu.CompareLessEqual})
+	got := samplerDescriptor(gfx.SamplerDesc{Comparison: true, Compare: gfx.CompareLessEqual})
 	if got.Compare != gputypes.CompareFunctionLessEqual {
 		t.Errorf("compare = %v, want LessEqual", got.Compare)
 	}
 	// Compare is ignored unless the sampler says it compares.
-	plain := samplerDescriptor(gpu.SamplerDesc{Compare: gpu.CompareLessEqual})
+	plain := samplerDescriptor(gfx.SamplerDesc{Compare: gfx.CompareLessEqual})
 	if plain.Compare != gputypes.CompareFunctionUndefined {
 		t.Errorf("compare = %v, want Undefined when Comparison is false", plain.Compare)
 	}
@@ -44,11 +44,11 @@ func TestComparisonSamplersCarryTheirCompare(t *testing.T) {
 
 func TestAnisotropyIsClampedAndOffAtZeroOrOne(t *testing.T) {
 	for _, off := range []uint8{0, 1} {
-		if got := samplerDescriptor(gpu.SamplerDesc{Anisotropy: off}).Anisotropy; got != 1 {
+		if got := samplerDescriptor(gfx.SamplerDesc{Anisotropy: off}).Anisotropy; got != 1 {
 			t.Errorf("Anisotropy for Anisotropy=%d is %d, want 1 (off)", off, got)
 		}
 	}
-	if got := samplerDescriptor(gpu.SamplerDesc{Anisotropy: 64}).Anisotropy; got != 16 {
+	if got := samplerDescriptor(gfx.SamplerDesc{Anisotropy: 64}).Anisotropy; got != 16 {
 		t.Errorf("Anisotropy for Anisotropy=64 is %d, want the clamp of 16", got)
 	}
 }
@@ -56,13 +56,13 @@ func TestAnisotropyIsClampedAndOffAtZeroOrOne(t *testing.T) {
 func TestAnisotropyWithoutLinearFilteringIsRejected(t *testing.T) {
 	// WebGPU requires mag, min and mip all linear when maxAnisotropy > 1. A
 	// silent clamp would hide the mistake.
-	if err := validateSampler(gpu.SamplerDesc{Anisotropy: 4, Mip: gpu.FilterNearest}); err == nil {
+	if err := validateSampler(gfx.SamplerDesc{Anisotropy: 4, Mip: gfx.FilterNearest}); err == nil {
 		t.Error("nearest mip with anisotropy was accepted, want an error")
 	}
-	if err := validateSampler(gpu.SamplerDesc{Anisotropy: 4}); err != nil {
+	if err := validateSampler(gfx.SamplerDesc{Anisotropy: 4}); err != nil {
 		t.Errorf("linear sampler with anisotropy rejected: %v", err)
 	}
-	if err := validateSampler(gpu.SamplerDesc{Mag: gpu.FilterNearest}); err != nil {
+	if err := validateSampler(gfx.SamplerDesc{Mag: gfx.FilterNearest}); err != nil {
 		t.Errorf("nearest sampler without anisotropy rejected: %v", err)
 	}
 }
@@ -90,7 +90,7 @@ func TestReflectionTypesDepthTexturesAndComparisonSamplers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reflect: %v", err)
 	}
-	byName := map[string]gpu.ShaderResource{}
+	byName := map[string]gfx.ShaderResource{}
 	for _, r := range layout.Resources {
 		byName[r.Name] = r
 	}

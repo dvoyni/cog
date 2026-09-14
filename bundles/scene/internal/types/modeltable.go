@@ -3,10 +3,9 @@ package types
 import (
 	"errors"
 
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // ModelState is one path's residency. It is a state rather than an absence
@@ -401,8 +400,8 @@ func (l *Lookup) ensureDefaults(resources *gfx.ResourceQueue) PbrDefaults {
 		return l.defaults
 	}
 	l.defaults = PbrDefaults{
-		White:      resources.BakeTexture(1, 1, gpu.FormatRGBA8, []byte{0xff, 0xff, 0xff, 0xff}, true, false),
-		FlatNormal: resources.BakeTexture(1, 1, gpu.FormatRGBA8, []byte{0x80, 0x80, 0xff, 0xff}, true, false),
+		White:      resources.BakeTexture(1, 1, gfx.FormatRGBA8, []byte{0xff, 0xff, 0xff, 0xff}, true, false),
+		FlatNormal: resources.BakeTexture(1, 1, gfx.FormatRGBA8, []byte{0x80, 0x80, 0xff, 0xff}, true, false),
 	}
 	l.hasDefaults = true
 	return l.defaults

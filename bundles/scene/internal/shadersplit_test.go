@@ -7,8 +7,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // flattenedSceneShader is the bundled module as the backend sees it, with every
@@ -17,7 +16,7 @@ import (
 // it.
 func flattenedSceneShader(t testing.TB, opts ...gfx.ShaderOption) string {
 	t.Helper()
-	text, _, err := gfx.FlattenShader(storage.NewFileSystem(shaderMountID, shaderFS),
+	text, err := flattenShader(t, shaderMountID, shaderFS,
 		types.SceneShader(append([]gfx.ShaderOption{
 			gfx.ShaderDefine("SCENE_SKIN"), gfx.ShaderDefine("SCENE_MORPH"),
 		}, opts...)...))
@@ -50,7 +49,7 @@ func TestTheSplitFlattensToExactlyItsSourcesLineCount(t *testing.T) {
 		total += lineCountOf(string(source))
 	}
 
-	text, sourceMap, err := gfx.FlattenShader(storage.NewFileSystem(shaderMountID, shaderFS),
+	text, err := flattenShader(t, shaderMountID, shaderFS,
 		types.SceneShader(gfx.ShaderDefine("SCENE_SKIN"), gfx.ShaderDefine("SCENE_MORPH")))
 	if err != nil {
 		t.Fatalf("flatten: %v", err)
@@ -58,10 +57,13 @@ func TestTheSplitFlattensToExactlyItsSourcesLineCount(t *testing.T) {
 	if got := lineCountOf(text); got != total {
 		t.Errorf("the module is %d lines, want the sources' %d", got, total)
 	}
-	for _, segment := range sourceMap.Segments {
-		if segment.Source == "" {
-			t.Errorf("the module carries a %d-line hoisted prologue; scene declares no §4 directive",
-				segment.Length)
+	// The source map stays inside gfx, so the prologue is read off the text: a
+	// hoisted §4 directive is a line starting with its keyword.
+	for i, line := range strings.Split(text, "\n") {
+		if keyword, _, _ := strings.Cut(strings.TrimSpace(line), " "); keyword == "enable" ||
+			keyword == "requires" || keyword == "diagnostic" {
+			t.Errorf("the module carries a hoisted prologue at line %d (%q); scene declares no §4 directive",
+				i+1, line)
 		}
 	}
 }
@@ -76,7 +78,7 @@ func TestEveryVariantFlattensToTheSameLineCount(t *testing.T) {
 		for _, name := range defines {
 			opts = append(opts, gfx.ShaderDefine(name))
 		}
-		text, _, err := gfx.FlattenShader(storage.NewFileSystem(shaderMountID, shaderFS), types.SceneShader(opts...))
+		text, err := flattenShader(t, shaderMountID, shaderFS, types.SceneShader(opts...))
 		if err != nil {
 			t.Fatalf("%v: flatten: %v", defines, err)
 		}

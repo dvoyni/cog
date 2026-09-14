@@ -11,9 +11,8 @@ Follow them in new and changed code without expanding a focused task into
 unrelated cleanup. Which package a declaration belongs in — the root,
 `internal/types`, `internal/` or the constructor package — and what a root may
 hold is [`architecture.instructions.md`](architecture.instructions.md); this
-file assumes it. A plugin still on the tier test's migration list keeps its
-contract root and `…impl`: read "root" as its contract root and "`internal/`" as
-its `…impl` below until it moves.
+file assumes it. The plugins still on the tier test's migration list, app and
+wgpu, keep their single-package layout until they move.
 
 ## Handler Structure
 
@@ -412,6 +411,9 @@ In a **root**:
 - `err.go`: exported error types and their `Error` methods.
 - `utils.go`: the forwarders into `internal/types`.
 
+A root's only other code is an inline anchor beside the aliases it anchors,
+`types.go` in gfx; architecture.instructions.md has the rule.
+
 In **`internal/types`**: a file per declared type or family, named for it
 (`state.go`, `opqueue.go`), and the plain functions giving `internal/` what
 exported methods do not.
@@ -434,10 +436,9 @@ Command handlers never sit beside their commands: `commands.go` stays a readable
 list of what the plugin offers. A root takes only the files it needs: an
 Extension has no `commands.go` even when it handles another plugin's commands.
 
-A plugin on the migration list keeps its old layout until it moves: its
-contract root's `contract.go` and `identities.go` hold what `doc.go`, `types.go`
-and `id.go` will, and its `…impl` holds `config.go`, `err.go` and the files
-`internal/` will.
+A plugin on the migration list keeps its old layout until it moves: `slots/app`
+is a contract with no implementation, and wgpu is one package holding its
+plugin, its backend and its declarations together.
 
 ## Validation
 

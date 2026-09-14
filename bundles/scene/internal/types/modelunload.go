@@ -3,7 +3,7 @@ package types
 import (
 	"strings"
 
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // UnloadModel queues one path's geometry, baked poses and material records for

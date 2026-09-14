@@ -6,9 +6,8 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 func testViewport() *gfx.Viewport {
@@ -22,7 +21,7 @@ func testViewport() *gfx.Viewport {
 // sizedTexture stands in for a baked renderable texture: only its declared
 // size matters to a projection.
 func sizedTexture(width, height int) gfx.TextureDescr {
-	return gfx.TextureWithBytes(width, height, gpu.FormatRGBA8Srgb, nil, false, false)
+	return gfx.TextureWithBytes(width, height, gfx.FormatRGBA8Srgb, nil, false, false)
 }
 
 func TestAScreenPassTakesItsAspectFromTheWindow(t *testing.T) {

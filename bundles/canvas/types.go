@@ -2,9 +2,8 @@ package canvas
 
 import (
 	"github.com/dvoyni/cog/bundles/canvas/internal/types"
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // Layer orders canvas drawing, and is a gfx pass order: canvas declares one
@@ -288,7 +287,7 @@ type LayerView struct {
 	// screen, and a layer drawing into a texture nothing composites afterwards
 	// is one of the ways a frame ends up empty.
 	Target        string        `json:"target"`
-	TargetTexture gpu.TextureID `json:"targetTexture,omitempty"`
+	TargetTexture gfx.TextureID `json:"targetTexture,omitempty"`
 	TargetWidth   int           `json:"targetWidth,omitempty"`
 	TargetHeight  int           `json:"targetHeight,omitempty"`
 	TargetMip     int           `json:"targetMip,omitempty"`

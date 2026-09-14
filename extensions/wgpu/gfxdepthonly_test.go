@@ -3,7 +3,7 @@ package wgpu
 import (
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 func TestOnlyAPassWithDepthAndNoColourIsDeclined(t *testing.T) {
@@ -13,22 +13,22 @@ func TestOnlyAPassWithDepthAndNoColourIsDeclined(t *testing.T) {
 	// error anything can catch.
 	cases := []struct {
 		name string
-		desc gpu.PassDesc
+		desc gfx.PassDesc
 		want bool
 	}{
-		{"the screen", gpu.PassDesc{Screen: true, DepthAuto: true}, false},
-		{"a texture target with pooled depth", gpu.PassDesc{Target: 7, DepthAuto: true}, false},
-		{"a texture target with its own depth", gpu.PassDesc{Target: 7, Depth: 9}, false},
-		{"a colour pass with no depth", gpu.PassDesc{Target: 7}, false},
-		{"a depth-only pass", gpu.PassDesc{NoColor: true, Depth: 9}, true},
-		{"a depth-only pass on the pooled texture", gpu.PassDesc{NoColor: true, DepthAuto: true}, true},
-		{"no attachments at all", gpu.PassDesc{NoColor: true}, false},
+		{"the screen", gfx.PassDesc{Screen: true, DepthAuto: true}, false},
+		{"a texture target with pooled depth", gfx.PassDesc{Target: 7, DepthAuto: true}, false},
+		{"a texture target with its own depth", gfx.PassDesc{Target: 7, Depth: 9}, false},
+		{"a colour pass with no depth", gfx.PassDesc{Target: 7}, false},
+		{"a depth-only pass", gfx.PassDesc{NoColor: true, Depth: 9}, true},
+		{"a depth-only pass on the pooled texture", gfx.PassDesc{NoColor: true, DepthAuto: true}, true},
+		{"no attachments at all", gfx.PassDesc{NoColor: true}, false},
 		// The case NoColor exists for: a temporary target on its first frame
 		// has no view yet, so its id is zero exactly as a colourless pass's is.
 		// It is a colour pass with nothing to render into, not a depth-only
 		// pass, and reporting it would fire on the first frame of every app
 		// that uses a render target.
-		{"a texture target whose view is not created yet", gpu.PassDesc{DepthAuto: true}, false},
+		{"a texture target whose view is not created yet", gfx.PassDesc{DepthAuto: true}, false},
 	}
 	for _, c := range cases {
 		if got := isDepthOnly(c.desc); got != c.want {

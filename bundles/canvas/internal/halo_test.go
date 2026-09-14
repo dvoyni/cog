@@ -11,8 +11,8 @@ import (
 
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/bundles/canvas/internal/types"
-	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/spirv"
 )

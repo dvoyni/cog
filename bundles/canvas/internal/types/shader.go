@@ -3,9 +3,8 @@ package types
 import (
 	"unsafe"
 
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // defaultKeyColor is what a draw that names no key colour gets: the mid-grey
@@ -36,8 +35,8 @@ const (
 // temporary texture on every draw.
 var defaultTrianglesMaterial = gfx.MaterialWithState(
 	gfx.ShaderWithResource(TrianglesShaderPath),
-	gpu.StateOverlay2D,
-	gfx.SamplerParam(SamplerSlot, gpu.SamplerDesc{}),
+	gfx.StateOverlay2D(),
+	gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{}),
 	gfx.ColorParam(KeyColorSlot, defaultKeyColor),
 )
 
@@ -49,8 +48,8 @@ var defaultTrianglesMaterial = gfx.MaterialWithState(
 // inline texture default, because that would re-bake a temporary on every draw.
 var defaultTextureMaterial = gfx.MaterialWithState(
 	gfx.ShaderWithResource(TextureShaderPath),
-	gpu.StateOverlay2D,
-	gfx.SamplerParam(SamplerSlot, gpu.SamplerDesc{}),
+	gfx.StateOverlay2D(),
+	gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{}),
 )
 
 // defaultSpriteMaterial draws many sprites, glyphs and fills in one instanced
@@ -59,7 +58,7 @@ var defaultTextureMaterial = gfx.MaterialWithState(
 // material canvas has, and a lone sprite is its one-instance case.
 var defaultSpriteMaterial = gfx.MaterialWithState(
 	gfx.ShaderWithResource(SpriteShaderPath),
-	gpu.StateOverlay2D,
+	gfx.StateOverlay2D(),
 )
 
 // DefaultKeyColor returns the key colour a draw that names none gets; see
@@ -96,7 +95,7 @@ var (
 )
 
 var triangleVertexLayout = [...]gfx.VertexAttr{
-	gfx.Attr(int(unsafe.Offsetof(Vertex{}.Position)), gpu.Float32x2),
-	gfx.Attr(int(unsafe.Offsetof(Vertex{}.Color)), gpu.Float32x4),
-	gfx.Attr(int(unsafe.Offsetof(Vertex{}.UV)), gpu.Float32x2),
+	gfx.Attr(int(unsafe.Offsetof(Vertex{}.Position)), gfx.Float32x2),
+	gfx.Attr(int(unsafe.Offsetof(Vertex{}.Color)), gfx.Float32x4),
+	gfx.Attr(int(unsafe.Offsetof(Vertex{}.UV)), gfx.Float32x2),
 }

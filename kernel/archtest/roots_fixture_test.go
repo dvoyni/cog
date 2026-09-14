@@ -95,6 +95,76 @@ func Reset(queue *Queue) { types.Reset(queue) }
 	}
 }
 
+// accessorMethods gives the fixture Slot's Queue the accessors an inline anchor
+// calls: one without arguments, and one with an argument it may not call.
+const accessorMethods = `package types
+
+import "fixture.test/cog/libs/l"
+
+func (q Queue) Len() int { return len(q.items) }
+
+func (q Queue) At(i int) l.Point { return q.items[i] }
+`
+
+// inlineAnchorFixture is the fixture Slot's types.go holding anchor beside its
+// Queue alias.
+func inlineAnchorFixture(anchor string) map[string]string {
+	return map[string]string{
+		"slots/s/internal/types/accessors.go": accessorMethods,
+		"slots/s/types.go": `package s
+
+import (
+	"fixture.test/cog/libs/l"
+	"fixture.test/cog/slots/s/internal/types"
+)
+
+type Queue = types.Queue
+
+var _ = l.Point{}
+
+var _ = types.NewQueue
+
+` + anchor + "\n",
+	}
+}
+
+// A root may hold one kind of code outside utils.go: an inline anchor, which
+// no one calls and which only calls its own aliased types' accessors so that
+// importers can inline them.
+func TestTiers_AnInlineAnchorPasses(t *testing.T) {
+	violations := fixtureViolationsWith(t, fixtureUnmoved, inlineAnchorFixture(`// inlineAnchor is never called.
+func inlineAnchor(q Queue, other Queue) {
+	_ = q.Len()
+	other.Len()
+}`))
+	if len(violations) != 0 {
+		t.Fatalf("an inline anchor has violations:\n%s", joinViolations(violations))
+	}
+}
+
+func TestTiers_AnInlineAnchorWithAnythingElseFails(t *testing.T) {
+	for name, test := range map[string]struct{ anchor, rule string }{
+		"exported":               {`func InlineAnchor(q Queue) { _ = q.Len() }`, ruleForwarder},
+		"other logic":            {`func inlineAnchor(q Queue) { if q.Len() > 0 { _ = q.Len() } }`, ruleInlineAnchor},
+		"a result":               {`func inlineAnchor(q Queue) int { return q.Len() }`, ruleInlineAnchor},
+		"a method argument":      {`func inlineAnchor(q Queue) { _ = q.At(0) }`, ruleInlineAnchor},
+		"a declared variable":    {`func inlineAnchor(q Queue) { n := q.Len(); _ = n }`, ruleInlineAnchor},
+		"a call off a parameter": {`func inlineAnchor(q Queue) { _ = types.NewQueue(0, l.Point{}).Len() }`, ruleInlineAnchor},
+		"a type not aliased":     {`func inlineAnchor(q types.Queue) { _ = q.Len() }`, ruleInlineAnchor},
+		"a caller": {`func inlineAnchor(q Queue) { _ = q.Len() }
+
+var anchored = inlineAnchor`, ruleInlineAnchor},
+		"an empty body": {`func inlineAnchor(q Queue) {}`, ruleInlineAnchor},
+	} {
+		t.Run(name, func(t *testing.T) {
+			violations := fixtureViolationsWith(t, fixtureUnmoved, inlineAnchorFixture(test.anchor))
+			if len(violations) != 1 || violations[0].rule != test.rule || violations[0].file != "slots/s/types.go" {
+				t.Fatalf("want one %q violation in slots/s/types.go, got:\n%s", test.rule, joinViolations(violations))
+			}
+		})
+	}
+}
+
 // bundles/b stands for another plugin: slots/s cannot import bundles/n, which
 // imports it.
 func TestTiers_ASlotForwarderNamingAnotherPluginsTypeFails(t *testing.T) {

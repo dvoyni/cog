@@ -415,7 +415,7 @@ Reproduced in full, per the house style, so it is reviewed as prompt text:
 > moment"*, which an agent could follow and still get two ticks: sharing the
 > step is opportunistic without a `wgpu_time hold`, and nothing in the response
 > said which tick it got. `gfx.SnapshotView` now carries `tick` — see
-> [gfx §The view types](../../../../extensions/gfx/docs/specs/mcp.md#the-view-types) and
+> [gfx §The view types](../../../../slots/gfx/docs/specs/mcp.md#the-view-types) and
 > [wgpu §A hold decides it](../../../../extensions/wgpu/docs/specs/mcp.md#a-hold-decides-it).
 > This is the capability the pairing was worth most to: a ui bug is read by
 > putting `ui_layout` beside `canvas_draws` from the same moment.

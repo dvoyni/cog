@@ -2,7 +2,7 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/canvas/internal/types"
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // shadeSprite resolves one sprite draw's shading: the material it draws with -

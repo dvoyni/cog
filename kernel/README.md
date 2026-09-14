@@ -237,7 +237,7 @@ The full rules are in [`docs/specs/ports.md`](docs/specs/ports.md).
 Both are declared like commands, as defined types built from a kernel shape:
 
 ```go
-type BackendPort kernel.RequiredPort[gpu.Backend]  // gfx: exactly one Adapter
+type BackendPort kernel.RequiredPort[Backend]      // gfx: exactly one Adapter
 type ProviderPort kernel.CollectedPort[Provider]   // mcp: any number, zero included
 type GfxBackend kernel.Adapter[gfx.BackendPort]    // wgpu: fills gfx.BackendPort
 ```
@@ -247,7 +247,7 @@ Three declarations on `Registrar` take those types:
 ```go
 backend := registrar.RequireAdapter[gfx.BackendPort]()           // exactly one
 providers := registrar.CollectAdapters[mcp.ProviderPort]()       // any number, zero included
-registrar.ProvideAdapter[GfxBackend](gpu.Backend(device))        // contribute one
+registrar.ProvideAdapter[GfxBackend](gfx.Backend(device))        // contribute one
 ```
 
 `RequireAdapter[P]` returns a `RequiredAdapter[I]` whose `Get()` yields the one
@@ -407,7 +407,7 @@ enclosing package, the segment before the last `internal`:
 | --- | --- | --- |
 | `*OpQueue` declared in `bundles/canvas/internal/types` | `*types.OpQueue` | `*canvas.OpQueue` |
 | `installModelCmd` declared in `bundles/scene/internal` | `internal.installModelCmd` | `scene.installModelCmd` |
-| `RenderEvent` declared in `extensions/gfx` | `gfx.RenderEvent` | `gfx.RenderEvent` |
+| `RenderOnRender` declared in `slots/gfx` | `gfx.RenderOnRender` | `gfx.RenderOnRender` |
 
 A plugin that declares a type in `internal/` or `internal/types` aliases it in
 its root, so the rendered name is the alias a caller writes and greps for.

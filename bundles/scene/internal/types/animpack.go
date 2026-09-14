@@ -3,8 +3,8 @@ package types
 import (
 	"math"
 
-	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // ResidentAnimation is a model's baked animation once it is resident: the clip

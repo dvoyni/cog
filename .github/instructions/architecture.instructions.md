@@ -65,7 +65,7 @@ stay where they are.
   (`type OpQueue = types.OpQueue`).
 - **`Config`** is plain data whose zero value is the default. It may have
   builder methods (`WithReadFS`), the only logic a root holds outside
-  `utils.go`. There is no `DefaultConfig`.
+  `utils.go` besides an inline anchor. There is no `DefaultConfig`.
 - **Functions** appear only in `utils.go`, and each one is a pure forwarder: a
   single call into the plugin's own `internal/types`, returned when the
   forwarder has results, with its parameters passed through in order. A
@@ -74,6 +74,27 @@ stay where they are.
   ```go
   func GetValue[T any](key string, defaultValue T, outValue *T) AccessValuesRequest {
   	return types.GetValue[T](key, defaultValue, outValue)
+  }
+  ```
+
+- **An inline anchor** is the one code exception a root may hold outside
+  `Config`'s builders and `utils.go`: an unexported function nothing calls,
+  returning nothing, whose parameters are typed with the root's own aliases of
+  `internal/types` types and whose every statement calls an argument-free
+  method on one of them, discarding the results. It exists for the compiler.
+  Go inlines a method of a package the caller does not import only when a
+  package it does import references that method, and nothing outside a plugin
+  imports its `internal/types`, so an accessor called per instance through a
+  root alias stops inlining in importers unless the root references it. Anchor
+  exactly the accessors a hot importer calls, say why in the function's
+  comment, and confirm with `-gcflags=-m` before and after:
+
+  ```go
+  // inlineAnchor is never called; see architecture.instructions.md.
+  func inlineAnchor(parameter ParameterDescr, format TextureFormat) {
+  	_ = parameter.Name()
+  	_, _ = parameter.ColorValue()
+  	_ = format.Resolve()
   }
   ```
 
@@ -134,9 +155,9 @@ performance goes in `internal/types`. Everything else goes in `internal/`.
 - Nothing in cog imports a constructor package or another plugin's `internal/`,
   except from `_test.go` files. A test composing an engine imports constructor
   packages; every other row holds for tests too.
-- For these rules, a plugin on the migration list's contract root, `slots/app`
-  and `extensions/gfx/gpu` count as roots, its `internal/…` as internal to it,
-  and its `…impl` and wgpu as constructor packages.
+- For these rules, `slots/app`, the one plugin on the migration list with a
+  root, counts as a root, and wgpu, still a single package, as a constructor
+  package.
 
 ## Ordering Identities
 
@@ -168,14 +189,12 @@ decided, and the tier test holds each of them to that shape's rules. Moving a
 plugin deletes its entry in the same change, and an entry naming a directory
 with no package fails the test. In that shape:
 
-- A Bundle, `bundles/X`, and a Port, `extensions/P` with a `Pimpl` child, have a
-  **contract root** (commands, events, Resource types, `Name`, ordering
-  identities, and the logic those need), an **`…impl`** exporting only `New`,
-  `Config`, `DefaultConfig` and `Err…` types, and an **`internal/`** the two
-  share. gfx also has a **vocabulary package**, `extensions/gfx/gpu`, importing
-  only Libraries.
 - `slots/app` is an **Open slot**: a contract with no implementation.
 - wgpu is a single package in `extensions/`.
+
+No plugin with a **contract root**, an **`…impl`** or a Port's **vocabulary
+package** is left: gfx, the last, moved in #366. The tier test keeps their rules
+until the final sweep deletes the list, and its fixtures still exercise them.
 
 | package | may import |
 | --- | --- |
@@ -196,7 +215,7 @@ a moved plugin counts as a root, its `internal/types` and `internal/` as its
 
 - every cog-internal import edge in every Go file, whatever its build tags;
 - every root's files against its kind's allowlist;
-- every root's functions against the forwarder rules;
+- every root's functions against the forwarder and inline-anchor rules;
 - every root for a Plugin type;
 - every Slot for a required Port, and every Bundle and Extension for none;
 - every Extension's declarations;

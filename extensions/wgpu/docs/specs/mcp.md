@@ -126,7 +126,7 @@ What else keeps running while paused, all of it deliberate:
 those words, because the opposite reading is the one that silently breaks every
 capture: a capture needs a frame to be *submitted* before its readback can
 resolve, so "paused" cannot mean "no submits". See
-[extensions/gfx/docs/specs/capture.md §The wait](../../../gfx/docs/specs/capture.md#the-wait).
+[slots/gfx/docs/specs/capture.md §The wait](../../../../slots/gfx/docs/specs/capture.md#the-wait).
 
 ---
 

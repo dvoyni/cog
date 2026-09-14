@@ -120,7 +120,7 @@ Design to **browser spec defaults**, not to desktop's reported hardware limits:
 8 storage buffers per shader stage, 128 MiB per binding, 256 MiB per buffer, 4
 bind groups, 64 KiB uniform. A native device reports hardware limits, so a
 desktop run will **not** catch a web limit violation; gfx therefore checks every
-reflected shader against `gpu.DefaultLimits` so it fails loudly on desktop
+reflected shader against `gfx.DefaultLimits()` so it fails loudly on desktop
 instead. There is no build gate on that check ([wgpu backend capabilities inventory](https://github.com/dvoyni/cog/issues/4)).
 
 ---
@@ -182,7 +182,7 @@ func (q *OpQueue) Plane(layers LayerMask, center m.Vec3, size m.Vec2, color m.Co
 func (q *OpQueue) Line3D(layers LayerMask, start, end m.Vec3, thickness float32, color m.Color)
 func (q *OpQueue) WireBox(layers LayerMask, center, size m.Vec3, thickness float32, color m.Color)
 
-func (q *OpQueue) TemporaryMesh[TVertex VertexLayout](vertices []TVertex, indices []uint32, topology gpu.PrimitiveTopology) MeshRef
+func (q *OpQueue) TemporaryMesh[TVertex VertexLayout](vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology) MeshRef
 
 func (q *OpQueue) Reset()
 func (q *OpQueue) OpCount() int
@@ -527,7 +527,7 @@ depth matrix; the derived matrix is published as an **output** instead, see
 
 Depth is conventional, **not reversed**: near → 0, far → 1, compare `Less`,
 clear to **1.0**. Reverse-Z buys large-world precision but would break the
-load-bearing property that every `gpu.MaterialState` zero value equals both the
+load-bearing property that every `gfx.MaterialState` zero value equals both the
 WebGPU default and today's behaviour, and `Depth32F` has precision to spare at
 demo scale.
 
@@ -621,13 +621,13 @@ HAL:
   otherwise and is part of the pipeline cache key, so one shader drawn in both
   kinds of pass gets two pipelines. A backend that honours it builds no fragment
   stage, which is also what lets a depth-only shader declare no `fs_main` at all.
-- `gpu.PassDesc` could not distinguish `NoTarget()` from a texture target whose
+- `gfx.PassDesc` could not distinguish `NoTarget()` from a texture target whose
   view does not exist yet, because both resolve to a zero `TextureViewID` — and
   **every temporary target is unresolved on its first frame**, since its
   allocation is a bake the backend replays *after* the pass descriptors were
   built. A backend reading "depth-only" off a zero target therefore misfires on
   the first frame of every app that uses a render target, into the same fault.
-  `gpu.PassDesc.NoColor` carries the distinction.
+  `gfx.PassDesc.NoColor` carries the distinction.
 
 Scene synthesises `PassDescr.Label` from the camera id and tag for debugging; it
 is not exposed.
@@ -1106,8 +1106,8 @@ procedural geometry owns its vertices and uses `UpdateMesh`, blending on the CPU
 type MeshRef struct{ /* source, id, generation — all unexported */ }
 func (r MeshRef) ID() uint32 // 0 when none
 
-func (q *OpQueue) TemporaryMesh[TVertex VertexLayout](vertices []TVertex, indices []uint32, topology gpu.PrimitiveTopology) MeshRef
-func (la LookupAccess) BakeMesh[TVertex VertexLayout](vertices []TVertex, indices []uint32, topology gpu.PrimitiveTopology) MeshRef
+func (q *OpQueue) TemporaryMesh[TVertex VertexLayout](vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology) MeshRef
+func (la LookupAccess) BakeMesh[TVertex VertexLayout](vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology) MeshRef
 func (la LookupAccess) UpdateMesh[TVertex VertexLayout](ref MeshRef, vertices []TVertex, indices []uint32) bool
 func (la LookupAccess) ReleaseMesh(ref MeshRef)
 
@@ -1246,7 +1246,7 @@ split that matters is **lifetime**, which gfx already encodes:
 | caller-owned dynamic meshes | `BakeBuffer` + `ReBakeBuffer` (or the arena if regenerated every frame anyway) |
 
 gfx needs nothing new for v1 and must not grow a mapped staging ring.
-`gpu.BufferDesc.Dynamic` is dead code — never read, and a pure function of
+`gfx.BufferDesc.Dynamic` is dead code — never read, and a pure function of
 `Kind` — and is deleted.
 
 ---
@@ -1781,9 +1781,9 @@ and `emissiveFactor` is itself overridable.
 | --- | --- |
 | `doubleSided: true` | `Cull: CullNone` |
 | `doubleSided: false` | `Cull: CullBack` |
-| `alphaMode: OPAQUE` | `gpu.StateOpaque3D` |
-| `alphaMode: MASK` | `gpu.StateOpaque3D` plus a shader `discard` against `alphaCutoff` |
-| `alphaMode: BLEND` | `gpu.StateTransparent3D` |
+| `alphaMode: OPAQUE` | `gfx.StateOpaque3D()` |
+| `alphaMode: MASK` | `gfx.StateOpaque3D()` plus a shader `discard` against `alphaCutoff` |
+| `alphaMode: BLEND` | `gfx.StateTransparent3D()` |
 | node transform determinant < 0 | the same material with `FrontFace: FrontCW` |
 
 `MASK` is **fixed-function-identical to `OPAQUE`** — it writes depth and batches
@@ -2465,7 +2465,7 @@ Three rules follow, and they are contract rather than guidance:
 - **A caller-supplied material may declare none of its own.** It may freely use
   the bindings scene binds on every draw — those are scene's and already counted
   — which is what the `procedural` demo does.
-- **The debug check compares against `gpu.DefaultLimits`, never against the
+- **The debug check compares against `gfx.DefaultLimits()`, never against the
   device's reported limits**, and covers every shader gfx reflects, not just
   scene's own. A desktop adapter reports hardware limits (200 storage buffers is
   ordinary), so checking the real device passes a build that cannot run in a
@@ -2875,7 +2875,7 @@ func (q *Queue) ReplayPasses(sink PassSink)           // replaces ReplayRenderPa
 
 Sink-driven, matching the one existing convention. Because `BeginPass` *returns*
 the `RenderPass`, the backend still owns encoder and pass lifetime entirely.
-`gpu.Queue` grows a pass list; bakes stay hoisted ahead of all passes.
+`gfx.Queue` grows a pass list; bakes stay hoisted ahead of all passes.
 
 Pipeline state ([Pipeline state growth for 3D](https://github.com/dvoyni/cog/issues/10)):
 
@@ -2993,7 +2993,7 @@ Bind groups and parameters
 - `BufferRangeParam(name, buf, offset, size)` joins `BufferParam`. `SetBuffer`
   already carries offset and size into the bind-group entry and the cache key
   already includes both — only the translator's hardcoded `0, 0` is in the way.
-- **`firstInstance` is plumbed** through `OpQueue.Draw` → `gpu.Queue.Draw` → the
+- **`firstInstance` is plumbed** through `OpQueue.Draw` → `gfx.Queue.Draw` → the
   backend; `gpuOp.arg4` is free on the draw path.
 
 Housekeeping:
@@ -3001,7 +3001,7 @@ Housekeeping:
 - **Drop `BufferDesc.Dynamic`** — dead code, never read, a pure function of
   `Kind`.
 - `TextureDesc` grows a **renderable bit**.
-- Add `gpu.DefaultLimits` — a hardcoded table of the **browser spec floor** — for
+- Add `gfx.DefaultLimits()` — a hardcoded table of the **browser spec floor** — for
   the debug-build web-limits check. It is the comparison target precisely because
   the device's own limits are not: a desktop adapter reports hardware limits, so
   checking against them passes a build that cannot run in a browser. The check
@@ -3070,7 +3070,7 @@ Pass declaration
   no draws recorded would silently stop clearing. One call site in the tree.
 - **`canvas.ClearDepth` is deleted** — zero callers, canvas's own materials never
   test depth, and the depth rule above is now unconditional.
-- Canvas's three hand-written state literals become `gpu.StateOverlay2D`.
+- Canvas's three hand-written state literals become `gfx.StateOverlay2D()`.
 - **A foreign pass interrupting a layer run needs no rule**: it fails the merge
   predicate and costs one more GPU pass, the honest price of the state change the
   app asked for.
@@ -3392,7 +3392,7 @@ The assertions live in **`_test.go` files beside each demo and run with no GPU**
 This is available because culling, sorting and packing happen entirely in the
 update-thread flush and the result is published as `Passes(dst []PassView)`
 including the frustum; `extensions/gfx/plugin_test.go` already has a `fakeBackend`
-implementing the full `Backend` interface; `gpu.Backend` is provided to gfx as an Adapter
+implementing the full `Backend` interface; `gfx.Backend` is provided to gfx as an Adapter
 without the `wgpu` plugin at all; and a headless engine is already a named
 concept. **`go test ./cmd/scene/...` is the one command the implementation effort
 runs.** Each demo additionally prints its own key numbers on screen through
@@ -3454,7 +3454,7 @@ canary needs it; and writing `cmd/prepare-assets`.
 **Desktop is the acceptance bar**, with `animated` designated the **web canary**
 — it touches the most storage-buffer bindings, the budget has no spare, and a
 single unbound binding silently kills the whole frame. Paired with the check
-against `gpu.DefaultLimits`, so a desktop run fails loudly on a web violation
+against `gfx.DefaultLimits()`, so a desktop run fails loudly on a web violation
 rather than deferring the discovery to the browser — and that check is **not
 debug-gated**, as an earlier draft of this section said: `gfx` measures every
 shader it reflects, from `ensureShader`, on every build, and surfaces the

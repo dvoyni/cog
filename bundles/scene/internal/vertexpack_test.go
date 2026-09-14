@@ -7,8 +7,8 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // everyAttribute is a mesh whose every field is written with a value nothing
@@ -44,7 +44,7 @@ func readFloat32(at []byte) float32 { return math.Float32frombits(binary.NativeE
 func TestBakeMeshStagesThePackedVertices(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) { q.Camera(testCamera, testCameraDescr()) })
 	vertices := everyAttribute()
-	ref := h.bake(vertices, nil, gpu.TopologyLineList)
+	ref := h.bake(vertices, nil, gfx.TopologyLineList)
 	if ref.ID() == 0 {
 		t.Fatal("the bake was refused")
 	}

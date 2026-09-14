@@ -49,8 +49,9 @@ func fileViolations(dir string, root place, m module) ([]violation, error) {
 }
 
 // forwarderViolations finds every exported function a root declares outside
-// utils.go, and every function in utils.go that is not a pure forwarder. It
-// reads the files the go tool loaded, so tests are not checked.
+// utils.go, every unexported one outside utils.go that is not an inline anchor,
+// and every function in utils.go that is not a pure forwarder. It reads the
+// files the go tool loaded, so tests are not checked.
 func forwarderViolations(pkg *packages.Package, root place, m module) []violation {
 	typesPath := m.path + "/" + root.plugin + "/internal/types"
 	var violations []violation
@@ -66,6 +67,9 @@ func forwarderViolations(pkg *packages.Package, root place, m module) []violatio
 			case !inUtils && function.Recv == nil && function.Name.IsExported():
 				violations = append(violations, declared(pkg, object, m,
 					root.path+" declares "+function.Name.Name+" outside utils.go", ruleForwarder))
+			case !inUtils && function.Recv == nil && !isInlineAnchor(function, pkg.TypesInfo, typesPath):
+				violations = append(violations, declared(pkg, object, m,
+					root.path+" declares "+function.Name.Name+", which is not an inline anchor", ruleInlineAnchor))
 			case inUtils && (function.Recv != nil || !isForwarder(function, pkg.TypesInfo, typesPath)):
 				violations = append(violations, declared(pkg, object, m,
 					root.path+" declares "+function.Name.Name+" in utils.go, which is not a pure forwarder", ruleForwarder))
@@ -79,6 +83,87 @@ func forwarderViolations(pkg *packages.Package, root place, m module) []violatio
 		}
 	}
 	return violations
+}
+
+// isInlineAnchor reports whether function is an inline anchor, the one piece
+// of code a root may hold outside utils.go and Config's builders: unexported,
+// never referenced, generic in nothing and returning nothing, with a body in
+// which every statement calls an argument-free method on one of its
+// parameters, discarding any results. Every parameter's type is spelled as a
+// name the root declares as an alias of a type in its own internal/types.
+//
+// It exists for the compiler rather than for callers. Go inlines a method of a
+// package the caller does not import only when a package it does import
+// references that method, and a root of aliases and forwarders references none,
+// so a root anchors the accessors its importers call per instance.
+func isInlineAnchor(function *ast.FuncDecl, info *types.Info, typesPath string) bool {
+	object, ok := info.Defs[function.Name].(*types.Func)
+	if !ok || function.Name.IsExported() || function.Body == nil || len(function.Body.List) == 0 {
+		return false
+	}
+	signature := object.Signature()
+	if signature.TypeParams().Len() > 0 || signature.Results().Len() > 0 {
+		return false
+	}
+	for _, used := range info.Uses {
+		if used == object {
+			return false
+		}
+	}
+	parameters := map[types.Object]bool{}
+	for _, field := range function.Type.Params.List {
+		name, ok := field.Type.(*ast.Ident)
+		if !ok {
+			return false
+		}
+		alias, ok := info.Uses[name].(*types.TypeName)
+		if !ok || !alias.IsAlias() || alias.Pkg() != object.Pkg() {
+			return false
+		}
+		named, ok := types.Unalias(alias.Type()).(*types.Named)
+		if !ok || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != typesPath {
+			return false
+		}
+		for _, parameter := range field.Names {
+			parameters[info.Defs[parameter]] = true
+		}
+	}
+	accessorCall := func(expression ast.Expr) bool {
+		call, ok := expression.(*ast.CallExpr)
+		if !ok || len(call.Args) != 0 {
+			return false
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return false
+		}
+		receiver, ok := selector.X.(*ast.Ident)
+		if !ok || !parameters[info.Uses[receiver]] {
+			return false
+		}
+		selection, ok := info.Selections[selector]
+		return ok && selection.Kind() == types.MethodVal
+	}
+	for _, statement := range function.Body.List {
+		switch statement := statement.(type) {
+		case *ast.ExprStmt:
+			if !accessorCall(statement.X) {
+				return false
+			}
+		case *ast.AssignStmt:
+			if statement.Tok != token.ASSIGN || len(statement.Rhs) != 1 || !accessorCall(statement.Rhs[0]) {
+				return false
+			}
+			for _, left := range statement.Lhs {
+				if blank, ok := left.(*ast.Ident); !ok || blank.Name != "_" {
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // slotMayName reports whether a Slot's forwarder may name a type declared in a

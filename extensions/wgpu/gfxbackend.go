@@ -7,7 +7,7 @@ import (
 	"slices"
 	"sync/atomic"
 
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
@@ -24,7 +24,7 @@ const gfxbUniformSize = 256
 // StencilReadOnly.
 const depthFormat = gputypes.TextureFormatDepth32Float
 
-// gfxBackend implements gpu.Backend over gogpu/wgpu. TextureID and BufferID key
+// gfxBackend implements gfx.Backend over gogpu/wgpu. TextureID and BufferID key
 // native textures and buffers directly; backend-minted IDs remain only for
 // shaders, pipelines, and samplers. All methods run on the render thread,
 // except NewTexture, NewBuffer and Ready.
@@ -46,16 +46,16 @@ type gfxBackend struct {
 	nextID        uint32
 	nextTextureID atomic.Uint32
 	nextBufferID  atomic.Uint32
-	samplers      map[gpu.SamplerID]*wgpu.Sampler
-	shaders       map[gpu.ShaderID]*gfxbShader
-	pipelines     map[gpu.PipelineID]*gfxbPipeline
+	samplers      map[gfx.SamplerID]*wgpu.Sampler
+	shaders       map[gfx.ShaderID]*gfxbShader
+	pipelines     map[gfx.PipelineID]*gfxbPipeline
 
-	bakedBuffers       map[gpu.BufferID]*wgpu.Buffer
-	bakedBufferDescs   map[gpu.BufferID]gpu.BufferDesc
-	bufferGenerations  map[gpu.BufferID]uint32
-	bakedTextures      map[gpu.TextureID]*gfxbTexture
-	bakedTextureDescs  map[gpu.TextureID]gpu.TextureDesc
-	textureGenerations map[gpu.TextureID]uint32
+	bakedBuffers       map[gfx.BufferID]*wgpu.Buffer
+	bakedBufferDescs   map[gfx.BufferID]gfx.BufferDesc
+	bufferGenerations  map[gfx.BufferID]uint32
+	bakedTextures      map[gfx.TextureID]*gfxbTexture
+	bakedTextureDescs  map[gfx.TextureID]gfx.TextureDesc
+	textureGenerations map[gfx.TextureID]uint32
 	replacedBuffers    []*wgpu.Buffer
 	replacedTextures   []*gfxbTexture
 	// barriers is scratch for one TransitionTextures call, reused so a frame
@@ -84,11 +84,11 @@ type gfxBackend struct {
 	// renderable views by texture, mip and layer.
 	depths map[gfxbDepthKey]*gfxbTexture
 	views  map[gfxbViewKey]*gfxbView
-	viewID map[gpu.TextureViewID]*gfxbView
+	viewID map[gfx.TextureViewID]*gfxbView
 
 	// screen is the current frame's surface render target, refreshed by setScreen
 	// before each render and exposed to the plugin as screenID.
-	screenID   gpu.TextureViewID
+	screenID   gfx.TextureViewID
 	screenView *wgpu.TextureView
 	screenW    int
 	screenH    int
@@ -141,7 +141,7 @@ type gfxbTexture struct {
 // GPU bind-group + pipeline layouts built from reflection.
 type gfxbShader struct {
 	module     *wgpu.ShaderModule
-	layout     gpu.ShaderLayout
+	layout     gfx.ShaderLayout
 	bgLayouts  []*wgpu.BindGroupLayout // indexed by bind group
 	pipeLayout *wgpu.PipelineLayout
 }
@@ -159,7 +159,7 @@ type gfxRenderPass struct {
 	shader  *gfxbShader
 }
 
-func (s *gfxRenderPass) SetPipeline(id gpu.PipelineID) {
+func (s *gfxRenderPass) SetPipeline(id gfx.PipelineID) {
 	if pipeline, ok := s.backend.pipelines[id]; ok {
 		s.pass.SetPipeline(pipeline.pipeline)
 		if s.shader != pipeline.shader {
@@ -191,7 +191,7 @@ func (s *gfxRenderPass) SetParams(params []byte) {
 	}
 }
 
-func (s *gfxRenderPass) SetTexture(texture gpu.TextureID, group, binding int) {
+func (s *gfxRenderPass) SetTexture(texture gfx.TextureID, group, binding int) {
 	view, textureID, generation := s.backend.textureBinding(texture)
 	s.backend.addEntry(group, gfxbBindEntry{
 		key:    gfxbBindingKey{kind: gfxbBindTexture, binding: uint16(binding), id: textureID, generation: generation},
@@ -199,7 +199,7 @@ func (s *gfxRenderPass) SetTexture(texture gpu.TextureID, group, binding int) {
 	})
 }
 
-func (s *gfxRenderPass) SetSampler(sampler gpu.SamplerID, group, binding int) {
+func (s *gfxRenderPass) SetSampler(sampler gfx.SamplerID, group, binding int) {
 	native, samplerID := s.backend.samplerBinding(sampler)
 	s.backend.addEntry(group, gfxbBindEntry{
 		key:    gfxbBindingKey{kind: gfxbBindSampler, binding: uint16(binding), id: samplerID},
@@ -207,19 +207,19 @@ func (s *gfxRenderPass) SetSampler(sampler gpu.SamplerID, group, binding int) {
 	})
 }
 
-func (s *gfxRenderPass) SetVertexBuffer(id gpu.BufferID, offset int) {
+func (s *gfxRenderPass) SetVertexBuffer(id gfx.BufferID, offset int) {
 	if buffer, ok := s.backend.bakedBuffers[id]; ok {
 		s.pass.SetVertexBuffer(0, buffer, uint64(offset))
 	}
 }
 
-func (s *gfxRenderPass) SetIndexBuffer(id gpu.BufferID, offset int, width gpu.IndexWidth) {
+func (s *gfxRenderPass) SetIndexBuffer(id gfx.BufferID, offset int, width gfx.IndexWidth) {
 	if buffer, ok := s.backend.bakedBuffers[id]; ok {
 		s.pass.SetIndexBuffer(buffer, indexFormat(width), uint64(offset))
 	}
 }
 
-func (s *gfxRenderPass) SetBuffer(group, binding int, id gpu.BufferID, offset, size int) {
+func (s *gfxRenderPass) SetBuffer(group, binding int, id gfx.BufferID, offset, size int) {
 	if buffer, ok := s.backend.bakedBuffers[id]; ok {
 		if size == 0 {
 			size = s.backend.bakedBufferDescs[id].Size - offset
@@ -262,24 +262,24 @@ func (s *gfxRenderPass) Draw(first, count, instances, firstInstance int, indexed
 	s.backend.resetAcc()
 }
 
-var _ gpu.Backend = (*gfxBackend)(nil)
+var _ gfx.Backend = (*gfxBackend)(nil)
 
 // newGfxBackend builds the backend with no device, which is what the plugin
 // provides to gfx at registration.
 func newGfxBackend() *gfxBackend {
 	return &gfxBackend{
-		samplers:           map[gpu.SamplerID]*wgpu.Sampler{},
-		shaders:            map[gpu.ShaderID]*gfxbShader{},
-		pipelines:          map[gpu.PipelineID]*gfxbPipeline{},
-		bakedBuffers:       map[gpu.BufferID]*wgpu.Buffer{},
-		bakedBufferDescs:   map[gpu.BufferID]gpu.BufferDesc{},
-		bufferGenerations:  map[gpu.BufferID]uint32{},
-		bakedTextures:      map[gpu.TextureID]*gfxbTexture{},
-		bakedTextureDescs:  map[gpu.TextureID]gpu.TextureDesc{},
-		textureGenerations: map[gpu.TextureID]uint32{},
+		samplers:           map[gfx.SamplerID]*wgpu.Sampler{},
+		shaders:            map[gfx.ShaderID]*gfxbShader{},
+		pipelines:          map[gfx.PipelineID]*gfxbPipeline{},
+		bakedBuffers:       map[gfx.BufferID]*wgpu.Buffer{},
+		bakedBufferDescs:   map[gfx.BufferID]gfx.BufferDesc{},
+		bufferGenerations:  map[gfx.BufferID]uint32{},
+		bakedTextures:      map[gfx.TextureID]*gfxbTexture{},
+		bakedTextureDescs:  map[gfx.TextureID]gfx.TextureDesc{},
+		textureGenerations: map[gfx.TextureID]uint32{},
 		depths:             map[gfxbDepthKey]*gfxbTexture{},
 		views:              map[gfxbViewKey]*gfxbView{},
-		viewID:             map[gpu.TextureViewID]*gfxbView{},
+		viewID:             map[gfx.TextureViewID]*gfxbView{},
 	}
 }
 
@@ -322,7 +322,7 @@ func (b *gfxBackend) attach(dp gogpu.DeviceProvider, backend string) error {
 		return err
 	}
 	b.white = &gfxbTexture{tex: view.Texture(), view: view}
-	b.screenID = gpu.TextureViewID(b.id())
+	b.screenID = gfx.TextureViewID(b.id())
 	b.ready.Store(true)
 	return nil
 }
@@ -331,17 +331,17 @@ func (b *gfxBackend) id() uint32 { b.nextID++; return b.nextID }
 
 // NewTexture reserves a logical texture ID. Native creation stays deferred to
 // the render thread when Execute processes its first bake op.
-func (b *gfxBackend) NewTexture() gpu.TextureID {
-	return gpu.TextureID(b.nextTextureID.Add(1))
+func (b *gfxBackend) NewTexture() gfx.TextureID {
+	return gfx.TextureID(b.nextTextureID.Add(1))
 }
 
 // NewBuffer reserves a logical buffer ID. Native creation stays deferred to
 // the render thread when Execute processes its first bake op.
-func (b *gfxBackend) NewBuffer() gpu.BufferID {
-	return gpu.BufferID(b.nextBufferID.Add(1))
+func (b *gfxBackend) NewBuffer() gfx.BufferID {
+	return gfx.BufferID(b.nextBufferID.Add(1))
 }
 
-func (b *gfxBackend) newTexture(desc gpu.TextureDesc) (*gfxbTexture, error) {
+func (b *gfxBackend) newTexture(desc gfx.TextureDesc) (*gfxbTexture, error) {
 	layers := max(desc.Layers, 1)
 	levels := uint32(1)
 	if desc.Mipmaps && mipmapsSupported(desc.Format) {
@@ -375,7 +375,7 @@ func (b *gfxBackend) newTexture(desc gpu.TextureDesc) (*gfxbTexture, error) {
 	return &gfxbTexture{tex: tex, view: view}, nil
 }
 
-func (b *gfxBackend) uploadTexture(texture *gfxbTexture, layer int, region gpu.Region, format gpu.TextureFormat, pixels []byte) {
+func (b *gfxBackend) uploadTexture(texture *gfxbTexture, layer int, region gfx.Region, format gfx.TextureFormat, pixels []byte) {
 	if texture == nil {
 		return
 	}
@@ -389,7 +389,7 @@ func (b *gfxBackend) uploadTexture(texture *gfxbTexture, layer int, region gpu.R
 
 // uploadMipChain box-filters level-0 pixels in the format's own colour space
 // and writes each smaller mip.
-func (b *gfxBackend) uploadMipChain(texture *gfxbTexture, width, height int, format gpu.TextureFormat, pixels []byte) {
+func (b *gfxBackend) uploadMipChain(texture *gfxbTexture, width, height int, format gfx.TextureFormat, pixels []byte) {
 	if texture == nil || !mipmapsSupported(format) {
 		return
 	}
@@ -443,7 +443,7 @@ func (b *gfxBackend) freeTexture(texture *gfxbTexture) {
 	texture.tex.Release()
 }
 
-func (b *gfxBackend) NewSampler(desc gpu.SamplerDesc) (gpu.SamplerID, error) {
+func (b *gfxBackend) NewSampler(desc gfx.SamplerDesc) (gfx.SamplerID, error) {
 	if err := validateSampler(desc); err != nil {
 		return 0, err
 	}
@@ -451,12 +451,12 @@ func (b *gfxBackend) NewSampler(desc gpu.SamplerDesc) (gpu.SamplerID, error) {
 	if err != nil {
 		return 0, err
 	}
-	id := gpu.SamplerID(b.id())
+	id := gfx.SamplerID(b.id())
 	b.samplers[id] = s
 	return id, nil
 }
 
-func (b *gfxBackend) FreeSampler(id gpu.SamplerID) {
+func (b *gfxBackend) FreeSampler(id gfx.SamplerID) {
 	if s, ok := b.samplers[id]; ok {
 		b.bindGroups.invalidateResource(gfxbBindSampler, uint32(id))
 		s.Release()
@@ -464,7 +464,7 @@ func (b *gfxBackend) FreeSampler(id gpu.SamplerID) {
 	}
 }
 
-func (b *gfxBackend) NewShader(desc gpu.ShaderDesc) (gpu.ShaderID, error) {
+func (b *gfxBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 	if len(desc.Code) == 0 {
 		return 0, errors.New("gfx: shader has no source code")
 	}
@@ -490,7 +490,7 @@ func (b *gfxBackend) NewShader(desc gpu.ShaderDesc) (gpu.ShaderID, error) {
 		module.Release()
 		return 0, fmt.Errorf("wgpu: shader %q layout build failed: %w", label, err)
 	}
-	id := gpu.ShaderID(b.id())
+	id := gfx.ShaderID(b.id())
 	b.shaders[id] = sh
 	return id, nil
 }
@@ -530,7 +530,7 @@ func (b *gfxBackend) buildShaderLayouts(sh *gfxbShader) error {
 			e.Buffer = &gputypes.BufferBindingLayout{Type: bindingType}
 		} else {
 			view := gputypes.TextureViewDimension2D
-			if r.TextureView == gpu.TextureView2DArray {
+			if r.TextureView == gfx.TextureView2DArray {
 				view = gputypes.TextureViewDimension2DArray
 			}
 			sampleType := gputypes.TextureSampleTypeFloat
@@ -558,7 +558,7 @@ func (b *gfxBackend) buildShaderLayouts(sh *gfxbShader) error {
 	return nil
 }
 
-func (b *gfxBackend) FreeShader(id gpu.ShaderID) {
+func (b *gfxBackend) FreeShader(id gfx.ShaderID) {
 	s, ok := b.shaders[id]
 	if !ok {
 		return
@@ -577,23 +577,23 @@ func (b *gfxBackend) FreeShader(id gpu.ShaderID) {
 }
 
 // ShaderLayout returns the reflected uniform layout cached at shader creation.
-func (b *gfxBackend) ShaderLayout(id gpu.ShaderID) gpu.ShaderLayout {
+func (b *gfxBackend) ShaderLayout(id gfx.ShaderID) gfx.ShaderLayout {
 	if s, ok := b.shaders[id]; ok {
 		return s.layout
 	}
-	return gpu.ShaderLayout{}
+	return gfx.ShaderLayout{}
 }
 
-func (b *gfxBackend) newBuffer(desc gpu.BufferDesc) (*wgpu.Buffer, error) {
+func (b *gfxBackend) newBuffer(desc gfx.BufferDesc) (*wgpu.Buffer, error) {
 	usage := gputypes.BufferUsageCopyDst
 	switch desc.Kind {
-	case gpu.BufferVertex:
+	case gfx.BufferVertex:
 		usage |= gputypes.BufferUsageVertex
-	case gpu.BufferIndex:
+	case gfx.BufferIndex:
 		usage |= gputypes.BufferUsageIndex
-	case gpu.BufferUniform:
+	case gfx.BufferUniform:
 		usage |= gputypes.BufferUsageUniform
-	case gpu.BufferStorage:
+	case gfx.BufferStorage:
 		// ResourceQueue bakes persistent buffers (e.g. the canvas quad) as Storage
 		// regardless of later use, so also allow vertex/index binding. Browser
 		// WebGPU enforces usage flags; native Dawn does not.
@@ -618,7 +618,7 @@ func (b *gfxBackend) freeBuffer(buffer *wgpu.Buffer) {
 	}
 }
 
-func (b *gfxBackend) NewPipeline(desc gpu.PipelineDesc) (gpu.PipelineID, error) {
+func (b *gfxBackend) NewPipeline(desc gfx.PipelineDesc) (gfx.PipelineID, error) {
 	sh, ok := b.shaders[desc.Shader]
 	if !ok {
 		return 0, errors.New("gfx: unknown shader for pipeline")
@@ -667,7 +667,7 @@ func (b *gfxBackend) NewPipeline(desc gpu.PipelineDesc) (gpu.PipelineID, error) 
 	if err != nil {
 		return 0, err
 	}
-	id := gpu.PipelineID(b.id())
+	id := gfx.PipelineID(b.id())
 	b.pipelines[id] = &gfxbPipeline{pipeline: pipeline, shader: sh}
 	return id, nil
 }
@@ -683,7 +683,7 @@ func (b *gfxBackend) NewPipeline(desc gpu.PipelineDesc) (gpu.PipelineID, error) 
 // fragment entry point to name: dropping the stage is what lets a depth-only
 // shader declare no fs_main at all, which is the shape a shadow or prepass
 // shader wants.
-func fragmentState(module *wgpu.ShaderModule, desc gpu.PipelineDesc) *wgpu.FragmentState {
+func fragmentState(module *wgpu.ShaderModule, desc gfx.PipelineDesc) *wgpu.FragmentState {
 	if desc.NoColorTarget {
 		return nil
 	}
@@ -700,22 +700,22 @@ func fragmentState(module *wgpu.ShaderModule, desc gpu.PipelineDesc) *wgpu.Fragm
 	}
 }
 
-func gfxBlendState(mode gpu.BlendMode) *gputypes.BlendState {
+func gfxBlendState(mode gfx.BlendMode) *gputypes.BlendState {
 	component := func(src, dst gputypes.BlendFactor) gputypes.BlendComponent {
 		return gputypes.BlendComponent{Operation: gputypes.BlendOperationAdd, SrcFactor: src, DstFactor: dst}
 	}
 	switch mode {
-	case gpu.BlendAlpha:
+	case gfx.BlendAlpha:
 		return &gputypes.BlendState{
 			Color: component(gputypes.BlendFactorSrcAlpha, gputypes.BlendFactorOneMinusSrcAlpha),
 			Alpha: component(gputypes.BlendFactorOne, gputypes.BlendFactorOneMinusSrcAlpha),
 		}
-	case gpu.BlendAdditive:
+	case gfx.BlendAdditive:
 		return &gputypes.BlendState{
 			Color: component(gputypes.BlendFactorSrcAlpha, gputypes.BlendFactorOne),
 			Alpha: component(gputypes.BlendFactorOne, gputypes.BlendFactorOne),
 		}
-	case gpu.BlendMultiply:
+	case gfx.BlendMultiply:
 		return &gputypes.BlendState{
 			Color: component(gputypes.BlendFactorDst, gputypes.BlendFactorZero),
 			Alpha: component(gputypes.BlendFactorOne, gputypes.BlendFactorOneMinusSrcAlpha),
@@ -725,7 +725,7 @@ func gfxBlendState(mode gpu.BlendMode) *gputypes.BlendState {
 	}
 }
 
-func (b *gfxBackend) FreePipeline(id gpu.PipelineID) {
+func (b *gfxBackend) FreePipeline(id gfx.PipelineID) {
 	if p, ok := b.pipelines[id]; ok {
 		p.pipeline.Release()
 		delete(b.pipelines, id)
@@ -747,13 +747,13 @@ func (b *gfxBackend) setScreen(view *wgpu.TextureView, w, h int) {
 }
 
 // ScreenFramebuffer returns the current frame's screen render target and size.
-func (b *gfxBackend) ScreenFramebuffer() (gpu.TextureViewID, int, int) {
+func (b *gfxBackend) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
 	return b.screenID, b.screenW, b.screenH
 }
 
 // resolveTarget maps a TextureViewID to its native view and size. Only the screen
 // target exists today; offscreen render targets slot in here later.
-func (b *gfxBackend) resolveTarget(target gpu.TextureViewID) (*wgpu.TextureView, int, int) {
+func (b *gfxBackend) resolveTarget(target gfx.TextureViewID) (*wgpu.TextureView, int, int) {
 	if target == b.screenID {
 		return b.screenView, b.screenW, b.screenH
 	}
@@ -762,7 +762,7 @@ func (b *gfxBackend) resolveTarget(target gpu.TextureViewID) (*wgpu.TextureView,
 
 // Execute performs the frame's bakes, encodes every pass into one command
 // encoder, submits once, then performs releases.
-func (b *gfxBackend) Execute(queue *gpu.Queue) {
+func (b *gfxBackend) Execute(queue *gfx.Queue) {
 	b.replacedBuffers = b.replacedBuffers[:0]
 	b.replacedTextures = b.replacedTextures[:0]
 	queue.ReplayBakes(b)
@@ -792,19 +792,19 @@ func (b *gfxBackend) Execute(queue *gpu.Queue) {
 	queue.ReplayReleases(b)
 }
 
-func (b *gfxBackend) BakeBuffer(id gpu.BufferID, kind gpu.BufferKind, size int, data []byte) {
+func (b *gfxBackend) BakeBuffer(id gfx.BufferID, kind gfx.BufferKind, size int, data []byte) {
 	b.bakeBuffer(id, kind, size, data)
 }
 
-func (b *gfxBackend) BakeTexture(id gpu.TextureID, width, height int, format gpu.TextureFormat, pixels []byte, mipmaps bool) {
+func (b *gfxBackend) BakeTexture(id gfx.TextureID, width, height int, format gfx.TextureFormat, pixels []byte, mipmaps bool) {
 	b.bakeTexture(id, width, height, format, pixels, mipmaps)
 }
 
-func (b *gfxBackend) AllocateTexture(id gpu.TextureID, desc gpu.TextureDesc) {
+func (b *gfxBackend) AllocateTexture(id gfx.TextureID, desc gfx.TextureDesc) {
 	b.allocateTexture(id, desc)
 }
 
-func (b *gfxBackend) UpdateTexture(id gpu.TextureID, layer int, region gpu.Region, pixels []byte) {
+func (b *gfxBackend) UpdateTexture(id gfx.TextureID, layer int, region gfx.Region, pixels []byte) {
 	texture, ok := b.bakedTextures[id]
 	desc := b.bakedTextureDescs[id]
 	if !ok || layer < 0 || layer >= max(desc.Layers, 1) || region.X < 0 || region.Y < 0 ||
@@ -814,7 +814,7 @@ func (b *gfxBackend) UpdateTexture(id gpu.TextureID, layer int, region gpu.Regio
 	b.uploadTexture(texture, layer, region, desc.Format, pixels)
 }
 
-func (b *gfxBackend) allocateTexture(id gpu.TextureID, desc gpu.TextureDesc) *gfxbTexture {
+func (b *gfxBackend) allocateTexture(id gfx.TextureID, desc gfx.TextureDesc) *gfxbTexture {
 	if id == 0 || desc.Width <= 0 || desc.Height <= 0 || desc.Layers < 0 {
 		return nil
 	}
@@ -840,11 +840,11 @@ func (b *gfxBackend) allocateTexture(id gpu.TextureID, desc gpu.TextureDesc) *gf
 	return texture
 }
 
-func (b *gfxBackend) bakeBuffer(id gpu.BufferID, kind gpu.BufferKind, size int, data []byte) {
+func (b *gfxBackend) bakeBuffer(id gfx.BufferID, kind gfx.BufferKind, size int, data []byte) {
 	if id == 0 || size <= 0 || len(data) == 0 {
 		return
 	}
-	desc := gpu.BufferDesc{Kind: kind, Size: size, Label: "gfx.baked"}
+	desc := gfx.BufferDesc{Kind: kind, Size: size, Label: "gfx.baked"}
 	if old, ok := b.bakedBuffers[id]; ok && b.bakedBufferDescs[id] == desc {
 		b.uploadBuffer(old, 0, data)
 		return
@@ -865,15 +865,15 @@ func (b *gfxBackend) bakeBuffer(id gpu.BufferID, kind gpu.BufferKind, size int, 
 	b.bakedBufferDescs[id] = desc
 }
 
-func (b *gfxBackend) bakeTexture(id gpu.TextureID, width, height int, format gpu.TextureFormat, pixels []byte, mipmaps bool) {
+func (b *gfxBackend) bakeTexture(id gfx.TextureID, width, height int, format gfx.TextureFormat, pixels []byte, mipmaps bool) {
 	if id == 0 || width <= 0 || height <= 0 || len(pixels) == 0 {
 		return
 	}
-	texture := b.allocateTexture(id, gpu.TextureDesc{Width: width, Height: height, Layers: 1, Format: format, Mipmaps: mipmaps})
+	texture := b.allocateTexture(id, gfx.TextureDesc{Width: width, Height: height, Layers: 1, Format: format, Mipmaps: mipmaps})
 	if texture == nil {
 		return
 	}
-	b.uploadTexture(texture, 0, gpu.Region{X: 0, Y: 0, Width: width, Height: height}, format, pixels)
+	b.uploadTexture(texture, 0, gfx.Region{X: 0, Y: 0, Width: width, Height: height}, format, pixels)
 	if mipmaps {
 		b.uploadMipChain(texture, width, height, format, pixels)
 	}
@@ -888,7 +888,7 @@ func (b *gfxBackend) releaseReplacedBaked() {
 	}
 }
 
-func (b *gfxBackend) ReleaseBuffer(id gpu.BufferID) {
+func (b *gfxBackend) ReleaseBuffer(id gfx.BufferID) {
 	if buffer, ok := b.bakedBuffers[id]; ok {
 		b.bindGroups.invalidateResource(gfxbBindBuffer, uint32(id))
 		b.freeBuffer(buffer)
@@ -898,7 +898,7 @@ func (b *gfxBackend) ReleaseBuffer(id gpu.BufferID) {
 	}
 }
 
-func (b *gfxBackend) ReleaseTexture(id gpu.TextureID) {
+func (b *gfxBackend) ReleaseTexture(id gfx.TextureID) {
 	if texture, ok := b.bakedTextures[id]; ok {
 		b.bindGroups.invalidateResource(gfxbBindTexture, uint32(id))
 		b.releaseTextureViews(id)
@@ -972,54 +972,54 @@ func (b *gfxBackend) uniform(i int) *wgpu.Buffer {
 	return b.uniforms[i]
 }
 
-func (b *gfxBackend) textureBinding(id gpu.TextureID) (*wgpu.TextureView, uint32, uint32) {
+func (b *gfxBackend) textureBinding(id gfx.TextureID) (*wgpu.TextureView, uint32, uint32) {
 	if texture, ok := b.bakedTextures[id]; ok {
 		return texture.view, uint32(id), b.textureGenerations[id]
 	}
 	return b.white.view, 0, 0
 }
 
-func (b *gfxBackend) samplerBinding(id gpu.SamplerID) (*wgpu.Sampler, uint32) {
+func (b *gfxBackend) samplerBinding(id gfx.SamplerID) (*wgpu.Sampler, uint32) {
 	if s, ok := b.samplers[id]; ok && id != 0 {
 		return s, uint32(id)
 	}
 	return b.defaultSampler, 0
 }
 
-func compareFunc(f gpu.CompareFunc) gputypes.CompareFunction {
+func compareFunc(f gfx.CompareFunc) gputypes.CompareFunction {
 	switch f {
-	case gpu.CompareNever:
+	case gfx.CompareNever:
 		return gputypes.CompareFunctionNever
-	case gpu.CompareLess:
+	case gfx.CompareLess:
 		return gputypes.CompareFunctionLess
-	case gpu.CompareLessEqual:
+	case gfx.CompareLessEqual:
 		return gputypes.CompareFunctionLessEqual
-	case gpu.CompareGreater:
+	case gfx.CompareGreater:
 		return gputypes.CompareFunctionGreater
-	case gpu.CompareGreaterEqual:
+	case gfx.CompareGreaterEqual:
 		return gputypes.CompareFunctionGreaterEqual
-	case gpu.CompareEqual:
+	case gfx.CompareEqual:
 		return gputypes.CompareFunctionEqual
-	case gpu.CompareNotEqual:
+	case gfx.CompareNotEqual:
 		return gputypes.CompareFunctionNotEqual
 	default:
 		return gputypes.CompareFunctionAlways
 	}
 }
 
-func cullMode(mode gpu.CullMode) gputypes.CullMode {
+func cullMode(mode gfx.CullMode) gputypes.CullMode {
 	switch mode {
-	case gpu.CullFront:
+	case gfx.CullFront:
 		return gputypes.CullModeFront
-	case gpu.CullBack:
+	case gfx.CullBack:
 		return gputypes.CullModeBack
 	default:
 		return gputypes.CullModeNone
 	}
 }
 
-func frontFace(face gpu.FrontFace) gputypes.FrontFace {
-	if face == gpu.FrontCW {
+func frontFace(face gfx.FrontFace) gputypes.FrontFace {
+	if face == gfx.FrontCW {
 		return gputypes.FrontFaceCW
 	}
 	return gputypes.FrontFaceCCW
@@ -1027,8 +1027,8 @@ func frontFace(face gpu.FrontFace) gputypes.FrontFace {
 
 // indexFormat is the WebGPU spelling of one of gfx's two index widths. There
 // is no uint8 member to map: WebGPU has none.
-func indexFormat(width gpu.IndexWidth) gputypes.IndexFormat {
-	if width == gpu.IndexUint16 {
+func indexFormat(width gfx.IndexWidth) gputypes.IndexFormat {
+	if width == gfx.IndexUint16 {
 		return gputypes.IndexFormatUint16
 	}
 	return gputypes.IndexFormatUint32
@@ -1039,86 +1039,86 @@ func indexFormat(width gpu.IndexWidth) gputypes.IndexFormat {
 // other topology. It is the one place a pipeline sees an index width at all -
 // a list pipeline never does, which is why only the strip format enters gfx's
 // pipeline key.
-func stripIndexFormat(topology gpu.PrimitiveTopology, width gpu.IndexWidth) *gputypes.IndexFormat {
-	if topology != gpu.TopologyTriangleStrip {
+func stripIndexFormat(topology gfx.PrimitiveTopology, width gfx.IndexWidth) *gputypes.IndexFormat {
+	if topology != gfx.TopologyTriangleStrip {
 		return nil
 	}
 	format := indexFormat(width)
 	return &format
 }
 
-func primitiveTopology(t gpu.PrimitiveTopology) gputypes.PrimitiveTopology {
+func primitiveTopology(t gfx.PrimitiveTopology) gputypes.PrimitiveTopology {
 	switch t {
-	case gpu.TopologyTriangleStrip:
+	case gfx.TopologyTriangleStrip:
 		return gputypes.PrimitiveTopologyTriangleStrip
-	case gpu.TopologyLineList:
+	case gfx.TopologyLineList:
 		return gputypes.PrimitiveTopologyLineList
 	default:
 		return gputypes.PrimitiveTopologyTriangleList
 	}
 }
 
-func vertexFormat(t gpu.VertexType) gputypes.VertexFormat {
+func vertexFormat(t gfx.VertexType) gputypes.VertexFormat {
 	switch t {
-	case gpu.Float32x2:
+	case gfx.Float32x2:
 		return gputypes.VertexFormatFloat32x2
-	case gpu.Float32x3:
+	case gfx.Float32x3:
 		return gputypes.VertexFormatFloat32x3
-	case gpu.Float32x4:
+	case gfx.Float32x4:
 		return gputypes.VertexFormatFloat32x4
-	case gpu.Float16x2:
+	case gfx.Float16x2:
 		return gputypes.VertexFormatFloat16x2
-	case gpu.Float16x4:
+	case gfx.Float16x4:
 		return gputypes.VertexFormatFloat16x4
-	case gpu.Uint8x2:
+	case gfx.Uint8x2:
 		return gputypes.VertexFormatUint8x2
-	case gpu.Uint8x4:
+	case gfx.Uint8x4:
 		return gputypes.VertexFormatUint8x4
-	case gpu.Sint8x2:
+	case gfx.Sint8x2:
 		return gputypes.VertexFormatSint8x2
-	case gpu.Sint8x4:
+	case gfx.Sint8x4:
 		return gputypes.VertexFormatSint8x4
-	case gpu.Unorm8x2:
+	case gfx.Unorm8x2:
 		return gputypes.VertexFormatUnorm8x2
-	case gpu.Unorm8x4:
+	case gfx.Unorm8x4:
 		return gputypes.VertexFormatUnorm8x4
-	case gpu.Snorm8x2:
+	case gfx.Snorm8x2:
 		return gputypes.VertexFormatSnorm8x2
-	case gpu.Snorm8x4:
+	case gfx.Snorm8x4:
 		return gputypes.VertexFormatSnorm8x4
-	case gpu.Uint16x2:
+	case gfx.Uint16x2:
 		return gputypes.VertexFormatUint16x2
-	case gpu.Uint16x4:
+	case gfx.Uint16x4:
 		return gputypes.VertexFormatUint16x4
-	case gpu.Sint16x2:
+	case gfx.Sint16x2:
 		return gputypes.VertexFormatSint16x2
-	case gpu.Sint16x4:
+	case gfx.Sint16x4:
 		return gputypes.VertexFormatSint16x4
-	case gpu.Unorm16x2:
+	case gfx.Unorm16x2:
 		return gputypes.VertexFormatUnorm16x2
-	case gpu.Unorm16x4:
+	case gfx.Unorm16x4:
 		return gputypes.VertexFormatUnorm16x4
-	case gpu.Snorm16x2:
+	case gfx.Snorm16x2:
 		return gputypes.VertexFormatSnorm16x2
-	case gpu.Snorm16x4:
+	case gfx.Snorm16x4:
 		return gputypes.VertexFormatSnorm16x4
-	case gpu.Uint32:
+	case gfx.Uint32:
 		return gputypes.VertexFormatUint32
-	case gpu.Uint32x2:
+	case gfx.Uint32x2:
 		return gputypes.VertexFormatUint32x2
-	case gpu.Uint32x3:
+	case gfx.Uint32x3:
 		return gputypes.VertexFormatUint32x3
-	case gpu.Uint32x4:
+	case gfx.Uint32x4:
 		return gputypes.VertexFormatUint32x4
-	case gpu.Sint32:
+	case gfx.Sint32:
 		return gputypes.VertexFormatSint32
-	case gpu.Sint32x2:
+	case gfx.Sint32x2:
 		return gputypes.VertexFormatSint32x2
-	case gpu.Sint32x3:
+	case gfx.Sint32x3:
 		return gputypes.VertexFormatSint32x3
-	case gpu.Sint32x4:
+	case gfx.Sint32x4:
 		return gputypes.VertexFormatSint32x4
-	case gpu.Unorm1010102:
+	case gfx.Unorm1010102:
 		return gputypes.VertexFormatUnorm1010102
 	default:
 		return gputypes.VertexFormatFloat32

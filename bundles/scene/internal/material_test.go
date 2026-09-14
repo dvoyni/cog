@@ -6,8 +6,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // testMaterial builds a caller material serving the given tags, each with its
@@ -15,9 +14,9 @@ import (
 func testMaterial(tags ...scene.PassTag) scene.Material {
 	material := make(scene.Material, 0, len(tags))
 	for i, tag := range tags {
-		state := gpu.StateOpaque3D
+		state := gfx.StateOpaque3D()
 		if i%2 == 1 {
-			state = gpu.StateTransparent3D
+			state = gfx.StateTransparent3D()
 		}
 		material = append(material, scene.MaterialTag{
 			Tag:   tag,
@@ -211,7 +210,7 @@ func TestMaterialsInternByContentNotByBacking(t *testing.T) {
 	forward := table.internTag(scene.TagForward)
 	build := func() scene.Material {
 		return scene.Material{{Descr: gfx.MaterialWithState(
-			gfx.ShaderWithResource(types.SceneShaderPath), gpu.StateOpaque3D, gfx.FloatParam("k", 1),
+			gfx.ShaderWithResource(types.SceneShaderPath), gfx.StateOpaque3D(), gfx.FloatParam("k", 1),
 		)}}
 	}
 	first, _ := resolve(&table, discardErrors, build(), forward)
@@ -220,7 +219,7 @@ func TestMaterialsInternByContentNotByBacking(t *testing.T) {
 		t.Fatalf("two identical materials took ids %d and %d", first.materialID, second.materialID)
 	}
 	different := scene.Material{{Descr: gfx.MaterialWithState(
-		gfx.ShaderWithResource(types.SceneShaderPath), gpu.StateOpaque3D, gfx.FloatParam("k", 2),
+		gfx.ShaderWithResource(types.SceneShaderPath), gfx.StateOpaque3D(), gfx.FloatParam("k", 2),
 	)}}
 	if other, _ := resolve(&table, discardErrors, different, forward); other.materialID == first.materialID {
 		t.Fatal("a material with a different parameter took the same id")
@@ -247,11 +246,11 @@ func TestTheBlendClassFollowsTheEntrysBlendMode(t *testing.T) {
 		descr gfx.MaterialDescr
 		blend bool
 	}{
-		{"opaque 3D", gfx.MaterialWithState(shader, gpu.StateOpaque3D), false},
+		{"opaque 3D", gfx.MaterialWithState(shader, gfx.StateOpaque3D()), false},
 		{"mask", gfx.MaterialWithState(shader, types.PbrState(types.AlphaMask, false)), false},
-		{"transparent 3D", gfx.MaterialWithState(shader, gpu.StateTransparent3D), true},
+		{"transparent 3D", gfx.MaterialWithState(shader, gfx.StateTransparent3D()), true},
 		{"default gfx.Material", gfx.Material(shader), true},
-		{"additive", gfx.MaterialWithState(shader, gpu.MaterialState{Blend: gpu.BlendAdditive}), true},
+		{"additive", gfx.MaterialWithState(shader, gfx.MaterialState{Blend: gfx.BlendAdditive}), true},
 	}
 	for _, c := range cases {
 		entry, ok := resolve(&table, discardErrors, scene.Material{{Descr: c.descr}}, forward)

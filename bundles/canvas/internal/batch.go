@@ -3,9 +3,8 @@ package internal
 import (
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/bundles/canvas/internal/types"
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // spriteShading is one sprite draw's resolved shading: the material it draws
@@ -33,11 +32,11 @@ type spriteShading struct {
 type spriteBatch struct {
 	active    bool
 	texture   gfx.TextureDescr
-	textureID gpu.TextureID
+	textureID gfx.TextureID
 	layer     m.Mat4
 	clip      m.Rect
 	hasClip   bool
-	filter    gpu.FilterMode
+	filter    gfx.FilterMode
 	viewport  m.Vec2
 	instances []canvas.SpriteInstance
 
@@ -79,7 +78,7 @@ type spriteBatch struct {
 	params []gfx.ParameterDescr
 }
 
-func (b *spriteBatch) keyMatches(texture gfx.TextureDescr, layer m.Mat4, clip m.Rect, hasClip bool, filter gpu.FilterMode, shading *spriteShading) bool {
+func (b *spriteBatch) keyMatches(texture gfx.TextureDescr, layer m.Mat4, clip m.Rect, hasClip bool, filter gfx.FilterMode, shading *spriteShading) bool {
 	if b.textureID != texture.ID() || b.layer != layer || b.clip != clip ||
 		b.hasClip != hasClip || b.filter != filter ||
 		b.fingerprint != shading.fingerprint || b.sharedKey != shading.sharedKey ||
@@ -94,7 +93,7 @@ func (b *spriteBatch) keyMatches(texture gfx.TextureDescr, layer m.Mat4, clip m.
 	return true
 }
 
-func (b *spriteBatch) add(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr, texture gfx.TextureDescr, layer m.Mat4, clip m.Rect, hasClip bool, filter gpu.FilterMode, viewport m.Vec2, shading *spriteShading, t0, t1, frame, tint, misc, keyColor m.Vec4) {
+func (b *spriteBatch) add(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr, texture gfx.TextureDescr, layer m.Mat4, clip m.Rect, hasClip bool, filter gfx.FilterMode, viewport m.Vec2, shading *spriteShading, t0, t1, frame, tint, misc, keyColor m.Vec4) {
 	if b.active && !b.keyMatches(texture, layer, clip, hasClip, filter, shading) {
 		b.flush(gfxWrite, quad)
 	}
@@ -157,7 +156,7 @@ func (b *spriteBatch) flush(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr) {
 		gfx.VecParam("canvasClip", m.Vec4{X: b.clip.X, Y: b.clip.Y, Z: b.clip.X + b.clip.Width, W: b.clip.Y + b.clip.Height}),
 		gfx.BufferParam("instances", buffer),
 		gfx.TextureParam(canvas.TextureSlot, b.texture),
-		gfx.SamplerParam(canvas.SamplerSlot, canvasSampler(gpu.AddressClamp, gpu.AddressClamp, b.filter)),
+		gfx.SamplerParam(canvas.SamplerSlot, canvasSampler(gfx.AddressClamp, gfx.AddressClamp, b.filter)),
 	)
 	for i := range b.arrayNames {
 		b.params = append(b.params, gfx.BufferParam(b.arrayNames[i], gfx.BufferWithBytes(b.arrayBytes[i], true)))
@@ -276,7 +275,7 @@ func (b *trianglesBatch) flush(gfxWrite *gfx.OpQueue) {
 		gfx.VecParam("canvasClip", m.Vec4{X: b.clip.X, Y: b.clip.Y, Z: b.clip.X + b.clip.Width, W: b.clip.Y + b.clip.Height}),
 	)
 	b.scratch = append(b.scratch, b.params...)
-	mesh := gfx.Mesh(gfx.BufferWithBytes(b.vertices, true), gpu.TopologyTriangleList, b.layout...)
+	mesh := gfx.Mesh(gfx.BufferWithBytes(b.vertices, true), gfx.TopologyTriangleList, b.layout...)
 	gfxWrite.Draw(mesh, *b.material, b.scratch...)
 	b.active = false
 	b.vertices = b.vertices[:0]

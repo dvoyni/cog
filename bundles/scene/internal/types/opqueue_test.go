@@ -3,8 +3,8 @@ package types
 import (
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // A mesh draw carries no colour of its own, so what it takes from the bundled
