@@ -1,6 +1,6 @@
 //go:build js
 
-package jsfs
+package internal
 
 import (
 	"bytes"

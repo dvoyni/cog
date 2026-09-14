@@ -87,7 +87,7 @@ config := map[kernel.PluginName]any{
 
 plugins := []kernel.Plugin{
     storageplugin.New(),
-    diskfsplugin.New(), // or jsfs.New in a browser
+    diskfsplugin.New(), // or jsfsplugin.New() in a browser, with jsfs.Config under jsfs.Name
     …
 }
 ```
@@ -124,11 +124,15 @@ The two cog ships are each built only for their platform.
   `diskfs.ErrInvalidAppId`, and a config value that is not a `diskfs.Config`
   with `diskfs.ErrInvalidConfig`. Every operation is confined to the directory
   through `os.Root`.
-- **`jsfs.New(jsfs.Config{AppId})`** exports only `New` and `Config` (plus
-  its `ErrInvalidAppId`), and keeps the whole filesystem as one JSON
-  document under `localStorage` key `cog.storage.<AppId>`. A browser has no
-  executable to name the app after, so an empty `AppId` is an error, as is one
-  that is not a single name: both fail `Register` with `jsfs.ErrInvalidAppId`.
+- **jsfs** is an Extension in the same shape. Its root, `extensions/jsfs`,
+  declares only `Name`, `Config`, the `StoragePermanentFS` Adapter and its
+  errors; the plugin is in its `internal/`, and `jsfsplugin.New()` constructs
+  it. Its `jsfs.Config` is supplied under `jsfs.Name`. The plugin keeps the
+  whole filesystem as one JSON document under `localStorage` key
+  `cog.storage.<AppId>`. A browser has no executable to name the app after, so
+  an empty `AppId`, the zero value included, is an error, as is one that is not
+  a single name: both fail `Register` with `jsfs.ErrInvalidAppId`. A config
+  value that is not a `jsfs.Config` fails it with `jsfs.ErrInvalidConfig`.
 
 ## Resources
 
@@ -233,7 +237,7 @@ splitting a single store into several entry points.
   malformed value requests.
 - `diskfs.ErrInvalidAppId{AppId}`, `jsfs.ErrInvalidAppId{AppId}`: the Adapter's
   application id is invalid.
-- `diskfs.ErrInvalidConfig{Got}`: the value under `diskfs.Name` is not a
-  `diskfs.Config`.
+- `diskfs.ErrInvalidConfig{Got}`, `jsfs.ErrInvalidConfig{Got}`: the value
+  under the Adapter's `Name` is not its `Config`.
 
 Each exported error type implements `Error() string`.
