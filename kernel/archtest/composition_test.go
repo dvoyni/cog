@@ -18,7 +18,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ecsscene/ecssceneimpl"
 	"github.com/dvoyni/cog/bundles/input/inputplugin"
 	"github.com/dvoyni/cog/bundles/mcp/mcpplugin"
-	"github.com/dvoyni/cog/bundles/scene/sceneimpl"
+	"github.com/dvoyni/cog/bundles/scene/sceneplugin"
 	"github.com/dvoyni/cog/bundles/ui/uiimpl"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
@@ -36,7 +36,7 @@ func TestTypeName_NamesEveryTypeInAFullCogCompositionUniquely(t *testing.T) {
 		Handler(func(err error) bool { failure = errors.Join(failure, err); return false }).
 		WithPlugins(
 			storageplugin.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{&detachedBackend{}},
-			inputplugin.New(), animplugin.New(), canvasplugin.New(), sceneimpl.New(), uiimpl.New(),
+			inputplugin.New(), animplugin.New(), canvasplugin.New(), sceneplugin.New(), uiimpl.New(),
 			ecsplugin.New(), ecssceneimpl.New(), mcpplugin.New(),
 		)
 	if failure != nil {

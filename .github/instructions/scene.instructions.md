@@ -26,18 +26,18 @@ plugin. The kernel orders them by their dependencies:
 ```go
 plugins := []kernel.Plugin{
 	storageplugin.New(), diskfs.New(diskfs.Config{AppId: "demo"}),
-	inputplugin.New(), gfximpl.New(), canvasplugin.New(), sceneimpl.New(), wgpu.New(),
+	inputplugin.New(), gfximpl.New(), canvasplugin.New(), sceneplugin.New(), wgpu.New(),
 	demo, // records into the queues the plugins above declare
 }
 ```
 
-Only the composition root imports `sceneimpl`. Recording code imports the
-contract root, `scene`, and nothing else: `*scene.OpQueue`, `*scene.Lookup`,
+Only the composition root imports `sceneplugin`. Recording code imports the
+root, `scene`, and nothing else: `*scene.OpQueue`, `*scene.Lookup`,
 `scene.NewLookupAccess` and every descriptor are there. A recorder that must run
 before scene's flush in the same tick orders itself
 `Before[scene.FlushOnUpdate]()`; one that asks for no order already runs before
 it, because the flush is registered `Last()`. Configuration, when a caller
-needs any, is `sceneimpl.Config` keyed by `scene.Name`, and a zero field takes
+needs any, is `scene.Config` keyed by `scene.Name`, and a zero field takes
 its default.
 
 Scene reads storage buffers from the vertex stage, so it needs a **WebGPU core

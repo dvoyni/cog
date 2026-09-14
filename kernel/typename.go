@@ -14,9 +14,9 @@ import (
 // renders under its enclosing package, the path segment before the last
 // internal. The package name alone would be internal for every Bundle and Port
 // that splits its declarations, so bundles/canvas/internal/types.OpQueue renders
-// as canvas.OpQueue, the name of the alias a caller writes and greps for. An
-// alias declared in an …impl renders the same way: sceneimpl.Config, an alias of
-// internal.Config, reads scene.Config.
+// as canvas.OpQueue, the name of the alias a caller writes and greps for. A type
+// declared in a plugin's internal/ itself renders the same way: scene's
+// bundles/scene/internal.installModelCmd reads scene.installModelCmd.
 //
 // The rule applies inside pointers, slices, arrays, maps, channels, functions
 // and generic type arguments. reflect spells a type argument by its full import

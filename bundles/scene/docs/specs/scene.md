@@ -38,6 +38,24 @@ correct without them.
 > an interface. The flush's subscription identity, `UpdateEventHandler` below, is
 > now `scene.FlushOnUpdate`. The file paths and line numbers cited below are as
 > they were when this was written.
+>
+> **Amended by [#361](https://github.com/dvoyni/cog/issues/361).** scene moved
+> to the declaration-root shape of
+> [ADR 0002](../../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+> Every name a recorder writes against is still spelled `scene.X`: the recording
+> vocabulary, `LookupAccess` and the inspection views are aliases in the root's
+> `types.go`, `OpQueue` and `Lookup` in its `resources.go`, `Config` in its
+> `config.go`, and `At`, `LookAt`, `Layer`, `NewLookup`, `NewLookupAccess` and
+> the four coordinate helpers are forwarders in its `utils.go`. The `Err*` types
+> stay in its `err.go`. What `bundles/scene/internal` held — `OpQueue` with its
+> recording and consume sides, the `Lookup` with its model table, the glTF
+> loader, the packing, the bundled PBR — moved to `bundles/scene/internal/types`,
+> and so did the coordinate maths. The plugin — the flush, the cull, the sort,
+> the material table, the light selection, the model expansion and the load
+> handlers — moved from `sceneimpl` to `bundles/scene/internal`, and the
+> built-in WGSL is embedded from `bundles/scene/internal/builtin/scene/`. It is
+> constructed with `sceneplugin.New()` and configured with `scene.Config`, whose
+> zero value is the default.
 
 ---
 
@@ -57,7 +75,7 @@ correct without them.
 ## Plugin
 
 - Name: `scene.Name` (`"scene"`)
-- Constructor: `sceneimpl.New() kernel.Plugin` (amended by #339; was `scene.New() *scene.Plugin`)
+- Constructor: `sceneplugin.New() kernel.Plugin` (amended by #361; #339 made it `sceneimpl.New()`, and before that it was `scene.New() *scene.Plugin`)
 - Plugin dependencies: `gfx`, `storage`
 - Go package dependencies: `app`, `gfx`, `kernel`, `m`, `storage`,
   `github.com/qmuntal/gltf`
@@ -65,12 +83,13 @@ correct without them.
 
 ```go
 kernel.New(map[kernel.PluginName]any{
-	scene.Name: sceneimpl.Config{PoseSampleRate: 60},
+	scene.Name: scene.Config{PoseSampleRate: 60},
 })
 ```
 
-`sceneimpl.Config` is the configuration type, and a zero field takes its default
-(amended by #339; was `scene.Config` with `scene.DefaultConfig()`). The plugin
+`scene.Config` is the configuration type, and a zero field takes its default
+(amended by #361; #339 moved it to `sceneimpl.Config`, and before that it was
+`scene.Config` with `scene.DefaultConfig()`). The plugin
 implements `Name`, `Dependencies`, and `Init` for the kernel lifecycle. During `Init` scene
 executes `storage.SetMountCmd` to mount its embedded shaders, as canvas does.
 Register `storage` before `scene`. A typical order is `storage`, `input`, `gfx`,

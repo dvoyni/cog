@@ -8,7 +8,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
 	"github.com/dvoyni/cog/bundles/ecsscene"
-	"github.com/dvoyni/cog/bundles/scene/sceneimpl"
+	"github.com/dvoyni/cog/bundles/scene/sceneplugin"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -48,7 +48,7 @@ func compose(mover *moverPlugin) error {
 	kernel.New(map[kernel.PluginName]any{storage.Name: storage.Config{}}).
 		Handler(func(err error) bool { failure = errors.Join(failure, err); return false }).
 		WithPlugins(storageplugin.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{&detachedBackend{}},
-			sceneimpl.New(), ecsplugin.New(), New(), mover)
+			sceneplugin.New(), ecsplugin.New(), New(), mover)
 	return failure
 }
 

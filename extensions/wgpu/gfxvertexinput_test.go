@@ -115,7 +115,7 @@ func TestEveryBundledShaderAndLayoutPairPassesTheVertexInterfaceCheck(t *testing
 // sceneSkinnedLayout is the layout half of the skinned pair. Scene's skinned
 // layout is unexported by design - no public path can author a joint or a
 // weight - so the six rows it shares with the standard layout are imported and
-// the two it adds are spelled here, at the offsets bundles/scene/internal/vertexpack.go names.
+// the two it adds are spelled here, at the offsets bundles/scene/internal/types/vertexpack.go names.
 //
 // Those two rows are the only thing in this file that can drift from scene, and
 // what would notice is scene's own TestBothNamedLayoutsAreFourAlignedAndUnpadded:

@@ -43,66 +43,68 @@ target stores records **only for the span of vertices it moves** — 18.8 KiB of
 deltas over the vendored corpus against 385.8 KiB, because 92% of the float
 store was exactly zero.
 
-scene is a **Bundle**: a Slot and its one Extension, shipped together. The
+scene is a **Bundle**: it requires no Adapter and contributes none. The
 vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
+[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
-scene has the Bundle shape: a contract root, an `…impl` and an `internal/`.
-
-- **`bundles/scene`** is the contract: the `*OpQueue` and `*Lookup` resources
-  with `LookupAccess` and `NewLookupAccess`, the recording vocabulary
-  (`Transform`, `At`, `LookAt`, `CameraID`, `CameraDescr`, `ProjectionKind`,
-  `Pass`, `PassTag`, `LayerMask`, `Layer`, `Material`, `MaterialTag`, `Vertex`,
-  `VertexLayout`, `MeshRef`, `MeshDraw`, `ModelDraw`, `ClipPlay`, `LightDescr`,
-  …), the model query types (`ModelRef`, `ModelState`, `ModelLight`,
-  `ClipInfo`), the inspection views (`Op`, `PassView`, `BatchView`), the `Err*`
-  types, `VertexDecodePath`, the coordinate helpers (`ViewProjection`,
-  `WorldToScreen`, `ScreenToWorld`, `ScreenToRay`), `Name` and the ordering
-  identity `FlushOnUpdate`. It declares no plugin, and it is what every other
-  package imports.
-- **`bundles/scene/sceneimpl`** is the plugin: `New`, `Config`, the flush that
-  expands model draws, selects lights, culls, sorts, interns materials and packs
-  instances into gfx passes and draws, the frame-build state all of that keeps
-  across frames, the handlers of the two-hop model load, and the `Start` mount
-  of the embedded shaders under `sceneimpl/builtin/scene/`. It exports `New` and
-  `Config` and nothing else. Only composition roots and tests import it.
-- **`bundles/scene/internal`** holds what the two share and nothing else may
-  reach: the declarations of `OpQueue` with its recording methods and the
-  consume side the flush reads, `Lookup` and `LookupAccess` with the model
-  table, residency and unloads, the mesh table and its deferred bakes, the glTF
-  loader and the animation and morph bakes behind them, the vertex packing, the
-  bundled PBR material and the camera maths the flush and the coordinate
-  helpers share. The parse command the Lookup enqueues, `LoadModelCmd`, is
-  declared here; `sceneimpl` handles it.
-
-`OpQueue`, `Lookup`, `LookupAccess` and the vocabulary they carry are declared in
-`internal` with their state unexported, and re-exported from the root as aliases
-(`type OpQueue = internal.OpQueue`) plus a wrapper for each constructor. They
-stay concrete types: recording a draw is a direct method call, with no interface
-anywhere on the per-instance path, and their exported methods (`OpQueue.Model`,
-`LookupAccess.Bounds`, …) are public API through the alias. What sceneimpl needs
-beyond that goes through plain functions `internal` exports, which only the root
-and sceneimpl can call. `internal` never imports the root. See
+scene has the declaration-root shape of
 [`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+
+- **`bundles/scene`** is the root, and holds declarations only: the `*OpQueue`
+  and `*Lookup` resources with `LookupAccess`, the recording vocabulary
+  (`Transform`, `CameraID`, `CameraDescr`, `ProjectionKind`, `Pass`, `PassTag`,
+  `LayerMask`, `Material`, `MaterialTag`, `Vertex`, `VertexLayout`, `MeshRef`,
+  `MeshDraw`, `ModelDraw`, `ClipPlay`, `LightDescr`, …), the model query types
+  (`ModelRef`, `ModelState`, `ModelLight`, `ClipInfo`), the inspection views
+  (`Op`, `PassView`, `BatchView`), `VertexDecodePath`, `Config`, the `Err*`
+  types, `Name` and the ordering identity `FlushOnUpdate`. Its functions —
+  `At`, `LookAt`, `Layer`, `NewLookup`, `NewLookupAccess` and the coordinate
+  helpers (`ViewProjection`, `WorldToScreen`, `ScreenToWorld`, `ScreenToRay`) —
+  are forwarders in `utils.go`. It declares no plugin, and it is what every
+  other package imports.
+- **`bundles/scene/internal/types`** declares `OpQueue` with its recording
+  methods and the consume side the flush reads, `Lookup` and `LookupAccess` with
+  the model table, residency and unloads, the mesh table and its deferred bakes,
+  the glTF loader and the animation and morph bakes behind them, the vertex
+  packing, the recording vocabulary, `Config` (which the Lookup holds), the
+  bundled PBR material, and the camera maths the flush and the coordinate
+  helpers share. The parse command the Lookup enqueues, `LoadModelCmd`, is
+  declared here too; the plugin handles it. The root aliases what it exposes.
+- **`bundles/scene/internal`** is the plugin: its `New`, the resolution of
+  `scene.Config`, the flush that expands model draws, selects lights, culls,
+  sorts, interns materials and packs instances into gfx passes and draws, the
+  frame-build state all of that keeps across frames, the handlers of the two-hop
+  model load, and the `Start` mount of the embedded shaders under
+  `internal/builtin/scene/`.
+- **`bundles/scene/sceneplugin`** exports only `New() kernel.Plugin`. Only
+  composition roots and tests import it.
+
+The aliased types stay concrete types (`type OpQueue = types.OpQueue`):
+recording a draw is a direct method call, with no interface anywhere on the
+per-instance path, and their exported methods (`OpQueue.Model`,
+`LookupAccess.Bounds`, …) are public API through the alias. What the plugin
+needs beyond that goes through plain functions `internal/types` exports, which
+nothing outside `bundles/scene` can call. `internal/types` never imports the
+root.
 
 ## Plugin
 
 - Name: `scene.Name` (`"scene"`)
-- Constructor: `sceneimpl.New() kernel.Plugin`
+- Constructor: `sceneplugin.New() kernel.Plugin`
 - Plugin dependencies: `gfx`, `storage`
 - Requires: no Adapter
 - Contributes: none
 - Go package dependencies: `app`, `gfx`, `kernel`, `m`, `storage`,
   `github.com/qmuntal/gltf`
 - Implements: `kernel.PluginStarter`
-- Configuration: `sceneimpl.Config`, optional
+- Configuration: `scene.Config`, optional
 - Events declared or published: none
 
 ```go
 kernel.New(map[kernel.PluginName]any{
-	scene.Name: sceneimpl.Config{PoseSampleRate: 30},
+	scene.Name: scene.Config{PoseSampleRate: 30},
 })
 ```
 
@@ -768,8 +770,8 @@ more after the draw that triggered it.
 `gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
 `gfx.PresentOnUpdate`, exactly as canvas is: gameplay records first, canvas
 and scene emit graphics draws second, gfx presents last. The identity is
-declared in the contract root so a recorder can order itself
-`Before[scene.FlushOnUpdate]()` importing contract and nothing else.
+declared in the root so a recorder can order itself
+`Before[scene.FlushOnUpdate]()` importing the root and nothing else.
 
 **Everything scene decides happens in that flush, on the update thread** —
 projection resolve, culling, sorting, instance packing and buffer uploads. Scene
