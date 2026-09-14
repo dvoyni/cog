@@ -75,7 +75,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, value any) error {
 		Last().Before[canvas.FlushOnUpdate]()
 	registrar.Subscribe[canvas.FlushOnUpdate](p.flush).
 		Last().Before[gfx.PresentOnUpdate]()
-	registrar.ProvideAdapter[mcp.Provider](provider{})
+	registrar.ProvideAdapter[canvas.McpProvider](mcp.Provider(provider{}))
 	return nil
 }
 

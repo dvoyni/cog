@@ -37,15 +37,18 @@ func (p *testProvider) Name() kernel.PluginName           { return p.name }
 func (p *testProvider) Dependencies() []kernel.PluginName { return nil }
 
 func (p *testProvider) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.ProvideAdapter[mcp.Provider](offering(p.capabilities))
+	registrar.ProvideAdapter[testMcpProvider](mcp.Provider(offering(p.capabilities)))
 	for _, more := range p.extra {
-		registrar.ProvideAdapter[mcp.Provider](offering(more))
+		registrar.ProvideAdapter[testMcpProvider](mcp.Provider(offering(more)))
 	}
 	return nil
 }
 
 // offering is the smallest Provider: a fixed list.
 type offering []mcp.Capability
+
+// testMcpProvider is the Adapter testProvider offers its capabilities as.
+type testMcpProvider kernel.Adapter[mcp.ProviderPort]
 
 func (o offering) Capabilities() []mcp.Capability { return o }
 

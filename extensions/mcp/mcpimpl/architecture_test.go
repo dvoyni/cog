@@ -97,8 +97,9 @@ func TestArchitecture_ReportsTheResolvedLockClosure(t *testing.T) {
 	}
 }
 
-// The Ports array is the kernel's: the broker collects mcp.Provider and is
-// itself among the contributors, beside every other plugin that provided one.
+// The Ports array is the kernel's, named by Port and Adapter types: the broker
+// collects mcp.ProviderPort and its own mcp.McpProvider is among the
+// contributors, beside every other Adapter provided for it.
 func TestArchitecture_ReportsEveryPortAndItsContributors(t *testing.T) {
 	broker := testBroker()
 	provider := &testProvider{name: "probe", capabilities: []mcp.Capability{echoing("echo")}}
@@ -109,11 +110,12 @@ func TestArchitecture_ReportsEveryPortAndItsContributors(t *testing.T) {
 		t.Fatalf("ports = %+v, want the broker's one declaration", document.Ports)
 	}
 	port := document.Ports[0]
-	if port.Interface != "mcp.Provider" || port.Port != "mcpserver" || !port.Collects {
-		t.Fatalf("port = %+v, want mcp.Provider collected by mcpserver", port)
+	if port.Interface != "mcp.Provider" || port.Port != "mcp.ProviderPort" || !port.Collects {
+		t.Fatalf("port = %+v, want mcp.ProviderPort on mcp.Provider, collected", port)
 	}
-	if len(port.Contributors) != 2 || port.Contributors[0] != "probe" || port.Contributors[1] != "mcpserver" {
-		t.Fatalf("contributors = %v, want [probe mcpserver] in plugin order", port.Contributors)
+	if len(port.Contributors) != 2 || port.Contributors[0] != "mcpimpl.testMcpProvider" ||
+		port.Contributors[1] != "mcp.McpProvider" {
+		t.Fatalf("contributors = %v, want [mcpimpl.testMcpProvider mcp.McpProvider] in plugin order", port.Contributors)
 	}
 }
 

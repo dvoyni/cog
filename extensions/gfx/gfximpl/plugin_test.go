@@ -412,11 +412,14 @@ func (c *countingFS) Open(name string) (fs.File, error) {
 
 func (testPlugin) Name() kernel.PluginName { return "gfxtest" }
 
+// testGfxBackend is the Adapter this fixture fills gfx's backend Port as.
+type testGfxBackend kernel.Adapter[gfx.BackendPort]
+
 // Name is the gfx plugin's, not this fixture's: the fixture locks gfx resources.
 func (testPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{gfx.Name} }
 func (testPlugin) Register(registrar *kernel.Registrar, _ any) error {
 	adapter := &testAdapter{}
-	registrar.ProvideAdapter[gpu.Backend](adapter)
+	registrar.ProvideAdapter[testGfxBackend](gpu.Backend(adapter))
 	registrar.HandleCommand[attachBackendCmd](adapter.attachBackendCmdImpl)
 	registrar.HandleCommand[recordCmd](recordCmdImpl)
 	registrar.HandleCommand[recordResourcesCmd](recordResourcesCmdImpl)

@@ -9,11 +9,25 @@ import (
 	"testing"
 )
 
-// testBackend is the interface a required-adapter Port declares.
+// testBackend is the interface a required Port declares.
 type testBackend interface{ Label() string }
 
-// testCapability is the interface a collecting Port declares.
+// testCapability is the interface a collected Port declares.
 type testCapability interface{ Label() string }
+
+// testBackendPort needs exactly one Adapter; testCapabilityPort takes any number.
+type (
+	testBackendPort    RequiredPort[testBackend]
+	testCapabilityPort CollectedPort[testCapability]
+)
+
+// testGPU and testSoftware both fill testBackendPort; testOffer contributes to
+// testCapabilityPort.
+type (
+	testGPU      Adapter[testBackendPort]
+	testSoftware Adapter[testBackendPort]
+	testOffer    Adapter[testCapabilityPort]
+)
 
 type testLabel string
 
@@ -29,14 +43,14 @@ func composeForTest(plugins ...Plugin) (*Engine, error) {
 	return e, errors.Join(handled...)
 }
 
-// A required Adapter is bound at composition and read from Start. The Port is
-// listed before its contributor and neither declares the other, so the binding
-// does not depend on registration order and adds no dependency edge.
+// A required Adapter is bound at composition and read from Start. The Port's
+// plugin is listed before its contributor and neither declares the other, so the
+// binding does not depend on registration order and adds no dependency edge.
 func TestPorts_RequiredAdapterIsBoundAndReadInStart(t *testing.T) {
 	var got string
 	port := &testPlugin{name: "port"}
 	port.register = func(r *Registrar) error {
-		backend := r.RequireAdapter[testBackend]()
+		backend := r.RequireAdapter[testBackendPort]()
 		port.start = func(Executioner) error {
 			got = backend.Get().Label()
 			return nil
@@ -44,7 +58,7 @@ func TestPorts_RequiredAdapterIsBoundAndReadInStart(t *testing.T) {
 		return nil
 	}
 	adapter := testPlugin{name: "adapter", register: func(r *Registrar) error {
-		r.ProvideAdapter[testBackend](testLabel("gpu"))
+		r.ProvideAdapter[testGPU](testBackend(testLabel("gpu")))
 		return nil
 	}}
 
@@ -67,7 +81,7 @@ func TestPorts_RequiredAdapterIsBoundAndReadInStart(t *testing.T) {
 
 func TestPorts_MissingRequiredAdapterFailsComposition(t *testing.T) {
 	port := testPlugin{name: "port", register: func(r *Registrar) error {
-		r.RequireAdapter[testBackend]()
+		r.RequireAdapter[testBackendPort]()
 		return nil
 	}}
 
@@ -77,44 +91,57 @@ func TestPorts_MissingRequiredAdapterFailsComposition(t *testing.T) {
 	if !errors.As(err, &missing) {
 		t.Fatalf("composition error = %v, want ErrMissingAdapter", err)
 	}
-	if want := (ErrMissingAdapter{Port: "port", Interface: reflect.TypeFor[testBackend]()}); missing != want {
+	if want := (ErrMissingAdapter{Plugin: "port", Port: reflect.TypeFor[testBackendPort]()}); missing != want {
 		t.Fatalf("missing = %+v, want %+v", missing, want)
+	}
+	if want := `plugin "port" requires an adapter for kernel.testBackendPort, but no plugin provides one`; err.Error() != want {
+		t.Fatalf("message = %q, want %q", err.Error(), want)
 	}
 }
 
 func TestPorts_DuplicateRequiredAdaptersFailComposition(t *testing.T) {
 	port := testPlugin{name: "port", register: func(r *Registrar) error {
-		r.RequireAdapter[testBackend]()
+		r.RequireAdapter[testBackendPort]()
 		return nil
 	}}
-	provider := func(name PluginName) testPlugin {
-		return testPlugin{name: name, register: func(r *Registrar) error {
-			r.ProvideAdapter[testBackend](testLabel(name))
-			return nil
-		}}
-	}
+	first := testPlugin{name: "first", register: func(r *Registrar) error {
+		r.ProvideAdapter[testGPU](testBackend(testLabel("first")))
+		return nil
+	}}
+	second := testPlugin{name: "second", register: func(r *Registrar) error {
+		r.ProvideAdapter[testSoftware](testBackend(testLabel("second")))
+		return nil
+	}}
 
-	_, err := composeForTest(port, provider("first"), provider("second"))
+	_, err := composeForTest(port, first, second)
 
 	var duplicate ErrDuplicateAdapter
 	if !errors.As(err, &duplicate) {
 		t.Fatalf("composition error = %v, want ErrDuplicateAdapter", err)
 	}
-	if duplicate.Port != "port" || duplicate.Interface != reflect.TypeFor[testBackend]() ||
-		!slices.Equal(duplicate.Contributors, []PluginName{"first", "second"}) {
-		t.Fatalf("duplicate = %+v", duplicate)
+	want := ErrDuplicateAdapter{Plugin: "port", Port: reflect.TypeFor[testBackendPort](), Adapters: []AdapterDescription{
+		{Type: reflect.TypeFor[testGPU](), Plugin: "first"},
+		{Type: reflect.TypeFor[testSoftware](), Plugin: "second"},
+	}}
+	if !reflect.DeepEqual(duplicate, want) {
+		t.Fatalf("duplicate = %+v, want %+v", duplicate, want)
+	}
+	wantMessage := `plugin "port" requires exactly one adapter for kernel.testBackendPort, ` +
+		`but several are provided: [kernel.testGPU (first), kernel.testSoftware (second)]`
+	if err.Error() != wantMessage {
+		t.Fatalf("message = %q, want %q", err.Error(), wantMessage)
 	}
 }
 
-// A nil Adapter is refused when it is provided, so a Port requiring the
-// interface fails composition with a named error instead of a binding panic.
-func TestPorts_NilAdapterForRequiredInterfaceFailsComposition(t *testing.T) {
+// A nil Adapter is refused when it is provided, so a Port requiring it fails
+// composition with a named error instead of a binding panic.
+func TestPorts_NilAdapterForRequiredPortFailsComposition(t *testing.T) {
 	port := testPlugin{name: "port", register: func(r *Registrar) error {
-		r.RequireAdapter[testBackend]()
+		r.RequireAdapter[testBackendPort]()
 		return nil
 	}}
 	adapter := testPlugin{name: "adapter", register: func(r *Registrar) error {
-		r.ProvideAdapter[testBackend](nil)
+		r.ProvideAdapter[testGPU](nil)
 		return nil
 	}}
 
@@ -124,21 +151,24 @@ func TestPorts_NilAdapterForRequiredInterfaceFailsComposition(t *testing.T) {
 	if !errors.As(err, &nilAdapter) {
 		t.Fatalf("composition error = %v, want ErrNilAdapter", err)
 	}
-	if want := (ErrNilAdapter{Plugin: "adapter", Interface: reflect.TypeFor[testBackend]()}); nilAdapter != want {
+	if want := (ErrNilAdapter{Plugin: "adapter", Adapter: reflect.TypeFor[testGPU]()}); nilAdapter != want {
 		t.Fatalf("nil adapter = %+v, want %+v", nilAdapter, want)
+	}
+	if want := `plugin "adapter" provides a nil kernel.testGPU`; !strings.Contains(err.Error(), want) {
+		t.Fatalf("composition error = %v, want it to contain %q", err, want)
 	}
 }
 
-// A nil Adapter for a collected interface is refused the same way. The refusal
-// is the only failure: the collecting Port's other contributions bind cleanly.
-func TestPorts_NilAdapterForCollectedInterfaceFailsComposition(t *testing.T) {
+// A nil Adapter for a collected Port is refused the same way. The refusal is the
+// only failure: the collected Port's other contributions bind cleanly.
+func TestPorts_NilAdapterForCollectedPortFailsComposition(t *testing.T) {
 	broker := testPlugin{name: "broker", register: func(r *Registrar) error {
-		r.CollectAdapters[testCapability]()
+		r.CollectAdapters[testCapabilityPort]()
 		return nil
 	}}
 	contributor := func(name PluginName, adapter testCapability) testPlugin {
 		return testPlugin{name: name, register: func(r *Registrar) error {
-			r.ProvideAdapter[testCapability](adapter)
+			r.ProvideAdapter[testOffer](adapter)
 			return nil
 		}}
 	}
@@ -150,7 +180,7 @@ func TestPorts_NilAdapterForCollectedInterfaceFailsComposition(t *testing.T) {
 	if !errors.As(err, &nilAdapter) {
 		t.Fatalf("composition error = %v, want ErrNilAdapter", err)
 	}
-	want := ErrNilAdapter{Plugin: "empty", Interface: reflect.TypeFor[testCapability]()}
+	want := ErrNilAdapter{Plugin: "empty", Adapter: reflect.TypeFor[testOffer]()}
 	if nilAdapter != want {
 		t.Fatalf("nil adapter = %+v, want %+v", nilAdapter, want)
 	}
@@ -159,11 +189,11 @@ func TestPorts_NilAdapterForCollectedInterfaceFailsComposition(t *testing.T) {
 	}
 }
 
-// A nil Adapter fails composition even when no Port declares its interface, so
-// the mistake does not lie dormant until one is added.
+// A nil Adapter fails composition even when no plugin declares its Port, so the
+// mistake does not lie dormant until one is added.
 func TestPorts_NilAdapterNobodyConsumesFailsComposition(t *testing.T) {
 	adapter := testPlugin{name: "adapter", register: func(r *Registrar) error {
-		r.ProvideAdapter[testCapability](nil)
+		r.ProvideAdapter[testOffer](nil)
 		return nil
 	}}
 
@@ -173,7 +203,7 @@ func TestPorts_NilAdapterNobodyConsumesFailsComposition(t *testing.T) {
 	if !errors.As(err, &nilAdapter) {
 		t.Fatalf("composition error = %v, want ErrNilAdapter", err)
 	}
-	if want := (ErrNilAdapter{Plugin: "adapter", Interface: reflect.TypeFor[testCapability]()}); nilAdapter != want {
+	if want := (ErrNilAdapter{Plugin: "adapter", Adapter: reflect.TypeFor[testOffer]()}); nilAdapter != want {
 		t.Fatalf("nil adapter = %+v, want %+v", nilAdapter, want)
 	}
 }
@@ -189,12 +219,12 @@ func (l *nilReceiverLabel) Label() string {
 }
 
 // A typed nil is a valid interface value, not a nil Adapter: it binds and
-// reaches the Port.
+// reaches the plugin requiring the Port.
 func TestPorts_TypedNilPointerAdapterIsAccepted(t *testing.T) {
 	var got string
 	port := &testPlugin{name: "port"}
 	port.register = func(r *Registrar) error {
-		backend := r.RequireAdapter[testBackend]()
+		backend := r.RequireAdapter[testBackendPort]()
 		port.start = func(Executioner) error {
 			got = backend.Get().Label()
 			return nil
@@ -202,7 +232,7 @@ func TestPorts_TypedNilPointerAdapterIsAccepted(t *testing.T) {
 		return nil
 	}
 	adapter := testPlugin{name: "adapter", register: func(r *Registrar) error {
-		r.ProvideAdapter[testBackend]((*nilReceiverLabel)(nil))
+		r.ProvideAdapter[testGPU](testBackend((*nilReceiverLabel)(nil)))
 		return nil
 	}}
 
@@ -219,8 +249,8 @@ func TestPorts_CollectedAdaptersComeInPluginOrderWithContributors(t *testing.T) 
 	var got []ContributedAdapter[testCapability]
 	broker := &testPlugin{name: "broker"}
 	broker.register = func(r *Registrar) error {
-		capabilities := r.CollectAdapters[testCapability]()
-		r.ProvideAdapter[testCapability](testLabel("broker-own"))
+		capabilities := r.CollectAdapters[testCapabilityPort]()
+		r.ProvideAdapter[testOffer](testCapability(testLabel("broker-own")))
 		broker.start = func(Executioner) error {
 			got = capabilities.Get()
 			return nil
@@ -229,7 +259,7 @@ func TestPorts_CollectedAdaptersComeInPluginOrderWithContributors(t *testing.T) 
 	}
 	contributor := func(name PluginName, deps ...PluginName) testPlugin {
 		return testPlugin{name: name, deps: deps, register: func(r *Registrar) error {
-			r.ProvideAdapter[testCapability](testLabel(name))
+			r.ProvideAdapter[testOffer](testCapability(testLabel(name)))
 			return nil
 		}}
 	}
@@ -251,7 +281,7 @@ func TestPorts_CollectingZeroAdaptersIsValid(t *testing.T) {
 	var got []ContributedAdapter[testCapability]
 	broker := &testPlugin{name: "broker"}
 	broker.register = func(r *Registrar) error {
-		capabilities := r.CollectAdapters[testCapability]()
+		capabilities := r.CollectAdapters[testCapabilityPort]()
 		broker.start = func(Executioner) error {
 			called = true
 			got = capabilities.Get()
@@ -267,11 +297,11 @@ func TestPorts_CollectingZeroAdaptersIsValid(t *testing.T) {
 	}
 }
 
-// An Adapter for an interface no plugin requires or collects binds to nothing
-// and fails nothing: a Bundle may contribute to a Port the engine lacks.
+// An Adapter for a Port no plugin requires or collects binds to nothing and fails
+// nothing: a Bundle may contribute to a Port the engine lacks.
 func TestPorts_UnconsumedAdapterIsNotAnError(t *testing.T) {
 	adapter := testPlugin{name: "adapter", register: func(r *Registrar) error {
-		r.ProvideAdapter[testCapability](testLabel("orphan"))
+		r.ProvideAdapter[testOffer](testCapability(testLabel("orphan")))
 		return nil
 	}}
 
@@ -285,17 +315,38 @@ func TestPorts_UnconsumedAdapterIsNotAnError(t *testing.T) {
 	}
 }
 
+// Two Ports on the same interface are distinct: an Adapter binds only to the
+// Port its type names.
+func TestPorts_AnAdapterBindsOnlyToItsOwnPort(t *testing.T) {
+	type otherBackendPort RequiredPort[testBackend]
+	port := testPlugin{name: "port", register: func(r *Registrar) error {
+		r.RequireAdapter[otherBackendPort]()
+		return nil
+	}}
+	adapter := testPlugin{name: "adapter", register: func(r *Registrar) error {
+		r.ProvideAdapter[testGPU](testBackend(testLabel("gpu")))
+		return nil
+	}}
+
+	_, err := composeForTest(port, adapter)
+
+	var missing ErrMissingAdapter
+	if !errors.As(err, &missing) || missing.Port != reflect.TypeFor[otherBackendPort]() {
+		t.Fatalf("composition error = %v, want ErrMissingAdapter for otherBackendPort", err)
+	}
+}
+
 func TestPorts_GetBeforeFinalizationPanics(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		read func(r *Registrar)
 	}{
-		{name: "required", read: func(r *Registrar) { r.RequireAdapter[testBackend]().Get() }},
-		{name: "collected", read: func(r *Registrar) { r.CollectAdapters[testCapability]().Get() }},
+		{name: "required", read: func(r *Registrar) { r.RequireAdapter[testBackendPort]().Get() }},
+		{name: "collected", read: func(r *Registrar) { r.CollectAdapters[testCapabilityPort]().Get() }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			port := testPlugin{name: "port", register: func(r *Registrar) error {
-				r.ProvideAdapter[testBackend](testLabel("gpu"))
+				r.ProvideAdapter[testGPU](testBackend(testLabel("gpu")))
 				tc.read(r)
 				return nil
 			}}
@@ -313,14 +364,19 @@ func TestPorts_GetBeforeFinalizationPanics(t *testing.T) {
 	}
 }
 
-func TestPorts_NonInterfaceTypeArgumentPanics(t *testing.T) {
+// A Port built on a type that is not an interface is refused by each of the
+// three declarations.
+func TestPorts_NonInterfacePortPanics(t *testing.T) {
+	type labelPort RequiredPort[testLabel]
+	type labelsPort CollectedPort[*testLabel]
+	type labelAdapter Adapter[labelPort]
 	for _, tc := range []struct {
 		name    string
 		declare func(r *Registrar)
 	}{
-		{name: "require", declare: func(r *Registrar) { r.RequireAdapter[testLabel]() }},
-		{name: "collect", declare: func(r *Registrar) { r.CollectAdapters[*testLabel]() }},
-		{name: "provide", declare: func(r *Registrar) { r.ProvideAdapter(testLabel("inferred")) }},
+		{name: "require", declare: func(r *Registrar) { r.RequireAdapter[labelPort]() }},
+		{name: "collect", declare: func(r *Registrar) { r.CollectAdapters[labelsPort]() }},
+		{name: "provide", declare: func(r *Registrar) { r.ProvideAdapter[labelAdapter](testLabel("concrete")) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := testPlugin{name: "p", register: func(r *Registrar) error {
@@ -341,18 +397,19 @@ func TestPorts_NonInterfaceTypeArgumentPanics(t *testing.T) {
 	}
 }
 
-func TestPorts_OnePluginDeclaringAnInterfaceTwiceFailsComposition(t *testing.T) {
+func TestPorts_OnePluginDeclaringAPortTwiceFailsComposition(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
+		port    reflect.Type
 		declare func(r *Registrar)
 	}{
-		{name: "require and collect", declare: func(r *Registrar) {
-			r.RequireAdapter[testBackend]()
-			r.CollectAdapters[testBackend]()
+		{name: "require twice", port: reflect.TypeFor[testBackendPort](), declare: func(r *Registrar) {
+			r.RequireAdapter[testBackendPort]()
+			r.RequireAdapter[testBackendPort]()
 		}},
-		{name: "require twice", declare: func(r *Registrar) {
-			r.RequireAdapter[testBackend]()
-			r.RequireAdapter[testBackend]()
+		{name: "collect twice", port: reflect.TypeFor[testCapabilityPort](), declare: func(r *Registrar) {
+			r.CollectAdapters[testCapabilityPort]()
+			r.CollectAdapters[testCapabilityPort]()
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -361,7 +418,7 @@ func TestPorts_OnePluginDeclaringAnInterfaceTwiceFailsComposition(t *testing.T) 
 				return nil
 			}}
 			adapter := testPlugin{name: "adapter", register: func(r *Registrar) error {
-				r.ProvideAdapter[testBackend](testLabel("gpu"))
+				r.ProvideAdapter[testGPU](testBackend(testLabel("gpu")))
 				return nil
 			}}
 
@@ -371,9 +428,7 @@ func TestPorts_OnePluginDeclaringAnInterfaceTwiceFailsComposition(t *testing.T) 
 			if !errors.As(err, &duplicate) {
 				t.Fatalf("composition error = %v, want ErrDuplicateRegistration", err)
 			}
-			want := ErrDuplicateRegistration{
-				Kind: "adapter declaration", Type: reflect.TypeFor[testBackend](), Owner: "port", Existing: "port",
-			}
+			want := ErrDuplicateRegistration{Kind: "port declaration", Type: tc.port, Owner: "port", Existing: "port"}
 			if duplicate != want {
 				t.Fatalf("duplicate = %+v, want %+v", duplicate, want)
 			}
@@ -381,24 +436,24 @@ func TestPorts_OnePluginDeclaringAnInterfaceTwiceFailsComposition(t *testing.T) 
 	}
 }
 
-// Describe lists each declaration with its Port and contributors, and Dump
-// renders the same as a ports section.
-func TestPorts_DescribeListsPortsAndContributors(t *testing.T) {
+// Describe lists each declaration by its Port type, with the Adapter types bound
+// to it, and Dump renders the same as a ports section.
+func TestPorts_DescribeNamesPortAndAdapterTypes(t *testing.T) {
 	gfx := testPlugin{name: "gfx", register: func(r *Registrar) error {
-		r.RequireAdapter[testBackend]()
+		r.RequireAdapter[testBackendPort]()
 		return nil
 	}}
 	broker := testPlugin{name: "broker", register: func(r *Registrar) error {
-		r.CollectAdapters[testCapability]()
+		r.CollectAdapters[testCapabilityPort]()
 		return nil
 	}}
 	wgpu := testPlugin{name: "wgpu", deps: []PluginName{"gfx"}, register: func(r *Registrar) error {
-		r.ProvideAdapter[testBackend](testLabel("gpu"))
-		r.ProvideAdapter[testCapability](testLabel("wgpu"))
+		r.ProvideAdapter[testGPU](testBackend(testLabel("gpu")))
+		r.ProvideAdapter[testOffer](testCapability(testLabel("wgpu")))
 		return nil
 	}}
 	input := testPlugin{name: "input", register: func(r *Registrar) error {
-		r.ProvideAdapter[testCapability](testLabel("input"))
+		r.ProvideAdapter[testOffer](testCapability(testLabel("input")))
 		return nil
 	}}
 
@@ -408,15 +463,24 @@ func TestPorts_DescribeListsPortsAndContributors(t *testing.T) {
 	}
 
 	want := []PortDescription{
-		{Interface: reflect.TypeFor[testBackend](), Port: "gfx", Contributors: []PluginName{"wgpu"}},
-		{Interface: reflect.TypeFor[testCapability](), Port: "broker", Collects: true, Contributors: []PluginName{"wgpu", "input"}},
+		{
+			Type: reflect.TypeFor[testBackendPort](), Interface: reflect.TypeFor[testBackend](), Owner: "gfx",
+			Adapters: []AdapterDescription{{Type: reflect.TypeFor[testGPU](), Plugin: "wgpu"}},
+		},
+		{
+			Type: reflect.TypeFor[testCapabilityPort](), Interface: reflect.TypeFor[testCapability](), Owner: "broker",
+			Collects: true, Adapters: []AdapterDescription{
+				{Type: reflect.TypeFor[testOffer](), Plugin: "wgpu"},
+				{Type: reflect.TypeFor[testOffer](), Plugin: "input"},
+			},
+		},
 	}
 	if got := e.Describe().Ports; !reflect.DeepEqual(got, want) {
 		t.Fatalf("ports = %+v, want %+v", got, want)
 	}
 	wantDump := "ports:\n" +
-		"  kernel.testBackend (gfx) requires [wgpu]\n" +
-		"  kernel.testCapability (broker) collects [wgpu input]\n" +
+		"  kernel.testBackendPort (gfx) requires [kernel.testGPU (wgpu)]\n" +
+		"  kernel.testCapabilityPort (broker) collects [kernel.testOffer (wgpu), kernel.testOffer (input)]\n" +
 		"commands:\n"
 	if dump := Dump(e); !strings.Contains(dump, wantDump) {
 		t.Fatalf("dump missing ports section %q:\n%s", wantDump, dump)

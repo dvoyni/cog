@@ -30,7 +30,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[input.SynthesizeCmd](synthesizeCmdImpl)
 	registrar.HandleCommand[input.StateCmd](stateCmdImpl)
 	registrar.Subscribe[input.AdvanceOnUpdate](advanceOnUpdate).First()
-	registrar.ProvideAdapter[mcp.Provider](provider{})
+	registrar.ProvideAdapter[input.McpProvider](mcp.Provider(provider{}))
 	return nil
 }
 

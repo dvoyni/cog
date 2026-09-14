@@ -211,8 +211,8 @@ From [#206](https://github.com/dvoyni/cog/issues/206) §4 and
 
 ### Collect at `Register`, open at `Start`
 
-At `Register` the broker declares `CollectAdapters[mcp.Provider]()` and
-contributes its own `mcp.Provider`. The engine binds every contribution after
+At `Register` the broker declares `CollectAdapters[mcp.ProviderPort]()` and
+contributes its own `mcp.Provider` as `mcp.McpProvider`. The engine binds every contribution after
 the last `Register` and before the first `Start`, so the set the broker reads is
 complete whichever order the plugins start in.
 
@@ -464,9 +464,13 @@ see
 - **Flat JSON, five arrays**, mirroring `ArchitectureDescription`: plugins,
   resources, ports, commands and subscriptions. The ports array was added by
   [#335](https://github.com/dvoyni/cog/issues/335) with the kernel's
-  `ArchitectureDescription.Ports`: each entry names the Adapter interface, the
-  Port plugin, whether it collects or requires one, and its contributors in
-  plugin order. `Dump` stays
+  `ArchitectureDescription.Ports`: each entry names the interface in `interface`,
+  the Port type in `port`, whether it collects or requires Adapters, and the
+  Adapter types bound to it in `contributors`, in plugin order, all rendered
+  through `kernel.TypeName`. (Amended by
+  [#353](https://github.com/dvoyni/cog/issues/353), which made Ports and
+  Adapters declared types; before it `port` named the declaring plugin and
+  `contributors` the providing plugins.) `Dump` stays
   the human spelling.
 - **No index, because the type string is the address.** `Uses`, `DependsOn`,
   `Reads` and `Writes` are all joins on it. This is
@@ -630,7 +634,7 @@ written for `extensions/mcpserver` and is updated to the paths and the collectio
 **`extensions/mcp/mcpimpl/plugin.go`**
 
 - `New() kernel.Plugin`; `Name() mcp.Name`; `Dependencies() nil`.
-- `Register`: `CollectAdapters[mcp.Provider]()`, and contribute the broker's own
+- `Register`: `CollectAdapters[mcp.ProviderPort]()`, and contribute the broker's own
   Provider, returning `mcpserver_architecture`.
 - `Start`: read the bound providers, collect and validate capabilities, build
   the server, listen, spawn the cancellation watcher, log the attach line.

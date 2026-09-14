@@ -171,7 +171,7 @@ invoke its update, draw, and input bridges directly.
 
 The private backend implements the public `gpu.Backend` contract, and is gfx's
 Adapter. The plugin builds it once and provides it with
-`registrar.ProvideAdapter[gpu.Backend]` at the top of `Register`, before the
+`registrar.ProvideAdapter[GfxBackend]`, the Adapter type in `adapters.go`, at the top of `Register`, before the
 GPU device exists: gfx is a Port, and its Adapter is bound at composition,
 while the device is created asynchronously inside the render loop. `onDraw`
 attaches the device to the same value on the first frame the device is
@@ -216,7 +216,7 @@ they import.
 - **The plugin wiring** is wgpu as a plugin that depends on gfx: `plugin.go`.
   It may import the gfx root, for the dependency on `gfx.Name` and to drive
   `gfx.SetViewportCmd` every drawable frame, and it imports `gpu` to provide the
-  backend with `registrar.ProvideAdapter[gpu.Backend]`.
+  backend with `registrar.ProvideAdapter[GfxBackend]`.
 - **Tests** may import the root, for `gfx.FlattenShader` and
   `gfx.CheckVertexInterface`, and gfximpl, to compose an engine.
 

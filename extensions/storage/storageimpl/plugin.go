@@ -35,7 +35,7 @@ func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 // Register requires the PermanentFS Adapter, resolves the configuration and
 // registers the storage resources and commands.
 func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
-	p.permanent = registrar.RequireAdapter[storage.PermanentFS]()
+	p.permanent = registrar.RequireAdapter[storage.PermanentFSPort]()
 	cfg := DefaultConfig()
 	if config != nil {
 		var ok bool

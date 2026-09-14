@@ -46,7 +46,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	if localStorage.IsUndefined() || localStorage.IsNull() {
 		return errors.New("jsfs: browser localStorage is unavailable")
 	}
-	registrar.ProvideAdapter[storage.PermanentFS](&webFS{key: keyPrefix + appId, storage: localStorage})
+	registrar.ProvideAdapter[StoragePermanentFS](storage.PermanentFS(&webFS{key: keyPrefix + appId, storage: localStorage}))
 	return nil
 }
 

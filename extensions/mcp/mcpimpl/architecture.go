@@ -66,9 +66,9 @@ type architectureResource struct {
 	Owner string `json:"owner"`
 }
 
-// architecturePort is one plugin's declaration of an Adapter interface: the
-// Port, whether it collects any number of Adapters or requires exactly one, and
-// the plugins that contributed one, in plugin order.
+// architecturePort is one plugin's declaration of a Port: the interface it is
+// built on, the Port type, whether it collects any number of Adapters or
+// requires exactly one, and the Adapter types bound to it, in plugin order.
 type architecturePort struct {
 	Interface    string   `json:"interface"`
 	Port         string   `json:"port"`
@@ -174,12 +174,12 @@ func describe(description kernel.ArchitectureDescription) architectureResponse {
 		})
 	}
 	for _, port := range description.Ports {
-		contributors := make([]string, 0, len(port.Contributors))
-		for _, contributor := range port.Contributors {
-			contributors = append(contributors, string(contributor))
+		contributors := make([]string, 0, len(port.Adapters))
+		for _, adapter := range port.Adapters {
+			contributors = append(contributors, kernel.TypeName(adapter.Type))
 		}
 		document.Ports = append(document.Ports, architecturePort{
-			Interface: kernel.TypeName(port.Interface), Port: string(port.Port),
+			Interface: kernel.TypeName(port.Interface), Port: kernel.TypeName(port.Type),
 			Collects: port.Collects, Contributors: contributors,
 		})
 	}

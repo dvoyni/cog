@@ -70,6 +70,60 @@ type Command[TRequest any, TResponse any] = func() (Lock, Execute[TRequest, TRes
 //	type FlushOnUpdate kernel.Subscription[app.UpdateEvent]
 type Subscription[TEvent any] = func() (Lock, Observe[TEvent])
 
+// RequiredPort is the shape of a Port that needs exactly one Adapter. A plugin
+// names its Port by defining a type from it, with the interface its Adapter
+// implements as the type argument, and that defined type is the Port's identity:
+//
+//	type BackendPort kernel.RequiredPort[Backend]
+//
+// The shape is never called; it exists so that the Port type carries its
+// interface and its kind, and the compiler can read both back.
+type RequiredPort[I any] = func(requiredPort) I
+
+// CollectedPort is the shape of a Port that takes any number of Adapters, zero
+// included, declared the same way:
+//
+//	type ProviderPort kernel.CollectedPort[Provider]
+type CollectedPort[I any] = func(collectedPort) I
+
+// Adapter is the shape of an Adapter identity. The plugin that fills a Port
+// defines a type from it with that Port as the type argument:
+//
+//	type GfxBackend kernel.Adapter[gfx.BackendPort]
+type Adapter[P any] = func(adapterOf) P
+
+// requiredPort, collectedPort and adapterOf mark the three shapes apart, so a
+// required Port cannot be collected, a collected one cannot be required, and a
+// Port cannot be provided in place of an Adapter.
+type (
+	requiredPort  struct{}
+	collectedPort struct{}
+	adapterOf     struct{}
+)
+
+// portKind is either Port kind, for the declarations that accept both.
+type portKind interface{ requiredPort | collectedPort }
+
+// RequiredPortConstraint identifies a required Port by its defined type.
+type RequiredPortConstraint[I any] interface {
+	~RequiredPort[I]
+}
+
+// CollectedPortConstraint identifies a collected Port by its defined type.
+type CollectedPortConstraint[I any] interface {
+	~CollectedPort[I]
+}
+
+// AdapterConstraint identifies an Adapter by its defined type.
+type AdapterConstraint[P any] interface {
+	~Adapter[P]
+}
+
+// portConstraint identifies a Port of either kind.
+type portConstraint[K portKind, I any] interface {
+	~func(K) I
+}
+
 // CommandConstraint identifies a command by its distinct defined factory type.
 // The factory is called once at registration to produce the command's Lock and
 // Execute; both are cached for the engine lifetime.

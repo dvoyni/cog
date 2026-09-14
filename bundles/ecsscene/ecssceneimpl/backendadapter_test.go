@@ -1,6 +1,7 @@
 package ecssceneimpl
 
 import (
+	"github.com/dvoyni/cog/extensions/gfx"
 	"sync/atomic"
 
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
@@ -15,9 +16,12 @@ func (backendAdapter) Name() kernel.PluginName           { return "gfxbackendtes
 func (backendAdapter) Dependencies() []kernel.PluginName { return nil }
 
 func (a backendAdapter) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.ProvideAdapter[gpu.Backend](a.backend)
+	registrar.ProvideAdapter[testGfxBackend](a.backend)
 	return nil
 }
+
+// testGfxBackend is the Adapter this fixture fills gfx's backend Port as.
+type testGfxBackend kernel.Adapter[gfx.BackendPort]
 
 // detachedBackend is a Backend whose device never arrives. gfx asks a backend
 // that is not ready only whether it is, and for ids, so nothing else is

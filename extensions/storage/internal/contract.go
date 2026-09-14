@@ -22,7 +22,7 @@ type ReadMount struct {
 }
 
 // PermanentFS is the Adapter storage requires: the filesystem writes land in.
-// An Adapter plugin provides it with ProvideAdapter[storage.PermanentFS], and
+// An Adapter plugin fills storage.PermanentFSPort with ProvideAdapter, and
 // storage never hands it back to callers: FileSystem keeps it inside and
 // exposes only its readable half, while WriteAccess exposes the mutating half
 // to write-lock holders.

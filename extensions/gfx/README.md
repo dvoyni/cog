@@ -86,9 +86,11 @@ The plugin has no configuration. Register `storage` before it so shader and
 texture resources are available at runtime.
 
 **The Backend Adapter.** The plugin calls
-`registrar.RequireAdapter[gpu.Backend]()` and reads the handle from `Start`
-onwards. A driver provides its backend with
-`registrar.ProvideAdapter[gpu.Backend](backend)` during its own `Register`; a
+`registrar.RequireAdapter[gfx.BackendPort]()`, the Port declared in `ports.go`
+on `gpu.Backend`, and reads the handle from `Start` onwards. A driver declares
+an Adapter type for it, as wgpu's `GfxBackend kernel.Adapter[gfx.BackendPort]`,
+and provides its backend with
+`registrar.ProvideAdapter[GfxBackend](gpu.Backend(backend))` during its own `Register`; a
 composition with no provider fails with `kernel.ErrMissingAdapter`, and one
 with two fails with `kernel.ErrDuplicateAdapter`. No command installs a
 backend.

@@ -82,8 +82,8 @@ auth is a different effort; logging is one line at startup.
 
 ## Lifecycle
 
-In `Register` the broker declares `CollectAdapters[mcp.Provider]()` and
-provides its own. At `Start` it reads the bound set, which the engine completed
+In `Register` the broker declares `CollectAdapters[mcp.ProviderPort]()` and
+provides its own as `mcp.McpProvider`. At `Start` it reads the bound set, which the engine completed
 during composition, calls `Capabilities()` on each exactly once, validates and renders every capability as a tool, retains
 the `Start` executioner, listens, and starts one goroutine waiting on
 `k.Context().Done()`.
@@ -180,9 +180,9 @@ explain it — the one thing an agent cannot compute by reading source, because 
 handler deliberately never names the resources behind a command it uses. It
 returns flat JSON in five arrays — plugins, resources, ports, commands and
 subscriptions — addressed by type string, and writes a file instead when given
-an absolute `.json` path. A port entry names the Adapter interface, the Port
-plugin, whether it collects or requires one, and the contributors in plugin
-order.
+an absolute `.json` path. A port entry names the interface, the Port type,
+whether it collects or requires Adapters, and the Adapter types bound to it in
+plugin order.
 
 ## Attaching
 

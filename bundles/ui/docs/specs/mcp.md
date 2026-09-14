@@ -69,7 +69,7 @@ Provider is an unexported value holding nothing, because the capability body
 reaches ui by dispatch.
 
 ```go
-registrar.ProvideAdapter[mcp.Provider](provider{}) // in Register
+registrar.ProvideAdapter[ui.McpProvider](mcp.Provider(provider{})) // in Register
 
 func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
@@ -413,7 +413,7 @@ A checklist for an implementation session.
 **`bundles/ui/mcpprovider.go`** (new)
 
 - A `provider` value whose `Capabilities()` returns the one capability,
-  contributed with `ProvideAdapter[mcp.Provider]` in `Register`.
+  contributed with `ProvideAdapter[ui.McpProvider]` in `Register`.
 - `LayoutRequest`/`LayoutResponse`, and the `Func` body: validate, dispatch the
   arm, wait with the capability's own **2s** deadline, then marshal and write on
   **this** goroutine.

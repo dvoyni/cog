@@ -31,7 +31,7 @@ type MountId = internal.MountId
 type ReadMount = internal.ReadMount
 
 // PermanentFS is the Adapter storage requires: the filesystem writes land in.
-// An Adapter plugin provides it with registrar.ProvideAdapter[storage.PermanentFS]
+// An Adapter plugin fills PermanentFSPort with registrar.ProvideAdapter
 // during its Register. storage never hands it back to callers: FileSystem keeps
 // it inside and exposes only its readable half, while WriteAccess exposes the
 // mutating half to write-lock holders. Operation names use fs.ValidPath form.

@@ -137,40 +137,40 @@ func (e ErrUnavailableDependency) Error() string {
 		e.Plugin, TypeName(e.Resource), e.Owner)
 }
 
-// ErrMissingAdapter is reported when a plugin requires an Adapter for an
-// interface and no plugin provides one.
+// ErrMissingAdapter is reported when a plugin requires a Port and no plugin
+// provides an Adapter for it.
 type ErrMissingAdapter struct {
-	Port      PluginName
-	Interface reflect.Type
+	Plugin PluginName
+	Port   reflect.Type
 }
 
 func (e ErrMissingAdapter) Error() string {
-	return fmt.Sprintf("plugin %q requires an adapter for %s, but no plugin provides one", e.Port, TypeName(e.Interface))
+	return fmt.Sprintf("plugin %q requires an adapter for %s, but no plugin provides one", e.Plugin, TypeName(e.Port))
 }
 
-// ErrDuplicateAdapter is reported when a plugin requires exactly one Adapter for
-// an interface and several plugins provide one. Contributors are in plugin order.
+// ErrDuplicateAdapter is reported when a plugin requires a Port and several
+// Adapters are provided for it. Adapters are in plugin order.
 type ErrDuplicateAdapter struct {
-	Port         PluginName
-	Interface    reflect.Type
-	Contributors []PluginName
+	Plugin   PluginName
+	Port     reflect.Type
+	Adapters []AdapterDescription
 }
 
 func (e ErrDuplicateAdapter) Error() string {
-	return fmt.Sprintf("plugin %q requires exactly one adapter for %s, but %v each provide one",
-		e.Port, TypeName(e.Interface), e.Contributors)
+	return fmt.Sprintf("plugin %q requires exactly one adapter for %s, but several are provided: %s",
+		e.Plugin, TypeName(e.Port), adapterList(e.Adapters))
 }
 
-// ErrNilAdapter is reported when a plugin provides an untyped nil Adapter for an
-// interface. The contribution is refused, so no Port ever receives it. A typed
-// nil, such as a nil pointer implementing the interface, is not nil.
+// ErrNilAdapter is reported when a plugin provides an untyped nil as an Adapter.
+// The contribution is refused, so no plugin declaring the Port ever receives it.
+// A typed nil, such as a nil pointer implementing the interface, is not nil.
 type ErrNilAdapter struct {
-	Plugin    PluginName
-	Interface reflect.Type
+	Plugin  PluginName
+	Adapter reflect.Type
 }
 
 func (e ErrNilAdapter) Error() string {
-	return fmt.Sprintf("plugin %q provides a nil adapter for %s", e.Plugin, TypeName(e.Interface))
+	return fmt.Sprintf("plugin %q provides a nil %s", e.Plugin, TypeName(e.Adapter))
 }
 
 // ErrSubscriptionCycle is returned when an event's subscriptions have an

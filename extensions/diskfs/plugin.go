@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
 )
 
@@ -48,7 +47,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	if err != nil {
 		return err
 	}
-	registrar.ProvideAdapter[storage.PermanentFS](permanent)
+	registrar.ProvideAdapter[StoragePermanentFS](permanent)
 	return nil
 }
 

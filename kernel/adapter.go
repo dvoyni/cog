@@ -3,14 +3,16 @@ package kernel
 import (
 	"fmt"
 	"reflect"
+	"strings"
 )
 
 // adapterDeclaration is one plugin's RequireAdapter or CollectAdapters for one
-// interface. bind receives every contribution for that interface, in plugin
-// order, and fills the typed handle the declaration returned.
+// Port. bind receives every contribution for that Port, in plugin order, and
+// fills the typed handle the declaration returned.
 type adapterDeclaration struct {
+	port     reflect.Type
 	iface    reflect.Type
-	port     PluginName
+	owner    PluginName
 	collects bool
 	bind     func(contributions []adapterContribution)
 }
@@ -18,150 +20,163 @@ type adapterDeclaration struct {
 // adapterContribution is one ProvideAdapter call.
 type adapterContribution struct {
 	plugin  PluginName
-	adapter any
+	adapter reflect.Type
+	value   any
 }
 
-// RequiredAdapter is the handle RequireAdapter returns. It is bound at
-// composition and valid from Start onwards.
-type RequiredAdapter[T any] struct{ binding *requiredBinding[T] }
+// RequiredAdapter is the handle RequireAdapter returns, typed by the Port's
+// interface. It is bound at composition and valid from Start onwards.
+type RequiredAdapter[I any] struct{ binding *requiredBinding[I] }
 
-type requiredBinding[T any] struct {
+type requiredBinding[I any] struct {
 	bound   bool
-	adapter T
+	adapter I
 }
 
-// Get returns the one Adapter bound for T. It takes no lock: an Adapter is a
-// plain value, and its thread rules are the Port interface's. It panics before
-// composition has bound the handle.
-func (h RequiredAdapter[T]) Get() T {
+// Get returns the one Adapter bound for the Port. It takes no lock: an Adapter
+// is a plain value, and its thread rules are the Port interface's. It panics
+// before composition has bound the handle.
+func (h RequiredAdapter[I]) Get() I {
 	if h.binding == nil || !h.binding.bound {
-		panic(unboundAdapter[T]())
+		panic(unboundAdapter[I]())
 	}
 	return h.binding.adapter
 }
 
-// CollectedAdapters is the handle CollectAdapters returns. It is bound at
-// composition and valid from Start onwards.
-type CollectedAdapters[T any] struct{ binding *collectedBinding[T] }
+// CollectedAdapters is the handle CollectAdapters returns, typed by the Port's
+// interface. It is bound at composition and valid from Start onwards.
+type CollectedAdapters[I any] struct{ binding *collectedBinding[I] }
 
-type collectedBinding[T any] struct {
+type collectedBinding[I any] struct {
 	bound    bool
-	adapters []ContributedAdapter[T]
+	adapters []ContributedAdapter[I]
 }
 
 // ContributedAdapter is one collected Adapter and the plugin that provided it.
-type ContributedAdapter[T any] struct {
+type ContributedAdapter[I any] struct {
 	Plugin  PluginName
-	Adapter T
+	Adapter I
 }
 
-// Get returns every Adapter bound for T, in plugin order, as a fresh slice. It
-// panics before composition has bound the handle.
-func (h CollectedAdapters[T]) Get() []ContributedAdapter[T] {
+// Get returns every Adapter bound for the Port, in plugin order, as a fresh
+// slice. It panics before composition has bound the handle.
+func (h CollectedAdapters[I]) Get() []ContributedAdapter[I] {
 	if h.binding == nil || !h.binding.bound {
-		panic(unboundAdapter[T]())
+		panic(unboundAdapter[I]())
 	}
-	return append([]ContributedAdapter[T](nil), h.binding.adapters...)
+	return append([]ContributedAdapter[I](nil), h.binding.adapters...)
 }
 
-func unboundAdapter[T any]() string {
-	return fmt.Sprintf("kernel: adapter handle for %s read before composition bound it", TypeName(reflect.TypeFor[T]()))
+func unboundAdapter[I any]() string {
+	return fmt.Sprintf("kernel: adapter handle for %s read before composition bound it", TypeName(reflect.TypeFor[I]()))
 }
 
 // RequireAdapter declares that this plugin needs exactly one Adapter for the
-// interface T. Composition binds it after every Register; none fails with
+// required Port P. Composition binds it after every Register; none fails with
 // ErrMissingAdapter and several with ErrDuplicateAdapter. The binding adds no
-// plugin dependency. It panics if T is not an interface type.
-func (r *Registrar) RequireAdapter[T any]() RequiredAdapter[T] {
-	binding := &requiredBinding[T]{}
-	r.declareAdapter[T](false, func(contributions []adapterContribution) {
+// plugin dependency. It panics if P is not built on an interface type.
+func (r *Registrar) RequireAdapter[P RequiredPortConstraint[I], I any]() RequiredAdapter[I] {
+	binding := &requiredBinding[I]{}
+	r.declarePort[P, I](false, func(contributions []adapterContribution) {
 		if len(contributions) != 1 {
 			return
 		}
-		binding.adapter = contributions[0].adapter.(T)
+		binding.adapter = contributions[0].value.(I)
 		binding.bound = true
 	})
-	return RequiredAdapter[T]{binding: binding}
+	return RequiredAdapter[I]{binding: binding}
 }
 
-// CollectAdapters declares that this plugin takes every Adapter provided for
-// the interface T, zero included. Composition binds them after every Register,
+// CollectAdapters declares that this plugin takes every Adapter provided for the
+// collected Port P, zero included. Composition binds them after every Register,
 // in plugin order, each with the name of the plugin that provided it. The
-// binding adds no plugin dependency. It panics if T is not an interface type.
-func (r *Registrar) CollectAdapters[T any]() CollectedAdapters[T] {
-	binding := &collectedBinding[T]{}
-	r.declareAdapter[T](true, func(contributions []adapterContribution) {
-		binding.adapters = make([]ContributedAdapter[T], 0, len(contributions))
+// binding adds no plugin dependency. It panics if P is not built on an
+// interface type.
+func (r *Registrar) CollectAdapters[P CollectedPortConstraint[I], I any]() CollectedAdapters[I] {
+	binding := &collectedBinding[I]{}
+	r.declarePort[P, I](true, func(contributions []adapterContribution) {
+		binding.adapters = make([]ContributedAdapter[I], 0, len(contributions))
 		for _, contribution := range contributions {
-			binding.adapters = append(binding.adapters, ContributedAdapter[T]{
-				Plugin: contribution.plugin, Adapter: contribution.adapter.(T),
+			binding.adapters = append(binding.adapters, ContributedAdapter[I]{
+				Plugin: contribution.plugin, Adapter: contribution.value.(I),
 			})
 		}
 		binding.bound = true
 	})
-	return CollectedAdapters[T]{binding: binding}
+	return CollectedAdapters[I]{binding: binding}
 }
 
-// ProvideAdapter contributes adapter for the interface T, spelled explicitly so
-// the compiler checks that adapter implements it. An Adapter no plugin requires
-// or collects is not an error. A nil adapter is refused with ErrNilAdapter and
-// contributes nothing; a typed nil, such as a nil pointer, is not nil. It panics
-// if T is not an interface type.
-func (r *Registrar) ProvideAdapter[T any](adapter T) {
-	id := adapterInterface[T]("ProvideAdapter")
+// ProvideAdapter contributes adapter as the Adapter A, to the Port A is built
+// on. The parameter has that Port's interface type, so the compiler checks that
+// adapter implements it. An Adapter no plugin requires or collects is not an
+// error. A nil adapter is refused with ErrNilAdapter and contributes nothing; a
+// typed nil, such as a nil pointer, is not nil. It panics if the Port is not
+// built on an interface type.
+//
+// Go infers type parameters from a call's arguments before it reads their
+// constraints, so a concrete adapter must already have the interface type:
+// convert it, as in ProvideAdapter[GfxBackend](gfx.Backend(device)), or pass a
+// value declared with that type.
+func (r *Registrar) ProvideAdapter[A AdapterConstraint[P], P portConstraint[K, I], K portKind, I any](adapter I) {
+	id := reflect.TypeFor[A]()
+	portInterface[I]("ProvideAdapter", id)
 	if any(adapter) == nil {
-		r.registry.errs = append(r.registry.errs, ErrNilAdapter{Plugin: r.owner, Interface: id})
+		r.registry.errs = append(r.registry.errs, ErrNilAdapter{Plugin: r.owner, Adapter: id})
 		return
 	}
-	r.registry.adapterContributions[id] = append(r.registry.adapterContributions[id],
-		adapterContribution{plugin: r.owner, adapter: adapter})
+	port := reflect.TypeFor[P]()
+	r.registry.adapterContributions[port] = append(r.registry.adapterContributions[port],
+		adapterContribution{plugin: r.owner, adapter: id, value: adapter})
 }
 
-func (r *Registrar) declareAdapter[T any](collects bool, bind func([]adapterContribution)) {
+func (r *Registrar) declarePort[P any, I any](collects bool, bind func([]adapterContribution)) {
 	declaration := "RequireAdapter"
 	if collects {
 		declaration = "CollectAdapters"
 	}
-	id := adapterInterface[T](declaration)
+	port := reflect.TypeFor[P]()
+	iface := portInterface[I](declaration, port)
 	for _, existing := range r.registry.adapterDeclarations {
-		if existing.iface == id && existing.port == r.owner {
+		if existing.port == port && existing.owner == r.owner {
 			r.registry.errs = append(r.registry.errs, ErrDuplicateRegistration{
-				Kind: "adapter declaration", Type: id, Owner: r.owner, Existing: existing.port,
+				Kind: "port declaration", Type: port, Owner: r.owner, Existing: existing.owner,
 			})
 			return
 		}
 	}
 	r.registry.adapterDeclarations = append(r.registry.adapterDeclarations, &adapterDeclaration{
-		iface: id, port: r.owner, collects: collects, bind: bind,
+		port: port, iface: iface, owner: r.owner, collects: collects, bind: bind,
 	})
 }
 
-// adapterInterface returns T's type, panicking when T is not an interface: an
-// Adapter is keyed by the contract it implements, never by a concrete type.
-func adapterInterface[T any](declaration string) reflect.Type {
-	id := reflect.TypeFor[T]()
-	if id.Kind() != reflect.Interface {
-		panic(fmt.Sprintf("kernel: %s type argument %s is not an interface type", declaration, TypeName(id)))
+// portInterface returns I's type, panicking when I is not an interface: a Port
+// is a contract its Adapters implement, never a concrete type. named is the Port
+// or Adapter type the declaration was given, for the message.
+func portInterface[I any](declaration string, named reflect.Type) reflect.Type {
+	iface := reflect.TypeFor[I]()
+	if iface.Kind() != reflect.Interface {
+		panic(fmt.Sprintf("kernel: %s type argument %s is built on %s, which is not an interface type",
+			declaration, TypeName(named), TypeName(iface)))
 	}
-	return id
+	return iface
 }
 
-// bindAdapters hands every declaration the contributions for its interface and
-// reports each required interface that has none or several. Contributions were
+// bindAdapters hands every declaration the contributions for its Port and
+// reports each required Port that has none or several. Contributions were
 // appended during sequential registration, so they are already in plugin order.
 func (r *registry) bindAdapters() []error {
 	var errs []error
 	for _, declaration := range r.adapterDeclarations {
-		contributions := r.adapterContributions[declaration.iface]
+		contributions := r.adapterContributions[declaration.port]
 		if !declaration.collects {
 			switch len(contributions) {
 			case 0:
-				errs = append(errs, ErrMissingAdapter{Port: declaration.port, Interface: declaration.iface})
+				errs = append(errs, ErrMissingAdapter{Plugin: declaration.owner, Port: declaration.port})
 				continue
 			case 1:
 			default:
 				errs = append(errs, ErrDuplicateAdapter{
-					Port: declaration.port, Interface: declaration.iface, Contributors: contributors(contributions),
+					Plugin: declaration.owner, Port: declaration.port, Adapters: describeAdapters(contributions),
 				})
 				continue
 			}
@@ -171,10 +186,20 @@ func (r *registry) bindAdapters() []error {
 	return errs
 }
 
-func contributors(contributions []adapterContribution) []PluginName {
-	names := make([]PluginName, 0, len(contributions))
+func describeAdapters(contributions []adapterContribution) []AdapterDescription {
+	adapters := make([]AdapterDescription, 0, len(contributions))
 	for _, contribution := range contributions {
-		names = append(names, contribution.plugin)
+		adapters = append(adapters, AdapterDescription{Type: contribution.adapter, Plugin: contribution.plugin})
 	}
-	return names
+	return adapters
+}
+
+// adapterList renders adapters as one bracketed, comma-separated list, each as
+// its Adapter type followed by the providing plugin in parentheses.
+func adapterList(adapters []AdapterDescription) string {
+	rendered := make([]string, 0, len(adapters))
+	for _, adapter := range adapters {
+		rendered = append(rendered, fmt.Sprintf("%s (%s)", TypeName(adapter.Type), adapter.Plugin))
+	}
+	return "[" + strings.Join(rendered, ", ") + "]"
 }

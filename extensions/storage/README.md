@@ -58,11 +58,11 @@ id belongs to the Adapter that uses it.
 - Name: `storage.Name` (`"storage"`)
 - Constructor: `storageimpl.New() kernel.Plugin`
 - Plugin dependencies: none
-- Requires: exactly one `storage.PermanentFS` Adapter
+- Requires: exactly one Adapter for `storage.PermanentFSPort`
 - Go package dependencies: `kernel` and the standard library
 - Events published or subscribed: none
 
-The plugin calls `registrar.RequireAdapter[storage.PermanentFS]()`. A
+The plugin calls `registrar.RequireAdapter[storage.PermanentFSPort]()`. A
 composition with no provider fails with `kernel.ErrMissingAdapter`, and one with
 two fails with `kernel.ErrDuplicateAdapter`. No command installs a permanent
 filesystem. The Adapter is bound after every `Register`, so the `FileSystem`
@@ -92,11 +92,14 @@ filesystem, and a `Config` that mounts it is rejected with `ErrReservedMount`.
 
 ## Adapters
 
-An Adapter is a plugin that provides `storage.PermanentFS` during its
+An Adapter plugin declares an Adapter type for `storage.PermanentFSPort` in its
+`adapters.go` and provides a `storage.PermanentFS` under it during its
 `Register`:
 
 ```go
-registrar.ProvideAdapter[storage.PermanentFS](permanent)
+type StoragePermanentFS kernel.Adapter[storage.PermanentFSPort]
+
+registrar.ProvideAdapter[StoragePermanentFS](permanent)
 ```
 
 Each of the two cog ships exports only `New` and `Config` (plus its
