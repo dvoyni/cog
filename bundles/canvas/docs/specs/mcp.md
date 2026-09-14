@@ -10,7 +10,7 @@ canvas queue during its own processing (`bundles/ui/plugin.go:80`). That is why
 `ui_layout` says what ui intended, `canvas_draws` says what it emitted.
 
 The extension point is
-[extensions/mcp/docs/specs/mcp.md](../../../../extensions/mcp/docs/specs/mcp.md). Assembled from the
+[bundles/mcp/docs/specs/mcp.md](../../../../bundles/mcp/docs/specs/mcp.md). Assembled from the
 resolved tickets of
 [An agent-facing extension point across cog](https://github.com/dvoyni/cog/issues/199);
 every section cites the tickets it came from. Nothing is decided here — where a
@@ -63,7 +63,7 @@ that asked for it.
 A **Capture** is the pixels; a **Snapshot** is what produced them, and the two
 are meant to name one moment. The glossary says *meant to*, deliberately: the
 timing is a spec rule under
-[mcp §Pairing a moment](../../../../extensions/mcp/docs/specs/mcp.md#pairing-a-moment), not a
+[mcp §Pairing a moment](../../../../bundles/mcp/docs/specs/mcp.md#pairing-a-moment), not a
 property of the terms, and a glossary carrying a guarantee will drift the moment
 the guarantee does.
 
@@ -98,7 +98,7 @@ annotation.
 > the same way. Nothing else about the registration changes.
 
 It follows
-[mcp §Arm-then-wait](../../../../extensions/mcp/docs/specs/mcp.md#arm-then-wait) and does not
+[mcp §Arm-then-wait](../../../../bundles/mcp/docs/specs/mcp.md#arm-then-wait) and does not
 restate it.
 
 ---
@@ -205,7 +205,7 @@ have.
 > `.Before[canvas.FlushOnUpdate]()`, reading `Read[*canvas.OpQueue]`.
 >
 > It is not the only subscription the capability needs. Arming inherits
-> [mcp §Arm-then-wait](../../../../extensions/mcp/docs/specs/mcp.md#arm-then-wait) verbatim —
+> [mcp §Arm-then-wait](../../../../bundles/mcp/docs/specs/mcp.md#arm-then-wait) verbatim —
 > *a snapshot shows the game as of a tick that began after the request* — and a
 > request landing inside a tick that has already recorded cannot be told from
 > one that arrived between ticks by anything running at the end of the tick. So
@@ -359,7 +359,7 @@ that leaves the capability usable and the agent's model of the world correct.
 **Joining a pending step** is what makes the pairing recipe work: three
 concurrent arms share one step and land on one tick, instead of taking three
 steps onto three different ticks. See
-[mcp §Pairing a moment](../../../../extensions/mcp/docs/specs/mcp.md#pairing-a-moment).
+[mcp §Pairing a moment](../../../../bundles/mcp/docs/specs/mcp.md#pairing-a-moment).
 
 Note the contrast with a Capture, which under pause costs **no** tick. The two
 are frame-bound for different reasons, and pause is where that difference first

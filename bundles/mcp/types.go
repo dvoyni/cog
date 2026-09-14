@@ -1,6 +1,31 @@
 package mcp
 
-import "encoding"
+import (
+	"encoding"
+
+	"github.com/dvoyni/cog/bundles/mcp/internal/types"
+)
+
+// Capability is a named, described, typed unit of engine functionality a
+// Provider offers to an agent. It is fixed for the engine lifetime.
+//
+// It is a struct with unexported fields rather than an interface, and only
+// Command and Func may construct one. That is what makes the capability-body
+// rule unforgeable: no other package can implement Capability and slip work
+// onto the broker's goroutine.
+//
+// Construction failures defer into its Err rather than panicking, because
+// Capabilities returns a slice literal and has nowhere to return an error. The
+// broker collects the failures at Start and fails composition with them.
+//
+// The broker reads it through Name, Description, RequestType, ResponseType,
+// ReadOnly, Err and Invoke.
+type Capability = types.Capability
+
+// Option configures a capability at construction. The list is variadic on both
+// constructors so later options do not break every provider, and the value it
+// writes to is unexported so the set of options stays closed to this package.
+type Option = types.Option
 
 // TextValued is implemented by a type that crosses the wire as a JSON string
 // rather than as whatever its Go kind implies. Values lists the strings it

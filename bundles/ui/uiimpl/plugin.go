@@ -3,10 +3,10 @@ package uiimpl
 import (
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/bundles/input"
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/bundles/ui"
 	"github.com/dvoyni/cog/bundles/ui/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/storage"

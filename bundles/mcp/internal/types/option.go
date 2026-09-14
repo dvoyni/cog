@@ -1,4 +1,4 @@
-package mcp
+package types
 
 // Option configures a capability at construction. The list is variadic on both
 // constructors so later options do not break every provider, and the value it

@@ -1,9 +1,9 @@
 # mcp broker — specification
 
-`github.com/dvoyni/cog/extensions/mcp/mcpimpl` is the one plugin that collects capabilities
-from every provider in the engine and serves them to an agent over MCP. It is
-the implementation of the `mcp` Port, and it collects every `mcp.Provider`
-Adapter the engine binds. It
+The broker, `github.com/dvoyni/cog/bundles/mcp/internal`, constructed with
+`mcpplugin.New()`, is the one plugin that collects capabilities from every
+provider in the engine and serves them to an agent over MCP. It is mcp's
+plugin, and it collects every Adapter the engine binds to `mcp.ProviderPort`. It
 imports `kernel`, `mcp`, the official Go MCP SDK and a JSON-schema library, and
 it imports **no provider** — not `gfx`, not `canvas`, not `ui`, not `input`, not
 `wgpu`.
@@ -15,7 +15,7 @@ might want.
 
 This document specifies the broker and the transport. The extension point it
 serves is
-[extensions/mcp/docs/specs/mcp.md](../../../docs/specs/mcp.md), which is
+[bundles/mcp/docs/specs/mcp.md](mcp.md), which is
 transport-independent — and this document is the proof of that, because almost
 nothing in it reaches back.
 
@@ -27,12 +27,24 @@ settle it.
 
 > **Amended by [#335](https://github.com/dvoyni/cog/issues/335).** This package
 > was `extensions/mcpserver` until
-> [ADR 0001](../../../../../docs/adr/0001-bundles-slots-ports-and-adapters.md)
+> [ADR 0001](../../../../docs/adr/0001-bundles-slots-ports-and-adapters.md)
 > made `mcp` a Port. It moved to `extensions/mcp/mcpimpl`, found providers with
 > `k.Plugins[mcp.Provider]()` until then, and now declares
 > `CollectAdapters[mcp.Provider]()`. The plugin keeps the name `mcpserver`
 > (`mcp.Name`), so every tool name is unchanged. The sections below say where
 > that changed an answer.
+
+> **Amended by [#359](https://github.com/dvoyni/cog/issues/359).** mcp moved to
+> `bundles/mcp` in the declaration-root shape of
+> [ADR 0002](../../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+> The broker moved from `extensions/mcp/mcpimpl` to `bundles/mcp/internal`, and
+> an app composes it with `mcpplugin.New()`. `Config` and the broker's errors
+> (`ErrListen`, `ErrMalformedCapability`, `ErrDuplicateCapability`,
+> `ErrNonObjectSchema`) are declared in the root and spelled `mcp.X`; the
+> defaults stay with the broker. This document was moved from
+> `extensions/mcp/mcpimpl/docs/specs/mcp.md` to `bundles/mcp/docs/specs/broker.md`.
+> The tool names and schemas are unchanged. File paths and line numbers cited
+> below are as they were when this was written, except the checklist.
 
 ---
 
@@ -47,7 +59,7 @@ settle it.
 - [`mcpserver_architecture`](#mcpserver_architecture)
 - [The rule that closes the door](#the-rule-that-closes-the-door)
 - [Attaching: what a person does once](#attaching-what-a-person-does-once)
-- [Required mcpimpl changes](#required-mcpimpl-changes) ·
+- [Required broker changes](#required-broker-changes) ·
   [Out of scope](#out-of-scope)
 
 ---
@@ -55,7 +67,7 @@ settle it.
 ## What the plugin is
 
 ```go
-package mcpimpl
+package mcpplugin
 
 func New() kernel.Plugin
 ```
@@ -70,15 +82,15 @@ unregistered command returns `ErrExecutingUnknownCommand` as an ordinary value
 (`kernel/kernel.go:147`) — and the broker holds no locks, so `checkCoupling`
 never engages. Declaring dependencies would do two bad things: make the broker
 name every provider it might ever serve, which is the knower at composition
-level; and force every app listing `mcpimpl.New()` to also list all five
+level; and force every app listing `mcpplugin.New()` to also list all five
 providers, because `Dependencies()` is a flat *required* list and composition
 fails on any missing one (`kernel/engine.go:86`). With no dependencies, an app
 composes exactly the providers it has and the broker serves exactly what it
 finds ([#204](https://github.com/dvoyni/cog/issues/204) §5). Collecting
 Adapters adds no dependency edge either: binding is not a plugin dependency
-([`kernel/docs/specs/ports.md`](../../../../../kernel/docs/specs/ports.md) rule 3).
+([`kernel/docs/specs/ports.md`](../../../../kernel/docs/specs/ports.md) rule 3).
 
-**Composition is the gate.** An app that does not list `mcpimpl.New()` has no
+**Composition is the gate.** An app that does not list `mcpplugin.New()` has no
 agent interface, which is a stronger guarantee than any flag, and it is why no
 provider needs its own gate and no separate plugin was created for any
 capability. Its providers still contribute their Adapters, which bind to
@@ -166,7 +178,7 @@ negotiating an older revision gets no cancellation propagation at all.** A
 blocking capability therefore cannot rely on the client's hang-up to unwind it,
 and needs its own deadline regardless — which is why the arm-then-wait
 discipline requires one
-([mcp §Arm-then-wait](../../../docs/specs/mcp.md#arm-then-wait)).
+([mcp §Arm-then-wait](mcp.md#arm-then-wait)).
 
 **Stdio was rejected** while charting, for two reasons that have not changed:
 the client would own the game's lifetime, and the engine's stdout — where its
@@ -222,7 +234,7 @@ At `Start` the broker, in order:
 2. Calls `Capabilities()` on each, exactly once.
 3. Validates every capability and renders it as a tool.
 4. Retains the `Start` executioner (see
-   [mcp §The retained executioner](../../../docs/specs/mcp.md#the-retained-executioner)).
+   [mcp §The retained executioner](mcp.md#the-retained-executioner)).
 5. Listens, and starts one goroutine waiting on `k.Context().Done()`.
 
 **A known flaw, stated rather than left to be found.** Knowing *which*
@@ -241,7 +253,7 @@ CI-driven agent would compose. Keeping headless serving is worth more than
 closing a race that requires an already-connected client to fire into a window
 it cannot see.
 
-Listing `mcpimpl.New()` **last** in the plugin slice is still worth doing —
+Listing `mcpplugin.New()` **last** in the plugin slice is still worth doing —
 `orderPlugins` picks the earliest-indexed ready plugin each round, so a
 dependency-free plugin listed last starts last and stops first — but it is
 belt-and-braces, and the spec must not rely on it.
@@ -306,7 +318,7 @@ still holding the port — is exactly the case where a loud failure saves the mo
 time.
 
 **js/wasm is the same answer.** `net.Listen` does not work in a browser, and cog
-does target it (`extensions/jsfs`). An app that composed `mcpimpl.New()`
+does target it (`extensions/jsfs`). An app that composed `mcpplugin.New()`
 into a browser build made a composition mistake, and cog fails composition
 loudly. This is deliberately **not** a build tag: excluding the plugin on `js`
 would break a `main.go` shared between desktop and web builds at *compile* time,
@@ -333,12 +345,12 @@ duplicate name is checked per plugin, across all of them.
 **Schemas** come from `jsonschema.ForType` over `Capability.RequestType()` and
 `ResponseType()`, with `ForOptions.TypeSchemas` populated by walking those types
 for `mcp.TextValued` implementors — see
-[mcp §Types that cross as text](../../../docs/specs/mcp.md#types-that-cross-as-text).
+[mcp §Types that cross as text](mcp.md#types-that-cross-as-text).
 That walk is the only place the broker inspects a provider's types for anything
 beyond their shape, and it learns a string set, never a meaning.
 
 **Annotations** map as
-[mcp §Annotations](../../../docs/specs/mcp.md#annotations) states:
+[mcp §Annotations](mcp.md#annotations) states:
 `ReadOnlyHint = readOnly`, `DestructiveHint` always false, `OpenWorldHint`
 always false, `IdempotentHint` untouched.
 
@@ -400,7 +412,7 @@ nothing about why they happened.
 
 The one thing the broker must not do is serialize calls itself. Doing so would
 break the pairing recipe in
-[mcp §Pairing a moment](../../../docs/specs/mcp.md#pairing-a-moment), which
+[mcp §Pairing a moment](mcp.md#pairing-a-moment), which
 depends on parallel arms landing in one inter-tick gap.
 
 ---
@@ -432,7 +444,7 @@ capability.
 **One consequence to state rather than discover: the broker collects its own
 Provider.** Harmless — collection is uniform and the broker's own capability
 arrives through the same path as everyone else's, which the kernel permits
-([`ports.md`](../../../../../kernel/docs/specs/ports.md) rule 12) — but it must be
+([`ports.md`](../../../../kernel/docs/specs/ports.md) rule 12) — but it must be
 written down, because it looks like a bug to anyone reading the loop cold.
 
 ### Why it exists at all
@@ -452,13 +464,13 @@ handler block* cannot be computed by hand, because a handler deliberately
 dispatch*). That is the tool's entire reason to exist, and it is why this
 capability depends on `kernel`'s description growing `Reads`/`Writes`/`Uses` —
 see
-[mcp §Required kernel changes](../../../docs/specs/mcp.md#required-kernel-changes).
+[mcp §Required kernel changes](mcp.md#required-kernel-changes).
 
 ### Shape
 
 - **`mcp.Func`**, whose body calls `k.Describe()` directly. It is the only
   capability that dispatches nothing, under the narrow exception in
-  [mcp §The capability-body rule](../../../docs/specs/mcp.md#the-capability-body-rule).
+  [mcp §The capability-body rule](mcp.md#the-capability-body-rule).
   Making it an `mcp.Command` would mean the broker registering a command it
   dispatches to itself — ceremony that takes the scheduler for nothing.
 - **Flat JSON, five arrays**, mirroring `ArchitectureDescription`: plugins,
@@ -572,7 +584,7 @@ co-arm — `Capability.invoke` is opaque, arm and wait are one function, so entr
 co-arms, which under pause is the broken form, because a capture costs no tick
 while a snapshot steps. What pairs a moment instead is an ordering plus one
 driver rule; see
-[mcp §Pairing a moment](../../../docs/specs/mcp.md#pairing-a-moment).
+[mcp §Pairing a moment](mcp.md#pairing-a-moment).
 
 A per-provider batch (`canvas_batch`, `ui_batch`) cannot launder it either: it
 multiplies the mechanism by the number of providers to buy strictly less, since
@@ -617,11 +629,12 @@ issue attaching a real client to a real game.
 
 ---
 
-## Required mcpimpl changes
+## Required broker changes
 
 A checklist for the implementation session that built the package. It was
 written for `extensions/mcpserver` and is updated to the paths and the collection mechanism
-[#335](https://github.com/dvoyni/cog/issues/335) moved it to.
+[#335](https://github.com/dvoyni/cog/issues/335) moved it to, and then to the
+paths of [#359](https://github.com/dvoyni/cog/issues/359).
 
 **Module**
 
@@ -631,7 +644,7 @@ written for `extensions/mcpserver` and is updated to the paths and the collectio
 - Neither may appear in any other package's import graph. A test that asserts
   this is worth writing: `go list -deps ./gfx` must not mention either.
 
-**`extensions/mcp/mcpimpl/plugin.go`**
+**`bundles/mcp/internal/plugin.go`**
 
 - `New() kernel.Plugin`; `Name() mcp.Name`; `Dependencies() nil`.
 - `Register`: `CollectAdapters[mcp.ProviderPort]()`, and contribute the broker's own
@@ -640,24 +653,24 @@ written for `extensions/mcpserver` and is updated to the paths and the collectio
   the server, listen, spawn the cancellation watcher, log the attach line.
 - `Stop`: close the listener; in-flight handlers already drained.
 
-**`extensions/mcp/mcpimpl/config.go`**
+**`bundles/mcp/config.go` and `bundles/mcp/internal/config.go`**
 
 - `Config{Addr, Path, Timeout}` with the defaults above, read from the config
   map under `mcp.Name`, a zero field taking its default.
 
-**`extensions/mcp/mcpimpl/render.go`**
+**`bundles/mcp/internal/render.go`**
 
 - Capability → tool: name, schemas via `jsonschema.ForType`, the `TextValued`
   walk building `ForOptions.TypeSchemas`, annotation mapping.
 - Validation: deferred `err`, duplicate name within a plugin, non-`object`
   schema root. All to `kernel.ReportError`.
 
-**`extensions/mcp/mcpimpl/invoke.go`**
+**`bundles/mcp/internal/invoke.go`**
 
 - The per-call sequence in [Invoking one](#invoking-one), including the
   `Unavailable` / fault split and the shutdown classification.
 
-**`extensions/mcp/mcpimpl/architecture.go`**
+**`bundles/mcp/internal/architecture.go`**
 
 - The one capability, its request (`{path?}`), its five-array response, and
   `reflect.Type` rendering via `kernel.TypeName`.

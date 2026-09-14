@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
-	"github.com/dvoyni/cog/extensions/mcp"
 )
 
 func TestGfxOffersItsTwoCapabilitiesAsReadOnly(t *testing.T) {

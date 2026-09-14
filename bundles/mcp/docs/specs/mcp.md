@@ -1,14 +1,14 @@
 # mcp extension point — specification
 
-`github.com/dvoyni/cog/extensions/mcp` is the contract root of a **Port**: it
-declares types that *other* plugins implement, and imports nothing but `kernel`
-and the standard library. It declares how a plugin offers typed
+`github.com/dvoyni/cog/bundles/mcp` is the root of a **Bundle** that collects a
+**Port**: it declares types that *other* plugins implement, and imports nothing
+but `kernel` and the standard library. It declares how a plugin offers typed
 **capabilities** to an **agent**, and nothing about how those capabilities reach
 one.
 
-The broker that collects them and serves them over MCP is the Port's
-implementation, `mcpimpl`, specified in
-[extensions/mcp/mcpimpl/docs/specs/mcp.md](../../mcpimpl/docs/specs/mcp.md). The split
+The broker that collects them and serves them over MCP is mcp's plugin, in
+`bundles/mcp/internal` and constructed with `mcpplugin.New()`, specified in
+[bundles/mcp/docs/specs/broker.md](broker.md). The split
 is load-bearing: `mcp` must never learn protocol vocabulary, and nothing that
 imports `gfx` should acquire an HTTP server and a JSON-schema library in its
 module graph.
@@ -106,6 +106,20 @@ itself. Providers name `mcp` on every capability they add; an app names
 > `extensions/mcp/mcpimpl`. The plugin is still named `mcpserver` (`mcp.Name`),
 > so its tool is still `mcpserver_architecture` and no tool name changed.
 
+> **Amended by [#359](https://github.com/dvoyni/cog/issues/359).** mcp moved to
+> `bundles/mcp` as a Bundle in the declaration-root shape of
+> [ADR 0002](../../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+> The two packages above are now the root and its `internal/`. The root holds
+> `Provider` and `ProviderPort` in `ports.go`, `TextValued` in `types.go`,
+> `Unavailable` and every error in `err.go`, and `Config`; `Command`, `Func` and
+> `ReadOnly` are forwarders in its `utils.go`. `Capability` and `Option` are
+> declared in `bundles/mcp/internal/types` and aliased in the root, so every
+> name here is still spelled `mcp.X`, and `internal/types` imports no SDK. The
+> broker moved from `extensions/mcp/mcpimpl` to `bundles/mcp/internal`, and an
+> app writes `mcpplugin.New()`. The broker's specification moved to
+> [broker.md](broker.md). The tool names are unchanged. File paths and line
+> numbers cited below are as they were when this was written.
+
 One package was rejected. It would put the MCP SDK and
 `github.com/google/jsonschema-go` in the module graph of anything importing
 `gfx`, and would force one package doc to describe both an extension point and
@@ -117,7 +131,7 @@ beyond these two: `gfx`, `canvas`, `ui`, `input` and `wgpu` each contribute an
 ([#205](https://github.com/dvoyni/cog/issues/205) §3). A separate plugin per
 capability was rejected — it is buildable, but its only advantage was a finer
 composition gate, and the broker's own presence is already the gate. An app
-that does not list `mcpimpl.New()` has no agent interface at all, and its
+that does not list `mcpplugin.New()` has no agent interface at all, and its
 providers' Adapters bind to nothing, which is not an error.
 
 ---
@@ -420,7 +434,7 @@ nobody can tune.
 **cog needs no writable directory of its own, and has none by design.** The
 agent names every path it wants written. This deletes a capture directory, a
 retention rule, a numbering scheme and a startup wipe, and it is why
-`mcpimpl.Config` has no output directory
+`mcp.Config` has no output directory
 ([#206](https://github.com/dvoyni/cog/issues/206) §8) and `gfx` has no config at
 all ([#207](https://github.com/dvoyni/cog/issues/207) §2). It also means
 `storage` is not in this picture anywhere: `storage.PermanentFS` exposes no OS
@@ -673,7 +687,7 @@ pending joins that step rather than requesting another**. Read per-arm, three
 concurrent arms would be three steps on three different ticks — the precise
 opposite of what arming them together is for. The rule is a `wgpu` tick-source
 behaviour before it is an agent-facing one; see
-[extensions/wgpu/docs/specs/mcp.md](../../../wgpu/docs/specs/mcp.md).
+[extensions/wgpu/docs/specs/mcp.md](../../../../extensions/wgpu/docs/specs/mcp.md).
 
 > **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).**
 > The recipe shipped without the hold and the check, and **it did not describe
@@ -744,7 +758,7 @@ the stack the whole time it is used. The broker's `Start` returns immediately
 and the handle outlives it. Different move, correctly treated differently.
 
 The obligations this places on the broker are in
-[extensions/mcp/mcpimpl/docs/specs/mcp.md](../../mcpimpl/docs/specs/mcp.md).
+[bundles/mcp/docs/specs/broker.md](broker.md).
 
 ---
 

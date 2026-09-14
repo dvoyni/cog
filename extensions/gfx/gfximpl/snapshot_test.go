@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
-	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"

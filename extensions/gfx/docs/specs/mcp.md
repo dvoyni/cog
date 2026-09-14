@@ -7,7 +7,7 @@ separate tools because "nothing is on screen" and "this looks wrong" are
 different sentences.
 
 The extension point these are built on is
-[extensions/mcp/docs/specs/mcp.md](../../../mcp/docs/specs/mcp.md); the readback mechanism
+[bundles/mcp/docs/specs/mcp.md](../../../../bundles/mcp/docs/specs/mcp.md); the readback mechanism
 under `gfx_capture` is
 [extensions/gfx/docs/specs/capture.md](./capture.md). This document specifies only what the
 agent sees, and reproduces the description prose in full so that it can be

@@ -32,7 +32,6 @@ var unmoved = []string{
 	"extensions/diskfs",
 	"extensions/gfx",
 	"extensions/jsfs",
-	"extensions/mcp",
 	"extensions/wgpu",
 	"slots/app",
 }

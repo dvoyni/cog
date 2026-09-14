@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/mcp"
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/slots/app"
 )
 

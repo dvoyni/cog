@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/gfx/internal"
-	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )

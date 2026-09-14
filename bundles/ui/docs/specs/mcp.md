@@ -12,7 +12,7 @@ shows what **survived the modifiers**.
 content into the game's frame; see [Out of scope](#out-of-scope).
 
 The extension point is
-[extensions/mcp/docs/specs/mcp.md](../../../../extensions/mcp/docs/specs/mcp.md). Assembled from the
+[bundles/mcp/docs/specs/mcp.md](../../../../bundles/mcp/docs/specs/mcp.md). Assembled from the
 resolved tickets of
 [An agent-facing extension point across cog](https://github.com/dvoyni/cog/issues/199);
 every section cites the tickets it came from. Nothing is decided here — where a
@@ -91,7 +91,7 @@ expressed in the annotation.
 > registration changes.
 
 It follows
-[mcp §Arm-then-wait](../../../../extensions/mcp/docs/specs/mcp.md#arm-then-wait) and does not
+[mcp §Arm-then-wait](../../../../bundles/mcp/docs/specs/mcp.md#arm-then-wait) and does not
 restate it.
 
 ---
@@ -154,7 +154,7 @@ one specific window.
 > declares, and was unaffected.
 >
 > It is not the only subscription the capability needs. Arming inherits
-> [mcp §Arm-then-wait](../../../../extensions/mcp/docs/specs/mcp.md#arm-then-wait) verbatim —
+> [mcp §Arm-then-wait](../../../../bundles/mcp/docs/specs/mcp.md#arm-then-wait) verbatim —
 > *a snapshot shows the game as of a tick that began after the request* — and a
 > request landing inside a tick whose frame is already being declared cannot be
 > told from one that arrived between ticks by anything running at the end of
@@ -358,7 +358,7 @@ snapshot without running a tick is not a thing that exists.
 
 Joining a pending step is what lets `ui_layout` and `canvas_draws` describe one
 moment, which is the common case for a ui bug. See
-[mcp §Pairing a moment](../../../../extensions/mcp/docs/specs/mcp.md#pairing-a-moment).
+[mcp §Pairing a moment](../../../../bundles/mcp/docs/specs/mcp.md#pairing-a-moment).
 
 ---
 
