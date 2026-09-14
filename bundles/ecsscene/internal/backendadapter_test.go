@@ -1,4 +1,4 @@
-package ecssceneimpl
+package internal
 
 import (
 	"github.com/dvoyni/cog/extensions/gfx"

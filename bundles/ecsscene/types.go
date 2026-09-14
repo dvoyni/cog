@@ -4,6 +4,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -119,4 +120,24 @@ type Camera struct {
 	AmbientIntensity float32
 
 	Passes ecs.List[scene.Pass]
+}
+
+// MaxPlays is how many clips one Animation blends. It is scene's own cap:
+// scene drops a fifth play by lowest weight and reports it, so a larger array
+// here would buy a report and no animation.
+const MaxPlays = 4
+
+// MaterialTag is one pass tag of a Material Component: scene.MaterialTag with
+// its gfx.MaterialDescr spelled out as the three things it is made of.
+//
+// It cannot hold a gfx.MaterialDescr, because a descriptor keeps its params as
+// a bare slice, which a Component may not hold. The recording System rebuilds
+// the descriptor every draw from these fields, in scratch, and scene copies it
+// into its frame arenas at record.
+type MaterialTag struct {
+	// Tag is the pass this entry serves; zero reads as scene.TagForward.
+	Tag    scene.PassTag
+	Shader gfx.ShaderDescr
+	State  gpu.MaterialState
+	Params ecs.List[gfx.ParameterDescr]
 }
