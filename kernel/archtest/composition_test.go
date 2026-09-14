@@ -101,7 +101,7 @@ func describedTypes(description kernel.ArchitectureDescription) []reflect.Type {
 }
 
 // backendAdapter provides a Backend to gfx, the way a driver provides its own:
-// gfx is a Port, and a composition without one fails.
+// gfx is a Slot, and a composition without one fails.
 type backendAdapter struct{ backend gfx.Backend }
 
 func (backendAdapter) Name() kernel.PluginName           { return "gfxbackendtest" }

@@ -725,10 +725,10 @@ diagnostic.
 A caller who wants a portable limit already has one:
 
 ```go
-gfx.ShaderConst("MAX_LIGHTS", strconv.Itoa(gpu.DefaultLimits.MaxStorageBuffersPerShaderStage))
+gfx.ShaderConst("MAX_LIGHTS", strconv.Itoa(gfx.DefaultLimits().MaxStorageBuffersPerShaderStage))
 ```
 
-`gpu.DefaultLimits` is exported, machine-independent, and available at
+`gfx.DefaultLimits()` is exported, machine-independent, and available at
 descriptor-construction time with no `Plugin` and no `Backend`. It is named here
 explicitly because nothing outside gfx references it today, so a bare "no" would
 read as "the limits are unreachable" and send a reader off to build a query gfx

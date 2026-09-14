@@ -428,8 +428,7 @@ In **`internal/types`**: a file per declared type or family, named for it
 (`state.go`, `opqueue.go`), and the plain functions giving `internal/` what
 exported methods do not.
 
-In **`internal/`** no layout is enforced. The conventions from the `…impl` carry
-over: `plugin.go` for the unexported `plugin`, `New`, `Name`, `Dependencies`,
+In **`internal/`** no layout is enforced. By convention: `plugin.go` for the unexported `plugin`, `New`, `Name`, `Dependencies`,
 `Register` and compact subscription wiring; `commandsimpl.go` for command
 registration and every command handler; `mcpprovider.go` for the unexported
 `provider`, its capabilities and their unexported request and response types. A

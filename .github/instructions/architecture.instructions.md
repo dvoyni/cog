@@ -11,9 +11,7 @@ plugin has the same package shape. [`docs/adr/0002-slots-extensions-and-bundles-
 records why; [`CONTEXT.md`](../../CONTEXT.md) defines each term. The kinds, the
 shape and the import rules are enforced by `kernel/archtest`, not by review.
 
-Every plugin has moved to this shape, and everything here is the rule for
-every plugin, new ones included. The tier test's migration list is empty; what
-is left of it is in [Plugins Not Yet Moved](#plugins-not-yet-moved).
+Everything here is the rule for every plugin, new ones included.
 
 ## The Kinds
 
@@ -35,10 +33,16 @@ A plugin `X` is four places, and nothing else under `X` may hold Go code:
 - **The root, `X/`**, holds declarations only: what the plugin offers others.
 - **`X/internal/types/`** holds the concrete types the root aliases, their
   methods, and the plain functions the implementation needs to read their
-  unexported state. It exists only where an interface in the root would cost
-  performance: the recording queues and hot state. It never imports its own
-  root, so anything such a type refers to is declared there too or in another
-  plugin's root.
+  unexported state. A declaration goes there for one of two reasons only:
+  - **performance**: a concrete type where an interface in the root would cost
+    it, as the recording queues and hot state do;
+  - **`internal/types` code names it**: `internal/types` never imports its own
+    root, so a type or command its code needs, a forwarder's body included, is
+    declared there and aliased in the root. input declares `SynthesizeCmd` and
+    `Action` there because `types.Play`, which `input.Play` forwards to,
+    dispatches the command.
+
+  Anything else such code refers to comes from another plugin's root.
 - **`X/internal/`** holds the implementation: the unexported plugin, its `New`,
   handlers, subscriptions, Adapter values and mcp provider. No file layout is
   enforced inside it.
@@ -142,8 +146,9 @@ Take the first answer that fits:
 4. Otherwise it is a **Bundle** in `bundles/`.
 
 Within the plugin, a declaration another plugin uses goes in the root, in the
-file its allowlist names for what it is. A type the root must alias for
-performance goes in `internal/types`. Everything else goes in `internal/`.
+file its allowlist names for what it is. A type the root must alias, for
+performance or because `internal/types` code names it, goes in
+`internal/types`. Everything else goes in `internal/`.
 
 ## Import Rules
 
@@ -182,34 +187,6 @@ the Plugins an engine is built from, so they import whatever they compose,
 constructor packages included. These rules apply to the cog repo only. Inside
 cog, `kernel/archtest/**` and `docs/research/**` are outside the tiers.
 
-## Plugins Not Yet Moved
-
-`unmoved` in `kernel/archtest/tiers_test.go` lists every plugin that still has
-the shape [ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md)
-decided, and the tier test holds each of them to that shape's rules. Moving a
-plugin deletes its entry in the same change, and an entry naming a directory
-with no package fails the test.
-
-The list is empty. No **Open slot** is left: app, the last plugin on it, became
-a Slot with its own plugin in #368. No plugin with a **contract root**, an
-**`…impl`** or a Port's **vocabulary package** is left either: gfx, the last,
-moved in #366. Nor is a single-package Extension: wgpu moved in #367. The tier
-test keeps their rules until the final sweep deletes the list, and its fixtures
-still exercise them.
-
-| package | may import |
-| --- | --- |
-| `slots/*` | `libs`, `kernel`, `slots/*`, roots |
-| contract root | `libs`, `kernel`, `slots/*`, other roots, vocabularies, its own `internal/…` |
-| `internal/…` | `libs`, `kernel`, `slots/*`, other roots, vocabularies |
-| `…impl` | anything its contract root may, plus that root |
-| vocabulary | `libs` only |
-| single-package Extension | `libs`, `kernel`, `slots/*`, roots, vocabularies |
-
-Nothing imports an `…impl` or a single-package Extension except `_test.go` files, and
-a moved plugin counts as a root, its `internal/types` and `internal/` as its
-`internal/…`, and its constructor package as an `…impl`.
-
 ## The Tier Test
 
 `go test ./kernel/archtest` checks:
@@ -221,8 +198,7 @@ a moved plugin counts as a root, its `internal/types` and `internal/` as its
 - every Slot for a required Port, and every Bundle and Extension for none;
 - every Extension's declarations;
 - every constructor package's exports;
-- every plugin's `ProvideAdapter` calls against its `adapters.go`;
-- the migration list.
+- every plugin's `ProvideAdapter` calls against its `adapters.go`.
 
 A failure names the file, the declaration or edge, and the rule it breaks, and
 every violation fails the test: fix the code to fit the rules. A change to the

@@ -55,7 +55,7 @@ func (s Size) Queue(at l.Point) Queue { return types.NewQueue(int(s), at) }`,
 // A forwarder may be generic, variadic or return nothing, as long as it passes
 // its type parameters and parameters through unchanged.
 func TestTiers_GenericVariadicAndVoidForwardersPass(t *testing.T) {
-	violations := fixtureViolationsWith(t, fixtureUnmoved, map[string]string{
+	violations := fixtureViolationsWith(t, map[string]string{
 		"slots/s/internal/types/more.go": `package types
 
 type Box[T any] struct{ value T }
@@ -132,7 +132,7 @@ var _ = types.NewQueue
 // no one calls and which only calls its own aliased types' accessors so that
 // importers can inline them.
 func TestTiers_AnInlineAnchorPasses(t *testing.T) {
-	violations := fixtureViolationsWith(t, fixtureUnmoved, inlineAnchorFixture(`// inlineAnchor is never called.
+	violations := fixtureViolationsWith(t, inlineAnchorFixture(`// inlineAnchor is never called.
 func inlineAnchor(q Queue, other Queue) {
 	_ = q.Len()
 	other.Len()
@@ -157,7 +157,7 @@ var anchored = inlineAnchor`, ruleInlineAnchor},
 		"an empty body": {`func inlineAnchor(q Queue) {}`, ruleInlineAnchor},
 	} {
 		t.Run(name, func(t *testing.T) {
-			violations := fixtureViolationsWith(t, fixtureUnmoved, inlineAnchorFixture(test.anchor))
+			violations := fixtureViolationsWith(t, inlineAnchorFixture(test.anchor))
 			if len(violations) != 1 || violations[0].rule != test.rule || violations[0].file != "slots/s/types.go" {
 				t.Fatalf("want one %q violation in slots/s/types.go, got:\n%s", test.rule, joinViolations(violations))
 			}
@@ -169,7 +169,7 @@ var anchored = inlineAnchor`, ruleInlineAnchor},
 // imports it.
 func TestTiers_ASlotForwarderNamingAnotherPluginsTypeFails(t *testing.T) {
 	files := map[string]string{
-		"bundles/b/thing.go": "package b\n\ntype Thing struct{}\n",
+		"bundles/b/types.go": "package b\n\ntype Thing struct{}\n",
 		"slots/s/internal/types/thing.go": `package types
 
 import "fixture.test/cog/bundles/b"
@@ -189,7 +189,7 @@ func NewQueue(size int, at l.Point) Queue { return types.NewQueue(size, at) }
 func Wrap(thing b.Thing) []b.Thing { return types.Wrap(thing) }
 `,
 	}
-	violations := fixtureViolationsWith(t, fixtureUnmoved, files)
+	violations := fixtureViolationsWith(t, files)
 	requireOne(t, violations,
 		"slots/s/utils.go:11",
 		"slots/s forwards Wrap, whose signature names fixture.test/cog/bundles/b.Thing",
@@ -199,8 +199,8 @@ func Wrap(thing b.Thing) []b.Thing { return types.Wrap(thing) }
 
 // A Bundle's forwarders may name any root's types.
 func TestTiers_ABundleForwarderNamingAnotherPluginsTypePasses(t *testing.T) {
-	violations := fixtureViolationsWith(t, fixtureUnmoved, map[string]string{
-		"bundles/b/thing.go": "package b\n\ntype Thing struct{}\n",
+	violations := fixtureViolationsWith(t, map[string]string{
+		"bundles/b/types.go": "package b\n\ntype Thing struct{}\n",
 		"bundles/n/internal/types/thing.go": `package types
 
 import "fixture.test/cog/bundles/b"
@@ -226,7 +226,7 @@ func Wrap(thing b.Thing) []b.Thing { return types.Wrap(thing) }
 // predeclared types, the standard library, Libraries and the kernel are all a
 // Slot's forwarder may name.
 func TestTiers_ASlotForwarderNamingItsOwnStandardLibraryAndKernelTypesPasses(t *testing.T) {
-	violations := fixtureViolationsWith(t, fixtureUnmoved, map[string]string{
+	violations := fixtureViolationsWith(t, map[string]string{
 		"kernel/write.go": "package kernel\n\ntype Write[T any] struct{ value T }\n",
 		"slots/s/internal/types/open.go": `package types
 
@@ -362,7 +362,7 @@ type NSecondProvider kernel.Adapter[n.ProviderPort]
 // A ProvideAdapter the go tool builds only for another platform still counts,
 // and so does one spelled with every type argument.
 func TestTiers_AnAdapterProvidedOnlyForAnotherPlatformPasses(t *testing.T) {
-	violations := fixtureViolationsWith(t, fixtureUnmoved, map[string]string{
+	violations := fixtureViolationsWith(t, map[string]string{
 		"extensions/e/internal/plugin.go": `package internal
 
 import (
@@ -421,7 +421,7 @@ func provideDriver(registrar *kernel.Registrar) {}
 
 // A collected Port does not make a Slot.
 func TestTiers_ASlotRootDeclaringNoRequiredPortFails(t *testing.T) {
-	violations := fixtureViolationsWith(t, fixtureUnmoved, map[string]string{
+	violations := fixtureViolationsWith(t, map[string]string{
 		"slots/t/id.go": `package t
 
 import "fixture.test/cog/kernel"
@@ -489,7 +489,7 @@ func TestTiers_AnExtensionRootWithAPIFails(t *testing.T) {
 
 // Contributing to a collected Port alone does not make an Extension.
 func TestTiers_AnExtensionFillingNoRequiredPortFails(t *testing.T) {
-	violations := fixtureViolationsWith(t, fixtureUnmoved, map[string]string{
+	violations := fixtureViolationsWith(t, map[string]string{
 		"extensions/e/adapters.go": `package e
 
 import (

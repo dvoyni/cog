@@ -92,7 +92,7 @@ func (a *testAdapter) TextureView(texture gfx.TextureID, mip, layer int) gfx.Tex
 // noFiles is the filesystem of a translation that loads nothing.
 func noFiles() fs.FS { return fstest.MapFS{} }
 
-// gfx is a Port: it requires exactly one Backend adapter, so a composition
+// gfx is a Slot: it requires exactly one Backend adapter, so a composition
 // that has none fails before anything starts, rather than rendering nothing
 // and reporting it a frame later.
 func TestACompositionWithoutABackendAdapterFails(t *testing.T) {
