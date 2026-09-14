@@ -409,8 +409,8 @@ enclosing package, the segment before the last `internal`:
 | `*OpQueue` declared in `bundles/scene/internal` | `*internal.OpQueue` | `*scene.OpQueue` |
 | `RenderEvent` declared in `extensions/gfx` | `gfx.RenderEvent` | `gfx.RenderEvent` |
 
-A Bundle or Port that declares a contract type in `internal/` aliases it in its
-contract root, so the rendered name is the alias a caller writes and greps for.
+A plugin that declares a type in `internal/` or `internal/types` aliases it in
+its root, so the rendered name is the alias a caller writes and greps for.
 Go's reflection cannot see aliases, which is why the rule is needed at all:
 `String()` uses the package name, and that is `internal` for every such package.
 

@@ -1,6 +1,6 @@
 ---
 name: "Kernel Usage"
-description: "Use when creating or changing Go code that registers plugins, commands, subscriptions, resources, Ports or Adapters with the kernel, or that runs inside a kernel handler. Covers handler structure, resource handles, scope discipline, ordering, Ports and Adapters, dependencies, and which file in a contract root or …impl a declaration goes in."
+description: "Use when creating or changing Go code that registers plugins, commands, subscriptions, resources, Ports or Adapters with the kernel, or that runs inside a kernel handler. Covers handler structure, resource handles, scope discipline, ordering, Ports and Adapters, dependencies, and which file in a plugin's root a declaration goes in."
 applyTo: "**/*.go"
 ---
 
@@ -8,9 +8,12 @@ applyTo: "**/*.go"
 
 `kernel/README.md` documents the API. These are the rules for using it correctly.
 Follow them in new and changed code without expanding a focused task into
-unrelated cleanup. Which package a declaration belongs in — contract root,
-`…impl` or `internal/` — is [`architecture.instructions.md`](architecture.instructions.md);
-this file assumes it.
+unrelated cleanup. Which package a declaration belongs in — the root,
+`internal/types`, `internal/` or the constructor package — and what a root may
+hold is [`architecture.instructions.md`](architecture.instructions.md); this
+file assumes it. A plugin still on the tier test's migration list keeps its
+contract root and `…impl`: read "root" as its contract root and "`internal/`" as
+its `…impl` below until it moves.
 
 ## Handler Structure
 
@@ -69,11 +72,10 @@ Register handlers by name; never inline the factory into `HandleCommand`:
 registrar.HandleCommand[LoadCmd](loadCmdImpl)
 ```
 
-The command type is declared in the contract root and its handler in the
-`…impl`, which registers it from its own `Register`, directly or through an
-unexported `registerCommands(registrar)` as `storageimpl` does. The handler stays
-private to the `…impl`: callers dispatch the command type and never name the
-handler.
+The command type is declared in the root's `commands.go` and its handler in
+`internal/`, which registers it from the plugin's `Register`, directly or
+through an unexported `registerCommands(registrar)`. The handler stays private
+to `internal/`: callers dispatch the command type and never name the handler.
 
 A test fixture that registers a different body per test case is the one place an
 inline factory is right — there is no single implementation to name. A fixture
@@ -274,23 +276,23 @@ dependencies, never to express a preference. Ready subscribers run concurrently.
 ### Ordering Identities
 
 Name and place a subscription identity as `architecture.instructions.md`
-§ Ordering Identities says: verb plus event, exported from the contract root when
-another package orders against it. The `…impl` subscribes the root's identity,
-and everyone else orders against it through contract alone:
+§ Ordering Identities says: verb plus event, exported from the root's `id.go`
+when another package orders against it. `internal/` subscribes the root's
+identity, and everyone else orders against it through the root alone:
 
 ```go
-// bundles/canvas: the contract root
+// bundles/canvas/id.go
 type FlushOnUpdate kernel.Subscription[app.UpdateEvent]
 
-// bundles/canvas/canvasimpl
+// bundles/canvas/internal
 registrar.Subscribe[canvas.FlushOnUpdate](p.flush).Last().Before[gfx.PresentOnUpdate]()
 
-// any other plugin, ordering against it through contract alone
+// any other plugin, ordering against it through the root alone
 registrar.Subscribe[recordOnUpdate](record).Before[canvas.FlushOnUpdate]()
 ```
 
-An identity nothing outside orders against stays unexported in the `…impl`
-(`canvasimpl`'s `drawsOnUpdate`).
+An identity nothing outside orders against stays unexported in `internal/`
+(canvas's `drawsOnUpdate`).
 
 ## Ports and Adapters
 
@@ -300,19 +302,21 @@ rules.
 
 **A Port** is a defined type built from `kernel.RequiredPort[I]` (exactly one
 Adapter) or `kernel.CollectedPort[I]` (any number, zero included), where `I` is
-the interface its Adapters implement. The plugin declaring it puts it in its
-contract root's `ports.go`:
+the interface its Adapters implement. The plugin declaring it puts it, beside
+that interface, in its root's `ports.go`. A required Port is what makes a plugin
+a Slot, so only a Slot declares one:
 
 ```go
-type BackendPort kernel.RequiredPort[gpu.Backend] // gfx/ports.go
+type BackendPort kernel.RequiredPort[Backend]         // gfx/ports.go
 type PermanentFSPort kernel.RequiredPort[PermanentFS] // storage/ports.go
-type ProviderPort kernel.CollectedPort[Provider]  // mcp/ports.go
+type ProviderPort kernel.CollectedPort[Provider]      // mcp/ports.go
 ```
 
 **An Adapter** is a defined type built from `kernel.Adapter[P]`, where `P` is the
 Port it fills, named for the Port's plugin and interface. The providing plugin
-puts it in its root's `adapters.go` (for wgpu, diskfs and jsfs, the package
-itself):
+puts it in its root's `adapters.go`, and the tier test fails when a plugin
+provides an Adapter `adapters.go` does not declare or declares one it never
+provides:
 
 ```go
 type GfxBackend kernel.Adapter[gfx.BackendPort]          // wgpu/adapters.go
@@ -320,13 +324,13 @@ type StoragePermanentFS kernel.Adapter[storage.PermanentFSPort] // diskfs, jsfs
 type McpProvider kernel.Adapter[mcp.ProviderPort]        // every plugin with capabilities
 ```
 
-**Requiring or collecting** a Port happens only in the `…impl` of the plugin
+**Requiring or collecting** a Port happens only in `internal/` of the plugin
 that declares it. Declare in `Register` and keep the handle on the plugin — a
 handle, unlike a resource value, is safe to keep — then read it from `Start`
 onwards; `Get` panics before composition binds it:
 
 ```go
-p.backend = registrar.RequireAdapter[gfx.BackendPort]()      // RequiredAdapter[gpu.Backend]
+p.backend = registrar.RequireAdapter[gfx.BackendPort]()      // RequiredAdapter[gfx.Backend]
 p.providers = registrar.CollectAdapters[mcp.ProviderPort]()  // CollectedAdapters[mcp.Provider]
 ```
 
@@ -336,13 +340,13 @@ compiler checks it; Go infers type arguments from the value before the
 constraints, so convert a concrete value to the interface:
 
 ```go
-registrar.ProvideAdapter[StoragePermanentFS](permanent)          // already a storage.PermanentFS
+registrar.ProvideAdapter[diskfs.StoragePermanentFS](permanent) // already a storage.PermanentFS
 registrar.ProvideAdapter[canvas.McpProvider](mcp.Provider(provider{}))
 ```
 
 - **The value exists by `Register`.** Something that becomes usable later says
-  so through the interface: wgpu provides one stable `gpu.Backend` at `Register`
-  and reports `Ready()` once its device arrives.
+  so through the interface: wgpu provides one stable backend at `Register` and
+  reports `Ready()` once its device arrives.
 - **An Adapter takes no lock.** Reading it is not a resource access, so which
   goroutines may call it is the interface's contract, and it holds no resource
   value (see above).
@@ -358,16 +362,15 @@ registrar.ProvideAdapter[canvas.McpProvider](mcp.Provider(provider{}))
 - **A test composing a plugin that requires a Port composes an Adapter too**: a
   small fixture plugin whose `Register` provides it under a test-local Adapter
   type (the `backendAdapter` providing `testGfxBackend` in the canvas, scene,
-  ecsscene and ui tests).
+  ecsscene and ui tests). A `_test.go` file is outside the `adapters.go` check.
 
-A plugin's mcp capabilities are an unexported `provider{}` in its own package's
-`mcpprovider.go` (the `…impl`, for a Bundle or Port), contributed from its
-`Register`.
+A plugin's mcp capabilities are an unexported `provider{}` in its `internal/`,
+contributed from its `Register`.
 
 ## Dependencies
 
-Declare in `Dependencies` every plugin whose contracts you use, named by its
-contract root's `Name`:
+Declare in `Dependencies` every plugin whose commands, events or resources you
+use, named by its root's `Name`:
 
 ```go
 func (p *plugin) Dependencies() []kernel.PluginName {
@@ -384,59 +387,57 @@ plugin.
 
 ## Package File Layout
 
-Place a declaration by **what it is**, not by the feature it belongs to, in the
-package its kind puts it in. Use these filenames consistently.
+Place a declaration by **what it is**, not by the feature it belongs to. Which
+files a root may hold, by kind, is `architecture.instructions.md` § What A Root
+Holds; this is what goes in each.
 
-In a **contract root** (`bundles/X`, `extensions/P`, `slots/*`):
+In a **root**:
 
-- `contract.go`: package documentation and shared public value types.
-- `identities.go`: `Name` and the exported ordering identities, or
-  `contract.go` beside the package documentation (canvas, scene and ui keep
-  them there).
+- `doc.go`: package documentation: what the plugin offers, and which Ports it
+  requires or collects and which Adapters it provides.
+- `id.go`: `Name` and the exported ordering identities.
 - `commands.go`: command, request, and response declarations only.
 - `events.go`: event declarations.
-- `resources.go`: the documented Resource types: an alias of the `internal/`
-  declaration (`type State = internal.State`) when the `…impl` reads its
-  unexported state, as every Resource queue's consume side does.
-- `ports.go`: the Port types the plugin declares.
+- `resources.go`: the documented Resource types, or an alias of the
+  `internal/types` declaration (`type State = types.State`) when the
+  implementation reads its unexported state, as every Resource queue's consume
+  side does.
+- `ports.go`: the Port types the plugin declares, and the interface each
+  carries.
 - `adapters.go`: the Adapter types the plugin provides.
+- `types.go`: the value types, enums and interfaces the declarations above
+  name, and aliases of `internal/types` value types.
+- `config.go`: `Config`, read from the config map under the root's `Name`, and
+  its builder methods. Its zero value is the default.
 - `err.go`: exported error types and their `Error` methods.
+- `utils.go`: the forwarders into `internal/types`.
 
-In the **`…impl`**:
+In **`internal/types`**: a file per declared type or family, named for it
+(`state.go`, `opqueue.go`), and the plain functions giving `internal/` what
+exported methods do not.
 
-- `doc.go`: package documentation: what it holds, that only composition roots
-  and tests import it, and which Adapters it requires, collects or provides.
-- `plugin.go`: the unexported `plugin`, `New`, `Name`, `Dependencies`,
-  `Register`, and compact subscription wiring.
-- `commandsimpl.go`: command registration and every command handler.
-- `config.go`: `Config`, `DefaultConfig` if it has one, and resolving it, a
-  zero field taking its default.
-- `err.go`: the exported `Err…` types its configuration and startup report.
-- `mcpprovider.go`: the unexported `provider`, its capabilities and their
-  unexported request and response types.
+In **`internal/`** no layout is enforced. The conventions from the `…impl` carry
+over: `plugin.go` for the unexported `plugin`, `New`, `Name`, `Dependencies`,
+`Register` and compact subscription wiring; `commandsimpl.go` for command
+registration and every command handler; `mcpprovider.go` for the unexported
+`provider`, its capabilities and their unexported request and response types. A
+Resource only the implementation touches stays unexported there.
 
-In **`internal/`**: `doc.go`, `friends.go` for the plain functions giving the
-root and the `…impl` what exported methods do not, and a file per declared type
-or family, named for it (`state.go`, `opqueue.go`). A root file wrapping those
-declarations takes the same name (`scene/camera.go` over `internal/camera.go`).
-A Resource only the `…impl` touches stays unexported in the `…impl`, as
-`uiimpl`'s `processor` does.
+The **constructor package** is a single file holding `New`.
 
 Never add a feature-named catch-all such as `viewport.go` holding a resource, its
 events, and its commands together. Split it: the resource goes to `resources.go`,
 the events to `events.go`, the commands to `commands.go`, and any shared enum or
-value type to `contract.go`.
+value type to `types.go`.
 
-Command handlers always live in `commandsimpl.go`, however small the package, so
-`commands.go` stays a readable list of the contract and never mixes declaration
-with implementation. Subscription handlers may stay in `plugin.go` while the
-wiring is compact; split those by ownership, not by an arbitrary size threshold.
+Command handlers never sit beside their commands: `commands.go` stays a readable
+list of what the plugin offers. A root takes only the files it needs: an
+Extension has no `commands.go` even when it handles another plugin's commands.
 
-A package takes only the files it needs. An Open slot such as `app` declares
-commands and events other plugins implement and has `commands.go` and
-`events.go`, but no `resources.go`, since it declares no Resources. An Extension
-such as `wgpu`, which implements `app.QuitCmd` but declares no command of its
-own, has `commandsimpl.go` alone.
+A plugin on the migration list keeps its old layout until it moves: its
+contract root's `contract.go` and `identities.go` hold what `doc.go`, `types.go`
+and `id.go` will, and its `…impl` holds `config.go`, `err.go` and the files
+`internal/` will.
 
 ## Validation
 

@@ -1,8 +1,8 @@
-// Package archtest holds the tier test: the import rules between plugin kinds
-// that .github/instructions/architecture.instructions.md describes, checked over
-// every cog-internal import edge instead of left to prose. It also holds the
-// tests of how kernel output names types, which compose every plugin and need a
-// fixture internal package of their own.
+// Package archtest holds the tier test: the plugin kinds, package shapes and
+// import rules that .github/instructions/architecture.instructions.md
+// describes, checked over every cog package instead of left to prose. It also
+// holds the tests of how kernel output names types, which compose every plugin
+// and need a fixture internal package of their own.
 package archtest
 
 import (
@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
-	"go/types"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,24 +20,77 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+// unmoved is the migration list: the plugins that have not yet moved to the
+// declaration-root shape, each held to the rules from before it. The ticket
+// that moves a plugin deletes its entry, and an entry naming a directory that
+// holds no package fails the test, so the list only shrinks.
+var unmoved = []string{
+	"bundles/anim",
+	"bundles/canvas",
+	"bundles/ecs",
+	"bundles/ecsscene",
+	"bundles/input",
+	"bundles/scene",
+	"bundles/ui",
+	"extensions/diskfs",
+	"extensions/gfx",
+	"extensions/jsfs",
+	"extensions/mcp",
+	"extensions/storage",
+	"extensions/wgpu",
+	"slots/app",
+}
+
 // The rules, as a failure names them. The instructions file states the same
 // rules in prose; change both together.
 const (
-	ruleImpl        = "nothing in cog imports an …impl package, except from _test.go files"
-	ruleExtension   = "nothing in cog imports an extensions/* directory that is not a Port, except from _test.go files"
-	rulePlugin      = "contract roots and slots/* declare no type that implements kernel.Plugin"
-	ruleNoTier      = "every package in cog belongs to a tier in architecture.instructions.md"
-	ruleImplExports = "an …impl exports only New() kernel.Plugin, Config, DefaultConfig() Config and Err… types"
+	ruleNoTier  = "every package in cog belongs to a tier in architecture.instructions.md"
+	rulePlugin  = "roots and slots/* declare no type that implements kernel.Plugin"
+	ruleKernel  = "kernel imports nothing else in cog"
+	ruleLib     = "libs/* import only libs and kernel"
+	ruleUnmoved = "every entry on the migration list names a plugin directory that still holds a package"
 
-	ruleKernel     = "kernel imports nothing else in cog"
-	ruleLib        = "libs/* import only libs and kernel"
-	ruleSlot       = "slots/* import only libs, kernel, slots/* and contract roots"
-	ruleRoot       = "a contract root imports only libs, kernel, slots/*, other contract roots, Port vocabularies and its own internal/…"
-	ruleInternal   = "internal/… imports only libs, kernel, slots/*, other contract roots and Port vocabularies"
-	ruleImplTable  = "…impl imports only what its contract root may, plus that root"
-	ruleOther      = "an extensions/* directory that is not a Port imports only libs, kernel, slots/*, contract roots and Port vocabularies"
-	ruleVocabulary = "a Port's vocabulary package imports only libs"
+	// The declaration-root shape.
+	ruleReach              = "nothing in cog imports a constructor package or another plugin's internal/, except from _test.go files"
+	ruleRootImports        = "a root imports only libs, kernel, other plugins' roots and its own internal/types"
+	ruleTypes              = "internal/types imports only libs, kernel and other plugins' roots"
+	ruleInternal           = "internal/ imports only libs, kernel, any root and its own internal/"
+	ruleConstructor        = "a constructor package imports only kernel and its own internal/"
+	ruleRootFiles          = "a Slot or Bundle root holds only doc.go, id.go, commands.go, events.go, resources.go, ports.go, adapters.go, types.go, config.go, err.go and utils.go, besides tests"
+	ruleExtensionFiles     = "an Extension root holds only doc.go, id.go, config.go, adapters.go and err.go, besides tests"
+	ruleForwarder          = "a root's exported functions are in utils.go, and every function there is exported and a single return of a call into the plugin's own internal/types, its parameters passed through in order"
+	ruleConstructorExports = "a constructor package exports only New() kernel.Plugin"
+	ruleUndeclaredAdapter  = "every ProvideAdapter in a plugin names an Adapter its root declares in adapters.go"
+	ruleUnprovidedAdapter  = "every Adapter a root declares in adapters.go is provided by its plugin"
+	ruleSlotPort           = "a slots/ root declares at least one required Port"
+	ruleNoRequiredPort     = "a Bundle or Extension root declares no required Port"
+	ruleExtensionAPI       = "an Extension root declares only Name, Config, its Adapters and Err… errors"
+	ruleExtensionAdapter   = "an Extension root declares an Adapter for at least one required Port"
+	ruleSlotForwarder      = "a Slot's forwarders name only its own types, predeclared types, the standard library, Libraries and the kernel"
+
+	// The shape before it, which a plugin on the migration list keeps.
+	ruleImpl           = "nothing in cog imports an …impl package, except from _test.go files"
+	ruleExtension      = "nothing in cog imports an extensions/* directory that is not a Port, except from _test.go files"
+	ruleImplExports    = "an …impl exports only New() kernel.Plugin, Config, DefaultConfig() Config and Err… types"
+	ruleSlot           = "slots/* import only libs, kernel, slots/* and contract roots"
+	ruleRoot           = "a contract root imports only libs, kernel, slots/*, other contract roots, Port vocabularies and its own internal/…"
+	ruleLegacyInternal = "internal/… imports only libs, kernel, slots/*, other contract roots and Port vocabularies"
+	ruleImplTable      = "…impl imports only what its contract root may, plus that root"
+	ruleOther          = "an extensions/* directory that is not a Port imports only libs, kernel, slots/*, contract roots and Port vocabularies"
+	ruleVocabulary     = "a Port's vocabulary package imports only libs"
 )
+
+// kind is a plugin's kind, which its top directory says.
+type kind int
+
+const (
+	kindNone kind = iota
+	kindSlot
+	kindBundle
+	kindExtension
+)
+
+var kindDirectories = map[string]kind{"slots": kindSlot, "bundles": kindBundle, "extensions": kindExtension}
 
 type tier int
 
@@ -47,115 +99,212 @@ const (
 	tierExempt
 	tierKernel
 	tierLib
-	tierSlot
-	tierRoot     // bundles/X, or extensions/P when P has a Pimpl child
-	tierInternal // bundles/X/internal/…, extensions/P/internal/…
-	tierImpl     // bundles/X/Ximpl, extensions/P/Pimpl
-	tierOther    // any other extensions/* directory: wgpu, diskfs, jsfs
-	// tierVocabulary is extensions/P/V for any V but Pimpl and internal, when P
-	// has a Pimpl child: the contract a Port's Adapters implement (gfx/gpu).
-	tierVocabulary
+
+	// The declaration-root shape, for a plugin X under slots/, bundles/ or
+	// extensions/ that is not on the migration list.
+	tierRoot        // X
+	tierTypes       // X/internal/types/…
+	tierInternal    // X/internal/…, except internal/types
+	tierConstructor // X/Xplugin
+
+	// The shape before it, for a plugin on the migration list.
+	tierLegacySlot     // slots/…
+	tierLegacyRoot     // bundles/X, or extensions/P when P has a Pimpl child
+	tierLegacyInternal // bundles/X/internal/…, extensions/P/internal/…
+	tierLegacyImpl     // bundles/X/Ximpl, extensions/P/Pimpl
+	tierLegacyOther    // any other extensions/* directory: wgpu, diskfs, jsfs
+	// tierLegacyVocabulary is extensions/P/V for any V but Pimpl and internal,
+	// when P has a Pimpl child: the contract a Port's Adapters implement (gfx/gpu).
+	tierLegacyVocabulary
 )
 
-// place is a package's tier. For internal/…, …impl and a vocabulary, root is
-// the module-relative path of the contract root they belong to.
+// place is a package's tier. plugin is the module-relative path of the plugin
+// directory the package sits in, kind that plugin's kind, and legacy whether
+// the plugin is on the migration list.
 type place struct {
-	path string
-	tier tier
-	root string
+	path   string
+	tier   tier
+	plugin string
+	kind   kind
+	legacy bool
 }
 
 // classify places one module-relative package path. present reports whether a
-// module-relative package exists, which is how a Port is told from any other
-// extension: by its …impl child.
-func classify(path string, present func(string) bool) place {
+// module-relative package exists, which is how a legacy Port is told from any
+// other legacy extension: by its …impl child.
+func classify(path string, present func(string) bool, unmoved []string) place {
 	parts := strings.Split(path, "/")
-	at := func(t tier, root string) place { return place{path: path, tier: t, root: root} }
+	at := func(t tier) place { return place{path: path, tier: t} }
 	switch {
 	case path == "kernel/archtest", strings.HasPrefix(path, "kernel/archtest/"),
 		path == "docs/research", strings.HasPrefix(path, "docs/research/"):
-		return at(tierExempt, "")
+		return at(tierExempt)
 	case path == "kernel":
-		return at(tierKernel, "")
+		return at(tierKernel)
 	case parts[0] == "libs" && len(parts) >= 2:
-		return at(tierLib, "")
-	case parts[0] == "slots" && len(parts) >= 2:
-		return at(tierSlot, "")
-	case parts[0] == "bundles" && len(parts) >= 2:
-		return nested(path, parts)
-	case parts[0] == "extensions" && len(parts) >= 2:
-		root := "extensions/" + parts[1]
-		if !present(root + "/" + parts[1] + "impl") {
-			if len(parts) == 2 {
-				return at(tierOther, "")
-			}
-			return at(tierNone, "")
-		}
-		if len(parts) == 3 && parts[2] != parts[1]+"impl" && parts[2] != "internal" {
-			return at(tierVocabulary, root)
-		}
-		return nested(path, parts)
+		return at(tierLib)
 	}
-	return at(tierNone, "")
-}
-
-// nested places a path under a contract root: the root itself, its …impl, or
-// its internal/… tree.
-func nested(path string, parts []string) place {
-	root := parts[0] + "/" + parts[1]
+	pluginKind, ok := kindDirectories[parts[0]]
+	if !ok || len(parts) < 2 {
+		return at(tierNone)
+	}
+	plugin := parts[0] + "/" + parts[1]
+	if slices.Contains(unmoved, plugin) {
+		return legacy(path, parts, present)
+	}
+	placed := place{path: path, plugin: plugin, kind: pluginKind}
 	switch {
 	case len(parts) == 2:
-		return place{path: path, tier: tierRoot}
-	case len(parts) == 3 && parts[2] == parts[1]+"impl":
-		return place{path: path, tier: tierImpl, root: root}
+		placed.tier = tierRoot
+	case len(parts) == 3 && parts[2] == parts[1]+"plugin":
+		placed.tier = tierConstructor
+	case parts[2] == "internal" && len(parts) >= 4 && parts[3] == "types":
+		placed.tier = tierTypes
 	case parts[2] == "internal":
-		return place{path: path, tier: tierInternal, root: root}
+		placed.tier = tierInternal
 	}
-	return place{path: path, tier: tierNone}
+	return placed
+}
+
+// legacy places a path of a plugin on the migration list by the rules from
+// before declaration roots.
+func legacy(path string, parts []string, present func(string) bool) place {
+	plugin := parts[0] + "/" + parts[1]
+	at := func(t tier) place { return place{path: path, tier: t, plugin: plugin, legacy: true} }
+	switch parts[0] {
+	case "slots":
+		return at(tierLegacySlot)
+	case "extensions":
+		if !present(plugin + "/" + parts[1] + "impl") {
+			if len(parts) == 2 {
+				return at(tierLegacyOther)
+			}
+			return at(tierNone)
+		}
+		if len(parts) == 3 && parts[2] != parts[1]+"impl" && parts[2] != "internal" {
+			return at(tierLegacyVocabulary)
+		}
+	}
+	switch {
+	case len(parts) == 2:
+		return at(tierLegacyRoot)
+	case len(parts) == 3 && parts[2] == parts[1]+"impl":
+		return at(tierLegacyImpl)
+	case parts[2] == "internal":
+		return at(tierLegacyInternal)
+	}
+	return at(tierNone)
+}
+
+// asLegacy is how the legacy rules see a package in the declaration-root shape:
+// any root is a contract root, internal/types and internal/ are internal to
+// their plugin, and a constructor package is an …impl.
+func (p place) asLegacy() place {
+	switch p.tier {
+	case tierRoot:
+		p.tier = tierLegacyRoot
+	case tierTypes, tierInternal:
+		p.tier = tierLegacyInternal
+	case tierConstructor:
+		p.tier = tierLegacyImpl
+	}
+	return p
+}
+
+// asDeclared is how the declaration-root rules see a legacy package: slots/*,
+// contract roots and vocabularies are roots, legacy internal/ is internal to its
+// plugin, and an …impl or a non-Port extension is implementation that only
+// tests reach, as a constructor package is.
+func (p place) asDeclared() place {
+	switch p.tier {
+	case tierLegacySlot, tierLegacyRoot, tierLegacyVocabulary:
+		p.tier = tierRoot
+	case tierLegacyInternal:
+		p.tier = tierInternal
+	case tierLegacyImpl, tierLegacyOther:
+		p.tier = tierConstructor
+	}
+	return p
 }
 
 // allowed reports whether from may import to, and if not, the rule it breaks.
-// A _test.go file may additionally import any …impl and any extension that is
-// not a Port; every other rule holds for tests too.
+// A package on the migration list is held to the legacy rules and every other
+// plugin package to the declaration-root rules, whichever shape it imports.
 func allowed(from, to place, testFile bool) (bool, string) {
-	if from.tier == tierExempt {
+	switch {
+	case from.tier == tierExempt:
+		return true, ""
+	case from.legacy, from.tier == tierKernel, from.tier == tierLib:
+		return allowedLegacy(from, to.asLegacy(), testFile)
+	}
+	return allowedDeclared(from, to.asDeclared(), testFile)
+}
+
+// allowedDeclared is the import table of the declaration-root shape. A _test.go
+// file may additionally import any constructor package and any internal/; every
+// other rule holds for tests too.
+func allowedDeclared(from, to place, testFile bool) (bool, string) {
+	inside := to.tier == tierTypes || to.tier == tierInternal
+	if testFile && (inside || to.tier == tierConstructor) {
 		return true, ""
 	}
+	if to.tier == tierConstructor || inside && to.plugin != from.plugin {
+		return false, ruleReach
+	}
+	base := to.tier == tierLib || to.tier == tierKernel
+	otherRoot := to.tier == tierRoot && to.plugin != from.plugin
+	switch from.tier {
+	case tierRoot:
+		return base || otherRoot || to.tier == tierTypes, ruleRootImports
+	case tierTypes:
+		return base || otherRoot || to.tier == tierTypes, ruleTypes
+	case tierInternal:
+		return base || to.tier == tierRoot || inside, ruleInternal
+	case tierConstructor:
+		return to.tier == tierKernel || to.tier == tierInternal, ruleConstructor
+	}
+	return false, ruleNoTier
+}
+
+// allowedLegacy is the import table from before declaration roots. A _test.go
+// file may additionally import any …impl and any extension that is not a Port;
+// every other rule holds for tests too.
+func allowedLegacy(from, to place, testFile bool) (bool, string) {
 	switch to.tier {
-	case tierImpl:
+	case tierLegacyImpl:
 		if testFile {
 			return true, ""
 		}
 		return false, ruleImpl
-	case tierOther:
+	case tierLegacyOther:
 		if testFile {
 			return true, ""
 		}
 		return false, ruleExtension
 	}
-	base := func(t tier) bool { return t == tierLib || t == tierKernel || t == tierSlot }
+	base := func(t tier) bool { return t == tierLib || t == tierKernel || t == tierLegacySlot }
 	// A Port's vocabulary is imported by its own Port, by Bundles, and by other
 	// Ports and extensions: every tier that may import a contract root, except
 	// slots/*.
-	vocabulary := to.tier == tierVocabulary
+	vocabulary := to.tier == tierLegacyVocabulary
 	switch from.tier {
 	case tierKernel:
 		return false, ruleKernel
 	case tierLib:
 		return to.tier == tierLib || to.tier == tierKernel, ruleLib
-	case tierSlot:
-		return base(to.tier) || to.tier == tierRoot, ruleSlot
-	case tierRoot:
-		return base(to.tier) || to.tier == tierRoot || vocabulary ||
-			to.tier == tierInternal && to.root == from.path, ruleRoot
-	case tierInternal:
-		return base(to.tier) || to.tier == tierRoot && to.path != from.root || vocabulary, ruleInternal
-	case tierImpl:
-		return base(to.tier) || to.tier == tierRoot || vocabulary ||
-			to.tier == tierInternal && to.root == from.root, ruleImplTable
-	case tierOther:
-		return base(to.tier) || to.tier == tierRoot || vocabulary, ruleOther
-	case tierVocabulary:
+	case tierLegacySlot:
+		return base(to.tier) || to.tier == tierLegacyRoot, ruleSlot
+	case tierLegacyRoot:
+		return base(to.tier) || to.tier == tierLegacyRoot || vocabulary ||
+			to.tier == tierLegacyInternal && to.plugin == from.plugin, ruleRoot
+	case tierLegacyInternal:
+		return base(to.tier) || to.tier == tierLegacyRoot && to.plugin != from.plugin || vocabulary, ruleLegacyInternal
+	case tierLegacyImpl:
+		return base(to.tier) || to.tier == tierLegacyRoot || vocabulary ||
+			to.tier == tierLegacyInternal && to.plugin == from.plugin, ruleImplTable
+	case tierLegacyOther:
+		return base(to.tier) || to.tier == tierLegacyRoot || vocabulary, ruleOther
+	case tierLegacyVocabulary:
 		return to.tier == tierLib, ruleVocabulary
 	}
 	return false, ruleNoTier
@@ -193,17 +342,41 @@ func requireGo(t *testing.T) {
 }
 
 // check loads every package of the module rooted at dir and returns every
-// violation in it, sorted.
-func check(t *testing.T, dir string) []violation {
+// violation in it, sorted, with unmoved as the migration list.
+func check(t *testing.T, dir string, unmoved []string) []violation {
 	t.Helper()
-	violations, err := violationsIn(dir)
+	violations, err := violationsIn(dir, unmoved)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return violations
 }
 
-func violationsIn(dir string) ([]violation, error) {
+// module is what every check needs to know about the module being checked.
+type module struct {
+	path    string // the module path
+	dir     string
+	present map[string]bool // module-relative package paths
+	unmoved []string
+}
+
+func (m module) relative(importPath string) (string, bool) {
+	return strings.CutPrefix(importPath, m.path+"/")
+}
+
+func (m module) within(file string) string {
+	rel, err := filepath.Rel(m.dir, file)
+	if err != nil {
+		return file
+	}
+	return filepath.ToSlash(rel)
+}
+
+func (m module) classify(rel string) place {
+	return classify(rel, func(path string) bool { return m.present[path] }, m.unmoved)
+}
+
+func violationsIn(dir string, unmoved []string) ([]violation, error) {
 	config := &packages.Config{
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedModule |
 			packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo,
@@ -220,34 +393,25 @@ func violationsIn(dir string) ([]violation, error) {
 	if len(loaded) == 0 || loaded[0].Module == nil {
 		return nil, fmt.Errorf("no module packages found in %s", dir)
 	}
-	module := loaded[0].Module
-	relative := func(importPath string) (string, bool) {
-		rest, ok := strings.CutPrefix(importPath, module.Path+"/")
-		return rest, ok
-	}
-	within := func(file string) string {
-		rel, err := filepath.Rel(module.Dir, file)
-		if err != nil {
-			return file
-		}
-		return filepath.ToSlash(rel)
-	}
-
-	present := map[string]bool{}
+	m := module{path: loaded[0].Module.Path, dir: loaded[0].Module.Dir, present: map[string]bool{}, unmoved: unmoved}
 	for _, pkg := range loaded {
-		if rel, ok := relative(pkg.PkgPath); ok {
-			present[rel] = true
+		if rel, ok := m.relative(pkg.PkgPath); ok {
+			m.present[rel] = true
 		}
 	}
-	has := func(path string) bool { return present[path] }
 
 	var violations []violation
+	listed := map[string]bool{}
+	adapters := map[string]*adapterUse{}
 	for _, pkg := range loaded {
-		rel, ok := relative(pkg.PkgPath)
+		rel, ok := m.relative(pkg.PkgPath)
 		if !ok {
 			continue
 		}
-		from := classify(rel, has)
+		from := m.classify(rel)
+		if from.legacy {
+			listed[from.plugin] = true
+		}
 		switch from.tier {
 		case tierExempt:
 			continue
@@ -259,16 +423,48 @@ func violationsIn(dir string) ([]violation, error) {
 			})
 			continue
 		}
-		edges, err := importViolations(pkg.Dir, from, relative, has, within)
+		edges, err := importViolations(pkg.Dir, from, m)
 		if err != nil {
 			return nil, err
 		}
 		violations = append(violations, edges...)
-		if from.tier == tierRoot || from.tier == tierSlot {
-			violations = append(violations, pluginViolations(pkg, rel, within)...)
+		if !from.legacy && from.plugin != "" {
+			if adapters[from.plugin] == nil {
+				adapters[from.plugin] = &adapterUse{}
+			}
+			if err := collectAdapters(pkg.Dir, from, m, adapters[from.plugin]); err != nil {
+				return nil, err
+			}
 		}
-		if from.tier == tierImpl {
-			violations = append(violations, exportViolations(pkg, rel, module.Path+"/kernel", within)...)
+		if from.tier == tierRoot {
+			files, err := fileViolations(pkg.Dir, from, m)
+			if err != nil {
+				return nil, err
+			}
+			violations = append(violations, files...)
+			violations = append(violations, forwarderViolations(pkg, from, m)...)
+			violations = append(violations, portViolations(pkg, from, m)...)
+		}
+		if from.tier == tierRoot || from.tier == tierLegacyRoot || from.tier == tierLegacySlot {
+			violations = append(violations, pluginViolations(pkg, rel, m)...)
+		}
+		if from.tier == tierConstructor {
+			violations = append(violations, constructorExportViolations(pkg, rel, m)...)
+		}
+		if from.tier == tierLegacyImpl {
+			violations = append(violations, implExportViolations(pkg, rel, m)...)
+		}
+	}
+	for plugin, use := range adapters {
+		violations = append(violations, adapterViolations(plugin, use)...)
+	}
+	for _, entry := range unmoved {
+		if !listed[entry] {
+			violations = append(violations, violation{
+				file: entry,
+				key:  entry + " is on the migration list and holds no package",
+				rule: ruleUnmoved,
+			})
 		}
 	}
 	slices.SortFunc(violations, func(a, b violation) int {
@@ -280,23 +476,14 @@ func violationsIn(dir string) ([]violation, error) {
 // importViolations parses every Go file in a package directory, whatever its
 // build constraints or whether it is a test, so an edge that only one platform
 // compiles is still checked.
-func importViolations(
-	dir string,
-	from place,
-	relative func(string) (string, bool),
-	present func(string) bool,
-	within func(string) string,
-) ([]violation, error) {
-	files, err := filepath.Glob(filepath.Join(dir, "*.go"))
+func importViolations(dir string, from place, m module) ([]violation, error) {
+	files, err := goFiles(dir)
 	if err != nil {
 		return nil, err
 	}
 	var violations []violation
 	fset := token.NewFileSet()
 	for _, file := range files {
-		if base := filepath.Base(file); strings.HasPrefix(base, "_") || strings.HasPrefix(base, ".") {
-			continue
-		}
 		syntax, err := parser.ParseFile(fset, file, nil, parser.ImportsOnly)
 		if err != nil {
 			return nil, fmt.Errorf("parsing %s: %w", file, err)
@@ -304,13 +491,13 @@ func importViolations(
 		testFile := strings.HasSuffix(file, "_test.go")
 		for _, spec := range syntax.Imports {
 			importPath := strings.Trim(spec.Path.Value, "`\"")
-			rel, ok := relative(importPath)
+			rel, ok := m.relative(importPath)
 			if !ok {
 				continue // std and third-party are not checked
 			}
-			if ok, rule := allowed(from, classify(rel, present), testFile); !ok {
+			if ok, rule := allowed(from, m.classify(rel), testFile); !ok {
 				violations = append(violations, violation{
-					file: within(file),
+					file: m.within(file),
 					line: fset.Position(spec.Pos()).Line,
 					key:  from.path + " imports " + rel,
 					rule: rule,
@@ -321,89 +508,23 @@ func importViolations(
 	return violations, nil
 }
 
-// pluginViolations finds every type a package declares that has the three
-// methods of kernel.Plugin, on the value or on the pointer. Acting on a
-// *kernel.Registrar the root is handed is not declaring a Plugin: functions
-// that take one (ecs.RegisterComponent, ecs.ToHandler) and types with fewer
-// than all three methods pass.
-func pluginViolations(pkg *packages.Package, rel string, within func(string) string) []violation {
-	var violations []violation
-	scope := pkg.Types.Scope()
-	for _, name := range scope.Names() {
-		object, ok := scope.Lookup(name).(*types.TypeName)
-		if !ok || types.IsInterface(object.Type()) {
-			continue
-		}
-		methods := types.NewMethodSet(types.NewPointer(object.Type()))
-		missing := func(method string) bool { return methods.Lookup(nil, method) == nil }
-		if !slices.ContainsFunc([]string{"Name", "Dependencies", "Register"}, missing) {
-			at := pkg.Fset.Position(object.Pos())
-			violations = append(violations, violation{
-				file: within(at.Filename),
-				line: at.Line,
-				key:  rel + " declares " + name,
-				rule: rulePlugin,
-			})
-		}
+// goFiles lists every Go file in a directory the go tool would consider for
+// some build, tests included: every *.go file whose name does not start with _
+// or a dot.
+func goFiles(dir string) ([]string, error) {
+	files, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		return nil, err
 	}
-	return violations
+	return slices.DeleteFunc(files, func(file string) bool {
+		base := filepath.Base(file)
+		return strings.HasPrefix(base, "_") || strings.HasPrefix(base, ".")
+	}), nil
 }
 
-// exportViolations finds every exported package-scope name of an …impl that the
-// rule does not allow: anything but New taking nothing and returning exactly
-// kernel.Plugin, the type Config, DefaultConfig taking nothing and returning
-// Config, and types and vars named Err…. Methods are not package-scope names,
-// so Config's With… methods pass, and _test.go files are not loaded, so test
-// exports pass too.
-func exportViolations(pkg *packages.Package, rel, kernelPath string, within func(string) string) []violation {
-	var violations []violation
-	scope := pkg.Types.Scope()
-	returnsOnly := func(object types.Object, want func(types.Type) bool) bool {
-		function, ok := object.(*types.Func)
-		if !ok {
-			return false
-		}
-		signature := function.Type().(*types.Signature)
-		return signature.Params().Len() == 0 && signature.Results().Len() == 1 &&
-			want(signature.Results().At(0).Type())
-	}
-	isPlugin := func(t types.Type) bool {
-		named, ok := types.Unalias(t).(*types.Named)
-		return ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == kernelPath &&
-			named.Obj().Name() == "Plugin"
-	}
-	isConfig := func(t types.Type) bool {
-		config, ok := scope.Lookup("Config").(*types.TypeName)
-		return ok && types.Identical(t, config.Type())
-	}
-	for _, name := range scope.Names() {
-		object := scope.Lookup(name)
-		if !object.Exported() {
-			continue
-		}
-		_, isType := object.(*types.TypeName)
-		_, isVar := object.(*types.Var)
-		switch {
-		case name == "New" && returnsOnly(object, isPlugin),
-			name == "Config" && isType,
-			name == "DefaultConfig" && returnsOnly(object, isConfig),
-			strings.HasPrefix(name, "Err") && (isType || isVar):
-			continue
-		}
-		at := pkg.Fset.Position(object.Pos())
-		violations = append(violations, violation{
-			file: within(at.Filename),
-			line: at.Line,
-			key:  rel + " exports " + name,
-			rule: ruleImplExports,
-		})
-	}
-	return violations
-}
-
-func TestTiers_CogKeepsItsImportRules(t *testing.T) {
+func TestTiers_CogKeepsItsRules(t *testing.T) {
 	requireGo(t)
-	for _, v := range check(t, "../..") {
+	for _, v := range check(t, "../..", unmoved) {
 		t.Errorf("%s", v)
 	}
 }

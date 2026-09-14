@@ -1,15 +1,19 @@
 ---
 name: "Plugin Kinds"
-description: "Use when creating, moving or changing Go code in cog: which plugin kind a package is, which directory it belongs in, what it may import, and where ordering identities are declared."
+description: "Use when creating, moving or changing Go code in cog: which kind a plugin is, which directory and package a declaration belongs in, what a root may declare, what each package may import, and where ordering identities are declared."
 applyTo: "**/*.go"
 ---
 
 # Plugin Kinds
 
-Every package in cog is exactly one kind, and its kind fixes both its directory
-and what it may import. [`docs/adr/0001-bundles-slots-ports-and-adapters.md`](../../docs/adr/0001-bundles-slots-ports-and-adapters.md)
-records why; [`CONTEXT.md`](../../CONTEXT.md) defines each term. The import
-rules are enforced by `kernel/archtest/tiers_test.go`, not by review.
+Every plugin in cog is exactly one kind. Its kind fixes its directory, and every
+plugin has the same package shape. [`docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md`](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md)
+records why; [`CONTEXT.md`](../../CONTEXT.md) defines each term. The kinds, the
+shape and the import rules are enforced by `kernel/archtest`, not by review.
+
+Plugins on the tier test's migration list have not moved yet and keep the shape
+in [Plugins Not Yet Moved](#plugins-not-yet-moved). Everything else here is the
+rule for every plugin that has moved, and for every new plugin.
 
 ## The Kinds
 
@@ -17,84 +21,99 @@ rules are enforced by `kernel/archtest/tiers_test.go`, not by review.
 | --- | --- | --- |
 | the kernel package | `kernel` | The Engine, Registrar and scheduler every Plugin is built on. |
 | **Library** | `libs/<name>` | Code that is not a Plugin and defines none (`libs/m`). |
-| **Open slot** | `slots/<name>` | A Slot shipped without an Extension (`slots/app`). It declares no Resources. |
-| **Bundle** | `bundles/X` | A Slot and its one Extension, shipped together and self-contained (input, anim, canvas, scene, ui, ecs, ecsscene). |
-| **Port** | `extensions/P` | A Plugin shipping its own contract and implementation that works only once an Adapter is bound to it: gfx and storage require exactly one, mcp collects any number. |
-| **Adapter** or Extension of an Open slot | `extensions/<name>` | A Plugin implementing a contract it does not own: wgpu (Extension of `app`, Adapter of gfx), diskfs and jsfs (Adapters of storage). |
+| **Slot** | `slots/<name>` | A Plugin whose root declares at least one required Port (app, gfx, storage). Composition fails until an Adapter fills it. |
+| **Extension** | `extensions/<name>` | A Plugin that provides Adapters, at least one of them for a Slot's required Port, and declares no API (wgpu, diskfs, jsfs). It may also contribute to a collected Port. |
+| **Bundle** | `bundles/<name>` | Every other Plugin (input, anim, canvas, scene, ui, ecs, ecsscene, mcp). Its root declares no required Port, and it may collect Adapters or contribute them. |
 
-A Bundle and a Port share one shape:
+A plugin that would need both a Slot's Adapters and an API of its own is two
+plugins: an Extension and a Bundle.
 
-- **Contract root**, `bundles/X` or `extensions/P`: the Slot. Commands, events,
-  Resource types, `Name`, and the ordering identities others order against. It
-  may act on a `*kernel.Registrar` it is handed, and it declares no type that
-  implements `kernel.Plugin`.
-- **`Ximpl`** / **`Pimpl`**: the unexported Plugin, its handlers, and any
-  Adapter it contributes. It exports only:
-  - `func New() kernel.Plugin`, taking no arguments;
-  - optionally `Config`, a type or an alias of an `internal/` type, with any
-    methods (`WithReadFS`), read from the config map under the root's `Name`,
-    a zero field taking its default;
-  - optionally `func DefaultConfig() Config`;
-  - optionally `Err…` types for its configuration and startup errors.
+## The Package Shape
 
-  Nothing else: no Plugin type, no capability request or response types, no
-  constants. A capability's wire schema is its only public contract.
-  `canvasimpl` and `storageimpl` are the worked examples.
-- **`internal/…`**: code the root and the `…impl` share, such as the consume
-  side of a Resource queue. A root with nothing to hide has none (ecsscene,
-  mcp).
-- **A Port's vocabulary**, `extensions/P/V` for any `V` but `Pimpl` and
-  `internal`: the contract the Port's Adapters implement, and every ID, format
-  and enum the Port's recording API and its Adapters both speak. It is declared
-  there, never aliased from the root, so each of its types has one name.
-  A Port that needs none has none (storage, mcp). Its Adapter author reads only
-  this package, and a recorder imports it beside the root. `extensions/gfx/gpu`
-  is the worked example: `gpu.Backend`, `gpu.Queue` and its sinks, the
-  descriptors a backend creates GPU objects from, `gpu.TextureID`,
-  `gpu.FormatRGBA8Srgb`, `gpu.MaterialState`.
+A plugin `X` is four places, and nothing else under `X` may hold Go code:
 
-A contract type whose unexported state the `…impl` reads is declared in
-`internal/` with its fields unexported, and the root re-exports it as an alias
-plus a wrapper per constructor (`type MeshDescr = internal.MeshDescr`). Its
-methods, the recording methods included, live in `internal/`. It stays a
-concrete type, so nothing goes through an interface. What the root and the
-`…impl` need beyond its exported methods, `internal/` exports as plain
-functions (`internal.OpQueueOps(q)`); only they can import `internal/`, so none
-of it is public API. `internal/` never imports its own root, so anything such a
-type refers to, down to the enums in its fields, is declared there too, or in
-the Port's vocabulary package, which `internal/` may import. Types
-nothing outside the root reads the insides of stay declared in the root.
-`extensions/gfx` is the worked example.
+- **The root, `X/`**, holds declarations only: what the plugin offers others.
+- **`X/internal/types/`** holds the concrete types the root aliases, their
+  methods, and the plain functions the implementation needs to read their
+  unexported state. It exists only where an interface in the root would cost
+  performance: the recording queues and hot state. It never imports its own
+  root, so anything such a type refers to is declared there too or in another
+  plugin's root.
+- **`X/internal/`** holds the implementation: the unexported plugin, its `New`,
+  handlers, subscriptions, Adapter values and mcp provider. No file layout is
+  enforced inside it.
+- **The constructor package, `X/Xplugin/`** (`appplugin`, `canvasplugin`), is
+  one file whose only export is `func New() kernel.Plugin`, returning
+  `internal.New()`.
+
+A plugin uses another plugin through its root only.
+
+### What A Root Holds
+
+Its non-test Go files come from its kind's allowlist. Non-Go files and `docs/`
+stay where they are.
+
+| Kind | Allowed files |
+| --- | --- |
+| Slot, Bundle | `doc.go`, `id.go`, `commands.go`, `events.go`, `resources.go`, `ports.go`, `adapters.go`, `types.go`, `config.go`, `err.go`, `utils.go` |
+| Extension | `doc.go`, `id.go`, `config.go`, `adapters.go`, `err.go` |
+
+- **Data-driven declarations.** Types with exported fields, and no getters or
+  setters.
+- **Aliases** go in the file matching what the aliased type is: a resource alias
+  in `resources.go`, a value type in `types.go`
+  (`type OpQueue = types.OpQueue`).
+- **`Config`** is plain data whose zero value is the default. It may have
+  builder methods (`WithReadFS`), the only logic a root holds outside
+  `utils.go`. There is no `DefaultConfig`.
+- **Functions** appear only in `utils.go`, and each one is a pure forwarder: a
+  single call into the plugin's own `internal/types`, returned when the
+  forwarder has results, with its parameters passed through in order. A
+  generic forwarder passes its type parameters through the same way:
+
+  ```go
+  func GetValue[T any](key string, defaultValue T, outValue *T) AccessValuesRequest {
+  	return types.GetValue[T](key, defaultValue, outValue)
+  }
+  ```
+
+- **A Slot's forwarders** name only the Slot's own types, predeclared types,
+  the standard library, Libraries and the kernel in their parameters and
+  results, never another plugin's types. A Slot's API stays interface-like, so
+  what fills it can change without its users changing.
+- **No Plugin.** A root declares no type implementing `kernel.Plugin`, meaning
+  no type with `Name`, `Dependencies` and `Register` methods.
+- **No dispatch helpers.** A caller dispatches a command itself and handles its
+  answer.
+- **An Extension's root** declares only `Name`, `Config`, its Adapter types and
+  `Err…` errors: no commands, events, resources, ports, types or forwarders.
+
+### Ports And Adapters
+
+A Port is a type in the declaring plugin's `ports.go`; an Adapter is a type in
+the providing plugin's `adapters.go`. [`kernel.instructions.md`](kernel.instructions.md)
+§ Ports and Adapters has the spelling.
+
+- A Slot's root declares at least one required Port. A Bundle's or an
+  Extension's declares none, though a Bundle may declare a collected Port.
+- Every `ProvideAdapter[A]` in a plugin names an `A` declared in that plugin's
+  `adapters.go`, and every type declared there is provided. A call in a file
+  only another platform builds counts.
 
 ## Placing New Code
 
 Take the first answer that fits:
 
-1. It defines no Plugin and no Slot → a **Library** in `libs/`.
-2. It is a contract whichever Extension an engine is composed with fills → an
-   **Open slot** in `slots/`.
-3. It implements a contract some other package owns, and ships none of its own
-   → a directory in `extensions/` with no `…impl` child.
-4. It needs something supplied from outside, an Adapter, before it works → a
-   **Port**: `extensions/P`, `extensions/P/Pimpl`, `extensions/P/internal/…`,
-   and optionally a vocabulary `extensions/P/V` for the contract its Adapters
-   implement.
-5. Otherwise it is a **Bundle**: `bundles/X`, `bundles/X/Ximpl`,
-   `bundles/X/internal/…`.
+1. It defines no Plugin → a **Library** in `libs/`.
+2. It cannot work until another plugin supplies an implementation → a **Slot**
+   in `slots/`, whose `ports.go` declares that required Port.
+3. It supplies implementations of Slots' Ports and offers nothing else → an
+   **Extension** in `extensions/`.
+4. Otherwise it is a **Bundle** in `bundles/`.
 
-New code goes in the root, the `…impl`, `internal/` or a Port's vocabulary by
-what it is: recording contract in the root, the Plugin and its handlers in the
-`…impl`, anything both need in `internal/`, and what an Adapter implements or
-both halves name in the vocabulary. A subpackage anywhere else under
-`bundles/X` or `extensions/P` (below a vocabulary, say) matches no tier and
-fails the test.
-
-## The `extensions/` Rule
-
-Every Plugin that is not a Bundle lives in `extensions/`. A directory there with
-an `…impl` child is a Port, and its root is contract any package may import. Any
-other directory there (wgpu, diskfs, jsfs) is imported only by composition roots
-and tests, and so is every `…impl`, in `bundles/` and `extensions/` alike.
+Within the plugin, a declaration another plugin uses goes in the root, in the
+file its allowlist names for what it is. A type the root must alias for
+performance goes in `internal/types`. Everything else goes in `internal/`.
 
 ## Import Rules
 
@@ -102,33 +121,17 @@ and tests, and so is every `…impl`, in `bundles/` and `extensions/` alike.
 | --- | --- |
 | `kernel` | nothing else in cog |
 | `libs/*` | `libs`, `kernel` |
-| `slots/*` | `libs`, `kernel`, `slots/*`, contract roots |
-| contract root: `bundles/X`, or `extensions/P` when `P` has a `Pimpl` child | `libs`, `kernel`, `slots/*`, other contract roots, Port vocabularies, its own `internal/…` |
-| `bundles/X/internal/…`, `extensions/P/internal/…` | `libs`, `kernel`, `slots/*`, other contract roots, Port vocabularies |
-| `bundles/X/Ximpl`, `extensions/P/Pimpl` | anything its contract root may, plus that root |
-| Port vocabulary: `extensions/P/V` when `P` has a `Pimpl` child | `libs` only |
-| other `extensions/*` (wgpu, diskfs, jsfs) | `libs`, `kernel`, `slots/*`, contract roots, Port vocabularies |
+| root `X` | `libs`, `kernel`, other plugins' roots, its own `internal/types` |
+| `X/internal/types/…` | `libs`, `kernel`, other plugins' roots |
+| `X/internal/…` | `libs`, `kernel`, any root, its own `internal/…` and `internal/types` |
+| constructor `X/Xplugin` | `kernel`, its own `internal/` |
 
-- Nothing in cog imports an `…impl` package or an `extensions/*` directory that
-  is not a Port, except from `_test.go` files. A test composing an engine may
-  import both; every other row holds for tests too.
-- A Port's vocabulary imports no kernel, no root and no Bundle, its own Port's
-  root and `internal/` included, so the split between the recording half and the
-  Adapter's contract cannot erode. Contract roots, `internal/…`, `…impl`s and
-  other `extensions/*` may import it, and so may anything outside cog; `kernel`,
-  `libs/*` and `slots/*` may not.
-- Within an Adapter that is also a Plugin depending on its Port, the files
-  that implement the vocabulary's interface import the vocabulary and not the
-  Port's root; only the Plugin wiring may import the root, for its `Name`, the
-  Adapter it provides, or a command it drives. wgpu is the worked example: its
-  `gfx*.go` backend files import `gfx/gpu`, and `plugin.go` also imports `gfx`
-  for `gfx.Name` and `gfx.SetViewportCmd`. The tier test works per package, so
-  this rule is kept by review.
-- Contract roots and `slots/*` declare no type that implements `kernel.Plugin`,
-  meaning no type with `Name`, `Dependencies` and `Register` methods.
-
-A plugin reaches another through its contract root only: never through its
-`…impl`, and never by naming its Plugin.
+- Nothing in cog imports a constructor package or another plugin's `internal/`,
+  except from `_test.go` files. A test composing an engine imports constructor
+  packages; every other row holds for tests too.
+- For these rules, a plugin on the migration list's contract root, `slots/app`
+  and `extensions/gfx/gpu` count as roots, its `internal/…` as internal to it,
+  and its `…impl` and wgpu, diskfs and jsfs as constructor packages.
 
 ## Ordering Identities
 
@@ -140,23 +143,62 @@ on which event:
 type PresentOnUpdate kernel.Subscription[app.UpdateEvent]
 ```
 
-Declare an identity another package orders against in the contract root, next to
-`Name`, so ordering against it imports contract and nothing else
+Declare an identity another package orders against in the root's `id.go`, next
+to `Name`, so ordering against it imports a root and nothing else
 (`gfx.PresentOnUpdate`, `canvas.FlushOnUpdate`). An identity nothing outside its
-package orders against is unexported, and stays in the package that subscribes it.
+plugin orders against is unexported, and stays in `internal/`.
 
 ## Composition Roots Are Exempt
 
 Games and examples (cog-examples, feuds-26, nox) are composition roots. They pick
-the Plugins and Adapters an engine is built from, so they import whatever they
-compose, `…impl` and Adapters included. These rules apply to the cog repo only.
-Inside cog, `kernel/archtest/**` and `docs/research/**` are outside the tiers.
+the Plugins an engine is built from, so they import whatever they compose,
+constructor packages included. These rules apply to the cog repo only. Inside
+cog, `kernel/archtest/**` and `docs/research/**` are outside the tiers.
+
+## Plugins Not Yet Moved
+
+`unmoved` in `kernel/archtest/tiers_test.go` lists every plugin that still has
+the shape [ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md)
+decided, and the tier test holds each of them to that shape's rules. Moving a
+plugin deletes its entry in the same change, and an entry naming a directory
+with no package fails the test. In that shape:
+
+- A Bundle, `bundles/X`, and a Port, `extensions/P` with a `Pimpl` child, have a
+  **contract root** (commands, events, Resource types, `Name`, ordering
+  identities, and the logic those need), an **`…impl`** exporting only `New`,
+  `Config`, `DefaultConfig` and `Err…` types, and an **`internal/`** the two
+  share. gfx also has a **vocabulary package**, `extensions/gfx/gpu`, importing
+  only Libraries.
+- `slots/app` is an **Open slot**: a contract with no implementation.
+- wgpu, diskfs and jsfs are single packages in `extensions/`.
+
+| package | may import |
+| --- | --- |
+| `slots/*` | `libs`, `kernel`, `slots/*`, roots |
+| contract root | `libs`, `kernel`, `slots/*`, other roots, vocabularies, its own `internal/…` |
+| `internal/…` | `libs`, `kernel`, `slots/*`, other roots, vocabularies |
+| `…impl` | anything its contract root may, plus that root |
+| vocabulary | `libs` only |
+| wgpu, diskfs, jsfs | `libs`, `kernel`, `slots/*`, roots, vocabularies |
+
+Nothing imports an `…impl` or wgpu, diskfs or jsfs except `_test.go` files, and
+a moved plugin counts as a root, its `internal/types` and `internal/` as its
+`internal/…`, and its constructor package as an `…impl`.
 
 ## The Tier Test
 
-`go test ./kernel/archtest` checks every cog-internal import edge in every Go file,
-whatever its build tags, every contract root and slot for a Plugin type, and
-every `…impl` for an export the rule above does not allow. A
-failure names the file, the edge and the rule it breaks, and every violation
-fails the test: fix the code to fit the rules. A change to the rules themselves
-changes this file and `kernel/archtest/tiers_test.go` together.
+`go test ./kernel/archtest` checks:
+
+- every cog-internal import edge in every Go file, whatever its build tags;
+- every root's files against its kind's allowlist;
+- every root's functions against the forwarder rules;
+- every root for a Plugin type;
+- every Slot for a required Port, and every Bundle and Extension for none;
+- every Extension's declarations;
+- every constructor package's exports;
+- every plugin's `ProvideAdapter` calls against its `adapters.go`;
+- the migration list.
+
+A failure names the file, the declaration or edge, and the rule it breaks, and
+every violation fails the test: fix the code to fit the rules. A change to the
+rules themselves changes this file and `kernel/archtest` together.
