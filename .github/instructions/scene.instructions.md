@@ -20,13 +20,13 @@ correct picture.
 ## Wiring
 
 Compose scene with what it depends on — storage and its `PermanentFS` Adapter,
-gfx and its `Backend` Adapter, which wgpu provides — and the app's own recording
-plugin. The kernel orders them by their dependencies:
+gfx and its `Backend` Adapter, and app, whose `Driver` Adapter wgpu provides with
+gfx's `Backend` — and the app's own recording plugin. The kernel orders them by their dependencies:
 
 ```go
 plugins := []kernel.Plugin{
 	storageplugin.New(), diskfsplugin.New(), // diskfs.Config{AppId: "demo"} under diskfs.Name
-	inputplugin.New(), gfxplugin.New(), canvasplugin.New(), sceneplugin.New(), wgpuplugin.New(),
+	inputplugin.New(), appplugin.New(), gfxplugin.New(), canvasplugin.New(), sceneplugin.New(), wgpuplugin.New(),
 	demo, // records into the queues the plugins above declare
 }
 ```

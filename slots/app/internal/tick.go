@@ -6,7 +6,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	cwgpu "github.com/dvoyni/cog/extensions/wgpu"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -31,12 +30,12 @@ const (
 // tick source — a paused engine keeps drawing the last completed frame, so
 // pause stops app.UpdateEvent publication and nothing else.
 //
-// Its state is atomics rather than a kernel resource because onUpdate is a
-// driver callback holding an Executioner, not a handler holding a lock:
+// Its state is atomics rather than a kernel resource because Frame is called
+// from a driver callback holding an Executioner, not a handler holding a lock:
 // reading a resource would cost a dispatch every frame merely to ask whether
 // to tick. The thread boundary it crosses — a command handler on some caller's
-// goroutine against onUpdate on the main thread — is the same one alpha and
-// frameSeq already cross, and for the same reason.
+// goroutine against Frame on the driver's main thread — is the same one alpha
+// already crosses, and for the same reason.
 //
 // mu guards the handover of one batch of steps to the frame that publishes
 // it, and the hold that can postpone the handover. The handover is the one
@@ -149,7 +148,7 @@ func (t *tickSource) control(ctx context.Context, request app.TimeRequest) (app.
 	case app.TimeRelease:
 		return t.state(app.TimeResponse{Changed: t.release(time.Now())}), nil
 	default:
-		return app.TimeResponse{}, cwgpu.ErrUnknownTimeAction{Action: request.Action}
+		return app.TimeResponse{}, app.ErrUnknownTimeAction{Action: request.Action}
 	}
 }
 
@@ -164,7 +163,7 @@ func (t *tickSource) pause() bool {
 }
 
 // resume hands the tick source back to the frame clock and reports whether
-// that changed anything. Nothing was banked while paused — onUpdate has been
+// that changed anything. Nothing was banked while paused — Frame has been
 // discarding frame time all along — so there is nothing to unwind and the
 // first frame after this one is worth exactly one frame.
 //
@@ -201,7 +200,7 @@ func (t *tickSource) hold(now time.Time, span time.Duration) (changed bool, err 
 		span = defaultHoldDuration
 	}
 	if span > maxHoldDuration {
-		return false, cwgpu.ErrHoldTooLong{For: span, Max: maxHoldDuration}
+		return false, app.ErrHoldTooLong{For: span, Max: maxHoldDuration}
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()

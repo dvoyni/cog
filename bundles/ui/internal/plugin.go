@@ -35,9 +35,10 @@ func New() kernel.Plugin { return &plugin{} }
 func (*plugin) Name() kernel.PluginName { return ui.Name }
 
 // Dependencies reports the plugins ui requires: input for the pointer, gfx for
-// the viewport, and canvas, which it records into.
+// the viewport, canvas, which it records into, and app, whose TimeCmd the
+// ui_layout capability dispatches.
 func (*plugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{input.Name, gfx.Name, canvas.Name}
+	return []kernel.PluginName{app.Name, input.Name, gfx.Name, canvas.Name}
 }
 
 func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {

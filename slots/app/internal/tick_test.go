@@ -1,189 +1,19 @@
 package internal
 
 import (
-	"context"
 	"errors"
-	"math"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/dvoyni/cog/bundles/input"
-	cwgpu "github.com/dvoyni/cog/extensions/wgpu"
-	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
 
-// tickTestUpdateHandler records every published tick.
-type tickTestUpdateHandler kernel.Subscription[app.UpdateEvent]
+// These are app's time-control tests. They drive the plugin the way a driver
+// does, through the Loop it attaches to a fake Driver, and control it the way
+// any caller does, by dispatching app.TimeCmd, against a real engine.
 
-// tickTestPlugin registers the driver's time-control handler against a real
-// engine, plus the two seams a paused frame must still reach: the input apply
-// command and the update event. The driver's own Register needs a window; the
-// tick source does not, so the handler is registered here instead.
-type tickTestPlugin struct{ harness *tickHarness }
-
-func (p *tickTestPlugin) Name() kernel.PluginName           { return "ticktest" }
-func (p *tickTestPlugin) Dependencies() []kernel.PluginName { return nil }
-
-func (p *tickTestPlugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.HandleCommand[app.TimeCmd](p.harness.plugin.timeCmdImpl)
-	registrar.HandleCommand[input.ApplyCmd](p.harness.applyCmdImpl)
-	registrar.Subscribe[tickTestUpdateHandler](p.harness.observeUpdate)
-	return nil
-}
-
-// tickHarness drives a bare driver's onUpdate against a running engine.
-type tickHarness struct {
-	t      *testing.T
-	plugin *plugin
-	k      kernel.Executioner
-
-	mu      sync.Mutex
-	updates []app.UpdateEvent
-	applied []input.Change
-}
-
-func newTickHarness(t *testing.T, config cwgpu.Config) *tickHarness {
-	t.Helper()
-	harness := &tickHarness{t: t, plugin: &plugin{config: config}}
-	ctx, cancel := context.WithCancel(context.Background())
-	engine := kernel.New(nil).
-		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
-		WithPlugins(&tickTestPlugin{harness: harness})
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		engine.Run(ctx)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		select {
-		case <-stopped:
-		case <-time.After(5 * time.Second):
-			t.Error("engine did not shut down")
-		}
-	})
-	<-engine.Ready()
-	harness.k = engine.Executioner()
-	return harness
-}
-
-func (h *tickHarness) observeUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	return nil, func(_ kernel.Kernel, event app.UpdateEvent) error {
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		h.updates = append(h.updates, event)
-		return nil
-	}
-}
-
-func (h *tickHarness) applyCmdImpl() (kernel.Lock, kernel.Execute[input.ApplyRequest, input.ApplyResponse]) {
-	return nil, func(_ kernel.Kernel, request input.ApplyRequest) (input.ApplyResponse, error) {
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		h.applied = append(h.applied, request.Changes...)
-		return input.ApplyResponse{}, nil
-	}
-}
-
-// frame runs one driver frame: it advances the frame clock by dt the way
-// onDraw does on the render thread, then runs onUpdate on this goroutine the
-// way gogpu's main loop does.
-func (h *tickHarness) frame(dt float64) {
-	h.plugin.frameDtBits.Store(math.Float64bits(dt))
-	h.plugin.frameSeq.Add(1)
-	h.plugin.onUpdate(h.k, 0)
-}
-
-// runFrames drives frames from a goroutine of its own until the returned stop
-// is called, which is what the driver's loop does and what the join window
-// was always racing against: a test that only steps the clock by hand can
-// never see an arm lose that race.
-func (h *tickHarness) runFrames() (stop func()) {
-	done, stopped := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(stopped)
-		for {
-			select {
-			case <-done:
-				return
-			default:
-			}
-			h.frame(0.010)
-			time.Sleep(time.Millisecond)
-		}
-	}()
-	return func() {
-		close(done)
-		<-stopped
-	}
-}
-
-func (h *tickHarness) recorded() []app.UpdateEvent {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return append([]app.UpdateEvent(nil), h.updates...)
-}
-
-func (h *tickHarness) appliedChanges() []input.Change {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return append([]input.Change(nil), h.applied...)
-}
-
-func (h *tickHarness) control(request app.TimeRequest) app.TimeResponse {
-	h.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	response, err := h.k.WithContext(ctx).ExecuteCommand[app.TimeCmd](request)
-	if err != nil {
-		h.t.Fatalf("%v: %v", request.Action, err)
-	}
-	return response
-}
-
-// waitPending blocks until the tick source is holding steps nobody has
-// published yet, so a test can land a second request while one is in flight.
-func (h *tickHarness) waitPending(steps int64) {
-	h.t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for h.plugin.ticks.pending.Load() != steps {
-		if time.Now().After(deadline) {
-			h.t.Fatalf("pending steps = %d, want %d", h.plugin.ticks.pending.Load(), steps)
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
-// waitSharing blocks until callers are sharing one pending step, so a test can
-// assert the pairing without racing the frame that ends it.
-func (h *tickHarness) waitSharing(callers int64) {
-	h.t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		h.plugin.ticks.mu.Lock()
-		batch := h.plugin.ticks.batch
-		h.plugin.ticks.mu.Unlock()
-		if batch != nil && batch.sharing.Load() == callers {
-			return
-		}
-		if time.Now().After(deadline) {
-			h.t.Fatalf("no pending step is shared by %d callers", callers)
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
-func tickTestConfig() cwgpu.Config {
-	return withDefaults(cwgpu.Config{}).
-		WithStep(10 * time.Millisecond).
-		WithMaxFrame(time.Second).
-		WithMaxPending(4)
-}
-
-// Pausing stops update ticks and nothing else: the frame still flushes input
-// into the seam that reaches the input plugin.
+// Pausing stops update ticks and nothing else: a paused driver's frames still
+// render, and each render still reaches subscribers.
 func TestTickSource_PauseStopsTicksAndNothingElse(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
@@ -196,16 +26,16 @@ func TestTickSource_PauseStopsTicksAndNothingElse(t *testing.T) {
 		t.Fatal("pause did not report a paused tick source")
 	}
 
-	harness.plugin.pending = []input.Change{input.KeyChange(input.KeyA, 0, true)}
 	for range 10 {
 		harness.frame(0.010)
+		harness.loop().Render(harness.k)
 	}
 
 	if got := len(harness.recorded()); got != 1 {
 		t.Errorf("paused frames published %d ticks, want the 1 from before the pause", got)
 	}
-	if got := len(harness.appliedChanges()); got != 1 {
-		t.Errorf("input applied %d changes while paused, want 1", got)
+	if got := len(harness.rendered()); got != 10 {
+		t.Errorf("paused frames rendered %d times, want 10", got)
 	}
 }
 
@@ -255,8 +85,8 @@ func TestTickSource_StepPublishesOneLastUpdate(t *testing.T) {
 	if !updates[0].Last {
 		t.Error("a step's tick is not marked as the last of its frame")
 	}
-	if updates[0].Dt != harness.plugin.config.Step.Seconds() {
-		t.Errorf("step tick Dt = %v, want the fixed step", updates[0].Dt)
+	if updates[0].Dt != 0.010 {
+		t.Errorf("step tick Dt = %v, want the fixed step 0.01", updates[0].Dt)
 	}
 	if !response.Paused || !response.Changed {
 		t.Errorf("step reported %+v, want a step that implied pause", response)
@@ -402,7 +232,7 @@ func TestTickSource_ResumeReleasesAPendingStep(t *testing.T) {
 	if response.Stepped != 0 {
 		t.Errorf("a step abandoned by a resume reported %d ticks, want 0", response.Stepped)
 	}
-	if pending := harness.plugin.ticks.pending.Load(); pending != 0 {
+	if pending := harness.ticks().pending.Load(); pending != 0 {
 		t.Errorf("%d steps survived the resume, want none", pending)
 	}
 	if got := len(harness.recorded()); got != 0 {
@@ -521,7 +351,7 @@ func TestTickSource_HoldLongerThanTheCapIsRefused(t *testing.T) {
 	var ticks tickSource
 
 	changed, err := ticks.hold(time.Now(), maxHoldDuration+time.Second)
-	var tooLong cwgpu.ErrHoldTooLong
+	var tooLong app.ErrHoldTooLong
 	if !errors.As(err, &tooLong) {
 		t.Fatalf("an over-long hold reported %v, want ErrHoldTooLong", err)
 	}

@@ -7,19 +7,18 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/bundles/mcp"
-	cwgpu "github.com/dvoyni/cog/extensions/wgpu"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
 
-// provider is what the driver contributes to the mcp Port: its one capability.
-// The driver is the one to contribute it because app has no plugin at all, and
-// only the host that owns the loop can stop it, so a different host would
-// contribute its own sdl_time with its own answer. It holds nothing: the
-// capability body reaches the driver by dispatch.
+// provider is what app contributes to the mcp Port: its one capability. app is
+// the one to contribute it because it owns the tick source, whichever Driver
+// runs the platform loop underneath, so every platform offers the same
+// app_time. It holds nothing: the capability body reaches the plugin by
+// dispatch.
 type provider struct{}
 
-// timeName is the driver's one capability, rendered as the tool wgpu_time.
+// timeName is app's one capability, rendered as the tool app_time.
 const timeName = "time"
 
 // maxTimeSteps caps one step request at ten seconds of simulation. A request
@@ -36,8 +35,8 @@ const maxTimeSteps = 600
 const stepDeadline = 5 * time.Second
 
 // timeDescription is prompt text, and it is reproduced in
-// extensions/wgpu/docs/specs/mcp.md so it is reviewed as prompt text rather than buried
-// as a string literal.
+// slots/app/docs/specs/mcp.md so it is reviewed as prompt text rather than
+// buried as a string literal.
 const timeDescription = "Stop, start or single-step the game's update loop. `pause` stops update " +
 	"ticks; the window keeps drawing the last completed frame, stays responsive and can still be " +
 	"captured, so a paused game does not look hung. `step` advances exactly the number of ticks " +
@@ -91,21 +90,21 @@ type TimeResponse struct {
 	HoldExpired bool `json:"holdExpired,omitempty"`
 }
 
-// Capabilities reports what the driver offers an agent: control of the tick
-// source, and nothing else. It is an engine feature the extension point
+// Capabilities reports what app offers an agent: control of the tick source,
+// and nothing else. It is an engine feature the extension point
 // happens to want, so the contract is app.TimeCmd and a test harness or a
 // frame-step debugger reaches it on the same terms.
 func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{mcp.Func(timeName, timeDescription, timeControl)}
 }
 
-// timeControl is the wgpu_time body. It is a Func rather than a Command
+// timeControl is the app_time body. It is a Func rather than a Command
 // because a step waits for a frame and so carries its own deadline, and
 // because the action is validated before anything is armed: a bad request
 // costs no frames.
 //
 // It is a package function rather than a method to keep the capability-body
-// rule visible at the call site — the driver is one pointer away and the body
+// rule visible at the call site — the plugin is one pointer away and the body
 // still reaches it only by dispatch.
 func timeControl(k kernel.Executioner, request TimeRequest) (TimeResponse, error) {
 	action, known := timeActions[request.Action]
@@ -137,7 +136,11 @@ func timeControl(k kernel.Executioner, request TimeRequest) (TimeResponse, error
 	// to postpone one, so the wait that names a stalled engine is extended by
 	// however long the window may stay open. Nothing else here waits at all.
 	if action == app.TimeStep {
-		ctx, cancel := context.WithTimeout(k.Context(), stepDeadline+app.HoldRemaining(k))
+		status, err := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
+		if err != nil {
+			return TimeResponse{}, timeFailure(err)
+		}
+		ctx, cancel := context.WithTimeout(k.Context(), stepDeadline+status.HoldFor)
 		defer cancel()
 		k = k.WithContext(ctx)
 	}
@@ -172,7 +175,7 @@ func timeFailure(err error) error {
 				"stopped rendering, or a hold may still be open; the steps will run when it "+
 				"draws again", stepDeadline)}
 	}
-	var tooLong cwgpu.ErrHoldTooLong
+	var tooLong app.ErrHoldTooLong
 	if errors.As(err, &tooLong) {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"a hold may stand for at most %d ms, and %d was asked for",

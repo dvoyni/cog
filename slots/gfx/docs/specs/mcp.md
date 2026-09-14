@@ -70,6 +70,16 @@ func (provider) Capabilities() []mcp.Capability {
 > behaviour are unchanged; the file paths and line numbers cited below are as
 > they were when this was written.
 
+> **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** `app` became
+> a Slot whose plugin owns time control — pause, step, hold and tick numbering
+> — and requires wgpu's `Driver` Adapter, so the time tool is now `app_time`,
+> renamed from `wgpu_time` with its schema unchanged; the description prose
+> below says `app_time hold`. `app.Paused` and `app.HoldRemaining` are gone:
+> `gfx_capture` and `gfx_frame` dispatch `app.TimeCmd` with `TimeStatus`
+> themselves and read `Paused` and `HoldFor`, and gfx declares `app.Name` as a
+> dependency so the handler is always there. File and line citations of wgpu's
+> tick code below are as they were before the move.
+
 Both are `mcp.Func` rather than `mcp.Command`, and for the same reason: each
 arms a flag and then waits for the engine, which cannot be one dispatch. Both
 are `mcp.ReadOnly()` — neither changes the game, and both write only a file they
@@ -398,7 +408,11 @@ shapes across two tools.
 > every tick it publishes and the number rides `app.UpdateEvent` — and it is
 > carried out of the tick that produced the snapshot rather than asked for
 > afterwards, when the tick source has already moved on. See
-> [wgpu §Every tick is numbered](../../../../extensions/wgpu/docs/specs/mcp.md#every-tick-is-numbered).
+> [app §Every tick is numbered](../../../../slots/app/docs/specs/mcp.md#every-tick-is-numbered).
+
+> **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** It is `app`'s
+> plugin, not the driver, that numbers every tick it publishes; wgpu only calls
+> the loop app hands it.
 
 A `MarshalJSON` on each descriptor implemented by `unsafe`-casting to a mirror
 struct with public fields was proposed and **rejected on four counts**:
@@ -448,7 +462,7 @@ mirror throws away.
 > response.
 >
 > Every response names the `tick` it describes. To describe one moment, call
-> `wgpu_time hold` first and arm this together with `canvas_draws` and
+> `app_time hold` first and arm this together with `canvas_draws` and
 > `ui_layout`, which then share that one step; they paired only if all three
 > report the same `tick`. Take `gfx_capture` last, because it costs no tick and
 > so shows whatever that step produced.
@@ -459,7 +473,7 @@ mirror throws away.
 > `canvas_draws` and `ui_layout`, which share that single step, and take
 > `gfx_capture` last"* — which was an instruction an agent could follow and
 > still get two ticks, because sharing the step is opportunistic without a
-> `wgpu_time hold`, and nothing in the response said which tick it got. The
+> `app_time hold`, and nothing in the response said which tick it got. The
 > prose now names the hold and the check.
 
 ---
@@ -476,7 +490,7 @@ behave differently from each other, and an agent holding both will notice.
 
 > **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).** Two additions to the second
 > row. Joining a pending step is *opportunistic* on its own — the window is
-> only as wide as the gap before the next drawn frame — so a `wgpu_time hold`
+> only as wide as the gap before the next drawn frame — so an `app_time hold`
 > is what makes several arms share one step reliably; and the response names
 > the `tick` it describes, so a split is visible rather than silent. A
 > capture still costs no tick, which is why it goes last and why it needs no

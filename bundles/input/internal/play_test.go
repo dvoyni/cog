@@ -57,7 +57,7 @@ func (h *playHarness) seam() input.StateResponse {
 	return response
 }
 
-// step advances the paused engine, the way wgpu_time step does.
+// step advances the paused engine, the way app_time step does.
 func (h *playHarness) step(ticks int) {
 	h.t.Helper()
 	if _, err := h.k.ExecuteCommand[app.TimeCmd](
@@ -75,13 +75,14 @@ func (h *playHarness) play(actions ...input.Action) input.StateResponse {
 	return response
 }
 
-// pausedHost is a tick source that is always paused: nothing ticks until a
-// step asks for ticks, and a step publishes exactly the ticks it was asked
-// for. It is app.TimeCmd's contract with the parts a window would own left
-// out, which is enough for the recipe pause exists to make possible.
+// pausedHost stands in for app as a tick source that is always paused: nothing
+// ticks until a step asks for ticks, and a step publishes exactly the ticks it
+// was asked for. It is app.TimeCmd's contract with the loop and the parts a
+// window would own left out, which is enough for the recipe pause exists to
+// make possible.
 type pausedHost struct{}
 
-func (pausedHost) Name() kernel.PluginName           { return "test-paused-host" }
+func (pausedHost) Name() kernel.PluginName           { return app.Name }
 func (pausedHost) Dependencies() []kernel.PluginName { return nil }
 func (pausedHost) Register(r *kernel.Registrar, _ any) error {
 	r.HandleCommand[app.TimeCmd](func() (kernel.Lock, kernel.Execute[app.TimeRequest, app.TimeResponse]) {
@@ -413,8 +414,8 @@ func TestPlay_ModifiersComeFromTheLiveDownSetAfterTheFold(t *testing.T) {
 func TestPlay_UnderPauseAKeyIsHeldForExactlyOneTick(t *testing.T) {
 	harness := newPlayHarness(t)
 	harness.probe.watch(input.KeyW)
-	if !app.Paused(harness.k) {
-		t.Fatal("the harness engine reports itself running")
+	if status, err := harness.k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus}); err != nil || !status.Paused {
+		t.Fatalf("the harness engine answered %+v, %v, want a paused tick source", status, err)
 	}
 
 	harness.play(input.Action{Do: input.ActionKeyDown, Key: input.KeyW})

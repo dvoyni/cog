@@ -120,6 +120,16 @@ itself. Providers name `mcp` on every capability they add; an app names
 > [broker.md](broker.md). The tool names are unchanged. File paths and line
 > numbers cited below are as they were when this was written.
 
+> **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** `app` became
+> a Slot with its own plugin, which owns time control — the accumulator, the
+> tick source, tick numbering, pause, step and hold — and requires wgpu's
+> `Driver` Adapter. The time tool moved with it and is now `app_time`, renamed
+> from `wgpu_time` with its schema unchanged; every mention below uses the new
+> name, and its row in the capability set names `app` as the provider. wgpu
+> offers no capability. The wgpu tool spec moved to
+> [slots/app/docs/specs/mcp.md](../../../../slots/app/docs/specs/mcp.md). File
+> and line citations of wgpu's tick code below are as they were before the move.
+
 One package was rejected. It would put the MCP SDK and
 `github.com/google/jsonschema-go` in the module graph of anything importing
 `gfx`, and would force one package doc to describe both an extension point and
@@ -541,6 +551,9 @@ What the agent may set today, all of it free:
 - **Paused-ness**, which the driver holds until something resumes it
   ([#211](https://github.com/dvoyni/cog/issues/211)).
 
+> **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** Paused-ness
+> is now held by `app`'s plugin, not by the driver.
+
 `#205` named a second tier — *content the agent authors* — whose only member was
 a ui debug overlay. `#231` ruled that out of scope: the agent says in chat
 everything it would have drawn, to the human who is already reading it. **The
@@ -579,8 +592,8 @@ means there is no session identity to reach for
 
 **The consequence to state in every provider spec that has standing state:** a
 held synthetic key and a paused engine both survive a disconnect, and nothing
-will clear them. `input_state` and `wgpu_time status` exist so an agent can find
-them; `input_send`'s 10s cap and `wgpu_time step`'s 600 cap exist so the window
+will clear them. `input_state` and `app_time status` exist so an agent can find
+them; `input_send`'s 10s cap and `app_time step`'s 600 cap exist so the window
 in which one can be *created and then orphaned* is bounded.
 
 ---
@@ -630,7 +643,7 @@ capture, or a second snapshot of the *same* kind, is refused.
 
 **Not every capability is frame-bound, and that is what keeps this section
 meaning something.** `input_send`, `input_state` and `mcpserver_architecture`
-bind to no frame at all; `wgpu_time` binds to one for `step` and to none for
+bind to no frame at all; `app_time` binds to one for `step` and to none for
 `pause`, `resume` and `status`.
 
 ### Under pause
@@ -656,7 +669,7 @@ between ticks rather than stale (`defer write.reset()`, `defer frame.clear()`).
 > **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).** The third bullet is new, and
 > the second one's "or joins one already pending" is weaker than it reads: the
 > join only reaches a step that is still pending, which the next drawn frame
-> ends. `wgpu_time hold` is what holds it open.
+> ends. `app_time hold` is what holds it open.
 
 ---
 
@@ -668,10 +681,10 @@ every frame-bound capability's description points at, and it is the whole reason
 a batch capability.
 
 ```
-wgpu_time pause
-wgpu_time hold                         (the step window stops belonging to the frame clock)
+app_time pause
+app_time hold                          (the step window stops belonging to the frame clock)
 canvas_draws + ui_layout + gfx_frame   (parallel arms, coalesced onto ONE step -> tick N+1)
-wgpu_time release                      (or let the hold expire)
+app_time release                       (or let the hold expire)
                                        -> all three report tick: N+1, or they did not pair
 gfx_capture                            (no tick; the frozen frame IS N+1)
 ```
@@ -687,7 +700,11 @@ pending joins that step rather than requesting another**. Read per-arm, three
 concurrent arms would be three steps on three different ticks — the precise
 opposite of what arming them together is for. The rule is a `wgpu` tick-source
 behaviour before it is an agent-facing one; see
-[extensions/wgpu/docs/specs/mcp.md](../../../../extensions/wgpu/docs/specs/mcp.md).
+[slots/app/docs/specs/mcp.md](../../../../slots/app/docs/specs/mcp.md).
+
+> **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** The tick
+> source is `app`'s now, not `wgpu`'s: the join rule is a behaviour of `app`'s
+> plugin, which wgpu drives through the `Driver` Adapter.
 
 > **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).**
 > The recipe shipped without the hold and the check, and **it did not describe
@@ -698,7 +715,7 @@ behaviour before it is an agent-facing one; see
 > before the next drawn frame consumes the batch, and three calls over three
 > connections do not reliably fit inside one.
 >
-> Two lines are therefore new. **`wgpu_time hold`** stops a frame from
+> Two lines are therefore new. **`app_time hold`** stops a frame from
 > consuming the step until `release` or until the hold's own deadline, so the
 > window belongs to the agent; and **every snapshot now reports the `tick` it
 > describes**, so the agent confirms the pairing from the responses instead of
@@ -830,10 +847,10 @@ is the order the agent reads them in.
 | `ui_layout` | `ui` | `Func` | tick | yes |
 | `input_send` | `input` | `Func` | no | no |
 | `input_state` | `input` | `Command` | no | yes |
-| `wgpu_time` | `wgpu` | `Func` | `step` only | no |
+| `app_time` | `app` | `Func` | `step` only | no |
 | `mcpserver_architecture` | `mcpserver` | `Func` | no | yes |
 
-`wgpu_time`'s row read *per action* until
+`app_time`'s row read *per action* until
 [#250](https://github.com/dvoyni/cog/issues/250) implemented it. An annotation
 is per tool, not per argument, and three of that tool's four actions change the
 game, so the whole tool is not read-only; `status` says it only reports in its
@@ -841,7 +858,7 @@ description. Per-action approval annotation is out of scope for this effort —
 it would need vocabulary here and in the broker, which
 [#211](https://github.com/dvoyni/cog/issues/211) §12 rules out.
 
-> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).** `wgpu_time` has six actions
+> **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).** `app_time` has six actions
 > rather than four: `hold` and `release` join it so that several snapshots can
 > be made to describe one tick — see
 > [Pairing a moment](#pairing-a-moment). The row is unchanged in every column.
@@ -868,13 +885,20 @@ duplicate *within* a plugin is a construction failure, whether it comes from one
 Provider or from two the same plugin contributed.
 
 The rule survives one case that looks like an exception and is not.
-`wgpu_time`'s subject is the engine's tick source, not the driver — but `app`
+`app_time`'s subject is the engine's tick source, not the driver — but `app`
 has no plugin, so `app` cannot provide, and `wgpu` can. **Pausing is a property
 of the host that owns the loop**, and a different host genuinely is a different
 thing with a different answer: it would offer `sdl_time`. Amending the rule so a
 provider declares its own prefix was rejected — the rule's whole value is that
 the prefix is unforgeable and unique by construction
 ([#211](https://github.com/dvoyni/cog/issues/211) §7).
+
+> **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** The case
+> dissolved rather than stayed an apparent exception: `app` now has a plugin,
+> and it owns the tick source, so the tool's prefix names its subject directly
+> as `app_time`. Pausing is no longer a property of the host — a different host
+> would supply a different `Driver` Adapter and offer no time tool of its own.
+> The rejection of provider-declared prefixes stands.
 
 `mcpserver_architecture` is the same shape read the other way: the prefix names
 who offers it, the description names what it is about.

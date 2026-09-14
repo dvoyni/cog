@@ -11,8 +11,7 @@ Follow them in new and changed code without expanding a focused task into
 unrelated cleanup. Which package a declaration belongs in — the root,
 `internal/types`, `internal/` or the constructor package — and what a root may
 hold is [`architecture.instructions.md`](architecture.instructions.md); this
-file assumes it. The plugin still on the tier test's migration list, app, keeps
-its old layout until it moves.
+file assumes it.
 
 ## Handler Structure
 
@@ -307,6 +306,7 @@ a Slot, so only a Slot declares one:
 
 ```go
 type BackendPort kernel.RequiredPort[Backend]         // gfx/ports.go
+type DriverPort kernel.RequiredPort[Driver]           // app/ports.go
 type PermanentFSPort kernel.RequiredPort[PermanentFS] // storage/ports.go
 type ProviderPort kernel.CollectedPort[Provider]      // mcp/ports.go
 ```
@@ -318,6 +318,7 @@ provides an Adapter `adapters.go` does not declare or declares one it never
 provides:
 
 ```go
+type AppDriver kernel.Adapter[app.DriverPort]            // wgpu/adapters.go
 type GfxBackend kernel.Adapter[gfx.BackendPort]          // wgpu/adapters.go
 type StoragePermanentFS kernel.Adapter[storage.PermanentFSPort] // diskfs, jsfs
 type McpProvider kernel.Adapter[mcp.ProviderPort]        // every plugin with capabilities
@@ -368,8 +369,8 @@ contributed from its `Register`.
 
 ## Dependencies
 
-Declare in `Dependencies` every plugin whose commands, events or resources you
-use, named by its root's `Name`:
+Declare in `Dependencies` every plugin whose commands you dispatch or whose
+resources you use, named by its root's `Name`:
 
 ```go
 func (p *plugin) Dependencies() []kernel.PluginName {
@@ -383,6 +384,15 @@ declared dependency. Registration order does not affect resource binding, but
 dependencies still order `Register` and `Start`. Test plugins are held to the
 same rule, so a fixture that locks a real plugin's resource must declare that
 plugin.
+
+A dependency on the plugin that handles a command is what guarantees the command
+a handler, so a caller never has to read a missing one as an answer. A plugin
+dispatching `app.TimeCmd` or `app.QuitCmd` declares `app.Name` (gfx, canvas and
+ui do, for their snapshot capabilities). An event has no owner to depend on:
+subscribing to `app.UpdateEvent` needs no dependency on app (input, anim and
+scene subscribe without one), because an event nobody publishes is
+simply never delivered, and subscribers are ordered with `First`, `Last`,
+`Before` and `After`, not by dependencies.
 
 ## Package File Layout
 
@@ -435,9 +445,6 @@ value type to `types.go`.
 Command handlers never sit beside their commands: `commands.go` stays a readable
 list of what the plugin offers. A root takes only the files it needs: an
 Extension has no `commands.go` even when it handles another plugin's commands.
-
-A plugin on the migration list keeps its old layout until it moves: `slots/app`
-is a contract with no implementation.
 
 ## Validation
 

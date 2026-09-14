@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/bundles/input"
-	"github.com/dvoyni/cog/bundles/mcp"
 	cwgpu "github.com/dvoyni/cog/extensions/wgpu"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
@@ -21,28 +20,22 @@ type plugin struct {
 	config cwgpu.Config
 	gpu    *gogpu.App
 
-	// accum is the unspent frame time (seconds); touched only on the gogpu OnUpdate
-	// (main) thread. alpha is the render interpolation factor (atomic float64 bits).
-	accum float64
-	alpha atomic.Uint64
+	// loop is app's half of the application loop, attached by app from its
+	// Start, before Run. The main and render threads only read it.
+	loop app.Loop
 
 	// Frame clock: onDraw (render thread, paced to real vsync/rAF, so accurate
 	// across JS turns) measures the true per-frame dt; onUpdate (main thread, called
 	// at an unreliable rate under gogpu's busy loop, whose time deltas are quantized
-	// on wasm) consumes it via the frame sequence to drive the fixed-step. lastDraw
-	// is render-thread-only; frameDtBits/frameSeq are atomic; lastFrameSeq is
-	// main-thread-only.
+	// on wasm) consumes it via the frame sequence and hands it to the Loop's fixed
+	// step. lastDraw is render-thread-only; frameDtBits/frameSeq are atomic;
+	// lastFrameSeq is main-thread-only.
 	lastDraw     time.Time
 	frameDtBits  atomic.Uint64
 	frameSeq     atomic.Uint64
 	lastFrameSeq uint64
 	windowWidth  int
 	windowHeight int
-
-	// ticks is the tick source: what decides when an update tick is published.
-	// Its state lives beside alpha and frameSeq, as atomics crossing the same
-	// main-thread boundary, so onUpdate reads it without a dispatch per frame.
-	ticks tickSource
 
 	// pending holds input changes accumulated from gogpu's EventSource callbacks
 	// (main thread), flushed once per frame in onUpdate. Main-thread-only; no lock.
@@ -70,15 +63,17 @@ func (p *plugin) Name() kernel.PluginName {
 
 // Dependencies reports the plugins wgpu requires: gfx (whose viewport it drives,
 // and whose Backend adapter it provides) and input (to which it forwards OS
-// input events).
+// input events). The app Driver it provides binds without a dependency: wgpu
+// dispatches none of app's commands, and app attaches its Loop from Start,
+// which precedes Run whatever the plugin order.
 func (p *plugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{cgfx.Name, input.Name}
 }
 
-// Register provides gfx's Backend adapter, resolves the configuration (nil ->
-// the zero wgpu.Config, and every zero field of either takes its default),
-// builds the gogpu App, and registers its commands. It does not block; the main
-// loop starts in Run.
+// Register provides gfx's Backend adapter and app's Driver, resolves the
+// configuration (nil -> the zero wgpu.Config, and every zero field takes its
+// default), and builds the gogpu App. It does not block; the main loop starts
+// in Run.
 //
 // The adapter is provided before the device exists, because a Port's adapter is
 // bound at composition and the device is created asynchronously inside the
@@ -88,7 +83,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 		p.gfxBackend = newGfxBackend()
 	}
 	registrar.ProvideAdapter[cwgpu.GfxBackend](cgfx.Backend(p.gfxBackend))
-	registrar.ProvideAdapter[cwgpu.McpProvider](mcp.Provider(provider{}))
+	registrar.ProvideAdapter[cwgpu.AppDriver](app.Driver(driver{p}))
 	var cfg cwgpu.Config
 	if config != nil {
 		c, ok := config.(cwgpu.Config)
@@ -103,29 +98,27 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	p.gpu = gogpu.NewApp(gogpuConfig(cfg))
 	// Bridge gogpu input events into the input contract.
 	p.wireInput()
-
-	registrar.HandleCommand[app.QuitCmd](p.quitCmdImpl)
-	registrar.HandleCommand[app.TimeCmd](p.timeCmdImpl)
 	return nil
 }
 
-// Run owns the calling (main) thread: it wires the gogpu callbacks to k, starts a
-// watcher that quits the gogpu App when the engine's context is canceled, then
-// runs the App's blocking main loop. Run returns when the window closes (or the
+// Run owns the calling (main) thread: it wires the gogpu callbacks to k, has the
+// Loop app attached publish app.InitEvent, starts a watcher that quits the
+// gogpu App when the engine's context is canceled, then runs the App's blocking
+// main loop, and has the Loop publish app.QuitEvent once it returns. Run returns when the window closes (or the
 // app quits), after which the engine shuts down. The callbacks are wired here
 // rather than in Register because that is where a Kernel first exists; the
 // captured value is immutable, so the main and render threads share it safely.
 func (p *plugin) Run(k kernel.Executioner) error {
 	ctx := k.Context()
-	// Fixed-timestep accumulator: turn gogpu's variable OnUpdate into fixed steps.
+	// Frame clock: hand gogpu's variable OnUpdate to the Loop's fixed step.
 	p.gpu.OnUpdate(func(dt float64) { p.onUpdate(k, dt) })
-	// Per-frame render barrier (publishes app.RenderEvent on the render thread).
+	// Per-frame render barrier (app.RenderEvent on the render thread).
 	p.gpu.OnDraw(func(dc *gogpu.Context) { p.onDraw(k, dc) })
 
-	if err := k.PublishEvent(app.InitEvent{}).Wait(); err != nil {
+	if err := p.loop.Init(k); err != nil {
 		return err
 	}
-	defer func() { _ = k.PublishEvent(app.QuitEvent{}).Wait() }()
+	defer p.loop.Quit(k)
 	runDone := make(chan struct{})
 	watcherDone := make(chan struct{})
 	go func() {
@@ -164,44 +157,20 @@ func quitOnCancellation(ctx context.Context, runDone <-chan struct{}, quit func(
 }
 
 // onUpdate runs on the gogpu (main) thread each frame. It flushes batched input,
-// then publishes one fixed app.UpdateEvent per whole Step accumulated. It advances
-// the accumulator by the real time of any newly rendered frames (measured in
+// then hands the Loop the real time of any newly rendered frames (measured in
 // onDraw), because gogpu's deltaTime is 0 on wasm and onUpdate's own time deltas
-// are quantized within gogpu's busy-loop burst. Publishing on the main thread —
-// not a separate goroutine — avoids starving the game under gogpu's busy loop.
-//
-// While paused the frame's time is consumed and discarded rather than
-// accumulated, so nothing is banked and a resume costs no catch-up ticks, and
-// the only ticks published are the steps somebody asked for. Everything else
-// this frame — the input flush here, and the whole of onDraw — runs exactly as
-// it does while running, because pause stops the tick and not the frame.
+// are quantized within gogpu's busy-loop burst. The flush comes first so every
+// tick the frame publishes sees that input, and it runs whether or not the tick
+// source is paused, because pause stops the tick and not the frame.
 func (p *plugin) onUpdate(k kernel.Executioner, _ float64) {
 	p.flushInput(k)
-	dt := p.consumeFrameTime()
-	steps, paused, batch := p.ticks.take()
-	if !paused {
-		steps = p.accumulate(dt)
-	}
-	e := app.UpdateEvent{Dt: p.config.Step.Seconds()}
-	for n := steps; n > 0; n-- {
-		// Every step is the last of its frame, so once-per-frame subscribers
-		// do their work and each step produces a complete frame; rendering
-		// then shows the last of them.
-		e.Last = paused || n == 1
-		// Every tick carries its own number, so that whatever a subscriber
-		// records inside one can name the tick it describes.
-		e.Tick = p.ticks.next()
-		_ = k.PublishEvent(e).Wait()
-	}
-	if paused {
-		p.ticks.published(steps, batch)
-	}
+	p.loop.Frame(k, p.consumeFrameTime())
 }
 
 // consumeFrameTime reports the real time of the frames rendered since the last
 // call, and marks them consumed. It runs whether or not the tick source is
-// paused: a paused engine keeps drawing, and leaving its frames unconsumed is
-// what would turn a thirty-second pause into a catch-up burst on resume.
+// paused: a paused engine keeps drawing, and the Loop discards the time a paused
+// frame hands it, so no pause turns into a catch-up burst on resume.
 func (p *plugin) consumeFrameTime() float64 {
 	seq := p.frameSeq.Load()
 	if seq <= p.lastFrameSeq {
@@ -212,42 +181,15 @@ func (p *plugin) consumeFrameTime() float64 {
 	return dt
 }
 
-// accumulate folds dt (clamped to MaxFrame) into the fixed-step accumulator and
-// returns how many app.UpdateEvent values to publish this frame — capped at
-// MaxPending, with excess whole steps dropped to stay near real-time rather than
-// spiralling. The leftover fraction is stored as the render interpolation alpha.
-func (p *plugin) accumulate(dt float64) int {
-	step := p.config.Step.Seconds()
-	if step <= 0 {
-		return 0
-	}
-	if maxFrame := p.config.MaxFrame.Seconds(); maxFrame > 0 && dt > maxFrame {
-		dt = maxFrame
-	}
-	p.accum += dt
-	maxSteps := p.config.MaxPending
-	if maxSteps < 1 {
-		maxSteps = 1
-	}
-	steps := 0
-	for p.accum >= step {
-		p.accum -= step
-		if steps < maxSteps {
-			steps++
-		}
-	}
-	p.storeAlpha(p.accum / step)
-	return steps
-}
-
-// onDraw runs on the gogpu render thread each frame. It drains pending texture
-// uploads (GPU resource creation must stay on this thread), publishes app.RenderEvent as
-// a barrier, then consumes the latest completed frame and replays its ops as
-// native GPU calls onto the surface view. gogpu presents the surface after
-// onDraw returns. Alpha is the interpolation factor from the last update.
+// onDraw runs on the gogpu render thread each frame. It measures the frame
+// clock, reports a window size change to the Loop, resolves the viewport,
+// attaches the backend to the surface, and then has the Loop publish
+// app.RenderEvent as a barrier, in whose handler gfx replays the latest
+// completed frame onto the surface view. gogpu presents the surface after
+// onDraw returns.
 func (p *plugin) onDraw(k kernel.Executioner, dc *gogpu.Context) {
 	// Measure the true per-frame dt from the render cadence (paced across JS turns,
-	// so accurate on wasm) and publish it for onUpdate's fixed-step accumulator.
+	// so accurate on wasm) and publish it for onUpdate to hand to the Loop.
 	if now := time.Now(); !p.lastDraw.IsZero() {
 		p.frameDtBits.Store(math.Float64bits(now.Sub(p.lastDraw).Seconds()))
 		p.frameSeq.Add(1)
@@ -259,9 +201,7 @@ func (p *plugin) onDraw(k kernel.Executioner, dc *gogpu.Context) {
 	windowW, windowH := dc.Size()
 	if windowW != p.windowWidth || windowH != p.windowHeight {
 		p.windowWidth, p.windowHeight = windowW, windowH
-		_ = k.PublishEvent(app.WindowSizeChangeEvent{
-			Width: float32(windowW), Height: float32(windowH),
-		}).Wait()
+		p.loop.WindowSize(k, float32(windowW), float32(windowH))
 	}
 
 	// SurfaceView forces gogpu's lazy frame start and returns the frame's render
@@ -277,8 +217,8 @@ func (p *plugin) onDraw(k kernel.Executioner, dc *gogpu.Context) {
 			FramebufferWidth: float32(fbW), FramebufferHeight: float32(fbH),
 		})
 
-	// Make the surface current on the backend, then publish app.RenderEvent — the
-	// gfx plugin renders in its render-thread handler.
+	// Make the surface current on the backend, then have the Loop publish
+	// app.RenderEvent — the gfx plugin renders in its render-thread handler.
 	if !p.gfxBackend.Ready() {
 		if err := p.gfxBackend.attach(p.gpu.DeviceProvider(), dc.Backend()); err != nil {
 			// The device is created asynchronously, so this is expected until it is
@@ -297,15 +237,5 @@ func (p *plugin) onDraw(k kernel.Executioner, dc *gogpu.Context) {
 		k.ReportError(err)
 	}
 	p.gfxBackend.setScreen(view, fbW, fbH)
-	_ = k.PublishEvent(app.RenderEvent{Alpha: p.loadAlpha()}).Wait()
-}
-
-// storeAlpha and loadAlpha carry the render interpolation factor across the
-// main->render thread boundary as an atomically-stored float64.
-func (p *plugin) storeAlpha(a float64) {
-	p.alpha.Store(math.Float64bits(a))
-}
-
-func (p *plugin) loadAlpha() float64 {
-	return math.Float64frombits(p.alpha.Load())
+	p.loop.Render(k)
 }

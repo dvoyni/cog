@@ -17,6 +17,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ui/internal/types"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/app/appplugin"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/gfx/gfxplugin"
 	"github.com/dvoyni/cog/slots/storage"
@@ -92,6 +93,7 @@ func TestPluginMapsWindowPointerToLogicalViewport(t *testing.T) {
 		return true
 	}).WithPlugins(
 		storageplugin.New(), permanentAdapter{},
+		appplugin.New(), driverAdapter{},
 		inputplugin.New(),
 		gfxplugin.New(),
 		backendAdapter{&detachedBackend{}},
@@ -154,6 +156,7 @@ func TestPluginProcessesAndClearsEveryUpdate(t *testing.T) {
 		return true
 	}).WithPlugins(
 		storageplugin.New(), permanentAdapter{},
+		appplugin.New(), driverAdapter{},
 		inputplugin.New(),
 		gfxplugin.New(),
 		backendAdapter{&detachedBackend{}},
@@ -224,7 +227,7 @@ func TestPluginSeesAScriptedClickAsAClick(t *testing.T) {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfxplugin.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, inputplugin.New(), gfxplugin.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
 	go engine.Run(runContext)
 	<-engine.Ready()
 	k := engine.Executioner()
@@ -263,7 +266,7 @@ func TestPluginSeesAScriptedDragAsADrag(t *testing.T) {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfxplugin.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, inputplugin.New(), gfxplugin.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
 	go engine.Run(runContext)
 	<-engine.Ready()
 	k := engine.Executioner()

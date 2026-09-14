@@ -205,8 +205,9 @@ func (p *plugin) Stop(kernel.Executioner) error {
 // before the Stop loop, after which every dispatch fails, so a broker waiting
 // for Stop would be serving an engine that can no longer execute anything. Stop
 // order is reverse start order, so a dependency-less broker listed first stops
-// last. And app has no plugin, so nothing can declare a dependency on it to
-// force the ordering.
+// last. And declaring a dependency on app, or on anything, to force the
+// ordering would buy nothing: a dependency orders Stop, and every Stop runs
+// after that cancellation.
 func (p *plugin) watch(engine context.Context) {
 	defer close(p.drained)
 	select {

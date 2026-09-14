@@ -19,6 +19,16 @@
 > `ErrCaptureAbandoned`, `ErrCaptureUnsupported` and `ErrCaptureNoTarget` are in
 > the root's `err.go`. The plugin, formerly `gfximpl`, is `slots/gfx/internal`,
 > constructed with `gfxplugin.New()`. File and line references predate the move.
+>
+> **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** `app` became
+> a Slot whose plugin owns time control and requires wgpu's `Driver` Adapter, so
+> pause is `app`'s and the time tool is now `app_time`, renamed from `wgpu_time`
+> with its schema unchanged; the burst cap below borrows from `app_time step`.
+> `app.Paused` is gone: to refuse a burst under pause, `gfx_capture` dispatches
+> `app.TimeCmd` with `TimeStatus` itself and reads `Paused`, and gfx declares
+> `app.Name` as a dependency. The wgpu mcp spec moved to
+> [slots/app/docs/specs/mcp.md](../../../../slots/app/docs/specs/mcp.md). File
+> and line citations of wgpu's code below are as they were before the move.
 
 `github.com/dvoyni/cog/extensions/gfx` cannot read a rendered pixel back today. `MapAsync`,
 `CopyTextureToBuffer`, `MapRead` and `GetMappedRange` return **zero hits across
@@ -277,7 +287,7 @@ the sequence is portable without a build tag.
 The consequence to carry upward: **one frame of latency is a fixed property of
 every capture**, and a capture needs a frame to be *submitted* before it can
 resolve. That is why pause cannot mean "no submits" — see
-[extensions/wgpu/docs/specs/mcp.md](../../../../extensions/wgpu/docs/specs/mcp.md).
+[slots/app/docs/specs/mcp.md](../../../../slots/app/docs/specs/mcp.md).
 
 ---
 
@@ -516,7 +526,7 @@ frame *i* binds to the completed op queue `i × interval` ticks after the arm,
 inheriting the guarantee above verbatim.
 
 - **Caps: `amount ≤ 60`, and `amount × interval ≤ 600`** — the span bound
-  borrowed from `wgpu_time step`'s cap, with the same number, so there is one
+  borrowed from `app_time step`'s cap, with the same number, so there is one
   figure to remember. `interval` is what buys a long window, never `amount`.
 - **`amount > 1` under pause is refused in words.** No new ticks means N
   byte-identical files, and a silent pile of duplicates is exactly the failure a

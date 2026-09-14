@@ -51,6 +51,15 @@ settle it.
 > `bundles/canvas/internal/types`. The plugin is constructed with
 > `canvasplugin.New()`. The tool name, its schema and its behaviour are
 > unchanged.
+>
+> **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** `app` became
+> a Slot whose plugin owns time control and requires wgpu's `Driver` Adapter, so
+> the time tool is now `app_time`, renamed from `wgpu_time` with its schema
+> unchanged; the description prose below says `app_time hold`. `app.Paused` is
+> gone: canvas's arm dispatches `app.TimeCmd` with `TimeStatus` itself and reads
+> `Paused`, and canvas declares `app.Name` as a dependency so the handler is
+> always there. The wgpu tool spec moved to
+> [slots/app/docs/specs/mcp.md](../../../../slots/app/docs/specs/mcp.md).
 
 ---
 
@@ -408,7 +417,7 @@ Reproduced in full, per the house style, so it is reviewed as prompt text:
 >
 > While the game is paused this performs one step to have something to record,
 > and says so in the response, along with the `tick` it describes. To describe
-> one moment, call `wgpu_time hold` first and arm this together with
+> one moment, call `app_time hold` first and arm this together with
 > `ui_layout` and `gfx_frame`, which then share that one step; they paired only
 > if all three report the same `tick`. Take `gfx_capture` last, because it
 > costs no tick and so shows whatever that step produced.
@@ -417,11 +426,11 @@ Reproduced in full, per the house style, so it is reviewed as prompt text:
 > The last two sentences are new. As shipped the prose said *"Arm it together
 > with `ui_layout` and `gfx_frame` to describe one moment: they share that
 > single step"*, which an agent could follow and still get two ticks: sharing
-> the step is opportunistic without a `wgpu_time hold`, and nothing in the
+> the step is opportunistic without an `app_time hold`, and nothing in the
 > response said which tick it got. `gfx.SnapshotView` now carries `tick`, so
 > this response names the moment it describes — see
 > [gfx §The view types](../../../../slots/gfx/docs/specs/mcp.md#the-view-types) and
-> [wgpu §A hold decides it](../../../../extensions/wgpu/docs/specs/mcp.md#a-hold-decides-it).
+> [app §A hold decides it](../../../../slots/app/docs/specs/mcp.md#a-hold-decides-it).
 
 ---
 

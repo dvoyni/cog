@@ -67,13 +67,13 @@ declarations on the next tick instead of retaining and mutating a submitted tree
 
 - Name: `ui.Name` (`"ui"`)
 - Constructor: `uiplugin.New() kernel.Plugin`
-- Dependencies: `input`, `gfx`, and `canvas`
+- Dependencies: `app` (whose `TimeCmd` `ui_layout` dispatches), `input`, `gfx`, and `canvas`
 - Configuration: none
 - Contributes: one `mcp.Provider` Adapter
 - Implements: `kernel.PluginStopper`
 
 Register dependencies before UI, typically in this order: `storage`, `input`,
-`gfx`, `canvas`, then `ui`.
+`app`, `gfx`, `canvas`, then `ui`.
 
 UI processing subscribes to `app.UpdateEvent` as `ui.ProcessOnUpdate`, after
 `input.AdvanceOnUpdate` and before `canvas.FlushOnUpdate`. It lays out the

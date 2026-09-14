@@ -11,9 +11,9 @@ plugin has the same package shape. [`docs/adr/0002-slots-extensions-and-bundles-
 records why; [`CONTEXT.md`](../../CONTEXT.md) defines each term. The kinds, the
 shape and the import rules are enforced by `kernel/archtest`, not by review.
 
-Plugins on the tier test's migration list have not moved yet and keep the shape
-in [Plugins Not Yet Moved](#plugins-not-yet-moved). Everything else here is the
-rule for every plugin that has moved, and for every new plugin.
+Every plugin has moved to this shape, and everything here is the rule for
+every plugin, new ones included. The tier test's migration list is empty; what
+is left of it is in [Plugins Not Yet Moved](#plugins-not-yet-moved).
 
 ## The Kinds
 
@@ -112,7 +112,8 @@ stay where they are.
   map under `Name`, since its constructor takes nothing. An Extension may be
   the engine's `kernel.PluginHost`, as wgpu is: the host is the plugin value
   its constructor returns, found by the kernel, so nothing in the root names
-  it. An Extension built for
+  it. The platform main loop it runs is still an Adapter like any other:
+  wgpu provides it as `AppDriver`, for app's `DriverPort`. An Extension built for
   one platform only (diskfs is `!js`, jsfs is `js`) tags its `internal/` implementation and its
   constructor package, and leaves its root untagged so the declarations build
   everywhere.
@@ -158,8 +159,6 @@ performance goes in `internal/types`. Everything else goes in `internal/`.
 - Nothing in cog imports a constructor package or another plugin's `internal/`,
   except from `_test.go` files. A test composing an engine imports constructor
   packages; every other row holds for tests too.
-- For these rules, `slots/app`, the one plugin on the migration list, counts
-  as a root.
 
 ## Ordering Identities
 
@@ -189,14 +188,14 @@ cog, `kernel/archtest/**` and `docs/research/**` are outside the tiers.
 the shape [ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md)
 decided, and the tier test holds each of them to that shape's rules. Moving a
 plugin deletes its entry in the same change, and an entry naming a directory
-with no package fails the test. In that shape:
+with no package fails the test.
 
-- `slots/app` is an **Open slot**: a contract with no implementation.
-
-No plugin with a **contract root**, an **`…impl`** or a Port's **vocabulary
-package** is left: gfx, the last, moved in #366. No single-package Extension is
-left either: wgpu moved in #367. The tier test keeps their rules until the final
-sweep deletes the list, and its fixtures still exercise them.
+The list is empty. No **Open slot** is left: app, the last plugin on it, became
+a Slot with its own plugin in #368. No plugin with a **contract root**, an
+**`…impl`** or a Port's **vocabulary package** is left either: gfx, the last,
+moved in #366. Nor is a single-package Extension: wgpu moved in #367. The tier
+test keeps their rules until the final sweep deletes the list, and its fixtures
+still exercise them.
 
 | package | may import |
 | --- | --- |

@@ -17,6 +17,7 @@ import (
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/app/appplugin"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
@@ -125,10 +126,11 @@ func (r *captureRig) runCapture(request captureScreenRequest) (captureScreenResp
 	}
 }
 
-// timePlugin answers app.TimeCmd so a test can tell the capability that the
-// tick source is stopped, and can stand in for the host when something steps
-// it. The real answer belongs to whichever host owns the loop, which a gfx
-// test does not have.
+// timePlugin stands in for app under app's name, answering app.TimeCmd so a
+// test can tell the capability that the tick source is stopped, and can stand
+// in for the loop when something steps it. gfx depends on app, and a test of
+// the capability's half wants to say what the tick source answers rather than
+// run one.
 type timePlugin struct {
 	paused atomic.Bool
 
@@ -143,7 +145,7 @@ type timePlugin struct {
 	requests []app.TimeRequest
 }
 
-func (*timePlugin) Name() kernel.PluginName           { return "gfxtesttime" }
+func (*timePlugin) Name() kernel.PluginName           { return app.Name }
 func (*timePlugin) Dependencies() []kernel.PluginName { return nil }
 
 func (t *timePlugin) Register(r *kernel.Registrar, _ any) error {
@@ -371,7 +373,7 @@ func TestACaptureAbandonedByShutdownArrivesOnItsChannel(t *testing.T) {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, renderer, testPlugin{})
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, renderer, testPlugin{})
 	stopped := make(chan struct{})
 	go func() { engine.Run(ctx); close(stopped) }()
 	<-engine.Ready()

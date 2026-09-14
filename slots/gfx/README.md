@@ -67,7 +67,7 @@ tier test allows exactly that shape.
 
 - Name: `gfx.Name` (`"gfx"`)
 - Constructor: `gfxplugin.New() kernel.Plugin`
-- Plugin dependency: `storage`
+- Plugin dependencies: `app`, `storage`
 - Requires: exactly one Adapter for `gfx.BackendPort`
 - Go package dependencies: `app`, `kernel`, `mcp`, `storage`, `x/image`
 - Contributes: one `mcp.Provider` Adapter
@@ -221,9 +221,11 @@ it can resolve — which is why a paused engine keeps drawing.
 
 **Under pause.** `ArmCaptureRequest.Paused` says the caller knows no further
 tick can begin, so the still binds straight to the next render and costs no
-tick. gfx does not read the tick source itself: pausing belongs to whichever
-host owns the loop, and gfx must not require a host to exist. Two captures
-taken under one pause are byte-identical, and a burst while paused is refused.
+tick. The arm command does not read the tick source itself; the caller says.
+`gfx_capture` finds out by dispatching `app.TimeCmd` with `TimeStatus` and
+reading `Paused`, which is why gfx declares `app` as a plugin dependency. Two
+captures taken under one pause are byte-identical, and a burst while paused is
+refused.
 
 **Bursts.** `Amount` stills, `Interval` ticks apart, capped at 60 stills and
 600 ticks of span. Each still binds on its own terms, so a burst spans many
@@ -283,7 +285,7 @@ were never evidence on their own — two snapshots both reporting a step may be
 one tick apart — so the response carries `tick`, taken out of the tick itself
 rather than read off the tick source afterwards. Snapshots armed together
 either agree on that number or they have split, and the agent can see which.
-Making them agree is `wgpu_time hold`'s job; saying whether they did is this
+Making them agree is `app_time hold`'s job; saying whether they did is this
 field's.
 
 ### The shared view types

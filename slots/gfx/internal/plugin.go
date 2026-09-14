@@ -62,8 +62,11 @@ func newPlugin() *plugin { return &plugin{translator: newTranslator()} }
 func (p *plugin) Name() kernel.PluginName { return gfx.Name }
 
 // Dependencies reports the plugins gfx requires: storage, from which it loads
-// shader and texture resources.
-func (p *plugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{storage.Name} }
+// shader and texture resources, and app, whose TimeCmd the gfx_capture and
+// gfx_frame capabilities dispatch.
+func (p *plugin) Dependencies() []kernel.PluginName {
+	return []kernel.PluginName{app.Name, storage.Name}
+}
 
 // Register requires the Backend adapter, and registers the three command-list
 // buffers, the Present/Acquire/Consume commands, and the end-of-tick present

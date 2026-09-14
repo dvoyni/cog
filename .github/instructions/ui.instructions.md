@@ -18,14 +18,14 @@ Establish why one level cannot express the behavior before moving to the next. E
 
 ## Wiring
 
-Compose ui in the composition root with the plugins it depends on — `input`,
-`gfx` and `canvas`, and what they need in turn. The kernel orders them by their
+Compose ui in the composition root with the plugins it depends on — `app`,
+`input`, `gfx` and `canvas`, and what they need in turn. The kernel orders them by their
 dependencies:
 
 ```go
 plugins := []kernel.Plugin{
 	storageplugin.New(), diskfsplugin.New(), // diskfs.Config{AppId: "demo"} under diskfs.Name
-	inputplugin.New(), gfxplugin.New(), canvasplugin.New(), uiplugin.New(), wgpuplugin.New(),
+	inputplugin.New(), appplugin.New(), gfxplugin.New(), canvasplugin.New(), uiplugin.New(), wgpuplugin.New(),
 	game, // declares the frame and reads the interactions
 }
 ```
