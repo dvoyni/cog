@@ -2,18 +2,20 @@ package app
 
 import "github.com/dvoyni/cog/kernel"
 
-// Driver is the interface app's Adapter implements: the platform main loop. A
-// plugin that owns one (wgpu on the desktop and the web) fills DriverPort with
-// registrar.ProvideAdapter during its Register, and is ordinarily the engine's
-// Host as well.
+// MainLoop is the interface app's required Adapter implements: the platform
+// main loop, which runs the frames and calls app's Loop in each of them. A
+// plugin that owns one (wgpu on the desktop and the web) fills MainLoopPort
+// with registrar.ProvideAdapter during its Register, and is ordinarily the
+// engine's Host as well.
 //
-// app hands the driver its Loop and asks it to stop, and nothing else.
-// Everything the driver does besides — measuring frame time, reading input,
-// tracking the window — it reports through that Loop.
-type Driver interface {
-	// Attach hands the driver the Loop it drives. app calls it once, from its
+// The two halves face opposite ways. app calls the MainLoop, and only to hand
+// over its Loop and to stop the platform loop. The MainLoop calls the Loop,
+// every frame, and reports through it everything else it does — measuring
+// frame time, reading input, tracking the window.
+type MainLoop interface {
+	// Attach hands the MainLoop the Loop it calls. app calls it once, from its
 	// Start, so it happens before the Host's Run and before any frame. The
-	// driver keeps the Loop for the engine's lifetime.
+	// MainLoop keeps the Loop for the engine's lifetime.
 	Attach(loop Loop)
 	// Quit stops the platform main loop, which unwinds the Host's Run and
 	// shuts the engine down. app calls it for QuitCmd, from whatever goroutine
@@ -21,7 +23,7 @@ type Driver interface {
 	Quit()
 }
 
-// DriverPort is the Port app requires exactly one Adapter for: the platform
-// main loop a driver such as wgpu provides. A composition without one fails
-// with kernel.ErrMissingAdapter.
-type DriverPort kernel.RequiredPort[Driver]
+// MainLoopPort is the Port app requires exactly one Adapter for: the platform
+// main loop, which wgpu provides as wgpu.AppMainLoop. A composition without
+// one fails with kernel.ErrMissingAdapter.
+type MainLoopPort kernel.RequiredPort[MainLoop]

@@ -476,7 +476,7 @@ func newTestKernelWith(t *testing.T, p *plugin, filesystem fs.FS, handler kernel
 	config := map[kernel.PluginName]any{
 		storage.Name: storage.Config{}.WithReadFS("test", 10, filesystem),
 	}
-	engine := kernel.New(config).Handler(handler).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, p, testPlugin{})
+	engine := kernel.New(config).Handler(handler).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, p, testPlugin{})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	return engine.Executioner()
@@ -1530,7 +1530,7 @@ func TestFailedShaderIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	engine := kernel.New(config).Handler(func(error) bool {
 		errorsReported++
 		return false
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, p, testPlugin{})
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, p, testPlugin{})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()

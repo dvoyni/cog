@@ -73,8 +73,12 @@ The optional lifecycle phase in which a plugin begins operating after all regist
 The single plugin that owns the application's blocking runtime loop, which the engine runs on the calling thread. It is a role the kernel gives one plugin, not a kind: the plugin playing it is still a Slot, an Extension or a Bundle.
 _Avoid_: System plugin. A System is the ECS's term for a func run over matching Entities, and has nothing to do with the Host.
 
+**MainLoop**:
+The Port app requires exactly one Adapter for: the platform main loop, which wgpu fills on the desktop and the web. app calls it only to hand over its Loop and to quit; the MainLoop runs the platform loop and calls the Loop every frame, and the Loop publishes app's events. The plugin filling it is ordinarily the Host.
+_Avoid_: Driver, which is the Store an ecs Query walks; Loop, which is the half app implements and the MainLoop calls
+
 **Tick source**:
-What decides when an update tick is published — the driver's frame clock while running, or an explicit step request while paused. Rendering is not a tick source: a paused engine keeps drawing the last completed frame.
+What decides when an update tick is published — the MainLoop's frame clock while running, or an explicit step request while paused. Rendering is not a tick source: a paused engine keeps drawing the last completed frame.
 
 **Tick number**:
 Which tick, counted from the engine's first and never reset. It is what names the moment something recorded inside a tick describes, so that two such records can be shown to describe one tick rather than assumed to. It is not a frame number: a frame may publish several ticks or none.
@@ -189,7 +193,7 @@ A Query field that narrows which Entities match without yielding anything into t
 _Avoid_: Predicate, matcher
 
 **Driver**:
-The one Store a Query walks to find candidates, every other Component it names being checked against each candidate in turn. A Query costs what its Driver is long, not what it matches, so narrowing a Query with a Tag can be the difference between visiting a hundred Entities and five thousand. A Filter can never be the Driver: it names the Entities to exclude, and nothing lists the rest.
+The one Store a Query walks to find candidates, every other Component it names being checked against each candidate in turn. A Query costs what its Driver is long, not what it matches, so narrowing a Query with a Tag can be the difference between visiting a hundred Entities and five thousand. A Filter can never be the Driver: it names the Entities to exclude, and nothing lists the rest. app's platform loop is the MainLoop, not a Driver.
 _Avoid_: lead, primary, base
 
 **System**:

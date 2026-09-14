@@ -46,7 +46,7 @@ import _ "fixture.test/cog/kernel"
 
 type Point struct{ X, Y int }
 `,
-	"slots/s/doc.go": `// Package s is a Slot: it cannot work until an Adapter fills its Driver.
+	"slots/s/doc.go": `// Package s is a Slot: it cannot work until an Adapter fills its MainLoop.
 package s
 `,
 	"slots/s/id.go": `package s
@@ -59,9 +59,9 @@ const Name kernel.PluginName = "s"
 
 import "fixture.test/cog/kernel"
 
-type Driver interface{ Run() error }
+type MainLoop interface{ Run() error }
 
-type DriverPort kernel.RequiredPort[Driver]
+type MainLoopPort kernel.RequiredPort[MainLoop]
 `,
 	"slots/s/types.go": `package s
 
@@ -161,7 +161,7 @@ import (
 	_ "fixture.test/cog/extensions/e/eplugin"
 )
 `,
-	"extensions/e/doc.go": `// Package e is an Extension: it fills s's Driver and contributes to n.
+	"extensions/e/doc.go": `// Package e is an Extension: it fills s's MainLoop and contributes to n.
 package e
 `,
 	"extensions/e/id.go": `package e
@@ -184,7 +184,7 @@ import (
 	"fixture.test/cog/slots/s"
 )
 
-type SDriver kernel.Adapter[s.DriverPort]
+type SMainLoop kernel.Adapter[s.MainLoopPort]
 
 type NProvider kernel.Adapter[n.ProviderPort]
 `,
@@ -205,9 +205,9 @@ import (
 
 type plugin struct{}
 
-type driver struct{}
+type mainLoop struct{}
 
-func (driver) Run() error { return nil }
+func (mainLoop) Run() error { return nil }
 
 type provider struct{}
 
@@ -218,7 +218,7 @@ func New() kernel.Plugin { return plugin{} }
 func (plugin) Name() kernel.PluginName           { return e.Name }
 func (plugin) Dependencies() []kernel.PluginName { return nil }
 func (plugin) Register(registrar *kernel.Registrar, config any) error {
-	registrar.ProvideAdapter[e.SDriver](s.Driver(driver{}))
+	registrar.ProvideAdapter[e.SMainLoop](s.MainLoop(mainLoop{}))
 	registrar.ProvideAdapter[e.NProvider](n.Provider(provider{}))
 	return nil
 }

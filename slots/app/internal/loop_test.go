@@ -24,16 +24,16 @@ func compose(config map[kernel.PluginName]any, plugins ...kernel.Plugin) error {
 	return failure
 }
 
-// app is a Slot: an engine that composes it without a Driver does not compose.
-func TestApp_RequiresADriver(t *testing.T) {
+// app is a Slot: an engine that composes it without a MainLoop does not compose.
+func TestApp_RequiresAMainLoop(t *testing.T) {
 	err := compose(nil, New())
 
 	var missing kernel.ErrMissingAdapter
 	if !errors.As(err, &missing) {
-		t.Fatalf("composing app with no Driver reported %v, want ErrMissingAdapter", err)
+		t.Fatalf("composing app with no MainLoop reported %v, want ErrMissingAdapter", err)
 	}
-	if got := kernel.TypeName(missing.Port); got != "app.DriverPort" {
-		t.Errorf("the Port missing its Adapter is %s, want app.DriverPort", got)
+	if got := kernel.TypeName(missing.Port); got != "app.MainLoopPort" {
+		t.Errorf("the Port missing its Adapter is %s, want app.MainLoopPort", got)
 	}
 }
 
@@ -45,18 +45,18 @@ func TestApp_RegistersUnderTheRootsName(t *testing.T) {
 	}
 }
 
-// Start hands the driver its Loop before the engine is ready, which is before
-// any Host's Run: a driver never enters its loop without one.
+// Start hands the MainLoop its Loop before the engine is ready, which is before
+// any Host's Run: a MainLoop never enters its loop without one.
 func TestApp_StartAttachesTheLoopBeforeTheEngineIsReady(t *testing.T) {
-	driver := &fakeDriver{}
+	mainLoop := &fakeMainLoop{}
 	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(nil).
 		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
-		WithPlugins(New(), driverAdapter{driver})
+		WithPlugins(New(), mainLoopAdapter{mainLoop})
 	stopped := make(chan struct{})
 	go func() { defer close(stopped); engine.Run(ctx) }()
 	<-engine.Ready()
-	attached := driver.attached()
+	attached := mainLoop.attached()
 	cancel()
 	<-stopped
 
@@ -65,19 +65,19 @@ func TestApp_StartAttachesTheLoopBeforeTheEngineIsReady(t *testing.T) {
 	}
 }
 
-// QuitCmd asks the driver to stop its loop; nothing else in app can.
-func TestApp_QuitCmdQuitsTheDriver(t *testing.T) {
+// QuitCmd asks the MainLoop to stop its loop; nothing else in app can.
+func TestApp_QuitCmdQuitsTheMainLoop(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
 	if _, err := harness.k.ExecuteCommand[app.QuitCmd](app.QuitRequest{}); err != nil {
 		t.Fatalf("quit: %v", err)
 	}
-	if quits := harness.driver.quits.Load(); quits != 1 {
-		t.Errorf("the driver was asked to quit %d times, want 1", quits)
+	if quits := harness.mainLoop.quits.Load(); quits != 1 {
+		t.Errorf("the MainLoop was asked to quit %d times, want 1", quits)
 	}
 }
 
-// Init and Quit bracket the driver's loop with InitEvent and QuitEvent, and
+// Init and Quit bracket the platform loop with InitEvent and QuitEvent, and
 // each has been delivered by the time the call returns.
 func TestLoop_InitAndQuitPublishTheLifecycleEvents(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
@@ -102,8 +102,8 @@ func TestLoop_InitAndQuitPublishTheLifecycleEvents(t *testing.T) {
 	}
 }
 
-// A window size the driver reports reaches subscribers before the call
-// returns, so the driver can resolve its viewport after them.
+// A window size the MainLoop reports reaches subscribers before the call
+// returns, so the MainLoop can resolve its viewport after them.
 func TestLoop_WindowSizePublishesTheSize(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
@@ -235,7 +235,7 @@ func TestConfig_BuildersSetOnlyTheirField(t *testing.T) {
 
 // A configuration value of the wrong type fails registration by name.
 func TestConfig_AWrongTypeFailsRegistration(t *testing.T) {
-	err := compose(map[kernel.PluginName]any{app.Name: 123}, New(), driverAdapter{&fakeDriver{}})
+	err := compose(map[kernel.PluginName]any{app.Name: 123}, New(), mainLoopAdapter{&fakeMainLoop{}})
 
 	var invalid app.ErrInvalidConfig
 	if !errors.As(err, &invalid) {

@@ -9,5 +9,5 @@ import (
 
 // New creates the wgpu plugin, the engine's kernel.PluginHost. Its wgpu.Config
 // arrives through kernel.New's config map under wgpu.Name, and it provides app's
-// Driver Adapter and gfx's Backend Adapter.
+// MainLoop Adapter and gfx's Backend Adapter.
 func New() kernel.Plugin { return internal.New() }

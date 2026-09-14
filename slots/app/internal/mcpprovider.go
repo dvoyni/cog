@@ -12,7 +12,7 @@ import (
 )
 
 // provider is what app contributes to the mcp Port: its one capability. app is
-// the one to contribute it because it owns the tick source, whichever Driver
+// the one to contribute it because it owns the tick source, whichever MainLoop
 // runs the platform loop underneath, so every platform offers the same
 // app_time. It holds nothing: the capability body reaches the plugin by
 // dispatch.

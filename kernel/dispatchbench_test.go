@@ -107,7 +107,7 @@ func BenchmarkUsesNestedDispatch(b *testing.B) {
 }
 
 // BenchmarkPublishEventSingleSubscriber measures the dominant publication shape:
-// one subscriber, waited on, as the driver does for every fixed update step.
+// one subscriber, waited on, as app does for every fixed update step.
 func BenchmarkPublishEventSingleSubscriber(b *testing.B) {
 	engine := benchEngine(b, func(r *Registrar) error {
 		r.InitResource(benchCounter(0))

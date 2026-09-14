@@ -63,14 +63,14 @@ func (p *plugin) Name() kernel.PluginName {
 
 // Dependencies reports the plugins wgpu requires: gfx (whose viewport it drives,
 // and whose Backend adapter it provides) and input (to which it forwards OS
-// input events). The app Driver it provides binds without a dependency: wgpu
+// input events). The app MainLoop it provides binds without a dependency: wgpu
 // dispatches none of app's commands, and app attaches its Loop from Start,
 // which precedes Run whatever the plugin order.
 func (p *plugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{cgfx.Name, input.Name}
 }
 
-// Register provides gfx's Backend adapter and app's Driver, resolves the
+// Register provides gfx's Backend adapter and app's MainLoop, resolves the
 // configuration (nil -> the zero wgpu.Config, and every zero field takes its
 // default), and builds the gogpu App. It does not block; the main loop starts
 // in Run.
@@ -83,7 +83,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 		p.gfxBackend = newGfxBackend()
 	}
 	registrar.ProvideAdapter[cwgpu.GfxBackend](cgfx.Backend(p.gfxBackend))
-	registrar.ProvideAdapter[cwgpu.AppDriver](app.Driver(driver{p}))
+	registrar.ProvideAdapter[cwgpu.AppMainLoop](app.MainLoop(mainLoop{p}))
 	var cfg cwgpu.Config
 	if config != nil {
 		c, ok := config.(cwgpu.Config)

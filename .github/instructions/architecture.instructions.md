@@ -117,7 +117,7 @@ stay where they are.
   the engine's `kernel.PluginHost`, as wgpu is: the host is the plugin value
   its constructor returns, found by the kernel, so nothing in the root names
   it. The platform main loop it runs is still an Adapter like any other:
-  wgpu provides it as `AppDriver`, for app's `DriverPort`. An Extension built for
+  wgpu provides it as `AppMainLoop`, for app's `MainLoopPort`. An Extension built for
   one platform only (diskfs is `!js`, jsfs is `js`) tags its `internal/` implementation and its
   constructor package, and leaves its root untagged so the declarations build
   everywhere.

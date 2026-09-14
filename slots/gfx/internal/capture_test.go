@@ -373,7 +373,7 @@ func TestACaptureAbandonedByShutdownArrivesOnItsChannel(t *testing.T) {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, renderer, testPlugin{})
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, renderer, testPlugin{})
 	stopped := make(chan struct{})
 	go func() { engine.Run(ctx); close(stopped) }()
 	<-engine.Ready()

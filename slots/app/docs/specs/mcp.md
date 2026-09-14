@@ -47,6 +47,10 @@ settle it.
 > this capability's included, dispatches `TimeStatus` and adds its `HoldFor`.
 > The "Required … changes" sections at the end are the original plan, kept as
 > it was.
+>
+> **Renamed after #368.** The Driver named in these notes is now **MainLoop**:
+> `app.MainLoop`, `app.MainLoopPort` and `wgpu.AppMainLoop`, so that Driver stays
+> the ecs term.
 
 ---
 
@@ -69,7 +73,7 @@ settle it.
 
 ## Vocabulary
 
-**Tick source** — what decides when an update tick is published: the driver's
+**Tick source** — what decides when an update tick is published: the MainLoop's
 frame clock while running, or an explicit step request while paused. **Rendering
 is not a tick source: a paused engine keeps drawing the last completed frame.**
 It is in `CONTEXT.md`.
@@ -369,13 +373,14 @@ different thing with a different answer.
 > driver dispatches nothing per frame — it calls the `app.Loop` app attached,
 > whose `Frame` reads the same atomics `onUpdate` read. What still varies by
 > platform is the Driver, the Adapter for `app.DriverPort` that runs the
-> platform main loop and hands the Loop its frame time.
+> platform main loop and hands the Loop its frame time. (Renamed since: the
+> Driver is now `app.MainLoop`, and its Port `app.MainLoopPort`.)
 
 ---
 
 ## The flag is an atomic
 
-The command handler runs on an HTTP goroutine; `Frame` runs on the driver's main
+The command handler runs on an HTTP goroutine; `Frame` runs on the MainLoop's main
 thread. **That boundary already exists and is already crossed with atomics** —
 `alpha` (`slots/app/internal/loop.go`) and wgpu's `frameDtBits`/`frameSeq`
 (`extensions/wgpu/internal/plugin.go`). The pause state, the pending-step count
@@ -383,7 +388,7 @@ and the step-coalescing flag join them as atomics on the tick source
 (`slots/app/internal/tick.go`), written only by the command handler.
 
 A kernel resource was the alternative and loses concretely: `Frame` is called
-from a driver callback holding an `Executioner`, not a handler holding a lock, so
+from a MainLoop callback holding an `Executioner`, not a handler holding a lock, so
 reading a resource would mean **a dispatch every frame just to ask whether to
 tick**. `gfx` pays that cost for the viewport because the viewport genuinely
 belongs to the engine; the tick source belongs to the loop alone.

@@ -20,7 +20,7 @@ correct picture.
 ## Wiring
 
 Compose scene with what it depends on — storage and its `PermanentFS` Adapter,
-gfx and its `Backend` Adapter, and app, whose `Driver` Adapter wgpu provides with
+gfx and its `Backend` Adapter, and app, whose `MainLoop` Adapter wgpu provides with
 gfx's `Backend` — and the app's own recording plugin. The kernel orders them by their dependencies:
 
 ```go

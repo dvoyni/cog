@@ -190,8 +190,8 @@ func acquire(read kernel.Write[*readList], ready kernel.Write[*readyList]) bool 
 
 // renderOnRender is the app.RenderEvent handler: it acquires the latest list,
 // translates it against the installed Backend, and executes the resulting op
-// stream into the backend's screen framebuffer. It runs on the driver's render
-// thread (where the driver publishes app.RenderEvent).
+// stream into the backend's screen framebuffer. It runs on the MainLoop's render
+// thread (where app publishes app.RenderEvent).
 func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent]) {
 	var read kernel.Write[*readList]
 	var ready kernel.Write[*readyList]

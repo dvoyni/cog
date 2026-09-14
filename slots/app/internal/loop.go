@@ -8,12 +8,12 @@ import (
 	"github.com/dvoyni/cog/slots/app"
 )
 
-// loop is app's half of the application loop, and the app.Loop a driver
-// drives. It turns the driver's variable frames into ordered fixed-step
+// loop is app's half of the application loop, and the app.Loop a MainLoop
+// drives. It turns the MainLoop's variable frames into ordered fixed-step
 // app.UpdateEvents through an accumulator, and publishes every other app event
-// when the driver reports the moment it names.
+// when the MainLoop reports the moment it names.
 //
-// Its threading is the driver's: Frame runs on the driver's main thread and
+// Its threading is the MainLoop's: Frame runs on the MainLoop's main thread and
 // Render on its render thread, possibly at the same time. accum is touched only
 // by Frame; alpha crosses to Render as atomic float64 bits; the tick source's
 // own state is atomics that a command handler on any goroutine writes.
@@ -49,12 +49,12 @@ func (l *loop) WindowSize(k kernel.Executioner, width, height float32) {
 }
 
 // Frame publishes one fixed app.UpdateEvent per whole Step accumulated, each
-// waited for in turn. Publishing on the driver's main thread — not a separate
+// waited for in turn. Publishing on the MainLoop's main thread — not a separate
 // goroutine — avoids starving the game under a busy platform loop.
 //
 // While paused the frame's time is discarded rather than accumulated, so
 // nothing is banked and a resume costs no catch-up ticks, and the only ticks
-// published are the steps somebody asked for. Everything else the driver does
+// published are the steps somebody asked for. Everything else the MainLoop does
 // this frame runs exactly as it does while running, because pause stops the
 // tick and not the frame.
 func (l *loop) Frame(k kernel.Executioner, dt float64) {

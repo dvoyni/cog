@@ -370,7 +370,7 @@ func testKernelRecorder(t testing.TB, filesystem fs.FS, config canvas.Config, re
 		storage.Name: storage.Config{}.WithReadFS("test", 10, filesystem),
 		canvas.Name:  config,
 	}
-	engine := kernel.New(configs).Handler(onError).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, gfxplugin.New(), backendAdapter{backend}, canvasPlugin, recorder)
+	engine := kernel.New(configs).Handler(onError).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, canvasPlugin, recorder)
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()

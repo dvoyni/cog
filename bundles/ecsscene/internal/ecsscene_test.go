@@ -260,7 +260,7 @@ func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gfx.Ba
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) bool { sink.add(err); return false }).
-		WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, gfxplugin.New(), backendAdapter{backend}, sceneplugin.New(),
+		WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, sceneplugin.New(),
 			ecsplugin.New(), New(), &gamePlugin{})
 	ctx, cancel := context.WithCancel(context.Background())
 	// The cleanup waits for Run to return rather than only cancelling it: a

@@ -306,7 +306,7 @@ a Slot, so only a Slot declares one:
 
 ```go
 type BackendPort kernel.RequiredPort[Backend]         // gfx/ports.go
-type DriverPort kernel.RequiredPort[Driver]           // app/ports.go
+type MainLoopPort kernel.RequiredPort[MainLoop]       // app/ports.go
 type PermanentFSPort kernel.RequiredPort[PermanentFS] // storage/ports.go
 type ProviderPort kernel.CollectedPort[Provider]      // mcp/ports.go
 ```
@@ -318,7 +318,7 @@ provides an Adapter `adapters.go` does not declare or declares one it never
 provides:
 
 ```go
-type AppDriver kernel.Adapter[app.DriverPort]            // wgpu/adapters.go
+type AppMainLoop kernel.Adapter[app.MainLoopPort]        // wgpu/adapters.go
 type GfxBackend kernel.Adapter[gfx.BackendPort]          // wgpu/adapters.go
 type StoragePermanentFS kernel.Adapter[storage.PermanentFSPort] // diskfs, jsfs
 type McpProvider kernel.Adapter[mcp.ProviderPort]        // every plugin with capabilities

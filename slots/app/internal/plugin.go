@@ -7,11 +7,11 @@ import (
 )
 
 // plugin registers app's commands and its capability, and hands its Loop to
-// the Driver.
+// the MainLoop.
 type plugin struct {
-	// driver is the bound Driver Adapter, valid from Start onwards.
-	driver kernel.RequiredAdapter[app.Driver]
-	// loop is what the driver calls. It is built at Register, once the
+	// mainLoop is the bound MainLoop Adapter, valid from Start onwards.
+	mainLoop kernel.RequiredAdapter[app.MainLoop]
+	// loop is what the MainLoop calls. It is built at Register, once the
 	// configuration is known, and never replaced.
 	loop *loop
 }
@@ -23,15 +23,15 @@ func New() kernel.Plugin { return &plugin{} }
 // Name reports the plugin name.
 func (p *plugin) Name() kernel.PluginName { return app.Name }
 
-// Dependencies reports the plugins app requires: none. The Driver it requires
+// Dependencies reports the plugins app requires: none. The MainLoop it requires
 // is bound at composition and adds no dependency.
 func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 
-// Register requires the Driver, resolves the configuration (nil -> the zero
+// Register requires the MainLoop, resolves the configuration (nil -> the zero
 // app.Config, and every zero field takes its default), builds the Loop, and
 // registers the commands and the capability provider.
 func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
-	p.driver = registrar.RequireAdapter[app.DriverPort]()
+	p.mainLoop = registrar.RequireAdapter[app.MainLoopPort]()
 	var cfg app.Config
 	if config != nil {
 		c, ok := config.(app.Config)
@@ -47,9 +47,9 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	return nil
 }
 
-// Start hands the Loop to the driver. Every Start runs before the Host's Run,
-// so the driver holds its Loop before it enters its main loop.
+// Start hands the Loop to the MainLoop. Every Start runs before the Host's Run,
+// so the MainLoop holds its Loop before it enters the platform loop.
 func (p *plugin) Start(kernel.Executioner) error {
-	p.driver.Get().Attach(p.loop)
+	p.mainLoop.Get().Attach(p.loop)
 	return nil
 }

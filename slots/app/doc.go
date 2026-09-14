@@ -1,7 +1,7 @@
-// Package app declares the app Slot: the driver-agnostic application loop. It
+// Package app declares the app Slot: the platform-agnostic application loop. It
 // declares the events every loop publishes (InitEvent, UpdateEvent,
 // RenderEvent, WindowSizeChangeEvent, QuitEvent), the QuitCmd and TimeCmd
-// commands, and the Driver the Slot requires.
+// commands, and the MainLoop the Slot requires.
 //
 // The plugin, built by appplugin.New, owns everything about the loop that does
 // not vary by platform: the fixed-step accumulator and render interpolation,
@@ -9,10 +9,10 @@
 // and the publication of every event declared here. It offers the tick source
 // to an agent as the tool app_time.
 //
-// app is a Slot: it requires exactly one Adapter for DriverPort, the platform
+// app is a Slot: it requires exactly one Adapter for MainLoopPort, the platform
 // main loop, which wgpu provides on the desktop and the web. app hands the
-// Driver its Loop from Start and asks it to Quit; the Driver calls the Loop
-// every frame. A composition without a Driver fails with
+// MainLoop its Loop from Start and asks it to Quit; the MainLoop calls the Loop
+// every frame. A composition without a MainLoop fails with
 // kernel.ErrMissingAdapter.
 //
 // A plugin that dispatches QuitCmd or TimeCmd declares Name as a dependency,
@@ -24,7 +24,7 @@
 //	}
 //	plugins := []kernel.Plugin{
 //	    appplugin.New(),
-//	    wgpuplugin.New(), // provides app's Driver
+//	    wgpuplugin.New(), // provides app's MainLoop
 //	    …
 //	}
 package app

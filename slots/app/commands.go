@@ -6,7 +6,7 @@ import (
 	"github.com/dvoyni/cog/kernel"
 )
 
-// QuitCmd requests that the application stop: app asks its Driver to quit the
+// QuitCmd requests that the application stop: app asks its MainLoop to quit the
 // platform main loop, which unwinds the Host's Run and shuts the engine down.
 // It returns once the request is made, not once the loop has stopped.
 type QuitCmd kernel.Command[QuitRequest, QuitResponse]
@@ -22,7 +22,7 @@ type QuitResponse struct{}
 // true. The app plugin handles it, because the tick source is part of the loop
 // app owns, and a plugin that declares Name as a dependency is guaranteed that
 // handler — which is what lets gameplay code, a test harness or a frame-step
-// debugger reach it without importing a driver, and without reading a missing
+// debugger reach it without importing a platform plugin, and without reading a missing
 // handler as a running engine.
 //
 // This is an engine feature rather than a debugging aside, and it comes with

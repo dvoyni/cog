@@ -35,7 +35,7 @@ func TestTypeName_NamesEveryTypeInAFullCogCompositionUniquely(t *testing.T) {
 	engine := kernel.New(map[kernel.PluginName]any{storage.Name: storage.Config{}}).
 		Handler(func(err error) bool { failure = errors.Join(failure, err); return false }).
 		WithPlugins(
-			storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
+			storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
 			inputplugin.New(), animplugin.New(), canvasplugin.New(), sceneplugin.New(), uiplugin.New(),
 			ecsplugin.New(), ecssceneplugin.New(), mcpplugin.New(),
 		)
