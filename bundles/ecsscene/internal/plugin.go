@@ -1,4 +1,4 @@
-package ecssceneimpl
+package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/ecs"
@@ -17,7 +17,7 @@ type plugin struct{}
 //	kernel.New(config).WithPlugins(
 //	    storageplugin.New(), diskfs.New(diskfs.Config{AppId: "game"}),
 //	    gfximpl.New(), sceneplugin.New(),
-//	    ecsplugin.New(), ecssceneimpl.New(), game.New())
+//	    ecsplugin.New(), ecssceneplugin.New(), game.New())
 //
 // ecsscene has no configuration, so there is no Config.
 func New() kernel.Plugin { return plugin{} }
@@ -42,7 +42,7 @@ const (
 // Register declares every Component, the recording scratch and the one System.
 // A Component is registered by the plugin that defines its Go type, which is
 // what keeps cog's coupling check working on Component data: the types are
-// declared in ecsscene's contract root, and this plugin, shipped in the same
+// declared in ecsscene's root, and this plugin, shipped in the same
 // Bundle, registers them under ecsscene.Name.
 func (plugin) Register(registrar *kernel.Registrar, _ any) error {
 	ecs.RegisterComponent[ecsscene.Transform](registrar, drawableReserve)

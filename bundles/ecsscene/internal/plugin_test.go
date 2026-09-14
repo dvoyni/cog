@@ -1,4 +1,4 @@
-package ecssceneimpl
+package internal
 
 import (
 	"errors"
@@ -26,7 +26,7 @@ type driftQuery struct {
 type driftSystem kernel.Subscription[app.UpdateEvent]
 
 // moverPlugin is a game that names the binding's Components through the
-// contract root alone and orders itself against the binding's identity.
+// root alone and orders itself against the binding's identity.
 type moverPlugin struct{ deps []kernel.PluginName }
 
 func (*moverPlugin) Name() kernel.PluginName             { return "mover" }
@@ -53,8 +53,8 @@ func compose(mover *moverPlugin) error {
 }
 
 // TestTheCouplingCheckStillHoldsOnTheBindingsComponents is the coupling rule
-// across the split. The Components are declared in the contract root and
-// registered by ecssceneimpl's plugin under ecsscene.Name, so a game System
+// across the split. The Components are declared in the root and
+// registered by the internal plugin under ecsscene.Name, so a game System
 // that locks one of their Stores must still declare ecsscene, and composes
 // once it does.
 func TestTheCouplingCheckStillHoldsOnTheBindingsComponents(t *testing.T) {

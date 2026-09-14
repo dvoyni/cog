@@ -19,40 +19,41 @@ documentation, not this one's: [`../scene/README.md`](../scene/README.md).
 record. **[What a binding may not do](#what-a-binding-may-not-do) is the part to
 read before writing a second one.**
 
-ecsscene is a **Bundle**: a Slot and its one Extension, shipped together. The
+ecsscene is a **Bundle**: it requires no Adapter and contributes none. The
 vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
+[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
-ecsscene has the Bundle shape: a contract root and an `…impl`. The two share
-nothing a consumer must not see, so it has no `internal/`.
+ecsscene has the declaration-root shape of
+[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+Its Components are plain data with no methods, so it has no `internal/types`.
 
-- **`bundles/ecsscene`** is the contract: the eight Components a game spawns
-  (`Transform`, `Model`, `Mesh`, `Animation`, `Params`, `Material`, `Light`,
-  `Camera`), `MaterialTag`, `MaxPlays`, `Name` and the ordering identity
-  `RecordOnUpdate`. It declares no plugin, and it is what a game's Systems
-  import.
-- **`bundles/ecsscene/ecssceneimpl`** is the plugin: `New`, the registration of
+- **`bundles/ecsscene`** is the root, and holds declarations only: the eight
+  Components a game spawns (`Transform`, `Model`, `Mesh`, `Animation`,
+  `Params`, `Material`, `Light`, `Camera`), `MaterialTag`, `MaxPlays`, `Name`
+  and the ordering identity `RecordOnUpdate`. It declares no plugin, and it is
+  what a game's Systems import.
+- **`bundles/ecsscene/internal`** is the plugin: its `New`, the registration of
   every Component, the recording scratch and the one recording System behind
-  `RecordOnUpdate`. It exports `New` and nothing else: ecsscene has no
-  configuration, so there is no `Config`. Only composition roots and tests
-  import it.
+  `RecordOnUpdate`.
+- **`bundles/ecsscene/ecssceneplugin`** exports only `New() kernel.Plugin`.
+  ecsscene has no configuration, so there is no `Config`. Only composition
+  roots and tests import it.
 
 **The Components are still registered by the plugin that defines their Go
-type.** Their types are declared in the contract root, and the plugin that
-registers them is the Extension shipped inside the same Bundle, under
-`ecsscene.Name`. Every Store is owned by `ecsscene`, so a game System that names
-one still has to declare `ecsscene` as a dependency, and the ECS's coupling
-check keeps holding on Component data.
+type.** Their types are declared in the root, and the plugin that registers
+them ships inside the same Bundle, under `ecsscene.Name`. Every Store is owned
+by `ecsscene`, so a game System that names one still has to declare `ecsscene`
+as a dependency, and the ECS's coupling check keeps holding on Component data.
 
 ## Files
 
-In the root, `contract.go` holds the package documentation and the vocabulary
-that is not a Component — `Name`, `RecordOnUpdate`, `MaxPlays`, `MaterialTag` —
-and `components.go` every Component. In `ecssceneimpl`, `plugin.go` holds the
-plugin and its registration, and `systems.go` the recording System, its Queries
-and its scratch.
+In the root, `doc.go` holds the package documentation, `id.go` `Name` and
+`RecordOnUpdate`, and `types.go` every Component with `MaxPlays` and
+`MaterialTag`. In `internal`, `plugin.go` holds the plugin and its
+registration, and `systems.go` the recording System, its Queries and its
+scratch.
 
 ## Dependencies
 
@@ -68,10 +69,10 @@ and its scratch.
 kernel.New(config).WithPlugins(
     storageplugin.New(), diskfs.New(diskfs.Config{AppId: "game"}),
     inputplugin.New(), gfximpl.New(), sceneplugin.New(), wgpu.New(),
-    ecsplugin.New(), ecssceneimpl.New(), game.New())
+    ecsplugin.New(), ecssceneplugin.New(), game.New())
 ```
 
-Only the composition root imports `ecssceneimpl`; a game's Systems import
+Only the composition root imports `ecssceneplugin`; a game's Systems import
 `ecsscene`.
 
 The binding takes no world. It declares `ecs` and `scene` as dependencies, so
@@ -127,7 +128,7 @@ type Camera struct {
 }
 ```
 
-All eight are registered by this Bundle's plugin, in `ecssceneimpl`, because a
+All eight are registered by this Bundle's plugin, in `internal`, because a
 Component is registered by the plugin that defines its Go type — which is what
 keeps cog's coupling check working on Component data. See
 [Packages](#packages).
@@ -172,7 +173,7 @@ func spawnCrates(sp *ecs.Spawn[Crate]) {
 
 ## The recording System
 
-It lives in `ecssceneimpl`, beside its Queries and its scratch:
+It lives in `internal`, beside its Queries and its scratch:
 
 ```go
 func record(
@@ -197,8 +198,8 @@ resource, so every recording System serialises against every other whatever
 Components they read. A second one would cost a scheduling slot and could not
 run concurrently anyway.
 
-`ecsscene.RecordOnUpdate` is its subscription identity, declared in the contract
-root and named verb plus event as scene's `FlushOnUpdate` and gfx's
+`ecsscene.RecordOnUpdate` is its subscription identity, declared in the root's
+`id.go` and named verb plus event as scene's `FlushOnUpdate` and gfx's
 `PresentOnUpdate` are. **It declares no ordering.** Scene subscribes
 `scene.FlushOnUpdate` `Last`, so anything that does not ask to be last already
 runs before it, and a draw recorded in a tick is in what that tick's flush
