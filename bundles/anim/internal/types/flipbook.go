@@ -1,16 +1,8 @@
-package anim
+package types
 
 // Flipbook is a Sequence that steps through a fixed list of frames, holding
-// each for an equal slice of the track. The frames are the values the track
-// produces (sprite declarations, texture paths, whatever the drawing code
-// takes), so nothing else has to turn progress into a frame index.
-//
-// Embed it in a named struct to give the track its own slot type, as with Lerp:
-//
-//	type FlagWaveSeq struct{ anim.Flipbook[Sprite] }
-//
-//	book := anim.Flipbook[Sprite]{Frames: flagFrames, FPS: 30}
-//	tl.Add(NoId{}, FlagWaveSeq{book}, book.Params().WithLoop().WithImmediate())
+// each for an equal slice of the track. The anim root aliases it as
+// anim.Flipbook, whose documentation shows how a track embeds it.
 type Flipbook[T any] struct {
 	// Frames are the frames in play order. An empty list produces the zero
 	// value of T.

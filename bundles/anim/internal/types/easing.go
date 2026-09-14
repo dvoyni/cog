@@ -1,15 +1,14 @@
-package anim
-
-import "github.com/dvoyni/cog/bundles/anim/internal"
+package types
 
 // Easing maps normalized progress in [0, 1] to eased progress. A track applies
 // its easing to clamped (or, when looping, wrapped) progress before the
 // sequence produces a value.
-type Easing = internal.Easing
+type Easing func(progress float32) float32
 
-// Linear returns progress unchanged. A track added without an easing uses it.
+// Linear returns progress unchanged. It is the easing of a track added without
+// one.
 func Linear(progress float32) float32 {
-	return internal.Linear(progress)
+	return progress
 }
 
 // EaseCubicIn starts slowly and accelerates.
@@ -34,9 +33,8 @@ func EaseCubicInOut(progress float32) float32 {
 }
 
 // Hold returns an easing that stays at 0 for the first fraction of the span,
-// then runs easing over the remainder. It folds a pause into a single track,
-// for a value that must hold before it moves. A fraction of 0 is easing
-// itself; a nil easing is Linear.
+// then runs easing over the remainder. A fraction of 0 is easing itself; a nil
+// easing is Linear.
 func Hold(fraction float32, easing Easing) Easing {
 	if easing == nil {
 		easing = Linear

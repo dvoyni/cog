@@ -1,8 +1,8 @@
-package animimpl
+package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/anim"
-	"github.com/dvoyni/cog/bundles/anim/internal"
+	"github.com/dvoyni/cog/bundles/anim/internal/types"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -22,7 +22,7 @@ func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 
 // Register registers the Timelines resource and the per-tick advance.
 func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.InitResource(internal.NewTimelines())
+	registrar.InitResource(types.NewTimelines())
 	registrar.Subscribe[anim.AdvanceOnUpdate](advanceOnUpdate).First()
 	return nil
 }
@@ -34,7 +34,7 @@ func advanceOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	return func(access kernel.ResourceAccess) {
 			timelines = access.GetWrite[*anim.Timelines]()
 		}, func(_ kernel.Kernel, event app.UpdateEvent) error {
-			internal.TimelinesAdvance(timelines.Get(), float32(event.Dt))
+			types.TimelinesAdvance(timelines.Get(), float32(event.Dt))
 			return nil
 		}
 }

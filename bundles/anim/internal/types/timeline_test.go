@@ -1,4 +1,4 @@
-package internal
+package types
 
 import (
 	"slices"
@@ -7,8 +7,8 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 )
 
-// lerp mixes two scalars. The anim root's Lerp is not reachable from here, so
-// the tests carry their own sequence of the same shape.
+// lerp mixes two scalars. The tests carry their own sequence of Lerp's shape,
+// so the timeline is exercised apart from Lerp.
 type lerp struct{ from, to float32 }
 
 func (l lerp) At(progress float32) float32 { return m.Lerp(l.from, l.to, progress) }

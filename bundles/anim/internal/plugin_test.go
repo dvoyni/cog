@@ -1,4 +1,4 @@
-package animimpl
+package internal
 
 import (
 	"context"
