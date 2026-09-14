@@ -237,8 +237,10 @@ The full rules are in [`docs/specs/ports.md`](docs/specs/ports.md).
 Both are declared like commands, as defined types built from a kernel shape:
 
 ```go
+type DriverPort kernel.RequiredPort[Driver]        // app: exactly one Adapter
 type BackendPort kernel.RequiredPort[Backend]      // gfx: exactly one Adapter
 type ProviderPort kernel.CollectedPort[Provider]   // mcp: any number, zero included
+type AppDriver kernel.Adapter[app.DriverPort]      // wgpu: fills app.DriverPort
 type GfxBackend kernel.Adapter[gfx.BackendPort]    // wgpu: fills gfx.BackendPort
 ```
 
@@ -332,7 +334,7 @@ or `CollectAdapters` declaration: the Port `Type`, the `Interface` it is built
 on, its declaring `Owner`, whether it `Collects`, and its `Adapters` in plugin
 order, each an `AdapterDescription` of the Adapter `Type` and the `Plugin` that
 provided it. `Dump` prints them in a `ports:` section, as
-`gfx.BackendPort (gfx) requires [wgpu.GfxBackend (wgpu)]`. An Adapter nobody
+`app.DriverPort (app) requires [wgpu.AppDriver (wgpu)]`. An Adapter nobody
 consumes binds to nothing and is not listed.
 
 `CommandDescription` and `SubscriptionDescription` also carry `Reads`, `Writes`

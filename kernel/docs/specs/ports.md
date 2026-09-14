@@ -28,6 +28,9 @@ compiler can read both back from the declared type. A plugin declares the Ports
 it offers, and the plugin filling a Port declares its Adapter:
 
 ```go
+// app
+type DriverPort kernel.RequiredPort[Driver]
+
 // gfx
 type BackendPort kernel.RequiredPort[Backend]
 
@@ -35,7 +38,10 @@ type BackendPort kernel.RequiredPort[Backend]
 type ProviderPort kernel.CollectedPort[Provider]
 
 // wgpu
+type AppDriver kernel.Adapter[app.DriverPort]
 type GfxBackend kernel.Adapter[gfx.BackendPort]
+
+// input
 type McpProvider kernel.Adapter[mcp.ProviderPort]
 ```
 
@@ -192,6 +198,7 @@ type AdapterDescription struct {
 
 ```
 ports:
+  app.DriverPort (app) requires [wgpu.AppDriver (wgpu)]
   gfx.BackendPort (gfx) requires [wgpu.GfxBackend (wgpu)]
   mcp.ProviderPort (mcpserver) collects [input.McpProvider (input), mcp.McpProvider (mcpserver)]
 ```

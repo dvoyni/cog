@@ -10,8 +10,8 @@ import (
 
 // fixtureModule is a miniature cog: one of every kind, wired the way the rules
 // allow, so that the clean tree has no violations and each failure test adds
-// exactly one. slots/s, bundles/n and extensions/e have the declaration-root
-// shape; the rest keep the shape from before it and are on fixtureUnmoved.
+// exactly one. slots/s is a Slot, extensions/e the Extension filling it, and
+// bundles/n a Bundle collecting a Port; bundles/b stands for any other plugin.
 var fixtureModule = map[string]string{
 	"go.mod": "module fixture.test/cog\n\ngo 1.27\n",
 	"kernel/kernel.go": `package kernel
@@ -133,7 +133,6 @@ type ProviderPort kernel.CollectedPort[Provider]
 import (
 	_ "fixture.test/cog/bundles/b"
 	"fixture.test/cog/bundles/n"
-	_ "fixture.test/cog/extensions/p/v"
 	"fixture.test/cog/kernel"
 )
 
@@ -157,10 +156,9 @@ func New() kernel.Plugin { return internal.New() }
 	"bundles/n/n_test.go": `package n_test
 
 import (
-	_ "fixture.test/cog/bundles/b/bimpl"
+	_ "fixture.test/cog/bundles/n/internal"
 	_ "fixture.test/cog/bundles/n/nplugin"
 	_ "fixture.test/cog/extensions/e/eplugin"
-	_ "fixture.test/cog/extensions/w"
 )
 `,
 	"extensions/e/doc.go": `// Package e is an Extension: it fills s's Driver and contributes to n.
@@ -234,84 +232,11 @@ import (
 
 func New() kernel.Plugin { return internal.New() }
 `,
-	"slots/o/o.go": `package o
+	"bundles/b/id.go": `package b
 
-import (
-	_ "fixture.test/cog/bundles/b"
-	_ "fixture.test/cog/extensions/p"
-	_ "fixture.test/cog/kernel"
-	_ "fixture.test/cog/libs/l"
-)
-`,
-	"bundles/a/a.go": `package a
+import "fixture.test/cog/kernel"
 
-import (
-	_ "fixture.test/cog/bundles/a/internal/shared"
-	_ "fixture.test/cog/bundles/b"
-	_ "fixture.test/cog/extensions/p"
-	_ "fixture.test/cog/slots/o"
-	_ "fixture.test/cog/slots/s"
-)
-
-const Name = "a"
-`,
-	"bundles/a/a_test.go": `package a
-
-import (
-	_ "fixture.test/cog/bundles/b/bimpl"
-	_ "fixture.test/cog/extensions/w"
-)
-`,
-	"bundles/a/internal/shared/shared.go": `package shared
-
-import _ "fixture.test/cog/bundles/b"
-`,
-	"bundles/a/aimpl/aimpl.go": `package aimpl
-
-import (
-	"fixture.test/cog/bundles/a"
-	_ "fixture.test/cog/bundles/a/internal/shared"
-	"fixture.test/cog/kernel"
-)
-
-type plugin struct{}
-
-func New() kernel.Plugin { return plugin{} }
-
-func (plugin) Name() kernel.PluginName                              { return a.Name }
-func (plugin) Dependencies() []kernel.PluginName                    { return nil }
-func (plugin) Register(registrar *kernel.Registrar, config any) error { return nil }
-`,
-	"bundles/b/b.go": `package b
-
-import _ "fixture.test/cog/kernel"
-`,
-	"bundles/b/bimpl/bimpl.go": `package bimpl
-
-import _ "fixture.test/cog/bundles/b"
-`,
-	"extensions/p/p.go": `package p
-
-import _ "fixture.test/cog/bundles/b"
-`,
-	"extensions/p/pimpl/pimpl.go": `package pimpl
-
-import (
-	_ "fixture.test/cog/extensions/p"
-	_ "fixture.test/cog/extensions/p/v"
-)
-`,
-	"extensions/p/v/v.go": `package v
-
-import _ "fixture.test/cog/libs/l"
-`,
-	"extensions/w/w.go": `package w
-
-import (
-	_ "fixture.test/cog/bundles/b"
-	_ "fixture.test/cog/extensions/p"
-	_ "fixture.test/cog/extensions/p/v"
-)
+const Name kernel.PluginName = "b"
 `,
 }
 
@@ -335,36 +260,31 @@ func addFile(t *testing.T, root, name, body string) {
 	}
 }
 
-// fixtureUnmoved is the fixture's migration list: the plugins that keep the
-// shape from before declaration roots.
-var fixtureUnmoved = []string{"bundles/a", "bundles/b", "extensions/p", "extensions/w", "slots/o"}
-
 // fixtureViolations checks a fixture tree after confirming that the clean tree
 // passes, so a failure test can only be failing on the file it added.
 func fixtureViolations(t *testing.T, name, body string) []violation {
 	t.Helper()
-	return fixtureViolationsWith(t, fixtureUnmoved, map[string]string{name: body})
+	return fixtureViolationsWith(t, map[string]string{name: body})
 }
 
-// fixtureViolationsWith is fixtureViolations adding or replacing several files,
-// checked with a migration list of its own.
-func fixtureViolationsWith(t *testing.T, unmoved []string, files map[string]string) []violation {
+// fixtureViolationsWith is fixtureViolations adding or replacing several files.
+func fixtureViolationsWith(t *testing.T, files map[string]string) []violation {
 	t.Helper()
 	requireGo(t)
 	root := writeFixture(t, fixtureModule)
-	if clean := check(t, root, fixtureUnmoved); len(clean) != 0 {
+	if clean := check(t, root); len(clean) != 0 {
 		t.Fatalf("the clean fixture has violations:\n%s", joinViolations(clean))
 	}
 	for name, body := range files {
 		addFile(t, root, name, body)
 	}
-	return check(t, root, unmoved)
+	return check(t, root)
 }
 
 func TestTiers_TheCleanFixturePasses(t *testing.T) {
 	requireGo(t)
 	root := writeFixture(t, fixtureModule)
-	if violations := check(t, root, fixtureUnmoved); len(violations) != 0 {
+	if violations := check(t, root); len(violations) != 0 {
 		t.Fatalf("the clean fixture has violations:\n%s", joinViolations(violations))
 	}
 }
@@ -382,146 +302,12 @@ func requireOne(t *testing.T, violations []violation, want ...string) {
 	}
 }
 
-func TestTiers_ABundleRootImportingAnotherBundlesImplFails(t *testing.T) {
-	violations := fixtureViolations(t, "bundles/a/reach.go", `package a
-
-import _ "fixture.test/cog/bundles/b/bimpl"
-`)
-	requireOne(t, violations,
-		"bundles/a/reach.go:3",
-		"bundles/a imports bundles/b/bimpl",
-		ruleImpl,
-	)
-}
-
-func TestTiers_AContractRootDeclaringAPluginFails(t *testing.T) {
-	violations := fixtureViolations(t, "bundles/a/plugin.go", `package a
+// Only a type with all three kernel.Plugin methods breaks the Plugin rule: a
+// root type that is handed a *kernel.Registrar without being a Plugin passes.
+func TestTiers_ARootTypeWithoutEveryPluginMethodPasses(t *testing.T) {
+	violations := fixtureViolations(t, "bundles/n/types.go", `package n
 
 import "fixture.test/cog/kernel"
-
-type plugin struct{}
-
-func (plugin) Name() kernel.PluginName                              { return Name }
-func (plugin) Dependencies() []kernel.PluginName                    { return nil }
-func (*plugin) Register(registrar *kernel.Registrar, config any) error { return nil }
-`)
-	requireOne(t, violations,
-		"bundles/a/plugin.go:5",
-		"bundles/a declares plugin",
-		rulePlugin,
-	)
-}
-
-func TestTiers_AnImplExportingAPluginTypeFails(t *testing.T) {
-	violations := fixtureViolations(t, "bundles/b/bimpl/plugin.go", `package bimpl
-
-import "fixture.test/cog/kernel"
-
-type Plugin struct{}
-
-func (Plugin) Name() kernel.PluginName                              { return "b" }
-func (Plugin) Dependencies() []kernel.PluginName                    { return nil }
-func (Plugin) Register(registrar *kernel.Registrar, config any) error { return nil }
-`)
-	requireOne(t, violations,
-		"bundles/b/bimpl/plugin.go:5",
-		"bundles/b/bimpl exports Plugin",
-		ruleImplExports,
-	)
-}
-
-func TestTiers_AnImplWhoseNewReturnsAConcretePointerFails(t *testing.T) {
-	violations := fixtureViolations(t, "bundles/b/bimpl/plugin.go", `package bimpl
-
-import "fixture.test/cog/kernel"
-
-type plugin struct{}
-
-func New() *plugin { return &plugin{} }
-
-func (*plugin) Name() kernel.PluginName                              { return "b" }
-func (*plugin) Dependencies() []kernel.PluginName                    { return nil }
-func (*plugin) Register(registrar *kernel.Registrar, config any) error { return nil }
-`)
-	requireOne(t, violations,
-		"bundles/b/bimpl/plugin.go:7",
-		"bundles/b/bimpl exports New",
-		ruleImplExports,
-	)
-}
-
-// A Port's vocabulary is what its Adapters implement against, so it may not
-// reach back into the Port's recording half: importing its own root is the edge
-// that would erode the split.
-func TestTiers_AVocabularyImportingItsPortRootFails(t *testing.T) {
-	violations := fixtureViolations(t, "extensions/p/v/reach.go", `package v
-
-import _ "fixture.test/cog/extensions/p"
-`)
-	requireOne(t, violations,
-		"extensions/p/v/reach.go:3",
-		"extensions/p/v imports extensions/p",
-		ruleVocabulary,
-	)
-}
-
-// A Bundle names the Port's IDs, formats and descriptors from the vocabulary
-// directly, the way it would from the Port's root.
-func TestTiers_ABundleImportingAPortVocabularyPasses(t *testing.T) {
-	violations := fixtureViolations(t, "bundles/a/vocabulary.go", `package a
-
-import _ "fixture.test/cog/extensions/p/v"
-`)
-	if len(violations) != 0 {
-		t.Fatalf("a Bundle importing a Port's vocabulary has violations:\n%s", joinViolations(violations))
-	}
-}
-
-// Config may be an alias of an internal type and carry methods, since methods
-// are not package-scope names, and an …impl may export the error types its
-// configuration and startup report.
-func TestTiers_AnImplExportingOnlyNewConfigDefaultConfigAndErrorsPasses(t *testing.T) {
-	violations := fixtureViolations(t, "extensions/p/pimpl/plugin.go", `package pimpl
-
-import "fixture.test/cog/kernel"
-
-type plugin struct{ config Config }
-
-func New() kernel.Plugin { return &plugin{config: DefaultConfig()} }
-
-func (*plugin) Name() kernel.PluginName                              { return "p" }
-func (*plugin) Dependencies() []kernel.PluginName                    { return nil }
-func (*plugin) Register(registrar *kernel.Registrar, config any) error { return nil }
-
-type Config struct{ Path string }
-
-func (c Config) WithPath(path string) Config { c.Path = path; return c }
-
-func DefaultConfig() Config { return Config{Path: "values"} }
-
-type ErrInvalidConfig struct{ Got any }
-
-func (e ErrInvalidConfig) Error() string { return "invalid config" }
-`)
-	if len(violations) != 0 {
-		t.Fatalf("an …impl exporting only what the rule allows has violations:\n%s", joinViolations(violations))
-	}
-}
-
-// A contract root may act on a *kernel.Registrar it is handed, the way ecs's
-// RegisterComponent, ToHandler and ToExecute do: functions that take one, and
-// types that are handed one without being a Plugin, are contract. Only a type
-// with all three kernel.Plugin methods breaks the rule.
-func TestTiers_AContractRootActingOnAHandedRegistrarPasses(t *testing.T) {
-	violations := fixtureViolations(t, "bundles/a/register.go", `package a
-
-import "fixture.test/cog/kernel"
-
-type Store struct{}
-
-func RegisterComponent(registrar *kernel.Registrar) *Store { return &Store{} }
-
-func ToHandler(registrar *kernel.Registrar, system any) func() { return func() {} }
 
 type Planner struct{}
 
@@ -529,13 +315,37 @@ func (Planner) Name() kernel.PluginName                              { return Na
 func (*Planner) Register(registrar *kernel.Registrar, config any) error { return nil }
 `)
 	if len(violations) != 0 {
-		t.Fatalf("a contract root acting on a handed Registrar has violations:\n%s", joinViolations(violations))
+		t.Fatalf("a root type with only some Plugin methods has violations:\n%s", joinViolations(violations))
 	}
 }
 
-// legacyPlugin is a plugin in the shape from before declaration roots: a
-// contract root under a free file name, an …impl and an internal/ package.
-var legacyPlugin = map[string]string{
+// Tests of the kernel and of Libraries get no exception: they may not reach a
+// plugin's constructor package either.
+func TestTiers_AKernelOrLibraryImportingAPluginFails(t *testing.T) {
+	for name, test := range map[string]struct{ file, body, key, rule string }{
+		"the kernel's test": {
+			file: "kernel/reach_test.go",
+			body: "package kernel_test\n\nimport _ \"fixture.test/cog/bundles/n/nplugin\"\n",
+			key:  "kernel/reach_test.go:3: kernel imports bundles/n/nplugin",
+			rule: ruleKernel,
+		},
+		"a Library's test": {
+			file: "libs/l/reach_test.go",
+			body: "package l\n\nimport _ \"fixture.test/cog/bundles/n/nplugin\"\n",
+			key:  "libs/l/reach_test.go:3: libs/l imports bundles/n/nplugin",
+			rule: ruleLib,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			requireOne(t, fixtureViolations(t, test.file, test.body), test.key, test.rule)
+		})
+	}
+}
+
+// retiredLayoutPlugin is a plugin in the layout declaration roots replaced: a
+// root holding code under a free file name, a qimpl package constructing the
+// plugin, and an internal/ package the root imports.
+var retiredLayoutPlugin = map[string]string{
 	"bundles/q/q.go": `package q
 
 import _ "fixture.test/cog/bundles/q/internal/shared"
@@ -565,15 +375,8 @@ func (plugin) Register(registrar *kernel.Registrar, config any) error { return n
 `,
 }
 
-func TestTiers_APluginOnTheMigrationListPassesUnderTheLegacyRules(t *testing.T) {
-	violations := fixtureViolationsWith(t, append(slices.Clone(fixtureUnmoved), "bundles/q"), legacyPlugin)
-	if len(violations) != 0 {
-		t.Fatalf("a listed legacy plugin has violations:\n%s", joinViolations(violations))
-	}
-}
-
-func TestTiers_ALegacyPluginOffTheMigrationListFails(t *testing.T) {
-	violations := fixtureViolationsWith(t, fixtureUnmoved, legacyPlugin)
+func TestTiers_APluginInTheRetiredLayoutFails(t *testing.T) {
+	violations := fixtureViolationsWith(t, retiredLayoutPlugin)
 	want := []string{
 		"bundles/q/q.go: bundles/q holds q.go: " + ruleRootFiles,
 		"bundles/q/q.go:3: bundles/q imports bundles/q/internal/shared: " + ruleRootImports,
@@ -586,14 +389,6 @@ func TestTiers_ALegacyPluginOffTheMigrationListFails(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("want violations\n\t%s\ngot\n%s", strings.Join(want, "\n\t"), joinViolations(violations))
 	}
-}
-
-func TestTiers_AMigrationEntryNamingNoPackageFails(t *testing.T) {
-	violations := fixtureViolationsWith(t, append(slices.Clone(fixtureUnmoved), "bundles/gone"), nil)
-	requireOne(t, violations,
-		"bundles/gone: bundles/gone is on the migration list and holds no package",
-		ruleUnmoved,
-	)
 }
 
 func TestTiers_ABundleRootFileOutsideTheAllowlistFails(t *testing.T) {
@@ -619,13 +414,13 @@ func TestTiers_ASlotRootHoldingEveryAllowedFilePasses(t *testing.T) {
 	for _, name := range []string{"commands.go", "events.go", "resources.go", "adapters.go", "config.go", "err.go"} {
 		files["slots/s/"+name] = "package s\n"
 	}
-	if violations := fixtureViolationsWith(t, fixtureUnmoved, files); len(violations) != 0 {
+	if violations := fixtureViolationsWith(t, files); len(violations) != 0 {
 		t.Fatalf("a Slot root holding only allowed files has violations:\n%s", joinViolations(violations))
 	}
 }
 
 func TestTiers_ARootImportingItsOwnInternalFails(t *testing.T) {
-	violations := fixtureViolationsWith(t, fixtureUnmoved, map[string]string{
+	violations := fixtureViolationsWith(t, map[string]string{
 		"bundles/n/internal/helper/helper.go": "package helper\n",
 		"bundles/n/doc.go": `// Package n is a Bundle.
 package n
@@ -659,23 +454,4 @@ func TestTiers_InternalImportingAConstructorFails(t *testing.T) {
 import _ "fixture.test/cog/slots/s/splugin"
 `)
 	requireOne(t, violations, "bundles/n/internal/reach.go:3", "bundles/n/internal imports slots/s/splugin", ruleReach)
-}
-
-// A legacy extension that is not a Port is implementation, which a moved
-// plugin reaches only from tests, as it would a constructor package.
-func TestTiers_InternalImportingALegacyExtensionFails(t *testing.T) {
-	violations := fixtureViolations(t, "bundles/n/internal/reach.go", `package internal
-
-import _ "fixture.test/cog/extensions/w"
-`)
-	requireOne(t, violations, "bundles/n/internal/reach.go:3", "bundles/n/internal imports extensions/w", ruleReach)
-}
-
-// A legacy root sees a constructor package as an …impl.
-func TestTiers_ALegacyRootImportingAConstructorFails(t *testing.T) {
-	violations := fixtureViolations(t, "bundles/a/reach.go", `package a
-
-import _ "fixture.test/cog/extensions/e/eplugin"
-`)
-	requireOne(t, violations, "bundles/a/reach.go:3", "bundles/a imports extensions/e/eplugin", ruleImpl)
 }

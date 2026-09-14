@@ -565,35 +565,3 @@ func constructorExportViolations(pkg *packages.Package, rel string, m module) []
 	}
 	return violations
 }
-
-// implExportViolations finds every exported package-scope name of a legacy
-// …impl that the rule does not allow: anything but New taking nothing and
-// returning exactly kernel.Plugin, the type Config, DefaultConfig taking
-// nothing and returning Config, and types and vars named Err…. Methods are not
-// package-scope names, so Config's With… methods pass, and _test.go files are
-// not loaded, so test exports pass too.
-func implExportViolations(pkg *packages.Package, rel string, m module) []violation {
-	var violations []violation
-	scope := pkg.Types.Scope()
-	isConfig := func(t types.Type) bool {
-		config, ok := scope.Lookup("Config").(*types.TypeName)
-		return ok && types.Identical(t, config.Type())
-	}
-	for _, name := range scope.Names() {
-		object := scope.Lookup(name)
-		if !object.Exported() {
-			continue
-		}
-		_, isType := object.(*types.TypeName)
-		_, isVar := object.(*types.Var)
-		switch {
-		case name == "New" && returnsOnly(object, func(t types.Type) bool { return isKernelPlugin(t, m) }),
-			name == "Config" && isType,
-			name == "DefaultConfig" && returnsOnly(object, isConfig),
-			strings.HasPrefix(name, "Err") && (isType || isVar):
-			continue
-		}
-		violations = append(violations, declared(pkg, object, m, rel+" exports "+name, ruleImplExports))
-	}
-	return violations
-}

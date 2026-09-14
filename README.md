@@ -100,8 +100,9 @@ Every plugin `X` has one shape:
 - **Its functions are forwarders.** They live in `utils.go`, and each one is a
     single call into `X/internal/types` passing its parameters through. A
     Slot's forwarders name no other plugin's types.
-- **`X/internal/types`** holds the concrete types the root aliases for
-    performance, and **`X/internal/`** holds the implementation.
+- **`X/internal/types`** holds the concrete types the root aliases, for
+    performance or because code there names them, and **`X/internal/`** holds
+    the implementation.
 - **The constructor package, `X/Xplugin`,** exports only `New()`.
 
 | package | may import |
@@ -114,9 +115,8 @@ Every plugin `X` has one shape:
 Nothing in cog imports a constructor package or another plugin's internals,
 except tests. Games and examples are composition roots and import freely.
 
-Every plugin has moved to this shape from the contract root, `…impl` and
-`internal/` shape of
-[ADR 0001](docs/adr/0001-bundles-slots-ports-and-adapters.md). The kinds, the
+This shape supersedes the one
+[ADR 0001](docs/adr/0001-bundles-slots-ports-and-adapters.md) decided. The kinds, the
 file allowlists, where new code goes and the full import table are in
 [`.github/instructions/architecture.instructions.md`](.github/instructions/architecture.instructions.md),
 and `go test ./kernel/archtest` enforces them.
