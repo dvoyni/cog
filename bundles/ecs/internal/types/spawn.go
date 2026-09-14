@@ -135,9 +135,6 @@ func (s *Spawn[S]) New(components S) Entity {
 		field := &s.fields[i]
 		field.set(e, unsafe.Add(buffer, field.offset))
 	}
-	if en.hooks != nil {
-		en.hooks.spawned(e)
-	}
 	return e
 }
 

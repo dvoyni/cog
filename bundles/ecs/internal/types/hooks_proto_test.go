@@ -16,14 +16,12 @@ type named struct {
 	X, Y float32
 }
 
-// hookBench is a set of Stores with no kernel around them, for the recording
-// microbenchmarks.
+// hookBench is a set of Stores with no kernel around them.
 type hookBench struct {
 	en        *Entities
 	bodies    *Store[body]
 	vels      *Store[velocity]
 	colliders *Store[collider]
-	disableds *Store[disabled]
 	names     *Store[named]
 }
 
@@ -35,42 +33,31 @@ func benchStore[C any](en *Entities, ids uint32) *Store[C] {
 
 func newHookBench(ids uint32) *hookBench {
 	en := newEntities(ids)
+	en.hookHub()
 	return &hookBench{
 		en:        en,
 		bodies:    benchStore[body](en, ids),
 		vels:      benchStore[velocity](en, ids),
 		colliders: benchStore[collider](en, ids),
-		disableds: benchStore[disabled](en, ids),
 		names:     benchStore[named](en, ids),
 	}
 }
 
-// spawn is Spawn.New's shape without a kernel handle: a whole act.
+// spawn is Spawn.New's body without a kernel handle.
 func (w *hookBench) spawn(b body, v velocity) Entity {
 	e := w.en.alloc()
 	w.bodies.set(e, b)
 	w.vels.set(e, v)
-	if w.en.hooks != nil {
-		w.en.hooks.spawned(e)
-	}
 	return e
 }
 
-type windowQ struct {
-	Body body
-	_    Without[disabled]
-	_    Entered
-	_    Exited
-	_    Changed
-}
-
 type seen struct {
-	e      Entity
-	kinds  string
-	values body
+	e     Entity
+	kinds string
+	value float32
 }
 
-func collect[Q any](h *Hooks[Q], values func(*Q) body) []seen {
+func collect[T any, K kindSet](h *Hooks[T, K], value func(*T) float32) []seen {
 	h.beginRun()
 	var out []seen
 	for e, hook := range h.All() {
@@ -78,29 +65,41 @@ func collect[Q any](h *Hooks[Q], values func(*Q) body) []seen {
 		for _, kind := range []struct {
 			on   bool
 			name string
-		}{{hook.IsSpawned(), "spawned"}, {hook.IsDespawned(), "despawned"}, {hook.IsEntered(), "entered"}, {hook.IsExited(), "exited"}, {hook.IsChanged(), "changed"}} {
+		}{{hook.IsSpawned(), "spawned"}, {hook.IsDespawned(), "despawned"}, {hook.IsAdded(), "added"}, {hook.IsRemoved(), "removed"}, {hook.IsChanged(), "changed"}} {
 			if kind.on {
 				k = append(k, kind.name)
 			}
 		}
-		out = append(out, seen{e, strings.Join(k, "+"), values(&hook.Values)})
+		out = append(out, seen{e, strings.Join(k, "+"), value(&hook.Value)})
 	}
 	h.endRun()
 	return out
 }
 
-// TestAWindowHoldsOneValuesCarryingRecord is #379's example: entered(v0),
-// changed(v1), exited(v1), entered(v2), changed(v3) is delivered as
-// entered+changed(v1), exited(v1), entered+changed(v3).
+func bodyX(b *body) float32 { return b.X }
+
+func expect(t *testing.T, what string, got, want []seen) {
+	t.Helper()
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("%s:\n got %v\nwant %v", what, got, want)
+	}
+}
+
+// TestAWindowHoldsOneValuesCarryingRecord is #379's example on one Component:
+// added(v0), changed(v1), removed(v1), added(v2), changed(v3) is delivered as
+// added+changed(v1), removed(v1), added+changed(v3).
 func TestAWindowHoldsOneValuesCarryingRecord(t *testing.T) {
 	w := newHookBench(16)
-	var reader Hooks[windowQ]
-	w.en.hookHub().preparing = 1
-	reader.bind(w.en)
-	reader.writer = 1
+	var all Hooks[body, HookAll]
+	var membership Hooks[body, HookAddedRemoved]
+	var despawns Hooks[body, HookDespawned]
+	w.en.hooks.preparing = 1
+	all.bind(w.en)
+	all.writer = 1
+	membership.bind(w.en)
+	despawns.bind(w.en)
 	w.en.hooks.preparing = 2
 	writer := snapshotFor[body](w.en)
-
 	write := func(e Entity, x float32) {
 		row, _ := w.bodies.probe(e)
 		writer.take(e, row)
@@ -109,90 +108,67 @@ func TestAWindowHoldsOneValuesCarryingRecord(t *testing.T) {
 	}
 
 	e := w.en.alloc()
-	w.bodies.Set(e, body{X: 0})      // entered(v0)
-	write(e, 1)                      // changed(v1)
-	w.disableds.Set(e, disabled{})   // exited(v1)
-	w.bodies.dense[0].X = 2          // unrecorded while outside
-	w.disableds.Remove(e)            // entered(v2)
-	write(e, 3)                      // changed(v3)
-	other := w.en.alloc()            // an Entity changed while already inside
-	w.bodies.Set(other, body{X: 10}) // before the reader's first run
-	first := collect(&reader, func(q *windowQ) body { return q.Body })
-	want := []seen{
-		{e, "entered+changed", body{X: 1}},
-		{e, "exited", body{X: 1}},
-		{e, "entered+changed", body{X: 3}},
-		{other, "entered+changed", body{X: 10}},
-	}
-	if fmt.Sprint(first) != fmt.Sprint(want) {
-		t.Fatalf("first run:\n got %v\nwant %v", first, want)
-	}
+	w.bodies.Set(e, body{X: 0})
+	write(e, 1)
+	w.bodies.Remove(e)
+	w.bodies.Set(e, body{X: 2})
+	write(e, 3)
+	expect(t, "HookAll, first run", collect(&all, bodyX), []seen{
+		{e, "added+changed", 1}, {e, "removed", 1}, {e, "added+changed", 3},
+	})
+	expect(t, "HookAddedRemoved sees no change, and its addition carries the value at the removal", collect(&membership, bodyX), []seen{
+		{e, "added+changed", 1}, {e, "removed", 1}, {e, "added+changed", 3},
+	})
+	expect(t, "HookDespawned sees nothing", collect(&despawns, bodyX), nil)
 
-	// Next run: a standalone change in the window open when the copy began,
-	// folded to one; a change the reader made itself is never seen.
-	write(other, 11)
-	write(other, 12)
+	// A standalone change folds to one; the reader's own change is never seen.
+	write(e, 11)
+	write(e, 12)
 	w.en.hooks.preparing = 1
 	own := snapshotFor[body](w.en)
-	row, _ := w.bodies.probe(e)
-	own.take(e, row)
+	other := w.en.alloc()
+	w.bodies.Set(other, body{X: 50})
+	membership.beginRun()
+	membership.endRun()
+	row, _ := w.bodies.probe(other)
+	own.take(other, row)
 	w.bodies.dense[row].X = 99
 	own.finish()
-	second := collect(&reader, func(q *windowQ) body { return q.Body })
-	want = []seen{{other, "changed", body{X: 12}}}
-	if fmt.Sprint(second) != fmt.Sprint(want) {
-		t.Fatalf("second run:\n got %v\nwant %v", second, want)
-	}
+	expect(t, "HookAll, second run", collect(&all, bodyX), []seen{
+		{e, "changed", 12}, {other, "added+changed", 99},
+	})
 
-	// A change to an Entity outside the match is dropped; a despawn out of
-	// the match carries its last values.
-	outside := w.en.alloc()
-	w.disableds.Set(outside, disabled{})
-	w.bodies.Set(outside, body{X: 5})
-	write(outside, 6)
-	w.en.despawn(other)
-	third := collect(&reader, func(q *windowQ) body { return q.Body })
-	want = []seen{{other, "exited", body{X: 12}}}
-	if fmt.Sprint(third) != fmt.Sprint(want) {
-		t.Fatalf("third run:\n got %v\nwant %v", third, want)
-	}
-}
-
-type spawnQ struct {
-	Body body
-	Vel  velocity
-	_    Spawned
-	_    Despawned
-}
-
-// TestASpawnIsOneAct: a Spawn into the match is one record, and a despawn out
-// of it carries values captured before the first Store was emptied.
-func TestASpawnIsOneAct(t *testing.T) {
-	w := newHookBench(16)
-	var reader Hooks[spawnQ]
-	reader.bind(w.en)
-	e := w.spawn(body{X: 1}, velocity{X: 2})
-	lonely := w.en.alloc()
-	w.bodies.Set(lonely, body{})
+	// A despawn carries the last value, once, as removed and despawned.
 	w.en.despawn(e)
-	w.en.despawn(lonely)
-	got := collect(&reader, func(q *spawnQ) body { return body{q.Body.X, q.Vel.X} })
-	want := []seen{{e, "spawned", body{1, 2}}, {e, "despawned", body{1, 2}}}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
+	expect(t, "HookAll, despawn", collect(&all, bodyX), []seen{{e, "despawned+removed", 12}})
+	expect(t, "HookDespawned, despawn", collect(&despawns, bodyX), []seen{{e, "despawned+removed", 12}})
 }
 
-type namedQ struct {
-	Named named
-	_     Exited
+// TestASpawnIsAnAdditionOnEveryStoreItCarries.
+func TestASpawnIsAnAdditionOnEveryStoreItCarries(t *testing.T) {
+	w := newHookBench(16)
+	var bodies Hooks[body, HookSpawnedDespawned]
+	var vels Hooks[velocity, HookAdded]
+	bodies.bind(w.en)
+	vels.bind(w.en)
+	e := w.spawn(body{X: 1}, velocity{X: 2})
+	lone := w.en.alloc()
+	w.bodies.Set(lone, body{X: 7})
+	w.en.despawn(e)
+	w.en.despawn(lone)
+	expect(t, "bodies", collect(&bodies, bodyX), []seen{
+		{e, "spawned+added+changed", 1}, {e, "despawned+removed", 1}, {lone, "despawned+removed", 7},
+	})
+	expect(t, "velocities", collect(&vels, func(v *velocity) float32 { return v.X }), []seen{
+		{e, "spawned+added+changed", 2},
+	})
 }
 
-// TestARetainedStringIsReleasedAtTheReset: an exit's copy keeps its string
+// TestARetainedStringIsReleasedAtTheReset: a removal's copy keeps its string
 // alive until the reader's run ends, and no longer.
 func TestARetainedStringIsReleasedAtTheReset(t *testing.T) {
 	w := newHookBench(16)
-	var reader Hooks[namedQ]
+	var reader Hooks[named, HookRemoved]
 	reader.bind(w.en)
 	released := make(chan struct{}, 1)
 	e := w.en.alloc()
@@ -208,34 +184,24 @@ func TestARetainedStringIsReleasedAtTheReset(t *testing.T) {
 	}
 	select {
 	case <-released:
-		t.Fatal("the string was released while an unread exit still held it")
+		t.Fatal("the string was released while an unread removal still held it")
 	default:
 	}
 	reader.beginRun()
 	for _, hook := range reader.All() {
-		if !strings.HasPrefix(hook.Values.Named.Name, "a name") {
-			t.Fatalf("retained name is %q", hook.Values.Named.Name)
+		if !strings.HasPrefix(hook.Value.Name, "a name") {
+			t.Fatalf("retained name is %q", hook.Value.Name)
 		}
 	}
 	reader.endRun()
-	for range 3 {
+	for range 20 {
 		runtime.GC()
-	}
-	select {
-	case <-released:
-	case <-timeoutAfterGC():
-		t.Fatal("the string outlived the reader's reset")
-	}
-}
-
-func timeoutAfterGC() <-chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		for range 20 {
-			runtime.GC()
-			runtime.Gosched()
+		runtime.Gosched()
+		select {
+		case <-released:
+			return
+		default:
 		}
-		close(done)
-	}()
-	return done
+	}
+	t.Fatal("the string outlived the reader's reset")
 }

@@ -90,7 +90,6 @@ type Set[T any] struct {
 func (s *Set[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 	s.entities = declareComponent[T](en, access, "Set")
 	s.store = access.GetWrite[*Store[T]]()
-	widenForHooks[T](en, access)
 	s.snap = snapshotFor[T](en)
 }
 
@@ -178,7 +177,7 @@ func (s *Set[T]) UpdateFor(e Entity, value T) {
 	}
 	store.add(e, value)
 	if store.hooks != nil {
-		store.hooks.gained(e)
+		store.hooks.added(e, kindAdded|kindChanged)
 	}
 }
 
@@ -195,7 +194,6 @@ type Remove[T any] struct {
 func (r *Remove[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 	_ = declareComponent[T](en, access, "Remove")
 	r.store = access.GetWrite[*Store[T]]()
-	widenForHooks[T](en, access)
 }
 
 // From takes this Component away from e and reports whether e had one. It is

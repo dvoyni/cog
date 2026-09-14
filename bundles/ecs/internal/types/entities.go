@@ -37,7 +37,7 @@ type Entities struct {
 	// as a reflect.Type: a generic cannot be instantiated from one, so the
 	// generic call is made where C is a compile-time type and kept here.
 	classes map[reflect.Type]*componentClass
-	// hooks is PROTOTYPE (proto/ecs-hooks): nil until a Hooks[Q] is planned.
+	// hooks is PROTOTYPE (proto/ecs-hooks): nil until a Hooks[T, K] is planned.
 	hooks *hookHub
 }
 
@@ -148,12 +148,14 @@ func nextGeneration(g uint32) uint32 {
 	return g
 }
 
-// despawnObserved is PROTOTYPE (proto/ecs-hooks): a despawn some Hooks[Q] may
+// despawnObserved is PROTOTYPE (proto/ecs-hooks): a despawn some Hooks[T, K] may
 // see, kept out of the unobserved path so that path is unchanged.
 //
 //go:noinline
 func (en *Entities) despawnObserved(e Entity) {
-	en.hooks.despawning(e)
+	for _, capture := range en.hooks.despawning {
+		capture(e)
+	}
 	for _, remove := range en.stores {
 		remove(e)
 	}

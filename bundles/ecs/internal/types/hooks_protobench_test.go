@@ -24,97 +24,57 @@ func (w *hookBench) populate(n int) []Entity {
 	return ents
 }
 
-type (
-	q1 struct {
-		C collider
-		_ Entered
-		_ Exited
-	}
-	q2 struct {
-		B body
-		C collider
-		_ Entered
-		_ Exited
-	}
-	q2n struct {
-		N named
-		C collider
-		_ Entered
-		_ Exited
-	}
-	q2b struct {
-		V velocity
-		C collider
-		_ Entered
-		_ Exited
-	}
-	q2c struct {
-		B body
-		V velocity
-		C collider
-		_ Entered
-		_ Exited
-	}
-	q2d struct {
-		B body
-		C collider
-		_ Without[disabled]
-		_ Entered
-		_ Exited
-	}
-	q2x struct {
-		B body
-		C collider
-		_ Changed
-	}
-)
-
 type drainer interface {
 	beginRun()
 	endRun()
 }
 
-func newReader[Q any](en *Entities) drainer {
-	h := &Hooks[Q]{}
+func reader[T any, K kindSet](en *Entities) drainer {
+	h := &Hooks[T, K]{}
 	h.bind(en)
 	return h
 }
 
-// BenchmarkHookAddRemove prices one UpdateFor that adds and one Remove.From, on
-// a Store some Hooks[Q] names. Readers drain every 1024 pairs, off the clock.
+// BenchmarkHookAddRemove prices one UpdateFor that adds and one Remove.From on a
+// Store some Hooks[T, K] reads. Readers drain every 1024 pairs, off the clock.
 func BenchmarkHookAddRemove(b *testing.B) {
-	arms := []struct {
+	type arm struct {
 		name    string
 		readers func(en *Entities) []drainer
-	}{
-		{"none", func(*Entities) []drainer { return nil }},
-		{"Q1-one-store", func(en *Entities) []drainer { return []drainer{newReader[q1](en)} }},
-		{"Q2-two-stores", func(en *Entities) []drainer { return []drainer{newReader[q2](en)} }},
-		{"Q2-string-values", func(en *Entities) []drainer { return []drainer{newReader[q2n](en)} }},
-		{"Q2-changed-only", func(en *Entities) []drainer { return []drainer{newReader[q2x](en)} }},
-		{"4-Qs", func(en *Entities) []drainer {
-			return []drainer{newReader[q2](en), newReader[q2b](en), newReader[q2c](en), newReader[q2d](en)}
-		}},
-		{"Q2-4-readers", func(en *Entities) []drainer {
-			return []drainer{newReader[q2](en), &Hooks[q2]{}, &Hooks[q2]{}, &Hooks[q2]{}}
-		}},
+		names   bool
 	}
-	for _, arm := range arms {
-		b.Run(arm.name, func(b *testing.B) {
+	arms := []arm{
+		{"none", func(*Entities) []drainer { return nil }, false},
+		{"HookAddedRemoved", func(en *Entities) []drainer { return []drainer{reader[collider, HookAddedRemoved](en)} }, false},
+		{"HookRemoved", func(en *Entities) []drainer { return []drainer{reader[collider, HookRemoved](en)} }, false},
+		{"HookDespawned", func(en *Entities) []drainer { return []drainer{reader[collider, HookDespawned](en)} }, false},
+		{"HookAll", func(en *Entities) []drainer { return []drainer{reader[collider, HookAll](en)} }, false},
+		{"4-readers", func(en *Entities) []drainer {
+			return []drainer{reader[collider, HookAddedRemoved](en), reader[collider, HookAll](en), reader[collider, HookRemoved](en), reader[collider, HookAdded](en)}
+		}, false},
+		{"string-HookAddedRemoved", func(en *Entities) []drainer { return []drainer{reader[named, HookAddedRemoved](en)} }, true},
+		{"string-none", func(*Entities) []drainer { return nil }, true},
+	}
+	for _, a := range arms {
+		b.Run(a.name, func(b *testing.B) {
 			w := newHookBench(hookPopulation)
 			ents := w.populate(hookPopulation)
-			readers := arm.readers(w.en)
-			for _, r := range readers {
-				if h, ok := r.(*Hooks[q2]); ok && h.log == nil {
-					h.bind(w.en)
-				}
+			readers := a.readers(w.en)
+			value := named{Name: "a collider's name"}
+			for _, e := range ents {
+				w.names.Remove(e)
 			}
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				e := ents[i%len(ents)]
-				w.colliders.Set(e, collider{Radius: 1})
-				w.colliders.Remove(e)
+				if a.names {
+					w.names.Set(e, value)
+					w.names.Remove(e)
+				} else {
+					w.colliders.Set(e, collider{Radius: 1})
+					w.colliders.Remove(e)
+				}
 				if i&1023 == 1023 {
 					b.StopTimer()
 					for _, r := range readers {
@@ -126,70 +86,22 @@ func BenchmarkHookAddRemove(b *testing.B) {
 			}
 		})
 	}
-	// lazy is #379's fallback: record under the act's own lock only — Entity,
-	// gained or lost, and the removed row — and resolve at the reader's start.
-	b.Run("lazy-Q2", func(b *testing.B) {
-		w := newHookBench(hookPopulation)
-		ents := w.populate(hookPopulation)
-		type lazyRecord struct {
-			e      Entity
-			seq    uint64
-			gained bool
-		}
-		var hub hookHub
-		var records []lazyRecord
-		var rows []collider
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			e := ents[i%len(ents)]
-			w.colliders.Set(e, collider{Radius: 1})
-			records = append(records, lazyRecord{e, hub.seq.Add(1), true})
-			row, _ := w.colliders.probe(e)
-			rows = append(rows, w.colliders.dense[row])
-			records = append(records, lazyRecord{e, hub.seq.Add(1), false})
-			w.colliders.Remove(e)
-			if i&1023 == 1023 {
-				records, rows = records[:0], rows[:0]
-			}
-		}
-	})
 }
 
-type (
-	sq struct {
-		B body
-		V velocity
-		_ Spawned
-		_ Despawned
-	}
-	sqm struct {
-		B body
-		V velocity
-		_ Entered
-		_ Exited
-		_ Changed
-	}
-	sqn struct {
-		N named
-		_ Spawned
-		_ Despawned
-	}
-)
-
-// BenchmarkHookSpawnDespawn prices a whole spawn and a whole despawn.
+// BenchmarkHookSpawnDespawn prices a whole spawn and a whole despawn of an
+// Entity carrying body and velocity.
 func BenchmarkHookSpawnDespawn(b *testing.B) {
 	arms := []struct {
 		name    string
 		readers func(en *Entities) []drainer
 	}{
 		{"none", func(*Entities) []drainer { return nil }},
-		{"Q-spawned-despawned", func(en *Entities) []drainer { return []drainer{newReader[sq](en)} }},
-		{"Q-membership-changed", func(en *Entities) []drainer { return []drainer{newReader[sqm](en)} }},
-		{"Q-unmatched", func(en *Entities) []drainer { return []drainer{newReader[sqn](en)} }},
-		{"4-Qs", func(en *Entities) []drainer {
-			return []drainer{newReader[sq](en), newReader[sqm](en), newReader[q2](en), newReader[sqn](en)}
+		{"body-HookSpawnedDespawned", func(en *Entities) []drainer { return []drainer{reader[body, HookSpawnedDespawned](en)} }},
+		{"body-HookAll", func(en *Entities) []drainer { return []drainer{reader[body, HookAll](en)} }},
+		{"body+velocity-HookAll", func(en *Entities) []drainer {
+			return []drainer{reader[body, HookAll](en), reader[velocity, HookAll](en)}
 		}},
+		{"other-Store-watched", func(en *Entities) []drainer { return []drainer{reader[collider, HookAll](en)} }},
 	}
 	for _, arm := range arms {
 		b.Run(arm.name, func(b *testing.B) {
@@ -214,91 +126,86 @@ func BenchmarkHookSpawnDespawn(b *testing.B) {
 }
 
 // BenchmarkHookReader prices a reader's run over records already in its log:
-// fixing the copy, iterating it, and the reset. ns/op is per record.
+// fixing the copy, iterating it, and the reset. ns/op is per record produced.
 func BenchmarkHookReader(b *testing.B) {
-	for _, records := range []int{64, 1024} {
-		for _, shape := range []string{"entries", "enter-exit", "changes", "changes-folded"} {
-			for _, readers := range []int{1, 4} {
-				b.Run(fmt.Sprintf("%s/%d-records/%d-readers", shape, records, readers), func(b *testing.B) {
-					w := newHookBench(hookPopulation)
-					ents := w.populate(hookPopulation)
-					hs := make([]*Hooks[q2x], readers)
-					w.en.hookHub().preparing = 1
-					for i := range hs {
-						hs[i] = &Hooks[q2x]{}
-						hs[i].bind(w.en)
-					}
-					w.en.hooks.preparing = 2
-					writer := snapshotFor[body](w.en)
-					for _, e := range ents {
-						w.colliders.Set(e, collider{})
-					}
-					for _, h := range hs {
-						h.beginRun()
-						h.endRun()
-					}
-					var sum float32
-					b.ReportAllocs()
-					b.ResetTimer()
-					for i := 0; i < b.N; i += records {
-						b.StopTimer()
-						for j := range records {
-							e := ents[(i+j)%len(ents)]
-							switch shape {
-							case "entries":
-								w.colliders.Remove(e)
-								w.colliders.Set(e, collider{})
-							case "enter-exit":
-								if j&1 == 0 {
-									w.colliders.Remove(e)
-								} else {
-									w.colliders.Set(e, collider{})
-								}
-							case "changes", "changes-folded":
-								row, _ := w.bodies.probe(e)
-								writer.take(e, row)
-								w.bodies.dense[row].X++
+	const records = 1024
+	for _, shape := range []string{"add-remove-pairs", "additions", "changes", "changes-twice"} {
+		for _, readers := range []int{1, 4} {
+			b.Run(fmt.Sprintf("%s/%d-readers", shape, readers), func(b *testing.B) {
+				w := newHookBench(hookPopulation)
+				ents := w.populate(hookPopulation)
+				hs := make([]*Hooks[body, HookAll], readers)
+				w.en.hooks.preparing = 1
+				for i := range hs {
+					hs[i] = &Hooks[body, HookAll]{writer: 1}
+					hs[i].bind(w.en)
+				}
+				w.en.hooks.preparing = 2
+				writer := snapshotFor[body](w.en)
+				var sum float32
+				b.ResetTimer()
+				for i := 0; i < b.N; i += records {
+					b.StopTimer()
+					for j := range records {
+						e := ents[(i+j)%len(ents)]
+						switch shape {
+						case "add-remove-pairs":
+							if j&1 == 0 {
+								w.bodies.Remove(e)
+							} else {
+								w.bodies.Set(e, body{X: 1})
 							}
+						case "additions":
+							w.bodies.Remove(e)
+						case "changes", "changes-twice":
+							row, _ := w.bodies.probe(e)
+							writer.take(e, row)
+							w.bodies.dense[row].X++
 						}
-						if shape == "changes-folded" {
-							// Every change again, a second writer run: folded away.
-							for j := range records {
-								e := ents[(i+j)%len(ents)]
-								row, _ := w.bodies.probe(e)
-								writer.finish()
-								writer.take(e, row)
-								w.bodies.dense[row].X++
-							}
-						}
-						writer.finish()
-						// Remove the "entries" setup's own exits from the price: re-run so
-						// only entries remain in the window being measured.
-						b.StartTimer()
+					}
+					writer.finish()
+					if shape == "additions" {
 						for _, h := range hs {
 							h.beginRun()
-							for _, hook := range h.All() {
-								sum += hook.Values.B.X
-							}
 							h.endRun()
 						}
-						if shape == "enter-exit" {
-							b.StopTimer()
-							for j := range records {
-								e := ents[(i+j)%len(ents)]
-								if j&1 == 0 {
-									w.colliders.Set(e, collider{})
-								}
-							}
-							for _, h := range hs {
-								h.beginRun()
-								h.endRun()
-							}
-							b.StartTimer()
+						for j := range records {
+							w.bodies.Set(ents[(i+j)%len(ents)], body{X: 1})
 						}
 					}
-					_ = sum
-				})
-			}
+					if shape == "changes-twice" {
+						for j := range records {
+							e := ents[(i+j)%len(ents)]
+							row, _ := w.bodies.probe(e)
+							writer.take(e, row)
+							w.bodies.dense[row].X++
+						}
+						writer.finish()
+					}
+					b.StartTimer()
+					for _, h := range hs {
+						h.beginRun()
+						for _, hook := range h.All() {
+							sum += hook.Value.X
+						}
+						h.endRun()
+					}
+					if shape == "add-remove-pairs" {
+						b.StopTimer()
+						for j := range records {
+							if j&1 == 0 {
+								w.bodies.Set(ents[(i+j)%len(ents)], body{X: 1})
+							}
+						}
+						for _, h := range hs {
+							h.beginRun()
+							h.endRun()
+						}
+						b.StartTimer()
+					}
+				}
+				_ = sum
+			})
 		}
 	}
 }
@@ -327,19 +234,9 @@ func BenchmarkChangedWriter(b *testing.B) {
 	}
 }
 
-type (
-	watchBody struct {
-		B body
-		_ Changed
-	}
-	watchBig struct {
-		R bigRow
-		_ Changed
-	}
-)
-
 func benchmarkChangedWriter[T any](b *testing.B, n, percent int, arm string, write func(*Store[T], int)) {
 	en := newEntities(uint32(n))
+	en.hookHub()
 	store := benchStore[T](en, uint32(n))
 	for range n {
 		var zero T
@@ -347,12 +244,7 @@ func benchmarkChangedWriter[T any](b *testing.B, n, percent int, arm string, wri
 	}
 	var snap *rowSnapshot
 	if arm != "unwatched" {
-		switch any(store).(type) {
-		case *Store[body]:
-			(&Hooks[watchBody]{}).bind(en)
-		case *Store[bigRow]:
-			(&Hooks[watchBig]{}).bind(en)
-		}
+		(&Hooks[T, HookAddedChanged]{}).bind(en)
 		snap = snapshotFor[T](en)
 	}
 	every := n + 1
@@ -379,21 +271,21 @@ func benchmarkChangedWriter[T any](b *testing.B, n, percent int, arm string, wri
 		switch arm {
 		case "per-row", "whole-store":
 			snap.finish()
-			snap.hooks.changes = snap.hooks.changes[:0]
+			snap.log.records = snap.log.records[:0]
 		case "explicit-call":
 			snap.run++
-			snap.hooks.changes = snap.hooks.changes[:0]
+			snap.log.records = snap.log.records[:0]
 		}
 	}
 }
 
-// BenchmarkChangedRef prices Set.Ref on 1% of a watched Store's rows: the sparse
-// writer, where snapshotting the whole Store would be the wrong shape.
+// BenchmarkChangedRef prices Set.Ref on 1% of a watched Store's rows.
 func BenchmarkChangedRef(b *testing.B) {
 	const n = 10_000
-	for _, arm := range []string{"unwatched", "per-row", "whole-store"} {
+	for _, arm := range []string{"unwatched", "per-row"} {
 		b.Run(arm, func(b *testing.B) {
 			en := newEntities(n)
+			en.hookHub()
 			store := benchStore[body](en, n)
 			ents := make([]Entity, n)
 			for i := range ents {
@@ -402,27 +294,24 @@ func BenchmarkChangedRef(b *testing.B) {
 			}
 			var snap *rowSnapshot
 			if arm != "unwatched" {
-				(&Hooks[watchBody]{}).bind(en)
+				(&Hooks[body, HookAddedChanged]{}).bind(en)
 				snap = snapshotFor[body](en)
 			}
 			b.ReportAllocs()
 			b.ResetTimer()
 			const touched = n / 100
 			for i := 0; i < b.N; i += touched {
-				if arm == "whole-store" {
-					snap.takeAll()
-				}
 				for j := range touched {
 					e := ents[(j*97+i)%n]
 					row, _ := store.probe(e)
-					if arm == "per-row" {
+					if snap != nil {
 						snap.take(e, row)
 					}
 					store.dense[row].X++
 				}
 				if snap != nil {
 					snap.finish()
-					snap.hooks.changes = snap.hooks.changes[:0]
+					snap.log.records = snap.log.records[:0]
 				}
 			}
 		})
@@ -435,33 +324,9 @@ type (
 	hookMoveSystem   kernel.Subscription[app.UpdateEvent]
 	hookChurnSystem  kernel.Subscription[app.UpdateEvent]
 	hookReaderSystem kernel.Subscription[app.UpdateEvent]
-	hookWalkSystem   kernel.Subscription[app.UpdateEvent]
 )
 
-type (
-	frameColliderQ struct {
-		C collider
-		_ Entered
-		_ Exited
-	}
-	frameBodyColQ struct {
-		B body
-		C collider
-		_ Entered
-		_ Exited
-	}
-	frameChangedQ struct {
-		B body
-		_ Changed
-	}
-	frameSpawnQ struct {
-		B body
-		V velocity
-		_ Spawned
-		_ Despawned
-	}
-	walkQ struct{ H *homing }
-)
+type walkQ struct{ H *homing }
 
 // frameArm is a whole-frame configuration: which logs to plan before any System
 // is prepared (#382's ordering question, sidestepped), and what to subscribe.
@@ -472,6 +337,8 @@ type frameArm struct {
 
 const churnPerTick = 100
 
+// churn walks its own Component, so nothing but a lock Hooks add could
+// serialise it against move, then adds or removes a collider on 100 Entities.
 func churn(ents *[]Entity, tick *int) func(*Set[collider], *Remove[collider], *Query[walkQ]) {
 	return func(set *Set[collider], remove *Remove[collider], q *Query[walkQ]) {
 		for _, it := range q.All() {
@@ -510,9 +377,12 @@ func hookFrameArms() map[string]frameArm {
 		var tick int
 		r.Subscribe[hookChurnSystem](ToHandler[app.UpdateEvent](r, churn(&ents, &tick)))
 	}
-	reader := func(read any) func(r *kernel.Registrar) {
+	spawnSub := func(r *kernel.Registrar) {
+		r.Subscribe[hookChurnSystem](ToHandler[app.UpdateEvent](r, spawner))
+	}
+	read := func(system any) func(r *kernel.Registrar) {
 		return func(r *kernel.Registrar) {
-			r.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](r, read))
+			r.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](r, system))
 		}
 	}
 	both := func(fs ...func(*kernel.Registrar)) func(*kernel.Registrar) {
@@ -523,24 +393,16 @@ func hookFrameArms() map[string]frameArm {
 		}
 	}
 	noPlan := func(*Entities) {}
+	plan := func(f func(en *Entities)) func(*Entities) { return func(en *Entities) { en.hookHub(); f(en) } }
 	return map[string]frameArm{
-		"move":                  {noPlan, moveSub},
-		"move+changed-reader":   {func(en *Entities) { hookLogFor[frameChangedQ](en) }, both(moveSub, reader(func(h *Hooks[frameChangedQ]) {}))},
-		"churn":                 {noPlan, churnSub},
-		"churn+Q1-reader":       {func(en *Entities) { hookLogFor[frameColliderQ](en) }, both(churnSub, reader(func(h *Hooks[frameColliderQ]) {}))},
-		"churn+Q2-reader":       {func(en *Entities) { hookLogFor[frameBodyColQ](en) }, both(churnSub, reader(func(h *Hooks[frameBodyColQ]) {}))},
-		"churn+move":            {noPlan, both(churnSub, moveSub)},
-		"churn+move+Q2-widened": {func(en *Entities) { hookLogFor[frameBodyColQ](en) }, both(churnSub, moveSub, reader(func(h *Hooks[frameBodyColQ]) {}))},
-		"churn+move+Q2-unwidened": {func(en *Entities) {
-			hookLogFor[frameBodyColQ](en)
-			en.hooks.noWiden = true
-		}, both(churnSub, moveSub, reader(func(h *Hooks[frameBodyColQ]) {}))},
-		"move+empty":       {noPlan, both(moveSub, reader(func() {}))},
-		"churn+empty":      {noPlan, both(churnSub, reader(func() {}))},
-		"churn+move+empty": {noPlan, both(churnSub, moveSub, reader(func() {}))},
-		"spawn+empty":      {noPlan, both(func(r *kernel.Registrar) { r.Subscribe[hookChurnSystem](ToHandler[app.UpdateEvent](r, spawner)) }, reader(func() {}))},
-		"spawn":            {noPlan, func(r *kernel.Registrar) { r.Subscribe[hookChurnSystem](ToHandler[app.UpdateEvent](r, spawner)) }},
-		"spawn+Q-reader":   {func(en *Entities) { hookLogFor[frameSpawnQ](en) }, both(func(r *kernel.Registrar) { r.Subscribe[hookChurnSystem](ToHandler[app.UpdateEvent](r, spawner)) }, reader(func(h *Hooks[frameSpawnQ]) {}))},
+		"move+empty":          {noPlan, both(moveSub, read(func() {}))},
+		"move+changed-reader": {plan(func(en *Entities) { logFor[body](en).watch |= kindChanged }), both(moveSub, read(func(h *Hooks[body, HookAddedChanged]) {}))},
+		"churn+empty":         {noPlan, both(churnSub, read(func() {}))},
+		"churn+reader":        {plan(func(en *Entities) { logFor[collider](en) }), both(churnSub, read(func(h *Hooks[collider, HookAddedRemoved]) {}))},
+		"churn+move+empty":    {noPlan, both(churnSub, moveSub, read(func() {}))},
+		"churn+move+reader":   {plan(func(en *Entities) { logFor[collider](en) }), both(churnSub, moveSub, read(func(h *Hooks[collider, HookAddedRemoved]) {}))},
+		"spawn+empty":         {noPlan, both(spawnSub, read(func() {}))},
+		"spawn+reader":        {plan(func(en *Entities) { logFor[body](en) }), both(spawnSub, read(func(h *Hooks[body, HookSpawnedDespawned]) {}))},
 	}
 }
 
@@ -550,8 +412,6 @@ func (arm frameArm) world(tb testing.TB, n int) *kernel.Engine {
 		arm.subscribe(r)
 	})
 	populate(entities, components, n)
-	// churn walks its own Component, so only the widened read can serialise it
-	// against move.
 	for _, e := range components.bodies.owners {
 		components.homings.Set(e, homing{})
 	}
@@ -559,8 +419,8 @@ func (arm frameArm) world(tb testing.TB, n int) *kernel.Engine {
 }
 
 var hookFrameNames = []string{
-	"move+empty", "move+changed-reader", "churn+empty", "churn+Q1-reader", "churn+Q2-reader",
-	"churn+move+empty", "churn+move+Q2-widened", "churn+move+Q2-unwidened", "spawn+empty", "spawn+Q-reader",
+	"move+empty", "move+changed-reader", "churn+empty", "churn+reader",
+	"churn+move+empty", "churn+move+reader", "spawn+empty", "spawn+reader",
 }
 
 func BenchmarkHookFrame(b *testing.B) {
@@ -585,8 +445,8 @@ func BenchmarkHookFrame(b *testing.B) {
 	}
 }
 
-// TestHookFramesStayOnTheAllocationLine is requirement 6: steady-state frames
-// with a reader cost what the same frame without one costs, at 1k and 10k.
+// TestHookFramesStayOnTheAllocationLine is requirement 6: a frame with a reader
+// costs what the same frame with an empty System in its place costs.
 func TestHookFramesStayOnTheAllocationLine(t *testing.T) {
 	const frames = 5_000
 	arms := hookFrameArms()
@@ -605,17 +465,15 @@ func TestHookFramesStayOnTheAllocationLine(t *testing.T) {
 		})
 		return float64(mallocs) / frames
 	}
-	// Each arm with a reader is held to the same frame with an empty System in
-	// the reader's place: the engine charges per subscription, not the ECS.
 	control := map[string]string{
-		"move+changed-reader": "move+empty", "churn+Q1-reader": "churn+empty", "churn+Q2-reader": "churn+empty",
-		"churn+move+Q2-widened": "churn+move+empty", "churn+move+Q2-unwidened": "churn+move+empty", "spawn+Q-reader": "spawn+empty",
+		"move+changed-reader": "move+empty", "churn+reader": "churn+empty",
+		"churn+move+reader": "churn+move+empty", "spawn+reader": "spawn+empty",
 	}
 	got := map[string][2]float64{}
 	for _, name := range hookFrameNames {
 		a, b := measure(name, 1_000), measure(name, 10_000)
 		got[name] = [2]float64{a, b}
-		t.Logf("%-26s objects a frame: 1k %.3f, 10k %.3f", name, a, b)
+		t.Logf("%-22s objects a frame: 1k %.3f, 10k %.3f", name, a, b)
 		if b > a+0.05 {
 			t.Errorf("%s allocates per Entity: %.3f at 1k, %.3f at 10k", name, a, b)
 		}
@@ -629,18 +487,10 @@ func TestHookFramesStayOnTheAllocationLine(t *testing.T) {
 
 func TestHookFramesDeliver(t *testing.T) {
 	counts := map[string]int{}
-	count := func(name string) func(kinds string) { return func(string) { counts[name]++ } }
-	run := func(name string, plan func(*Entities), sub func(*kernel.Registrar)) {
-		engine := frameArm{plan, sub}.world(t, 1_000)
+	run := func(arm frameArm) {
+		engine := arm.world(t, 1_000)
 		for range 11 {
 			frame(t, engine, 1)
-		}
-	}
-	both := func(fs ...func(*kernel.Registrar)) func(*kernel.Registrar) {
-		return func(r *kernel.Registrar) {
-			for _, f := range fs {
-				f(r)
-			}
 		}
 	}
 	moveSub := func(r *kernel.Registrar) { r.Subscribe[hookMoveSystem](ToHandler[app.UpdateEvent](r, move)) }
@@ -649,31 +499,33 @@ func TestHookFramesDeliver(t *testing.T) {
 		var tick int
 		r.Subscribe[hookChurnSystem](ToHandler[app.UpdateEvent](r, churn(&ents, &tick)))
 	}
-	c := count("changed")
-	run("changed", func(en *Entities) { hookLogFor[frameChangedQ](en) }, both(moveSub, func(r *kernel.Registrar) {
-		r.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](r, func(h *Hooks[frameChangedQ]) {
+	run(frameArm{func(en *Entities) { en.hookHub(); logFor[body](en).watch |= kindChanged }, func(r *kernel.Registrar) {
+		moveSub(r)
+		r.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](r, func(h *Hooks[body, HookAddedChanged]) {
 			for range h.All() {
-				c("")
+				counts["changed"]++
 			}
 		})).After[hookMoveSystem]()
-	}))
-	m := count("membership")
-	run("membership", func(en *Entities) { hookLogFor[frameBodyColQ](en) }, both(churnSub, func(r *kernel.Registrar) {
-		r.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](r, func(h *Hooks[frameBodyColQ]) {
+	}})
+	run(frameArm{func(en *Entities) { en.hookHub(); logFor[collider](en) }, func(r *kernel.Registrar) {
+		churnSub(r)
+		moveSub(r)
+		r.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](r, func(h *Hooks[collider, HookAddedRemoved]) {
 			for range h.All() {
-				m("")
+				counts["membership"]++
 			}
 		})).After[hookChurnSystem]()
-	}))
-	s := count("spawn")
-	run("spawn", func(en *Entities) { hookLogFor[frameSpawnQ](en) }, both(func(r *kernel.Registrar) {
+	}})
+	run(frameArm{func(en *Entities) { en.hookHub(); logFor[body](en) }, func(r *kernel.Registrar) {
 		r.Subscribe[hookChurnSystem](ToHandler[app.UpdateEvent](r, spawner))
-	}, func(r *kernel.Registrar) {
-		r.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](r, func(h *Hooks[frameSpawnQ]) {
+		r.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](r, func(h *Hooks[body, HookSpawnedDespawned]) {
 			for range h.All() {
-				s("")
+				counts["spawn"]++
 			}
 		})).After[hookChurnSystem]()
-	}))
-	t.Logf("records over 11 frames: %v", counts)
+	}})
+	t.Logf("records over 11 frames at 1k: %v", counts)
+	if counts["changed"] != 11_000 || counts["membership"] != 1_000 || counts["spawn"] != 2_200 {
+		t.Fatalf("records over 11 frames: %v, want changed 11000, membership 1000, spawn 2200", counts)
+	}
 }

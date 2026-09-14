@@ -4,45 +4,31 @@ package types
 // what recording and resetting it cost"
 // (https://github.com/dvoyni/cog/issues/380) on the map
 // https://github.com/dvoyni/cog/issues/377. It exists to be measured; nothing
-// here is the shape the spec names, and it takes shortcuts a real build may not
-// (a log reaches Stores through their erased header rather than a kernel handle).
+// here is the shape the spec names.
 //
-// The shape measured:
+// The shape measured is a Hook per Component, ecs.Hooks[T, K], K one of a closed
+// set of kind sets:
 //
-//   - One log per Q type, shared by every reader of it, with a cursor per
-//     reader. Membership records (spawned, despawned, entered, exited) are
-//     appended at the act, under locks the act holds: a Store's own add/remove
-//     for Set and Remove (widened to read Q's other Stores), write{*Entities}
-//     for a Spawn or a Despawn. An exit or despawn copies Q's values into the
-//     log's retained arena; nothing else copies at the act.
-//   - Changes live per Store, not per Q, because two value writers of two of
-//     Q's Stores run concurrently and are never widened. A writer snapshots the
-//     rows it is handed with write access and compares at its run end, appending
-//     (Entity, sequence, writer) for each row whose bytes differ.
-//   - A reader's run start merges its log and change streams by sequence into
-//     its own copy, folds to one values-carrying record per window, and fills
-//     entry and change values from the next exit or from the live Stores. Its
-//     run end advances its cursors, compacts what every reader has passed, and
-//     clears its copy so retained strings and Lists are released.
+//   - One log per Store, shared by every reader of it, with a cursor per
+//     reader. Every record is appended under a lock the act already holds:
+//     write{T} for UpdateFor, Remove.From and a writer's run end, write{*Entities}
+//     for a Spawn or a Despawn. No act reads another Store, so no lock set grows
+//     and the log needs no sequence: the lock orders it.
+//   - A removal or despawn copies T's row into the log's retained arena. An
+//     addition copies nothing.
+//   - A writer handed rows with write access on a Store watched for Changed
+//     snapshots them and compares at its run end, appending a change record.
+//   - A reader's run start folds its window into its own copy and fills values
+//     from the next removal or the live Store. Its run end advances its cursor,
+//     compacts what every reader has passed, and clears its copy.
 
 import (
-	"fmt"
 	"iter"
 	"reflect"
 	"sync"
-	"sync/atomic"
 	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
-)
-
-// The blank marker fields a Hooks Q declares its kinds with.
-type (
-	Spawned   struct{}
-	Despawned struct{}
-	Entered   struct{}
-	Exited    struct{}
-	Changed   struct{}
 )
 
 type hookKind uint8
@@ -50,21 +36,34 @@ type hookKind uint8
 const (
 	kindSpawned hookKind = 1 << iota
 	kindDespawned
-	kindEntered
-	kindExited
+	kindAdded
+	kindRemoved
 	kindChanged
 )
 
-// membership is what makes a log need Store sinks: a Changed reader needs
-// entries and exits whether it declares them or not.
-const membership = kindEntered | kindExited | kindChanged
+// kindSet is closed: only the types below satisfy it.
+type kindSet interface{ kinds() hookKind }
 
-var markerKinds = map[reflect.Type]hookKind{
-	reflect.TypeFor[Spawned]():   kindSpawned,
-	reflect.TypeFor[Despawned](): kindDespawned,
-	reflect.TypeFor[Entered]():   kindEntered,
-	reflect.TypeFor[Exited]():    kindExited,
-	reflect.TypeFor[Changed]():   kindChanged,
+type (
+	HookSpawned          struct{}
+	HookDespawned        struct{}
+	HookSpawnedDespawned struct{}
+	HookAdded            struct{}
+	HookRemoved          struct{}
+	HookAddedRemoved     struct{}
+	HookAddedChanged     struct{}
+	HookAll              struct{}
+)
+
+func (HookSpawned) kinds() hookKind          { return kindSpawned }
+func (HookDespawned) kinds() hookKind        { return kindDespawned }
+func (HookSpawnedDespawned) kinds() hookKind { return kindSpawned | kindDespawned }
+func (HookAdded) kinds() hookKind            { return kindAdded }
+func (HookRemoved) kinds() hookKind          { return kindRemoved }
+func (HookAddedRemoved) kinds() hookKind     { return kindAdded | kindRemoved }
+func (HookAddedChanged) kinds() hookKind     { return kindAdded | kindChanged }
+func (HookAll) kinds() hookKind {
+	return kindSpawned | kindDespawned | kindAdded | kindRemoved | kindChanged
 }
 
 type runBeginner interface {
@@ -77,290 +76,93 @@ type runEnder interface {
 	endRun()
 }
 
-// hookHub hangs off Entities once any Hooks[Q] is planned.
+// hookHub hangs off Entities once any Hooks[T, K] is planned.
 type hookHub struct {
-	// seq orders membership records against change records across logs and
-	// Stores. A membership record takes Add; a change takes Load, which is
-	// stable against Q's own log because every appender to that log is
-	// excluded from a writer of Q's Stores.
-	seq atomic.Uint64
-	sinks      []hookSink
-	logs       map[reflect.Type]hookSink
+	// despawning is one capture per observed Store, walked before a despawn
+	// empties the Stores.
+	despawning []func(e Entity)
 	nextWriter uint32
 	preparing  uint32
-	// noWiden is a benchmark switch: plan widened locks or not.
-	noWiden bool
 }
 
 func (en *Entities) hookHub() *hookHub {
 	if en.hooks == nil {
-		en.hooks = &hookHub{logs: map[reflect.Type]hookSink{}}
+		en.hooks = &hookHub{}
 	}
 	return en.hooks
 }
 
-type hookSink interface {
-	gained(e Entity, field int)
-	losing(e Entity, field int)
-	spawned(e Entity)
-	despawning(e Entity)
-	classes() []*componentClass
-	kinds() hookKind
+type hookRecord struct {
+	e Entity
+	// value is the absolute index of the retained copy a removal took, or -1.
+	value  int64
+	writer uint32
+	kinds  hookKind
 }
 
-func (w *hookHub) spawned(e Entity) {
-	for _, s := range w.sinks {
-		s.spawned(e)
-	}
-}
-
-func (w *hookHub) despawning(e Entity) {
-	for _, s := range w.sinks {
-		s.despawning(e)
-	}
-}
-
-type storeSink struct {
-	sink  hookSink
-	field int
-}
-
-// storeHooks is what a Store carries once some Hooks[Q] names it.
-type storeHooks struct {
-	hub   *hookHub
-	sinks []storeSink
-	// watched is set when some reader declares Changed over this Store as a
-	// value field; it is what makes a writer snapshot.
-	watched bool
-	size    uintptr
+// hookRecords is the half of a log that knows no T, which a writer's snapshot
+// appends change records to. hookLog[T] embeds it first, so the Store header's
+// erased pointer is a pointer to it.
+type hookRecords struct {
+	watch   hookKind
 	mu      sync.Mutex
-	changes []changeRecord
+	records []hookRecord
 	base    uint64
 	cursors []*uint64
 }
 
-type changeRecord struct {
-	e      Entity
-	seq    uint64
-	writer uint32
-}
-
-func (h *storeHooks) gained(e Entity) {
-	for i := range h.sinks {
-		h.sinks[i].sink.gained(e, h.sinks[i].field)
-	}
-}
-
-func (h *storeHooks) losing(e Entity) {
-	for i := range h.sinks {
-		h.sinks[i].sink.losing(e, h.sinks[i].field)
-	}
-}
-
-// compact drops the changes every reader has passed. Held under mu.
-func (h *storeHooks) compact() {
-	least := h.base + uint64(len(h.changes))
-	for _, c := range h.cursors {
-		least = min(least, *c)
-	}
-	n := int(least - h.base)
-	if n == 0 {
-		return
-	}
-	kept := copy(h.changes, h.changes[n:])
-	h.changes = h.changes[:kept]
-	h.base = least
-}
-
-type hookField struct {
-	class  *componentClass
-	store  *storeHeader
-	hooks  *storeHooks
-	wanted uint32
-	offset uintptr
-	size   uintptr
-	filter bool
-	copy   func(dst, src unsafe.Pointer)
-}
-
-type hookRecord struct {
-	e     Entity
-	kinds hookKind
-	seq   uint64
-	// value is the absolute index of the retained copy an exit or despawn
-	// took, or -1.
-	value int64
-}
-
-// hookLog is one Q's membership log, shared by all its readers.
-type hookLog[Q any] struct {
-	hub          *hookHub
-	fields       []hookField
-	watch        hookKind
+type hookLog[T any] struct {
+	hookRecords
 	trivial      bool
-	mu           sync.Mutex
-	records      []hookRecord
-	base         uint64
-	retained     []Q
+	retained     []T
 	retainedBase int64
-	cursors      []*uint64
 }
 
-func hookLogFor[Q any](en *Entities) *hookLog[Q] {
-	w := en.hookHub()
-	queryType := reflect.TypeFor[Q]()
-	if existing, ok := w.logs[queryType]; ok {
-		return existing.(*hookLog[Q])
+func logFor[T any](en *Entities) *hookLog[T] {
+	hub := en.hookHub()
+	class := en.classOf(reflect.TypeFor[T]())
+	if class == nil {
+		panic("ecs: Hooks names unregistered Component " + kernel.TypeName(reflect.TypeFor[T]()))
 	}
-	l := &hookLog[Q]{hub: w, trivial: PointerFree(queryType) == nil}
-	for i := range queryType.NumField() {
-		field := queryType.Field(i)
-		if kind, ok := markerKinds[field.Type]; ok {
-			l.watch |= kind
-			continue
-		}
-		componentType, wanted, isFilter := field.Type, uint32(0), false
-		if component, present, is := filterOf(field.Type); is {
-			componentType, isFilter = component, true
-			if !present {
-				wanted = absentGeneration
+	store := (*Store[T])(unsafe.Pointer(class.header))
+	if store.hooks == nil {
+		log := &hookLog[T]{trivial: class.trivial}
+		store.hooks = log
+		hub.despawning = append(hub.despawning, func(e Entity) {
+			if row, ok := store.probe(e); ok {
+				log.removed(e, &store.dense[row], kindRemoved|kindDespawned)
 			}
-		} else if field.Type.Kind() == reflect.Pointer {
-			panic(fmt.Sprintf("ecs: Hooks %s field %s is a %s; a Hook's values are a copy, so write through Set[T].Ref",
-				kernel.TypeName(queryType), field.Name, kernel.TypeName(field.Type)))
-		}
-		class := en.classOf(componentType)
-		if class == nil {
-			panic(fmt.Sprintf("ecs: Hooks %s names unregistered Component %s", kernel.TypeName(queryType), kernel.TypeName(componentType)))
-		}
-		planned := hookField{class: class, store: class.header, wanted: wanted, offset: field.Offset, size: class.size, filter: isFilter}
-		if isFilter {
-			planned.size = 0
-		} else if !class.trivial {
-			planned.copy = class.copyValue
-		}
-		l.fields = append(l.fields, planned)
+		})
 	}
-	if l.watch == 0 {
-		panic(fmt.Sprintf("ecs: Hooks %s declares no kind", kernel.TypeName(queryType)))
-	}
-	for i := range l.fields {
-		f := &l.fields[i]
-		if f.store.hooks == nil {
-			f.store.hooks = &storeHooks{hub: w, size: f.class.size}
-		}
-		f.hooks = f.store.hooks
-		if l.watch&membership != 0 {
-			f.hooks.sinks = append(f.hooks.sinks, storeSink{sink: l, field: i})
-		}
-		if l.watch&kindChanged != 0 && !f.filter && f.size > 0 {
-			f.hooks.watched = true
-		}
-	}
-	w.sinks = append(w.sinks, l)
-	w.logs[queryType] = l
-	return l
+	return store.hooks
 }
 
-func (l *hookLog[Q]) kinds() hookKind { return l.watch }
-
-func (l *hookLog[Q]) classes() []*componentClass {
-	out := make([]*componentClass, len(l.fields))
-	for i := range l.fields {
-		out[i] = l.fields[i].class
-	}
-	return out
-}
-
-// matches is Q's match for e, skipping one field: the Store the act is on.
-func (l *hookLog[Q]) matches(e Entity, except int) bool {
-	index := e.idx()
-	for i := range l.fields {
-		if i == except {
-			continue
-		}
-		f := &l.fields[i]
-		sparse := f.store.sparse
-		if int(index) >= len(sparse) {
-			if f.wanted != absentGeneration {
-				return false
-			}
-			continue
-		}
-		if uint32(sparse[index]>>32) != e.gen()|f.wanted {
-			return false
-		}
-	}
-	return true
-}
-
-// fill copies Q's value fields for a matching e into dst.
-func (l *hookLog[Q]) fill(e Entity, dst unsafe.Pointer) {
-	index := e.idx()
-	for i := range l.fields {
-		f := &l.fields[i]
-		if f.size == 0 {
-			continue
-		}
-		src := unsafe.Add(f.store.dense.data, uintptr(uint32(f.store.sparse[index]))*f.size)
-		if f.copy != nil {
-			f.copy(unsafe.Add(dst, f.offset), src)
-			continue
-		}
-		(queryCursor{rows: src, size: f.size, offset: f.offset}).fill(0, dst)
-	}
-}
-
-func (l *hookLog[Q]) capture(e Entity) int64 {
-	var zero Q
-	l.retained = append(l.retained, zero)
-	l.fill(e, unsafe.Pointer(&l.retained[len(l.retained)-1]))
-	return l.retainedBase + int64(len(l.retained)-1)
-}
-
-func (l *hookLog[Q]) record(e Entity, kinds hookKind, value int64) {
-	l.records = append(l.records, hookRecord{e: e, kinds: kinds, seq: l.hub.seq.Add(1), value: value})
-}
-
-func (l *hookLog[Q]) gained(e Entity, field int) {
-	if !l.matches(e, field) {
+// added records an addition. A Store watched only for Spawned or Despawned skips
+// the additions an UpdateFor makes.
+func (l *hookLog[T]) added(e Entity, kinds hookKind) {
+	if l.watch&(kinds&(kindSpawned|kindAdded|kindChanged)) == 0 {
 		return
 	}
-	if l.fields[field].wanted == absentGeneration {
-		l.record(e, kindExited, l.capture(e))
-		return
-	}
-	l.record(e, kindEntered|kindChanged, -1)
+	l.records = append(l.records, hookRecord{e: e, value: -1, kinds: kinds})
 }
 
-func (l *hookLog[Q]) losing(e Entity, field int) {
-	if !l.matches(e, field) {
+// removed records a removal with T's last value. A Store watched only for
+// Despawned skips a plain removal.
+func (l *hookLog[T]) removed(e Entity, row *T, kinds hookKind) {
+	if kinds&kindDespawned == 0 && l.watch&^kindDespawned == 0 {
 		return
 	}
-	if l.fields[field].wanted == absentGeneration {
-		l.record(e, kindEntered|kindChanged, -1)
-		return
-	}
-	l.record(e, kindExited, l.capture(e))
+	l.retained = append(l.retained, *row)
+	l.records = append(l.records, hookRecord{e: e, value: l.retainedBase + int64(len(l.retained)-1), kinds: kinds})
 }
 
-func (l *hookLog[Q]) spawned(e Entity) {
-	if l.watch&(kindSpawned|membership) == 0 || !l.matches(e, -1) {
-		return
-	}
-	l.record(e, kindSpawned|kindEntered|kindChanged, -1)
+func (r *hookRecords) changed(e Entity, writer uint32) {
+	r.records = append(r.records, hookRecord{e: e, value: -1, writer: writer, kinds: kindChanged})
 }
 
-func (l *hookLog[Q]) despawning(e Entity) {
-	if l.watch&(kindDespawned|membership) == 0 || !l.matches(e, -1) {
-		return
-	}
-	l.record(e, kindDespawned|kindExited, l.capture(e))
-}
-
-// compact drops what every reader has passed, and zeroes the retained copies
-// it drops so a string or List they hold is released. Held under mu.
-func (l *hookLog[Q]) compact() {
+// compact drops what every reader has passed, zeroing the retained copies it
+// drops so a string or List they hold is released. Held under mu.
+func (l *hookLog[T]) compact() {
 	least := l.base + uint64(len(l.records))
 	for _, c := range l.cursors {
 		least = min(least, *c)
@@ -389,26 +191,25 @@ func (l *hookLog[Q]) compact() {
 }
 
 // Hook is one record, as its reader sees it.
-type Hook[Q any] struct {
+type Hook[T any] struct {
 	kinds  hookKind
 	filled bool
-	Values Q
+	Value  T
 }
 
-func (h *Hook[Q]) IsSpawned() bool   { return h.kinds&kindSpawned != 0 }
-func (h *Hook[Q]) IsDespawned() bool { return h.kinds&kindDespawned != 0 }
-func (h *Hook[Q]) IsEntered() bool   { return h.kinds&kindEntered != 0 }
-func (h *Hook[Q]) IsExited() bool    { return h.kinds&kindExited != 0 }
-func (h *Hook[Q]) IsChanged() bool   { return h.kinds&kindChanged != 0 }
+func (h *Hook[T]) IsSpawned() bool   { return h.kinds&kindSpawned != 0 }
+func (h *Hook[T]) IsDespawned() bool { return h.kinds&kindDespawned != 0 }
+func (h *Hook[T]) IsAdded() bool     { return h.kinds&kindAdded != 0 }
+func (h *Hook[T]) IsRemoved() bool   { return h.kinds&kindRemoved != 0 }
+func (h *Hook[T]) IsChanged() bool   { return h.kinds&kindChanged != 0 }
 
-type hookEntry[Q any] struct {
+type hookEntry[T any] struct {
 	e    Entity
-	hook Hook[Q]
+	hook Hook[T]
 }
 
 const (
 	markNone uint8 = iota
-	markTentative
 	markOpen
 	markOutside
 )
@@ -420,67 +221,44 @@ type hookMark struct {
 	state uint8
 }
 
-type hookStream struct {
-	hooks  *storeHooks
-	cursor uint64
-	view   []changeRecord
-	pos    int
-}
-
 // Hooks is the System parameter.
-type Hooks[Q any] struct {
-	log      *hookLog[Q]
-	cursor   uint64
-	streams  []hookStream
-	out      []hookEntry[Q]
-	pending  []int32
-	marks    []hookMark
-	run      uint32
-	writer   uint32
-	declared hookKind
+type Hooks[T any, K kindSet] struct {
+	log     *hookLog[T]
+	store   *Store[T]
+	cursor  uint64
+	out     []hookEntry[T]
+	pending []int32
+	marks   []hookMark
+	run     uint32
+	writer  uint32
+	deliver hookKind
 }
 
-func (h *Hooks[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
+func (h *Hooks[T, K]) prepare(en *Entities, access kernel.ResourceAccess) {
 	h.bind(en)
 	h.writer = en.hooks.preparing
-	for i := range h.log.fields {
-		_ = h.log.fields[i].class.declareRead(access)
-	}
+	_ = en.classOf(reflect.TypeFor[T]()).declareRead(access)
 }
 
-// bind plans the reader against the hub, with no kernel, for benchmarks.
-func (h *Hooks[Q]) bind(en *Entities) {
-	h.log = hookLogFor[Q](en)
-	h.declared = h.log.watch
+// bind plans the reader with no kernel, for benchmarks.
+func (h *Hooks[T, K]) bind(en *Entities) {
+	var k K
+	h.log = logFor[T](en)
+	h.store = (*Store[T])(unsafe.Pointer(en.classOf(reflect.TypeFor[T]()).header))
+	h.deliver = k.kinds()
+	h.log.watch |= h.deliver
 	h.cursor = h.log.base + uint64(len(h.log.records))
 	h.log.cursors = append(h.log.cursors, &h.cursor)
-	if h.log.watch&kindChanged != 0 {
-		for i := range h.log.fields {
-			f := &h.log.fields[i]
-			if f.filter || f.size == 0 {
-				continue
-			}
-			h.streams = append(h.streams, hookStream{hooks: f.hooks})
-		}
-		for i := range h.streams {
-			s := &h.streams[i]
-			s.cursor = s.hooks.base + uint64(len(s.hooks.changes))
-			s.hooks.cursors = append(s.hooks.cursors, &s.cursor)
-		}
-	}
 }
 
-func (h *Hooks[Q]) needsRunBegin() bool { return true }
-func (h *Hooks[Q]) needsRunEnd() bool   { return true }
+func (h *Hooks[T, K]) needsRunBegin() bool { return true }
+func (h *Hooks[T, K]) needsRunEnd() bool   { return true }
 
 // All yields the records fixed at the run's start, in the order they happened.
-func (h *Hooks[Q]) All() iter.Seq2[Entity, *Hook[Q]] {
-	return func(yield func(Entity, *Hook[Q]) bool) {
+func (h *Hooks[T, K]) All() iter.Seq2[Entity, *Hook[T]] {
+	return func(yield func(Entity, *Hook[T]) bool) {
 		for i := range h.out {
 			o := &h.out[i]
-			if o.hook.kinds == 0 {
-				continue
-			}
 			if !yield(o.e, &o.hook) {
 				return
 			}
@@ -488,7 +266,7 @@ func (h *Hooks[Q]) All() iter.Seq2[Entity, *Hook[Q]] {
 	}
 }
 
-func (h *Hooks[Q]) mark(e Entity) *hookMark {
+func (h *Hooks[T, K]) mark(e Entity) *hookMark {
 	index := e.idx()
 	for int(index) >= len(h.marks) {
 		h.marks = append(h.marks, hookMark{})
@@ -500,111 +278,67 @@ func (h *Hooks[Q]) mark(e Entity) *hookMark {
 	return m
 }
 
-func (h *Hooks[Q]) beginRun() {
+func (h *Hooks[T, K]) beginRun() {
 	l := h.log
 	h.run++
 	h.out = h.out[:0]
 	h.pending = h.pending[:0]
 	l.mu.Lock()
-	for i := range h.streams {
-		s := &h.streams[i]
-		s.hooks.mu.Lock()
-		s.view = s.hooks.changes[s.cursor-s.hooks.base:]
-		s.pos = 0
-	}
 	records := l.records[h.cursor-l.base:]
 	for i := range records {
 		r := &records[i]
-		if h.streams != nil {
-			h.drain(r.seq)
+		switch {
+		case r.kinds == kindChanged:
+			if h.deliver&kindChanged == 0 || r.writer == h.writer {
+				continue
+			}
+			m := h.mark(r.e)
+			if m.state != markNone {
+				continue // folded into the record that opened the window
+			}
+			m.state, m.out = markOpen, int32(len(h.out))
+			h.out = append(h.out, hookEntry[T]{e: r.e, hook: Hook[T]{kinds: kindChanged}})
+			h.pending = append(h.pending, m.out)
+		case r.kinds&kindAdded != 0:
+			m := h.mark(r.e)
+			m.state, m.out = markOpen, -1
+			if r.kinds&h.deliver != 0 {
+				m.out = int32(len(h.out))
+				h.out = append(h.out, hookEntry[T]{e: r.e, hook: Hook[T]{kinds: r.kinds}})
+				h.pending = append(h.pending, m.out)
+			}
+		default:
+			retained := &l.retained[r.value-l.retainedBase]
+			m := h.mark(r.e)
+			if m.state == markOpen && m.out >= 0 {
+				o := &h.out[m.out]
+				o.hook.Value, o.hook.filled = *retained, true
+			}
+			m.state, m.out = markOutside, -1
+			if r.kinds&h.deliver != 0 {
+				h.out = append(h.out, hookEntry[T]{e: r.e, hook: Hook[T]{kinds: r.kinds, filled: true, Value: *retained}})
+			}
 		}
-		h.apply(r)
-	}
-	if h.streams != nil {
-		h.drain(^uint64(0))
 	}
 	h.cursor = l.base + uint64(len(l.records))
-	for i := range h.streams {
-		s := &h.streams[i]
-		s.cursor = s.hooks.base + uint64(len(s.hooks.changes))
-		s.view = nil
-		s.hooks.mu.Unlock()
-	}
 	l.mu.Unlock()
+	store := h.store
 	for _, i := range h.pending {
 		o := &h.out[i]
-		if o.hook.kinds == 0 || o.hook.filled {
+		if o.hook.filled {
 			continue
 		}
-		if h.mark(o.e).state == markTentative && !l.matches(o.e, -1) {
-			o.hook.kinds = 0
-			continue
-		}
-		l.fill(o.e, unsafe.Pointer(&o.hook.Values))
-		o.hook.filled = true
-	}
-}
-
-func (h *Hooks[Q]) drain(limit uint64) {
-	for i := range h.streams {
-		s := &h.streams[i]
-		for s.pos < len(s.view) && s.view[s.pos].seq < limit {
-			c := s.view[s.pos]
-			s.pos++
-			if c.writer == h.writer {
-				continue
-			}
-			m := h.mark(c.e)
-			if m.state != markNone {
-				continue
-			}
-			m.state = markTentative
-			m.out = int32(len(h.out))
-			h.out = append(h.out, hookEntry[Q]{e: c.e, hook: Hook[Q]{kinds: kindChanged}})
-			h.pending = append(h.pending, m.out)
+		if row, ok := store.probe(o.e); ok {
+			o.hook.Value, o.hook.filled = store.dense[row], true
 		}
 	}
 }
 
-func (h *Hooks[Q]) apply(r *hookRecord) {
-	m := h.mark(r.e)
-	kinds := r.kinds & h.declared
-	if r.kinds&kindEntered != 0 {
-		if m.state == markTentative {
-			h.out[m.out].hook.kinds = 0
-		}
-		m.state, m.out = markOpen, -1
-		if kinds != 0 {
-			m.out = int32(len(h.out))
-			h.out = append(h.out, hookEntry[Q]{e: r.e, hook: Hook[Q]{kinds: kinds}})
-			h.pending = append(h.pending, m.out)
-		}
-		return
-	}
-	retained := &h.log.retained[r.value-h.log.retainedBase]
-	if (m.state == markOpen || m.state == markTentative) && m.out >= 0 {
-		if o := &h.out[m.out]; o.hook.kinds != 0 {
-			o.hook.Values = *retained
-			o.hook.filled = true
-		}
-	}
-	m.state, m.out = markOutside, -1
-	if kinds != 0 {
-		h.out = append(h.out, hookEntry[Q]{e: r.e, hook: Hook[Q]{kinds: kinds, filled: true, Values: *retained}})
-	}
-}
-
-func (h *Hooks[Q]) endRun() {
+func (h *Hooks[T, K]) endRun() {
 	l := h.log
 	l.mu.Lock()
 	l.compact()
 	l.mu.Unlock()
-	for i := range h.streams {
-		s := h.streams[i].hooks
-		s.mu.Lock()
-		s.compact()
-		s.mu.Unlock()
-	}
 	if !l.trivial {
 		clear(h.out)
 	}
@@ -612,9 +346,9 @@ func (h *Hooks[Q]) endRun() {
 }
 
 // rowSnapshot is a writer's copy of the rows it was handed with write access on
-// a watched Store, compared when its run ends.
+// a Store watched for Changed, compared when its run ends.
 type rowSnapshot struct {
-	hooks  *storeHooks
+	log    *hookRecords
 	store  *storeHeader
 	size   uintptr
 	writer uint32
@@ -631,10 +365,10 @@ func snapshotFor[T any](en *Entities) *rowSnapshot {
 }
 
 func snapshotOfClass(en *Entities, class *componentClass) *rowSnapshot {
-	if class == nil || class.header.hooks == nil || !class.header.hooks.watched || class.size == 0 {
+	if class == nil || class.header.hooks == nil || class.header.hooks.watch&kindChanged == 0 || class.size == 0 {
 		return nil
 	}
-	return &rowSnapshot{hooks: class.header.hooks, store: class.header, size: class.size, writer: en.hooks.preparing, run: 1}
+	return &rowSnapshot{log: class.header.hooks, store: class.header, size: class.size, writer: en.hooks.preparing, run: 1}
 }
 
 func (s *rowSnapshot) take(e Entity, row uint32) {
@@ -671,8 +405,7 @@ func (s *rowSnapshot) finish() {
 	if !s.taken {
 		return
 	}
-	h, st, size := s.hooks, s.store, s.size
-	seq := h.hub.seq.Load()
+	log, st, size := s.log, s.store, s.size
 	if s.bulk && len(st.owners) == len(s.ents) && entitiesBytes(st.owners) == entitiesBytes(s.ents) {
 		live := unsafe.Slice((*byte)(st.dense.data), uintptr(len(s.ents))*size)
 		const block = 64
@@ -684,7 +417,7 @@ func (s *rowSnapshot) finish() {
 			for r := start; r < end; r++ {
 				lo, hi := uintptr(r)*size, uintptr(r+1)*size
 				if string(live[lo:hi]) != string(s.rows[lo:hi]) {
-					h.changes = append(h.changes, changeRecord{e: s.ents[r], seq: seq, writer: s.writer})
+					log.changed(s.ents[r], s.writer)
 				}
 			}
 		}
@@ -701,7 +434,7 @@ func (s *rowSnapshot) finish() {
 			live := unsafe.Slice((*byte)(unsafe.Add(st.dense.data, uintptr(uint32(slot))*size)), size)
 			lo := uintptr(i) * size
 			if string(live) != string(s.rows[lo:lo+size]) {
-				h.changes = append(h.changes, changeRecord{e: e, seq: seq, writer: s.writer})
+				log.changed(e, s.writer)
 			}
 		}
 	}
@@ -712,38 +445,6 @@ func (s *rowSnapshot) finish() {
 
 func entitiesBytes(es []Entity) string {
 	return unsafe.String((*byte)(unsafe.Pointer(unsafe.SliceData(es))), len(es)*8)
-}
-
-// widenForHooks is section 5 of #379: a handle that adds to or removes from one
-// of a multi-Store Q's Stores also reads Q's other Stores, while a reader of Q
-// watches a kind that depends on the match.
-func widenForHooks[T any](en *Entities, access kernel.ResourceAccess) {
-	w := en.hooks
-	if w == nil || w.noWiden {
-		return
-	}
-	class := en.classOf(reflect.TypeFor[T]())
-	for _, sink := range w.sinks {
-		if sink.kinds()&membership == 0 {
-			continue
-		}
-		classes := sink.classes()
-		if len(classes) < 2 {
-			continue
-		}
-		names := false
-		for _, c := range classes {
-			names = names || c == class
-		}
-		if !names {
-			continue
-		}
-		for _, c := range classes {
-			if c != class {
-				_ = c.declareRead(access)
-			}
-		}
-	}
 }
 
 // recordChangeAtCall is the explicit-call fallback of #268: UpdateFor records
@@ -757,5 +458,5 @@ func (s *rowSnapshot) recordChangeAtCall(e Entity) {
 		return
 	}
 	s.stamps[index] = s.run
-	s.hooks.changes = append(s.hooks.changes, changeRecord{e: e, seq: s.hooks.hub.seq.Load(), writer: s.writer})
+	s.log.changed(e, s.writer)
 }
