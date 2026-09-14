@@ -139,7 +139,7 @@ config := map[kernel.PluginName]any{
     storage.Name: storage.Config{}.
         WithReadFS("res", storage.DefaultReadPriority, os.DirFS("res")),
     diskfs.Name: diskfs.Config{AppId: "my-app"},
-    wgpu.Name: wgpu.DefaultConfig().WithTitle("My App"),
+    wgpu.Name: wgpu.Config{}.WithTitle("My App"),
 }
 
 plugins := []kernel.Plugin{
@@ -147,7 +147,7 @@ plugins := []kernel.Plugin{
     diskfsplugin.New(), // provides storage's PermanentFS Adapter
     inputplugin.New(),
     gfxplugin.New(),
-    wgpu.New(), // provides gfx's Backend Adapter
+    wgpuplugin.New(), // provides gfx's Backend Adapter
     ...
 }
 

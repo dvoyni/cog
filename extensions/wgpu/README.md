@@ -8,27 +8,39 @@ and WebAssembly.
 ## Plugin
 
 - Name: `wgpu.Name` (`"wgpu"`)
-- Constructor: `wgpu.New() *wgpu.Plugin`
+- Kind: an Extension. The root declares only `Name`, `Config`, the Adapters
+  `GfxBackend` and `McpProvider`, and the errors; everything else is in
+  `internal/`.
+- Constructor: `wgpuplugin.New() kernel.Plugin`
 - Plugin dependencies: `gfx`, `input`
 - Go package dependencies: `app`, `gfx`, `input`, `kernel`, `mcp`,
-  `gogpu`, WebGPU implementation packages
+  `gogpu`, WebGPU implementation packages. The root imports only `kernel`,
+  `app`, `gfx` and `mcp`; gogpu is imported by `internal/` alone.
 - Contributes: one `gfx.Backend` Adapter and one `mcp.Provider` Adapter
-- Implements: `kernel.Host`, `kernel.PluginStopper`
+- Implements: `kernel.PluginHost`, `kernel.PluginStopper`
 - Subscribed kernel events: none
 
 Register dependencies before the driver. `Run(ctx)` owns the calling thread and
 blocks in the platform main loop until the window closes, `app.QuitCmd` runs, or
 the context is canceled.
 
-`Plugin` implements `Name`, `Dependencies`, `Init`, `Run`, and `Stop`. `Stop`
-exists for one job: releasing a readback the closing window left outstanding.
+The plugin implements `Name`, `Dependencies`, `Register`, `Run`, and `Stop`.
+`Stop` exists for one job: releasing a readback the closing window left
+outstanding. It is still the one `kernel.PluginHost`: the engine finds the host
+by asking each plugin value, so the value `wgpuplugin.New()` returns is the
+host without any type in the root naming it.
+
+On desktop, importing the plugin (through `wgpuplugin`) locks the main
+goroutine to OS thread 0 in a package `init`, which gogpu's window needs.
 
 ## Configuration
 
-Start from `DefaultConfig()` and use immutable setters:
+`Config` arrives through `kernel.New`'s config map under `wgpu.Name`, and its
+zero value is the default. Set only what changes, directly or with the
+immutable builders:
 
 ```go
-cfg := wgpu.DefaultConfig().
+cfg := wgpu.Config{}.
     WithTitle("My App").
     WithAppName("My App").
     WithSize(1280, 720).
@@ -40,10 +52,21 @@ cfg := wgpu.DefaultConfig().
     WithMaxPending(4)
 ```
 
-`Config` also exposes all fields directly: `Step`, `MaxFrame`, `MaxPending`,
-`Title`, `Width`, `Height`, `Resizable`, `VSync`, `Fullscreen`, and `AppName`.
+`Config` also exposes all fields directly: `Step` (zero means 1/60 s),
+`MaxFrame` (250 ms), `MaxPending` (4), `Title` (`"cog"`), `Width` and `Height`
+(1280x720), `NoResize`, `NoVSync`, `Fullscreen`, and `AppName`. The two
+switches that default to on are spelled as their negation, so that off is the
+zero value; `WithResizable` and `WithVSync` set them. Because a zero field
+means the default, a zero `MaxFrame` no longer turns the frame clamp off.
 `ErrInvalidConfig{Got}` reports a configuration value of the wrong type and its
 `Error() string` method implements `error`.
+
+## Errors
+
+The root's `err.go` declares the errors the plugin reports that a caller may
+match: `ErrInvalidConfig`; `ErrUnknownTimeAction` and `ErrHoldTooLong`, from
+the `app.TimeCmd` handler; and `ErrDepthOnlyPassUnsupported`, reported once
+per run for a depth-only pass the selected backend declines to encode.
 
 ## Commands Implemented
 
@@ -171,7 +194,7 @@ invoke its update, draw, and input bridges directly.
 
 The private backend implements the public `gfx.Backend` contract, and is gfx's
 Adapter. The plugin builds it once and provides it with
-`registrar.ProvideAdapter[GfxBackend]`, the Adapter type in `adapters.go`, at the top of `Register`, before the
+`registrar.ProvideAdapter[GfxBackend]`, the Adapter type in the root's `adapters.go`, at the top of `Register`, before the
 GPU device exists: gfx is a Slot, and its Adapter is bound at composition,
 while the device is created asynchronously inside the render loop. `onDraw`
 attaches the device to the same value on the first frame the device is
@@ -204,8 +227,8 @@ format on the web.
 
 ### Backend Files And Plugin Wiring
 
-wgpu is two things to gfx at once, and its files say which one they are by what
-they use of the gfx root.
+wgpu is two things to gfx at once, and its `internal/` files say which one they
+are by what they use of the gfx root.
 
 - **The backend** is gfx's Adapter: every `gfx*.go` file (`gfxbackend.go`,
   `gfxpass.go` with the queue replay, `gfxcapture.go`, `gfxpresent.go`,
@@ -215,7 +238,7 @@ they use of the gfx root.
   replay a `gfx.Queue` and speak its IDs, formats and descriptors, and nothing
   in them names the recording API (`OpQueue`, `ResourceQueue`, the commands)
   an Adapter must never call.
-- **The plugin wiring** is wgpu as a plugin that depends on gfx: `plugin.go`.
+- **The plugin wiring** is wgpu as a plugin that depends on gfx: `internal/plugin.go`.
   It uses the gfx root for the dependency on `gfx.Name`, to drive
   `gfx.SetViewportCmd` every drawable frame, and to provide the backend as a
   `gfx.Backend` with `registrar.ProvideAdapter[GfxBackend]`.

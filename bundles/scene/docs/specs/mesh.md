@@ -273,7 +273,7 @@ and [#195](https://github.com/dvoyni/cog/issues/195).
 
 Every narrow format used here is already wired end to end: `Unorm1010102`,
 `Float16x2`, `Unorm16x2` and the rest map to `gputypes` at
-`extensions/wgpu/gfxbackend.go:1018-1071`, and `gfx.VertexType.Size()` knows their widths
+`extensions/wgpu/internal/gfxbackend.go:1018-1071`, and `gfx.VertexType.Size()` knows their widths
 (`extensions/gfx/mesh.go:56-66`). `scene.Vertex` uses **none** of them today except
 `Unorm8x4` for `Color`. **Nothing has to be built in the backend for this axis.**
 
@@ -840,7 +840,7 @@ model load — and draws the line where the cost changes character.
 ### Two mechanics worth stating
 
 **The index format enters `pipelineKey` as the *strip* format** — the same
-`nil`/`Uint16`/`Uint32` that `stripIndexFormat` (`extensions/wgpu/gfxbackend.go:991`) hands
+`nil`/`Uint16`/`Uint32` that `stripIndexFormat` (`extensions/wgpu/internal/gfxbackend.go:991`) hands
 the pipeline descriptor, `nil` for every non-strip topology. Keying on the width
 unconditionally would build two identical pipelines for two triangle lists that
 differ only in an encoding detail the pipeline never sees. Keyed this way it
@@ -1238,7 +1238,7 @@ the cache that already exists.
 > which is exactly the split check 1 closed for the vertex buffer — except that
 > check reads `@location` declarations and **never sees a storage buffer**. `gfx`
 > already reflects storage structs, member offsets and array strides included
-> (`extensions/wgpu/gfxreflect.go:88`), so the numbers a check would need exist and nothing
+> (`extensions/wgpu/internal/gfxreflect.go:88`), so the numbers a check would need exist and nothing
 > compares them. Stated here as exposure; the check itself belongs on
 > [gfx: an unsupplied storage buffer binding fails silently](https://github.com/dvoyni/cog/issues/133).
 
@@ -1341,7 +1341,7 @@ scene compiled against them.
   error return. Note this makes it the **second** non-fatal report in `gfx`; the
   comment at `extensions/gfx/translate.go:322` claiming `ErrShaderExceedsWebLimits` is the
   only one is edited deliberately.
-- Vertex-input reflection: `shaderLayoutFrom` (`extensions/wgpu/gfxreflect.go:33`) grows one
+- Vertex-input reflection: `shaderLayoutFrom` (`extensions/wgpu/internal/gfxreflect.go:33`) grows one
   loop over `EntryPoints[i].Function.Arguments[j]`; `ShaderLayout` grows one
   slice. No new parse, no second lowering, no new dependency.
 - The exact-match comparison plus the `arrayStride % 4` check in
@@ -1440,7 +1440,7 @@ scene compiled against them.
   **Storage vertex**, **Sparse target** and **Live span**. The glossary defines
   `Variant`, `Supply` and `Define` and defines no mesh or morph vocabulary at
   all.
-- `extensions/wgpu/gfxbackend.go:990`'s *"Index buffers are uint32 throughout the engine"*
+- `extensions/wgpu/internal/gfxbackend.go:990`'s *"Index buffers are uint32 throughout the engine"*
   and `extensions/gfx/mesh.go:99,118`'s *"optional uint32 index array"* both go stale with
   the index change and are fixed by it.
 
@@ -1468,7 +1468,7 @@ repeated here so a reader of the spec alone does not re-propose them.
 - **An entry-point field on `ShaderDescr`** — `#45`'s option 1. It existed to
   avoid duplicating the fragment stage across variant modules, which the
   preprocessor solved by making variants share sources. The backend still
-  hardcodes `vs_main`/`fs_main` (`extensions/wgpu/gfxbackend.go:618,654`), and that is now
+  hardcodes `vs_main`/`fs_main` (`extensions/wgpu/internal/gfxbackend.go:618,654`), and that is now
   merely a fact rather than a cost.
 - **The baked pose buffer's precision.** `bundles/scene/animpack.go`'s poses are per-model
   animation data with their own consumer and their own error budget, sized by

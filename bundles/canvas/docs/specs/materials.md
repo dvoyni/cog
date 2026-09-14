@@ -329,7 +329,7 @@ inter-stage struct of its own**, under its own name, beside the published
 
 The thing carried across is the **instance index**, flat, and not the record or
 any field of it. Every reflected binding is bound `Vertex|Fragment`
-(`extensions/gfx/limits.go:9-10`, `extensions/wgpu/gfxbackend.go:475`), so one `u32` component buys the
+(`extensions/gfx/limits.go:9-10`, `extensions/wgpu/internal/gfxbackend.go:475`), so one `u32` component buys the
 whole 96-byte record where the frame rect alone would cost four:
 
 ```wgsl
@@ -870,7 +870,7 @@ draws, not the two unbatched escapes.
 
 **1. Moving would delete the extension mechanism this contract is built on.** gfx
 cannot pack named parameters into a storage struct — `ShaderResource.Members` is
-reflected at `extensions/wgpu/gfxreflect.go:46` and read by nothing outside tests — so the
+reflected at `extensions/wgpu/internal/gfxreflect.go:46` and read by nothing outside tests — so the
 uniform block is the **only name-packed target gfx has**. Appending a member to
 that block is how a custom material declares its own parameters, and
 `uniforms.wgsl` is published so an extending shader hand-writes four lines and

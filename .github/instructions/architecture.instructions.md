@@ -109,7 +109,10 @@ stay where they are.
 - **An Extension's root** declares only `Name`, `Config`, its Adapter types and
   `Err…` errors: no commands, events, resources, ports, types or forwarders.
   Its `Config` arrives, as every plugin's does, through `kernel.New`'s config
-  map under `Name`, since its constructor takes nothing. An Extension built for
+  map under `Name`, since its constructor takes nothing. An Extension may be
+  the engine's `kernel.PluginHost`, as wgpu is: the host is the plugin value
+  its constructor returns, found by the kernel, so nothing in the root names
+  it. An Extension built for
   one platform only (diskfs is `!js`, jsfs is `js`) tags its `internal/` implementation and its
   constructor package, and leaves its root untagged so the declarations build
   everywhere.
@@ -155,9 +158,8 @@ performance goes in `internal/types`. Everything else goes in `internal/`.
 - Nothing in cog imports a constructor package or another plugin's `internal/`,
   except from `_test.go` files. A test composing an engine imports constructor
   packages; every other row holds for tests too.
-- For these rules, `slots/app`, the one plugin on the migration list with a
-  root, counts as a root, and wgpu, still a single package, as a constructor
-  package.
+- For these rules, `slots/app`, the one plugin on the migration list, counts
+  as a root.
 
 ## Ordering Identities
 
@@ -190,11 +192,11 @@ plugin deletes its entry in the same change, and an entry naming a directory
 with no package fails the test. In that shape:
 
 - `slots/app` is an **Open slot**: a contract with no implementation.
-- wgpu is a single package in `extensions/`.
 
 No plugin with a **contract root**, an **`…impl`** or a Port's **vocabulary
-package** is left: gfx, the last, moved in #366. The tier test keeps their rules
-until the final sweep deletes the list, and its fixtures still exercise them.
+package** is left: gfx, the last, moved in #366. No single-package Extension is
+left either: wgpu moved in #367. The tier test keeps their rules until the final
+sweep deletes the list, and its fixtures still exercise them.
 
 | package | may import |
 | --- | --- |
@@ -203,9 +205,9 @@ until the final sweep deletes the list, and its fixtures still exercise them.
 | `internal/…` | `libs`, `kernel`, `slots/*`, other roots, vocabularies |
 | `…impl` | anything its contract root may, plus that root |
 | vocabulary | `libs` only |
-| wgpu | `libs`, `kernel`, `slots/*`, roots, vocabularies |
+| single-package Extension | `libs`, `kernel`, `slots/*`, roots, vocabularies |
 
-Nothing imports an `…impl` or wgpu except `_test.go` files, and
+Nothing imports an `…impl` or a single-package Extension except `_test.go` files, and
 a moved plugin counts as a root, its `internal/types` and `internal/` as its
 `internal/…`, and its constructor package as an `…impl`.
 

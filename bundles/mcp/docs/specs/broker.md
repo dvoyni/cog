@@ -273,7 +273,7 @@ got wrong by someone reimplementing it:
   stopping early.
 - **`app` has no plugin at all** — it is pure contract — so nothing can declare
   a dependency on it to force ordering, and `app.QuitEvent` fires only when a
-  host exists (`extensions/wgpu/plugin.go:119`).
+  host exists (`extensions/wgpu/internal/plugin.go:119`).
 
 So: the broker runs one goroutine on `k.Context().Done()` that calls
 `Server.Shutdown`. That fires before any `Stop`, is independent of listing

@@ -339,7 +339,7 @@ affect translator-owned path resources; they do not release explicit
 ### Declared
 
 `WindowSizeChangeEvent{Width, Height}` reports logical-window size changes.
-`wgpu.Plugin` publishes it synchronously before updating the viewport. Gfx does
+The wgpu plugin publishes it synchronously before updating the viewport. Gfx does
 not subscribe to this event itself.
 
 ### Subscribed

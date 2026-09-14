@@ -17,6 +17,17 @@ every section cites the tickets it came from. Nothing is decided here — where 
 claim rests on something unverified, it is marked **Gap** and says what would
 settle it.
 
+> **Amended by [#367](https://github.com/dvoyni/cog/issues/367).** wgpu moved
+> to the declaration-root shape of
+> [ADR 0002](../../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md)
+> as an Extension. Its root holds only `Name`, `Config`, the `GfxBackend` and
+> `McpProvider` Adapters and its errors, `ErrHoldTooLong` among them. The
+> plugin, the tick source, the provider and the description string moved to
+> `extensions/wgpu/internal`, and the plugin is constructed with
+> `wgpuplugin.New()`. File references below point into `internal/`; their line
+> numbers predate the move. `Config`'s zero value is the default, so
+> `DefaultConfig` is gone. The tool name is unchanged.
+
 ---
 
 ## Contents
@@ -54,10 +65,10 @@ gets it from source.
 
 The hardest-looking question here dissolves on one grep.
 
-**`time.Now()` appears exactly once in the whole module** — `extensions/wgpu/plugin.go:203`,
+**`time.Now()` appears exactly once in the whole module** — `extensions/wgpu/internal/plugin.go:203`,
 the frame pacer measuring draw-to-draw interval. Nothing else in cog reads
 wall-clock time. `app.UpdateEvent.Dt` is always `p.config.Step.Seconds()`
-(`extensions/wgpu/plugin.go:160`), a **constant**, and `anim` advances timelines by exactly
+(`extensions/wgpu/internal/plugin.go:160`), a **constant**, and `anim` advances timelines by exactly
 that constant (`bundles/anim/internal/plugin.go:37`).
 
 So there is no engine time to distort, only a driver-local accumulator, and
@@ -65,7 +76,7 @@ pause is the decision to stop feeding it. **No time scaling, no virtual clock,
 no `Time` resource.**
 
 > **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).** `time.Now()` now appears
-> **twice**: the frame pacer, and a hold's deadline in `extensions/wgpu/tick.go` — see
+> **twice**: the frame pacer, and a hold's deadline in `extensions/wgpu/internal/tick.go` — see
 > [A hold decides it](#a-hold-decides-it). The conclusion is unchanged. A hold
 > measures how long an absent agent may keep the engine from stepping, never
 > how far the simulation has moved, so there is still no engine clock, no
@@ -102,7 +113,7 @@ visibly stops.**
 **Pause stops `app.UpdateEvent` publication and nothing else.**
 
 The lever already exists and is one branch deep. `onUpdate`
-(`extensions/wgpu/plugin.go:152`) converts measured frame time into N update events through
+(`extensions/wgpu/internal/plugin.go:152`) converts measured frame time into N update events through
 `accumulate` (`:171`); `onDraw` (`:200`) is gogpu's own vsync callback and is
 independent of it. Stop feeding the accumulator and updates stop while draws
 continue.
@@ -116,7 +127,7 @@ capture still has something to read.
 
 What else keeps running while paused, all of it deliberate:
 
-- `flushInput` still dispatches `input.ApplyCmd` (`extensions/wgpu/input.go:98-105`), so
+- `flushInput` still dispatches `input.ApplyCmd` (`extensions/wgpu/internal/input.go:98-105`), so
   synthetic input still reaches the seam and banks there.
 - `app.WindowSizeChangeEvent` still publishes, and `gfx.SetViewportCmd` still
   fires from `onDraw`.
@@ -132,12 +143,12 @@ resolve, so "paused" cannot mean "no submits". See
 
 ## Resume banks nothing
 
-While paused, `onDraw` keeps incrementing `frameSeq` (`extensions/wgpu/plugin.go:205`), so
+While paused, `onDraw` keeps incrementing `frameSeq` (`extensions/wgpu/internal/plugin.go:205`), so
 a naive resume computes `dt = frameDt × (seq − lastFrameSeq)` and turns thirty
 paused seconds into a thirty-second delta.
 
 The existing guards already contain it — `MaxFrame` clamps to 250 ms
-(`extensions/wgpu/plugin.go:176`, default `extensions/wgpu/config.go:45`) and `MaxPending` caps at 4
+(`extensions/wgpu/internal/plugin.go:176`, default `extensions/wgpu/internal/config.go`) and `MaxPending` caps at 4
 whole steps (`:180`) — so the worst case today is four catch-up ticks, not a
 spiral. This is polish rather than safety, and it is worth taking anyway:
 
@@ -302,7 +313,7 @@ capability.**
 
 `app` is an Open slot and a driver implements it — the exact precedent is
 `app.QuitCmd`, declared at `slots/app/commands.go:6` and handled by `wgpu` at
-`extensions/wgpu/plugin.go:99`, with `gfx.SetViewportCmd` handled by `gfx` as the second
+`extensions/wgpu/internal/plugin.go:99`, with `gfx.SetViewportCmd` handled by `gfx` as the second
 instance. Time control is the same shape: **only the host that owns the loop can
 stop it**, and `app` names the contract so gameplay code never imports a driver.
 
@@ -331,9 +342,9 @@ different thing with a different answer.
 
 The command handler runs on an HTTP goroutine; `onUpdate` runs on the main
 thread. **That boundary already exists in this plugin and is already crossed
-with atomics** — `alpha` (`extensions/wgpu/plugin.go:37`) and `frameDtBits`/`frameSeq`
+with atomics** — `alpha` (`extensions/wgpu/internal/plugin.go:37`) and `frameDtBits`/`frameSeq`
 (`:46-47`). The pause state, the pending-step count and the step-coalescing flag
-join them as atomics on `wgpu.Plugin`, written only by the command handler.
+join them as atomics on the wgpu plugin, written only by the command handler.
 
 A kernel resource was the alternative and loses concretely: `onUpdate` is a
 driver callback holding an `Executioner`, not a handler holding a lock, so
@@ -496,7 +507,7 @@ The mechanism is one branch inside a function that already exists.
 > `gfx.SnapshotView` gains `Tick`, and `gfx`, `canvas` and `ui` carry it out
 > of the tick their snapshot was recorded in.
 
-**`extensions/wgpu/plugin.go`**
+**`extensions/wgpu/internal/plugin.go`**
 
 - Atomics beside `alpha` and `frameSeq`: `paused`, `pendingSteps`, and the
   step-coalescing flag.
@@ -507,7 +518,7 @@ The mechanism is one branch inside a function that already exists.
 - Register the time-control command handler; it writes the atomics and blocks
   until the requested steps have been published.
 
-**`extensions/wgpu/mcpprovider.go`** (new)
+**`extensions/wgpu/internal/mcpprovider.go`** (new)
 
 - A `provider` value whose `Capabilities()` returns the one capability,
   contributed with `ProvideAdapter[McpProvider]` in `Register`.
