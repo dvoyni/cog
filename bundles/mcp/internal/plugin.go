@@ -1,8 +1,9 @@
-// Package mcpimpl is the broker: the one plugin that collects every
+// Package internal is the mcp broker: the one plugin that collects every
 // mcp.Provider Adapter in the engine and serves their capabilities to an agent
-// over the Model Context Protocol. It is the implementation of the mcp Port. It
-// imports kernel, mcp, the official Go MCP SDK and a JSON-schema library, and it
-// imports no provider.
+// over the Model Context Protocol. Composition roots and tests reach New
+// through mcpplugin; everything else reaches mcp through its root, which pulls
+// in neither of the broker's dependencies. It imports kernel, mcp's root, the
+// official Go MCP SDK and a JSON-schema library, and it imports no provider.
 //
 // That absence is the design. The broker renders; it does not know. Everything
 // it can say about a capability it learned from an mcp.Capability value, and
@@ -34,8 +35,8 @@
 // that point fails on a cancelled context rather than reaching a stopped
 // plugin.
 //
-// The full design is in extensions/mcp/mcpimpl/docs/specs/mcp.md.
-package mcpimpl
+// The full design is in bundles/mcp/docs/specs/broker.md.
+package internal
 
 import (
 	"context"
@@ -44,7 +45,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/dvoyni/cog/extensions/mcp"
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -57,7 +58,7 @@ const serverName = "cog"
 // plugin is the broker. It owns the HTTP listener, the rendered tool set, and
 // the executioner every capability body dispatches through.
 type plugin struct {
-	config      Config
+	config      mcp.Config
 	providers   kernel.CollectedAdapters[mcp.Provider]
 	executioner kernel.Executioner
 	listener    net.Listener
@@ -146,7 +147,7 @@ func (p *plugin) Start(k kernel.Executioner) error {
 
 	listener, err := net.Listen("tcp", p.config.Addr)
 	if err != nil {
-		return ErrListen{Addr: p.config.Addr, Err: err}
+		return mcp.ErrListen{Addr: p.config.Addr, Err: err}
 	}
 	p.listener = listener
 

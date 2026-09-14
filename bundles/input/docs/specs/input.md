@@ -365,7 +365,7 @@ thing that defuses it.
 rather than the `{"type": "integer"}` reflection would otherwise infer. That
 interface is the only thing in this feature that exists for the agent's sake;
 see
-[mcp §Types that cross as text](../../../../extensions/mcp/docs/specs/mcp.md#types-that-cross-as-text).
+[mcp §Types that cross as text](../../../../bundles/mcp/docs/specs/mcp.md#types-that-cross-as-text).
 
 ---
 

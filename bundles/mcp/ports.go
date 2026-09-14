@@ -1,5 +1,7 @@
 package mcp
 
+import "github.com/dvoyni/cog/kernel"
+
 // Provider is the Adapter the broker collects: a value that offers
 // capabilities to an agent. It speaks cog contracts only; it never emits
 // protocol vocabulary.
@@ -23,3 +25,7 @@ type Provider interface {
 	// exactly once, during the broker's Start.
 	Capabilities() []Capability
 }
+
+// ProviderPort is the Port the broker collects every Provider through, zero
+// included.
+type ProviderPort kernel.CollectedPort[Provider]

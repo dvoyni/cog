@@ -1,4 +1,4 @@
-package mcpimpl
+package internal
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/mcp"
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/google/jsonschema-go/jsonschema"
 )
@@ -142,7 +142,7 @@ func TestRender_NonObjectSchemaRootIsRejected(t *testing.T) {
 	}
 
 	_, err := render([]offered{{provider: "probe", capability: capability}})
-	var root ErrNonObjectSchema
+	var root mcp.ErrNonObjectSchema
 	if !errors.As(err, &root) || root.Root == "object" {
 		t.Fatalf("render error = %v, want ErrNonObjectSchema", err)
 	}

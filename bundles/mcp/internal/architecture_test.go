@@ -1,4 +1,4 @@
-package mcpimpl
+package internal
 
 import (
 	"encoding/json"
@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/mcp"
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 )
 
@@ -79,20 +79,20 @@ func TestArchitecture_ReportsTheResolvedLockClosure(t *testing.T) {
 		len(document.Commands) != 2 {
 		t.Fatalf("document = %+v, want the arrays filled", document)
 	}
-	if document.Resources[0].Type != "mcpimpl.archCounter" || document.Resources[0].Owner != "arch" {
+	if document.Resources[0].Type != "mcp.archCounter" || document.Resources[0].Owner != "arch" {
 		t.Fatalf("resource = %+v, want the type string as its address", document.Resources[0])
 	}
 
 	var outer architectureCommand
 	for _, command := range document.Commands {
-		if command.Type == "mcpimpl.archOuterCmd" {
+		if command.Type == "mcp.archOuterCmd" {
 			outer = command
 		}
 	}
-	if len(outer.Writes) != 1 || outer.Writes[0] != "mcpimpl.archCounter" {
+	if len(outer.Writes) != 1 || outer.Writes[0] != "mcp.archCounter" {
 		t.Fatalf("outer writes = %v, want the lock it never named", outer.Writes)
 	}
-	if len(outer.Uses) != 1 || outer.Uses[0] != "mcpimpl.archInnerCmd" {
+	if len(outer.Uses) != 1 || outer.Uses[0] != "mcp.archInnerCmd" {
 		t.Fatalf("outer uses = %v, want the edge that explains the write", outer.Uses)
 	}
 }
@@ -113,9 +113,9 @@ func TestArchitecture_ReportsEveryPortAndItsContributors(t *testing.T) {
 	if port.Interface != "mcp.Provider" || port.Port != "mcp.ProviderPort" || !port.Collects {
 		t.Fatalf("port = %+v, want mcp.ProviderPort on mcp.Provider, collected", port)
 	}
-	if len(port.Contributors) != 2 || port.Contributors[0] != "mcpimpl.testMcpProvider" ||
+	if len(port.Contributors) != 2 || port.Contributors[0] != "mcp.testMcpProvider" ||
 		port.Contributors[1] != "mcp.McpProvider" {
-		t.Fatalf("contributors = %v, want [mcpimpl.testMcpProvider mcp.McpProvider] in plugin order", port.Contributors)
+		t.Fatalf("contributors = %v, want [mcp.testMcpProvider mcp.McpProvider] in plugin order", port.Contributors)
 	}
 }
 

@@ -1,8 +1,8 @@
 package wgpu
 
 import (
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/kernel"
 )
 

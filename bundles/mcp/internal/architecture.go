@@ -1,4 +1,4 @@
-package mcpimpl
+package internal
 
 import (
 	"encoding/json"
@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/dvoyni/cog/extensions/mcp"
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 )
 
@@ -18,7 +18,7 @@ import (
 const architectureName = "architecture"
 
 // architectureDescription is prompt text, and it is reproduced in
-// extensions/mcp/mcpimpl/docs/specs/mcp.md so it is reviewed as prompt text rather than
+// bundles/mcp/docs/specs/broker.md so it is reviewed as prompt text rather than
 // buried as a string literal.
 const architectureDescription = "What this engine is actually composed of: the plugins in start " +
 	"order, who owns which command, event and resource, which plugins contributed the Adapters " +

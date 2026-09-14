@@ -1,4 +1,4 @@
-package mcpimpl
+package internal
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/dvoyni/cog/extensions/mcp"
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )

@@ -1,4 +1,4 @@
-package mcpimpl
+package internal
 
 import (
 	"bytes"
@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/mcp"
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -67,7 +67,7 @@ func echoing(name string, opts ...mcp.Option) mcp.Capability {
 
 // testConfig binds the broker to any free port, so tests never contend for the
 // default one.
-var testConfig = Config{Addr: "127.0.0.1:0"}
+var testConfig = mcp.Config{Addr: "127.0.0.1:0"}
 
 // runEngine composes and runs an engine with the broker configured by
 // testConfig, returning the errors its handler saw. The engine is cancelled and
@@ -211,7 +211,7 @@ func TestStart_DuplicateCapabilityWithinOneProviderFailsComposition(t *testing.T
 	}}
 	reported := runEngine(t, provider, testBroker())
 
-	var duplicate ErrDuplicateCapability
+	var duplicate mcp.ErrDuplicateCapability
 	if err := firstError(t, reported); !errors.As(err, &duplicate) || duplicate.Capability != "echo" {
 		t.Fatalf("reported %v, want ErrDuplicateCapability", err)
 	}
@@ -229,7 +229,7 @@ func TestStart_DuplicateCapabilityAcrossOnePluginsProvidersFailsComposition(t *t
 	}
 	reported := runEngine(t, provider, testBroker())
 
-	var duplicate ErrDuplicateCapability
+	var duplicate mcp.ErrDuplicateCapability
 	if err := firstError(t, reported); !errors.As(err, &duplicate) ||
 		duplicate.Provider != "split" || duplicate.Capability != "echo" {
 		t.Fatalf("reported %v, want ErrDuplicateCapability", err)
@@ -280,7 +280,7 @@ func TestStart_MalformedCapabilityFailsComposition(t *testing.T) {
 	}}
 	reported := runEngine(t, provider, testBroker())
 
-	var malformed ErrMalformedCapability
+	var malformed mcp.ErrMalformedCapability
 	if err := firstError(t, reported); !errors.As(err, &malformed) {
 		t.Fatalf("reported %v, want ErrMalformedCapability", err)
 	}
@@ -301,9 +301,9 @@ func TestStart_BindFailureTerminatesTheEngine(t *testing.T) {
 	defer held.Close()
 
 	addr := held.Addr().String()
-	reported := runConfigured(t, Config{Addr: addr}, New())
+	reported := runConfigured(t, mcp.Config{Addr: addr}, New())
 
-	var listenErr ErrListen
+	var listenErr mcp.ErrListen
 	if err := firstError(t, reported); !errors.As(err, &listenErr) {
 		t.Fatalf("reported %v, want ErrListen", err)
 	}
@@ -316,7 +316,7 @@ func TestStart_BindFailureTerminatesTheEngine(t *testing.T) {
 // other plugin, and a field left zero keeps its default.
 func TestRegister_ReadsConfigFromTheConfigMap(t *testing.T) {
 	broker := New().(*plugin)
-	runConfigured(t, Config{Addr: "127.0.0.1:0", Path: "/agent"}, broker)
+	runConfigured(t, mcp.Config{Addr: "127.0.0.1:0", Path: "/agent"}, broker)
 
 	endpoint := broker.endpoint()
 	if !strings.HasSuffix(endpoint, "/agent") || strings.HasSuffix(endpoint, ":7654/agent") {

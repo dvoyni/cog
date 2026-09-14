@@ -1,4 +1,4 @@
-package mcpimpl
+package internal
 
 import (
 	"os"
@@ -18,15 +18,17 @@ var brokerOnlyModules = []string{
 }
 
 // Nothing outside the broker may acquire the MCP SDK or the schema library.
-// That absence is the whole reason mcp and mcpimpl are two packages: an app
-// importing gfx should not end up with an HTTP server and a JSON-schema
-// library in its module graph.
+// That absence is the whole reason the broker lives in mcp's internal/ and not
+// its root: an app importing gfx should not end up with an HTTP server and a
+// JSON-schema library in its module graph. The constructor package imports the
+// broker, so it is the one other package allowed to reach them.
 func TestImports_BrokerDependenciesReachNoOtherPackage(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("the go tool is needed to resolve the import graph")
 	}
 	others := slices.DeleteFunc(goList(t, "./..."), func(pkg string) bool {
-		return pkg == "github.com/dvoyni/cog/extensions/mcp/mcpimpl"
+		return pkg == "github.com/dvoyni/cog/bundles/mcp/internal" ||
+			pkg == "github.com/dvoyni/cog/bundles/mcp/mcpplugin"
 	})
 	if len(others) < 2 {
 		t.Fatalf("go list found %d packages besides the broker", len(others))

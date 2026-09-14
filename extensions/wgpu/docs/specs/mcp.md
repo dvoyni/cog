@@ -10,7 +10,7 @@ deterministic test harness and a replay tool all want the identical thing. It
 ships whether or not the broker exists, and `mcp` learns nothing new from it.
 
 The extension point is
-[extensions/mcp/docs/specs/mcp.md](../../../mcp/docs/specs/mcp.md). Assembled from the
+[bundles/mcp/docs/specs/mcp.md](../../../../bundles/mcp/docs/specs/mcp.md). Assembled from the
 resolved tickets of
 [An agent-facing extension point across cog](https://github.com/dvoyni/cog/issues/199);
 every section cites the tickets it came from. Nothing is decided here — where a
@@ -232,7 +232,7 @@ depending on whether several requests fit inside one frame's gap.
 It is **one mechanism, spelled as two actions on the capability that already
 owns pause and step**, which is where the state it acts on already lives.
 No new capability, no package learning about another, and `mcp` and
-`mcpimpl` learn nothing: a hold is a tick-source behaviour with an
+the broker learn nothing: a hold is a tick-source behaviour with an
 agent-facing spelling, exactly as a step is.
 
 Four properties, each load-bearing:

@@ -11,7 +11,7 @@ document specifies only what the agent sees, and reproduces the description
 prose in full so it can be reviewed as prompt text.
 
 The extension point is
-[extensions/mcp/docs/specs/mcp.md](../../../../extensions/mcp/docs/specs/mcp.md). Assembled from the
+[bundles/mcp/docs/specs/mcp.md](../../../../bundles/mcp/docs/specs/mcp.md). Assembled from the
 resolved tickets of
 [An agent-facing extension point across cog](https://github.com/dvoyni/cog/issues/199).
 Nothing is decided here — where a claim rests on something unverified, it is
@@ -129,7 +129,7 @@ nothing here — per-capability plurality won the argument once, and won it type
 **Keys are names**, and `#<n>` is accepted because it is what an unnamed key
 prints as. The schema is an `anyOf` of the name enum and `^#-?[0-9]+$`, so a
 typo is rejected client-side rather than reaching the engine; see
-[mcp §Types that cross as text](../../../../extensions/mcp/docs/specs/mcp.md#types-that-cross-as-text).
+[mcp §Types that cross as text](../../../../bundles/mcp/docs/specs/mcp.md#types-that-cross-as-text).
 
 **The caps are refusals, not truncations**: 10 s of total duration and 256 steps,
 both checked before a single step runs, both `mcp.Unavailable`. Everything else
@@ -201,7 +201,7 @@ breaks, and breaks silently on a 1:1 display. See
 
 **`input_send` is the first capability in this family that binds to no frame**,
 and saying so is what keeps
-[mcp §Arm-then-wait](../../../../extensions/mcp/docs/specs/mcp.md#arm-then-wait) a statement
+[mcp §Arm-then-wait](../../../../bundles/mcp/docs/specs/mcp.md#arm-then-wait) a statement
 about frame-bound capabilities rather than a house style.
 
 It does not need to wait, and **should not**, because a capture binds to a tick

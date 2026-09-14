@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/input"
-	"github.com/dvoyni/cog/extensions/mcp"
+	"github.com/dvoyni/cog/bundles/mcp"
 )
 
 // One tool acts and one looks, and the annotation is what makes them two: MCP

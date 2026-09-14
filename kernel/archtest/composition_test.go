@@ -17,11 +17,11 @@ import (
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
 	"github.com/dvoyni/cog/bundles/ecsscene/ecssceneimpl"
 	"github.com/dvoyni/cog/bundles/input/inputplugin"
+	"github.com/dvoyni/cog/bundles/mcp/mcpplugin"
 	"github.com/dvoyni/cog/bundles/scene/sceneimpl"
 	"github.com/dvoyni/cog/bundles/ui/uiimpl"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
-	"github.com/dvoyni/cog/extensions/mcp/mcpimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
@@ -37,7 +37,7 @@ func TestTypeName_NamesEveryTypeInAFullCogCompositionUniquely(t *testing.T) {
 		WithPlugins(
 			storageplugin.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{&detachedBackend{}},
 			inputplugin.New(), animplugin.New(), canvasimpl.New(), sceneimpl.New(), uiimpl.New(),
-			ecsplugin.New(), ecssceneimpl.New(), mcpimpl.New(),
+			ecsplugin.New(), ecssceneimpl.New(), mcpplugin.New(),
 		)
 	if failure != nil {
 		t.Fatalf("composing every plugin failed: %v", failure)

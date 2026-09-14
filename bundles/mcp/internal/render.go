@@ -1,9 +1,9 @@
-package mcpimpl
+package internal
 
 import (
 	"reflect"
 
-	"github.com/dvoyni/cog/extensions/mcp"
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/google/jsonschema-go/jsonschema"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -38,12 +38,12 @@ func collect(providers []kernel.ContributedAdapter[mcp.Provider]) ([]offered, er
 		}
 		for _, capability := range contributed.Adapter.Capabilities() {
 			if err := capability.Err(); err != nil {
-				return nil, ErrMalformedCapability{
+				return nil, mcp.ErrMalformedCapability{
 					Provider: string(contributed.Plugin), Capability: capability.Name(), Err: err,
 				}
 			}
 			if _, duplicate := names[capability.Name()]; duplicate {
-				return nil, ErrDuplicateCapability{
+				return nil, mcp.ErrDuplicateCapability{
 					Provider: string(contributed.Plugin), Capability: capability.Name(),
 				}
 			}
@@ -63,7 +63,7 @@ func render(all []offered) ([]*sdk.Tool, error) {
 	for _, one := range all {
 		tool, err := renderTool(one, overrides)
 		if err != nil {
-			return nil, ErrMalformedCapability{
+			return nil, mcp.ErrMalformedCapability{
 				Provider: string(one.provider), Capability: one.capability.Name(), Err: err,
 			}
 		}
@@ -110,7 +110,7 @@ func payloadSchema(
 		return nil, err
 	}
 	if schema.Type != "object" {
-		return nil, ErrNonObjectSchema{Type: payload, Root: schema.Type}
+		return nil, mcp.ErrNonObjectSchema{Type: payload, Root: schema.Type}
 	}
 	return schema, nil
 }

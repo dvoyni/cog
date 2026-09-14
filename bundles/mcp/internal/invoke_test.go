@@ -1,4 +1,4 @@
-package mcpimpl
+package internal
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/mcp"
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -133,7 +133,7 @@ func TestInvoke_TimeoutRefusesInWords(t *testing.T) {
 		return echoResponse{}, k.Context().Err()
 	})
 	broker := testBroker()
-	reported := runConfigured(t, Config{Addr: "127.0.0.1:0", Timeout: 20 * time.Millisecond},
+	reported := runConfigured(t, mcp.Config{Addr: "127.0.0.1:0", Timeout: 20 * time.Millisecond},
 		&testProvider{name: "probe", capabilities: []mcp.Capability{capability}}, broker)
 
 	result := callTool(t, broker, capability, `{}`)

@@ -1,13 +1,17 @@
-// Package mcp is the contract root of the agent-facing Port: how a plugin
-// offers typed capabilities to an agent, and nothing about how those
-// capabilities reach one. It imports kernel and the standard library.
+// Package mcp declares the agent-facing Bundle: how a plugin offers typed
+// capabilities to an agent, and nothing about how those capabilities reach one.
+// It imports kernel and the standard library.
+//
+// mcp is a Bundle. Its plugin, the broker built by mcpplugin.New, collects every
+// Provider through ProviderPort, contributes one McpProvider of its own, and
+// serves the capabilities over the Model Context Protocol. The broker and its
+// SDK and JSON-schema dependencies live in mcp's internal/, so a plugin that
+// imports this root to offer a capability compiles in neither.
 //
 // A Provider is the Adapter a plugin contributes to offer Capabilities. A
 // Capability is a named, described, typed dispatch, built with either Command
-// or Func. The broker that collects every Provider and serves the capabilities
-// over the Model Context Protocol is the Port's implementation, mcpimpl; this
-// package must never learn protocol vocabulary, so a provider writes no schema,
-// no tool name and no annotation.
+// or Func. This package must never learn protocol vocabulary, so a provider
+// writes no schema, no tool name and no annotation.
 //
 // # The capability-body rule
 //
@@ -32,6 +36,6 @@
 // # Specification
 //
 // The full design, including the reasoning behind every rule here, is in
-// extensions/mcp/docs/specs/mcp.md; the broker's half is in
-// extensions/mcp/mcpimpl/docs/specs/mcp.md.
+// bundles/mcp/docs/specs/mcp.md; the broker's half is in
+// bundles/mcp/docs/specs/broker.md.
 package mcp

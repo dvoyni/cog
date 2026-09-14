@@ -74,10 +74,9 @@ error handling.
 - [`wgpu`](extensions/wgpu/README.md): window, input, timing with pause, step and a hold
     that makes several observations describe one tick, and WebGPU system
     driver.
-- [`mcp`](extensions/mcp/README.md): the agent-facing extension point — typed capabilities
-    a plugin offers, as a Port that collects every plugin's Provider.
-- [`mcpimpl`](extensions/mcp/mcpimpl/README.md): the broker that collects capabilities from
-    every provider and serves them to an agent over MCP.
+- [`mcp`](bundles/mcp/README.md): the agent-facing extension point — typed capabilities
+    a plugin offers, collected through a Port from every plugin's Provider by a
+    broker that serves them to an agent over MCP.
 
 ## Plugin Kinds
 
