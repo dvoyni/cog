@@ -48,7 +48,7 @@ error handling.
     resources, and errors.
 - [`app`](slots/app/README.md): the application loop — lifecycle, fixed-step update
     and render events, quit, and time control with pause, step and a hold that
-    makes several observations describe one tick — over a platform Driver.
+    makes several observations describe one tick — over a platform MainLoop.
 - [`input`](bundles/input/README.md): input state, discrete events, the driver-facing
     apply command, and scripted input.
 - [`anim`](bundles/anim/README.md): timelines of eased value tracks and one-tick cues,
@@ -73,7 +73,7 @@ error handling.
 - [`ui`](bundles/ui/README.md): immediate-mode layout, interaction, canvas-backed visual
     processing, and a snapshot of what layout resolved.
 - [`wgpu`](extensions/wgpu/README.md): window, input, frame timing and WebGPU system
-    driver, and app's platform Driver.
+    driver, and app's platform MainLoop.
 - [`mcp`](bundles/mcp/README.md): the agent-facing extension point — typed capabilities
     a plugin offers, collected through a Port from every plugin's Provider by a
     broker that serves them to an agent over MCP.
@@ -147,7 +147,7 @@ plugins := []kernel.Plugin{
     inputplugin.New(),
     appplugin.New(),
     gfxplugin.New(),
-    wgpuplugin.New(), // provides app's Driver and gfx's Backend Adapters
+    wgpuplugin.New(), // provides app's MainLoop and gfx's Backend Adapters
     ...
 }
 

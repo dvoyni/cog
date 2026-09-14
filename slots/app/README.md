@@ -1,12 +1,12 @@
 # app
 
-`github.com/dvoyni/cog/slots/app` is the driver-neutral application loop: the
+`github.com/dvoyni/cog/slots/app` is the platform-neutral application loop: the
 lifecycle, update, render and window-size events every game subscribes to, the
 quit and time commands, and the plugin that owns the fixed step, pause, step,
 hold and tick numbering behind them.
 
 app is a **Slot**: it ships its own declarations and implementation, and works
-only once a `Driver` **Adapter** fills its required `DriverPort`. The Driver is
+only once a `MainLoop` **Adapter** fills its required `MainLoopPort`. The MainLoop is
 the platform main loop, and `wgpu` provides it on the desktop and the web. The
 vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
 [ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
@@ -19,11 +19,11 @@ app has the declaration-root shape of
 [`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
 
 - **`slots/app`** is the root, and holds declarations only: the events, the
-  commands, `Driver` and `DriverPort`, `Loop` and `TimeAction`, `Config`, the
+  commands, `MainLoop` and `MainLoopPort`, `Loop` and `TimeAction`, `Config`, the
   errors, the `McpProvider` Adapter and `Name`. It has no functions. It is what
   every other package imports.
 - **`slots/app/internal`** is the plugin: its `New`, the `Loop` it hands the
-  Driver, the tick source, the command handlers and the mcp provider.
+  MainLoop, the tick source, the command handlers and the mcp provider.
 - **`slots/app/appplugin`** exports only `New() kernel.Plugin`. Only composition
   roots and tests import it.
 
@@ -32,7 +32,7 @@ There is no `internal/types`: nothing app declares is aliased.
 ## Plugin
 
 - Name: `app.Name` (`"app"`)
-- Kind: a Slot, requiring one Adapter for `app.DriverPort`
+- Kind: a Slot, requiring one Adapter for `app.MainLoopPort`
 - Constructor: `appplugin.New() kernel.Plugin`
 - Plugin dependencies: none
 - Contributes: one `mcp.Provider` Adapter (`app.McpProvider`)
@@ -54,20 +54,20 @@ plugins := []kernel.Plugin{
     inputplugin.New(),
     appplugin.New(),
     gfxplugin.New(),
-    wgpuplugin.New(), // provides app's Driver and gfx's Backend
+    wgpuplugin.New(), // provides app's MainLoop and gfx's Backend
     …
 }
 ```
 
-## The Loop And The Driver
+## The Loop And The MainLoop
 
 ```go
-type Driver interface {
+type MainLoop interface {
     Attach(loop Loop)
     Quit()
 }
 
-type DriverPort kernel.RequiredPort[Driver]
+type MainLoopPort kernel.RequiredPort[MainLoop]
 
 type Loop interface {
     Init(k kernel.Executioner) error
@@ -78,29 +78,31 @@ type Loop interface {
 }
 ```
 
-The loop is split along what varies by platform. **The Driver** runs the platform
+The loop is split along what varies by platform. **The MainLoop** runs the platform
 main loop: it owns the window and the OS thread, measures real frame time, and
 reads input. **app** owns everything else: the fixed-step accumulator, render
-interpolation, the tick source and publishing every event.
+interpolation, the tick source and publishing every event. The two interfaces
+face opposite ways: app calls the `MainLoop`, only to hand over its `Loop` and to
+quit, and the `MainLoop` calls the `Loop`, every frame.
 
-- **app hands over its `Loop` from `Start`** with `Driver.Attach`. Every `Start`
-  runs before the Host's `Run`, so a driver never enters its loop without one.
-- **The driver calls the `Loop`** from its own callbacks, with the Executioner
+- **app hands over its `Loop` from `Start`** with `MainLoop.Attach`. Every `Start`
+  runs before the Host's `Run`, so a MainLoop never enters its loop without one.
+- **The MainLoop calls the `Loop`** from its own callbacks, with the Executioner
   it holds as the Host: `Init` immediately before entering its loop (an error
   means the loop must not start), `Frame` once per update on its main thread
   with the real seconds the frames drawn since the last call took, `WindowSize`
   when the window's size in device-independent pixels changes, `Render` once per
   drawn frame on its render thread, and `Quit` after its loop returns. Each
-  publishes one event and waits for its subscribers, so the ordering the driver
+  publishes one event and waits for its subscribers, so the ordering the MainLoop
   chooses between its own work and these calls is the ordering subscribers see.
   wgpu flushes the frame's input before `Frame`, so every tick of the frame sees
   it, and calls `WindowSize` before it resolves the frame's viewport.
-- **`QuitCmd` calls `Driver.Quit`**, from whatever goroutine dispatched it, so
+- **`QuitCmd` calls `MainLoop.Quit`**, from whatever goroutine dispatched it, so
   `Quit` must be safe on any goroutine.
-- **Composition fails without a Driver**, with `kernel.ErrMissingAdapter`
-  naming `app.DriverPort`.
+- **Composition fails without a MainLoop**, with `kernel.ErrMissingAdapter`
+  naming `app.MainLoopPort`.
 
-A headless run is a Driver with no loop of its own: cog-examples'
+A headless run is a MainLoop with no loop of its own: cog-examples'
 `internal/headless` keeps the `Loop` it is handed and calls `Frame` with exactly
 one `Step` of time and `Render` for each frame a test steps.
 
@@ -136,7 +138,7 @@ The root's `err.go` declares the errors a caller may match:
 type QuitCmd kernel.Command[QuitRequest, QuitResponse]
 ```
 
-Requests that the application stop: app asks its Driver to quit the platform
+Requests that the application stop: app asks its MainLoop to quit the platform
 main loop, which unwinds the Host's `Run` and shuts the engine down. It returns
 once the request is made, not once the loop has stopped. `QuitRequest` and
 `QuitResponse` are empty structs, and the handler takes no locks.
@@ -172,18 +174,18 @@ type TimeResponse struct {
 
 Controls the engine's **tick source**: what decides when an update tick is
 published — the frame clock while running, or an explicit step while paused.
-The app plugin handles it, whichever Driver runs the loop underneath, and the
+The app plugin handles it, whichever MainLoop runs the loop underneath, and the
 handler takes no locks, which is what makes a step safe to wait on inside it.
 
 This is an engine feature, not a debugging aside: a frame-step debugger, a
 deterministic test harness and a replay tool all want the identical thing, and
-none of them has to import a driver to get it. A caller dispatches
+none of them has to import a platform plugin to get it. A caller dispatches
 `TimeStatus` and reads `Paused` to know whether a tick is coming, and adds
 `HoldFor` to its own deadline before it waits for a step; there are no helpers
 for either, and a caller that declares app as a dependency always gets an
 answer.
 
-- **Pause stops update ticks and stops nothing else.** The driver keeps
+- **Pause stops update ticks and stops nothing else.** The MainLoop keeps
   drawing the last completed frame, input still reaches `input.ApplyCmd`,
   `WindowSizeChangeEvent` still publishes, and the window stays live, movable
   and resizable. A paused game must not look hung, and a frame is still
@@ -242,10 +244,10 @@ Two limits, stated as non-guarantees rather than left to be discovered:
 
 - **Pause is one branch in `Frame`.** While paused it discards `dt`, leaves the
   accumulator untouched, and publishes only the steps somebody asked for.
-  Everything the driver does around `Frame` runs exactly as it does while
+  Everything the MainLoop does around `Frame` runs exactly as it does while
   running.
 - **The state is atomics, not a kernel resource.** The command handler runs on
-  whatever goroutine dispatched it and `Frame` runs on the driver's main thread,
+  whatever goroutine dispatched it and `Frame` runs on the MainLoop's main thread,
   the boundary the render interpolation factor already crosses to `Render`. A
   resource would mean a dispatch every frame merely to ask whether to tick. A
   running frame reads one atomic; a paused frame with nothing pending reads two;
@@ -298,7 +300,7 @@ The description prose the agent reads is reproduced in full in
 type InitEvent struct{}
 ```
 
-Published once, immediately before the driver enters its main loop. Plugins use
+Published once, immediately before the MainLoop enters the platform loop. Plugins use
 it for runtime initialization that depends on commands or resources registered
 by other plugins.
 
@@ -308,7 +310,7 @@ by other plugins.
 type QuitEvent struct{}
 ```
 
-Published once, after the driver's main loop returns. Plugins use it to dispose
+Published once, after the MainLoop's platform loop returns. Plugins use it to dispose
 application runtime state.
 
 ### `UpdateEvent`
@@ -321,7 +323,7 @@ type UpdateEvent struct {
 }
 ```
 
-A fixed simulation step, published by app on the driver's main thread, in order,
+A fixed simulation step, published by app on the MainLoop's main thread, in order,
 waiting for each. `Dt` is the fixed step in seconds, always `Config.Step`.
 `Last` is true for the final catch-up step of the current frame, allowing
 subscribers to defer once-per-frame work until the latest simulation state; long
@@ -351,8 +353,8 @@ type RenderEvent struct {
 }
 ```
 
-A rendered frame, published by app on the driver's render thread once per drawn
-frame, after the driver makes the target current. `Alpha` is the interpolation
+A rendered frame, published by app on the MainLoop's render thread once per drawn
+frame, after the MainLoop makes the target current. `Alpha` is the interpolation
 factor in `[0, 1)` between the previous and current fixed updates: the fraction
 of a step the last `Frame` left in the accumulator.
 
@@ -367,6 +369,6 @@ type WindowSizeChangeEvent struct{ Width, Height float32 }
 ```
 
 A change to the window size in device-independent pixels. app publishes it when
-the driver reports one, before the driver resolves that frame's logical
+the MainLoop reports one, before the MainLoop resolves that frame's logical
 viewport, so a game can pick a different desired policy for the new aspect (for
 example landscape versus portrait).

@@ -29,7 +29,7 @@ it offers, and the plugin filling a Port declares its Adapter:
 
 ```go
 // app
-type DriverPort kernel.RequiredPort[Driver]
+type MainLoopPort kernel.RequiredPort[MainLoop]
 
 // gfx
 type BackendPort kernel.RequiredPort[Backend]
@@ -38,7 +38,7 @@ type BackendPort kernel.RequiredPort[Backend]
 type ProviderPort kernel.CollectedPort[Provider]
 
 // wgpu
-type AppDriver kernel.Adapter[app.DriverPort]
+type AppMainLoop kernel.Adapter[app.MainLoopPort]
 type GfxBackend kernel.Adapter[gfx.BackendPort]
 
 // input
@@ -198,7 +198,7 @@ type AdapterDescription struct {
 
 ```
 ports:
-  app.DriverPort (app) requires [wgpu.AppDriver (wgpu)]
+  app.MainLoopPort (app) requires [wgpu.AppMainLoop (wgpu)]
   gfx.BackendPort (gfx) requires [wgpu.GfxBackend (wgpu)]
   mcp.ProviderPort (mcpserver) collects [input.McpProvider (input), mcp.McpProvider (mcpserver)]
 ```

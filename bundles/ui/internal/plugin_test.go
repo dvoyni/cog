@@ -93,7 +93,7 @@ func TestPluginMapsWindowPointerToLogicalViewport(t *testing.T) {
 		return true
 	}).WithPlugins(
 		storageplugin.New(), permanentAdapter{},
-		appplugin.New(), driverAdapter{},
+		appplugin.New(), mainLoopAdapter{},
 		inputplugin.New(),
 		gfxplugin.New(),
 		backendAdapter{&detachedBackend{}},
@@ -156,7 +156,7 @@ func TestPluginProcessesAndClearsEveryUpdate(t *testing.T) {
 		return true
 	}).WithPlugins(
 		storageplugin.New(), permanentAdapter{},
-		appplugin.New(), driverAdapter{},
+		appplugin.New(), mainLoopAdapter{},
 		inputplugin.New(),
 		gfxplugin.New(),
 		backendAdapter{&detachedBackend{}},
@@ -227,7 +227,7 @@ func TestPluginSeesAScriptedClickAsAClick(t *testing.T) {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, inputplugin.New(), gfxplugin.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, inputplugin.New(), gfxplugin.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
 	go engine.Run(runContext)
 	<-engine.Ready()
 	k := engine.Executioner()
@@ -266,7 +266,7 @@ func TestPluginSeesAScriptedDragAsADrag(t *testing.T) {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, inputplugin.New(), gfxplugin.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, inputplugin.New(), gfxplugin.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
 	go engine.Run(runContext)
 	<-engine.Ready()
 	k := engine.Executioner()

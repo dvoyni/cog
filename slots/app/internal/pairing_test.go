@@ -35,7 +35,7 @@ import (
 // This is the closest the repository gets to the live test. What it does not
 // have is a window, a GPU and three HTTP connections; what it does have is
 // every seam between them, with app driven through the Loop it attaches to a
-// fake Driver, as a platform driver drives it.
+// fake MainLoop, as wgpu's MainLoop drives it.
 
 // pairingRounds is how many times each recipe is run. The live failure was a
 // race against the frame clock rather than a fixed limit, so one pass proves
@@ -63,15 +63,15 @@ func (p *pairingPlugin) Register(registrar *kernel.Registrar, _ any) error {
 }
 
 // pairingRig is a whole engine - storage, input, app, gfx, canvas and ui -
-// with a frame loop of its own, driven the way a driver drives it: the Loop's
+// with a frame loop of its own, driven the way a MainLoop drives it: the Loop's
 // Frame on one goroutine, its Render behind it.
 type pairingRig struct {
-	t       *testing.T
-	app     *plugin
-	driver  *fakeDriver
-	k       kernel.Executioner
-	caps    map[string]mcp.Capability
-	backend *pairingBackend
+	t        *testing.T
+	app      *plugin
+	mainLoop *fakeMainLoop
+	k        kernel.Executioner
+	caps     map[string]mcp.Capability
+	backend  *pairingBackend
 	// providers collects every mcp.Provider the composed plugins contribute,
 	// the way the broker does.
 	providers kernel.CollectedAdapters[mcp.Provider]
@@ -82,7 +82,7 @@ type pairingRig struct {
 func newPairingRig(t *testing.T) *pairingRig {
 	t.Helper()
 	rig := &pairingRig{
-		t: t, app: New().(*plugin), driver: &fakeDriver{},
+		t: t, app: New().(*plugin), mainLoop: &fakeMainLoop{},
 		caps: map[string]mcp.Capability{}, backend: newPairingBackend(),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -93,7 +93,7 @@ func newPairingRig(t *testing.T) *pairingRig {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
 	}).WithPlugins(
-		storageplugin.New(), permanentAdapter{}, rig.app, driverAdapter{rig.driver},
+		storageplugin.New(), permanentAdapter{}, rig.app, mainLoopAdapter{rig.mainLoop},
 		inputplugin.New(), gfxplugin.New(), canvasplugin.New(), uiplugin.New(),
 		&pairingPlugin{rig: rig},
 	)
@@ -138,7 +138,7 @@ func newPairingRig(t *testing.T) *pairingRig {
 }
 
 // run starts the frame loop: the Loop's Frame on a goroutine of its own, then
-// the Render a driver calls from its draw callback. This is what the join
+// the Render a MainLoop calls from its draw callback. This is what the join
 // window was racing, and what a hand-stepped test can never reproduce.
 func (r *pairingRig) run() {
 	done, stopped := make(chan struct{}), make(chan struct{})
@@ -150,7 +150,7 @@ func (r *pairingRig) run() {
 				return
 			default:
 			}
-			loop := r.driver.attached()
+			loop := r.mainLoop.attached()
 			loop.Frame(r.k, 0)
 			loop.Render(r.k)
 			time.Sleep(time.Millisecond)

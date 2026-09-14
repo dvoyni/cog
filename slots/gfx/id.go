@@ -13,8 +13,8 @@ const Name kernel.PluginName = "gfx"
 type PresentOnUpdate kernel.Subscription[app.UpdateEvent]
 
 // RenderOnRender is the subscription type of the plugin's per-frame render
-// handler on app.RenderEvent. A driver publishes app.RenderEvent synchronously on
-// its render thread (after making the surface current), so this handler acquires
-// the latest list, translates it, and executes it into the backend's screen
-// framebuffer — no explicit render command needed.
+// handler on app.RenderEvent. app publishes app.RenderEvent synchronously on the
+// MainLoop's render thread (after the MainLoop makes the surface current), so
+// this handler acquires the latest list, translates it, and executes it into
+// the backend's screen framebuffer — no explicit render command needed.
 type RenderOnRender kernel.Subscription[app.RenderEvent]

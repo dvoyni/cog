@@ -6,9 +6,9 @@ import (
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
-// AppDriver is the Adapter through which wgpu fills app's Driver Port: the
+// AppMainLoop is the Adapter through which wgpu fills app's MainLoop Port: the
 // gogpu main loop, which drives the Loop app attaches.
-type AppDriver kernel.Adapter[app.DriverPort]
+type AppMainLoop kernel.Adapter[app.MainLoopPort]
 
 // GfxBackend is the Adapter through which wgpu fills gfx's backend Port.
 type GfxBackend kernel.Adapter[gfx.BackendPort]

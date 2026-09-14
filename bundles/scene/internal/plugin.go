@@ -117,7 +117,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, value any) error {
 
 // Start mounts the bundled shader filesystem. Startup runs after every plugin
 // has registered and before the host loop, so the shader is in place for the
-// first frame without depending on a driver publishing an event.
+// first frame without depending on app publishing an event.
 func (p *plugin) Start(k kernel.Executioner) error {
 	_, err := k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{Mount: storage.ReadMount{
 		Id: shaderMountID, Priority: math.MaxInt, FS: shaderFS,
@@ -159,7 +159,7 @@ func (p *plugin) flushFrame(
 	for _, id := range types.OpQueueDuplicates(write) {
 		k.ReportError(scene.ErrCameraAlreadyRecorded{Camera: id})
 	}
-	// A frame before the driver has reported a window, or while one is
+	// A frame before the MainLoop has reported a window, or while one is
 	// minimised, is skipped whole rather than reported: every screen-targeted
 	// pass in it would resolve an aspect of zero, and reporting that once per
 	// camera per frame says nothing a caller can act on.

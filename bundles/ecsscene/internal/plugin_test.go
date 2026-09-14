@@ -48,7 +48,7 @@ func compose(mover *moverPlugin) error {
 	var failure error
 	kernel.New(map[kernel.PluginName]any{storage.Name: storage.Config{}}).
 		Handler(func(err error) bool { failure = errors.Join(failure, err); return false }).
-		WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
+		WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
 			sceneplugin.New(), ecsplugin.New(), New(), mover)
 	return failure
 }

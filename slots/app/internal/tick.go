@@ -25,16 +25,16 @@ const (
 	maxHoldDuration     = 10 * time.Second
 )
 
-// tickSource decides when an update tick is published: the driver's frame
+// tickSource decides when an update tick is published: the MainLoop's frame
 // clock while running, or an explicit step while paused. Rendering is not a
 // tick source — a paused engine keeps drawing the last completed frame, so
 // pause stops app.UpdateEvent publication and nothing else.
 //
 // Its state is atomics rather than a kernel resource because Frame is called
-// from a driver callback holding an Executioner, not a handler holding a lock:
+// from a MainLoop callback holding an Executioner, not a handler holding a lock:
 // reading a resource would cost a dispatch every frame merely to ask whether
 // to tick. The thread boundary it crosses — a command handler on some caller's
-// goroutine against Frame on the driver's main thread — is the same one alpha
+// goroutine against Frame on the MainLoop's main thread — is the same one alpha
 // already crosses, and for the same reason.
 //
 // mu guards the handover of one batch of steps to the frame that publishes

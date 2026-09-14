@@ -20,7 +20,7 @@ Every plugin `X` is four places:
 - **`X/internal/`** holds the implementation.
 - **The constructor package `X/xplugin`** exports only `New()`, and only composition roots and tests import it.
 
-Ports and Adapters are declared identity types, as commands are: a Port in its plugin's `ports.go`, an Adapter in the providing plugin's `adapters.go`. The tier test cross-checks every `ProvideAdapter` against `adapters.go`. gfx folds `gpu` back into its root. app becomes a Slot owning the application loop, with a Driver Port that wgpu fills.
+Ports and Adapters are declared identity types, as commands are: a Port in its plugin's `ports.go`, an Adapter in the providing plugin's `adapters.go`. The tier test cross-checks every `ProvideAdapter` against `adapters.go`. gfx folds `gpu` back into its root. app becomes a Slot owning the application loop, with a MainLoop Port that wgpu fills.
 
 This applies to the cog repo. Games and examples are composition roots and stay free-form.
 

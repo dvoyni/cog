@@ -41,7 +41,7 @@ func flattenShader(t testing.TB, mount storage.MountId, filesystem fs.FS, shader
 			mu.Unlock()
 		}
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, gfxplugin.New(), flattenRecorder{backend: backend, shader: shader})
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), flattenRecorder{backend: backend, shader: shader})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()

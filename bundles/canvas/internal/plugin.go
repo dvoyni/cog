@@ -130,7 +130,7 @@ func (p *plugin) snapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent
 
 // Start mounts the built-in filesystem: the shaders and the default font.
 // Startup runs after every plugin has registered and before the host loop, so
-// both are in place for the first frame without depending on a driver
+// both are in place for the first frame without depending on app
 // publishing an event.
 func (p *plugin) Start(k kernel.Executioner) error {
 	_, err := k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{Mount: storage.ReadMount{

@@ -8,11 +8,11 @@ import (
 	"github.com/dvoyni/cog/slots/app"
 )
 
-// These are app's time-control tests. They drive the plugin the way a driver
-// does, through the Loop it attaches to a fake Driver, and control it the way
+// These are app's time-control tests. They drive the plugin the way a MainLoop
+// does, through the Loop it attaches to a fake MainLoop, and control it the way
 // any caller does, by dispatching app.TimeCmd, against a real engine.
 
-// Pausing stops update ticks and nothing else: a paused driver's frames still
+// Pausing stops update ticks and nothing else: a paused MainLoop's frames still
 // render, and each render still reaches subscribers.
 func TestTickSource_PauseStopsTicksAndNothingElse(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
@@ -344,7 +344,7 @@ func TestTickSource_ResumeDropsAHold(t *testing.T) {
 	}
 }
 
-// A hold longer than the driver will honour is refused rather than quietly
+// A hold longer than app will honour is refused rather than quietly
 // shortened, and no hold begins: a caller told it has a minute, and given ten
 // seconds, would meet the difference as a split.
 func TestTickSource_HoldLongerThanTheCapIsRefused(t *testing.T) {

@@ -2,26 +2,26 @@
 
 `github.com/dvoyni/cog/extensions/wgpu` is Cog's window, input, frame timing,
 and WebGPU system driver built on `gogpu`. It owns the OS main loop and provides
-it as app's `app.Driver` Adapter, provides gfx's `gfx.Backend` Adapter, and feeds
+it as app's `app.MainLoop` Adapter, provides gfx's `gfx.Backend` Adapter, and feeds
 `input`, on desktop and WebAssembly.
 
 ## Plugin
 
 - Name: `wgpu.Name` (`"wgpu"`)
 - Kind: an Extension. The root declares only `Name`, `Config`, the Adapters
-  `AppDriver` and `GfxBackend`, and the errors; everything else is in
+  `AppMainLoop` and `GfxBackend`, and the errors; everything else is in
   `internal/`.
 - Constructor: `wgpuplugin.New() kernel.Plugin`
 - Plugin dependencies: `gfx`, `input`
 - Go package dependencies: `app`, `gfx`, `input`, `kernel`, `gogpu`, WebGPU
   implementation packages. The root imports only `kernel`, `app` and `gfx`;
   gogpu is imported by `internal/` alone.
-- Contributes: one `app.Driver` Adapter and one `gfx.Backend` Adapter
+- Contributes: one `app.MainLoop` Adapter and one `gfx.Backend` Adapter
 - Implements: `kernel.PluginHost`, `kernel.PluginStopper`
 - Subscribed kernel events: none
 
-Register dependencies before the driver, and compose `appplugin.New()`: app is
-the Slot wgpu's Driver fills. `Run(ctx)` owns the calling thread and blocks in
+Register dependencies before wgpu, and compose `appplugin.New()`: app is
+the Slot wgpu's MainLoop fills. `Run(ctx)` owns the calling thread and blocks in
 the platform main loop until the window closes, `app.QuitCmd` runs, or the
 context is canceled.
 
@@ -66,10 +66,10 @@ match: `ErrInvalidConfig`, and `ErrDepthOnlyPassUnsupported`, reported once
 per run for a depth-only pass the selected backend declines to encode. The time
 errors are app's.
 
-## App's Driver
+## App's MainLoop
 
 wgpu is the platform half of app's loop, and app is the rest. It provides a
-view of itself as `app.Driver` with `registrar.ProvideAdapter[AppDriver]` in
+view of itself as `app.MainLoop` with `registrar.ProvideAdapter[AppMainLoop]` in
 `Register`; app hands it an `app.Loop` from app's `Start`, which precedes `Run`,
 and asks it to `Quit` for `app.QuitCmd`, which stops the gogpu App from any
 goroutine. The binding adds no dependency: wgpu dispatches none of app's
@@ -108,7 +108,7 @@ None of its own. The Loop calls above are what publish `app.InitEvent`,
 `app.UpdateEvent`, `app.WindowSizeChangeEvent`, `app.RenderEvent` and
 `app.QuitEvent`, each synchronously on the thread wgpu calls it from.
 
-The driver does not subscribe through the kernel registry; `gogpu` callbacks
+wgpu does not subscribe through the kernel registry; `gogpu` callbacks
 invoke its update, draw, and input bridges directly.
 
 ## Backend Behavior

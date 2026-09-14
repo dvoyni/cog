@@ -11,38 +11,38 @@ import (
 	"github.com/dvoyni/cog/slots/app"
 )
 
-// fakeDriver is the Driver these tests compose app with: it keeps the Loop app
-// attaches, the way a platform driver does, and counts the quits it is asked
-// for. A test stands where the driver's main loop stands and calls that Loop
+// fakeMainLoop is the MainLoop these tests compose app with: it keeps the Loop app
+// attaches, the way a platform MainLoop does, and counts the quits it is asked
+// for. A test stands where the platform loop stands and calls that Loop
 // on the goroutine it chooses.
-type fakeDriver struct {
+type fakeMainLoop struct {
 	loop  atomic.Pointer[app.Loop]
 	quits atomic.Int32
 }
 
-func (d *fakeDriver) Attach(loop app.Loop) { d.loop.Store(&loop) }
-func (d *fakeDriver) Quit()                { d.quits.Add(1) }
+func (d *fakeMainLoop) Attach(loop app.Loop) { d.loop.Store(&loop) }
+func (d *fakeMainLoop) Quit()                { d.quits.Add(1) }
 
 // attached is the Loop app handed over, or nil when it handed none.
-func (d *fakeDriver) attached() app.Loop {
+func (d *fakeMainLoop) attached() app.Loop {
 	if loop := d.loop.Load(); loop != nil {
 		return *loop
 	}
 	return nil
 }
 
-// driverAdapter provides a fake driver as app's Driver, the way a platform
+// mainLoopAdapter provides a fakeMainLoop as app's MainLoop, the way a platform
 // plugin provides its own: app is a Slot, and a composition without one fails.
-type driverAdapter struct{ driver *fakeDriver }
+type mainLoopAdapter struct{ mainLoop *fakeMainLoop }
 
-// testAppDriver is the Adapter this fixture fills app's Driver Port as.
-type testAppDriver kernel.Adapter[app.DriverPort]
+// testAppMainLoop is the Adapter this fixture fills app's MainLoop Port as.
+type testAppMainLoop kernel.Adapter[app.MainLoopPort]
 
-func (driverAdapter) Name() kernel.PluginName           { return "apptestdriver" }
-func (driverAdapter) Dependencies() []kernel.PluginName { return nil }
+func (mainLoopAdapter) Name() kernel.PluginName           { return "apptestmainloop" }
+func (mainLoopAdapter) Dependencies() []kernel.PluginName { return nil }
 
-func (a driverAdapter) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.ProvideAdapter[testAppDriver](app.Driver(a.driver))
+func (a mainLoopAdapter) Register(registrar *kernel.Registrar, _ any) error {
+	registrar.ProvideAdapter[testAppMainLoop](app.MainLoop(a.mainLoop))
 	return nil
 }
 
@@ -113,23 +113,23 @@ func (o *observer) Register(registrar *kernel.Registrar, _ any) error {
 	return nil
 }
 
-// tickHarness is app composed with a fake driver and an observer, running in a
+// tickHarness is app composed with a fakeMainLoop and an observer, running in a
 // real engine.
 type tickHarness struct {
 	t        *testing.T
 	plugin   *plugin
-	driver   *fakeDriver
+	mainLoop *fakeMainLoop
 	observer *observer
 	k        kernel.Executioner
 }
 
 func newTickHarness(t *testing.T, config app.Config) *tickHarness {
 	t.Helper()
-	harness := &tickHarness{t: t, plugin: New().(*plugin), driver: &fakeDriver{}, observer: &observer{}}
+	harness := &tickHarness{t: t, plugin: New().(*plugin), mainLoop: &fakeMainLoop{}, observer: &observer{}}
 	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(map[kernel.PluginName]any{app.Name: config}).
 		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
-		WithPlugins(harness.plugin, driverAdapter{harness.driver}, harness.observer)
+		WithPlugins(harness.plugin, mainLoopAdapter{harness.mainLoop}, harness.observer)
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
@@ -145,21 +145,21 @@ func newTickHarness(t *testing.T, config app.Config) *tickHarness {
 	})
 	<-engine.Ready()
 	harness.k = engine.Executioner()
-	if harness.driver.attached() == nil {
-		t.Fatal("app started without attaching its Loop to the driver")
+	if harness.mainLoop.attached() == nil {
+		t.Fatal("app started without attaching its Loop to the MainLoop")
 	}
 	return harness
 }
 
-// loop is the Loop app attached to the driver.
-func (h *tickHarness) loop() app.Loop { return h.driver.attached() }
+// loop is the Loop app attached to the MainLoop.
+func (h *tickHarness) loop() app.Loop { return h.mainLoop.attached() }
 
-// frame runs one driver frame of dt real seconds on this goroutine, the way a
-// driver's main loop does.
+// frame runs one frame of dt real seconds on this goroutine, the way a
+// platform loop does.
 func (h *tickHarness) frame(dt float64) { h.loop().Frame(h.k, dt) }
 
 // runFrames drives frames from a goroutine of its own until the returned stop
-// is called, which is what the driver's loop does and what the join window
+// is called, which is what the platform loop does and what the join window
 // was always racing against: a test that only steps the clock by hand can
 // never see an arm lose that race.
 func (h *tickHarness) runFrames() (stop func()) {

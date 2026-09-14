@@ -102,7 +102,7 @@ func TestACompositionWithoutABackendAdapterFails(t *testing.T) {
 	}).Handler(func(err error) bool {
 		reported = append(reported, err)
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, newPlugin())
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, newPlugin())
 
 	var missing kernel.ErrMissingAdapter
 	if !errors.As(errors.Join(reported...), &missing) {

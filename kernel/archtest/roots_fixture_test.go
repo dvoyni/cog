@@ -324,10 +324,10 @@ import (
 )
 
 func provideMore(registrar *kernel.Registrar) {
-	registrar.ProvideAdapter[e.SDriver](nil)
+	registrar.ProvideAdapter[e.SMainLoop](nil)
 }
 `,
-			key: "bundles/n/internal/extra.go:9: bundles/n provides e.SDriver, which bundles/n/adapters.go does not declare",
+			key: "bundles/n/internal/extra.go:9: bundles/n provides e.SMainLoop, which bundles/n/adapters.go does not declare",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -346,7 +346,7 @@ import (
 	"fixture.test/cog/slots/s"
 )
 
-type SDriver kernel.Adapter[s.DriverPort]
+type SMainLoop kernel.Adapter[s.MainLoopPort]
 
 type NProvider kernel.Adapter[n.ProviderPort]
 
@@ -383,11 +383,11 @@ func (plugin) Name() kernel.PluginName           { return e.Name }
 func (plugin) Dependencies() []kernel.PluginName { return nil }
 func (plugin) Register(registrar *kernel.Registrar, config any) error {
 	registrar.ProvideAdapter[e.NProvider](n.Provider(provider{}))
-	provideDriver(registrar)
+	provideMainLoop(registrar)
 	return nil
 }
 `,
-		"extensions/e/internal/driver_js.go": `//go:build js
+		"extensions/e/internal/mainloop_js.go": `//go:build js
 
 package internal
 
@@ -397,21 +397,21 @@ import (
 	"fixture.test/cog/slots/s"
 )
 
-type driver struct{}
+type mainLoop struct{}
 
-func (driver) Run() error { return nil }
+func (mainLoop) Run() error { return nil }
 
-func provideDriver(registrar *kernel.Registrar) {
-	registrar.ProvideAdapter[adapters.SDriver, s.DriverPort](s.Driver(driver{}))
+func provideMainLoop(registrar *kernel.Registrar) {
+	registrar.ProvideAdapter[adapters.SMainLoop, s.MainLoopPort](s.MainLoop(mainLoop{}))
 }
 `,
-		"extensions/e/internal/driver_other.go": `//go:build !js
+		"extensions/e/internal/mainloop_other.go": `//go:build !js
 
 package internal
 
 import "fixture.test/cog/kernel"
 
-func provideDriver(registrar *kernel.Registrar) {}
+func provideMainLoop(registrar *kernel.Registrar) {}
 `,
 	})
 	if len(violations) != 0 {

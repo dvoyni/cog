@@ -12,15 +12,15 @@ import (
 	"github.com/dvoyni/cog/slots/app"
 )
 
-// wgpu is app's Driver: each gogpu update hands the Loop app attached the real
+// wgpu is app's MainLoop: each gogpu update hands the Loop app attached the real
 // time of the frames drawn since the last one, after flushing the frame's input,
 // so every tick the Loop publishes sees that input. The window itself is not
 // needed to show it: onUpdate runs against a bare plugin and a real engine.
 
-// recordingLoop is an app.Loop that records what the driver hands it, and what
+// recordingLoop is an app.Loop that records what the MainLoop hands it, and what
 // the input seam held at that moment.
 type recordingLoop struct {
-	harness *driverHarness
+	harness *mainLoopHarness
 	frames  []float64
 	// inputAtFrame is how many input changes had been applied when each frame
 	// was handed over.
@@ -38,16 +38,16 @@ func (l *recordingLoop) Frame(_ kernel.Executioner, dt float64) {
 	l.inputAtFrame = append(l.inputAtFrame, len(l.harness.appliedChanges()))
 }
 
-// driverHarness answers input.ApplyCmd, the seam a frame's input flush reaches.
-type driverHarness struct {
+// mainLoopHarness answers input.ApplyCmd, the seam a frame's input flush reaches.
+type mainLoopHarness struct {
 	mu      sync.Mutex
 	applied []input.Change
 }
 
-func (*driverHarness) Name() kernel.PluginName           { return "wgpudrivertest" }
-func (*driverHarness) Dependencies() []kernel.PluginName { return nil }
+func (*mainLoopHarness) Name() kernel.PluginName           { return "wgpumainlooptest" }
+func (*mainLoopHarness) Dependencies() []kernel.PluginName { return nil }
 
-func (h *driverHarness) Register(registrar *kernel.Registrar, _ any) error {
+func (h *mainLoopHarness) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[input.ApplyCmd](func() (kernel.Lock, kernel.Execute[input.ApplyRequest, input.ApplyResponse]) {
 		return nil, func(_ kernel.Kernel, request input.ApplyRequest) (input.ApplyResponse, error) {
 			h.mu.Lock()
@@ -59,14 +59,14 @@ func (h *driverHarness) Register(registrar *kernel.Registrar, _ any) error {
 	return nil
 }
 
-func (h *driverHarness) appliedChanges() []input.Change {
+func (h *mainLoopHarness) appliedChanges() []input.Change {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]input.Change(nil), h.applied...)
 }
 
-func TestDriver_UpdateFlushesInputThenHandsTheLoopTheFrameTime(t *testing.T) {
-	harness := &driverHarness{}
+func TestMainLoop_UpdateFlushesInputThenHandsTheLoopTheFrameTime(t *testing.T) {
+	harness := &mainLoopHarness{}
 	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(nil).
 		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
@@ -86,7 +86,7 @@ func TestDriver_UpdateFlushesInputThenHandsTheLoopTheFrameTime(t *testing.T) {
 
 	p := &plugin{}
 	loop := &recordingLoop{harness: harness}
-	app.Driver(driver{p}).Attach(loop)
+	app.MainLoop(mainLoop{p}).Attach(loop)
 
 	// Two frames drawn at 10ms apiece since the last update, and a key press
 	// waiting to be flushed.

@@ -1,5 +1,5 @@
 // Package internal is the wgpu plugin: New, the kernel.PluginHost that owns the
-// gogpu main loop, the app.Driver and gfx.Backend it provides, and the input
+// gogpu main loop, the app.MainLoop and gfx.Backend it provides, and the input
 // bridge. Composition roots and tests reach New through wgpuplugin.
 //
 // gogpu's OnUpdate hands the real frame time to the app.Loop's Frame, which
