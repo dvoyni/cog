@@ -26,6 +26,15 @@ marked **Gap** and says what would settle it.
 > they carry stay in the contract root, and the tool names are unchanged. The
 > file paths and line numbers cited below are as they were when this was written.
 
+> **Amended by [#356](https://github.com/dvoyni/cog/issues/356).** input moved
+> to the declaration-root shape of
+> [ADR 0002](../../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+> The Provider, both capability bodies and the description strings moved from
+> `inputimpl` to `bundles/input/internal/mcpprovider.go`, and the plugin is
+> constructed with `inputplugin.New()`. `input.Play`, `SynthesizeCmd` and the
+> types they carry are declared in `bundles/input/internal/types` and aliased in
+> the root, so they are still spelled `input.X`. The tool names are unchanged.
+
 ---
 
 ## Contents
@@ -42,11 +51,11 @@ marked **Gap** and says what would settle it.
 
 ## The provider
 
-`input` contributes an `mcp.Provider` itself, from `inputimpl`'s `Register`. The
+`input` contributes an `mcp.Provider` itself, from its plugin's `Register`. The
 Provider is an unexported value holding nothing: input's state is a resource.
 
 ```go
-registrar.ProvideAdapter[input.McpProvider](mcp.Provider(provider{})) // in inputimpl's Register
+registrar.ProvideAdapter[input.McpProvider](mcp.Provider(provider{})) // in the plugin's Register, bundles/input/internal
 
 func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{

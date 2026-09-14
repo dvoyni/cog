@@ -1,8 +1,8 @@
-package inputimpl
+package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/input"
-	"github.com/dvoyni/cog/bundles/input/internal"
+	"github.com/dvoyni/cog/bundles/input/internal/types"
 	"github.com/dvoyni/cog/kernel"
 )
 
@@ -15,7 +15,7 @@ func applyCmdImpl() (kernel.Lock, kernel.Execute[input.ApplyRequest, input.Apply
 		}, func(k kernel.Kernel, request input.ApplyRequest) (input.ApplyResponse, error) {
 			s := state.Get()
 			for _, c := range request.Changes {
-				internal.StateApply(s, c)
+				types.StateApply(s, c)
 				publish(k, c)
 			}
 			return input.ApplyResponse{}, nil
@@ -64,9 +64,9 @@ func synthesize(k kernel.Kernel, s *input.State, action input.Action) {
 // inconsistent about a modifier's own press event; cog takes the self-consistent
 // reading.
 func fold(k kernel.Kernel, s *input.State, change input.Change) {
-	internal.StateApply(s, change)
-	if internal.ChangeKindOf(&change) == internal.ChangeKindKey {
-		*internal.ChangeModsRef(&change) = internal.StateModifiers(s)
+	types.StateApply(s, change)
+	if types.ChangeKindOf(&change) == types.ChangeKindKey {
+		*types.ChangeModsRef(&change) = types.StateModifiers(s)
 	}
 	publish(k, change)
 }
@@ -108,5 +108,5 @@ func stateCmdImpl() (kernel.Lock, kernel.Execute[input.StateRequest, input.State
 // slice is always non-nil, so "nothing is held" reads as an empty list rather
 // than as a missing answer.
 func snapshot(s *input.State) input.StateResponse {
-	return input.StateResponse{Down: internal.StateHeld(s), Pointer: s.Pointer()}
+	return input.StateResponse{Down: types.StateHeld(s), Pointer: s.Pointer()}
 }

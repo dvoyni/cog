@@ -1,4 +1,4 @@
-package inputimpl
+package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/input"

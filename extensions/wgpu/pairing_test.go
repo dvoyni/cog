@@ -13,7 +13,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/bundles/canvas/canvasimpl"
-	"github.com/dvoyni/cog/bundles/input/inputimpl"
+	"github.com/dvoyni/cog/bundles/input/inputplugin"
 	"github.com/dvoyni/cog/bundles/ui"
 	"github.com/dvoyni/cog/bundles/ui/uiimpl"
 	"github.com/dvoyni/cog/extensions/gfx"
@@ -94,7 +94,7 @@ func newPairingRig(t *testing.T) *pairingRig {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
 	}).WithPlugins(
-		storageplugin.New(), permanentAdapter{}, inputimpl.New(), gfximpl.New(), canvasimpl.New(), uiimpl.New(),
+		storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfximpl.New(), canvasimpl.New(), uiimpl.New(),
 		&pairingPlugin{rig: rig},
 	)
 	stopped := make(chan struct{})

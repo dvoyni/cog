@@ -1,6 +1,9 @@
 package input
 
-import "github.com/dvoyni/cog/kernel"
+import (
+	"github.com/dvoyni/cog/bundles/input/internal/types"
+	"github.com/dvoyni/cog/kernel"
+)
 
 // ApplyCmd applies a batch of input Changes to the State (under its write lock)
 // and publishes the discrete input events.
@@ -26,13 +29,13 @@ type ApplyResponse struct{}
 // It never waits. ActionDelay is ignored here and honoured by Play, because a
 // handler that slept would sleep under the State write lock and stall every
 // tick for the delay's duration.
-type SynthesizeCmd kernel.Command[SynthesizeRequest, StateResponse]
+//
+// It is declared in internal/types, where Play dispatches it, and aliased here.
+type SynthesizeCmd = types.SynthesizeCmd
 
 // SynthesizeRequest is one batch of a synthetic input sequence: the steps that
 // land in the same tick.
-type SynthesizeRequest struct {
-	Actions []Action `json:"actions" jsonschema:"the steps to apply, in order"`
-}
+type SynthesizeRequest = types.SynthesizeRequest
 
 // StateCmd reports what the input seam holds, under the State read lock,
 // changing nothing.
@@ -44,10 +47,8 @@ type StateRequest struct{}
 // StateResponse is the picture of the seam: what is held, and where the
 // pointer is. SynthesizeCmd answers with it too, deliberately — every way in
 // answers the same question, which is how a caller that leaked a key finds it.
-type StateResponse struct {
-	// Down is every key and mouse button currently held, sorted by key code
-	// because map iteration is not ordered. A key nothing releases stays here.
-	Down []Key `json:"down" jsonschema:"every key and mouse button currently held"`
-	// Pointer is where the pointer is, in window units.
-	Pointer Pos `json:"pointer" jsonschema:"the pointer position in window units"`
-}
+//
+// Down is every key and mouse button currently held, sorted by key code because
+// map iteration is not ordered; a key nothing releases stays there. Pointer is
+// where the pointer is, in window units.
+type StateResponse = types.StateResponse

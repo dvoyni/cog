@@ -1,4 +1,4 @@
-package inputimpl
+package internal
 
 import (
 	"errors"

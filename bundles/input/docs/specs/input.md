@@ -31,6 +31,17 @@ marked **Gap** and says what would settle it.
 > identity `input.UpdateEventHandler` is now `input.AdvanceOnUpdate`. The file
 > paths and line numbers cited below are as they were when this was written.
 
+> **Amended by [#356](https://github.com/dvoyni/cog/issues/356).** input moved
+> to the declaration-root shape of
+> [ADR 0002](../../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+> The root, `bundles/input`, holds declarations only, and `ParseKey`, `Play` and
+> the `Change` constructors are forwarders in its `utils.go`. `Key`, `Mods`,
+> `Pos`, `Change` and `State`, together with `Play`, `Action`, `SynthesizeCmd`,
+> `SynthesizeRequest` and `StateResponse`, are declared in
+> `bundles/input/internal/types` and aliased in the root, so every name above is
+> still spelled `input.X`. The plugin and its handlers moved from `inputimpl` to
+> `bundles/input/internal`, and it is constructed with `inputplugin.New()`.
+
 ---
 
 ## Contents
