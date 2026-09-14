@@ -36,7 +36,6 @@ var unmoved = []string{
 	"extensions/gfx",
 	"extensions/jsfs",
 	"extensions/mcp",
-	"extensions/storage",
 	"extensions/wgpu",
 	"slots/app",
 }

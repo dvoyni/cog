@@ -5,7 +5,7 @@ import (
 	"testing/fstest"
 
 	"github.com/dvoyni/cog/bundles/canvas/internal"
-	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/slots/storage"
 	"golang.org/x/image/font/gofont/goregular"
 )
 

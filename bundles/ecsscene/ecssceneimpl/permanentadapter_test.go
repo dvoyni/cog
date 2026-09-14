@@ -5,8 +5,8 @@ import (
 	"io/fs"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
 // permanentAdapter provides storage's PermanentFS Adapter to the engines these

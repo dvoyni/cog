@@ -6,7 +6,7 @@
 // composition roots and tests import it.
 //
 //	plugins := []kernel.Plugin{
-//	    storageimpl.New(),
+//	    storageplugin.New(),
 //	    jsfs.New(jsfs.Config{AppId: "my-app"}),
 //	    …
 //	}

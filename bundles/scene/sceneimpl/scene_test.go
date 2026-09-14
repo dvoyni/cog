@@ -12,10 +12,10 @@ import (
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
-	"github.com/dvoyni/cog/extensions/storage"
-	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
 // testBackend is a Backend that mints ids and records the passes it was asked
@@ -393,12 +393,12 @@ func newHarnessOver(
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	configs := map[kernel.PluginName]any{
-		storage.Name: storageimpl.DefaultConfig().WithReadFS("test", 10, fs.FS(files)),
+		storage.Name: storage.Config{}.WithReadFS("test", 10, fs.FS(files)),
 		scene.Name:   Config{},
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) bool { sink.add(err); *reported = append(*reported, err); return false }).
-		WithPlugins(storageimpl.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{backend}, New(), recordPlugin{record: record})
+		WithPlugins(storageplugin.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{backend}, New(), recordPlugin{record: record})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()

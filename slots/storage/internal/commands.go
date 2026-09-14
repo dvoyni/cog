@@ -1,9 +1,9 @@
-package storageimpl
+package internal
 
 import (
-	"github.com/dvoyni/cog/extensions/storage"
-	"github.com/dvoyni/cog/extensions/storage/internal"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/storage/internal/types"
 )
 
 func registerCommands(registrar *kernel.Registrar) {
@@ -23,7 +23,7 @@ func setMountCmdImpl() (kernel.Lock, kernel.Execute[storage.SetMountRequest, sto
 			if request.Mount.Id == storage.PermanentMount {
 				return storage.SetMountResponse{}, storage.ErrReservedMount{Id: request.Mount.Id}
 			}
-			filesystem.Set(internal.FileSystemWithMount(filesystem.Get(), request.Mount))
+			filesystem.Set(types.FileSystemWithMount(filesystem.Get(), request.Mount))
 			return storage.SetMountResponse{}, nil
 		}
 }
@@ -37,9 +37,9 @@ func removeMountCmdImpl() (kernel.Lock, kernel.Execute[storage.RemoveMountReques
 				return storage.RemoveMountResponse{}, storage.ErrReservedMount{Id: request.Id}
 			}
 			current := filesystem.Get()
-			_, found := internal.FileSystemMount(current, request.Id)
+			_, found := types.FileSystemMount(current, request.Id)
 			if found {
-				filesystem.Set(internal.FileSystemWithoutMount(current, request.Id))
+				filesystem.Set(types.FileSystemWithoutMount(current, request.Id))
 			}
 			return storage.RemoveMountResponse{Removed: found}, nil
 		}
@@ -55,7 +55,7 @@ func accessValuesCmdImpl() (kernel.Lock, kernel.Execute[storage.AccessValuesRequ
 			filesystem = access.GetWrite[storage.FileSystem]()
 			values = access.GetWrite[storage.Values]()
 		}, func(_ kernel.Kernel, request storage.AccessValuesRequest) (storage.AccessValuesResponse, error) {
-			store, response, err := internal.ApplyValues(request, values.Get(), filesystem.Get())
+			store, response, err := types.ApplyValues(request, values.Get(), filesystem.Get())
 			values.Set(store)
 			return response, err
 		}

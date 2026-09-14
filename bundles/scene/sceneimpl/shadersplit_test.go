@@ -8,7 +8,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
 // flattenedSceneShader is the bundled module as the backend sees it, with every

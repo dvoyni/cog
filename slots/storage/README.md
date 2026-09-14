@@ -1,28 +1,34 @@
 # storage
 
-`github.com/dvoyni/cog/extensions/storage` provides one kernel resource,
+`github.com/dvoyni/cog/slots/storage` provides one kernel resource,
 `FileSystem`: a prioritized read-only overlay over every mounted filesystem,
 including the single permanent one that writes land in.
 
-storage is a **Port**: it ships its own contract and implementation, and works
-only once a `PermanentFS` **Adapter** is bound to it. The vocabulary is in
-[`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
+storage is a **Slot**: it ships its own declarations and implementation, and
+works only once a `PermanentFS` **Adapter** fills its required
+`PermanentFSPort`. The vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the
+decision in
+[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
-storage has the Port shape: a contract root, an `…impl` and an `internal/`.
+storage has the declaration-root shape of
+[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
 
-- **`extensions/storage`** is the contract: the commands, `FileSystem`,
-  `WriteFS`, `WriteAccess`, `Values`, `ReadMount`, `PermanentFS`, the errors and
-  `Name`. It declares no plugin, and it is what every other package imports.
-- **`extensions/storage/storageimpl`** is the plugin: `New`, `Config` and the
-  command handlers. Only composition roots and tests import it.
-- **`extensions/storage/internal`** declares `FileSystem`, `WriteFS`, `Values`
-  and the value requests, whose unexported state the handlers read, and the
-  root aliases them.
+- **`slots/storage`** is the root, and holds declarations only: the commands,
+  `Config`, `FileSystem`, `Values`, `WriteFS`, `ReadMount`, `PermanentFS` and
+  `PermanentFSPort`, the errors and `Name`. Its functions, the value-request
+  builders, `WriteAccess` and `NewFileSystem`, are forwarders in `utils.go`. It
+  is what every other package imports.
+- **`slots/storage/internal/types`** declares `FileSystem`, `WriteFS`, `Values`,
+  the value requests and what they refer to, whose unexported state the
+  handlers read, and the root aliases them.
+- **`slots/storage/internal`** is the plugin: its `New`, configuration
+  resolution and the command handlers.
+- **`slots/storage/storageplugin`** exports only `New() kernel.Plugin`. Only
+  composition roots and tests import it.
 
-The Adapters are separate plugins in `extensions/`:
+The Adapters are Extensions in `extensions/`:
 
 - **`extensions/diskfs`** (`!js`): a directory under the user's data directory,
   named by the application id.
@@ -31,9 +37,9 @@ The Adapters are separate plugins in `extensions/`:
 
 ## No Platform Code
 
-storage carries no platform code: its root, `storageimpl` and `internal` have
-no build tags and do not import `os`. What persists is the Adapter's business,
-and read mounts are plain `fs.FS` values the composition root chooses.
+storage carries no platform code: none of its packages has build tags or
+imports `os`. What persists is the Adapter's business, and read mounts are
+plain `fs.FS` values the composition root chooses.
 
 The reason is what a disk read mount does in a browser. This was established by
 a probe built for `GOOS=js GOARCH=wasm` and run under the browser
@@ -56,7 +62,7 @@ id belongs to the Adapter that uses it.
 ## Plugin
 
 - Name: `storage.Name` (`"storage"`)
-- Constructor: `storageimpl.New() kernel.Plugin`
+- Constructor: `storageplugin.New() kernel.Plugin`
 - Plugin dependencies: none
 - Requires: exactly one Adapter for `storage.PermanentFSPort`
 - Go package dependencies: `kernel` and the standard library
@@ -68,23 +74,24 @@ two fails with `kernel.ErrDuplicateAdapter`. No command installs a permanent
 filesystem. The Adapter is bound after every `Register`, so the `FileSystem`
 resource resolves it when it is read or written, which is from `Start` onwards.
 
-Configuration is supplied under `storage.Name`:
+Configuration is a `storage.Config` supplied under `storage.Name`. Its zero
+value is the default: no read mounts and `DefaultValuesPath`.
 
 ```go
 config := map[kernel.PluginName]any{
-    storage.Name: storageimpl.DefaultConfig().
+    storage.Name: storage.Config{}.
         WithReadFS("res", storage.DefaultReadPriority, os.DirFS("res")).
         WithReadFS("embedded", 100, embeddedFS),
 }
 
 plugins := []kernel.Plugin{
-    storageimpl.New(),
+    storageplugin.New(),
     diskfs.New(diskfs.Config{AppId: "my-app"}), // or jsfs.New in a browser
     …
 }
 ```
 
-`storageimpl.Config` exposes `ReadMounts` and `ValuesPath`. Its `With*` methods
+`storage.Config` exposes `ReadMounts` and `ValuesPath`. Its `With*` methods
 return modified copies. `DefaultReadPriority` is zero.
 
 `PermanentMount` is reserved: the plugin derives it from the permanent
@@ -92,7 +99,7 @@ filesystem, and a `Config` that mounts it is rejected with `ErrReservedMount`.
 
 ## Adapters
 
-An Adapter plugin declares an Adapter type for `storage.PermanentFSPort` in its
+An Extension declares an Adapter type for `storage.PermanentFSPort` in its
 `adapters.go` and provides a `storage.PermanentFS` under it during its
 `Register`:
 
@@ -208,8 +215,7 @@ splitting a single store into several entry points.
 
 ## Errors
 
-- `storageimpl.ErrInvalidConfig{Got}`: plugin configuration is not a
-  `storageimpl.Config`.
+- `ErrInvalidConfig{Got}`: plugin configuration is not a `storage.Config`.
 - `ErrInvalidMount{Id}`: a mount has an empty ID or nil filesystem.
 - `ErrReservedMount{Id}`: `PermanentMount` was mounted or unmounted by hand.
 - `ErrNoWriteAccess{Op, Path}`: `WriteAccess` received a handle whose write lock

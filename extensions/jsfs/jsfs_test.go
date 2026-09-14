@@ -9,9 +9,9 @@ import (
 	"syscall/js"
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/storage"
-	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
 // fakeLocalStorage installs a localStorage of getItem and setItem over a Go map
@@ -95,7 +95,7 @@ func TestAnEmptyOrInvalidAppIdIsRejected(t *testing.T) {
 			kernel.New(nil).Handler(func(err error) bool {
 				reported = append(reported, err)
 				return true
-			}).WithPlugins(storageimpl.New(), New(Config{AppId: appId}))
+			}).WithPlugins(storageplugin.New(), New(Config{AppId: appId}))
 
 			var invalid ErrInvalidAppId
 			if !errors.As(errors.Join(reported...), &invalid) || invalid.AppId != appId {
@@ -150,7 +150,7 @@ func start(t *testing.T, config Config) running {
 			t.Errorf("unexpected kernel error: %v", err)
 			return true
 		}).
-		WithPlugins(storageimpl.New(), New(config))
+		WithPlugins(storageplugin.New(), New(config))
 	done := make(chan struct{})
 	go func() {
 		engine.Run(ctx)

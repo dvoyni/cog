@@ -10,10 +10,10 @@ import (
 
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
-	"github.com/dvoyni/cog/extensions/storage"
-	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
 // testAdapter is the Backend adapter the gfx tests compose. It is provided at
@@ -98,11 +98,11 @@ func noFiles() fs.FS { return fstest.MapFS{} }
 func TestACompositionWithoutABackendAdapterFails(t *testing.T) {
 	var reported []error
 	kernel.New(map[kernel.PluginName]any{
-		storage.Name: storageimpl.DefaultConfig(),
+		storage.Name: storage.Config{},
 	}).Handler(func(err error) bool {
 		reported = append(reported, err)
 		return true
-	}).WithPlugins(storageimpl.New(), permanentAdapter{}, newPlugin())
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, newPlugin())
 
 	var missing kernel.ErrMissingAdapter
 	if !errors.As(errors.Join(reported...), &missing) {

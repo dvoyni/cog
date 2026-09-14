@@ -1,0 +1,30 @@
+package storage
+
+import (
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/storage/internal/types"
+)
+
+// PermanentFS is the interface storage's Adapter implements: the filesystem
+// writes land in. An Extension fills PermanentFSPort with
+// registrar.ProvideAdapter during its Register. storage never hands it back to
+// callers: FileSystem keeps it inside and exposes only its readable half, while
+// WriteAccess exposes the mutating half to write-lock holders. Operation names
+// use fs.ValidPath form.
+//
+// It is declared in internal/types, beside the FileSystem that holds it, and
+// aliased here:
+//
+//	interface {
+//		fs.FS
+//		WriteFile(name string, data []byte, perm fs.FileMode) error
+//		MkdirAll(path string, perm fs.FileMode) error
+//		Remove(name string) error
+//		Rename(oldName, newName string) error
+//	}
+type PermanentFS = types.PermanentFS
+
+// PermanentFSPort is the Port storage requires exactly one Adapter for: the
+// permanent filesystem an Extension such as diskfs or jsfs provides. A
+// composition without one fails with kernel.ErrMissingAdapter.
+type PermanentFSPort kernel.RequiredPort[PermanentFS]

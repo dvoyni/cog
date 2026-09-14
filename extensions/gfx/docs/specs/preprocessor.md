@@ -274,7 +274,7 @@ frame's command buffer vanishing without a word, the default here is loud.
 ### Storage layering: unpinned, and that is the feature
 
 An included path resolves through the **full mount overlay**, exactly like the
-root source (`FileSystem.Open` in `extensions/storage/internal/filesystem.go` searches mounts by descending
+root source (`FileSystem.Open` in `slots/storage/internal/types/filesystem.go` searches mounts by descending
 priority, per file). A game that mounts its own `builtin/scene/pbr.wgsl` at
 higher priority replaces that one source inside cog's module and keeps the rest.
 

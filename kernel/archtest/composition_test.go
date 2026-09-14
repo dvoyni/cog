@@ -2,7 +2,6 @@ package archtest
 
 import (
 	"errors"
-	"github.com/dvoyni/cog/extensions/gfx"
 	"io/fs"
 	"reflect"
 	"slices"
@@ -10,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
+
+	"github.com/dvoyni/cog/extensions/gfx"
 
 	"github.com/dvoyni/cog/bundles/anim/animimpl"
 	"github.com/dvoyni/cog/bundles/canvas/canvasimpl"
@@ -21,9 +22,9 @@ import (
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/mcp/mcpimpl"
-	"github.com/dvoyni/cog/extensions/storage"
-	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
 // Every Bundle and Port in cog, composed with the test Adapters gfx and storage
@@ -31,10 +32,10 @@ import (
 // Adapter type, command and subscription cog declares. Nothing runs: composition is what Describe reads.
 func TestTypeName_NamesEveryTypeInAFullCogCompositionUniquely(t *testing.T) {
 	var failure error
-	engine := kernel.New(map[kernel.PluginName]any{storage.Name: storageimpl.DefaultConfig()}).
+	engine := kernel.New(map[kernel.PluginName]any{storage.Name: storage.Config{}}).
 		Handler(func(err error) bool { failure = errors.Join(failure, err); return false }).
 		WithPlugins(
-			storageimpl.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{&detachedBackend{}},
+			storageplugin.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{&detachedBackend{}},
 			inputimpl.New(), animimpl.New(), canvasimpl.New(), sceneimpl.New(), uiimpl.New(),
 			ecsimpl.New(), ecssceneimpl.New(), mcpimpl.New(),
 		)

@@ -18,11 +18,11 @@ import (
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/gfx/internal"
-	"github.com/dvoyni/cog/extensions/storage"
-	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
 // testMaterial builds a material with an inline (fake-compiled) shader.
@@ -474,9 +474,9 @@ func newTestKernelWith(t *testing.T, p *plugin, filesystem fs.FS, handler kernel
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	config := map[kernel.PluginName]any{
-		storage.Name: storageimpl.DefaultConfig().WithReadFS("test", 10, filesystem),
+		storage.Name: storage.Config{}.WithReadFS("test", 10, filesystem),
 	}
-	engine := kernel.New(config).Handler(handler).WithPlugins(storageimpl.New(), permanentAdapter{}, p, testPlugin{})
+	engine := kernel.New(config).Handler(handler).WithPlugins(storageplugin.New(), permanentAdapter{}, p, testPlugin{})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	return engine.Executioner()
@@ -1525,12 +1525,12 @@ func TestFailedShaderIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	t.Cleanup(cancel)
 	errorsReported := 0
 	config := map[kernel.PluginName]any{
-		storage.Name: storageimpl.DefaultConfig().WithReadFS("test", 10, filesystem),
+		storage.Name: storage.Config{}.WithReadFS("test", 10, filesystem),
 	}
 	engine := kernel.New(config).Handler(func(error) bool {
 		errorsReported++
 		return false
-	}).WithPlugins(storageimpl.New(), permanentAdapter{}, p, testPlugin{})
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, p, testPlugin{})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()

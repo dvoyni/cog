@@ -2,7 +2,7 @@ package gfx
 
 import (
 	"github.com/dvoyni/cog/extensions/gfx/internal"
-	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
 // FlattenShader resolves one shader's sources into the single WGSL string a

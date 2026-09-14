@@ -1,4 +1,4 @@
-package internal
+package types
 
 import (
 	"errors"
@@ -50,7 +50,7 @@ func TestThePermanentFilesystemIsResolvedWhenUsed(t *testing.T) {
 	filesystem := NewFileSystem(nil, func() PermanentFS { return bound })
 
 	bound = newMemoryFS()
-	if err := WriteAccess(filesystem).WriteFile("save.txt", []byte("saved"), 0o600); err != nil {
+	if err := writeAccess(filesystem).WriteFile("save.txt", []byte("saved"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	assertReadFile(t, filesystem, "save.txt", "saved")
@@ -62,7 +62,7 @@ func TestValueStoreLoadDefaultsAndFlush(t *testing.T) {
 	}
 	permanent := newMemoryFS()
 	filesystem := NewFileSystem([]ReadMount{{Id: "packaged", Priority: 1, FS: packaged}}, constant(permanent))
-	write := WriteAccess(filesystem)
+	write := writeAccess(filesystem)
 
 	store, err := NewValues("config.json").load(filesystem)
 	if err != nil {
@@ -163,7 +163,7 @@ func TestChangingMountsKeepsThePermanentFilesystem(t *testing.T) {
 	filesystem = FileSystemWithMount(filesystem, ReadMount{Id: "extra", Priority: math.MaxInt, FS: fstest.MapFS{
 		"save.txt": &fstest.MapFile{Data: []byte("extra")},
 	}})
-	if err := WriteAccess(filesystem).WriteFile("save.txt", []byte("saved"), 0o600); err != nil {
+	if err := writeAccess(filesystem).WriteFile("save.txt", []byte("saved"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	assertReadFile(t, filesystem, "save.txt", "saved")

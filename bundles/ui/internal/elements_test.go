@@ -11,8 +11,8 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 
 	"github.com/dvoyni/cog/bundles/canvas"
-	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
 // testAssets returns an in-memory filesystem with a sprite of the given size.
