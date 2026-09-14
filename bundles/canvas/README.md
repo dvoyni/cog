@@ -12,74 +12,79 @@ as includable WGSL, how draws merge into batches, and how a material reaches
 the reasoning behind each rule, and this README is the API surface. Go there
 before proposing a change to any of it.
 
-canvas is a **Bundle**: a Slot and its one Extension, shipped together. The
-vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
+canvas is a **Bundle**: it requires no Adapter, and contributes one to mcp's
+collected Port. The vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the
+decision in
+[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
-canvas has the Bundle shape: a contract root, an `…impl` and an `internal/`.
-
-- **`bundles/canvas`** is the contract: the `*OpQueue` and `*Lookup` resources
-  with `LookupAccess` and its measurements, the recording vocabulary (`Layer`,
-  `SpriteTransform`, `SpriteFrame`, `TextDraw`, `ShapeDraw`, `Vertex`,
-  `VertexLayout`, `AspectMode`, `TextAlign`), `MaterialSet`,
-  `HaloMaterialSet` and the built-in material constructors, the reserved slot
-  names and published WGSL paths, `SpriteInstance`, `Op`, the coordinate helpers
-  (`LayerTransform`, `WorldToScreen`, `ScreenToWorld`), `ArmDrawsCmd` with
-  `DrawsSnapshot` and its view types, `Name` and the ordering identity
-  `FlushOnUpdate`. It declares no plugin, and it is what every other package
-  imports.
-- **`bundles/canvas/canvasimpl`** is the plugin: `New`, `Config`, the flush that
-  turns a recording into gfx draws, the sprite and triangle batchers and their
-  scratch, the draw-snapshot slot and its two subscriptions, the `Start` mount
-  of the embedded shaders and default font, and the mcp Provider. It exports
-  `New` and `Config` and nothing else. Only composition roots and tests import
-  it.
-- **`bundles/canvas/internal`** holds what the two share and nothing else may
-  reach: the declarations of `OpQueue` with its recording methods and the
-  consume side the flush reads, `Lookup` and `LookupAccess` with the sprite and
-  glyph atlases, the font store and the sprite-size cache behind them, inline
-  text parsing, the recording vocabulary, and the built-in and halo materials.
-
-`OpQueue`, `Lookup`, `LookupAccess` and the vocabulary they carry are declared in
-`internal` with their resource state unexported, and re-exported from the root as
-aliases (`type OpQueue = internal.OpQueue`) plus a wrapper for each constructor.
-They stay concrete types: recording a sprite is a direct method call, with no
-interface anywhere on the per-sprite path, and their exported methods
-(`OpQueue.Sprite`, `LookupAccess.MeasureTextSize`, …) are public API through the
-alias. What canvasimpl needs beyond that goes through plain functions `internal`
-exports, which only the root and canvasimpl can call. `internal` never imports
-the root. See
+canvas has the declaration-root shape of
 [`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+
+- **`bundles/canvas`** is the root, and holds declarations only: the `*OpQueue`
+  and `*Lookup` resources with `LookupAccess` and `FontMetrics`, the recording
+  vocabulary (`Layer`, `SpriteTransform`, `SpriteFrame`, `TextDraw`,
+  `ShapeDraw`, `Vertex`, `VertexLayout`, `AspectMode`, `TextAlign`),
+  `MaterialSet` and `HaloProfile`, the reserved slot names and published WGSL
+  paths, `SpriteInstance`, `Op`, `ArmDrawsCmd` with `DrawsSnapshot` and its view
+  types, `Config`, the `McpProvider` Adapter, the `ErrDraws…` errors, `Name` and
+  the ordering identity `FlushOnUpdate`. Its functions — `NewLookup`,
+  `NewLookupAccess`, the coordinate helpers (`LayerTransform`, `WorldToScreen`,
+  `ScreenToWorld`), `DefaultKeyColor`, the built-in material constructors,
+  `DefaultHaloProfile` and `HaloMaterialSet` — are forwarders in `utils.go`. It
+  declares no plugin, and it is what every other package imports.
+- **`bundles/canvas/internal/types`** declares `OpQueue` with its recording
+  methods and the consume side the flush reads, `Lookup` and `LookupAccess` with
+  the sprite and glyph atlases, the font store and the sprite-size cache behind
+  them, inline text parsing, the recording vocabulary, `Config` (which the
+  atlases hold), `HaloProfile`, and the built-in and halo materials. The root
+  aliases what it exposes.
+- **`bundles/canvas/internal`** is the plugin: its `New`, the resolution of
+  `canvas.Config`, the flush that turns a recording into gfx draws, the sprite
+  and triangle batchers and their scratch, the draw-snapshot slot and its two
+  subscriptions, the `Start` mount of the embedded shaders and default font
+  (under `internal/builtin/canvas/`), and the mcp Provider.
+- **`bundles/canvas/canvasplugin`** exports only `New() kernel.Plugin`. Only
+  composition roots and tests import it.
+
+The aliased types stay concrete types (`type OpQueue = types.OpQueue`):
+recording a sprite is a direct method call, with no interface anywhere on the
+per-sprite path, and their exported methods (`OpQueue.Sprite`,
+`LookupAccess.MeasureTextSize`, …) are public API through the alias. What the
+plugin needs beyond that goes through plain functions `internal/types` exports,
+which nothing outside `bundles/canvas` can call. `internal/types` never imports
+the root.
 
 ## Plugin
 
 - Name: `canvas.Name` (`"canvas"`)
-- Constructor: `canvasimpl.New() kernel.Plugin`
+- Constructor: `canvasplugin.New() kernel.Plugin`
 - Plugin dependencies: `gfx`, `storage`
 - Requires: no Adapter
-- Contributes: one `mcp.Provider` Adapter
+- Contributes: one `mcp.Provider`, as the `canvas.McpProvider` Adapter for
+  `mcp.ProviderPort`
 - Go package dependencies: `app`, `gfx`, `kernel`, `mcp`, `storage`, `x/image`
 - Implements: `kernel.PluginStarter`, `kernel.PluginStopper`
-- Configuration: `canvasimpl.Config`, optional
+- Configuration: `canvas.Config`, optional
 - Events declared or published: none
 
 ```go
 kernel.New(map[kernel.PluginName]any{
-	canvas.Name: canvasimpl.Config{AtlasSize: 2048},
+	canvas.Name: canvas.Config{AtlasSize: 2048},
 })
 ```
 
 `Config` has `AtlasSize`, `LayersPerArray` and `MaxAtlasBytes`. A zero field
-takes its default — 4096, 2 and 256 MiB — and giving no configuration at all
-takes all three. `LayersPerArray` must be at least two. Atlas dimensions and the
-memory budget must be positive, and one array must fit within `MaxAtlasBytes`.
+takes its default — 4096, 2 and 256 MiB — so the zero `Config`, or giving no
+configuration at all, takes all three. `LayersPerArray` must be at least two.
+Atlas dimensions and the memory budget must be positive, and one array must fit
+within `MaxAtlasBytes`.
 
 During `Start`, canvas executes `storage.SetMountCmd` to mount its embedded
 shaders and default font. Register `storage` before `canvas`. A typical order is
 `storage`, `input`, `gfx`, `canvas`, then the system driver. Compose it with
-`canvasimpl.New()`.
+`canvasplugin.New()`.
 
 ## Resources
 
@@ -577,7 +582,7 @@ A recorder that must land in this tick's frame orders
 `Before[canvas.FlushOnUpdate]()`; ui does.
 
 The two halves of the agent snapshot are subscriptions nothing outside orders
-against, so their identities are unexported in canvasimpl, and both are inert
+against, so their identities are unexported in `internal`, and both are inert
 when no snapshot is armed. `armDrawsOnUpdate` is ordered `First()` and declares
 no resources: it admits a waiting request to the tick that has just begun,
 which is what makes "a tick that *began* after the request" decidable.

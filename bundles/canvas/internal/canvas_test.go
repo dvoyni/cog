@@ -1,0 +1,1611 @@
+package internal
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"image"
+	"image/color"
+	"image/png"
+	"io/fs"
+	"math"
+	"reflect"
+	"strings"
+	"testing"
+	"testing/fstest"
+
+	"github.com/dvoyni/cog/bundles/canvas"
+	"github.com/dvoyni/cog/bundles/canvas/internal/types"
+	"github.com/dvoyni/cog/libs/m"
+
+	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
+	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/storage/storageplugin"
+	"github.com/gogpu/naga"
+	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/naga/spirv"
+	"github.com/gogpu/naga/wgsl"
+)
+
+type testFS struct {
+	fs.FS
+	opens int
+}
+
+func (f *testFS) Open(name string) (fs.File, error) {
+	f.opens++
+	return f.FS.Open(name)
+}
+
+type testBackend struct {
+	nextTexture      gpu.TextureID
+	nextBuffer       gpu.BufferID
+	nextID           uint32
+	allocations      []textureAllocation
+	updates          []textureUpdate
+	drawParams       [][]byte
+	draws            int
+	pipelines        []gpu.PipelineDesc
+	passes           []gpu.PassDesc
+	releasedTextures []gpu.TextureID
+	releasedBuffers  []gpu.BufferID
+	buffers          []bufferBake
+	samplers         []gpu.SamplerDesc
+	presents         int
+	capture          bool
+	// shaderSources maps each shader the backend was handed to its source, so a
+	// test can tell which built-in shader a pipeline was built from.
+	shaderSources map[gpu.ShaderID]string
+}
+
+// pipelineShader returns the source of the shader pipeline i was built from.
+func (b *testBackend) pipelineShader(i int) string {
+	return b.shaderSources[b.pipelines[i].Shader]
+}
+
+type textureAllocation struct {
+	id   gpu.TextureID
+	desc gpu.TextureDesc
+}
+
+type textureUpdate struct {
+	id     gpu.TextureID
+	layer  int
+	region gpu.Region
+	pixels []byte
+}
+
+type bufferBake struct {
+	kind gpu.BufferKind
+	data []byte
+}
+
+type customTriangleVertex struct {
+	Position m.Vec2
+	Data     m.Vec4
+}
+
+var customTriangleVertexLayout = [...]gfx.VertexAttr{
+	gfx.Attr(0, gpu.Float32x2),
+	gfx.Attr(8, gpu.Float32x4),
+}
+
+func (customTriangleVertex) VertexLayout() []gfx.VertexAttr {
+	return customTriangleVertexLayout[:]
+}
+
+func (b *testBackend) Ready() bool { return true }
+
+func (b *testBackend) NewTexture() gpu.TextureID { b.nextTexture++; return b.nextTexture }
+func (b *testBackend) NewBuffer() gpu.BufferID   { b.nextBuffer++; return b.nextBuffer }
+func (b *testBackend) NewSampler(desc gpu.SamplerDesc) (gpu.SamplerID, error) {
+	b.nextID++
+	if b.capture {
+		b.samplers = append(b.samplers, desc)
+	}
+	return gpu.SamplerID(b.nextID), nil
+}
+func (b *testBackend) FreeSampler(gpu.SamplerID) {}
+func (b *testBackend) NewShader(desc gpu.ShaderDesc) (gpu.ShaderID, error) {
+	b.nextID++
+	id := gpu.ShaderID(b.nextID)
+	if b.shaderSources == nil {
+		b.shaderSources = map[gpu.ShaderID]string{}
+	}
+	b.shaderSources[id] = string(desc.Code)
+	return id, nil
+}
+func (b *testBackend) FreeShader(gpu.ShaderID) {}
+
+// ShaderLayout is one hand-written union standing in for every shader, so it
+// puts bindings and offsets where the real shaders do not. Anything asserting
+// about groups, bindings or the uniform block must go through naga.Parse and
+// wgsl.Lower instead - see TestCanvasNumbersItsGroupsByKind.
+//
+// canvasViewport at 48 is what makes the tests' clipEnabled read at 56 work: the
+// batch supplies it as one vec4, so its .z lands on the union's clipEnabled
+// slot. wobble is here so a per-instance parameter array has a binding to
+// resolve against.
+func (b *testBackend) ShaderLayout(gpu.ShaderID) gpu.ShaderLayout {
+	return gpu.ShaderLayout{
+		UniformSize: 208, UniformGroup: 0, UniformBinding: 0,
+		Uniforms: []gpu.UniformMember{
+			{Name: "canvasViewport", Offset: 48},
+			{Name: "canvasLayer", Offset: 64},
+			{Name: "canvasClip", Offset: 128},
+			{Name: "tint", Offset: 144},
+			{Name: "keyColor", Offset: 160},
+			{Name: "customValue", Offset: 180},
+			{Name: "fade", Offset: 176},
+			{Name: "haloReach", Offset: testHaloReachOffset},
+			{Name: "haloPlateau", Offset: testHaloPlateauOffset},
+			{Name: "haloExponent", Offset: testHaloExponentOffset},
+		},
+		Resources: []gpu.ShaderResource{
+			{Name: "canvasSampler", Sampler: true, Group: 1, Binding: 0},
+			{Name: "canvasTexture", TextureView: gpu.TextureView2DArray, Group: 1, Binding: 1},
+			{Name: "instances", StorageBuffer: true, Group: 2, Binding: 0},
+			{Name: "wobble", StorageBuffer: true, Group: 2, Binding: 1},
+		},
+	}
+}
+
+// extendingSpriteMaterialSource is the worked example from the material spec: a
+// fade sprite material as six lines of declaration plus three includes, where
+// copying the contract by hand would be seventy. It hand-writes the uniform
+// block precisely because it extends it, and so can never include the published
+// uniforms source.
+const extendingSpriteMaterialSource = `struct CanvasUniforms {
+    canvasViewport: vec4<f32>,
+    canvasLayer: mat4x4<f32>,
+    canvasClip: vec4<f32>,
+    fade: f32,
+};
+@group(0) @binding(0) var<uniform> u: CanvasUniforms;
+
+//#include builtin/canvas/spritevertex.wgsl
+//#include builtin/canvas/clip.wgsl
+//#include builtin/canvas/keycolor.wgsl
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    if canvasClipped(in.canvasPosition) { discard; }
+    let sampled = keyColorRamp(
+        textureSample(canvasTexture, canvasSampler, in.uv, in.atlasLayer),
+        in.keyColor.rgb,
+    );
+    return sampled * in.tint * vec4<f32>(1.0, 1.0, 1.0, u.fade);
+}
+`
+
+func (b *testBackend) NewPipeline(desc gpu.PipelineDesc) (gpu.PipelineID, error) {
+	b.nextID++
+	if b.capture {
+		b.pipelines = append(b.pipelines, desc)
+	}
+	return gpu.PipelineID(b.nextID), nil
+}
+func (b *testBackend) FreePipeline(gpu.PipelineID) {}
+func (b *testBackend) ScreenFramebuffer() (gpu.TextureViewID, int, int) {
+	return 1, 100, 100
+}
+func (b *testBackend) Limits() gpu.Limits { return gpu.DefaultLimits }
+func (b *testBackend) TextureView(texture gpu.TextureID, mip, layer int) gpu.TextureViewID {
+	b.nextID++
+	return gpu.TextureViewID(b.nextID)
+}
+func (b *testBackend) Execute(queue *gpu.Queue) {
+	queue.ReplayBakes(b)
+	queue.ReplayPasses(b)
+	queue.ReplayReleases(b)
+}
+func (b *testBackend) BeginPass(desc gpu.PassDesc) gpu.RenderPass {
+	b.passes = append(b.passes, desc)
+	return b
+}
+func (b *testBackend) EndPass(gpu.RenderPass) {}
+func (b *testBackend) Present()               { b.presents++ }
+
+// Capture is the readback seam; nothing here reads a frame back.
+func (b *testBackend) Capture(gpu.CaptureDesc) {}
+
+func (b *testBackend) TakeCapture() (gpu.Capture, bool) { return gpu.Capture{}, false }
+
+func (b *testBackend) TransitionTextures([]gpu.TextureTransition) {}
+func (b *testBackend) BakeBuffer(_ gpu.BufferID, kind gpu.BufferKind, _ int, data []byte) {
+	if b.capture {
+		b.buffers = append(b.buffers, bufferBake{kind: kind, data: append([]byte(nil), data...)})
+	}
+}
+func (b *testBackend) BakeTexture(gpu.TextureID, int, int, gpu.TextureFormat, []byte, bool) {
+}
+func (b *testBackend) AllocateTexture(id gpu.TextureID, desc gpu.TextureDesc) {
+	b.allocations = append(b.allocations, textureAllocation{id: id, desc: desc})
+}
+func (b *testBackend) UpdateTexture(id gpu.TextureID, layer int, region gpu.Region, pixels []byte) {
+	b.updates = append(b.updates, textureUpdate{id: id, layer: layer, region: region, pixels: append([]byte(nil), pixels...)})
+}
+func (b *testBackend) SetPipeline(gpu.PipelineID) {}
+func (b *testBackend) SetParams(params []byte) {
+	if b.capture {
+		b.drawParams = append(b.drawParams, append([]byte(nil), params...))
+	}
+}
+func (b *testBackend) SetTexture(gpu.TextureID, int, int) {}
+
+func (b *testBackend) SetSampler(gpu.SamplerID, int, int)               {}
+func (b *testBackend) SetVertexBuffer(gpu.BufferID, int)                {}
+func (b *testBackend) SetIndexBuffer(gpu.BufferID, int, gpu.IndexWidth) {}
+func (b *testBackend) SetBuffer(int, int, gpu.BufferID, int, int)       {}
+func (b *testBackend) Draw(_, _, _, _ int, _ bool)                      { b.draws++ }
+func (b *testBackend) ReleaseBuffer(id gpu.BufferID) {
+	b.releasedBuffers = append(b.releasedBuffers, id)
+}
+func (b *testBackend) ReleaseTexture(id gpu.TextureID) {
+	b.releasedTextures = append(b.releasedTextures, id)
+}
+
+// recordCanvasPlugin stands in for the app's own recording plugin. It locks
+// gfx's OpQueue as well as canvas's, because minting a render target takes the
+// gfx queue and an app that draws a canvas layer into a texture holds both.
+type recordCanvasPlugin struct {
+	record    func(*canvas.OpQueue)
+	recordGfx func(*canvas.OpQueue, *gfx.OpQueue)
+}
+type recordCanvasHandler kernel.Subscription[app.UpdateEvent]
+
+// lookupProbeCmd runs a callback inside a handler that holds the Lookup and
+// filesystem locks, giving tests a valid scoped LookupAccess to exercise the
+// public query and unload API the way real callers do.
+type lookupProbeCmd kernel.Command[lookupProbeRequest, lookupProbeResponse]
+type lookupProbeRequest struct{ run func(canvas.LookupAccess) }
+type lookupProbeResponse struct{}
+
+// readFileProbeCmd reads a path from storage.FileSystem under its read lock,
+// standing in for production code that reads the resource directly.
+type readFileProbeCmd kernel.Command[readFileProbeRequest, readFileProbeResponse]
+type readFileProbeRequest struct{ Name string }
+type readFileProbeResponse struct{ Data []byte }
+
+func (p recordCanvasPlugin) Name() kernel.PluginName { return "canvas-test-recorder" }
+
+// Name is the canvas plugin's, not this fixture's: the recorder is a separate
+// plugin that locks canvas resources and storage.FileSystem.
+func (p recordCanvasPlugin) Dependencies() []kernel.PluginName {
+	return []kernel.PluginName{canvas.Name, storage.Name}
+}
+func (p recordCanvasPlugin) Register(registrar *kernel.Registrar, _ any) error {
+	registrar.Subscribe[recordCanvasHandler](func() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
+		var queue kernel.Write[*canvas.OpQueue]
+		var gfxQueue kernel.Write[*gfx.OpQueue]
+		return func(access kernel.ResourceAccess) {
+				queue = access.GetWrite[*canvas.OpQueue]()
+				gfxQueue = access.GetWrite[*gfx.OpQueue]()
+			}, func(_ kernel.Kernel, _ app.UpdateEvent) error {
+				if p.record != nil {
+					p.record(queue.Get())
+				}
+				if p.recordGfx != nil {
+					p.recordGfx(queue.Get(), gfxQueue.Get())
+				}
+				return nil
+			}
+	})
+	registrar.HandleCommand[lookupProbeCmd](lookupProbeCmdImpl)
+	registrar.HandleCommand[readFileProbeCmd](readFileProbeCmdImpl)
+	return nil
+}
+
+func lookupProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupProbeRequest, lookupProbeResponse]) {
+	var lookup kernel.Write[*canvas.Lookup]
+	var filesystem kernel.Read[storage.FileSystem]
+	return func(access kernel.ResourceAccess) {
+			lookup = access.GetWrite[*canvas.Lookup]()
+			filesystem = access.GetRead[storage.FileSystem]()
+		}, func(k kernel.Kernel, req lookupProbeRequest) (lookupProbeResponse, error) {
+			req.run(canvas.NewLookupAccess(k, lookup.Get(), filesystem.Get()))
+			return lookupProbeResponse{}, nil
+		}
+}
+
+func readFileProbeCmdImpl() (kernel.Lock, kernel.Execute[readFileProbeRequest, readFileProbeResponse]) {
+	var filesystem kernel.Read[storage.FileSystem]
+	return func(access kernel.ResourceAccess) {
+			filesystem = access.GetRead[storage.FileSystem]()
+		}, func(_ kernel.Kernel, req readFileProbeRequest) (readFileProbeResponse, error) {
+			data, err := fs.ReadFile(filesystem.Get(), req.Name)
+			return readFileProbeResponse{Data: data}, err
+		}
+}
+
+// probeLookup executes fn with a scoped LookupAccess inside a canvas handler.
+func probeLookup(k kernel.Executioner, fn func(canvas.LookupAccess)) {
+	k.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{run: fn})
+}
+func testKernel(t testing.TB, filesystem fs.FS, config canvas.Config, record func(*canvas.OpQueue)) (kernel.Executioner, *plugin, *testBackend) {
+	return testKernelHandler(t, filesystem, config, record, func(err error) bool {
+		t.Errorf("unexpected kernel error: %v", err)
+		return true
+	})
+}
+
+// testKernelCapturing builds a harness whose error handler records reported
+// errors instead of failing, so tests can assert the report-once behavior of the
+// Lookup query API.
+func testKernelCapturing(t testing.TB, filesystem fs.FS, config canvas.Config, record func(*canvas.OpQueue)) (kernel.Executioner, *[]error) {
+	var errs []error
+	k, _, _ := testKernelHandler(t, filesystem, config, record, func(err error) bool {
+		errs = append(errs, err)
+		return false
+	})
+	return k, &errs
+}
+
+// testKernelGfx builds the same harness as testKernel for a recorder that also
+// needs gfx's queue - the one an app allocating its own render target holds.
+func testKernelGfx(t testing.TB, filesystem fs.FS, config canvas.Config, record func(*canvas.OpQueue, *gfx.OpQueue)) (kernel.Executioner, *plugin, *testBackend) {
+	t.Helper()
+	return testKernelRecorder(t, filesystem, config, recordCanvasPlugin{recordGfx: record}, func(err error) bool {
+		t.Errorf("unexpected kernel error: %v", err)
+		return true
+	})
+}
+
+func testKernelHandler(t testing.TB, filesystem fs.FS, config canvas.Config, record func(*canvas.OpQueue), onError func(error) bool) (kernel.Executioner, *plugin, *testBackend) {
+	t.Helper()
+	return testKernelRecorder(t, filesystem, config, recordCanvasPlugin{record: record}, onError)
+}
+
+func testKernelRecorder(t testing.TB, filesystem fs.FS, config canvas.Config, recorder recordCanvasPlugin, onError func(error) bool) (kernel.Executioner, *plugin, *testBackend) {
+	t.Helper()
+	canvasPlugin := &plugin{}
+	backend := &testBackend{capture: true}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	configs := map[kernel.PluginName]any{
+		storage.Name: storage.Config{}.WithReadFS("test", 10, filesystem),
+		canvas.Name:  config,
+	}
+	engine := kernel.New(configs).Handler(onError).WithPlugins(storageplugin.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{backend}, canvasPlugin, recorder)
+	go engine.Run(ctx)
+	<-engine.Ready()
+	k := engine.Executioner()
+	k.PublishEvent(app.InitEvent{}).Wait()
+	k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
+		Width: 100, Height: 100, FramebufferWidth: 200, FramebufferHeight: 200,
+	})
+	return k, canvasPlugin, backend
+}
+
+func runFrame(k kernel.Executioner) {
+	k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
+	k.PublishEvent(app.RenderEvent{}).Wait()
+}
+
+func TestPluginMountsBuiltInShaders(t *testing.T) {
+	k, _, _ := testKernel(t, fstest.MapFS{}, canvas.Config{}, func(*canvas.OpQueue) {})
+	for _, path := range []string{types.SpriteShaderPath, types.TrianglesShaderPath, canvas.KeyColorPath} {
+		want, err := fs.ReadFile(builtinFS, path)
+		if err != nil {
+			t.Fatalf("read embedded shader %q: %v", path, err)
+		}
+		got, _ := k.ExecuteCommand[readFileProbeCmd](readFileProbeRequest{Name: path})
+		if !bytes.Equal(got.Data, want) {
+			t.Fatalf("mounted shader %q differs from embedded source", path)
+		}
+	}
+}
+
+func TestDefaultAtlasUsesTwoLayerArrays(t *testing.T) {
+	config := types.WithDefaults(canvas.Config{})
+	if config.LayersPerArray != 2 {
+		t.Fatalf("default atlas layers = %d, want 2", config.LayersPerArray)
+	}
+}
+
+func BenchmarkCanvasRecordSteadyState(b *testing.B) {
+	var list canvas.OpQueue
+	params := []gfx.ParameterDescr{gfx.ColorParam("tint", m.Color{R: 1, A: 1})}
+	transform := canvas.SpriteTransform{Position: m.Vec2{X: 10, Y: 20}, Size: m.Vec2{X: 32, Y: 32}}
+	list.Sprite(1, "images/sprite.png", transform, nil, params...)
+	list.Reset()
+	b.ReportAllocs()
+	for b.Loop() {
+		list.Sprite(1, "images/sprite.png", transform, nil, params...)
+		list.Reset()
+	}
+}
+
+func BenchmarkCanvasRecordCustomMaterial(b *testing.B) {
+	var list canvas.OpQueue
+	material := gfx.Material(gfx.ShaderWithText("// custom"), gfx.FloatParam("base", 1))
+	params := []gfx.ParameterDescr{gfx.ColorParam("tint", m.Color{R: 1, A: 1})}
+	transform := canvas.SpriteTransform{Position: m.Vec2{X: 10, Y: 20}, Size: m.Vec2{X: 32, Y: 32}}
+	list.Sprite(1, "images/sprite.png", transform, &material, params...)
+	list.Reset()
+	b.ReportAllocs()
+	for b.Loop() {
+		list.Sprite(1, "images/sprite.png", transform, &material, params...)
+		list.Reset()
+	}
+}
+
+func BenchmarkCanvasRecordTriangles(b *testing.B) {
+	var list canvas.OpQueue
+	vertices := []canvas.Vertex{
+		{Position: m.Vec2{}, Color: m.Color{R: 1, A: 1}},
+		{Position: m.Vec2{X: 10}, Color: m.Color{G: 1, A: 1}},
+		{Position: m.Vec2{Y: 10}, Color: m.Color{B: 1, A: 1}},
+	}
+	list.DrawTriangles(1, vertices, nil)
+	list.Reset()
+	b.ReportAllocs()
+	for b.Loop() {
+		list.DrawTriangles(1, vertices, nil)
+		list.Reset()
+	}
+}
+
+func BenchmarkCanvasFlushSprites(b *testing.B) {
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(b, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+		for i := range 100 {
+			write.Sprite(canvas.Layer(i%4), "", canvas.SpriteTransform{
+				Position: m.Vec2{X: float32(i), Y: float32(i)}, Size: m.Vec2{X: 8, Y: 8},
+			}, nil)
+		}
+	})
+	runFrame(k)
+	backend.capture = false
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		runFrame(k)
+	}
+}
+
+func BenchmarkCanvasFlushTexturedTriangles(b *testing.B) {
+	filesystem := fstest.MapFS{}
+	paths := []string{"a.png", "b.png", "c.png", "d.png", "e.png", "f.png", "g.png", "h.png"}
+	for _, p := range paths {
+		filesystem[p] = &fstest.MapFile{Data: pngBytes(b, 8, 8)}
+	}
+	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	white := m.Color{R: 1, G: 1, B: 1, A: 1}
+	verts := []canvas.Vertex{
+		{Position: m.Vec2{X: 0, Y: 0}, Color: white}, {Position: m.Vec2{X: 8, Y: 0}, UV: m.Vec2{X: 1}, Color: white}, {Position: m.Vec2{X: 8, Y: 8}, UV: m.Vec2{X: 1, Y: 1}, Color: white},
+		{Position: m.Vec2{X: 0, Y: 0}, Color: white}, {Position: m.Vec2{X: 8, Y: 8}, UV: m.Vec2{X: 1, Y: 1}, Color: white}, {Position: m.Vec2{X: 0, Y: 8}, UV: m.Vec2{Y: 1}, Color: white},
+	}
+	k, _, backend := testKernel(b, filesystem, config, func(write *canvas.OpQueue) {
+		for i := 0; i < 300; i++ {
+			write.DrawTriangles(canvas.Layer(i%6), verts, nil,
+				gfx.TextureParam(canvas.TextureSlot, gfx.TextureWithResource(paths[i%len(paths)])),
+				gfx.SamplerParam(canvas.SamplerSlot, gpu.SamplerDesc{}))
+		}
+	})
+	runFrame(k)
+	backend.capture = false
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		runFrame(k)
+	}
+}
+
+func TestPrimitiveHelpersUseWhiteSpriteAndNormalizePaths(t *testing.T) {
+	var list canvas.OpQueue
+	list.FillRect(1, m.Rect{X: 1, Y: 2, Width: 3, Height: 4}, canvas.ShapeDraw{Color: m.Color{R: 1}})
+	list.Line(1, m.Vec2{}, m.Vec2{X: 10}, canvas.ShapeDraw{Color: m.Color{G: 1}, Thickness: 2})
+	list.Sprite(1, `images\units\..\hero.png`, canvas.SpriteTransform{Size: m.Vec2{X: 1, Y: 1}}, nil)
+	ops := types.OpQueueLayers(&list)[1].Ops
+	if len(ops) != 3 || ops[0].Sprite.Path != "" || ops[1].Sprite.Path != "" {
+		t.Fatalf("primitive paths = (%q,%q), want empty", ops[0].Sprite.Path, ops[1].Sprite.Path)
+	}
+	if got := ops[2].Sprite.Path; got != "images/hero.png" {
+		t.Fatalf("normalized path = %q, want images/hero.png", got)
+	}
+}
+
+func TestEmptyPathUsesWhiteAtlasAndLayersAreOrdered(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{}}
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(5, "", canvas.SpriteTransform{Position: m.Vec2{X: 50}, Size: m.Vec2{X: 10, Y: 10}}, nil)
+		write.Sprite(1, "", canvas.SpriteTransform{Position: m.Vec2{X: 10}, Size: m.Vec2{X: 10, Y: 10}}, nil)
+	})
+	runFrame(k)
+
+	if filesystem.opens != 0 {
+		t.Fatalf("empty-path storage opens = %d, want 0", filesystem.opens)
+	}
+	if len(backend.allocations) != 1 || backend.allocations[0].desc.Width != 16 || backend.allocations[0].desc.Height != 16 || backend.allocations[0].desc.Layers != 2 {
+		t.Fatalf("atlas allocations = %+v, want one 16x16x2 texture array", backend.allocations)
+	}
+	if len(backend.updates) != 1 || backend.updates[0].pixels[0] != 255 {
+		t.Fatalf("white updates = %+v, want one opaque-white upload", backend.updates)
+	}
+	if backend.draws != 2 || len(backend.drawParams) != 2 {
+		t.Fatalf("draws/params = (%d,%d), want 2", backend.draws, len(backend.drawParams))
+	}
+	instances := spriteInstances(backend)
+	if len(instances) != 2 {
+		t.Fatalf("instance buffers = %d, want 2 (one per layer batch)", len(instances))
+	}
+	first := instanceAt(instances[0], 0)
+	if firstX := floatAt(first, 0); firstX != 10 {
+		t.Fatalf("first layered draw X = %v, want lower-layer X 10", firstX)
+	}
+	if u0, v0, u1, v1 := floatAt(first, 32), floatAt(first, 36), floatAt(first, 40), floatAt(first, 44); u0 != 0.5/16 || v0 != 0.5/16 || u1 != 0.5/16 || v1 != 0.5/16 {
+		t.Fatalf("white sprite UV = (%v,%v,%v,%v), want texel center", u0, v0, u1, v1)
+	}
+	if width, height := floatAt(backend.drawParams[0], 48), floatAt(backend.drawParams[0], 52); width != 100 || height != 100 {
+		t.Fatalf("Canvas viewport = %vx%v, want logical 100x100", width, height)
+	}
+	if len(backend.pipelines) != 1 || backend.pipelines[0].State != gpu.StateOverlay2D {
+		t.Fatalf("default pipeline state = %+v, want alpha with depth disabled", backend.pipelines)
+	}
+}
+
+func TestLogicalAtlasPagesShareOneTextureArrayAndBatch(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{
+		"a.png": &fstest.MapFile{Data: pngBytes(t, 10, 10)},
+		"b.png": &fstest.MapFile{Data: pngBytes(t, 10, 10)},
+	}}
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "a.png", canvas.SpriteTransform{}, nil)
+		write.Sprite(0, "b.png", canvas.SpriteTransform{}, nil)
+	})
+	runFrame(k)
+
+	if len(backend.allocations) != 1 || backend.allocations[0].desc != (gpu.TextureDesc{Width: 16, Height: 16, Layers: 2, Format: gpu.FormatRGBA8Srgb}) {
+		t.Fatalf("atlas allocations = %+v, want one 16x16x2 texture array", backend.allocations)
+	}
+	if len(backend.updates) != 3 {
+		t.Fatalf("atlas updates = %d, want white texel and two sprites", len(backend.updates))
+	}
+	if update := backend.updates[2]; update.id != backend.updates[1].id || update.layer != 1 || update.region.Y != 0 {
+		t.Fatalf("second-page update = %+v, want same texture at layer 1, Y 0", update)
+	}
+	if backend.draws != 1 {
+		t.Fatalf("draws = %d, want sprites from both logical pages in one batch", backend.draws)
+	}
+	instances := spriteInstances(backend)
+	if len(instances) != 1 {
+		t.Fatalf("instance buffers = %d, want one batch", len(instances))
+	}
+	second := instanceAt(instances[0], 1)
+	if v0, v1, layer := floatAt(second, 36), floatAt(second, 44), floatAt(second, 64); v0 != 2.0/16 || v1 != 12.0/16 || layer != 1 {
+		t.Fatalf("second-page V coordinates/layer = (%v,%v,%v), want (2/16,12/16,1)", v0, v1, layer)
+	}
+}
+
+func TestLayerTransformFinalStateAndActiveClipSnapshot(t *testing.T) {
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+		write.SetClip(m.Rect{X: 1, Y: 2, Width: 3, Height: 4})
+		write.Sprite(1, "", canvas.SpriteTransform{Size: m.Vec2{X: 10, Y: 10}}, nil)
+		write.Sprite(2, "", canvas.SpriteTransform{Size: m.Vec2{X: 10, Y: 10}}, nil)
+		write.SetLayerTransform(1, m.Rect{X: 10, Y: 20, Width: 50, Height: 25}, canvas.AspectInscribe)
+	})
+	runFrame(k)
+	if len(backend.drawParams) != 2 {
+		t.Fatalf("draw params = %d, want 2", len(backend.drawParams))
+	}
+	if scaleX, scaleY := floatAt(backend.drawParams[0], 64), floatAt(backend.drawParams[0], 84); scaleX != 2 || scaleY != 2 {
+		t.Fatalf("layer transform scale = (%v,%v), want inscribed (2,2)", scaleX, scaleY)
+	}
+	if x, y := floatAt(backend.drawParams[0], 112), floatAt(backend.drawParams[0], 116); x != -20 || y != -15 {
+		t.Fatalf("layer transform translation = (%v,%v), want centered (-20,-15)", x, y)
+	}
+	for i, params := range backend.drawParams {
+		if enabled := floatAt(params, 56); enabled != 1 {
+			t.Fatalf("draw %d clip enabled = %v, want 1", i, enabled)
+		}
+		if left, top, right, bottom := floatAt(params, 128), floatAt(params, 132), floatAt(params, 136), floatAt(params, 140); left != 1 || top != 2 || right != 4 || bottom != 6 {
+			t.Fatalf("draw %d clip = (%v,%v,%v,%v), want (1,2,4,6)", i, left, top, right, bottom)
+		}
+	}
+}
+
+func TestClipSnapshotIsPerOperation(t *testing.T) {
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 10, Y: 10}}, nil)
+		write.SetClip(m.Rect{X: 1, Y: 2, Width: 3, Height: 4})
+		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 10, Y: 10}}, nil)
+		write.RemoveClip()
+		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 10, Y: 10}}, nil)
+	})
+	runFrame(k)
+	if len(backend.drawParams) != 3 {
+		t.Fatalf("draw params = %d, want 3 in record order", len(backend.drawParams))
+	}
+	if enabled := floatAt(backend.drawParams[0], 56); enabled != 0 {
+		t.Fatalf("draw before SetClip clip enabled = %v, want 0", enabled)
+	}
+	if enabled := floatAt(backend.drawParams[1], 56); enabled != 1 {
+		t.Fatalf("draw under clip enabled = %v, want 1", enabled)
+	}
+	if left, top, right, bottom := floatAt(backend.drawParams[1], 128), floatAt(backend.drawParams[1], 132), floatAt(backend.drawParams[1], 136), floatAt(backend.drawParams[1], 140); left != 1 || top != 2 || right != 4 || bottom != 6 {
+		t.Fatalf("clipped draw clip = (%v,%v,%v,%v), want (1,2,4,6)", left, top, right, bottom)
+	}
+	if enabled := floatAt(backend.drawParams[2], 56); enabled != 0 {
+		t.Fatalf("draw after RemoveClip enabled = %v, want 0", enabled)
+	}
+}
+
+func TestLayerTransformAspectModes(t *testing.T) {
+	view := layerSurface(gfx.TargetDescr{}, &gfx.Viewport{Width: 100, Height: 100})
+	tests := []struct {
+		name             string
+		aspect           canvas.AspectMode
+		scaleX, scaleY   float32
+		offsetX, offsetY float32
+	}{
+		{name: "inscribe", aspect: canvas.AspectInscribe, scaleX: 2, scaleY: 2, offsetX: -20, offsetY: -15},
+		{name: "overlap", aspect: canvas.AspectOverlap, scaleX: 4, scaleY: 4, offsetX: -90, offsetY: -80},
+		{name: "stretch", aspect: canvas.AspectStretch, scaleX: 2, scaleY: 4, offsetX: -20, offsetY: -80},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var list canvas.OpQueue
+			list.SetLayerTransform(1, m.Rect{X: 10, Y: 20, Width: 50, Height: 25}, test.aspect)
+			transform := resolveLayerTransform(types.OpQueueLayers(&list)[1], view)
+			if transform[0] != test.scaleX || transform[5] != test.scaleY || transform[12] != test.offsetX || transform[13] != test.offsetY {
+				t.Fatalf("transform scale=(%v,%v) offset=(%v,%v), want scale=(%v,%v) offset=(%v,%v)",
+					transform[0], transform[5], transform[12], transform[13], test.scaleX, test.scaleY, test.offsetX, test.offsetY)
+			}
+		})
+	}
+}
+
+func TestLayerTransformHelpersInvert(t *testing.T) {
+	window := m.Rect{X: 10, Y: 20, Width: 50, Height: 25}
+	viewport := m.Vec2{X: 100, Y: 100}
+	scale, offset := canvas.LayerTransform(window, canvas.AspectInscribe, viewport)
+	if scale != (m.Vec2{X: 2, Y: 2}) || offset != (m.Vec2{X: -20, Y: -15}) {
+		t.Fatalf("transform = scale %+v offset %+v, want (2,2)/(-20,-15)", scale, offset)
+	}
+	world := m.Vec2{X: 30, Y: 25}
+	if screen := canvas.WorldToScreen(window, canvas.AspectInscribe, viewport, world); screen != (m.Vec2{X: 40, Y: 35}) {
+		t.Fatalf("world->screen = %+v, want (40,35)", screen)
+	}
+	if back := canvas.ScreenToWorld(window, canvas.AspectInscribe, viewport, m.Vec2{X: 40, Y: 35}); back != world {
+		t.Fatalf("screen->world = %+v, want %+v", back, world)
+	}
+	if scale, offset := canvas.LayerTransform(m.Rect{}, canvas.AspectStretch, viewport); scale != (m.Vec2{X: 1, Y: 1}) || offset != (m.Vec2{}) {
+		t.Fatalf("zero window = scale %+v offset %+v, want identity", scale, offset)
+	}
+}
+
+func TestDrawTrianglesSnapshotsStandardVerticesAndUsesLayerTransform(t *testing.T) {
+	vertices := []canvas.Vertex{
+		{Position: m.Vec2{X: 1, Y: 2}, Color: m.Color{R: 1, A: 1}, UV: m.Vec2{}},
+		{Position: m.Vec2{X: 11, Y: 2}, Color: m.Color{G: 1, A: 1}, UV: m.Vec2{X: 1}},
+		{Position: m.Vec2{X: 1, Y: 12}, Color: m.Color{B: 1, A: 1}, UV: m.Vec2{Y: 1}},
+	}
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+		write.DrawTriangles(1, vertices, nil)
+		vertices[0].Position.X = 99
+		write.SetLayerTransform(1, m.Rect{Width: 50, Height: 50}, canvas.AspectStretch)
+	})
+	runFrame(k)
+	if backend.draws != 1 || len(backend.pipelines) != 1 {
+		t.Fatalf("draws/pipelines = (%d,%d), want (1,1)", backend.draws, len(backend.pipelines))
+	}
+	pipeline := backend.pipelines[0]
+	if pipeline.Stride != 32 || len(pipeline.Attributes) != 3 ||
+		pipeline.Attributes[0] != (gpu.VertexAttribute{Offset: 0, Type: gpu.Float32x2, Location: 0}) ||
+		pipeline.Attributes[1] != (gpu.VertexAttribute{Offset: 8, Type: gpu.Float32x4, Location: 1}) ||
+		pipeline.Attributes[2] != (gpu.VertexAttribute{Offset: 24, Type: gpu.Float32x2, Location: 2}) {
+		t.Fatalf("triangle vertex pipeline = %+v", pipeline)
+	}
+	var uploaded []byte
+	for _, buffer := range backend.buffers {
+		if buffer.kind == gpu.BufferVertex && len(buffer.data) == len(vertices)*32 {
+			uploaded = buffer.data
+		}
+	}
+	if uploaded == nil || floatAt(uploaded, 0) != 1 || floatAt(uploaded, 8) != 1 || floatAt(uploaded, 24) != 0 {
+		t.Fatalf("triangle vertex upload = %v, want snapshotted position/color/uv", uploaded)
+	}
+	params := backend.drawParams[0]
+	if scaleX, scaleY := floatAt(params, 64), floatAt(params, 84); scaleX != 2 || scaleY != 2 {
+		t.Fatalf("triangle layer scale = (%v,%v), want (2,2)", scaleX, scaleY)
+	}
+}
+
+func TestDrawTrianglesBindsTextureViaSlotParams(t *testing.T) {
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	white := m.Color{R: 1, G: 1, B: 1, A: 1}
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+		write.DrawTriangles(0, []canvas.Vertex{
+			{Position: m.Vec2{}, Color: white},
+			{Position: m.Vec2{X: 4}, Color: white, UV: m.Vec2{X: 2}},
+			{Position: m.Vec2{Y: 4}, Color: white, UV: m.Vec2{Y: 2}},
+		}, nil,
+			gfx.TextureParam(canvas.TextureSlot, gfx.TextureWithBytes(2, 2, gpu.FormatRGBA8, make([]byte, 16), true, false)),
+			gfx.SamplerParam(canvas.SamplerSlot, gpu.SamplerDesc{AddressU: gpu.AddressRepeat, AddressV: gpu.AddressRepeat, Mag: gpu.FilterNearest, Min: gpu.FilterNearest, Mip: gpu.FilterNearest}),
+		)
+	})
+	runFrame(k)
+	if backend.draws != 1 || len(backend.pipelines) != 1 {
+		t.Fatalf("draws/pipelines = (%d,%d), want 1 texture-slot triangle", backend.draws, len(backend.pipelines))
+	}
+}
+
+func TestDrawTrianglesSupportsCustomVertexLayout(t *testing.T) {
+	vertices := []customTriangleVertex{
+		{Position: m.Vec2{X: 1, Y: 2}, Data: m.Vec4{X: 3, Y: 4, Z: 5, W: 6}},
+		{Position: m.Vec2{X: 7, Y: 8}},
+		{Position: m.Vec2{X: 9, Y: 10}},
+	}
+	material := gfx.MaterialWithState(
+		gfx.ShaderWithText("// custom triangle shader"),
+		gpu.MaterialState{Blend: gpu.BlendOpaque},
+	)
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+		write.DrawTriangles(1, vertices, &material)
+		vertices[0].Position.X = 99
+		customTriangleVertexLayout[0] = gfx.Attr(4, gpu.Float32)
+	})
+	t.Cleanup(func() { customTriangleVertexLayout[0] = gfx.Attr(0, gpu.Float32x2) })
+	runFrame(k)
+	if len(backend.pipelines) != 1 {
+		t.Fatalf("pipelines = %d, want 1", len(backend.pipelines))
+	}
+	pipeline := backend.pipelines[0]
+	if pipeline.Stride != 24 || len(pipeline.Attributes) != 2 ||
+		pipeline.Attributes[0] != (gpu.VertexAttribute{Offset: 0, Type: gpu.Float32x2, Location: 0}) ||
+		pipeline.Attributes[1] != (gpu.VertexAttribute{Offset: 8, Type: gpu.Float32x4, Location: 1}) ||
+		pipeline.State.Blend != gpu.BlendOpaque {
+		t.Fatalf("custom triangle pipeline = %+v", pipeline)
+	}
+	var uploaded []byte
+	for _, buffer := range backend.buffers {
+		if buffer.kind == gpu.BufferVertex && len(buffer.data) == len(vertices)*24 {
+			uploaded = buffer.data
+		}
+	}
+	if uploaded == nil || floatAt(uploaded, 0) != 1 || floatAt(uploaded, 8) != 3 {
+		t.Fatalf("custom triangle upload = %v, want snapshotted custom vertices", uploaded)
+	}
+}
+
+// A custom material reaches the backend with its own pipeline state and its own
+// parameters, and canvas's reserved names are canvas's: a caller's tint is
+// consumed into the instance record rather than reaching the material, because
+// the record is where tint lives and a shader reads it from the shared
+// VertexOut.
+func TestCustomMaterialKeepsItsStateAndCannotReclaimTint(t *testing.T) {
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	custom := gfx.MaterialWithState(
+		gfx.ShaderWithText("// custom canvas shader"),
+		gpu.MaterialState{Blend: gpu.BlendOpaque},
+		gfx.FloatParam("customValue", 1),
+	)
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "", canvas.SpriteTransform{Position: m.Vec2{X: 12}, Size: m.Vec2{X: 8, Y: 8}}, &custom,
+			gfx.ColorParam(canvas.TintSlot, m.Color{R: 0.25, G: 0.5, B: 0.75, A: 1}),
+		)
+	})
+	runFrame(k)
+	if len(backend.drawParams) != 1 {
+		t.Fatalf("draw params = %d, want 1", len(backend.drawParams))
+	}
+	// The material's own value is per batch and lands in the uniform block. A
+	// per-sprite value would not: on the sprite path a draw parameter is per
+	// instance and becomes a storage array, which is what
+	// TestASpriteDrawParameterNamingAUniformMemberIsReported covers.
+	if got := floatAt(backend.drawParams[0], 180); got != 1 {
+		t.Fatalf("custom value = %v, want the material's 1", got)
+	}
+
+	// The union layout puts tint at 144. Nothing writes it: canvas strips the
+	// reserved name before the parameters reach the material, so it stays zero
+	// there and appears in the instance record instead.
+	if got := floatAt(backend.drawParams[0], 144); got != 0 {
+		t.Fatalf("tint reached the uniform block as %v; it belongs to the instance record", got)
+	}
+	instances := spriteInstances(backend)
+	if len(instances) != 1 {
+		t.Fatalf("instance buffers = %d, want 1", len(instances))
+	}
+	record := instanceAt(instances[0], 0)
+	if got := floatAt(record, 48); got != 0.25 {
+		t.Fatalf("instance tint red = %v, want the caller's 0.25", got)
+	}
+	if len(backend.pipelines) != 1 || backend.pipelines[0].State != (gpu.MaterialState{Blend: gpu.BlendOpaque}) {
+		t.Fatalf("custom pipeline state = %+v", backend.pipelines)
+	}
+}
+
+// Naming a material no longer costs a draw, and naming the built-in explicitly
+// is the same as saying nothing: the key takes the material's fingerprint, not
+// the fact that one was named.
+func TestSpritesSharingAMaterialBatchAndDefaultMaterialBatchesWithNil(t *testing.T) {
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	custom := gfx.MaterialWithState(gfx.ShaderWithText("// custom"), gpu.StateOverlay2D)
+	other := gfx.MaterialWithState(gfx.ShaderWithText("// other"), gpu.StateOverlay2D)
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+		at := func(x float32) canvas.SpriteTransform {
+			return canvas.SpriteTransform{Position: m.Vec2{X: x}, Size: m.Vec2{X: 4, Y: 4}}
+		}
+		write.Sprite(0, "", at(0), nil)
+		write.Sprite(0, "", at(8), canvas.DefaultMaterial())
+		write.Sprite(0, "", at(16), &custom)
+		write.Sprite(0, "", at(24), &custom)
+		write.Sprite(0, "", at(32), &other)
+	})
+	runFrame(k)
+	instances := spriteInstances(backend)
+	// nil + DefaultMaterial() merge; the two customs merge; the third is its own.
+	if len(instances) != 3 {
+		t.Fatalf("draws = %d, want 3", len(instances))
+	}
+	if got := len(instances[0]) / testInstanceSize; got != 2 {
+		t.Fatalf("the built-in batch holds %d sprites, want nil and DefaultMaterial() together", got)
+	}
+	if got := len(instances[1]) / testInstanceSize; got != 2 {
+		t.Fatalf("the shared custom material batch holds %d sprites, want 2", got)
+	}
+}
+
+// Two sprites differing only in tint still merge - the merge the instanced path
+// exists to make - because the reserved names are stripped before the ordered
+// name key is taken.
+func TestSpritesDifferingOnlyInTintStillMerge(t *testing.T) {
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil,
+			gfx.ColorParam(canvas.TintSlot, m.Color{R: 1, A: 1}))
+		write.Sprite(0, "", canvas.SpriteTransform{Position: m.Vec2{X: 8}, Size: m.Vec2{X: 4, Y: 4}}, nil,
+			gfx.ColorParam(canvas.TintSlot, m.Color{G: 1, A: 1}))
+	})
+	runFrame(k)
+	instances := spriteInstances(backend)
+	if len(instances) != 1 || len(instances[0])/testInstanceSize != 2 {
+		t.Fatalf("instance buffers = %v, want one batch of two", len(instances))
+	}
+}
+
+// An unreserved value parameter is per sprite: it is collected across the batch
+// into one storage buffer read with the same instance index the record uses, so
+// two sprites differing only in that value still merge. A sprite that carries a
+// name another lacks splits the batch, and the missing element is never
+// zero-filled - for a multiplier, zero is the opposite of absent.
+func TestAPerSpriteParameterBecomesOneArrayAndItsNameSplitsTheBatch(t *testing.T) {
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+		at := func(x float32) canvas.SpriteTransform {
+			return canvas.SpriteTransform{Position: m.Vec2{X: x}, Size: m.Vec2{X: 4, Y: 4}}
+		}
+		write.Sprite(0, "", at(0), nil, gfx.FloatParam("wobble", 1))
+		write.Sprite(0, "", at(8), nil, gfx.FloatParam("wobble", 2))
+		write.Sprite(0, "", at(16), nil)
+	})
+	runFrame(k)
+	instances := spriteInstances(backend)
+	if len(instances) != 2 {
+		t.Fatalf("draws = %d, want the two wobbling sprites merged and the third split off", len(instances))
+	}
+	if got := len(instances[0]) / testInstanceSize; got != 2 {
+		t.Fatalf("the wobble batch holds %d sprites, want 2", got)
+	}
+	wobble := namedStorageBuffer(backend, 8)
+	if wobble == nil {
+		t.Fatal("no 8-byte storage buffer was baked; the wobble array was not collected")
+	}
+	if floatAt(wobble, 0) != 1 || floatAt(wobble, 4) != 2 {
+		t.Fatalf("wobble array = [%v %v], want [1 2]", floatAt(wobble, 0), floatAt(wobble, 4))
+	}
+}
+
+// Both shape helpers and text can carry a material, and both are sprite draws,
+// so they batch with each other exactly as any other sprite does.
+func TestAFillAndAGlyphCarryingAMaterialAreSpriteDraws(t *testing.T) {
+	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	custom := gfx.MaterialWithState(gfx.ShaderWithText("// custom"), gpu.StateOverlay2D)
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+		write.FillRect(0, m.Rect{Width: 4, Height: 4}, canvas.ShapeDraw{Color: m.Color{R: 1, A: 1}, Material: &custom})
+		write.FillRect(0, m.Rect{X: 8, Width: 4, Height: 4}, canvas.ShapeDraw{Color: m.Color{G: 1, A: 1}, Material: &custom})
+	})
+	runFrame(k)
+	instances := spriteInstances(backend)
+	if len(instances) != 1 || len(instances[0])/testInstanceSize != 2 {
+		t.Fatalf("fill draws = %v, want one batch of two", len(instances))
+	}
+}
+
+// A zero colour is opaque white. Without that rule a ShapeDraw naming only a
+// material draws nothing at all, which is the likelier mistake in the world the
+// type creates.
+func TestAZeroShapeColourIsOpaqueWhite(t *testing.T) {
+	var list canvas.OpQueue
+	list.FillRect(0, m.Rect{Width: 4, Height: 4}, canvas.ShapeDraw{})
+	color, ok := types.OpQueueLayers(&list)[0].Ops[0].Sprite.Params[0].ColorValue()
+	if !ok || color != (m.Color{R: 1, G: 1, B: 1, A: 1}) {
+		t.Fatalf("zero shape colour = %+v (%v), want opaque white", color, ok)
+	}
+}
+
+// namedStorageBuffer returns the first baked storage buffer of exactly size
+// bytes, which is how a test picks out one per-instance parameter array: the
+// instance buffer is a multiple of 96 and the quad buffers are not storage.
+func namedStorageBuffer(b *testBackend, size int) []byte {
+	for i := range b.buffers {
+		if b.buffers[i].kind == gpu.BufferStorage && len(b.buffers[i].data) == size {
+			return b.buffers[i].data
+		}
+	}
+	return nil
+}
+
+func TestSpriteLoadsOnceAndAppliesFramePadding(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 3)}}}
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "sprite.png", canvas.SpriteTransform{
+			Size: m.Vec2{X: 10, Y: 10}, Frame: canvas.SpriteFrame{Left: 1, Top: 1, Right: 1},
+		}, nil)
+	})
+	runFrame(k)
+	runFrame(k)
+	if filesystem.opens != 1 {
+		t.Fatalf("sprite opens = %d, want one lazy load", filesystem.opens)
+	}
+	if len(backend.updates) != 2 {
+		t.Fatalf("atlas uploads = %d, want white texel and sprite", len(backend.updates))
+	}
+	inst := instanceAt(spriteInstances(backend)[0], 0)
+	u0, v0 := floatAt(inst, 32), floatAt(inst, 36)
+	u1, v1 := floatAt(inst, 40), floatAt(inst, 44)
+	if u0 != 4.0/16 || v0 != 3.0/16 || u1 != 6.0/16 || v1 != 5.0/16 {
+		t.Fatalf("frame UV = (%v,%v,%v,%v)", u0, v0, u1, v1)
+	}
+}
+
+func TestSpriteNineSliceExpandsAfterTextureDimensionsResolve(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}}
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "sprite.png", canvas.SpriteTransform{
+			Size: m.Vec2{X: 12, Y: 12}, NineSlice: canvas.SpriteFrame{Left: 1, Top: 1, Right: 1, Bottom: 1},
+		}, nil)
+	})
+	runFrame(k)
+	instances := spriteInstances(backend)
+	if len(instances) != 1 || len(instances[0])/96 != 9 {
+		t.Fatalf("nine-slice instances = %d batches, %d instances; want 1, 9", len(instances), len(instances[0])/96)
+	}
+}
+
+func TestUnloadSpriteReloadsOnNextFrame(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 2, 2)}}}
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
+	})
+	runFrame(k)
+	probeLookup(k, func(la canvas.LookupAccess) { la.UnloadSprite("sprite.png") })
+	runFrame(k)
+	if filesystem.opens != 2 || len(backend.updates) != 3 {
+		t.Fatalf("path reload opens/updates = (%d,%d), want (2,3)", filesystem.opens, len(backend.updates))
+	}
+}
+
+func TestSpriteSnapshotsMaterialAndParametersWhileLayerTransformIsFinal(t *testing.T) {
+	var list canvas.OpQueue
+	materialParams := []gfx.ParameterDescr{gfx.FloatParam("base", 1)}
+	material := gfx.Material(gfx.ShaderWithText("// custom"), materialParams...)
+	params := []gfx.ParameterDescr{gfx.FloatParam("value", 2)}
+	window := m.Rect{X: 3, Y: 4, Width: 20, Height: 10}
+	list.SetLayerTransform(2, window, canvas.AspectStretch)
+	list.Sprite(2, "image.png", canvas.SpriteTransform{Size: m.Vec2{X: 1, Y: 1}}, &material, params...)
+	params[0] = gfx.FloatParam("other", 9)
+	materialParams[0] = gfx.FloatParam("mutated", 9)
+	list.SetLayerTransform(2, m.Rect{Width: 30, Height: 15}, canvas.AspectOverlap)
+	op := types.OpQueueLayers(&list)[2].Ops[0].Sprite
+	if !op.HasMaterial || reflect.DeepEqual(op.Params[0], params[0]) || reflect.DeepEqual(op.Material, material) {
+		t.Fatal("sprite did not snapshot material and parameters")
+	}
+	if got := types.OpQueueLayers(&list)[2]; got.Window != (m.Rect{Width: 30, Height: 15}) || got.Aspect != canvas.AspectOverlap {
+		t.Fatalf("layer window = %+v mode %v, want final frame window", got.Window, got.Aspect)
+	}
+}
+
+func TestSpriteSizeReturnsPixelDimensions(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 6, 4)}}}
+	config := canvas.Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	k, _, _ := testKernel(t, filesystem, config, func(*canvas.OpQueue) {})
+
+	var size, again m.Vec2
+	probeLookup(k, func(la canvas.LookupAccess) {
+		size = la.SpriteSize("sprite.png")
+	})
+	if size != (m.Vec2{X: 6, Y: 4}) {
+		t.Fatalf("size = %+v, want 6x4", size)
+	}
+	if filesystem.opens != 1 {
+		t.Fatalf("opens = %d, want one header read", filesystem.opens)
+	}
+
+	probeLookup(k, func(la canvas.LookupAccess) {
+		again = la.SpriteSize("sprite.png")
+	})
+	if again != (m.Vec2{X: 6, Y: 4}) || filesystem.opens != 1 {
+		t.Fatalf("second query should reuse metadata: %+v opens %d", again, filesystem.opens)
+	}
+}
+
+func TestSpriteScaleRendersTextureSizeTimesScale(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 6, 4)}}}
+	config := canvas.Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Scale: 2}, nil)
+	})
+	runFrame(k)
+	if backend.draws != 1 || len(backend.drawParams) != 1 {
+		t.Fatalf("draws/params = (%d,%d), want 1 scaled sprite", backend.draws, len(backend.drawParams))
+	}
+	inst := instanceAt(spriteInstances(backend)[0], 0)
+	if w, h := floatAt(inst, 8), floatAt(inst, 12); w != 12 || h != 8 {
+		t.Fatalf("scaled size = (%v,%v), want (12,8) = 6x4 texture times 2", w, h)
+	}
+}
+
+func TestSpriteSizeAspectFitAndDefault(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 6, 4)}}}
+	config := canvas.Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Size: m.Vec2{X: 12}}, nil)
+		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Size: m.Vec2{Y: 8}}, nil)
+		write.Sprite(0, "sprite.png", canvas.SpriteTransform{}, nil)
+	})
+	runFrame(k)
+	if len(backend.drawParams) != 1 {
+		t.Fatalf("draw params = %d, want 1 batched draw", len(backend.drawParams))
+	}
+	buffer := spriteInstances(backend)[0]
+	if w, h := floatAt(instanceAt(buffer, 0), 8), floatAt(instanceAt(buffer, 0), 12); w != 12 || h != 8 {
+		t.Fatalf("aspect from width = (%v,%v), want (12,8) preserving 6x4 ratio", w, h)
+	}
+	if w, h := floatAt(instanceAt(buffer, 1), 8), floatAt(instanceAt(buffer, 1), 12); w != 12 || h != 8 {
+		t.Fatalf("aspect from height = (%v,%v), want (12,8) preserving 6x4 ratio", w, h)
+	}
+	if w, h := floatAt(instanceAt(buffer, 2), 8), floatAt(instanceAt(buffer, 2), 12); w != 6 || h != 4 {
+		t.Fatalf("unset size = (%v,%v), want natural texture 6x4 (Scale defaults to 1)", w, h)
+	}
+}
+
+func TestSpriteFlipSwapsUV(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 6, 4)}}}
+	config := canvas.Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Size: m.Vec2{X: 6, Y: 4}}, nil)
+		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Size: m.Vec2{X: 6, Y: 4}, FlipX: true}, nil)
+		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Size: m.Vec2{X: 6, Y: 4}, FlipY: true}, nil)
+	})
+	runFrame(k)
+	if len(backend.drawParams) != 1 {
+		t.Fatalf("draw params = %d, want 1 batched draw", len(backend.drawParams))
+	}
+	buffer := spriteInstances(backend)[0]
+	// frame uv packs at instance offset 32: X=32, Y=36, Z=40, W=44.
+	base := instanceAt(buffer, 0)
+	baseX, baseY, baseZ, baseW := floatAt(base, 32), floatAt(base, 36), floatAt(base, 40), floatAt(base, 44)
+	flipX := instanceAt(buffer, 1)
+	if floatAt(flipX, 32) != baseZ || floatAt(flipX, 40) != baseX || floatAt(flipX, 36) != baseY || floatAt(flipX, 44) != baseW {
+		t.Fatalf("FlipX should swap U only: got X=%v Z=%v, want X=%v Z=%v", floatAt(flipX, 32), floatAt(flipX, 40), baseZ, baseX)
+	}
+	flipY := instanceAt(buffer, 2)
+	if floatAt(flipY, 36) != baseW || floatAt(flipY, 44) != baseY || floatAt(flipY, 32) != baseX || floatAt(flipY, 40) != baseZ {
+		t.Fatalf("FlipY should swap V only: got Y=%v W=%v, want Y=%v W=%v", floatAt(flipY, 36), floatAt(flipY, 44), baseW, baseY)
+	}
+}
+
+func TestTiledSpriteRepeatsAcrossSizeViaStandaloneTexture(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"wave.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}}
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	tint := m.Color{R: 1, G: 0, B: 0, A: 1}
+	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "wave.png", canvas.SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true}, nil,
+			gfx.ColorParam("tint", tint))
+	})
+	runFrame(k)
+	runFrame(k)
+	if backend.draws != 2 {
+		t.Fatalf("draws = %d, want 2 tiled draws", backend.draws)
+	}
+	if filesystem.opens != 1 {
+		t.Fatalf("opens = %d, want one cached standalone decode", filesystem.opens)
+	}
+	var vertices []byte
+	for _, buffer := range backend.buffers {
+		if buffer.kind == gpu.BufferVertex && len(buffer.data) == 6*32 {
+			vertices = buffer.data
+		}
+	}
+	if vertices == nil {
+		t.Fatal("tiled sprite vertex buffer was not uploaded")
+	}
+	// Vertex 1 is the top-right corner: position (12,0), uv (12/4, 0) = 3 repeats.
+	if px := floatAt(vertices, 32); px != 12 {
+		t.Fatalf("corner x = %v, want 12", px)
+	}
+	if u := floatAt(vertices, 32+24); u != 3 {
+		t.Fatalf("tiled u = %v, want 12/4 = 3 repeats", u)
+	}
+	if r, g := floatAt(vertices, 8), floatAt(vertices, 12); r != 1 || g != 0 {
+		t.Fatalf("vertex color = (%v,%v), want tint baked into color", r, g)
+	}
+}
+
+func TestTiledSpriteRepeatsOnlyTiledAxes(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"wave.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}}
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "wave.png", canvas.SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true, Filter: gpu.FilterNearest}, nil)
+	})
+	runFrame(k)
+	found := false
+	for _, sampler := range backend.samplers {
+		if sampler.AddressU == gpu.AddressRepeat && sampler.AddressV == gpu.AddressClamp && sampler.Mag == gpu.FilterNearest {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("samplers = %+v, want one repeating U only, filtered nearest", backend.samplers)
+	}
+}
+
+// The per-sprite data travels as a Go struct reinterpreted as bytes, so a
+// divergence between canvas.SpriteInstance and the WGSL record is a silent
+// misread rather than a compile error - every sprite in the frame drawn from the
+// wrong offsets, with nothing reported anywhere. This is the only thing that
+// catches it.
+//
+// It goes through naga.Parse and wgsl.Lower rather than through the in-package
+// testBackend, whose ShaderLayout is one hand-written union for every shader and
+// puts bindings where the real shaders do not.
+func TestSpriteInstanceMatchesTheShaderRecord(t *testing.T) {
+	module := lowerBuiltinShader(t, types.SpriteShaderPath)
+	var record ir.StructType
+	for _, typ := range module.Types {
+		structure, ok := typ.Inner.(ir.StructType)
+		if ok && typ.Name == "SpriteInstance" {
+			record = structure
+		}
+	}
+	if record.Members == nil {
+		t.Fatal("the sprite shader declares no SpriteInstance struct")
+	}
+	goType := reflect.TypeFor[canvas.SpriteInstance]()
+	if int(record.Span) != int(goType.Size()) {
+		t.Fatalf("WGSL SpriteInstance spans %d bytes, Go %d", record.Span, goType.Size())
+	}
+	if len(record.Members) != goType.NumField() {
+		t.Fatalf("WGSL SpriteInstance has %d members, Go %d", len(record.Members), goType.NumField())
+	}
+	// The names differ only in case: WGSL is lowerCamel and the Go fields are
+	// exported, so the comparison folds the first letter rather than pretending
+	// they are unrelated.
+	for i, member := range record.Members {
+		field := goType.Field(i)
+		if !strings.EqualFold(member.Name, field.Name) {
+			t.Fatalf("member %d is %q in WGSL and %q in Go", i, member.Name, field.Name)
+		}
+		if int(member.Offset) != int(field.Offset) {
+			t.Fatalf("member %q is at WGSL offset %d and Go offset %d", member.Name, member.Offset, field.Offset)
+		}
+	}
+}
+
+// The uniform block is what a custom material extends, so its member offsets are
+// part of the published contract: an extending shader hand-writes the canvas
+// prefix and appends after it, and a prefix that drifted would silently
+// misaddress every member the app declared.
+func TestTheUniformBlockIsThePublishedPrefix(t *testing.T) {
+	want := []struct {
+		name   string
+		offset uint32
+	}{
+		{"canvasViewport", 0}, {"canvasLayer", 16}, {"canvasClip", 80},
+	}
+	for _, path := range []string{types.SpriteShaderPath, types.TextureShaderPath} {
+		module := lowerBuiltinShader(t, path)
+		members := uniformBlockMembers(t, module)
+		if len(members) != len(want) {
+			t.Fatalf("%s uniform block has %d members, want %d", path, len(members), len(want))
+		}
+		for i, member := range members {
+			if member.Name != want[i].name || member.Offset != want[i].offset {
+				t.Fatalf("%s member %d = %q@%d, want %q@%d",
+					path, i, member.Name, member.Offset, want[i].name, want[i].offset)
+			}
+		}
+	}
+	// triangles.wgsl extends the block with its own keyColor, which is the
+	// mechanism a custom material uses, demonstrated by a built-in.
+	extended := uniformBlockMembers(t, lowerBuiltinShader(t, types.TrianglesShaderPath))
+	if len(extended) != 4 || extended[3].Name != "keyColor" || extended[3].Offset != 96 {
+		t.Fatalf("the triangles block = %+v, want the canvas prefix plus keyColor at 96", extended)
+	}
+}
+
+// Groups are numbered by what a binding is: 0 the uniform block, 1 the texture a
+// draw samples, 2 per-sprite storage. Group 3 is claimed by nothing, and nothing
+// in Go names any of these numbers - gfx reflects them out of the source.
+func TestCanvasNumbersItsGroupsByKind(t *testing.T) {
+	want := map[string]map[string][2]uint32{
+		types.SpriteShaderPath: {
+			"u": {0, 0}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1}, "instances": {2, 0},
+		},
+		types.TrianglesShaderPath: {
+			"u": {0, 0}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1},
+		},
+		types.TextureShaderPath: {
+			"u": {0, 0}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1},
+		},
+	}
+	for path, expected := range want {
+		module := lowerBuiltinShader(t, path)
+		seen := map[string][2]uint32{}
+		for _, variable := range module.GlobalVariables {
+			if variable.Binding == nil {
+				continue
+			}
+			seen[variable.Name] = [2]uint32{variable.Binding.Group, variable.Binding.Binding}
+			if variable.Binding.Group > 2 {
+				t.Errorf("%s binds %q at group %d; group 3 is claimed by nothing",
+					path, variable.Name, variable.Binding.Group)
+			}
+		}
+		if !reflect.DeepEqual(seen, expected) {
+			t.Errorf("%s bindings = %v, want %v", path, seen, expected)
+		}
+	}
+}
+
+// The case the uniform block was split out for: a material that APPENDS a member
+// cannot include uniforms.wgsl, because include-once means the struct would
+// already be declared and WGSL has no way to add a member to it. So it
+// hand-writes the block and includes the rest - and that has to compile.
+func TestAMaterialExtendingTheUniformBlockCompiles(t *testing.T) {
+	source := extendingSpriteMaterialSource
+	text, _, err := gfx.FlattenShader(storage.NewFileSystem(builtinMountID, builtinFS), gfx.ShaderWithText(source))
+	if err != nil {
+		t.Fatalf("flatten the extending material: %v", err)
+	}
+	parsed, err := naga.Parse(text)
+	if err != nil {
+		t.Fatalf("parse the extending material: %v", err)
+	}
+	module, err := wgsl.Lower(parsed)
+	if err != nil {
+		t.Fatalf("lower the extending material: %v", err)
+	}
+	members := uniformBlockMembers(t, module)
+	if len(members) != 4 || members[3].Name != "fade" {
+		t.Fatalf("extended block = %+v, want the canvas prefix plus fade", members)
+	}
+}
+
+// lowerBuiltinShader flattens and lowers one built-in through the same front end
+// the backend puts it through, and returns the module for reflection.
+func lowerBuiltinShader(t *testing.T, path string) *ir.Module {
+	t.Helper()
+	parsed, err := naga.Parse(flattenBuiltinShader(t, path))
+	if err != nil {
+		t.Fatalf("parse %q: %v", path, err)
+	}
+	module, err := wgsl.Lower(parsed)
+	if err != nil {
+		t.Fatalf("lower %q: %v", path, err)
+	}
+	return module
+}
+
+// uniformBlockMembers reflects the members of the module's one uniform block.
+func uniformBlockMembers(t *testing.T, module *ir.Module) []ir.StructMember {
+	t.Helper()
+	for _, variable := range module.GlobalVariables {
+		if variable.Name != "u" || variable.Space != ir.SpaceUniform {
+			continue
+		}
+		structure, ok := module.Types[variable.Type].Inner.(ir.StructType)
+		if !ok {
+			t.Fatal("the canvas uniform is not a struct")
+		}
+		return structure.Members
+	}
+	t.Fatal("the canvas uniform block was not reflected")
+	return nil
+}
+
+// The atlas holds artwork, and artwork is gamma-encoded, so the array has to
+// be sRGB for the hardware to decode it on read. Allocation is the only part of
+// that a device-free test can see: the decode itself happens in the sampler.
+// If this flips back to unorm, every sprite in every game renders too bright
+// and nothing else fails.
+func TestAtlasArrayIsAllocatedSrgb(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"a.png": &fstest.MapFile{Data: pngBytes(t, 10, 10)}}}
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "a.png", canvas.SpriteTransform{}, nil)
+	})
+	runFrame(k)
+
+	if len(backend.allocations) != 1 {
+		t.Fatalf("atlas allocations = %d, want 1", len(backend.allocations))
+	}
+	if format := backend.allocations[0].desc.Format; format != gpu.FormatRGBA8Srgb {
+		t.Fatalf("atlas format = %v, want gpu.FormatRGBA8Srgb", format)
+	}
+}
+
+// flattenBuiltinShader resolves one built-in through the preprocessor, off the
+// same mounted filesystem the plugin installs. Tests read this rather than the
+// embedded source, because the key-colour ramp now lives in an included file
+// and no single source is a whole module.
+func flattenBuiltinShader(t *testing.T, path string) string {
+	t.Helper()
+	text, _, err := gfx.FlattenShader(storage.NewFileSystem(builtinMountID, builtinFS), gfx.ShaderWithResource(path))
+	if err != nil {
+		t.Fatalf("flatten %q: %v", path, err)
+	}
+	return text
+}
+
+// assertBuiltinShaderLowers checks one built-in through the same front end the
+// backend puts it through, so a shader that ships broken fails here rather than
+// on a device.
+func assertBuiltinShaderLowers(t *testing.T, path string) {
+	t.Helper()
+	parsed, err := naga.Parse(flattenBuiltinShader(t, path))
+	if err != nil {
+		t.Fatalf("parse %q: %v", path, err)
+	}
+	if _, err := wgsl.Lower(parsed); err != nil {
+		t.Fatalf("lower %q: %v", path, err)
+	}
+}
+
+// Lowering to IR is not the whole front end a native backend puts a shader
+// through: it then compiles to SPIR-V, and the two can disagree about what WGSL
+// is legal. any() and all() over a vector of bools used to lower cleanly and
+// then die in the SPIR-V backend with "unsupported expression kind:
+// ir.ExprRelational" - at pipeline creation, on a device, which is the last
+// place a built-in should fail. Every canvas entry point goes the whole way
+// here instead, so the next such gap is caught in CI and not in a frame.
+func TestEveryBuiltInCompilesToSpirv(t *testing.T) {
+	for _, path := range []string{types.SpriteShaderPath, types.TrianglesShaderPath, types.TextureShaderPath, types.HaloShaderPath} {
+		if _, err := spirv.NewBackend(spirv.DefaultOptions()).Compile(lowerBuiltinShader(t, path)); err != nil {
+			t.Errorf("compile %q to SPIR-V: %v", path, err)
+		}
+	}
+}
+
+func TestSpriteShaderParses(t *testing.T) {
+	assertBuiltinShaderLowers(t, types.SpriteShaderPath)
+}
+
+func TestTrianglesShaderParses(t *testing.T) {
+	assertBuiltinShaderLowers(t, types.TrianglesShaderPath)
+}
+
+// The include has to resolve on the real path too: through the mount the plugin
+// installs, inside the translate step the backend drives, not only through a
+// filesystem a test hands to FlattenShader. If it did not, the pipeline would be
+// built from a module missing keyColorRamp.
+func TestASpriteDrawReachesTheBackendWithTheRampIncluded(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 2, 2)}}}
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
+	})
+	runFrame(k)
+	if len(backend.pipelines) != 1 {
+		t.Fatalf("pipelines = %d, want 1", len(backend.pipelines))
+	}
+	if !strings.Contains(backend.pipelineShader(0), "fn keyColorRamp") {
+		t.Error("the sprite pipeline was built from a module with no keyColorRamp: the include did not resolve")
+	}
+}
+
+// An app's own shader, in an app's own mount, reaching the built-in ramp by its
+// absolute storage name. This is the cross-mount case a consuming app depends
+// on - the ramp is shared with downstream shaders, not merely between canvas's
+// own three - and nothing else exercises it.
+func TestAnAppShaderIncludesTheBuiltInRampAcrossMounts(t *testing.T) {
+	appShader := `//#include builtin/canvas/keycolor.wgsl
+struct AppUniforms {
+    canvasTransform0: vec4<f32>,
+    canvasTransform1: vec4<f32>,
+    canvasFrame: vec4<f32>,
+    canvasViewport: vec2<f32>,
+    atlasLayer: f32,
+    clipEnabled: f32,
+    canvasLayer: mat4x4<f32>,
+    canvasClip: vec4<f32>,
+    tint: vec4<f32>,
+    keyColor: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> u: AppUniforms;
+@group(1) @binding(0) var canvasSampler: sampler;
+@group(1) @binding(1) var canvasTexture: texture_2d_array<f32>;
+
+@vertex
+fn vs_main(@location(0) quad: vec2<f32>) -> @builtin(position) vec4<f32> {
+    return vec4<f32>(quad, 0.0, 1.0);
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    return keyColorRamp(u.tint, u.keyColor.rgb);
+}
+`
+	filesystem := fstest.MapFS{"app.wgsl": &fstest.MapFile{Data: []byte(appShader)}}
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	material := gfx.MaterialWithState(gfx.ShaderWithResource("app.wgsl"), gpu.StateOverlay2D)
+	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, &material)
+	})
+	runFrame(k)
+	if len(backend.pipelines) != 1 {
+		t.Fatalf("pipelines = %d, want 1", len(backend.pipelines))
+	}
+	if !strings.Contains(backend.pipelineShader(0), "fn keyColorRamp") {
+		t.Error("an app shader's absolute #include of the built-in ramp did not resolve")
+	}
+}
+
+// The ramp is declared once and reached by #include. This is the test that the
+// preprocessor resolves a relative include for a shader loaded from canvas's
+// mount at all - nothing exercised that before - and the one that would catch a
+// copy creeping back into a second source.
+func TestTheKeyColorRampIsIncludedRatherThanCopied(t *testing.T) {
+	for _, path := range []string{types.SpriteShaderPath, types.TrianglesShaderPath} {
+		source, err := fs.ReadFile(builtinFS, path)
+		if err != nil {
+			t.Fatalf("read embedded shader %q: %v", path, err)
+		}
+		if bytes.Contains(source, []byte("fn keyColorRamp")) {
+			t.Errorf("%s declares keyColorRamp itself; it should include %s", path, canvas.KeyColorPath)
+		}
+		if got := strings.Count(flattenBuiltinShader(t, path), "fn keyColorRamp"); got != 1 {
+			t.Errorf("%s flattens to %d keyColorRamp declarations, want 1", path, got)
+		}
+	}
+	texture, err := fs.ReadFile(builtinFS, types.TextureShaderPath)
+	if err != nil {
+		t.Fatalf("read embedded shader %q: %v", types.TextureShaderPath, err)
+	}
+	if bytes.Contains(texture, []byte("keycolor.wgsl")) {
+		t.Errorf("%s includes the ramp; a render target is not artwork", types.TextureShaderPath)
+	}
+}
+
+func TestSpriteSizeReadsHeaderWithoutGPUUpload(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 6, 4)}}}
+	config := canvas.Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(*canvas.OpQueue) {})
+	var size m.Vec2
+	probeLookup(k, func(la canvas.LookupAccess) { size = la.SpriteSize("sprite.png") })
+	if size != (m.Vec2{X: 6, Y: 4}) {
+		t.Fatalf("size = %+v, want 6x4 from header", size)
+	}
+	if len(backend.allocations) != 0 || len(backend.updates) != 0 {
+		t.Fatalf("header sizing uploaded to GPU: allocs %d updates %d", len(backend.allocations), len(backend.updates))
+	}
+}
+
+func TestLookupReportsMissingAndInvalidPathsOncePerEpisode(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{}}
+	config := canvas.Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	k, errs := testKernelCapturing(t, filesystem, config, func(*canvas.OpQueue) {})
+	var missing, invalid m.Vec2
+	probeLookup(k, func(la canvas.LookupAccess) {
+		missing = la.SpriteSize("gone.png")
+		_ = la.SpriteSize("gone.png") // repeat: must not report again
+		invalid = la.SpriteSize("../escape.png")
+	})
+	if missing != (m.Vec2{}) || invalid != (m.Vec2{}) {
+		t.Fatalf("failed lookups returned %+v and %+v, want zero", missing, invalid)
+	}
+	if len(*errs) != 2 {
+		t.Fatalf("reported errors = %d, want one per episode (missing + invalid)", len(*errs))
+	}
+}
+
+func pngBytes(t testing.TB, width, height int) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: uint8(x + 1), G: uint8(y + 1), B: 1, A: 255})
+		}
+	}
+	var out bytes.Buffer
+	if err := png.Encode(&out, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	return out.Bytes()
+}
+
+func floatAt(data []byte, offset int) float32 {
+	return math.Float32frombits(binary.LittleEndian.Uint32(data[offset:]))
+}
+
+// testInstanceSize is the byte size of one batched sprite/glyph instance record.
+const testInstanceSize = 96
+
+// spriteInstances returns the per-draw instance storage buffers captured during
+// the frame, in draw (flush) order. Instance buffers are storage buffers whose
+// size is a whole number of 96-byte instance records, which distinguishes them
+// from the small persistent quad vertex/index buffers.
+func spriteInstances(b *testBackend) [][]byte {
+	var out [][]byte
+	for i := range b.buffers {
+		if b.buffers[i].kind == gpu.BufferStorage && len(b.buffers[i].data) > 0 && len(b.buffers[i].data)%testInstanceSize == 0 {
+			out = append(out, b.buffers[i].data)
+		}
+	}
+	return out
+}
+
+// instanceAt returns the i-th instance record within one storage buffer. Field
+// offsets: transform0@0 (pos.xy,size.xy), transform1@16 (origin.xy,sin,cos),
+// frame@32 (uv), tint@48, misc@64 (atlasLayer), keyColor@80.
+func instanceAt(buffer []byte, i int) []byte {
+	return buffer[i*testInstanceSize : (i+1)*testInstanceSize]
+}
+
+// One name has one frequency. A value named on the material is per batch and is
+// a uniform member; the same name at a sprite draw call is per sprite and
+// becomes a storage array. Naming a uniform member at the draw call is an
+// authoring error, and it is reported rather than silently rerouted - without
+// the check gfx would bind a buffer descriptor into a uniform slot and draw
+// garbage with no diagnostic anywhere.
+func TestASpriteDrawParameterNamingAUniformMemberIsReported(t *testing.T) {
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, errs := testKernelCapturing(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil,
+			gfx.FloatParam("customValue", 7))
+	})
+	runFrame(k)
+	if len(*errs) != 1 {
+		t.Fatalf("reported errors = %d, want the kind mismatch", len(*errs))
+	}
+	mismatch, ok := (*errs)[0].(gfx.ErrParameterKindMismatch)
+	if !ok || mismatch.Parameter != "customValue" {
+		t.Fatalf("reported %v, want a kind mismatch naming customValue", (*errs)[0])
+	}
+}
+
+// Two sprites differing only in key colour are one batch. keyColor is a
+// reserved slot consumed into the per-instance record, so it never reaches the
+// material or the batch key - which is what lets a roster of units in different
+// player colours cost one draw rather than one per player.
+func TestDifferingKeyColoursShareOneBatch(t *testing.T) {
+	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	files := fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 3)}}
+	k, _, backend := testKernel(t, files, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}},
+			nil, gfx.ColorParam(canvas.KeyColorSlot, m.NewColorSrgb(0.2, 0.4, 0.9, 1)))
+		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Position: m.Vec2{X: 8}, Size: m.Vec2{X: 4, Y: 4}},
+			nil, gfx.ColorParam(canvas.KeyColorSlot, m.NewColorSrgb(0.9, 0.3, 0.1, 1)))
+	})
+	runFrame(k)
+	instances := spriteInstances(backend)
+	if len(instances) != 1 || len(instances[0])/testInstanceSize != 2 {
+		t.Fatalf("key-coloured sprite draws = %d batches, want one batch of two", len(instances))
+	}
+}

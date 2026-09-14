@@ -78,7 +78,7 @@ func TestBundledSceneShaderReflectsItsVertexStageInputs(t *testing.T) {
 // dependency this file otherwise avoids, and it is what makes the pair real
 // rather than a copy of it that can drift.
 func TestEveryBundledShaderAndLayoutPairPassesTheVertexInterfaceCheck(t *testing.T) {
-	// The quad is canvas's own, declared at bundles/canvas/canvasimpl/plugin.go where the sprite
+	// The quad is canvas's own, declared at bundles/canvas/internal/plugin.go where the sprite
 	// mesh is built: one vec2 corner, instanced.
 	quad := []cgfx.VertexAttr{cgfx.Attr(0, gpu.Float32x2)}
 	for _, pair := range []struct {
@@ -134,5 +134,5 @@ func sceneSkinnedLayout(t *testing.T) []cgfx.VertexAttr {
 
 func canvasShader(t *testing.T, path string) string {
 	t.Helper()
-	return bundledShader(t, "canvas", "../../bundles/canvas/canvasimpl", path)
+	return bundledShader(t, "canvas", "../../bundles/canvas/internal", path)
 }

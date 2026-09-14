@@ -26,7 +26,7 @@ plugin. The kernel orders them by their dependencies:
 ```go
 plugins := []kernel.Plugin{
 	storageplugin.New(), diskfs.New(diskfs.Config{AppId: "demo"}),
-	inputplugin.New(), gfximpl.New(), canvasimpl.New(), sceneimpl.New(), wgpu.New(),
+	inputplugin.New(), gfximpl.New(), canvasplugin.New(), sceneimpl.New(), wgpu.New(),
 	demo, // records into the queues the plugins above declare
 }
 ```

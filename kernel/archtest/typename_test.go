@@ -15,7 +15,7 @@ import (
 // taggedBox's type argument is an unnamed struct whose tag looks like a
 // qualified name. A tag is a string, not a type, and TypeName leaves it alone.
 type taggedBox = m.Maybe[struct {
-	A int `doc:"see bundles/canvas/internal.OpQueue"`
+	A int `doc:"see bundles/canvas/internal/types.OpQueue"`
 }]
 
 // The fixture package's import path is github.com/dvoyni/cog/kernel/archtest/internal,
@@ -48,7 +48,7 @@ func TestTypeName_RendersInternalDeclarationsUnderTheirEnclosingPackage(t *testi
 		{"stdlib type", reflect.TypeFor[time.Duration](), "time.Duration"},
 		{"stdlib generic with a stdlib argument", reflect.TypeFor[atomic.Pointer[http.Request]](), "atomic.Pointer[http.Request]"},
 		{"struct tag in a type argument", reflect.TypeFor[taggedBox](),
-			`m.Maybe[struct { A int "doc:\"see bundles/canvas/internal.OpQueue\"" }]`},
+			`m.Maybe[struct { A int "doc:\"see bundles/canvas/internal/types.OpQueue\"" }]`},
 		{"predeclared type", reflect.TypeFor[int](), "int"},
 		{"predeclared interface", reflect.TypeFor[error](), "error"},
 		{"unnamed struct", reflect.TypeFor[struct{ Font internal.Font }](), "struct { Font internal.Font }"},
