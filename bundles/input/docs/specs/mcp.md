@@ -35,6 +35,13 @@ marked **Gap** and says what would settle it.
 > types they carry are declared in `bundles/input/internal/types` and aliased in
 > the root, so they are still spelled `input.X`. The tool names are unchanged.
 
+> **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** `app` became
+> a Slot whose plugin owns time control and requires wgpu's `Driver` Adapter, so
+> the time tool that pauses and steps the engine is now `app_time`, renamed from
+> `wgpu_time` with its schema unchanged; the recipe in
+> [Under pause](#under-pause) uses the new name. input dispatches no app
+> command, and neither of its capabilities changed.
+
 ---
 
 ## Contents
@@ -232,7 +239,7 @@ land on the same tick and arrive as `JustPressed && JustReleased` together, with
 so nothing was held — and refusing would block the legitimate recipe:
 
 ```
-input_send key_down  ->  wgpu_time step 1  ->  input_send key_up  ->  wgpu_time step 1
+input_send key_down  ->  app_time step 1  ->  input_send key_up  ->  app_time step 1
 ```
 
 which holds a key for **exactly one tick**, something no running engine can

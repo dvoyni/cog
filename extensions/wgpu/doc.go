@@ -1,9 +1,11 @@
-// Package wgpu declares cog's window, input, timing and WebGPU driver, built on
-// gogpu: the one kernel.PluginHost. It owns the OS main loop and drives the
-// engine's fixed-timestep app.UpdateEvent and per-frame app.RenderEvent.
+// Package wgpu declares cog's window, input, frame timing and WebGPU driver,
+// built on gogpu: the one kernel.PluginHost. It owns the OS main loop and fills
+// app's Driver Port with it, driving the Loop app attaches: the real frame time
+// app turns into fixed-timestep app.UpdateEvents, and each drawn frame's
+// app.RenderEvent.
 //
 // wgpu is an Extension. Its root declares only Name, Config, its two Adapters,
-// GfxBackend and McpProvider, and its errors; the plugin, built by
+// AppDriver and GfxBackend, and its errors; the plugin, built by
 // wgpuplugin.New, is in its internal/. Its Config is supplied under Name, and
 // its zero value is the default.
 //
@@ -13,6 +15,7 @@
 //	plugins := []kernel.Plugin{
 //	    storageplugin.New(),
 //	    inputplugin.New(),
+//	    appplugin.New(),
 //	    gfxplugin.New(),
 //	    wgpuplugin.New(),
 //	    …

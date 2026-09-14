@@ -1,11 +1,11 @@
-# wgpu as an mcp provider — specification
+# app as an mcp provider — specification
 
-`wgpu` offers an agent one capability: **`wgpu_time`**, which pauses the engine,
+`app` offers an agent one capability: **`app_time`**, which pauses the engine,
 resumes it, steps it a named number of ticks, and reports which of those is
 true.
 
 Underneath it is an engine feature that MCP happens to want, not an MCP feature:
-`app` declares the contract, `wgpu` implements it, and a frame-step debugger, a
+`app` declares the contract and implements it, and a frame-step debugger, a
 deterministic test harness and a replay tool all want the identical thing. It
 ships whether or not the broker exists, and `mcp` learns nothing new from it.
 
@@ -27,6 +27,26 @@ settle it.
 > `wgpuplugin.New()`. File references below point into `internal/`; their line
 > numbers predate the move. `Config`'s zero value is the default, so
 > `DefaultConfig` is gone. The tool name is unchanged.
+>
+> **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** Time control
+> moved out of wgpu, and this document moved with it from
+> `extensions/wgpu/docs/specs/mcp.md`. `app` is now a Slot with a plugin of its
+> own, built by `appplugin.New()`: it handles `app.QuitCmd` and `app.TimeCmd`,
+> owns the fixed-step accumulator, the tick source, tick numbering and
+> `ErrHoldTooLong` (now `app.ErrHoldTooLong`), and offers the capability, so the
+> tool is renamed **`app_time`**; its schema, description and behaviour are
+> unchanged. `Step`, `MaxFrame` and `MaxPending` moved from `wgpu.Config` to
+> `app.Config`. app requires one Adapter for `app.DriverPort`, the platform main
+> loop, which wgpu provides as `wgpu.AppDriver`: app hands it an `app.Loop` from
+> `Start`, wgpu's `onUpdate` flushes input and calls `Loop.Frame` with the frame
+> time, and `onDraw` calls `Loop.WindowSize` and `Loop.Render`. The tick source
+> is `slots/app/internal/tick.go`, the accumulator and the pause branch are
+> `slots/app/internal/loop.go`, and the provider is
+> `slots/app/internal/mcpprovider.go`; citations of moved code below point
+> there. `app.HoldRemaining` and `app.Paused` are gone: every wait for a step,
+> this capability's included, dispatches `TimeStatus` and adds its `HoldFor`.
+> The "Required … changes" sections at the end are the original plan, kept as
+> it was.
 
 ---
 
@@ -40,7 +60,7 @@ settle it.
 - [Every tick is numbered](#every-tick-is-numbered)
 - [Whose capability it is](#whose-capability-it-is) ·
   [The flag is an atomic](#the-flag-is-an-atomic)
-- [`wgpu_time`](#wgpu_time) · [What the loop buys](#what-the-loop-buys)
+- [`app_time`](#app_time) · [What the loop buys](#what-the-loop-buys)
 - [Required app changes](#required-app-changes) ·
   [Required wgpu changes](#required-wgpu-changes)
 - [Out of scope](#out-of-scope)
@@ -55,7 +75,7 @@ is not a tick source: a paused engine keeps drawing the last completed frame.**
 It is in `CONTEXT.md`.
 
 That second sentence is the one every reader gets wrong, and it is why the term
-exists at all. The fact is spread across an accumulator in `wgpu`, an ignored
+exists at all. The fact is spread across an accumulator in `app`, an ignored
 `acquire` return in `gfx`, and two `defer` resets in `canvas` and `ui` — nobody
 gets it from source.
 
@@ -65,18 +85,19 @@ gets it from source.
 
 The hardest-looking question here dissolves on one grep.
 
-**`time.Now()` appears exactly once in the whole module** — `extensions/wgpu/internal/plugin.go:203`,
-the frame pacer measuring draw-to-draw interval. Nothing else in cog reads
-wall-clock time. `app.UpdateEvent.Dt` is always `p.config.Step.Seconds()`
-(`extensions/wgpu/internal/plugin.go:160`), a **constant**, and `anim` advances timelines by exactly
-that constant (`bundles/anim/internal/plugin.go:37`).
+**`time.Now()` appears exactly once in the whole module** — `onDraw` in
+`extensions/wgpu/internal/plugin.go`, the frame pacer measuring draw-to-draw
+interval. Nothing else in cog reads wall-clock time. `app.UpdateEvent.Dt` is
+always `l.config.Step.Seconds()` (`Frame` in `slots/app/internal/loop.go`), a
+**constant**, and `anim` advances timelines by exactly that constant
+(`advanceOnUpdate` in `bundles/anim/internal/plugin.go`).
 
-So there is no engine time to distort, only a driver-local accumulator, and
+So there is no engine time to distort, only a loop-local accumulator, and
 pause is the decision to stop feeding it. **No time scaling, no virtual clock,
 no `Time` resource.**
 
 > **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).** `time.Now()` now appears
-> **twice**: the frame pacer, and a hold's deadline in `extensions/wgpu/internal/tick.go` — see
+> **twice**: the frame pacer, and a hold's deadline in `slots/app/internal/tick.go` — see
 > [A hold decides it](#a-hold-decides-it). The conclusion is unchanged. A hold
 > measures how long an absent agent may keep the engine from stepping, never
 > how far the simulation has moved, so there is still no engine clock, no
@@ -112,11 +133,12 @@ visibly stops.**
 
 **Pause stops `app.UpdateEvent` publication and nothing else.**
 
-The lever already exists and is one branch deep. `onUpdate`
-(`extensions/wgpu/internal/plugin.go:152`) converts measured frame time into N update events through
-`accumulate` (`:171`); `onDraw` (`:200`) is gogpu's own vsync callback and is
-independent of it. Stop feeding the accumulator and updates stop while draws
-continue.
+The lever already exists and is one branch deep. app's `Frame`
+(`slots/app/internal/loop.go`), which wgpu's `onUpdate` calls every frame,
+converts measured frame time into N update events through `accumulate`; wgpu's
+`onDraw` (`extensions/wgpu/internal/plugin.go`) is gogpu's own vsync callback
+and is independent of it. Stop feeding the accumulator and updates stop while
+draws continue.
 
 **A paused engine still paints, and this is already true of the code.**
 `renderOnRender` (`extensions/gfx/plugin.go:111`) calls `acquire`, **ignores its `false`
@@ -143,17 +165,19 @@ resolve, so "paused" cannot mean "no submits". See
 
 ## Resume banks nothing
 
-While paused, `onDraw` keeps incrementing `frameSeq` (`extensions/wgpu/internal/plugin.go:205`), so
-a naive resume computes `dt = frameDt × (seq − lastFrameSeq)` and turns thirty
-paused seconds into a thirty-second delta.
+While paused, `onDraw` keeps incrementing `frameSeq`
+(`extensions/wgpu/internal/plugin.go`), so a naive resume computes
+`dt = frameDt × (seq − lastFrameSeq)` and turns thirty paused seconds into a
+thirty-second delta.
 
-The existing guards already contain it — `MaxFrame` clamps to 250 ms
-(`extensions/wgpu/internal/plugin.go:176`, default `extensions/wgpu/internal/config.go`) and `MaxPending` caps at 4
-whole steps (`:180`) — so the worst case today is four catch-up ticks, not a
-spiral. This is polish rather than safety, and it is worth taking anyway:
+The existing guards already contain it — `MaxFrame` clamps to 250 ms and
+`MaxPending` caps at 4 whole steps (`accumulate` in
+`slots/app/internal/loop.go`, defaults in `slots/app/internal/config.go`) — so
+the worst case today is four catch-up ticks, not a spiral. This is polish
+rather than safety, and it is worth taking anyway:
 
-**While paused, `onUpdate` consumes the frame sequence and discards its `dt`,
-leaving `accum` untouched.** Resume then costs zero catch-up ticks and the
+**While paused, `onUpdate` still consumes the frame sequence, and `Frame`
+discards the `dt` it is handed, leaving `accum` untouched.** Resume then costs zero catch-up ticks and the
 clamps are never exercised.
 
 A resumed game continues from exactly where it stopped, which is the property an
@@ -167,7 +191,7 @@ agent relies on when it compares two observations across a pause.
   `Last` is true because a step *is* the last — and only — catch-up step of its
   frame, so once-per-frame subscribers (`canvas.flush`, `gfx.presentOnUpdate`,
   `scene.flush`) do their work and the step produces a complete frame.
-- **`step(n)` publishes all n in one `onUpdate`, bypassing `MaxPending`.** That
+- **`step(n)` publishes all n in one `Frame`, bypassing `MaxPending`.** That
   cap exists to keep a real-time engine near real time by dropping excess work;
   a step is not real time, and dropping requested steps would be a silent lie.
   Rendering shows the last of the n, which is what *advance sixty ticks and
@@ -176,7 +200,7 @@ agent relies on when it compares two observations across a pause.
   capability pauses first rather than refusing.
 - **`step` blocks until the steps are published.** The request arrives on an
   HTTP goroutine and the tick happens on the main thread, so `step` is a user of
-  [mcp §Arm-then-wait](../../../mcp/docs/specs/mcp.md#arm-then-wait) and carries
+  [mcp §Arm-then-wait](../../../../bundles/mcp/docs/specs/mcp.md#arm-then-wait) and carries
   its own deadline for the same reason a capture does: the broker's 30 s is not
   the specific message.
 - **`n` is capped at 600 — ten seconds of simulation** — on the same reasoning
@@ -196,15 +220,15 @@ three concurrent arms three steps — three different ticks, which is the precis
 opposite of what arming them together is for, and it would leave *canvas and ui
 from one moment* unreachable. That pairing is the common case for a ui bug.
 
-Implementation is **one more atomic on the driver** beside the pause flag,
-`alpha` and `frameSeq` — the same thread boundary, for the same reason as
+Implementation is **one more atomic on the tick source** beside the pause flag
+and `alpha` — the same thread boundary, for the same reason as
 [below](#the-flag-is-an-atomic). It costs nothing when no step is pending.
 
 This is what makes the pairing recipe work without any broker mechanism, and it
 is why that recipe orders a capture **last**: a capture costs no tick, so it
 shows whatever the last step produced, while armed first it would resolve
 against the current frozen frame and straddle two ticks. See
-[mcp §Pairing a moment](../../../mcp/docs/specs/mcp.md#pairing-a-moment).
+[mcp §Pairing a moment](../../../../bundles/mcp/docs/specs/mcp.md#pairing-a-moment).
 
 **It is a tick-source behaviour before it is an agent-facing one**, so it
 belongs in the `app` and `wgpu` READMEs alongside pause and step, not only here.
@@ -235,7 +259,7 @@ belongs in the `app` and `wgpu` READMEs alongside pause and step, not only here.
 **A hold stops a frame from consuming the pending step, so the step window
 belongs to the agent rather than to the frame clock.**
 
-`wgpu_time` gains two actions. `hold` opens the window, `release` closes it,
+`app_time` gains two actions. `hold` opens the window, `release` closes it,
 and `take` declines the batch it finds while one stands. The recipe becomes
 *pause, hold, arm everything to be paired, release*, and the pairing stops
 depending on whether several requests fit inside one frame's gap.
@@ -254,7 +278,7 @@ Four properties, each load-bearing:
   at, for the same reason.
 - **A longer one is refused, not shortened.** A caller told it holds the
   window for a minute and quietly given ten seconds meets the difference as a
-  split. The refusal is a typed domain error in `extensions/wgpu/err.go` mapped to
+  split. The refusal is a typed domain error in `slots/app/err.go` mapped to
   `mcp.Unavailable` in the provider, which is this family's error shape.
 - **Expiry is reported.** `holdExpired` stands on every answer until the next
   hold begins, because the caller who needs to know is the one coming back to
@@ -269,8 +293,8 @@ turns the mechanism into the failure:
 > **A wait for a step is extended by whatever a hold may still cost.** The
 > deadline that names a stalled engine is the wait for a tick that can never
 > come, and a window somebody deliberately held open is not that. The
-> snapshots' waits and `wgpu_time step`'s alike read `app.HoldRemaining` and
-> **add** it to their own floor.
+> snapshots' waits and `app_time step`'s alike read the hold's remaining
+> `HoldFor` from a `TimeStatus` dispatch and **add** it to their own floor.
 
 The deadline is the tick source's only wall-clock read, and it does not
 reintroduce the engine clock
@@ -289,14 +313,14 @@ two: the frame pacer, and this.
 > split, which is what made the defect above invisible from the outside.
 
 **`app.UpdateEvent` carries a `Tick`: a count of the ticks published, from
-one, never reset.** The driver numbers every tick it publishes — one atomic
+one, never reset.** app numbers every tick it publishes — one atomic
 add on the frame path — and the number rides the event, so anything recorded
 *inside* a tick knows which tick it was without asking the tick source
 afterwards, by which time the answer has moved.
 
 It reaches an agent as one field on `gfx.SnapshotView`, which `gfx_frame`,
 `canvas_draws` and `ui_layout` all embed: **one field, not three**, because a
-tick is the same tick in all of them. `wgpu_time` reports the current one on
+tick is the same tick in all of them. `app_time` reports the current one on
 every answer, so a snapshot and a time-control call line up.
 
 This is what makes the hold *checkable* rather than merely asserted, and it is
@@ -336,25 +360,37 @@ name its own `sdl_time`. Two ways out were considered and rejected:
 property of the host that owns the loop, and a different host genuinely is a
 different thing with a different answer.
 
+> **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** This section
+> is superseded. [#351](https://github.com/dvoyni/cog/issues/351) took the
+> second way out: `app` got a plugin, which owns the tick source, handles
+> `app.TimeCmd` and `app.QuitCmd`, and provides the capability, so the tool is
+> **`app_time`** and every platform offers the same one. The cost that rejected
+> it did not materialise: every composition adds `appplugin.New()`, and the
+> driver dispatches nothing per frame — it calls the `app.Loop` app attached,
+> whose `Frame` reads the same atomics `onUpdate` read. What still varies by
+> platform is the Driver, the Adapter for `app.DriverPort` that runs the
+> platform main loop and hands the Loop its frame time.
+
 ---
 
 ## The flag is an atomic
 
-The command handler runs on an HTTP goroutine; `onUpdate` runs on the main
-thread. **That boundary already exists in this plugin and is already crossed
-with atomics** — `alpha` (`extensions/wgpu/internal/plugin.go:37`) and `frameDtBits`/`frameSeq`
-(`:46-47`). The pause state, the pending-step count and the step-coalescing flag
-join them as atomics on the wgpu plugin, written only by the command handler.
+The command handler runs on an HTTP goroutine; `Frame` runs on the driver's main
+thread. **That boundary already exists and is already crossed with atomics** —
+`alpha` (`slots/app/internal/loop.go`) and wgpu's `frameDtBits`/`frameSeq`
+(`extensions/wgpu/internal/plugin.go`). The pause state, the pending-step count
+and the step-coalescing flag join them as atomics on the tick source
+(`slots/app/internal/tick.go`), written only by the command handler.
 
-A kernel resource was the alternative and loses concretely: `onUpdate` is a
-driver callback holding an `Executioner`, not a handler holding a lock, so
+A kernel resource was the alternative and loses concretely: `Frame` is called
+from a driver callback holding an `Executioner`, not a handler holding a lock, so
 reading a resource would mean **a dispatch every frame just to ask whether to
 tick**. `gfx` pays that cost for the viewport because the viewport genuinely
-belongs to the engine; the tick source belongs to the driver alone.
+belongs to the engine; the tick source belongs to the loop alone.
 
 ---
 
-## `wgpu_time`
+## `app_time`
 
 ```go
 type TimeRequest struct {
@@ -400,7 +436,7 @@ different arguments to one.
 > This section originally said the broker could annotate approval *per action*.
 > It cannot: MCP annotates a tool, not an argument, and `mcp.ReadOnly()` is the
 > only lever a provider has — so the choice is one annotation for all four
-> actions. Three of them change the game, so **`wgpu_time` is not
+> actions. Three of them change the game, so **`app_time` is not
 > `mcp.ReadOnly()`**, as
 > [#204](https://github.com/dvoyni/cog/issues/204) and
 > [#211](https://github.com/dvoyni/cog/issues/211) already required of pause and
@@ -466,7 +502,7 @@ makes possible:
 ```
 gfx_capture          -> image A, no tick
 input_send key_down  -> banked, nothing ticks
-wgpu_time step 1     -> exactly one tick, carrying exactly that input
+app_time step 1      -> exactly one tick, carrying exactly that input
 gfx_capture          -> image B, no tick
 ```
 

@@ -1,26 +1,14 @@
 package internal
 
 import (
-	"time"
-
 	cwgpu "github.com/dvoyni/cog/extensions/wgpu"
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/gputypes"
 )
 
 // withDefaults fills every zero field of config with the value the driver runs
-// with when it is given none: a 1/60s step, a 250ms frame clamp, four pending
-// steps, and a 1280x720 window titled "cog".
+// with when it is given none: a 1280x720 window titled "cog".
 func withDefaults(config cwgpu.Config) cwgpu.Config {
-	if config.Step == 0 {
-		config.Step = time.Second / 60
-	}
-	if config.MaxFrame == 0 {
-		config.MaxFrame = 250 * time.Millisecond
-	}
-	if config.MaxPending == 0 {
-		config.MaxPending = 4
-	}
 	if config.Title == "" {
 		config.Title = "cog"
 	}

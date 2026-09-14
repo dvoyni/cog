@@ -46,6 +46,14 @@ settle it.
 > The tool names and schemas are unchanged. File paths and line numbers cited
 > below are as they were when this was written, except the checklist.
 
+> **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** `app` became
+> a Slot with its own plugin, which owns time control and requires wgpu's
+> `Driver` Adapter; the time tool is now `app_time`, renamed from `wgpu_time`
+> with its schema unchanged. The broker is unaffected: it still declares no
+> dependencies, and [Close on engine-context cancellation](#close-on-engine-context-cancellation-not-in-stop)
+> still holds. File and line citations of wgpu's code below are as they were
+> before the move.
+
 ---
 
 ## Contents
@@ -275,6 +283,12 @@ got wrong by someone reimplementing it:
   a dependency on it to force ordering, and `app.QuitEvent` fires only when a
   host exists (`extensions/wgpu/internal/plugin.go:119`).
 
+> **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** `app` now has
+> a plugin, so a dependency on it can be declared. It would still not make the
+> broker stop before the engine context is cancelled — every `Stop` runs after
+> that cancellation — and `app.QuitEvent` still fires only when a driver runs
+> the loop, so the conclusion below stands.
+
 So: the broker runs one goroutine on `k.Context().Done()` that calls
 `Server.Shutdown`. That fires before any `Stop`, is independent of listing
 order, and needs no dependency on anything. `Stop` closes the listener as a
@@ -428,7 +442,7 @@ it needs no mechanism to hold it up.
 
 Only capabilities that *wait for a frame* are affected, and each answers for
 itself: a capture under pause needs no tick, a snapshot performs one step, and
-`wgpu_time step` is the thing doing the stepping. The ceilings they sit under
+`app_time step` is the thing doing the stepping. The ceilings they sit under
 are the broker's 30s and the client's five-minute idle abort
 ([#201](https://github.com/dvoyni/cog/issues/201)).
 

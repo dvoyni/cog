@@ -21,6 +21,7 @@ import (
 	"github.com/dvoyni/cog/bundles/scene/sceneplugin"
 	"github.com/dvoyni/cog/bundles/ui/uiplugin"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/app/appplugin"
 	"github.com/dvoyni/cog/slots/gfx/gfxplugin"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
@@ -34,7 +35,7 @@ func TestTypeName_NamesEveryTypeInAFullCogCompositionUniquely(t *testing.T) {
 	engine := kernel.New(map[kernel.PluginName]any{storage.Name: storage.Config{}}).
 		Handler(func(err error) bool { failure = errors.Join(failure, err); return false }).
 		WithPlugins(
-			storageplugin.New(), permanentAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
+			storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
 			inputplugin.New(), animplugin.New(), canvasplugin.New(), sceneplugin.New(), uiplugin.New(),
 			ecsplugin.New(), ecssceneplugin.New(), mcpplugin.New(),
 		)

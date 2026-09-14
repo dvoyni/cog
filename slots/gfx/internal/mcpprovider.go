@@ -31,8 +31,8 @@ const (
 // captureTick the per-still part. Two seconds is a hundred and twenty frames
 // at 60 Hz: anything slower is not slow, it is not rendering, and saying so in
 // two seconds beats the broker's generic thirty. The tick figure is nominal -
-// the step belongs to whichever host owns the loop, and gfx has no way to read
-// it - so it sizes the wait rather than measuring anything.
+// the step is app's configuration, and gfx has no way to read it - so it sizes
+// the wait rather than measuring anything.
 const (
 	captureFloorDeadline = 2 * time.Second
 	captureTick          = time.Second / 60
@@ -140,7 +140,11 @@ func captureScreen(k kernel.Executioner, request captureScreenRequest) (captureS
 	if err := validateCaptureSpan(amount, interval); err != nil {
 		return captureScreenResponse{}, err
 	}
-	paused := app.Paused(k)
+	status, err := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
+	if err != nil {
+		return captureScreenResponse{}, captureRefusal(err, amount, interval)
+	}
+	paused := status.Paused
 	if amount > 1 && paused {
 		return captureScreenResponse{}, mcp.Unavailable{Reason: "the game is paused, so a burst would " +
 			"write identical files; resume it, or ask for a single capture"}
@@ -336,7 +340,7 @@ const frameDescription = "What the renderer was told to do for one frame: every 
 	"calling it. Filter by `pass` to cut a busy frame down. Pass `path` to write the JSON to a " +
 	"file instead of returning it inline. While the game is paused this performs one step to " +
 	"have something to record, and says so in the response.\n\n" +
-	"Every response names the `tick` it describes. To describe one moment, call `wgpu_time " +
+	"Every response names the `tick` it describes. To describe one moment, call `app_time " +
 	"hold` first and arm this together with `canvas_draws` and `ui_layout`, which then share " +
 	"that one step; they paired only if all three report the same `tick`. Take `gfx_capture` " +
 	"last, because it costs no tick and so shows whatever that step produced."
@@ -388,7 +392,11 @@ func frameSnapshot(k kernel.Executioner, request frameSnapshotRequest) (frameSna
 				"the directory for %s could not be created: %v", request.Path, err)}
 		}
 	}
-	paused := app.Paused(k)
+	status, err := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
+	if err != nil {
+		return frameSnapshotResponse{}, frameRefusal(err)
+	}
+	paused := status.Paused
 
 	armed, err := k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{Pass: request.Pass})
 	if err != nil {
@@ -399,7 +407,7 @@ func frameSnapshot(k kernel.Executioner, request frameSnapshotRequest) (frameSna
 	// began after it. Joining a step another arm already raised is what makes
 	// three snapshots armed together describe one tick instead of three.
 	if paused {
-		if response.Stepped, response.Joined, err = stepForSnapshot(k, snapshotWait(k)); err != nil {
+		if response.Stepped, response.Joined, err = stepForSnapshot(k); err != nil {
 			return frameSnapshotResponse{}, err
 		}
 	}
@@ -429,20 +437,22 @@ func frameSnapshot(k kernel.Executioner, request frameSnapshotRequest) (frameSna
 	return response, nil
 }
 
-// snapshotWait is how long this snapshot's step may take: the deadline that
-// names a stopped engine, plus however long a hold may keep the step window
-// open. A hold is somebody's deliberate decision to postpone the tick, so
-// charging it against the stall deadline would turn the mechanism that makes
-// pairing reliable into the thing that breaks it.
-func snapshotWait(k kernel.Executioner) time.Duration {
-	return frameDeadline + app.HoldRemaining(k)
-}
-
 // stepForSnapshot runs the one tick a paused engine owes a snapshot, or joins
 // the one another arm already raised. Refusing instead would make snapshots
 // unreachable under pause, since a blocking arm cannot ask the agent to step
 // for it; waiting instead would be a guaranteed deadline expiry.
-func stepForSnapshot(k kernel.Executioner, wait time.Duration) (stepped, joined bool, err error) {
+//
+// Its wait is the deadline that names a stopped engine, plus however long a
+// hold may keep the step window open, read from the tick source immediately
+// before the step. A hold is somebody's deliberate decision to postpone the
+// tick, so charging it against the stall deadline would turn the mechanism
+// that makes pairing reliable into the thing that breaks it.
+func stepForSnapshot(k kernel.Executioner) (stepped, joined bool, err error) {
+	status, err := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
+	if err != nil {
+		return false, false, frameRefusal(err)
+	}
+	wait := frameDeadline + status.HoldFor
 	ctx, cancel := context.WithTimeout(k.Context(), wait)
 	defer cancel()
 	answer, err := k.WithContext(ctx).ExecuteCommand[app.TimeCmd](app.TimeRequest{

@@ -84,8 +84,9 @@ type ArmCaptureRequest struct {
 	Interval int
 	// Paused says the caller knows the engine's tick source is stopped, so no
 	// tick can begin after this request and the last completed tick already is
-	// the present. gfx does not read the tick source itself: pausing belongs to
-	// the host that owns the loop, and gfx must not require a host to exist.
+	// the present. The handler does not read the tick source itself: the
+	// caller asks app with app.TimeCmd, as gfx_capture does, and says what it
+	// was told.
 	//
 	// A paused capture is served from the next render and costs no tick, which
 	// is what makes two captures taken under one pause byte-identical. A burst

@@ -68,8 +68,20 @@ func (*snapshotFixture) Dependencies() []kernel.PluginName {
 func (f *snapshotFixture) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.Subscribe[appRecordHandler](f.recordOnUpdate)
 	registrar.Subscribe[uiRecordHandler](f.recordUIOnUpdate).Before[canvas.FlushOnUpdate]()
-	registrar.HandleCommand[app.TimeCmd](f.timeCmdImpl)
 	registrar.HandleCommand[gfxResourceProbeCmd](gfxResourceProbeCmdImpl)
+	return nil
+}
+
+// appStandIn answers app.TimeCmd under app's name with the fixture's tick
+// source. canvas depends on app, and a test of the capability's half wants to
+// say what the tick source answers rather than run one.
+type appStandIn struct{ fixture *snapshotFixture }
+
+func (appStandIn) Name() kernel.PluginName           { return app.Name }
+func (appStandIn) Dependencies() []kernel.PluginName { return nil }
+
+func (s appStandIn) Register(registrar *kernel.Registrar, _ any) error {
+	registrar.HandleCommand[app.TimeCmd](s.fixture.timeCmdImpl)
 	return nil
 }
 
@@ -157,7 +169,7 @@ func newDrawsRig(t *testing.T) *drawsRig {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, gfxplugin.New(), backendAdapter{&testBackend{}}, New(), fixture)
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appStandIn{fixture}, gfxplugin.New(), backendAdapter{&testBackend{}}, New(), fixture)
 	stopped := make(chan struct{})
 	go func() { engine.Run(ctx); close(stopped) }()
 	<-engine.Ready()

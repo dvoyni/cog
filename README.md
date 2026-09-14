@@ -46,8 +46,9 @@ error handling.
 
 - [`kernel`](kernel/README.md): plugin lifecycle, typed registry, scheduler,
     resources, and errors.
-- [`app`](slots/app/README.md): driver-neutral update, render, time-control, and quit
-    contracts. No implementation.
+- [`app`](slots/app/README.md): the application loop — lifecycle, fixed-step update
+    and render events, quit, and time control with pause, step and a hold that
+    makes several observations describe one tick — over a platform Driver.
 - [`input`](bundles/input/README.md): input state, discrete events, the driver-facing
     apply command, and scripted input.
 - [`anim`](bundles/anim/README.md): timelines of eased value tracks and one-tick cues,
@@ -71,9 +72,8 @@ error handling.
     scene's own types, and the one system that records them into scene.
 - [`ui`](bundles/ui/README.md): immediate-mode layout, interaction, canvas-backed visual
     processing, and a snapshot of what layout resolved.
-- [`wgpu`](extensions/wgpu/README.md): window, input, timing with pause, step and a hold
-    that makes several observations describe one tick, and WebGPU system
-    driver.
+- [`wgpu`](extensions/wgpu/README.md): window, input, frame timing and WebGPU system
+    driver, and app's platform Driver.
 - [`mcp`](bundles/mcp/README.md): the agent-facing extension point — typed capabilities
     a plugin offers, collected through a Port from every plugin's Provider by a
     broker that serves them to an agent over MCP.
@@ -114,11 +114,10 @@ Every plugin `X` has one shape:
 Nothing in cog imports a constructor package or another plugin's internals,
 except tests. Games and examples are composition roots and import freely.
 
-The plugins are moving to this shape one at a time. Until each moves, it keeps
-the contract root, `…impl` and `internal/` shape of
-[ADR 0001](docs/adr/0001-bundles-slots-ports-and-adapters.md), and the paths
-and constructors below are its current ones. The kinds, the file allowlists,
-where new code goes, the full import table and the plugins not yet moved are in
+Every plugin has moved to this shape from the contract root, `…impl` and
+`internal/` shape of
+[ADR 0001](docs/adr/0001-bundles-slots-ports-and-adapters.md). The kinds, the
+file allowlists, where new code goes and the full import table are in
 [`.github/instructions/architecture.instructions.md`](.github/instructions/architecture.instructions.md),
 and `go test ./kernel/archtest` enforces them.
 
@@ -146,8 +145,9 @@ plugins := []kernel.Plugin{
     storageplugin.New(),
     diskfsplugin.New(), // provides storage's PermanentFS Adapter
     inputplugin.New(),
+    appplugin.New(),
     gfxplugin.New(),
-    wgpuplugin.New(), // provides gfx's Backend Adapter
+    wgpuplugin.New(), // provides app's Driver and gfx's Backend Adapters
     ...
 }
 

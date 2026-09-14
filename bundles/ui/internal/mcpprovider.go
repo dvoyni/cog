@@ -57,7 +57,7 @@ const layoutDescription = "The UI element tree for one tick, flattened, with wha
 	"Blocks until the next tick has been processed, so it reflects anything you did before " +
 	"calling it. Pass `path` to write the JSON to a file instead of returning it inline. While " +
 	"the game is paused this performs one step, and says so in the response, along with the " +
-	"`tick` it describes. To describe one moment, call `wgpu_time hold` first and arm this " +
+	"`tick` it describes. To describe one moment, call `app_time hold` first and arm this " +
 	"together with `canvas_draws` and `gfx_frame`, which then share that one step; they paired " +
 	"only if all three report the same `tick`. Take `gfx_capture` last, because it costs no " +
 	"tick and so shows whatever that step produced."
@@ -132,7 +132,11 @@ func layoutSnapshot(k kernel.Executioner, request layoutRequest) (layoutResponse
 				"the directory for %s could not be created: %v", request.Path, err)}
 		}
 	}
-	paused := app.Paused(k)
+	status, err := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
+	if err != nil {
+		return layoutResponse{}, layoutRefusal(err)
+	}
+	paused := status.Paused
 
 	armed, err := k.ExecuteCommand[ui.ArmLayoutCmd](armRequest)
 	if err != nil {
@@ -143,7 +147,7 @@ func layoutSnapshot(k kernel.Executioner, request layoutRequest) (layoutResponse
 	// began after it. Joining a step another arm already raised is what makes
 	// three snapshots armed together describe one tick instead of three.
 	if paused {
-		if response.Stepped, response.Joined, err = stepForSnapshot(k, snapshotWait(k)); err != nil {
+		if response.Stepped, response.Joined, err = stepForSnapshot(k); err != nil {
 			return layoutResponse{}, err
 		}
 	}
@@ -173,15 +177,6 @@ func layoutSnapshot(k kernel.Executioner, request layoutRequest) (layoutResponse
 	return response, nil
 }
 
-// snapshotWait is how long this snapshot's step may take: the deadline that
-// names a stopped engine, plus however long a hold may keep the step window
-// open. A hold is somebody's deliberate decision to postpone the tick, so
-// charging it against the stall deadline would turn the mechanism that makes
-// pairing reliable into the thing that breaks it.
-func snapshotWait(k kernel.Executioner) time.Duration {
-	return layoutDeadline + app.HoldRemaining(k)
-}
-
 // stepForSnapshot runs the one tick a paused engine owes a snapshot, or joins
 // the one another arm already raised. Refusing instead would make a snapshot
 // unreachable under pause, since a blocking arm cannot ask the agent to step
@@ -189,7 +184,18 @@ func snapshotWait(k kernel.Executioner) time.Duration {
 // is *empty* between ticks rather than stale - processUpdate ends in
 // defer frame.clear() - so producing a snapshot without running a tick is not
 // a thing that exists.
-func stepForSnapshot(k kernel.Executioner, wait time.Duration) (stepped, joined bool, err error) {
+//
+// Its wait is the deadline that names a stopped engine, plus however long a
+// hold may keep the step window open, read from the tick source immediately
+// before the step. A hold is somebody's deliberate decision to postpone the
+// tick, so charging it against the stall deadline would turn the mechanism
+// that makes pairing reliable into the thing that breaks it.
+func stepForSnapshot(k kernel.Executioner) (stepped, joined bool, err error) {
+	status, err := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
+	if err != nil {
+		return false, false, layoutRefusal(err)
+	}
+	wait := layoutDeadline + status.HoldFor
 	ctx, cancel := context.WithTimeout(k.Context(), wait)
 	defer cancel()
 	answer, err := k.WithContext(ctx).ExecuteCommand[app.TimeCmd](app.TimeRequest{

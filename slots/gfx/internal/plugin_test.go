@@ -18,6 +18,7 @@ import (
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/app/appplugin"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 	"github.com/dvoyni/cog/slots/storage"
@@ -475,7 +476,7 @@ func newTestKernelWith(t *testing.T, p *plugin, filesystem fs.FS, handler kernel
 	config := map[kernel.PluginName]any{
 		storage.Name: storage.Config{}.WithReadFS("test", 10, filesystem),
 	}
-	engine := kernel.New(config).Handler(handler).WithPlugins(storageplugin.New(), permanentAdapter{}, p, testPlugin{})
+	engine := kernel.New(config).Handler(handler).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, p, testPlugin{})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	return engine.Executioner()
@@ -1529,7 +1530,7 @@ func TestFailedShaderIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	engine := kernel.New(config).Handler(func(error) bool {
 		errorsReported++
 		return false
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, p, testPlugin{})
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, p, testPlugin{})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()

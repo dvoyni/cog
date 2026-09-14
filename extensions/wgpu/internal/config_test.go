@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/dvoyni/cog/bundles/input/inputplugin"
 	cwgpu "github.com/dvoyni/cog/extensions/wgpu"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/app/appplugin"
 	"github.com/dvoyni/cog/slots/gfx/gfxplugin"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
@@ -17,11 +17,8 @@ import (
 // default to on.
 func TestDefaultConfig(t *testing.T) {
 	d := withDefaults(cwgpu.Config{})
-	if d.Step != time.Second/60 {
-		t.Errorf("Step = %v, want 1/60s", d.Step)
-	}
-	if d.MaxPending != 4 {
-		t.Errorf("MaxPending = %d, want 4", d.MaxPending)
+	if d.Title != "cog" {
+		t.Errorf("Title = %q, want %q", d.Title, "cog")
 	}
 	if d.Width != 1280 || d.Height != 720 {
 		t.Errorf("size = %dx%d, want 1280x720", d.Width, d.Height)
@@ -39,7 +36,7 @@ func TestConfigSettersChain(t *testing.T) {
 		WithTitle("Feuds").
 		WithSize(800, 600).
 		WithVSync(false).
-		WithStep(10 * time.Millisecond)
+		WithFullscreen(true)
 
 	if got.Title != "Feuds" {
 		t.Errorf("Title = %q, want %q", got.Title, "Feuds")
@@ -50,12 +47,12 @@ func TestConfigSettersChain(t *testing.T) {
 	if !got.NoVSync {
 		t.Error("NoVSync = false, want true")
 	}
-	if got.Step != 10*time.Millisecond {
-		t.Errorf("Step = %v, want 10ms", got.Step)
+	if !got.Fullscreen {
+		t.Error("Fullscreen = false, want true")
 	}
 	// Untouched fields keep their defaults.
-	if got.MaxPending != base.MaxPending || got.NoResize {
-		t.Errorf("untouched fields changed: MaxPending=%d NoResize=%v", got.MaxPending, got.NoResize)
+	if got.AppName != base.AppName || got.NoResize {
+		t.Errorf("untouched fields changed: AppName=%q NoResize=%v", got.AppName, got.NoResize)
 	}
 	// The receiver is unchanged (value semantics).
 	if base.Title != "cog" || base.NoVSync {
@@ -71,7 +68,7 @@ func TestPluginInitRejectsWrongConfigType(t *testing.T) {
 			err = got
 			return true
 		}).
-		WithPlugins(storageplugin.New(), permanentAdapter{}, gfxplugin.New(), inputplugin.New(), New()).
+		WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), gfxplugin.New(), inputplugin.New(), New()).
 		Run(context.Background())
 	var invalid cwgpu.ErrInvalidConfig
 	if !errors.As(err, &invalid) {

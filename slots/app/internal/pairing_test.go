@@ -17,7 +17,6 @@ import (
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/bundles/ui"
 	"github.com/dvoyni/cog/bundles/ui/uiplugin"
-	cwgpu "github.com/dvoyni/cog/extensions/wgpu"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -35,7 +34,8 @@ import (
 //
 // This is the closest the repository gets to the live test. What it does not
 // have is a window, a GPU and three HTTP connections; what it does have is
-// every seam between them.
+// every seam between them, with app driven through the Loop it attaches to a
+// fake Driver, as a platform driver drives it.
 
 // pairingRounds is how many times each recipe is run. The live failure was a
 // race against the frame clock rather than a fixed limit, so one pass proves
@@ -43,10 +43,8 @@ import (
 // the race it used to lose.
 const pairingRounds = 25
 
-// pairingPlugin registers the driver's real time-control handler against an
-// engine the driver itself cannot join, because wgpu's own Register needs a
-// window and the tick source does not. It is the same trick tickTestPlugin
-// uses, with the snapshot-owning plugins beside it.
+// pairingPlugin provides gfx's backend to the rig's engine and collects the
+// mcp Providers the composed plugins contribute, the way the broker does.
 type pairingPlugin struct{ rig *pairingRig }
 
 func (p *pairingPlugin) Name() kernel.PluginName { return "pairingtest" }
@@ -61,16 +59,16 @@ func (p *pairingPlugin) Dependencies() []kernel.PluginName {
 func (p *pairingPlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.ProvideAdapter[testGfxBackend](gfx.Backend(p.rig.backend))
 	p.rig.providers = registrar.CollectAdapters[mcp.ProviderPort]()
-	registrar.HandleCommand[app.TimeCmd](p.rig.plugin.timeCmdImpl)
 	return nil
 }
 
-// pairingRig is a whole engine - storage, input, gfx, canvas, ui and the
-// driver's tick source - with a frame loop of its own, driven the way the
-// host drives it: onUpdate on one goroutine, a render event behind it.
+// pairingRig is a whole engine - storage, input, app, gfx, canvas and ui -
+// with a frame loop of its own, driven the way a driver drives it: the Loop's
+// Frame on one goroutine, its Render behind it.
 type pairingRig struct {
 	t       *testing.T
-	plugin  *plugin
+	app     *plugin
+	driver  *fakeDriver
 	k       kernel.Executioner
 	caps    map[string]mcp.Capability
 	backend *pairingBackend
@@ -84,17 +82,19 @@ type pairingRig struct {
 func newPairingRig(t *testing.T) *pairingRig {
 	t.Helper()
 	rig := &pairingRig{
-		t: t, plugin: &plugin{config: tickTestConfig()},
+		t: t, app: New().(*plugin), driver: &fakeDriver{},
 		caps: map[string]mcp.Capability{}, backend: newPairingBackend(),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{},
+		app.Name:     tickTestConfig(),
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
 	}).WithPlugins(
-		storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfxplugin.New(), canvasplugin.New(), uiplugin.New(),
+		storageplugin.New(), permanentAdapter{}, rig.app, driverAdapter{rig.driver},
+		inputplugin.New(), gfxplugin.New(), canvasplugin.New(), uiplugin.New(),
 		&pairingPlugin{rig: rig},
 	)
 	stopped := make(chan struct{})
@@ -114,11 +114,8 @@ func newPairingRig(t *testing.T) *pairingRig {
 	rig.k = engine.Executioner()
 
 	// The capabilities are collected exactly as the broker collects them, so
-	// what the test calls is what an agent calls. The driver's own Register
-	// needs a window, so its Provider is added under its name by hand.
-	contributed := append(rig.providers.Get(),
-		kernel.ContributedAdapter[mcp.Provider]{Plugin: cwgpu.Name, Adapter: provider{}})
-	for _, one := range contributed {
+	// what the test calls is what an agent calls.
+	for _, one := range rig.providers.Get() {
 		for _, capability := range one.Adapter.Capabilities() {
 			if err := capability.Err(); err != nil {
 				t.Fatalf("capability %s: %v", capability.Name(), err)
@@ -127,7 +124,7 @@ func newPairingRig(t *testing.T) *pairingRig {
 		}
 	}
 	for _, tool := range []string{
-		"gfx_capture", "gfx_frame", "canvas_draws", "ui_layout", "input_send", "input_state", "wgpu_time",
+		"gfx_capture", "gfx_frame", "canvas_draws", "ui_layout", "input_send", "input_state", "app_time",
 	} {
 		if _, offered := rig.caps[tool]; !offered {
 			t.Fatalf("no Provider contributed %s; collected %v", tool, slices.Collect(maps.Keys(rig.caps)))
@@ -140,9 +137,9 @@ func newPairingRig(t *testing.T) *pairingRig {
 	return rig
 }
 
-// run starts the frame loop: onUpdate on a goroutine of its own, then the
-// render event the driver publishes from its draw callback. This is what the
-// join window was racing, and what a hand-stepped test can never reproduce.
+// run starts the frame loop: the Loop's Frame on a goroutine of its own, then
+// the Render a driver calls from its draw callback. This is what the join
+// window was racing, and what a hand-stepped test can never reproduce.
 func (r *pairingRig) run() {
 	done, stopped := make(chan struct{}), make(chan struct{})
 	go func() {
@@ -153,9 +150,9 @@ func (r *pairingRig) run() {
 				return
 			default:
 			}
-			r.plugin.frameSeq.Add(1)
-			r.plugin.onUpdate(r.k, 0)
-			r.k.PublishEvent(app.RenderEvent{}).Wait()
+			loop := r.driver.attached()
+			loop.Frame(r.k, 0)
+			loop.Render(r.k)
 			time.Sleep(time.Millisecond)
 		}
 	}()
@@ -172,13 +169,13 @@ func (r *pairingRig) stop() {
 	}
 }
 
-// time calls wgpu_time the way an agent does, through the capability rather
+// time calls app_time the way an agent does, through the capability rather
 // than the command, so the agent-facing refusals are exercised too.
 func (r *pairingRig) time(request TimeRequest) TimeResponse {
 	r.t.Helper()
-	answer, err := r.caps["wgpu_time"].Invoke(r.k, &request)
+	answer, err := r.caps["app_time"].Invoke(r.k, &request)
 	if err != nil {
-		r.t.Fatalf("wgpu_time %s: %v", request.Action, err)
+		r.t.Fatalf("app_time %s: %v", request.Action, err)
 	}
 	return answer.(TimeResponse)
 }
@@ -260,19 +257,7 @@ func (r *pairingRig) collect(arms []<-chan pairingAnswer) []gfx.SnapshotView {
 // be asserting its own timing rather than the mechanism.
 func (r *pairingRig) waitSharing(callers int64) {
 	r.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		r.plugin.ticks.mu.Lock()
-		batch := r.plugin.ticks.batch
-		r.plugin.ticks.mu.Unlock()
-		if batch != nil && batch.sharing.Load() == callers {
-			return
-		}
-		if time.Now().After(deadline) {
-			r.t.Fatalf("no step is shared by %d arms", callers)
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitSharing(r.t, &r.app.loop.ticks, callers, 10*time.Second)
 }
 
 // Three snapshots armed under one hold describe one tick, and say so: every
@@ -423,7 +408,7 @@ func TestPairing_ASplitIsVisibleInTheResponses(t *testing.T) {
 }
 
 // A hold that runs out publishes the step it was keeping open rather than
-// stranding the arms waiting on it, and the next answer from wgpu_time names
+// stranding the arms waiting on it, and the next answer from app_time names
 // the expiry instead of leaving it to be inferred from a split.
 func TestPairing_AnExpiredHoldReleasesTheArmsAndIsReported(t *testing.T) {
 	rig := newPairingRig(t)

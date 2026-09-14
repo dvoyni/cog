@@ -11,6 +11,7 @@ import (
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/app/appplugin"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/gfx/gfxplugin"
 	"github.com/dvoyni/cog/slots/storage"
@@ -397,7 +398,7 @@ func newHarnessOver(
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) bool { sink.add(err); *reported = append(*reported, err); return false }).
-		WithPlugins(storageplugin.New(), permanentAdapter{}, gfxplugin.New(), backendAdapter{backend}, New(), recordPlugin{record: record})
+		WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, gfxplugin.New(), backendAdapter{backend}, New(), recordPlugin{record: record})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()

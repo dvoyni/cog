@@ -6,7 +6,9 @@ import (
 	"github.com/dvoyni/cog/kernel"
 )
 
-// QuitCmd requests that the system driver stop its main loop.
+// QuitCmd requests that the application stop: app asks its Driver to quit the
+// platform main loop, which unwinds the Host's Run and shuts the engine down.
+// It returns once the request is made, not once the loop has stopped.
 type QuitCmd kernel.Command[QuitRequest, QuitResponse]
 
 // QuitRequest is the empty request for QuitCmd.
@@ -17,10 +19,11 @@ type QuitResponse struct{}
 
 // TimeCmd controls the engine's tick source: it pauses the update loop,
 // resumes it, steps it a named number of ticks, and reports which of those is
-// true. Package app only declares it; the driver that owns the loop implements
-// it, because only the host that owns the loop can stop it — and declaring it
-// here is what lets gameplay code, a test harness or a frame-step debugger
-// reach it without importing a driver.
+// true. The app plugin handles it, because the tick source is part of the loop
+// app owns, and a plugin that declares Name as a dependency is guaranteed that
+// handler — which is what lets gameplay code, a test harness or a frame-step
+// debugger reach it without importing a driver, and without reading a missing
+// handler as a running engine.
 //
 // This is an engine feature rather than a debugging aside, and it comes with
 // two limits stated as non-guarantees rather than left to be discovered:
@@ -44,7 +47,7 @@ type TimeRequest struct {
 	// Action is what to do to the tick source.
 	Action TimeAction
 	// Steps is how many update ticks TimeStep publishes; zero means one. They
-	// are published together in one frame, and the driver's catch-up cap does
+	// are published together in one frame, and the loop's catch-up cap does
 	// not apply to them: a step that dropped ticks would be a silent lie.
 	// Each carries UpdateEvent.Last, so every step produces a complete frame.
 	Steps int
@@ -58,9 +61,9 @@ type TimeRequest struct {
 	// as it finds one. TimeHold is what makes it deterministic.
 	Join bool
 	// Hold is how long a TimeHold may stand before it expires by itself; zero
-	// asks for the driver's default. A driver caps it, and refuses anything
-	// above the cap rather than silently shortening it: a hold nobody ends is
-	// an engine nothing can step.
+	// asks for the default, one second. app caps it at ten seconds, and
+	// refuses anything above the cap with ErrHoldTooLong rather than silently
+	// shortening it: a hold nobody ends is an engine nothing can step.
 	Hold time.Duration
 }
 
@@ -100,44 +103,4 @@ type TimeResponse struct {
 	// because the caller that needs to know is the one that comes back to a
 	// window it thought it still had.
 	HoldExpired bool
-}
-
-// Paused reports whether the engine's tick source is stopped. It is the
-// caller-side half of TimeCmd, for the frame-bound work that has to know:
-// whether an observation spanning several ticks is worth arming at all, and
-// whether waiting for a tick would be waiting for one that can never come. The
-// answer is dispatched rather than read off a driver, so asking obliges nobody
-// to import a host.
-//
-// A game composed without time control cannot be paused, so an engine that
-// does not handle TimeCmd is answering rather than failing: with no tick
-// source to stop, it is running. Every other dispatch failure reads the same
-// way, which is the safe direction — believing a running engine paused refuses
-// work that would have succeeded, while the opposite costs at worst a wait
-// that ends in the caller's own deadline.
-func Paused(k kernel.Executioner) bool {
-	state, err := k.ExecuteCommand[TimeCmd](TimeRequest{Action: TimeStatus})
-	if err != nil {
-		return false
-	}
-	return state.Paused
-}
-
-// HoldRemaining reports how much longer a hold may keep a requested step from
-// being published. It is the other caller-side half of TimeCmd, for the
-// frame-bound work that is about to wait for a step: the wait that names a
-// stopped engine has to be the wait for a tick that never comes, and a window
-// somebody deliberately held open is not that. A caller adds this to its own
-// deadline rather than replacing it.
-//
-// Zero is the answer whenever no hold stands, and also whenever the engine
-// cannot be asked — the same safe direction Paused takes, since a caller that
-// does not extend its deadline fails on its own terms rather than waiting
-// indefinitely.
-func HoldRemaining(k kernel.Executioner) time.Duration {
-	state, err := k.ExecuteCommand[TimeCmd](TimeRequest{Action: TimeStatus})
-	if err != nil {
-		return 0
-	}
-	return state.HoldFor
 }

@@ -1,10 +1,10 @@
 // Package internal is the wgpu plugin: New, the kernel.PluginHost that owns the
-// gogpu main loop, the fixed-step accumulator and tick source, the input bridge,
-// the gfx.Backend it provides, and its mcp provider. Composition roots and tests
-// reach New through wgpuplugin.
+// gogpu main loop, the app.Driver and gfx.Backend it provides, and the input
+// bridge. Composition roots and tests reach New through wgpuplugin.
 //
-// gogpu's OnUpdate becomes ordered fixed-timestep app.UpdateEvent values through
-// an accumulator, and OnDraw publishes app.RenderEvent{Alpha} as a render-thread
-// barrier. The plugin also provides gfx's Backend Adapter, forwards OS input into
-// the input plugin, and reports window and framebuffer sizes to the viewport.
+// gogpu's OnUpdate hands the real frame time to the app.Loop's Frame, which
+// turns it into fixed-timestep app.UpdateEvents, and OnDraw has the Loop publish
+// app.RenderEvent as a render-thread barrier. The plugin also forwards OS input
+// into the input plugin, and reports window and framebuffer sizes to app and the
+// viewport.
 package internal

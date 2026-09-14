@@ -10,6 +10,7 @@ import (
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/app/appplugin"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
@@ -101,7 +102,7 @@ func TestACompositionWithoutABackendAdapterFails(t *testing.T) {
 	}).Handler(func(err error) bool {
 		reported = append(reported, err)
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, newPlugin())
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, newPlugin())
 
 	var missing kernel.ErrMissingAdapter
 	if !errors.As(errors.Join(reported...), &missing) {

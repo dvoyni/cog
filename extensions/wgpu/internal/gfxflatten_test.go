@@ -9,6 +9,7 @@ import (
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/app/appplugin"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/gfx/gfxplugin"
 	"github.com/dvoyni/cog/slots/storage"
@@ -40,7 +41,7 @@ func flattenShader(t testing.TB, mount storage.MountId, filesystem fs.FS, shader
 			mu.Unlock()
 		}
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, gfxplugin.New(), flattenRecorder{backend: backend, shader: shader})
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), driverAdapter{}, gfxplugin.New(), flattenRecorder{backend: backend, shader: shader})
 	go engine.Run(ctx)
 	<-engine.Ready()
 	k := engine.Executioner()

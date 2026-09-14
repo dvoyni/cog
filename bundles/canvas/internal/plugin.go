@@ -55,10 +55,11 @@ func New() kernel.Plugin { return &plugin{} }
 // Name reports the plugin name.
 func (p *plugin) Name() kernel.PluginName { return canvas.Name }
 
-// Dependencies reports the plugins canvas requires: gfx (for the draw pipeline)
-// and storage (which hosts its shader filesystem mount).
+// Dependencies reports the plugins canvas requires: gfx (for the draw
+// pipeline), storage (which hosts its shader filesystem mount) and app, whose
+// TimeCmd the canvas_draws capability dispatches.
 func (p *plugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{gfx.Name, storage.Name}
+	return []kernel.PluginName{app.Name, gfx.Name, storage.Name}
 }
 
 func (p *plugin) Register(registrar *kernel.Registrar, value any) error {

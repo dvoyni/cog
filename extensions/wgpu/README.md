@@ -1,28 +1,29 @@
 # wgpu
 
-`github.com/dvoyni/cog/extensions/wgpu` is Cog's window, input, timing, and WebGPU system
-driver built on `gogpu`. It owns the OS main loop, provides gfx's `gfx.Backend`
-Adapter, feeds `input`, and drives the `app` update/render contract on desktop
-and WebAssembly.
+`github.com/dvoyni/cog/extensions/wgpu` is Cog's window, input, frame timing,
+and WebGPU system driver built on `gogpu`. It owns the OS main loop and provides
+it as app's `app.Driver` Adapter, provides gfx's `gfx.Backend` Adapter, and feeds
+`input`, on desktop and WebAssembly.
 
 ## Plugin
 
 - Name: `wgpu.Name` (`"wgpu"`)
 - Kind: an Extension. The root declares only `Name`, `Config`, the Adapters
-  `GfxBackend` and `McpProvider`, and the errors; everything else is in
+  `AppDriver` and `GfxBackend`, and the errors; everything else is in
   `internal/`.
 - Constructor: `wgpuplugin.New() kernel.Plugin`
 - Plugin dependencies: `gfx`, `input`
-- Go package dependencies: `app`, `gfx`, `input`, `kernel`, `mcp`,
-  `gogpu`, WebGPU implementation packages. The root imports only `kernel`,
-  `app`, `gfx` and `mcp`; gogpu is imported by `internal/` alone.
-- Contributes: one `gfx.Backend` Adapter and one `mcp.Provider` Adapter
+- Go package dependencies: `app`, `gfx`, `input`, `kernel`, `gogpu`, WebGPU
+  implementation packages. The root imports only `kernel`, `app` and `gfx`;
+  gogpu is imported by `internal/` alone.
+- Contributes: one `app.Driver` Adapter and one `gfx.Backend` Adapter
 - Implements: `kernel.PluginHost`, `kernel.PluginStopper`
 - Subscribed kernel events: none
 
-Register dependencies before the driver. `Run(ctx)` owns the calling thread and
-blocks in the platform main loop until the window closes, `app.QuitCmd` runs, or
-the context is canceled.
+Register dependencies before the driver, and compose `appplugin.New()`: app is
+the Slot wgpu's Driver fills. `Run(ctx)` owns the calling thread and blocks in
+the platform main loop until the window closes, `app.QuitCmd` runs, or the
+context is canceled.
 
 The plugin implements `Name`, `Dependencies`, `Register`, `Run`, and `Stop`.
 `Stop` exists for one job: releasing a readback the closing window left
@@ -46,124 +47,53 @@ cfg := wgpu.Config{}.
     WithSize(1280, 720).
     WithResizable(true).
     WithVSync(true).
-    WithFullscreen(false).
-    WithStep(time.Second / 60).
-    WithMaxFrame(250 * time.Millisecond).
-    WithMaxPending(4)
+    WithFullscreen(false)
 ```
 
-`Config` also exposes all fields directly: `Step` (zero means 1/60 s),
-`MaxFrame` (250 ms), `MaxPending` (4), `Title` (`"cog"`), `Width` and `Height`
-(1280x720), `NoResize`, `NoVSync`, `Fullscreen`, and `AppName`. The two
+`Config` also exposes all fields directly: `Title` (`"cog"`), `Width` and
+`Height` (1280x720), `NoResize`, `NoVSync`, `Fullscreen`, and `AppName`. The two
 switches that default to on are spelled as their negation, so that off is the
-zero value; `WithResizable` and `WithVSync` set them. Because a zero field
-means the default, a zero `MaxFrame` no longer turns the frame clamp off.
+zero value; `WithResizable` and `WithVSync` set them. The fixed step, its frame
+clamp and its catch-up cap (`Step`, `MaxFrame`, `MaxPending`) are app's
+`app.Config`, not this one.
 `ErrInvalidConfig{Got}` reports a configuration value of the wrong type and its
 `Error() string` method implements `error`.
 
 ## Errors
 
 The root's `err.go` declares the errors the plugin reports that a caller may
-match: `ErrInvalidConfig`; `ErrUnknownTimeAction` and `ErrHoldTooLong`, from
-the `app.TimeCmd` handler; and `ErrDepthOnlyPassUnsupported`, reported once
-per run for a depth-only pass the selected backend declines to encode.
+match: `ErrInvalidConfig`, and `ErrDepthOnlyPassUnsupported`, reported once
+per run for a depth-only pass the selected backend declines to encode. The time
+errors are app's.
 
-## Commands Implemented
+## App's Driver
 
-`app.QuitCmd` calls the underlying application's `Quit` method. It has no
-resource locks.
+wgpu is the platform half of app's loop, and app is the rest. It provides a
+view of itself as `app.Driver` with `registrar.ProvideAdapter[AppDriver]` in
+`Register`; app hands it an `app.Loop` from app's `Start`, which precedes `Run`,
+and asks it to `Quit` for `app.QuitCmd`, which stops the gogpu App from any
+goroutine. The binding adds no dependency: wgpu dispatches none of app's
+commands.
 
-`app.TimeCmd` controls the tick source; see below. It has no resource locks
-either, which is what makes a step safe to wait on inside it.
+wgpu calls the Loop from gogpu's callbacks and owns no time control of its own:
 
-## The Tick Source
+- `Run` calls `Loop.Init` immediately before entering gogpu's blocking main
+  loop, and `Loop.Quit` once it returns.
+- `onDraw`, on the render thread, measures the real draw-to-draw interval (paced
+  to vsync or `requestAnimationFrame`, so accurate across JS turns) into an
+  atomic frame clock, calls `Loop.WindowSize` when the DIP window size changes,
+  resolves the viewport with `gfx.SetViewportCmd`, attaches the backend to the
+  surface, and calls `Loop.Render`.
+- `onUpdate`, on the main thread, flushes the frame's batched input and then
+  calls `Loop.Frame` with the real time of the frames drawn since the last
+  update. gogpu's own `deltaTime` is 0 on wasm and its busy-loop deltas are
+  quantized, which is why the time comes from `onDraw`. The flush comes first,
+  so every tick the frame publishes sees that input, and it runs whether or not
+  app's tick source is paused.
 
-The driver decides when an update tick is published — from its frame clock
-while running, from an explicit step while paused. Rendering is not a tick
-source: **a paused engine keeps drawing the last completed frame.** `app`
-declares the contract (`app.TimeCmd`) and states its limits; this is how the
-driver implements it.
-
-- **Pause is one branch in `onUpdate`.** While paused it consumes the frame
-  sequence and **discards its `dt`**, leaving the accumulator untouched, and
-  publishes only the steps somebody asked for. Nothing else changes: the input
-  flush at the top of `onUpdate` still runs, and the whole of `onDraw` — the
-  frame clock, `app.WindowSizeChangeEvent`, `gfx.SetViewportCmd`,
-  `app.RenderEvent` — runs exactly as it does while running. `gfx` replays the
-  last completed queue every frame, so the window shows the frozen frame
-  rather than going black, and a frame is still submitted.
-- **Discarding the frame time is what makes resume cost nothing.** `MaxFrame`
-  and `MaxPending` would already bound a naive resume to four catch-up ticks;
-  discarding makes it zero, so a resumed game continues from exactly where it
-  stopped.
-- **A step publishes all of its ticks in one `onUpdate`, bypassing
-  `MaxPending`**, and marks **every one** of them `Last: true`. The cap exists
-  to keep a real-time engine near real time by dropping work; a step is not
-  real time, and dropping requested ticks would be a silent lie. `Last` on each
-  makes every step a complete frame, and rendering shows the last of them.
-- **The state is atomics, not a kernel resource.** The command handler runs on
-  whatever goroutine dispatched it and `onUpdate` runs on the main thread — the
-  boundary `alpha` and `frameDtBits`/`frameSeq` already cross. A resource would
-  mean a dispatch every frame merely to ask whether to tick. A running frame
-  reads one atomic; a paused frame with nothing pending reads two.
-- **An arm joins a pending step.** A `TimeCmd` request with `Join` set attaches
-  to the step already pending rather than raising another, and everything
-  waiting on that step reads back the same ticks. Read per-caller, three arms
-  landing together would be three steps on three different ticks, which is the
-  opposite of what arming them together is for. An explicit step never joins.
-- **Joining alone is opportunistic; a hold is what decides it.** There is a
-  pending step to join only until the next rendered frame takes the batch, so
-  whether several arms pair depends on whether they all arrive inside one
-  frame's gap — which, measured against a real game, three calls over three
-  connections do not. `TimeHold` makes `take` decline the batch it finds, so
-  the window belongs to whoever took the hold rather than to the frame clock,
-  and `TimeRelease` gives it back. The hold carries a deadline (default 1 s,
-  maximum 10 s) and expires by itself, so an absent caller cannot leave an
-  engine nothing can step; a longer one is refused rather than shortened, and
-  an expiry is reported on the next answer rather than left to be inferred
-  from a split. It is the one wall-clock deadline in the tick source, and it
-  measures an absent caller rather than simulation time.
-- **Resuming with a step still pending abandons it** and releases its caller,
-  rather than leaving somebody waiting on a tick the frame clock will never
-  publish; the caller reads back zero ticks stepped. A hold goes the same way,
-  so resume is always the way out of whatever state an engine was left in.
-- **Every published tick is numbered**, from one, never reset, one atomic add
-  on the frame path. The number rides `app.UpdateEvent.Tick` so that anything
-  recorded inside a tick can say which tick it describes — which is what turns
-  "these snapshots pair" from a claim into something an agent checks.
-
-## Offered To An Agent
-
-`wgpu` contributes an `mcp.Provider` from `Register` and offers one capability, rendered as the
-tool `wgpu_time`: `pause`, `resume`, `step`, `hold`, `release` and `status`
-over `app.TimeCmd`, with the resulting state on every answer. It is an
-`mcp.Func` rather than an `mcp.Command` because a step waits for a frame and
-so carries its own deadline (5s), and because the action is validated before
-anything is armed.
-
-- `step` is capped at **600 ticks** — ten seconds of simulation — so the window
-  in which a request can be created and then orphaned by its own deadline is
-  bounded. A `hold` is capped at **10 s** on the same reasoning and with the
-  same figure, and defaults to 1 s.
-- `hold` and `release` are what make several snapshots describe one tick: hold
-  first, arm the snapshots, release. Every answer also names the current
-  `tick`, which is the number those snapshots report, so an agent confirms the
-  pairing from the responses rather than from timing.
-- A step's own wait, and each snapshot's, is **extended by whatever a hold may
-  still cost**. A window somebody deliberately held open is not a stalled
-  engine, and the deadline that names a stall must not be spent on it.
-- Asking for a state the engine is already in (`pause` while paused, `resume`
-  while running, `hold` while held, `release` with nothing held) is an
-  `mcp.Unavailable` the agent reads and moves past, not an error.
-- The capability is **not** `mcp.ReadOnly()`: all but one of its actions change
-  the game. `status` is the read-only one, and MCP annotates a tool rather than
-  an argument, so the honest annotation for the tool is the acting one.
-- The provider offers it whether or not a broker is composed, and nothing
-  resumes a paused game on disconnect: a pause stands until something resumes
-  it.
-
-The description prose the agent reads is reproduced in full in
-[`docs/specs/mcp.md`](docs/specs/mcp.md), so it is reviewed as prompt text.
+app turns that frame time into fixed-step ticks and publishes every app event;
+pause, step, hold, tick numbering and the `app_time` tool are app's, in
+[`slots/app`](../../slots/app/README.md).
 
 ## Commands Executed
 
@@ -174,18 +104,9 @@ The description prose the agent reads is reproduced in full in
 
 ## Events Published
 
-- `app.InitEvent`: published synchronously once in `Run`, immediately before
-  entering gogpu's blocking main loop.
-- `app.UpdateEvent`: published synchronously on the main thread at the fixed
-  `Config.Step`. Long frames are clamped by `MaxFrame`; at most `MaxPending`
-  catch-up events are emitted, and the last has `Last: true`. While the tick
-  source is paused none is published at all, except the steps `app.TimeCmd`
-  asks for — which ignore `MaxPending` and each carry `Last: true`.
-- `gfx.WindowSizeChangeEvent`: published synchronously when DIP window size
-  changes, before `SetViewportCmd` resolves the viewport.
-- `app.RenderEvent`: published synchronously on the render thread after the
-  surface is current. `Alpha` is the remaining fixed-step interpolation ratio.
-- `app.QuitEvent`: published synchronously once when gogpu's main loop returns.
+None of its own. The Loop calls above are what publish `app.InitEvent`,
+`app.UpdateEvent`, `app.WindowSizeChangeEvent`, `app.RenderEvent` and
+`app.QuitEvent`, each synchronously on the thread wgpu calls it from.
 
 The driver does not subscribe through the kernel registry; `gogpu` callbacks
 invoke its update, draw, and input bridges directly.

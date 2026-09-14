@@ -24,9 +24,7 @@ import (
 // declaration-root shape, each held to the rules from before it. The ticket
 // that moves a plugin deletes its entry, and an entry naming a directory that
 // holds no package fails the test, so the list only shrinks.
-var unmoved = []string{
-	"slots/app",
-}
+var unmoved = []string{}
 
 // The rules, as a failure names them. The instructions file states the same
 // rules in prose; change both together.

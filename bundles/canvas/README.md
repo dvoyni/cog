@@ -60,7 +60,7 @@ the root.
 
 - Name: `canvas.Name` (`"canvas"`)
 - Constructor: `canvasplugin.New() kernel.Plugin`
-- Plugin dependencies: `gfx`, `storage`
+- Plugin dependencies: `app` (whose `TimeCmd` `canvas_draws` dispatches), `gfx`, `storage`
 - Requires: no Adapter
 - Contributes: one `mcp.Provider`, as the `canvas.McpProvider` Adapter for
   `mcp.ProviderPort`
