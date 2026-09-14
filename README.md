@@ -138,12 +138,13 @@ covering one focused mechanism takes that mechanism's name.
 config := map[kernel.PluginName]any{
     storage.Name: storage.Config{}.
         WithReadFS("res", storage.DefaultReadPriority, os.DirFS("res")),
+    diskfs.Name: diskfs.Config{AppId: "my-app"},
     wgpu.Name: wgpu.DefaultConfig().WithTitle("My App"),
 }
 
 plugins := []kernel.Plugin{
     storageplugin.New(),
-    diskfs.New(diskfs.Config{AppId: "my-app"}), // provides storage's PermanentFS Adapter
+    diskfsplugin.New(), // provides storage's PermanentFS Adapter
     inputplugin.New(),
     gfximpl.New(),
     wgpu.New(), // provides gfx's Backend Adapter

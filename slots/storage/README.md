@@ -82,11 +82,12 @@ config := map[kernel.PluginName]any{
     storage.Name: storage.Config{}.
         WithReadFS("res", storage.DefaultReadPriority, os.DirFS("res")).
         WithReadFS("embedded", 100, embeddedFS),
+    diskfs.Name: diskfs.Config{AppId: "my-app"},
 }
 
 plugins := []kernel.Plugin{
     storageplugin.New(),
-    diskfs.New(diskfs.Config{AppId: "my-app"}), // or jsfs.New in a browser
+    diskfsplugin.New(), // or jsfs.New in a browser
     …
 }
 ```
@@ -109,16 +110,22 @@ type StoragePermanentFS kernel.Adapter[storage.PermanentFSPort]
 registrar.ProvideAdapter[StoragePermanentFS](permanent)
 ```
 
-Each of the two cog ships exports only `New` and `Config` (plus its
-`ErrInvalidAppId`), and is built only for its platform.
+The two cog ships are each built only for their platform.
 
-- **`diskfs.New(diskfs.Config{AppId})`** opens `<data dir>/<AppId>`, creating
-  it if needed: `%LOCALAPPDATA%` on Windows, `$XDG_DATA_HOME` (or
-  `~/.local/share`) on Linux, the user config directory on macOS. An empty
-  `AppId` is the executable's name without its extension. An `AppId` that is not
-  one directory name fails `Register` with `diskfs.ErrInvalidAppId`. Every
-  operation is confined to the directory through `os.Root`.
-- **`jsfs.New(jsfs.Config{AppId})`** keeps the whole filesystem as one JSON
+- **diskfs** is an Extension in the declaration-root shape. Its root,
+  `extensions/diskfs`, declares only `Name`, `Config`, the
+  `StoragePermanentFS` Adapter and its errors; the plugin is in its
+  `internal/`, and `diskfsplugin.New()` constructs it. Its `diskfs.Config` is
+  supplied under `diskfs.Name`, and its zero value is the default. The plugin
+  opens `<data dir>/<AppId>`, creating it if needed: `%LOCALAPPDATA%` on
+  Windows, `$XDG_DATA_HOME` (or `~/.local/share`) on Linux, the user config
+  directory on macOS. An empty `AppId` is the executable's name without its
+  extension. An `AppId` that is not one directory name fails `Register` with
+  `diskfs.ErrInvalidAppId`, and a config value that is not a `diskfs.Config`
+  with `diskfs.ErrInvalidConfig`. Every operation is confined to the directory
+  through `os.Root`.
+- **`jsfs.New(jsfs.Config{AppId})`** exports only `New` and `Config` (plus
+  its `ErrInvalidAppId`), and keeps the whole filesystem as one JSON
   document under `localStorage` key `cog.storage.<AppId>`. A browser has no
   executable to name the app after, so an empty `AppId` is an error, as is one
   that is not a single name: both fail `Register` with `jsfs.ErrInvalidAppId`.
@@ -226,5 +233,7 @@ splitting a single store into several entry points.
   malformed value requests.
 - `diskfs.ErrInvalidAppId{AppId}`, `jsfs.ErrInvalidAppId{AppId}`: the Adapter's
   application id is invalid.
+- `diskfs.ErrInvalidConfig{Got}`: the value under `diskfs.Name` is not a
+  `diskfs.Config`.
 
 Each exported error type implements `Error() string`.

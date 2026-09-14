@@ -1,6 +1,6 @@
 //go:build !js
 
-package diskfs
+package internal
 
 import (
 	"fmt"
@@ -9,33 +9,31 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/dvoyni/cog/extensions/diskfs"
 	"github.com/dvoyni/cog/kernel"
 )
 
-// name is the plugin's name. Nothing orders against or configures the plugin by
-// name: its Config goes to New.
-const name kernel.PluginName = "diskfs"
-
-// Config configures the desktop permanent filesystem.
-type Config struct {
-	// AppId names the directory under the user's data directory that writes land
-	// in. It must be a single directory name. Empty means the executable's name
-	// without its extension.
-	AppId string
-}
-
-// New creates the diskfs plugin. It opens the permanent directory during
+// New creates the diskfs plugin. Its diskfs.Config arrives through kernel.New's
+// config map under diskfs.Name. It opens the permanent directory during
 // Register and provides it as storage's PermanentFS Adapter.
-func New(config Config) kernel.Plugin { return &plugin{config: config} }
+func New() kernel.Plugin { return &plugin{} }
 
-type plugin struct{ config Config }
+type plugin struct{}
 
-func (p *plugin) Name() kernel.PluginName { return name }
+func (p *plugin) Name() kernel.PluginName { return diskfs.Name }
 
 func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 
-func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
-	appId, err := resolveAppId(p.config.AppId)
+func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
+	var cfg diskfs.Config
+	if config != nil {
+		var ok bool
+		cfg, ok = config.(diskfs.Config)
+		if !ok {
+			return diskfs.ErrInvalidConfig{Got: config}
+		}
+	}
+	appId, err := resolveAppId(cfg.AppId)
 	if err != nil {
 		return err
 	}
@@ -47,15 +45,8 @@ func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	if err != nil {
 		return err
 	}
-	registrar.ProvideAdapter[StoragePermanentFS](permanent)
+	registrar.ProvideAdapter[diskfs.StoragePermanentFS](permanent)
 	return nil
-}
-
-// ErrInvalidAppId reports an application id that is not a single directory name.
-type ErrInvalidAppId struct{ AppId string }
-
-func (e ErrInvalidAppId) Error() string {
-	return fmt.Sprintf("diskfs: invalid app id %q", e.AppId)
 }
 
 // resolveAppId falls back to the executable's name and checks that the result
@@ -70,7 +61,7 @@ func resolveAppId(appId string) (string, error) {
 		appId = strings.TrimSuffix(filepath.Base(executable), filepath.Ext(executable))
 	}
 	if appId == "." || appId == ".." || filepath.Base(appId) != appId || filepath.VolumeName(appId) != "" {
-		return "", ErrInvalidAppId{AppId: appId}
+		return "", diskfs.ErrInvalidAppId{AppId: appId}
 	}
 	return appId, nil
 }

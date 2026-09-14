@@ -200,7 +200,7 @@ _Avoid_: System plugin, which is the Host
 Any change to which Entities have which Components — adding or removing a Component, spawning or despawning an Entity — as opposed to a change to a Component's value. A System may make one to the Entity it is currently visiting; changing whether some _other_ Entity is in the Store being iterated is undefined, and so is using any pointer into a Store after that Store has structurally changed.
 
 **Hook**:
-The record of the Structural changes made to one Component type — which Entities gained it, and which lost it together with the value they lost — kept so that Systems read it later through a Query, each at its own scheduled time, rather than being told at the moment of change. Nothing runs inside a Structural change on a Hook's behalf, and a change to a Component's value is not in it.
+The record of what happened to one Component type — which Entities gained it, which lost it together with the value they lost, and whose value changed — kept so that Systems read it later through a Query, each at its own scheduled time, rather than being told at the moment of change. A Structural change and a change of value are recorded in the same form and read the same way. Nothing runs on a Hook's behalf at the moment of change.
 _Avoid_: Callback, observer, listener, trigger, `OnAdd`/`OnRemove`, and Event, which is a kernel term for something published rather than read.
 
 **Spawn**:

@@ -87,6 +87,11 @@ stay where they are.
   answer.
 - **An Extension's root** declares only `Name`, `Config`, its Adapter types and
   `Err…` errors: no commands, events, resources, ports, types or forwarders.
+  Its `Config` arrives, as every plugin's does, through `kernel.New`'s config
+  map under `Name`, since its constructor takes nothing. An Extension built for
+  one platform only (diskfs is `!js`) tags its `internal/` implementation and its
+  constructor package, and leaves its root untagged so the declarations build
+  everywhere.
 
 ### Ports And Adapters
 
@@ -131,7 +136,7 @@ performance goes in `internal/types`. Everything else goes in `internal/`.
   packages; every other row holds for tests too.
 - For these rules, a plugin on the migration list's contract root, `slots/app`
   and `extensions/gfx/gpu` count as roots, its `internal/…` as internal to it,
-  and its `…impl` and wgpu, diskfs and jsfs as constructor packages.
+  and its `…impl` and wgpu and jsfs as constructor packages.
 
 ## Ordering Identities
 
@@ -170,7 +175,7 @@ with no package fails the test. In that shape:
   share. gfx also has a **vocabulary package**, `extensions/gfx/gpu`, importing
   only Libraries.
 - `slots/app` is an **Open slot**: a contract with no implementation.
-- wgpu, diskfs and jsfs are single packages in `extensions/`.
+- wgpu and jsfs are single packages in `extensions/`.
 
 | package | may import |
 | --- | --- |
@@ -179,9 +184,9 @@ with no package fails the test. In that shape:
 | `internal/…` | `libs`, `kernel`, `slots/*`, other roots, vocabularies |
 | `…impl` | anything its contract root may, plus that root |
 | vocabulary | `libs` only |
-| wgpu, diskfs, jsfs | `libs`, `kernel`, `slots/*`, roots, vocabularies |
+| wgpu, jsfs | `libs`, `kernel`, `slots/*`, roots, vocabularies |
 
-Nothing imports an `…impl` or wgpu, diskfs or jsfs except `_test.go` files, and
+Nothing imports an `…impl` or wgpu or jsfs except `_test.go` files, and
 a moved plugin counts as a root, its `internal/types` and `internal/` as its
 `internal/…`, and its constructor package as an `…impl`.
 
