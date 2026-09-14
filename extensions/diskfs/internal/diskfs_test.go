@@ -1,6 +1,6 @@
 //go:build !js
 
-package diskfs
+package internal
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dvoyni/cog/extensions/diskfs"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
@@ -31,7 +32,7 @@ func isolateDataDir(t *testing.T) string {
 // data directory, and an engine started afterwards reads them back.
 func TestValuesRoundTripAndSurviveARestart(t *testing.T) {
 	dataDir := isolateDataDir(t)
-	config := Config{AppId: "cog-diskfs-test"}
+	config := diskfs.Config{AppId: "cog-diskfs-test"}
 
 	first := start(t, config)
 	if _, err := first.kernel.ExecuteCommand[storage.AccessValuesCmd](storage.SetValue("volume", 0.25)); err != nil {
@@ -64,16 +65,32 @@ func TestAnInvalidAppIdIsRejected(t *testing.T) {
 	for _, appId := range []string{".", "..", "a/b", filepath.Join("a", "b"), filepath.Join(t.TempDir(), "abs")} {
 		t.Run(appId, func(t *testing.T) {
 			var reported []error
-			kernel.New(nil).Handler(func(err error) bool {
+			kernel.New(map[kernel.PluginName]any{diskfs.Name: diskfs.Config{AppId: appId}}).Handler(func(err error) bool {
 				reported = append(reported, err)
 				return true
-			}).WithPlugins(storageplugin.New(), New(Config{AppId: appId}))
+			}).WithPlugins(storageplugin.New(), New())
 
-			var invalid ErrInvalidAppId
+			var invalid diskfs.ErrInvalidAppId
 			if !errors.As(errors.Join(reported...), &invalid) || invalid.AppId != appId {
 				t.Fatalf("composition reported %v, want ErrInvalidAppId for %q", reported, appId)
 			}
 		})
+	}
+}
+
+// A configuration value under diskfs.Name that is not a diskfs.Config fails
+// Register rather than falling back to the default.
+func TestAConfigThatIsNotAConfigIsRejected(t *testing.T) {
+	isolateDataDir(t)
+	var reported []error
+	kernel.New(map[kernel.PluginName]any{diskfs.Name: "feuds"}).Handler(func(err error) bool {
+		reported = append(reported, err)
+		return true
+	}).WithPlugins(storageplugin.New(), New())
+
+	var invalid diskfs.ErrInvalidConfig
+	if !errors.As(errors.Join(reported...), &invalid) || invalid.Got != "feuds" {
+		t.Fatalf("composition reported %v, want ErrInvalidConfig for %q", reported, "feuds")
 	}
 }
 
@@ -137,15 +154,15 @@ type running struct {
 
 // start runs an engine of storage and diskfs until stop, which waits for it to
 // shut down, as a process exit would.
-func start(t *testing.T, config Config) running {
+func start(t *testing.T, config diskfs.Config) running {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	engine := kernel.New(nil).
+	engine := kernel.New(map[kernel.PluginName]any{diskfs.Name: config}).
 		Handler(func(err error) bool {
 			t.Errorf("unexpected kernel error: %v", err)
 			return true
 		}).
-		WithPlugins(storageplugin.New(), New(config))
+		WithPlugins(storageplugin.New(), New())
 	done := make(chan struct{})
 	go func() {
 		engine.Run(ctx)

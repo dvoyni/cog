@@ -25,7 +25,6 @@ import (
 // that moves a plugin deletes its entry, and an entry naming a directory that
 // holds no package fails the test, so the list only shrinks.
 var unmoved = []string{
-	"extensions/diskfs",
 	"extensions/gfx",
 	"extensions/jsfs",
 	"extensions/wgpu",

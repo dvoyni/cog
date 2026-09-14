@@ -1,6 +1,6 @@
 //go:build !js
 
-package diskfs
+package internal
 
 import (
 	"fmt"
