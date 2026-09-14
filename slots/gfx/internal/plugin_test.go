@@ -1834,7 +1834,7 @@ func TestABackendCompileFailureCarriesTheSegmentTable(t *testing.T) {
 		reported = append(reported, err)
 		return false
 	})
-	backend := &fakeBackend{shaderErr: errors.New("wgpu: parse error: line 3, column 12: expected ';'")}
+	backend := &fakeBackend{shaderErr: errors.New("gogpu: parse error: line 3, column 12: expected ';'")}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)

@@ -10,7 +10,7 @@
 // to an agent as the tool app_time.
 //
 // app is a Slot: it requires exactly one Adapter for MainLoopPort, the platform
-// main loop, which wgpu provides on the desktop and the web. app hands the
+// main loop, which gogpu provides on the desktop and the web. app hands the
 // MainLoop its Loop from Start and asks it to Quit; the MainLoop calls the Loop
 // every frame. A composition without a MainLoop fails with
 // kernel.ErrMissingAdapter.
@@ -24,7 +24,7 @@
 //	}
 //	plugins := []kernel.Plugin{
 //	    appplugin.New(),
-//	    wgpuplugin.New(), // provides app's MainLoop
+//	    gogpuplugin.New(), // provides app's MainLoop
 //	    …
 //	}
 package app

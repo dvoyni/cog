@@ -447,9 +447,9 @@ func TestPorts_DescribeNamesPortAndAdapterTypes(t *testing.T) {
 		r.CollectAdapters[testCapabilityPort]()
 		return nil
 	}}
-	wgpu := testPlugin{name: "wgpu", deps: []PluginName{"gfx"}, register: func(r *Registrar) error {
+	gogpu := testPlugin{name: "gogpu", deps: []PluginName{"gfx"}, register: func(r *Registrar) error {
 		r.ProvideAdapter[testGPU](testBackend(testLabel("gpu")))
-		r.ProvideAdapter[testOffer](testCapability(testLabel("wgpu")))
+		r.ProvideAdapter[testOffer](testCapability(testLabel("gogpu")))
 		return nil
 	}}
 	input := testPlugin{name: "input", register: func(r *Registrar) error {
@@ -457,7 +457,7 @@ func TestPorts_DescribeNamesPortAndAdapterTypes(t *testing.T) {
 		return nil
 	}}
 
-	e, err := composeForTest(wgpu, broker, gfx, input)
+	e, err := composeForTest(gogpu, broker, gfx, input)
 	if err != nil {
 		t.Fatalf("composition error = %v", err)
 	}
@@ -465,12 +465,12 @@ func TestPorts_DescribeNamesPortAndAdapterTypes(t *testing.T) {
 	want := []PortDescription{
 		{
 			Type: reflect.TypeFor[testBackendPort](), Interface: reflect.TypeFor[testBackend](), Owner: "gfx",
-			Adapters: []AdapterDescription{{Type: reflect.TypeFor[testGPU](), Plugin: "wgpu"}},
+			Adapters: []AdapterDescription{{Type: reflect.TypeFor[testGPU](), Plugin: "gogpu"}},
 		},
 		{
 			Type: reflect.TypeFor[testCapabilityPort](), Interface: reflect.TypeFor[testCapability](), Owner: "broker",
 			Collects: true, Adapters: []AdapterDescription{
-				{Type: reflect.TypeFor[testOffer](), Plugin: "wgpu"},
+				{Type: reflect.TypeFor[testOffer](), Plugin: "gogpu"},
 				{Type: reflect.TypeFor[testOffer](), Plugin: "input"},
 			},
 		},
@@ -479,8 +479,8 @@ func TestPorts_DescribeNamesPortAndAdapterTypes(t *testing.T) {
 		t.Fatalf("ports = %+v, want %+v", got, want)
 	}
 	wantDump := "ports:\n" +
-		"  kernel.testBackendPort (gfx) requires [kernel.testGPU (wgpu)]\n" +
-		"  kernel.testCapabilityPort (broker) collects [kernel.testOffer (wgpu), kernel.testOffer (input)]\n" +
+		"  kernel.testBackendPort (gfx) requires [kernel.testGPU (gogpu)]\n" +
+		"  kernel.testCapabilityPort (broker) collects [kernel.testOffer (gogpu), kernel.testOffer (input)]\n" +
 		"commands:\n"
 	if dump := Dump(e); !strings.Contains(dump, wantDump) {
 		t.Fatalf("dump missing ports section %q:\n%s", wantDump, dump)

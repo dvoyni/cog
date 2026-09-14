@@ -294,7 +294,7 @@ func TestADrawWhoseStrideIsNotAMultipleOfFourIsDroppedAndReported(t *testing.T) 
 // which made "gfx refused to build this" and "the backend refused to build
 // this" the same silent event from the caller's seat.
 func TestABackendPipelineFailureReachesTheCallerOnce(t *testing.T) {
-	refusal := errors.New("wgpu: pipeline layout rejected")
+	refusal := errors.New("gogpu: pipeline layout rejected")
 	backend := &fakeBackend{pipelineErr: refusal}
 
 	reported := pipelineErrFrames(t, backend, triangle(), 3)

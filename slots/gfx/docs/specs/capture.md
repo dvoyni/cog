@@ -29,6 +29,9 @@
 > `app.Name` as a dependency. The wgpu mcp spec moved to
 > [slots/app/docs/specs/mcp.md](../../../../slots/app/docs/specs/mcp.md). File
 > and line citations of wgpu's code below are as they were before the move.
+>
+> **Renamed by the user after #369.** The wgpu Extension these notes name is
+> now **gogpu**: `extensions/gogpu`, built by `gogpuplugin.New()`.
 
 `github.com/dvoyni/cog/extensions/gfx` cannot read a rendered pixel back today. `MapAsync`,
 `CopyTextureToBuffer`, `MapRead` and `GetMappedRange` return **zero hits across
@@ -67,7 +70,7 @@ settle it.
   [Bursts](#bursts)
 - [Facts the implementer must own](#facts-the-implementer-must-own)
 - [Required gfx changes](#required-gfx-changes) ·
-  [Required wgpu changes](#required-wgpu-changes)
+  [Required gogpu changes](#required-gogpu-changes)
 - [Out of scope](#out-of-scope)
 
 ---
@@ -102,7 +105,7 @@ leans on them throughout. From
   carries `Screen bool` beside `Target TextureViewID` — the exact addressing
   split a capture needs.
 - **Nothing in cog is copyable off the GPU today.** `textureUsage`
-  (`extensions/wgpu/internal/texformat.go:31-41`) grants `TextureBinding|CopyDst|RenderAttachment`
+  (`extensions/gogpu/internal/texformat.go:31-41`) grants `TextureBinding|CopyDst|RenderAttachment`
   and never `CopySrc`, so as the code stands `CopyTextureToBuffer` on the frame
   buffer fails validation. This is the one genuinely blocking change, and it is
   a one-line one.
@@ -113,10 +116,10 @@ leans on them throughout. From
 - **The copy must be encoded after present, and that is forced rather than
   chosen.** `Present()` transitions the frame buffer
   `RenderAttachment -> TextureBinding` and then samples it
-  (`extensions/wgpu/internal/gfxpresent.go`). Encode a capture before present and present's own
+  (`extensions/gogpu/internal/gfxpresent.go`). Encode a capture before present and present's own
   barrier names an old layout that is no longer true.
 - **The frame buffer's bytes are already a picture.** `ScreenTarget` is an
-  offscreen `RGBA8UnormSrgb` framebuffer (`extensions/wgpu/internal/texformat.go:13`), straight
+  offscreen `RGBA8UnormSrgb` framebuffer (`extensions/gogpu/internal/texformat.go:13`), straight
   alpha, not the swapchain. The present pass's OETF shader exists only because
   the *swapchain* is `BGRA8Unorm`; a readback bypasses the swapchain entirely.
   Un-stride the 256-aligned rows and you have the image — no colour conversion
@@ -146,8 +149,8 @@ Two alternatives were rejected:
 - **A method on `gpu.Backend`.** An out-of-band call has no encoder to write
   into and would have to open a second one, breaking `Execute`'s contract that
   it encodes every pass into one command encoder and submits once
-  (`extensions/wgpu/internal/gfxbackend.go:737-763`).
-- **`wgpu` providing the capability to the broker directly.** It leaves gfx's
+  (`extensions/gogpu/internal/gfxbackend.go:737-763`).
+- **The `gogpu` Extension providing the capability to the broker directly.** It leaves gfx's
   own users unable to read a texture back forever, and it puts a GPU driver in
   the business of knowing what an agent is.
 
@@ -170,7 +173,7 @@ type CaptureDesc struct {
 
 Render-to-texture works end to end already — `gfx.TextureTarget`
 (`extensions/gfx/pass.go:77`), resolved at `extensions/gfx/translate.go:302`, views cached at
-`extensions/wgpu/internal/gfxpass.go:29-57` — and target-agnostic capture is barely more code than
+`extensions/gogpu/internal/gfxpass.go:29-57` — and target-agnostic capture is barely more code than
 screen-only. It is what a shadow map or a post-process intermediate wants later.
 
 `TextureID` rather than `TextureViewID`, because `CopyTextureToBuffer` takes a
@@ -178,7 +181,7 @@ texture rather than a view, and because `TextureTransition.Texture` is already a
 `TextureID` (`extensions/gfx/gpuqueue.go:67-70`). **A capture always reads mip 0, layer 0.**
 
 **Depth is refused.** `FormatDepth32F` is denied even `CopyDst` because "WebGPU
-forbids writing texels into a depth32float texture" (`extensions/wgpu/internal/texformat.go:28-30`),
+forbids writing texels into a depth32float texture" (`extensions/gogpu/internal/texformat.go:28-30`),
 and a depth capture is not an image — it is a float field needing a range to be
 legible. Depth readback is a real want
 ([#179](https://github.com/dvoyni/cog/issues/179)'s terracing is a depth
@@ -307,14 +310,14 @@ promise by construction.
 TakeCapture() (gpu.Capture, bool)
 ```
 
-The precedent is `takeRefusal()` (`extensions/wgpu/internal/gfxdepthonly.go:107-113`) — backend
+The precedent is `takeRefusal()` (`extensions/gogpu/internal/gfxdepthonly.go:107-113`) — backend
 state that has to reach a plugin without a kernel handle on the render thread,
 drained once per frame. The **shape** is that one; the drain **site** differs,
-and deliberately: `takeRefusal` is drained by the wgpu plugin in `onDraw`
-(`extensions/wgpu/internal/plugin.go:243-245`), whereas `TakeCapture` is drained by **gfx's own
+and deliberately: `takeRefusal` is drained by the gogpu plugin in `onDraw`
+(`extensions/gogpu/internal/plugin.go:243-245`), whereas `TakeCapture` is drained by **gfx's own
 render handler**, immediately after `list.backend.Execute(ops)`
 (`extensions/gfx/gfximpl/plugin.go, `renderOnRender``), which is the handler that holds gfx's resource locks.
-**The wgpu plugin never learns that captures exist.**
+**The gogpu plugin never learns that captures exist.**
 
 Rejected: **a channel handed in with the request**, which puts a channel across
 the render-thread boundary for no gain.
@@ -384,7 +387,7 @@ provider. What matters is *which goroutine*: see
 - **A staging buffer is allocated per capture and released after `Unmap`.** No
   cached buffer. The frame buffer's own doc already made this call the same way:
   "a frame that renders only into its own textures never asks for it and never
-  pays for it" (`extensions/wgpu/internal/gfxpresent.go`). Holding ~8 MiB for a whole run so that a
+  pays for it" (`extensions/gogpu/internal/gfxpresent.go`). Holding ~8 MiB for a whole run so that a
   debug feature used a few times an hour saves an allocation is the wrong trade.
 - **At most one capture in flight**, enforced by the backend — the only layer
   that knows whether a map is pending. A second arm is refused, and the refusal
@@ -576,7 +579,7 @@ layer down.
   `RGBA8Srgb`, `Depth32F`, and depth is refused — so every capture is RGBA8 and
   the un-stride is a straight `copy` per row.
 - **Bytes per texel comes from `BlockCopySize()`**, which `bytesPerTexel`
-  (`extensions/wgpu/internal/texformat.go:23-25`) already uses. Never a hardcoded `* 4`, which is
+  (`extensions/gogpu/internal/texformat.go:23-25`) already uses. Never a hardcoded `* 4`, which is
   gogpu's other shortcut.
 - **`MapPending` must be `Release()`d.** gogpu leaks its own
   (`renderer.go:1900`); the pool entry is harmless but the omission is not a
@@ -586,7 +589,7 @@ layer down.
   Copy out before `Unmap`.
 - **`MapAsync` validation errors are synchronous** (`buffer.go:168-181`), so a
   bad range fails at the arm rather than a frame later.
-- **`extensions/wgpu/internal/gfxbackend.go:717` `resolveTarget` is stale dead code** — its comment
+- **`extensions/gogpu/internal/gfxbackend.go:717` `resolveTarget` is stale dead code** — its comment
   "Only the screen target exists today" is false and nothing calls it. Do not
   take it as evidence about targets.
 
@@ -655,14 +658,14 @@ a single still, which a burst made false.
 
 ---
 
-## Required wgpu changes
+## Required gogpu changes
 
-**`extensions/wgpu/internal/texformat.go`**
+**`extensions/gogpu/internal/texformat.go`**
 
 - `textureUsage` adds `TextureUsageCopySrc` when `desc.Renderable` is set. This
   is the one-line blocking change.
 
-**`extensions/wgpu/internal/gfxbackend.go`**
+**`extensions/gogpu/internal/gfxbackend.go`**
 
 - Handle the capture op inside `Execute`: `CopyTextureToBuffer` into a fresh
   staging buffer before `Finish`, then `MapAsync` immediately after the frame's
@@ -675,7 +678,7 @@ a single still, which a burst made false.
   captures at shutdown with `ErrCaptureAbandoned{}`; refuse depth and non-RGBA8
   with `ErrCaptureUnsupported{Format}`.
 
-**`extensions/wgpu/README.md`**
+**`extensions/gogpu/README.md`**
 
 - The staging-buffer sequence and the auto-poll it relies on, because the next
   person to read `Execute` will wonder where the wait went.

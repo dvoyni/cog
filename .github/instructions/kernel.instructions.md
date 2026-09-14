@@ -318,9 +318,9 @@ provides an Adapter `adapters.go` does not declare or declares one it never
 provides:
 
 ```go
-type AppMainLoop kernel.Adapter[app.MainLoopPort]        // wgpu/adapters.go
-type GfxBackend kernel.Adapter[gfx.BackendPort]          // wgpu/adapters.go
-type StoragePermanentFS kernel.Adapter[storage.PermanentFSPort] // diskfs, jsfs
+type AppMainLoop kernel.Adapter[app.MainLoopPort]        // gogpu/adapters.go
+type GfxBackend kernel.Adapter[gfx.BackendPort]          // gogpu/adapters.go
+type StoragePermanentFS kernel.Adapter[storage.PermanentFSPort] // diskstorage, jsstorage
 type McpProvider kernel.Adapter[mcp.ProviderPort]        // every plugin with capabilities
 ```
 
@@ -340,12 +340,12 @@ compiler checks it; Go infers type arguments from the value before the
 constraints, so convert a concrete value to the interface:
 
 ```go
-registrar.ProvideAdapter[diskfs.StoragePermanentFS](permanent) // already a storage.PermanentFS
+registrar.ProvideAdapter[diskstorage.StoragePermanentFS](permanent) // already a storage.PermanentFS
 registrar.ProvideAdapter[canvas.McpProvider](mcp.Provider(provider{}))
 ```
 
 - **The value exists by `Register`.** Something that becomes usable later says
-  so through the interface: wgpu provides one stable backend at `Register` and
+  so through the interface: gogpu provides one stable backend at `Register` and
   reports `Ready()` once its device arrives.
 - **An Adapter takes no lock.** Reading it is not a resource access, so which
   goroutines may call it is the interface's contract, and it holds no resource

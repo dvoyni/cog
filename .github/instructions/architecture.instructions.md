@@ -20,7 +20,7 @@ Everything here is the rule for every plugin, new ones included.
 | the kernel package | `kernel` | The Engine, Registrar and scheduler every Plugin is built on. |
 | **Library** | `libs/<name>` | Code that is not a Plugin and defines none (`libs/m`). |
 | **Slot** | `slots/<name>` | A Plugin whose root declares at least one required Port (app, gfx, storage). Composition fails until an Adapter fills it. |
-| **Extension** | `extensions/<name>` | A Plugin that provides Adapters, at least one of them for a Slot's required Port, and declares no API (wgpu, diskfs, jsfs). It may also contribute to a collected Port. |
+| **Extension** | `extensions/<name>` | A Plugin that provides Adapters, at least one of them for a Slot's required Port, and declares no API (gogpu, diskstorage, jsstorage). It may also contribute to a collected Port. |
 | **Bundle** | `bundles/<name>` | Every other Plugin (input, anim, canvas, scene, ui, ecs, ecsscene, mcp). Its root declares no required Port, and it may collect Adapters or contribute them. |
 
 A plugin that would need both a Slot's Adapters and an API of its own is two
@@ -114,13 +114,18 @@ stay where they are.
   `Err…` errors: no commands, events, resources, ports, types or forwarders.
   Its `Config` arrives, as every plugin's does, through `kernel.New`'s config
   map under `Name`, since its constructor takes nothing. An Extension may be
-  the engine's `kernel.PluginHost`, as wgpu is: the host is the plugin value
+  the engine's `kernel.PluginHost`, as gogpu is: the host is the plugin value
   its constructor returns, found by the kernel, so nothing in the root names
   it. The platform main loop it runs is still an Adapter like any other:
-  wgpu provides it as `AppMainLoop`, for app's `MainLoopPort`. An Extension built for
-  one platform only (diskfs is `!js`, jsfs is `js`) tags its `internal/` implementation and its
-  constructor package, and leaves its root untagged so the declarations build
-  everywhere.
+  gogpu provides it as `AppMainLoop`, for app's `MainLoopPort`. An Extension
+  built for one platform only (diskstorage is `!js`, jsstorage is `js`) tags
+  its `internal/` implementation and its constructor package, and leaves its
+  root untagged so the declarations build everywhere.
+- **An Extension's name** takes the Slot it fills as its suffix when it fills
+  Adapters for exactly one Slot: `diskstorage` and `jsstorage` both fill
+  storage. An Extension that fills more than one Slot has no naming rule:
+  gogpu, named for the library it wraps, fills both app and gfx. The tier test
+  does not check names.
 
 ### Ports And Adapters
 

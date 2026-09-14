@@ -15,7 +15,7 @@ type plugin struct{}
 // world, which it reaches at registration through its dependency on ecs:
 //
 //	kernel.New(config).WithPlugins(
-//	    storageplugin.New(), diskfsplugin.New(),
+//	    storageplugin.New(), diskstorageplugin.New(),
 //	    gfxplugin.New(), sceneplugin.New(),
 //	    ecsplugin.New(), ecssceneplugin.New(), game.New())
 //

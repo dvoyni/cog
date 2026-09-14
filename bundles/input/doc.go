@@ -1,7 +1,7 @@
 // Package input declares the driver-agnostic input Bundle: a unified Key space
 // (keyboard keys AND mouse buttons), a polled State resource, discrete input
 // events, and the Apply command a driver uses to feed input changes. Gameplay
-// depends only on this package, never on a specific driver (e.g. wgpu).
+// depends only on this package, never on a specific driver (e.g. gogpu).
 //
 // input is a Bundle. Its plugin, built by inputplugin.New, requires no Adapter
 // and contributes one McpProvider.

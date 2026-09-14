@@ -72,7 +72,7 @@ ran from, and is kept as the record of what changed rather than as an open list.
 [What all of it is worth](#what-all-of-it-is-worth) have been re-measured by
 driving the real loader over every vendored asset, which is what turned that
 table's `≈` into a number; every *fidelity* claim in this document is still a
-judgement by eye, because there is still no pixel readback in `gfx` or `wgpu`.
+judgement by eye, because there is still no pixel readback in `gfx` or `gogpu`.
 The prototypes the fidelity findings came from are throwaway branches in
 `dvoyni/cog-examples` — `proto/vertex-narrow`, `measure/mesh-bytes`,
 `measure/attr-precision`, `measure/morph-deltas` — which are not to be merged.
@@ -170,7 +170,7 @@ evidence than they are:
   argument than pressure, and the honest one.
 
 There is also **no instrumentation of any kind** in the engine — no draw counter,
-no memory counter — and **no pixel readback anywhere in `gfx` or `wgpu`**. Every
+no memory counter — and **no pixel readback anywhere in `gfx` or `gogpu`**. Every
 size here was arithmetic over the assets when this document was written; the
 totals are now taken by driving `convertDocument` over the corpus and measuring
 what the packer emits, which is an observation of the built loader but still not
@@ -273,7 +273,7 @@ and [#195](https://github.com/dvoyni/cog/issues/195).
 
 Every narrow format used here is already wired end to end: `Unorm1010102`,
 `Float16x2`, `Unorm16x2` and the rest map to `gputypes` at
-`extensions/wgpu/internal/gfxbackend.go:1018-1071`, and `gfx.VertexType.Size()` knows their widths
+`extensions/gogpu/internal/gfxbackend.go:1018-1071`, and `gfx.VertexType.Size()` knows their widths
 (`extensions/gfx/mesh.go:56-66`). `scene.Vertex` uses **none** of them today except
 `Unorm8x4` for `Color`. **Nothing has to be built in the backend for this axis.**
 
@@ -840,7 +840,7 @@ model load — and draws the line where the cost changes character.
 ### Two mechanics worth stating
 
 **The index format enters `pipelineKey` as the *strip* format** — the same
-`nil`/`Uint16`/`Uint32` that `stripIndexFormat` (`extensions/wgpu/internal/gfxbackend.go:991`) hands
+`nil`/`Uint16`/`Uint32` that `stripIndexFormat` (`extensions/gogpu/internal/gfxbackend.go:991`) hands
 the pipeline descriptor, `nil` for every non-strip topology. Keying on the width
 unconditionally would build two identical pipelines for two triangle lists that
 differ only in an encoding detail the pipeline never sees. Keyed this way it
@@ -1238,12 +1238,12 @@ the cache that already exists.
 > which is exactly the split check 1 closed for the vertex buffer — except that
 > check reads `@location` declarations and **never sees a storage buffer**. `gfx`
 > already reflects storage structs, member offsets and array strides included
-> (`extensions/wgpu/internal/gfxreflect.go:88`), so the numbers a check would need exist and nothing
+> (`extensions/gogpu/internal/gfxreflect.go:88`), so the numbers a check would need exist and nothing
 > compares them. Stated here as exposure; the check itself belongs on
 > [gfx: an unsupplied storage buffer binding fails silently](https://github.com/dvoyni/cog/issues/133).
 
 > **Gap — every fidelity claim in this document was judged by eye.** There is no
-> pixel readback anywhere in `gfx` or `wgpu`, so the `oct32`-versus-`oct16`
+> pixel readback anywhere in `gfx` or `gogpu`, so the `oct32`-versus-`oct16`
 > finding rests on differenced screenshots analysed offline, and the motion
 > finding on [#179](https://github.com/dvoyni/cog/issues/179) rests on words with
 > no capture behind it. What would settle it is readback, which is out of scope
@@ -1332,7 +1332,7 @@ scene compiled against them.
 - A `uint16` index path. `MeshDescr` gains an index-width field; `pipelineKey`
   gains the **strip** format. **`RenderPass.SetIndexBuffer(BufferID, int)` is
   exported** (`extensions/gfx/gpuqueue.go:139`), so every backend implementation changes
-  signature — `wgpu` plus three test fakes (`extensions/gfx/plugin_test.go:209,408`,
+  signature — `gogpu` plus three test fakes (`extensions/gfx/plugin_test.go:209,408`,
   `bundles/scene/scene_test.go:206`). The queue encoding is free: `gpuOp` already carries
   spare `arg` fields.
 - Index-length validation in the translator, at the existing
@@ -1341,7 +1341,7 @@ scene compiled against them.
   error return. Note this makes it the **second** non-fatal report in `gfx`; the
   comment at `extensions/gfx/translate.go:322` claiming `ErrShaderExceedsWebLimits` is the
   only one is edited deliberately.
-- Vertex-input reflection: `shaderLayoutFrom` (`extensions/wgpu/internal/gfxreflect.go:33`) grows one
+- Vertex-input reflection: `shaderLayoutFrom` (`extensions/gogpu/internal/gfxreflect.go:33`) grows one
   loop over `EntryPoints[i].Function.Arguments[j]`; `ShaderLayout` grows one
   slice. No new parse, no second lowering, no new dependency.
 - The exact-match comparison plus the `arrayStride % 4` check in
@@ -1440,7 +1440,7 @@ scene compiled against them.
   **Storage vertex**, **Sparse target** and **Live span**. The glossary defines
   `Variant`, `Supply` and `Define` and defines no mesh or morph vocabulary at
   all.
-- `extensions/wgpu/internal/gfxbackend.go:990`'s *"Index buffers are uint32 throughout the engine"*
+- `extensions/gogpu/internal/gfxbackend.go:990`'s *"Index buffers are uint32 throughout the engine"*
   and `extensions/gfx/mesh.go:99,118`'s *"optional uint32 index array"* both go stale with
   the index change and are fixed by it.
 
@@ -1468,7 +1468,7 @@ repeated here so a reader of the spec alone does not re-propose them.
 - **An entry-point field on `ShaderDescr`** — `#45`'s option 1. It existed to
   avoid duplicating the fragment stage across variant modules, which the
   preprocessor solved by making variants share sources. The backend still
-  hardcodes `vs_main`/`fs_main` (`extensions/wgpu/internal/gfxbackend.go:618,654`), and that is now
+  hardcodes `vs_main`/`fs_main` (`extensions/gogpu/internal/gfxbackend.go:618,654`), and that is now
   merely a fact rather than a cost.
 - **The baked pose buffer's precision.** `bundles/scene/animpack.go`'s poses are per-model
   animation data with their own consumer and their own error budget, sized by

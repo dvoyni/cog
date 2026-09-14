@@ -7,7 +7,7 @@ hold and tick numbering behind them.
 
 app is a **Slot**: it ships its own declarations and implementation, and works
 only once a `MainLoop` **Adapter** fills its required `MainLoopPort`. The MainLoop is
-the platform main loop, and `wgpu` provides it on the desktop and the web. The
+the platform main loop, and `gogpu` provides it on the desktop and the web. The
 vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
 [ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 app declares no Resources: the viewport, its resource and its commands belong to
@@ -54,7 +54,7 @@ plugins := []kernel.Plugin{
     inputplugin.New(),
     appplugin.New(),
     gfxplugin.New(),
-    wgpuplugin.New(), // provides app's MainLoop and gfx's Backend
+    gogpuplugin.New(), // provides app's MainLoop and gfx's Backend
     …
 }
 ```
@@ -95,7 +95,7 @@ quit, and the `MainLoop` calls the `Loop`, every frame.
   drawn frame on its render thread, and `Quit` after its loop returns. Each
   publishes one event and waits for its subscribers, so the ordering the MainLoop
   chooses between its own work and these calls is the ordering subscribers see.
-  wgpu flushes the frame's input before `Frame`, so every tick of the frame sees
+  gogpu flushes the frame's input before `Frame`, so every tick of the frame sees
   it, and calls `WindowSize` before it resolves the frame's viewport.
 - **`QuitCmd` calls `MainLoop.Quit`**, from whatever goroutine dispatched it, so
   `Quit` must be safe on any goroutine.

@@ -41,6 +41,9 @@ marked **Gap** and says what would settle it.
 > `wgpu_time` with its schema unchanged; the recipe in
 > [Under pause](#under-pause) uses the new name. input dispatches no app
 > command, and neither of its capabilities changed.
+>
+> **Renamed by the user after #369.** The wgpu Extension these notes name is
+> now **gogpu**: `extensions/gogpu`, built by `gogpuplugin.New()`.
 
 ---
 
@@ -185,7 +188,7 @@ HiDPI laptop.
 `input` **cannot** convert: `gfx.Viewport` is gfx's resource and
 `input.Dependencies()` is `nil`. The two routes that would let it are both worse
 than the arithmetic — `input` depending on `gfx` inverts the import graph for a
-debug facility, and having `wgpu` push the window size into an `input` resource
+debug facility, and having `gogpu` push the window size into an `input` resource
 duplicates `gfx.Viewport` and puts a new obligation on the driver contract.
 
 **The agent converts, using numbers it already holds**, and the description says

@@ -447,7 +447,7 @@ const (
 type TextureTransition = types.TextureTransition
 
 // ShaderDesc describes a shader module to create from opaque, backend-specific
-// source bytes (WGSL for the wgpu backend). gfx flattens a shader's sources
+// source bytes (WGSL for the gogpu backend). gfx flattens a shader's sources
 // before it hands Code over, so a backend never sees a preprocessor directive.
 type ShaderDesc = types.ShaderDesc
 
@@ -709,7 +709,7 @@ type ResourceOpView struct {
 
 // inlineAnchor is never called. It exists so that gfx's importers can inline
 // the accessors they call per instance - canvas per sprite, scene per draw,
-// wgpu per pass. Go inlines a method of a package the caller does not import
+// gogpu per pass. Go inlines a method of a package the caller does not import
 // only when a package it does import references that method, and these
 // methods are declared in gfx/internal/types, which nothing outside gfx can
 // import. Referencing them here puts their bodies in this package's export

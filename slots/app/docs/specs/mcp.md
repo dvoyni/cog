@@ -51,6 +51,11 @@ settle it.
 > **Renamed after #368.** The Driver named in these notes is now **MainLoop**:
 > `app.MainLoop`, `app.MainLoopPort` and `wgpu.AppMainLoop`, so that Driver stays
 > the ecs term.
+>
+> **Renamed by the user after #369.** The wgpu Extension these notes name is
+> now **gogpu**: `extensions/gogpu`, `gogpuplugin.New()` and
+> `gogpu.AppMainLoop`. "Whose capability it is" below keeps the old name,
+> because it is the reasoning that named the tool `wgpu_time` after wgpu.
 
 ---
 
@@ -66,7 +71,7 @@ settle it.
   [The flag is an atomic](#the-flag-is-an-atomic)
 - [`app_time`](#app_time) · [What the loop buys](#what-the-loop-buys)
 - [Required app changes](#required-app-changes) ·
-  [Required wgpu changes](#required-wgpu-changes)
+  [Required gogpu changes](#required-gogpu-changes)
 - [Out of scope](#out-of-scope)
 
 ---
@@ -90,7 +95,7 @@ gets it from source.
 The hardest-looking question here dissolves on one grep.
 
 **`time.Now()` appears exactly once in the whole module** — `onDraw` in
-`extensions/wgpu/internal/plugin.go`, the frame pacer measuring draw-to-draw
+`extensions/gogpu/internal/plugin.go`, the frame pacer measuring draw-to-draw
 interval. Nothing else in cog reads wall-clock time. `app.UpdateEvent.Dt` is
 always `l.config.Step.Seconds()` (`Frame` in `slots/app/internal/loop.go`), a
 **constant**, and `anim` advances timelines by exactly that constant
@@ -138,9 +143,9 @@ visibly stops.**
 **Pause stops `app.UpdateEvent` publication and nothing else.**
 
 The lever already exists and is one branch deep. app's `Frame`
-(`slots/app/internal/loop.go`), which wgpu's `onUpdate` calls every frame,
-converts measured frame time into N update events through `accumulate`; wgpu's
-`onDraw` (`extensions/wgpu/internal/plugin.go`) is gogpu's own vsync callback
+(`slots/app/internal/loop.go`), which gogpu's `onUpdate` calls every frame,
+converts measured frame time into N update events through `accumulate`; gogpu's
+`onDraw` (`extensions/gogpu/internal/plugin.go`) is the gogpu library's own vsync callback
 and is independent of it. Stop feeding the accumulator and updates stop while
 draws continue.
 
@@ -153,7 +158,7 @@ capture still has something to read.
 
 What else keeps running while paused, all of it deliberate:
 
-- `flushInput` still dispatches `input.ApplyCmd` (`extensions/wgpu/internal/input.go:98-105`), so
+- `flushInput` still dispatches `input.ApplyCmd` (`extensions/gogpu/internal/input.go:98-105`), so
   synthetic input still reaches the seam and banks there.
 - `app.WindowSizeChangeEvent` still publishes, and `gfx.SetViewportCmd` still
   fires from `onDraw`.
@@ -170,7 +175,7 @@ resolve, so "paused" cannot mean "no submits". See
 ## Resume banks nothing
 
 While paused, `onDraw` keeps incrementing `frameSeq`
-(`extensions/wgpu/internal/plugin.go`), so a naive resume computes
+(`extensions/gogpu/internal/plugin.go`), so a naive resume computes
 `dt = frameDt × (seq − lastFrameSeq)` and turns thirty paused seconds into a
 thirty-second delta.
 
@@ -235,7 +240,7 @@ against the current frozen frame and straddle two ticks. See
 [mcp §Pairing a moment](../../../../bundles/mcp/docs/specs/mcp.md#pairing-a-moment).
 
 **It is a tick-source behaviour before it is an agent-facing one**, so it
-belongs in the `app` and `wgpu` READMEs alongside pause and step, not only here.
+belongs in the `app` and `gogpu` READMEs alongside pause and step, not only here.
 
 > **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).**
 > This section shipped as written and **is not sufficient on its own**. The
@@ -341,7 +346,7 @@ capability.**
 
 `app` is an Open slot and a driver implements it — the exact precedent is
 `app.QuitCmd`, declared at `slots/app/commands.go:6` and handled by `wgpu` at
-`extensions/wgpu/internal/plugin.go:99`, with `gfx.SetViewportCmd` handled by `gfx` as the second
+`extensions/gogpu/internal/plugin.go:99`, with `gfx.SetViewportCmd` handled by `gfx` as the second
 instance. Time control is the same shape: **only the host that owns the loop can
 stop it**, and `app` names the contract so gameplay code never imports a driver.
 
@@ -382,8 +387,8 @@ different thing with a different answer.
 
 The command handler runs on an HTTP goroutine; `Frame` runs on the MainLoop's main
 thread. **That boundary already exists and is already crossed with atomics** —
-`alpha` (`slots/app/internal/loop.go`) and wgpu's `frameDtBits`/`frameSeq`
-(`extensions/wgpu/internal/plugin.go`). The pause state, the pending-step count
+`alpha` (`slots/app/internal/loop.go`) and gogpu's `frameDtBits`/`frameSeq`
+(`extensions/gogpu/internal/plugin.go`). The pause state, the pending-step count
 and the step-coalescing flag join them as atomics on the tick source
 (`slots/app/internal/tick.go`), written only by the command handler.
 
@@ -537,7 +542,7 @@ The mechanism is one branch inside a function that already exists.
 
 ---
 
-## Required wgpu changes
+## Required gogpu changes
 
 > **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).** Three additions to the
 > list below, all of them consequences of the two new sections above: the tick
@@ -548,7 +553,7 @@ The mechanism is one branch inside a function that already exists.
 > `gfx.SnapshotView` gains `Tick`, and `gfx`, `canvas` and `ui` carry it out
 > of the tick their snapshot was recorded in.
 
-**`extensions/wgpu/internal/plugin.go`**
+**`extensions/gogpu/internal/plugin.go`**
 
 - Atomics beside `alpha` and `frameSeq`: `paused`, `pendingSteps`, and the
   step-coalescing flag.
@@ -559,14 +564,14 @@ The mechanism is one branch inside a function that already exists.
 - Register the time-control command handler; it writes the atomics and blocks
   until the requested steps have been published.
 
-**`extensions/wgpu/internal/mcpprovider.go`** (new)
+**`extensions/gogpu/internal/mcpprovider.go`** (new)
 
 - A `provider` value whose `Capabilities()` returns the one capability,
   contributed with `ProvideAdapter[McpProvider]` in `Register`.
 - `TimeRequest`/`TimeResponse`, the `Func` body with its own deadline, and the
   description string reproduced above.
 
-**`extensions/wgpu/README.md`**
+**`extensions/gogpu/README.md`**
 
 - The accumulator branch, the discard-on-pause, step semantics, the atomics, and
   the step-coalescing rule.

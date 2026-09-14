@@ -7,7 +7,8 @@
 // same file conflict instead of racing.
 //
 // storage is a Slot: its plugin, built by storageplugin.New, requires exactly
-// one PermanentFS Adapter through PermanentFSPort, which an Extension (diskfs,
-// jsfs) provides. storage itself carries no platform code: no build tags, no
-// os. Read mounts are plain fs.FS values the composition root chooses.
+// one PermanentFS Adapter through PermanentFSPort, which an Extension
+// (diskstorage, jsstorage) provides. storage itself carries no platform code:
+// no build tags, no os. Read mounts are plain fs.FS values the composition root
+// chooses.
 package storage

@@ -13,7 +13,7 @@ assembled from the resolved tickets of
 every section cites the tickets it came from. Nothing is decided here — where a
 gap was found while assembling, it is marked **Gap** and filed as its own ticket.
 
-The plugin does not exist yet. Neither do the `gfx`, `wgpu`, `m` and `canvas`
+The plugin does not exist yet. Neither do the `gfx`, `gogpu`, `m` and `canvas`
 changes it depends on; those are specified here as checklists
 ([Required engine changes](#required-engine-changes)), because scene cannot be
 correct without them.
@@ -588,7 +588,7 @@ not scene's doing.** gogpu's Vulkan HAL returns a render-pass encoder *without
 beginning a render pass* when the descriptor names no colour attachments, and
 `End` then calls `vkCmdEndRenderPass` on a pass that was never begun — an access
 violation inside the driver, several frames of stack from anything that names a
-pass. It is in the pinned version and in the newest published one. `cog/extensions/wgpu`
+pass. It is in the pinned version and in the newest published one. `cog/extensions/gogpu`
 therefore declines such a pass and reports `ErrDepthOnlyPassUnsupported` once
 per run, which turns the segfault into a line a caller can read; a browser's own
 WebGPU encodes the pass correctly, so the same build run through `cmd/web` does
@@ -607,7 +607,7 @@ shadow maps will have to negotiate when they land.
 Vulkan does, since `gogpu/wgpu#353` shipped in v0.34.5; a browser always did. The
 GLES HAL does not, and it fails more quietly than Vulkan used to: it binds no
 framebuffer for a colourless pass and draws into whatever was bound last, with
-no fault and nothing reported. `cog/extensions/wgpu` therefore asks the selected backend
+no fault and nothing reported. `cog/extensions/gogpu` therefore asks the selected backend
 rather than the build tag, and **an unrecognised backend is treated as unable** —
 a refused pass reports itself, an encoded one that does not work is a wrong
 picture on someone else's machine.
@@ -3012,7 +3012,7 @@ Housekeeping:
   `maxInterStageShaderVariables`, `maxPushConstantSize` and
   `maxNonSamplerBindings` at zero, so a field-by-field comparison must skip them.
 
-### `wgpu`
+### `gogpu`
 
 - `resolveTarget` grows a texture-view path cached by `{texture, mip, layer}`; it
   knows only the screen ID today.
@@ -3126,7 +3126,7 @@ Colour ([Canvas colour-space migration](https://github.com/dvoyni/cog/issues/33)
 
 **Migration order.** Both consumers `replace` to the working tree with no version
 pin, so the `m` sweep is atomic across all three trees by construction. The
-choice is the gfx/wgpu half, and it lands **first, as a separate step**: the
+choice is the gfx/gogpu half, and it lands **first, as a separate step**: the
 `RGBA8Srgb` member, `ScreenTarget()` becoming a frame buffer plus present pass,
 and `TextureWithResource` taking a format are all additive, used by nothing, and
 must produce a **pixel-identical frame**. That is the strongest falsifiable claim
@@ -3393,7 +3393,7 @@ This is available because culling, sorting and packing happen entirely in the
 update-thread flush and the result is published as `Passes(dst []PassView)`
 including the frustum; `extensions/gfx/plugin_test.go` already has a `fakeBackend`
 implementing the full `Backend` interface; `gfx.Backend` is provided to gfx as an Adapter
-without the `wgpu` plugin at all; and a headless engine is already a named
+without the `gogpu` plugin at all; and a headless engine is already a named
 concept. **`go test ./cmd/scene/...` is the one command the implementation effort
 runs.** Each demo additionally prints its own key numbers on screen through
 canvas, so a human running it sees them without a second command.

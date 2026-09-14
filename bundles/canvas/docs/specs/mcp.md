@@ -60,6 +60,9 @@ settle it.
 > `Paused`, and canvas declares `app.Name` as a dependency so the handler is
 > always there. The wgpu tool spec moved to
 > [slots/app/docs/specs/mcp.md](../../../../slots/app/docs/specs/mcp.md).
+>
+> **Renamed by the user after #369.** The wgpu Extension these notes name is
+> now **gogpu**: `extensions/gogpu`, built by `gogpuplugin.New()`.
 
 ---
 

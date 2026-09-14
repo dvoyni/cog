@@ -95,7 +95,7 @@ From
 | an app writes       | —                               | `mcpimpl.New()`               |
 
 `app` is the precedent the map picked, and it is exact: `app` is the contract,
-named for what it is about, while `wgpu` — its single implementor — is named for
+named for what it is about, while `gogpu` — its single implementor — is named for
 itself. Providers name `mcp` on every capability they add; an app names
 `mcpimpl` once, in its plugin list. The good name goes to the many.
 
@@ -129,6 +129,11 @@ itself. Providers name `mcp` on every capability they add; an app names
 > offers no capability. The wgpu tool spec moved to
 > [slots/app/docs/specs/mcp.md](../../../../slots/app/docs/specs/mcp.md). File
 > and line citations of wgpu's tick code below are as they were before the move.
+>
+> **Renamed by the user after #369.** The wgpu Extension these notes name is
+> now **gogpu**: `extensions/gogpu`, built by `gogpuplugin.New()`. Where the
+> text below has wgpu as the tick source and the provider of `wgpu_time`, as it
+> was before #368, it keeps the old name, because the tool was named after it.
 
 One package was rejected. It would put the MCP SDK and
 `github.com/google/jsonschema-go` in the module graph of anything importing
@@ -768,8 +773,8 @@ What makes the exception safe is mechanical rather than a promise:
   after that point fails on a cancelled context rather than reaching a stopped
   plugin.
 
-**`wgpu` is not precedent for this.** the wgpu plugin's `Run` captures its
-`Executioner` into the gogpu callbacks (`extensions/wgpu/internal/plugin.go:109-114`), but `Run`
+**`gogpu` is not precedent for this.** the gogpu plugin's `Run` captures its
+`Executioner` into the gogpu library's callbacks (`extensions/gogpu/internal/plugin.go:109-114`), but `Run`
 never returns until shutdown: the handler that received the handle is still on
 the stack the whole time it is used. The broker's `Start` returns immediately
 and the handle outlives it. Different move, correctly treated differently.

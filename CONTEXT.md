@@ -37,7 +37,7 @@ A Plugin that cannot work until an Adapter fills a Port it requires, and that co
 _Avoid_: Interface, contract half; Open slot, which is retired
 
 **Extension**:
-A Plugin that fills Slots' required Ports with Adapters and offers no API of its own. It may also contribute to a collected Port. A plugin that would need both is two plugins.
+A Plugin that fills Slots' required Ports with Adapters and offers no API of its own. It may also contribute to a collected Port. A plugin that would need both is two plugins. One that fills exactly one Slot is named with that Slot as its suffix, as diskstorage and jsstorage fill storage; one that fills several, as gogpu fills app and gfx, is named freely.
 _Avoid_: Backend, driver, as the name of the kind; implementation of a Slot, its retired meaning
 
 **Bundle**:
@@ -74,7 +74,7 @@ The single plugin that owns the application's blocking runtime loop, which the e
 _Avoid_: System plugin. A System is the ECS's term for a func run over matching Entities, and has nothing to do with the Host.
 
 **MainLoop**:
-The Port app requires exactly one Adapter for: the platform main loop, which wgpu fills on the desktop and the web. app calls it only to hand over its Loop and to quit; the MainLoop runs the platform loop and calls the Loop every frame, and the Loop publishes app's events. The plugin filling it is ordinarily the Host.
+The Port app requires exactly one Adapter for: the platform main loop, which gogpu fills on the desktop and the web. app calls it only to hand over its Loop and to quit; the MainLoop runs the platform loop and calls the Loop every frame, and the Loop publishes app's events. The plugin filling it is ordinarily the Host.
 _Avoid_: Driver, which is the Store an ecs Query walks; Loop, which is the half app implements and the MainLoop calls
 
 **Tick source**:

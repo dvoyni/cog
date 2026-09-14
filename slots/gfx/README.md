@@ -31,7 +31,7 @@ gfx has the declaration-root shape of
   sinks, `RenderPass`, `Capture`, the shader, pipeline, texture, sampler and
   buffer descriptors, `Limits`, and every ID, format and enum in `types.go`.
   Recorders (canvas, scene, ui, ecsscene and games) import it to draw, and an
-  Adapter's backend (wgpu's `gfx*.go` files, cog-examples' headless `Backend`)
+  Adapter's backend (gogpu's `gfx*.go` files, cog-examples' headless `Backend`)
   imports it and nothing else of gfx.
 - **`slots/gfx/internal/types`** declares the concrete types the root aliases:
   the recording types whose unexported state the translator reads, their
@@ -59,7 +59,7 @@ package the caller does not import only when a package it does import
 references that method, and nothing outside gfx can import `internal/types`, so
 the anchor references the accessors importers call per instance —
 `ParameterDescr.Name` and its value accessors, `TextureDescr.ID` and `Size`,
-`MaterialDescr.State`, `TextureFormat.Resolve` — and canvas, scene and wgpu
+`MaterialDescr.State`, `TextureFormat.Resolve` — and canvas, scene and gogpu
 inline them. Add an accessor to it when a hot importer stops inlining one; the
 tier test allows exactly that shape.
 
@@ -79,14 +79,14 @@ texture resources are available at runtime.
 **The Backend Adapter.** The plugin calls
 `registrar.RequireAdapter[gfx.BackendPort]()`, the Port declared in `ports.go`
 on `gfx.Backend`, and reads the handle from `Start` onwards. A driver declares
-an Adapter type for it, as wgpu's `GfxBackend kernel.Adapter[gfx.BackendPort]`,
+an Adapter type for it, as gogpu's `GfxBackend kernel.Adapter[gfx.BackendPort]`,
 and provides its backend with
 `registrar.ProvideAdapter[GfxBackend](gfx.Backend(backend))` during its own `Register`; a
 composition with no provider fails with `kernel.ErrMissingAdapter`, and one
 with two fails with `kernel.ErrDuplicateAdapter`. No command installs a
 backend.
 
-A driver whose GPU device arrives later (wgpu's is created asynchronously
+A driver whose GPU device arrives later (gogpu's is created asynchronously
 inside the render loop) provides a stable value at `Register` and attaches the
 device to it once the device exists. Until then `Backend.Ready` is false.
 `ResourceQueue.Ready` asks the same question, and a frame rendered before the
@@ -341,7 +341,7 @@ affect translator-owned path resources; they do not release explicit
 ### Declared
 
 `WindowSizeChangeEvent{Width, Height}` reports logical-window size changes.
-The wgpu plugin publishes it synchronously before updating the viewport. Gfx does
+The gogpu plugin publishes it synchronously before updating the viewport. Gfx does
 not subscribe to this event itself.
 
 ### Subscribed

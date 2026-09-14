@@ -25,6 +25,6 @@ import (
 type PermanentFS = types.PermanentFS
 
 // PermanentFSPort is the Port storage requires exactly one Adapter for: the
-// permanent filesystem an Extension such as diskfs or jsfs provides. A
-// composition without one fails with kernel.ErrMissingAdapter.
+// permanent filesystem an Extension such as diskstorage or jsstorage provides.
+// A composition without one fails with kernel.ErrMissingAdapter.
 type PermanentFSPort kernel.RequiredPort[PermanentFS]

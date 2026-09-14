@@ -9,5 +9,5 @@ import (
 
 // New creates the app plugin. Its app.Config arrives through kernel.New's
 // config map under app.Name, and it requires exactly one Adapter for
-// app.MainLoopPort, which wgpu provides.
+// app.MainLoopPort, which gogpu provides.
 func New() kernel.Plugin { return internal.New() }

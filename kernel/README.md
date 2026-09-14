@@ -240,8 +240,8 @@ Both are declared like commands, as defined types built from a kernel shape:
 type MainLoopPort kernel.RequiredPort[MainLoop]    // app: exactly one Adapter
 type BackendPort kernel.RequiredPort[Backend]      // gfx: exactly one Adapter
 type ProviderPort kernel.CollectedPort[Provider]   // mcp: any number, zero included
-type AppMainLoop kernel.Adapter[app.MainLoopPort]  // wgpu: fills app.MainLoopPort
-type GfxBackend kernel.Adapter[gfx.BackendPort]    // wgpu: fills gfx.BackendPort
+type AppMainLoop kernel.Adapter[app.MainLoopPort]  // gogpu: fills app.MainLoopPort
+type GfxBackend kernel.Adapter[gfx.BackendPort]    // gogpu: fills gfx.BackendPort
 ```
 
 Three declarations on `Registrar` take those types:
@@ -334,7 +334,7 @@ or `CollectAdapters` declaration: the Port `Type`, the `Interface` it is built
 on, its declaring `Owner`, whether it `Collects`, and its `Adapters` in plugin
 order, each an `AdapterDescription` of the Adapter `Type` and the `Plugin` that
 provided it. `Dump` prints them in a `ports:` section, as
-`app.MainLoopPort (app) requires [wgpu.AppMainLoop (wgpu)]`. An Adapter nobody
+`app.MainLoopPort (app) requires [gogpu.AppMainLoop (gogpu)]`. An Adapter nobody
 consumes binds to nothing and is not listed.
 
 `CommandDescription` and `SubscriptionDescription` also carry `Reads`, `Writes`

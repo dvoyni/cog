@@ -37,7 +37,7 @@ type BackendPort kernel.RequiredPort[Backend]
 // mcp
 type ProviderPort kernel.CollectedPort[Provider]
 
-// wgpu
+// gogpu
 type AppMainLoop kernel.Adapter[app.MainLoopPort]
 type GfxBackend kernel.Adapter[gfx.BackendPort]
 
@@ -60,7 +60,7 @@ Only the first type argument is written; the rest are inferred from it:
 ```go
 p.backend = registrar.RequireAdapter[gfx.BackendPort]()          // in gfx
 p.providers = registrar.CollectAdapters[mcp.ProviderPort]()      // in the mcp broker
-registrar.ProvideAdapter[GfxBackend](gfx.Backend(p.gfxBackend))  // in wgpu
+registrar.ProvideAdapter[GfxBackend](gfx.Backend(p.gfxBackend))  // in gogpu
 ```
 
 - **`RequireAdapter[P]`** declares that the calling plugin needs exactly one
@@ -170,8 +170,8 @@ unbound Port and every nil Adapter at once. Messages name types through
 
 ```
 plugin "gfx" requires an adapter for gfx.BackendPort, but no plugin provides one
-plugin "gfx" requires exactly one adapter for gfx.BackendPort, but several are provided: [wgpu.GfxBackend (wgpu), headless.gfxBackendAdapter (headlessbackend)]
-plugin "diskfs" provides a nil diskfs.StoragePermanentFS
+plugin "gfx" requires exactly one adapter for gfx.BackendPort, but several are provided: [gogpu.GfxBackend (gogpu), headless.gfxBackendAdapter (headlessbackend)]
+plugin "diskstorage" provides a nil diskstorage.StoragePermanentFS
 ```
 
 ## Description
@@ -198,8 +198,8 @@ type AdapterDescription struct {
 
 ```
 ports:
-  app.MainLoopPort (app) requires [wgpu.AppMainLoop (wgpu)]
-  gfx.BackendPort (gfx) requires [wgpu.GfxBackend (wgpu)]
+  app.MainLoopPort (app) requires [gogpu.AppMainLoop (gogpu)]
+  gfx.BackendPort (gfx) requires [gogpu.GfxBackend (gogpu)]
   mcp.ProviderPort (mcpserver) collects [input.McpProvider (input), mcp.McpProvider (mcpserver)]
 ```
 

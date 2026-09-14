@@ -9,7 +9,7 @@ import (
 )
 
 // A depth-only pass is the one place in the engine where a pipeline's colour
-// targets and a pass's attachments can disagree. wgpu's BeginPass already
+// targets and a pass's attachments can disagree. gogpu's BeginPass already
 // encodes a NoTarget() pass with no colour attachment at all, and every
 // pipeline gfx built declared one anyway, so setting one into the other is a
 // validation failure - and gfx drops those, so the whole frame's command buffer

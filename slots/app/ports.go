@@ -4,7 +4,7 @@ import "github.com/dvoyni/cog/kernel"
 
 // MainLoop is the interface app's required Adapter implements: the platform
 // main loop, which runs the frames and calls app's Loop in each of them. A
-// plugin that owns one (wgpu on the desktop and the web) fills MainLoopPort
+// plugin that owns one (gogpu on the desktop and the web) fills MainLoopPort
 // with registrar.ProvideAdapter during its Register, and is ordinarily the
 // engine's Host as well.
 //
@@ -24,6 +24,6 @@ type MainLoop interface {
 }
 
 // MainLoopPort is the Port app requires exactly one Adapter for: the platform
-// main loop, which wgpu provides as wgpu.AppMainLoop. A composition without
+// main loop, which gogpu provides as gogpu.AppMainLoop. A composition without
 // one fails with kernel.ErrMissingAdapter.
 type MainLoopPort kernel.RequiredPort[MainLoop]

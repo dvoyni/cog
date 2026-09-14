@@ -57,9 +57,10 @@ error handling.
     in, and systems as plain funcs whose parameter types are their lock set.
 - [`storage`](slots/storage/README.md): layered read filesystems and one permanent
     writable filesystem, which a platform Adapter provides.
-- [`diskfs`](extensions/diskfs) and [`jsfs`](extensions/jsfs): storage's permanent
-    filesystem Adapters, a directory under the user's data directory on desktop
-    and localStorage in a browser.
+- [`diskstorage`](extensions/diskstorage) and
+    [`jsstorage`](extensions/jsstorage): storage's permanent filesystem
+    Adapters, a directory under the user's data directory on desktop and
+    localStorage in a browser.
 - [`m`](libs/m): immutable vectors, rectangles, colors, matrices, quaternions,
     scalar helpers, and splines. Angles use radians.
 - [`gfx`](slots/gfx/README.md): driver-neutral rendering queues, resources, viewport,
@@ -72,7 +73,7 @@ error handling.
     scene's own types, and the one system that records them into scene.
 - [`ui`](bundles/ui/README.md): immediate-mode layout, interaction, canvas-backed visual
     processing, and a snapshot of what layout resolved.
-- [`wgpu`](extensions/wgpu/README.md): window, input, frame timing and WebGPU system
+- [`gogpu`](extensions/gogpu/README.md): window, input, frame timing and WebGPU system
     driver, and app's platform MainLoop.
 - [`mcp`](bundles/mcp/README.md): the agent-facing extension point — typed capabilities
     a plugin offers, collected through a Port from every plugin's Provider by a
@@ -85,7 +86,7 @@ Every plugin is one kind, and its directory says which:
 - **Slots** (`slots/`) cannot work until an **Adapter** fills a **Port** they
     require, and composition fails without one: app, gfx, storage.
 - **Extensions** (`extensions/`) provide Adapters for Slots and declare no API:
-    wgpu, diskfs, jsfs.
+    gogpu, diskstorage, jsstorage.
 - **Bundles** (`bundles/`) are every other plugin. They require no Port, and
     may collect Adapters or contribute them.
 - **Libraries** (`libs/`) define no plugin and import only other Libraries and
@@ -137,17 +138,17 @@ covering one focused mechanism takes that mechanism's name.
 config := map[kernel.PluginName]any{
     storage.Name: storage.Config{}.
         WithReadFS("res", storage.DefaultReadPriority, os.DirFS("res")),
-    diskfs.Name: diskfs.Config{AppId: "my-app"},
-    wgpu.Name: wgpu.Config{}.WithTitle("My App"),
+    diskstorage.Name: diskstorage.Config{AppId: "my-app"},
+    gogpu.Name: gogpu.Config{}.WithTitle("My App"),
 }
 
 plugins := []kernel.Plugin{
     storageplugin.New(),
-    diskfsplugin.New(), // provides storage's PermanentFS Adapter
+    diskstorageplugin.New(), // provides storage's PermanentFS Adapter
     inputplugin.New(),
     appplugin.New(),
     gfxplugin.New(),
-    wgpuplugin.New(), // provides app's MainLoop and gfx's Backend Adapters
+    gogpuplugin.New(), // provides app's MainLoop and gfx's Backend Adapters
     ...
 }
 
