@@ -1,8 +1,8 @@
-package inputimpl
+package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/input"
-	"github.com/dvoyni/cog/bundles/input/internal"
+	"github.com/dvoyni/cog/bundles/input/internal/types"
 	"github.com/dvoyni/cog/extensions/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
@@ -25,7 +25,7 @@ func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 
 // Register registers the input contract with the kernel.
 func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.InitResource(internal.NewState())
+	registrar.InitResource(types.NewState())
 	registrar.HandleCommand[input.ApplyCmd](applyCmdImpl)
 	registrar.HandleCommand[input.SynthesizeCmd](synthesizeCmdImpl)
 	registrar.HandleCommand[input.StateCmd](stateCmdImpl)
@@ -42,21 +42,21 @@ func advanceOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	return func(access kernel.ResourceAccess) {
 			state = access.GetWrite[*input.State]()
 		}, func(kernel.Kernel, app.UpdateEvent) error {
-			internal.StateAdvance(state.Get())
+			types.StateAdvance(state.Get())
 			return nil
 		}
 }
 
 // publish asynchronously publishes the discrete input event for one change.
 func publish(k kernel.Kernel, c input.Change) {
-	switch internal.ChangeKindOf(&c) {
-	case internal.ChangeKindKey:
-		k.PublishEvent(input.KeyEvent{Key: internal.ChangeKey(&c), Mods: internal.ChangeMods(&c), Down: internal.ChangeDown(&c)})
-	case internal.ChangeKindPointer:
-		k.PublishEvent(input.PointerEvent{Pos: internal.ChangePos(&c)})
-	case internal.ChangeKindScroll:
-		k.PublishEvent(input.ScrollEvent{Dx: internal.ChangeDx(&c), Dy: internal.ChangeDy(&c)})
-	case internal.ChangeKindText:
-		k.PublishEvent(input.TextEvent{Rune: internal.ChangeRune(&c)})
+	switch types.ChangeKindOf(&c) {
+	case types.ChangeKindKey:
+		k.PublishEvent(input.KeyEvent{Key: types.ChangeKey(&c), Mods: types.ChangeMods(&c), Down: types.ChangeDown(&c)})
+	case types.ChangeKindPointer:
+		k.PublishEvent(input.PointerEvent{Pos: types.ChangePos(&c)})
+	case types.ChangeKindScroll:
+		k.PublishEvent(input.ScrollEvent{Dx: types.ChangeDx(&c), Dy: types.ChangeDy(&c)})
+	case types.ChangeKindText:
+		k.PublishEvent(input.TextEvent{Rune: types.ChangeRune(&c)})
 	}
 }

@@ -145,7 +145,7 @@ config := map[kernel.PluginName]any{
 plugins := []kernel.Plugin{
     storageplugin.New(),
     diskfs.New(diskfs.Config{AppId: "my-app"}), // provides storage's PermanentFS Adapter
-    inputimpl.New(),
+    inputplugin.New(),
     gfximpl.New(),
     wgpu.New(), // provides gfx's Backend Adapter
     ...

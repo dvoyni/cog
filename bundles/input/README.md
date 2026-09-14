@@ -4,44 +4,49 @@
 raw changes through one command; gameplay can poll the `State` resource or
 subscribe to discrete events without depending on a windowing implementation.
 
-input is a **Bundle**: a Slot and its one Extension, shipped together. The
-vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
+input is a **Bundle**: it requires no Adapter, and contributes one to mcp's
+collected Port. The vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the
+decision in
+[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
-input has the Bundle shape: a contract root, an `…impl` and an `internal/`.
-
-- **`bundles/input`** is the contract: `ApplyCmd`, `SynthesizeCmd` and
-  `StateCmd` with their requests and responses, the four events, the `State`
-  resource, the `Key`, `Mods`, `Pos` and `Change` vocabulary, `Action`,
-  `ParseKey`, `Play`, `Name` and the ordering identity `AdvanceOnUpdate`. It
-  declares no plugin, and it is what every other package imports.
-- **`bundles/input/inputimpl`** is the plugin: `New`, the handlers behind the
-  three commands and `AdvanceOnUpdate`, and the mcp Provider with its two
-  capabilities. It exports `New` and nothing else. Only composition roots and
-  tests import it.
-- **`bundles/input/internal`** holds what the two share and nothing else may
-  reach: the declarations of `Key` (with its name table), `Mods`, `Pos`,
-  `Change` and `State`, and the consume side of `State` — folding a change in
-  and advancing the per-tick edges.
-
-`State`, `Change` and the vocabulary they carry are declared in `internal` with
-their fields unexported, and re-exported from the root as aliases
-(`type State = internal.State`) plus a wrapper for each constructor. They stay
-concrete types, and their exported methods (`State.Pressed`, `Key.String`, …)
-are public API through the alias. What inputimpl needs beyond that goes through
-plain functions `internal` exports, which only the root and inputimpl can call.
-`internal` never imports the root. See
+input has the declaration-root shape of
 [`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+
+- **`bundles/input`** is the root, and holds declarations only: `ApplyCmd`,
+  `SynthesizeCmd` and `StateCmd` with their requests and responses, the four
+  events, the `State` resource, `Key`, `Mods`, `Pos`, `Change`, `Action`, the
+  `McpProvider` Adapter, `ErrUnknownKey`, `Name` and the ordering identity
+  `AdvanceOnUpdate`. Its functions, the `Change` constructors, `ParseKey` and
+  `Play`, are forwarders in `utils.go`. It declares no plugin, and it is what
+  every other package imports.
+- **`bundles/input/internal/types`** declares `Key` (with its name table),
+  `Mods`, `Pos`, `Change` and `State`, whose unexported state the plugin reads
+  or writes, and the consume side of `State` — folding a change in and
+  advancing the per-tick edges. It also holds `Play` and what `Play` dispatches
+  and carries: `SynthesizeCmd`, `SynthesizeRequest`, `StateResponse` and
+  `Action`. The root aliases every one of them.
+- **`bundles/input/internal`** is the plugin: its `New`, the handlers behind the
+  three commands and `AdvanceOnUpdate`, and the mcp Provider with its two
+  capabilities.
+- **`bundles/input/inputplugin`** exports only `New() kernel.Plugin`. Only
+  composition roots and tests import it.
+
+The aliased types stay concrete types, and their exported methods
+(`State.Pressed`, `Key.String`, …) are public API through the alias
+(`type State = types.State`). What the plugin needs beyond that goes through
+plain functions `internal/types` exports, which nothing outside `bundles/input`
+can call. `internal/types` never imports the root.
 
 ## Plugin
 
 - Name: `input.Name` (`"input"`)
-- Constructor: `inputimpl.New() kernel.Plugin`
+- Constructor: `inputplugin.New() kernel.Plugin`
 - Plugin dependencies: none
 - Requires: no Adapter
-- Contributes: one `mcp.Provider` Adapter
+- Contributes: one `mcp.Provider`, as the `input.McpProvider` Adapter for
+  `mcp.ProviderPort`
 - Go package dependencies: `app`, `kernel`, `mcp`
 - Configuration: none
 
@@ -49,7 +54,7 @@ plain functions `internal` exports, which only the root and inputimpl can call.
 `StateCmd`, subscribes `AdvanceOnUpdate` first to `app.UpdateEvent`, and
 contributes the Provider.
 
-Compose it with `inputimpl.New()`. A driver such as wgpu, or a test harness,
+Compose it with `inputplugin.New()`. A driver such as wgpu, or a test harness,
 does not compose anything of its own for input: it is a caller that dispatches
 `input.ApplyCmd`.
 
@@ -150,7 +155,7 @@ What to expect at the edges:
 - `ScrollEvent{Dx, Dy}` for scroll deltas.
 - `TextEvent{Rune}` for each text-input rune.
 
-The contract root declares all four event types and inputimpl publishes them.
+The root declares all four event types and the plugin publishes them.
 Neither subscribes to them.
 
 ## Event Subscribed
@@ -164,8 +169,8 @@ that reads those edges and wants the ordering stated orders
 
 ## State Resource
 
-`State` is a concrete type, declared in `internal` and aliased in the root; only
-inputimpl folds changes into it and advances it. Subscribers should bind
+`State` is a concrete type, declared in `internal/types` and aliased in the
+root; only the plugin folds changes into it and advances it. Subscribers should bind
 `access.GetRead[*input.State]()` and query:
 
 - `Pressed(Key) bool`: whether the key or button is currently held.
@@ -241,9 +246,9 @@ included.
 
 ## Offered To An Agent
 
-`inputimpl` contributes an `mcp.Provider` from `Register` and offers two
+The plugin contributes an `mcp.Provider` from `Register` and offers two
 capabilities, rendered as the tools `input_send` and `input_state`. The Provider
-and both capability bodies live in `inputimpl`.
+and both capability bodies live in `bundles/input/internal`.
 
 - **`input_send`** is an `mcp.Func` over `Play` — it cannot be an `mcp.Command`,
   because the wait between batches must happen outside every lock. It is

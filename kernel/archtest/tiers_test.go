@@ -29,7 +29,6 @@ var unmoved = []string{
 	"bundles/canvas",
 	"bundles/ecs",
 	"bundles/ecsscene",
-	"bundles/input",
 	"bundles/scene",
 	"bundles/ui",
 	"extensions/diskfs",

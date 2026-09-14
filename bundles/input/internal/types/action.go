@@ -1,4 +1,4 @@
-package input
+package types
 
 // ActionKind tags the variant of an Action. The seven kinds are the whole
 // vocabulary of a synthetic input sequence: there is no compound click and no
