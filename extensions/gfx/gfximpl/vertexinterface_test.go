@@ -14,8 +14,8 @@ import (
 // shader/layout pairs the engine ships, restated here rather than imported:
 // scene and canvas both sit above gfx, so gfx cannot see their Go types, and a
 // check gfx performs has to be exercised against the pairs gfx is actually
-// handed. They mirror bundles/scene/internal/vertexpack.go and bundles/canvas/internal/types/shader.go; the shader
-// halves mirror bundles/scene/sceneimpl/builtin/scene/vertex.wgsl and bundles/canvas/internal/builtin/canvas.
+// handed. They mirror bundles/scene/internal/types/vertexpack.go and bundles/canvas/internal/types/shader.go; the shader
+// halves mirror bundles/scene/internal/builtin/scene/vertex.wgsl and bundles/canvas/internal/builtin/canvas.
 //
 // Scene ships two named layouts, and the standard one is the skinned one's
 // first six rows - the same reslice scene itself makes, so the pair below

@@ -1,28 +1,9 @@
-// Package internal holds what scene's contract root and sceneimpl share but no
-// consumer may reach: the declarations of the recording vocabulary and the two
-// resources, the recording methods of OpQueue and the queries and mutations of
-// LookupAccess, the consume side of the queue, the model table with its
-// residency, unloads and the glTF loader behind it, the mesh table, the bundled
-// PBR material, the vertex, morph and animation packing, and the camera maths
-// the flush and the coordinate helpers both build on.
+// Package internal is the scene plugin: New, the resolution of scene.Config,
+// the flush that turns a tick's recorded scene.OpQueue into gfx passes and
+// draws - model expansion, light selection, culling, sorting, material
+// interning and instance packing - the handlers of the two-hop model load, and
+// the Start mount of the bundled shaders. Composition roots and tests reach New
+// through sceneplugin; everything else reaches scene through its root.
 //
-// A contract type whose unexported state sceneimpl reads (OpQueue, Lookup,
-// LookupAccess, MeshRef, Pass, MaterialTag, LayerMask) is declared here with its
-// fields unexported and aliased in the root (type OpQueue = internal.OpQueue).
-// It stays a concrete type - no per-instance call goes through an interface -
-// and its exported methods are scene's public API through the alias. What
-// sceneimpl reads beyond that goes through the plain functions in friends.go.
-// The types only sceneimpl ever holds (DrawRecord, MeshRecord, ModelView,
-// AnimBinding and the rest) export what the flush reads, because no public API
-// hands a consumer one of them.
-//
-// The model load is two commands. LoadModelCmd, the parse, is declared here
-// because the Lookup enqueues it from every draw and query of a path that is
-// not resident; sceneimpl handles it, and declares and handles the install that
-// follows.
-//
-// Only the root and sceneimpl can import this package: Go allows nothing
-// outside bundles/scene to. Nothing declared here imports the root, which is
-// what keeps the arrangement acyclic, so everything a recording method refers
-// to - down to the enums in its fields - is declared here too.
+// The plugin requires no Adapter and contributes none.
 package internal

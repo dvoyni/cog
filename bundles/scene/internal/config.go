@@ -1,14 +1,25 @@
 package internal
 
-// Config is scene's configuration. It is declared here because the Lookup
-// resource carries it, and sceneimpl re-exports it as sceneimpl.Config.
-type Config struct {
-	// PoseSampleRate is the global animation bake rate in Hz: every clip of
-	// every model is baked to pose rows at this rate at load. It must be
-	// positive.
-	PoseSampleRate int
-}
+import (
+	"fmt"
 
-// DefaultConfig is the configuration scene runs with when it is given none, and
-// what fills a field a caller left zero.
-func DefaultConfig() Config { return Config{PoseSampleRate: 60} }
+	"github.com/dvoyni/cog/bundles/scene"
+	"github.com/dvoyni/cog/bundles/scene/internal/types"
+)
+
+// resolveConfig reads the plugin's configuration value, filling every zero field
+// from the defaults, and validates what results.
+func resolveConfig(value any) (scene.Config, error) {
+	config := types.WithDefaults(scene.Config{})
+	if value != nil {
+		given, ok := value.(scene.Config)
+		if !ok {
+			return scene.Config{}, fmt.Errorf("scene: invalid config %T", value)
+		}
+		config = types.WithDefaults(given)
+	}
+	if config.PoseSampleRate <= 0 {
+		return scene.Config{}, fmt.Errorf("scene: PoseSampleRate must be positive, got %d", config.PoseSampleRate)
+	}
+	return config, nil
+}

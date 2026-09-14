@@ -18,7 +18,7 @@ import (
 // includee's own default, which is what an unsupplied #const means.
 func bundledSceneShader(t *testing.T, opts ...cgfx.ShaderOption) string {
 	t.Helper()
-	filesystem := storage.NewFileSystem("scene", os.DirFS("../../bundles/scene/sceneimpl"))
+	filesystem := storage.NewFileSystem("scene", os.DirFS("../../bundles/scene/internal"))
 	text, _, err := cgfx.FlattenShader(filesystem, cgfx.ShaderWithResource("builtin/scene/scene.wgsl", opts...))
 	if err != nil {
 		t.Fatalf("flatten the bundled scene shader: %v", err)

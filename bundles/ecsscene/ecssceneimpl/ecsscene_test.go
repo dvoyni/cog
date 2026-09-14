@@ -11,7 +11,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
 	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/sceneimpl"
+	"github.com/dvoyni/cog/bundles/scene/sceneplugin"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/kernel"
@@ -259,7 +259,7 @@ func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gpu.Ba
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) bool { sink.add(err); return false }).
-		WithPlugins(storageplugin.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{backend}, sceneimpl.New(),
+		WithPlugins(storageplugin.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{backend}, sceneplugin.New(),
 			ecsplugin.New(), New(), &gamePlugin{})
 	ctx, cancel := context.WithCancel(context.Background())
 	// The cleanup waits for Run to return rather than only cancelling it: a

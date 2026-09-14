@@ -54,6 +54,18 @@ ran from, and is kept as the record of what changed rather than as an open list.
 > `bundles/scene/sceneimpl`; and the WGSL sources are under
 > `bundles/scene/sceneimpl/builtin/scene/`. The file paths and line numbers
 > cited below are as they were when this was written.
+>
+> **Amended by [#361](https://github.com/dvoyni/cog/issues/361).** scene moved
+> to the declaration-root shape of
+> [ADR 0002](../../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+> The names an app authors a mesh with are still spelled `scene.X`: `Vertex`,
+> `VertexLayout`, `MeshRef`, `MeshDraw` and `VertexDecodePath` are in the root's
+> `types.go`, and `ErrMeshCustomLayoutNeedsMaterial` is declared in its
+> `err.go`. The mesh table, the minting and staging, the packing, the glTF
+> conversion and the bundled PBR moved from `bundles/scene/internal` to
+> `bundles/scene/internal/types`; the flush moved from `sceneimpl` to
+> `bundles/scene/internal`; and the WGSL sources are under
+> `bundles/scene/internal/builtin/scene/`.
 
 **What remains open is the by-eye confirmation**
 ([#223](https://github.com/dvoyni/cog/issues/223)). The size figures in
