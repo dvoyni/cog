@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/dvoyni/cog/bundles/ui/internal"
+import "github.com/dvoyni/cog/bundles/ui/internal/types"
 
 // ErrLayoutBusy reports a layout-snapshot arm made while one is already live.
 // It is refused rather than queued, for the reason a second draw or frame
@@ -26,4 +26,4 @@ func (ErrLayoutAbandoned) Error() string {
 // ErrLayoutNoSuchElement reports a subtree filter naming an index the tick's
 // tree does not have. It is raised inside the tick, where the tree is, and
 // travels the snapshot's delivery channel.
-type ErrLayoutNoSuchElement = internal.ErrLayoutNoSuchElement
+type ErrLayoutNoSuchElement = types.ErrLayoutNoSuchElement

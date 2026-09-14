@@ -1,30 +1,29 @@
-package ui_test
+package ui
 
 import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/canvas"
-	"github.com/dvoyni/cog/bundles/ui"
 	"github.com/dvoyni/cog/libs/m"
 )
 
 type modifierVisual struct {
-	states *[]ui.State
+	states *[]State
 }
 
 func (modifierVisual) DefaultSize(canvas.LookupAccess, any) m.Vec2 {
 	return m.Vec2{X: 10, Y: 10}
 }
 
-func (visual modifierVisual) Draw(_ canvas.LookupAccess, _ *canvas.OpQueue, state ui.State, _ any) {
+func (visual modifierVisual) Draw(_ canvas.LookupAccess, _ *canvas.OpQueue, state State, _ any) {
 	if visual.states != nil {
 		*visual.states = append(*visual.states, state)
 	}
 }
 
 func TestElementExposesEveryModifier(t *testing.T) {
-	children := []ui.Element{ui.NewElement()}
-	element := ui.NewElement().
+	children := []Element{NewElement()}
+	element := NewElement().
 		ID("element").
 		Width(100).
 		WidthRel(0.5).
@@ -66,15 +65,15 @@ func TestElementExposesEveryModifier(t *testing.T) {
 		PaddingBottomRel(0.1).
 		Stretch(1).
 		Shrink(1).
-		Align(ui.AlignCenter).
+		Align(AlignCenter).
 		Layer(1).
 		IgnoreLayout().
 		IgnoreClip().
-		State(ui.VisualActive, ui.VisualDisabled).
+		State(VisualActive, VisualDisabled).
 		Children(children...).
-		Layout(ui.LayoutGrid).
-		ChildrenArrangement(ui.ArrangeCenter).
-		ChildrenAlignment(ui.AlignCenter).
+		Layout(LayoutGrid).
+		ChildrenArrangement(ArrangeCenter).
+		ChildrenAlignment(AlignCenter).
 		Gap(8).
 		GapRel(0.1).
 		Wrap().
@@ -84,11 +83,11 @@ func TestElementExposesEveryModifier(t *testing.T) {
 	_ = element
 }
 
-var modifierSink ui.Element
+var modifierSink Element
 
 func TestElementModifiersDoNotAllocate(t *testing.T) {
 	allocations := testing.AllocsPerRun(100, func() {
-		modifierSink = ui.NewElement().
+		modifierSink = NewElement().
 			ID("element").
 			WidthRel(0.5).
 			Height(20).
