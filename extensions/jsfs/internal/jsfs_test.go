@@ -1,6 +1,6 @@
 //go:build js
 
-package jsfs
+package internal
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"syscall/js"
 	"testing"
 
+	"github.com/dvoyni/cog/extensions/jsfs"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
@@ -57,7 +58,7 @@ func fakeLocalStorage(t *testing.T) map[string]string {
 // and an engine started afterwards reads them back.
 func TestValuesRoundTripAndSurviveARestart(t *testing.T) {
 	items := fakeLocalStorage(t)
-	config := Config{AppId: "cog-jsfs-test"}
+	config := jsfs.Config{AppId: "cog-jsfs-test"}
 
 	first := start(t, config)
 	if _, err := first.kernel.ExecuteCommand[storage.AccessValuesCmd](storage.SetValue("volume", 0.25)); err != nil {
@@ -92,16 +93,32 @@ func TestAnEmptyOrInvalidAppIdIsRejected(t *testing.T) {
 	for _, appId := range []string{"", ".", "..", "a/b", `a\b`} {
 		t.Run(appId, func(t *testing.T) {
 			var reported []error
-			kernel.New(nil).Handler(func(err error) bool {
+			kernel.New(map[kernel.PluginName]any{jsfs.Name: jsfs.Config{AppId: appId}}).Handler(func(err error) bool {
 				reported = append(reported, err)
 				return true
-			}).WithPlugins(storageplugin.New(), New(Config{AppId: appId}))
+			}).WithPlugins(storageplugin.New(), New())
 
-			var invalid ErrInvalidAppId
+			var invalid jsfs.ErrInvalidAppId
 			if !errors.As(errors.Join(reported...), &invalid) || invalid.AppId != appId {
 				t.Fatalf("composition reported %v, want ErrInvalidAppId for %q", reported, appId)
 			}
 		})
+	}
+}
+
+// A configuration value under jsfs.Name that is not a jsfs.Config fails Register
+// rather than being read as an empty AppId.
+func TestAConfigThatIsNotAConfigIsRejected(t *testing.T) {
+	fakeLocalStorage(t)
+	var reported []error
+	kernel.New(map[kernel.PluginName]any{jsfs.Name: "feuds"}).Handler(func(err error) bool {
+		reported = append(reported, err)
+		return true
+	}).WithPlugins(storageplugin.New(), New())
+
+	var invalid jsfs.ErrInvalidConfig
+	if !errors.As(errors.Join(reported...), &invalid) || invalid.Got != "feuds" {
+		t.Fatalf("composition reported %v, want ErrInvalidConfig for %q", reported, "feuds")
 	}
 }
 
@@ -142,15 +159,15 @@ type running struct {
 
 // start runs an engine of storage and jsfs until stop, which waits for it to
 // shut down, as a page unload would.
-func start(t *testing.T, config Config) running {
+func start(t *testing.T, config jsfs.Config) running {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	engine := kernel.New(nil).
+	engine := kernel.New(map[kernel.PluginName]any{jsfs.Name: config}).
 		Handler(func(err error) bool {
 			t.Errorf("unexpected kernel error: %v", err)
 			return true
 		}).
-		WithPlugins(storageplugin.New(), New(config))
+		WithPlugins(storageplugin.New(), New())
 	done := make(chan struct{})
 	go func() {
 		engine.Run(ctx)
