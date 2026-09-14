@@ -3,8 +3,8 @@ package types
 import (
 	"math"
 
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // unitShape names one of scene's own meshes, the ones the debug vocabulary is
@@ -67,7 +67,7 @@ func (l *Lookup) ensureUnit(shape unitShape, bake BakeFunc) MeshRef {
 	l.unit[shape] = l.bakeMeshNow(meshInput{
 		vertices: vertexSpan, indices: indexSpan,
 		vertexCount: len(vertices), indexCount: len(indices),
-		topology: gpu.TopologyTriangleList, indexWidth: width, layout: layout,
+		topology: gfx.TopologyTriangleList, indexWidth: width, layout: layout,
 		layoutID: layoutID, standard: true, bounds: bounds, uv: uv,
 	}, arena, bake)
 	return l.unit[shape]

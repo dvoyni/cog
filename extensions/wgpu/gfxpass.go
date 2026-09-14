@@ -1,7 +1,7 @@
 package wgpu
 
 import (
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -12,21 +12,21 @@ type gfxbDepthKey struct{ width, height int }
 
 // gfxbViewKey identifies one renderable view of a baked texture.
 type gfxbViewKey struct {
-	texture    gpu.TextureID
+	texture    gfx.TextureID
 	mip, layer int
 }
 
 // gfxbView is a cached texture view, the ID pass descriptors name it by, and
 // the size it renders at.
 type gfxbView struct {
-	id            gpu.TextureViewID
+	id            gfx.TextureViewID
 	view          *wgpu.TextureView
 	width, height int
 }
 
 // TextureView returns a renderable view of one mip level of one layer,
 // minting and caching it on first use.
-func (b *gfxBackend) TextureView(texture gpu.TextureID, mip, layer int) gpu.TextureViewID {
+func (b *gfxBackend) TextureView(texture gfx.TextureID, mip, layer int) gfx.TextureViewID {
 	key := gfxbViewKey{texture: texture, mip: mip, layer: layer}
 	if cached, ok := b.views[key]; ok {
 		return cached.id
@@ -46,7 +46,7 @@ func (b *gfxBackend) TextureView(texture gpu.TextureID, mip, layer int) gpu.Text
 		return 0
 	}
 	cached := &gfxbView{
-		id:     gpu.TextureViewID(b.id()),
+		id:     gfx.TextureViewID(b.id()),
 		view:   view,
 		width:  max(desc.Width>>mip, 1),
 		height: max(desc.Height>>mip, 1),
@@ -58,7 +58,7 @@ func (b *gfxBackend) TextureView(texture gpu.TextureID, mip, layer int) gpu.Text
 
 // releaseTextureViews drops the cached views of a texture that is being
 // replaced or released, since they point at the old native texture.
-func (b *gfxBackend) releaseTextureViews(texture gpu.TextureID) {
+func (b *gfxBackend) releaseTextureViews(texture gfx.TextureID) {
 	for key, view := range b.views {
 		if key.texture != texture {
 			continue
@@ -71,7 +71,7 @@ func (b *gfxBackend) releaseTextureViews(texture gpu.TextureID) {
 
 // BeginPass encodes one pass's attachments into the frame's encoder and returns
 // the RenderPass its commands go to.
-func (b *gfxBackend) BeginPass(desc gpu.PassDesc) gpu.RenderPass {
+func (b *gfxBackend) BeginPass(desc gfx.PassDesc) gfx.RenderPass {
 	if b.encoder == nil {
 		return nil
 	}
@@ -144,7 +144,7 @@ func (b *gfxBackend) BeginPass(desc gpu.PassDesc) gpu.RenderPass {
 // Cost is one image transition per write-then-read pair, independent of scene
 // complexity - unlike Device.WaitIdle, which also removes the artifact but
 // stalls the CPU on the GPU to do it.
-func (b *gfxBackend) TransitionTextures(transitions []gpu.TextureTransition) {
+func (b *gfxBackend) TransitionTextures(transitions []gfx.TextureTransition) {
 	if b.encoder == nil || len(transitions) == 0 {
 		return
 	}
@@ -182,11 +182,11 @@ func (b *gfxBackend) TransitionTextures(transitions []gpu.TextureTransition) {
 // textureBarrierUsage maps gfx's three texture roles onto the backend's usage
 // flags. gfx names only the roles it can put a texture in; every other usage is
 // the backend's own business.
-func textureBarrierUsage(usage gpu.TextureUsage) gputypes.TextureUsage {
+func textureBarrierUsage(usage gfx.TextureUsage) gputypes.TextureUsage {
 	switch usage {
-	case gpu.TextureUsageTextureBinding:
+	case gfx.TextureUsageTextureBinding:
 		return gputypes.TextureUsageTextureBinding
-	case gpu.TextureUsageCopySrc:
+	case gfx.TextureUsageCopySrc:
 		return gputypes.TextureUsageCopySrc
 	default:
 		return gputypes.TextureUsageRenderAttachment
@@ -194,14 +194,14 @@ func textureBarrierUsage(usage gpu.TextureUsage) gputypes.TextureUsage {
 }
 
 // EndPass closes the pass BeginPass opened.
-func (b *gfxBackend) EndPass(pass gpu.RenderPass) {
+func (b *gfxBackend) EndPass(pass gfx.RenderPass) {
 	if encoded, ok := pass.(*gfxRenderPass); ok && encoded != nil {
 		_ = encoded.pass.End()
 	}
 }
 
 // passColour resolves a pass's colour attachment and the size it renders at.
-func (b *gfxBackend) passColour(desc gpu.PassDesc) (*wgpu.TextureView, int, int) {
+func (b *gfxBackend) passColour(desc gfx.PassDesc) (*wgpu.TextureView, int, int) {
 	if desc.Screen {
 		// A screen pass renders into the frame buffer, never into the surface:
 		// only the present pass touches that. This is also where the buffer is
@@ -220,7 +220,7 @@ func (b *gfxBackend) passColour(desc gpu.PassDesc) (*wgpu.TextureView, int, int)
 
 // passDepth resolves a pass's depth attachment, allocating the shared DepthAuto
 // texture for the target's size when it does not exist yet.
-func (b *gfxBackend) passDepth(desc gpu.PassDesc, width, height int) *wgpu.TextureView {
+func (b *gfxBackend) passDepth(desc gfx.PassDesc, width, height int) *wgpu.TextureView {
 	if desc.DepthAuto {
 		return b.autoDepth(width, height)
 	}
@@ -239,9 +239,9 @@ func (b *gfxBackend) autoDepth(width, height int) *wgpu.TextureView {
 	if depth, ok := b.depths[key]; ok {
 		return depth.view
 	}
-	depth, err := b.newTexture(gpu.TextureDesc{
+	depth, err := b.newTexture(gfx.TextureDesc{
 		Width: width, Height: height, Layers: 1,
-		Format: gpu.FormatDepth32F, Renderable: true, Label: "gfx.depth",
+		Format: gfx.FormatDepth32F, Renderable: true, Label: "gfx.depth",
 	})
 	if err != nil {
 		return nil
@@ -259,17 +259,17 @@ func (b *gfxBackend) releaseDepths() {
 	}
 }
 
-func loadOp(op gpu.LoadOp) gputypes.LoadOp {
+func loadOp(op gfx.LoadOp) gputypes.LoadOp {
 	// WebGPU has no "don't care" load, and clearing is the legal way to say the
 	// previous contents are not read.
-	if op == gpu.LoadPreserve {
+	if op == gfx.LoadPreserve {
 		return gputypes.LoadOpLoad
 	}
 	return gputypes.LoadOpClear
 }
 
-func storeOp(op gpu.StoreOp) gputypes.StoreOp {
-	if op == gpu.StoreDiscard {
+func storeOp(op gfx.StoreOp) gputypes.StoreOp {
+	if op == gfx.StoreDiscard {
 		return gputypes.StoreOpDiscard
 	}
 	return gputypes.StoreOpStore

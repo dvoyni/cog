@@ -5,9 +5,8 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // frameBenchDraws is the population the frame benchmark records: the number
@@ -71,7 +70,7 @@ func BenchmarkFrame(b *testing.B) {
 					q.Mesh(0, ref, draw)
 				}
 			})
-			ref = h.bake(triangle(), []uint32{0, 1, 2}, gpu.TopologyTriangleList)
+			ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 			// The first frame bakes scene's defaults, which the shared
 			// material binds.
 			h.frame()
@@ -124,7 +123,7 @@ func frameBenchMaterial(defaults types.PbrDefaults) (scene.Material, []gfx.Param
 		)
 	}
 	material := scene.Material{{Descr: gfx.MaterialWithState(
-		gfx.ShaderWithResource(types.SceneShaderPath), gpu.StateOpaque3D, params...,
+		gfx.ShaderWithResource(types.SceneShaderPath), gfx.StateOpaque3D(), params...,
 	)}}
 	return material, []gfx.ParameterDescr{gfx.FloatParam("key", 0.25)}
 }

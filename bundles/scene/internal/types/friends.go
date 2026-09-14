@@ -1,8 +1,8 @@
 package types
 
 import (
-	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // The friend functions: what scene's internal/ reads from, or does to, a public

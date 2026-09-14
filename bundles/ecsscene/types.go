@@ -3,9 +3,8 @@ package ecsscene
 import (
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // Transform is where an Entity stands: scene.Transform itself, as a type of
@@ -138,6 +137,6 @@ type MaterialTag struct {
 	// Tag is the pass this entry serves; zero reads as scene.TagForward.
 	Tag    scene.PassTag
 	Shader gfx.ShaderDescr
-	State  gpu.MaterialState
+	State  gfx.MaterialState
 	Params ecs.List[gfx.ParameterDescr]
 }

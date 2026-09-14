@@ -1,7 +1,7 @@
 package wgpu
 
 import (
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -54,9 +54,9 @@ func captureRowBytes(width, bytesPerTexel int) int {
 // of. Depth is refused outright, and so is anything else that is not 8-bit
 // RGBA: cog's format table is closed, so this is a whitelist rather than a
 // guess.
-func captureSupported(format gpu.TextureFormat) bool {
+func captureSupported(format gfx.TextureFormat) bool {
 	switch format.Resolve() {
-	case gpu.FormatRGBA8, gpu.FormatRGBA8Srgb:
+	case gfx.FormatRGBA8, gfx.FormatRGBA8Srgb:
 		return true
 	default:
 		return false
@@ -87,7 +87,7 @@ type captureReadback struct {
 	staging       captureStaging
 	width, height int
 	rowBytes      int
-	format        gpu.TextureFormat
+	format        gfx.TextureFormat
 	err           error
 }
 
@@ -122,27 +122,27 @@ func (r *captureRing) push(entry captureReadback) {
 // take reports the oldest readback if it has resolved, and clears it. It is a
 // Status check - a field read - when the head has not resolved, and reports
 // nothing at all when nothing is outstanding.
-func (r *captureRing) take() (gpu.Capture, bool) {
+func (r *captureRing) take() (gfx.Capture, bool) {
 	if len(r.outstanding) == 0 {
-		return gpu.Capture{}, false
+		return gfx.Capture{}, false
 	}
 	head := r.outstanding[0]
 	if head.err == nil {
 		ready, err := head.staging.status()
 		if !ready {
-			return gpu.Capture{}, false
+			return gfx.Capture{}, false
 		}
 		head.err = err
 	}
 	r.pop()
 	if head.staging == nil {
-		return gpu.Capture{Err: head.err}, true
+		return gfx.Capture{Err: head.err}, true
 	}
 	defer head.staging.release()
 	if head.err != nil {
-		return gpu.Capture{Err: head.err}, true
+		return gfx.Capture{Err: head.err}, true
 	}
-	return gpu.Capture{
+	return gfx.Capture{
 		Pixels: head.staging.read(head.rowBytes * head.height),
 		Width:  head.width, Height: head.height,
 		Format: head.format, BytesPerRow: head.rowBytes,
@@ -158,7 +158,7 @@ func (r *captureRing) abandon() {
 		if staging := r.outstanding[i].staging; staging != nil {
 			staging.release()
 		}
-		r.outstanding[i] = captureReadback{err: gpu.ErrCaptureAbandoned{}}
+		r.outstanding[i] = captureReadback{err: gfx.ErrCaptureAbandoned{}}
 	}
 }
 
@@ -209,20 +209,20 @@ func (s *gfxbStaging) release() {
 
 // Capture encodes the frame's readback into the frame's own encoder, after the
 // present. It never waits: the map is started after the submit, in armCapture.
-func (b *gfxBackend) Capture(desc gpu.CaptureDesc) {
+func (b *gfxBackend) Capture(desc gfx.CaptureDesc) {
 	if b.encoder == nil {
 		return
 	}
 	texture, width, height, format := b.captureSource(desc)
 	switch {
 	case texture == nil:
-		b.captures.refuse(gpu.ErrCaptureNoTarget{})
+		b.captures.refuse(gfx.ErrCaptureNoTarget{})
 		return
 	case !captureSupported(format):
-		b.captures.refuse(gpu.ErrCaptureUnsupported{Format: format})
+		b.captures.refuse(gfx.ErrCaptureUnsupported{Format: format})
 		return
 	case b.captures.full():
-		b.captures.refuse(gpu.ErrCaptureBusy{})
+		b.captures.refuse(gfx.ErrCaptureBusy{})
 		return
 	}
 
@@ -279,16 +279,16 @@ func (b *gfxBackend) captureBarrier(texture *gfxbTexture, from, to gputypes.Text
 // captureSource resolves what a capture reads. Screen is the frame buffer gfx
 // owns, which only the backend can resolve because it is sized from the
 // surface; a texture capture always reads mip 0, layer 0.
-func (b *gfxBackend) captureSource(desc gpu.CaptureDesc) (*gfxbTexture, int, int, gpu.TextureFormat) {
+func (b *gfxBackend) captureSource(desc gfx.CaptureDesc) (*gfxbTexture, int, int, gfx.TextureFormat) {
 	if desc.Screen {
 		if b.frame == nil {
-			return nil, 0, 0, gpu.FrameBufferFormat
+			return nil, 0, 0, gfx.FrameBufferFormat
 		}
-		return b.frame, b.frameW, b.frameH, gpu.FrameBufferFormat
+		return b.frame, b.frameW, b.frameH, gfx.FrameBufferFormat
 	}
 	texture, ok := b.bakedTextures[desc.Texture]
 	if !ok || texture == nil {
-		return nil, 0, 0, gpu.FormatRGBA8
+		return nil, 0, 0, gfx.FormatRGBA8
 	}
 	held := b.bakedTextureDescs[desc.Texture]
 	return texture, held.Width, held.Height, held.Format
@@ -318,6 +318,6 @@ func (b *gfxBackend) armCapture() {
 }
 
 // TakeCapture returns a completed readback, if one is ready, and clears it.
-func (b *gfxBackend) TakeCapture() (gpu.Capture, bool) {
+func (b *gfxBackend) TakeCapture() (gfx.Capture, bool) {
 	return b.captures.take()
 }

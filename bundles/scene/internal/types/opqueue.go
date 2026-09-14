@@ -4,8 +4,8 @@ import (
 	"cmp"
 	"slices"
 
-	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // CameraRecord is one registered camera. Its descriptor's Passes slice aliases

@@ -6,8 +6,7 @@ import (
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/libs/m"
 
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 type customInspectVertex struct {
@@ -15,7 +14,7 @@ type customInspectVertex struct {
 }
 
 func (customInspectVertex) VertexLayout() []gfx.VertexAttr {
-	return []gfx.VertexAttr{gfx.Attr(0, gpu.Float32x2)}
+	return []gfx.VertexAttr{gfx.Attr(0, gfx.Float32x2)}
 }
 
 func TestOpsReturnRecordedOperationsInFlushOrder(t *testing.T) {
@@ -99,7 +98,7 @@ func TestOpsAreEmptyAfterReset(t *testing.T) {
 // The recording-inspection surface has to report a texture-sourced sprite, or a
 // recorder's tests cannot tell one from a FillRect: both carry an empty Path.
 func TestOpsReportTheTextureASpriteAndACustomShapeSource(t *testing.T) {
-	texture := gfx.TextureWithBytes(8, 4, gpu.FormatRGBA8, make([]byte, 8*4*4), true, false)
+	texture := gfx.TextureWithBytes(8, 4, gfx.FormatRGBA8, make([]byte, 8*4*4), true, false)
 	white := m.Color{R: 1, G: 1, B: 1, A: 1}
 	write := &canvas.OpQueue{}
 	write.SpriteTexture(0, texture, canvas.SpriteTransform{Size: m.Vec2{X: 20, Y: 10}}, nil)
@@ -129,7 +128,7 @@ func TestOpsReportTheTextureASpriteAndACustomShapeSource(t *testing.T) {
 // assert where a layer went without running the pipeline. A layer nobody gave a
 // target reports none, which is the screen.
 func TestLayerTargetReportsWhereALayerDraws(t *testing.T) {
-	texture := gfx.TextureWithBytes(64, 32, gpu.FormatRGBA8Srgb, make([]byte, 64*32*4), true, false)
+	texture := gfx.TextureWithBytes(64, 32, gfx.FormatRGBA8Srgb, make([]byte, 64*32*4), true, false)
 	target := gfx.TextureTarget(texture, 0, 0)
 	write := &canvas.OpQueue{}
 	write.SetLayerTarget(3, target)

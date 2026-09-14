@@ -1,7 +1,7 @@
 package types
 
 import (
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // ModelDraw is everything one Model call says beyond which file it draws.

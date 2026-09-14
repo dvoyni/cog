@@ -3,7 +3,7 @@ package wgpu
 import (
 	"fmt"
 
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/wgsl"
@@ -24,10 +24,10 @@ func lowerWGSL(source string) (*ir.Module, error) {
 }
 
 // reflectShaderLayout reflects the uniform + resource bindings of WGSL source.
-func reflectShaderLayout(source string) (gpu.ShaderLayout, error) {
+func reflectShaderLayout(source string) (gfx.ShaderLayout, error) {
 	mod, err := lowerWGSL(source)
 	if err != nil {
-		return gpu.ShaderLayout{}, err
+		return gfx.ShaderLayout{}, err
 	}
 	return shaderLayoutFrom(mod)
 }
@@ -35,8 +35,8 @@ func reflectShaderLayout(source string) (gpu.ShaderLayout, error) {
 // shaderLayoutFrom extracts the uniform block's member layout, every storage
 // struct's member layout, and every texture and sampler binding from a lowered
 // module.
-func shaderLayoutFrom(mod *ir.Module) (gpu.ShaderLayout, error) {
-	var layout gpu.ShaderLayout
+func shaderLayoutFrom(mod *ir.Module) (gfx.ShaderLayout, error) {
+	var layout gfx.ShaderLayout
 	uniform := ""
 	for _, gv := range mod.GlobalVariables {
 		if gv.Binding == nil {
@@ -46,7 +46,7 @@ func shaderLayoutFrom(mod *ir.Module) (gpu.ShaderLayout, error) {
 		switch inner := mod.Types[gv.Type].Inner.(type) {
 		case ir.StructType:
 			if gv.Space == ir.SpaceStorage {
-				layout.Resources = append(layout.Resources, gpu.ShaderResource{
+				layout.Resources = append(layout.Resources, gfx.ShaderResource{
 					Name: gv.Name, StorageBuffer: true, WritableBuffer: gv.Access == ir.StorageReadWrite,
 					Group: group, Binding: binding, Members: storageMembers(mod, inner),
 				})
@@ -58,7 +58,7 @@ func shaderLayoutFrom(mod *ir.Module) (gpu.ShaderLayout, error) {
 			// A second uniform block used to overwrite the first, which moves
 			// every parameter to the wrong offset with nothing to point at.
 			if uniform != "" {
-				return gpu.ShaderLayout{}, fmt.Errorf(
+				return gfx.ShaderLayout{}, fmt.Errorf(
 					"wgpu: shader declares two uniform blocks, %q and %q; gfx supports one", uniform, gv.Name)
 			}
 			uniform = gv.Name
@@ -66,19 +66,19 @@ func shaderLayoutFrom(mod *ir.Module) (gpu.ShaderLayout, error) {
 			layout.UniformGroup = group
 			layout.UniformBinding = binding
 			for _, mem := range inner.Members {
-				layout.Uniforms = append(layout.Uniforms, gpu.UniformMember{Name: mem.Name, Offset: int(mem.Offset)})
+				layout.Uniforms = append(layout.Uniforms, gfx.UniformMember{Name: mem.Name, Offset: int(mem.Offset)})
 			}
 		case ir.ImageType:
-			view := gpu.TextureView2D
+			view := gfx.TextureView2D
 			if inner.Dim == ir.Dim2D && inner.Arrayed {
-				view = gpu.TextureView2DArray
+				view = gfx.TextureView2DArray
 			}
-			layout.Resources = append(layout.Resources, gpu.ShaderResource{
+			layout.Resources = append(layout.Resources, gfx.ShaderResource{
 				Name: gv.Name, TextureView: view, Depth: inner.Class == ir.ImageClassDepth,
 				Group: group, Binding: binding,
 			})
 		case ir.SamplerType:
-			layout.Resources = append(layout.Resources, gpu.ShaderResource{
+			layout.Resources = append(layout.Resources, gfx.ShaderResource{
 				Name: gv.Name, Sampler: true, Comparison: inner.Comparison,
 				Group: group, Binding: binding,
 			})
@@ -96,8 +96,8 @@ func shaderLayoutFrom(mod *ir.Module) (gpu.ShaderLayout, error) {
 // The entry point is the one named vs_main, because that is the one
 // gfxBackend.NewPipeline names. A module carrying a second vertex function
 // nothing is built against has no say in what a draw through this shader reads.
-func vertexInputs(mod *ir.Module) []gpu.ShaderVertexInput {
-	var inputs []gpu.ShaderVertexInput
+func vertexInputs(mod *ir.Module) []gfx.ShaderVertexInput {
+	var inputs []gfx.ShaderVertexInput
 	for i := range mod.EntryPoints {
 		entry := &mod.EntryPoints[i]
 		if entry.Stage != ir.StageVertex || entry.Name != vertexEntryPoint {
@@ -137,22 +137,22 @@ func vertexInputs(mod *ir.Module) []gpu.ShaderVertexInput {
 // present - is not a vertex input and is reported as not one.
 func vertexInput(
 	mod *ir.Module, name string, typ ir.TypeHandle, binding ir.Binding,
-) (gpu.ShaderVertexInput, bool) {
+) (gfx.ShaderVertexInput, bool) {
 	location, ok := binding.(ir.LocationBinding)
 	if !ok {
-		return gpu.ShaderVertexInput{}, false
+		return gfx.ShaderVertexInput{}, false
 	}
-	input := gpu.ShaderVertexInput{Name: name, Location: int(location.Location)}
+	input := gfx.ShaderVertexInput{Name: name, Location: int(location.Location)}
 	switch inner := mod.Types[typ].Inner.(type) {
 	case ir.ScalarType:
 		input.Kind, input.Count = vertexScalar(inner.Kind), 1
 	case ir.VectorType:
 		input.Kind, input.Count = vertexScalar(inner.Scalar.Kind), int(inner.Size)
 	default:
-		return gpu.ShaderVertexInput{}, false
+		return gfx.ShaderVertexInput{}, false
 	}
-	if input.Kind == gpu.VertexScalarNone {
-		return gpu.ShaderVertexInput{}, false
+	if input.Kind == gfx.VertexScalarNone {
+		return gfx.ShaderVertexInput{}, false
 	}
 	return input, true
 }
@@ -160,25 +160,25 @@ func vertexInput(
 // vertexScalar maps a WGSL scalar kind onto what a vertex format decodes to.
 // Half-width floats are still floats: WebGPU's float16 formats present as f32,
 // so the width is not part of the comparison.
-func vertexScalar(kind ir.ScalarKind) gpu.VertexScalar {
+func vertexScalar(kind ir.ScalarKind) gfx.VertexScalar {
 	switch kind {
 	case ir.ScalarFloat:
-		return gpu.VertexScalarFloat
+		return gfx.VertexScalarFloat
 	case ir.ScalarUint:
-		return gpu.VertexScalarUint
+		return gfx.VertexScalarUint
 	case ir.ScalarSint:
-		return gpu.VertexScalarSint
+		return gfx.VertexScalarSint
 	}
-	return gpu.VertexScalarNone
+	return gfx.VertexScalarNone
 }
 
 // storageMembers walks one level of a storage struct. An array member carries
 // its element stride and count, because a reader of `lights: array<Light, 16>`
 // needs both where the array starts and how far apart its elements sit.
-func storageMembers(mod *ir.Module, structure ir.StructType) []gpu.StorageMember {
-	members := make([]gpu.StorageMember, 0, len(structure.Members))
+func storageMembers(mod *ir.Module, structure ir.StructType) []gfx.StorageMember {
+	members := make([]gfx.StorageMember, 0, len(structure.Members))
 	for _, member := range structure.Members {
-		reflected := gpu.StorageMember{Name: member.Name, Offset: int(member.Offset)}
+		reflected := gfx.StorageMember{Name: member.Name, Offset: int(member.Offset)}
 		if array, ok := mod.Types[member.Type].Inner.(ir.ArrayType); ok {
 			reflected.Stride = int(array.Stride)
 			if array.Size.Constant != nil {

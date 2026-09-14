@@ -3,7 +3,7 @@ package types
 import (
 	"strconv"
 
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 const (

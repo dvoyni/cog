@@ -12,11 +12,11 @@ import (
 	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/sceneplugin"
-	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/gfx"
+	"github.com/dvoyni/cog/slots/gfx/gfxplugin"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
@@ -184,7 +184,7 @@ func bakeCmdImpl() (kernel.Lock, kernel.Execute[bakeRequest, bakeResponse]) {
 				{Position: m.Vec3{Y: 1}, Normal: m.Vec3{Z: 1}},
 			}
 			la := scene.NewLookupAccess(k, lookup.Get())
-			return bakeResponse{Ref: la.BakeMesh(vertices, []uint32{0, 1, 2}, gpu.TopologyTriangleList)}, nil
+			return bakeResponse{Ref: la.BakeMesh(vertices, []uint32{0, 1, 2}, gfx.TopologyTriangleList)}, nil
 		}
 }
 
@@ -250,7 +250,7 @@ func newHarnessOver(t testing.TB, files fstest.MapFS, ids uint32) *harness {
 }
 
 // newHarnessWith is newHarnessOver rendering through backend.
-func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gpu.Backend) *harness {
+func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gfx.Backend) *harness {
 	t.Helper()
 	sink := &errorSink{}
 	configs := map[kernel.PluginName]any{
@@ -259,7 +259,7 @@ func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gpu.Ba
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) bool { sink.add(err); return false }).
-		WithPlugins(storageplugin.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{backend}, sceneplugin.New(),
+		WithPlugins(storageplugin.New(), permanentAdapter{}, gfxplugin.New(), backendAdapter{backend}, sceneplugin.New(),
 			ecsplugin.New(), New(), &gamePlugin{})
 	ctx, cancel := context.WithCancel(context.Background())
 	// The cleanup waits for Run to return rather than only cancelling it: a

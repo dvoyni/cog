@@ -7,10 +7,10 @@ import (
 
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/bundles/canvas/internal/types"
-	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // armDrawsOnUpdate is the subscription type of the plugin's

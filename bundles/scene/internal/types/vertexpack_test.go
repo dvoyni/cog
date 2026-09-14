@@ -5,9 +5,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // everyAttribute is a mesh whose every field is written with a value nothing
@@ -301,8 +300,8 @@ func TestTheTwoNamedLayoutsAreTheSixAndTheSameSixPlusTwo(t *testing.T) {
 	}
 	// The two rows the standard layout declines to supply are the two
 	// SceneVertexIn declares only under SCENE_SKIN.
-	if skinned[6] != gfx.Attr(storageJoints, gpu.Uint8x4) ||
-		skinned[7] != gfx.Attr(storageWeights, gpu.Unorm8x4) {
+	if skinned[6] != gfx.Attr(storageJoints, gfx.Uint8x4) ||
+		skinned[7] != gfx.Attr(storageWeights, gfx.Unorm8x4) {
 		t.Errorf("the skinned layout's last two rows are %+v and %+v, want the joints and the weights",
 			skinned[6], skinned[7])
 	}

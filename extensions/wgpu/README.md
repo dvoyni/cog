@@ -1,7 +1,7 @@
 # wgpu
 
 `github.com/dvoyni/cog/extensions/wgpu` is Cog's window, input, timing, and WebGPU system
-driver built on `gogpu`. It owns the OS main loop, provides gfx's `gpu.Backend`
+driver built on `gogpu`. It owns the OS main loop, provides gfx's `gfx.Backend`
 Adapter, feeds `input`, and drives the `app` update/render contract on desktop
 and WebAssembly.
 
@@ -10,9 +10,9 @@ and WebAssembly.
 - Name: `wgpu.Name` (`"wgpu"`)
 - Constructor: `wgpu.New() *wgpu.Plugin`
 - Plugin dependencies: `gfx`, `input`
-- Go package dependencies: `app`, `gfx`, `gfx/gpu`, `input`, `kernel`, `mcp`,
+- Go package dependencies: `app`, `gfx`, `input`, `kernel`, `mcp`,
   `gogpu`, WebGPU implementation packages
-- Contributes: one `gpu.Backend` Adapter and one `mcp.Provider` Adapter
+- Contributes: one `gfx.Backend` Adapter and one `mcp.Provider` Adapter
 - Implements: `kernel.Host`, `kernel.PluginStopper`
 - Subscribed kernel events: none
 
@@ -169,10 +169,10 @@ invoke its update, draw, and input bridges directly.
 
 ## Backend Behavior
 
-The private backend implements the public `gpu.Backend` contract, and is gfx's
+The private backend implements the public `gfx.Backend` contract, and is gfx's
 Adapter. The plugin builds it once and provides it with
 `registrar.ProvideAdapter[GfxBackend]`, the Adapter type in `adapters.go`, at the top of `Register`, before the
-GPU device exists: gfx is a Port, and its Adapter is bound at composition,
+GPU device exists: gfx is a Slot, and its Adapter is bound at composition,
 while the device is created asynchronously inside the render loop. `onDraw`
 attaches the device to the same value on the first frame the device is
 available, and retries every frame until then; a failure is reported once.
@@ -183,18 +183,18 @@ before the device is ready.
 It maps Cog's
 opaque IDs to native WebGPU textures and buffers, reflects WGSL bindings, caches
 pipelines/samplers/bind groups, maintains depth targets, performs queued bakes
-and releases, and submits each translated `gpu.Queue` to the current surface.
+and releases, and submits each translated `gfx.Queue` to the current surface.
 
 Reflection walks a shader's lowered module once. Alongside the global variables
 it reads the `vs_main` entry point's arguments — flat `@location` parameters and
 the members of a struct argument alike — and reports each as a
-`gpu.ShaderVertexInput`, which is what `gfx.CheckVertexInterface` compares the
+`gfx.ShaderVertexInput`, which is what `gfx.CheckVertexInterface` compares the
 bound vertex layout against. `vs_main` is a constant shared with pipeline
 creation, so what is checked cannot drift from what is built.
 
 A pass whose target is `gfx.ScreenTarget()` does not render into the surface.
 It renders into a frame-sized frame buffer the backend allocates on first use
-in `gpu.FrameBufferFormat` and drops whenever the surface resizes; the frame's
+in `gfx.FrameBufferFormat` and drops whenever the surface resizes; the frame's
 implicit present pass then draws a full-screen triangle that samples it into
 the surface. The present pipeline is the only one built for the surface's own
 format — every other pipeline is built for the frame buffer's — because a
@@ -205,25 +205,28 @@ format on the web.
 ### Backend Files And Plugin Wiring
 
 wgpu is two things to gfx at once, and its files say which one they are by what
-they import.
+they use of the gfx root.
 
 - **The backend** is gfx's Adapter: every `gfx*.go` file (`gfxbackend.go`,
   `gfxpass.go` with the queue replay, `gfxcapture.go`, `gfxpresent.go`,
   `gfxreflect.go`, `gfxsampler.go`, `gfxdepthonly.go`, `gfxlimits.go`) and
-  `texformat.go`. These import `extensions/gfx/gpu` and never the gfx root: the
-  backend implements `gpu.Backend` and replays a `gpu.Queue`, and nothing in them
-  names the recording API an Adapter must never call.
+  `texformat.go`. Of cog they import the gfx root and Libraries only, and of
+  the root they use only the backend contract: they implement `gfx.Backend`,
+  replay a `gfx.Queue` and speak its IDs, formats and descriptors, and nothing
+  in them names the recording API (`OpQueue`, `ResourceQueue`, the commands)
+  an Adapter must never call.
 - **The plugin wiring** is wgpu as a plugin that depends on gfx: `plugin.go`.
-  It may import the gfx root, for the dependency on `gfx.Name` and to drive
-  `gfx.SetViewportCmd` every drawable frame, and it imports `gpu` to provide the
-  backend with `registrar.ProvideAdapter[GfxBackend]`.
-- **Tests** may import the root, for `gfx.FlattenShader` and
-  `gfx.CheckVertexInterface`, and gfximpl, to compose an engine.
+  It uses the gfx root for the dependency on `gfx.Name`, to drive
+  `gfx.SetViewportCmd` every drawable frame, and to provide the backend as a
+  `gfx.Backend` with `registrar.ProvideAdapter[GfxBackend]`.
+- **Tests** may use the whole root, for `gfx.CheckVertexInterface`, and
+  `gfxplugin`, to compose an engine. A test that needs a flattened module draws
+  once with the shader through `gfxplugin.New()` and a recording backend
+  (`gfxflatten_test.go`), since the preprocessor is internal to gfx.
 
-The tier test checks imports per package, so it cannot tell these files apart:
-the split is this README's rule and
-[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md)'s,
-and a backend file that grows a gfx-root import breaks it.
+The tier test checks imports per package and cannot see which names a file
+uses, so it cannot tell these files apart: the split is this README's rule, and
+a backend file that names the recording API breaks it.
 
 ### Reading A Frame Back Without Waiting
 
@@ -258,8 +261,8 @@ Two readbacks may be live at once and no more. That is not two captures in
 flight: the frame that encodes the next still is the frame whose submit
 resolves the previous one, so one slot is transiently held by a readback that
 has resolved and not yet been taken. Anything beyond that is refused with
-`gpu.ErrCaptureBusy`, and a refusal travels the same seam a result would have,
-through `gpu.Capture.Err`. Depth and any format that is not 8-bit RGBA are
+`gfx.ErrCaptureBusy`, and a refusal travels the same seam a result would have,
+through `gfx.Capture.Err`. Depth and any format that is not 8-bit RGBA are
 refused the same way, as is a target the frame never rendered into.
 
 A screen capture reads the frame buffer, which `gfx` never names, so the
@@ -268,7 +271,7 @@ before the copy and back again after it, because the present pass left it in
 `TextureBinding` and the next frame's present barrier still has to name the
 layout it is actually in. A texture capture needs neither — `gfx` tracked that
 texture's role all frame and declared the transition itself, which is what the
-third `gpu.TextureUsage` value is for.
+third `gfx.TextureUsage` value is for.
 
 `textureUsage` grants `CopySrc` to every `Renderable` texture, the one blocking
 change the whole feature rested on. Nothing in cog was copyable off the GPU
@@ -278,7 +281,7 @@ whether or not a capture ever happens, and bounded to render targets.
 
 `Stop` abandons whatever is still live. A capture armed in the last frame has
 no further submit to resolve against, so its staging buffer and pending map are
-released and `gpu.ErrCaptureAbandoned` takes their place; `gfx` delivers that
+released and `gfx.ErrCaptureAbandoned` takes their place; `gfx` delivers that
 reason to whoever armed it.
 
 ### Barriers Are Ours To Place

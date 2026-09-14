@@ -10,7 +10,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/slots/gfx"
 
 	"github.com/dvoyni/cog/bundles/anim/animplugin"
 	"github.com/dvoyni/cog/bundles/canvas/canvasplugin"
@@ -20,9 +20,8 @@ import (
 	"github.com/dvoyni/cog/bundles/mcp/mcpplugin"
 	"github.com/dvoyni/cog/bundles/scene/sceneplugin"
 	"github.com/dvoyni/cog/bundles/ui/uiplugin"
-	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/gfx/gfxplugin"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
@@ -35,7 +34,7 @@ func TestTypeName_NamesEveryTypeInAFullCogCompositionUniquely(t *testing.T) {
 	engine := kernel.New(map[kernel.PluginName]any{storage.Name: storage.Config{}}).
 		Handler(func(err error) bool { failure = errors.Join(failure, err); return false }).
 		WithPlugins(
-			storageplugin.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{&detachedBackend{}},
+			storageplugin.New(), permanentAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
 			inputplugin.New(), animplugin.New(), canvasplugin.New(), sceneplugin.New(), uiplugin.New(),
 			ecsplugin.New(), ecssceneplugin.New(), mcpplugin.New(),
 		)
@@ -102,7 +101,7 @@ func describedTypes(description kernel.ArchitectureDescription) []reflect.Type {
 
 // backendAdapter provides a Backend to gfx, the way a driver provides its own:
 // gfx is a Port, and a composition without one fails.
-type backendAdapter struct{ backend gpu.Backend }
+type backendAdapter struct{ backend gfx.Backend }
 
 func (backendAdapter) Name() kernel.PluginName           { return "gfxbackendtest" }
 func (backendAdapter) Dependencies() []kernel.PluginName { return nil }
@@ -118,13 +117,13 @@ type testGfxBackend kernel.Adapter[gfx.BackendPort]
 // detachedBackend is a Backend whose device never arrives. Nothing here runs,
 // so only the ids a plugin may take at registration are implemented.
 type detachedBackend struct {
-	gpu.Backend
+	gfx.Backend
 	next atomic.Uint32
 }
 
 func (*detachedBackend) Ready() bool                 { return false }
-func (b *detachedBackend) NewTexture() gpu.TextureID { return gpu.TextureID(b.next.Add(1)) }
-func (b *detachedBackend) NewBuffer() gpu.BufferID   { return gpu.BufferID(b.next.Add(1)) }
+func (b *detachedBackend) NewTexture() gfx.TextureID { return gfx.TextureID(b.next.Add(1)) }
+func (b *detachedBackend) NewBuffer() gfx.BufferID   { return gfx.BufferID(b.next.Add(1)) }
 
 // permanentAdapter provides storage's PermanentFS: an empty filesystem that
 // reads nothing and refuses writes.

@@ -1,6 +1,6 @@
 package types
 
-import "github.com/dvoyni/cog/extensions/gfx"
+import "github.com/dvoyni/cog/slots/gfx"
 
 // The friend functions: what canvas's internal/ reads from, or does to, a
 // public type's unexported state. Only packages under bundles/canvas can import

@@ -5,8 +5,8 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
-	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
 )
 

@@ -1,9 +1,8 @@
 package types
 
 import (
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // Layer orders canvas drawing, and is a gfx pass order: canvas declares one
@@ -107,7 +106,7 @@ type SpriteTransform struct {
 	TileY bool
 	// Filter selects sampler minification/magnification filtering. Its zero value
 	// is linear; set FilterNearest for crisp pixel art.
-	Filter gpu.FilterMode
+	Filter gfx.FilterMode
 }
 
 type TextAlign uint8

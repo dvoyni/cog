@@ -174,7 +174,7 @@ func (q *OpQueue) Line3D(layers LayerMask, start, end m.Vec3, thickness float32,
 func (q *OpQueue) WireBox(layers LayerMask, center, size m.Vec3, thickness float32, color m.Color)
 
 func (q *OpQueue) TemporaryMesh[TVertex VertexLayout](
-	vertices []TVertex, indices []uint32, topology gpu.PrimitiveTopology) MeshRef
+	vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology) MeshRef
 
 func (q *OpQueue) Reset()
 func (q *OpQueue) OpCount() int
@@ -437,8 +437,8 @@ app controls.
 ## Buffer-Built Meshes
 
 ```go
-ref := la.BakeMesh(vertices, indices, gpu.TopologyTriangleList) // durable
-ref := q.TemporaryMesh(vertices, indices, gpu.TopologyTriangleList) // this frame only
+ref := la.BakeMesh(vertices, indices, gfx.TopologyTriangleList) // durable
+ref := q.TemporaryMesh(vertices, indices, gfx.TopologyTriangleList) // this frame only
 q.Mesh(layers, ref, scene.MeshDraw{Transform: scene.At(0, 1, 0)})
 ```
 
@@ -735,7 +735,7 @@ a fragment-stage slot too. Three rules follow, and they are contract:
   the bindings scene binds on every draw — `sceneFrame`, `sceneInstances` and
   `scenePbrMaterial`, any subset — because those are scene's and already counted.
   That is what the `procedural` demo does.
-- gfx checks every reflected shader against `gpu.DefaultLimits`, the browser
+- gfx checks every reflected shader against `gfx.DefaultLimits()`, the browser
   floor, never against the device's reported limits, and reports
   `ErrShaderExceedsWebLimits`. A desktop adapter reports hardware limits, so
   checking the real device would pass a build no browser can run.

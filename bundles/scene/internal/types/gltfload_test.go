@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/ext/lightspunctual"
 	"github.com/qmuntal/gltf/ext/texturetransform"
@@ -76,10 +76,10 @@ func TestConvertDocumentMakesAFrontCWVariantForMirroredNodes(t *testing.T) {
 	}
 	plain := model.materials[model.primitives[0].material]
 	mirrored := model.materials[model.primitives[1].material]
-	if plain.state.FrontFace != gpu.FrontCCW {
+	if plain.state.FrontFace != gfx.FrontCCW {
 		t.Errorf("the unmirrored node is %v, want FrontCCW", plain.state.FrontFace)
 	}
-	if mirrored.state.FrontFace != gpu.FrontCW {
+	if mirrored.state.FrontFace != gfx.FrontCW {
 		t.Errorf("the mirrored node is %v, want FrontCW", mirrored.state.FrontFace)
 	}
 }
@@ -215,13 +215,13 @@ func TestConvertDocumentReadsTheMetallicRoughnessSet(t *testing.T) {
 	}
 	// MASK is fixed-function-identical to OPAQUE - the cutoff is entirely a
 	// fragment-shader concern - so it must land in the opaque sort class.
-	if material.state.Blend != gpu.BlendOpaque {
+	if material.state.Blend != gfx.BlendOpaque {
 		t.Errorf("alphaMode MASK blends %v, want opaque state plus a shader discard", material.state.Blend)
 	}
 	if material.record.AlphaCutoff != 0.25 {
 		t.Errorf("alphaCutoff = %v, want 0.25", material.record.AlphaCutoff)
 	}
-	if material.state.Cull != gpu.CullNone {
+	if material.state.Cull != gfx.CullNone {
 		t.Errorf("doubleSided culls %v, want CullNone", material.state.Cull)
 	}
 	if material.record.EmissiveFactor.Z != 0.3 {
@@ -256,7 +256,7 @@ func TestConvertDocumentBlendsATransparentMaterial(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
-	if model.materials[0].state.Blend == gpu.BlendOpaque {
+	if model.materials[0].state.Blend == gfx.BlendOpaque {
 		t.Error("alphaMode BLEND must reach the blend sort class")
 	}
 }

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
 )
@@ -22,7 +22,7 @@ import (
 type gltfGeometry struct {
 	vertices []skinnedVertex
 	indices  []uint32
-	topology gpu.PrimitiveTopology
+	topology gfx.PrimitiveTopology
 	// box is the primitive's local-space bounds, taken from the POSITION
 	// accessor's min and max, which glTF requires. hasBox is false when the
 	// file omitted them, which makes the whole model never-cull.
@@ -116,7 +116,7 @@ func convertPrimitive(doc *gltf.Document, primitive *gltf.Primitive, needTangent
 	if err != nil {
 		return gltfGeometry{}, err
 	}
-	if geometry.topology != gpu.TopologyTriangleList {
+	if geometry.topology != gfx.TopologyTriangleList {
 		// Normals and tangents are a triangle's properties. A line list has no
 		// faces to take them from, and the bundled shader lights it by whatever
 		// the file supplied - which for a line is nothing, so it renders by its
@@ -263,22 +263,22 @@ func readIndices(doc *gltf.Document, primitive *gltf.Primitive) ([]uint32, error
 // duplicating its vertices, which is the cheaper half of the same conversion.
 func convertTopology(
 	mode gltf.PrimitiveMode, indices []uint32, vertexCount int,
-) (gpu.PrimitiveTopology, []uint32, error) {
+) (gfx.PrimitiveTopology, []uint32, error) {
 	switch mode {
 	case gltf.PrimitiveTriangles:
-		return gpu.TopologyTriangleList, indices, nil
+		return gfx.TopologyTriangleList, indices, nil
 	case gltf.PrimitiveLines:
-		return gpu.TopologyLineList, indices, nil
+		return gfx.TopologyLineList, indices, nil
 	case gltf.PrimitivePoints:
 		return 0, nil, errPointTopology
 	case gltf.PrimitiveLineStrip:
-		return gpu.TopologyLineList, expandLineStrip(sequence(indices, vertexCount), false), nil
+		return gfx.TopologyLineList, expandLineStrip(sequence(indices, vertexCount), false), nil
 	case gltf.PrimitiveLineLoop:
-		return gpu.TopologyLineList, expandLineStrip(sequence(indices, vertexCount), true), nil
+		return gfx.TopologyLineList, expandLineStrip(sequence(indices, vertexCount), true), nil
 	case gltf.PrimitiveTriangleStrip:
-		return gpu.TopologyTriangleList, expandTriangleStrip(sequence(indices, vertexCount)), nil
+		return gfx.TopologyTriangleList, expandTriangleStrip(sequence(indices, vertexCount)), nil
 	case gltf.PrimitiveTriangleFan:
-		return gpu.TopologyTriangleList, expandTriangleFan(sequence(indices, vertexCount)), nil
+		return gfx.TopologyTriangleList, expandTriangleFan(sequence(indices, vertexCount)), nil
 	}
 	return 0, nil, fmt.Errorf("primitive mode %v is not a glTF mode", mode)
 }

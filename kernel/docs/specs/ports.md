@@ -29,7 +29,7 @@ it offers, and the plugin filling a Port declares its Adapter:
 
 ```go
 // gfx
-type BackendPort kernel.RequiredPort[gpu.Backend]
+type BackendPort kernel.RequiredPort[Backend]
 
 // mcp
 type ProviderPort kernel.CollectedPort[Provider]
@@ -54,7 +54,7 @@ Only the first type argument is written; the rest are inferred from it:
 ```go
 p.backend = registrar.RequireAdapter[gfx.BackendPort]()          // in gfx
 p.providers = registrar.CollectAdapters[mcp.ProviderPort]()      // in the mcp broker
-registrar.ProvideAdapter[GfxBackend](gpu.Backend(p.gfxBackend))  // in wgpu
+registrar.ProvideAdapter[GfxBackend](gfx.Backend(p.gfxBackend))  // in wgpu
 ```
 
 - **`RequireAdapter[P]`** declares that the calling plugin needs exactly one

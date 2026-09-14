@@ -1,8 +1,8 @@
 package types
 
 import (
-	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // overrideRecord merges a draw's OverrideParams into its own copy of the

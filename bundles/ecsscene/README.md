@@ -68,7 +68,7 @@ scratch.
 ```go
 kernel.New(config).WithPlugins(
     storageplugin.New(), diskfsplugin.New(),
-    inputplugin.New(), gfximpl.New(), sceneplugin.New(), wgpu.New(),
+    inputplugin.New(), gfxplugin.New(), sceneplugin.New(), wgpu.New(),
     ecsplugin.New(), ecssceneplugin.New(), game.New())
 ```
 
@@ -103,7 +103,7 @@ type Material  struct{ Tags ecs.List[MaterialTag] }
 type MaterialTag struct {
     Tag    scene.PassTag
     Shader gfx.ShaderDescr
-    State  gpu.MaterialState
+    State  gfx.MaterialState
     Params ecs.List[gfx.ParameterDescr]
 }
 

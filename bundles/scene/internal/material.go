@@ -6,8 +6,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // tagID is a pass tag interned to a dense index. Tags intern once per pass, not
@@ -129,7 +128,7 @@ func (t *materialTable) entry(interned int32, tag tagID) (materialEntry, bool) {
 		descr:      descr,
 		index:      index,
 		materialID: material.ids[tag],
-		blend:      descr.State().Blend != gpu.BlendOpaque,
+		blend:      descr.State().Blend != gfx.BlendOpaque,
 	}, true
 }
 

@@ -6,9 +6,8 @@ import (
 	"reflect"
 	"unsafe"
 
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // Vertex is the authoring vertex: the struct an app fills in for a scene mesh,
@@ -138,12 +137,12 @@ type MeshRecord struct {
 	Indices     gfx.BufferDescr
 	indexCount  int
 	VertexCount int
-	Topology    gpu.PrimitiveTopology
+	Topology    gfx.PrimitiveTopology
 	// IndexWidth is how wide one element of indices is. It is re-derived on
 	// every bake rather than frozen for a ref's life the way layout is: layout
 	// is part of a mesh's contract with a material, and width is not - for a
 	// triangle list it never reaches the pipeline at all.
-	IndexWidth gpu.IndexWidth
+	IndexWidth gfx.IndexWidth
 	Layout     []gfx.VertexAttr
 	// layoutID is the layout's dense index in the cache that resolved it, kept
 	// so UpdateMesh can reject a layout change with one integer compare rather
@@ -221,8 +220,8 @@ type meshInput struct {
 	indices     Span
 	vertexCount int
 	indexCount  int
-	topology    gpu.PrimitiveTopology
-	indexWidth  gpu.IndexWidth
+	topology    gfx.PrimitiveTopology
+	indexWidth  gfx.IndexWidth
 	layout      []gfx.VertexAttr
 	layoutID    int
 	standard    bool
@@ -258,13 +257,13 @@ type meshInput struct {
 // that is a frame's worth of unread staging rather than a leak.
 func mintMesh[TVertex VertexLayout](
 	cache *layoutCache, arena *[]byte, vertices []TVertex, indices []uint32,
-	topology gpu.PrimitiveTopology, durable bool,
+	topology gfx.PrimitiveTopology, durable bool,
 ) (meshInput, error) {
 	if err := validateMesh(len(vertices), indices, topology); err != nil {
 		return meshInput{}, err
 	}
 	layoutID, layout, standard := cache.resolve[TVertex]()
-	width := gpu.IndexUint32
+	width := gfx.IndexUint32
 	if durable {
 		width = indexWidthFor(len(vertices))
 	}
@@ -295,7 +294,7 @@ func mintMesh[TVertex VertexLayout](
 // validateMesh rejects geometry that could only draw garbage. Every failure
 // yields a zero MeshRef, which then skips at draw time, so a caller that
 // ignores the report still gets nothing rather than a crash.
-func validateMesh(vertexCount int, indices []uint32, topology gpu.PrimitiveTopology) error {
+func validateMesh(vertexCount int, indices []uint32, topology gfx.PrimitiveTopology) error {
 	if vertexCount == 0 {
 		return ErrMeshGeometryInvalid{Reason: "it has no vertices"}
 	}
@@ -311,7 +310,7 @@ func validateMesh(vertexCount int, indices []uint32, topology gpu.PrimitiveTopol
 	if count == 0 {
 		count, kind = vertexCount, "vertices"
 	}
-	if topology == gpu.TopologyTriangleList && count%3 != 0 {
+	if topology == gfx.TopologyTriangleList && count%3 != 0 {
 		return ErrMeshGeometryInvalid{Reason: fmt.Sprintf(
 			"it is a triangle list of %d %s, which is not a multiple of three", count, kind)}
 	}
@@ -351,7 +350,7 @@ type BakeFunc func(data []byte) gfx.BufferDescr
 
 // bakeTextureFunc uploads one texture's texels and returns the durable
 // descriptor for them, the texture twin of BakeFunc.
-type bakeTextureFunc func(width, height int, format gpu.TextureFormat, pixels []byte) gfx.TextureDescr
+type bakeTextureFunc func(width, height int, format gfx.TextureFormat, pixels []byte) gfx.TextureDescr
 
 // claimMesh puts one record in the mesh table and returns the ref for it,
 // reusing a released slot when there is one. A reused slot keeps the generation
@@ -406,11 +405,11 @@ const narrowIndexLimit = 0xFFFF
 // guaranteed below the vertex count - validateMesh enforces it on the authoring
 // path and the glTF path has it by construction - so a max-index scan would
 // have been new O(n) load-time work where a comparison does.
-func indexWidthFor(vertexCount int) gpu.IndexWidth {
+func indexWidthFor(vertexCount int) gfx.IndexWidth {
 	if vertexCount <= narrowIndexLimit {
-		return gpu.IndexUint16
+		return gfx.IndexUint16
 	}
-	return gpu.IndexUint32
+	return gfx.IndexUint32
 }
 
 // indexBytes renders indices as their upload bytes at the given width. At
@@ -421,11 +420,11 @@ func indexWidthFor(vertexCount int) gpu.IndexWidth {
 // The narrowing writes native-endian words because the uint32 path is a
 // reinterpret of native memory, and a buffer that changed byte order with the
 // width would be a difference no caller could see coming.
-func indexBytes(indices []uint32, width gpu.IndexWidth) []byte {
+func indexBytes(indices []uint32, width gfx.IndexWidth) []byte {
 	if len(indices) == 0 {
 		return nil
 	}
-	if width != gpu.IndexUint16 {
+	if width != gfx.IndexUint16 {
 		return unsafe.Slice((*byte)(unsafe.Pointer(&indices[0])), len(indices)*4)
 	}
 	narrow := make([]byte, len(indices)*2)

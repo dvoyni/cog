@@ -658,7 +658,7 @@ every sprite has. Only *unrecognised* draw parameters become arrays.
 
 **The budget.** `MaxBindGroups` 4 with the sprite shader using three leaves group
 3 free; `MaxStorageBuffersPerShaderStage` 8 with `instances` taking one leaves
-**seven** app parameter arrays. Each array pads to `gpu.StorageAlignment` (256),
+**seven** app parameter arrays. Each array pads to `gfx.StorageAlignment` (256),
 so a one-sprite batch carrying one float parameter spends 256 bytes on four —
 irrelevant at this draw count, noted so nobody rediscovers it as a problem.
 
@@ -1050,7 +1050,7 @@ without touching a single `*Params` struct — so the interactive payload wrappe
 change not at all, and a custom `Visual`, which is a public interface, receives
 the set through the `State` it already gets and picks the slot for the family it
 draws. `ui` already exposes a gfx type in its public API (`SpriteParams.Filter`
-is a `gpu.FilterMode`), so this is not a first crossing of that line.
+is a `gfx.FilterMode`), so this is not a first crossing of that line.
 
 A child element naming an empty set stops inheriting; the opt-out costs nothing
 to have.

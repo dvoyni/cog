@@ -19,12 +19,11 @@ import (
 	"github.com/dvoyni/cog/bundles/input/inputplugin"
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/bundles/ui"
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/gfx"
+	"github.com/dvoyni/cog/slots/gfx/gfxplugin"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
@@ -189,7 +188,7 @@ func newLayoutRig(t *testing.T) *layoutRig {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), fixture)
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfxplugin.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), fixture)
 	stopped := make(chan struct{})
 	go func() { engine.Run(ctx); close(stopped) }()
 	<-engine.Ready()
@@ -658,7 +657,7 @@ func TestASecondLayoutSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 		t.Errorf("a frame snapshot was refused while a layout snapshot was in flight: %v", err)
 	}
 	if _, err := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
-		Target: gpu.CaptureDesc{Screen: true},
+		Target: gfx.CaptureDesc{Screen: true},
 	}); err != nil {
 		t.Errorf("a capture was refused while a layout snapshot was in flight: %v", err)
 	}

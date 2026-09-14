@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
 )
@@ -44,7 +44,7 @@ func TestConvertPrimitiveReadsPositionsAndDeclaredBounds(t *testing.T) {
 	if geometry.box.Max != (m.Vec3{X: 2, Y: 3}) {
 		t.Errorf("box.Max = %v, want {2 3 0}", geometry.box.Max)
 	}
-	if geometry.topology != gpu.TopologyTriangleList {
+	if geometry.topology != gfx.TopologyTriangleList {
 		t.Errorf("topology = %v, want triangle list", geometry.topology)
 	}
 }
@@ -115,32 +115,32 @@ func TestConvertTopologyExpandsStripsLoopsAndFans(t *testing.T) {
 		name     string
 		mode     gltf.PrimitiveMode
 		indices  []uint32
-		topology gpu.PrimitiveTopology
+		topology gfx.PrimitiveTopology
 		want     []uint32
 	}{
 		{
 			name: "triangle strip flips odd triangles", mode: gltf.PrimitiveTriangleStrip,
-			indices: []uint32{0, 1, 2, 3}, topology: gpu.TopologyTriangleList,
+			indices: []uint32{0, 1, 2, 3}, topology: gfx.TopologyTriangleList,
 			want: []uint32{0, 1, 2, 2, 1, 3},
 		},
 		{
 			name: "triangle fan shares the first vertex", mode: gltf.PrimitiveTriangleFan,
-			indices: []uint32{0, 1, 2, 3}, topology: gpu.TopologyTriangleList,
+			indices: []uint32{0, 1, 2, 3}, topology: gfx.TopologyTriangleList,
 			want: []uint32{0, 1, 2, 0, 2, 3},
 		},
 		{
 			name: "line strip", mode: gltf.PrimitiveLineStrip,
-			indices: []uint32{0, 1, 2}, topology: gpu.TopologyLineList,
+			indices: []uint32{0, 1, 2}, topology: gfx.TopologyLineList,
 			want: []uint32{0, 1, 1, 2},
 		},
 		{
 			name: "line loop closes", mode: gltf.PrimitiveLineLoop,
-			indices: []uint32{0, 1, 2}, topology: gpu.TopologyLineList,
+			indices: []uint32{0, 1, 2}, topology: gfx.TopologyLineList,
 			want: []uint32{0, 1, 1, 2, 2, 0},
 		},
 		{
 			name: "triangles pass through", mode: gltf.PrimitiveTriangles,
-			indices: []uint32{0, 1, 2}, topology: gpu.TopologyTriangleList,
+			indices: []uint32{0, 1, 2}, topology: gfx.TopologyTriangleList,
 			want: []uint32{0, 1, 2},
 		},
 	} {

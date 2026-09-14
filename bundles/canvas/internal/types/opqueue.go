@@ -9,7 +9,7 @@ import (
 
 	"github.com/dvoyni/cog/libs/m"
 
-	"github.com/dvoyni/cog/extensions/gfx"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // SpriteOp is one recorded Sprite, SpriteTexture or shape helper, as the flush

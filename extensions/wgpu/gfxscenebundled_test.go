@@ -4,9 +4,7 @@ import (
 	"os"
 	"testing"
 
-	cgfx "github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
-	"github.com/dvoyni/cog/slots/storage"
+	cgfx "github.com/dvoyni/cog/slots/gfx"
 )
 
 // bundledSceneShader flattens one variant of scene's shader off disk rather
@@ -18,8 +16,7 @@ import (
 // includee's own default, which is what an unsupplied #const means.
 func bundledSceneShader(t *testing.T, opts ...cgfx.ShaderOption) string {
 	t.Helper()
-	filesystem := storage.NewFileSystem("scene", os.DirFS("../../bundles/scene/internal"))
-	text, _, err := cgfx.FlattenShader(filesystem, cgfx.ShaderWithResource("builtin/scene/scene.wgsl", opts...))
+	text, err := flattenShader(t, "scene", os.DirFS("../../bundles/scene/internal"), cgfx.ShaderWithResource("builtin/scene/scene.wgsl", opts...))
 	if err != nil {
 		t.Fatalf("flatten the bundled scene shader: %v", err)
 	}
@@ -52,7 +49,7 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 	if layout.UniformSize != 0 {
 		t.Fatalf("the scene shader declares a %d-byte uniform block; all scene data is storage", layout.UniformSize)
 	}
-	resources := map[string]gpu.ShaderResource{}
+	resources := map[string]cgfx.ShaderResource{}
 	for _, resource := range layout.Resources {
 		resources[resource.Name] = resource
 	}
@@ -203,7 +200,7 @@ func TestBundledSceneShaderRecordsMatchTheirPackedOffsets(t *testing.T) {
 	}
 }
 
-func membersOf(t *testing.T, layout gpu.ShaderLayout, name string) []gpu.StorageMember {
+func membersOf(t *testing.T, layout cgfx.ShaderLayout, name string) []cgfx.StorageMember {
 	t.Helper()
 	for _, resource := range layout.Resources {
 		if resource.Name == name {
@@ -228,7 +225,7 @@ func TestBundledSceneShaderFitsTheWebStorageBudget(t *testing.T) {
 			storage++
 		}
 	}
-	if floor := gpu.DefaultLimits.MaxStorageBuffersPerShaderStage; storage > floor {
+	if floor := cgfx.DefaultLimits().MaxStorageBuffersPerShaderStage; storage > floor {
 		t.Fatalf("the bundled scene shader declares %d storage buffers, past the web floor of %d", storage, floor)
 	}
 }

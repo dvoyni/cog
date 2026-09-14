@@ -210,7 +210,7 @@ have.
 > instead, immediately before the swap — the same point in the frame, reached
 > from the other side, since canvas's own
 > `Before[gfx.PresentOnUpdate]()` already puts the flush ahead of it. See
-> [gfx §Where it sits in the tick](../../../../extensions/gfx/docs/specs/mcp.md#where-it-sits-in-the-tick).
+> [gfx §Where it sits in the tick](../../../../slots/gfx/docs/specs/mcp.md#where-it-sits-in-the-tick).
 >
 > **The other two rows are unaffected and stay exactly as written**, because
 > each names a handler type its own package declares.
@@ -275,7 +275,7 @@ descriptors, plus their resolutions**:
   only** — never the dead half of the union, and never inline pixel data. The
   view types are declared by `gfx` and embedded here, so one value never appears
   in two shapes across two tools; see
-  [gfx §The view types](../../../../extensions/gfx/docs/specs/mcp.md#the-view-types).
+  [gfx §The view types](../../../../slots/gfx/docs/specs/mcp.md#the-view-types).
 - canvas's own types — `SpriteTransform`, `TextDraw`, `Vertex` — marshal
   directly and need no view.
 
@@ -283,7 +283,7 @@ descriptors, plus their resolutions**:
 > The third bullet is false, and it is false in the two ways the view types
 > exist to prevent.
 >
-> `SpriteTransform.Filter` is a `gpu.FilterMode` and `TextDraw.Align` a
+> `SpriteTransform.Filter` is a `gfx.FilterMode` and `TextDraw.Align` a
 > `TextAlign`; marshalled directly, each is an **ordinal** — an enum reported
 > as `1` is a lookup an agent cannot perform, and every enum in this family is
 > a name. Worse, `TextDraw` carries `Material *gfx.MaterialDescr` and
@@ -291,7 +291,7 @@ descriptors, plus their resolutions**:
 > unexported fields, so marshalling one yields `{}`: a text draw would publish
 > an empty object where its material is and a row of empty objects where its
 > parameters are, which is precisely the dead end
-> [gfx §The view types](../../../../extensions/gfx/docs/specs/mcp.md#the-view-types)
+> [gfx §The view types](../../../../slots/gfx/docs/specs/mcp.md#the-view-types)
 > documents. `Vertex` marshals without lying but with `X`/`Y`/`R` keys, against
 > a document that is camelCase throughout.
 >
@@ -420,7 +420,7 @@ Reproduced in full, per the house style, so it is reviewed as prompt text:
 > the step is opportunistic without a `wgpu_time hold`, and nothing in the
 > response said which tick it got. `gfx.SnapshotView` now carries `tick`, so
 > this response names the moment it describes — see
-> [gfx §The view types](../../../../extensions/gfx/docs/specs/mcp.md#the-view-types) and
+> [gfx §The view types](../../../../slots/gfx/docs/specs/mcp.md#the-view-types) and
 > [wgpu §A hold decides it](../../../../extensions/wgpu/docs/specs/mcp.md#a-hold-decides-it).
 
 ---
@@ -478,7 +478,7 @@ once, to stop stating a timing guarantee the terms do not own.
   honest answer is probably to read the CPU-side pixels that produced it, which
   never left main memory. If it survives, it belongs here as its own capability
   rather than as a widening of `gfx`'s readback. See
-  [extensions/gfx/docs/specs/capture.md §Out of scope](../../../../extensions/gfx/docs/specs/capture.md#out-of-scope).
+  [slots/gfx/docs/specs/capture.md §Out of scope](../../../../slots/gfx/docs/specs/capture.md#out-of-scope).
 
 - **Pagination.** Flat sequences are the shape that *does* paginate in prior art
   — page size, page index, fetch-by-index — and cog answers with a filter plus a

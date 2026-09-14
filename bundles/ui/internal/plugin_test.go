@@ -15,10 +15,10 @@ import (
 	"github.com/dvoyni/cog/bundles/input/inputplugin"
 	"github.com/dvoyni/cog/bundles/ui"
 	"github.com/dvoyni/cog/bundles/ui/internal/types"
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/gfx"
+	"github.com/dvoyni/cog/slots/gfx/gfxplugin"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
@@ -93,7 +93,7 @@ func TestPluginMapsWindowPointerToLogicalViewport(t *testing.T) {
 	}).WithPlugins(
 		storageplugin.New(), permanentAdapter{},
 		inputplugin.New(),
-		gfximpl.New(),
+		gfxplugin.New(),
 		backendAdapter{&detachedBackend{}},
 		canvasplugin.New(),
 		New(),
@@ -155,7 +155,7 @@ func TestPluginProcessesAndClearsEveryUpdate(t *testing.T) {
 	}).WithPlugins(
 		storageplugin.New(), permanentAdapter{},
 		inputplugin.New(),
-		gfximpl.New(),
+		gfxplugin.New(),
 		backendAdapter{&detachedBackend{}},
 		canvasplugin.New(),
 		New(),
@@ -224,7 +224,7 @@ func TestPluginSeesAScriptedClickAsAClick(t *testing.T) {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfxplugin.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
 	go engine.Run(runContext)
 	<-engine.Ready()
 	k := engine.Executioner()
@@ -263,7 +263,7 @@ func TestPluginSeesAScriptedDragAsADrag(t *testing.T) {
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, inputplugin.New(), gfxplugin.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
 	go engine.Run(runContext)
 	<-engine.Ready()
 	k := engine.Executioner()

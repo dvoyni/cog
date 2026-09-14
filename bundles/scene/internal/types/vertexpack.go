@@ -5,9 +5,8 @@ import (
 	"math"
 	"unsafe"
 
-	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // The storage vertex: where each attribute sits in the buffer scene uploads,
@@ -75,14 +74,14 @@ const unorm8CodeMax = 0xFF
 // row together is that divide.
 var (
 	skinnedVertexLayout = [...]gfx.VertexAttr{
-		gfx.Attr(storagePosition, gpu.Float32x3), // POSITION
-		gfx.Attr(storageNormal, gpu.Unorm16x2),   // NORMAL     - oct32
-		gfx.Attr(storageTangent, gpu.Uint32),     // TANGENT    - oct 15/15 + handedness
-		gfx.Attr(storageUV0, gpu.Unorm16x2),      // TEXCOORD_0 - against the mesh record
-		gfx.Attr(storageUV1, gpu.Unorm16x2),      // TEXCOORD_1 - against the mesh record
-		gfx.Attr(storageColor, gpu.Unorm8x4),     // COLOR_0
-		gfx.Attr(storageJoints, gpu.Uint8x4),     // JOINTS_0   - one byte a joint, capped at 256
-		gfx.Attr(storageWeights, gpu.Unorm8x4),   // WEIGHTS_0  - renormalised in the shader
+		gfx.Attr(storagePosition, gfx.Float32x3), // POSITION
+		gfx.Attr(storageNormal, gfx.Unorm16x2),   // NORMAL     - oct32
+		gfx.Attr(storageTangent, gfx.Uint32),     // TANGENT    - oct 15/15 + handedness
+		gfx.Attr(storageUV0, gfx.Unorm16x2),      // TEXCOORD_0 - against the mesh record
+		gfx.Attr(storageUV1, gfx.Unorm16x2),      // TEXCOORD_1 - against the mesh record
+		gfx.Attr(storageColor, gfx.Unorm8x4),     // COLOR_0
+		gfx.Attr(storageJoints, gfx.Uint8x4),     // JOINTS_0   - one byte a joint, capped at 256
+		gfx.Attr(storageWeights, gfx.Unorm8x4),   // WEIGHTS_0  - renormalised in the shader
 	}
 	standardVertexLayout = skinnedVertexLayout[:StandardVertexAttrs]
 )

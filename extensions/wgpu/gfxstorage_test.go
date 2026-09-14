@@ -3,7 +3,7 @@ package wgpu
 import (
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 const testSceneWGSL = `
@@ -39,7 +39,7 @@ func TestStorageStructMembersAreReflected(t *testing.T) {
 	if len(layout.Resources) != 1 || !layout.Resources[0].StorageBuffer {
 		t.Fatalf("resources = %+v, want one storage buffer", layout.Resources)
 	}
-	members := map[string]gpu.StorageMember{}
+	members := map[string]gfx.StorageMember{}
 	for _, member := range layout.Resources[0].Members {
 		members[member.Name] = member
 	}

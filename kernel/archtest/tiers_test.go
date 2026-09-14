@@ -25,7 +25,6 @@ import (
 // that moves a plugin deletes its entry, and an entry naming a directory that
 // holds no package fails the test, so the list only shrinks.
 var unmoved = []string{
-	"extensions/gfx",
 	"extensions/wgpu",
 	"slots/app",
 }
@@ -48,6 +47,7 @@ const (
 	ruleRootFiles          = "a Slot or Bundle root holds only doc.go, id.go, commands.go, events.go, resources.go, ports.go, adapters.go, types.go, config.go, err.go and utils.go, besides tests"
 	ruleExtensionFiles     = "an Extension root holds only doc.go, id.go, config.go, adapters.go and err.go, besides tests"
 	ruleForwarder          = "a root's exported functions are in utils.go, and every function there is exported and a single return of a call into the plugin's own internal/types, its parameters passed through in order"
+	ruleInlineAnchor       = "a root's unexported functions are inline anchors: never called, returning nothing, and only calling argument-free methods on parameters typed as the root's aliases of its own internal/types"
 	ruleConstructorExports = "a constructor package exports only New() kernel.Plugin"
 	ruleUndeclaredAdapter  = "every ProvideAdapter in a plugin names an Adapter its root declares in adapters.go"
 	ruleUnprovidedAdapter  = "every Adapter a root declares in adapters.go is provided by its plugin"
@@ -103,7 +103,7 @@ const (
 	tierLegacyImpl     // bundles/X/Ximpl, extensions/P/Pimpl
 	tierLegacyOther    // any other extensions/* directory: wgpu
 	// tierLegacyVocabulary is extensions/P/V for any V but Pimpl and internal,
-	// when P has a Pimpl child: the contract a Port's Adapters implement (gfx/gpu).
+	// when P has a Pimpl child: the contract a Port's Adapters implement, as gfx/gpu was.
 	tierLegacyVocabulary
 )
 

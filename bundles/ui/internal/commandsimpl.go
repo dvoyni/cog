@@ -2,8 +2,8 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/ui"
-	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // registerCommands declares ui's own commands. There is one: the snapshot arm,

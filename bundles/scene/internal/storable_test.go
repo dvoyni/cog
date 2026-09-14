@@ -6,8 +6,8 @@ import (
 
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // A pass and a transform are storable, so a Component can hold scene's own
@@ -37,7 +37,7 @@ func TestAZeroPassPreservesColourAndDepth(t *testing.T) {
 		t.Fatalf("gfx passes = %d, want 1", len(h.backend.passes))
 	}
 	pass := h.backend.passes[0]
-	if pass.Load != gpu.LoadPreserve || pass.DepthLoad != gpu.LoadPreserve {
+	if pass.Load != gfx.LoadPreserve || pass.DepthLoad != gfx.LoadPreserve {
 		t.Errorf("colour load = %v, depth load = %v; want both LoadPreserve", pass.Load, pass.DepthLoad)
 	}
 }
@@ -53,10 +53,10 @@ func TestAPresentClearClearsAtItsValue(t *testing.T) {
 	h.frame()
 
 	pass := h.backend.passes[0]
-	if pass.Load != gpu.LoadClear || pass.Clear != (m.Color{}) {
+	if pass.Load != gfx.LoadClear || pass.Clear != (m.Color{}) {
 		t.Errorf("colour load = %v clear = %v, want LoadClear to transparent black", pass.Load, pass.Clear)
 	}
-	if pass.DepthLoad != gpu.LoadClear || pass.DepthClear != 1 {
+	if pass.DepthLoad != gfx.LoadClear || pass.DepthClear != 1 {
 		t.Errorf("depth load = %v clear = %v, want LoadClear at 1.0", pass.DepthLoad, pass.DepthClear)
 	}
 }
@@ -73,7 +73,7 @@ func TestANonUniformlyScaledDrawTakesTheInverseTransposeNormalPath(t *testing.T)
 			NeverCull: true,
 		})
 	})
-	ref = h.bake(triangle(), []uint32{0, 1, 2}, gpu.TopologyTriangleList)
+	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 	h.frame()
 
 	instance := firstInstance(t, h)
@@ -92,7 +92,7 @@ func TestAUniformlyScaledDrawKeepsThePlainNormalPath(t *testing.T) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, ref, scene.MeshDraw{Transform: scene.At(0, 0, 0).WithScale(3), NeverCull: true})
 	})
-	ref = h.bake(triangle(), []uint32{0, 1, 2}, gpu.TopologyTriangleList)
+	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 	h.frame()
 
 	if flags := firstInstance(t, h).Flags; flags&sceneNonUniform != 0 {

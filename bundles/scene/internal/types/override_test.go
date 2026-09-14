@@ -3,8 +3,8 @@ package types
 import (
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // OverrideParams merges by name into the draw's own copy of the bundled PBR
