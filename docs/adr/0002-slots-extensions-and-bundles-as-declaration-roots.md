@@ -10,7 +10,7 @@ ADR 0001 split every plugin into a contract root, an `…impl` and an `internal/
 We give every plugin one shape and one of three kinds, and check both with the tier test:
 
 - A **Slot** (`slots/`: app, gfx, storage) declares at least one required Port and cannot work until an Adapter fills it. Its forwarders name only its own types, predeclared types, the standard library, Libraries and the kernel.
-- An **Extension** (`extensions/`: wgpu, diskfs, jsfs) provides Adapters for Slots and declares no API.
+- An **Extension** (`extensions/`: gogpu, diskstorage, jsstorage) provides Adapters for Slots and declares no API.
 - A **Bundle** (`bundles/`) is every other plugin. It requires no Port, and may collect Adapters or contribute them.
 
 Every plugin `X` is four places:
@@ -20,7 +20,7 @@ Every plugin `X` is four places:
 - **`X/internal/`** holds the implementation.
 - **The constructor package `X/xplugin`** exports only `New()`, and only composition roots and tests import it.
 
-Ports and Adapters are declared identity types, as commands are: a Port in its plugin's `ports.go`, an Adapter in the providing plugin's `adapters.go`. The tier test cross-checks every `ProvideAdapter` against `adapters.go`. gfx folds `gpu` back into its root. app becomes a Slot owning the application loop, with a MainLoop Port that wgpu fills.
+Ports and Adapters are declared identity types, as commands are: a Port in its plugin's `ports.go`, an Adapter in the providing plugin's `adapters.go`. The tier test cross-checks every `ProvideAdapter` against `adapters.go`. gfx folds `gpu` back into its root. app becomes a Slot owning the application loop, with a MainLoop Port that gogpu fills.
 
 This applies to the cog repo. Games and examples are composition roots and stay free-form.
 
@@ -35,6 +35,6 @@ This applies to the cog repo. Games and examples are composition roots and stay 
 - The move is staged. The tier test holds a migration list of plugins not yet moved, each still checked under ADR 0001's rules. Each plugin's move deletes its entry, and the final sweep deletes the empty list.
 - `DefaultConfig` is removed everywhere: a `Config`'s zero value is its default.
 - Helpers that dispatch commands leave the API, so every caller dispatches and handles the answer itself.
-- The time tool moves from wgpu to app and is renamed `app_time`. No other tool name or schema changes.
+- The time tool moves from gogpu to app and is renamed `app_time`. No other tool name or schema changes.
 - `FlattenShader` leaves gfx's API, since its signature names `storage.FileSystem`.
 - A root that aliases types with hot accessors may hold one kind of code: an unexported, never-called inline anchor calling those accessors. Go inlines a method of a package its caller does not import only when a package the caller imports references it, and a root of aliases and forwarders references none; gfx's move lost per-sprite and per-draw inlining in canvas and scene until its root anchored them (#366).

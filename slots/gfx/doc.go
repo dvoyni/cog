@@ -12,7 +12,7 @@
 // touches a GPU API and the plugin never imports one.
 //
 // gfx is a Slot: its plugin, built by gfxplugin.New, works only once an Adapter
-// for BackendPort is bound to it. A driver such as wgpu provides one with
+// for BackendPort is bound to it. A driver such as gogpu provides one with
 // kernel.Registrar.ProvideAdapter, and a composition without one fails with
 // kernel.ErrMissingAdapter.
 //

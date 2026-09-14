@@ -1,7 +1,7 @@
 package types
 
 // ShaderDesc describes a shader module to create from opaque, backend-specific
-// source bytes (WGSL for the wgpu backend). gfx flattens a shader's sources
+// source bytes (WGSL for the gogpu backend). gfx flattens a shader's sources
 // before it hands Code over, so a backend never sees a preprocessor directive.
 type ShaderDesc struct {
 	Code  []byte

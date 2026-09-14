@@ -8,5 +8,5 @@ import (
 )
 
 // New creates the gfx plugin. It requires exactly one Adapter for
-// gfx.BackendPort, which a driver such as wgpu provides.
+// gfx.BackendPort, which a driver such as gogpu provides.
 func New() kernel.Plugin { return internal.New() }

@@ -71,8 +71,8 @@ type samplerBinding struct {
 }
 
 // testShaderLayout is what reflection reports for the bundled scene shader. The
-// real source is reflected and asserted in the wgpu package, the only tree with
-// a WGSL front end; here it stands in so that scene's bindings reach the
+// real source is reflected and asserted in the gogpu package, the only tree
+// with a WGSL front end; here it stands in so that scene's bindings reach the
 // backend and can be read back by name.
 var testShaderLayout = gfx.ShaderLayout{Resources: []gfx.ShaderResource{
 	{Name: "sceneFrame", StorageBuffer: true, Group: 0, Binding: 0},

@@ -54,7 +54,7 @@ can call. `internal/types` never imports the root.
 `StateCmd`, subscribes `AdvanceOnUpdate` first to `app.UpdateEvent`, and
 contributes the Provider.
 
-Compose it with `inputplugin.New()`. A driver such as wgpu, or a test harness,
+Compose it with `inputplugin.New()`. A driver such as gogpu, or a test harness,
 does not compose anything of its own for input: it is a caller that dispatches
 `input.ApplyCmd`.
 

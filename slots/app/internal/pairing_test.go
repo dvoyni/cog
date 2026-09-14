@@ -35,7 +35,7 @@ import (
 // This is the closest the repository gets to the live test. What it does not
 // have is a window, a GPU and three HTTP connections; what it does have is
 // every seam between them, with app driven through the Loop it attaches to a
-// fake MainLoop, as wgpu's MainLoop drives it.
+// fake MainLoop, as gogpu's MainLoop drives it.
 
 // pairingRounds is how many times each recipe is run. The live failure was a
 // race against the frame clock rather than a fixed limit, so one pass proves

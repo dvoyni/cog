@@ -30,9 +30,9 @@ storage has the declaration-root shape of
 
 The Adapters are Extensions in `extensions/`:
 
-- **`extensions/diskfs`** (`!js`): a directory under the user's data directory,
-  named by the application id.
-- **`extensions/jsfs`** (`js`): the page's `localStorage`, under the key
+- **`extensions/diskstorage`** (`!js`): a directory under the user's data
+  directory, named by the application id.
+- **`extensions/jsstorage`** (`js`): the page's `localStorage`, under the key
   `cog.storage.<AppId>`.
 
 ## No Platform Code
@@ -82,12 +82,12 @@ config := map[kernel.PluginName]any{
     storage.Name: storage.Config{}.
         WithReadFS("res", storage.DefaultReadPriority, os.DirFS("res")).
         WithReadFS("embedded", 100, embeddedFS),
-    diskfs.Name: diskfs.Config{AppId: "my-app"},
+    diskstorage.Name: diskstorage.Config{AppId: "my-app"},
 }
 
 plugins := []kernel.Plugin{
     storageplugin.New(),
-    diskfsplugin.New(), // or jsfsplugin.New() in a browser, with jsfs.Config under jsfs.Name
+    diskstorageplugin.New(), // or jsstorageplugin.New() in a browser, with jsstorage.Config under jsstorage.Name
     …
 }
 ```
@@ -112,27 +112,29 @@ registrar.ProvideAdapter[StoragePermanentFS](permanent)
 
 The two cog ships are each built only for their platform.
 
-- **diskfs** is an Extension in the declaration-root shape. Its root,
-  `extensions/diskfs`, declares only `Name`, `Config`, the
-  `StoragePermanentFS` Adapter and its errors; the plugin is in its
-  `internal/`, and `diskfsplugin.New()` constructs it. Its `diskfs.Config` is
-  supplied under `diskfs.Name`, and its zero value is the default. The plugin
-  opens `<data dir>/<AppId>`, creating it if needed: `%LOCALAPPDATA%` on
+- **diskstorage** is an Extension in the declaration-root shape. Its root,
+  `extensions/diskstorage`, declares only `Name`, `Config`, the
+  `StoragePermanentFS` Adapter and its errors; the plugin is in its `internal/`,
+  and `diskstorageplugin.New()` constructs it. Its `diskstorage.Config` is
+  supplied under `diskstorage.Name`, and its zero value is the default. The
+  plugin opens `<data dir>/<AppId>`, creating it if needed: `%LOCALAPPDATA%` on
   Windows, `$XDG_DATA_HOME` (or `~/.local/share`) on Linux, the user config
   directory on macOS. An empty `AppId` is the executable's name without its
   extension. An `AppId` that is not one directory name fails `Register` with
-  `diskfs.ErrInvalidAppId`, and a config value that is not a `diskfs.Config`
-  with `diskfs.ErrInvalidConfig`. Every operation is confined to the directory
-  through `os.Root`.
-- **jsfs** is an Extension in the same shape. Its root, `extensions/jsfs`,
-  declares only `Name`, `Config`, the `StoragePermanentFS` Adapter and its
-  errors; the plugin is in its `internal/`, and `jsfsplugin.New()` constructs
-  it. Its `jsfs.Config` is supplied under `jsfs.Name`. The plugin keeps the
+  `diskstorage.ErrInvalidAppId`, and a config value that is not a
+  `diskstorage.Config` with `diskstorage.ErrInvalidConfig`. Every operation is
+  confined to the directory through `os.Root`.
+- **jsstorage** is an Extension in the same shape. Its root,
+  `extensions/jsstorage`, declares only `Name`, `Config`, the
+  `StoragePermanentFS` Adapter and its errors; the plugin is in its
+  `internal/`, and `jsstorageplugin.New()` constructs it. Its
+  `jsstorage.Config` is supplied under `jsstorage.Name`. The plugin keeps the
   whole filesystem as one JSON document under `localStorage` key
   `cog.storage.<AppId>`. A browser has no executable to name the app after, so
   an empty `AppId`, the zero value included, is an error, as is one that is not
-  a single name: both fail `Register` with `jsfs.ErrInvalidAppId`. A config
-  value that is not a `jsfs.Config` fails it with `jsfs.ErrInvalidConfig`.
+  a single name: both fail `Register` with `jsstorage.ErrInvalidAppId`. A config
+  value that is not a `jsstorage.Config` fails it with
+  `jsstorage.ErrInvalidConfig`.
 
 ## Resources
 
@@ -235,9 +237,9 @@ splitting a single store into several entry points.
 - `ErrInvalidValuesFile{Path, Err}`: the values file is not a JSON object.
 - `ErrInvalidKey`, `ErrInvalidValueRequest`, `ErrInvalidOutValue{Key}`:
   malformed value requests.
-- `diskfs.ErrInvalidAppId{AppId}`, `jsfs.ErrInvalidAppId{AppId}`: the Adapter's
+- `diskstorage.ErrInvalidAppId{AppId}`, `jsstorage.ErrInvalidAppId{AppId}`: the Adapter's
   application id is invalid.
-- `diskfs.ErrInvalidConfig{Got}`, `jsfs.ErrInvalidConfig{Got}`: the value
+- `diskstorage.ErrInvalidConfig{Got}`, `jsstorage.ErrInvalidConfig{Got}`: the value
   under the Adapter's `Name` is not its `Config`.
 
 Each exported error type implements `Error() string`.

@@ -114,7 +114,7 @@ takes it too; a negative rate is refused. `Start` mounts scene's embedded shader
 filesystem through `storage.SetMountCmd`.
 
 **Register `storage` before `scene`.** The order the demos use is `storage`,
-`input`, `gfx`, `canvas`, `scene`, then the driver (`wgpu`), with the app's own
+`input`, `gfx`, `canvas`, `scene`, then the driver (`gogpu`), with the app's own
 recording plugin last, because it records into the queues those plugins declare.
 
 **Scene needs a WebGPU core adapter.** It reads storage buffers from the vertex
@@ -816,8 +816,8 @@ absorbed quietly. The ones a caller can observe:
   target with no id in it. `gfx.OpQueue.TemporaryTarget` returns the target and
   the texture together; `Pass.Target` takes the handle untouched.
 - **A `NoTarget()` depth-only pass executes on Vulkan and in a browser, and is
-  declined on GLES.** `cog/extensions/wgpu` asks the selected backend, not the build tag,
-  and reports `wgpu.ErrDepthOnlyPassUnsupported` once per run where it declines.
+  declined on GLES.** `cog/extensions/gogpu` asks the selected backend, not the build tag,
+  and reports `gogpu.ErrDepthOnlyPassUnsupported` once per run where it declines.
   Vulkan was fixed by `gogpu/wgpu#353` in v0.34.5; the GLES HAL binds no
   framebuffer for a colourless pass and would draw into whatever was bound last,
   so it is refused rather than encoded. An unrecognised backend is refused too.

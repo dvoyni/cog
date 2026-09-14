@@ -24,8 +24,8 @@ dependencies:
 
 ```go
 plugins := []kernel.Plugin{
-	storageplugin.New(), diskfsplugin.New(), // diskfs.Config{AppId: "demo"} under diskfs.Name
-	inputplugin.New(), appplugin.New(), gfxplugin.New(), canvasplugin.New(), uiplugin.New(), wgpuplugin.New(),
+	storageplugin.New(), diskstorageplugin.New(), // diskstorage.Config{AppId: "demo"} under diskstorage.Name
+	inputplugin.New(), appplugin.New(), gfxplugin.New(), canvasplugin.New(), uiplugin.New(), gogpuplugin.New(),
 	game, // declares the frame and reads the interactions
 }
 ```

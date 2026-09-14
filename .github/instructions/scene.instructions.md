@@ -20,13 +20,13 @@ correct picture.
 ## Wiring
 
 Compose scene with what it depends on — storage and its `PermanentFS` Adapter,
-gfx and its `Backend` Adapter, and app, whose `MainLoop` Adapter wgpu provides with
+gfx and its `Backend` Adapter, and app, whose `MainLoop` Adapter gogpu provides with
 gfx's `Backend` — and the app's own recording plugin. The kernel orders them by their dependencies:
 
 ```go
 plugins := []kernel.Plugin{
-	storageplugin.New(), diskfsplugin.New(), // diskfs.Config{AppId: "demo"} under diskfs.Name
-	inputplugin.New(), appplugin.New(), gfxplugin.New(), canvasplugin.New(), sceneplugin.New(), wgpuplugin.New(),
+	storageplugin.New(), diskstorageplugin.New(), // diskstorage.Config{AppId: "demo"} under diskstorage.Name
+	inputplugin.New(), appplugin.New(), gfxplugin.New(), canvasplugin.New(), sceneplugin.New(), gogpuplugin.New(),
 	demo, // records into the queues the plugins above declare
 }
 ```
@@ -255,8 +255,8 @@ attachment, so two adjacent auto-depth passes into one target never merge.
 
 **A depth-only pass may be written, but its output may not be depended on in the
 same frame unless the backend is known to encode it.** Vulkan and a browser do;
-GLES does not, and neither does anything `cog/extensions/wgpu` does not recognise — it
-declines a `NoTarget()` pass and reports `wgpu.ErrDepthOnlyPassUnsupported`. It
+GLES does not, and neither does anything `cog/extensions/gogpu` does not recognise — it
+declines a `NoTarget()` pass and reports `gogpu.ErrDepthOnlyPassUnsupported`. It
 is the backend that decides, not the platform. A later pass loading that depth
 with `ClearDepth: nil` therefore renders against undefined depth wherever the
 pass was skipped — the whole target, not the one draw.

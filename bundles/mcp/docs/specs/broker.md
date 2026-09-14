@@ -6,7 +6,7 @@ provider in the engine and serves them to an agent over MCP. It is mcp's
 plugin, and it collects every Adapter the engine binds to `mcp.ProviderPort`. It
 imports `kernel`, `mcp`, the official Go MCP SDK and a JSON-schema library, and
 it imports **no provider** — not `gfx`, not `canvas`, not `ui`, not `input`, not
-`wgpu`.
+`gogpu`.
 
 That absence is the design. The broker renders; it does not know. Everything it
 can say about a capability it learned from an `mcp.Capability` value, and there
@@ -53,6 +53,9 @@ settle it.
 > dependencies, and [Close on engine-context cancellation](#close-on-engine-context-cancellation-not-in-stop)
 > still holds. File and line citations of wgpu's code below are as they were
 > before the move.
+>
+> **Renamed by the user after #369.** The wgpu Extension these notes name is
+> now **gogpu**: `extensions/gogpu`, built by `gogpuplugin.New()`.
 
 ---
 
@@ -281,7 +284,7 @@ got wrong by someone reimplementing it:
   stopping early.
 - **`app` has no plugin at all** — it is pure contract — so nothing can declare
   a dependency on it to force ordering, and `app.QuitEvent` fires only when a
-  host exists (`extensions/wgpu/internal/plugin.go:119`).
+  host exists (`extensions/gogpu/internal/plugin.go:119`).
 
 > **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** `app` now has
 > a plugin, so a dependency on it can be declared. It would still not make the
@@ -332,7 +335,7 @@ still holding the port — is exactly the case where a loud failure saves the mo
 time.
 
 **js/wasm is the same answer.** `net.Listen` does not work in a browser, and cog
-does target it (`extensions/jsfs`). An app that composed `mcpplugin.New()`
+does target it (`extensions/jsstorage`). An app that composed `mcpplugin.New()`
 into a browser build made a composition mistake, and cog fails composition
 loudly. This is deliberately **not** a build tag: excluding the plugin on `js`
 would break a `main.go` shared between desktop and web builds at *compile* time,

@@ -67,8 +67,8 @@ scratch.
 
 ```go
 kernel.New(config).WithPlugins(
-    storageplugin.New(), diskfsplugin.New(),
-    inputplugin.New(), appplugin.New(), gfxplugin.New(), sceneplugin.New(), wgpuplugin.New(),
+    storageplugin.New(), diskstorageplugin.New(),
+    inputplugin.New(), appplugin.New(), gfxplugin.New(), sceneplugin.New(), gogpuplugin.New(),
     ecsplugin.New(), ecssceneplugin.New(), game.New())
 ```
 
