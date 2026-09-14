@@ -1,4 +1,4 @@
-package internal
+package types
 
 // Timelines holds every timeline by key. Keys are compared as map keys, so a
 // private marker struct per owner keeps them from colliding across packages.
@@ -7,7 +7,7 @@ type Timelines struct {
 	byKey map[any]*Timeline
 }
 
-// NewTimelines creates the empty resource animimpl registers.
+// NewTimelines creates the empty resource anim's internal/ registers.
 func NewTimelines() *Timelines {
 	return &Timelines{byKey: map[any]*Timeline{}}
 }

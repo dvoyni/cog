@@ -1,4 +1,4 @@
-package internal
+package types
 
 // Params describes how a track plays. The zero value is a zero-duration,
 // linear, one-shot track that starts at the chain point.
@@ -15,6 +15,12 @@ type Params struct {
 	Loop bool
 	// Immediate starts the track now instead of at the chain point.
 	Immediate bool
+}
+
+// Over returns Params for a one-shot linear track of the given duration that
+// starts at the chain point.
+func Over(duration float32) Params {
+	return Params{Duration: duration}
 }
 
 // WithEasing returns a copy with the given easing.
@@ -52,22 +58,4 @@ const (
 // Found reports whether any track, active or pending, matched the query.
 func (s State) Found() bool {
 	return s != StateNotFound
-}
-
-// Easing maps normalized progress in [0, 1] to eased progress. A track applies
-// its easing to clamped (or, when looping, wrapped) progress before the
-// sequence produces a value.
-type Easing func(progress float32) float32
-
-// Linear returns progress unchanged. It is the easing of a track added without
-// one.
-func Linear(progress float32) float32 {
-	return progress
-}
-
-// Sequence produces a value of type T for eased progress in [0, 1]. Any type
-// may implement it; a track stores the sequence value it was added with, so a
-// sequence may carry whatever payload the reader needs at draw time.
-type Sequence[T any] interface {
-	At(progress float32) T
 }

@@ -5,55 +5,42 @@ one-tick cues. A game declares what a value should do over time (a sequence,
 a duration, an easing) and reads the current value each tick; the plugin
 advances every timeline by the fixed step, so nothing else needs to tick.
 
-anim is a **Bundle**: a Slot and its one Extension, shipped together. The
+anim is a **Bundle**: it requires no Adapter and contributes none. The
 vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0001](../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
+[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
-anim has the Bundle shape: a contract root, an `…impl` and an `internal/`.
-
-- **`bundles/anim`** is the contract: the `Timelines` resource, the library
-  that is most of the package (`Timeline`, `Params` and `Over`, `State`, the
-  easings, `Sequence`, `Lerp` and its `Lerp*` constructors, `Flipbook`), `Name`
-  and the ordering identity `AdvanceOnUpdate`. It declares no plugin, and it is
-  what every other package imports.
-- **`bundles/anim/animimpl`** is the plugin: `New` and the handler behind
-  `AdvanceOnUpdate`. It exports `New` and nothing else. Only composition roots
-  and tests import it.
-- **`bundles/anim/internal`** holds what the two share and nothing else may
-  reach: the declarations of `Timelines` and `Timeline`, of what they refer to
-  (`Params`, `State`, `Easing`, `Linear` and `Sequence`), and the consume side
-  of the resource — advancing every timeline by a tick.
-
-`Timelines`, `Timeline` and the vocabulary they carry are declared in
-`internal` with their fields unexported, and re-exported from the root as
-aliases (`type Timelines = internal.Timelines`). They stay concrete types, and
-their exported methods (`Timelines.Get`, `Timeline.Add`, `Params.WithLoop`, …)
-are public API through the alias. What animimpl needs beyond that goes through
-a plain function `internal` exports, which only the root and animimpl can call.
-`internal` never imports the root. See
+anim has the declaration-root shape of
 [`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
 
-## Files
+- **`bundles/anim`** is the root, and holds declarations only: the `Timelines`
+  resource, `Timeline`, `Params`, `State`, `Easing`, `Sequence`, `Lerp`,
+  `Flipbook`, `Name` and the ordering identity `AdvanceOnUpdate`. Its
+  functions, `Over`, the easings and the `Lerp*` constructors, are forwarders
+  in `utils.go`. It declares no plugin, and it is what every other package
+  imports.
+- **`bundles/anim/internal/types`** declares `Timelines` and `Timeline`, whose
+  unexported state the plugin advances, and what they refer to or a track is
+  built from (`Params`, `State`, `Easing`, `Sequence`, `Lerp` and `Flipbook`),
+  with the functions the root forwards to and the consume side of the
+  resource — advancing every timeline by a tick. The root aliases every one of
+  them.
+- **`bundles/anim/internal`** is the plugin: its `New` and the handler behind
+  `AdvanceOnUpdate`.
+- **`bundles/anim/animplugin`** exports only `New() kernel.Plugin`. Only
+  composition roots and tests import it.
 
-In the root, `contract.go` holds the package documentation and the `Params`
-and `State` aliases with `Over`; `identities.go` `Name` and `AdvanceOnUpdate`;
-`resources.go` the `Timelines` alias; `timeline.go` the `Timeline` alias;
-`easing.go` the easing curves; `sequence.go` the `Sequence` alias and `Lerp`;
-`flipbook.go` the frame-list sequence.
-
-In `internal`, `contract.go` declares `Params`, `State`, `Easing`, `Linear` and
-`Sequence`; `timelines.go` the resource; `timeline.go` the `Timeline` type and
-its generic timeline methods; `friends.go` the function animimpl advances the
-resource through.
-
-In `animimpl`, `plugin.go` holds the plugin and its tick subscription.
+The aliased types stay concrete types, and their exported methods
+(`Timelines.Get`, `Timeline.Add`, `Params.WithLoop`, …) are public API through
+the alias (`type Timelines = types.Timelines`). What the plugin needs beyond
+that goes through a plain function `internal/types` exports, which nothing
+outside `bundles/anim` can call. `internal/types` never imports the root.
 
 ## Plugin
 
 - Name: `anim.Name` (`"anim"`)
-- Constructor: `animimpl.New() kernel.Plugin`
+- Constructor: `animplugin.New() kernel.Plugin`
 - Plugin dependencies: none
 - Requires: no Adapter
 - Contributes: no Adapter
