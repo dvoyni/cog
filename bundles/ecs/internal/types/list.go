@@ -49,6 +49,7 @@ var listMarkerType = reflect.TypeFor[listMarker]()
 type List[T any] struct {
 	_    listMarker
 	data []T
+	gen  uint64
 }
 
 // NewList copies its arguments into a List. It is the spelling for a literal:
@@ -124,7 +125,7 @@ func (l List[T]) Set(i int, value T) {
 // rename of this one cannot silently break the walk.
 func isList(t reflect.Type) bool {
 	return t.Kind() == reflect.Struct &&
-		t.NumField() == 2 &&
+		t.NumField() == 3 &&
 		t.Field(0).Type == listMarkerType
 }
 
