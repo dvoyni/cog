@@ -6,7 +6,7 @@ import (
 
 	cgfx "github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
-	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
 // bundledSceneShader flattens one variant of scene's shader off disk rather

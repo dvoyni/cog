@@ -20,10 +20,10 @@ import (
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/mcp"
-	"github.com/dvoyni/cog/extensions/storage"
-	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
 // The pairing recipe is the umbrella's headline promise and the thing #259
@@ -89,12 +89,12 @@ func newPairingRig(t *testing.T) *pairingRig {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storageimpl.DefaultConfig(),
+		storage.Name: storage.Config{},
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
 	}).WithPlugins(
-		storageimpl.New(), permanentAdapter{}, inputimpl.New(), gfximpl.New(), canvasimpl.New(), uiimpl.New(),
+		storageplugin.New(), permanentAdapter{}, inputimpl.New(), gfximpl.New(), canvasimpl.New(), uiimpl.New(),
 		&pairingPlugin{rig: rig},
 	)
 	stopped := make(chan struct{})

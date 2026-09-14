@@ -4,8 +4,8 @@ import (
 	"io/fs"
 	"path"
 
-	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/storage"
 	"github.com/qmuntal/gltf"
 )
 

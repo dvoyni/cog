@@ -16,11 +16,11 @@ import (
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/mcp"
-	"github.com/dvoyni/cog/extensions/storage"
-	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
 // A capture is the first thing in cog that reads a rendered pixel back, and
@@ -47,11 +47,11 @@ func newCaptureRig(t *testing.T) *captureRig {
 	ctx, cancel := context.WithCancel(context.Background())
 	renderer, clock, gate, flush := newPlugin(), &timePlugin{}, &gatePlugin{}, &flushPlugin{}
 	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storageimpl.DefaultConfig(),
+		storage.Name: storage.Config{},
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageimpl.New(), permanentAdapter{}, renderer, clock, gate, flush, testPlugin{})
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, renderer, clock, gate, flush, testPlugin{})
 	stopped := make(chan struct{})
 	go func() { engine.Run(ctx); close(stopped) }()
 	<-engine.Ready()
@@ -368,11 +368,11 @@ func TestACaptureAbandonedByShutdownArrivesOnItsChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	renderer := newPlugin()
 	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storageimpl.DefaultConfig(),
+		storage.Name: storage.Config{},
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageimpl.New(), permanentAdapter{}, renderer, testPlugin{})
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, renderer, testPlugin{})
 	stopped := make(chan struct{})
 	go func() { engine.Run(ctx); close(stopped) }()
 	<-engine.Ready()

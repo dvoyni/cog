@@ -8,8 +8,8 @@ import (
 	"strings"
 	"syscall/js"
 
-	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
 // name is the plugin's name. Nothing orders against or configures the plugin by

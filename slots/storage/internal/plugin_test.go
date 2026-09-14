@@ -1,4 +1,4 @@
-package storageimpl
+package internal
 
 import (
 	"context"
@@ -9,11 +9,11 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
-// storage is a Port: it requires exactly one PermanentFS Adapter, so a
+// storage is a Slot: it requires exactly one PermanentFS Adapter, so a
 // composition without one fails before anything starts.
 func TestStorageWithoutAnAdapterFailsWithErrMissingAdapter(t *testing.T) {
 	var reported []error
@@ -32,14 +32,14 @@ func TestStorageWithoutAnAdapterFailsWithErrMissingAdapter(t *testing.T) {
 }
 
 func TestPermanentMountIsReserved(t *testing.T) {
-	config := DefaultConfig().WithReadFS(storage.PermanentMount, 10, fstest.MapFS{})
+	config := storage.Config{}.WithReadFS(storage.PermanentMount, 10, fstest.MapFS{})
 
 	var reserved storage.ErrReservedMount
 	if _, _, err := resolveConfig(config, nil); !errors.As(err, &reserved) {
 		t.Fatalf("resolveConfig error = %v, want ErrReservedMount", err)
 	}
 
-	k := testKernel(t, DefaultConfig(), newMemoryFS())
+	k := testKernel(t, storage.Config{}, newMemoryFS())
 	if _, err := k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{
 		Mount: storage.ReadMount{Id: storage.PermanentMount, Priority: 1, FS: fstest.MapFS{}},
 	}); !errors.As(err, &reserved) {
@@ -54,7 +54,7 @@ func TestPermanentMountIsReserved(t *testing.T) {
 // permanent filesystem the Adapter provides reads back ahead of it.
 func TestReadMountsAndTheAdapterShareOneOverlay(t *testing.T) {
 	permanent := newMemoryFS()
-	config := DefaultConfig().WithReadFS("assets", storage.DefaultReadPriority, fstest.MapFS{
+	config := storage.Config{}.WithReadFS("assets", storage.DefaultReadPriority, fstest.MapFS{
 		"asset.txt": &fstest.MapFile{Data: []byte("asset")},
 		"save.txt":  &fstest.MapFile{Data: []byte("packaged")},
 	})
@@ -83,7 +83,7 @@ func TestReadMountsAndTheAdapterShareOneOverlay(t *testing.T) {
 // single lock, and a later read observes the write through the same overlay.
 func TestValueRoundTripThroughOneWriteLock(t *testing.T) {
 	permanent := newMemoryFS()
-	k := testKernel(t, DefaultConfig(), permanent)
+	k := testKernel(t, storage.Config{}, permanent)
 
 	if _, err := k.ExecuteCommand[storage.AccessValuesCmd](storage.SetValue("volume", 0.25)); err != nil {
 		t.Fatal(err)
@@ -102,14 +102,14 @@ func TestValueRoundTripThroughOneWriteLock(t *testing.T) {
 }
 
 func TestAZeroValueRequestIsRejected(t *testing.T) {
-	k := testKernel(t, DefaultConfig(), newMemoryFS())
+	k := testKernel(t, storage.Config{}, newMemoryFS())
 	var invalid storage.ErrInvalidValueRequest
 	if _, err := k.ExecuteCommand[storage.AccessValuesCmd](storage.AccessValuesRequest{}); !errors.As(err, &invalid) {
 		t.Fatalf("zero request error = %v, want ErrInvalidValueRequest", err)
 	}
 }
 
-func testKernel(t *testing.T, config Config, permanent storage.PermanentFS) kernel.Executioner {
+func testKernel(t *testing.T, config storage.Config, permanent storage.PermanentFS) kernel.Executioner {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

@@ -54,7 +54,7 @@ error handling.
     advanced every fixed step.
 - [`ecs`](bundles/ecs/README.md): entities, components, the sparse-set stores they live
     in, and systems as plain funcs whose parameter types are their lock set.
-- [`storage`](extensions/storage/README.md): layered read filesystems and one permanent
+- [`storage`](slots/storage/README.md): layered read filesystems and one permanent
     writable filesystem, which a platform Adapter provides.
 - [`diskfs`](extensions/diskfs) and [`jsfs`](extensions/jsfs): storage's permanent
     filesystem Adapters, a directory under the user's data directory on desktop
@@ -137,13 +137,13 @@ covering one focused mechanism takes that mechanism's name.
 
 ```go
 config := map[kernel.PluginName]any{
-    storage.Name: storageimpl.DefaultConfig().
+    storage.Name: storage.Config{}.
         WithReadFS("res", storage.DefaultReadPriority, os.DirFS("res")),
     wgpu.Name: wgpu.DefaultConfig().WithTitle("My App"),
 }
 
 plugins := []kernel.Plugin{
-    storageimpl.New(),
+    storageplugin.New(),
     diskfs.New(diskfs.Config{AppId: "my-app"}), // provides storage's PermanentFS Adapter
     inputimpl.New(),
     gfximpl.New(),

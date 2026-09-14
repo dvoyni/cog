@@ -15,7 +15,7 @@ import (
 	"syscall/js"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
 // webFS keeps the whole permanent filesystem as one JSON document under one

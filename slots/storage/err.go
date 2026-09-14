@@ -3,8 +3,15 @@ package storage
 import (
 	"fmt"
 
-	"github.com/dvoyni/cog/extensions/storage/internal"
+	"github.com/dvoyni/cog/slots/storage/internal/types"
 )
+
+// ErrInvalidConfig reports a plugin configuration value that is not a Config.
+type ErrInvalidConfig struct{ Got any }
+
+func (e ErrInvalidConfig) Error() string {
+	return fmt.Sprintf("storage: invalid config: want %T, got %T", Config{}, e.Got)
+}
 
 // ErrInvalidMount reports a mount with an empty id or nil filesystem.
 type ErrInvalidMount struct{ Id MountId }
@@ -32,18 +39,18 @@ func (e ErrInvalidValuesPath) Error() string {
 // ErrNoWriteAccess reports a WriteFS with no permanent filesystem behind it,
 // which happens when the handle passed to WriteAccess never had its write lock
 // declared.
-type ErrNoWriteAccess = internal.ErrNoWriteAccess
+type ErrNoWriteAccess = types.ErrNoWriteAccess
 
 // ErrInvalidKey reports an empty value key.
-type ErrInvalidKey = internal.ErrInvalidKey
+type ErrInvalidKey = types.ErrInvalidKey
 
 // ErrInvalidValueRequest reports a zero AccessValuesRequest, which names no
 // operation.
-type ErrInvalidValueRequest = internal.ErrInvalidValueRequest
+type ErrInvalidValueRequest = types.ErrInvalidValueRequest
 
 // ErrInvalidOutValue reports a nil destination pointer passed to GetValue.
-type ErrInvalidOutValue = internal.ErrInvalidOutValue
+type ErrInvalidOutValue = types.ErrInvalidOutValue
 
 // ErrInvalidValuesFile reports a values file that is not a JSON object. The
 // file is left untouched so unreadable data is never overwritten.
-type ErrInvalidValuesFile = internal.ErrInvalidValuesFile
+type ErrInvalidValuesFile = types.ErrInvalidValuesFile

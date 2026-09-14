@@ -6,7 +6,7 @@
 // instead. Only composition roots and tests import it.
 //
 //	plugins := []kernel.Plugin{
-//	    storageimpl.New(),
+//	    storageplugin.New(),
 //	    diskfs.New(diskfs.Config{AppId: "my-app"}),
 //	    …
 //	}

@@ -20,11 +20,11 @@ import (
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
 	"github.com/dvoyni/cog/extensions/mcp"
-	"github.com/dvoyni/cog/extensions/storage"
-	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
 // canvas_draws answers "nothing is on screen; was it even recorded, and on
@@ -153,13 +153,13 @@ func newDrawsRig(t *testing.T) *drawsRig {
 	ctx, cancel := context.WithCancel(context.Background())
 	fixture := &snapshotFixture{}
 	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storageimpl.DefaultConfig().
+		storage.Name: storage.Config{}.
 			WithReadFS("test", 10, fstest.MapFS{}),
 		canvas.Name: internal.DefaultConfig(),
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageimpl.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{&testBackend{}}, New(), fixture)
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{&testBackend{}}, New(), fixture)
 	stopped := make(chan struct{})
 	go func() { engine.Run(ctx); close(stopped) }()
 	<-engine.Ready()

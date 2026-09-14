@@ -1,4 +1,4 @@
-package internal
+package types
 
 import "io/fs"
 
@@ -21,11 +21,11 @@ type ReadMount struct {
 	FS       fs.FS
 }
 
-// PermanentFS is the Adapter storage requires: the filesystem writes land in.
-// An Adapter plugin fills storage.PermanentFSPort with ProvideAdapter, and
-// storage never hands it back to callers: FileSystem keeps it inside and
-// exposes only its readable half, while WriteAccess exposes the mutating half
-// to write-lock holders.
+// PermanentFS is the interface of the Adapter storage requires: the filesystem
+// writes land in. An Extension fills storage.PermanentFSPort with
+// ProvideAdapter, and storage never hands it back to callers: FileSystem keeps
+// it inside and exposes only its readable half, while WriteAccess exposes the
+// mutating half to write-lock holders.
 type PermanentFS interface {
 	fs.FS
 	WriteFile(name string, data []byte, perm fs.FileMode) error

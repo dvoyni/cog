@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
 // openDiskFS creates path if needed and returns a confined writable filesystem

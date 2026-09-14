@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/dvoyni/cog/extensions/gfx"
-	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
 // FontMetrics reports a font's vertical metrics at a given size, in logical

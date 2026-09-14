@@ -1,4 +1,4 @@
-package internal
+package types
 
 import (
 	"cmp"
@@ -8,6 +8,8 @@ import (
 	"math"
 	"path"
 	"slices"
+
+	"github.com/dvoyni/cog/kernel"
 )
 
 // FileSystem is the resource value: an immutable snapshot of the overlay plus
@@ -68,6 +70,12 @@ func NewFileSystem(mounts []ReadMount, permanent func() PermanentFS) FileSystem 
 	return result
 }
 
+// NewStandaloneFileSystem builds the overlay over a single mounted filesystem at
+// DefaultReadPriority, with no permanent filesystem behind it.
+func NewStandaloneFileSystem(id MountId, filesystem fs.FS) FileSystem {
+	return NewFileSystem([]ReadMount{{Id: id, Priority: 0, FS: filesystem}}, nil)
+}
+
 // permanentMount reads the permanent filesystem through the overlay, resolving
 // the Adapter on each open.
 type permanentMount func() PermanentFS
@@ -111,9 +119,15 @@ func FileSystemWithoutMount(f FileSystem, id MountId) FileSystem {
 	return NewFileSystem(mounts, f.permanent)
 }
 
-// WriteAccess returns the mutating half of f's permanent filesystem. The
+// WriteAccess returns the mutating half of the permanent filesystem behind a
+// write lock on FileSystem.
+func WriteAccess(handle kernel.Write[FileSystem]) WriteFS {
+	return writeAccess(handle.Get())
+}
+
+// writeAccess returns the mutating half of f's permanent filesystem. The
 // caller is responsible for holding the write lock f came from.
-func WriteAccess(f FileSystem) WriteFS {
+func writeAccess(f FileSystem) WriteFS {
 	if f.permanent == nil {
 		return WriteFS{}
 	}

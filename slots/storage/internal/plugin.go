@@ -1,17 +1,17 @@
-// Package storageimpl is the storage plugin: New, its Config and the handlers
-// behind storage's commands. Only composition roots and tests import it;
-// everything else reaches storage through its contract root.
+// Package internal is the storage plugin: New and the handlers behind storage's
+// commands. Composition roots and tests reach New through storageplugin;
+// everything else reaches storage through its root.
 //
 // The plugin requires exactly one storage.PermanentFS Adapter. A composition
 // with none fails with kernel.ErrMissingAdapter.
-package storageimpl
+package internal
 
 import (
 	"io/fs"
 
-	"github.com/dvoyni/cog/extensions/storage"
-	"github.com/dvoyni/cog/extensions/storage/internal"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/storage/internal/types"
 )
 
 // plugin registers the FileSystem and Values resources and storage commands.
@@ -21,8 +21,8 @@ type plugin struct {
 	permanent kernel.RequiredAdapter[storage.PermanentFS]
 }
 
-// New creates a storage plugin. Its Config arrives through kernel.New's config
-// map under storage.Name.
+// New creates a storage plugin. Its storage.Config arrives through kernel.New's
+// config map under storage.Name.
 func New() kernel.Plugin { return &plugin{} }
 
 // Name reports the plugin name.
@@ -36,12 +36,12 @@ func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 // registers the storage resources and commands.
 func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	p.permanent = registrar.RequireAdapter[storage.PermanentFSPort]()
-	cfg := DefaultConfig()
+	var cfg storage.Config
 	if config != nil {
 		var ok bool
-		cfg, ok = config.(Config)
+		cfg, ok = config.(storage.Config)
 		if !ok {
-			return ErrInvalidConfig{Got: config}
+			return storage.ErrInvalidConfig{Got: config}
 		}
 	}
 
@@ -55,7 +55,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	return nil
 }
 
-func resolveConfig(config Config, permanent func() storage.PermanentFS) (storage.FileSystem, storage.Values, error) {
+func resolveConfig(config storage.Config, permanent func() storage.PermanentFS) (storage.FileSystem, storage.Values, error) {
 	for _, mount := range config.ReadMounts {
 		if mount.Id == "" || mount.FS == nil {
 			return storage.FileSystem{}, storage.Values{}, storage.ErrInvalidMount{Id: mount.Id}
@@ -73,5 +73,5 @@ func resolveConfig(config Config, permanent func() storage.PermanentFS) (storage
 		return storage.FileSystem{}, storage.Values{}, storage.ErrInvalidValuesPath{Path: valuesPath}
 	}
 
-	return internal.NewFileSystem(config.ReadMounts, permanent), internal.NewValues(valuesPath), nil
+	return types.NewFileSystem(config.ReadMounts, permanent), types.NewValues(valuesPath), nil
 }

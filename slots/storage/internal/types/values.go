@@ -1,4 +1,4 @@
-package internal
+package types
 
 import "encoding/json"
 
@@ -24,7 +24,7 @@ func ApplyValues(request AccessValuesRequest, store Values, filesystem FileSyste
 	}
 	store, response, err := request.op.apply(store, filesystem)
 	if err == nil && request.op.flushes() {
-		store, err = store.flush(WriteAccess(filesystem))
+		store, err = store.flush(writeAccess(filesystem))
 	}
 	if err != nil {
 		return store, AccessValuesResponse{}, err

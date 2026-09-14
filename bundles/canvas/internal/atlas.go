@@ -10,7 +10,7 @@ import (
 
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
-	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
 const whiteAtlasKey = "\x00canvas.white"

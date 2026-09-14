@@ -14,11 +14,11 @@ import (
 	"github.com/dvoyni/cog/bundles/scene/sceneimpl"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
-	"github.com/dvoyni/cog/extensions/storage"
-	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
 // Everything here runs against a real kernel.Engine with the real ecs and the
@@ -254,12 +254,12 @@ func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gpu.Ba
 	t.Helper()
 	sink := &errorSink{}
 	configs := map[kernel.PluginName]any{
-		storage.Name: storageimpl.DefaultConfig().WithReadFS("test", 10, fs.FS(files)),
+		storage.Name: storage.Config{}.WithReadFS("test", 10, fs.FS(files)),
 		ecs.Name:     ecsimpl.Config{PrewarmEntities: ids},
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) bool { sink.add(err); return false }).
-		WithPlugins(storageimpl.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{backend}, sceneimpl.New(),
+		WithPlugins(storageplugin.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{backend}, sceneimpl.New(),
 			ecsimpl.New(), New(), &gamePlugin{})
 	ctx, cancel := context.WithCancel(context.Background())
 	// The cleanup waits for Run to return rather than only cancelling it: a

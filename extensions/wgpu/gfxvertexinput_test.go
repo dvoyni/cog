@@ -8,7 +8,7 @@ import (
 	"github.com/dvoyni/cog/bundles/scene"
 	cgfx "github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gpu"
-	"github.com/dvoyni/cog/extensions/storage"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
 // bundledShader flattens one of the engine's own root shaders off disk. wgpu is

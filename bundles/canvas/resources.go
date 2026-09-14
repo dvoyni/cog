@@ -2,8 +2,8 @@ package canvas
 
 import (
 	"github.com/dvoyni/cog/bundles/canvas/internal"
-	"github.com/dvoyni/cog/extensions/storage"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
 // OpQueue is the frame-local writable resource used to record layered Canvas

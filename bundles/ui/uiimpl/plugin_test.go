@@ -17,10 +17,10 @@ import (
 	"github.com/dvoyni/cog/bundles/ui/internal"
 	"github.com/dvoyni/cog/extensions/gfx"
 	"github.com/dvoyni/cog/extensions/gfx/gfximpl"
-	"github.com/dvoyni/cog/extensions/storage"
-	"github.com/dvoyni/cog/extensions/storage/storageimpl"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
 type pluginTestVisual struct {
@@ -86,12 +86,12 @@ func TestPluginMapsWindowPointerToLogicalViewport(t *testing.T) {
 
 	consumer := &pluginTestConsumer{visual: &pluginTestVisual{}, left: 40, top: 30}
 	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storageimpl.DefaultConfig(),
+		storage.Name: storage.Config{},
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
 	}).WithPlugins(
-		storageimpl.New(), permanentAdapter{},
+		storageplugin.New(), permanentAdapter{},
 		inputimpl.New(),
 		gfximpl.New(),
 		backendAdapter{&detachedBackend{}},
@@ -148,12 +148,12 @@ func TestPluginProcessesAndClearsEveryUpdate(t *testing.T) {
 	visual := &pluginTestVisual{}
 	consumer := &pluginTestConsumer{visual: visual}
 	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storageimpl.DefaultConfig(),
+		storage.Name: storage.Config{},
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
 	}).WithPlugins(
-		storageimpl.New(), permanentAdapter{},
+		storageplugin.New(), permanentAdapter{},
 		inputimpl.New(),
 		gfximpl.New(),
 		backendAdapter{&detachedBackend{}},
@@ -220,11 +220,11 @@ func TestPluginSeesAScriptedClickAsAClick(t *testing.T) {
 
 	consumer := &pluginTestConsumer{visual: &pluginTestVisual{}}
 	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storageimpl.DefaultConfig(),
+		storage.Name: storage.Config{},
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageimpl.New(), permanentAdapter{}, inputimpl.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvasimpl.New(), New(), consumer)
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, inputimpl.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvasimpl.New(), New(), consumer)
 	go engine.Run(runContext)
 	<-engine.Ready()
 	k := engine.Executioner()
@@ -259,11 +259,11 @@ func TestPluginSeesAScriptedDragAsADrag(t *testing.T) {
 
 	consumer := &pluginTestConsumer{visual: &pluginTestVisual{}}
 	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storageimpl.DefaultConfig(),
+		storage.Name: storage.Config{},
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
 		return true
-	}).WithPlugins(storageimpl.New(), permanentAdapter{}, inputimpl.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvasimpl.New(), New(), consumer)
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, inputimpl.New(), gfximpl.New(), backendAdapter{&detachedBackend{}}, canvasimpl.New(), New(), consumer)
 	go engine.Run(runContext)
 	<-engine.Ready()
 	k := engine.Executioner()

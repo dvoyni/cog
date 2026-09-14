@@ -66,7 +66,7 @@ and its scratch.
 
 ```go
 kernel.New(config).WithPlugins(
-    storageimpl.New(), diskfs.New(diskfs.Config{AppId: "game"}),
+    storageplugin.New(), diskfs.New(diskfs.Config{AppId: "game"}),
     inputimpl.New(), gfximpl.New(), sceneimpl.New(), wgpu.New(),
     ecsimpl.New(), ecssceneimpl.New(), game.New())
 ```
