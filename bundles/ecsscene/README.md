@@ -68,7 +68,7 @@ and its scratch.
 kernel.New(config).WithPlugins(
     storageplugin.New(), diskfs.New(diskfs.Config{AppId: "game"}),
     inputplugin.New(), gfximpl.New(), sceneimpl.New(), wgpu.New(),
-    ecsimpl.New(), ecssceneimpl.New(), game.New())
+    ecsplugin.New(), ecssceneimpl.New(), game.New())
 ```
 
 Only the composition root imports `ecssceneimpl`; a game's Systems import

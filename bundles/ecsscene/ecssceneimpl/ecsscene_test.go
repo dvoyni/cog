@@ -8,7 +8,7 @@ import (
 	"testing/fstest"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecs/ecsimpl"
+	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
 	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/sceneimpl"
@@ -255,12 +255,12 @@ func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gpu.Ba
 	sink := &errorSink{}
 	configs := map[kernel.PluginName]any{
 		storage.Name: storage.Config{}.WithReadFS("test", 10, fs.FS(files)),
-		ecs.Name:     ecsimpl.Config{PrewarmEntities: ids},
+		ecs.Name:     ecs.Config{PrewarmEntities: ids},
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) bool { sink.add(err); return false }).
 		WithPlugins(storageplugin.New(), permanentAdapter{}, gfximpl.New(), backendAdapter{backend}, sceneimpl.New(),
-			ecsimpl.New(), New(), &gamePlugin{})
+			ecsplugin.New(), New(), &gamePlugin{})
 	ctx, cancel := context.WithCancel(context.Background())
 	// The cleanup waits for Run to return rather than only cancelling it: a
 	// dying engine allocates while it winds down, and the allocation claims here
