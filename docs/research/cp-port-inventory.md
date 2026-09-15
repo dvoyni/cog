@@ -184,7 +184,16 @@ With anchors at the CoG, `r = 0` and the angular terms vanish, **but `i_inv` mus
 | tree margin | 0.1·extent and 0.1·v | `bbtree.go:457, 461` |
 | fallback normals | (1, 0), (0, 1) | `collision.go:99`; `circle.go:64` |
 
-**What breaks in float32** (cog's `m.Vec2` is float32): `INFINITY = MaxFloat64` does not fit and is compared exactly to classify bodies (`body.go:222-225`; `space.go:453, 526`); the `1e-15` epsilons do nothing except against exact 0; `MAGIC_EPSILON` 1e-5 is about the float32 spacing at 128 m (7.6e-6); exact equality in the end-cap test; `CheckPointGreater` is a product of differences, so it flips sign sooner near degeneracy; `CircleSegmentQuery`'s `qb² − qa·c` cancels; positions integrate absolutely (`p += v·dt`); `m = 0` gives `m_inv = +Inf`; slop, tree margins and thresholds are absolute lengths.
+> **Amendment (2026-09-15).** Right after this note, the map's owner set physics to **float64**, like cp. The float32 list below no longer applies to the port. cp's constants, epsilons, GJK/EPA tolerances and `CPFLOAT_MIN` guards port as written.
+>
+> What still matters:
+> - `INFINITY` classification, which the port replaces by Component presence;
+> - `m = 0` giving `m_inv = +Inf`;
+> - pixel-sized absolute lengths (slop, tree margins, thresholds), which are converted to metres regardless.
+>
+> The float32 measurements in §13 (Box2D port, cog's grid) stand as measured, and the grid's are re-measured in float64 by the spec.
+
+**What breaks in float32** (cog's `m.Vec2` is float32; superseded, see the amendment above): `INFINITY = MaxFloat64` does not fit and is compared exactly to classify bodies (`body.go:222-225`; `space.go:453, 526`); the `1e-15` epsilons do nothing except against exact 0; `MAGIC_EPSILON` 1e-5 is about the float32 spacing at 128 m (7.6e-6); exact equality in the end-cap test; `CheckPointGreater` is a product of differences, so it flips sign sooner near degeneracy; `CircleSegmentQuery`'s `qb² − qa·c` cancels; positions integrate absolutely (`p += v·dt`); `m = 0` gives `m_inv = +Inf`; slop, tree margins and thresholds are absolute lengths.
 
 ## 13. Measurements
 
