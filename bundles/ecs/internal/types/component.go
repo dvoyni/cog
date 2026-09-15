@@ -19,7 +19,12 @@ import (
 // reflection looks it up by reflect.Type afterwards and never needs the
 // instantiation at all.
 type componentClass struct {
-	size uintptr
+	// store is the *Store[C] itself, for the handles that keep a pointer to it
+	// at registration: a writer's check of the Store's watched kinds, and a
+	// Hooks reader adding its kinds to them. Nothing reaches it while the engine
+	// runs.
+	store any
+	size  uintptr
 	// trivial is the pointer-free answer for this Component type, and it is a
 	// fast-path selector rather than a gate. A trivial row is copied by the
 	// sized moves in fill, is left where it lies by a swap-remove, and sits in
@@ -100,6 +105,7 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 	registrar.InitResource(store)
 	trivial := PointerFree(componentType) == nil
 	class := &componentClass{
+		store:   store,
 		size:    componentType.Size(),
 		trivial: trivial,
 		lists:   listSites(componentType),

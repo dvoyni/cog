@@ -152,3 +152,48 @@ type Resp[T any] = types.Resp[T]
 // A List's backing array is a heap allocation the collector scans; prefer [N]T
 // wherever the bound is small and real.
 type List[T any] = types.List[T]
+
+// Hooks is what happened to one Component T since the System's last run, one
+// record per act, in the order the acts happened, filtered by the kind set K:
+//
+//	func index(h *ecs.Hooks[Shape, ecs.HookAddedRemoved]) {
+//	    for e, hook := range h.All() {
+//	        if hook.IsAdded()   { tree.Insert(e, hook.Value) }
+//	        if hook.IsRemoved() { tree.Remove(e) }
+//	    }
+//	}
+//
+// A reader is an ordinary System. Its copy is fixed when its run starts, so the
+// System's own acts appear in its next run, and a record never lands inside a
+// run. It declares read{*Store[T]} and read{*Entities}, a Query's lock set over
+// T, and changes no other handler's lock set: every record is appended under a
+// lock the act already holds. See bundles/ecs/docs/specs/hooks.md.
+type Hooks[T any, K types.KindSet] = types.Hooks[T, K]
+
+// Hook is one record: Value is T as the record carries it, and the IsX methods
+// report every kind true of the act, not only the kinds K names. The pointer
+// All yields is valid until the System's run ends; Value may be copied out.
+type Hook[T any] = types.Hook[T]
+
+// The eight kind sets a Hooks names. A record is delivered when any of its kinds
+// is in the set. "Every addition" includes Spawns, and "every removal" includes
+// Despawns; every addition also carries Changed.
+type (
+	// HookSpawned delivers Spawns carrying T.
+	HookSpawned = types.HookSpawned
+	// HookDespawned delivers Despawns of Entities holding T.
+	HookDespawned = types.HookDespawned
+	// HookSpawnedDespawned delivers Spawns carrying T and Despawns of Entities
+	// holding it.
+	HookSpawnedDespawned = types.HookSpawnedDespawned
+	// HookAdded delivers every addition of T.
+	HookAdded = types.HookAdded
+	// HookRemoved delivers every removal of T, with its last value.
+	HookRemoved = types.HookRemoved
+	// HookAddedRemoved delivers every addition and every removal.
+	HookAddedRemoved = types.HookAddedRemoved
+	// HookAddedChanged delivers every addition and every change.
+	HookAddedChanged = types.HookAddedChanged
+	// HookAll delivers every addition, change and removal.
+	HookAll = types.HookAll
+)

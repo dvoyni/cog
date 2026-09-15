@@ -1309,7 +1309,7 @@ This is contract, not convention. A System takes any number of:
 | `*ecs.WriteableEntities` | `write{*Entities}` | despawning |
 | `*ecs.Get[T]` | `read{*Store[T]}` | reading one Component of an Entity it did not iterate to |
 | `*ecs.Set[T]` | `write{*Store[T]}` | writing, or inserting, the same |
-| `*ecs.Hooks[T, K]` | `read{*Entities}` + `read{*Store[T]}` | what happened to `T` since the System's last run — [`hooks.md`](hooks.md), *since Hooks, not yet built* |
+| `*ecs.Hooks[T, K]` | `read{*Entities}` + `read{*Store[T]}` | what happened to `T` since the System's last run — [`hooks.md`](hooks.md), *since Hooks* |
 | `*ecs.Read[T]`, `*ecs.Write[T]` | the kernel's own read/write on `T` | any other plugin's resource |
 | `*ecs.In[T]` | nothing | a value projected out of the event |
 | `*ecs.Resp[Res]` | nothing | a command only: the answer it writes |
@@ -2516,7 +2516,7 @@ remains open is called out at the end of the verification list and in the
   read is a data race, and validation mode catches the ones a run executes while
   the detector would catch the ones that interleave.
 
-**Since Hooks — open, partly built**
+**Since Hooks — open, except what is marked built**
 
 The items that change what this document specifies for code naming no Hooks.
 Everything else Hooks need is in [`hooks.md` § Required work](hooks.md#required-work)
@@ -2534,8 +2534,9 @@ and in the implementation tickets under
   [#386](https://github.com/dvoyni/cog/issues/386)).
 - `ShrinkCmd` and the generation floor
   ([#381](https://github.com/dvoyni/cog/issues/381)).
-- The `*ecs.Hooks[T, K]` row in the signature contract
-  ([#380](https://github.com/dvoyni/cog/issues/380)).
+- ~~The `*ecs.Hooks[T, K]` row in the signature contract
+  ([#380](https://github.com/dvoyni/cog/issues/380)).~~ **Built**
+  ([#390](https://github.com/dvoyni/cog/issues/390)).
 
 ---
 

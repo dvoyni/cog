@@ -81,13 +81,19 @@ type Set[T any] struct {
 	// insertion names still exists. See UpdateFor for why that question has to be
 	// asked here and cannot be left to the System.
 	entities kernel.Read[*Entities]
+	// hooks is whether this run's additions are recorded: on when a Hooks
+	// reader watches the Store for additions or changes.
+	hooks hookGate
 }
 
 // prepare declares the locks and binds the Store. It runs once, at registration.
 func (s *Set[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 	s.entities = declareComponent[T](en, access, "Set")
 	s.store = access.GetWrite[*Store[T]]()
+	s.hooks = gateFor[T](en, recordsAddition)
 }
+
+func (s *Set[T]) gate() *hookGate { return &s.hooks }
 
 // Of reports e's Component, and whether e has one — the same copy Get yields,
 // available here because a write authorises a read.
@@ -162,6 +168,9 @@ func (s *Set[T]) UpdateFor(e Entity, value T) {
 		return
 	}
 	store.add(e, value)
+	if s.hooks.on {
+		store.hooks.added(e, kindAdded|kindChanged)
+	}
 }
 
 // Remove takes a Component away from an Entity and is the inverse of
@@ -171,13 +180,19 @@ func (s *Set[T]) UpdateFor(e Entity, value T) {
 // It declares write{*Store[T]} and read{*Entities}.
 type Remove[T any] struct {
 	store kernel.Write[*Store[T]]
+	// hooks is whether this run's removals are recorded: on when a Hooks reader
+	// watches the Store for any kind but Despawned.
+	hooks hookGate
 }
 
 // prepare declares the locks and binds the Store. It runs once, at registration.
 func (r *Remove[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 	_ = declareComponent[T](en, access, "Remove")
 	r.store = access.GetWrite[*Store[T]]()
+	r.hooks = gateFor[T](en, recordsRemoval)
 }
+
+func (r *Remove[T]) gate() *hookGate { return &r.hooks }
 
 // From takes this Component away from e and reports whether e had one. It is
 // swap-remove, so it relocates whichever Entity owned the last row.
@@ -185,7 +200,16 @@ func (r *Remove[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 // Removing the Component a Query is driving on, for the Entity that Query is
 // currently visiting, is safe — the backwards walk is what buys that. Doing it
 // to any other Entity of that driver is undefined.
-func (r *Remove[T]) From(e Entity) bool { return r.store.Get().Remove(e) }
+//
+// On a Store a Hooks reader watches, the removal is recorded with T's value as
+// it stood.
+func (r *Remove[T]) From(e Entity) bool {
+	store := r.store.Get()
+	if r.hooks.on {
+		return store.removeRecorded(e)
+	}
+	return store.remove(e)
+}
 
 // declareComponent is the half of every accessor's prepare that is the same for
 // all three: the unconditional read of the authority, and the check that turns
@@ -211,4 +235,12 @@ func declareComponent[T any](en *Entities, access kernel.ResourceAccess, accesso
 		panic(fmt.Sprintf("ecs: %s[%s] names unregistered Component %s", accessor, kernel.TypeName(componentType), kernel.TypeName(componentType)))
 	}
 	return entities
+}
+
+// gateFor is a writer handle's check of T's watched kinds, bound to the Store
+// at registration and armed at each run start. declareComponent has already
+// refused an unregistered T.
+func gateFor[T any](en *Entities, mask hookKind) hookGate {
+	store := en.classOf(reflect.TypeFor[T]()).store.(*Store[T])
+	return hookGate{watch: &store.watch, mask: mask}
 }
