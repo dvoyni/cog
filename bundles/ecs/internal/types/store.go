@@ -233,6 +233,28 @@ func (s *Store[T]) removeRecorded(e Entity) bool {
 	return s.remove(e)
 }
 
+// setRecorded is Set inside a Spawn, on a Store watched for Spawns: the addition
+// is recorded once add returns, beside it and never inside it. A value the same
+// Spawn already gave e is replaced, which is not an addition.
+func (s *Store[T]) setRecorded(e Entity, value T) {
+	if s.update(e, value) {
+		return
+	}
+	s.add(e, value)
+	s.hooks.added(e, kindSpawned|kindAdded|kindChanged)
+}
+
+// captureDespawn is this Store's capture, which a Despawn calls before it
+// empties the Stores: if e holds T, the removal is recorded with T's value as it
+// stood. It reads only its own Store, under the Despawn's write{*Entities}.
+func (s *Store[T]) captureDespawn(e Entity) {
+	row, ok := s.probe(e)
+	if !ok {
+		return
+	}
+	s.hooks.removed(e, &s.dense[row], kindDespawned|kindRemoved)
+}
+
 // probe reports the dense row e's value is in. The compare that finds the row
 // is the compare that rejects a stale handle, so liveness is not an extra cost;
 // it is the probe. owners is not touched at all — a probed Store reads two

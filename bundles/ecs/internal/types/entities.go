@@ -31,6 +31,13 @@ type Entities struct {
 	// It is the Store's remove bound to the Store, which NewStore enrols. A
 	// despawn pays one indirect call per Store, never per entity.
 	stores []func(e Entity) bool
+	// captures is one call per Store a Hooks reader watches, which a despawn
+	// makes before it empties the Stores: each probes its own Store and records
+	// the removal with T's last value. A watched Store enrols its capture beside
+	// its remove when its first reader registers, so the list is fixed before any
+	// System runs, and a world nobody reads has none and takes the despawn path
+	// it always took. See hooks.go.
+	captures []func(e Entity)
 	// classes is what component registration baked, keyed by the Component's Go
 	// type. It is written during registration and read during registration —
 	// once, while a Query is planned — and never touched while the engine runs.
@@ -154,6 +161,11 @@ func (en *Entities) alloc() Entity {
 func (en *Entities) despawn(e Entity) bool {
 	if !en.Alive(e) {
 		return false
+	}
+	// Every capture runs before any Store is emptied, so each records T's value
+	// as it stood at the Despawn. Despawn's one call to each Store is unchanged.
+	for _, capture := range en.captures {
+		capture(e)
 	}
 	for _, remove := range en.stores {
 		remove(e)

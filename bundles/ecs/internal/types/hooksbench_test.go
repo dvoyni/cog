@@ -15,9 +15,10 @@ import (
 // a frame with a reader sits on.
 
 type (
-	hookMoveSystem   kernel.Subscription[app.UpdateEvent]
-	hookChurnSystem  kernel.Subscription[app.UpdateEvent]
-	hookReaderSystem kernel.Subscription[app.UpdateEvent]
+	hookMoveSystem    kernel.Subscription[app.UpdateEvent]
+	hookChurnSystem   kernel.Subscription[app.UpdateEvent]
+	hookReaderSystem  kernel.Subscription[app.UpdateEvent]
+	hookSpawnerSystem kernel.Subscription[app.UpdateEvent]
 )
 
 // walkQuery is churn's own Component, so nothing but a lock a Hook added could
@@ -68,20 +69,64 @@ func subscribeChurnAndMove(registrar *kernel.Registrar) {
 	registrar.Subscribe[hookMoveSystem](ToHandler[app.UpdateEvent](registrar, move))
 }
 
+// spawnsPerTick is how many Entities spawner spawns each tick, despawning the
+// ones it spawned the tick before.
+const spawnsPerTick = 100
+
+// spawner despawns the Entities it spawned last tick and spawns as many again,
+// each carrying body and velocity.
+func spawner() func(sp *Spawn[spawnSet], we *WriteableEntities) {
+	live := make([]Entity, 0, spawnsPerTick)
+	return func(sp *Spawn[spawnSet], we *WriteableEntities) {
+		for _, e := range live {
+			we.Despawn(e)
+		}
+		live = live[:0]
+		for range spawnsPerTick {
+			live = append(live, sp.New(spawnSet{Body: body{X: 1}, Velocity: velocity{X: 1}}))
+		}
+	}
+}
+
+func subscribeSpawner(registrar *kernel.Registrar) {
+	registrar.Subscribe[hookSpawnerSystem](ToHandler[app.UpdateEvent](registrar, spawner()))
+}
+
 // hookFrame is one whole-frame arm: the Systems, and what sits in the reader's
-// place — a Hooks[collider, HookAddedRemoved] reader, or an empty System, which
-// is the control, because the engine charges per subscription.
+// place — a Hooks reader counting what it is given, or, where reader is nil, an
+// empty System, which is the control, because the engine charges per
+// subscription.
 type hookFrame struct {
 	name      string
 	subscribe func(*kernel.Registrar)
-	reader    bool
+	reader    func(delivered *int) any
+}
+
+// colliderReader is the membership reader churn feeds.
+func colliderReader(delivered *int) any {
+	return func(h *Hooks[collider, HookAddedRemoved]) {
+		for range h.All() {
+			*delivered++
+		}
+	}
+}
+
+// lifetimeReader is the reader spawner feeds.
+func lifetimeReader(delivered *int) any {
+	return func(h *Hooks[body, HookSpawnedDespawned]) {
+		for range h.All() {
+			*delivered++
+		}
+	}
 }
 
 var hookFrames = []hookFrame{
-	{"churn+empty", subscribeChurn, false},
-	{"churn+reader", subscribeChurn, true},
-	{"churn+move+empty", subscribeChurnAndMove, false},
-	{"churn+move+reader", subscribeChurnAndMove, true},
+	{"churn+empty", subscribeChurn, nil},
+	{"churn+reader", subscribeChurn, colliderReader},
+	{"churn+move+empty", subscribeChurnAndMove, nil},
+	{"churn+move+reader", subscribeChurnAndMove, colliderReader},
+	{"spawn+empty", subscribeSpawner, nil},
+	{"spawn+reader", subscribeSpawner, lifetimeReader},
 }
 
 // world composes the arm at n Entities. The count is how many records the
@@ -91,13 +136,8 @@ func (arm hookFrame) world(tb testing.TB, n int) (*kernel.Engine, *int) {
 	delivered := new(int)
 	entities, components, engine := newWorld(tb, uint32(n), func(registrar *kernel.Registrar) {
 		arm.subscribe(registrar)
-		if arm.reader {
-			registrar.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](registrar,
-				func(h *Hooks[collider, HookAddedRemoved]) {
-					for range h.All() {
-						*delivered++
-					}
-				}))
+		if arm.reader != nil {
+			registrar.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](registrar, arm.reader(delivered)))
 		} else {
 			registrar.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](registrar, func() {}))
 		}
@@ -122,7 +162,7 @@ func TestAHookReaderStaysOnTheAllocationLine(t *testing.T) {
 			frame(t, engine, 1)
 		}
 		defer func() {
-			if arm.reader && *delivered < churnPerTick*frames {
+			if arm.reader != nil && *delivered < churnPerTick*frames {
 				t.Errorf("%s at %d delivered %d records over %d frames, want at least %d",
 					arm.name, n, *delivered, frames+100, churnPerTick*frames)
 			}
@@ -142,7 +182,9 @@ func TestAHookReaderStaysOnTheAllocationLine(t *testing.T) {
 		got[arm.name] = [2]float64{measure(arm, 1_000), measure(arm, 10_000)}
 		t.Logf("%-18s objects a frame: 1k %.3f, 10k %.3f", arm.name, got[arm.name][0], got[arm.name][1])
 	}
-	for _, pair := range [][2]string{{"churn+reader", "churn+empty"}, {"churn+move+reader", "churn+move+empty"}} {
+	for _, pair := range [][2]string{
+		{"churn+reader", "churn+empty"}, {"churn+move+reader", "churn+move+empty"}, {"spawn+reader", "spawn+empty"},
+	} {
 		reader, control := got[pair[0]], got[pair[1]]
 		if reader[1] > reader[0]+0.05 {
 			t.Errorf("%s allocates per Entity: %.3f a frame at 1k, %.3f at 10k", pair[0], reader[0], reader[1])
@@ -172,6 +214,63 @@ func BenchmarkHookNothingWatching(b *testing.B) {
 		e := ids[i%accessorBatch]
 		world.colliderSet.UpdateFor(e, collider{Radius: 1})
 		world.colliderRemove.From(e)
+	}
+}
+
+// BenchmarkHookNothingWatchingSpawnTwoFields is a Spawn carrying two
+// Components on a world no reader watches: what recording costs a Spawn nobody
+// reads. It is BenchmarkSpawnTwoFields under the name hooks.md publishes it by,
+// and that one is its A/B partner against the parent of the first Hooks commit.
+func BenchmarkHookNothingWatchingSpawnTwoFields(b *testing.B) { BenchmarkSpawnTwoFields(b) }
+
+// BenchmarkHookNothingWatchingDespawnSixStores is a Despawn on a world no reader
+// watches, where the components plugin has enrolled six Stores: what recording
+// costs a Despawn nobody reads. It is BenchmarkDespawnOnly under the name
+// hooks.md publishes it by, and that one is its A/B partner.
+func BenchmarkHookNothingWatchingDespawnSixStores(b *testing.B) { BenchmarkDespawnOnly(b) }
+
+// BenchmarkHookSpawnDespawn prices a Spawn carrying body and velocity plus its
+// Despawn, with readers watching Stores the Component set carries and one it
+// does not, against the same pair with nothing watching. The readers run every
+// 1024 pairs, off the clock, so the logs stay at their steady size.
+func BenchmarkHookSpawnDespawn(b *testing.B) {
+	arms := []struct {
+		name   string
+		reader any
+	}{
+		{"none", func() {}},
+		{"carried/body-HookSpawnedDespawned", func(h *Hooks[body, HookSpawnedDespawned]) {}},
+		{"carried/body-HookAll", func(h *Hooks[body, HookAll]) {}},
+		{"carried/body+velocity-HookAll", func(h *Hooks[body, HookAll], v *Hooks[velocity, HookAll]) {}},
+		{"not-carried/collider-HookAll", func(h *Hooks[collider, HookAll]) {}},
+	}
+	for _, arm := range arms {
+		b.Run(arm.name, func(b *testing.B) {
+			var spawn *Spawn[spawnSet]
+			var writeable *WriteableEntities
+			_, _, engine := newWorld(b, spawnBatch, func(registrar *kernel.Registrar) {
+				registrar.Subscribe[hookCaptureSystem](ToHandler[app.UpdateEvent](registrar,
+					func(sp *Spawn[spawnSet], we *WriteableEntities) { spawn, writeable = sp, we }))
+				registrar.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](registrar, arm.reader))
+			})
+			frame(b, engine, 1)
+			values := spawnSet{Body: body{X: 1}, Velocity: velocity{X: 2}}
+			pair := func() { writeable.Despawn(spawn.New(values)) }
+			for range 1024 {
+				pair()
+			}
+			frame(b, engine, 1)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				pair()
+				if i&1023 == 1023 {
+					b.StopTimer()
+					frame(b, engine, 1)
+					b.StartTimer()
+				}
+			}
+		})
 	}
 }
 
@@ -332,9 +431,10 @@ func BenchmarkHookReader(b *testing.B) {
 	}
 }
 
-// BenchmarkHookFrame is the parallel frame with a reader, against the same frame
-// with an empty System in the reader's place: churn + move + reader at 10k is
-// budgeted at 1.10x its control.
+// BenchmarkHookFrame is each frame with a reader, against the same frame with an
+// empty System in the reader's place: churn + move + reader at 10k is budgeted
+// at 1.10x its control, and spawn + reader is the 100 spawns plus despawns a
+// tick with a HookSpawnedDespawned reader.
 func BenchmarkHookFrame(b *testing.B) {
 	for _, n := range []int{1_000, 10_000} {
 		for _, arm := range hookFrames {

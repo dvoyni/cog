@@ -19,9 +19,26 @@ import (
 // runs when: a writer's run, then a reader's, then another writer's.
 
 type (
-	hookActCmd  kernel.Command[hookRequest, hookResponse]
-	hookReadCmd kernel.Command[hookRequest, hookResponse]
+	hookActCmd     kernel.Command[hookRequest, hookResponse]
+	hookReadCmd    kernel.Command[hookRequest, hookResponse]
+	hookRestackCmd kernel.Command[hookRequest, hookResponse]
 )
+
+// armedSet is a Component set carrying collider; spawnSet carries body and
+// velocity and not collider.
+type armedSet struct {
+	Body     body
+	Collider collider
+}
+
+// restacking is what a structural writer holds: a Spawn carrying collider, one
+// that does not, the despawning handle, and Set for a write no act records.
+type restacking struct {
+	armed   *Spawn[armedSet]
+	unarmed *Spawn[spawnSet]
+	we      *WriteableEntities
+	set     *Set[collider]
+}
 
 type (
 	hookRequest  struct{}
@@ -120,6 +137,7 @@ type hookWorld struct {
 	components *componentsPlugin
 	engine     *kernel.Engine
 	act        func(set *Set[collider], remove *Remove[collider])
+	restack    func(r restacking)
 }
 
 func newHookWorld(t *testing.T, reader any, also ...func(*kernel.Registrar)) *hookWorld {
@@ -128,6 +146,10 @@ func newHookWorld(t *testing.T, reader any, also ...func(*kernel.Registrar)) *ho
 	w.entities, w.components, w.engine = newWorld(t, 64, func(registrar *kernel.Registrar) {
 		registrar.HandleCommand[hookActCmd](ToExecute[hookRequest, hookResponse](registrar,
 			func(set *Set[collider], remove *Remove[collider]) { w.act(set, remove) }))
+		registrar.HandleCommand[hookRestackCmd](ToExecute[hookRequest, hookResponse](registrar,
+			func(armed *Spawn[armedSet], unarmed *Spawn[spawnSet], we *WriteableEntities, set *Set[collider]) {
+				w.restack(restacking{armed, unarmed, we, set})
+			}))
 		registrar.HandleCommand[hookReadCmd](ToExecute[hookRequest, hookResponse](registrar, reader))
 		for _, subscribe := range also {
 			subscribe(registrar)
@@ -141,6 +163,15 @@ func (w *hookWorld) write(t *testing.T, act func(set *Set[collider], remove *Rem
 	w.act = act
 	if _, err := w.engine.Executioner().ExecuteCommand[hookActCmd](hookRequest{}); err != nil {
 		t.Fatalf("running the writer: %v", err)
+	}
+}
+
+// structural runs a System that spawns and despawns.
+func (w *hookWorld) structural(t *testing.T, restack func(r restacking)) {
+	t.Helper()
+	w.restack = restack
+	if _, err := w.engine.Executioner().ExecuteCommand[hookRestackCmd](hookRequest{}); err != nil {
+		t.Fatalf("running the structural writer: %v", err)
 	}
 }
 
@@ -185,6 +216,167 @@ func TestEachKindSetDeliversWhatItsTableSays(t *testing.T) {
 
 	w.read(t)
 	expectHeard(t, "HookAll, a run with no act since the last", readers.all, nil)
+}
+
+// TestEachKindSetDeliversWhatItsTableSaysForSpawnsAndDespawns is hooks.md § The
+// eight kind sets for the acts Entities make: a Spawn carrying collider, a Spawn
+// not carrying it, a Despawn of an Entity holding it, one of an Entity without
+// it, and one of a dead Entity. An UpdateFor addition and a Remove.From ride
+// beside them, so HookSpawned and HookDespawned are seen to pass over both.
+func TestEachKindSetDeliversWhatItsTableSaysForSpawnsAndDespawns(t *testing.T) {
+	readers := &kindSetReaders{}
+	w := newHookWorld(t, readers.system)
+	held, added, gone := w.entities.alloc(), w.entities.alloc(), w.entities.alloc()
+	w.components.colliders.Set(held, collider{Radius: 5})
+	w.entities.despawn(gone)
+
+	var armed, unarmed Entity
+	var deadReport bool
+	w.structural(t, func(r restacking) {
+		armed = r.armed.New(armedSet{Collider: collider{Radius: 1}}) // spawned+added+changed
+		unarmed = r.unarmed.New(spawnSet{Body: body{X: 1}})          // nothing for collider
+		r.set.UpdateFor(added, collider{Radius: 2})                  // added+changed, no Spawn
+		r.we.Despawn(held)                                           // despawned+removed, carrying 5
+		r.we.Despawn(unarmed)                                        // holds no collider: nothing
+		deadReport = r.we.Despawn(gone)                              // dead: nothing
+	})
+	w.write(t, func(set *Set[collider], remove *Remove[collider]) {
+		remove.From(added) // removed, no Despawn
+	})
+	w.read(t)
+
+	if deadReport {
+		t.Fatal("despawning a dead Entity reported true")
+	}
+	spawn := heard{armed, "spawned+added+changed", 1}
+	addition := heard{added, "added+changed", 2}
+	despawn := heard{held, "despawned+removed", 5}
+	removal := heard{added, "removed", 2}
+	expectHeard(t, "HookSpawned", readers.spawned, []heard{spawn})
+	expectHeard(t, "HookDespawned", readers.despawned, []heard{despawn})
+	expectHeard(t, "HookSpawnedDespawned", readers.spawnedDespawned, []heard{spawn, despawn})
+	expectHeard(t, "HookAdded", readers.added, []heard{spawn, addition})
+	expectHeard(t, "HookRemoved", readers.removed, []heard{despawn, removal})
+	expectHeard(t, "HookAddedRemoved", readers.addedRemoved, []heard{spawn, addition, despawn, removal})
+	expectHeard(t, "HookAddedChanged", readers.addedChanged, []heard{spawn, addition})
+	expectHeard(t, "HookAll", readers.all, []heard{spawn, addition, despawn, removal})
+}
+
+// TestADespawnCarriesTheValueAtTheDespawn is hooks.md § Values, and a window,
+// for Entities: a Despawn's record carries collider as it stood at the Despawn,
+// after writes no act records, and a spawn despawned in the same window carries
+// the Despawn's value, not the zero value and not that of the Entity that reuses
+// its index. The spawns are read under HookSpawned, which is not given the
+// removals that fix their values.
+func TestADespawnCarriesTheValueAtTheDespawn(t *testing.T) {
+	var spawned, despawned []heard
+	w := newHookWorld(t, func(s *Hooks[collider, HookSpawned], d *Hooks[collider, HookDespawned]) {
+		spawned, despawned = spawned[:0], despawned[:0]
+		listen(s, &spawned, radius)
+		listen(d, &despawned, radius)
+	})
+
+	var early, brief, after Entity
+	w.structural(t, func(r restacking) {
+		early = r.armed.New(armedSet{Collider: collider{Radius: 1}})
+	})
+	w.read(t)
+	expectHeard(t, "HookSpawned, the first window", spawned, []heard{{early, "spawned+added+changed", 1}})
+	expectHeard(t, "HookDespawned, the first window", despawned, nil)
+
+	w.structural(t, func(r restacking) {
+		ref, _ := r.set.Ref(early)
+		ref.Radius = 2
+		r.we.Despawn(early)
+		brief = r.armed.New(armedSet{Collider: collider{Radius: 3}})
+		ref, _ = r.set.Ref(brief)
+		ref.Radius = 4
+		r.we.Despawn(brief)
+		after = r.armed.New(armedSet{Collider: collider{Radius: 9}})
+	})
+	if brief.idx() != early.idx() || after.idx() != brief.idx() {
+		t.Fatalf("the harness did not recycle the index: %v, %v, %v", early, brief, after)
+	}
+	w.read(t)
+	expectHeard(t, "HookSpawned", spawned, []heard{
+		{brief, "spawned+added+changed", 4},
+		{after, "spawned+added+changed", 9},
+	})
+	expectHeard(t, "HookDespawned", despawned, []heard{
+		{early, "despawned+removed", 2},
+		{brief, "despawned+removed", 4},
+	})
+}
+
+type hookSpawnEveryCmd kernel.Command[hookRequest, hookResponse]
+
+// everySet carries four Components: two whose Stores are watched for Spawns,
+// one watched only for Despawns, and one nobody reads. collider, which it does
+// not carry, is watched for everything.
+type everySet struct {
+	Body     body
+	Velocity velocity
+	Homing   homing
+	Solid    solid
+}
+
+// TestASpawnRecordsOnEveryWatchedStoreItCarriesAndNoOther is hooks.md § Which
+// acts are recorded for a Spawn: one record on each Store it carries that is
+// watched for Spawns, additions or changes, and nothing on a carried Store
+// watched only for Despawns, on a watched Store it does not carry, or on a Store
+// nobody reads.
+func TestASpawnRecordsOnEveryWatchedStoreItCarriesAndNoOther(t *testing.T) {
+	var bodies, homings, colliders int
+	entities, components, engine := newWorld(t, 16, func(registrar *kernel.Registrar) {
+		registrar.HandleCommand[hookSpawnEveryCmd](ToExecute[hookRequest, hookResponse](registrar,
+			func(sp *Spawn[everySet]) { sp.New(everySet{Body: body{X: 1}}) }))
+		registrar.HandleCommand[hookReadCmd](ToExecute[hookRequest, hookResponse](registrar,
+			func(b *Hooks[body, HookSpawned], h *Hooks[homing, HookAddedChanged],
+				v *Hooks[velocity, HookDespawned], c *Hooks[collider, HookAll],
+			) {
+				for range b.All() {
+					bodies++
+				}
+				for range h.All() {
+					homings++
+				}
+				for range c.All() {
+					colliders++
+				}
+			}))
+	})
+	if _, err := engine.Executioner().ExecuteCommand[hookSpawnEveryCmd](hookRequest{}); err != nil {
+		t.Fatalf("running the spawner: %v", err)
+	}
+
+	spawnedKinds := kindSpawned | kindAdded | kindChanged
+	for _, log := range []struct {
+		name    string
+		records []hookRecord
+		want    int
+	}{
+		{"body, watched for Spawns and carried", components.bodies.hooks.records, 1},
+		{"homing, watched for additions and changes and carried", components.homings.hooks.records, 1},
+		{"velocity, watched only for Despawns and carried", components.velocities.hooks.records, 0},
+		{"collider, watched for everything and not carried", components.colliders.hooks.records, 0},
+	} {
+		if len(log.records) != log.want {
+			t.Fatalf("%s: the log holds %d records, want %d", log.name, len(log.records), log.want)
+		}
+		if log.want == 1 && (log.records[0].kinds != spawnedKinds || !entities.Alive(log.records[0].e)) {
+			t.Fatalf("%s: the record is %+v, want spawned+added+changed of the live Entity", log.name, log.records[0])
+		}
+	}
+	if components.solids.hooks != nil {
+		t.Fatal("solid, which nobody reads, has a log")
+	}
+
+	if _, err := engine.Executioner().ExecuteCommand[hookReadCmd](hookRequest{}); err != nil {
+		t.Fatalf("running the reader: %v", err)
+	}
+	if bodies != 1 || homings != 1 || colliders != 0 {
+		t.Fatalf("the readers were given %d bodies, %d homings and %d colliders, want 1, 1 and 0", bodies, homings, colliders)
+	}
 }
 
 // TestAnAdditionCarriesTheValueAtItsNextRemoval is hooks.md § Values, and a
@@ -246,8 +438,11 @@ func TestARemovalThenAReAdditionIsTwoRecords(t *testing.T) {
 // TestARecycledIndexIsNeverFoldedWithTheEntityItReplaced carries the full
 // Entity in every record. The first Entity's addition is still open when its
 // index is reused, and the removal of the Entity that reused it must not fix
-// the first one's value. The second Entity's collider is written straight into
-// the Store, which no act records, so its removal is the only record it has.
+// the first one's value. A Despawn of an Entity holding collider records a
+// removal that would close the addition, so the first Entity's collider is taken
+// straight out of the Store first, which no act records. The second Entity's
+// collider is written straight into the Store the same way, so its removal is
+// the only record it has.
 func TestARecycledIndexIsNeverFoldedWithTheEntityItReplaced(t *testing.T) {
 	var got []heard
 	w := newHookWorld(t, func(h *Hooks[collider, HookAddedRemoved]) {
@@ -259,6 +454,7 @@ func TestARecycledIndexIsNeverFoldedWithTheEntityItReplaced(t *testing.T) {
 	w.write(t, func(set *Set[collider], remove *Remove[collider]) {
 		set.UpdateFor(first, collider{Radius: 1})
 	})
+	w.components.colliders.Remove(first)
 	w.entities.despawn(first)
 	second := w.entities.alloc()
 	if second.idx() != first.idx() || second == first {
@@ -583,6 +779,45 @@ func TestRecordingAnActAllocatesNothing(t *testing.T) {
 	if len(log.records) != 2*1001 || len(log.retained) != 1001 {
 		t.Fatalf("the log holds %d records and %d values after 1001 pairs, want 2002 and 1001",
 			len(log.records), len(log.retained))
+	}
+}
+
+// TestRecordingASpawnAndADespawnAllocatesNothing is Spawn and Despawn on watched
+// Stores, after the logs have grown to what they fill between two runs of their
+// readers: a Spawn carrying body and velocity and its Despawn allocate nothing,
+// and each is recorded once on each Store.
+func TestRecordingASpawnAndADespawnAllocatesNothing(t *testing.T) {
+	var spawn *Spawn[spawnSet]
+	var writeable *WriteableEntities
+	_, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[hookCaptureSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[spawnSet], we *WriteableEntities) {
+			spawn, writeable = sp, we
+		}))
+		registrar.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](registrar,
+			func(b *Hooks[body, HookSpawnedDespawned], v *Hooks[velocity, HookAll]) {}))
+	})
+	frame(t, engine, 1)
+	values := spawnSet{Body: body{X: 1}, Velocity: velocity{X: 2}}
+	pair := func() { writeable.Despawn(spawn.New(values)) }
+	for range 4096 {
+		pair()
+	}
+	frame(t, engine, 1)
+
+	if objects := testing.AllocsPerRun(1000, pair); objects != 0 {
+		t.Fatalf("a Spawn and a Despawn on watched Stores allocated %v objects, want 0", objects)
+	}
+	for _, log := range []struct {
+		name              string
+		records, retained int
+	}{
+		{"body", len(components.bodies.hooks.records), len(components.bodies.hooks.retained)},
+		{"velocity", len(components.velocities.hooks.records), len(components.velocities.hooks.retained)},
+	} {
+		if log.records != 2*1001 || log.retained != 1001 {
+			t.Fatalf("%s's log holds %d records and %d values after 1001 pairs, want 2002 and 1001",
+				log.name, log.records, log.retained)
+		}
 	}
 }
 

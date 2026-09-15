@@ -68,6 +68,10 @@ type Spawn[S any] struct {
 	// Reflection runs exactly once, here, and never again — the mirror of the
 	// Query's fill.
 	fields []spawnField
+	// hooks is whether this run's spawns are recorded on any Store the Component
+	// set carries: on when a Hooks reader watches one of them for Spawns,
+	// additions or changes. Checked when each run starts. See hooks.go.
+	hooks spawnGate
 }
 
 // spawnField is one Component of a Component set, as registration left it.
@@ -80,6 +84,11 @@ type spawnField struct {
 	// offset is where this Component sits in the Component set's struct, which
 	// is where it sits in staging: they are the same type.
 	offset uintptr
+	// recorded is set that also records the Spawn in the Store's Hook log, and
+	// hooks whether this run takes it. Neither is read on a Spawn that records
+	// nowhere.
+	recorded func(e Entity, value unsafe.Pointer)
+	hooks    hookGate
 }
 
 // prepare plans the Component set against the world and declares the locks. It
@@ -107,12 +116,14 @@ func (s *Spawn[S]) prepare(en *Entities, access kernel.ResourceAccess) {
 		if class == nil {
 			panic(fmt.Sprintf("ecs: Component set %s names unregistered Component %s", kernel.TypeName(setType), kernel.TypeName(field.Type)))
 		}
-		s.fields = append(s.fields, spawnField{
-			set:    class.declareSet(access),
-			offset: field.Offset,
-		})
+		planned := class.declareSet(access)
+		planned.offset = field.Offset
+		s.fields = append(s.fields, planned)
 	}
+	s.hooks = spawnGate{fields: s.fields}
 }
+
+func (s *Spawn[S]) spawnGate() *spawnGate { return &s.hooks }
 
 // New creates an Entity carrying every Component the Component set names and
 // returns its handle. The Components are written in field order, and the Entity
@@ -130,6 +141,10 @@ func (s *Spawn[S]) New(components S) Entity {
 	s.staging = components
 	e := s.entities.Get().alloc()
 	buffer := unsafe.Pointer(&s.staging)
+	if s.hooks.on {
+		s.hooks.spawn(e, buffer)
+		return e
+	}
 	for i := range s.fields {
 		field := &s.fields[i]
 		field.set(e, unsafe.Add(buffer, field.offset))
