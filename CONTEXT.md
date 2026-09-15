@@ -496,6 +496,10 @@ _Avoid_: Layer matrix, intersection matrix, filter
 A Shape that reports contacts but is never pushed and pushes nothing. The Collision matrix pairs it like any other Shape. A circle sensor that moves reports everything it touched on its way through the tick, not only where it ended, which is what keeps a point from passing through a wall unseen. What a sensor does on contact is the game's, never the physics.
 _Avoid_: Trigger (a Hook word), ghost, phantom
 
+**Contact**:
+Two Entities whose Shapes touch, found once a tick for each pair the Collision matrix lets collide, whatever kinds of Body they are. A contact is marked as begun this tick, continuing from the last, or ended, so the tick two Entities stop touching is reported too. When one party is a Sensor, the contact also says how far along the Sensor's movement the touch happened.
+_Avoid_: Collision, collision event, manifold, touch
+
 **Contact force**:
 The force contact response writes into a Dynamic body and integration consumes, rebuilt from nothing every tick rather than summed across ticks.
 _Avoid_: Contact accumulator, penetration spring, as names for what a Body carries
@@ -510,7 +514,7 @@ _Avoid_: Ray cast, shape cast, segment query, trace
 
 **Hit**:
 What a Sweep reports about one thing it touched: the Entity, how far along the Sweep, where, and the surface normal.
-_Avoid_: Contact (that is between Bodies, and is what detection reports; a Sensor's contact carries a Hit), intersection
+_Avoid_: Contact (that is what detection reports each tick, never a query result), intersection
 
 **Overlap**:
 Asking which Entities a Shape at a position touches. It counts as touching exactly what contact would.
