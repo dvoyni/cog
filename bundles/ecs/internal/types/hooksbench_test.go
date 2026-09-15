@@ -377,9 +377,12 @@ func hookReaders[K KindSet](kinds string) hookReaderArm {
 }
 
 // BenchmarkHookAddRemove prices an UpdateFor that adds plus a Remove.From on a
-// Store read under each kind set, by one reader and by four. The readers run
-// every 1024 pairs, off the clock, so the log stays at its steady size.
+// Store read under each kind set, by one reader and by four, against the same
+// pair on the same world with an empty System in the reader's place. The
+// readers run every 1024 pairs, off the clock, so the log stays at its steady
+// size.
 func BenchmarkHookAddRemove(b *testing.B) {
+	b.Run("nothing-watching", func(b *testing.B) { benchmarkHookAddRemove(b, func() {}) })
 	arms := []hookReaderArm{
 		hookReaders[HookSpawned]("HookSpawned"),
 		hookReaders[HookDespawned]("HookDespawned"),
@@ -395,29 +398,80 @@ func BenchmarkHookAddRemove(b *testing.B) {
 			name   string
 			system any
 		}{{"1-reader", a.one}, {"4-readers", a.four}} {
-			b.Run(a.kinds+"/"+readers.name, func(b *testing.B) {
-				handles, ids, engine := recordingWorld(b, accessorBatch, readers.system)
-				pair := func(i int) {
-					e := ids[i%accessorBatch]
-					handles.set.UpdateFor(e, collider{Radius: 1})
-					handles.remove.From(e)
-				}
-				for i := range accessorBatch {
-					pair(i)
-				}
-				frame(b, engine, 1)
-				b.ReportAllocs()
-				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
-					pair(i)
-					if i&1023 == 1023 {
-						b.StopTimer()
-						frame(b, engine, 1)
-						b.StartTimer()
-					}
-				}
-			})
+			b.Run(a.kinds+"/"+readers.name, func(b *testing.B) { benchmarkHookAddRemove(b, readers.system) })
 		}
+	}
+}
+
+func benchmarkHookAddRemove(b *testing.B, readers any) {
+	handles, ids, engine := recordingWorld(b, accessorBatch, readers)
+	pair := func(i int) {
+		e := ids[i%accessorBatch]
+		handles.set.UpdateFor(e, collider{Radius: 1})
+		handles.remove.From(e)
+	}
+	for i := range accessorBatch {
+		pair(i)
+	}
+	frame(b, engine, 1)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		pair(i)
+		if i&1023 == 1023 {
+			b.StopTimer()
+			frame(b, engine, 1)
+			b.StartTimer()
+		}
+	}
+}
+
+// BenchmarkHookAddRemoveString is BenchmarkHookAddRemove's pair on a Component
+// holding a string, whose removal's retained copy is a non-trivial T, with one
+// reader under HookAddedRemoved and HookAll against nothing watching.
+func BenchmarkHookAddRemoveString(b *testing.B) {
+	arms := []struct {
+		name   string
+		reader any
+	}{
+		{"nothing-watching", func() {}},
+		{"HookAddedRemoved/1-reader", func(h *Hooks[namedComponent, HookAddedRemoved]) {}},
+		{"HookAll/1-reader", func(h *Hooks[namedComponent, HookAll]) {}},
+	}
+	for _, arm := range arms {
+		b.Run(arm.name, func(b *testing.B) {
+			var set *Set[namedComponent]
+			var remove *Remove[namedComponent]
+			entities, _, engine := newWorldWith(b, accessorBatch, func(registrar *kernel.Registrar) {
+				registrar.Subscribe[hookCaptureSystem](ToHandler[app.UpdateEvent](registrar,
+					func(s *Set[namedComponent], r *Remove[namedComponent]) { set, remove = s, r }))
+				registrar.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](registrar, arm.reader))
+			}, []kernel.PluginName{Name, "components", "hookowner"}, &hookOwnerPlugin{})
+			frame(b, engine, 1)
+			ids := make([]Entity, accessorBatch)
+			for i := range ids {
+				ids[i] = entities.alloc()
+			}
+			pair := func(i int) {
+				e := ids[i%accessorBatch]
+				set.UpdateFor(e, namedComponent{Name: "a voice's emitter"})
+				remove.From(e)
+			}
+			for i := range accessorBatch {
+				pair(i)
+			}
+			frame(b, engine, 1)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				pair(i)
+				if i&1023 == 1023 {
+					b.StopTimer()
+					frame(b, engine, 1)
+					b.StartTimer()
+				}
+			}
+		})
 	}
 }
 
@@ -557,6 +611,154 @@ func BenchmarkHookShrink(b *testing.B) {
 			b.ReportMetric(float64(released.Entities)/float64(b.N), "entities-B/op")
 			b.ReportMetric(float64(released.Scratch)/float64(b.N), "scratch-B/op")
 		})
+	}
+}
+
+// hookWatchSystem is the System BenchmarkHookWatchCheck runs by hand.
+type hookWatchSystem kernel.Subscription[app.UpdateEvent]
+
+// watchWriteQuery is a Query writing two Stores, so its bind has two *T fields
+// to check.
+type watchWriteQuery struct {
+	Body     *body
+	Velocity *velocity
+}
+
+// BenchmarkHookWatchCheck is a writer's run start on Stores no reader watches:
+// one run of a System, called by hand outside the kernel, whose body does
+// nothing but bind what it holds. A handle is a *T Query field, a Set, a Remove
+// or a field of a Spawn's Component set, and each pays one load and one bit
+// test per run. The arm compiles unchanged against the parent of the first
+// Hooks commit, which has no check, so the A/B difference divided by the arm's
+// handles is the check's cost per handle per run, budgeted at 1 ns; 0-handles
+// is what a System naming no writer handle pays.
+func BenchmarkHookWatchCheck(b *testing.B) {
+	arms := []struct {
+		name   string
+		system any
+	}{
+		{"0-handles", func() {}},
+		{"2-handles/query-write-fields", func(q *Query[watchWriteQuery]) {
+			for range q.All() {
+			}
+		}},
+		{"2-handles/spawn-fields", func(sp *Spawn[spawnSet]) {}},
+		{"12-handles/set-and-remove-on-six-stores", func(
+			_ *Set[body], _ *Remove[body], _ *Set[velocity], _ *Remove[velocity],
+			_ *Set[collider], _ *Remove[collider], _ *Set[homing], _ *Remove[homing],
+			_ *Set[disabled], _ *Remove[disabled], _ *Set[solid], _ *Remove[solid],
+		) {
+		}},
+	}
+	for _, arm := range arms {
+		b.Run(arm.name, func(b *testing.B) {
+			var run kernel.Observe[app.UpdateEvent]
+			_, _, engine := newWorld(b, 16, func(registrar *kernel.Registrar) {
+				handler := ToHandler[app.UpdateEvent](registrar, arm.system)
+				registrar.Subscribe[hookWatchSystem](func() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
+					lock, observe := handler()
+					run = observe
+					return lock, observe
+				})
+			})
+			frame(b, engine, 1)
+			event := app.UpdateEvent{Dt: 1}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = run(kernel.Kernel{}, event)
+			}
+		})
+	}
+}
+
+// BenchmarkHookPaceCounter is Validation mode's pace counter on one log: a
+// run's start and end on the counter, around one append, against the append
+// alone. The difference is its cost per counted run per log. A release build
+// compiles the counter out through const validate, so the arm runs only under
+// -tags ecs_validate.
+func BenchmarkHookPaceCounter(b *testing.B) {
+	if !validate {
+		b.Skip("the pace counter runs only in a validating build")
+	}
+	for _, arm := range []string{"append-alone", "counted-run"} {
+		b.Run(arm, func(b *testing.B) {
+			var set *Set[collider]
+			entities, _, engine := newWorld(b, 16, func(registrar *kernel.Registrar) {
+				registrar.Subscribe[hookCaptureSystem](ToHandler[app.UpdateEvent](registrar, func(s *Set[collider]) { set = s }))
+				registrar.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](registrar, func(h *Hooks[collider, HookAll]) {}))
+			})
+			frame(b, engine, 1)
+			store := set.changes.store
+			log := store.hooks
+			var pace systemPace
+			pace.enrol(store)
+			pace.begin(entities)
+			pace.end()
+			e := entities.alloc()
+			counted := arm == "counted-run"
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if counted {
+					pace.begin(entities)
+				}
+				log.changed(e, 1)
+				if counted {
+					pace.end()
+				}
+				if i&1023 == 1023 {
+					log.base += uint64(len(log.records))
+					log.records = log.records[:0]
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkHookFirstWatchedRun is the allocation a writer's first run on a
+// Store watched for Changed makes, and the none every later run makes, at 10k
+// Entities of an 8 B Component: a *T Query field's whole-Store copy, Set.Ref on
+// 1% of the rows, and Set.MarkChanged on 1%. The first arm gives the copy's
+// buffers back before each op, off the clock, as ShrinkCmd does, so every op is
+// a first watched run; B/op is its allocation.
+func BenchmarkHookFirstWatchedRun(b *testing.B) {
+	const n, touched = 10_000, 100
+	for _, route := range []string{"query-field", "ref-1%", "mark-1%"} {
+		for _, when := range []string{"first", "later"} {
+			b.Run(route+"/"+when, func(b *testing.B) {
+				w := changedWriterWorld[body](b, n, true)
+				run := func(i int) {
+					switch route {
+					case "query-field":
+						for _, it := range w.q.All() {
+							it.Row.X++
+						}
+					case "ref-1%":
+						for j := range touched {
+							ref, _ := w.set.Ref(w.ids[(j*97+i)%n])
+							ref.X++
+						}
+					default:
+						for j := range touched {
+							w.set.MarkChanged(w.ids[(j*97+i)%n])
+						}
+					}
+					w.runEnd()
+				}
+				run(0)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if when == "first" {
+						b.StopTimer()
+						w.set.changes.release()
+						b.StartTimer()
+					}
+					run(i)
+				}
+			})
+		}
 	}
 }
 

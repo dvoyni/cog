@@ -1235,8 +1235,12 @@ resource in the signature** — six objects a frame, the engine's own
 Entities. Over a ten-thousand-frame steady state: **6.004 at 1k and 6.001 at
 10k** for `In` + `Feed` against **6.004 and 6.003** for naming the event, and
 **6.002 at both** for the recording System. `-gcflags=-m` still reports no
-`moved to heap` anywhere in the package, and `queryCursor.row` and
-`queryCursor.fill` still inline.
+`moved to heap` on any path a frame or a Command runs, and `queryCursor.row` and
+`queryCursor.fill` still inline. The package's one `moved to heap` is at
+registration: `entities`, the cell the `ShrinkCmd` factory's two closures share
+(`shrink.go`, and `friends.go` where the factory inlines), one allocation when
+the plugin registers the Command, present since 144aa8a. See [What a Hook
+costs](#what-a-hook-costs).
 
 **Time is the same too**, and the three timed arms are inside this machine's
 whole-frame noise of each other. That noise is several hundred nanoseconds on a
@@ -1291,6 +1295,252 @@ object here, and `take` clears it on the way out so an invocation that answers
 nothing cannot inherit the answer before it. Nothing is boxed: the `reflect.Value`
 holding the cell pointer is built once and reused, the same way the event cell,
 the kernel cell and every handle are.
+
+### What a Hook costs
+
+A System reading `*ecs.Hooks[T, K]` is specified in
+[`docs/specs/hooks.md`](docs/specs/hooks.md), and every arm its *What it costs*
+lists is measured here on the build. That section keeps the prototype's figures
+as the record the build was held to; these supersede them. AMD Ryzen 9 7950X3D,
+go1.27.1 windows/amd64, `NumCPU=32`, the build at 6ab00a5 with the benchmark arms
+in `hooksbench_test.go` and `hooksmarkbench_test.go`. **The reference commit is
+[50043cd](https://github.com/dvoyni/cog/commit/50043cd)**, the parent of the
+first Hooks commit.
+
+Figures are medians of five runs. Four things change that:
+
+- **A budget row is an A/B:** test binaries of 50043cd and of the build,
+  alternated with the order flipped each round, seven rounds.
+- **A row priced against a control** is the median of each round's difference
+  or ratio against the same world with an empty System in the reader's place,
+  because the engine charges per subscription.
+- **The per-act and reader-changes arms are medians of fifteen.** Their absolute
+  times switch between two levels from one process to the next, by about 4 ns on
+  an add plus remove pair. The difference against the control holds within a
+  round.
+- **Single values move by ±10%** with run order on this machine.
+
+**Timings are published and never tested.** Tests assert only what can be
+counted exactly: allocations, lock sets, occupancy, record counts and sizes.
+
+#### Nothing watching
+
+| against 50043cd | 50043cd | build | change | budget |
+| --- | --- | --- | --- | --- |
+| `UpdateFor` add plus `Remove.From` | 7.69 ns | 7.99 ns | +0.30 ns | ≤ +1.0 ns |
+| `Spawn[S].New`, two fields | 16.68 ns | 16.70 ns | +0.02 ns | ≤ +1.0 ns |
+| `Despawn`, six enrolled Stores | 21.02 ns | 20.73 ns | −0.29 ns | ≤ +2.0 ns |
+| a two-Component Query frame, 1 000 | 9 268 ns | 9 443 ns | +1.9% | ≤ +3% |
+| a two-Component Query frame, 10 000 | 43 717 ns | 44 665 ns | +2.2% | ≤ +3% |
+| **the watch check, per handle per run: `Set` or `Remove`** | 187.4 ns | 212.4 ns | **+2.08 ns** | ≤ 1 ns, **missed** |
+| **…a `*T` Query field** | 78.04 ns | 86.25 ns | **+4.1 ns** | ≤ 1 ns, **missed** |
+| **…a field of a Spawn's Component set** | 68.66 ns | 74.16 ns | **+2.75 ns** | ≤ 1 ns, **missed** |
+| …a System naming no writer handle | 62.71 ns | 62.84 ns | +0.13 ns | |
+
+`Despawn`'s figure moves with code placement. [#389](https://github.com/dvoyni/cog/issues/389)
+measured a 1.6 ns placement effect on it and the owner accepted it, and
+[#391](https://github.com/dvoyni/cog/issues/391) measured +1.28 ns. The five
+figures above are within budget.
+
+**The watch check is over its budget, and the owner accepted the figures.**
+`BenchmarkHookWatchCheck` calls one run of a System by hand on Stores nothing
+watches. The body does nothing but bind what it holds.
+- **The Set and Remove row** holds a `Set` and a `Remove` on each of six Stores:
+  twelve handles.
+- **The Query row** is two `*T` fields.
+- **The Spawn row** is a Component set of two fields.
+
+An unwatched writer pays more than one load and one bit test per handle:
+- a `Set` holds two gates, its own and its Store's row copy, and each check
+  stores its flag;
+- every Store a writer holds rows of pays a `rowCopy.compare` call at run end,
+  which does not inline, even when nothing was copied;
+- a `*T` field also pays a loop over its row copies in `bind`.
+
+Bringing it down is [#403](https://github.com/dvoyni/cog/issues/403). It is paid
+per handle per run, never per row.
+
+#### Recording
+
+An `UpdateFor` that adds plus a `Remove.From`, on a Store read under each kind
+set, is priced against the same pair with nothing watching. That pair costs
+8.0 ns on its own world (`BenchmarkHookNothingWatching`). Readers run off the
+clock every 1 024 pairs (`BenchmarkHookAddRemove`, `BenchmarkHookAddRemoveString`).
+
+| kind set | 1 reader | 4 readers |
+| --- | --- | --- |
+| `HookSpawned` | +3.0 ns | +3.1 ns |
+| `HookDespawned` | +0.0 ns | −0.0 ns |
+| `HookSpawnedDespawned` | +3.2 ns | +3.1 ns |
+| `HookAdded` | +4.4 ns | +4.4 ns |
+| `HookRemoved` | +3.0 ns | +3.0 ns |
+| `HookAddedRemoved` | +4.4 ns | +4.5 ns |
+| `HookAddedChanged` | +4.5 ns | +4.7 ns |
+| `HookAll` | +4.6 ns | +4.8 ns |
+| `HookAddedRemoved`, with a `string` in `T` | +4.9 ns | |
+| `HookAll`, with a `string` in `T` | +5.5 ns | |
+
+- **Recording is per watched Store, not per reader.** Four readers cost what one does.
+- **`HookSpawned` still records the removal.** A removal fixes an addition's value,
+  so it is recorded wherever an addition is watched, including an addition only a
+  Spawn makes.
+- **`HookDespawned` records neither half.** It watches only Despawns.
+
+A Spawn carrying `body` and `velocity`, plus its Despawn, costs 42.6 ns with
+nothing watching (`BenchmarkHookSpawnDespawn`):
+
+| watching | added to the pair |
+| --- | --- |
+| `body` under `HookSpawnedDespawned` | +6.9 ns |
+| `body` under `HookAll` | +9.6 ns |
+| `body` and `velocity` under `HookAll` | +14.4 ns |
+| `collider`, which the Spawn does not carry, under `HookAll` | +1.2 ns |
+
+#### Reading
+
+A reader's run, per record it is given: take, filter, fold, fill, iterate and
+run end. Records are made off the clock, 1 024 at a time (`BenchmarkHookReader`,
+`BenchmarkHookReaderChanges`).
+
+| records | 1 reader | 4 readers, together |
+| --- | --- | --- |
+| add plus remove pairs | 6.0 ns | 18.4 ns |
+| additions, filled from the live Store | 8.8 ns | 24.9 ns |
+| changes, one per Entity | 8.1 ns | 23.6 ns |
+| changes, two per Entity, folded into one, per change in the log | 4.9 ns | 14.7 ns |
+
+A reader's work is paid per record. Four readers are four copies, so they cost
+about three times one.
+
+#### Changed
+
+On a Store a `HookAddedChanged` or `HookAll` reader watches, a writer copies the
+rows it is handed and compares them at its run end
+(`BenchmarkHookChangedWriter`). A writer walks 10 000 Entities and writes a share
+of them. The figures are per row walked, the compare included:
+
+| rows written | `*T` field, unwatched | `*T` field, whole-Store copy | `Ref` per row, unwatched | `Ref` per row, copy per row |
+| --- | --- | --- | --- | --- |
+| 8 B, 0% | 2.52 ns | 3.00 ns | 3.19 ns | 10.82 ns |
+| 8 B, 1% | 2.63 ns | 4.58 ns | 3.00 ns | 10.95 ns |
+| 8 B, 10% | 2.59 ns | 5.69 ns | 3.26 ns | 10.85 ns |
+| 8 B, 100% | 3.43 ns | 7.10 ns | 4.07 ns | 12.24 ns |
+| 64 B, 0% | 2.48 ns | 5.02 ns | 3.22 ns | 12.72 ns |
+| 64 B, 1% | 2.61 ns | 6.99 ns | 3.12 ns | 12.35 ns |
+| 64 B, 10% | 2.58 ns | 7.48 ns | 3.26 ns | 12.75 ns |
+| 64 B, 100% | 3.53 ns | 8.72 ns | 4.53 ns | 13.90 ns |
+
+| call | unwatched | watched for Changed |
+| --- | --- | --- |
+| `Set[T].Ref` on 1% of 10 000, writing each row (`BenchmarkHookChangedRef`) | 4.36 ns | 12.75 ns |
+| `Set[T].MarkChanged` on 1% of 10 000, per mark, its record included (`BenchmarkHookMarkChanged`) | 1.01 ns | 4.55 ns |
+
+Two rules decide what a byte compare records.
+
+- **A Component some reader watches for Changed has no implicit padding.** Go
+  leaves padding holding whatever was there, so equal fields can differ in bytes.
+  - **Validating build:** registering such a reader walks the Component's layout,
+    nested structs and arrays included. It panics naming the field the gap
+    follows, or "at the end", the byte count, and the fix: an explicit
+    `_ [N]byte` field there.
+  - **Release build:** there is no check. Implicit padding can record a Changed
+    no field made, and never misses a real one.
+- **A `List` nested in another `List`'s element** is written through `At`'s copy,
+  which the compare cannot see. `Set[T].MarkChanged(e)` records it, and so does
+  writing the whole outer element back through the stored `List`.
+
+#### Frames
+
+The whole frame on a real engine, each against the same frame with an empty
+System in every reader's place (`BenchmarkHookFrame`):
+
+| frame | 1 000 | 10 000 |
+| --- | --- | --- |
+| `churn`: 100 adds or removes a tick, `Hooks[collider, HookAddedRemoved]` | 17 499 → 19 450 ns, 1.11× | 39 505 → 40 870 ns, 1.06× |
+| `churn`, `Hooks[collider, HookAll]` | 17 499 → 19 726 ns, 1.13× | 39 505 → 41 151 ns, 1.04× |
+| **`churn` + `move` + `Hooks[collider, HookAddedRemoved]`** | 20 974 → 24 665 ns, 1.18× | 68 585 → 73 719 ns, **1.06×**, budget ≤ 1.10× |
+| 100 spawns plus despawns a tick, `Hooks[body, HookSpawnedDespawned]` | 18 244 → 20 520 ns, 1.14× | 18 383 → 20 562 ns, 1.12× |
+| **every `body` changed every tick, `Hooks[body, HookAddedChanged]`** | 18 666 → 33 443 ns, 1.80× | 55 199 → 154 821 ns, **2.80×** |
+| the same, four `Hooks[body, HookAll]` readers against four empty Systems | 22 566 → 70 523 ns, 2.92× | 61 532 → 352 389 ns, 5.72× |
+
+**The worst case is published, not budgeted.** A Changed reader over every
+Entity, each changing every tick, costs about 10 ns per changed Entity at 10 000,
+2.8× the frame. **Such a reader should be a Query.** A reader's work per record,
+the Changed grid, the worst case and `ShrinkCmd` carry no budget: they are the
+reader's trade.
+
+#### Memory
+
+**Allocations.** Every arm stays on the engine's line. Over a 5 000-frame steady
+state (`TestAHookReaderStaysOnTheAllocationLine`), in objects a frame:
+
+| frame | control, 1k / 10k | with the readers, 1k / 10k |
+| --- | --- | --- |
+| `churn` + `HookAddedRemoved` | 13.075 / 13.028 | 13.046 / 13.036 |
+| `churn` + `HookAll` | 13.075 / 13.028 | 13.032 / 13.011 |
+| `churn` + `move` + `HookAddedRemoved` | 14.035 / 14.025 | 14.005 / 14.011 |
+| spawn and despawn + `HookSpawnedDespawned` | 10.024 / 10.002 | 10.019 / 10.011 |
+| `move` + `HookAddedChanged` | 10.007 / 10.006 | 10.009 / 10.031 |
+| `move` + 4 × `HookAll` | 14.055 / 14.045 | 14.045 / 14.025 |
+
+`testing.AllocsPerRun` reports 0 for `UpdateFor`, `From`, `Ref`, `MarkChanged`,
+a `*T` field, Spawn and Despawn on a watched Store after its first watched run.
+
+**A writer's first watched run** allocates its row copies, and every later run
+allocates nothing (`BenchmarkHookFirstWatchedRun`, 10 000 Entities of an 8 B
+Component):
+
+| route | first watched run | later runs |
+| --- | --- | --- |
+| a `*T` field, the whole-Store copy | 163 840 B, 2 objects | 0 |
+| `Ref` on 1% of the rows | 44 912 B, 17 objects | 0 |
+| `MarkChanged` on 1% of the rows | 43 008 B, 9 objects | 0 |
+
+The whole-Store copy is an `Entity` and a row per Entity. `Ref` and `MarkChanged`
+also stamp 4 B per index in the Store's sparse array. Only `ShrinkCmd` gives
+them back.
+
+**A stalled reader's log grows by 24 B per record, plus a copy of `T` per
+removal.** Capacity grows by `append`'s rule, and a test pins both. **A
+removal's retained value** stays alive until the run end of the last reader
+whose copy included it, and is freed then. A test checks this with a `string`
+and `runtime.AddCleanup`, in both build modes.
+
+**`ShrinkCmd`'s zero request after a spike** on a watched Store: n Entities gain
+`collider`, every row is changed, all but one in a thousand are despawned, and
+two `HookAll` readers read it all (`BenchmarkHookShrink`).
+
+| spike | time | `Hooks` | `Stores` | `Entities` | `Scratch` |
+| --- | --- | --- | --- | --- | --- |
+| 1 000 | 13.5 µs | 257 780 B | 25 812 B | 10 720 B | 43 008 B |
+| 10 000 | 25.8 µs | 2 588 638 B | 172 457 B | 24 158 B | 417 792 B |
+
+- **The time is noisy.** It includes the Command's hand-off, and the five runs
+  at 10 000 ranged from 7.3 to 55.6 µs.
+- **`Hooks` includes each reader's fold marks**, with its copy.
+- **`Scratch` includes a Query's walk**, which aliases a Store's owners array, so
+  `Scratch` and `Stores` are not summed.
+
+**The pace counter** is Validation mode's check that a reader keeps up. It costs
+2.6 ns per counted run per log a System can append to
+(`BenchmarkHookPaceCounter`). A release build compiles it out through
+`const validate`.
+
+#### Escape analysis
+
+`-gcflags=-m`, in both build modes, shows no `moved to heap` on any of these:
+- the log append in `UpdateFor`, `Remove.From`, Spawn and Despawn;
+- a reader's fold and fill;
+- the whole-Store and per-row copies, and `MarkChanged`;
+- the compare at a writer's run end;
+- `ShrinkCmd`'s execution.
+
+**The package's one `moved to heap` is registration-time**: `entities`, the cell
+the `ShrinkCmd` factory's two closures share (`shrink.go`, and `friends.go`
+where the factory inlines). It is one allocation when the plugin registers the
+Command, and it has been there since 144aa8a. Executing the Command allocates
+only what the shrink itself makes: `shrinkIndices` builds a bitmap of the free
+indices on every shrink that has some, and its size is known only at run time.
 
 ### What naming an engine-side thing cost
 
