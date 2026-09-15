@@ -1,0 +1,4 @@
+github.com/jakecoffman/cp/v2 v2.4.0 h1:Mf5SIl1/mV4igtTWnSF4LqJ5LyYNdOiqyF/qKCkDiYU=
+github.com/jakecoffman/cp/v2 v2.4.0/go.mod h1:6lPSBgxx6+//RIlSaMH3XaXtcCwPY1ZCJox1ThK5bZw=
+github.com/neguse/gox2d v0.0.0-20260315140214-8616afaae132 h1:v7tuYxZVoV9qYwDNE7Gkw579ToW5RnI1rIKoS3nrE6k=
+github.com/neguse/gox2d v0.0.0-20260315140214-8616afaae132/go.mod h1:l78eLKCSd+p3ZvcSqMPy8K8jDfhvqs+W2pD2Xw7hFjc=
