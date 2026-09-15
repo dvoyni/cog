@@ -484,6 +484,14 @@ A Body with a mass and a Drag, moved by the forces on it and pushed by what it t
 The one region a Body occupies: a circle, an axis-aligned box, or a segment. A point is a circle of radius 0. A Body has at most one.
 _Avoid_: Collider, fixture, hull
 
+**CollisionBits**:
+Which collision groups a Shape is in; it may be in several. Two Entities collide when the Collision matrix lets any group of one collide with any group of the other. A Shape with no bits set is in every group, and an Entity with no Shape collides with nothing. A query names the groups it sees the same way, without the Collision matrix. Rules about a particular pair, such as a projectile passing its own caster, are not groups.
+_Avoid_: Layer, group, category and mask, collision filter
+
+**Collision matrix**:
+Which collision groups may collide with which, always both ways, declared once when physics is configured and never changed while the game runs. Groups it does not pair never collide; declaring nothing lets everything collide.
+_Avoid_: Layer matrix, intersection matrix, filter
+
 **Contact force**:
 The force contact response writes into a Dynamic body and integration consumes, rebuilt from nothing every sub-step rather than summed across a tick.
 _Avoid_: Contact accumulator, penetration spring, as names for what a Body carries
