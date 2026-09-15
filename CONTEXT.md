@@ -466,8 +466,8 @@ _Avoid_: Ramp, crossfade, tween, as names for anything audio does
 ## Physics
 
 **Body**:
-An Entity that physics moves or collides with: it has a position on the plane, and a Shape or a velocity. Every Body is exactly one of the three kinds below, and which one is said by the Components it has rather than by a flag. A Body stands on a 2D plane; placing it in 3D is a Transform's job, written by whoever draws it.
-_Avoid_: Collider, rigid body (nothing rotates), physics object, actor
+An Entity that physics moves or collides with: it has a position and an Angle on the plane, and a Shape or a velocity. Every Body is exactly one of the three kinds below, and which one is said by the Components it has rather than by a flag. A Body stands on a 2D plane; placing it in 3D is a Transform's job, written by whoever draws it.
+_Avoid_: Collider, rigid body, physics object, actor
 
 **Static body**:
 A Body that never moves and is never pushed, and whose Shape and position never change in place: moving one means replacing the Entity. It pushes Dynamic bodies.
@@ -478,7 +478,27 @@ A Body the game moves by setting its velocity. It pushes Dynamic bodies and noth
 _Avoid_: Immobile, as a kind of its own
 
 **Dynamic body**:
-A Body with a mass and a Drag, moved by the forces on it and pushed by what it touches.
+A Body with a mass, a Moment of inertia and a Damping, moved and turned by the forces and Torques on it and pushed by what it touches.
+
+**Angle**:
+How far a Body has turned on the plane, in radians, counted on from every earlier turn rather than wrapped into one revolution.
+_Avoid_: Rotation, heading, facing, orientation
+
+**Angular velocity**:
+How fast a Body's Angle changes, in radians per second.
+_Avoid_: Spin, rotation speed
+
+**Torque**:
+What turns a Dynamic body, as a Force moves it; the game adds it and the physics consumes it each tick.
+_Avoid_: Angular force, moment (alone)
+
+**Moment of inertia**:
+How hard a Dynamic body is to turn, as mass is how hard it is to move. An infinite Moment of inertia is a body that does not turn, not a kind of its own.
+_Avoid_: Inertia (alone), rotational mass, fixed rotation
+
+**Centre of gravity**:
+The point a Body moves and turns about, which is the Body's position itself. A Shape is placed relative to it and need not be centred on it.
+_Avoid_: Centre of mass, pivot, origin, anchor
 
 **Shape**:
 The one region a Body occupies: a circle, an axis-aligned box, or a segment. A point is a circle of radius 0. A Body has at most one.
@@ -504,9 +524,9 @@ _Avoid_: Collision, collision event, manifold, touch
 The force contact response writes into a Dynamic body and integration consumes, rebuilt from nothing every tick rather than summed across ticks.
 _Avoid_: Contact accumulator, penetration spring, as names for what a Body carries
 
-**Drag**:
-How fast a Dynamic body's velocity decays, as a rate per second. It is what makes a pushed thing stop, where friction would elsewhere.
-_Avoid_: Damping, friction
+**Damping**:
+How fast a Dynamic body's velocity decays on its own, as a rate per second; its Angular velocity decays by an angular Damping of its own. It is what makes a pushed thing stop and a spun thing settle when nothing else holds it back. It is a rate, not the share of velocity kept each second.
+_Avoid_: Drag, friction, damping ratio
 
 **Sweep**:
 Moving a circle, possibly of radius 0, in a straight line from one position to another, and finding what it touches on the way. Line of sight is one use of a Sweep, not another operation.
