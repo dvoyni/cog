@@ -1491,6 +1491,10 @@ repeated here so a reader of the spec alone does not re-propose them.
 - **The two silent-failure defects the prototype hit and could not explain** —
   [#184](https://github.com/dvoyni/cog/issues/184) and
   [#185](https://github.com/dvoyni/cog/issues/185). Defects rather than design
-  questions. The second is the honest answer to *"what would `gfx` have had to
-  check"*: **nothing** — the layout and the shader agreed, the formats were legal,
-  and the data still did not arrive.
+  questions. The second, once reproduced, was not a vertex defect at all: the
+  attribute arrived intact, and the prototype's decode multiplied it by a
+  module-scope `const vec2` that naga's SPIR-V backend handed the shader as zero
+  — [#181](https://github.com/dvoyni/cog/issues/181) in a second shader, built in
+  a module that had not inherited cog's naga override. It is not an answer to
+  *"what would `gfx` have had to check"*; a build-time SPIR-V check of the
+  generated shader would have caught it.
