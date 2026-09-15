@@ -151,8 +151,9 @@ func TestRemoveIsSwapRemoveAndThePopulationStaysExact(t *testing.T) {
 	}
 }
 
-// Nothing shrinks: no compaction, no sweep, and no array handed back. A
-// respawn reuses the row rather than buying it again.
+// Nothing shrinks on its own: no compaction, no sweep, and no array handed back
+// by a removal. A respawn reuses the row rather than buying it again; capacity
+// goes back only through ShrinkCmd, tested in shrink_test.go.
 func TestNothingShrinks(t *testing.T) {
 	entities := newEntities(64)
 	store := NewStore[position](entities, 0)

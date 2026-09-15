@@ -85,7 +85,8 @@ func (s *Store[T]) erase() *storeHeader { return (*storeHeader)(unsafe.Pointer(s
 // a despawn empty it; a Store the authority cannot reach would keep rows for
 // entities that no longer exist. ids is the peak population the app expects,
 // reserving the three arrays so the fill costs no further allocation — it is a
-// hint and not a cap, and nothing here ever shrinks.
+// hint and not a cap, and nothing here shrinks on its own: the capacity goes
+// back only when the app executes ShrinkCmd.
 //
 // Component registration is the sanctioned caller. It is what checks the
 // pointer-free rule and hands the Store to the kernel as a resource.
@@ -105,7 +106,7 @@ func NewStore[T any](en *Entities, ids uint32) *Store[T] {
 	for i := range s.sparse {
 		s.sparse[i] = absentSlot
 	}
-	en.enrol(s.remove)
+	en.enrol(s.remove, s.shrink)
 	return s
 }
 
@@ -255,4 +256,48 @@ func (s *Store[T]) remove(e Entity) bool {
 	s.dense = s.dense[:last]
 	s.sparse[e.idx()] = absentSlot
 	return true
+}
+
+// shrink cuts the rows to the population and the sparse array to the highest
+// index held, leaving capacity equal to length in all three, and reports the
+// bytes let go. An array already at its length is left as it is, so a second
+// shrink allocates nothing and releases nothing.
+//
+// Only ShrinkCmd calls it, holding write{*Entities}, which excludes every
+// handler that could hold this Store.
+func (s *Store[T]) shrink() uintptr {
+	held := 0
+	for _, e := range s.owners {
+		held = max(held, int(e.idx())+1)
+	}
+	before := s.bytes()
+	// Every slot at or above the highest index held is absent, so dropping them
+	// changes no answer the probe gives: an index beyond the array is absence.
+	s.sparse = clip(s.sparse[:held])
+	s.owners = clip(s.owners)
+	s.dense = clip(s.dense)
+	return before - s.bytes()
+}
+
+// bytes is what the three arrays hold, by capacity.
+func (s *Store[T]) bytes() uintptr {
+	return uintptr(cap(s.sparse))*unsafe.Sizeof(uint64(0)) +
+		uintptr(cap(s.owners))*unsafe.Sizeof(Entity(0)) +
+		uintptr(cap(s.dense))*unsafe.Sizeof(*new(T))
+}
+
+// clip returns s at capacity equal to its length, copying into a new array when
+// there is slack and returning s itself when there is none. An empty s becomes
+// nil rather than a zero-capacity slice of the old array, which would keep that
+// array reachable.
+func clip[T any](s []T) []T {
+	if len(s) == cap(s) {
+		return s
+	}
+	if len(s) == 0 {
+		return nil
+	}
+	clipped := make([]T, len(s))
+	copy(clipped, s)
+	return clipped
 }

@@ -19,10 +19,13 @@
 // name is spelled, and what resolves it, belong to the two plugins that share
 // it. There is deliberately nothing central, and no process-wide interner.
 //
-// Nothing here is a Command. A structural change is a direct call on a handle
-// the System already holds, and the exclusion it needs was arranged before the
-// frame started: Spawn and WriteableEntities declare write{*Entities}, which is
-// a total barrier because Entities holds a reference to every Store.
+// No structural change is a Command. A structural change is a direct call on a
+// handle the System already holds, and the exclusion it needs was arranged
+// before the frame started: Spawn and WriteableEntities declare
+// write{*Entities}, which is a total barrier because Entities holds a reference
+// to every Store. The one Command here is ShrinkCmd, which changes no
+// membership: nothing gives memory back on its own, and the app executes it
+// after a spike.
 //
 // There is no binding mechanism, and that is the decision. A plugin that is not
 // the ECS attaches to the world by being an ordinary plugin: it registers
@@ -38,6 +41,6 @@
 // rejects a stale handle: liveness is not an extra structure, it is the probe.
 //
 // ecs is a Bundle. Its plugin, built by ecsplugin.New and configured by Config,
-// publishes the authority, *Entities, and nothing else; it requires no Adapter
-// and contributes none.
+// publishes the authority, *Entities, and registers ShrinkCmd, and nothing else;
+// it requires no Adapter and contributes none.
 package ecs

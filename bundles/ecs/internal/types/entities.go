@@ -13,13 +13,14 @@ import "reflect"
 // entities exist arrives through the write-locked promotions of this value —
 // Spawn and WriteableEntities — and nowhere else.
 type Entities struct {
-	// gens holds the current generation of each index. An index that has been
-	// allocated is never removed, so len(gens) is the index space in use.
+	// gens holds the current generation of each index, so len(gens) is the
+	// index space in use. An index that has been allocated is removed only when
+	// ShrinkCmd drops it from the top of the index space, free.
 	gens []uint32
 	// free holds indices whose entity has been despawned, newest last.
 	// Reclamation is eager and is therefore nothing at all: an index returns
-	// here the moment its entity is retired, so there is no compaction, no
-	// shrink and no sweep anywhere in the package.
+	// here the moment its entity is retired, and nothing reclaims on its own.
+	// Capacity goes back only when the app executes ShrinkCmd.
 	free []uint32
 	// stores is every Store enrolled with this authority, as the one call a
 	// despawn makes of it: its remove. It is the reason holding Entities for
@@ -37,6 +38,34 @@ type Entities struct {
 	// as a reflect.Type: a generic cannot be instantiated from one, so the
 	// generic call is made where C is a compile-time type and kept here.
 	classes map[reflect.Type]*componentClass
+	// The fields below are ShrinkCmd's. They sit after everything a spawn or a
+	// despawn reads, and what only the Command reads is behind one pointer,
+	// because this object's size class is measurable on a despawn: three
+	// slices here took it from 80 to 144 bytes and BenchmarkDespawnOnly from
+	// 17.6 to 19.5 ns with no instruction on its path changed, where a uint32
+	// and a pointer, 96 bytes, measured 17.6.
+	//
+	// floor is the generation an index appended to the index space starts at.
+	// A shrink that drops free indices from the top of the index space forgets
+	// their generations, so it raises the floor to the highest of them first:
+	// each is the generation that index would have carried next, above every
+	// generation it was ever issued, so a handle to a dropped index never
+	// matches the Entity the index is later allocated to. It starts at 1, which
+	// is where generations start.
+	floor uint32
+	// shrinkable is what ShrinkCmd reaches, enrolled at registration and
+	// created by the first enrolment.
+	shrinkable *shrinkable
+}
+
+// shrinkable is everything ShrinkCmd reaches besides the authority's own
+// arrays, and nothing else reads it.
+type shrinkable struct {
+	// stores is every enrolled Store's shrink. It is kept apart from
+	// Entities.stores because a despawn must never pay for it.
+	stores []func() uintptr
+	// scratch is every Query's release, enrolled when the Query is planned.
+	scratch []func() uintptr
 }
 
 // newEntities creates the authority, reserving room for ids indices. The number
@@ -48,8 +77,9 @@ type Entities struct {
 // publishes through kernel.Registrar.Dependency.
 func newEntities(ids uint32) *Entities {
 	return &Entities{
-		gens: make([]uint32, 0, ids),
-		free: make([]uint32, 0, ids),
+		gens:  make([]uint32, 0, ids),
+		free:  make([]uint32, 0, ids),
+		floor: 1,
 	}
 }
 
@@ -95,7 +125,10 @@ func (en *Entities) Alive(e Entity) bool {
 // when the Store is created, because a Store the authority cannot reach would
 // keep rows for entities that no longer exist and no later call would find
 // them.
-func (en *Entities) enrol(remove func(e Entity) bool) { en.stores = append(en.stores, remove) }
+func (en *Entities) enrol(remove func(e Entity) bool, shrink func() uintptr) {
+	en.stores = append(en.stores, remove)
+	en.shrinkables().stores = append(en.shrinkables().stores, shrink)
+}
 
 // alloc hands out an id, recycling a freed index where there is one so that the
 // flat sparse index of every Store stays bounded by peak concurrent entities
@@ -107,8 +140,8 @@ func (en *Entities) alloc() Entity {
 		return newEntity(index, en.gens[index])
 	}
 	index := uint32(len(en.gens))
-	en.gens = append(en.gens, 1)
-	return newEntity(index, 1)
+	en.gens = append(en.gens, en.floor)
+	return newEntity(index, en.floor)
 }
 
 // despawn empties every Store of e and retires the handle, returning its index
@@ -140,4 +173,19 @@ func nextGeneration(g uint32) uint32 {
 		return 1
 	}
 	return g
+}
+
+// enrolScratch adds a per-System buffer's release to the set ShrinkCmd calls.
+// It happens once, when the buffer's owner is planned at registration.
+func (en *Entities) enrolScratch(release func() uintptr) {
+	en.shrinkables().scratch = append(en.shrinkables().scratch, release)
+}
+
+// shrinkables is what ShrinkCmd reaches, created on first use. Only
+// registration enrols, so only registration creates it.
+func (en *Entities) shrinkables() *shrinkable {
+	if en.shrinkable == nil {
+		en.shrinkable = &shrinkable{}
+	}
+	return en.shrinkable
 }
