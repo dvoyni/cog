@@ -497,7 +497,7 @@ A Shape that reports contacts but is never pushed and pushes nothing. The Collis
 _Avoid_: Trigger (a Hook word), ghost, phantom
 
 **Contact force**:
-The force contact response writes into a Dynamic body and integration consumes, rebuilt from nothing every sub-step rather than summed across a tick.
+The force contact response writes into a Dynamic body and integration consumes, rebuilt from nothing every tick rather than summed across ticks.
 _Avoid_: Contact accumulator, penetration spring, as names for what a Body carries
 
 **Drag**:
