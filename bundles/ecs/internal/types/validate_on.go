@@ -27,7 +27,9 @@ import (
 // through unsafe, or through a []T a caller extracted before the value ever
 // reached a Store. A write by a callee the value was passed to, which is
 // reported against whoever called Set and not against whoever handed it over. A
-// List whose backing array was evicted from the table below. And, first among
+// List whose backing array was evicted from the table below. A Set through a
+// Set.Of copy taken before a Ref or a write field reached the same array, which
+// the later stamp makes look like a write through that handle. And, first among
 // them, anything a run never executes: this is detection, and its coverage is
 // the test suite rather than the type system.
 //
@@ -183,6 +185,10 @@ func checkListWritable(data unsafe.Pointer) {
 		panic(fmt.Sprintf(
 			"ecs: List.Set through a read of %s: a read yields a copy and a copy of a List shares its backing array, so this writes the Store while every concurrent reader holds read{%s}. Name the Component as *%s to write it",
 			entry.owner, entry.owner, entry.owner))
+	case modeSetOf:
+		panic(fmt.Sprintf(
+			"ecs: List.Set through a Set[%s].Of copy: the copy shares the stored List's backing array but not the row, so the write never reaches the stored Component's bytes and no Changed Hook can see it. Write the stored List through Set[%s].Ref",
+			entry.owner, entry.owner))
 	case modeWrite:
 		if entry.run == nil {
 			return

@@ -286,7 +286,7 @@ func ListOf[T any](values []T) List[T]
 func (l List[T]) Len() int
 func (l List[T]) At(i int) T
 func (l List[T]) All() iter.Seq2[int, T]
-func (l List[T]) Set(i int, value T)   // write lock only; checked under -tags ecs_validate
+func (l *List[T]) Set(i int, value T)  // write lock only; checked under -tags ecs_validate
 ```
 
 **A `[]T` in a Component is refused; a `List[T]` is what it holds instead.** The

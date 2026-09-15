@@ -170,7 +170,8 @@ func TestAWriteThroughANestedReadIsCaught(t *testing.T) {
 		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[readGrid], spawn *Spawn[gridSet]) {
 			spawn.New(gridSet{Grid: twoByTwo()})
 			for _, it := range q.All() {
-				caught = recovered(func() { it.Grid.Rows.At(1).Cells.Set(0, 99) })
+				cells := it.Grid.Rows.At(1).Cells
+				caught = recovered(func() { cells.Set(0, 99) })
 			}
 		}))
 	})
@@ -192,7 +193,8 @@ func TestAWriteThroughANestedWriteIsAllowed(t *testing.T) {
 		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[writeGrid], spawn *Spawn[gridSet]) {
 			spawn.New(gridSet{Grid: twoByTwo()})
 			for _, it := range q.All() {
-				caught = recovered(func() { it.Grid.Rows.At(1).Cells.Set(0, 99) })
+				cells := it.Grid.Rows.At(1).Cells
+				caught = recovered(func() { cells.Set(0, 99) })
 				seen = it.Grid.Rows.At(1).Cells.At(0)
 			}
 		}))
@@ -217,6 +219,128 @@ func TestTheCallersOwnNestedCopyIsClosedByStoring(t *testing.T) {
 	caught := recovered(func() { cells.Set(0, 9) })
 	if !strings.Contains(caught, "already in the world") {
 		t.Fatalf("writing the caller's own alias of a nested stored List: %q", caught)
+	}
+}
+
+// TestASetThroughASetOfCopyIsCaughtAndNamesRef is the case Hooks changed. The
+// copy Set[C].Of hands out shares the stored backing array, but not the row, so
+// a Set through it bumps the copy's generation and never reaches the stored
+// Component's bytes, where a Changed Hook would look. It used to be allowed; it
+// panics now, and the message names the route that works.
+func TestASetThroughASetOfCopyIsCaughtAndNamesRef(t *testing.T) {
+	var caught string
+	lists := &listsPlugin{ids: 16}
+	var e Entity
+	worldOfOne(t, lists, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(set *Set[inventory]) {
+			copied, _ := set.Of(e)
+			caught = recovered(func() { copied.Slots.Set(0, 99) })
+		}))
+	}, func(entities *Entities) {
+		e = entities.alloc()
+		lists.inventorys.Set(e, inventory{Slots: ListOf([]uint32{1, 2, 3})})
+	})
+	if caught == "" {
+		t.Fatal("writing a List through a Set.Of copy was allowed")
+	}
+	if !strings.Contains(caught, "Set[ecs.inventory].Ref") {
+		t.Fatalf("the panic does not name Ref as the fix: %q", caught)
+	}
+}
+
+// TestASetThroughANestedSetOfCopyIsCaughtAndNamesRef is the same copy one List
+// further in: the inner array is reached through the same handle as the row, so
+// it takes the same stamp and the same panic.
+func TestASetThroughANestedSetOfCopyIsCaughtAndNamesRef(t *testing.T) {
+	var caught string
+	lists := &listsPlugin{ids: 16}
+	var e Entity
+	worldOfOne(t, lists, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(set *Set[grid]) {
+			copied, _ := set.Of(e)
+			cells := copied.Rows.At(1).Cells
+			caught = recovered(func() { cells.Set(0, 99) })
+		}))
+	}, func(entities *Entities) {
+		e = entities.alloc()
+		lists.grids.Set(e, twoByTwo())
+	})
+	if caught == "" {
+		t.Fatal("writing a nested List through a Set.Of copy was allowed")
+	}
+	if !strings.Contains(caught, "Set[ecs.grid].Ref") {
+		t.Fatalf("the panic does not name Ref as the fix: %q", caught)
+	}
+}
+
+// TestASetThroughRefIsAllowed is the route the Set.Of panic names, and the
+// test that keeps the panic from being a ban: the stored List, reached through
+// Ref, is the Component itself, flat or nested.
+func TestASetThroughRefIsAllowed(t *testing.T) {
+	var flat, nested string
+	var seenFlat, seenNested uint32
+	lists := &listsPlugin{ids: 16}
+	var e Entity
+	worldOfOne(t, lists, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(inventories *Set[inventory], grids *Set[grid]) {
+			stored, _ := inventories.Ref(e)
+			flat = recovered(func() { stored.Slots.Set(0, 99) })
+			seenFlat = stored.Slots.At(0)
+
+			storedGrid, _ := grids.Ref(e)
+			cells := storedGrid.Rows.At(1).Cells
+			nested = recovered(func() { cells.Set(0, 98) })
+			seenNested = storedGrid.Rows.At(1).Cells.At(0)
+		}))
+	}, func(entities *Entities) {
+		e = entities.alloc()
+		lists.inventorys.Set(e, inventory{Slots: ListOf([]uint32{1, 2, 3})})
+		lists.grids.Set(e, twoByTwo())
+	})
+	if flat != "" || nested != "" {
+		t.Fatalf("writing a List through Ref was refused: flat %q, nested %q", flat, nested)
+	}
+	if seenFlat != 99 || seenNested != 98 {
+		t.Fatalf("the writes did not land: flat %d, nested %d", seenFlat, seenNested)
+	}
+}
+
+// TestASetOnAFreshListBeforeUpdateForIsAllowed is the first row of the
+// legality table: a List no Store has seen is the caller's own, and so is a
+// Set on it, right up to the UpdateFor that hands it to the world.
+func TestASetOnAFreshListBeforeUpdateForIsAllowed(t *testing.T) {
+	var caught string
+	var stored uint32
+	lists := &listsPlugin{ids: 16}
+	var e Entity
+	worldOfOne(t, lists, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(set *Set[inventory]) {
+			fresh := inventory{Slots: ListOf([]uint32{1, 2, 3})}
+			caught = recovered(func() { fresh.Slots.Set(0, 42) })
+			set.UpdateFor(e, fresh)
+			value, _ := set.Of(e)
+			stored = value.Slots.At(0)
+		}))
+	}, func(entities *Entities) {
+		e = entities.alloc()
+	})
+	if caught != "" {
+		t.Fatalf("writing a fresh List before UpdateFor was refused: %s", caught)
+	}
+	if stored != 42 {
+		t.Fatalf("the stored List holds %d, want 42", stored)
+	}
+}
+
+// worldOfOne builds the lists world, lets seed populate its Stores, and runs
+// one update.
+func worldOfOne(t *testing.T, lists *listsPlugin, subscribe func(*kernel.Registrar), seed func(*Entities)) {
+	t.Helper()
+	entities, _, engine := newWorldWith(t, 16, subscribe,
+		[]kernel.PluginName{Name, "components", "lists"}, lists)
+	seed(entities)
+	if err := engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
+		t.Fatalf("publishing the update: %v", err)
 	}
 }
 

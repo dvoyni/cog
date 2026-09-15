@@ -136,9 +136,9 @@ func (s *Store[T]) Get(e Entity) (T, bool) {
 
 // stampFor is validation mode's hook for the accessors, which reach a row
 // without a Query and so without a run. It stamps with a nil run, so the mode
-// is checked and retention is not: a value a Get handed out is illegal to write
-// whenever it happens, and one a Set handed out is legal the same way, so
-// neither answer depends on the window it is asked in.
+// is checked and retention is not: a value a Get or a Set.Of handed out is
+// illegal to write whenever it happens, and one a Set.Ref handed out is legal
+// the same way, so neither answer depends on the window it is asked in.
 func (s *Store[T]) stampFor(e Entity, mode listMode) {
 	if len(s.lists) == 0 {
 		return

@@ -375,17 +375,18 @@ lets a Changed Hook detect a change by comparing bytes
 ([What counts as a value change, for a Changed
 Hook](https://github.com/dvoyni/cog/issues/268)). The call sites above are
 unchanged, because a List reached through a `*T` field or `Ref` is addressable.
-*Since Hooks, not yet built.*
 
 **The header grows from 24 to 32 bytes, and every List user pays it**, watched
-or not. Measured on [`proto/ecs-hooks`](https://github.com/dvoyni/cog/tree/proto/ecs-hooks)
-([`5f41e42`](https://github.com/dvoyni/cog/commit/5f41e42)):
+or not. Measured on the build ([#388](https://github.com/dvoyni/cog/issues/388))
+by `listheaderbench_test.go`, as medians of seven interleaved A/B rounds against
+the 24-byte header; first measured on [`proto/ecs-hooks`](https://github.com/dvoyni/cog/tree/proto/ecs-hooks)
+([`5f41e42`](https://github.com/dvoyni/cog/commit/5f41e42)) at 73, 28, 7.7 and 15.9:
 
 | over a Component holding one `List` | 24 B header | 32 B header |
 | --- | --- | --- |
-| Query read, 10k Entities | 73 µs | 73 µs |
-| Query write, 10k Entities | 28 µs | 28 µs |
-| Store remove plus add, as the row crosses 32 → 40 B | 7.7 ns | **15.9 ns** |
+| Query read, 10k Entities | 73.1 µs | 72.9 µs |
+| Query write, 10k Entities | 28.3 µs | 28.6 µs |
+| Store remove plus add, as the row crosses 32 → 40 B | 7.8 ns | **16.2 ns** |
 
 **Where `Set` is legal:**
 
@@ -474,7 +475,7 @@ read, write and stored cases tested again one List further in:
 | `Set` through a `C` read field, or a `Get[C]` | **panics**, naming the Component and the mode |
 | `Set` through a value retained past the `All()` that yielded it | **panics**, naming the run |
 | `Set` through the caller's own copy, after the value entered a Store | **panics** — `ListOf` copies, but `Set` shares |
-| `Set` through a `Set[C].Of` copy | **panics**, naming `Ref` — *since Hooks, not yet built* |
+| `Set` through a `Set[C].Of` copy | **panics**, naming `Ref` |
 | `Set` on an array a second Component holds while its first owner still holds it | **panics**, naming both — *since Hooks, not yet built* |
 | `Set` through a Hooks value, at any time | **panics**, naming `Hooks[T, K]` — see [`hooks.md`](hooks.md#a-value-that-holds-a-list) |
 | any of the above, on a List inside another List's elements | the same as the flat case — the stamp walks nested Lists |
@@ -2515,7 +2516,7 @@ remains open is called out at the end of the verification list and in the
   read is a data race, and validation mode catches the ones a run executes while
   the detector would catch the ones that interleave.
 
-**Since Hooks — open, none of it built**
+**Since Hooks — open, partly built**
 
 The items that change what this document specifies for code naming no Hooks.
 Everything else Hooks need is in [`hooks.md` § Required work](hooks.md#required-work)
@@ -2523,9 +2524,11 @@ and in the implementation tickets under
 [the map](https://github.com/dvoyni/cog/issues/377).
 
 - `List.Set` with a pointer receiver and a generation in a 32-byte header
-  ([#268](https://github.com/dvoyni/cog/issues/268)).
+  ([#268](https://github.com/dvoyni/cog/issues/268)). **Built**
+  ([#388](https://github.com/dvoyni/cog/issues/388)).
 - `Set[C].Of` no longer stamping a write, so `Set` through its copy panics naming
-  `Ref` ([#387](https://github.com/dvoyni/cog/issues/387)).
+  `Ref` ([#387](https://github.com/dvoyni/cog/issues/387)). **Built**
+  ([#388](https://github.com/dvoyni/cog/issues/388)).
 - The shared-array mark registered at the Changed compare, released at the
   removing act ([#268](https://github.com/dvoyni/cog/issues/268),
   [#386](https://github.com/dvoyni/cog/issues/386)).

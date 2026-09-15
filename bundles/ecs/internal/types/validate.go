@@ -3,10 +3,11 @@ package types
 // listMode is what a stamp records about the last handle a List's backing array
 // was reached through, and it is the whole of what the write check consults.
 //
-// The three are not a hierarchy. modeStored says the array is in the world and
+// The four are not a hierarchy. modeStored says the array is in the world and
 // the only legal route to it is a write-locked handle; modeRead says the run
 // that handed it out held a read; modeWrite says the run held a write, and is
-// the one mode a write is legal under.
+// the one mode a write is legal under; modeSetOf says a write-locked handle
+// handed out a copy rather than the row.
 type listMode uint8
 
 const (
@@ -19,6 +20,12 @@ const (
 	modeStored listMode = iota
 	// modeRead is stamped by a read field's fill and by Get.Of.
 	modeRead
-	// modeWrite is stamped by a write field's fill and by Set.Of and Set.Ref.
+	// modeWrite is stamped by a write field's fill and by Set.Ref.
 	modeWrite
+	// modeSetOf is stamped by Set.Of. Its copy shares the stored backing array
+	// but not the row, so a Set through it would change the elements without
+	// the generation in the stored Component's header, and no byte compare
+	// would see the write. Set.Of stamped modeWrite until Hooks; Ref is the
+	// route to a List a System means to write.
+	modeSetOf
 )
