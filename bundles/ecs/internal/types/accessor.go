@@ -144,6 +144,25 @@ func (s *Set[T]) Ref(e Entity) (*T, bool) {
 	return &store.dense[row], true
 }
 
+// MarkChanged records a Changed for e at this System's run end, whether or not
+// e's bytes differ then. It is for the write a byte compare cannot see: a Set on
+// a List nested in another List's element, which goes through At's copy and
+// leaves the stored row's bytes as they were.
+//
+// It is deduplicated with the byte compare, so a run yields at most one Changed
+// for e however often it marks or writes e. Every other Changed rule holds: the
+// System's own Hooks readers skip it, and a removal of T later in the run leaves
+// only the removal.
+//
+// It does nothing on a Store no reader watches for Changed, for a Component with
+// no fields, or on an Entity that does not hold T, a dead one included. It
+// declares nothing beyond what Set already holds.
+func (s *Set[T]) MarkChanged(e Entity) {
+	if s.changes.gate.on {
+		s.changes.mark(e)
+	}
+}
+
 // UpdateFor gives e this Component, replacing the value if it already has one.
 // Inserting is legal here rather than needing a handle of its own, because the
 // handle already holds write{*Store[T]} and that is the whole of what adding a

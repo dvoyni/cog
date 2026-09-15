@@ -1590,7 +1590,7 @@ scheduler has already excluded everyone.
 | `ecs.Spawn[S]` | `.New(S) Entity` | `write{*Entities}`, plus `write{*Store[F]}` per Component set field |
 | `ecs.WriteableEntities` | `.Despawn(Entity) bool` | `write{*Entities}` |
 | `ecs.Get[T]` | `.Of(Entity) (T, bool)` | `read{*Store[T]}` |
-| `ecs.Set[T]` | `.Of(Entity) (T, bool)`, `.Ref(Entity) (*T, bool)`, `.UpdateFor(Entity, T)` | `write{*Store[T]}` |
+| `ecs.Set[T]` | `.Of(Entity) (T, bool)`, `.Ref(Entity) (*T, bool)`, `.UpdateFor(Entity, T)`, `.MarkChanged(Entity)` | `write{*Store[T]}` |
 | `ecs.Remove[T]` | `.From(Entity) bool` | `write{*Store[T]}` |
 
 Spawn and Despawn are **two handles rather than one**, because folding `Despawn`
@@ -1606,6 +1606,12 @@ never reaches an appended entry. So `UpdateFor` is how a Component is added;
 copy the rows they hand out**, for the compare at the writer's run end. That is a
 cost the reader puts on every writer of `T`, and it is priced in
 [`hooks.md`](hooks.md#what-it-costs). *Since Hooks, not yet built.*
+
+**`Set[T].MarkChanged(e)` forces a Changed record for `e`** at the writer's run end, for a
+write the compare cannot see, such as a `Set` on a List nested in another List's
+element. It needs nothing beyond the `write{*Store[T]}` `Set[T]` holds, and does
+nothing where no reader watches `T` for Changed
+([`hooks.md` § Changed is a difference in bytes](hooks.md#changed-is-a-difference-in-bytes)).
 
 **Gap.** The prototype builds `Query`, `Spawn`, `WriteableEntities`, `Read`,
 `Write` and `In`, and it was the accessors' *cost* that was measured — on the

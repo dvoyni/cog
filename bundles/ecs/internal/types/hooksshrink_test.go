@@ -97,7 +97,7 @@ func (w *hookSpikeWorld) shrink(tb testing.TB, request ShrinkRequest) ShrinkResp
 
 // spike is a spike of additions, changes and removals on collider, which both
 // readers watch: n Entities gain it, every row is written through Ref and then
-// through a Query, and all but spikeSurvivor's few are despawned. The reader
+// through a Query and then marked changed, and all but spikeSurvivor's few are despawned. The reader
 // runs after each act, so its copy reaches the spike's size, and the late
 // reader runs at the end, so the log is compacted to empty and holds only its
 // capacity. It returns the survivors.
@@ -127,6 +127,12 @@ func (w *hookSpikeWorld) spike(tb testing.TB, n int) []Entity {
 		}
 	})
 	w.read(tb)
+	w.written(tb, func(_ *Query[colliderQuery], set *Set[collider], _ *WriteableEntities) {
+		for _, e := range ids {
+			set.MarkChanged(e)
+		}
+	})
+	w.read(tb)
 	var survivors []Entity
 	w.written(tb, func(_ *Query[colliderQuery], _ *Set[collider], we *WriteableEntities) {
 		for i, e := range ids {
@@ -152,11 +158,13 @@ func (w *hookSpikeWorld) hookCapacity() hookCapacity {
 	return hookCapacity{cap(log.records), cap(log.retained), cap(h.out), cap(h.fills), cap(h.marks)}
 }
 
-// copyCapacity is what the writer's row copy of collider holds.
-type copyCapacity struct{ owners, rows, stamps int }
+// copyCapacity is what the writer's row copy of collider holds, its marks
+// included.
+type copyCapacity struct{ owners, rows, stamps, marks, marked int }
 
 func (w *hookSpikeWorld) copyCapacity() copyCapacity {
-	return copyCapacity{cap(w.changes.owners), cap(w.changes.rows), cap(w.changes.stamps)}
+	c := w.changes
+	return copyCapacity{cap(c.owners), cap(c.rows), cap(c.stamps), cap(c.marks), cap(c.marked)}
 }
 
 func TestTheZeroRequestGivesBackWhatHooksHold(t *testing.T) {
@@ -165,7 +173,7 @@ func TestTheZeroRequestGivesBackWhatHooksHold(t *testing.T) {
 	if got := w.hookCapacity(); got.records < spikePeak || got.out < spikePeak || got.marks < spikePeak {
 		t.Fatalf("the Hooks area holds %+v after the spike, want every array at least %d: the spike is not measuring it", got, spikePeak)
 	}
-	if got := w.copyCapacity(); got.owners < spikePeak || got.stamps < spikePeak {
+	if got := w.copyCapacity(); got.owners < spikePeak || got.stamps < spikePeak || got.marks < spikePeak || got.marked < spikePeak {
 		t.Fatalf("the row copy holds %+v after the spike, want at least %d: the spike is not measuring it", got, spikePeak)
 	}
 
