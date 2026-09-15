@@ -232,8 +232,9 @@ func TestKeepScratchReleasesNothingFromAQuery(t *testing.T) {
 }
 
 // TestTheZeroRequestShrinksEveryArea is the request an app sends after a spike.
-// Hooks has nothing to release until Hook logs exist, so it reports 0 whether
-// or not it is kept. A second shrink finds every area already at its length.
+// No Hook reader watches this world, so Hooks has nothing to release and reports
+// 0 whether or not it is kept. A second shrink finds every area already at its
+// length.
 func TestTheZeroRequestShrinksEveryArea(t *testing.T) {
 	w := spiked(t)
 
@@ -243,7 +244,7 @@ func TestTheZeroRequestShrinksEveryArea(t *testing.T) {
 		t.Fatalf("the zero request after a spike released %+v, want every area but Hooks above 0", released)
 	}
 	if released.Hooks != 0 {
-		t.Fatalf("the zero request released %d Hooks bytes with no Hook log to release", released.Hooks)
+		t.Fatalf("the zero request released %d Hooks bytes with no Hook reader to release", released.Hooks)
 	}
 	if again := w.shrink(t, ShrinkRequest{}); again != (ShrinkResponse{}) {
 		t.Fatalf("a second shrink released %+v, want nothing: every area was already at its length", again)

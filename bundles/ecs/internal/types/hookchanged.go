@@ -27,8 +27,8 @@ import (
 // reached through a *T field, Ref and UpdateFor in one run is compared once, and
 // records at most one Changed.
 //
-// Its buffers are allocated on the System's first watched run and kept, so
-// steady state allocates nothing.
+// Its buffers are allocated on the System's first watched run and kept until
+// ShrinkCmd releases them, so steady state allocates nothing.
 type rowCopy struct {
 	// gate is the System's check, at each run start, of whether the Store is
 	// watched for Changed. A Component with no fields never records Changed,
@@ -171,6 +171,25 @@ func (c *rowCopy) compare() {
 		clear(c.stamps)
 		c.run = 1
 	}
+}
+
+// release drops the copy's buffers, and reports the bytes let go. Between runs
+// the copy is empty, and a stamp matches only the run that wrote it, so none of
+// it is read again: the next watched run allocates what it needs.
+//
+// Only ShrinkCmd calls it, holding write{*Entities}, which excludes the System
+// that owns this copy.
+func (c *rowCopy) release() uintptr {
+	before := c.bytes()
+	c.owners, c.rows, c.stamps = clip(c.owners), clip(c.rows), nil
+	return before - c.bytes()
+}
+
+// bytes is what the copy's buffers hold, by capacity.
+func (c *rowCopy) bytes() uintptr {
+	return uintptr(cap(c.owners))*unsafe.Sizeof(Entity(0)) +
+		uintptr(cap(c.rows)) +
+		uintptr(cap(c.stamps))*unsafe.Sizeof(uint32(0))
 }
 
 // implicitPadding reports the first implicit padding in t's layout, in memory

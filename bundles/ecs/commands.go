@@ -6,9 +6,10 @@ import (
 )
 
 // ShrinkCmd gives memory back after a spike, and it is the only thing in the
-// ECS that does. A Store keeps its high-water capacity, and so do the free list
-// and a Query's walk, so steady state never allocates; after a level load or a
-// screen of effects that capacity stays until the app executes this:
+// ECS that does. A Store keeps its high-water capacity, and so do the free list,
+// a Query's walk and what Hooks hold, so steady state never allocates; after a
+// level load or a screen of effects that capacity stays until the app executes
+// this:
 //
 //	response, err := executioner.ExecuteCommand[ecs.ShrinkCmd](ecs.ShrinkRequest{})
 //
@@ -34,7 +35,8 @@ type ShrinkCmd kernel.Command[ShrinkRequest, ShrinkResponse]
 //   - KeepEntities keeps the free list and the index space, whose unused indices
 //     at the top are otherwise dropped behind a generation floor, so a handle to
 //     a dropped index never matches the Entity that index is later allocated to;
-//   - KeepScratch keeps per-System buffers: a Query's walk.
+//   - KeepScratch keeps per-System buffers: a Query's walk, and a writer's row
+//     copies for Changed.
 type ShrinkRequest = types.ShrinkRequest
 
 // ShrinkResponse is the bytes a ShrinkCmd released, per area. An area kept
