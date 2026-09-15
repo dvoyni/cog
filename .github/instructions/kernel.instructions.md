@@ -6,7 +6,7 @@ applyTo: "**/*.go"
 
 # Kernel Usage
 
-`kernel/README.md` documents the API. These are the rules for using it correctly.
+`kernel/docs/README.md` documents the API. These are the rules for using it correctly.
 Follow them in new and changed code without expanding a focused task into
 unrelated cleanup. Which package a declaration belongs in — the root,
 `internal/types`, `internal/` or the constructor package — and what a root may

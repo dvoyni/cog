@@ -1435,7 +1435,7 @@ scene compiled against them.
   argument, the address formula. What stays in `scene.md` is the plumbing that is
   untouched: one buffer per model, the per-node weight slots, the CPU-side blend.
   **Two specs describing one layout is how they drift.**
-- `bundles/scene/README.md` gains the pointer to this document.
+- `bundles/scene/docs/README.md` gains the pointer to this document.
 - `CONTEXT.md` gains **Vertex layout**, **Named layout**, **Authoring vertex**,
   **Storage vertex**, **Sparse target** and **Live span**. The glossary defines
   `Variant`, `Supply` and `Define` and defines no mesh or morph vocabulary at

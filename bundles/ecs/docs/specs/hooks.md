@@ -26,7 +26,7 @@ is marked **Settled here**.
 
 **This document is built.** `github.com/dvoyni/cog/bundles/ecs` implements it,
 and what a Hook costs on the build is measured in the package README's [*What a
-Hook costs*](../../README.md#what-a-hook-costs). The design was first measured on
+Hook costs*](../README.md#what-a-hook-costs). The design was first measured on
 the throwaway branch [`proto/ecs-hooks`](https://github.com/dvoyni/cog/tree/proto/ecs-hooks);
 [What it costs](#what-it-costs) keeps those figures as the record the build was
 held to, and the README's supersede them. [Required work](#required-work) is the
@@ -813,7 +813,7 @@ runs. Each is compared with the same frame holding an empty System in the
 reader's place, because the engine charges per subscription. Nothing-watching
 figures come from the prototype binary alternated with `main` over six runs.
 Single values are ±10%. The package README's [*What a Hook
-costs*](../../README.md#what-a-hook-costs) carries the same arms re-measured on
+costs*](../README.md#what-a-hook-costs) carries the same arms re-measured on
 the build, and those figures supersede these
 ([#385](https://github.com/dvoyni/cog/issues/385) §1). The table stays as the
 record the build was held to.
@@ -849,7 +849,7 @@ unchanged) is paid by every `List` user and is published in
 
 **Four arms the prototype never had are measured only on the build**
 ([#385](https://github.com/dvoyni/cog/issues/385) §2), and their figures are in
-the README's [*What a Hook costs*](../../README.md#what-a-hook-costs): the watch
+the README's [*What a Hook costs*](../README.md#what-a-hook-costs): the watch
 check at a writer's run start on an unwatched Store (`BenchmarkHookWatchCheck`),
 the Validation counter per counted run (`BenchmarkHookPaceCounter`), `ShrinkCmd`
 after a spike (`BenchmarkHookShrink`), and a writer's first watched run
@@ -1086,7 +1086,7 @@ row.
 
 **Documentation**
 
-- `bundles/ecs/README.md` gains *What a Hook costs* under *What it costs*, with
+- `bundles/ecs/docs/README.md` gains *What a Hook costs* under *What it costs*, with
   the arms in [What it costs](#what-it-costs) re-measured on the build, and names
   the reference commit.
 - The README's "no compaction, no shrink and no sweep" and "Nothing shrinks"

@@ -232,7 +232,7 @@ values derived from one. This is a contract, not a checked invariant.
 A **Port** is a declared identity type naming an interface a plugin needs filled;
 an **Adapter** is a declared identity type naming one way of filling it, under
 which a plugin provides a plain value that the engine binds during composition.
-The full rules are in [`docs/specs/ports.md`](docs/specs/ports.md).
+The full rules are in [`specs/ports.md`](specs/ports.md).
 
 Both are declared like commands, as defined types built from a kernel shape:
 

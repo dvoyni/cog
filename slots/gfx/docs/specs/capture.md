@@ -635,7 +635,7 @@ A checklist for an implementation session, in dependency order.
   `list.backend.Execute(ops)` (`:126-138`) and does one non-blocking send.
 - gfx contributes an `mcp.Provider`; see [slots/gfx/docs/specs/mcp.md](./mcp.md).
 
-**`extensions/gfx/README.md`**
+**`slots/gfx/docs/README.md`**
 
 - Document the capture op, `TakeCapture`, the third `TextureUsage`, and that
   `Renderable` now implies `CopySrc` with its compression cost. A game's own
@@ -678,7 +678,7 @@ a single still, which a burst made false.
   captures at shutdown with `ErrCaptureAbandoned{}`; refuse depth and non-RGBA8
   with `ErrCaptureUnsupported{Format}`.
 
-**`extensions/gogpu/README.md`**
+**`extensions/gogpu/docs/README.md`**
 
 - The staging-buffer sequence and the auto-poll it relies on, because the next
   person to read `Execute` will wonder where the wait went.

@@ -466,7 +466,7 @@ A checklist for an implementation session.
 - The logical viewport size is present on the response. This is the field whose
   absence is silent on a 1:1 display.
 
-**`bundles/ui/README.md`** — a pointer to this document.
+**`bundles/ui/docs/README.md`** — a pointer to this document.
 
 > **Amended at implementation ([#255](https://github.com/dvoyni/cog/issues/255)).**
 > The checklist names two new files and the implementation has four, because

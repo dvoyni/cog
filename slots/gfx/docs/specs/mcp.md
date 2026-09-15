@@ -543,7 +543,7 @@ The readback and arming halves are in
   matches the unfiltered one.
 - A texture with inline pixels does **not** put them in the response.
 
-**`extensions/gfx/README.md`** — a pointer to this document and to
+**`slots/gfx/docs/README.md`** — a pointer to this document and to
 [capture.md](./capture.md), worded so a reader knows what is specified and what
 is implemented.
 

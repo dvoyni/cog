@@ -4,7 +4,7 @@
 custom triangles, then translates them into `gfx` draws at the end of each
 simulation update.
 
-[`docs/specs/materials.md`](docs/specs/materials.md) is the specification of the
+[`specs/materials.md`](specs/materials.md) is the specification of the
 **canvas material contract** — what a custom material may replace and what it
 must match exactly, canvas's group and binding convention, what canvas publishes
 as includable WGSL, how draws merge into batches, and how a material reaches
@@ -13,14 +13,14 @@ the reasoning behind each rule, and this README is the API surface. Go there
 before proposing a change to any of it.
 
 canvas is a **Bundle**: it requires no Adapter, and contributes one to mcp's
-collected Port. The vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the
+collected Port. The vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the
 decision in
-[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+[ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
 canvas has the declaration-root shape of
-[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
 
 - **`bundles/canvas`** is the root, and holds declarations only: the `*OpQueue`
   and `*Lookup` resources with `LookupAccess` and `FontMetrics`, the recording
@@ -218,7 +218,7 @@ what it wants.
 
 `ui` inherits a set down the element tree — `Frame.SetMaterial` seeds the roots
 and `Element.Material` replaces it for a subtree — so one modifier on a menu root
-reaches every visual beneath it. See `bundles/ui/README.md`.
+reaches every visual beneath it. See `bundles/ui/docs/README.md`.
 
 ### The halo
 
@@ -524,7 +524,7 @@ declares, so one value reaches an agent in one shape whichever tool showed it,
 and the three coordinate sizes come from `gfx.SnapshotView` — as does `tick`,
 the number of the tick this snapshot describes, which is how an agent confirms
 that this and `ui_layout` describe one moment rather than two. The full contract
-is in [docs/specs/mcp.md](docs/specs/mcp.md), and the capability that document
+is in [specs/mcp.md](specs/mcp.md), and the capability that document
 specifies is implemented.
 
 ## Coordinate Helpers

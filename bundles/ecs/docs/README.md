@@ -10,17 +10,17 @@ thing, and another plugin attaches with no mechanism at all: the storage, the
 registration, the Query, its filters, structural change, the accessors, the
 `List` and its write check, the resource and event handles, and both handler
 builders are here.**
-[`docs/specs/ecs.md`](docs/specs/ecs.md) is the specification the whole plugin is
+[`specs/ecs.md`](specs/ecs.md) is the specification the whole plugin is
 judged against.
 
 ecs is a **Bundle**: it requires no Adapter and contributes none. The
-vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
+[ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
 ecs has the declaration-root shape of
-[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
 
 - **`bundles/ecs`** is the root, and holds declarations only, which are the
   whole library a System author uses: `Entity`, `NoEntity`, the `Entities` and
@@ -1012,7 +1012,7 @@ of the ECS's own.
 a plugin like `scene` imports nothing of `ecs`, so neither can know about the
 other. That is what "no binding mechanism" means in practice — and a project not
 using the ECS simply does not register that plugin and schedules no Systems.
-cog ships the ecs↔scene one as [`ecsscene`](../ecsscene/README.md), which is the
+cog ships the ecs↔scene one as [`ecsscene`](../../ecsscene/docs/README.md), which is the
 whole shape in one System and carries the prohibitions a second binding has to
 keep true.
 
@@ -1299,7 +1299,7 @@ the kernel cell and every handle are.
 ### What a Hook costs
 
 A System reading `*ecs.Hooks[T, K]` is specified in
-[`docs/specs/hooks.md`](docs/specs/hooks.md), and every arm its *What it costs*
+[`specs/hooks.md`](specs/hooks.md), and every arm its *What it costs*
 lists is measured here on the build. That section keeps the prototype's figures
 as the record the build was held to; these supersede them. AMD Ryzen 9 7950X3D,
 go1.27.1 windows/amd64, `NumCPU=32`, the build at 6ab00a5 with the benchmark arms

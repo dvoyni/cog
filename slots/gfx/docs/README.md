@@ -7,10 +7,10 @@ triple buffer, resolves resource-backed shaders and textures, translates to a
 
 gfx is a **Slot**: it declares a required Port, `BackendPort`, and works only
 once a `gfx.Backend` **Adapter** fills it. The vocabulary is in
-[`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+[`CONTEXT.md`](../../../CONTEXT.md) and the decision in
+[ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
-[`docs/specs/preprocessor.md`](docs/specs/preprocessor.md) is the design record
+[`specs/preprocessor.md`](specs/preprocessor.md) is the design record
 for the WGSL shader preprocessor — the `#include` / `#define` / `#const` / `#if`
 language shader sources are written in, and what each rule is and why. It is
 internal to gfx: `ensureShader` flattens a shader on a cache miss, so that every
@@ -20,7 +20,7 @@ exists; nothing else in this README describes it.
 ## Packages
 
 gfx has the declaration-root shape of
-[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md):
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md):
 
 - **`slots/gfx`** is the root, and holds declarations only. It is both the
   recording API and the GPU contract, so each type has one name, `gfx.X`:
@@ -291,7 +291,7 @@ field's.
 ### The shared view types
 
 gfx also declares the vocabulary every cog snapshot shares, in
-[`internal/types/views.go`](internal/types/views.go), aliased in `types.go`: `ParameterView`, `TextureView`, `MaterialView`, and
+[`internal/types/views.go`](../internal/types/views.go), aliased in `types.go`: `ParameterView`, `TextureView`, `MaterialView`, and
 `SnapshotView` — the three coordinate sizes, the tick the snapshot describes,
 and the step fields, all of which every snapshot response carries. `canvas` and `ui` embed them, so one value reaches an agent in
 one shape whichever tool showed it.
@@ -314,8 +314,8 @@ formatting an enum with `%v` still prints its number. The tables for gfx's own
 recording enums stay in `internal/types` as functions, because naming them for a debug document
 is not a commitment to render them for every cog app.
 
-The full contract is in [docs/specs/capture.md](docs/specs/capture.md) and
-[docs/specs/mcp.md](docs/specs/mcp.md); both capabilities those documents
+The full contract is in [specs/capture.md](specs/capture.md) and
+[specs/mcp.md](specs/mcp.md); both capabilities those documents
 specify are implemented.
 
 ## Commands Implemented

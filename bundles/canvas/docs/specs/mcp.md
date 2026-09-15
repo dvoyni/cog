@@ -474,7 +474,7 @@ A checklist for an implementation session.
   a filter that removed earlier ops.
 - A texture parameter does not put inline pixels in the response.
 
-**`bundles/canvas/README.md`** — a pointer to this document, worded so a reader knows
+**`bundles/canvas/docs/README.md`** — a pointer to this document, worded so a reader knows
 what is specified and what is implemented.
 
 **`CONTEXT.md`** — already applied. **Snapshot** is defined and has been amended

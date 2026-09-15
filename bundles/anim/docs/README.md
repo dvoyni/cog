@@ -6,13 +6,13 @@ a duration, an easing) and reads the current value each tick; the plugin
 advances every timeline by the fixed step, so nothing else needs to tick.
 
 anim is a **Bundle**: it requires no Adapter and contributes none. The
-vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
+[ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
 anim has the declaration-root shape of
-[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
 
 - **`bundles/anim`** is the root, and holds declarations only: the `Timelines`
   resource, `Timeline`, `Params`, `State`, `Easing`, `Sequence`, `Lerp`,

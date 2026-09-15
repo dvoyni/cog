@@ -45,7 +45,7 @@ prototype that produced the numbers below lived on the throwaway branch
 package. The sections Hooks changed are built as well: [Required
 work](#required-work) records them under *Since Hooks*, and the package's README
 carries their measured cost under [*What a Hook
-costs*](../../README.md#what-a-hook-costs).
+costs*](../README.md#what-a-hook-costs).
 
 **Two things here are younger than the rest, and each is marked where it
 appears.** The first: the Component rule was relaxed after the package shipped.
@@ -1608,7 +1608,7 @@ never reaches an appended entry. So `UpdateFor` is how a Component is added;
 copy the rows they hand out**, for the compare at the writer's run end. That is a
 cost the reader puts on every writer of `T`, and it is priced in
 [`hooks.md`](hooks.md#what-it-costs), and measured in the README's [*What a Hook
-costs*](../../README.md#what-a-hook-costs). *Since Hooks.*
+costs*](../README.md#what-a-hook-costs). *Since Hooks.*
 
 **`Set[T].MarkChanged(e)` forces a Changed record for `e`** at the writer's run end, for a
 write the compare cannot see, such as a `Set` on a List nested in another List's
@@ -2495,7 +2495,7 @@ Hooks* block after it is built too.
 
 **Documentation**
 
-- `bundles/ecs/README.md`, which is the package's API per the repo's own layout rule.
+- `bundles/ecs/docs/README.md`, which is the package's API per the repo's own layout rule.
 - `README.md`'s package list gains `ecs` when the package exists.
 - `.github/instructions/kernel.instructions.md`'s "Keep `Lock` Straight-Line"
   becomes "Keep `Lock` Deterministic, Total and Final" — full replacement text

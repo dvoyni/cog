@@ -479,7 +479,7 @@ A checklist for an implementation session.
   event.
 - A sequence over the duration cap is refused with **nothing applied**.
 
-**`bundles/input/README.md`**
+**`bundles/input/docs/README.md`**
 
 - Document `Action`, `SynthesizeCmd`, `Play` and the key names, as package
   features. A test harness is a first-class caller here and must not have to

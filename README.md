@@ -44,18 +44,18 @@ error handling.
 
 ## Packages
 
-- [`kernel`](kernel/README.md): plugin lifecycle, typed registry, scheduler,
+- [`kernel`](kernel/docs/README.md): plugin lifecycle, typed registry, scheduler,
     resources, and errors.
-- [`app`](slots/app/README.md): the application loop — lifecycle, fixed-step update
+- [`app`](slots/app/docs/README.md): the application loop — lifecycle, fixed-step update
     and render events, quit, and time control with pause, step and a hold that
     makes several observations describe one tick — over a platform MainLoop.
-- [`input`](bundles/input/README.md): input state, discrete events, the driver-facing
+- [`input`](bundles/input/docs/README.md): input state, discrete events, the driver-facing
     apply command, and scripted input.
-- [`anim`](bundles/anim/README.md): timelines of eased value tracks and one-tick cues,
+- [`anim`](bundles/anim/docs/README.md): timelines of eased value tracks and one-tick cues,
     advanced every fixed step.
-- [`ecs`](bundles/ecs/README.md): entities, components, the sparse-set stores they live
+- [`ecs`](bundles/ecs/docs/README.md): entities, components, the sparse-set stores they live
     in, and systems as plain funcs whose parameter types are their lock set.
-- [`storage`](slots/storage/README.md): layered read filesystems and one permanent
+- [`storage`](slots/storage/docs/README.md): layered read filesystems and one permanent
     writable filesystem, which a platform Adapter provides.
 - [`diskstorage`](extensions/diskstorage) and
     [`jsstorage`](extensions/jsstorage): storage's permanent filesystem
@@ -63,19 +63,19 @@ error handling.
     localStorage in a browser.
 - [`m`](libs/m): immutable vectors, rectangles, colors, matrices, quaternions,
     scalar helpers, and splines. Angles use radians.
-- [`gfx`](slots/gfx/README.md): driver-neutral rendering queues, resources, viewport,
+- [`gfx`](slots/gfx/docs/README.md): driver-neutral rendering queues, resources, viewport,
     backend contract, frame capture, and per-tick snapshots.
-- [`canvas`](bundles/canvas/README.md): layered 2D sprites, text, primitives, and custom
+- [`canvas`](bundles/canvas/docs/README.md): layered 2D sprites, text, primitives, and custom
     triangles over gfx, with a snapshot of what a tick recorded.
-- [`scene`](bundles/scene/README.md): declarative 3D cameras, glTF models, buffer-built
+- [`scene`](bundles/scene/docs/README.md): declarative 3D cameras, glTF models, buffer-built
     meshes, punctual lights, and debug shapes over gfx.
-- [`ecsscene`](bundles/ecsscene/README.md): the ecs↔scene binding — components holding
+- [`ecsscene`](bundles/ecsscene/docs/README.md): the ecs↔scene binding — components holding
     scene's own types, and the one system that records them into scene.
-- [`ui`](bundles/ui/README.md): immediate-mode layout, interaction, canvas-backed visual
+- [`ui`](bundles/ui/docs/README.md): immediate-mode layout, interaction, canvas-backed visual
     processing, and a snapshot of what layout resolved.
-- [`gogpu`](extensions/gogpu/README.md): window, input, frame timing and WebGPU system
+- [`gogpu`](extensions/gogpu/docs/README.md): window, input, frame timing and WebGPU system
     driver, and app's platform MainLoop.
-- [`mcp`](bundles/mcp/README.md): the agent-facing extension point — typed capabilities
+- [`mcp`](bundles/mcp/docs/README.md): the agent-facing extension point — typed capabilities
     a plugin offers, collected through a Port from every plugin's Provider by a
     broker that serves them to an agent over MCP.
 
@@ -127,8 +127,8 @@ and `go test ./kernel/archtest` enforces them.
 Plugin file layout, handler structure, and resource-scope rules are enforced
 conventions; see [`.github/instructions/kernel.instructions.md`](.github/instructions/kernel.instructions.md).
 
-Each package's `README.md` is its API. Design records live under
-`<package>/docs/specs/`: the package's general spec is `<package>.md` (for
+Each package's documents live under `<package>/docs/`. `<package>/docs/README.md` is
+its API, and design records live under `<package>/docs/specs/`: the package's general spec is `<package>.md` (for
 example [`bundles/scene/docs/specs/scene.md`](bundles/scene/docs/specs/scene.md)) and a spec
 covering one focused mechanism takes that mechanism's name.
 
@@ -183,7 +183,7 @@ Plugins talk through three mechanisms, all identified by exact Go type:
 A handler is a factory returning a `Lock` that binds handles and a body that runs
 per invocation. The factory runs once, at registration.
 
-See [`kernel/README.md`](kernel/README.md) for the full API and
+See [`kernel/docs/README.md`](kernel/docs/README.md) for the full API and
 [`.github/instructions/kernel.instructions.md`](.github/instructions/kernel.instructions.md)
 for the rules that keep usage correct — particularly that values read from a
 handle are valid only while the handler holds its lock.

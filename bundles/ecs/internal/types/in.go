@@ -27,8 +27,8 @@ import (
 // Get must be read once outside the loop, and that is a usage rule rather than
 // an implementation detail. In is a pointer to a cell the adapter writes, so a
 // Get inside the loop is a load the compiler cannot hoist past the Component
-// writes: it has no way to prove they do not alias. bundles/ecs/README.md carries the
-// measured cost of forgetting.
+// writes: it has no way to prove they do not alias. bundles/ecs/docs/README.md
+// carries the measured cost of forgetting.
 //
 // In declares no lock. It is not a route to the world; it is a value the
 // adapter already had.

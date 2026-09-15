@@ -12,11 +12,11 @@ publishes those decisions back as `Passes`.
 
 This README is the API. `bundles/scene/docs/specs/scene.md` is the design record — what each rule is
 for and what was rejected to get there — and
-[`.github/instructions/scene.instructions.md`](../../.github/instructions/scene.instructions.md)
+[`.github/instructions/scene.instructions.md`](../../../.github/instructions/scene.instructions.md)
 is the traps a caller hits that neither the compiler nor a plausible-looking zero
 value warns about.
 
-[`docs/specs/mesh.md`](docs/specs/mesh.md) specifies **what a mesh stores** — the
+[`specs/mesh.md`](specs/mesh.md) specifies **what a mesh stores** — the
 vertex layout and the precision of each attribute, which attributes a mesh may
 omit, how wide its indices are, how morph deltas are packed, and what the bundled
 PBR requires of a mesh handed to it. Its **Index width** section is implemented:
@@ -44,13 +44,13 @@ deltas over the vendored corpus against 385.8 KiB, because 92% of the float
 store was exactly zero.
 
 scene is a **Bundle**: it requires no Adapter and contributes none. The
-vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
+[ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
 scene has the declaration-root shape of
-[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
 
 - **`bundles/scene`** is the root, and holds declarations only: the `*OpQueue`
   and `*Lookup` resources with `LookupAccess`, the recording vocabulary

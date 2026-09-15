@@ -13,20 +13,20 @@ register it and schedules no ECS Systems.
 `scene.Transform`, a `scene.ModelRef`, a `scene.MeshRef`, `scene.ClipPlay`s,
 `gfx.ParameterDescr`s, `scene.Pass`es — and its one System copies every matching
 Entity into scene's op queue once a tick. What each field means is scene's
-documentation, not this one's: [`../scene/README.md`](../scene/README.md).
+documentation, not this one's: [`../../scene/docs/README.md`](../../scene/docs/README.md).
 
-[`../ecs/docs/specs/ecs.md`](../ecs/docs/specs/ecs.md) §Binding is the design
+[`../../ecs/docs/specs/ecs.md`](../../ecs/docs/specs/ecs.md) §Binding is the design
 record. **[What a binding may not do](#what-a-binding-may-not-do) is the part to
 read before writing a second one.**
 
 ecsscene is a **Bundle**: it requires no Adapter and contributes none. The
-vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
+[ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
 ecsscene has the declaration-root shape of
-[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
 Its Components are plain data with no methods, so it has no `internal/types`.
 
 - **`bundles/ecsscene`** is the root, and holds declarations only: the eight

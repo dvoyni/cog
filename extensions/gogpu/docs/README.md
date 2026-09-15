@@ -97,7 +97,7 @@ of its own:
 
 app turns that frame time into fixed-step ticks and publishes every app event;
 pause, step, hold, tick numbering and the `app_time` tool are app's, in
-[`slots/app`](../../slots/app/README.md).
+[`slots/app`](../../../slots/app/docs/README.md).
 
 ## Commands Executed
 

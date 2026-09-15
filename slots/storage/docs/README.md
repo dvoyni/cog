@@ -6,14 +6,14 @@ including the single permanent one that writes land in.
 
 storage is a **Slot**: it ships its own declarations and implementation, and
 works only once a `PermanentFS` **Adapter** fills its required
-`PermanentFSPort`. The vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the
+`PermanentFSPort`. The vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the
 decision in
-[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+[ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
 storage has the declaration-root shape of
-[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
 
 - **`slots/storage`** is the root, and holds declarations only: the commands,
   `Config`, `FileSystem`, `Values`, `WriteFS`, `ReadMount`, `PermanentFS` and
