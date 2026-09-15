@@ -872,7 +872,7 @@ because the engine caps nothing.
 | handle | methods | declares |
 | --- | --- | --- |
 | `ecs.Get[T]` | `.Of(Entity) (T, bool)` | `read{*Store[T]}`, `read{*Entities}` |
-| `ecs.Set[T]` | `.Of`, `.Ref(Entity) (*T, bool)`, `.UpdateFor(Entity, T)` | `write{*Store[T]}`, `read{*Entities}` |
+| `ecs.Set[T]` | `.Of`, `.Ref(Entity) (*T, bool)`, `.UpdateFor(Entity, T)`, `.MarkChanged(Entity)` | `write{*Store[T]}`, `read{*Entities}` |
 | `ecs.Remove[T]` | `.From(Entity) bool` | `write{*Store[T]}`, `read{*Entities}` |
 
 **`Get[T]` has no `Ref`, and that is what stops a read handle being a write in

@@ -18,6 +18,10 @@ import (
 // under the write{T} the System already holds, naming the System so its own
 // Hooks readers skip it.
 //
+// Set.MarkChanged marks a row instead of copying it: at the run end a marked row
+// whose Entity still holds T records Changed whatever its bytes, and the byte
+// compare leaves it to the mark, so the two together record one.
+//
 // The copy is bytes, whatever T holds. It is only ever compared, never read back
 // as a T, so a string header or a List header in it keeps nothing alive and
 // needs no write barrier.
@@ -41,7 +45,8 @@ type rowCopy struct {
 	// run is this run's stamp: a row whose index is stamped with it has been
 	// copied this run already.
 	run uint32
-	// taken says a row was copied this run, and whole that the whole Store was.
+	// taken says a row was copied or marked this run, and whole that the whole
+	// Store was copied.
 	taken bool
 	whole bool
 	// owners and rows are the copies, one Entity and one row's bytes each, in
@@ -49,6 +54,10 @@ type rowCopy struct {
 	owners []Entity
 	rows   []byte
 	stamps []uint32
+	// marks are the Entities MarkChanged named this run, each once, and marked
+	// is the run stamp per index that keeps them once.
+	marks  []Entity
+	marked []uint32
 }
 
 // newRowCopy is a handle's own row copy of class's Store, made when the handle
@@ -97,6 +106,29 @@ func (c *rowCopy) take(e Entity, row uint32) {
 	c.rows = append(c.rows, unsafe.Slice((*byte)(unsafe.Add(c.store.dense.data, uintptr(row)*c.size)), c.size)...)
 }
 
+// mark names e for a Changed at the run end whatever its bytes, once per run.
+// The caller has checked the gate is on, and holds the Store's write lock. An
+// Entity that does not hold T, a dead one included, is not marked.
+//
+// An index is marked once per run, as take copies it once: an Entity that
+// reused a marked index during the run gained T this run, and that addition
+// already carries Changed.
+func (c *rowCopy) mark(e Entity) {
+	if _, ok := c.store.probe(e); !ok {
+		return
+	}
+	index := e.idx()
+	if int(index) >= len(c.marked) {
+		c.marked = append(c.marked, make([]uint32, max(int(index)+1, len(c.store.sparse))-len(c.marked))...)
+	}
+	if c.marked[index] == c.run {
+		return
+	}
+	c.marked[index] = c.run
+	c.taken = true
+	c.marks = append(c.marks, e)
+}
+
 // takeWhole copies the whole Store, once per run, when a Query holding a *T
 // field binds. A row already copied this run keeps the bytes it was copied
 // with, because the System may have written it since.
@@ -122,7 +154,8 @@ func (c *rowCopy) takeWhole() {
 }
 
 // compare is the System's run end on this Store: each copied row whose Entity
-// still holds T and whose bytes differ appends one Changed record. A row whose
+// still holds T and whose bytes differ appends one Changed record, and so does
+// each marked Entity that still holds T, once, whatever its bytes. A row whose
 // Entity lost T during the run compares against nothing and records nothing,
 // so a change followed by a removal records only the removal.
 //
@@ -147,7 +180,7 @@ func (c *rowCopy) compare() {
 			}
 			for row := start; row < end; row++ {
 				lo, hi := uintptr(row)*size, uintptr(row+1)*size
-				if string(live[lo:hi]) != string(c.rows[lo:hi]) {
+				if string(live[lo:hi]) != string(c.rows[lo:hi]) && !c.isMarked(c.owners[row]) {
 					log.changed(c.owners[row], c.writer)
 				}
 			}
@@ -159,18 +192,36 @@ func (c *rowCopy) compare() {
 				continue
 			}
 			at := uintptr(row) * size
-			if string(live[at:at+size]) != string(c.rows[uintptr(i)*size:uintptr(i+1)*size]) {
+			if string(live[at:at+size]) != string(c.rows[uintptr(i)*size:uintptr(i+1)*size]) && !c.isMarked(e) {
 				log.changed(e, c.writer)
 			}
 		}
 	}
-	c.owners, c.rows = c.owners[:0], c.rows[:0]
+	for _, e := range c.marks {
+		if _, ok := store.probe(e); ok {
+			log.changed(e, c.writer)
+		}
+	}
+	c.owners, c.rows, c.marks = c.owners[:0], c.rows[:0], c.marks[:0]
 	c.taken, c.whole = false, false
 	c.run++
 	if c.run == 0 {
 		clear(c.stamps)
+		clear(c.marked)
 		c.run = 1
 	}
+}
+
+// isMarked reports whether e's index was marked this run, so the byte compare
+// leaves e to its mark. Only a row whose bytes differ asks. An index past the
+// stamps belongs to an Entity that gained T after the last mark, and is not
+// marked.
+func (c *rowCopy) isMarked(e Entity) bool {
+	if len(c.marks) == 0 {
+		return false
+	}
+	index := int(e.idx())
+	return index < len(c.marked) && c.marked[index] == c.run
 }
 
 // implicitPadding reports the first implicit padding in t's layout, in memory

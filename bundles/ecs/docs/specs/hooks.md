@@ -321,8 +321,32 @@ and the copy is compared when that System's run ends:
 
 **At the writer's run end, each copied row whose bytes differ appends one Changed
 record,** under the `write{T}` the writer already holds. Identical bytes record
-nothing, whatever was called. A row whose Entity lost `T` during the run
-compares against nothing and records nothing.
+nothing, whatever was called, unless the row was marked (below). A row whose
+Entity lost `T` during the run compares against nothing and records nothing.
+
+**`Set[T].MarkChanged(e Entity)` forces a Changed record** for a write the byte
+compare cannot see
+([ecs: Set[T].MarkChanged](https://github.com/dvoyni/cog/issues/396)). It is on
+`Set[T]` because `Set[T]` already holds `write{*Store[T]}`, so it declares
+nothing new, and it is named for the Hook kind, not "dirty".
+
+- **On a Store watched for Changed, it marks `e`'s row.** At the writer's run
+  end, a marked row appends one Changed record whether or not its bytes differ.
+- **It is deduplicated with the byte compare.** One writer run yields at most
+  one Changed per Entity, however many times it marks or writes that Entity, on
+  any route: a `*T` Query field, `Ref`, `UpdateFor`, or `MarkChanged` before or
+  after the Query binds.
+- **It does nothing** on an Entity that does not hold `T` when it is called
+  (even if the Entity gains `T` later in the run, whose addition already carries
+  Changed), on a dead Entity, on a Store no reader watches for Changed, and for a
+  Tag, which never records Changed.
+- **Every other Changed rule holds.** A System never sees its own mark's
+  Changed; a mark followed by a removal in the same run records only the
+  removal; a marked Changed folds in each reader's copy like any other.
+- **It costs** about 1.0 ns a call on a Store nothing watches and 4.4 ns per
+  marked row on a watched one, the run end's record included
+  (`BenchmarkHookMarkChanged`, 10k Entities, 1% marked). Its marks are allocated
+  on the writer's first marking run and kept.
 
 **Why bytes are exact.** A `string` cannot be written in place. A `List` change
 shows in its header ([below](#a-list-shows-its-changes-in-its-header)). A write
@@ -335,13 +359,16 @@ a `List` nested in another `List`'s element (the Gap below).
 the element, so a nested `List` can only be written through that copy. Its `Set`
 changes the backing array the stored row shares, and bumps the copy's
 generation, not the stored row's bytes, so the byte compare does not see it.
-Nothing is built for it
+The compare does not look inside
 ([ecs: List.Set by pointer with a generation](https://github.com/dvoyni/cog/issues/388),
 ruled on [ecs: Hooks record Changed](https://github.com/dvoyni/cog/issues/392)).
-A System that needs the Changed record writes the whole outer element back
-through the stored `List`, `Rows.Set(i, row)`, which bumps the generation the
-compare sees. An explicit call, `Set[T].MarkChanged(e)`, is
-[its own ticket](https://github.com/dvoyni/cog/issues/396).
+**A System that needs the Changed record calls `Set[T].MarkChanged(e)`** on the
+outer Entity after the nested `Set`
+([ecs: Set[T].MarkChanged](https://github.com/dvoyni/cog/issues/396)). Writing
+the whole outer element back through the stored `List`, `Rows.Set(i, row)`, also
+records it, because that bumps the generation the compare sees.
+`TestAMarkRecordsANestedListSet` shows both halves: the nested `Set` alone records
+nothing, and with `MarkChanged` records one Changed carrying the nested write.
 
 **A Component some reader watches for Changed has no implicit padding**
 ([ruled on #392](https://github.com/dvoyni/cog/issues/392)). A byte compare sees
