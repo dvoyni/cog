@@ -15,7 +15,8 @@ type ShrinkRequest struct {
 	KeepStores bool
 	// KeepEntities keeps the free list and the index space.
 	KeepEntities bool
-	// KeepScratch keeps per-System buffers: a Query's walk.
+	// KeepScratch keeps per-System buffers: a Query's walk, and a writer's row
+	// copies for Changed.
 	KeepScratch bool
 }
 
@@ -34,6 +35,11 @@ func shrinkCommand() (kernel.Lock, kernel.Execute[ShrinkRequest, ShrinkResponse]
 
 func (en *Entities) shrink(request ShrinkRequest) ShrinkResponse {
 	var released ShrinkResponse
+	if !request.KeepHooks {
+		for _, shrink := range en.shrinkables().hooks {
+			released.Hooks += shrink()
+		}
+	}
 	if !request.KeepStores {
 		for _, shrink := range en.shrinkables().stores {
 			released.Stores += shrink()

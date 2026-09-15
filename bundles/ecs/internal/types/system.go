@@ -198,6 +198,7 @@ func (c *systemCall[E]) shareRowCopy(own *rowCopy, writer uint32) *rowCopy {
 	own.writer = writer
 	c.copies = append(c.copies, own)
 	c.gates = append(c.gates, &own.gate)
+	c.entities.enrolScratch(own.release)
 	return own
 }
 

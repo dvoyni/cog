@@ -42,6 +42,11 @@ type churnSystem kernel.Subscription[app.UpdateEvent]
 
 type steadyMoveSystem kernel.Subscription[app.UpdateEvent]
 
+type (
+	steadyLifetimeSystem kernel.Subscription[app.UpdateEvent]
+	steadyMirrorSystem   kernel.Subscription[app.UpdateEvent]
+)
+
 // growCmd spawns as many projectiles as it is asked for, and cutCmd despawns all
 // but as many as it is asked to keep. They are how the test makes a spike from
 // outside the frame, the way a level load would.
@@ -55,10 +60,17 @@ type cutCmd kernel.Command[int, struct{}]
 const churnPerTick = 16
 
 // steadyGame is an app's game: a System that churns Entities every frame, a
-// System that moves everything, and the two commands that make a spike.
+// System that moves everything, and the two commands that make a spike. With
+// hooks it also has two Hook readers: one of every Spawn and Despawn carrying
+// velocity, and one of everything that happens to position, which move changes
+// on every Entity every frame. So the Hook logs, both readers' copies and
+// move's row copy for Changed all hold the spike's capacity, and all regrow
+// after a shrink.
 type steadyGame struct {
-	churned []ecs.Entity
-	held    []ecs.Entity
+	hooks     bool
+	churned   []ecs.Entity
+	held      []ecs.Entity
+	delivered int
 }
 
 func (*steadyGame) Name() kernel.PluginName { return "steady" }
@@ -83,6 +95,18 @@ func (g *steadyGame) Register(registrar *kernel.Registrar, _ any) error {
 			it.Position.X += it.Velocity.X
 		}
 	})).Last()
+	if g.hooks {
+		registrar.Subscribe[steadyLifetimeSystem](ecs.ToHandler[app.UpdateEvent](registrar, func(h *ecs.Hooks[velocity, ecs.HookSpawnedDespawned]) {
+			for range h.All() {
+				g.delivered++
+			}
+		}))
+		registrar.Subscribe[steadyMirrorSystem](ecs.ToHandler[app.UpdateEvent](registrar, func(h *ecs.Hooks[position, ecs.HookAll]) {
+			for range h.All() {
+				g.delivered++
+			}
+		}))
+	}
 	registrar.HandleCommand[growCmd](ecs.ToExecute[int, struct{}](registrar, func(n int, sp *ecs.Spawn[projectile]) {
 		for range n {
 			g.held = append(g.held, sp.New(projectile{Velocity: velocity{X: 1}}))
@@ -101,13 +125,16 @@ func (g *steadyGame) Register(registrar *kernel.Registrar, _ any) error {
 // after a spike, and measures the frames that follow against a control that
 // had the same spike and no shrink. The frames that regrow what the shrink cut
 // are excluded, as the spec says they allocate; after them the frame must be
-// back on the line its control is on.
+// back on the line its control is on. It does so without Hooks, and with Hook
+// readers watching the spike, where the zero request also gives back the Hook
+// logs, the readers' copies and the row copy for Changed.
 func TestAShrunkWorldReturnsToItsSteadyState(t *testing.T) {
 	const frames = 10_000
-	measure := func(shrink bool) float64 {
+	measure := func(hooks, shrink bool) float64 {
+		game := &steadyGame{hooks: hooks}
 		engine := kernel.New(map[kernel.PluginName]any{ecs.Name: ecs.Config{PrewarmEntities: 64}}).
 			Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
-			WithPlugins(New(), &steadyGame{})
+			WithPlugins(New(), game)
 		ctx, cancel := context.WithCancel(context.Background())
 		stopped := make(chan struct{})
 		t.Cleanup(func() {
@@ -146,25 +173,36 @@ func TestAShrunkWorldReturnsToItsSteadyState(t *testing.T) {
 			released, err := executioner.ExecuteCommand[ecs.ShrinkCmd](ecs.ShrinkRequest{})
 			execute(err)
 			if released.Stores == 0 || released.Entities == 0 || released.Scratch == 0 {
-				t.Fatalf("the zero request after a spike released %+v, want every area but Hooks above 0", released)
+				t.Fatalf("the zero request after a spike released %+v, want Stores, Entities and Scratch above 0", released)
+			}
+			if (released.Hooks > 0) != hooks {
+				t.Fatalf("the zero request after a spike released %d Hooks bytes, with Hook readers %v", released.Hooks, hooks)
 			}
 		}
-		// The regrowth frames, excluded: the free list, the Stores and the walks
-		// grow back to what the steady state needs.
+		// The regrowth frames, excluded: the free list, the Stores, the walks, the
+		// Hook logs, the readers' copies and the row copy grow back to what the
+		// steady state needs.
 		run(100)
 
+		delivered := game.delivered
 		var before, after runtime.MemStats
 		runtime.GC()
 		runtime.ReadMemStats(&before)
 		run(frames)
 		runtime.ReadMemStats(&after)
+		if hooks && game.delivered-delivered < frames*churnPerTick {
+			t.Fatalf("the Hook readers were given %d records over %d frames, want at least %d: the arm is not reading",
+				game.delivered-delivered, frames, frames*churnPerTick)
+		}
 		return float64(after.Mallocs-before.Mallocs) / frames
 	}
 
-	control := measure(false)
-	shrunk := measure(true)
-	t.Logf("objects a frame after a spike: control %.3f, after the zero request %.3f", control, shrunk)
-	if shrunk > control+0.05 {
-		t.Fatalf("after the zero request the frame costs %.3f objects against its control's %.3f", shrunk, control)
+	for _, hooks := range []bool{false, true} {
+		control := measure(hooks, false)
+		shrunk := measure(hooks, true)
+		t.Logf("objects a frame after a spike, Hook readers %v: control %.3f, after the zero request %.3f", hooks, control, shrunk)
+		if shrunk > control+0.05 {
+			t.Errorf("after the zero request, Hook readers %v, the frame costs %.3f objects against its control's %.3f", hooks, shrunk, control)
+		}
 	}
 }

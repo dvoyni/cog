@@ -76,8 +76,12 @@ type shrinkable struct {
 	// stores is every enrolled Store's shrink. It is kept apart from
 	// Entities.stores because a despawn must never pay for it.
 	stores []func() uintptr
-	// scratch is every Query's release, enrolled when the Query is planned.
+	// scratch is every Query's release, enrolled when the Query is planned, and
+	// every System's row copy's, enrolled when the System shares it.
 	scratch []func() uintptr
+	// hooks is every Hook log's shrink, enrolled when the log is created, and
+	// every reader's release, enrolled when the reader is prepared.
+	hooks []func() uintptr
 }
 
 // newEntities creates the authority, reserving room for ids indices. The number
@@ -203,6 +207,12 @@ func (en *Entities) nextWriter() uint32 {
 // It happens once, when the buffer's owner is planned at registration.
 func (en *Entities) enrolScratch(release func() uintptr) {
 	en.shrinkables().scratch = append(en.shrinkables().scratch, release)
+}
+
+// enrolHooks adds a Hook log's shrink, or a reader's release, to the set
+// ShrinkCmd calls unless KeepHooks. It happens once, at registration.
+func (en *Entities) enrolHooks(release func() uintptr) {
+	en.shrinkables().hooks = append(en.shrinkables().hooks, release)
 }
 
 // shrinkables is what ShrinkCmd reaches, created on first use. Only

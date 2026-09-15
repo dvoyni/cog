@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
@@ -518,6 +519,44 @@ func BenchmarkHookFrame(b *testing.B) {
 				}
 			})
 		}
+	}
+}
+
+// BenchmarkHookShrink is ShrinkCmd's zero request after a spike on a watched
+// Store: n Entities gain collider, every row is changed through Ref and then
+// through a Query, all but one in a thousand are despawned, and two HookAll
+// readers read all of it. Each op makes its spike first, so ns/op is the
+// Command alone, timed around its execution through the kernel; the bytes each
+// area released are reported per op. ShrinkCmd is opt-in, so it has no budget.
+func BenchmarkHookShrink(b *testing.B) {
+	for _, n := range []int{1_000, 10_000} {
+		b.Run(fmt.Sprintf("%d", n), func(b *testing.B) {
+			w := newHookSpikeWorld(b)
+			var survivors []Entity
+			var took time.Duration
+			var released ShrinkResponse
+			for i := 0; i < b.N; i++ {
+				gone := survivors
+				w.written(b, func(_ *Query[colliderQuery], _ *Set[collider], we *WriteableEntities) {
+					for _, e := range gone {
+						we.Despawn(e)
+					}
+				})
+				survivors = w.spike(b, n)
+				start := time.Now()
+				op := w.shrink(b, ShrinkRequest{})
+				took += time.Since(start)
+				released.Hooks += op.Hooks
+				released.Stores += op.Stores
+				released.Entities += op.Entities
+				released.Scratch += op.Scratch
+			}
+			b.ReportMetric(float64(took.Nanoseconds())/float64(b.N), "ns/op")
+			b.ReportMetric(float64(released.Hooks)/float64(b.N), "hooks-B/op")
+			b.ReportMetric(float64(released.Stores)/float64(b.N), "stores-B/op")
+			b.ReportMetric(float64(released.Entities)/float64(b.N), "entities-B/op")
+			b.ReportMetric(float64(released.Scratch)/float64(b.N), "scratch-B/op")
+		})
 	}
 }
 

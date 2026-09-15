@@ -228,17 +228,19 @@ released, err := executioner.ExecuteCommand[ecs.ShrinkCmd](ecs.ShrinkRequest{})
 ```
 
 **Nothing in the ECS gives memory back on its own, and the app gives it back
-with one Command.** A Store, the free list and a Query's walk keep their
-high-water capacity, so steady state never allocates; after a spike, such as a
-level load or a screen of effects, the app executes `ShrinkCmd`, because the app
-knows when the spike has ended and a heuristic cannot.
+with one Command.** A Store, the free list, a Query's walk and what Hooks hold
+keep their high-water capacity, so steady state never allocates; after a spike,
+such as a level load or a screen of effects, the app executes `ShrinkCmd`,
+because the app knows when the spike has ended and a heuristic cannot.
 
 - **The zero request shrinks every area to capacity equal to length**, and each
   `Keep` option opts one out: `KeepStores` (each Store's rows, cut to its
   population, and its sparse array, cut to its highest index held),
   `KeepEntities` (the free list, and the free indices at the top of the index
-  space), `KeepScratch` (each Query's walk) and `KeepHooks`, which has nothing to
-  release until Hook logs exist and reports 0.
+  space), `KeepScratch` (each Query's walk, and each writer's row copies for
+  Changed) and `KeepHooks` (each Store's Hook log, cut to the records some reader
+  has yet to take, and each reader's copy). Records not yet read survive, with
+  their values.
 - **The response is the bytes each area released.** An area kept reports 0 and
   its capacity is unchanged. A Query's walk aliases its driver Store's owners
   array, so `Scratch` and `Stores` can count the same array and are not summed.

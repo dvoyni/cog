@@ -194,8 +194,8 @@ func (l *hookLog[T]) removed(e Entity, row *T, kinds hookKind) {
 }
 
 // compact drops every record all readers have passed, and the retained values
-// only those records named. Capacity is kept, so steady state never allocates.
-// Held under mu.
+// only those records named. Capacity is kept until ShrinkCmd cuts it, so steady
+// state never allocates. Held under mu.
 func (l *hookLog[T]) compact() {
 	least := l.base + uint64(len(l.records))
 	for _, place := range l.places {
@@ -230,8 +230,30 @@ func (s *Store[T]) logFor(en *Entities) *hookLog[T] {
 	if s.hooks == nil {
 		s.hooks = &hookLog[T]{trivial: s.trivial}
 		en.captures = append(en.captures, s.captureDespawn)
+		en.enrolHooks(s.hooks.shrink)
 	}
 	return s.hooks
+}
+
+// shrink cuts the records and the retained values to their length, and reports
+// the bytes let go. What no reader has passed is the length, so every record a
+// reader has yet to take survives, with its value, at the same absolute
+// position; compaction has already dropped the rest. An array already at its
+// length is left as it is, so a second shrink releases nothing.
+//
+// Only ShrinkCmd calls it, holding write{*Entities}, which excludes every writer
+// that appends and every reader that folds or compacts, so mu is not taken.
+func (l *hookLog[T]) shrink() uintptr {
+	before := l.bytes()
+	l.records = clip(l.records)
+	l.retained = clip(l.retained)
+	return before - l.bytes()
+}
+
+// bytes is what the log's records and retained values hold, by capacity.
+func (l *hookLog[T]) bytes() uintptr {
+	return uintptr(cap(l.records))*unsafe.Sizeof(hookRecord{}) +
+		uintptr(cap(l.retained))*unsafe.Sizeof(*new(T))
 }
 
 // hookGate is a writer handle's check of its Store's watched kinds. The Store's
@@ -376,6 +398,7 @@ func (h *Hooks[T, K]) prepare(en *Entities, access kernel.ResourceAccess) {
 	h.log = store.logFor(en)
 	h.place = h.log.base + uint64(len(h.log.records))
 	h.log.places = append(h.log.places, &h.place)
+	en.enrolHooks(h.release)
 }
 
 // ownedBy is told this reader's System when the System registers.
@@ -490,4 +513,27 @@ func (h *Hooks[T, K]) endRun() {
 		clear(h.out)
 	}
 	h.out = h.out[:0]
+}
+
+// release cuts this reader's copy and its fills to their length, which between
+// runs is 0, and drops its fold marks, and reports the bytes let go. A mark is
+// current only during the run start that wrote it, so between runs none of them
+// is, and the next run start grows what it needs from nothing. A reader's place
+// is in the log, not in the copy, so what it has yet to take is untouched.
+//
+// Only ShrinkCmd calls it, holding write{*Entities}, which excludes the System
+// that owns this reader.
+func (h *Hooks[T, K]) release() uintptr {
+	before := h.bytes()
+	h.out = clip(h.out)
+	h.fills = clip(h.fills)
+	h.marks = nil
+	return before - h.bytes()
+}
+
+// bytes is what the reader's copy, fills and marks hold, by capacity.
+func (h *Hooks[T, K]) bytes() uintptr {
+	return uintptr(cap(h.out))*unsafe.Sizeof(hookEntry[T]{}) +
+		uintptr(cap(h.fills))*unsafe.Sizeof(int32(0)) +
+		uintptr(cap(h.marks))*unsafe.Sizeof(hookMark{})
 }

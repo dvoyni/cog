@@ -2533,11 +2533,11 @@ and in the implementation tickets under
 - The shared-array mark registered at the Changed compare, released at the
   removing act ([#268](https://github.com/dvoyni/cog/issues/268),
   [#386](https://github.com/dvoyni/cog/issues/386)).
-- `ShrinkCmd` and the generation floor
-  ([#381](https://github.com/dvoyni/cog/issues/381)). **Built for Stores,
-  Entities with the generation floor, and a Query's walk**
-  ([#389](https://github.com/dvoyni/cog/issues/389)); the Hook logs and writers'
-  row copies for Changed are still open
+- ~~`ShrinkCmd` and the generation floor
+  ([#381](https://github.com/dvoyni/cog/issues/381)).~~ **Built**: Stores,
+  Entities with the generation floor, and a Query's walk
+  ([#389](https://github.com/dvoyni/cog/issues/389)); the Hook logs, readers'
+  copies and writers' row copies for Changed
   ([#394](https://github.com/dvoyni/cog/issues/394)).
 - ~~The `*ecs.Hooks[T, K]` row in the signature contract
   ([#380](https://github.com/dvoyni/cog/issues/380)).~~ **Built**
