@@ -138,6 +138,10 @@ type systemCall[E any] struct {
 	// spawns are the Spawn parameters' checks, one per Spawn, each covering
 	// every Store its Component set carries.
 	spawns []*spawnGate
+	// copies are the System's row copies for Changed, one per Store it is handed
+	// rows of with write access, shared by every handle on that Store and
+	// compared when its run ends. Each one's gate is among gates.
+	copies []*rowCopy
 }
 
 // lock is the System's kernel.Lock: it runs once, at registration, and declares
@@ -156,19 +160,45 @@ func (c *systemCall[E]) lock(access kernel.ResourceAccess) {
 	// this read rather than sitting beside it — which is what makes a structural
 	// change a total barrier.
 	access.GetRead[*Entities]()
-	c.gates, c.readers, c.spawns = c.gates[:0], c.readers[:0], c.spawns[:0]
+	c.gates, c.readers, c.spawns, c.copies = c.gates[:0], c.readers[:0], c.spawns[:0], c.copies[:0]
+	// writer names this System on the Changed records its run end appends, and
+	// is what its own Hooks readers skip.
+	writer := c.entities.nextWriter()
 	for _, param := range c.params {
 		param.prepare(c.entities, access)
-		if writer, ok := param.(gated); ok {
-			c.gates = append(c.gates, writer.gate())
+		if checked, ok := param.(gated); ok {
+			c.gates = append(c.gates, checked.gate())
 		}
 		if spawner, ok := param.(spawnGated); ok {
 			c.spawns = append(c.spawns, spawner.spawnGate())
 		}
+		if copier, ok := param.(rowCopier); ok {
+			copier.rowCopies(func(slot **rowCopy) { *slot = c.shareRowCopy(*slot, writer) })
+		}
 		if reader, ok := param.(runEdges); ok {
 			c.readers = append(c.readers, reader)
 		}
+		if owned, ok := param.(ownedReader); ok {
+			owned.ownedBy(writer)
+		}
 	}
+}
+
+// ownedReader is a Hooks parameter, told which System it belongs to.
+type ownedReader interface{ ownedBy(writer uint32) }
+
+// shareRowCopy is the row copy this System keeps for own's Store: the one an
+// earlier handle on the same Store already holds, or own itself, enrolled.
+func (c *systemCall[E]) shareRowCopy(own *rowCopy, writer uint32) *rowCopy {
+	for _, shared := range c.copies {
+		if shared.store == own.store {
+			return shared
+		}
+	}
+	own.writer = writer
+	c.copies = append(c.copies, own)
+	c.gates = append(c.gates, &own.gate)
+	return own
 }
 
 // call runs the System once. The event lands in its cell before the projections
@@ -198,6 +228,12 @@ func (c *systemCall[E]) call(handle kernel.Kernel, driven E) {
 		reader.beginRun()
 	}
 	c.fn.Call(c.args)
+	// A change is recorded at the writer's run end, after every write the run
+	// made, and after this System's readers took their copies, which is why none
+	// of them is given it.
+	for _, copied := range c.copies {
+		copied.compare()
+	}
 	for _, reader := range c.readers {
 		reader.endRun()
 	}

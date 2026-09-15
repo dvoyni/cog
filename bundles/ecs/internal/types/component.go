@@ -24,7 +24,11 @@ type componentClass struct {
 	// Hooks reader adding its kinds to them. Nothing reaches it while the engine
 	// runs.
 	store any
-	size  uintptr
+	// header is the same Store erased, for a writer's row copy for Changed,
+	// which knows the Store only as bytes and holds its write lock whenever it
+	// reads through this.
+	header *storeHeader
+	size   uintptr
 	// trivial is the pointer-free answer for this Component type, and it is a
 	// fast-path selector rather than a gate. A trivial row is copied by the
 	// sized moves in fill, is left where it lies by a swap-remove, and sits in
@@ -110,6 +114,7 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 	trivial := PointerFree(componentType) == nil
 	class := &componentClass{
 		store:   store,
+		header:  store.erase(),
 		size:    componentType.Size(),
 		trivial: trivial,
 		lists:   listSites(componentType),

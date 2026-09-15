@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/dvoyni/cog/kernel"
@@ -18,8 +19,26 @@ type (
 	hookMoveSystem    kernel.Subscription[app.UpdateEvent]
 	hookChurnSystem   kernel.Subscription[app.UpdateEvent]
 	hookReaderSystem  kernel.Subscription[app.UpdateEvent]
+	hookReader2System kernel.Subscription[app.UpdateEvent]
+	hookReader3System kernel.Subscription[app.UpdateEvent]
+	hookReader4System kernel.Subscription[app.UpdateEvent]
 	hookSpawnerSystem kernel.Subscription[app.UpdateEvent]
 )
+
+// subscribeReader subscribes the i-th System in a frame's reader places, each
+// under its own subscription type.
+func subscribeReader(registrar *kernel.Registrar, i int, system any) {
+	switch i {
+	case 0:
+		registrar.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](registrar, system))
+	case 1:
+		registrar.Subscribe[hookReader2System](ToHandler[app.UpdateEvent](registrar, system))
+	case 2:
+		registrar.Subscribe[hookReader3System](ToHandler[app.UpdateEvent](registrar, system))
+	default:
+		registrar.Subscribe[hookReader4System](ToHandler[app.UpdateEvent](registrar, system))
+	}
+}
 
 // walkQuery is churn's own Component, so nothing but a lock a Hook added could
 // serialise churn against move.
@@ -92,14 +111,16 @@ func subscribeSpawner(registrar *kernel.Registrar) {
 	registrar.Subscribe[hookSpawnerSystem](ToHandler[app.UpdateEvent](registrar, spawner()))
 }
 
-// hookFrame is one whole-frame arm: the Systems, and what sits in the reader's
-// place — a Hooks reader counting what it is given, or, where reader is nil, an
-// empty System, which is the control, because the engine charges per
-// subscription.
+// hookFrame is one whole-frame arm: the Systems, and what sits in each of the
+// reader places — a Hooks reader counting what it is given, or, where reader is
+// nil, an empty System, which is the control, because the engine charges per
+// subscription. readers is how many places there are, 1 when it is 0; each
+// reader counts into its own cell, because readers of one Store run together.
 type hookFrame struct {
 	name      string
 	subscribe func(*kernel.Registrar)
 	reader    func(delivered *int) any
+	readers   int
 }
 
 // colliderReader is the membership reader churn feeds.
@@ -120,33 +141,75 @@ func lifetimeReader(delivered *int) any {
 	}
 }
 
+// changeReader is the reader move feeds, whose every body changes every tick:
+// the published worst case.
+func changeReader(delivered *int) any {
+	return func(h *Hooks[body, HookAddedChanged]) {
+		for range h.All() {
+			*delivered++
+		}
+	}
+}
+
+// mirrorReader reads every kind of act on body.
+func mirrorReader(delivered *int) any {
+	return func(h *Hooks[body, HookAll]) {
+		for range h.All() {
+			*delivered++
+		}
+	}
+}
+
+// churnMirrorReader watches collider for everything, Changed included, while
+// churn adds and removes it.
+func churnMirrorReader(delivered *int) any {
+	return func(h *Hooks[collider, HookAll]) {
+		for range h.All() {
+			*delivered++
+		}
+	}
+}
+
 var hookFrames = []hookFrame{
-	{"churn+empty", subscribeChurn, nil},
-	{"churn+reader", subscribeChurn, colliderReader},
-	{"churn+move+empty", subscribeChurnAndMove, nil},
-	{"churn+move+reader", subscribeChurnAndMove, colliderReader},
-	{"spawn+empty", subscribeSpawner, nil},
-	{"spawn+reader", subscribeSpawner, lifetimeReader},
+	{"churn+empty", subscribeChurn, nil, 1},
+	{"churn+reader", subscribeChurn, colliderReader, 1},
+	{"churn+changed-reader", subscribeChurn, churnMirrorReader, 1},
+	{"churn+move+empty", subscribeChurnAndMove, nil, 1},
+	{"churn+move+reader", subscribeChurnAndMove, colliderReader, 1},
+	{"spawn+empty", subscribeSpawner, nil, 1},
+	{"spawn+reader", subscribeSpawner, lifetimeReader, 1},
+	{"move+empty", subscribeMove, nil, 1},
+	{"move+changed-reader", subscribeMove, changeReader, 1},
+	{"move+4-empty", subscribeMove, nil, 4},
+	{"move+4-readers-all", subscribeMove, mirrorReader, 4},
 }
 
 // world composes the arm at n Entities. The count is how many records the
-// reader has been given, so a test can see the arm is recording.
-func (arm hookFrame) world(tb testing.TB, n int) (*kernel.Engine, *int) {
+// readers have been given, so a test can see the arm is recording.
+func (arm hookFrame) world(tb testing.TB, n int) (*kernel.Engine, func() int) {
 	tb.Helper()
-	delivered := new(int)
+	delivered := make([]int, max(arm.readers, 1))
 	entities, components, engine := newWorld(tb, uint32(n), func(registrar *kernel.Registrar) {
 		arm.subscribe(registrar)
-		if arm.reader != nil {
-			registrar.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](registrar, arm.reader(delivered)))
-		} else {
-			registrar.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](registrar, func() {}))
+		for i := range delivered {
+			if arm.reader != nil {
+				subscribeReader(registrar, i, arm.reader(&delivered[i]))
+			} else {
+				subscribeReader(registrar, i, func() {})
+			}
 		}
 	})
 	populate(entities, components, n)
 	for _, e := range components.bodies.owners {
 		components.homings.Set(e, homing{})
 	}
-	return engine, delivered
+	return engine, func() int {
+		total := 0
+		for _, count := range delivered {
+			total += count
+		}
+		return total
+	}
 }
 
 // TestAHookReaderStaysOnTheAllocationLine is hooks.md's allocation line: a frame
@@ -162,9 +225,9 @@ func TestAHookReaderStaysOnTheAllocationLine(t *testing.T) {
 			frame(t, engine, 1)
 		}
 		defer func() {
-			if arm.reader != nil && *delivered < churnPerTick*frames {
+			if arm.reader != nil && delivered() < churnPerTick*frames {
 				t.Errorf("%s at %d delivered %d records over %d frames, want at least %d",
-					arm.name, n, *delivered, frames+100, churnPerTick*frames)
+					arm.name, n, delivered(), frames+100, churnPerTick*frames)
 			}
 		}()
 		mallocs := allocationsDuring(func() {
@@ -183,7 +246,9 @@ func TestAHookReaderStaysOnTheAllocationLine(t *testing.T) {
 		t.Logf("%-18s objects a frame: 1k %.3f, 10k %.3f", arm.name, got[arm.name][0], got[arm.name][1])
 	}
 	for _, pair := range [][2]string{
-		{"churn+reader", "churn+empty"}, {"churn+move+reader", "churn+move+empty"}, {"spawn+reader", "spawn+empty"},
+		{"churn+reader", "churn+empty"}, {"churn+changed-reader", "churn+empty"},
+		{"churn+move+reader", "churn+move+empty"}, {"spawn+reader", "spawn+empty"},
+		{"move+changed-reader", "move+empty"}, {"move+4-readers-all", "move+4-empty"},
 	} {
 		reader, control := got[pair[0]], got[pair[1]]
 		if reader[1] > reader[0]+0.05 {
@@ -451,6 +516,210 @@ func BenchmarkHookFrame(b *testing.B) {
 						b.Fatalf("publishing the update: %v", err)
 					}
 				}
+			})
+		}
+	}
+}
+
+// row64 is a 64-byte Component with no padding, for the wide half of the
+// Changed writer grid; body is the 8-byte half.
+type row64 struct {
+	A, B, C, D, E, F, G, H float64
+}
+
+// changedRowsPlugin owns row64.
+type changedRowsPlugin struct{ ids uint32 }
+
+func (changedRowsPlugin) Name() kernel.PluginName { return "changedrows" }
+
+func (changedRowsPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
+
+func (p changedRowsPlugin) Register(registrar *kernel.Registrar, _ any) error {
+	RegisterComponent[row64](registrar, p.ids)
+	return nil
+}
+
+// changedWriter is a writer of T captured out of its System, so a benchmark can
+// run it outside a frame: a *T Query field and Set, which share one row copy,
+// and the Store.
+type changedWriter[T any] struct {
+	q     *Query[fieldOf[T]]
+	set   *Set[T]
+	store *Store[T]
+	ids   []Entity
+}
+
+// changedWriterWorld populates n Entities with T and captures a writer of T.
+// When watched, a HookAddedChanged reader of T is registered; it runs once, in
+// the frame that arms the writer's gates, and never again, so a benchmark
+// empties the log itself.
+func changedWriterWorld[T any](b *testing.B, n int, watched bool) *changedWriter[T] {
+	b.Helper()
+	w := &changedWriter[T]{}
+	entities, _, engine := newWorldWith(b, uint32(n), func(registrar *kernel.Registrar) {
+		registrar.Subscribe[hookCaptureSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[fieldOf[T]], set *Set[T]) {
+			w.q, w.set = q, set
+		}))
+		if watched {
+			registrar.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](registrar, func(h *Hooks[T, HookAddedChanged]) {}))
+		}
+	}, []kernel.PluginName{Name, "components", "changedrows"}, changedRowsPlugin{ids: uint32(n)})
+	w.ids = make([]Entity, n)
+	var zero T
+	var store *Store[T]
+	for i := range w.ids {
+		w.ids[i] = entities.alloc()
+	}
+	frame(b, engine, 1)
+	store = w.set.store.Get()
+	for _, e := range w.ids {
+		store.Set(e, zero)
+	}
+	w.store = store
+	return w
+}
+
+// runEnd is the writer's run end on its Store, off a frame: the compare, then
+// the log emptied as a reader would leave it.
+func (w *changedWriter[T]) runEnd() {
+	w.set.changes.compare()
+	if w.store.hooks != nil {
+		w.store.hooks.records = w.store.hooks.records[:0]
+	}
+}
+
+// BenchmarkHookChangedWriter is the Changed writer grid: a writer walking a
+// 10k-Entity Store and writing 0, 1, 10 or 100% of its rows, 8 B and 64 B wide,
+// through a *T Query field (the whole-Store copy) or through Ref on every row
+// walked (the copy per row), each against the same walk with nothing watching.
+// ns/op is per row walked, the run end's compare included.
+func BenchmarkHookChangedWriter(b *testing.B) {
+	const n = 10_000
+	for _, width := range []string{"8B", "64B"} {
+		for _, percent := range []int{0, 1, 10, 100} {
+			for _, arm := range []string{"query-unwatched", "query-whole-store", "ref-unwatched", "ref-per-row"} {
+				b.Run(fmt.Sprintf("%s/%d%%/%s", width, percent, arm), func(b *testing.B) {
+					watched := arm == "query-whole-store" || arm == "ref-per-row"
+					byQuery := strings.HasPrefix(arm, "query")
+					if width == "8B" {
+						benchmarkChangedWriter(b, n, percent, watched, byQuery, func(p *body) { p.X++ })
+					} else {
+						benchmarkChangedWriter(b, n, percent, watched, byQuery, func(p *row64) { p.H++ })
+					}
+				})
+			}
+		}
+	}
+}
+
+func benchmarkChangedWriter[T any](b *testing.B, n, percent int, watched, byQuery bool, write func(*T)) {
+	w := changedWriterWorld[T](b, n, watched)
+	every := n + 1
+	if percent > 0 {
+		every = 100 / percent
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i += n {
+		row := 0
+		if byQuery {
+			for _, it := range w.q.All() {
+				if row%every == 0 {
+					write(it.Row)
+				}
+				row++
+			}
+		} else {
+			for _, e := range w.ids {
+				ref, _ := w.set.Ref(e)
+				if row%every == 0 {
+					write(ref)
+				}
+				row++
+			}
+		}
+		w.runEnd()
+	}
+}
+
+// BenchmarkHookChangedRef is Set.Ref on 1% of a 10k-Entity Store, writing each
+// row it reaches, watched for Changed and not. ns/op is per Ref, the run end's
+// compare included.
+func BenchmarkHookChangedRef(b *testing.B) {
+	const n, touched = 10_000, 100
+	for _, arm := range []string{"unwatched", "watched"} {
+		b.Run(arm, func(b *testing.B) {
+			w := changedWriterWorld[body](b, n, arm == "watched")
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i += touched {
+				for j := range touched {
+					ref, _ := w.set.Ref(w.ids[(j*97+i)%n])
+					ref.X++
+				}
+				w.runEnd()
+			}
+		})
+	}
+}
+
+// BenchmarkHookReaderChanges prices a reader's run per Changed record it takes:
+// raw, one change per Entity per window, and folded, two writer runs changing
+// the same Entities so each window's second change folds into its first. The
+// records are made off the clock, 1024 Entities at a time. ns/op is per record
+// in the log, so the folded arm's reader delivers half of what it is charged
+// for.
+func BenchmarkHookReaderChanges(b *testing.B) {
+	const entities = 1024
+	for _, shape := range []string{"raw", "folded"} {
+		for _, readers := range []int{1, 4} {
+			b.Run(fmt.Sprintf("%s/%d-readers", shape, readers), func(b *testing.B) {
+				var hooks []*Hooks[body, HookAll]
+				var reader any = func(h *Hooks[body, HookAll]) { hooks = append(hooks[:0], h) }
+				if readers == 4 {
+					reader = func(h0, h1, h2, h3 *Hooks[body, HookAll]) { hooks = append(hooks[:0], h0, h1, h2, h3) }
+				}
+				var set *Set[body]
+				population, components, engine := newWorld(b, 2*entities, func(registrar *kernel.Registrar) {
+					registrar.Subscribe[hookCaptureSystem](ToHandler[app.UpdateEvent](registrar, func(s *Set[body]) { set = s }))
+					registrar.Subscribe[hookReaderSystem](ToHandler[app.UpdateEvent](registrar, reader))
+				})
+				ids := make([]Entity, 2*entities)
+				for i := range ids {
+					ids[i] = population.alloc()
+					components.bodies.Set(ids[i], body{})
+				}
+				frame(b, engine, 1)
+				produce := func(batch int) {
+					for j := range entities {
+						ref, _ := set.Ref(ids[(batch+j)%len(ids)])
+						ref.X++
+					}
+					set.changes.compare()
+				}
+				perRecord := entities
+				if shape == "folded" {
+					perRecord = 2 * entities
+				}
+				var sum float32
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i += perRecord {
+					b.StopTimer()
+					produce(i)
+					if shape == "folded" {
+						produce(i)
+					}
+					b.StartTimer()
+					for _, h := range hooks {
+						h.beginRun()
+						for _, hook := range h.All() {
+							sum += hook.Value.X
+						}
+						h.endRun()
+					}
+				}
+				_ = sum
 			})
 		}
 	}

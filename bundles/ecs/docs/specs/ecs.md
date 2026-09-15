@@ -479,6 +479,7 @@ read, write and stored cases tested again one List further in:
 | `Set` on an array a second Component holds while its first owner still holds it | **panics**, naming both — *since Hooks, not yet built* |
 | `Set` through a Hooks value, at any time | **panics**, naming `Hooks[T, K]` — see [`hooks.md`](hooks.md#a-value-that-holds-a-list) |
 | any of the above, on a List inside another List's elements | the same as the flat case — the stamp walks nested Lists |
+| registering a `Hooks[C, HookAddedChanged]` or `Hooks[C, HookAll]` reader of a Component with implicit padding, between fields, at the tail, or inside a nested struct or array | **panics** at registration, naming the Component, the field the gap follows or "at the end", the byte count, and the `_ [N]byte` field that fixes it — see [`hooks.md`](hooks.md#changed-is-a-difference-in-bytes) |
 
 **`Set[C].Of` no longer stamps a write, and that is a change in behaviour.** It
 used to stamp `modeWrite`, so a `Set` through its copy was allowed. The copy

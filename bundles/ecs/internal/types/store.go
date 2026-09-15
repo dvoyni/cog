@@ -75,7 +75,18 @@ type storeHeader struct {
 	lists   []listSite
 	owner   string
 	watch   hookKind
-	hooks   unsafe.Pointer
+	// hooks is the log's T-free half, which a *hookLog[T] begins with.
+	hooks *hookRecords
+}
+
+// probe is Store.probe on the erased view: the dense row e's value is in.
+func (h *storeHeader) probe(e Entity) (uint32, bool) {
+	index := e.idx()
+	if int(index) >= len(h.sparse) {
+		return 0, false
+	}
+	slot := h.sparse[index]
+	return uint32(slot), uint32(slot>>32) == e.gen()
 }
 
 // denseRows is the header of dense []T with the element type erased. A row is

@@ -67,6 +67,11 @@ type Query[Q any] struct {
 	// stay on the caller's stack. Measured in situ; invisible in a
 	// microbenchmark, where the whole iterator inlines at the range site.
 	shape uint8
+	// copies is the System's row copy of each Store a *T field writes, one per
+	// Store. When a Hooks reader watches that Store for Changed, bind copies the
+	// whole Store once per run, before any row is handed out; the loop itself is
+	// untouched. See hookchanged.go.
+	copies []*rowCopy
 }
 
 // queryField is one Component of a Query, as registration left it.
@@ -218,6 +223,7 @@ func (q *Query[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
 		}
 		if write {
 			planned.get = class.declareWrite(access)
+			q.copyRowsOf(class)
 		} else {
 			planned.get = class.declareRead(access)
 		}
@@ -241,6 +247,23 @@ func (q *Query[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
 	}
 	q.run = newRunToken(kernel.TypeName(queryType))
 	en.enrolScratch(q.release)
+}
+
+// copyRowsOf gives a *T field's Store a row copy, unless another field already
+// did.
+func (q *Query[Q]) copyRowsOf(class *componentClass) {
+	for _, copied := range q.copies {
+		if copied.store == class.header {
+			return
+		}
+	}
+	q.copies = append(q.copies, newRowCopy(class))
+}
+
+func (q *Query[Q]) rowCopies(each func(slot **rowCopy)) {
+	for i := range q.copies {
+		each(&q.copies[i])
+	}
 }
 
 // All iterates the Entities having every Component the Query names, yielding
@@ -299,7 +322,15 @@ func (q *Query[Q]) iterate(yield func(Entity, *Q) bool) {
 //
 // The driver is moved to index 0 so the fillers need no per-Entity branch to
 // find it. Field order is not observable: an offset travels with its field.
+//
+// On a Store a *T field writes and a Hooks reader watches for Changed, bind
+// first copies the whole Store, once per run.
 func (q *Query[Q]) bind() {
+	for _, copied := range q.copies {
+		if copied.gate.on {
+			copied.takeWhole()
+		}
+	}
 	driver, shortest := 0, -1
 	for i := range q.fields {
 		field := &q.fields[i]

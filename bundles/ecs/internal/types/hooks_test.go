@@ -22,6 +22,7 @@ type (
 	hookActCmd     kernel.Command[hookRequest, hookResponse]
 	hookReadCmd    kernel.Command[hookRequest, hookResponse]
 	hookRestackCmd kernel.Command[hookRequest, hookResponse]
+	hookWalkCmd    kernel.Command[hookRequest, hookResponse]
 )
 
 // armedSet is a Component set carrying collider; spawnSet carries body and
@@ -138,6 +139,7 @@ type hookWorld struct {
 	engine     *kernel.Engine
 	act        func(set *Set[collider], remove *Remove[collider])
 	restack    func(r restacking)
+	walk       func(q *Query[colliderQuery], set *Set[collider], remove *Remove[collider])
 }
 
 func newHookWorld(t *testing.T, reader any, also ...func(*kernel.Registrar)) *hookWorld {
@@ -150,6 +152,8 @@ func newHookWorld(t *testing.T, reader any, also ...func(*kernel.Registrar)) *ho
 			func(armed *Spawn[armedSet], unarmed *Spawn[spawnSet], we *WriteableEntities, set *Set[collider]) {
 				w.restack(restacking{armed, unarmed, we, set})
 			}))
+		registrar.HandleCommand[hookWalkCmd](ToExecute[hookRequest, hookResponse](registrar,
+			func(q *Query[colliderQuery], set *Set[collider], remove *Remove[collider]) { w.walk(q, set, remove) }))
 		registrar.HandleCommand[hookReadCmd](ToExecute[hookRequest, hookResponse](registrar, reader))
 		for _, subscribe := range also {
 			subscribe(registrar)
@@ -163,6 +167,16 @@ func (w *hookWorld) write(t *testing.T, act func(set *Set[collider], remove *Rem
 	w.act = act
 	if _, err := w.engine.Executioner().ExecuteCommand[hookActCmd](hookRequest{}); err != nil {
 		t.Fatalf("running the writer: %v", err)
+	}
+}
+
+// walked runs a System holding every write route to collider at once: a
+// *collider Query field, Set and Remove.
+func (w *hookWorld) walked(t *testing.T, walk func(q *Query[colliderQuery], set *Set[collider], remove *Remove[collider])) {
+	t.Helper()
+	w.walk = walk
+	if _, err := w.engine.Executioner().ExecuteCommand[hookWalkCmd](hookRequest{}); err != nil {
+		t.Fatalf("running the walking writer: %v", err)
 	}
 }
 

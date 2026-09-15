@@ -84,6 +84,10 @@ type Set[T any] struct {
 	// hooks is whether this run's additions are recorded: on when a Hooks
 	// reader watches the Store for additions or changes.
 	hooks hookGate
+	// changes is the System's copy of the rows Ref and a replacing UpdateFor
+	// hand it, compared at its run end when a Hooks reader watches the Store for
+	// Changed. See hookchanged.go.
+	changes *rowCopy
 }
 
 // prepare declares the locks and binds the Store. It runs once, at registration.
@@ -91,9 +95,12 @@ func (s *Set[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 	s.entities = declareComponent[T](en, access, "Set")
 	s.store = access.GetWrite[*Store[T]]()
 	s.hooks = gateFor[T](en, recordsAddition)
+	s.changes = newRowCopy(en.classOf(reflect.TypeFor[T]()))
 }
 
 func (s *Set[T]) gate() *hookGate { return &s.hooks }
+
+func (s *Set[T]) rowCopies(each func(slot **rowCopy)) { each(&s.changes) }
 
 // Of reports e's Component, and whether e has one — the same copy Get yields,
 // available here because a write authorises a read.
@@ -119,12 +126,22 @@ func (s *Set[T]) Of(e Entity) (T, bool) {
 // dense array leaves the old one behind entirely. Either way a retained pointer
 // addresses a slot that is no longer the Entity's. Use it and drop it; nothing
 // may be held across an UpdateFor, a From, a spawn or a despawn.
+//
+// On a Store watched for Changed, the row is copied before the pointer is handed
+// out, once per run, and compared when the System's run ends.
 func (s *Set[T]) Ref(e Entity) (*T, bool) {
 	store := s.store.Get()
 	if validate {
 		store.stampFor(e, modeWrite)
 	}
-	return store.Ref(e)
+	row, ok := store.probe(e)
+	if !ok {
+		return nil, false
+	}
+	if s.changes.gate.on {
+		s.changes.take(e, row)
+	}
+	return &store.dense[row], true
 }
 
 // UpdateFor gives e this Component, replacing the value if it already has one.
@@ -159,8 +176,17 @@ func (s *Set[T]) Ref(e Entity) (*T, bool) {
 // this path: every accessor already answers a dangling Reference with absence —
 // Of and Ref miss, From reports false — and an insertion that does nothing is
 // that same answer.
+//
+// A replacement is not an addition. On a Store watched for Changed, the row is
+// copied before it is replaced, once per run, and records Changed only if its
+// bytes differ when the System's run ends.
 func (s *Set[T]) UpdateFor(e Entity, value T) {
 	store := s.store.Get()
+	if s.changes.gate.on {
+		if row, ok := store.probe(e); ok {
+			s.changes.take(e, row)
+		}
+	}
 	if store.update(e, value) {
 		return
 	}
