@@ -91,10 +91,15 @@ func (s *Set[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 
 // Of reports e's Component, and whether e has one — the same copy Get yields,
 // available here because a write authorises a read.
+//
+// It is a read route and not a write route. The copy shares the stored List
+// backing arrays but not the row, so a List.Set through it would never reach
+// the stored Component's bytes; validation mode panics on one and names Ref,
+// which is the handle to write through.
 func (s *Set[T]) Of(e Entity) (T, bool) {
 	store := s.store.Get()
 	if validate {
-		store.stampFor(e, modeWrite)
+		store.stampFor(e, modeSetOf)
 	}
 	return store.Get(e)
 }

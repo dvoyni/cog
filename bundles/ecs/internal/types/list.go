@@ -46,9 +46,18 @@ var listMarkerType = reflect.TypeFor[listMarker]()
 // A List is not free. Its backing array is a heap allocation the collector
 // scans, so a Component holding one leaves the noscan span a pointer-free
 // Component lives in; prefer [N]T wherever the bound is small and real.
+//
+// Its header is 32 bytes rather than a slice's 24, and every List pays the
+// difference whether anything watches it or not: the extra word is the
+// generation Set adds one to. See [List.Set].
 type List[T any] struct {
 	_    listMarker
 	data []T
+	// gen is how an in-place change shows in the bytes of the Component
+	// holding the List. The elements live in the backing array, outside the
+	// row, so without it a Set would leave the row as it was and a byte
+	// compare could not see the write.
+	gen uint64
 }
 
 // NewList copies its arguments into a List. It is the spelling for a literal:
@@ -91,10 +100,18 @@ func (l List[T]) All() iter.Seq2[int, T] {
 	}
 }
 
-// Set writes element i. It is legal only for a caller holding the write lock on
-// the Component the List came out of — a *C field of a Query, or a Set[C]
-// accessor — and calling it through a value a read yielded is the error
-// validation mode exists to find.
+// Set writes element i and adds one to the List's generation, so the change
+// shows in the bytes of the Component holding the List. That is why the
+// receiver is a pointer: a Set through a copy would bump the copy's generation
+// and leave the stored row's bytes untouched. A List reached through a *C Query
+// field or Set[C].Ref is addressable, so those call sites read as they always
+// did.
+//
+// It is legal on a fresh List not yet in any Store, and on the stored List
+// reached through a *C field of a Query or Set[C].Ref. Calling it through a
+// value a read yielded, a Get[C].Of copy or a Set[C].Of copy is the error
+// validation mode exists to find: a Set[C].Of copy shares the stored array but
+// not the row, so its write never reaches the Component's bytes.
 //
 // In validation mode the call checks the List's backing array against what the
 // run that produced it was allowed to do, and panics naming the Component and
@@ -107,11 +124,12 @@ func (l List[T]) All() iter.Seq2[int, T] {
 // the writes a run actually executes. It does not make the illegal write
 // impossible the way the pointer-free rule made a dangling Component
 // impossible, and a build without the tag has no check at all.
-func (l List[T]) Set(i int, value T) {
+func (l *List[T]) Set(i int, value T) {
 	if validate {
 		checkListWritable(unsafe.Pointer(unsafe.SliceData(l.data)))
 	}
 	l.data[i] = value
+	l.gen++
 }
 
 // Slice is deliberately absent. Handing back the backing array would give away
@@ -124,7 +142,7 @@ func (l List[T]) Set(i int, value T) {
 // rename of this one cannot silently break the walk.
 func isList(t reflect.Type) bool {
 	return t.Kind() == reflect.Struct &&
-		t.NumField() == 2 &&
+		t.NumField() == 3 &&
 		t.Field(0).Type == listMarkerType
 }
 

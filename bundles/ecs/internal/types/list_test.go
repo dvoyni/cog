@@ -1,10 +1,12 @@
 package types
 
 import (
+	"bytes"
 	"reflect"
 	"runtime"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -139,6 +141,62 @@ func TestAListCopiesRatherThanAdoptingWhatItWasBuiltFrom(t *testing.T) {
 	}
 	if seen != 2 {
 		t.Fatalf("All yielded %d elements, want 2", seen)
+	}
+}
+
+// TestAListHeaderIsThirtyTwoBytes pins the width every List user pays: the
+// slice header and the generation Set adds one to. A wider header is a wider
+// row in every Store holding a List, so it changes only with its measurements
+// in ecs.md § The List.
+func TestAListHeaderIsThirtyTwoBytes(t *testing.T) {
+	if size := unsafe.Sizeof(List[uint32]{}); size != 32 {
+		t.Fatalf("a List header is %d bytes, want 32", size)
+	}
+}
+
+// TestASetShowsInTheBytesOfTheComponentHoldingTheList is why the generation
+// exists: the elements live in the backing array, outside the row, so without
+// it an in-place change leaves the stored Component's bytes as they were and a
+// byte compare cannot see it. Writing the value already there still shows,
+// because what changes is the header and not the element.
+func TestASetShowsInTheBytesOfTheComponentHoldingTheList(t *testing.T) {
+	var unchanged, repeated string
+	var landed uint32
+	rich := &richPlugin{ids: 16}
+	var e Entity
+	entities, _, engine := newWorldWith(t, 16,
+		func(registrar *kernel.Registrar) {
+			registrar.Subscribe[richSystem](ToHandler[app.UpdateEvent](registrar, func(set *Set[inventory]) {
+				stored, _ := set.Ref(e)
+				rowBytes := func() []byte {
+					return bytes.Clone(unsafe.Slice((*byte)(unsafe.Pointer(stored)), unsafe.Sizeof(*stored)))
+				}
+				before := rowBytes()
+				stored.Slots.Set(0, 1)
+				after := rowBytes()
+				if bytes.Equal(before, after) {
+					unchanged = "a Set through the stored List left the Component's bytes unchanged"
+				}
+				stored.Slots.Set(1, 5)
+				if bytes.Equal(after, rowBytes()) {
+					repeated = "a second Set left the Component's bytes as the first one did"
+				}
+				landed = stored.Slots.At(1)
+			}))
+		}, []kernel.PluginName{Name, "components", "rich"}, rich)
+
+	e = entities.alloc()
+	rich.inventories.Set(e, inventory{Slots: ListOf([]uint32{1, 2, 3})})
+	if err := engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
+		t.Fatalf("publishing the update: %v", err)
+	}
+	for _, failure := range []string{unchanged, repeated} {
+		if failure != "" {
+			t.Fatal(failure)
+		}
+	}
+	if landed != 5 {
+		t.Fatalf("the write did not land: element 1 is %d, want 5", landed)
 	}
 }
 
