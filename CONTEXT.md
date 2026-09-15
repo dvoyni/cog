@@ -492,6 +492,10 @@ _Avoid_: Layer, group, category and mask, collision filter
 Which collision groups may collide with which, always both ways, declared once when physics is configured and never changed while the game runs. Groups it does not pair never collide; declaring nothing lets everything collide.
 _Avoid_: Layer matrix, intersection matrix, filter
 
+**Sensor**:
+A Shape that reports contacts but is never pushed and pushes nothing. The Collision matrix pairs it like any other Shape.
+_Avoid_: Trigger (a Hook word), ghost, phantom
+
 **Contact force**:
 The force contact response writes into a Dynamic body and integration consumes, rebuilt from nothing every sub-step rather than summed across a tick.
 _Avoid_: Contact accumulator, penetration spring, as names for what a Body carries
