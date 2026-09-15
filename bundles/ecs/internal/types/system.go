@@ -130,6 +130,11 @@ type systemCall[E any] struct {
 	// handle is the stable cell the kernel value is written into, nil unless the
 	// signature names it.
 	handle *kernel.Kernel
+	// gates are the writer handles' checks of their Stores' watched kinds, and
+	// readers the Hooks parameters, each with work at the edges of a run. Both
+	// are empty for a System that names neither, and cost it a length check.
+	gates   []*hookGate
+	readers []runEdges
 }
 
 // lock is the System's kernel.Lock: it runs once, at registration, and declares
@@ -148,8 +153,15 @@ func (c *systemCall[E]) lock(access kernel.ResourceAccess) {
 	// this read rather than sitting beside it — which is what makes a structural
 	// change a total barrier.
 	access.GetRead[*Entities]()
+	c.gates, c.readers = c.gates[:0], c.readers[:0]
 	for _, param := range c.params {
 		param.prepare(c.entities, access)
+		if writer, ok := param.(gated); ok {
+			c.gates = append(c.gates, writer.gate())
+		}
+		if reader, ok := param.(runEdges); ok {
+			c.readers = append(c.readers, reader)
+		}
 	}
 }
 
@@ -166,13 +178,26 @@ func (c *systemCall[E]) call(handle kernel.Kernel, driven E) {
 	if c.handle != nil {
 		*c.handle = handle
 	}
+	// The watched kinds are fixed before any System runs, and a writer reads
+	// them here rather than at registration, because the reader that watches
+	// its Store may register after it. A reader's copy is fixed before the body
+	// and cleared after, so a System's own acts appear in its next run.
+	for _, gate := range c.gates {
+		gate.check()
+	}
+	for _, reader := range c.readers {
+		reader.beginRun()
+	}
 	c.fn.Call(c.args)
+	for _, reader := range c.readers {
+		reader.endRun()
+	}
 }
 
 // prepareSystem is the classification, and the classification is contract.
 //
 // A System takes any number of *Query[Q], *Spawn[S], *WriteableEntities,
-// *Get[T], *Set[T], *Remove[T], *Read[T], *Write[T] and *In[T]; the
+// *Get[T], *Set[T], *Remove[T], *Hooks[T, K], *Read[T], *Write[T] and *In[T]; the
 // kernel.Kernel value; at most once the event or request value itself; and, for
 // a command only, at most once the *Resp[Res] it answers through. Anything else
 // is a composition-time failure naming the System's type.
@@ -337,6 +362,6 @@ func refusal(systemType, paramType, drivenType reflect.Type, driven string) stri
 		}
 	}
 	return fmt.Sprintf(
-		"ecs: System %s takes %s, which is not something a System may take; a System takes *ecs.Query, *ecs.Spawn, *ecs.WriteableEntities, *ecs.Get, *ecs.Set, *ecs.Remove, *ecs.Read, *ecs.Write, *ecs.In, the kernel.Kernel value, at most once the %s value %s, and for a command at most once the *ecs.Resp it answers through",
+		"ecs: System %s takes %s, which is not something a System may take; a System takes *ecs.Query, *ecs.Spawn, *ecs.WriteableEntities, *ecs.Get, *ecs.Set, *ecs.Remove, *ecs.Hooks, *ecs.Read, *ecs.Write, *ecs.In, the kernel.Kernel value, at most once the %s value %s, and for a command at most once the *ecs.Resp it answers through",
 		kernel.TypeName(systemType), kernel.TypeName(paramType), driven, kernel.TypeName(drivenType))
 }

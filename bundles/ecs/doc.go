@@ -7,6 +7,7 @@
 // filters that yield nothing and still declare a read; a Spawn over the Component
 // set it creates; the WriteableEntities that can retire one; the Get, Set and
 // Remove accessors that reach one Component of an Entity it did not iterate to;
+// the Hooks that say what happened to one Component since its last run;
 // the Read and Write handles that name another plugin's resource; the In that
 // carries a value projected out of the event; and, for a command, the Resp it
 // answers through. ToHandler turns one into the factory an ordinary cog

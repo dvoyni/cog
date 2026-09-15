@@ -50,6 +50,13 @@ type Store[T any] struct {
 	// Component's name for the diagnostic.
 	lists []listSite
 	owner string
+	// watch is the union of the kind sets of this Store's Hooks readers, fixed
+	// when registration closes, and hooks is the log they read, nil while
+	// nobody reads. A writer handle reads watch when its System's run starts;
+	// neither is touched by add or remove, which stay leaf functions. See
+	// hooks.go.
+	watch hookKind
+	hooks *hookLog[T]
 }
 
 // storeHeader is what every *Store[T] looks like once T is forgotten, and it is
@@ -67,6 +74,8 @@ type storeHeader struct {
 	trivial bool
 	lists   []listSite
 	owner   string
+	watch   hookKind
+	hooks   unsafe.Pointer
 }
 
 // denseRows is the header of dense []T with the element type erased. A row is
@@ -210,6 +219,18 @@ func (s *Store[T]) add(e Entity, value T) {
 
 // Remove takes this Component away from e and reports whether it had one.
 func (s *Store[T]) Remove(e Entity) bool { return s.remove(e) }
+
+// removeRecorded is Remove.From on a Store watched for removals: T's last value
+// is copied into the log before remove vacates the row. It is a separate
+// function so the call sits beside remove and never inside it.
+func (s *Store[T]) removeRecorded(e Entity) bool {
+	row, ok := s.probe(e)
+	if !ok {
+		return false
+	}
+	s.hooks.removed(e, &s.dense[row], kindRemoved)
+	return s.remove(e)
+}
 
 // probe reports the dense row e's value is in. The compare that finds the row
 // is the compare that rejects a stale handle, so liveness is not an extra cost;
