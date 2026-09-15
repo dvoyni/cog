@@ -42,15 +42,27 @@ this document says otherwise. [Required work](#required-work) is the checklist
 it was built from and now records what is still open. The zero-allocation
 prototype that produced the numbers below lived on the throwaway branch
 `proto/ecs-zero-alloc` and is gone; the benchmarks that replaced it are in the
-package.
+package. **The sections Hooks changed describe a design not yet built**, and
+[Required work](#required-work) lists those items as open under *Since Hooks*.
 
-**One thing here is younger than the rest, and it is marked where it appears.**
-The Component rule was relaxed after the package shipped: a Component holds no
-*mutable* indirection rather than no pointers at all, which admits `string` and
-[`ecs.List[T]`](#the-list). The sections that changed say what they used to say
-and why the old reason did not survive, because the old rule was argued for in
-this document at some length and a reader who remembers that argument is owed
-the correction rather than a silent overwrite.
+**Two things here are younger than the rest, and each is marked where it
+appears.** The first: the Component rule was relaxed after the package shipped.
+A Component holds no *mutable* indirection rather than no pointers at all, which
+admits `string` and [`ecs.List[T]`](#the-list). The sections that changed say what
+they used to say and why the old reason did not survive, because the old rule
+was argued for in this document at some length and a reader who remembers that
+argument is owed the correction rather than a silent overwrite.
+
+The second: **Hooks**, specified in [`hooks.md`](hooks.md) and assembled from
+[ecs: Hooks, and how a System learns what happened to an
+Entity](https://github.com/dvoyni/cog/issues/377). This document states in full
+what Hooks change for code that names none: a `List`'s `Set`, what Validation
+mode checks, the signature contract, and [giving memory
+back](#giving-memory-back). A cost a reader puts on other Systems gets one line
+and a link. A reader's own contract is only pointed to. Three claims this
+document argued for are now false, and the sections that made them say what
+they used to say: that nothing ever shrinks, that structural hooks were ruled
+out, and that change detection would arrive as Query fields.
 
 ---
 
@@ -59,7 +71,7 @@ the correction rather than a silent overwrite.
 - [Vocabulary](#vocabulary) · [What the numbers are, and what they are not](#what-the-numbers-are-and-what-they-are-not)
 - [Entity](#entity) · [Component](#component) · [The List](#the-list) · [Validation mode](#validation-mode) · [Naming an engine-side thing](#naming-an-engine-side-thing)
 - [Registration and ownership](#registration-and-ownership)
-- [The Store](#the-store) · [The Query](#the-query) · [The Driver](#the-driver)
+- [The Store](#the-store) · [Giving memory back](#giving-memory-back) · [The Query](#the-query) · [The Driver](#the-driver)
 - [The System](#the-system) · [The lock set](#the-lock-set)
 - [Structural change](#structural-change) · [Reaching another Entity](#reaching-another-entity)
 - [Binding: how another plugin attaches](#binding-how-another-plugin-attaches)
@@ -68,6 +80,7 @@ the correction rather than a silent overwrite.
 - [What is not foreclosed](#what-is-not-foreclosed)
 - [Shapes that were rejected](#shapes-that-were-rejected)
 - [Required work](#required-work) · [Out of scope](#out-of-scope)
+- Hooks, in their own document: [`hooks.md`](hooks.md)
 
 ---
 
@@ -112,10 +125,13 @@ are retired outright.
 - **Reference** — an Entity kept inside a Component. It points one way.
 - **Accessor** — a System's means of reaching one Component of an Entity it did
   not iterate to.
+- **Hook** — one record of one act on one Component of an Entity, read by a
+  System later rather than run at the act. See [`hooks.md`](hooks.md).
 - **Hash**, **Name table** — retired. Naming an engine-side thing is the
   business of the two plugins that share the name, not of the ECS.
-- **Validation mode** — a build tag that checks, at the one place the rule can
-  be broken, that nobody writes a List through a read.
+- **Validation mode** — a build tag that checks that nobody writes a List except
+  through the Component holding it under a write lock, and that a System reading
+  Hooks keeps pace with the Systems writing its Component.
 
 ---
 
@@ -352,6 +368,39 @@ List written into the Component under an ordinary write lock. Where the length
 changes every frame the answer is unchanged — a fixed-capacity array with a live
 count, a child Entity, or a side store keyed by Entity.
 
+**`Set` has a pointer receiver, `func (l *List[T]) Set(i int, v T)`, and adds one
+to a generation kept in the List's header.** So an in-place change to the
+elements shows in the bytes of the Component holding the List. That is what
+lets a Changed Hook detect a change by comparing bytes
+([What counts as a value change, for a Changed
+Hook](https://github.com/dvoyni/cog/issues/268)). The call sites above are
+unchanged, because a List reached through a `*T` field or `Ref` is addressable.
+*Since Hooks, not yet built.*
+
+**The header grows from 24 to 32 bytes, and every List user pays it**, watched
+or not. Measured on [`proto/ecs-hooks`](https://github.com/dvoyni/cog/tree/proto/ecs-hooks)
+([`5f41e42`](https://github.com/dvoyni/cog/commit/5f41e42)):
+
+| over a Component holding one `List` | 24 B header | 32 B header |
+| --- | --- | --- |
+| Query read, 10k Entities | 73 µs | 73 µs |
+| Query write, 10k Entities | 28 µs | 28 µs |
+| Store remove plus add, as the row crosses 32 → 40 B | 7.7 ns | **15.9 ns** |
+
+**Where `Set` is legal:**
+
+| `Set` called on | legal |
+| --- | --- |
+| a fresh List, not yet in any Store, before `UpdateFor` or a Spawn | yes |
+| the stored List, reached through a `*T` Query field or `Set[T].Ref` | yes |
+| a `Set[T].Of` copy, even if `UpdateFor` follows | **no** — use `Ref` |
+| a Query read copy, a `Get[T].Of` copy, or a Hook's `Value` | **no** |
+
+**A List that is `Set` belongs to exactly one Component.** If two Components
+hold the same backing array, a `Set` under `write{A}` changes memory that
+`B`'s readers read under `read{B}`, which is a race no lock names. A List held by
+several Components is never `Set`.
+
 **`List[T]` where `T` itself contains a List is admitted**, and validation
 reaches it. This was refused at first, because validation stamped List backing
 arrays at fixed offsets within a row and an array a List's *elements* name sits
@@ -408,8 +457,8 @@ a List costs.
 
 ### Validation mode
 
-**`List.Set` is checked under `-tags ecs_validate` and nowhere else.** The build
-tag selects between a file where `const validate = true` and one where it is
+**`List.Set` is checked under `-tags ecs_validate` and nowhere else, along with
+the Hook checks [`hooks.md`](hooks.md) lists.** The build tag selects between a file where `const validate = true` and one where it is
 `false`, so a release build contains no branch, no table and no load for any of
 it. This is ark's own pattern (`//go:build ark_debug`) and Unity DOTS's
 (`ENABLE_UNITY_COLLECTIONS_CHECKS`, on in the editor, compiled out of player
@@ -425,7 +474,27 @@ read, write and stored cases tested again one List further in:
 | `Set` through a `C` read field, or a `Get[C]` | **panics**, naming the Component and the mode |
 | `Set` through a value retained past the `All()` that yielded it | **panics**, naming the run |
 | `Set` through the caller's own copy, after the value entered a Store | **panics** — `ListOf` copies, but `Set` shares |
+| `Set` through a `Set[C].Of` copy | **panics**, naming `Ref` — *since Hooks, not yet built* |
+| `Set` on an array a second Component holds while its first owner still holds it | **panics**, naming both — *since Hooks, not yet built* |
+| `Set` through a Hooks value, at any time | **panics**, naming `Hooks[T, K]` — see [`hooks.md`](hooks.md#a-value-that-holds-a-list) |
 | any of the above, on a List inside another List's elements | the same as the flat case — the stamp walks nested Lists |
+
+**`Set[C].Of` no longer stamps a write, and that is a change in behaviour.** It
+used to stamp `modeWrite`, so a `Set` through its copy was allowed. The copy
+shares the stored array, but `Of` hands out a value rather than the row, so the
+write never reaches the Component's bytes and a Changed Hook cannot see it. `Ref`
+is the route to a List a System means to write.
+
+**The second owner.** When a Changed compare at a writer's run end finds a row
+holding a List, it registers that List's array to that Component and Entity. An
+array arriving in a second Component while its first owner still holds it is
+marked shared, and `Set` on a shared array panics naming both. Registering at
+the compare covers an array that arrives through `*p =`, which never passes
+`UpdateFor` or a Spawn. **The first owner stops holding the array at the act that
+removes its row**, `Remove[T].From` or a Despawn, and a Hook log that retains the
+removed value is never an owner
+([Validation mode and a retained value holding a
+List](https://github.com/dvoyni/cog/issues/386)).
 
 **This is detection and not prevention, and that is a weaker guarantee than
 anything else in this document.** `string` is sound by construction; a List is
@@ -440,7 +509,21 @@ discovered: a write through `unsafe`; a write by a callee the value was passed
 to, which is reported against whoever called `Set`; a List whose array was
 evicted from the bounded table, which a nested List fills faster; a write
 through an `m.Blob`, which has no method to check; and anything a run never
-executes. Its cost is a
+executes. Two more since Hooks:
+
+- **A second owner on a Store no Changed Hook reads.** The shared-array mark is
+  registered at the Changed compare, which runs only on a Store a Changed reader
+  watches. A List copied with `Get`, added to a second Entity with `UpdateFor`
+  and `Set` there is a race on any Store, and it is caught only on a watched one.
+  Widening the mark to every `Ref` and `*T` bind on every Store in validating
+  builds was considered and not taken: it is new design, and the hole is stated
+  instead.
+- **A kept List read outside a run holding `read{T}`.** A List kept from a Query
+  read field or from a Hook still shares its array with the Store or the log.
+  Reading it in a later run that holds `read{T}` is sound; reading it anywhere
+  else is a race no lock names, and no stamp sees a read.
+
+Its cost is a
 map write per List field per stamped row per run under one mutex, so a
 validating build serialises where a release build runs concurrently. That cost
 is confined to a build nobody ships, which is the whole reason it is a tag.
@@ -852,7 +935,63 @@ iteration allocates zero and growth happens only under a structural write lock �
 but at 30 Hz the spike is what is felt. So: `append` doubling for `dense` and for
 the sparse index, **nothing shrinks automatically**, and a
 reserve-at-registration hint lets an app that knows its peak buy the
-three-allocation column outright. Compaction stays out.
+three-allocation column outright. Compaction stays out. Capacity goes back only
+when the app asks, through [`ecs.ShrinkCmd`](#giving-memory-back).
+
+---
+
+## Giving memory back
+
+*Since Hooks, not yet built.* **Nothing in the ECS gives memory back on its own,
+and the app gives it back with one Command**
+([A Hooks reader that falls behind: what bounds its
+log](https://github.com/dvoyni/cog/issues/381)). A Store keeps its high-water
+capacity, and so do the free list, a System's scratch and a Hook log, so steady
+state never allocates. After a spike, such as a level load or a screen of
+effects, that capacity stays until the app releases it:
+
+```go
+type ShrinkCmd kernel.Command[ShrinkRequest, ShrinkResponse]
+
+type ShrinkRequest struct {
+    KeepHooks    bool // every Store's Hook log, and each reader's copy
+    KeepStores   bool // each Store's rows cut to its length, its sparse array to its highest index held
+    KeepEntities bool // the free list; unused indices at the top dropped behind a generation floor
+    KeepScratch  bool // per-System buffers: a Query's walk, a writer's row copies for Changed
+}
+
+type ShrinkResponse struct{ Hooks, Stores, Entities, Scratch uintptr } // bytes released
+```
+
+- **The zero request shrinks everything**, and each `Keep` option opts one area
+  out. The app executes it like any kernel Command.
+- **Shrinking means capacity equals length exactly**, with no slack left.
+- **The response reports bytes released per area.** Go frees the old arrays at
+  its next collection. Handing memory back to the OS stays the runtime's job, and
+  `debug.FreeOSMemory` is the caller's to call.
+- **The frames after it regrow capacity, and those frames allocate.** Shrink when
+  a spike has ended, not every frame.
+
+**Its lock is `write{*Entities}` alone, and that is enough.** Every handler that
+touches any Store declares `read{*Entities}`, and a Despawn already empties every
+Store under that one lock (see [the load-bearing
+invariant](#the-load-bearing-invariant-the-kernel-cannot-enforce)). So the
+Command excludes every ECS System while it runs, needs no Store lock and no
+registration order, and costs nothing in a frame that doesn't execute it. **The
+ecs plugin registers it itself.**
+
+**The generation floor.** `KeepEntities: false` drops free indices at the top of
+the index space. Dropping an index forgets its generation, so the authority keeps
+one generation floor, a `uint32`. An index allocated again after being dropped
+starts above any generation ever issued, so a stale handle can never match it.
+Staleness stays decided, never estimated.
+
+**Why there is no heuristic.** General containers never shrink on their own: Go
+slices and maps, Rust `Vec`, Bevy's message buffers, and flecs outside its
+manual `ecs_shrink`. Allocators shrink against a decaying peak. For a spike
+every *k* frames, "shrink under a quarter of capacity" shrinks between every pair
+of spikes and grows back. The engine cannot know when a load has ended, and the
+app does.
 
 ---
 
@@ -1169,6 +1308,7 @@ This is contract, not convention. A System takes any number of:
 | `*ecs.WriteableEntities` | `write{*Entities}` | despawning |
 | `*ecs.Get[T]` | `read{*Store[T]}` | reading one Component of an Entity it did not iterate to |
 | `*ecs.Set[T]` | `write{*Store[T]}` | writing, or inserting, the same |
+| `*ecs.Hooks[T, K]` | `read{*Entities}` + `read{*Store[T]}` | what happened to `T` since the System's last run — [`hooks.md`](hooks.md), *since Hooks, not yet built* |
 | `*ecs.Read[T]`, `*ecs.Write[T]` | the kernel's own read/write on `T` | any other plugin's resource |
 | `*ecs.In[T]` | nothing | a value projected out of the event |
 | `*ecs.Resp[Res]` | nothing | a command only: the answer it writes |
@@ -1280,9 +1420,9 @@ exactly once and never again.**
 Four rules make the whole of it.
 
 1. **Every handler that touches any Store declares `read{*Entities}`**,
-   unconditionally and first. Not only Queries: Accessors, `Add` and `Remove`
-   too, so the invariant is closed by construction rather than by the accident
-   that everything happens to use a Query.
+   unconditionally and first. Not only Queries: Accessors, `Add`, `Remove` and
+   Hooks too, so the invariant is closed by construction rather than by the
+   accident that everything happens to use a Query.
 2. **A Query field's pointer-ness is its access mode**, and a filter field
    contributes a read of its Store.
 3. **`Spawn` and `WriteableEntities` take `write{*Entities}`**, which supersedes
@@ -1290,6 +1430,12 @@ Four rules make the whole of it.
    the frame.
 4. **`ecs.Read[T]`/`ecs.Write[T]` join the same set**, so a bound plugin's
    resource is as visible in the signature as a Component is.
+
+**A Hooks reader adds its own two reads and never changes another handler's lock
+set.** A reader existing makes no writer declare more. `TestAHookNeverWidensALockSet`
+and an occupancy test hold that
+([The benchmarks hooks.md publishes, and the thresholds they are held
+to](https://github.com/dvoyni/cog/issues/385)).
 
 ### `write{*Entities}` is one entry, not N
 
@@ -1424,10 +1570,11 @@ A **structural change** is a change to which Entities have which Components, as
 against a change to a Component's value: `Spawn`, `Despawn`, adding a Component,
 removing one.
 
-**There is no exclusion mechanism to build, and nothing in the ECS is a
+**There is no exclusion mechanism to build, and no structural change is a
 Command.** That is the whole of [Structural change, and what excludes it from
 iteration](https://github.com/dvoyni/cog/issues/240), and it retired all four of
-that ticket's candidate answers at once. A `Uses` dispatch is not a scheduled
+that ticket's candidate answers at once. The ECS's only Command is
+[`ShrinkCmd`](#giving-memory-back), which is not a structural change. A `Uses` dispatch is not a scheduled
 unit — it passes `noLocks, noLocks` and runs on the calling goroutine — and the
 fold is **static**, run once at finalisation, transitively, with cycle
 detection. So **a handler's lock set is complete before the frame starts**: a
@@ -1452,6 +1599,11 @@ disguise. `Set[T].UpdateFor` **inserts when absent** — legal because it alread
 holds `write{*Store[T]}`, and safe during iteration because the reverse walk
 never reaches an appended entry. So `UpdateFor` is how a Component is added;
 `Remove[T]` is how one is taken away.
+
+**On a Store a Changed Hook watches, a `*T` Query field, `Ref` and `UpdateFor`
+copy the rows they hand out**, for the compare at the writer's run end. That is a
+cost the reader puts on every writer of `T`, and it is priced in
+[`hooks.md`](hooks.md#what-it-costs). *Since Hooks, not yet built.*
 
 **Gap.** The prototype builds `Query`, `Spawn`, `WriteableEntities`, `Read`,
 `Write` and `In`, and it was the accessors' *cost* that was measured — on the
@@ -1504,10 +1656,12 @@ holds a dead Entity**; **`len(owners)` stays the exact population** the Driver
 choice reads; and **`add` needs no orphan-slot branch** — without one, 1000
 recycles of an index leak 1000 dense entries, measured.
 
-So: swap-remove on `Remove[T]`, swap-remove on Despawn, **no compaction, no
-shrink, no sweep**, and the index returns to the free list immediately — safe
-not merely because generations are exact but because nothing stale is left to
-trip over.
+So: swap-remove on `Remove[T]`, swap-remove on Despawn, **nothing reclaims on its
+own**, and the index returns to the free list immediately — safe not merely
+because generations are exact but because nothing stale is left to trip over.
+This said "no compaction, no shrink, no sweep" until Hooks. Memory now goes back
+when the app executes [`ShrinkCmd`](#giving-memory-back), and never on the
+engine's initiative. What eager reclamation was chosen for is unchanged.
 
 **The vacated row is zeroed if, and only if, the Component is not pointer-free.**
 A pointer-free row is left where it lies, because nothing it holds keeps
@@ -1516,7 +1670,10 @@ numbers above were taken against and they are unchanged. A row holding a string
 or a List is cleared by a typed assignment, because otherwise the slot keeps a
 despawned Entity's data reachable until something else happens to take the row.
 `TestARemovedRowDoesNotKeepItsValueAlive` pins it with a finaliser, which is the
-only way to ask about reachability rather than a proxy for it.
+only way to ask about reachability rather than a proxy for it. **That holds for
+the Store, not for a Hook log:** on a Store a removal reader watches, the log
+keeps the removed value alive until the last reader passes it
+([`hooks.md`](hooks.md#the-log-and-the-locks-it-is-appended-under)).
 
 A Despawn reaches every Store through an interface carrying **exactly one
 method**, `remove(Entity)`. That costs 9%: 85 Stores are 218 ns through the
@@ -1525,7 +1682,13 @@ interface against 199 ns direct, zero allocations. Driver selection reads
 Since [#340](https://github.com/dvoyni/cog/issues/340) the authority is declared
 in `internal`, which cannot name that interface, so a Store enrols its one
 method bound to itself and a Despawn calls that: still one indirect call per
-Store, never per Entity.
+Store, never per Entity. A Store a Hook watches also enrols a capture, which a
+Despawn calls first so the removal is recorded with its last value; a world with
+no watched Store takes the path above unchanged. The Despawn figures here and
+the Spawn figures in the next section predate the nothing-watching cost Hooks
+add to both, which
+[`hooks.md`](hooks.md#budgets-for-the-costs-nobody-asked-for) publishes with its
+budgets.
 
 **The storm case is recorded, not designed for**: 500 despawns in a tick costs
 109 µs, a third of a 33 ms budget. The answer if a game hits it is
@@ -1591,16 +1754,19 @@ never run concurrently**, and torn state is unrepresentable.
 
 **No new promise is made:** a System sees every structural change made by
 Systems that ran before it and none from those that ran after; where two declare
-no ordering, which ran first is unspecified.
+no ordering, which ran first is unspecified. What a System reads through Hooks,
+its own acts included, is [`hooks.md`](hooks.md#when-a-system-sees-a-record)'s
+to specify.
 
-### Structural hooks are out of scope
+### Hooks: what happened, read by a System
 
-`OnAdd[T]` / `OnRemove[T]` would fire inside a structural change, under its
-lock, so they cannot be cog events without re-entering the world mid-mutation —
-and a callback there holds exactly the changing Store's lock and nothing else. A
-game's lifecycle hooks (create, init, die, pickup, drop, …) are ordinary cog
-events and the ECS owns none of them. **Ruled out of scope, not deferred**, so a
-future need arrives with a use case rather than as a reserved hole.
+This section said structural hooks were **"ruled out of scope, not deferred"**,
+so that a future need would arrive with a use case, and the use cases have
+arrived. Callbacks stay rejected for the reason it gave: `OnAdd[T]` /
+`OnRemove[T]` would fire inside a structural change, holding exactly the changing
+Store's lock and nothing else, which is why a Hook is instead a record that an
+ordinary System reads later under its own declared locks. They are specified in
+[`hooks.md`](hooks.md).
 
 ### The load-bearing invariant the kernel cannot enforce
 
@@ -1610,7 +1776,8 @@ touching a Store declares `read{*Entities}`.** It holds by construction — the
 only route to a Store is a generated handle, and the generated `Lock` always
 emits that read — but it is written into the spec as an invariant, not left
 implicit, because an implementation that added a second route would break it
-silently.
+silently. [`ShrinkCmd`](#giving-memory-back) is the second thing that relies on
+it: it rewrites every Store's arrays holding `write{*Entities}` alone.
 
 It is also why the obvious optimisation stays forbidden. A per-Entity bitmask of
 "which Stores hold me" would let a Despawn skip the scan, but the mask lives in
@@ -2036,16 +2203,19 @@ the population holds steady at n+1 across 500 ticks of spawn-and-despawn.
 **A constraint nobody wrote down is not a constraint**, so each of these says
 what would have to change, in what register.
 
-**Change detection — additive, and the shape is already settled.** `Added[T]`
-and `Changed[T]` arrive as further Query field types with the lock derivation
-unchanged, which is exactly the query-vocabulary growth axis requirement 3
-named — except that, unlike `Without`, they contribute a real **read**. What was
-never decided is the **storage and its per-frame cost**, and v1 ships without
-it: no consumer has asked, `Chunk` is already reserved for the one thing a real
-block would buy (a run of rows sharing one change version), and the open half
-touches the zero on the *write* path, so it must be measured on the same footing
-rather than argued. → [ecs: where a change tick lives, and what it costs a
-frame](https://github.com/dvoyni/cog/issues/268).
+**Change detection — specified, and not in the shape this section promised.** It
+said `Added[T]` and `Changed[T]` would arrive as further Query field types over
+per-Store change versions, with the lock derivation unchanged, and that only the
+storage and its per-frame cost were open. Neither half survived. Versions count
+write access as a change, where a Changed Hook counts a difference in bytes
+([What counts as a value change, for a Changed
+Hook](https://github.com/dvoyni/cog/issues/268)). And a reader shaped like a
+Query must widen the locks of every handle acting on its other Stores, which
+costs System parallelism: two Systems that ran in parallel in 44.0 µs took
+71.5 µs ([Where a Hook log lives, and what recording and resetting it
+cost](https://github.com/dvoyni/cog/issues/380)). A System learns what happened
+to one Component through `*ecs.Hooks[T, K]` instead, and `Chunk` stays unspent.
+→ [`hooks.md`](hooks.md).
 
 **Data-driven spawning and serialisation — additive.** No Component, Query,
 System signature or lock changes when it arrives, and the expensive part is
@@ -2066,7 +2236,10 @@ or System signature. →
 [#264](https://github.com/dvoyni/cog/issues/264).
 
 **Deferred structural change — additive, and it buys lock duration.** Not safety
-and not allocation, both of which are already had. →
+and not allocation, both of which are already had. A drained change reaches a
+Hook at the drain, as the same records an immediate change makes
+([Deferred structural change and Hooks: when a drained change is
+recorded](https://github.com/dvoyni/cog/issues/383)). →
 [#260](https://github.com/dvoyni/cog/issues/260).
 
 **Relations — not additive, and the promise is weaker on purpose.** The only
@@ -2256,7 +2429,8 @@ connotes a slice-like value, which a Query is not.
 The checklist the implementation was built from, in dependency order. It is kept
 because it is the record of what was promised; everything in the three code
 sections below exists in the package, the documentation items are done, and what
-remains open is called out at the end of the verification list.
+remains open is called out at the end of the verification list and in the
+*Since Hooks* block after it.
 
 **`ecs` package — the core**
 
@@ -2341,6 +2515,25 @@ remains open is called out at the end of the verification list.
   read is a data race, and validation mode catches the ones a run executes while
   the detector would catch the ones that interleave.
 
+**Since Hooks — open, none of it built**
+
+The items that change what this document specifies for code naming no Hooks.
+Everything else Hooks need is in [`hooks.md` § Required work](hooks.md#required-work)
+and in the implementation tickets under
+[the map](https://github.com/dvoyni/cog/issues/377).
+
+- `List.Set` with a pointer receiver and a generation in a 32-byte header
+  ([#268](https://github.com/dvoyni/cog/issues/268)).
+- `Set[C].Of` no longer stamping a write, so `Set` through its copy panics naming
+  `Ref` ([#387](https://github.com/dvoyni/cog/issues/387)).
+- The shared-array mark registered at the Changed compare, released at the
+  removing act ([#268](https://github.com/dvoyni/cog/issues/268),
+  [#386](https://github.com/dvoyni/cog/issues/386)).
+- `ShrinkCmd` and the generation floor
+  ([#381](https://github.com/dvoyni/cog/issues/381)).
+- The `*ecs.Hooks[T, K]` row in the signature contract
+  ([#380](https://github.com/dvoyni/cog/issues/380)).
+
 ---
 
 ## Out of scope
@@ -2359,13 +2552,9 @@ here so a reader of the spec alone does not re-propose them.
 - **The physics contract itself** — [Physics plugin: contract, swept queries,
   and an adopted backend](https://github.com/dvoyni/cog/issues/182), its own
   map. This spec fixes only the binding shape physics attaches through.
-- **Structural hooks** (`OnAdd[T]` / `OnRemove[T]`) — ruled out, not deferred.
 - **Chunk-parallel execution**, entirely, with its non-foreclosure obligation
   withdrawn. [#242](https://github.com/dvoyni/cog/issues/242) holds the full
   record.
-- **Change detection's storage and per-frame cost** —
-  [#268](https://github.com/dvoyni/cog/issues/268). The shape is settled and
-  stays settled.
 - **Data-driven spawning and world serialisation** —
   [#266](https://github.com/dvoyni/cog/issues/266). Includes **a
   runtime-addressable template**: a template is already just a value of a
