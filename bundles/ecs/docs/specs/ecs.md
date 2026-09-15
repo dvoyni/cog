@@ -42,8 +42,10 @@ this document says otherwise. [Required work](#required-work) is the checklist
 it was built from and now records what is still open. The zero-allocation
 prototype that produced the numbers below lived on the throwaway branch
 `proto/ecs-zero-alloc` and is gone; the benchmarks that replaced it are in the
-package. **The sections Hooks changed describe a design not yet built**, and
-[Required work](#required-work) lists those items as open under *Since Hooks*.
+package. The sections Hooks changed are built as well: [Required
+work](#required-work) records them under *Since Hooks*, and the package's README
+carries their measured cost under [*What a Hook
+costs*](../../README.md#what-a-hook-costs).
 
 **Two things here are younger than the rest, and each is marked where it
 appears.** The first: the Component rule was relaxed after the package shipped.
@@ -944,7 +946,7 @@ when the app asks, through [`ecs.ShrinkCmd`](#giving-memory-back).
 
 ## Giving memory back
 
-*Since Hooks, not yet built.* **Nothing in the ECS gives memory back on its own,
+*Since Hooks.* **Nothing in the ECS gives memory back on its own,
 and the app gives it back with one Command**
 ([A Hooks reader that falls behind: what bounds its
 log](https://github.com/dvoyni/cog/issues/381)). A Store keeps its high-water
@@ -1605,7 +1607,8 @@ never reaches an appended entry. So `UpdateFor` is how a Component is added;
 **On a Store a Changed Hook watches, a `*T` Query field, `Ref` and `UpdateFor`
 copy the rows they hand out**, for the compare at the writer's run end. That is a
 cost the reader puts on every writer of `T`, and it is priced in
-[`hooks.md`](hooks.md#what-it-costs). *Since Hooks, not yet built.*
+[`hooks.md`](hooks.md#what-it-costs), and measured in the README's [*What a Hook
+costs*](../../README.md#what-a-hook-costs). *Since Hooks.*
 
 **`Set[T].MarkChanged(e)` forces a Changed record for `e`** at the writer's run end, for a
 write the compare cannot see, such as a `Set` on a List nested in another List's
@@ -2437,8 +2440,8 @@ connotes a slice-like value, which a Query is not.
 The checklist the implementation was built from, in dependency order. It is kept
 because it is the record of what was promised; everything in the three code
 sections below exists in the package, the documentation items are done, and what
-remains open is called out at the end of the verification list and in the
-*Since Hooks* block after it.
+remains open is called out at the end of the verification list. The *Since
+Hooks* block after it is built too.
 
 **`ecs` package — the core**
 
@@ -2523,7 +2526,7 @@ remains open is called out at the end of the verification list and in the
   read is a data race, and validation mode catches the ones a run executes while
   the detector would catch the ones that interleave.
 
-**Since Hooks — open, except what is marked built**
+**Since Hooks — built**
 
 The items that change what this document specifies for code naming no Hooks.
 Everything else Hooks need is in [`hooks.md` § Required work](hooks.md#required-work)

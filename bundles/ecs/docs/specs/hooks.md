@@ -24,12 +24,15 @@ something unverified it is marked **Gap** and says what would settle it, and
 where assembling the decisions side by side settled something no ticket did, it
 is marked **Settled here**.
 
-**Nothing in this document is built yet.** The design was measured on the
-throwaway branch [`proto/ecs-hooks`](https://github.com/dvoyni/cog/tree/proto/ecs-hooks),
-and every figure below comes from there. [Required work](#required-work) is the
-checklist the implementation is built from. The rules in this document are also
-the list of behaviour tests. Where the package and this document disagree once
-it is built, the package is the defect unless this document says otherwise.
+**This document is built.** `github.com/dvoyni/cog/bundles/ecs` implements it,
+and what a Hook costs on the build is measured in the package README's [*What a
+Hook costs*](../../README.md#what-a-hook-costs). The design was first measured on
+the throwaway branch [`proto/ecs-hooks`](https://github.com/dvoyni/cog/tree/proto/ecs-hooks);
+[What it costs](#what-it-costs) keeps those figures as the record the build was
+held to, and the README's supersede them. [Required work](#required-work) is the
+checklist the implementation was built from. The rules in this document are also
+the list of behaviour tests. Where the package and this document disagree, the
+package is the defect unless this document says otherwise.
 
 `ecs.md` changed when this document landed, and those sections point here. What
 binds code that names no Hooks is stated there in full: a `List`'s `Set`, the
@@ -182,7 +185,8 @@ All five are relative to `T`.
   despawned.
 - **Spawned** is the special case of Added made by a Spawn.
 - **Despawned** is the special case of Removed made by a Despawn.
-- **Changed:** `T`'s bytes differ when a writer's run ends. See
+- **Changed:** `T`'s bytes differ when a writer's run ends, or the writer marked
+  the Entity with `Set[T].MarkChanged` for a write the bytes cannot show. See
   [Changed is a difference in bytes](#changed-is-a-difference-in-bytes).
 
 **One act, one record, and a record may be several kinds.** A Spawn carrying
@@ -281,7 +285,7 @@ of its readers' kind sets
 | --- | --- | --- |
 | a Spawn carrying `T` | spawned + added + changed | Spawned, Added or Changed |
 | `Set[T].UpdateFor` adding `T` | added + changed | Added or Changed |
-| a writer's run end, `T`'s bytes differ | changed | Changed |
+| a writer's run end, `T`'s bytes differ or `Set[T].MarkChanged` marked the Entity | changed | Changed |
 | `Remove[T].From` | removed | Spawned, Added, Changed or Removed |
 | a Despawn of an Entity holding `T` | despawned + removed | any kind |
 
@@ -566,10 +570,12 @@ constraint written onto it from
   starts with the first act.
 - **A writer reads its Store's watched kinds when each of its runs starts**, not
   when it registers. That covers a `*T` Query field, `Set[T]`, `Remove[T]` and a
-  `Spawn[S]` carrying `T`, and costs one load and one bit test per handle per
-  run, not per row. Dependency order puts an owner's writers before a dependent
-  plugin's readers, so a writer deciding at registration would never learn of
-  them.
+  `Spawn[S]` carrying `T`, and costs per handle per run, not per row: one load
+  and one bit test for the check itself, and 2–4 ns per handle per run on the
+  build once a writer's run end is counted, over its 1 ns budget (see
+  [Budgets](#budgets-for-the-costs-nobody-asked-for)). Dependency order puts an
+  owner's writers before a dependent plugin's readers, so a writer deciding at
+  registration would never learn of them.
 - **Row-copy buffers are allocated on a writer's first watched run and kept**, so
   steady state allocates nothing. Only [`ecs.ShrinkCmd`](ecs.md#giving-memory-back)
   releases them.
@@ -806,9 +812,11 @@ builds only.
 runs. Each is compared with the same frame holding an empty System in the
 reader's place, because the engine charges per subscription. Nothing-watching
 figures come from the prototype binary alternated with `main` over six runs.
-Single values are ±10%. The README's *What a Hook costs* carries the same arms
-re-measured on the build, and those figures supersede these once they exist
-([#385](https://github.com/dvoyni/cog/issues/385) §1).
+Single values are ±10%. The package README's [*What a Hook
+costs*](../../README.md#what-a-hook-costs) carries the same arms re-measured on
+the build, and those figures supersede these
+([#385](https://github.com/dvoyni/cog/issues/385) §1). The table stays as the
+record the build was held to.
 
 | what | result |
 | --- | --- |
@@ -839,29 +847,44 @@ a row crosses 32 → 40 B; a Query read or write over a `List` Component
 unchanged) is paid by every `List` user and is published in
 [`ecs.md` § The List](ecs.md#the-list).
 
-**Not yet measured, and measured by the build**
-([#385](https://github.com/dvoyni/cog/issues/385) §2):
-
-- the watch check at a writer's run start on an unwatched Store, per handle per
-  run, against today's bind;
-- the Validation counter's cost per counted run, in validating builds;
-- `ShrinkCmd` after a spike: bytes released per area, and how long it takes;
-- a writer's first watched run: the size of its row-copy allocation, then 0 on
-  every later run.
+**Four arms the prototype never had are measured only on the build**
+([#385](https://github.com/dvoyni/cog/issues/385) §2), and their figures are in
+the README's [*What a Hook costs*](../../README.md#what-a-hook-costs): the watch
+check at a writer's run start on an unwatched Store (`BenchmarkHookWatchCheck`),
+the Validation counter per counted run (`BenchmarkHookPaceCounter`), `ShrinkCmd`
+after a spike (`BenchmarkHookShrink`), and a writer's first watched run
+(`BenchmarkHookFirstWatchedRun`).
 
 ### Budgets, for the costs nobody asked for
 
 **Only costs paid without opting in carry a budget:** code that watches nothing,
 and the parallel frame ([#385](https://github.com/dvoyni/cog/issues/385) §6).
 
-| arm | budget | prototype |
-| --- | --- | --- |
-| nothing watching: `UpdateFor` add plus `Remove.From` | ≤ +1.0 ns | +0.55 |
-| nothing watching: Spawn with 2 fields | ≤ +1.0 ns | +0.8 |
-| nothing watching: Despawn with six enrolled Stores | ≤ +2.0 ns | +1.65 |
-| the watch check at run start, on an unwatched Store | ≤ 1 ns per handle per run | not measured |
-| Query frame at 1k and 10k, nothing watching | ≤ +3% | unchanged |
-| `churn` + `move` + reader at 10k | ≤ 1.10× its empty-System control | 1.04× |
+| arm | budget | prototype | build, against 50043cd |
+| --- | --- | --- | --- |
+| nothing watching: `UpdateFor` add plus `Remove.From` | ≤ +1.0 ns | +0.55 | +0.30 (7.69 → 7.99) |
+| nothing watching: Spawn with 2 fields | ≤ +1.0 ns | +0.8 | +0.02 (16.68 → 16.70) |
+| nothing watching: Despawn with six enrolled Stores | ≤ +2.0 ns | +1.65 | −0.29 (21.02 → 20.73); +1.28 when [#391](https://github.com/dvoyni/cog/issues/391) measured it |
+| the watch check at run start, on an unwatched Store | ≤ 1 ns per handle per run | not measured | **missed**: 2.08 per `Set` or `Remove`, 2.75 per Spawn field, 4.1 per `*T` Query field; accepted by the owner |
+| Query frame at 1k and 10k, nothing watching | ≤ +3% | unchanged | +1.9% at 1k, +2.2% at 10k |
+| `churn` + `move` + reader at 10k | ≤ 1.10× its empty-System control | 1.04× | 1.06× |
+
+**The watch check missed its budget, and the owner accepted the figures**
+([#395](https://github.com/dvoyni/cog/issues/395)). Measured with
+`BenchmarkHookWatchCheck`, one System run called by hand on Stores nothing
+watches, interleaved against 50043cd over seven rounds. The cost is more than one
+load and one bit test per handle:
+
+- a `Set` holds two gates, its own and its Store's row copy, and each check
+  stores its flag;
+- every writer's Store pays a `rowCopy.compare` call at run end, which does not
+  inline, even when nothing was copied;
+- a `*T` Query field also pays a loop over its row copies in `bind`;
+- the System call's loops over Spawns and readers run empty.
+
+Bringing it down toward 1 ns per handle per run is
+[ecs: Hooks watch check on unwatched writers down toward 1 ns per handle per
+run](https://github.com/dvoyni/cog/issues/403).
 
 - **How a budget is checked:** by hand, in the build, with interleaved A/B runs,
   five or more. The reference is **the parent of the first Hooks commit**, not a
@@ -875,10 +898,13 @@ and the parallel frame ([#385](https://github.com/dvoyni/cog/issues/385) §6).
 **Timings are published and never tested.** A test asserts only what can be
 counted exactly: allocations, lock sets, occupancy, record counts and sizes.
 
-**Escape analysis.** `-gcflags=-m` shows no `moved to heap` on the log append in
-the accessors, Spawn and Despawn; on a reader's fold and fill; on the whole-Store
-and per-row copies; on the compare at run end; or on `ShrinkCmd`. The README
-states it, as it does for the Query and Spawn, and nothing tests it.
+**Escape analysis.** `-gcflags=-m`, in both build modes, shows no `moved to
+heap` on the log append in the accessors, Spawn and Despawn; on a reader's fold
+and fill; on the whole-Store and per-row copies; on the compare at run end; on
+`MarkChanged`; or on `ShrinkCmd`'s execution. The package's one `moved to heap`
+is `entities` in the `ShrinkCmd` factory, one allocation when the plugin
+registers the Command. The README states it, as it does for the Query and Spawn,
+and nothing tests it.
 
 ---
 
