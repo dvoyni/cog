@@ -67,7 +67,11 @@ type componentClass struct {
 	// would let any plugin fabricate any other plugin's Components with no
 	// declared relationship, which is a bigger hole than the redundancy is a
 	// cost.
-	declareSet func(access kernel.ResourceAccess) func(e Entity, value unsafe.Pointer)
+	//
+	// The field it returns carries a second setter that also records the Spawn
+	// in the Store's Hook log, and the gate that chooses between them when a run
+	// starts. The offset is the Spawn's to fill.
+	declareSet func(access kernel.ResourceAccess) spawnField
 }
 
 // RegisterComponent declares that C is a Component of this world, and is the
@@ -123,10 +127,16 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 		// only as bytes at an offset: the deref here is where the Component's type
 		// comes back, and it is sound because the offset was taken from the same
 		// reflect.Type this class was baked for.
-		declareSet: func(access kernel.ResourceAccess) func(e Entity, value unsafe.Pointer) {
+		declareSet: func(access kernel.ResourceAccess) spawnField {
 			handle := access.GetWrite[*Store[C]]()
-			return func(e Entity, value unsafe.Pointer) {
-				handle.Get().Set(e, *(*C)(value))
+			return spawnField{
+				set: func(e Entity, value unsafe.Pointer) {
+					handle.Get().Set(e, *(*C)(value))
+				},
+				recorded: func(e Entity, value unsafe.Pointer) {
+					handle.Get().setRecorded(e, *(*C)(value))
+				},
+				hooks: hookGate{watch: &store.watch, mask: recordsSpawn},
 			}
 		},
 	}

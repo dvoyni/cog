@@ -5,6 +5,7 @@ import (
 	"iter"
 	"reflect"
 	"sync"
+	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
 )
@@ -23,6 +24,11 @@ import (
 // addition's value to the Entity's next removal, and fills what is still open
 // from the live Store under its own read{*Store[T]}. Its run end compacts what
 // every reader has passed and clears its copy.
+//
+// A Spawn and a Despawn append under write{*Entities}. A Spawn records on each
+// watched Store it carries, through the Store's setter baked beside the plain
+// one. A Despawn calls one capture per watched Store before the Stores are
+// emptied, each probing its own Store and retaining T's last value.
 
 // hookKind is the set of facts one record carries, all relative to its
 // Component. An act is recorded with every kind true of it.
@@ -41,7 +47,10 @@ const (
 // watched, because it fixes their values.
 const (
 	recordsAddition = kindAdded | kindChanged
+	recordsSpawn    = kindSpawned | recordsAddition
 	recordsRemoval  = kindSpawned | kindAdded | kindChanged | kindRemoved
+	// A Despawn is recorded whichever kind is watched, so it has no mask: every
+	// Store with a log enrols a capture.
 )
 
 // KindSet is the closed set of types a Hooks parameter names to choose which
@@ -190,11 +199,13 @@ func (l *hookLog[T]) compact() {
 	l.base = least
 }
 
-// logFor is the Store's log, created by the first reader that registers. A
-// Store nobody reads has none.
-func (s *Store[T]) logFor() *hookLog[T] {
+// logFor is the Store's log, created by the first reader that registers, which
+// also enrols the Store's Despawn capture: a Despawn is recorded whichever kind
+// is watched. A Store nobody reads has neither.
+func (s *Store[T]) logFor(en *Entities) *hookLog[T] {
 	if s.hooks == nil {
 		s.hooks = &hookLog[T]{trivial: s.trivial}
+		en.captures = append(en.captures, s.captureDespawn)
 	}
 	return s.hooks
 }
@@ -214,6 +225,41 @@ func (g *hookGate) check() { g.on = *g.watch&g.mask != 0 }
 
 // gated is a System parameter holding a hookGate.
 type gated interface{ gate() *hookGate }
+
+// spawnGate is a Spawn's check of the watched kinds of every Store its Component
+// set carries: a hookGate per field, and on when any of them is, so a Spawn
+// that records nowhere pays one test per New. fields shares its array with the
+// Spawn's own.
+type spawnGate struct {
+	fields []spawnField
+	on     bool
+}
+
+func (g *spawnGate) check() {
+	on := false
+	for i := range g.fields {
+		field := &g.fields[i].hooks
+		field.check()
+		on = on || field.on
+	}
+	g.on = on
+}
+
+// spawn writes each Component of a Spawn some watched Store carries, recording
+// the addition on each Store whose gate is on and on no other.
+func (g *spawnGate) spawn(e Entity, staging unsafe.Pointer) {
+	for i := range g.fields {
+		field := &g.fields[i]
+		if field.hooks.on {
+			field.recorded(e, unsafe.Add(staging, field.offset))
+		} else {
+			field.set(e, unsafe.Add(staging, field.offset))
+		}
+	}
+}
+
+// spawnGated is a System parameter holding a spawnGate.
+type spawnGated interface{ spawnGate() *spawnGate }
 
 // runEdges is a System parameter with work at the start and end of its System's
 // run.
@@ -282,7 +328,7 @@ func (h *Hooks[T, K]) prepare(en *Entities, access kernel.ResourceAccess) {
 	var k K
 	h.deliver = k.kinds()
 	store.watch |= h.deliver
-	h.log = store.logFor()
+	h.log = store.logFor(en)
 	h.place = h.log.base + uint64(len(h.log.records))
 	h.log.places = append(h.log.places, &h.place)
 }

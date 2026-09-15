@@ -135,6 +135,9 @@ type systemCall[E any] struct {
 	// are empty for a System that names neither, and cost it a length check.
 	gates   []*hookGate
 	readers []runEdges
+	// spawns are the Spawn parameters' checks, one per Spawn, each covering
+	// every Store its Component set carries.
+	spawns []*spawnGate
 }
 
 // lock is the System's kernel.Lock: it runs once, at registration, and declares
@@ -153,11 +156,14 @@ func (c *systemCall[E]) lock(access kernel.ResourceAccess) {
 	// this read rather than sitting beside it — which is what makes a structural
 	// change a total barrier.
 	access.GetRead[*Entities]()
-	c.gates, c.readers = c.gates[:0], c.readers[:0]
+	c.gates, c.readers, c.spawns = c.gates[:0], c.readers[:0], c.spawns[:0]
 	for _, param := range c.params {
 		param.prepare(c.entities, access)
 		if writer, ok := param.(gated); ok {
 			c.gates = append(c.gates, writer.gate())
+		}
+		if spawner, ok := param.(spawnGated); ok {
+			c.spawns = append(c.spawns, spawner.spawnGate())
 		}
 		if reader, ok := param.(runEdges); ok {
 			c.readers = append(c.readers, reader)
@@ -184,6 +190,9 @@ func (c *systemCall[E]) call(handle kernel.Kernel, driven E) {
 	// and cleared after, so a System's own acts appear in its next run.
 	for _, gate := range c.gates {
 		gate.check()
+	}
+	for _, spawn := range c.spawns {
+		spawn.check()
 	}
 	for _, reader := range c.readers {
 		reader.beginRun()
