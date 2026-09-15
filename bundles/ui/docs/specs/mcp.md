@@ -198,11 +198,17 @@ one specific window.
 
 ```go
 type LayoutRequest struct {
-	Path     string `json:"path,omitempty"`     // absolute, ending in .json
-	Subtree  *int   `json:"subtree,omitempty"`  // source index of a subtree root
-	MaxDepth *int   `json:"maxDepth,omitempty"`
+	Path     string       `json:"path,omitempty"`    // absolute, ending in .json
+	Subtree  m.Maybe[int] `json:"subtree,omitzero"`  // source index of a subtree root
+	MaxDepth m.Maybe[int] `json:"maxDepth,omitzero"`
 }
 ```
+
+> **Amended ([#312](https://github.com/dvoyni/cog/issues/312)).** The filters
+> were `*int` under `omitempty`, and are `m.Maybe[int]` under `omitzero` from
+> the request through `ui.ArmLayoutRequest` and `LayoutViewOf` to the echo in
+> `LayoutView`. The wire is unchanged: an absent filter is omitted, a missing or
+> `null` one reads as absent, and the tool schema still says a nullable integer.
 
 **`Path` is optional**, per the family's delivery contract: omit it and the JSON
 comes back inline, supply it and a greppable file is written. A small ui frame
@@ -309,6 +315,14 @@ my button in the wrong place*, answered rather than restated.
 > ui declaring material views that `gfx` already declares for the two
 > capabilities whose subject materials are. A ui element's material reaches an
 > agent through `canvas_draws`, on the op the visual recorded.
+
+> **Amended ([#312](https://github.com/dvoyni/cog/issues/312)).** ui's private
+> `opt[T]` is gone: `Element`'s constraints are `m.Maybe[T]`, which already
+> carries whether a value was set. The declared block's lengths, weights, layer
+> and counts, and an element's `drawOrder`, are `m.Maybe` under `omitzero`
+> rather than pointers under `omitempty`, and emit exactly what they did. The
+> block itself, `declared`, stays a pointer, so a plain element still costs
+> nothing. `ui/internal/wire_test.go` pins the documents byte for byte.
 
 ---
 

@@ -248,13 +248,24 @@ have.
 
 ```go
 type DrawsRequest struct {
-	Path      string   `json:"path,omitempty"`      // absolute, ending in .json
-	FromLayer *int     `json:"fromLayer,omitempty"`
-	ToLayer   *int     `json:"toLayer,omitempty"`
-	Kinds     []string `json:"kinds,omitempty"`     // op kinds to include
-	Vertices  []int    `json:"vertices,omitempty"`  // op indices to expand in full
+	Path      string       `json:"path,omitempty"`     // absolute, ending in .json
+	FromLayer m.Maybe[int] `json:"fromLayer,omitzero"`
+	ToLayer   m.Maybe[int] `json:"toLayer,omitzero"`
+	Kinds     []string     `json:"kinds,omitempty"`    // op kinds to include
+	Vertices  []int        `json:"vertices,omitempty"` // op indices to expand in full
 }
 ```
+
+> **Amended ([#312](https://github.com/dvoyni/cog/issues/312)).** The layer
+> bounds were `*int` under `omitempty`, and are `m.Maybe[int]` under `omitzero`
+> from the request through `canvas.ArmDrawsRequest` to the echo in `DrawsView`;
+> a layer's `window`, an op's `clip` and a triangle list's `bounds` are
+> `m.Maybe[RectView]` the same way. The wire is unchanged: an absent bound is
+> omitted, a missing or `null` one reads as absent, and the tool schema still
+> says a nullable integer. The per-kind blocks - `texture`, `transform`, `draw`,
+> `material`, `frame`, `nineSlice` - stay pointers, because inline they would
+> cost every op a block most ops do not have. `canvas/internal/wire_test.go`
+> pins the documents byte for byte.
 
 **`Path` is optional**, per the family's delivery contract: omit it and the JSON
 comes back inline, supply it and a greppable file is written. A small frame is

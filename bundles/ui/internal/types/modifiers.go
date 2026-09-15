@@ -4,6 +4,7 @@ import (
 	"iter"
 
 	"github.com/dvoyni/cog/bundles/canvas"
+	"github.com/dvoyni/cog/libs/m"
 )
 
 // NewElement returns an empty element declaration.
@@ -164,7 +165,7 @@ func (element Element) PaddingRel(values ...float32) Element {
 	return element.padding(values, relativeSize)
 }
 
-func (element Element) padding(values []float32, makeSize func(float32) opt[size]) Element {
+func (element Element) padding(values []float32, makeSize func(float32) m.Maybe[size]) Element {
 	if len(values) == 0 {
 		return element
 	}
@@ -227,22 +228,22 @@ func (element Element) PaddingBottomRel(value float32) Element {
 }
 
 func (element Element) Stretch(weight float32) Element {
-	element.stretch = someValue(weight)
+	element.stretch = m.Some(weight)
 	return element
 }
 
 func (element Element) Shrink(weight float32) Element {
-	element.shrink = someValue(weight)
+	element.shrink = m.Some(weight)
 	return element
 }
 
 func (element Element) Align(alignment Alignment) Element {
-	element.align = someValue(alignment)
+	element.align = m.Some(alignment)
 	return element
 }
 
 func (element Element) Layer(layer int) Element {
-	element.layer = someValue(layer)
+	element.layer = m.Some(layer)
 	return element
 }
 
@@ -260,7 +261,7 @@ func (element Element) Layer(layer int) Element {
 // per-draw material, so ui adds no precedence rule of its own and the batch key
 // is untouched.
 func (element Element) Material(set canvas.MaterialSet) Element {
-	element.material = someValue(set)
+	element.material = m.Some(set)
 	return element
 }
 
@@ -339,12 +340,12 @@ func (element Element) Layout(layout Layout) Element {
 }
 
 func (element Element) ChildrenArrangement(arrangement Arrangement) Element {
-	element.childrenArrangement = someValue(arrangement)
+	element.childrenArrangement = m.Some(arrangement)
 	return element
 }
 
 func (element Element) ChildrenAlignment(alignment Alignment) Element {
-	element.childrenAlignment = someValue(alignment)
+	element.childrenAlignment = m.Some(alignment)
 	return element
 }
 
@@ -364,12 +365,12 @@ func (element Element) Wrap() Element {
 }
 
 func (element Element) Columns(columns int) Element {
-	element.columns = someValue(columns)
+	element.columns = m.Some(columns)
 	return element
 }
 
 func (element Element) Rows(rows int) Element {
-	element.rows = someValue(rows)
+	element.rows = m.Some(rows)
 	return element
 }
 
@@ -389,14 +390,10 @@ func (element Element) UserData[T any](userData T) Element {
 	return element
 }
 
-func pixelSize(value float32) opt[size] {
-	return opt[size]{v: size{value: value}, set: true}
+func pixelSize(value float32) m.Maybe[size] {
+	return m.Some(size{value: value})
 }
 
-func relativeSize(value float32) opt[size] {
-	return opt[size]{v: size{value: value, relative: true}, set: true}
-}
-
-func someValue[T any](value T) opt[T] {
-	return opt[T]{v: value, set: true}
+func relativeSize(value float32) m.Maybe[size] {
+	return m.Some(size{value: value, relative: true})
 }

@@ -2,6 +2,7 @@ package canvas
 
 import (
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
@@ -20,11 +21,11 @@ type ArmDrawsCmd kernel.Command[ArmDrawsRequest, ArmDrawsResponse]
 // request is known: the serialization runs in the tick, and by then it already
 // knows what was asked for.
 type ArmDrawsRequest struct {
-	// FromLayer and ToLayer bound the layers kept, inclusive, and a nil one is
+	// FromLayer and ToLayer bound the layers kept, inclusive, and an absent one is
 	// unbounded on that side. Layers they drop are counted rather than silently
 	// missing, and every op keeps its own record index, so an index read off a
 	// filtered snapshot still addresses the same op in an unfiltered one.
-	FromLayer, ToLayer *int
+	FromLayer, ToLayer m.Maybe[int]
 	// Kinds keeps only the recording calls named. An empty list keeps them all.
 	Kinds []OpKind
 	// Vertices are the record indices of the triangle ops whose vertices are

@@ -166,7 +166,7 @@ A run of bytes treated as static: once the value holding it is built, nothing wr
 _Avoid_: Buffer, which is a GPU object; bytes, for a run that is still being written
 
 **Maybe**:
-A value that may be absent, held inline with no pointer. Its zero value is absent, so an optional field nobody wrote reads as unset, and a present zero stays distinct from it. It is what an optional field of a storable value uses where a pointer would make the value mutable indirection.
+A value that may be absent, held inline with no pointer. Its zero value is absent, so an optional field nobody wrote reads as unset, and a present zero stays distinct from it. It is what an optional field uses where a pointer would make the value mutable indirection, whether the value is stored, compared or rendered for an agent. It crosses JSON as the nullable value it holds, and an agent's tool schema reads it the same way.
 _Avoid_: Option, nullable, pointer-to-mean-optional
 
 **Tag**:

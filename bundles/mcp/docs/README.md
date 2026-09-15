@@ -274,7 +274,8 @@ owns the description prose and nothing else that reaches the wire.
   contributed, fails composition.
 - **Schemas** are inferred from the request and response types, with
   `mcp.TextValued` types overridden by the string schema they actually cross the
-  wire as.
+  wire as, and each `m.Maybe[T]` rendered as a pointer to `T` would be: `T`'s
+  schema with `null` admitted.
 - **Annotations**: `ReadOnlyHint` is the provider's statement,
   `DestructiveHint` is always false and never derived from `!readOnly`,
   `OpenWorldHint` is always false, `IdempotentHint` is left alone.

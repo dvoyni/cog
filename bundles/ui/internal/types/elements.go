@@ -148,7 +148,7 @@ var (
 	sharedInteractiveColorVisual             interactiveColorVisual
 )
 
-type packedVisualStates[T any] [16]opt[T]
+type packedVisualStates[T any] [16]m.Maybe[T]
 
 type InteractiveSpritePayload struct {
 	defaultValue SpriteParams
@@ -520,7 +520,7 @@ func packVisualStates[T any](values VisualStates[T]) packedVisualStates[T] {
 	for mask, value := range values {
 		for index := range packed {
 			if mask&(VisualState(1)<<index) != 0 {
-				packed[index] = opt[T]{v: value, set: true}
+				packed[index] = m.Some(value)
 			}
 		}
 	}
@@ -529,8 +529,11 @@ func packVisualStates[T any](values VisualStates[T]) packedVisualStates[T] {
 
 func (values *packedVisualStates[T]) value(state VisualState, fallback T) T {
 	for index := len(values) - 1; index >= 0; index-- {
-		if state&(VisualState(1)<<index) != 0 && values[index].set {
-			return values[index].v
+		if state&(VisualState(1)<<index) == 0 {
+			continue
+		}
+		if value, ok := values[index].Get(); ok {
+			return value
 		}
 	}
 	return fallback

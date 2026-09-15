@@ -2,6 +2,7 @@ package ui
 
 import (
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
@@ -28,12 +29,12 @@ type ArmLayoutRequest struct {
 	// Subtree is the source index of the element the report starts at. Flatten
 	// is depth-first pre-order, so a subtree is a contiguous index range and
 	// the filter is a slice rather than a traversal.
-	Subtree *int
+	Subtree m.Maybe[int]
 	// MaxDepth keeps elements no deeper than this below the reported root -
 	// zero is the root alone, one is the root and its children. Depth is
 	// measured from the subtree root when there is one and from each tree root
 	// otherwise.
-	MaxDepth *int
+	MaxDepth m.Maybe[int]
 }
 
 // ArmLayoutResponse hands back the wait and the viewport.

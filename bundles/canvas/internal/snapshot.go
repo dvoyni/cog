@@ -37,10 +37,11 @@ func keeps(r canvas.ArmDrawsRequest, kind canvas.OpKind) bool {
 
 // keepsLayer reports whether one layer survives the layer range.
 func keepsLayer(r canvas.ArmDrawsRequest, layerID canvas.Layer) bool {
-	if r.FromLayer != nil && int(layerID) < *r.FromLayer {
+	if from, ok := r.FromLayer.Get(); ok && int(layerID) < from {
 		return false
 	}
-	return r.ToLayer == nil || int(layerID) <= *r.ToLayer
+	to, ok := r.ToLayer.Get()
+	return !ok || int(layerID) <= to
 }
 
 // snapshotRequest is one live draw snapshot: the filter it was armed with, and
@@ -208,8 +209,7 @@ func speaks(value types.LayerOps) bool {
 func layerViewOf(layerID canvas.Layer, value types.LayerOps) canvas.LayerView {
 	view := canvas.LayerView{Layer: int(layerID), Target: "screen", Ops: len(value.Ops)}
 	if value.Window != (m.Rect{}) {
-		window := rectViewOf(value.Window)
-		view.Window, view.Aspect = &window, aspectModeName(value.Aspect)
+		view.Window, view.Aspect = m.Some(rectViewOf(value.Window)), aspectModeName(value.Aspect)
 	}
 	if texture, mip, arrayLayer, ok := value.Target.Texture(); ok {
 		view.Target, view.TargetTexture = "texture", texture
@@ -232,8 +232,7 @@ func opViewOf(index int, op canvas.Op, expand bool) canvas.OpView {
 		Params: gfx.ParameterViewsOf(op.Params),
 	}
 	if op.HasClip {
-		clip := rectViewOf(op.Clip)
-		view.Clip = &clip
+		view.Clip = m.Some(rectViewOf(op.Clip))
 	}
 	if op.HasMaterial {
 		material := gfx.MaterialViewOf(op.Material)
@@ -255,7 +254,7 @@ func opViewOf(index int, op canvas.Op, expand bool) canvas.OpView {
 	case canvas.OpTriangles:
 		view.VertexCount, view.VertexBytes = len(op.Vertices), op.VertexBytes
 		if bounds, ok := vertexBounds(op.Vertices); ok {
-			view.Bounds = &bounds
+			view.Bounds = m.Some(bounds)
 		}
 		if expand {
 			view.Vertices = vertexViewsOf(op.Vertices)

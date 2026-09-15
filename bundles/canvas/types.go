@@ -266,11 +266,11 @@ type DrawsView struct {
 	// OmittedOps and OmittedLayers are what it dropped. Whatever a snapshot
 	// omits it says it omitted: a tool that silently truncates cannot be told
 	// from a game that drew nothing.
-	FromLayer     *int     `json:"fromLayer,omitempty"`
-	ToLayer       *int     `json:"toLayer,omitempty"`
-	Kinds         []string `json:"kinds,omitempty"`
-	OmittedOps    int      `json:"omittedOps,omitempty"`
-	OmittedLayers int      `json:"omittedLayers,omitempty"`
+	FromLayer     m.Maybe[int] `json:"fromLayer,omitzero"`
+	ToLayer       m.Maybe[int] `json:"toLayer,omitzero"`
+	Kinds         []string     `json:"kinds,omitempty"`
+	OmittedOps    int          `json:"omittedOps,omitempty"`
+	OmittedLayers int          `json:"omittedLayers,omitempty"`
 }
 
 // LayerView is one canvas layer: the world window its ops are written in, what
@@ -281,8 +281,8 @@ type LayerView struct {
 	// Window is the world rectangle SetLayerTransform mapped onto the layer's
 	// surface, and Aspect how it was fitted. A layer that set neither has
 	// neither, and its coordinates are the logical viewport's own.
-	Window *RectView `json:"window,omitempty"`
-	Aspect string    `json:"aspect,omitempty"`
+	Window m.Maybe[RectView] `json:"window,omitzero"`
+	Aspect string            `json:"aspect,omitempty"`
 	// Target is screen or texture: a layer that named no target draws to the
 	// screen, and a layer drawing into a texture nothing composites afterwards
 	// is one of the ways a frame ends up empty.
@@ -314,7 +314,7 @@ type OpView struct {
 	// Clip is the recording-time clip rectangle in layer world space, present
 	// only where one was in effect. An op clipped to nothing draws nothing,
 	// which is an answer in itself.
-	Clip *RectView `json:"clip,omitempty"`
+	Clip m.Maybe[RectView] `json:"clip,omitzero"`
 	// Path and Transform describe a sprite, and Texture the gfx texture it
 	// samples where it named one instead of a resource path.
 	Path      string               `json:"path,omitempty"`
@@ -330,10 +330,10 @@ type OpView struct {
 	// Vertices is the full list, and is present only for an op the request
 	// named: a triangle-heavy frame is tens of thousands of them and nobody
 	// debugs by reading coordinates.
-	VertexCount int          `json:"vertexCount,omitempty"`
-	VertexBytes int          `json:"vertexBytes,omitempty"`
-	Bounds      *RectView    `json:"bounds,omitempty"`
-	Vertices    []VertexView `json:"vertices,omitempty"`
+	VertexCount int               `json:"vertexCount,omitempty"`
+	VertexBytes int               `json:"vertexBytes,omitempty"`
+	Bounds      m.Maybe[RectView] `json:"bounds,omitzero"`
+	Vertices    []VertexView      `json:"vertices,omitempty"`
 	// Material is the material the op named, and its absence means the op named
 	// none: such a draw resolves to the layer's material set and then to the
 	// built-in for its family, both at flush.

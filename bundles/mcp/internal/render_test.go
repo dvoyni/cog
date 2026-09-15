@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
@@ -145,5 +147,47 @@ func TestRender_NonObjectSchemaRootIsRejected(t *testing.T) {
 	var root mcp.ErrNonObjectSchema
 	if !errors.As(err, &root) || root.Root == "object" {
 		t.Fatalf("render error = %v, want ErrNonObjectSchema", err)
+	}
+}
+
+type testRect struct {
+	X     float32 `json:"x"`
+	Width float32 `json:"width"`
+}
+
+// pointerOptionals and maybeOptionals are one request spelled both ways an
+// optional field can be: the schema an agent reads must not say which.
+type pointerOptionals struct {
+	Layer *int      `json:"layer,omitempty" jsonschema:"a layer bound"`
+	Rect  *testRect `json:"rect,omitempty"`
+	Many  []*int    `json:"many,omitempty"`
+}
+
+type maybeOptionals struct {
+	Layer m.Maybe[int]      `json:"layer,omitzero" jsonschema:"a layer bound"`
+	Rect  m.Maybe[testRect] `json:"rect,omitzero"`
+	Many  []m.Maybe[int]    `json:"many,omitzero"`
+}
+
+// A Maybe crosses the wire as the nullable value a pointer did, so it renders
+// as the pointer's schema - never as the struct of unexported fields it is in
+// Go.
+func TestRender_AMaybeRendersAsThePointerItReplaced(t *testing.T) {
+	pointer := renderOne(t, mcp.Func("pointer", "", func(kernel.Executioner, pointerOptionals) (echoResponse, error) {
+		return echoResponse{}, nil
+	}))
+	maybe := renderOne(t, mcp.Func("maybe", "", func(kernel.Executioner, maybeOptionals) (echoResponse, error) {
+		return echoResponse{}, nil
+	}))
+	want, err := json.Marshal(pointer)
+	if err != nil {
+		t.Fatalf("marshal pointer schema: %v", err)
+	}
+	got, err := json.Marshal(maybe)
+	if err != nil {
+		t.Fatalf("marshal maybe schema: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("maybe schema = %s\nwant the pointer's %s", got, want)
 	}
 }

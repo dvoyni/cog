@@ -173,8 +173,8 @@ func (context *Processor) flatten(roots []Element, layers []canvas.Layer, materi
 		if item.parent >= 0 {
 			layer = context.nodes[item.parent].layer
 		}
-		if item.element.layer.set {
-			layer = item.base + canvas.Layer(item.element.layer.v)
+		if offset, ok := item.element.layer.Get(); ok {
+			layer = item.base + canvas.Layer(offset)
 		}
 
 		// The material set inherits exactly as the layer does: the parent's,
@@ -184,8 +184,10 @@ func (context *Processor) flatten(roots []Element, layers []canvas.Layer, materi
 		if item.parent >= 0 {
 			elementMaterials = context.nodes[item.parent].materials
 		}
-		if item.element.material.set {
-			elementMaterials = item.element.material.v
+		// Present first: Get would copy the whole set out for every element,
+		// and most elements name none.
+		if item.element.material.Present() {
+			elementMaterials, _ = item.element.material.Get()
 		}
 
 		nodeIndex := len(context.nodes)
@@ -229,12 +231,14 @@ func (context *Processor) disableGridOverflow() {
 	for nodeIndex := range context.nodes {
 		node := &context.nodes[nodeIndex]
 		element := node.element
-		if !node.active || element.layout != LayoutGrid || !element.columns.set || !element.rows.set {
+		declaredColumns, hasColumns := element.columns.Get()
+		declaredRows, hasRows := element.rows.Get()
+		if !node.active || element.layout != LayoutGrid || !hasColumns || !hasRows {
 			continue
 		}
 
-		columns := positiveCount(element.columns.v)
-		rows := positiveCount(element.rows.v)
+		columns := positiveCount(declaredColumns)
+		rows := positiveCount(declaredRows)
 		capacity := int(^uint(0) >> 1)
 		if rows <= capacity/columns {
 			capacity = rows * columns
@@ -264,7 +268,7 @@ func (context *Processor) measure(lookup canvas.LookupAccess) {
 		}
 
 		defaultSize := m.Vec2{}
-		if element.visual != nil && (!element.width.set || !element.height.set) {
+		if element.visual != nil && (!element.width.Present() || !element.height.Present()) {
 			defaultSize = element.visual.DefaultSize(lookup)
 		}
 		contentSize := context.measureContent(nodeIndex)
@@ -272,11 +276,11 @@ func (context *Processor) measure(lookup canvas.LookupAccess) {
 		paddingHeight := intrinsicSize(element.paddingTop) + intrinsicSize(element.paddingBottom)
 
 		width := max(defaultSize.X, contentSize.X) + paddingWidth
-		if element.width.set {
+		if element.width.Present() {
 			width = resolveSize(element.width, 0)
 		}
 		height := max(defaultSize.Y, contentSize.Y) + paddingHeight
-		if element.height.set {
+		if element.height.Present() {
 			height = resolveSize(element.height, 0)
 		}
 		width = constrain(width, element.minWidth, element.maxWidth, 0)
@@ -373,13 +377,13 @@ func (context *Processor) measureContent(nodeIndex int) m.Vec2 {
 			childWidth := childElement.intermediate.measured.X
 			if explicit, ok := absoluteSize(childElement.width); ok {
 				childWidth = explicit
-			} else if !childElement.width.set && relativeEdges(childElement.left, childElement.right) {
+			} else if !childElement.width.Present() && relativeEdges(childElement.left, childElement.right) {
 				childWidth = constrain(0, childElement.minWidth, childElement.maxWidth, 0)
 			}
 			childHeight := childElement.intermediate.measured.Y
 			if explicit, ok := absoluteSize(childElement.height); ok {
 				childHeight = explicit
-			} else if !childElement.height.set && relativeEdges(childElement.top, childElement.bottom) {
+			} else if !childElement.height.Present() && relativeEdges(childElement.top, childElement.bottom) {
 				childHeight = constrain(0, childElement.minHeight, childElement.maxHeight, 0)
 			}
 			width = max(width, intrinsicSize(childElement.left)+childWidth+intrinsicSize(childElement.right))
@@ -390,8 +394,10 @@ func (context *Processor) measureContent(nodeIndex int) m.Vec2 {
 	return m.Vec2{}
 }
 
-func relativeEdges(start, end opt[size]) bool {
-	return start.set && start.v.relative && end.set && end.v.relative
+func relativeEdges(start, end m.Maybe[size]) bool {
+	startLength, hasStart := start.Get()
+	endLength, hasEnd := end.Get()
+	return hasStart && startLength.relative && hasEnd && endLength.relative
 }
 
 // crossBasis is what a child's relative cross size measures against: the row's
@@ -532,10 +538,7 @@ func (context *Processor) arrangeFlow(nodeIndex int, horizontal bool) {
 			continue
 		}
 		size := arrangedSize(childNode.element, content)
-		alignment := valueOr(element.childrenAlignment, AlignStart)
-		if childNode.element.align.set {
-			alignment = childNode.element.align.v
-		}
+		alignment := childNode.element.align.Or(element.childrenAlignment.Or(AlignStart))
 		if crossDefinite && !canWrap && alignment == AlignStretch &&
 			!crossSizeSet(childNode.element, horizontal) && !mainSizeSet(childNode.element, horizontal) {
 			size = sizeFromStretchedCross(childNode.element, size, availableCross, horizontal)
@@ -587,14 +590,11 @@ func (context *Processor) arrangeFlow(nodeIndex int, horizontal bool) {
 			usedMain += items[itemIndex].main
 		}
 		freeMain := max(itemsAvailable-usedMain, 0)
-		mainPosition, arrangedGap := arrangementSpacing(valueOr(element.childrenArrangement, ArrangeStart), freeMain, len(items))
+		mainPosition, arrangedGap := arrangementSpacing(element.childrenArrangement.Or(ArrangeStart), freeMain, len(items))
 		for itemIndex := range items {
 			item := &items[itemIndex]
 			child := &context.nodes[item.node]
-			alignment := valueOr(element.childrenAlignment, AlignStart)
-			if child.element.align.set {
-				alignment = child.element.align.v
-			}
+			alignment := child.element.align.Or(element.childrenAlignment.Or(AlignStart))
 			itemCross := item.cross
 			if alignment == AlignStretch && !crossSizeSet(child.element, horizontal) {
 				itemCross = line.cross
@@ -603,14 +603,14 @@ func (context *Processor) arrangeFlow(nodeIndex int, horizontal bool) {
 			childCross := crossPosition + alignmentOffset(alignment, crossFree)
 			if horizontal {
 				child.rect = Rect{X: content.X + mainPosition, Y: content.Y + childCross, Width: item.main, Height: itemCross}
-				child.definiteWidth = child.element.width.set
-				child.definiteHeight = child.element.height.set ||
+				child.definiteWidth = child.element.width.Present()
+				child.definiteHeight = child.element.height.Present() ||
 					(alignment == AlignStretch && node.definiteHeight && !canWrap)
 			} else {
 				child.rect = Rect{X: content.X + childCross, Y: content.Y + mainPosition, Width: itemCross, Height: item.main}
-				child.definiteWidth = child.element.width.set ||
+				child.definiteWidth = child.element.width.Present() ||
 					(alignment == AlignStretch && node.definiteWidth && !canWrap)
-				child.definiteHeight = child.element.height.set
+				child.definiteHeight = child.element.height.Present()
 			}
 			mainPosition += item.main + fixedGap + arrangedGap
 		}
@@ -742,16 +742,13 @@ func (context *Processor) arrangeGrid(nodeIndex int) {
 		}
 		child := &context.nodes[context.flow[itemIndex].node]
 		size := arrangedSize(child.element, cell)
-		mainAlignment := arrangementAlignment(valueOr(element.childrenArrangement, ArrangeStart))
-		crossAlignment := valueOr(element.childrenAlignment, AlignStart)
-		if child.element.align.set {
-			crossAlignment = child.element.align.v
-		}
+		mainAlignment := arrangementAlignment(element.childrenArrangement.Or(ArrangeStart))
+		crossAlignment := child.element.align.Or(element.childrenAlignment.Or(AlignStart))
 		if crossAlignment == AlignStretch {
-			if !child.element.width.set {
+			if !child.element.width.Present() {
 				size.X = cell.Width
 			}
-			if !child.element.height.set {
+			if !child.element.height.Present() {
 				size.Y = cell.Height
 			}
 		}
@@ -770,8 +767,8 @@ func (context *Processor) arrangeGrid(nodeIndex int) {
 				Height: size.Y,
 			}
 		}
-		child.definiteWidth = child.element.width.set
-		child.definiteHeight = child.element.height.set
+		child.definiteWidth = child.element.width.Present()
+		child.definiteHeight = child.element.height.Present()
 	}
 }
 
@@ -1043,31 +1040,31 @@ func rectVisible(rect, clip Rect) bool {
 
 func arrangedSize(element *Element, containing Rect) m.Vec2 {
 	width := element.intermediate.measured.X
-	if element.width.set {
+	if element.width.Present() {
 		width = resolveSize(element.width, containing.Width)
 	}
 	height := element.intermediate.measured.Y
-	if element.height.set {
+	if element.height.Present() {
 		height = resolveSize(element.height, containing.Height)
 	}
 	width = constrain(width, element.minWidth, element.maxWidth, containing.Width)
 	height = constrain(height, element.minHeight, element.maxHeight, containing.Height)
-	if element.width.set && !element.height.set && element.intermediate.aspectRatio > 0 {
+	if element.width.Present() && !element.height.Present() && element.intermediate.aspectRatio > 0 {
 		height = max(width/element.intermediate.aspectRatio, element.intermediate.contentMinimum.Y)
 		height = constrain(height, element.minHeight, element.maxHeight, containing.Height)
-	} else if element.height.set && !element.width.set && element.intermediate.aspectRatio > 0 {
+	} else if element.height.Present() && !element.width.Present() && element.intermediate.aspectRatio > 0 {
 		width = max(height*element.intermediate.aspectRatio, element.intermediate.contentMinimum.X)
 		width = constrain(width, element.minWidth, element.maxWidth, containing.Width)
 	}
 	return m.Vec2{X: width, Y: height}
 }
 
-func resolveAxis(parentStart, parentLength, natural float32, dimension, minimum, maximum, start, end, pivotStart, pivotEnd opt[size]) (float32, float32, bool) {
+func resolveAxis(parentStart, parentLength, natural float32, dimension, minimum, maximum, start, end, pivotStart, pivotEnd m.Maybe[size]) (float32, float32, bool) {
 	length := natural
-	definite := dimension.set || (start.set && end.set)
-	if dimension.set {
+	definite := dimension.Present() || (start.Present() && end.Present())
+	if dimension.Present() {
 		length = resolveSize(dimension, parentLength)
-	} else if start.set && end.set {
+	} else if start.Present() && end.Present() {
 		denominator := 1 - relativeValue(pivotStart) - relativeValue(pivotEnd)
 		if denominator > 0 {
 			length = (parentLength - resolveSignedSize(start, parentLength) - resolveSignedSize(end, parentLength) +
@@ -1079,44 +1076,46 @@ func resolveAxis(parentStart, parentLength, natural float32, dimension, minimum,
 	length = constrain(length, minimum, maximum, parentLength)
 
 	position := parentStart - resolveSize(pivotStart, length)
-	if start.set {
+	if start.Present() {
 		position = parentStart + resolveSignedSize(start, parentLength) - resolveSize(pivotStart, length)
-	} else if end.set {
+	} else if end.Present() {
 		position = parentStart + parentLength - resolveSignedSize(end, parentLength) - length + resolveSize(pivotEnd, length)
 	}
 	return position, length, definite
 }
 
-func resolveSize(value opt[size], basis float32) float32 {
-	if !value.set {
+func resolveSize(value m.Maybe[size], basis float32) float32 {
+	length, ok := value.Get()
+	if !ok {
 		return 0
 	}
-	resolved := value.v.value
-	if value.v.relative {
+	resolved := length.value
+	if length.relative {
 		resolved *= basis
 	}
 	return max(resolved, 0)
 }
 
-func resolveSignedSize(value opt[size], basis float32) float32 {
-	if !value.set {
+func resolveSignedSize(value m.Maybe[size], basis float32) float32 {
+	length, ok := value.Get()
+	if !ok {
 		return 0
 	}
-	resolved := value.v.value
-	if value.v.relative {
+	resolved := length.value
+	if length.relative {
 		resolved *= basis
 	}
 	return resolved
 }
 
-func constrain(value float32, minimum, maximum opt[size], basis float32) float32 {
+func constrain(value float32, minimum, maximum m.Maybe[size], basis float32) float32 {
 	value = max(value, 0)
 	minimumValue := float32(0)
-	if minimum.set {
+	if minimum.Present() {
 		minimumValue = resolveSize(minimum, basis)
 	}
 	maximumValue := float32(math.Inf(1))
-	if maximum.set {
+	if maximum.Present() {
 		maximumValue = resolveSize(maximum, basis)
 	}
 	if minimumValue > maximumValue {
@@ -1125,37 +1124,40 @@ func constrain(value float32, minimum, maximum opt[size], basis float32) float32
 	return min(max(value, minimumValue), maximumValue)
 }
 
-func relativeValue(value opt[size]) float32 {
-	if value.set && value.v.relative {
-		return value.v.value
+func relativeValue(value m.Maybe[size]) float32 {
+	if length, ok := value.Get(); ok && length.relative {
+		return length.value
 	}
 	return 0
 }
 
-func absoluteValue(value opt[size]) float32 {
-	if value.set && !value.v.relative {
-		return max(value.v.value, 0)
+func absoluteValue(value m.Maybe[size]) float32 {
+	if length, ok := value.Get(); ok && !length.relative {
+		return max(length.value, 0)
 	}
 	return 0
 }
 
-func absoluteSize(value opt[size]) (float32, bool) {
-	if !value.set || value.v.relative {
+func absoluteSize(value m.Maybe[size]) (float32, bool) {
+	length, ok := value.Get()
+	if !ok || length.relative {
 		return 0, false
 	}
-	return max(value.v.value, 0), true
+	return max(length.value, 0), true
 }
 
 func gridShape(element *Element, count int, maxWidth, maxHeight, width, height float32, widthDefinite, heightDefinite bool) (int, int, bool) {
-	if element.columns.set && element.rows.set {
-		return positiveCount(element.columns.v), positiveCount(element.rows.v), false
+	declaredColumns, hasColumns := element.columns.Get()
+	declaredRows, hasRows := element.rows.Get()
+	if hasColumns && hasRows {
+		return positiveCount(declaredColumns), positiveCount(declaredRows), false
 	}
-	if element.columns.set {
-		columns := positiveCount(element.columns.v)
+	if hasColumns {
+		columns := positiveCount(declaredColumns)
 		return columns, max(ceilDiv(count, columns), 1), false
 	}
-	if element.rows.set {
-		rows := positiveCount(element.rows.v)
+	if hasRows {
+		rows := positiveCount(declaredRows)
 		return max(ceilDiv(count, rows), 1), rows, true
 	}
 	if count <= 0 {
@@ -1240,18 +1242,20 @@ func alignmentOffset(alignment Alignment, free float32) float32 {
 	}
 }
 
-func intrinsicSize(value opt[size]) float32 {
-	if !value.set || value.v.relative {
+func intrinsicSize(value m.Maybe[size]) float32 {
+	length, ok := value.Get()
+	if !ok || length.relative {
 		return 0
 	}
-	return max(value.v.value, 0)
+	return max(length.value, 0)
 }
 
-func intrinsicSignedSize(value opt[size]) float32 {
-	if !value.set || value.v.relative {
+func intrinsicSignedSize(value m.Maybe[size]) float32 {
+	length, ok := value.Get()
+	if !ok || length.relative {
 		return 0
 	}
-	return value.v.value
+	return length.value
 }
 
 func elementContentRect(element *Element, outer Rect) Rect {
@@ -1266,25 +1270,26 @@ func elementContentRect(element *Element, outer Rect) Rect {
 }
 
 func crossSizeSet(element *Element, horizontal bool) bool {
-	return crossDimension(element, horizontal).set
+	return crossDimension(element, horizontal).Present()
 }
 
-func crossDimension(element *Element, horizontal bool) opt[size] {
+func crossDimension(element *Element, horizontal bool) m.Maybe[size] {
 	if horizontal {
 		return element.height
 	}
 	return element.width
 }
 
-func isRelative(value opt[size]) bool {
-	return value.set && value.v.relative
+func isRelative(value m.Maybe[size]) bool {
+	length, ok := value.Get()
+	return ok && length.relative
 }
 
 func mainSizeSet(element *Element, horizontal bool) bool {
 	if horizontal {
-		return element.width.set
+		return element.width.Present()
 	}
-	return element.height.set
+	return element.height.Present()
 }
 
 func weightFor(element *Element, growing bool) float32 {
@@ -1292,10 +1297,11 @@ func weightFor(element *Element, growing bool) float32 {
 	if growing {
 		weight = element.stretch
 	}
-	if !weight.set {
+	value, ok := weight.Get()
+	if !ok {
 		return 0
 	}
-	return max(weight.v, 0)
+	return max(value, 0)
 }
 
 func mainLimits(element *Element, horizontal bool, basis float32) (float32, float32) {
@@ -1304,11 +1310,11 @@ func mainLimits(element *Element, horizontal bool, basis float32) (float32, floa
 		minimum, maximum = element.minWidth, element.maxWidth
 	}
 	minimumValue := float32(0)
-	if minimum.set {
+	if minimum.Present() {
 		minimumValue = resolveSize(minimum, basis)
 	}
 	maximumValue := float32(math.Inf(1))
-	if maximum.set {
+	if maximum.Present() {
 		maximumValue = resolveSize(maximum, basis)
 	}
 	if minimumValue > maximumValue {
@@ -1340,13 +1346,6 @@ func intersect(left, right Rect) Rect {
 	rightEdge := min(left.X+left.Width, right.X+right.Width)
 	bottomEdge := min(left.Y+left.Height, right.Y+right.Height)
 	return Rect{X: x, Y: y, Width: max(rightEdge-x, 0), Height: max(bottomEdge-y, 0)}
-}
-
-func valueOr[T any](value opt[T], fallback T) T {
-	if value.set {
-		return value.v
-	}
-	return fallback
 }
 
 func positiveCount(value int) int {

@@ -7,11 +7,6 @@ import (
 
 type ID string
 
-type opt[T any] struct {
-	v   T
-	set bool
-}
-
 type size struct {
 	value    float32
 	relative bool
@@ -114,16 +109,16 @@ func (b boundVisual[T]) Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, 
 type Element struct {
 	id                                           ID
 	userData                                     any
-	width, minWidth, maxWidth                    opt[size]
-	height, minHeight, maxHeight                 opt[size]
-	left, right, top, bottom                     opt[size]
-	pivotLeft, pivotRight, pivotTop, pivotBottom opt[size]
-	paddingLeft, paddingRight                    opt[size]
-	paddingTop, paddingBottom                    opt[size]
-	stretch, shrink                              opt[float32]
-	align                                        opt[Alignment]
-	layer                                        opt[int]
-	material                                     opt[canvas.MaterialSet]
+	width, minWidth, maxWidth                    m.Maybe[size]
+	height, minHeight, maxHeight                 m.Maybe[size]
+	left, right, top, bottom                     m.Maybe[size]
+	pivotLeft, pivotRight, pivotTop, pivotBottom m.Maybe[size]
+	paddingLeft, paddingRight                    m.Maybe[size]
+	paddingTop, paddingBottom                    m.Maybe[size]
+	stretch, shrink                              m.Maybe[float32]
+	align                                        m.Maybe[Alignment]
+	layer                                        m.Maybe[int]
+	material                                     m.Maybe[canvas.MaterialSet]
 	ignoreLayout                                 bool
 	ignoreClip                                   bool
 	ignoreHitTest                                bool
@@ -133,11 +128,11 @@ type Element struct {
 
 	children            []Element
 	layout              Layout
-	childrenArrangement opt[Arrangement]
-	childrenAlignment   opt[Alignment]
-	gap                 opt[size]
+	childrenArrangement m.Maybe[Arrangement]
+	childrenAlignment   m.Maybe[Alignment]
+	gap                 m.Maybe[size]
 	wrap                bool
-	columns, rows       opt[int]
+	columns, rows       m.Maybe[int]
 
 	visual Visual
 
