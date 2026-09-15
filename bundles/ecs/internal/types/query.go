@@ -240,6 +240,7 @@ func (q *Query[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
 		}
 	}
 	q.run = newRunToken(kernel.TypeName(queryType))
+	en.enrolScratch(q.release)
 }
 
 // All iterates the Entities having every Component the Query names, yielding
@@ -591,4 +592,32 @@ func (q *Query[Q]) stampRow(e Entity, driverRow uintptr) {
 		}
 		stampRun(unsafe.Add(field.cursor.rows, row*field.cursor.size), field.lists, field.owner, q.run, mode)
 	}
+}
+
+// release drops everything a run captured, and reports the bytes the walk
+// held. The walk and the cursors alias the Stores of the last run and the fill
+// buffer may address one of their rows, so between runs they keep those arrays
+// reachable: once a shrink has replaced a Store's arrays, the old ones stay
+// alive until this Query next runs, which for a System on a rare event may be
+// never. Nothing reads any of it before bind captures it afresh, so dropping
+// it changes no run.
+//
+// The bytes counted are the walk's capacity, which is the driver Store's owners
+// array as that run saw it. The same array is a Store's until that Store
+// shrinks, so the two areas count it independently and are not summed.
+//
+// Only ShrinkCmd calls it, holding write{*Entities}, which excludes the System
+// that owns this Query.
+func (q *Query[Q]) release() uintptr {
+	released := uintptr(cap(q.walk)) * unsafe.Sizeof(Entity(0))
+	q.walk = nil
+	for i := range q.fields {
+		q.fields[i].cursor.sparse = nil
+		q.fields[i].cursor.rows = nil
+	}
+	// A typed assignment, so a pointer field the fill wrote without a barrier is
+	// cleared with one.
+	var empty Q
+	q.rows = empty
+	return released
 }

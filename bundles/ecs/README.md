@@ -26,7 +26,8 @@ ecs has the declaration-root shape of
   whole library a System author uses: `Entity`, `NoEntity`, the `Entities` and
   `Store` resources, `Query`, `With` and `Without`, `Spawn` and
   `WriteableEntities`, the `Get`, `Set` and `Remove` accessors, `List`, `Read`
-  and `Write`, `In` and `Feeder`, `Resp`, `Config` and `Name`. Its functions,
+  and `Write`, `In` and `Feeder`, `Resp`, `ShrinkCmd` with `ShrinkRequest` and
+  `ShrinkResponse`, `Config` and `Name`. Its functions,
   `RegisterComponent`, `NewStore`, `Storable`, `PointerFree`, `ToHandler`,
   `ToExecute`, `Feed`, `NewList` and `ListOf`, are forwarders in `utils.go`. It
   declares no plugin, and it is what every other package imports.
@@ -38,8 +39,8 @@ ecs has the declaration-root shape of
   handles, and both handler builders with the parameter classification they
   share. The root aliases every type and forwards every function to it.
 - **`bundles/ecs/internal`** is the plugin: its `New`, the resolution of
-  `ecs.Config`, and a `Register` that publishes the authority and does nothing
-  else.
+  `ecs.Config`, and a `Register` that publishes the authority, registers
+  `ShrinkCmd`, and does nothing else.
 - **`bundles/ecs/ecsplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
 
@@ -47,8 +48,8 @@ The aliased types stay concrete types (`type Entities = types.Entities`,
 `type Query[Q any] = types.Query[Q]`): no probe, fill or spawn goes through an
 interface, and a despawn pays the one indirect call per Store it always paid.
 Their exported methods (`Entities.Alive`, `Query.All`, `Store.Get`, …) are
-public API through the alias. What the plugin needs beyond that is the one
-function `internal/types` exports in `friends.go`, which nothing outside
+public API through the alias. What the plugin needs beyond that is the two
+functions `internal/types` exports in `friends.go`, which nothing outside
 `bundles/ecs` can call. `internal/types` never imports the root. The types are
 declared there, but the kernel's architecture output and every ecs diagnostic
 still name them `ecs.X` — the resource is `*ecs.Entities`, a Store
@@ -72,9 +73,9 @@ kernel.New(config).WithPlugins(ecsplugin.New(), physics.New(), game.New())
 
 **No plugin constructor takes the world.** `ecsplugin.New` creates the authority
 from its config and publishes it as the `*Entities` resource every System holds
-for read and every structural change holds for write; it registers nothing else,
-because Components are registered by the plugins that define them and Systems
-are ordinary subscriptions.
+for read and every structural change holds for write. Besides that it registers
+only [`ShrinkCmd`](#giving-memory-back), because Components are registered by the
+plugins that define them and Systems are ordinary subscriptions.
 
 Component registration and the handler builder still need the authority at
 registration, before any handler runs. They read it with
@@ -135,7 +136,9 @@ Indices are **recycled through a free list**, which is what bounds every Store's
 flat sparse index by *peak concurrent* entities rather than by entities ever
 created. Reclamation is **eager and is therefore nothing at all**: a despawn
 empties every Store immediately and the index returns to the free list at once.
-There is no compaction, no shrink and no sweep anywhere in the package.
+**Nothing reclaims on its own**: there is no compaction and no sweep, and the free
+list keeps its high-water capacity until the app shrinks it through
+[`ShrinkCmd`](#giving-memory-back).
 
 **Allocating and despawning are not methods a reader can call.** `Entities` is
 held for read by every handler that touches any Store, so the authority to
@@ -201,8 +204,9 @@ handle's `Get` return a copy, so mutations through it are silently discarded.
 empty it; component registration is its sanctioned caller, and that is where the
 pointer-free check and the kernel resource come from. Its `ids` argument is a
 reserve hint: reserving buys an allocation-free fill, where growing from empty
-doubles repeatedly. **Nothing shrinks** — the arrays are re-sliced, never handed
-back, so a respawn reuses the row.
+doubles repeatedly. **Nothing shrinks on its own** — a removal re-slices the
+arrays and never hands them back, so a respawn reuses the row, and the app gives
+the capacity back through [`ShrinkCmd`](#giving-memory-back).
 
 Two consequences of swap-remove are contract:
 
@@ -215,6 +219,41 @@ Two consequences of swap-remove are contract:
 
 A **Tag** — a Component with no fields — is an ordinary Store whose rows carry
 nothing, so its dense array costs no memory however many entities it holds.
+
+### Giving memory back
+
+```go
+released, err := executioner.ExecuteCommand[ecs.ShrinkCmd](ecs.ShrinkRequest{})
+// released.Stores, released.Entities, released.Scratch, released.Hooks: bytes
+```
+
+**Nothing in the ECS gives memory back on its own, and the app gives it back
+with one Command.** A Store, the free list and a Query's walk keep their
+high-water capacity, so steady state never allocates; after a spike, such as a
+level load or a screen of effects, the app executes `ShrinkCmd`, because the app
+knows when the spike has ended and a heuristic cannot.
+
+- **The zero request shrinks every area to capacity equal to length**, and each
+  `Keep` option opts one out: `KeepStores` (each Store's rows, cut to its
+  population, and its sparse array, cut to its highest index held),
+  `KeepEntities` (the free list, and the free indices at the top of the index
+  space), `KeepScratch` (each Query's walk) and `KeepHooks`, which has nothing to
+  release until Hook logs exist and reports 0.
+- **The response is the bytes each area released.** An area kept reports 0 and
+  its capacity is unchanged. A Query's walk aliases its driver Store's owners
+  array, so `Scratch` and `Stores` can count the same array and are not summed.
+  Go frees the old arrays at its next collection; `debug.FreeOSMemory` is the
+  caller's to call.
+- **The frames after it regrow what they need, and those frames allocate.**
+  Shrink when a spike has ended, not every frame. After them the frame is back on
+  its line, within 0.05 objects of an engine that never shrank.
+- **A dropped index keeps its handles stale.** Dropping an index forgets its
+  generation, so the authority keeps one generation floor: an index allocated
+  again starts above every generation it was ever issued, and a handle from
+  before the shrink never matches the Entity it is allocated to.
+- **Its lock is `write{*Entities}` alone**, which excludes every ECS System while
+  it runs, because every handler that touches a Store holds `read{*Entities}`. It
+  costs nothing in a frame that doesn't execute it.
 
 ## Components: what a Component may hold
 
@@ -743,8 +782,9 @@ func fire(sp *ecs.Spawn[Projectile], we *ecs.WriteableEntities) {
 ```
 
 A **structural change** is a change to which Entities have which Components, as
-against a change to a Component's value. **Nothing here is a Command**, and that
-is the part most likely to be built wrong from habit: `Spawn[S].New` and
+against a change to a Component's value. **No structural change is a Command**
+(the ECS's one Command is [`ShrinkCmd`](#giving-memory-back), which changes no
+membership), and that is the part most likely to be built wrong from habit: `Spawn[S].New` and
 `WriteableEntities.Despawn` are direct calls on handles the System already
 holds, not messages, not a queue and not a deferred buffer. There is no
 exclusion mechanism to build either, because the lock set below already excludes

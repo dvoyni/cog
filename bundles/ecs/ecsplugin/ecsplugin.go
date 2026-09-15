@@ -8,5 +8,5 @@ import (
 )
 
 // New creates the ecs plugin, which publishes the id authority, *ecs.Entities,
-// sized by ecs.Config. It requires no Adapter.
+// sized by ecs.Config, and registers ecs.ShrinkCmd. It requires no Adapter.
 func New() kernel.Plugin { return internal.New() }
