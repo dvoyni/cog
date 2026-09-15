@@ -239,6 +239,10 @@ func (r *Remove[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 
 func (r *Remove[T]) gate() *hookGate { return &r.hooks }
 
+func (r *Remove[T]) removes(en *Entities) *storeHeader {
+	return en.classOf(reflect.TypeFor[T]()).header
+}
+
 // From takes this Component away from e and reports whether e had one. It is
 // swap-remove, so it relocates whichever Entity owned the last row.
 //
@@ -250,6 +254,9 @@ func (r *Remove[T]) gate() *hookGate { return &r.hooks }
 // it stood.
 func (r *Remove[T]) From(e Entity) bool {
 	store := r.store.Get()
+	if validate && len(store.lists) > 0 {
+		releaseLists(store.erase(), e)
+	}
 	if r.hooks.on {
 		return store.removeRecorded(e)
 	}

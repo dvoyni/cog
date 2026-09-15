@@ -202,6 +202,11 @@ func (c *rowCopy) compare() {
 			log.changed(e, c.writer)
 		}
 	}
+	if validate && len(store.lists) > 0 {
+		// Each compared row's Lists are registered to it: ecs.md § Validation
+		// mode, the second owner.
+		holdLists(store, size, c.owners)
+	}
 	c.owners, c.rows, c.marks = c.owners[:0], c.rows[:0], c.marks[:0]
 	c.taken, c.whole = false, false
 	c.run++
