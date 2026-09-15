@@ -3,11 +3,12 @@ package types
 // listMode is what a stamp records about the last handle a List's backing array
 // was reached through, and it is the whole of what the write check consults.
 //
-// The four are not a hierarchy. modeStored says the array is in the world and
+// The five are not a hierarchy. modeStored says the array is in the world and
 // the only legal route to it is a write-locked handle; modeRead says the run
 // that handed it out held a read; modeWrite says the run held a write, and is
 // the one mode a write is legal under; modeSetOf says a write-locked handle
-// handed out a copy rather than the row.
+// handed out a copy rather than the row; modeHook says a Hooks reader handed it
+// out in a record's value.
 type listMode uint8
 
 const (
@@ -28,4 +29,11 @@ const (
 	// would see the write. Set.Of stamped modeWrite until Hooks; Ref is the
 	// route to a List a System means to write.
 	modeSetOf
+	// modeHook is stamped by a Hooks reader on every List in a record's value
+	// it fills or folds. An addition's or a change's value shares the stored
+	// row's arrays, and a removal's is shared by every reader's copy, so a Set
+	// through either writes memory other Systems read under read{T}. It is tied
+	// to no run: a Set through a value kept past the run panics the same way.
+	// modeRead's message names *T as the fix, which is the wrong one for a Hook.
+	modeHook
 )

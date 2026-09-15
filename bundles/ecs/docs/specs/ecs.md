@@ -476,7 +476,7 @@ read, write and stored cases tested again one List further in:
 | `Set` through a value retained past the `All()` that yielded it | **panics**, naming the run |
 | `Set` through the caller's own copy, after the value entered a Store | **panics** — `ListOf` copies, but `Set` shares |
 | `Set` through a `Set[C].Of` copy | **panics**, naming `Ref` |
-| `Set` on an array a second Component holds while its first owner still holds it | **panics**, naming both — *since Hooks, not yet built* |
+| `Set` on an array a second Component holds while its first owner still holds it | **panics**, naming both |
 | `Set` through a Hooks value, at any time | **panics**, naming `Hooks[T, K]` — see [`hooks.md`](hooks.md#a-value-that-holds-a-list) |
 | any of the above, on a List inside another List's elements | the same as the flat case — the stamp walks nested Lists |
 | registering a `Hooks[C, HookAddedChanged]` or `Hooks[C, HookAll]` reader of a Component with implicit padding, between fields, at the tail, or inside a nested struct or array | **panics** at registration, naming the Component, the field the gap follows or "at the end", the byte count, and the `_ [N]byte` field that fixes it — see [`hooks.md`](hooks.md#changed-is-a-difference-in-bytes) |
@@ -2532,7 +2532,8 @@ and in the implementation tickets under
   ([#388](https://github.com/dvoyni/cog/issues/388)).
 - The shared-array mark registered at the Changed compare, released at the
   removing act ([#268](https://github.com/dvoyni/cog/issues/268),
-  [#386](https://github.com/dvoyni/cog/issues/386)).
+  [#386](https://github.com/dvoyni/cog/issues/386)). **Built**
+  ([#393](https://github.com/dvoyni/cog/issues/393)).
 - `ShrinkCmd` and the generation floor
   ([#381](https://github.com/dvoyni/cog/issues/381)). **Built for Stores,
   Entities with the generation floor, and a Query's walk**

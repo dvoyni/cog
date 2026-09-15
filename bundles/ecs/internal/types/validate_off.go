@@ -28,4 +28,15 @@ func (*runToken) end()   {}
 
 func stampStored(unsafe.Pointer, []listSite, string)                   {}
 func stampRun(unsafe.Pointer, []listSite, string, *runToken, listMode) {}
+func stampHook(unsafe.Pointer, []listSite, string, string, string)     {}
+func holdLists(*storeHeader, uintptr, []Entity)                        {}
+func releaseLists(*storeHeader, Entity)                                {}
+func releaseEntityLists(Entity)                                        {}
 func checkListWritable(unsafe.Pointer)                                 {}
+
+// hookUnder is the kind set a delivered Hook carries for IsX to check, which a
+// release build does not, so it is zero-size and a Hook is as wide as it was.
+type hookUnder = struct{}
+
+func underOf(hookKind) hookUnder        { return hookUnder{} }
+func deliveredUnder(hookUnder) hookKind { return 0 }

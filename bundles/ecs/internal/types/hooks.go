@@ -102,6 +102,10 @@ func (HookAll) kinds() hookKind {
 // reader's copy is cleared. Value may be copied out and kept.
 type Hook[T any] struct {
 	kinds hookKind
+	// under is, in a validating build, the kind set the record was delivered
+	// under, which IsX checks against. It is zero-size in a release build, and
+	// sits between the kinds and Value so it adds no padding there.
+	under hookUnder
 	// Value is T as the record carries it: a removal's last value, taken at the
 	// act; or, for an addition, T at the Entity's next removal, or at the
 	// reader's run start if it has not been removed since.
@@ -109,20 +113,45 @@ type Hook[T any] struct {
 }
 
 // IsSpawned reports whether the record is of a Spawn carrying T.
-func (h *Hook[T]) IsSpawned() bool { return h.kinds&kindSpawned != 0 }
+func (h *Hook[T]) IsSpawned() bool {
+	if validate {
+		h.ask(kindSpawned, "IsSpawned")
+	}
+	return h.kinds&kindSpawned != 0
+}
 
 // IsDespawned reports whether the record is of a Despawn of an Entity holding T.
-func (h *Hook[T]) IsDespawned() bool { return h.kinds&kindDespawned != 0 }
+func (h *Hook[T]) IsDespawned() bool {
+	if validate {
+		h.ask(kindDespawned, "IsDespawned")
+	}
+	return h.kinds&kindDespawned != 0
+}
 
 // IsAdded reports whether the act gave the Entity T.
-func (h *Hook[T]) IsAdded() bool { return h.kinds&kindAdded != 0 }
+func (h *Hook[T]) IsAdded() bool {
+	if validate {
+		h.ask(kindAdded, "IsAdded")
+	}
+	return h.kinds&kindAdded != 0
+}
 
 // IsRemoved reports whether the act took T away.
-func (h *Hook[T]) IsRemoved() bool { return h.kinds&kindRemoved != 0 }
+func (h *Hook[T]) IsRemoved() bool {
+	if validate {
+		h.ask(kindRemoved, "IsRemoved")
+	}
+	return h.kinds&kindRemoved != 0
+}
 
 // IsChanged reports whether the record gives the reader a value of T it has not
 // seen. Every addition carries it.
-func (h *Hook[T]) IsChanged() bool { return h.kinds&kindChanged != 0 }
+func (h *Hook[T]) IsChanged() bool {
+	if validate {
+		h.ask(kindChanged, "IsChanged")
+	}
+	return h.kinds&kindChanged != 0
+}
 
 // hookRecord is one act in a Store's log, 24 bytes: the full Entity, generation
 // included, so a despawned Entity and the one reusing its index are never
@@ -153,6 +182,10 @@ type hookRecords struct {
 	// places is each reader's absolute position: the first record its next run
 	// start takes.
 	places []*uint64
+	// runs is Validation mode's count of the runs that appended to the log,
+	// each counted once at its System's run end. A release build never reads
+	// or writes it. See hookvalidate.go.
+	runs uint64
 }
 
 // changed records a change a writer's run end found in e's bytes. The caller
@@ -343,10 +376,20 @@ type Hooks[T any, K KindSet] struct {
 	// later removal fixed it instead. Both keep their capacity.
 	out   []hookEntry[T]
 	fills []int32
+	// under is deliver as each delivered Hook carries it: K's kinds in a
+	// validating build, and nothing in a release one.
+	under hookUnder
 	marks []hookMark
 	run   uint32
 	// writer is this reader's System, whose own changes it skips.
 	writer uint32
+	// seen, named and system are Validation mode's, and a release build never
+	// sets them: the log's count of appending runs at this reader's last run,
+	// and this parameter's and its System's names for the diagnostics. See
+	// hookvalidate.go.
+	seen   uint64
+	named  string
+	system string
 }
 
 // prepare declares the locks, and adds K's kinds to the Store's watched kinds.
@@ -364,6 +407,7 @@ func (h *Hooks[T, K]) prepare(en *Entities, access kernel.ResourceAccess) {
 	store := class.store.(*Store[T])
 	var k K
 	h.deliver = k.kinds()
+	h.under = underOf(h.deliver)
 	if validate && h.deliver&kindChanged != 0 {
 		if where, bytes := implicitPadding(componentType); bytes > 0 {
 			panic(fmt.Sprintf(
@@ -375,11 +419,20 @@ func (h *Hooks[T, K]) prepare(en *Entities, access kernel.ResourceAccess) {
 	store.watch |= h.deliver
 	h.log = store.logFor(en)
 	h.place = h.log.base + uint64(len(h.log.records))
+	h.seen = h.log.runs
 	h.log.places = append(h.log.places, &h.place)
 }
 
-// ownedBy is told this reader's System when the System registers.
-func (h *Hooks[T, K]) ownedBy(writer uint32) { h.writer = writer }
+// ownedBy is told this reader's System when the System registers: its writer
+// name, and in a validating build the name its diagnostics use.
+func (h *Hooks[T, K]) ownedBy(writer uint32, system string) {
+	h.writer = writer
+	if validate {
+		h.system = system
+		h.named = fmt.Sprintf("Hooks[%s, %s]",
+			kernel.TypeName(reflect.TypeFor[T]()), kernel.TypeName(reflect.TypeFor[K]()))
+	}
+}
 
 // All yields the records fixed at this run's start, in the order the acts
 // happened. Nothing is netted: a removal then a re-addition is two records.
@@ -418,6 +471,9 @@ func (h *Hooks[T, K]) mark(e Entity) *hookMark {
 // change, which is where the one standalone Changed is delivered. A change this
 // reader's own System recorded is skipped, as if it were not in the log.
 func (h *Hooks[T, K]) beginRun() {
+	if validate {
+		h.keepPace()
+	}
 	h.run++
 	if h.run == 0 {
 		clear(h.marks)
@@ -440,7 +496,7 @@ func (h *Hooks[T, K]) beginRun() {
 			m.window = windowOpen
 			m.entry, m.fill = int32(len(h.out)), int32(len(h.fills))
 			h.fills = append(h.fills, m.entry)
-			h.out = append(h.out, hookEntry[T]{e: r.e, hook: Hook[T]{kinds: r.kinds}})
+			h.out = append(h.out, hookEntry[T]{e: r.e, hook: Hook[T]{kinds: r.kinds, under: h.under}})
 			continue
 		}
 		m := h.mark(r.e)
@@ -452,7 +508,7 @@ func (h *Hooks[T, K]) beginRun() {
 			}
 			m.window, m.entry, m.fill = windowClosed, -1, -1
 			if r.kinds&h.deliver != 0 {
-				h.out = append(h.out, hookEntry[T]{e: r.e, hook: Hook[T]{kinds: r.kinds, Value: *retained}})
+				h.out = append(h.out, hookEntry[T]{e: r.e, hook: Hook[T]{kinds: r.kinds, under: h.under, Value: *retained}})
 			}
 			continue
 		}
@@ -460,7 +516,7 @@ func (h *Hooks[T, K]) beginRun() {
 		if r.kinds&h.deliver != 0 {
 			m.entry, m.fill = int32(len(h.out)), int32(len(h.fills))
 			h.fills = append(h.fills, m.entry)
-			h.out = append(h.out, hookEntry[T]{e: r.e, hook: Hook[T]{kinds: r.kinds}})
+			h.out = append(h.out, hookEntry[T]{e: r.e, hook: Hook[T]{kinds: r.kinds, under: h.under}})
 		}
 	}
 	h.place = l.base + uint64(len(l.records))
@@ -474,6 +530,13 @@ func (h *Hooks[T, K]) beginRun() {
 		out := &h.out[entry]
 		if row, ok := store.probe(out.e); ok {
 			out.hook.Value = store.dense[row]
+		}
+	}
+	if validate && len(store.lists) > 0 {
+		// Every value this copy was given, filled or folded, is a read of T:
+		// hooks.md § A value that holds a List.
+		for i := range h.out {
+			stampHook(unsafe.Pointer(&h.out[i].hook.Value), store.lists, store.owner, h.named, h.system)
 		}
 	}
 }

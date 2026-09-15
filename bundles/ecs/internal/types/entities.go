@@ -167,6 +167,11 @@ func (en *Entities) despawn(e Entity) bool {
 	if !en.Alive(e) {
 		return false
 	}
+	if validate {
+		// The Entity's Components stop holding their Lists at the Despawn,
+		// whatever a Hook log retains: ecs.md § Validation mode.
+		releaseEntityLists(e)
+	}
 	// Every capture runs before any Store is emptied, so each records T's value
 	// as it stood at the Despawn. Despawn's one call to each Store is unchanged.
 	for _, capture := range en.captures {

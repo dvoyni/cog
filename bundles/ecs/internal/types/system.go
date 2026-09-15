@@ -142,6 +142,9 @@ type systemCall[E any] struct {
 	// rows of with write access, shared by every handle on that Store and
 	// compared when its run ends. Each one's gate is among gates.
 	copies []*rowCopy
+	// pace is Validation mode's count of this System's runs on the Hook logs it
+	// can append to, and a release build never fills it. See hookvalidate.go.
+	pace systemPace
 }
 
 // lock is the System's kernel.Lock: it runs once, at registration, and declares
@@ -164,6 +167,11 @@ func (c *systemCall[E]) lock(access kernel.ResourceAccess) {
 	// writer names this System on the Changed records its run end appends, and
 	// is what its own Hooks readers skip.
 	writer := c.entities.nextWriter()
+	var system string
+	if validate {
+		system = systemName(c.fn)
+		c.pace = systemPace{}
+	}
 	for _, param := range c.params {
 		param.prepare(c.entities, access)
 		if checked, ok := param.(gated); ok {
@@ -179,13 +187,40 @@ func (c *systemCall[E]) lock(access kernel.ResourceAccess) {
 			c.readers = append(c.readers, reader)
 		}
 		if owned, ok := param.(ownedReader); ok {
-			owned.ownedBy(writer)
+			owned.ownedBy(writer, system)
+		}
+		if validate {
+			c.enrolPace(param)
+		}
+	}
+	if validate {
+		for _, copied := range c.copies {
+			c.pace.enrol(copied.store)
 		}
 	}
 }
 
+// enrolPace names to Validation mode's pace count the Stores a parameter lets
+// the System append to the logs of. A Set and a *T Query field are named by
+// their row copies, once every parameter is prepared.
+func (c *systemCall[E]) enrolPace(param systemParam) {
+	switch p := param.(type) {
+	case *WriteableEntities, spawnGated:
+		c.pace.every = true
+	case remover:
+		c.pace.enrol(p.removes(c.entities))
+	}
+}
+
+// remover is a Remove parameter, naming the Store it removes from.
+type remover interface {
+	removes(en *Entities) *storeHeader
+}
+
 // ownedReader is a Hooks parameter, told which System it belongs to.
-type ownedReader interface{ ownedBy(writer uint32) }
+type ownedReader interface {
+	ownedBy(writer uint32, system string)
+}
 
 // shareRowCopy is the row copy this System keeps for own's Store: the one an
 // earlier handle on the same Store already holds, or own itself, enrolled.
@@ -227,12 +262,18 @@ func (c *systemCall[E]) call(handle kernel.Kernel, driven E) {
 	for _, reader := range c.readers {
 		reader.beginRun()
 	}
+	if validate {
+		c.pace.begin(c.entities)
+	}
 	c.fn.Call(c.args)
 	// A change is recorded at the writer's run end, after every write the run
 	// made, and after this System's readers took their copies, which is why none
 	// of them is given it.
 	for _, copied := range c.copies {
 		copied.compare()
+	}
+	if validate {
+		c.pace.end()
 	}
 	for _, reader := range c.readers {
 		reader.endRun()
