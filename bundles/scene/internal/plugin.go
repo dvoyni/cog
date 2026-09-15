@@ -253,7 +253,7 @@ func (p *plugin) prepareDraws(
 		// buffer-built draw's is the zero value, which is a valid offset rather
 		// than an absent one.
 		skin := &p.prepared[i].anim.Skin
-		p.prepared[i].interned = p.materials.intern(report, record.Material,
+		p.prepared[i].interned = p.materials.intern(report, record.Material, record.MaterialKey,
 			types.VariantFor(skin.Bound, skin.Morphed))
 		if !skin.Bound && !skin.Morphed {
 			p.prepared[i].anim.Offset = types.SceneNoAnim

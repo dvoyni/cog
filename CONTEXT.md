@@ -307,7 +307,7 @@ The name of what a Pass is for, and the key that selects which of a Scene materi
 _Avoid_: Queue, light mode
 
 **Scene material**:
-The set of graphics materials one recorded thing offers, one per Pass tag. A Pass whose tag it has no entry for does not draw that thing. A recording call copies it — its entries and each entry's parameters, but not their Blobs — so the caller may change it the moment the call returns; two equal ones batch together however each was built, because a Scene material is keyed by content.
+The set of graphics materials one recorded thing offers, one per Pass tag. A Pass whose tag it has no entry for does not draw that thing. A recording call copies it — its entries and each entry's parameters, but not their Blobs, and once per frame per distinct content — so the caller may change it the moment the call returns; two equal ones batch together however each was built, because a Scene material is keyed by content.
 _Avoid_: Shader
 
 **Transform**:

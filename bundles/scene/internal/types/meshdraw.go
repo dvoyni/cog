@@ -77,11 +77,12 @@ func (q *OpQueue) Mesh(layers LayerMask, ref MeshRef, draw MeshDraw) {
 		q.meshes.params = append(q.meshes.params, params...)
 		params = q.meshes.params[start:len(q.meshes.params):len(q.meshes.params)]
 	}
-	draw.Material = q.meshes.copyMaterial(draw.Material)
+	var key MaterialKey
+	draw.Material, key = q.meshes.copyMaterial(draw.Material)
 	draw.Transforms, draw.Params = transforms, params
 	q.calls = append(q.calls, Op{Kind: OpMesh, Layers: layers, Mesh: ref, Draw: draw})
 	record := DrawRecord{
-		Layers: layers, Transform: draw.Transform, Material: draw.Material,
+		Layers: layers, Transform: draw.Transform, Material: draw.Material, MaterialKey: key,
 		Mesh: ref, Params: params, Bounds: draw.sphere(), NeverCull: draw.NeverCull,
 	}
 	if len(transforms) == 0 {
@@ -179,8 +180,12 @@ type MeshRecording struct {
 	// materials holds the tag entries of every Material a draw named; each
 	// entry's parameters are copied into params beside the draw's own.
 	materials []MaterialTag
-	Reports   []error
-	layouts   layoutCache
+	// copies finds this frame's copy of a material by content key, so a
+	// material named by a thousand draws is copied once. It keeps its buckets
+	// across frames.
+	copies  map[MaterialKey]Material
+	Reports []error
+	layouts layoutCache
 }
 
 func (r *MeshRecording) reset() {
@@ -191,13 +196,14 @@ func (r *MeshRecording) reset() {
 	r.params = r.params[:0]
 	clear(r.materials)
 	r.materials = r.materials[:0]
+	clear(r.copies)
 	r.Reports = r.Reports[:0]
 }
 
 // copyMaterial copies a caller's Material into the recording's arenas - its tag
 // entries into materials, each entry's parameters into params - and returns the
-// copy, which aliases the arenas for exactly as long as a draw's copied
-// Transforms and Params do.
+// copy with its content key. The copy aliases the arenas for exactly as long as
+// a draw's copied Transforms and Params do.
 //
 // It is what takes away the obligation the flush used to put on every caller:
 // reading the caller's slices at flush meant a material had to be kept alive
@@ -205,24 +211,41 @@ func (r *MeshRecording) reset() {
 // the difference, because a material is keyed by content and never by where
 // its bytes live.
 //
+// A material whose content this frame has already copied is not copied again:
+// the earlier copy is returned. The reuse is keyed by content rather than by
+// the caller's slice, because a caller may rewrite a shared material between
+// two draws, and the later draw must see the rewrite. Two materials whose keys
+// collide share a copy, which is no new risk: the flush interns by the same key
+// and would draw both with the first either way. The key is handed on, so
+// the flush does not fingerprint the material a second time.
+//
 // A nil Material stays nil, because nil is the bundled PBR and an empty
 // non-nil Material is a different answer - a material serving no pass. An empty
 // one is returned as a zero-capacity window of itself rather than sliced out of
 // the arena, because an arena that has never held an entry is nil and would
-// turn the empty material into the bundled PBR.
-func (r *MeshRecording) copyMaterial(material Material) Material {
+// turn the empty material into the bundled PBR. Neither is keyed.
+func (r *MeshRecording) copyMaterial(material Material) (Material, MaterialKey) {
 	if material == nil {
-		return nil
+		return nil, 0
 	}
 	if len(material) == 0 {
-		return material[:0:0]
+		return material[:0:0], 0
+	}
+	key := MaterialKeyOf(material)
+	if copied, ok := r.copies[key]; ok {
+		return copied, key
 	}
 	start := len(r.materials)
 	for _, entry := range material {
 		entry.Descr, r.params = entry.Descr.CloneTo(r.params)
 		r.materials = append(r.materials, entry)
 	}
-	return r.materials[start:len(r.materials):len(r.materials)]
+	copied := r.materials[start:len(r.materials):len(r.materials)]
+	if r.copies == nil {
+		r.copies = map[MaterialKey]Material{}
+	}
+	r.copies[key] = copied
+	return copied, key
 }
 
 // Record builds the mesh record one temporary draws from. Its buffers are

@@ -180,7 +180,7 @@ func TestAModelDrawWithAMaterialReplacesTheFilesWholesale(t *testing.T) {
 	for i := range records {
 		// The draw binds the recording's copy of the caller's material, so the
 		// two are one material by content rather than by address.
-		if len(records[i].Material) != 1 || materialKeyOf(records[i].Material) != materialKeyOf(replacement) {
+		if len(records[i].Material) != 1 || types.MaterialKeyOf(records[i].Material) != types.MaterialKeyOf(replacement) {
 			t.Errorf("draw %d binds a material other than the caller's", i)
 		}
 		if records[i].Pbr != nil {

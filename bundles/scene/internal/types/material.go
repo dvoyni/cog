@@ -1,6 +1,9 @@
 package types
 
 import (
+	"encoding/binary"
+	"hash/maphash"
+
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
@@ -36,6 +39,37 @@ func (t MaterialTag) tag() PassTag {
 		return TagForward
 	}
 	return t.Tag
+}
+
+// MaterialKey identifies one Material by content: a fingerprint of each entry's
+// tag and gfx material - shader source-or-path, pipeline state and parameter
+// bytes. A caller-supplied gfx.MaterialDescr has no id of its own, and keying
+// by the slice's backing instead would hand the spec's own idiom,
+// Material{{Descr: descr}} built inline per draw, a fresh id every draw and so
+// never sort two of them together.
+//
+// Zero is never a key. It is what a draw record carries when nothing keyed its
+// material at record, which tells the flush to key it there.
+type MaterialKey uint64
+
+var materialSeed = maphash.MakeSeed()
+
+// MaterialKeyOf keys material by content. A fingerprint that lands on zero is
+// read as one, which folds it into the same one-in-2^64 collision class every
+// other key already risks.
+func MaterialKeyOf(material Material) MaterialKey {
+	var h maphash.Hash
+	h.SetSeed(materialSeed)
+	var buf [8]byte
+	for i := range material {
+		h.WriteString(string(material[i].tag()))
+		binary.LittleEndian.PutUint64(buf[:], material[i].Descr.Fingerprint())
+		h.Write(buf[:])
+	}
+	if key := MaterialKey(h.Sum64()); key != 0 {
+		return key
+	}
+	return 1
 }
 
 // grow returns a slice of exactly n elements, reusing values' backing when it

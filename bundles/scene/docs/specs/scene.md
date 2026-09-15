@@ -731,6 +731,22 @@ copy is of descriptors and never of megabytes.
 the descriptors live, so a copied material batches with its equals exactly as
 the original did.
 
+**A material is copied once per frame, not once per draw**
+([#314](https://github.com/dvoyni/cog/issues/314)). The recording takes the
+material's content key first and looks it up among the frame's copies; a hit
+hands the draw the earlier copy and copies nothing. The lookup is by content and
+never by the caller's slice, because a caller may rewrite a shared material
+between two draws of one frame and the later draw must see the rewrite — keyed
+by slice identity it would be handed the earlier draw's copy, which is the very
+bug the copy exists to close. Two materials whose keys collide share one copy,
+which adds no risk: the flush interns by that same key and would draw both with
+the first either way. The copies are forgotten when the recording resets, since
+the arenas they point into are rewritten from the next frame on.
+
+The key is not paid twice. The draw record carries it to the flush, which
+interns by it without fingerprinting again; only a draw the recording did not
+key — a model's own glTF materials — is keyed at the flush.
+
 **What it replaced, and what it costs.** Two alternatives were measured first
 and refused, and their per-draw numbers are what the frame benchmark below is
 checked against. Both come from a throwaway microbenchmark over a
@@ -739,7 +755,7 @@ iterations, medians of five, AMD Ryzen 9 7950X3D, Go 1.27.1, windows/amd64:
 
 | per draw | ns | allocs | at 5 000 draws |
 | --- | --- | --- | --- |
-| `Material.key()`, the content key the flush pays per draw naming a material | **106** | 0 | 0.53 ms |
+| `Material.key()`, the content key paid per draw naming a material — at the flush then, at record since [#314](https://github.com/dvoyni/cog/issues/314) | **106** | 0 | 0.53 ms |
 | rebuilding a whole material into a frame arena that keeps its backing | **62** | 0 | 0.31 ms |
 
 A durable `MaterialRef` — a handle baked once, whose key is computed at bake —
@@ -777,7 +793,7 @@ Four things are worth carrying out of it.
   5 000 draws, against the four-parameter material the 62 ns row measured. The
   run ranges do not overlap, so +10.6% and +13.1% of a frame are real rather than
   run order. Copying a shared material once per frame instead of once per draw
-  is [#314](https://github.com/dvoyni/cog/issues/314).
+  is [#314](https://github.com/dvoyni/cog/issues/314), measured below.
 - **The content key is not where a material's frame cost is.** Before the copy,
   naming a shared material cost 192 ns a draw over the bundled PBR, against the
   106 ns the key alone was predicted at — key, intern and a material record per
@@ -789,6 +805,28 @@ Four things are worth carrying out of it.
   recorded draws are not merged, which is the deferred automatic collapse
   ([#49](https://github.com/dvoyni/cog/issues/49)), and the copy changes nothing
   about batching.
+
+**Once per frame** ([#314](https://github.com/dvoyni/cog/issues/314)). Measured
+before and after the recording started reusing a frame's copy by content key and
+handing that key to the flush, by the same method: both binaries built first, ten
+runs of each interleaved, 60 frames a run, medians with the run range; same
+machine and Go:
+
+| per frame | before: ms | after: ms | Δ per draw | B | allocs | batches |
+| --- | --- | --- | --- | --- | --- | --- |
+| none | 13.24 (12.95–13.43) | 13.18 (12.92–13.71) | −12 ns (noise) | 15.0 MB | 5 028 | 5 000 |
+| shared | 16.14 (15.74–16.19) | 14.16 (13.96–14.30) | **−396 ns** | 14.7 MB | 27–29 | 5 000 |
+| override | 17.63 (17.23–18.21) | 15.26 (15.04–15.39) | **−475 ns** | 14.7 MB | 27–28 | 5 000 |
+
+- **It wins back more than the copy cost.** The "before" column sits about 6%
+  above the record-time copy's own "after" run on the same machine, which is the
+  run-to-run drift whole-frame numbers carry; within this run the ranges do not
+  overlap, and the shared case is 12% of a frame faster, the override case 13%.
+  Keying 5 000 draws at record and probing a map is cheaper than 5 000 copies of
+  3.6 KB of descriptors, and the flush no longer keys at all.
+- **Allocation and batching are unchanged.** The copies map keeps its buckets
+  across frames; the allocation count wanders between 27 and 29 in both binaries.
+  Every draw is still its own batch.
 
 **One trap in writing such a benchmark.** A material whose textures are inline
 bytes measures gfx rather than scene: gfx bakes an inline texture into a
@@ -1885,7 +1923,9 @@ read, not a map hit. Every mesh scene can draw comes from a scene-owned handle: 
 model primitive, a `MeshRef`, or a built-in unit mesh. The single exception is a
 caller-supplied `gfx.MaterialDescr`, which has no `ID()`; those are **interned
 per frame** by a fingerprint of shader source-or-path + `MaterialState` +
-parameter bytes, costing one map hit only for draws that pass one.
+parameter bytes, costing one map hit only for draws that pass one. The recording
+takes that fingerprint when it copies the material and the draw record carries
+it, so the flush's hit does not fingerprint again.
 
 `materialID` is per `(material, tag)` rather than per material, because the sort
 key must distinguish the pipelines actually bound in that pass.
