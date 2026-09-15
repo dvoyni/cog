@@ -17,6 +17,7 @@ structure holds that cost down. The results and the verdict are in
 | `queryindex/shape.go` | Closed-form sweeps: a circle (a point is radius 0) against a circle, box or segment. Exact rounded growth, cog#306's `Hit`. |
 | `queryindex/index.go` | `Linear`, the brute-force oracle. |
 | `queryindex/grid.go` | Uniform grid: rectangle scan for short sweeps, an ordered cell walk with early-out for long ones. |
+| `queryindex/hashgrid.go` | The same grid with hashed cells: no world extent. |
 | `queryindex/bvh.go` | Median-split BVH, rebuilt or refit, walked nearer-child-first. |
 | `queryindex/workload.go` | Seeded layouts and query sets. |
 | `queryindex/*_test.go` | Oracle agreement, zero-allocation checks, benchmarks, shape-test counts. |

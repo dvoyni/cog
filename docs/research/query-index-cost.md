@@ -10,7 +10,7 @@ down](https://github.com/dvoyni/cog/issues/345), under the physics map
 `-benchtime 200ms`. All figures are ns per call unless marked µs. Raw output, the medians and the
 shape-test counts are in `bundles/ecsphysics2d/proto/results/`.
 
-## The answer in six lines
+## The answer in seven lines
 
 1. **A uniform grid, for both indices.** It is 4–7× cheaper than a BVH on every short query at the
    reference workload (30–50 ns against 190–300 ns; 2× in a 0.25 / m² melee), 7–10× cheaper than `gox2d`'s tree, and 20–25×
@@ -27,6 +27,9 @@ shape-test counts are in `bundles/ecsphysics2d/proto/results/`.
    only on dense bodies, and no §6 query asks that.
 6. **The whole query and index bill for a busy tick is about 0.26 ms, 1.5% of a 16.7 ms frame.** On a
    BVH it is about 1 ms, and `cp`'s contact-pair line of sight alone is about 0.8 ms.
+7. **Hashing the cells removes the world extent for about 6–10% on the frequent queries** (§4a):
+   20–30% on long walks, and parity on incremental body updates. The whole tick comes to 0.29 ms.
+   It still allocates nothing and is still 4–6× cheaper than a BVH.
 
 ## 1. The workload
 
@@ -178,6 +181,68 @@ of cell headers per index, and 8.3 MB at 1 m. A dense grid needs **the world's e
 Out-of-extent shapes are clamped into edge cells: still correct, but slow if there are many. A spatial hash
 removes the extent but was not measured.
 
+## 4a. A spatial hash instead of a dense grid
+
+A dense grid needs the world's extent up front. `HashGrid` (`hashgrid.go`) keeps the grid's traversal
+unchanged and addresses cells by hashing their integer coordinates into a power-of-two bucket table.
+
+- **The table** is sized to twice the cell listings, rounded up, and only ever grows. Each entry carries
+  its cell's coordinates, so a visit skips the entries of any other cell that collided into the same
+  bucket.
+- **There are no bounds.** `TestHashUnbounded` shifts the rooms layout 6 km into negative X and 9 km
+  into positive Y and still agrees with the oracle.
+- **It allocates nothing** once bucket capacities settle over a few rebuilds.
+
+It was measured against the dense grid in three interleaved rounds (`results/hx_*.txt`, medians in
+`results/hash-vs-grid.tsv`).
+
+| ns (µs where marked) | grid 1 m | hash 1 m | grid 2 m | hash 2 m | grid 4 m | hash 4 m |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| static scatter proj `Sweep` | 31 | 33 | 31 | 31 | 38 | 36 |
+| static rooms16 proj `Sweep` | 35 | 39 | 36 | 39 | 45 | 43 |
+| static rooms16 lospair `Sweep` | 49 | 64 | 47 | 51 | 51 | 54 |
+| static rooms16 sight `Sweep` | 222 | 271 | 164 | 210 | 145 | 199 |
+| static halls64 sight `Sweep` | 268 | 321 | 160 | 187 | 87 | 116 |
+| bodies crowd256 proj `Sweep` | 89 | 98 | 113 | 124 | 176 | 185 |
+| bodies arena1024 proj `Sweep` | 38 | 41 | 45 | 45 | 67 | 70 |
+| bodies arena1024 body `Sweep` | 60 | 123 | 75 | 99 | 105 | 111 |
+| bodies arena1024 sight `SweepAll` | 527 | 680 | 413 | 483 | 367 | 403 |
+| arena1024 `Update`, µs | 16.1 | 16.8 | 8.8 | 9.1 | 7.9 | 7.3 |
+| map4096 `Update`, µs | 80.0 | 104.7 | 40.6 | 40.2 | 35.4 | 31.0 |
+| map4096 `Build`, µs | 156 | 215 | 88 | 110 | 60 | 81 |
+| rooms16 static `Replace` | 21 | 28 | 17 | 23 | 17 | 24 |
+| arena1024 `Overlap` r 36.9 m, µs | 13.7 | 28.9 | 6.1 | 9.4 | 3.7 | 4.4 |
+
+The hash grid's cost as a ratio of the dense grid's, over every matching benchmark:
+
+| Group | Benchmarks | Median | Range |
+| --- | ---: | ---: | --- |
+| static short (proj, body, lospair) | 108 | 1.06 | 0.95–1.46 |
+| static long (sight, losmap) | 72 | 1.29 | 1.14–1.47 |
+| bodies short | 81 | 1.10 | 0.99–2.03 |
+| bodies sight | 27 | 1.19 | 1.04–1.43 |
+| `Overlap` | 27 | 1.23 | 0.86–3.20 |
+| body `Update` / `Build` | 18 | 1.27 | 0.87–1.38 |
+| static `Replace` / `Build` | 24 | 1.40 | 1.00–1.69 |
+
+- **Where it costs:** the hash pays a multiply and a table load per cell, so long walks and large
+  rectangles pay most. At 1 m a body-radius sweep's rectangle covers up to 16 cells, and the hash doubles
+  it (60 → 123 ns).
+- **Where it doesn't:** a projectile sub-step visits one to four cells and pays almost nothing.
+  Incremental updates cost the same, because most bodies never touch the table.
+- **Memory** follows the shapes rather than the world: 16 384–32 768 buckets for these layouts at 2 m,
+  0.4–0.8 MB, against the dense grid's 2.1 MB for a 512 m world.
+
+Scenario A of §7 on a 2 m hash grid:
+
+| Work | µs / tick |
+| --- | ---: |
+| projectiles, (39 + 45) ns × 512 | 43 |
+| Q3, 51 ns × 1 000 | 51 |
+| updates, 9.1 µs × 2 | 18 |
+| AI sight, (210 + 483) ns × 256 | 177 |
+| **Total** | **289 µs, 1.7% of the frame** |
+
 ## 5. Keeping the indices current
 
 | Per sub-step (µs) | crowd256 | arena1024 | map4096 |
@@ -246,11 +311,12 @@ These are decisions for the ticket's resolution, not facts the prototype can sup
 - **Who picks cell size.** It is an index parameter. It could be a plugin setting the app supplies, a
   default, or derived per index at build time from the shapes it holds. The map's guard forbids a content
   assumption, and a fixed 2 m default is close to one.
-- **World extent.** A dense grid needs bounds; a spatial hash does not, and was not measured.
+- **World extent.** A dense grid needs bounds; a spatial hash does not, and costs 6–10% on the frequent
+  queries (§4a).
 - **Update per sub-step or less often.** Per sub-step is affordable. Whether it is required is the System
   decomposition's call.
 - **Not measured:** concurrent readers contending for memory bandwidth, clustered rather than uniform body
-  placement beyond `crowd256`, a spatial hash, a CSR (compact array) cell layout instead of per-cell
+  placement beyond `crowd256`, a CSR (compact array) cell layout instead of per-cell
   slices, and the cost of a hook drain feeding `Replace`.
 
 ## Caveats

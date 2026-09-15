@@ -126,9 +126,9 @@ func BenchmarkBodyUpdate(b *testing.B) {
 						idx.Build(frames[i&1])
 					}
 				})
-				if c.name[:4] == "grid" {
+				if _, ok := c.make().(updater); ok {
 					b.Run(c.name+"/Update", func(b *testing.B) {
-						g := c.make().(*Grid)
+						g := c.make().(updater)
 						g.Build(frames[0])
 						g.Update(frames[1])
 						b.ReportAllocs()
@@ -164,7 +164,10 @@ func BenchmarkStaticChange(b *testing.B) {
 		open.At.X += 0.5
 		b.Run(l.Name, func(b *testing.B) {
 			for _, c := range staticCandidates()[1:] {
-				if g, ok := c.make().(*Grid); ok {
+				if g, ok := c.make().(interface {
+					Index
+					Replace(int32, Placed)
+				}); ok {
 					g.Build(items)
 					b.Run(c.name+"/Replace", func(b *testing.B) {
 						b.ReportAllocs()

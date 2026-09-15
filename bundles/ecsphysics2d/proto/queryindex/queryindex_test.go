@@ -68,6 +68,9 @@ func staticCandidates() []candidate {
 		{"grid2m", func() Index { return NewGrid(2) }},
 		{"grid4m", func() Index { return NewGrid(4) }},
 		{"grid8m", func() Index { return NewGrid(8) }},
+		{"hash1m", func() Index { return NewHashGrid(1) }},
+		{"hash2m", func() Index { return NewHashGrid(2) }},
+		{"hash4m", func() Index { return NewHashGrid(4) }},
 		{"bvh2", func() Index { return NewBVH(2) }},
 		{"bvh4", func() Index { return NewBVH(4) }},
 		{"bvh8", func() Index { return NewBVH(8) }},
@@ -219,8 +222,10 @@ func TestZeroAllocations(t *testing.T) {
 			continue
 		}
 		idx := c.make()
-		idx.Build(bodies)
-		idx.Build(moved)
+		for range 10 { // bucket capacities settle over a few alternations
+			idx.Build(bodies)
+			idx.Build(moved)
+		}
 		i := 0
 		if allocs := testing.AllocsPerRun(50, func() {
 			if i++; i%2 == 0 {
@@ -237,7 +242,7 @@ func TestZeroAllocations(t *testing.T) {
 			}
 		}
 	}
-	gu := NewGrid(2)
+	gu := NewHashGrid(2)
 	gu.Build(bodies)
 	gu.Update(moved)
 	if allocs := testing.AllocsPerRun(50, func() {
@@ -247,24 +252,25 @@ func TestZeroAllocations(t *testing.T) {
 			gu.Update(moved)
 		}
 	}); allocs != 0 {
+		t.Errorf("hash update: %v allocs", allocs)
+	}
+	checkUpdated(t, gu, bodies)
+	gd := NewGrid(2)
+	gd.Build(bodies)
+	gd.Update(moved)
+	if allocs := testing.AllocsPerRun(50, func() {
+		if i++; i%2 == 0 {
+			gd.Update(bodies)
+		} else {
+			gd.Update(moved)
+		}
+	}); allocs != 0 {
 		t.Errorf("grid update: %v allocs", allocs)
 	}
-	// Update must leave the grid answering exactly as a fresh build does
-	fresh, oracle := NewGrid(2), &Linear{}
-	far := Moved(bodies, 3, 9)
-	gu.Update(far)
-	fresh.Build(far)
-	oracle.Build(far)
-	for _, q := range QuerySet(Mixes[3], 128)[:512] {
-		wh, wok := oracle.Sweep(q.From, q.To, q.Radius, 0)
-		gh, gok := gu.Sweep(q.From, q.To, q.Radius, 0)
-		if wok != gok || (wok && !near(wh.T, gh.T)) {
-			t.Fatalf("grid after Update disagrees with oracle: %+v vs %+v", gh, wh)
-		}
-	}
-	_ = fresh
+	checkUpdated(t, gd, bodies)
 	g := NewGrid(2)
 	g.Build(statics)
+
 	door := statics[10]
 	open := Placed{Segment(m.Vec2{}), door.At}
 	if allocs := testing.AllocsPerRun(50, func() {
@@ -275,5 +281,54 @@ func TestZeroAllocations(t *testing.T) {
 		}
 	}); allocs != 0 {
 		t.Errorf("grid replace: %v allocs", allocs)
+	}
+}
+
+type updater interface {
+	Index
+	Update(items []Placed)
+}
+
+// checkUpdated moves idx far from where it was built and checks it answers as
+// the oracle does.
+func checkUpdated(t *testing.T, idx updater, bodies []Placed) {
+	far := Moved(bodies, 3, 9)
+	idx.Update(far)
+	oracle := &Linear{}
+	oracle.Build(far)
+	for _, q := range QuerySet(Mixes[3], 128)[:512] {
+		wh, wok := oracle.Sweep(q.From, q.To, q.Radius, 0)
+		gh, gok := idx.Sweep(q.From, q.To, q.Radius, 0)
+		if wok != gok || (wok && !near(wh.T, gh.T)) {
+			t.Fatalf("%s after Update disagrees with oracle: %+v vs %+v", idx.Name(), gh, wh)
+		}
+	}
+}
+
+// TestHashUnbounded places geometry far outside a dense grid's extent, at
+// negative and large coordinates, which only the hash grid indexes as cells.
+func TestHashUnbounded(t *testing.T) {
+	off := v(-6000, 9000)
+	shift := func(items []Placed) []Placed {
+		out := make([]Placed, len(items))
+		for i, it := range items {
+			it.At = it.At.Add(off)
+			out[i] = it
+		}
+		return out
+	}
+	items := shift(Rooms(16, true))
+	oracle, h := &Linear{}, NewHashGrid(2)
+	oracle.Build(items)
+	h.Build(items)
+	for _, mix := range Mixes {
+		for i, q := range QuerySet(mix, MapSize)[:512] {
+			q.From, q.To = q.From.Add(off), q.To.Add(off)
+			wh, wok := oracle.Sweep(q.From, q.To, q.Radius, 0)
+			gh, gok := h.Sweep(q.From, q.To, q.Radius, 0)
+			if wok != gok || (wok && !near(wh.T, gh.T)) {
+				t.Fatalf("%s %d: got %v %+v, want %v %+v", mix.Name, i, gok, gh, wok, wh)
+			}
+		}
 	}
 }
