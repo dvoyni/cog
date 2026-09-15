@@ -328,14 +328,58 @@ compares against nothing and records nothing.
 shows in its header ([below](#a-list-shows-its-changes-in-its-header)). A write
 through an `m.Blob` already breaks the Blob's contract. So a byte compare raises
 no false alarm for any kind a Component may hold, and there is no call a System
-can forget to make. **The one stated miss is a write through an `m.Blob`.**
+can forget to make. **Two misses are stated:** a write through an `m.Blob`, and
+a `List` nested in another `List`'s element (the Gap below).
 
-**Gap: padding.** A byte compare sees a struct's padding, and Go does not
-specify what padding holds. An `UpdateFor` replacing a value with equal fields,
-copied from a stack value whose padding differs, could record a Changed no field
-made. It would never miss a change, only add one. What would settle it: a test
-writing equal values into a padded Component through `UpdateFor`, `Ref` and a
-`*T` field, and counting the Changed records.
+**Gap: a `List` nested in another `List`'s element.** `At` returns a copy of
+the element, so a nested `List` can only be written through that copy. Its `Set`
+changes the backing array the stored row shares, and bumps the copy's
+generation, not the stored row's bytes, so the byte compare does not see it.
+Nothing is built for it
+([ecs: List.Set by pointer with a generation](https://github.com/dvoyni/cog/issues/388),
+ruled on [ecs: Hooks record Changed](https://github.com/dvoyni/cog/issues/392)).
+A System that needs the Changed record writes the whole outer element back
+through the stored `List`, `Rows.Set(i, row)`, which bumps the generation the
+compare sees. An explicit call, `Set[T].MarkChanged(e)`, is
+[its own ticket](https://github.com/dvoyni/cog/issues/396).
+
+**A Component some reader watches for Changed has no implicit padding**
+([ruled on #392](https://github.com/dvoyni/cog/issues/392)). A byte compare sees
+a struct's padding, and Go leaves padding holding whatever was there, so equal
+fields can differ in bytes. The padding is spelled out instead, as blank fields:
+
+```go
+type Flags struct {
+    Visible bool
+    _       [7]byte // was implicit padding
+    Layer   int64
+}
+```
+
+- **Measured, on Go 1.27.1 windows/amd64, ten runs in each build mode.**
+  `TestExplicitPaddingRecordsNoChangedForEqualFieldValues` writes values equal
+  field by field on eight routes:
+  - a `*T` field assigned a value a function built after a stack filler, assigned
+    a literal, and written field by field;
+  - `Ref` assigned a built value, and written field by field;
+  - `UpdateFor` with a literal, with a built value, and with the value `Of` read
+    back.
+- **Explicit `_ [N]byte` padding recorded 0 Changed on every route,** flat, in a
+  nested struct, and in an array, and every blank byte stayed zero.
+- **The same layout with implicit padding recorded 8 of 8 on most of those
+  routes.** The differing bytes were padding alone: the filler's pattern, or
+  stack leftovers. Every field was equal.
+- **The Validation check.** In a validating build, when a reader whose kind set
+  holds Changed (`HookAddedChanged`, `HookAll`) registers, the ECS walks its
+  Component's layout, nested structs and arrays included. A gap between fields,
+  or at the tail after the last field (a trailing zero-size field included),
+  panics at registration. The message names the Component, the field the gap
+  follows or "at the end", the byte count, and the fix: an explicit `_ [N]byte`
+  field there, which keeps the same size and alignment. A Component no reader
+  watches for Changed is not checked.
+- **A release build does not check, and pays nothing,** through `const validate`.
+  There, a Component with implicit padding can record a Changed no field made. It
+  never misses a real change.
 
 **Settled here: a change followed by a removal in the same writer run records
 only the removal.** The change record would be appended at run end, and by then
@@ -978,6 +1022,7 @@ row.
   - the counter per Store and the panic past 16 counted runs;
   - `IsX()` panicking on a kind `K` can never deliver;
   - the `modeHook` stamp at fill and fold;
+  - the implicit-padding check when a reader watching Changed registers;
   - the owner registration ending at the removing act.
 
 **Documentation**
@@ -1017,7 +1062,10 @@ The rules in this document are the list. At least:
   flat and nested, and again through a value kept into a later run;
 - **a `List` moved** from a removed Entity to another is not marked shared while a
   reader retains the removal;
-- **the padding [Gap](#changed-is-a-difference-in-bytes)**, settled by counting.
+- **the padding [rule](#changed-is-a-difference-in-bytes)**: explicit `_ [N]byte`
+  padding records no Changed for equal fields on every write route, and a
+  Changed reader of a Component with implicit padding panics at registration in
+  a validating build.
 
 **The parallelism guard**
 

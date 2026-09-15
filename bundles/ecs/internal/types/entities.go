@@ -60,6 +60,11 @@ type Entities struct {
 	// matches the Entity the index is later allocated to. It starts at 1, which
 	// is where generations start.
 	floor uint32
+	// writers is how many Systems have registered, and so the name the next one
+	// gets: a Changed record names the System whose run end recorded it. It is
+	// written during registration only, and sits in what was padding after
+	// floor, so this object's size class is unchanged.
+	writers uint32
 	// shrinkable is what ShrinkCmd reaches, enrolled at registration and
 	// created by the first enrolment.
 	shrinkable *shrinkable
@@ -185,6 +190,13 @@ func nextGeneration(g uint32) uint32 {
 		return 1
 	}
 	return g
+}
+
+// nextWriter names a System as it registers. Names start at 1, so the 0 every
+// record but a change carries names no System.
+func (en *Entities) nextWriter() uint32 {
+	en.writers++
+	return en.writers
 }
 
 // enrolScratch adds a per-System buffer's release to the set ShrinkCmd calls.

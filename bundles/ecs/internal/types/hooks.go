@@ -29,6 +29,10 @@ import (
 // watched Store it carries, through the Store's setter baked beside the plain
 // one. A Despawn calls one capture per watched Store before the Stores are
 // emptied, each probing its own Store and retaining T's last value.
+//
+// A change is recorded at the end of its writer's run, by comparing the bytes
+// of each row the System was handed with write access against a copy taken
+// before it could write them: hookchanged.go.
 
 // hookKind is the set of facts one record carries, all relative to its
 // Component. An act is recorded with every kind true of it.
@@ -123,13 +127,38 @@ func (h *Hook[T]) IsChanged() bool { return h.kinds&kindChanged != 0 }
 // hookRecord is one act in a Store's log, 24 bytes: the full Entity, generation
 // included, so a despawned Entity and the one reusing its index are never
 // folded together; where a removal's copy of T sits among the log's retained
-// values, or -1; and the act's kinds.
+// values, or -1; the System whose run end recorded a change; and the act's
+// kinds.
 type hookRecord struct {
 	e Entity
 	// value is the absolute position of a removal's retained copy, counted
 	// from the first value the log ever retained, so compaction moves no index.
 	value int64
-	kinds hookKind
+	// writer is the System that recorded a change, and 0 on every other record:
+	// a reader skips the changes its own System recorded. It sits in what was
+	// the record's padding.
+	writer uint32
+	kinds  hookKind
+}
+
+// hookRecords is the half of a Store's log that knows no T: the records, and
+// the readers' places in them. hookLog[T] begins with it, so the erased Store
+// header reaches it through the same pointer, which is how a Changed compare
+// that knows its Store only as bytes appends to it.
+type hookRecords struct {
+	mu      sync.Mutex
+	records []hookRecord
+	// base is the absolute position of records[0].
+	base uint64
+	// places is each reader's absolute position: the first record its next run
+	// start takes.
+	places []*uint64
+}
+
+// changed records a change a writer's run end found in e's bytes. The caller
+// holds the Store's write lock, and has checked the Store watches changes.
+func (r *hookRecords) changed(e Entity, writer uint32) {
+	r.records = append(r.records, hookRecord{e: e, value: -1, writer: writer, kinds: kindChanged})
 }
 
 // hookLog is one watched Store's record of acts. Writers append to records and
@@ -138,17 +167,12 @@ type hookRecord struct {
 // mu is what two readers of the same Store, running together, share while they
 // fold and compact. It is never held by a writer or across a System's body.
 type hookLog[T any] struct {
-	mu      sync.Mutex
-	records []hookRecord
-	// base is the absolute position of records[0].
-	base uint64
+	// hookRecords is first, and must stay first: see hookRecords.
+	hookRecords
 	// retained is the removals' copies of T, and retainedBase the absolute
 	// position of retained[0].
 	retained     []T
 	retainedBase int64
-	// places is each reader's absolute position: the first record its next run
-	// start takes.
-	places []*uint64
 	// trivial is T's pointer-free answer. A retained copy of a non-trivial T is
 	// zeroed when compaction drops it, so a string or a List it holds is
 	// released.
@@ -276,16 +300,27 @@ type hookEntry[T any] struct {
 
 // hookMark is a reader's fold state for one Entity index during one run start.
 // It is current only while run and gen match, so nothing is cleared between
-// runs. open says an addition this copy took has not been removed since; entry
-// is where that addition sits in the copy, or -1 if it was not delivered, and
-// fill where it sits in the list of values to fill from the live Store.
+// runs. window says whether this copy has seen a record of the Entity yet, and
+// whether the last one opened a window or closed it; entry is where the record
+// that opened it sits in the copy, or -1 if it was not delivered, and fill where
+// it sits in the list of values to fill from the live Store.
 type hookMark struct {
-	gen   uint32
-	run   uint32
-	entry int32
-	fill  int32
-	open  bool
+	gen    uint32
+	run    uint32
+	entry  int32
+	fill   int32
+	window uint8
 }
+
+const (
+	// windowUnseen: no record of the Entity yet in this copy, so a change is in
+	// the window already open when the copy began.
+	windowUnseen uint8 = iota
+	// windowOpen: an addition, or a standalone change, is waiting for its value.
+	windowOpen
+	// windowClosed: a removal fixed the value of whatever was open.
+	windowClosed
+)
 
 // Hooks is the System parameter: what happened to T since the System's last
 // run, filtered by the kind set K. It declares read{*Entities} and
@@ -310,6 +345,8 @@ type Hooks[T any, K KindSet] struct {
 	fills []int32
 	marks []hookMark
 	run   uint32
+	// writer is this reader's System, whose own changes it skips.
+	writer uint32
 }
 
 // prepare declares the locks, and adds K's kinds to the Store's watched kinds.
@@ -327,11 +364,22 @@ func (h *Hooks[T, K]) prepare(en *Entities, access kernel.ResourceAccess) {
 	store := class.store.(*Store[T])
 	var k K
 	h.deliver = k.kinds()
+	if validate && h.deliver&kindChanged != 0 {
+		if where, bytes := implicitPadding(componentType); bytes > 0 {
+			panic(fmt.Sprintf(
+				"ecs: Hooks[%s, %s] watches %s for Changed, and %s has %d bytes of implicit padding %s: a change is a difference in bytes, and Go leaves padding holding whatever was there, so equal fields can record a Changed no field made; spell the padding out as an explicit _ [%d]byte field there, which keeps the same size and alignment",
+				kernel.TypeName(componentType), kernel.TypeName(reflect.TypeFor[K]()), kernel.TypeName(componentType),
+				kernel.TypeName(componentType), bytes, where, bytes))
+		}
+	}
 	store.watch |= h.deliver
 	h.log = store.logFor(en)
 	h.place = h.log.base + uint64(len(h.log.records))
 	h.log.places = append(h.log.places, &h.place)
 }
+
+// ownedBy is told this reader's System when the System registers.
+func (h *Hooks[T, K]) ownedBy(writer uint32) { h.writer = writer }
 
 // All yields the records fixed at this run's start, in the order the acts
 // happened. Nothing is netted: a removal then a re-addition is two records.
@@ -360,9 +408,15 @@ func (h *Hooks[T, K]) mark(e Entity) *hookMark {
 }
 
 // beginRun takes the records since this reader's place, keeps those whose kinds
-// meet K, folds each addition's value to the Entity's next removal, and moves
-// the place to the end of the log. It then fills every addition still open from
-// the live Store, outside mu and under the System's read{*Store[T]}.
+// meet K, folds each addition's or change's value to the Entity's next removal,
+// and moves the place to the end of the log. It then fills every addition and
+// change still open from the live Store, outside mu and under the System's
+// read{*Store[T]}.
+//
+// A change folds into the window it falls in: into the addition that opened it,
+// or, in the window already open when this copy began, into that window's first
+// change, which is where the one standalone Changed is delivered. A change this
+// reader's own System recorded is skipped, as if it were not in the log.
 func (h *Hooks[T, K]) beginRun() {
 	h.run++
 	if h.run == 0 {
@@ -375,20 +429,34 @@ func (h *Hooks[T, K]) beginRun() {
 	records := l.records[h.place-l.base:]
 	for i := range records {
 		r := &records[i]
+		if r.kinds == kindChanged {
+			if h.deliver&kindChanged == 0 || r.writer == h.writer {
+				continue
+			}
+			m := h.mark(r.e)
+			if m.window != windowUnseen {
+				continue
+			}
+			m.window = windowOpen
+			m.entry, m.fill = int32(len(h.out)), int32(len(h.fills))
+			h.fills = append(h.fills, m.entry)
+			h.out = append(h.out, hookEntry[T]{e: r.e, hook: Hook[T]{kinds: r.kinds}})
+			continue
+		}
 		m := h.mark(r.e)
 		if r.kinds&kindRemoved != 0 {
 			retained := &l.retained[r.value-l.retainedBase]
-			if m.open && m.entry >= 0 {
+			if m.window == windowOpen && m.entry >= 0 {
 				h.out[m.entry].hook.Value = *retained
 				h.fills[m.fill] = -1
 			}
-			m.open, m.entry, m.fill = false, -1, -1
+			m.window, m.entry, m.fill = windowClosed, -1, -1
 			if r.kinds&h.deliver != 0 {
 				h.out = append(h.out, hookEntry[T]{e: r.e, hook: Hook[T]{kinds: r.kinds, Value: *retained}})
 			}
 			continue
 		}
-		m.open, m.entry, m.fill = true, -1, -1
+		m.window, m.entry, m.fill = windowOpen, -1, -1
 		if r.kinds&h.deliver != 0 {
 			m.entry, m.fill = int32(len(h.out)), int32(len(h.fills))
 			h.fills = append(h.fills, m.entry)
