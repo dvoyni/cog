@@ -733,11 +733,17 @@ and never a reason for a writer's code to panic.
 | `Set` on a `List` in a `hook.Value` kept past the run | **panics**, naming `Hooks[T, K]` |
 | assigning `hook.Value`'s fields | allowed; it is the reader's copy |
 
-**One stated misattribution**, joining those `validate_on.go` already lists: if a
-writer later reaches the same array through `Ref` or a `*T` field, the stamp
-becomes `modeWrite`. A `Set` through the kept copy then panics as "after the run
-that yielded it finished", naming the writer's run. It still panics, because a
-reader holding `read{T}` never runs inside a writer's run.
+**One stated misattribution and one stated hole**, joining those `validate_on.go`
+already lists, for a kept value whose array a writer later reaches:
+
+- **Through a `*T` field**, the stamp becomes `modeWrite` tied to the writer's
+  run. A `Set` through the kept copy then panics as "after the run that yielded
+  it finished", naming the writer's run rather than the Hook. It still panics,
+  because a reader holding `read{T}` never runs inside a writer's run.
+- **Through `Set[T].Ref`**, the stamp becomes `modeWrite` with no run, so a `Set`
+  through the kept copy is **allowed**, until a reader next stamps that array.
+  This is `Ref`'s own gap, not a Hook's: a writer keeping a List it reached
+  through `Ref` past its run is not caught either.
 
 **The cost** is one stamp per `List` per delivered record per run, in validating
 builds only.
