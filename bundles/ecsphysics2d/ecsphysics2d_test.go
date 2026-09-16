@@ -1,6 +1,7 @@
 package ecsphysics2d
 
 import (
+	"errors"
 	"math"
 	"testing"
 
@@ -83,6 +84,30 @@ func TestTheMassForwardersPassTheirArgumentsThrough(t *testing.T) {
 	}
 	if _, ok := CentroidForPoly(nil); ok {
 		t.Fatal("CentroidForPoly accepted an empty outline")
+	}
+}
+
+func TestTheDynamicForwarderPassesItsArgumentsThrough(t *testing.T) {
+	body, err := NewDynamic(2, 8, 15, 0.3)
+	if err != nil {
+		t.Fatalf("NewDynamic(2, 8, 15, 0.3): %v", err)
+	}
+	if got, want := body.Mass(), 2.0; got != want {
+		t.Errorf("Mass = %v, want %v", got, want)
+	}
+	if got, want := body.Moment(), 8.0; got != want {
+		t.Errorf("Moment = %v, want %v", got, want)
+	}
+	if got, want := body.Damping(), 15.0; got != want {
+		t.Errorf("Damping = %v, want %v", got, want)
+	}
+	if got, want := body.AngularDamping(), 0.3; got != want {
+		t.Errorf("AngularDamping = %v, want %v", got, want)
+	}
+
+	var refusal ErrBadMass
+	if _, err := NewDynamic(0, 8, 0, 0); !errors.As(err, &refusal) {
+		t.Errorf("NewDynamic with a mass of 0 returned %v, want an ErrBadMass", err)
 	}
 }
 

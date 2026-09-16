@@ -95,3 +95,10 @@ func AreaForPoly(verts []m.Vec2d, radius float64) float64 {
 // false for a degenerate one — zero area or coincident vertices — where the
 // divide would otherwise hand back a NaN.
 func CentroidForPoly(verts []m.Vec2d) (m.Vec2d, bool) { return types.CentroidForPoly(verts) }
+
+// NewDynamic is the Dynamic body a mass, a Moment of inertia and the two
+// Damping rates in 1/s describe. A rejected argument yields the zero Dynamic,
+// which moves under nothing, and the error naming which argument it was.
+func NewDynamic(mass, moment, damping, angularDamping float64) (Dynamic, error) {
+	return types.NewDynamic(mass, moment, damping, angularDamping)
+}
