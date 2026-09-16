@@ -1,6 +1,7 @@
 package ecsphysics2d
 
 import (
+	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecsphysics2d/internal/types"
 	"github.com/dvoyni/cog/libs/m"
 )
@@ -115,6 +116,100 @@ func NewBoxShapeFor(box BB, radius float64) Shape {
 func PolygonVerts(dst []m.Vec2d, shape Shape, polygon Polygon) []m.Vec2d {
 	return types.PolygonVerts(dst, shape, polygon)
 }
+
+// NewPinJoint holds A's anchor and B's anchor at a fixed distance in metres.
+// Both anchors are local to their Body's centre of gravity, and PinDistance is
+// the pure helper that works the distance out from where the two Bodies stand.
+func NewPinJoint(a, b ecs.Entity, anchorA, anchorB m.Vec2d, distance float64) Joint {
+	return types.NewPinJoint(a, b, anchorA, anchorB, distance)
+}
+
+// PinDistance is the distance between two anchors as they stand in the world,
+// which is what cp's pin constructor reads off the two Bodies.
+func PinDistance(
+	posA m.Vec2d, angleA float64, anchorA m.Vec2d,
+	posB m.Vec2d, angleB float64, anchorB m.Vec2d,
+) float64 {
+	return types.PinDistance(posA, angleA, anchorA, posB, angleB, anchorB)
+}
+
+// NewSlideJoint holds A's anchor and B's anchor within a range of distances in
+// metres, and holds nothing at all inside that range.
+func NewSlideJoint(a, b ecs.Entity, anchorA, anchorB m.Vec2d, minimum, maximum float64) Joint {
+	return types.NewSlideJoint(a, b, anchorA, anchorB, minimum, maximum)
+}
+
+// NewPivotJoint holds A's anchor and B's anchor at the same point: the hinge a
+// jointed figure of limbs turns about. PivotAnchors splits one world pivot into
+// the two local anchors.
+func NewPivotJoint(a, b ecs.Entity, anchorA, anchorB m.Vec2d) Joint {
+	return types.NewPivotJoint(a, b, anchorA, anchorB)
+}
+
+// PivotAnchors splits one world pivot into the two anchors, each local to its
+// own Body's centre of gravity.
+func PivotAnchors(
+	posA m.Vec2d, angleA float64,
+	posB m.Vec2d, angleB float64,
+	worldPivot m.Vec2d,
+) (anchorA, anchorB m.Vec2d) {
+	return types.PivotAnchors(posA, angleA, posB, angleB, worldPivot)
+}
+
+// NewGrooveJoint holds A's anchor on the line segment from start to end carried
+// by B. All three points are local to their own Body. cp carries the groove on
+// its first Body and the anchor on its second; this port's A is cp's b, so the
+// two are the other way round — the one place that substitution is visible.
+func NewGrooveJoint(a, b ecs.Entity, anchorA, start, end m.Vec2d) Joint {
+	return types.NewGrooveJoint(a, b, anchorA, start, end)
+}
+
+// NewSpringJoint pushes A's anchor and B's anchor towards a rest length,
+// harder the further they are from it, settling by its Absorption. stiffness is
+// in N/m and absorption in N·s/m. It only pushes, so anything else acting on
+// the two Bodies can win against it.
+func NewSpringJoint(
+	a, b ecs.Entity, anchorA, anchorB m.Vec2d,
+	restLength, stiffness, absorption float64,
+) Joint {
+	return types.NewSpringJoint(a, b, anchorA, anchorB, restLength, stiffness, absorption)
+}
+
+// NewRotarySpringJoint pushes the two Bodies towards a rest Angle in radians,
+// settling by its Absorption. stiffness is in N·m/rad.
+func NewRotarySpringJoint(a, b ecs.Entity, restAngle, stiffness, absorption float64) Joint {
+	return types.NewRotarySpringJoint(a, b, restAngle, stiffness, absorption)
+}
+
+// NewRotaryLimitJoint holds the Angle of A relative to B within a range of
+// radians, and holds nothing inside it.
+func NewRotaryLimitJoint(a, b ecs.Entity, minimum, maximum float64) Joint {
+	return types.NewRotaryLimitJoint(a, b, minimum, maximum)
+}
+
+// NewRatchetJoint lets the Angle of A relative to B turn one way and clicks it
+// over in steps of ratchet radians, offset by phase. angle is the Angle it
+// starts at, which is A's Angle less B's; the app passes it because a cog
+// constructor reads no Store.
+func NewRatchetJoint(a, b ecs.Entity, angle, phase, ratchet float64) Joint {
+	return types.NewRatchetJoint(a, b, angle, phase, ratchet)
+}
+
+// NewGearJoint holds the two Bodies turning in step: A's Angle times the ratio
+// less B's Angle, held at the phase.
+func NewGearJoint(a, b ecs.Entity, phase, ratio float64) Joint {
+	return types.NewGearJoint(a, b, phase, ratio)
+}
+
+// NewMotorJoint turns the two Bodies against each other, driving A's Angular
+// velocity less B's towards the negation of rate, which is cp's sign.
+func NewMotorJoint(a, b ecs.Entity, rate float64) Joint {
+	return types.NewMotorJoint(a, b, rate)
+}
+
+// NewJointedPairs is an empty set of the pairs a Joint holds apart. The plugin
+// publishes one; an app never needs to build one.
+func NewJointedPairs() *JointedPairs { return types.NewJointedPairs() }
 
 // NewStaticIndex is an empty static index with that cell size in metres. A cell
 // size of 0 or less takes the documented default of 2 m, which is tuned for a

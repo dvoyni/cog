@@ -54,10 +54,15 @@ func (p *plugin) Dependencies() []kernel.PluginName {
 const (
 	bodyReserve   = 1024
 	staticReserve = 4096
+	// Joints are their own Entities and there are far fewer of them than there
+	// are Bodies: a jointed figure of limbs is a dozen, and the cost estimates
+	// the design is built on are quoted at 500.
+	jointReserve = 512
 )
 
 // Register resolves the settings, declares the seven Components a Body is made
-// of, publishes the two indices, and chains the four Systems in cp's order.
+// of and the Joint that holds two of them, publishes the two indices and the
+// two solver Resources, and chains the four Systems in cp's order.
 //
 // The chain is explicit rather than left to the locks. Integrate and Solve
 // would serialise on Velocity anyway, Index reads the Position Integrate
@@ -91,6 +96,10 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	// Shape of more than four vertices needs, and a scene whose every Shape is
 	// one is not a scene anyone has measured.
 	ecs.RegisterComponent[ecsphysics2d.Polygon](registrar, bodyReserve)
+	// The Joint is the one Component that is not a Body's: it is carried by an
+	// Entity of its own, holding two Bodies by Reference, because a Body may be
+	// held by several Joints and a Component is one per Entity.
+	ecs.RegisterComponent[ecsphysics2d.Joint](registrar, jointReserve)
 
 	// The two indices, at the cell sizes the settings resolved — two named types
 	// so that their locks stay apart: rebuilding the Bodies write-locks only the
@@ -101,6 +110,11 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	// The Contact list, seeded with the one source of randomness in the
 	// package: the direction two exactly coincident Shapes are parted along.
 	registrar.InitResource(types.NewContacts(resolved.seed))
+
+	// The pairs a Joint holds apart, rebuilt by Index and read by Detect. It is
+	// a Resource of its own so that the Joint walk's write does not have to be
+	// held through detection.
+	registrar.InitResource(types.NewJointedPairs())
 
 	registrar.Subscribe[ecsphysics2d.IntegrateOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, integrate, step()))

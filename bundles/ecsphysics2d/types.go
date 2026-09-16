@@ -150,6 +150,54 @@ const (
 	PhaseEnded      = types.PhaseEnded
 )
 
+// Joint is a rule the app sets that holds two Bodies to each other — at a fixed
+// distance, about a shared pivot, within a range of Angles, turning in step. It
+// is one kind-discriminated Component of 120 bytes carried by an Entity of its
+// own, rather than something a Body carries, because one Body may be held by
+// several Joints.
+//
+// It is all ten of cp's constraints in one value: pin, slide, pivot, groove,
+// Spring, rotary Spring, rotary limit, ratchet, gear and motor. The parameters
+// are unexported because they carry an invariant with Kind, so a Joint is built
+// by one of the ten constructors in utils.go and read back through the
+// per-kind accessors; MaxForce, ErrorBias, MaxBias, Kind and CollideBodies are
+// plain fields the app writes.
+//
+// Its accessors are Anchors, GrooveAnchor, Groove, Distance, Span, RestLength,
+// RestAngle, Stiffness, Absorption, Angle, Phase, Ratchet, Ratio and Rate, each
+// with a setter beside it, and Impulse is what the Joint delivered over the
+// tick.
+//
+// A Joint whose Reference resolves to nothing is skipped and its Impulse reads
+// 0: the plugin never despawns a Joint, structural change during the step being
+// forbidden, and a dangling Reference is the app's to clean up.
+type Joint = types.Joint
+
+// JointKind is which of cp's ten constraints a Joint is, and it names which of
+// the parameters mean anything.
+type JointKind = types.JointKind
+
+// The ten Joint kinds. A Spring is the one kind that holds nothing — it only
+// pushes — and the motor is the one that drives rather than holds.
+const (
+	JointPin          = types.JointPin
+	JointSlide        = types.JointSlide
+	JointPivot        = types.JointPivot
+	JointGroove       = types.JointGroove
+	JointSpring       = types.JointSpring
+	JointRotarySpring = types.JointRotarySpring
+	JointRotaryLimit  = types.JointRotaryLimit
+	JointRatchet      = types.JointRatchet
+	JointGear         = types.JointGear
+	JointMotor        = types.JointMotor
+)
+
+// DefaultJointErrorBias is the ErrorBias every Joint constructor fills in: the
+// share of positional error left after one second, spelled as a rate per
+// second, and byte for byte the same number as the collision bias. MaxForce and
+// MaxBias both default to an infinity, which is cp's.
+const DefaultJointErrorBias = types.DefaultJointErrorBias
+
 // Hit is what a Probe reports: the Entity it met, T as the fraction of the
 // Probe at which it met it, the Point on that Shape's surface and the unit
 // Normal there, facing the Prober.

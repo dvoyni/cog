@@ -151,7 +151,7 @@ func TestAPairIsReportedOnceHoweverManyCellsItSpans(t *testing.T) {
 	bodies.Insert(ecs.Entity(2), NewCircleShape(1.5, m.Vec2d{}), m.Vec2d{X: 1}, 0, nil)
 	statics.Insert(ecs.Entity(3), NewCircleShape(1.5, m.Vec2d{}), m.Vec2d{Y: 1}, 0, nil)
 
-	Collide(contacts, bodies, statics, 3)
+	Collide(contacts, bodies, statics, noJoints, 3)
 	if got := contacts.Len(); got != 3 {
 		t.Fatalf("three mutually overlapping Shapes made %d Contacts, want 3", got)
 	}
@@ -174,7 +174,7 @@ func TestAIsTheNonStaticPartyAndTheNormalFacesIt(t *testing.T) {
 	bodies.Insert(body, NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{Y: 0.4}, 0, nil)
 	statics.Insert(wall, NewSegmentShape(m.Vec2d{X: -2}, m.Vec2d{X: 2}, 0), m.Vec2d{}, 0, nil)
 
-	Collide(contacts, bodies, statics, 3)
+	Collide(contacts, bodies, statics, noJoints, 3)
 	if contacts.Len() != 1 {
 		t.Fatalf("a circle resting in a wall made %d Contacts, want 1", contacts.Len())
 	}
@@ -203,7 +203,7 @@ func TestAIsTheSensorBeforeItIsAnythingElse(t *testing.T) {
 	statics.Insert(ecs.Entity(20), sensor, m.Vec2d{}, 0, nil)
 	bodies.Insert(ecs.Entity(3), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 0.5}, 0, nil)
 
-	Collide(contacts, bodies, statics, 3)
+	Collide(contacts, bodies, statics, noJoints, 3)
 	if contacts.Len() != 1 {
 		t.Fatalf("a Sensor overlapping a Body made %d Contacts, want 1", contacts.Len())
 	}
@@ -228,7 +228,7 @@ func TestAPairBeginsThenContinuesThenEndsExactlyOnce(t *testing.T) {
 		bodies.Clear()
 		bodies.Insert(one, NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{}, 0, nil)
 		bodies.Insert(two, NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: apart}, 0, nil)
-		Collide(contacts, bodies, statics, 3)
+		Collide(contacts, bodies, statics, noJoints, 3)
 	}
 
 	touching(0.9)
@@ -256,7 +256,7 @@ func TestAnEndedEntryKeepsTheGeometryOfTheTickItLastTouched(t *testing.T) {
 		bodies.Clear()
 		bodies.Insert(ecs.Entity(1), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{}, 0, nil)
 		bodies.Insert(ecs.Entity(2), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: apart}, 0, nil)
-		Collide(contacts, bodies, statics, 3)
+		Collide(contacts, bodies, statics, noJoints, 3)
 	}
 
 	place(0.9)
@@ -283,7 +283,7 @@ func TestAPairThatFlickersApartAndBackKeepsItsImpulses(t *testing.T) {
 		bodies.Clear()
 		bodies.Insert(ecs.Entity(1), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{}, 0, nil)
 		bodies.Insert(ecs.Entity(2), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: apart}, 0, nil)
-		Collide(contacts, bodies, statics, 3)
+		Collide(contacts, bodies, statics, noJoints, 3)
 	}
 
 	place(0.9)
@@ -311,7 +311,7 @@ func TestAPairOutsideThePersistenceWindowStartsOver(t *testing.T) {
 		bodies.Clear()
 		bodies.Insert(ecs.Entity(1), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{}, 0, nil)
 		bodies.Insert(ecs.Entity(2), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: apart}, 0, nil)
-		Collide(contacts, bodies, statics, 3)
+		Collide(contacts, bodies, statics, noJoints, 3)
 	}
 
 	place(0.9)
@@ -336,7 +336,7 @@ func TestTheOnlyBitsThatCrossATickAreTheOnesTheSpecificationNames(t *testing.T) 
 		bodies.Clear()
 		bodies.Insert(ecs.Entity(1), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{}, 0, nil)
 		bodies.Insert(ecs.Entity(2), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 0.9}, 0, nil)
-		Collide(contacts, bodies, statics, 3)
+		Collide(contacts, bodies, statics, noJoints, 3)
 	}
 
 	place()
@@ -406,7 +406,7 @@ func TestAnExcludedTickForgetsTheSolutionItNeverHad(t *testing.T) {
 		bodies.Clear()
 		bodies.Insert(ecs.Entity(1), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{}, 0, nil)
 		bodies.Insert(ecs.Entity(2), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 0.9}, 0, nil)
-		Collide(contacts, bodies, statics, 3)
+		Collide(contacts, bodies, statics, noJoints, 3)
 
 		entry := &contacts.entries[0]
 		entry.Points[0].NormalImpulse = 17.5
@@ -445,7 +445,7 @@ func TestAnIgnoredPairContinuesWhileADroppedOneBeginsAgain(t *testing.T) {
 			bodies.Clear()
 			bodies.Insert(ecs.Entity(1), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{}, 0, nil)
 			bodies.Insert(ecs.Entity(2), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 0.9}, 0, nil)
-			Collide(contacts, bodies, statics, 3)
+			Collide(contacts, bodies, statics, noJoints, 3)
 		}
 
 		place()
@@ -492,7 +492,7 @@ func TestABodyWithAnUnplaceableBoxIsSkippedRatherThanSearchedFor(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		Collide(contacts, bodies, statics, 3)
+		Collide(contacts, bodies, statics, noJoints, 3)
 	}()
 	select {
 	case <-done:
@@ -527,7 +527,7 @@ func TestDetectionAllocatesNothing(t *testing.T) {
 	// maps and the index's own arena — so what is measured is the steady state.
 	for range 8 {
 		fill()
-		Collide(contacts, bodies, statics, 3)
+		Collide(contacts, bodies, statics, noJoints, 3)
 	}
 	if contacts.Len() == 0 {
 		t.Fatal("the scene the measurement runs over found no Contacts at all")
@@ -535,7 +535,7 @@ func TestDetectionAllocatesNothing(t *testing.T) {
 
 	if got := testing.AllocsPerRun(200, func() {
 		fill()
-		Collide(contacts, bodies, statics, 3)
+		Collide(contacts, bodies, statics, noJoints, 3)
 	}); got != 0 {
 		t.Errorf("detection allocates %v objects a tick, want none", got)
 	}
@@ -561,7 +561,7 @@ func detectCoincident(t testing.TB, seed uint64) m.Vec2d {
 	bodies, statics := NewBodyIndex(0), NewStaticIndex(0)
 	bodies.Insert(ecs.Entity(1), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 3, Y: 4}, 0, nil)
 	bodies.Insert(ecs.Entity(2), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 3, Y: 4}, 0, nil)
-	Collide(contacts, bodies, statics, 3)
+	Collide(contacts, bodies, statics, noJoints, 3)
 	if contacts.Len() != 1 {
 		t.Fatalf("two coincident circles made %d Contacts, want 1", contacts.Len())
 	}

@@ -38,3 +38,14 @@ type BodyIndex = types.BodyIndex
 // persistence window closes, so a pair that flickers apart and back keeps its
 // Impulses. It is rebuilt each tick reusing its buffers and allocates nothing.
 type Contacts = types.Contacts
+
+// JointedPairs is the set of Entity pairs whose Joint says the two Bodies do
+// not collide, rebuilt by Index from the Joint Query and read by Detect after
+// the bit filter and the bounding-box test — so the Contact is never created
+// and never reported, which is cp's own semantics.
+//
+// It is a Resource of its own so that the Joint walk's write is held only for
+// the rebuild, and Detect's check is gated on Len, so a scene with no such
+// Joint pays one branch. An app reads it through ecs.Read[*JointedPairs]; Len,
+// Has, Add and Clear are the whole of it.
+type JointedPairs = types.JointedPairs

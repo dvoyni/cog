@@ -51,9 +51,17 @@ type bodyIndexQuery struct {
 	_     ecs.Without[ecsphysics2d.Static]
 }
 
+// jointIndexQuery drives the JointedPairs rebuild: every Joint, read. cp walks
+// a Body's intrusive constraint list per candidate pair; the port has no such
+// list and will not grow one, so the set of pairs a Joint holds apart is built
+// here, once a tick, out of the one walk Index was going to make anyway.
+type jointIndexQuery struct {
+	Joint ecsphysics2d.Joint
+}
+
 // index rebuilds the two spatial indices from the positions Integrate has just
-// written, and drains the Shape hooks that say which Static Entities came and
-// went.
+// written, drains the Shape hooks that say which Static Entities came and went,
+// and rebuilds the set of pairs a Joint holds apart.
 //
 // The two halves are not symmetric, and that is the whole design. Statics are
 // maintained incrementally, world-cached once at Insert and never again, which
@@ -79,8 +87,10 @@ func (p *plugin) index(
 	statics *ecs.Get[ecsphysics2d.Static],
 	polygons *ecs.Get[ecsphysics2d.Polygon],
 	bodies *ecs.Query[bodyIndexQuery],
+	joints *ecs.Query[jointIndexQuery],
 	staticIndex *ecs.Write[*ecsphysics2d.StaticIndex],
 	bodyIndex *ecs.Write[*ecsphysics2d.BodyIndex],
+	jointed *ecs.Write[*ecsphysics2d.JointedPairs],
 ) {
 	static := staticIndex.Get()
 	for entity, hook := range shapes.All() {
@@ -131,6 +141,18 @@ func (p *plugin) index(
 			p.polygonVerts(polygons, entity, it.Shape),
 		)
 	}
+
+	// A Joint whose two Bodies still collide contributes nothing, so the set
+	// stays empty for every scene that has no such Joint and Detect's check
+	// stays one branch. A dangling Reference is added like any other pair: the
+	// pair simply never comes up.
+	pairs := jointed.Get()
+	pairs.Clear()
+	for _, it := range joints.All() {
+		if !it.Joint.CollideBodies {
+			pairs.Add(it.Joint.A, it.Joint.B)
+		}
+	}
 }
 
 // polygonVerts is the run of local vertices an Insert takes: nil for every kind
@@ -167,11 +189,12 @@ func (p *plugin) polygonVerts(
 func (p *plugin) detect(
 	staticIndex *ecs.Read[*ecsphysics2d.StaticIndex],
 	bodyIndex *ecs.Read[*ecsphysics2d.BodyIndex],
+	jointed *ecs.Read[*ecsphysics2d.JointedPairs],
 	contacts *ecs.Write[*ecsphysics2d.Contacts],
 	step *ecs.In[float64],
 ) {
 	types.Collide(
-		contacts.Get(), bodyIndex.Get(), staticIndex.Get(),
+		contacts.Get(), bodyIndex.Get(), staticIndex.Get(), jointed.Get(),
 		p.settings.persistenceTicks(step.Get()),
 	)
 }
@@ -191,6 +214,7 @@ func (p *plugin) detect(
 // one could have run beside the other.
 func (p *plugin) solve(
 	bodies *ecs.Query[types.VelocityQuery],
+	joints *ecs.Query[types.JointQuery],
 	dynamics *ecs.Get[ecsphysics2d.Dynamic],
 	velocities *ecs.Set[ecsphysics2d.Velocity],
 	places *ecs.Set[ecsphysics2d.Position],
@@ -198,7 +222,7 @@ func (p *plugin) solve(
 	step *ecs.In[float64],
 ) {
 	types.Solve(
-		contacts.Get(), bodies, dynamics, velocities, places,
+		contacts.Get(), bodies, joints, dynamics, velocities, places,
 		step.Get(), p.settings.iterations, p.settings.slop, p.settings.bias,
 	)
 }

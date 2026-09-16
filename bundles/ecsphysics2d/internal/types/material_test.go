@@ -21,7 +21,7 @@ func detectPair(t testing.TB, first, second Shape) Contact {
 	bodies, statics := NewBodyIndex(0), NewStaticIndex(0)
 	bodies.Insert(ecs.Entity(1), first, m.Vec2d{}, 0, nil)
 	bodies.Insert(ecs.Entity(2), second, m.Vec2d{X: 0.9}, 0, nil)
-	Collide(contacts, bodies, statics, 3)
+	Collide(contacts, bodies, statics, noJoints, 3)
 	list := contacts.All()
 	if len(list) != 1 {
 		t.Fatalf("the two circles gave %d entries, want 1", len(list))
