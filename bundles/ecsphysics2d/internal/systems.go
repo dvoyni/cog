@@ -15,20 +15,6 @@ type positionQuery struct {
 	Velocity ecsphysics2d.Velocity
 }
 
-// velocityQuery drives the velocity half of Solve: Dynamic bodies only, which
-// is cp skipping Kinematic ones, said here by naming Dynamic. Velocity and
-// Force are written and Dynamic is read.
-//
-// A Dynamic body with no Force falls out of this walk and silently never moves.
-// That is the one trap in the Component set and it is stated rather than
-// checked: the package has no validity checks and does not borrow the ECS's
-// Validation mode for them.
-type velocityQuery struct {
-	Velocity *ecsphysics2d.Velocity
-	Force    *ecsphysics2d.Force
-	Body     ecsphysics2d.Dynamic
-}
-
 // integrate moves every Body with a Velocity by that Velocity over one step,
 // and records where it was when the tick began.
 //
@@ -130,28 +116,53 @@ func index(
 	}
 }
 
-// detect finds the tick's Contacts by walking the indices, and is where the
+// detect finds the tick's Contacts by walking the two indices, and is where the
 // seeded coincidence nudge lives.
 //
-// It is empty until there are indices to walk, and is registered and chained
-// now for the same reason index is: an app's filter Systems order themselves
-// After[DetectOnUpdate]().Before[SolveOnUpdate](), and that ordering is written
-// before there is anything to filter.
-func detect() {}
+// It names no Component Store. cp's narrowphase reaches the Shape and the Body
+// through pointers; the port's index entries carry the Shape, its world cache
+// and the transform the position built, so detection reads them and nothing
+// else. The lock set is the two indices for read and the Contact list for
+// write, which is strictly less than the specification's table allows itself.
+//
+// An app's filter Systems — cp's Begin and PreSolve — order themselves
+// After[DetectOnUpdate]().Before[SolveOnUpdate]() and take
+// *ecs.Write[*Contacts].
+func (p *plugin) detect(
+	staticIndex *ecs.Read[*ecsphysics2d.StaticIndex],
+	bodyIndex *ecs.Read[*ecsphysics2d.BodyIndex],
+	contacts *ecs.Write[*ecsphysics2d.Contacts],
+	step *ecs.In[float64],
+) {
+	types.Collide(
+		contacts.Get(), bodyIndex.Get(), staticIndex.Get(),
+		p.settings.persistenceTicks(step.Get()),
+	)
+}
 
-// solve is the indivisible half of the step. Today it is the velocity
-// integration alone; around it will come the dense solved-Contact list, the
-// Joint list, the gather through the slot table, PreStep, the warm start, the
-// iterations and the bias applied as a position delta.
+// solve is the indivisible half of the step: the dense solved-Contact list, the
+// gather through the BodyIndex slot table, PreStep, the velocity integration,
+// the warm start, the iterations, and the bias applied as a position delta.
 //
 // Velocity integration cannot be a System of its own, which is what makes Solve
 // indivisible, and both sides force it: PreStep computes bounce from the
 // velocity before integration, which is what stops gravity-fed jitter from
-// eating Restitution, and ApplyCachedImpulse must follow damping, or the
-// warm-start Impulse is damped away before it does anything.
-func solve(bodies *ecs.Query[velocityQuery], step *ecs.In[float64]) {
-	h := step.Get()
-	for _, it := range bodies.All() {
-		types.IntegrateVelocity(&it.Body, it.Velocity, it.Force, h)
-	}
+// eating Restitution, and the warm start must follow damping, or the cached
+// Impulse is damped away before it does anything.
+//
+// Position is written here as well as by Integrate, which costs no parallelism:
+// the two are links of the same chain, so nothing that could have run beside
+// one could have run beside the other.
+func (p *plugin) solve(
+	bodies *ecs.Query[types.VelocityQuery],
+	dynamics *ecs.Get[ecsphysics2d.Dynamic],
+	velocities *ecs.Set[ecsphysics2d.Velocity],
+	places *ecs.Set[ecsphysics2d.Position],
+	contacts *ecs.Write[*ecsphysics2d.Contacts],
+	step *ecs.In[float64],
+) {
+	types.Solve(
+		contacts.Get(), bodies, dynamics, velocities, places,
+		step.Get(), p.settings.iterations, p.settings.slop, p.settings.bias,
+	)
 }

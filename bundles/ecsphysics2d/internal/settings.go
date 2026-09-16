@@ -1,6 +1,10 @@
 package internal
 
-import "github.com/dvoyni/cog/bundles/ecsphysics2d"
+import (
+	"math"
+
+	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+)
 
 // The defaults a zero Config field takes. Every one of them is documented on
 // the Config field it fills, with what it is in cp and what changed.
@@ -25,6 +29,20 @@ type settings struct {
 	staticCellSize float64
 	bodyCellSize   float64
 	seed           uint64
+}
+
+// persistenceTicks is how many ticks of a step of h seconds the persistence
+// window is, which is what cp counts directly.
+//
+// It is stored in seconds and converted here because 3 ticks is 0.05 s at 60 Hz
+// and 0.1 s at 30, and the second is not what cp intends: it is a hysteresis
+// window, not a frame count. At least one tick, so that a window shorter than a
+// step still reports the end of a Contact.
+func (s settings) persistenceTicks(h float64) int {
+	if !(h > 0) {
+		return 1
+	}
+	return max(1, int(math.Round(s.persistence/h)))
 }
 
 // resolveConfig reads the plugin's configuration value and fills every zero

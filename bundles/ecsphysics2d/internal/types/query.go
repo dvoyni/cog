@@ -309,62 +309,139 @@ func pointQueryWorld(p m.Vec2d, shape Shape, world []m.Vec2d) (m.Vec2d, float64,
 	return p, infinity, m.Vec2d{Y: 1}
 }
 
-// penetrateWorld is Penetration over world caches already built. The pair
-// dispatch is a switch on the family, in place of cp's [9]CollisionFunc table
-// keyed by an Order() type switch over an interface.
+// touching is what a closed form finds: cp's CollisionInfo as a value, with the
+// two surface points cp's PushContact writes beside the normal and the overlap
+// Penetration already reported.
 //
-// Only the two closed forms are here. Everything with a Polygon on either side,
-// and segment against segment, goes through GJK, which arrives with the Polygon
-// pipeline; until then those pairs report no touch.
+// normal points from the first Shape towards the second, which is cp's own
+// sense. p1 is on the first Shape's surface and p2 on the second's, both in
+// world space, exactly as cp pushes them; depth is how far along the normal one
+// would move to part them, and is −(p2 − p1)·normal by construction. id is the
+// point's identity across ticks, two vertex indices packed into a uint32 —
+// exact, where cp mixes shape pointers into a hash and admits false positives.
+//
+// The count is 1 for both closed forms. The array is two wide because the
+// Polygon manifolds that arrive with GJK push two, and the Contact entry the
+// caller fills is already laid out for them.
+type touching struct {
+	normal m.Vec2d
+	points [2]touchingPoint
+	count  int
+}
+
+type touchingPoint struct {
+	p1, p2 m.Vec2d
+	depth  float64
+	id     uint32
+}
+
+// pointID packs two vertex indices into one uint32. The closed forms have no
+// vertices to name and pass 0, which is the id cp's own hash carries for them.
+func pointID(first, second uint32) uint32 { return first<<16 | second }
+
+// penetrateWorld is Penetration over world caches already built: collideWorld
+// with the two surface points dropped and no direction invented on coincident
+// centres.
 func penetrateWorld(
 	a Shape, transformA Transform, worldA []m.Vec2d,
 	b Shape, transformB Transform, worldB []m.Vec2d,
 ) (m.Vec2d, float64, bool) {
-	if len(worldA) == 0 || len(worldB) == 0 {
+	touch, ok := collideWorld(a, transformA, worldA, b, transformB, worldB, m.Vec2d{})
+	if !ok {
 		return m.Vec2d{}, 0, false
+	}
+	return touch.normal, touch.points[0].depth, true
+}
+
+// collideWorld is cp's Collide over world caches already built. The pair
+// dispatch is a switch on the family, in place of cp's [9]CollisionFunc table
+// keyed by an Order() type switch over an interface; the switch is what sorts
+// the two Shapes into cp's kind order — circle < segment < poly — so the caller
+// may pass them either way round and always reads a normal from its own first
+// Shape towards its second.
+//
+// coincident is the direction to take when two circles share a centre, where cp
+// invents a fixed (1, 0) that never breaks symmetry. The zero vector asks for
+// no direction at all, which is what the pure Penetration reports.
+//
+// Only the two closed forms are here. Everything with a Polygon on either side,
+// and segment against segment, goes through GJK, which arrives with the Polygon
+// pipeline; until then those pairs report no touch.
+func collideWorld(
+	a Shape, transformA Transform, worldA []m.Vec2d,
+	b Shape, transformB Transform, worldB []m.Vec2d,
+	coincident m.Vec2d,
+) (touching, bool) {
+	if len(worldA) == 0 || len(worldB) == 0 {
+		return touching{}, false
 	}
 
 	switch {
 	case a.Kind == ShapeCircle && b.Kind == ShapeCircle:
-		return penetrateCircles(worldA[0], a.Radius, worldB[0], b.Radius)
+		return collideCircles(worldA[0], a.Radius, worldB[0], b.Radius, coincident)
 
 	case a.Kind == ShapeCircle && b.Kind == ShapeSegment:
-		return penetrateCircleSegment(worldA[0], a.Radius, b, transformB, worldB)
+		return collideCircleSegment(worldA[0], a.Radius, b, transformB, worldB)
 
 	case a.Kind == ShapeSegment && b.Kind == ShapeCircle:
-		normal, depth, ok := penetrateCircleSegment(worldB[0], b.Radius, a, transformA, worldA)
-		return normal.Negate(), depth, ok
+		// The kind order the switch requires puts the circle first, so the one
+		// answer is turned round here: the normal flips and the two surface
+		// points swap, leaving the caller's own first Shape the one the normal
+		// points away from.
+		touch, ok := collideCircleSegment(worldB[0], b.Radius, a, transformA, worldA)
+		if !ok {
+			return touching{}, false
+		}
+		touch.normal = touch.normal.Negate()
+		for i := range touch.count {
+			touch.points[i].p1, touch.points[i].p2 = touch.points[i].p2, touch.points[i].p1
+		}
+		return touch, true
 	}
 
-	return m.Vec2d{}, 0, false
+	return touching{}, false
 }
 
-// penetrateCircles is cp's CircleToCircle, reporting the overlap rather than
-// pushing a Contact point.
-func penetrateCircles(centreA m.Vec2d, radiusA float64, centreB m.Vec2d, radiusB float64) (m.Vec2d, float64, bool) {
+// collideCircles is cp's CircleToCircle.
+func collideCircles(
+	centreA m.Vec2d, radiusA float64, centreB m.Vec2d, radiusB float64, coincident m.Vec2d,
+) (touching, bool) {
 	minimum := radiusA + radiusB
 	delta := centreB.Sub(centreA)
 	squared := delta.LengthSquared()
 
 	if squared >= minimum*minimum {
-		return m.Vec2d{}, 0, false
+		return touching{}, false
 	}
 
 	distance := math.Sqrt(squared)
-	if distance == 0 {
-		// cp answers (1, 0) here. A pure function does not invent a direction:
-		// the caller owns the choice, and in the solver it is a seeded nudge.
-		return m.Vec2d{}, minimum, true
+	// cp answers a fixed (1, 0) when the two centres coincide, which never
+	// breaks the symmetry it is there to break. The direction is the caller's:
+	// Detect hands in a seeded one and the pure Penetration hands in none, which
+	// leaves the normal zero and both points at their own centre.
+	normal := coincident
+	if distance != 0 {
+		normal = delta.MulS(1 / distance)
 	}
-	return delta.MulS(1 / distance), minimum - distance, true
+
+	var touch touching
+	touch.normal = normal
+	touch.count = 1
+	touch.points[0] = touchingPoint{
+		p1:    centreA.Add(normal.MulS(radiusA)),
+		p2:    centreB.Add(normal.MulS(-radiusB)),
+		depth: minimum - distance,
+		id:    pointID(0, 0),
+	}
+	return touch, true
 }
 
-// penetrateCircleSegment is cp's CircleToSegment, the circle first as cp's
-// order requires, reporting the overlap rather than pushing a Contact point.
-func penetrateCircleSegment(
+// collideCircleSegment is cp's CircleToSegment, the circle first as cp's kind
+// order requires.
+func collideCircleSegment(
 	centre m.Vec2d, radius float64,
 	segment Shape, transform Transform, world []m.Vec2d,
-) (m.Vec2d, float64, bool) {
+) (touching, bool) {
 	segA, segB, segNormal := world[0], world[1], world[2]
 
 	segDelta := segB.Sub(segA)
@@ -375,10 +452,12 @@ func penetrateCircleSegment(
 	delta := closest.Sub(centre)
 	squared := delta.LengthSquared()
 	if squared >= minimum*minimum {
-		return m.Vec2d{}, 0, false
+		return touching{}, false
 	}
 
 	distance := math.Sqrt(squared)
+	// cp's fallback here is geometry rather than a coin flip — the segment's own
+	// normal — and ports as written.
 	normal := segNormal
 	if distance != 0 {
 		normal = delta.MulS(1 / distance)
@@ -391,9 +470,18 @@ func penetrateCircleSegment(
 	rotation := m.Vec2d{X: transform.A, Y: transform.B}
 	if (closestT != 0 || normal.Dot(segment.verts[2].Rotate(rotation)) >= 0) &&
 		(closestT != 1 || normal.Dot(segment.verts[3].Rotate(rotation)) >= 0) {
-		return normal, minimum - distance, true
+		var touch touching
+		touch.normal = normal
+		touch.count = 1
+		touch.points[0] = touchingPoint{
+			p1:    centre.Add(normal.MulS(radius)),
+			p2:    closest.Add(normal.MulS(-segment.Radius)),
+			depth: minimum - distance,
+			id:    pointID(0, 0),
+		}
+		return touch, true
 	}
-	return m.Vec2d{}, 0, false
+	return touching{}, false
 }
 
 // closestPointOnSegment is cp's Vector.ClosestPointOnSegment.

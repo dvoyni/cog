@@ -26,13 +26,14 @@ import (
 func TestTheStepSitsOnTheEnginesAllocationLine(t *testing.T) {
 	const ticks = 10_000
 
-	measure := func(n int) float64 {
+	measure := func(n int) (float64, int) {
 		h := newHarnessWith(t, nil, uint32(2*max(n, 1)))
 		populate(t, h, n)
 		h.game.push = m.Vec2d{X: 10}
 		// Warm every pool the first ticks fill, so what is measured is the
 		// steady state and not the first tick.
 		h.frames(t, 100)
+		touching := len(h.contacts(t))
 		mallocs := allocationsDuring(func() {
 			for range ticks {
 				if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
@@ -40,13 +41,19 @@ func TestTheStepSitsOnTheEnginesAllocationLine(t *testing.T) {
 				}
 			}
 		})
-		return float64(mallocs) / ticks
+		return float64(mallocs) / ticks, touching
 	}
 
-	empty, small, large := measure(0), measure(256), measure(1024)
-	t.Logf("objects a step: %.3f with no Bodies, %.3f at N=256, %.3f at N=1024 — "+
-		"the first is the kernel's own dispatch over the nine subscriptions this engine composes",
-		empty, small, large)
+	empty, _ := measure(0)
+	small, smallTouching := measure(256)
+	large, largeTouching := measure(1024)
+	t.Logf("objects a step: %.3f with no Bodies, %.3f at N=256 over %d Contacts, "+
+		"%.3f at N=1024 over %d Contacts — the first is the kernel's own dispatch over "+
+		"the ten subscriptions this engine composes",
+		empty, small, smallTouching, large, largeTouching)
+	if smallTouching == 0 || largeTouching == 0 {
+		t.Fatal("the measured scene has no Contacts at all, so it measures neither Detect nor Solve")
+	}
 
 	if small > empty+0.05 {
 		t.Errorf("256 Bodies cost %.3f objects a step against %.3f with none", small, empty)
@@ -92,6 +99,14 @@ func BenchmarkTheStep(b *testing.B) {
 // is measured, and doing the work a real scene gives it. The Kinematic half
 // stays shapeless, which is the other thing worth pinning: a shapeless Body is
 // in neither index and costs the rebuild nothing.
+//
+// Each Static sits 0.75 m along +X from one of the Dynamic Bodies, which are
+// pushed into them: a summed radius of 0.8 m, so the pair overlaps and the
+// solver holds it at the Slop for ever. That gives n/4 Contacts that Began once
+// and Continue every tick after, so detection, the pair map, the gather, the
+// warm start and ten iterations are all inside the measurement rather than
+// walking an empty list. The other quarter of the Dynamic Bodies drift free,
+// which keeps the no-Contact path in it too.
 func populate(t testing.TB, h *harness, n int) {
 	t.Helper()
 	if n == 0 {
@@ -113,7 +128,7 @@ func populate(t testing.TB, h *harness, n int) {
 	for i := range n / 4 {
 		h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: gridAt(i)},
+			Place: ecsphysics2d.Position{Current: gridAt(i).Add(m.Vec2d{X: 0.75})},
 			Shape: circle(0.4),
 		})
 	}

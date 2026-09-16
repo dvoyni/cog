@@ -263,6 +263,53 @@ func indexCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 	})
 }
 
+// contactsCmd reads the tick's Contact list back, which is how a test sees what
+// Detect wrote and what Solve did to it. The list persists until the next
+// Detect, so reading it between ticks is what an app's own System ordered
+// before Integrate would legally see.
+type contactsCmd kernel.Command[contactsRequest, contactsResponse]
+
+type contactsRequest struct{}
+
+type contactsResponse struct {
+	Contacts []ecsphysics2d.Contact
+}
+
+func contactsCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[contactsRequest, contactsResponse]) {
+	return ecs.ToExecute[contactsRequest, contactsResponse](registrar, func(
+		_ contactsRequest,
+		contacts *ecs.Read[*ecsphysics2d.Contacts],
+		answer *ecs.Resp[contactsResponse],
+	) {
+		answer.Set(contactsResponse{
+			Contacts: append([]ecsphysics2d.Contact(nil), contacts.Get().All()...),
+		})
+	})
+}
+
+// despawnCmd retires an Entity, which is what makes an Ended entry name a Body
+// no Store holds any more.
+type despawnCmd kernel.Command[despawnRequest, despawnResponse]
+
+type despawnRequest struct{ Entity ecs.Entity }
+
+type despawnResponse struct{}
+
+func despawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[despawnRequest, despawnResponse]) {
+	return ecs.ToExecute[despawnRequest, despawnResponse](registrar, func(
+		request despawnRequest,
+		entities *ecs.WriteableEntities,
+		answer *ecs.Resp[despawnResponse],
+	) {
+		entities.Despawn(request.Entity)
+		answer.Set(despawnResponse{})
+	})
+}
+
+// filterOnUpdate is the app's filter System — cp's Begin and PreSolve — ordered
+// into the one gap the specification puts it in.
+type filterOnUpdate kernel.Subscription[app.UpdateEvent]
+
 // pushQuery is the gameplay write that Force exists for: a System of the app's,
 // ordered Before[IntegrateOnUpdate], adding this tick's Force to every Body
 // that can take one.
@@ -294,6 +341,10 @@ type game struct {
 	// torque is the angular half of the same write.
 	torque float64
 
+	// filter is the app's filter System's body, written between ticks like push
+	// and run over every entry the tick found. A nil one marks nothing.
+	filter func(entry *ecsphysics2d.Contact)
+
 	mu    sync.Mutex
 	order []string
 }
@@ -310,12 +361,26 @@ func (g *game) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[shapeCmd](shapeCmdImpl(registrar))
 	registrar.HandleCommand[placeCmd](placeCmdImpl(registrar))
 	registrar.HandleCommand[indexCmd](indexCmdImpl(registrar))
+	registrar.HandleCommand[contactsCmd](contactsCmdImpl(registrar))
+	registrar.HandleCommand[despawnCmd](despawnCmdImpl(registrar))
 	registrar.Subscribe[pushOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, func(q *ecs.Query[pushQuery]) {
 		for _, it := range q.All() {
 			it.Force.Force = it.Force.Force.Add(g.push)
 			it.Force.Torque += g.torque
 		}
 	})).Before[ecsphysics2d.IntegrateOnUpdate]()
+
+	registrar.Subscribe[filterOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, func(
+		contacts *ecs.Write[*ecsphysics2d.Contacts],
+	) {
+		if g.filter == nil {
+			return
+		}
+		list := contacts.Get().All()
+		for i := range list {
+			g.filter(&list[i])
+		}
+	})).After[ecsphysics2d.DetectOnUpdate]().Before[ecsphysics2d.SolveOnUpdate]()
 
 	g.probe(registrar)
 	return nil
@@ -468,6 +533,24 @@ func (h *harness) indexed(t testing.TB, at m.Vec2d, radius float64) indexRespons
 		t.Fatalf("asking the indices: %v", err)
 	}
 	return response
+}
+
+// contacts is the tick's Contact list as the app sees it.
+func (h *harness) contacts(t testing.TB) []ecsphysics2d.Contact {
+	t.Helper()
+	response, err := h.kernel.ExecuteCommand[contactsCmd](contactsRequest{})
+	if err != nil {
+		t.Fatalf("reading the Contacts: %v", err)
+	}
+	return response.Contacts
+}
+
+// despawn retires an Entity from outside a tick.
+func (h *harness) despawn(t testing.TB, e ecs.Entity) {
+	t.Helper()
+	if _, err := h.kernel.ExecuteCommand[despawnCmd](despawnRequest{Entity: e}); err != nil {
+		t.Fatalf("despawning %v: %v", e, err)
+	}
 }
 
 // circle is the Shape every index test spawns with: the smallest thing that
