@@ -85,18 +85,45 @@ func BenchmarkTheStep(b *testing.B) {
 // populate spawns n Bodies, half Dynamic under a Force and half Kinematic, plus
 // a quarter as many Static ones for the walk to step over. A count of zero
 // spawns nothing, which is the engine's own line to measure the rest against.
+//
+// The Dynamic half and the statics carry Shapes, and are spread over a grid
+// rather than stacked in one cell, so that the per-tick Body rebuild — Clear
+// then one Insert per Body, which is squarely on the hot path — is inside what
+// is measured, and doing the work a real scene gives it. The Kinematic half
+// stays shapeless, which is the other thing worth pinning: a shapeless Body is
+// in neither index and costs the rebuild nothing.
 func populate(t testing.TB, h *harness, n int) {
 	t.Helper()
 	if n == 0 {
 		return
 	}
-	h.spawn(t, spawnRequest{Kind: kindDynamic, Count: n / 2, Body: dynamic(t, 2, 8, 15, 0.3)})
+	for i := range n / 2 {
+		h.spawn(t, spawnRequest{
+			Kind:  kindShapedBody,
+			Place: ecsphysics2d.Position{Current: gridAt(i)},
+			Body:  dynamic(t, 2, 8, 15, 0.3),
+			Shape: circle(0.4),
+		})
+	}
 	h.spawn(t, spawnRequest{
 		Kind:     kindKinematic,
 		Count:    n / 2,
 		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 1}},
 	})
-	h.spawn(t, spawnRequest{Kind: kindStatic, Count: n / 4})
+	for i := range n / 4 {
+		h.spawn(t, spawnRequest{
+			Kind:  kindShapedStatic,
+			Place: ecsphysics2d.Position{Current: gridAt(i)},
+			Shape: circle(0.4),
+		})
+	}
+}
+
+// gridAt is where the i-th Shape goes: a 1.7 m grid, the spacing the index's
+// own measurements use — close enough that a 2 m cell holds more than one, far
+// enough apart that they are not all in the same one.
+func gridAt(i int) m.Vec2d {
+	return m.Vec2d{X: float64(i%16) * 1.7, Y: float64(i/16) * 1.7}
 }
 
 // allocationsDuring counts the objects f allocates, the way ecs's own frame
