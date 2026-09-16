@@ -26,9 +26,11 @@ type plugin struct {
 	quadIndices  gfx.BufferDescr
 	quadReady    bool
 	layers       []canvas.Layer
-	// params is the flush scratch for the two draws that emit their own quad
-	// rather than joining a batcher: the tiled sprite and the texture sprite.
-	params       []gfx.ParameterDescr
+	// quadParams is the shading scratch for the two draws that build their own
+	// quad rather than replaying vertices an app recorded: the tiled sprite and
+	// the texture sprite. Both join the triangles batcher, which copies what it
+	// keeps, so one buffer serves every quad in a frame.
+	quadParams   []gfx.ParameterDescr
 	tileVertices []byte
 	batch        spriteBatch
 	tris         trianglesBatch
@@ -326,10 +328,13 @@ func (p *plugin) ensureQuad(resources *gfx.ResourceQueue) bool {
 
 func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, atlas *types.Atlas, gfxResources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.SpriteOp) {
 	// Recording order is the contract, so a sprite closes every batch whose
-	// pending draw would otherwise land after it. The atlas batch is the only one
-	// a path sprite can join; a texture-sourced sprite joins neither, because its
-	// draw emits here and now.
-	p.tris.flush(gfxWrite)
+	// pending draw would otherwise land after it - but only the batches it
+	// cannot itself join. A texture-sourced or tiled sprite is a quad in the
+	// built-in vertex layout and joins the triangles batch, so flushing that
+	// batch here would close the very run it is about to extend; it closes the
+	// atlas batch instead. A path sprite is the mirror image: it joins the atlas
+	// batch and closes the triangles one, which is why that flush sits below
+	// these two returns rather than above them.
 	if op.HasTexture {
 		p.batch.flush(gfxWrite, p.quad)
 		p.drawTextureSprite(gfxWrite, surf, layerTransform, clip, hasClip, materials, op)
@@ -349,6 +354,12 @@ func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, atlas *types.Atlas, gfxResour
 	if !ok {
 		return
 	}
+	// The sprite is going to the atlas batch, which no triangle draw can join,
+	// so the pending triangles run closes here. It closes after the resolve
+	// rather than before it: a sprite whose atlas entry does not resolve draws
+	// nothing, and ending a batch for a draw that never happens costs a draw
+	// for no ordering anyone can observe.
+	p.tris.flush(gfxWrite)
 	// Naming a material no longer costs a draw: it joins the batch key by
 	// fingerprint, so a sprite that names one merges with every sprite that names
 	// the same one, and a lone sprite is the one-instance case.
@@ -444,12 +455,8 @@ func (p *plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *types.Atlas, gfxR
 	if size.X == 0 || size.Y == 0 {
 		return
 	}
-	clipEnabled := float32(0)
-	if hasClip {
-		if clip.Width <= 0 || clip.Height <= 0 {
-			return
-		}
-		clipEnabled = 1
+	if hasClip && (clip.Width <= 0 || clip.Height <= 0) {
+		return
 	}
 	spanX := float32(1)
 	if t.TileX {
@@ -477,19 +484,12 @@ func (p *plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *types.Atlas, gfxR
 	for _, i := range [6]int{0, 1, 2, 0, 2, 3} {
 		p.tileVertices = appendTileVertex(p.tileVertices, positions[i], tint, uvs[i])
 	}
-	p.params = p.params[:0]
-	p.params = append(p.params,
-		gfx.VecParam("canvasViewport", m.Vec4{X: surf.size.X, Y: surf.size.Y, Z: clipEnabled}),
-		gfx.MatParam("canvasLayer", layerTransform),
-		gfx.VecParam("canvasClip", m.Vec4{X: clip.X, Y: clip.Y, Z: clip.X + clip.Width, W: clip.Y + clip.Height}),
-		gfx.TextureParam(canvas.TextureSlot, entry.Texture),
-		gfx.SamplerParam(canvas.SamplerSlot, tileSampler(t)),
-	)
-	p.params = append(p.params, op.Params...)
-	material, _, scope := materials.Resolve(types.FamilyTriangles, nil, 0)
-	p.params = append(p.params, scope...)
-	mesh := gfx.Mesh(gfx.BufferWithBytes(p.tileVertices, true), gfx.TopologyTriangleList, canvas.Vertex{}.VertexLayout()...)
-	gfxWrite.Draw(mesh, *material, p.params...)
+	// A tiled sprite keeps FamilyTriangles: it is artwork, and artwork wants the
+	// key-colour ramp. Only the texture sprite below is exempt.
+	material, fingerprint, scope := materials.Resolve(types.FamilyTriangles, nil, 0)
+	shading := p.shadeQuad(material, fingerprint, entry.Texture, tileSampler(t), op.Params, scope)
+	p.tris.add(gfxWrite, surf.size, builtinQuadLayoutID, canvas.Vertex{}.VertexLayout(),
+		layerTransform, clip, hasClip, &shading, p.tileVertices)
 }
 
 // drawTextureSprite draws a sprite sourcing an arbitrary gfx texture rather than
@@ -497,9 +497,14 @@ func (p *plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *types.Atlas, gfxR
 //
 // It cannot join the sprite batch: that shader's binding is a
 // texture_2d_array and an arbitrary texture is a texture_2d, so an atlas batch
-// and a texture sprite can never be the same draw. It emits its own quad
+// and a texture sprite can never be the same draw. It builds its own quad
 // instead, the same route the tiled sprite takes, through the texture material
 // so the key-colour ramp never touches a rendered image.
+//
+// The quad still batches - it joins the triangles batcher, and a nine-slice is
+// one draw rather than nine - because what keeps it off the sprite path is the
+// binding type, not anything about the geometry. Two quads over one texture and
+// one sampler are one draw; a second texture splits them.
 func (p *plugin) drawTextureSprite(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.SpriteOp) {
 	width, height := op.Texture.Size()
 	if width <= 0 || height <= 0 {
@@ -517,20 +522,17 @@ func (p *plugin) drawTextureSprite(gfxWrite *gfx.OpQueue, surf surface, layerTra
 	p.emitTextureQuad(gfxWrite, surf, layerTransform, clip, hasClip, width, height, op.Transform, materials, op)
 }
 
-// emitTextureQuad draws one rectangle of a texture-sourced sprite: two triangles
-// in the built-in vertex layout, with the tint as vertex colour so it needs no
-// parameter the texture material would have to declare.
+// emitTextureQuad adds one rectangle of a texture-sourced sprite to the triangles
+// batcher: two triangles in the built-in vertex layout, with the tint as vertex
+// colour so it needs no parameter the texture material would have to declare -
+// and so that two quads differing only in tint still merge.
 func (p *plugin) emitTextureQuad(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, width, height int, t canvas.SpriteTransform, materials *types.ScopeMaterials, op *types.SpriteOp) {
 	size := spriteSize(width, height, t)
 	if size.X == 0 || size.Y == 0 {
 		return
 	}
-	clipEnabled := float32(0)
-	if hasClip {
-		if clip.Width <= 0 || clip.Height <= 0 {
-			return
-		}
-		clipEnabled = 1
+	if hasClip && (clip.Width <= 0 || clip.Height <= 0) {
+		return
 	}
 	uv, ok := textureUV(width, height, t, size)
 	if !ok {
@@ -553,19 +555,10 @@ func (p *plugin) emitTextureQuad(gfxWrite *gfx.OpQueue, surf surface, layerTrans
 	for _, i := range [6]int{0, 1, 2, 0, 2, 3} {
 		p.tileVertices = appendTileVertex(p.tileVertices, positions[i], tint, uvs[i])
 	}
-	material, _, scope := materials.Resolve(types.FamilyTexture, op.NamedMaterial(), op.Fingerprint)
-	p.params = p.params[:0]
-	p.params = append(p.params,
-		gfx.VecParam("canvasViewport", m.Vec4{X: surf.size.X, Y: surf.size.Y, Z: clipEnabled}),
-		gfx.MatParam("canvasLayer", layerTransform),
-		gfx.VecParam("canvasClip", m.Vec4{X: clip.X, Y: clip.Y, Z: clip.X + clip.Width, W: clip.Y + clip.Height}),
-		gfx.TextureParam(canvas.TextureSlot, op.Texture),
-		gfx.SamplerParam(canvas.SamplerSlot, tileSampler(t)),
-	)
-	p.params = append(p.params, op.Params...)
-	p.params = append(p.params, scope...)
-	mesh := gfx.Mesh(gfx.BufferWithBytes(p.tileVertices, true), gfx.TopologyTriangleList, canvas.Vertex{}.VertexLayout()...)
-	gfxWrite.Draw(mesh, *material, p.params...)
+	material, fingerprint, scope := materials.Resolve(types.FamilyTexture, op.NamedMaterial(), op.Fingerprint)
+	shading := p.shadeQuad(material, fingerprint, op.Texture, tileSampler(t), op.Params, scope)
+	p.tris.add(gfxWrite, surf.size, builtinQuadLayoutID, canvas.Vertex{}.VertexLayout(),
+		layerTransform, clip, hasClip, &shading, p.tileVertices)
 }
 
 // textureUV resolves the uv rect a texture-sourced sprite samples. Unlike an
