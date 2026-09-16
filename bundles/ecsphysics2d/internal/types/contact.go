@@ -327,7 +327,13 @@ type Contacts struct {
 
 	// nudge is the seeded source the one coin flip in the whole package draws
 	// from, and nudged is the direction it drew for this tick: the way two
-	// exactly coincident circles are parted.
+	// exactly coincident Shapes are parted, of whatever kinds.
+	//
+	// It reaches every collision arm and not only the circles'. The closed
+	// circle-against-circle form reads it when the two centres coincide; the
+	// four GJK arms hand it to gjk, whose cold-start axis is the difference of
+	// the two bounding-box centres and therefore nothing at the same placement.
+	// One seed, one mechanism, read at one condition.
 	//
 	// It is drawn once a tick rather than once a pair, because a pair that has
 	// to ask is vanishingly rare and asking costs a sine and a cosine, which
@@ -386,8 +392,9 @@ func (c *Contacts) beginTick() {
 	c.nudged = c.nudgeNormal()
 }
 
-// nudgeNormal draws this tick's coincidence direction. cp invents a fixed
-// (1, 0) there, which never breaks the symmetry it is there to break.
+// nudgeNormal draws this tick's coincidence direction: one draw, which every
+// pair the tick tests then shares. cp invents a fixed (1, 0) there, which never
+// breaks the symmetry it is there to break.
 //
 // It is an xorshift64 over the seeded state, which allocates nothing and needs
 // no source object.

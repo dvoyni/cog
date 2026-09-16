@@ -39,6 +39,12 @@ import (
 // than no test.
 const finitenessSeed = 0x9E3779B97F4A7C15
 
+// finitenessNudgeSeed is the coincidence directions' own generator, kept apart
+// from the placements' so that adding the seeded arm to the pair sweep moved not
+// one of the placements it draws. The counts this sweep logs are comparable
+// across that change, which is the point of the separation.
+const finitenessNudgeSeed = 0xD1B54A32D192ED03
+
 // finitenessDraws is how many cases each of the three sweeps takes. Bounded, and
 // the whole test is well under a second.
 const finitenessDraws = 6000
@@ -127,9 +133,37 @@ func finitenessWorld(s finitenessShape, at m.Vec2d, angle float64) ([]m.Vec2d, B
 	return world[:used], box
 }
 
+// pointLike says whether a Shape's support set is a single point whatever
+// direction is asked of it: a circle, whose support is always its centre
+// whatever its radius, a segment whose two endpoints are the same point, or a
+// Polygon whose world vertices are all one point.
+//
+// Two such Shapes have a Minkowski difference that is a single point, and a
+// single point has no edge for any axis to find. That is the one placement a
+// seed cannot rescue, and it is not the coincidence problem: every support query
+// answers the same however the axis is chosen, so there is no symmetry to break.
+// The radius, which is added after GJK, is the whole of what such a pair could
+// have to separate, and it is the same answer cp gives.
+func pointLike(shape Shape, world []m.Vec2d) bool {
+	switch shape.Kind {
+	case ShapeCircle:
+		return true
+	case ShapeSegment:
+		return world[0] == world[1]
+	}
+	verts, _ := polyWorld(world)
+	for _, v := range verts {
+		if v != verts[0] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestTheFinitenessInvariantHoldsOverASweepOfDegenerateInputs(t *testing.T) {
 	catalogue := finitenessCatalogue(t)
 	rng := splitmix64(finitenessSeed)
+	nudges := splitmix64(finitenessNudgeSeed)
 
 	// The angles the sweep draws from. Zero dominates on purpose: a Shape turned
 	// by anything else has no exactly axis-aligned face — cos(pi/2) is 6.1e-17
@@ -149,10 +183,14 @@ func TestTheFinitenessInvariantHoldsOverASweepOfDegenerateInputs(t *testing.T) {
 		// seed. Penetration is pure and hands in none; Detect hands in c.nudged.
 		// The depth survives: it is the summed radius, and it is right.
 		seeded int
-		// unseeded is one of the four GJK arms, which take no seed at all. Their
-		// cold start is axis := centreA.Sub(centreB).Perp() and a degenerate
-		// simplex takes closestTo's d <= 0 arm with a normal Normalize guarded to
-		// zero, so the depth is lost along with the direction.
+		// unseeded is one of the four GJK arms reached through the pure
+		// Penetration, which hands in no seed either. Their cold start is
+		// axis := centreA.Sub(centreB).Perp() and a degenerate simplex takes
+		// closestTo's d <= 0 arm with a normal Normalize guarded to zero, so the
+		// depth is lost along with the direction.
+		//
+		// That is the pure primitive's stated rule and not a gap. The seeded
+		// route is measured against it below, pair for pair.
 		unseeded int
 		// coincident and collinear split the unseeded ones by what degenerated
 		// the simplex: exactly coincident world bounding box centres, which is a
@@ -169,6 +207,26 @@ func TestTheFinitenessInvariantHoldsOverASweepOfDegenerateInputs(t *testing.T) {
 		// depthKept is the failure: a GJK arm that lost the direction but reported
 		// a depth anyway, which would push two Bodies along a normal of nothing.
 		depthKept []string
+		// The seeded route, run on every pair the unseeded one reported as a
+		// directionless GJK touch on exactly coincident centres — which is the
+		// placement Detect's nudge is drawn for. Three outcomes are legitimate and
+		// there is no fourth:
+		//
+		//   - seededParted: the pair comes apart. A real normal is what cp's
+		//     end-cap rejection and the summed-radius gate read, and with the zero
+		//     normal they were reading nothing; a pair they now refuse was being
+		//     reported as touching with nothing to separate it;
+		//   - seededRecovered: a unit normal, which is the fix;
+		//   - seededFlat: still no direction, and only where the two Shapes'
+		//     Minkowski difference is a single point. No axis finds an edge of a
+		//     point, so there is no symmetry there for a seed to break.
+		seededParted, seededRecovered, seededFlat int
+		// seededLost is the failure this ticket exists to make impossible: a
+		// coincident pair that a seed should have parted and did not.
+		seededLost []string
+		// seededNotUnit is a normal that came back neither zero nor of length one,
+		// which would scale every impulse spent along it.
+		seededNotUnit []string
 		// asymmetric counts the pairs the broadphase admits that read differently
 		// either way round with a real depth behind the disagreement.
 		asymmetric []string
@@ -201,8 +259,8 @@ func TestTheFinitenessInvariantHoldsOverASweepOfDegenerateInputs(t *testing.T) {
 			atB = rng.lattice()
 		}
 
-		_, boxA := finitenessWorld(a, atA, angleA)
-		_, boxB := finitenessWorld(b, atB, angleB)
+		worldA, boxA := finitenessWorld(a, atA, angleA)
+		worldB, boxB := finitenessWorld(b, atB, angleB)
 
 		normal, depth, ok := Penetration(
 			a.shape, atA, angleA, a.verts,
@@ -273,15 +331,58 @@ func TestTheFinitenessInvariantHoldsOverASweepOfDegenerateInputs(t *testing.T) {
 		}
 
 		unseeded++
-		if boxA.Centre() == boxB.Centre() {
-			coincident++
-		} else {
-			collinear++
-		}
 		if depth != 0 {
 			depthKept = append(depthKept, fmt.Sprintf(
 				"%s at %v angle %v against %s at %v angle %v — depth %v with no normal at all",
 				a.name, atA, angleA, b.name, atB, angleB, depth))
+		}
+		if boxA.Centre() != boxB.Centre() {
+			// A Minkowski difference with no area for the axis to have found,
+			// which is a different condition in the same function and not what the
+			// nudge is drawn for. It is tracked apart.
+			collinear++
+			continue
+		}
+		coincident++
+
+		// The same pair through the seeded route, which is what Detect runs: one
+		// direction drawn from the sweep's own generator, as Collide draws one a
+		// tick from its own. This is the half of the sweep that moved when the
+		// seed reached the GJK arms — before it did, every one of these answered
+		// exactly as the unseeded run above and none of them recovered.
+		seed := m.ForAngle(float64(nudges.next()>>11) * (2 * math.Pi / (1 << 53)))
+		touch, seededOK := seededCollide(t,
+			a.shape, atA, angleA, a.verts, b.shape, atB, angleB, b.verts, seed)
+		finite(fmt.Sprintf("the seeded normal of %s against %s", a.name, b.name),
+			touch.normal.X, touch.normal.Y)
+		for i := range touch.count {
+			finite(fmt.Sprintf("the seeded depth of %s against %s", a.name, b.name),
+				touch.points[i].depth)
+		}
+
+		switch {
+		case !seededOK:
+			seededParted++
+		case touch.normal == (m.Vec2d{}):
+			seededFlat++
+			if !pointLike(a.shape, worldA) || !pointLike(b.shape, worldB) {
+				seededLost = append(seededLost, fmt.Sprintf(
+					"%s at %v angle %v against %s at %v angle %v, seeded along %v — "+
+						"no direction, and neither Shape is a point",
+					a.name, atA, angleA, b.name, atB, angleB, seed))
+			}
+			if deepest(touch) != 0 {
+				depthKept = append(depthKept, fmt.Sprintf(
+					"seeded, %s against %s — depth %v with no normal at all",
+					a.name, b.name, deepest(touch)))
+			}
+		default:
+			seededRecovered++
+			if math.Abs(touch.normal.Length()-1) > 1e-12 {
+				seededNotUnit = append(seededNotUnit, fmt.Sprintf(
+					"%s against %s, seeded along %v — normal %v of length %v",
+					a.name, b.name, seed, touch.normal, touch.normal.Length()))
+			}
 		}
 	}
 
@@ -343,12 +444,16 @@ func TestTheFinitenessInvariantHoldsOverASweepOfDegenerateInputs(t *testing.T) {
 
 	t.Logf("seed %#x: %d pairs, of which %d had boxes the broadphase gate refuses (%d of those "+
 		"reported touching anyway, which no engine path can see); %d touching through the gate, "+
-		"%d of them with no direction at all — %d from a closed form given no seed, which keeps "+
-		"its depth, and %d from a GJK arm, which does not (%d on exactly coincident bounding box "+
-		"centres, %d on a Minkowski difference with no area); %d Probes (%d Hits, %d aimed exactly "+
-		"along a face plane); %d point queries (%d exactly on an edge coordinate)",
+		"%d of them with no direction at all through the pure Penetration — %d from a closed form "+
+		"given no seed, which keeps its depth, and %d from a GJK arm, which does not (%d on "+
+		"exactly coincident bounding box centres, %d on a Minkowski difference with no area). "+
+		"Of the %d coincident ones run again through the seeded route Detect uses, %d part along "+
+		"a unit normal, %d come apart outright, and %d still have no direction — every one of "+
+		"those a pair whose Minkowski difference is a single point. %d Probes (%d Hits, %d aimed "+
+		"exactly along a face plane); %d point queries (%d exactly on an edge coordinate)",
 		uint64(finitenessSeed), pairs, ungated, ungatedTouching,
 		touching, seeded+unseeded, seeded, unseeded, coincident, collinear,
+		coincident, seededRecovered, seededParted, seededFlat,
 		probes, hits, exactlyParallel, points, exactlyOnAnEdge)
 
 	if len(depthKept) > 0 {
@@ -358,6 +463,21 @@ func TestTheFinitenessInvariantHoldsOverASweepOfDegenerateInputs(t *testing.T) {
 	if len(asymmetric) > 0 {
 		t.Errorf("%d pairs the broadphase admits read differently either way round with a real "+
 			"overlap behind it; the first is %s", len(asymmetric), asymmetric[0])
+	}
+
+	// The clause that moved. The sweep used to hold that every directionless
+	// touch from a GJK arm lost its depth with its direction, full stop, because
+	// no GJK arm could be given a seed. It still holds of the pure Penetration
+	// above, which is a rule and not a gap; what it no longer holds of is the
+	// seeded route, and this is what is true there instead.
+	if len(seededLost) > 0 {
+		t.Errorf("%d pairs on exactly coincident bounding box centres still have no direction "+
+			"when seeded, and are not two points with nothing to separate; the first is %s",
+			len(seededLost), seededLost[0])
+	}
+	if len(seededNotUnit) > 0 {
+		t.Errorf("%d seeded normals are neither zero nor of length one, which would scale every "+
+			"impulse spent along them; the first is %s", len(seededNotUnit), seededNotUnit[0])
 	}
 
 	// The emptiness guards. A sweep that never reached a degenerate case would
@@ -372,6 +492,14 @@ func TestTheFinitenessInvariantHoldsOverASweepOfDegenerateInputs(t *testing.T) {
 	if coincident == 0 {
 		t.Error("the sweep never placed two Shapes on exactly coincident bounding box centres, " +
 			"so it says nothing about GJK's zero cold-start axis")
+	}
+	if seededRecovered == 0 {
+		t.Error("no coincident pair recovered a direction when seeded, so the sweep says nothing " +
+			"about whether the nudge reaches the GJK arms at all")
+	}
+	if seededFlat == 0 {
+		t.Error("the sweep never reached a coincident pair whose Minkowski difference is a " +
+			"single point, so the one placement a seed cannot rescue is not being measured")
 	}
 	if seeded == 0 {
 		t.Error("the sweep never reached a closed form with no seed, so it draws no contrast " +
@@ -449,25 +577,77 @@ func TestACircleAgainstAZeroLengthSegmentAnswersWithANumberWhereChipmunkAnswersW
 	wantPoint(t, "ClosestPoint", point, 1+0.2/math.Sqrt2, 1+0.2/math.Sqrt2)
 }
 
-// TestTwoShapesWhoseBoundingBoxCentresCoincideExactlyReportNoDirectionAndNoDepth
-// freezes the GJK cold-start gap as the port's own answer. It is a
-// characterisation and not an endorsement: whether to guard it is a human
-// decision this ticket was told not to take, and the numbers below are what that
-// decision would be taken against.
+// seededCollide is the narrowphase over two Shapes placed at the same point,
+// handed the direction Detect would have drawn for the tick. It is collideWorld
+// cold — a cached simplex of 0 — so the answer is a function of the two Shapes,
+// their poses and the seed alone.
+//
+// Penetration cannot be used for this: it is the pure primitive and hands in no
+// seed at all, which is exactly the contrast the test below draws.
+func seededCollide(
+	t testing.TB,
+	a Shape, atA m.Vec2d, angleA float64, vertsA []m.Vec2d,
+	b Shape, atB m.Vec2d, angleB float64, vertsB []m.Vec2d,
+	seed m.Vec2d,
+) (touching, bool) {
+	t.Helper()
+	transformA := NewTransformRigid(atA, angleA)
+	transformB := NewTransformRigid(atB, angleB)
+	worldA := make([]m.Vec2d, worldLenFor(a, vertsA))
+	worldB := make([]m.Vec2d, worldLenFor(b, vertsB))
+	usedA, _ := cacheWorldAt(a, transformA, vertsA, worldA)
+	usedB, _ := cacheWorldAt(b, transformB, vertsB, worldB)
+	return collideWorld(
+		a, transformA, worldA[:usedA], b, transformB, worldB[:usedB], seed, 0)
+}
+
+// deepest is the depth of the deepest point of a manifold. A two-point manifold
+// on a coincident pair carries the whole overlap on one of its points and about
+// nothing on the other, which is the manifold and not the minimum translation.
+func deepest(touch touching) float64 {
+	depth := touch.points[0].depth
+	for i := range touch.count {
+		if touch.points[i].depth > depth {
+			depth = touch.points[i].depth
+		}
+	}
+	return depth
+}
+
+// TestTwoShapesWhoseBoundingBoxCentresCoincideExactlyPartOnlyAlongASeededDirection
+// pins both halves of the rule for a pair placed where no separating direction is
+// preferred over any other: the pure primitive withholds the direction, and the
+// seeded route parts them.
 //
 // gjk()'s cold start is axis := centreA.Sub(centreB).Perp() over the two world
-// bounding box centres. When they coincide exactly the axis is the zero vector,
+// bounding box centres. When they coincide exactly that axis is the zero vector,
 // both support queries return the same vertex, the simplex collapses to a single
 // Minkowski point, and closestTo takes its d <= 0 arm with a normal that
-// Normalize guarded to zero — so the pair is reported as touching with no
-// direction and, worse, with a depth of zero when the real overlap is a whole
-// Shape wide.
+// Normalize guarded to zero — so the pair comes back touching with no direction
+// and, worse, with a depth of zero when the real overlap is a whole Shape wide.
 //
-// Detect's seeded nudge does not reach here. Collide passes c.nudged into
-// collideWorld as coincident and collideCircles is the only arm that consumes it,
-// so the symmetry-breaking built for two coincident circles has no counterpart
-// for a circle concentric with a box.
-func TestTwoShapesWhoseBoundingBoxCentresCoincideExactlyReportNoDirectionAndNoDepth(t *testing.T) {
+// Detect's seeded nudge now reaches here. Collide passes c.nudged into
+// collideWorld as coincident, collideWorld hands it to gjk, and gjk reads it at
+// the one placement where its own axis is nothing. With a direction to start
+// from, EPA converges and **the depth comes back with the normal** — the depth
+// was never the ambiguous half.
+//
+// Two claims are made per row, and the second is the point of the whole test:
+//
+//   - Penetration still reports a zero normal, because it is pure and hands in no
+//     seed. The specification states that as a rule and not as a gap;
+//   - seeded, the pair parts along a unit normal at the right depth, and **which**
+//     unit normal depends on the seed. Every one of these placements is symmetric
+//     about its own centre, so the minimum translation is a tie between two or
+//     four directions and no single one of them is the right answer. A fixed axis
+//     — cp's (1, 0), which the specification rejects — would answer the same one
+//     every time; the seed answers a different one as the seed moves, which is
+//     what breaking the symmetry means and is asserted below as such.
+//
+// cp's own behaviour is on every row, measured at 1e-9 cold on the
+// research/port-vs-cp branch. Where cp recovers, its normal is one of the tied
+// minima the port draws from and its depth is the depth the port now reports.
+func TestTwoShapesWhoseBoundingBoxCentresCoincideExactlyPartOnlyAlongASeededDirection(t *testing.T) {
 	box := NewBoxShape(1, 1, 0)
 	circle := NewCircleShape(0.5, m.Vec2d{})
 	capsule := NewSegmentShape(m.Vec2d{X: -0.5}, m.Vec2d{X: 0.5}, 0.2)
@@ -480,68 +660,147 @@ func TestTwoShapesWhoseBoundingBoxCentresCoincideExactlyReportNoDirectionAndNoDe
 
 	triangleShape := PolygonVerts(nil, triangle, triangleVerts)
 
+	// The triangle's tied minima are the two slanted edge normals and their
+	// negatives; its base normal is a whole unit away and never wins.
+	slant := m.Vec2d{X: 2, Y: -1}.Normalize()
+	mirror := m.Vec2d{X: 2, Y: 1}.Normalize()
+
 	for _, c := range []struct {
 		name           string
 		a, b           Shape
 		vertsA, vertsB []m.Vec2d
-		degenerate     bool
-		wantDepth      float64
-		chipmunkNote   string
+		// tied is every unit normal the minimum translation is a tie between, and
+		// is nil for a pair where the seed itself is the answer.
+		tied         []m.Vec2d
+		wantDepth    float64
+		chipmunk     string
+		chipmunkNear m.Vec2d
+		chipmunkDeep float64
 	}{
 		{
 			name: "two identical boxes", a: box, b: box,
-			degenerate:   true,
-			chipmunkNote: "cp degenerates identically here",
+			tied: []m.Vec2d{
+				{X: 1}, {X: -1}, {Y: 1}, {Y: -1},
+			},
+			wantDepth: 1,
+			chipmunk: "cp degenerates identically here, so the port now recovers " +
+				"a minimum translation where cp reports none",
 		},
 		{
 			name: "two identical capsules", a: capsule, b: capsule,
-			degenerate:   true,
-			chipmunkNote: "cp degenerates identically here",
+			tied:      []m.Vec2d{{Y: 1}, {Y: -1}},
+			wantDepth: 0.4,
+			chipmunk: "cp degenerates identically here, so the port now recovers " +
+				"a minimum translation where cp reports none",
 		},
 		{
 			name: "two identical triangles", a: triangle, b: triangle,
 			vertsA: triangleShape, vertsB: triangleShape,
-			degenerate:   true,
-			chipmunkNote: "cp degenerates identically here",
+			tied:      []m.Vec2d{slant, slant.Negate(), mirror, mirror.Negate()},
+			wantDepth: 0.8944271909999159,
+			chipmunk: "cp degenerates identically here, so the port now recovers " +
+				"a minimum translation where cp reports none",
 		},
 		{
 			name: "a circle concentric with a box", a: circle, b: box,
-			degenerate:   true,
-			chipmunkNote: "cp recovers with a normal of (0, 1) and a depth of 1",
+			tied: []m.Vec2d{
+				{X: 1}, {X: -1}, {Y: 1}, {Y: -1},
+			},
+			wantDepth:    1,
+			chipmunk:     "cp recovers with a normal of (0, 1) and a depth of 1",
+			chipmunkNear: m.Vec2d{Y: 1},
+			chipmunkDeep: 1,
 		},
 		{
 			name: "a segment through a box's centre", a: through, b: box,
-			degenerate:   true,
-			chipmunkNote: "cp recovers with a normal of (0, 1) and a depth of 0.5",
+			tied:         []m.Vec2d{{Y: 1}, {Y: -1}},
+			wantDepth:    0.5,
+			chipmunk:     "cp recovers with a normal of (0, 1) and a depth of 0.5",
+			chipmunkNear: m.Vec2d{Y: 1},
+			chipmunkDeep: 0.5,
 		},
 		{
-			// The one pair kind the seed does reach, and the contrast that makes
-			// the gap a gap: two coincident circles take a closed form, and that
-			// closed form has a seeded direction parameter the four GJK arms do
-			// not.
+			// The closed form, which took the seed before any of the four GJK arms
+			// did. Its answer is the seed itself rather than one of a tied set,
+			// there being no edge for the minimum to lie on.
 			name: "two coincident circles", a: circle, b: circle,
-			wantDepth:    1,
-			chipmunkNote: "cp invents a fixed (1, 0) that never breaks the symmetry",
+			wantDepth: 1,
+			chipmunk:  "cp invents a fixed (1, 0) that never breaks the symmetry",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			normal, depth, ok := Penetration(c.a, m.Vec2d{}, 0, c.vertsA, c.b, m.Vec2d{}, 0, c.vertsB)
+			// The pure primitive first. It withholds the direction, which is the
+			// specification's rule for coincident centres and not a gap: choosing a
+			// direction is the caller's, and a pure function takes no randomness.
+			normal, _, ok := Penetration(c.a, m.Vec2d{}, 0, c.vertsA, c.b, m.Vec2d{}, 0, c.vertsB)
 			if !ok {
 				t.Fatalf("%s does not touch at all", c.name)
 			}
 			if normal != (m.Vec2d{}) {
-				t.Errorf("%s reports a normal of %v, want none — %s", c.name, normal, c.chipmunkNote)
+				t.Errorf("%s reports a normal of %v through the pure Penetration, want none — "+
+					"a pure function takes no randomness", c.name, normal)
 			}
-			if c.degenerate {
-				// The depth is the half that is not ambiguous and is lost anyway:
-				// two identical boxes overlap completely and the port says zero.
-				if depth != 0 {
-					t.Errorf("%s reports a depth of %v, want the degenerate zero this pins — %s",
-						c.name, depth, c.chipmunkNote)
+
+			// Seeded, over a fan of directions standing in for the tick's draw.
+			// Every one must part the pair along a unit normal at the right depth,
+			// and the fan as a whole must produce more than one of them — which is
+			// the symmetry breaking, and the thing cp's fixed axis cannot do.
+			const fan = 64
+			drawn := map[m.Vec2d]int{}
+			for i := range fan {
+				seed := m.ForAngle(float64(i) * (2 * math.Pi / fan))
+				touch, ok := seededCollide(t,
+					c.a, m.Vec2d{}, 0, c.vertsA, c.b, m.Vec2d{}, 0, c.vertsB, seed)
+				if !ok {
+					t.Fatalf("%s does not touch at all when seeded along %v", c.name, seed)
 				}
-				return
+				got := touch.normal
+				if math.Abs(got.Length()-1) > cpTolerance {
+					t.Fatalf("%s seeded along %v reports a normal of %v, whose length is %v "+
+						"and not one", c.name, seed, got, got.Length())
+				}
+				wantNear(t, c.name+" seeded depth", deepest(touch), c.wantDepth)
+
+				if c.tied != nil {
+					matched := false
+					for _, want := range c.tied {
+						if near(got.X, want.X) && near(got.Y, want.Y) {
+							matched = true
+						}
+					}
+					if !matched {
+						t.Fatalf("%s seeded along %v parts along %v, which is none of the "+
+							"tied minima %v", c.name, seed, got, c.tied)
+					}
+				}
+				drawn[m.Vec2d{X: math.Round(got.X * 1e9), Y: math.Round(got.Y * 1e9)}]++
 			}
-			wantNear(t, "Depth", depth, c.wantDepth)
+
+			// The whole of the departure from cp's fixed (1, 0): the direction moves
+			// with the seed. One direction over the whole fan would be a symmetry
+			// that never breaks, whatever axis it happened to pick.
+			if len(drawn) < 2 {
+				t.Errorf("%s parts along a single direction over %d seeds, which is a "+
+					"symmetry that never breaks — %s", c.name, fan, c.chipmunk)
+			}
+
+			// cp's own answer, where cp has one, at the corpus's 1e-9 cold. The
+			// depth is the half that was never ambiguous, so it must agree exactly;
+			// the direction is a tie cp resolves by its fixed axis, so all the port
+			// claims is that cp's pick is one of the ones it draws from.
+			if c.chipmunkDeep != 0 {
+				cpNear(t, c.name+" depth against cp", c.wantDepth, c.chipmunkDeep)
+				matched := false
+				for _, want := range c.tied {
+					if near(want.X, c.chipmunkNear.X) && near(want.Y, c.chipmunkNear.Y) {
+						matched = true
+					}
+				}
+				if !matched {
+					t.Errorf("cp parts %s along %v, which is not among the tied minima %v "+
+						"the port draws from", c.name, c.chipmunkNear, c.tied)
+				}
+			}
 		})
 	}
 }

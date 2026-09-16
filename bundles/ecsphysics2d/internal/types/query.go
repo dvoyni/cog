@@ -531,9 +531,17 @@ func penetrateWorld(
 // may pass them either way round and always reads a normal from its own first
 // Shape towards its second.
 //
-// coincident is the direction to take when two circles share a centre, where cp
-// invents a fixed (1, 0) that never breaks symmetry. The zero vector asks for
-// no direction at all, which is what the pure Penetration reports.
+// coincident is the direction to take when the two Shapes are placed so that no
+// separating direction is preferred over any other, where cp invents a fixed
+// (1, 0) that never breaks symmetry. The zero vector asks for no direction at
+// all, which is what the pure Penetration reports.
+//
+// It reaches every arm. The closed circle-against-circle form reads it when the
+// two centres coincide; the four GJK arms hand it to gjk, which reads it when
+// the two bounding-box centres coincide and its cold-start axis is therefore the
+// zero vector. Both are the same placement seen through two different pieces of
+// arithmetic, and one seed answers both — the specification's symmetry-breaking
+// is a single mechanism living in Detect, not one per collision arm.
 //
 // cached is the previous tick's simplex for this pair, cp's collisionId, which
 // the four GJK arms warm start from and the two closed forms ignore. It is
@@ -565,22 +573,22 @@ func collideWorld(
 		return flipped(collideCircleSegment(worldB[0], b.Radius, a, transformA, worldA))
 
 	case a.Kind == ShapeCircle && isPolygon(b.Kind):
-		return collideCirclePoly(a, worldA, b, worldB, cached)
+		return collideCirclePoly(a, worldA, b, worldB, coincident, cached)
 
 	case isPolygon(a.Kind) && b.Kind == ShapeCircle:
-		return flipped(collideCirclePoly(b, worldB, a, worldA, cached))
+		return flipped(collideCirclePoly(b, worldB, a, worldA, coincident, cached))
 
 	case a.Kind == ShapeSegment && b.Kind == ShapeSegment:
-		return collideSegments(a, transformA, worldA, b, transformB, worldB, cached)
+		return collideSegments(a, transformA, worldA, b, transformB, worldB, coincident, cached)
 
 	case a.Kind == ShapeSegment && isPolygon(b.Kind):
-		return collideSegmentPoly(a, transformA, worldA, b, worldB, cached)
+		return collideSegmentPoly(a, transformA, worldA, b, worldB, coincident, cached)
 
 	case isPolygon(a.Kind) && b.Kind == ShapeSegment:
-		return flipped(collideSegmentPoly(b, transformB, worldB, a, worldA, cached))
+		return flipped(collideSegmentPoly(b, transformB, worldB, a, worldA, coincident, cached))
 	}
 
-	return collidePolys(a, worldA, b, worldB, cached)
+	return collidePolys(a, worldA, b, worldB, coincident, cached)
 }
 
 // flipped turns one arm's answer round: the normal flips and the two surface
