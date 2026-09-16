@@ -163,6 +163,16 @@ func (c *systemCall[E]) lock(access kernel.ResourceAccess) {
 	// this read rather than sitting beside it — which is what makes a structural
 	// change a total barrier.
 	access.GetRead[*Entities]()
+	// A System is not re-entrant, and the kernel is what makes that true rather
+	// than the caller. Everything below this line is per-invocation state held in
+	// one registration-time struct — args, driven, handle, and ToExecute's single
+	// Resp cell — so a second invocation entering while the first is inside would
+	// overwrite the first one's arguments and answer. It is declared for every
+	// System, not only the read-only ones a write lock would not already
+	// serialise: it excludes a System against itself alone, so it costs no
+	// parallelism against any other System, and an unconditional line cannot
+	// drift as parameter kinds change.
+	access.Exclusive()
 	c.gates, c.readers, c.spawns, c.copies = c.gates[:0], c.readers[:0], c.spawns[:0], c.copies[:0]
 	// writer names this System on the Changed records its run end appends, and
 	// is what its own Hooks readers skip.

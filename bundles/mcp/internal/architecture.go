@@ -84,6 +84,11 @@ type architectureCommand struct {
 	Reads  []string `json:"reads,omitempty"`
 	Writes []string `json:"writes,omitempty"`
 	Uses   []string `json:"uses,omitempty"`
+	// SelfExclusive says the handler never runs concurrently with itself, so two
+	// simultaneous calls that reach it queue rather than overlap. It names no
+	// resource and so raises no pair in the contention report, which is why an
+	// Agent wondering why its parallel calls serialised has to read it here.
+	SelfExclusive bool `json:"selfExclusive,omitempty"`
 }
 
 // architectureSubscription is one subscription, its place in its event's
@@ -97,6 +102,8 @@ type architectureSubscription struct {
 	Reads     []string `json:"reads,omitempty"`
 	Writes    []string `json:"writes,omitempty"`
 	Uses      []string `json:"uses,omitempty"`
+	// SelfExclusive says the same thing architectureCommand's does.
+	SelfExclusive bool `json:"selfExclusive,omitempty"`
 }
 
 // architecture is the one capability body that dispatches nothing. It reads
@@ -187,7 +194,7 @@ func describe(description kernel.ArchitectureDescription) architectureResponse {
 		document.Commands = append(document.Commands, architectureCommand{
 			Type: kernel.TypeName(command.Type), Owner: string(command.Owner),
 			Reads: typeNames(command.Reads), Writes: typeNames(command.Writes),
-			Uses: typeNames(command.Uses),
+			Uses: typeNames(command.Uses), SelfExclusive: command.SelfExclusive,
 		})
 	}
 	for _, subscription := range description.Subscriptions {
@@ -196,7 +203,7 @@ func describe(description kernel.ArchitectureDescription) architectureResponse {
 			Owner: string(subscription.Owner), Phase: subscription.Phase,
 			DependsOn: typeNames(subscription.DependsOn),
 			Reads:     typeNames(subscription.Reads), Writes: typeNames(subscription.Writes),
-			Uses: typeNames(subscription.Uses),
+			Uses: typeNames(subscription.Uses), SelfExclusive: subscription.SelfExclusive,
 		})
 	}
 	return document

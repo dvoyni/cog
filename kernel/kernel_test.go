@@ -585,7 +585,7 @@ func TestKernel_DuplicateResourceRegistrationFails(t *testing.T) {
 }
 
 func TestResourceAccess_WriteDeclarationSupersedesRead(t *testing.T) {
-	access := newResourceAccess(map[reflect.Type]*resource{})
+	access := newResourceAccess(map[reflect.Type]*resource{}, reflect.TypeFor[testDoubleCmd]())
 	access.GetRead[testCounterResource]()
 	access.GetWrite[testCounterResource]()
 	id := reflect.TypeFor[testCounterResource]()
@@ -598,7 +598,7 @@ func TestResourceAccess_WriteDeclarationSupersedesRead(t *testing.T) {
 }
 
 func TestResourceAccess_BindingCreatesCellAndSetInitializes(t *testing.T) {
-	access := newResourceAccess(map[reflect.Type]*resource{})
+	access := newResourceAccess(map[reflect.Type]*resource{}, reflect.TypeFor[testDoubleCmd]())
 	counter := access.GetWrite[testCounterResource]()
 	if got := counter.Get(); got != 0 {
 		t.Fatalf("uninitialized resource = %d, want zero value", got)

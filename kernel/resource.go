@@ -45,14 +45,17 @@ func (w Write[T]) Set(value T) {
 // returned handles outlive the Lock call; the ResourceAccess itself does not.
 type ResourceAccess struct {
 	resources map[reflect.Type]*resource
-	read      map[reflect.Type]struct{}
-	write     map[reflect.Type]struct{}
-	uses      map[reflect.Type]*usage
+	// self is the handler's own identity type, which Exclusive locks it against.
+	self  reflect.Type
+	read  map[reflect.Type]struct{}
+	write map[reflect.Type]struct{}
+	uses  map[reflect.Type]*usage
 }
 
-func newResourceAccess(resources map[reflect.Type]*resource) *ResourceAccess {
+func newResourceAccess(resources map[reflect.Type]*resource, self reflect.Type) *ResourceAccess {
 	return &ResourceAccess{
 		resources: resources,
+		self:      self,
 		read:      map[reflect.Type]struct{}{},
 		write:     map[reflect.Type]struct{}{},
 		uses:      map[reflect.Type]*usage{},
@@ -78,6 +81,28 @@ func (r ResourceAccess) GetWrite[T any]() Write[T] {
 	r.write[id] = struct{}{}
 	return Write[T]{cell: cell}
 }
+
+// Exclusive declares that this handler never runs concurrently with itself. A
+// second invocation waits for the first to finish rather than joining it.
+//
+// It excludes this handler and nothing else: the key is the handler's own
+// identity type, and no two handlers share one, so declaring it costs no
+// parallelism against anybody. A handler that write-locks anything it mutates
+// already has this for free, because two invocations conflict on that write.
+// Exclusive is for the state a lock cannot reach — mutable state in the factory
+// closure — which is otherwise forbidden outright. See "The Factory Closure Is
+// Shared" in kernel.instructions.md before reaching for it: a resource is
+// visible to Describe, to the contention report and to an agent reading the
+// architecture, and closure state is visible to none of them.
+//
+// It deliberately does not go through cell: the key names no resource, and
+// nothing may report it as one.
+func (r ResourceAccess) Exclusive() { r.write[r.self] = struct{}{} }
+
+// isResource reports whether a lock-set key names a real resource. Only a key
+// Exclusive added does not, including one absorbed from a command declared in
+// Uses, and every report of what a handler holds skips those.
+func (r ResourceAccess) isResource(id reflect.Type) bool { return r.resources[id] != nil }
 
 // cell returns T's cell, creating it if this is the first mention. Registration
 // is single-threaded, and the map slot is never replaced afterward.

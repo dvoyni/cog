@@ -638,6 +638,36 @@ holds it for read.
 | `kernel.Kernel` | nothing | the kernel value, for publishing an event |
 | the event or request value | nothing | legal, and not the default shape |
 
+### A System is not re-entrant
+
+Every System keeps its per-invocation state in one struct built at registration:
+the `reflect.Value` arguments it calls through, the cell its event or request is
+written into, and, for `ToExecute`, the single `Resp` its answer leaves by. That
+is what makes a System cost nothing a tick, and it means two invocations of one
+System must never overlap.
+
+**The kernel guarantees that; the caller does not have to.** Every System
+declares `ResourceAccess.Exclusive()` in its `Lock`, so a second invocation
+queues behind the first rather than joining it. It excludes a System against
+itself alone, and costs no parallelism against any other System.
+
+This matters most where the lock set would not have saved it. A System that
+writes any Store is already serialised against itself by that write, but a
+**read-only** one — a query that answers a question and changes nothing —
+declares no write at all, so nothing else would keep two invocations apart:
+
+```go
+func count(request CountRequest, q *ecs.Query[CountQ], answer *ecs.Resp[CountResponse]) {
+    reply := CountResponse{}
+    for range q.All() { reply.N++ }
+    answer.Set(reply)
+}
+```
+
+Exposed as an agent tool, that is exactly the shape two parallel calls reach at
+once. Without the declaration each caller could receive the other's answer, and
+nothing would fail to say so.
+
 **Anything else is a composition-time failure naming the System's type.** This
 is a mistake every new user makes once, so the diagnostic matters more than the
 mechanism. The failure is a registration-time panic, which the plugin boundary

@@ -103,6 +103,21 @@ func handler() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 Per-invocation state belongs in the `Execute`/`Observe` body. State that must
 persist across invocations belongs in a resource.
 
+**That rule still stands.** `ResourceAccess.Exclusive()` exists for the one case
+it cannot serve — a hot path that may not allocate per invocation — and it does
+not make closure state ordinary. A handler that declares it never runs
+concurrently with itself, because the key is the handler's own identity type, so
+it excludes that handler and nothing else. A handler that write-locks whatever it
+mutates already has this for free: two invocations conflict on that write.
+
+Reach for a resource first. A resource is visible — to `Describe`, to the
+contention report, to `Dump` and to an agent reading the architecture — and
+closure state is visible to none of them. `Exclusive()` makes closure state
+*safe*; it does not make it *legible*. The ECS takes it because a `systemCall`'s
+arguments, its event cell and `ToExecute`'s single `Resp` are allocated once at
+registration precisely so a System costs nothing a tick, and a resource would
+undo that.
+
 ### Keep `Lock` Deterministic and Total
 
 `Lock` binds handles and nothing else, and it runs **once**, during

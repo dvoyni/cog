@@ -64,6 +64,11 @@ type CommandDescription struct {
 	Reads  []reflect.Type
 	Writes []reflect.Type
 	Uses   []reflect.Type
+	// SelfExclusive reports that the handler declared Exclusive: it never runs
+	// concurrently with itself, and a second invocation queues behind the first.
+	// It names no resource, so it appears here rather than among Writes, and it
+	// raises no entry in the conflict report, which pairs distinct handlers only.
+	SelfExclusive bool
 }
 
 // SubscriptionDescription reports one registered subscription, its position in
@@ -78,6 +83,8 @@ type SubscriptionDescription struct {
 	Reads     []reflect.Type
 	Writes    []reflect.Type
 	Uses      []reflect.Type
+	// SelfExclusive reports the same declaration CommandDescription does.
+	SelfExclusive bool
 }
 
 // Describe returns a detached description of the finalized engine architecture.
@@ -109,9 +116,10 @@ func (e *Engine) Describe() ArchitectureDescription {
 		})
 	}
 	for commandType, command := range e.registry.commands {
-		reads, writes, uses := describeAccess(command.resources)
+		reads, writes, uses, selfExclusive := describeAccess(command.resources)
 		description.Commands = append(description.Commands, CommandDescription{
 			Type: commandType, Owner: command.owner, Reads: reads, Writes: writes, Uses: uses,
+			SelfExclusive: selfExclusive,
 		})
 	}
 	for eventType, plan := range e.registry.publications {
@@ -123,11 +131,11 @@ func (e *Engine) Describe() ArchitectureDescription {
 				}
 			}
 			owner, access := node.task.coupling()
-			reads, writes, uses := describeAccess(access)
+			reads, writes, uses, selfExclusive := describeAccess(access)
 			description.Subscriptions = append(description.Subscriptions, SubscriptionDescription{
 				Event: eventType, Type: node.task.orderID(), Owner: owner,
 				Phase: subscriptionPhase(node.task), DependsOn: dependencyTypes,
-				Reads: reads, Writes: writes, Uses: uses,
+				Reads: reads, Writes: writes, Uses: uses, SelfExclusive: selfExclusive,
 			})
 		}
 	}
@@ -153,11 +161,21 @@ func (e *Engine) Describe() ArchitectureDescription {
 // already the transitive closure — resolveUses folded every declared dispatch
 // into them at composition — while uses holds the direct edges that explain how
 // they got there. Each slice is a copy, so the description stays detached.
-func describeAccess(access *ResourceAccess) (reads, writes, uses []reflect.Type) {
+func describeAccess(access *ResourceAccess) (reads, writes, uses []reflect.Type, selfExclusive bool) {
 	if access == nil {
-		return nil, nil, nil
+		return nil, nil, nil, false
 	}
-	return sortedTypes(access.read), sortedTypes(access.write), sortedTypes(access.uses)
+	_, selfExclusive = access.write[access.self]
+	// Only the write set can carry a key that names no resource: Exclusive adds
+	// one, and absorb can fold a callee's in. Reads are resources by
+	// construction, so they need no filtering.
+	writes = make([]reflect.Type, 0, len(access.write))
+	for _, id := range sortedTypes(access.write) {
+		if access.isResource(id) {
+			writes = append(writes, id)
+		}
+	}
+	return sortedTypes(access.read), writes, sortedTypes(access.uses), selfExclusive
 }
 
 func subscriptionPhase(value subscription) string {
@@ -224,7 +242,7 @@ func Dump(engine *Engine) string {
 	}
 	out.WriteString("commands:\n")
 	for _, cmd := range description.Commands {
-		fmt.Fprintf(&out, "  %s (%s)%s\n", TypeName(cmd.Type), cmd.Owner, dumpAccess(cmd.Reads, cmd.Writes, cmd.Uses))
+		fmt.Fprintf(&out, "  %s (%s)%s\n", TypeName(cmd.Type), cmd.Owner, dumpAccess(cmd.Reads, cmd.Writes, cmd.Uses, cmd.SelfExclusive))
 	}
 	out.WriteString("subscriptions:\n")
 	var event reflect.Type
@@ -237,7 +255,7 @@ func Dump(engine *Engine) string {
 		if len(sub.DependsOn) > 0 {
 			fmt.Fprintf(&out, " after %v", typeNames(sub.DependsOn))
 		}
-		out.WriteString(dumpAccess(sub.Reads, sub.Writes, sub.Uses))
+		out.WriteString(dumpAccess(sub.Reads, sub.Writes, sub.Uses, sub.SelfExclusive))
 		out.WriteString("\n")
 	}
 	dumpContention(&out, description.Contention)
@@ -246,7 +264,7 @@ func Dump(engine *Engine) string {
 
 // dumpAccess renders a handler's resolved lock set as trailing columns, omitting
 // the ones it has nothing in.
-func dumpAccess(reads, writes, uses []reflect.Type) string {
+func dumpAccess(reads, writes, uses []reflect.Type, selfExclusive bool) string {
 	var out strings.Builder
 	if len(reads) > 0 {
 		fmt.Fprintf(&out, " reads %v", typeNames(reads))
@@ -256,6 +274,9 @@ func dumpAccess(reads, writes, uses []reflect.Type) string {
 	}
 	if len(uses) > 0 {
 		fmt.Fprintf(&out, " uses %v", typeNames(uses))
+	}
+	if selfExclusive {
+		out.WriteString(" exclusive")
 	}
 	return out.String()
 }

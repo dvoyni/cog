@@ -1815,6 +1815,9 @@
                   "array"
                 ]
               },
+              "selfExclusive": {
+                "type": "boolean"
+              },
               "type": {
                 "type": "string"
               },
@@ -1973,6 +1976,9 @@
                   "null",
                   "array"
                 ]
+              },
+              "selfExclusive": {
+                "type": "boolean"
               },
               "type": {
                 "type": "string"

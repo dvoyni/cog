@@ -90,7 +90,7 @@ func (r *Registrar) HandleCommand[
 		return
 	}
 	lock, execute := factory()
-	access := newResourceAccess(r.registry.resources)
+	access := newResourceAccess(r.registry.resources, id)
 	if lock != nil {
 		lock(*access)
 	}
@@ -108,7 +108,7 @@ func (r *Registrar) Subscribe[
 	id := reflect.TypeFor[TSubscription]()
 
 	lock, observe := factory()
-	access := newResourceAccess(r.registry.resources)
+	access := newResourceAccess(r.registry.resources, id)
 	if lock != nil {
 		lock(*access)
 	}

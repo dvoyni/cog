@@ -1301,6 +1301,19 @@ Cost agrees. Per-Entity dispatch is 2.40 ns per entity per system against a
 0.59 ns loop step, where per-Query dispatch is 87–142 ns **once per System per
 tick** — 0.09% of a 30 Hz frame at 200 Systems.
 
+### A System is not re-entrant
+
+A System's arguments, its event or request cell and `ToExecute`'s single `Resp`
+are allocated once, at registration, which is what makes a System cost nothing a
+tick. Two invocations of one System therefore must never overlap.
+
+The kernel enforces it rather than the caller promising it: every System's
+`Lock` declares `ResourceAccess.Exclusive()`, which excludes a System against
+itself alone and leaves it concurrent with every other System. A System that
+writes a Store would be serialised against itself by that write in any case; the
+declaration is what covers a **read-only** System, whose lock set holds no write
+for the scheduler to serialise on.
+
 ### What a signature may contain
 
 This is contract, not convention. A System takes any number of:
