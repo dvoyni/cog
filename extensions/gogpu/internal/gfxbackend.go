@@ -128,6 +128,11 @@ type gfxBackend struct {
 	// report on the update thread. The backend has no kernel handle of its own.
 	refusedDepthOnly bool
 	refusal          error
+	// refusedBindGroups is the set of (shader, group) sites already named, so a
+	// material that cannot fill a group is reported once rather than at frame
+	// rate. It is cleared per shader when that shader is freed, alongside the
+	// bind groups cached for it.
+	refusedBindGroups map[gfxbRefusedGroup]struct{}
 
 	prevCmd *wgpu.CommandBuffer
 }
@@ -140,6 +145,10 @@ type gfxbTexture struct {
 // gfxbShader is a compiled shader module, its reflected uniform layout, and the
 // GPU bind-group + pipeline layouts built from reflection.
 type gfxbShader struct {
+	// label is the shader's name as it was compiled, kept so a refusal at draw
+	// time can say which shader it was; nothing else on the render thread knows
+	// a shader by anything but its pointer.
+	label      string
 	module     *wgpu.ShaderModule
 	layout     gfx.ShaderLayout
 	bgLayouts  []*wgpu.BindGroupLayout // indexed by bind group
@@ -269,6 +278,7 @@ var _ gfx.Backend = (*gfxBackend)(nil)
 func newGfxBackend() *gfxBackend {
 	return &gfxBackend{
 		samplers:           map[gfx.SamplerID]*wgpu.Sampler{},
+		refusedBindGroups:  map[gfxbRefusedGroup]struct{}{},
 		shaders:            map[gfx.ShaderID]*gfxbShader{},
 		pipelines:          map[gfx.PipelineID]*gfxbPipeline{},
 		bakedBuffers:       map[gfx.BufferID]*wgpu.Buffer{},
@@ -485,7 +495,7 @@ func (b *gfxBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 		module.Release()
 		return 0, fmt.Errorf("gogpu: shader %q reflection failed: %w", label, err)
 	}
-	sh := &gfxbShader{module: module, layout: layout}
+	sh := &gfxbShader{label: label, module: module, layout: layout}
 	if err := b.buildShaderLayouts(sh); err != nil {
 		module.Release()
 		return 0, fmt.Errorf("gogpu: shader %q layout build failed: %w", label, err)
@@ -564,6 +574,7 @@ func (b *gfxBackend) FreeShader(id gfx.ShaderID) {
 		return
 	}
 	b.bindGroups.invalidateShader(s)
+	b.forgetRefusedBindGroups(s)
 	if s.pipeLayout != nil {
 		s.pipeLayout.Release()
 	}
@@ -943,6 +954,13 @@ func (b *gfxBackend) flushBinds(rp *wgpu.RenderPassEncoder, shader *gfxbShader) 
 		})
 		bg := b.bindGroups.get(shader, g, b.acc[g])
 		if bg == nil {
+			// Every route to a short or malformed entry list ends here, this
+			// one included: gfx checks what it emits, but a binding filled by a
+			// buffer this backend no longer holds is emitted and then dropped
+			// by SetBuffer, and only the refused group shows it.
+			if err := b.noteRefusedBindGroup(shader, g); err != nil && b.refusal == nil {
+				b.refusal = err
+			}
 			continue
 		}
 		for len(b.bound) <= g {

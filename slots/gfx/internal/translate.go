@@ -100,18 +100,25 @@ type translator struct {
 	// exactly the case the quiet exists for; the cost is that two meshes broken
 	// the same way report once between them.
 	badIndexLengths map[indexLengthKey]struct{}
+	// unsuppliedBuffers is the set of storage bindings already reported as
+	// unfilled, so a material that misses one is named once rather than at
+	// frame rate. It is keyed by shader and parameter name rather than by
+	// plan, because a plan is keyed by parameter shape and two materials of
+	// one shape carrying different buffers are two faults.
+	unsuppliedBuffers map[unsuppliedBufferKey]struct{}
 }
 
 func newTranslator() *translator {
 	return &translator{
-		shaders:         map[gfx.ShaderDescr]*cachedShader{},
-		pipelines:       map[pipelineKey]gfx.PipelineID{},
-		samplers:        map[gfx.SamplerDesc]gfx.SamplerID{},
-		layouts:         map[gfx.ShaderID]gfx.ShaderLayout{},
-		textures:        map[string]gfx.TextureDescr{},
-		parameterPlans:  map[parameterPlanBucketKey][]cachedParameterPlan{},
-		textureUsage:    map[gfx.TextureID]gfx.TextureUsage{},
-		badIndexLengths: map[indexLengthKey]struct{}{},
+		shaders:           map[gfx.ShaderDescr]*cachedShader{},
+		pipelines:         map[pipelineKey]gfx.PipelineID{},
+		samplers:          map[gfx.SamplerDesc]gfx.SamplerID{},
+		layouts:           map[gfx.ShaderID]gfx.ShaderLayout{},
+		textures:          map[string]gfx.TextureDescr{},
+		parameterPlans:    map[parameterPlanBucketKey][]cachedParameterPlan{},
+		textureUsage:      map[gfx.TextureID]gfx.TextureUsage{},
+		badIndexLengths:   map[indexLengthKey]struct{}{},
+		unsuppliedBuffers: map[unsuppliedBufferKey]struct{}{},
 	}
 }
 
@@ -428,6 +435,12 @@ func (t *translator) translateDraw(op *types.Op, pass gfx.PassDescr, backend gfx
 		}
 		return
 	}
+	if resource, unbaked, ok := unsuppliedBuffer(plan, op.Params, op.Material.Params()); ok {
+		if err := t.reportUnsuppliedBuffer(shaderID, label, resource, unbaked); err != nil && *firstErr == nil {
+			*firstErr = err
+		}
+		return
+	}
 	t.ops.SetPipeline(pipeline)
 	// A shader that declares no uniform block gets no uniform binding and no
 	// pooled buffer. Emitting one anyway puts an entry in a group the pipeline
@@ -471,6 +484,55 @@ func (t *translator) reportIndexLength(m *gfx.MeshDescr, label string) error {
 	}
 	t.badIndexLengths[key] = struct{}{}
 	return gfx.ErrIndexBufferLength{Shader: label, Length: key.length, Width: key.width.Bytes()}
+}
+
+// unsuppliedBuffer returns the first declared storage binding the draw does not
+// fill, and whether a parameter named it at all. It walks the same slice
+// sampledAttachment does, for the same reason: the plan is cached per parameter
+// shape, so it knows which names are declared but not which buffers this draw
+// carries, and an unbaked buffer is a per-draw value.
+func unsuppliedBuffer(plan *parameterPlan, drawParams, materialParams []gfx.ParameterDescr) (*plannedResource, bool, bool) {
+	for i := range plan.resources {
+		resource := &plan.resources[i]
+		if resource.kind != plannedBuffer {
+			continue
+		}
+		p := resource.param.value(materialParams, drawParams)
+		if p == nil {
+			return resource, false, true
+		}
+		// The kind is already settled in plan.mismatch, so a parameter that is
+		// here at all is a buffer; only its id is still in question.
+		if types.ParameterBuffer(p).ID() == 0 {
+			return resource, true, true
+		}
+	}
+	return nil, false, false
+}
+
+// unsuppliedBufferKey is one storage binding a shader never got filled. The
+// parameter name is in it because one shader may declare several.
+type unsuppliedBufferKey struct {
+	shader    gfx.ShaderID
+	parameter string
+}
+
+// reportUnsuppliedBuffer returns the report for an unfilled storage binding the
+// first time that binding is seen, and nothing on the frames after it. The draw
+// is dropped either way, on reportIndexLength's terms: a material that misses a
+// binding misses it until someone fixes the material, and firstErr carries only
+// the frame's first error, so re-reporting would mask every later error in
+// every later frame.
+func (t *translator) reportUnsuppliedBuffer(shader gfx.ShaderID, label string, resource *plannedResource, unbaked bool) error {
+	key := unsuppliedBufferKey{shader: shader, parameter: resource.name}
+	if _, seen := t.unsuppliedBuffers[key]; seen {
+		return nil
+	}
+	t.unsuppliedBuffers[key] = struct{}{}
+	return gfx.ErrStorageBufferUnsupplied{
+		Shader: label, Parameter: resource.name,
+		Group: resource.group, Binding: resource.binding, Unbaked: unbaked,
+	}
 }
 
 // sampledAttachment names the first texture parameter a draw samples that its
@@ -735,6 +797,7 @@ func (t *translator) freeCachedResources(backend gfx.Backend) {
 	clear(t.layouts)
 	clear(t.parameterPlans)
 	clear(t.badIndexLengths)
+	clear(t.unsuppliedBuffers)
 }
 
 // shaderLayout returns the backend's reflected layout for a shader, cached by id.

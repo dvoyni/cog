@@ -467,6 +467,36 @@ lives in plan construction, which is cached per `(shader, parameter shape)`, so
 it costs nothing per draw. A name that matched no binding is not a mismatch:
 gfx drops a parameter no shader declared, which is ordinary.
 
+**A binding no parameter fills behaves by kind, and only one kind is fatal.** A
+shader declares three sorts of binding and an unfilled one used to fail three
+different ways, only one of them deliberate:
+
+- **Sampler** — falls back to the zero `SamplerDesc`: clamp and linear.
+- **Texture** — falls back to a 1x1 opaque white texture. This one is
+  load-bearing beyond a forgotten parameter: a texture resource that has not
+  finished loading, or failed to, resolves the same way, so white is what an
+  unresolved texture renders as rather than a licence to omit the parameter.
+  The fallback is a plain 2D view, so it does not hold for a binding declared
+  `texture_2d_array` — see [#410](https://github.com/dvoyni/cog/issues/410).
+- **Storage buffer** — the draw is dropped and `ErrStorageBufferUnsupplied` is
+  reported. There is no fallback worth having: nothing is emitted for the
+  binding, the group comes up one entry short of its layout, `CreateBindGroup`
+  refuses it and the draw encodes with no bindings for that group at all. A
+  zero-length dummy would not save it, because the binding is validated against
+  the size the shader's own declaration needs.
+
+The storage case covers a binding no parameter names **and** a parameter that
+names it while carrying a buffer nothing baked; the message says which. It is
+reported once per `(shader, parameter)` and the draw is dropped every time,
+because a material that misses a binding misses it until someone fixes the
+material, and the frame reports only its first error — so saying it every frame
+would mask every later error in every later frame.
+
+Beneath all of that, the backend reports a bind group the device refused, once
+per `(shader, group)`, as `gogpu.ErrBindGroupRefused`. It is the backstop for
+the route gfx cannot see: a binding gfx did emit, against a buffer the backend
+no longer holds.
+
 
 `BufferRangeParam(name, buf, offset, size)` binds one slice of a buffer, which
 is how a draw addresses its own record in a shared arena: the binding is the
@@ -704,6 +734,12 @@ shader cannot be loaded. Its `Error() string` method implements `error`.
 when a parameter's name matches a binding its kind cannot fill, and the draw is
 dropped. See the parameter section above for why an unreported one is worse than
 a dropped draw.
+
+`ErrStorageBufferUnsupplied{Shader, Parameter, Group, Binding, Unbaked}` is
+reported when a declared storage binding goes unfilled, and the draw is dropped.
+`Unbaked` separates a binding no parameter names from one whose parameter
+carries a buffer that was never baked. Reported once per `(shader, parameter)`.
+See the parameter section above.
 
 `ErrVertexInputUnsupplied{Shader, Input, Location, Declared}`,
 `ErrVertexInputMismatch{Shader, Input, Location, Declared, Supplied}` and

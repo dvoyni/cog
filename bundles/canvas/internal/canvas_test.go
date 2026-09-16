@@ -130,7 +130,28 @@ func (b *testBackend) FreeShader(gfx.ShaderID) {}
 // batch supplies it as one vec4, so its .z lands on the union's clipEnabled
 // slot. wobble is here so a per-instance parameter array has a binding to
 // resolve against.
-func (b *testBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout {
+func (b *testBackend) ShaderLayout(id gfx.ShaderID) gfx.ShaderLayout {
+	layout := testUnionLayout()
+	// The storage bindings are narrowed to what this shader's source declares,
+	// while the rest of the union stands. An unfilled storage binding is fatal
+	// to the draw - gfx reports it rather than letting the short bind group go
+	// silently - so declaring `instances` against the triangles shader, or
+	// `wobble` against anything but a per-instance array, would drop draws that
+	// render perfectly well in production. Samplers and textures fall back, so
+	// the union costs nothing there.
+	source := b.shaderSources[id]
+	kept := layout.Resources[:0:0]
+	for _, resource := range layout.Resources {
+		if resource.StorageBuffer && !strings.Contains(source, resource.Name) {
+			continue
+		}
+		kept = append(kept, resource)
+	}
+	layout.Resources = kept
+	return layout
+}
+
+func testUnionLayout() gfx.ShaderLayout {
 	return gfx.ShaderLayout{
 		UniformSize: 208, UniformGroup: 0, UniformBinding: 0,
 		Uniforms: []gfx.UniformMember{
