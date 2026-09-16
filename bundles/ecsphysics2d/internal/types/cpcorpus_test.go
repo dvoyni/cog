@@ -49,10 +49,29 @@ const cpTolerance = 1e-9
 //     identical boxes and two identical capsules agree with the port on a zero
 //     normal -- and recovers a minimum translation on others.
 //
-// That last asymmetry is a finding rather than a fix: inventing an axis inside
-// GJK is exactly cp's fixed (1, 0), which the specification rejects as a
-// symmetry that never breaks, and Detect's seeded nudge is deliberately a
-// Detect-level answer that the pure primitives do not take.
+// **The seeded nudge now reaches all four GJK arms, and none of these rows moved
+// because of it.** That is not an oversight, it is what the corpus is: every case
+// here runs `collideWorld` with no seed, which is the pure `Penetration` the
+// specification's coincidence rule is written about, and it has to, for two
+// reasons that point the same way.
+//
+// The first is that the direction stays ambiguous however it is drawn. Each of
+// these placements is symmetric about its own centre, so its Minkowski difference
+// is symmetric about the origin and the minimum translation is a tie between two
+// or four directions, none of them preferred. A seed picks one of the tied
+// directions rather than making one of them right, so a seeded corpus would agree
+// with cp's single frozen answer one time in two or one in four and disagree the
+// rest, which is not a fidelity comparison at all.
+//
+// The second is that seeding the corpus would *shrink* it. Two rows it holds --
+// poly.box against poly.box and segment.capsule against segment.capsule -- are
+// fidelity cases today, where the port and cp agree on a degenerate zero normal;
+// seeded, the port recovers a minimum translation there and cp still does not, so
+// both would have to be held out.
+//
+// What the seed does answer is asserted next door, in
+// TestTheCoincidentPlacementsPartAlongASeededDirectionWhereChipmunkTakesAFixedAxis,
+// against cp's own rows at the same 1e-9 and the same cold call.
 var cpAmbiguous = map[string]string{
 	"circle-circle/circle.point/circle.unit/0.000,0.000,0.000,0.000,0.000,0.000":       "a point at a circle's own centre",
 	"circle-circle/circle.unit/circle.unit/0.000,0.000,0.000,0.000,0.000,0.000":        "two circles sharing a centre",
@@ -201,7 +220,12 @@ func TestTheAmbiguousPlacementsAreFrozenAsThePortsOwnAnswer(t *testing.T) {
 		// The three GJK rows lose the depth as well, the cold-start axis being
 		// the zero vector. cp answers (0, 1) at a depth of 1 for the first and
 		// (0, 1) at 0.5 for the third; neither is a direction the port is
-		// entitled to invent, and the lost depth is this ticket's finding.
+		// entitled to invent here, where it is handed no seed at all.
+		//
+		// Seeded, all three recover cp's depth exactly and draw cp's direction
+		// from a tie of two or four -- which is asserted next door and is why
+		// these rows stay held out rather than moving back into the fidelity
+		// corpus. The pure primitive is unchanged, to the bit.
 		"circle-poly/circle.unit/poly.box/0.000,0.000,0.000,0.000,0.000,0.000": {
 			normal: [2]float64{0, 0}, count: 1,
 			points: [2][5]float64{{0, 0, 0.5, -0.5, 0}},
@@ -258,6 +282,197 @@ func TestTheAmbiguousPlacementsAreFrozenAsThePortsOwnAnswer(t *testing.T) {
 			t.Errorf("%s is named ambiguous but no corpus case has that name", name)
 		}
 	}
+}
+
+// cpSeededCollide is cpCollideAt with a direction for coincident centres, which
+// is the route Detect takes: the same cold call, the same cached simplex of 0,
+// and the seed Collide would have drawn for the tick.
+func cpSeededCollide(t testing.TB, want cpCollideCase, seed m.Vec2d) (touching, bool) {
+	t.Helper()
+	shapeA, vertsA := cpPortShape(t, cpShapes[want.a])
+	shapeB, vertsB := cpPortShape(t, cpShapes[want.b])
+	transformA := NewTransformRigid(m.Vec2d{X: want.pose[0], Y: want.pose[1]}, want.pose[2])
+	transformB := NewTransformRigid(m.Vec2d{X: want.pose[3], Y: want.pose[4]}, want.pose[5])
+	worldA := make([]m.Vec2d, worldLenFor(shapeA, vertsA))
+	worldB := make([]m.Vec2d, worldLenFor(shapeB, vertsB))
+	usedA, boxA := cacheWorldAt(shapeA, transformA, vertsA, worldA)
+	usedB, boxB := cacheWorldAt(shapeB, transformB, vertsB, worldB)
+	if boxA.Centre() != boxB.Centre() {
+		t.Fatalf("%s is not a coincident placement after all", cpCaseName(want))
+	}
+	return collideWorld(
+		shapeA, transformA, worldA[:usedA], shapeB, transformB, worldB[:usedB], seed, 0)
+}
+
+// cpCoincident says whether a case places its two Shapes so that their world
+// bounding-box centres coincide exactly, which is the one condition the seed is
+// read at, and whether it reaches a GJK arm rather than one of the two closed
+// forms.
+func cpCoincidentGJK(t testing.TB, want cpCollideCase) bool {
+	t.Helper()
+	switch want.kind {
+	case "circle-circle", "circle-segment":
+		return false
+	}
+	shapeA, vertsA := cpPortShape(t, cpShapes[want.a])
+	shapeB, vertsB := cpPortShape(t, cpShapes[want.b])
+	worldA := make([]m.Vec2d, worldLenFor(shapeA, vertsA))
+	worldB := make([]m.Vec2d, worldLenFor(shapeB, vertsB))
+	_, boxA := cacheWorldAt(shapeA,
+		NewTransformRigid(m.Vec2d{X: want.pose[0], Y: want.pose[1]}, want.pose[2]), vertsA, worldA)
+	_, boxB := cacheWorldAt(shapeB,
+		NewTransformRigid(m.Vec2d{X: want.pose[3], Y: want.pose[4]}, want.pose[5]), vertsB, worldB)
+	return boxA.Centre() == boxB.Centre()
+}
+
+// cpDeepest is the depth of the deepest point of a manifold, and cpDeepestWant
+// the same for one of cp's own rows. A coincident pair's manifold carries the
+// whole overlap on one point and about nothing on the other, so the minimum
+// translation is the maximum over the points and not the first of them.
+func cpDeepest(touch touching) float64 {
+	depth := touch.points[0].depth
+	for i := range touch.count {
+		if touch.points[i].depth > depth {
+			depth = touch.points[i].depth
+		}
+	}
+	return depth
+}
+
+func cpDeepestWant(want cpCollideCase) float64 {
+	depth := want.points[0][4]
+	for i := range want.count {
+		if want.points[i][4] > depth {
+			depth = want.points[i][4]
+		}
+	}
+	return depth
+}
+
+// TestTheCoincidentPlacementsPartAlongASeededDirectionWhereChipmunkTakesAFixedAxis
+// is the corpus's layer A comparison for the one thing the fidelity corpus above
+// cannot ask, because the fidelity corpus runs the pure primitive: what the port
+// answers when Detect hands its GJK arms a direction.
+//
+// Every row here places the two Shapes so that their world bounding-box centres
+// coincide exactly, which makes gjk's cold-start axis the zero vector. Seeded,
+// the axis is the tick's drawn direction instead, EPA converges, and the depth
+// comes back with the normal.
+//
+// The two halves of the answer are not alike and are asserted differently:
+//
+//   - **the depth is not ambiguous.** It is the minimum translation, it is the
+//     same whichever tied direction the seed lands on, and where cp recovers one
+//     at all it is cp's own to 1e-9 — the corpus's tolerance, cold, with no
+//     mismatch budget;
+//   - **the direction is.** Each of these placements is symmetric about its own
+//     centre, so its Minkowski difference is symmetric about the origin and the
+//     minimum translation is a tie between two or four directions. cp resolves
+//     the tie with a fixed axis and answers the same one every time; the port
+//     draws, so cp's answer is one of the ones it draws from and never the only
+//     one it gives. That is the departure, and it is the specification's:
+//     a fixed (1, 0) is a symmetry that never breaks.
+//
+// Where cp does not recover at all — two identical boxes, two identical capsules
+// — the port now does, and that is a departure under the fourth heading, a defect
+// in cp: a pair reported as touching with a zero normal and a zero depth, while
+// the two overlap completely, is an answer a solver can spend nothing on.
+func TestTheCoincidentPlacementsPartAlongASeededDirectionWhereChipmunkTakesAFixedAxis(t *testing.T) {
+	const fan = 64
+
+	var rows, recovers, degenerates int
+	for _, want := range cpCollideCases {
+		if !cpCoincidentGJK(t, want) {
+			continue
+		}
+		rows++
+		cpNormal := cpVec(want.normal)
+		if cpNormal != (m.Vec2d{}) {
+			recovers++
+		} else {
+			degenerates++
+		}
+
+		t.Run(cpCaseName(want), func(t *testing.T) {
+			drawn := map[m.Vec2d]bool{}
+			depth := math.NaN()
+			for i := range fan {
+				seed := m.ForAngle(float64(i) * (2 * math.Pi / fan))
+				got, ok := cpSeededCollide(t, want, seed)
+				if !ok {
+					t.Fatalf("seeded along %v the pair does not touch at all", seed)
+				}
+				if got.normal == (m.Vec2d{}) {
+					t.Fatalf("seeded along %v the pair still has no direction", seed)
+				}
+				if math.Abs(got.normal.Length()-1) > cpTolerance {
+					t.Fatalf("seeded along %v the normal is %v, whose length is %v and not one",
+						seed, got.normal, got.normal.Length())
+				}
+
+				// The depth is the half that is not ambiguous, so it may not move
+				// with the seed at all.
+				if math.IsNaN(depth) {
+					depth = cpDeepest(got)
+				} else {
+					cpNear(t, "the depth against another seed's", cpDeepest(got), depth)
+				}
+				drawn[m.Vec2d{
+					X: math.Round(got.normal.X * 1e9),
+					Y: math.Round(got.normal.Y * 1e9),
+				}] = true
+			}
+
+			if len(drawn) < 2 {
+				t.Errorf("the pair parts along one direction over %d seeds, which is a symmetry "+
+					"that never breaks — cp's own fixed axis answers %v", fan, cpNormal)
+			}
+
+			if cpNormal == (m.Vec2d{}) {
+				// cp reports no direction and no depth here. The port now reports
+				// both, which is the departure, and the only thing to assert is
+				// that it is a real one.
+				if depth <= 0 {
+					t.Errorf("cp degenerates here and the port recovers a depth of %v, which is "+
+						"no recovery at all", depth)
+				}
+				return
+			}
+
+			// Defect 1's shift, which the fidelity corpus applies to the same rows.
+			shift := 0.0
+			if cpRoundedCirclePoly(want) {
+				shift = 2 * cpShapes[want.b].radius
+			}
+			cpNear(t, "the seeded depth", depth, cpDeepestWant(want)+shift)
+
+			if !drawn[m.Vec2d{
+				X: math.Round(cpNormal.X * 1e9),
+				Y: math.Round(cpNormal.Y * 1e9),
+			}] {
+				t.Errorf("cp parts along %v, which is none of the %d directions the seed draws "+
+					"from — the tie is not the one cp resolves", cpNormal, len(drawn))
+			}
+		})
+	}
+
+	// The emptiness guards. A corpus that had stopped reaching a coincident
+	// placement, or reached only the ones cp answers, would pass every assertion
+	// above while measuring nothing.
+	if rows == 0 {
+		t.Error("no corpus row places two Shapes on exactly coincident bounding box centres " +
+			"through a GJK arm, so this test says nothing at all")
+	}
+	if recovers == 0 {
+		t.Error("no coincident corpus row is one cp recovers a minimum translation on, so the " +
+			"depth is not being compared against cp anywhere")
+	}
+	if degenerates == 0 {
+		t.Error("no coincident corpus row is one cp degenerates on, so the departure where the " +
+			"port recovers and cp does not is not being asserted")
+	}
+	t.Logf("%d coincident placements through a GJK arm: cp recovers a minimum translation on "+
+		"%d of them and degenerates on %d", rows, recovers, degenerates)
 }
 
 // ---------------------------------------------------------------------------

@@ -626,3 +626,77 @@ func TestAnEndedEntryMayNameADespawnedEntity(t *testing.T) {
 		t.Error("the Ended entry lost its points; it keeps the geometry of the tick it last touched")
 	}
 }
+
+// TestACircleSpawnedConcentricWithABoxIsPartedAlongTheTicksSeededDirection is the
+// end of the route the seed takes, through a real engine rather than a call into
+// the narrowphase: Detect draws one direction a tick, hands it to collideWorld as
+// coincident, and collideWorld hands it to the GJK arm that needs it.
+//
+// Two Shapes spawned on the same point exactly is the placement gjk's cold-start
+// axis is nothing at, and before the seed reached the arms an app got a Contact
+// there with a zero Normal and a zero Depth — a pair reported as touching with
+// nothing to separate it, which the solver spends nothing on and which therefore
+// fails without a symptom. The circle sits inside the box by a whole metre of
+// summed half-extent and radius, and the Depth is that, whichever way the tick
+// parted them.
+//
+// The seed is the whole of what chooses between the four: a 1 m box concentric
+// with a 0.5 m circle is symmetric about its centre, so up, down, left and right
+// are equally shallow and none is the right answer. cp answers (0, 1) every time,
+// which is the symmetry that never breaks and what the specification rejects. The
+// seeds below part it more than one way, which is what asserts the difference.
+func TestACircleSpawnedConcentricWithABoxIsPartedAlongTheTicksSeededDirection(t *testing.T) {
+	// The specification's 1e-9, as everywhere else in this file.
+	const tolerance = 1e-9
+
+	parted := map[m.Vec2d]uint64{}
+	for _, seed := range []uint64{1, 2, 3, 4} {
+		h := newHarnessWith(t, ecsphysics2d.Config{Seed: seed}, 64)
+		h.spawn(t, spawnRequest{
+			Kind:  kindShapedStatic,
+			Place: ecsphysics2d.Position{Current: m.Vec2d{}},
+			Shape: ecsphysics2d.NewBoxShape(1, 1, 0),
+		})
+		h.spawn(t, spawnRequest{
+			Kind:  kindShapedBody,
+			Place: ecsphysics2d.Position{Current: m.Vec2d{}},
+			Shape: circle(0.5),
+		})
+
+		h.frames(t, 2)
+		list := h.contacts(t)
+		if len(list) != 1 {
+			t.Fatalf("a circle concentric with a box gave %d Contacts at seed %d, want one",
+				len(list), seed)
+		}
+		got := list[0]
+		if math.Abs(got.Normal.Length()-1) > tolerance {
+			t.Fatalf("the Contact's Normal at seed %d is %v, whose length is %v and not one — "+
+				"the pair is reported as touching with nothing to separate it",
+				seed, got.Normal, got.Normal.Length())
+		}
+		if got.Count == 0 {
+			t.Fatalf("the Contact at seed %d carries no points at all", seed)
+		}
+		deepest := got.Points[0].Depth
+		for i := range int(got.Count) {
+			if got.Points[i].Depth > deepest {
+				deepest = got.Points[i].Depth
+			}
+		}
+		if math.Abs(deepest-1) > tolerance {
+			t.Errorf("the Contact's deepest point at seed %d is %v, want the whole metre the "+
+				"two overlap by", seed, deepest)
+		}
+		parted[m.Vec2d{
+			X: math.Round(got.Normal.X * 1e9),
+			Y: math.Round(got.Normal.Y * 1e9),
+		}] = seed
+	}
+
+	if len(parted) < 2 {
+		t.Errorf("every seed parted the pair the same way, which is a symmetry that never "+
+			"breaks — cp's own fixed (0, 1) here, and what the specification rejects; the "+
+			"directions drawn were %v", parted)
+	}
+}
