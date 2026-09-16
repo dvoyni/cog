@@ -75,9 +75,62 @@
 // a filter for one tick. Both default to zero, as cp's do, which is why sliding
 // along a wall at the defaults is exactly v ← v − (v·n)·n and is the solver's
 // own behaviour rather than a rule of its own. Surface velocity is on the entry
-// and stays zero; the Shape field that would feed it is not built yet.
-// Polygons, Sensors as swept Probes, collision groups' own ticket and Joints
-// each arrive with theirs.
+// and stays zero; the Shape field that would feed it is not built yet. Polygons
+// and Joints each arrive with theirs.
+//
+// # Which pairs collide, and what keeps a point from tunnelling
+//
+// A pair collides when a.CollisionBits & b.CollidesWith and b.CollisionBits &
+// a.CollidesWith are both non-zero, which is cp's ShapeFilter.Reject without
+// cp's Group, and it is decided before any Shape test. There are 32 groups, one
+// per bit of a uint32. Zero in either field means nothing collides, as in cp,
+// and every constructor sets both fields to every bit, so a Shape built the
+// normal way collides with everything — while a Shape written as a bare literal
+// collides with nothing, which is a hazard the package documents rather than
+// guards. Querying as a Shape collides is passing that Shape's two fields, so a
+// Shape that collides with nothing is invisible to queries too; queries do not
+// skip Sensors, which departs from cp, because Overlap has to be able to find
+// one and the groups already say the skip when an app wants it.
+//
+// The plugin has no collision configuration at all: no matrix, no rule list and
+// nothing to change at runtime. A Body changes what it collides with by writing
+// its own Shape, which Index picks up on the next tick; a Static body is
+// replaced instead. A rule that depends on the pair rather than the categories
+// — owner exclusion, a line-of-sight gate — stays in the app's own filter
+// System, so there are two filtering mechanisms by design.
+//
+// The package has no projectile concept either. A projectile is an ordinary
+// Dynamic body with a circle Shape marked a Sensor, and the same mechanism
+// serves pressure plates and area damage. Every moving circle Sensor is Probed
+// once a tick, from Position.Previous to Current, with no opt-in flag: its
+// entries are its Entity plus a Hit, sitting together in the list and ordered
+// by T, so the app takes the first and stops at a wall. Box and segment Sensors
+// are tested discretely, a Static Sensor is never Probed, and two Sensors that
+// find each other keep the smaller T. T and Depth mean one thing on every
+// entry: a Probed Sensor carries the Probe's T and a Depth of 0, except one
+// that started inside something, which reports T = 0 with the overlap at the
+// start, and everything else reports T = 1 with the overlap where the tick
+// ended.
+//
+// Two holes are accepted rather than fixed. A Sensor's path is a chord and not
+// the polyline it flew, so a sharply curving one can clip a corner; and two
+// moving Sensors are tested against each other's end positions rather than
+// their relative motion, so two with a radius crossing within one tick can miss
+// each other.
+//
+// The plugin never moves a Sensor back and never stops one. Snap-back is the
+// app's write — Position.Current = Previous, which is from.Lerp(to, T) — and so
+// are reflecting, exploding and expiring it. An app that teleports a Sensor
+// sets Previous = Current, as render interpolation already requires; a Sensor
+// with no Velocity is one Integrate never moves, so its Previous is the app's
+// to keep.
+//
+// A filter marks an entry two ways. Dropped takes the pair out of this tick's
+// solution, so a dropped Began entry disappears, a dropped Continuing one
+// becomes Ended and an Ended one cannot be dropped. Ignored is cp's arb.Ignore
+// and runs until the pair comes apart, which is what a one-way platform needs;
+// Solve skips an ignored entry as it skips a Sensor's, and the ignore ends when
+// the pair misses one tick.
 //
 // The query surface, in two layers, both exported because a replacement solver
 // lives in another package and is built from exactly these. The pair primitives

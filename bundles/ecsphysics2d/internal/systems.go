@@ -112,7 +112,16 @@ func index(
 	body := bodyIndex.Get()
 	body.Clear()
 	for entity, it := range bodies.All() {
-		body.Insert(entity, it.Shape, it.Place.Current, it.Place.Angle, nil)
+		// InsertMoving rather than Insert, so that a moving circle Sensor
+		// carries the path Detect Probes it along. The previous pose comes off
+		// the Position this walk already reads, which is what keeps the swept
+		// Sensor from costing any System a lock it did not already hold: Detect
+		// names no Component Store at all and still does not.
+		body.InsertMoving(
+			entity, it.Shape,
+			it.Place.Current, it.Place.Previous, it.Place.Angle, it.Place.PreviousAngle,
+			nil,
+		)
 	}
 }
 
