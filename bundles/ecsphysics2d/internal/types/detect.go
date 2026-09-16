@@ -31,6 +31,16 @@ func Collide(contacts *Contacts, bodies *BodyIndex, statics *StaticIndex, persis
 		if !first.live || first.worldLen == 0 {
 			continue
 		}
+		// A Body placed at a NaN or an infinity is in no cell of its own index,
+		// which the Body walk below inherits for free: list leaves its cell
+		// range empty and the loop does not run. The static walk derives its
+		// range from the box instead, in the static grid's own cells, so the
+		// same refusal is made again here — otherwise a half-infinite box would
+		// clamp to the two ends of an int32 grid and scan it whole, looking for
+		// a Shape that is listed nowhere.
+		if !finiteBB(first.box) {
+			continue
+		}
 
 		worldFirst := moving.world(first)
 
@@ -192,12 +202,14 @@ func (c *Contacts) carry(made *Contact) {
 	c.prevAux[at].matched = true
 
 	made.gjkId = old.gjkId
-	if old.survived() {
+	if old.phased() {
 		made.Phase = PhaseContinuing
 	} else {
 		// A pair the previous tick did not show the app touching begins again,
 		// which is where the port and cp differ by one call: cp does not call
-		// Begin a second time for a pair its own Begin callback refused.
+		// Begin a second time for a pair its own Begin callback refused. Only a
+		// drop lands here, and only because a drop is for one tick and the
+		// filter has just decided again.
 		made.Phase = PhaseBegan
 	}
 	if old.Phase != PhaseEnded && old.Ignored() {

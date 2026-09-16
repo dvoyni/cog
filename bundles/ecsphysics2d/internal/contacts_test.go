@@ -367,6 +367,9 @@ func TestAPairWithNoMassBetweenItIsReportedAndNeverSolved(t *testing.T) {
 		t.Errorf("a pair with no mass between it was solved: it carries %v",
 			list[0].Points[0].NormalImpulse)
 	}
+	if list[0].Phase != ecsphysics2d.PhaseContinuing {
+		t.Errorf("an excluded pair that keeps touching is %v, want Continuing", list[0].Phase)
+	}
 	if got := h.read(t, kinematic); got.Velocity.Linear != (m.Vec2d{}) ||
 		got.Place.Current.X != 0.6 {
 		t.Errorf("the immovable pair moved something: %+v", got)
@@ -471,11 +474,20 @@ func TestAnIgnoredPairStaysIgnoredUntilItComesApart(t *testing.T) {
 
 	// The mark keeps arriving for as long as the two keep touching, which a
 	// circle of radius 0.5 does for the half metre it takes to pass the wall.
+	//
+	// The pair Continues while it does. The two marks differ in exactly this: a
+	// drop is for one tick and the filter re-decides, so a dropped pair begins
+	// again, but an ignore runs until the pair comes apart and there is nothing
+	// to re-decide — which is cp's IGNORE state persisting and cp not calling
+	// Begin a second time.
 	for range 20 {
 		h.frames(t, 1)
 		list := h.contacts(t)
 		if len(list) != 1 || !list[0].Ignored() {
 			t.Fatalf("the pair arrived as %+v, want one entry already marked ignored", list)
+		}
+		if list[0].Phase != ecsphysics2d.PhaseContinuing {
+			t.Fatalf("an ignored pair that never stopped touching is %v, want Continuing", list[0].Phase)
 		}
 		if list[0].Points[0].NormalImpulse != 0 {
 			t.Errorf("an ignored pair was solved: it carries %v", list[0].Points[0].NormalImpulse)

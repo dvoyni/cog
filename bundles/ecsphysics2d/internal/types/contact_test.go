@@ -3,6 +3,7 @@ package types
 import (
 	"math"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/dvoyni/cog/bundles/ecs"
@@ -383,6 +384,128 @@ func TestTotalImpulseAndTotalKEReadTheSolutionOffTheEntry(t *testing.T) {
 	untouched.Points[0].NormalImpulse = 3
 	if got := untouched.TotalKE(); got != 0 {
 		t.Errorf("an entry the solver never reached reports %v of energy, want none", got)
+	}
+}
+
+func TestAnExcludedTickForgetsTheSolutionItNeverHad(t *testing.T) {
+	// cp drops an excluded pair's contacts outright at space.go's else branch,
+	// so its next Update finds none to copy an accumulated Impulse from. Every
+	// one of the four exclusions is the same rule: a tick with no solution has
+	// the solution zero, and the alternative applies a sixty-tick-old Impulse
+	// when a filter changes its mind.
+	for _, exclusion := range []struct {
+		name string
+		mark func(entry *Contact)
+	}{
+		{"a Sensor", func(entry *Contact) { entry.Sensor = true }},
+		{"a dropped entry", func(entry *Contact) { entry.Drop() }},
+		{"an ignored entry", func(entry *Contact) { entry.Ignore() }},
+	} {
+		contacts := NewContacts(7)
+		bodies, statics := NewBodyIndex(0), NewStaticIndex(0)
+		bodies.Clear()
+		bodies.Insert(ecs.Entity(1), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{}, 0, nil)
+		bodies.Insert(ecs.Entity(2), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 0.9}, 0, nil)
+		Collide(contacts, bodies, statics, 3)
+
+		entry := &contacts.entries[0]
+		entry.Points[0].NormalImpulse = 17.5
+		entry.Points[0].TangentImpulse = -2.25
+		exclusion.mark(entry)
+		// The Bodies are both massless here, which is the fourth exclusion, so
+		// the list is walked twice over: beginSolve takes out the three marks
+		// and preStep takes out the mass.
+		contacts.beginSolve()
+		contacts.preStep(1.0/60, 0.005, 6.32)
+
+		if got := contacts.entries[0].Points[0]; got.NormalImpulse != 0 || got.TangentImpulse != 0 {
+			t.Errorf("%s kept %v and %v across a tick it was never solved on",
+				exclusion.name, got.NormalImpulse, got.TangentImpulse)
+		}
+	}
+}
+
+func TestAnIgnoredPairContinuesWhileADroppedOneBeginsAgain(t *testing.T) {
+	// The two marks differ in one thing and it is visible in the phase: a drop
+	// is for one tick and the filter re-decides, so the pair begins again — the
+	// one accepted difference from cp — while an ignore runs until the pair
+	// comes apart, so there is nothing to re-decide and the pair Continues, as
+	// cp's own IGNORE state does.
+	for _, mark := range []struct {
+		name  string
+		apply func(entry *Contact)
+		want  Phase
+	}{
+		{"an ignore", func(entry *Contact) { entry.Ignore() }, PhaseContinuing},
+		{"a drop", func(entry *Contact) { entry.Drop() }, PhaseBegan},
+	} {
+		contacts := NewContacts(7)
+		bodies, statics := NewBodyIndex(0), NewStaticIndex(0)
+		place := func() {
+			bodies.Clear()
+			bodies.Insert(ecs.Entity(1), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{}, 0, nil)
+			bodies.Insert(ecs.Entity(2), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 0.9}, 0, nil)
+			Collide(contacts, bodies, statics, 3)
+		}
+
+		place()
+		mark.apply(&contacts.entries[0])
+		place()
+		if got := contacts.All()[0].Phase; got != mark.want {
+			t.Errorf("after %s the pair is %v, want %v", mark.name, got, mark.want)
+		}
+	}
+}
+
+func TestASeedThatWouldStopTheNudgeIsMovedOffIt(t *testing.T) {
+	// The mixing is a multiply by an odd constant, so exactly one seed lands on
+	// the generator's fixed point. Landing there would hand back cp's own fixed
+	// (1, 0) for ever, which is the thing the nudge replaces.
+	for _, seed := range []uint64{0, 1, math.MaxUint64, math.MaxUint64 - 1} {
+		contacts := NewContacts(seed)
+		if contacts.nudge == 0 {
+			t.Fatalf("the seed %d left the nudge stopped", seed)
+		}
+		first, second := contacts.nudgeNormal(), contacts.nudgeNormal()
+		if first == second {
+			t.Errorf("the seed %d draws %v every time", seed, first)
+		}
+	}
+}
+
+func TestABodyWithAnUnplaceableBoxIsSkippedRatherThanSearchedFor(t *testing.T) {
+	// A Shape placed at a NaN or an infinity is listed in no cell at all, which
+	// the index already refuses to do. The static half of the walk derives its
+	// cell range from the box rather than from that refusal, so it has to make
+	// the same one: a box running from one infinity to the other would clamp to
+	// the two ends of an int32 grid and be searched for cell by cell.
+	//
+	// It is asserted as a deadline rather than as a value, because the failure
+	// is a walk that does not end.
+	contacts := NewContacts(7)
+	bodies, statics := NewBodyIndex(0), NewStaticIndex(0)
+	statics.Insert(ecs.Entity(1), NewCircleShape(0.4, m.Vec2d{}), m.Vec2d{}, 0, nil)
+	bodies.Insert(ecs.Entity(2), NewCircleShape(0.4, m.Vec2d{}), m.Vec2d{X: 0.5}, 0, nil)
+	bodies.Insert(ecs.Entity(3),
+		NewSegmentShape(m.Vec2d{X: math.Inf(-1)}, m.Vec2d{X: math.Inf(1)}, 0), m.Vec2d{}, 0, nil)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		Collide(contacts, bodies, statics, 3)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("detection is still walking the grid looking for a Shape that is listed in no cell")
+	}
+
+	if contacts.Len() != 1 {
+		t.Fatalf("the placeable pair gave %d Contacts, want 1", contacts.Len())
+	}
+	entry := contacts.All()[0]
+	if entry.A != ecs.Entity(2) || entry.B != ecs.Entity(1) {
+		t.Errorf("the entry names %v and %v, want the Body and the Static one", entry.A, entry.B)
 	}
 }
 

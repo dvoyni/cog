@@ -185,9 +185,13 @@ func (c *Contacts) beginSolve() {
 	s.solved = s.solved[:0]
 	s.rows = append(s.rows[:0], solverBody{})
 
+	// The slot table grows with slack rather than to the exact count. Every other
+	// buffer here grows through append and is amortised; sizing this one exactly
+	// would allocate every tick of a scene whose Body count climbs by one, which
+	// a fixed-size measurement never catches.
 	slots := int(c.maxSlot)
 	if cap(s.slotDense) < slots {
-		s.slotDense = make([]int32, slots)
+		s.slotDense = make([]int32, slots, max(2*slots, 64))
 	}
 	s.slotDense = s.slotDense[:slots]
 	for i := range s.slotDense {
@@ -197,28 +201,32 @@ func (c *Contacts) beginSolve() {
 	for i := range c.current {
 		entry := &c.entries[i]
 		if entry.Dropped() {
-			// A dropped Continuing entry becomes Ended, so that reacting
-			// Systems still see the end; a dropped Began entry is one nobody saw
-			// begin and stays as it is, to come back as Began next tick. Either
-			// way the tick has no solution, and a tick with no solution has the
-			// solution zero — warm starting carries the previous tick's, and
-			// applying a sixty-tick-old Impulse when a filter changes its mind
-			// is the alternative.
+			// A dropped Continuing entry becomes Ended, so that reacting Systems
+			// still see the end; a dropped Began entry is one nobody saw begin
+			// and stays as it is, to come back as Began next tick.
+			//
+			// It is rewritten where it stands. The specification orders the
+			// Ended entries after every current one, and that is the order Detect
+			// writes; a filter marking one afterwards perturbs it, and the
+			// alternative — deleting or moving the entry — is rejected outright,
+			// because a reacting System would then see a Contact begin twice
+			// without ending and every drop would shift the slice under the
+			// other filters.
 			if entry.Phase == PhaseContinuing {
 				entry.Phase = PhaseEnded
 			}
-			for j := range len(entry.Points) {
-				entry.Points[j].NormalImpulse = 0
-				entry.Points[j].TangentImpulse = 0
-			}
+		} else if !entry.Sensor && !entry.Ignored() {
+			s.assign(c.aux[i].slotA, entry.A)
+			s.assign(c.aux[i].slotB, entry.B)
+			s.solved = append(s.solved, int32(i))
 			continue
 		}
-		if entry.Sensor || entry.Ignored() {
-			continue
-		}
-		s.assign(c.aux[i].slotA, entry.A)
-		s.assign(c.aux[i].slotB, entry.B)
-		s.solved = append(s.solved, int32(i))
+		// A tick with no solution has the solution zero. cp says the same by
+		// dropping the excluded pair's contacts outright, so its next Update
+		// finds none to copy an accumulated impulse from; warm starting carries
+		// the previous tick's solution, and the alternative applies a
+		// sixty-tick-old Impulse when a filter changes its mind.
+		entry.zeroImpulses()
 	}
 }
 
@@ -288,6 +296,9 @@ func (c *Contacts) preStep(h, slop, bias float64) {
 		entry := &c.entries[at]
 		first, second := c.rowsOf(at)
 		if first.invMass == 0 && second.invMass == 0 {
+			// The fourth exclusion, and the same rule as the other three: the
+			// tick has no solution, so the solution is zero.
+			entry.zeroImpulses()
 			continue
 		}
 		kept = append(kept, at)

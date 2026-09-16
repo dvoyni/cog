@@ -115,6 +115,13 @@ type Contact struct {
 	// SurfaceVelocity is cp's surface_vr, the relative velocity of the two
 	// surfaces with its normal component removed. It is zero until Shapes carry
 	// a surface velocity of their own.
+	//
+	// When they do, it is A's less B's, and the sign is worth stating because it
+	// is easy to land backwards. cp computes b.surfaceV − a.surfaceV, and this
+	// port's A plays the part cp's b plays — the Normal faces A where cp's faces
+	// its second Body — so cp's expression is A's less B's here. The
+	// specification's prose spells it the other way round, quoting cp's own a
+	// and b; it changes no number today, because nothing writes this field.
 	SurfaceVelocity m.Vec2d
 	// Points are the Contact's points, of which Count are meaningful.
 	Points [2]ContactPoint
@@ -226,10 +233,33 @@ func (c *Contact) TotalKE() float64 {
 	return sum
 }
 
+// zeroImpulses forgets the accumulated solution, which is what a tick the
+// solver skipped the pair on leaves behind.
+func (c *Contact) zeroImpulses() {
+	for i := range c.Points {
+		c.Points[i].NormalImpulse = 0
+		c.Points[i].TangentImpulse = 0
+	}
+}
+
+// phased reports that the entry was a current one the previous tick that no
+// filter dropped, which is what the next tick's phase is compared against.
+//
+// An ignored entry counts. The two marks differ in exactly this: a drop is for
+// one tick, so the filter re-decides every tick and a pair it dropped begins
+// again — the one accepted difference from cp, which does not call Begin twice.
+// An ignore runs until the pair comes apart, so there is no re-decision to
+// report and the pair Continues, which is cp's own IGNORE state persisting.
+func (c *Contact) phased() bool {
+	return c.Phase != PhaseEnded && c.flags&flagDropped == 0
+}
+
 // survived reports that the entry was one the app saw touching and no filter
-// took away, which is what the next tick's phases are compared against.
+// marked at all, which is what an Ended entry is produced for: a dropped pair
+// was never shown beginning and an ignored one is never seen at all, so neither
+// has an end to report.
 func (c *Contact) survived() bool {
-	return c.Phase != PhaseEnded && c.flags&(flagDropped|flagIgnored) == 0
+	return c.phased() && c.flags&flagIgnored == 0
 }
 
 // contactAux is the run of solver- and detector-private numbers beside each
@@ -313,9 +343,16 @@ type Contacts struct {
 //
 // The seed is mixed rather than taken raw because the generator behind it has
 // zero as a fixed point, and zero is an ordinary seed a caller may name — the
-// settings take it as given rather than as a request for an arbitrary one.
+// settings take it as given rather than as a request for an arbitrary one. The
+// mixing is a multiply by an odd constant, so it is a permutation and exactly
+// one seed still lands on zero; that one is moved off it, because the state
+// staying zero would hand back cp's own fixed direction for ever.
 func NewContacts(seed uint64) *Contacts {
-	return &Contacts{nudge: seed*0x9E3779B97F4A7C15 + 0x9E3779B97F4A7C15}
+	state := seed*0x9E3779B97F4A7C15 + 0x9E3779B97F4A7C15
+	if state == 0 {
+		state = 0x9E3779B97F4A7C15
+	}
+	return &Contacts{nudge: state}
 }
 
 // All is the tick's Contacts: every current entry and then every Ended one.
