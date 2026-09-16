@@ -164,6 +164,15 @@
 // Kinematic Tag and no FixedRotation Tag, and nothing compares a mass against
 // an infinity to find out.
 //
+// # Memory is given back when the app asks and never before
+//
+// The Contact buffers, the two grids and the world-cache slab keep their
+// high-water capacity, so a steady scene allocates nothing. ShrinkCmd is what
+// gives that capacity back, with a Keep option per area, and it is the only
+// thing in the package that allocates on purpose. Shrinking on a heuristic was
+// rejected — it would put an allocation into the tick after every lull — and so
+// were buffers that never gave memory back.
+//
 // # Units
 //
 // SI throughout, and per second rather than per tick: metres, kilograms,

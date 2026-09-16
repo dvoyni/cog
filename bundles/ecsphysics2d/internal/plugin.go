@@ -62,7 +62,8 @@ const (
 
 // Register resolves the settings, declares the seven Components a Body is made
 // of and the Joint that holds two of them, publishes the two indices and the
-// two solver Resources, and chains the four Systems in cp's order.
+// two solver Resources, registers ShrinkCmd, and chains the four Systems in
+// cp's order.
 //
 // The chain is explicit rather than left to the locks. Integrate and Solve
 // would serialise on Velocity anyway, Index reads the Position Integrate
@@ -115,6 +116,12 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	// a Resource of its own so that the Joint walk's write does not have to be
 	// held through detection.
 	registrar.InitResource(types.NewJointedPairs())
+
+	// The one Command physics has: giving the buffers back after a spike. It is
+	// registered here rather than reached through a Resource because releasing
+	// memory must exclude the Systems that hold those buffers, and a Command's
+	// lock is the only thing that does.
+	registrar.HandleCommand[ecsphysics2d.ShrinkCmd](types.ShrinkCommand)
 
 	registrar.Subscribe[ecsphysics2d.IntegrateOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, integrate, step()))

@@ -152,20 +152,50 @@ Numbers fall into four classes and the difference matters:
   reference scene, with 164 / 12.5 KB and 656 / 49.8 KB of allocation, and 44.5
   and 177.2 touching Contacts. From the porting index §13. These are the numbers
   the port is compared against, and **they are recorded, never asserted.**
-- **cog's, measured** — the index costs from [prototype: what a sweep costs per
-  call on each index](https://github.com/dvoyni/cog/issues/345): a short Probe at
-  30–50 ns, `BodyIndex` upkeep at 9 µs per 1 024 Bodies, one static Entity
-  replaced at 17–24 ns. **Measured in float32.**
-- **cog's, derived** — the ECS walk at ≈ 3.4 ns an Entity, scheduling at ≈ 5.7 µs
-  a System, `Uses` dispatch at 1113 ns against 0.49 ns for a direct call. From
-  `ecs.md`; used here in arithmetic, not re-derived.
+- **cog's, measured** — the index costs, **re-taken in float64** on the hardware
+  above: a short Probe at **103 ns**, `BodyIndex` upkeep at **70 µs** per 1 024
+  Bodies, one static Entity replaced at **97–102 ns**. The float32 prototype
+  [issue 345](https://github.com/dvoyni/cog/issues/345) had the same three at
+  30–50 ns, 9 µs and 17–24 ns, and **those numbers are superseded, not adjusted**:
+  its Components were half the size and nothing measured over them can be quoted
+  for this package.
+- **cog's, derived** — the ECS walk at **≈ 9 ns an Entity over these Components**,
+  **re-taken in float64** against `ecs.md`'s ≈ 3.4 ns; scheduling at ≈ 5.7 µs a
+  System, confirmed here at 5.3–6.3 µs for a frame with one System and no Bodies
+  in it; `Uses` dispatch at 1113 ns against 0.49 ns for a direct call, from
+  `ecs.md` and not re-derived.
 - **Gaps** — stated as such where they appear.
 
-**The float64 re-measurement is the largest Gap.** Body Components roughly double
-in size against the float32 prototype, so the Query walk and the grid Probes are
-re-measured as spec numbers before any of them is quoted as fact.
-[Rotation](https://github.com/dvoyni/cog/issues/319) added two `math.Exp` calls
-per Body per tick that were never measured either.
+**The float64 re-measurement has been taken**, and three of the four numbers came
+back materially worse than the float32 figures the design was argued from.
+
+| | float32, as argued from | float64, re-taken | |
+| --- | --- | --- | --- |
+| ECS Query walk over Body Components | ≈ 3.4 ns an Entity | **8.6–10.1 ns an Entity** | 2.6× |
+| short grid Probe, radius 0 | 30–50 ns | **103 ns** | ≈ 2.6× |
+| `BodyIndex` upkeep, 1 024 Bodies | 9 µs | **69–73 µs** | **7.7×** |
+| two `math.Exp` a Body a tick | never measured | **≈ 27 ns a Body** | — |
+
+The walk was re-taken as a **slope** between 1 000 and 10 000 Entities, so that
+the frame's fixed cost drops out, and the float32 predecessor was re-taken the
+same way in the same session, **interleaved round by round** rather than one
+after the other: `ecs.md`'s own two-Component walk reproduced at 3.48 ns an
+Entity on this machine, which is what makes the 2.6× a comparison and not two
+measurements from two eras. **Body Components doubling is not the whole reason.**
+A `Position` and a `Velocity` are 48 B and 24 B, so the walk streams 72 B a row
+where `ecs.md`'s two test Components are 16 B; float64 doubles the struct, and
+the rest of the factor is that this is a far wider row than the number was ever
+taken over.
+
+**The upkeep gap is the one that matters**, and it is a finding rather than a
+correction: 70 µs against 9 µs is 7.7×, and it sits inside `BodyIndex`'s write
+lock every tick. Broken into its parts, per 1 024 Bodies: **17 µs** of `math.Cos`
+and `math.Sin`, one pair a Body, which this specification prescribes; **13 µs**
+of Go map operations for the Entity-to-slot table, two a Body; **8 µs** of cell
+listing; and the remainder in the world-cache write and the entry bookkeeping.
+The map alone is larger than the whole figure the design was argued from. Nothing
+is re-decided on the strength of it here: the number is recorded, the design it
+was argued for is unchanged, and what to do about it is a later ticket's.
 
 **The porting index's own measurements are not reproducible.** They were taken
 *"in throwaway modules outside cog's tree"* with no branch, directory or
@@ -496,9 +526,12 @@ Making Systems that run in parallel today take turns is rejected outright.
 - **Integrate is one System, not two.** Both its Queries use `Velocity`, one
   writing and one reading, so a split serialises anyway and costs about 6 µs.
 - **Index and Detect are two Systems, not one.** The index writes are held only
-  for the rebuild — about 9 µs for 1 024 Bodies — and detection, the heavy part,
-  runs under reads, so gameplay queries overlap it. One System doing both would
-  hold the index write through detection and no query could overlap it.
+  for the rebuild — **about 70 µs for 1 024 Bodies, re-taken in float64** against
+  the 9 µs the float32 prototype gave — and detection, the heavy part, runs under
+  reads, so gameplay queries overlap it. One System doing both would hold the
+  index write through detection and no query could overlap it. The re-taken
+  number makes the split matter more rather than less, and it also says plainly
+  what a gameplay query on `BodyIndex` waits behind at that population.
 - **Scheduling costs about 4 × 5.7 µs ≈ 23 µs a tick.** For physics this
   supersedes the map's finding that one System per bound plugin is the shape the
   arithmetic supports: detection and response must be separate Systems.
@@ -523,8 +556,18 @@ Angle    ← Angle   + w·h
 
 `exp(−rate·h)` is cp's `damping^dt` with `damping = e^−rate`. It is exact and
 stable at any `h`. A naive `v − rate·v·h` goes negative once `rate·h > 1`;
-Box2D's `1/(1 + rate·h)` is cheaper but departs from cp. **Gap:** two
-`math.Exp` calls per Body per tick, never measured.
+Box2D's `1/(1 + rate·h)` is cheaper but departs from cp.
+
+**Measured**, on the hardware above: the velocity update costs **37 ns a Body a
+tick** as it ships, **10 ns** with Box2D's form in place of the exponentials, and
+**2.6 ns** with no damping factor at all. So exponential Damping's two
+`math.Exp` calls are **≈ 27 ns a Body a tick** against the cheap form and ≈ 34 ns
+against nothing — about **28 µs a tick over 1 024 Dynamic bodies**, which is the
+same order as keeping `BodyIndex` current. The pair on its own,
+in a loop with nothing to overlap them, is ≈ 15 ns; they cost more where they sit
+than they do in isolation. **cp's form is kept anyway**: it is exact and stable
+at any `h`, and the alternative is a departure from cp with no reason from the
+four that are acceptable.
 
 **Damping is per Body**, a rate in 1/s, for moving and for turning — a superset
 of cp's single global damping, which is reproduced by giving every Body the same
@@ -594,7 +637,16 @@ N=1024 with 177.2 touching Contacts and 10 iterations:
 | --- | --- |
 | Store lookups per Contact per iteration — 3 540 random reaches | 12–35 µs, **4–12% of a 284 µs step** |
 | Gather through an Entity→slot hash — ~500 gathers, ~600 hash operations | ~9 µs; the hash eats the win |
-| **Gather through the slot table** — ~500 gathers and scatters at ≈ 3.4 ns, plus a 4 KB clear | **~2 µs** |
+| **Gather through the slot table** — ~500 gathers and scatters at ≈ 9 ns, plus a 4 KB clear | **~5 µs** |
+
+The ≈ 9 ns is the float64 re-measurement of the ≈ 3.4 ns this table was first
+written with, and it narrows the win over the hash from about 4.5× to about 1.8×
+without changing which row is cheapest. **The arithmetic is also generous to the
+slot table and always was**: it prices a gather into a dense `[]int32` at what an
+ECS Query walk over 72-byte Component rows costs, which is the one number this
+package had for *"reaching a Body's data"* and is not the same operation. The
+conflation is recorded rather than repaired; the row order it produces is not in
+question, and re-deriving it belongs with whoever reopens the solver.
 
 The hot loop then touches nothing but two dense `float64` arrays. It is also
 where the bias velocities live for free, and it is the structure a parallel
@@ -1021,7 +1073,8 @@ only.
 ### Cost, and a missing Body
 
 The References are followed **once**, at gather; the twelve passes index the dense
-array. At 500 Joints: one Query walk of about **1.7 µs** at 3.4 ns an Entity, a
+array. At 500 Joints: one Query walk of about **4.5 µs** at the re-taken 9 ns an
+Entity — 1.7 µs on the float32 figure this was first written with — a
 dense row of about 128 bytes, and 64 KB streamed twelve times — against a 284 µs
 step at N=1024.
 
@@ -1234,9 +1287,13 @@ Kernel Resources are keyed by type, so these are two named types even if they
 share an implementation.
 
 **Both are hashed uniform grids internally**, which is not part of the contract.
-Measured: a short Probe costs **30–50 ns** at a 2 m cell against 190–300 ns for a
-BVH (4–7×, and 2× in a dense melee), about 300 ns for `gox2d`'s SAH tree, and
-745–790 ns plus 2 allocations for cp's BBTree. cp's own static tree is also badly
+Measured, **re-taken in float64**: a short Probe costs **103 ns** at a 2 m cell
+over 1 024 circles among sixteen forty-metre walls, where the float32 prototype
+gave 30–50 ns. The structures it was chosen over — 190–300 ns for a BVH (4–7×,
+and 2× in a dense melee), about 300 ns for `gox2d`'s SAH tree, and 745–790 ns
+plus 2 allocations for cp's BBTree — **were measured on that prototype and none
+of them has been re-taken**, so the ratios in this paragraph are the prototype's
+and the only float64 number in it is the grid's own. cp's own static tree is also badly
 unbalanced — 4 224 grid segments inserted in order give mean leaf depth 37.5 and
 max 75, against about 13 balanced — with no `Optimize`, no rotations, and a
 `Reindex` that panics `"implement me"`.
@@ -1713,6 +1770,38 @@ before *bench* — call `b.ReportAllocs()` in code rather than relying on
 rejected in this repo** for pinning loop variables through `runtime.KeepAlive`.
 There is no race detector in this environment; concurrency claims are tested with
 `-count=10` and say so.
+
+### The evidence
+
+Written after the measuring rather than before it. On the hardware this
+specification names:
+
+| measured | objects a tick |
+| --- | --- |
+| the engine with no Bodies in it | 19.089 |
+| N=256, over 104 Contacts and 40 Sensor Hits | 19.019 |
+| N=1 024, over 608 Contacts and 352 Sensor Hits | 19.015 |
+| the Polygon scene, no Bodies | 19.033 |
+| the Polygon scene, N=256 over 256 Contacts | 19.013 |
+| the jointed scene, nothing in it | 19.039 |
+| the jointed scene, N=256 over 104 Contacts and 64 Joints | 19.017 |
+| the jointed scene, N=1 024 over 608 Contacts and 256 Joints | 19.010 |
+
+**The slope is flat and slightly negative**, which is the claim: what a tick
+allocates is the kernel's own dispatch over the subscriptions the engine
+composes, and it does not move when the Body count goes up four-fold. cp
+allocates 164 objects and 12.5 KB a step at N=256 and 656 and 49.8 KB at N=1 024
+over the same scene. The Contact counts and the Sensor-Hit counts are printed
+beside every figure and asserted above zero, because **two earlier rounds
+measured an empty scene without noticing** and a third found the fixture spawning
+shapeless Bodies, so the index rebuild walked nothing.
+
+Every query and primitive benchmark reports **0 B/op and 0 allocs/op** beside its
+cost, over a warmed, adequately sized buffer, and the `AllocsPerRun` tests are
+what fail when one does not. **`ShrinkCmd` is the one thing in the package that
+allocates on purpose**, and it is not on the hot path: the ticks after it regrow
+what it cut, which is measured against a control that had the same spike and no
+shrink.
 
 ---
 
