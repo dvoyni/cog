@@ -505,19 +505,19 @@ The one region a Body occupies: a circle, an axis-aligned box, or a segment. A p
 _Avoid_: Collider, fixture, hull
 
 **CollisionBits**:
-Which collision groups a Shape is in; it may be in several. Two Entities collide when the Collision matrix lets any group of one collide with any group of the other. A Shape with no bits set is in every group, and an Entity with no Shape collides with nothing. A query names the groups it sees the same way, without the Collision matrix. Rules about a particular pair, such as a projectile passing its own caster, are not groups.
-_Avoid_: Layer, group, category and mask, collision filter
+Which collision groups a Shape is in; it may be in several, and a Shape in none of them collides with nothing. An Entity with no Shape collides with nothing either. A query names the groups it is in the same way. Rules about a particular pair, such as a projectile passing its own caster, are not groups.
+_Avoid_: Layer, group (alone), category, mask, collision filter
 
-**Collision matrix**:
-Which collision groups may collide with which, always both ways, declared once when physics is configured and never changed while the game runs. Groups it does not pair never collide; declaring nothing lets everything collide.
-_Avoid_: Layer matrix, intersection matrix, filter
+**CollidesWith**:
+Which collision groups a Shape collides with, carried by the Shape itself and changed by writing it. Two Entities collide only when each one's groups are among the other's, so either side alone can refuse. A query says what it looks for the same way, and a Shape that collides with nothing is invisible to queries too.
+_Avoid_: Mask, collision matrix, layer matrix, filter
 
 **Sensor**:
-A Shape that reports contacts but is never pushed and pushes nothing. The Collision matrix pairs it like any other Shape. A circle sensor that moves reports everything it touched on its way through the tick, not only where it ended, which is what keeps a point from passing through a wall unseen. What a sensor does on contact is the game's, never the physics.
+A Shape that reports contacts but is never pushed and pushes nothing. Its collision groups pair it like any other Shape's. A circle sensor that moves reports everything it touched on its way through the tick, not only where it ended, which is what keeps a point from passing through a wall unseen. What a sensor does on contact is the game's, never the physics.
 _Avoid_: Trigger (a Hook word), ghost, phantom
 
 **Contact**:
-Two Entities whose Shapes touch, found once a tick for each pair the Collision matrix lets collide, whatever kinds of Body they are. A contact is marked as begun this tick, continuing from the last, or ended, so the tick two Entities stop touching is reported too. When one party is a Sensor, the contact also says how far along the Sensor's movement the touch happened.
+Two Entities whose Shapes touch, found once a tick for each pair their collision groups let collide, whatever kinds of Body they are. A contact is marked as begun this tick, continuing from the last, or ended, so the tick two Entities stop touching is reported too. When one party is a Sensor, the contact also says how far along the Sensor's movement the touch happened. A game may drop a contact for the tick, or ignore the pair until the two come apart; a dropped contact that was continuing is reported as ended.
 _Avoid_: Collision, collision event, manifold, touch
 
 **Contact force**:
@@ -528,12 +528,12 @@ _Avoid_: Contact accumulator, penetration spring, as names for what a Body carri
 How fast a Dynamic body's velocity decays on its own, as a rate per second; its Angular velocity decays by an angular Damping of its own. It is what makes a pushed thing stop and a spun thing settle when nothing else holds it back. It is a rate, not the share of velocity kept each second.
 _Avoid_: Drag, friction, damping ratio
 
-**Sweep**:
-Moving a circle, possibly of radius 0, in a straight line from one position to another, and finding what it touches on the way. Line of sight is one use of a Sweep, not another operation.
-_Avoid_: Ray cast, shape cast, segment query, trace
+**Probe**:
+Moving a circle, possibly of radius 0, in a straight line from one position to another, and finding what it touches on the way. Line of sight is one use of a Probe, not another operation.
+_Avoid_: Sweep, ray cast, shape cast, segment query, trace
 
 **Hit**:
-What a Sweep reports about one thing it touched: the Entity, how far along the Sweep, where, and the surface normal.
+What a Probe reports about one thing it touched: the Entity, how far along the Probe, where, and the surface normal.
 _Avoid_: Contact (that is what detection reports each tick, never a query result), intersection
 
 **Overlap**:
