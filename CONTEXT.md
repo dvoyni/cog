@@ -60,6 +60,10 @@ _Avoid_: all three.
 Code that is not a plugin and defines none, importing only other Libraries and the kernel.
 _Avoid_: Package, which is every Go directory; util, common
 
+**Asset**:
+Data a plugin loads and holds: named by a path under storage or supplied directly as bytes, decoded, installed into a backend, kept under a key the plugin chooses, and released explicitly. A texture, a model, a sprite, a font face and a sound clip are Assets.
+_Avoid_: Resource, which is engine-coordinated shared state; gfx already spells this meaning "resource" in names that predate the term
+
 **Registrar**:
 A plugin-scoped capability used only during Registration to declare owned contracts and initial resources, and the Adapters the plugin requires, collects or contributes.
 
