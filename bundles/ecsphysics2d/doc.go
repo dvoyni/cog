@@ -70,10 +70,14 @@
 // from eating Restitution, and the warm start must follow the damping, or the
 // cached Impulse is damped away before it does anything.
 //
-// Friction and Restitution ship at cp's own defaults of zero, which is why
-// sliding along a wall is exactly v ← v − (v·n)·n and is the solver's own
-// behaviour rather than a rule of its own. Polygons, Sensors as swept Probes,
-// collision groups' own ticket and Joints each arrive with theirs.
+// Friction and Restitution are plain Shape fields, combined into the Contact
+// entry by Detect as the plain products u = ua·ub and e = ea·eb and writable by
+// a filter for one tick. Both default to zero, as cp's do, which is why sliding
+// along a wall at the defaults is exactly v ← v − (v·n)·n and is the solver's
+// own behaviour rather than a rule of its own. Surface velocity is on the entry
+// and stays zero; the Shape field that would feed it is not built yet.
+// Polygons, Sensors as swept Probes, collision groups' own ticket and Joints
+// each arrive with theirs.
 //
 // The query surface, in two layers, both exported because a replacement solver
 // lives in another package and is built from exactly these. The pair primitives

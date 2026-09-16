@@ -55,6 +55,26 @@ const CollisionBitsNone uint32 = 0
 // Local normals are not stored. They are derived when the world cache is built,
 // which is once at insert for a static Entity, so the sqrt falls only on moving
 // geometry.
+//
+// Friction is cp's u and Restitution is cp's e, and both are plain fields
+// rather than constructor arguments, because the range is cp's and cp validates
+// neither. Detect combines a pair as the plain products u = ua·ub and
+// e = ea·eb, so one slippery Shape is enough to make a pair slide and one dead
+// Shape absorbs the bounce.
+//
+//   - Friction runs from 0, frictionless, upwards; 1 is about wood on wood.
+//     Solve clamps the friction impulse to ±u·jn, so at 0 the tangent is left
+//     alone and sliding along a wall is exactly v ← v − (v·n)·n. Above 1 is
+//     legal and means a pair gripping harder than it presses.
+//   - Restitution is how much of its approach speed a Body keeps when it
+//     bounces: 0 stops it dead against the surface and 1 sends it away as fast
+//     as it arrived. Above 1 is legal and hands back more than arrived, which
+//     is cp's own behaviour and is left to the app.
+//
+// Both default to 0, as cp's do, so a Shape nobody has written a material onto
+// behaves exactly as it did before either was spent. A Contact's Friction is
+// not a Body's Damping and not a Spring's Absorption; the three are different
+// things.
 type Shape struct {
 	verts                       [4]m.Vec2d
 	Radius                      float64
