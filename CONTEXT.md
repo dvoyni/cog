@@ -532,13 +532,17 @@ _Avoid_: Manifold (that is the pair of them together, and the game never needs a
 How much push a Contact delivered at one of its points: a Force acting for an instant rather than over a second, which is what a game asks when it wants to know how hard something was hit.
 _Avoid_: Force (it is not one), momentum transfer, hit strength
 
-**Contact force**:
-The force contact response writes into a Dynamic body and integration consumes, rebuilt from nothing every tick rather than summed across ticks.
-_Avoid_: Contact accumulator, penetration spring, as names for what a Body carries
+**Friction**:
+How strongly two touching Shapes resist sliding across each other, as a share of how hard they are pressed together rather than a speed or a force. Pressing harder grips harder in the same proportion, which is why a heavy crate and a light one shoved the same way slide the same distance. Each Shape carries its own and a Contact's is the two of them multiplied, so one slippery Shape is enough to make a pair slide. It exists only where two Shapes touch, which is what separates it from Damping.
+_Avoid_: Drag, Damping, grip, traction, coefficient of friction
+
+**Restitution**:
+How much of its approach speed a Body keeps when it bounces off what it hit: none means it stops dead against the surface, all of it means it leaves as fast as it arrived. Each Shape carries its own and a Contact's is the two of them multiplied, so one dead Shape absorbs the bounce however lively the other is.
+_Avoid_: Bounciness, elasticity, bounce, springiness, coefficient of restitution
 
 **Damping**:
-How fast a Dynamic body's velocity decays on its own, as a rate per second; its Angular velocity decays by an angular Damping of its own. It is what makes a pushed thing stop and a spun thing settle when nothing else holds it back. It is a rate, not the share of velocity kept each second.
-_Avoid_: Drag, friction, damping ratio
+How fast a Dynamic body's velocity decays on its own, as a rate per second; its Angular velocity decays by an angular Damping of its own. It is what makes a pushed thing stop and a spun thing settle when nothing else holds it back. It is a rate, not the share of velocity kept each second. It slows a Body wherever it is, touching nothing, which is what separates it from Friction.
+_Avoid_: Drag, damping ratio, Friction (a Contact's, not a Body's)
 
 **Probe**:
 Moving a circle, possibly of radius 0, in a straight line from one position to another, and finding what it touches on the way. Line of sight is one use of a Probe, not another operation.
