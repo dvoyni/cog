@@ -98,6 +98,27 @@ func NewSegmentShape(a, b m.Vec2d, radius float64) Shape {
 	return shape
 }
 
+// NewSegmentShapeWithNeighbours is the segment from a to b, fattened by that
+// radius, with the points the app knows come before and after it along its run
+// of geometry. Every point is local to the Body's Position.
+//
+// The two neighbours are kept as the tangents C's cpSegmentShapeSetNeighbors
+// stores — previous − a and next − b — at verts[2] and verts[3], and stay local:
+// cp's CacheData never transforms them, and the end-cap rejection rotates them
+// on use. With them written, a Body rolling along a run of segments does not
+// catch at the joints, which is defect 4 fixed. Nothing in cp ever writes them,
+// which is why cp's own rejection is dead code.
+//
+// There is no chain concept. The segments stay separate Entities and which
+// segment neighbours which is the app's knowledge, like door axes and merged
+// runs.
+func NewSegmentShapeWithNeighbours(previous, a, b, next m.Vec2d, radius float64) Shape {
+	shape := NewSegmentShape(a, b, radius)
+	shape.verts[2] = previous.Sub(a)
+	shape.verts[3] = next.Sub(b)
+	return shape
+}
+
 // Offset is a circle's centre, local to the Body's Position. It is meaningless
 // on any other kind.
 func (s Shape) Offset() m.Vec2d { return s.verts[0] }

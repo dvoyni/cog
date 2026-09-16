@@ -132,7 +132,7 @@ func (idx *index) Insert(entity ecs.Entity, shape Shape, at m.Vec2d, angle float
 	}
 	idx.Remove(entity)
 
-	needed := int32(worldLenFor(shape))
+	needed := int32(worldLenFor(shape, verts))
 	slot := idx.allocEntry()
 	if needed > idx.entries[slot].worldCap {
 		// The abandoned run is reclaimed by the next Clear, which resets the
@@ -225,9 +225,10 @@ func (idx *index) Overlap(
 	dst []ecs.Entity, shape Shape, at m.Vec2d, angle float64, verts []m.Vec2d,
 	bits, collidesWith uint32, exclude ecs.Entity,
 ) []ecs.Entity {
-	var world [worldScratchLen]m.Vec2d
+	var scratch [worldScratchLen]m.Vec2d
+	world := worldRunFor(scratch[:], shape, verts)
 	transform := NewTransformRigid(at, angle)
-	used, box := cacheWorldAt(shape, transform, verts, world[:])
+	used, box := cacheWorldAt(shape, transform, verts, world)
 	if used == 0 {
 		return dst
 	}
@@ -533,9 +534,9 @@ func (idx *index) list(slot int32) {
 		// A Shape placed at a NaN or an infinity is listed in no cell at all,
 		// rather than in every cell between the two ends of the grid; cp never
 		// meets this, its own index being a tree over the box itself. A Shape
-		// of a kind with no world cache yet — the Polygon kinds, until the
-		// Polygon pipeline lands — is listed in none either, rather than all of
-		// them at the origin.
+		// with no world cache at all is listed in none either — which now means
+		// a ShapePoly whose Polygon Component is missing or empty, every other
+		// kind carrying its vertex count in its kind.
 		e.left, e.bottom, e.right, e.top = 0, 0, -1, -1
 		return
 	}

@@ -63,6 +63,59 @@ func NewSegmentShape(a, b m.Vec2d, radius float64) Shape {
 	return types.NewSegmentShape(a, b, radius)
 }
 
+// NewSegmentShapeWithNeighbours is the segment from a to b with the points the
+// app knows come before and after it along its run of geometry, so that a Body
+// rolling over the joint does not catch on the end cap. The two neighbours are
+// kept as local tangents and rotated on use.
+//
+// There is no chain concept: the segments stay separate Entities, and which
+// segment neighbours which is the app's knowledge. Chipmunk's own
+// cpSegmentShapeSetNeighbors has no counterpart in cp at all, which is why cp's
+// end-cap rejection is dead code.
+func NewSegmentShapeWithNeighbours(previous, a, b, next m.Vec2d, radius float64) Shape {
+	return types.NewSegmentShapeWithNeighbours(previous, a, b, next, radius)
+}
+
+// NewPolygonShape is the convex polygon of those vertices, local to the Body's
+// Position and rounded by that radius. It always hulls, which is what enforces
+// Chipmunk's winding, and it is the one way to build a polygon Shape.
+//
+// Three or four vertices come back as ShapeTri or ShapeQuad carrying them
+// inline, with the zero Polygon; more come back as ShapePoly with the vertices
+// in the Polygon, which the app spawns on the same Entity. Spawning the zero
+// Polygon beside an inline kind is harmless, so a caller may always spawn both.
+//
+// A refused outline comes back as a point — a circle of radius 0 — with the
+// zero Polygon and one of ErrTooFewVertices, ErrDegenerateOutline or
+// ErrConcaveOutline. A concave Polygon does not silently become its hull, which
+// is what cp does with nothing said.
+func NewPolygonShape(verts []m.Vec2d, radius float64) (Shape, Polygon, error) {
+	return types.NewPolygonShape(verts, radius)
+}
+
+// NewBoxShape is a box of that width and height centred on the Body's Position,
+// rounded by that radius. It keeps its four vertices directly rather than
+// hulling them, a box being convex and wound by construction.
+func NewBoxShape(width, height, radius float64) Shape {
+	return types.NewBoxShape(width, height, radius)
+}
+
+// NewBoxShapeFor is the box with those four edges, local to the Body's
+// Position, rounded by that radius — which is what a wall drawn around
+// something other than its own middle is.
+func NewBoxShapeFor(box BB, radius float64) Shape {
+	return types.NewBoxShapeFor(box, radius)
+}
+
+// PolygonVerts appends a Shape's local vertices to dst and returns it, which is
+// how a caller builds the run the queries take: the Polygon Component's for
+// ShapePoly and the Shape's own slots for ShapeTri and ShapeQuad. The idiom is
+// dst = PolygonVerts(dst[:0], shape, polygon), which settles to no allocation
+// once the buffer is big enough.
+func PolygonVerts(dst []m.Vec2d, shape Shape, polygon Polygon) []m.Vec2d {
+	return types.PolygonVerts(dst, shape, polygon)
+}
+
 // NewStaticIndex is an empty static index with that cell size in metres. A cell
 // size of 0 or less takes the documented default of 2 m, which is tuned for a
 // metre-scaled world rather than assumed of one.

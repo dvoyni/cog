@@ -2,6 +2,7 @@ package internal
 
 import (
 	"fmt"
+	"math"
 	"runtime"
 	"testing"
 
@@ -63,6 +64,124 @@ func TestTheStepSitsOnTheEnginesAllocationLine(t *testing.T) {
 	}
 	if large-empty > 0.05 {
 		t.Errorf("the step's own cost is %.3f objects a tick, want none", large-empty)
+	}
+}
+
+// TestThePolygonStepSitsOnTheEnginesAllocationLineToo measures the same slope
+// over a scene of Polygons rather than circles, which is what puts GJK, EPA and
+// the Polygon Component's copy into the index inside the measurement.
+//
+// It is the same claim and the same method as the circle measurement above, at
+// two sizes rather than three and over fewer ticks, because what it adds is one
+// question: whether the narrowphase's own path allocates. cp's does — a fresh
+// hull slice on every one of up to thirty EPA iterations, plus the lookup key
+// per touching pair — and this is where the port's two ping-ponged stack
+// buffers are worth their comment.
+func TestThePolygonStepSitsOnTheEnginesAllocationLineToo(t *testing.T) {
+	const ticks = 4_000
+
+	measure := func(n int) (float64, int) {
+		h := newHarnessWith(t, nil, uint32(4*max(n, 1)))
+		populatePolygons(t, h, n)
+		h.game.push = m.Vec2d{Y: -9.8}
+		h.frames(t, 100)
+		touching := len(h.contacts(t))
+		mallocs := allocationsDuring(func() {
+			for range ticks {
+				if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
+					t.Fatalf("publishing the update: %v", err)
+				}
+			}
+		})
+		return float64(mallocs) / ticks, touching
+	}
+
+	empty, _ := measure(0)
+	full, touching := measure(256)
+	t.Logf("objects a step: %.3f with no Bodies, %.3f at N=256 over %d Contacts", empty, full, touching)
+	if touching == 0 {
+		t.Fatal("the measured scene has no Contacts at all, so it measures neither Detect nor Solve")
+	}
+	if full-empty > 0.05 {
+		t.Errorf("the Polygon step's own cost is %.3f objects a tick, want none", full-empty)
+	}
+}
+
+// populatePolygons spawns n Polygon Bodies over a grid of static boxes: a
+// quarter of them boxes carrying their four vertices inline, a quarter
+// triangles, and half hexagons carrying a Polygon Component, so that all three
+// polygon kinds and every pair the switch sorts them into are inside the
+// measurement.
+func populatePolygons(t testing.TB, h *harness, n int) {
+	t.Helper()
+	if n == 0 {
+		return
+	}
+
+	hexagon, hexagonVerts := regularPolygon(t, 6, 0.3)
+	triangle, _ := regularPolygon(t, 3, 0.35)
+	box := ecsphysics2d.NewBoxShape(0.5, 0.5, 0)
+
+	for i := range n {
+		shape, polygon := box, ecsphysics2d.Polygon{}
+		switch i % 4 {
+		case 1:
+			shape = triangle
+		case 2, 3:
+			shape, polygon = hexagon, hexagonVerts
+		}
+		h.spawn(t, spawnRequest{
+			Kind:    kindPolygonBody,
+			Place:   ecsphysics2d.Position{Current: gridAt(i).Add(m.Vec2d{Y: 0.45})},
+			Body:    dynamic(t, 1, 0.1, 0, 0),
+			Shape:   shape,
+			Polygon: polygon,
+		})
+	}
+	// A static floor tile under each of them, close enough that every Body
+	// rests on one and the pair Continues every tick.
+	for i := range n {
+		h.spawn(t, spawnRequest{
+			Kind:  kindShapedStatic,
+			Place: ecsphysics2d.Position{Current: gridAt(i)},
+			Shape: ecsphysics2d.NewBoxShapeFor(ecsphysics2d.NewBB(-0.8, -0.4, 0.8, 0.2), 0),
+		})
+	}
+}
+
+// regularPolygon is the n-gon of that circumradius, built the one way in.
+func regularPolygon(t testing.TB, count int, radius float64) (ecsphysics2d.Shape, ecsphysics2d.Polygon) {
+	t.Helper()
+	corners := make([]m.Vec2d, count)
+	for i := range count {
+		corners[i] = m.ForAngle(-2 * math.Pi * float64(i) / float64(count)).MulS(radius)
+	}
+	shape, polygon, err := ecsphysics2d.NewPolygonShape(corners, 0)
+	if err != nil {
+		t.Fatalf("hulling a %d-gon: %v", count, err)
+	}
+	return shape, polygon
+}
+
+// BenchmarkThePolygonStep is BenchmarkTheStep's scene made of Polygons, which
+// is the narrowphase's expensive half: GJK and, wherever two of them overlap,
+// EPA.
+func BenchmarkThePolygonStep(b *testing.B) {
+	for _, n := range []int{256, 1024} {
+		b.Run(fmt.Sprintf("N=%d", n), func(b *testing.B) {
+			h := newHarnessWith(b, nil, uint32(4*n))
+			populatePolygons(b, h, n)
+			h.game.push = m.Vec2d{Y: -9.8}
+			h.frames(b, 100)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
+					b.Fatalf("publishing the update: %v", err)
+				}
+			}
+		})
 	}
 }
 

@@ -70,9 +70,20 @@ type Static = types.Static
 // convex Polygon, any of them rounded by its Radius. It is a Component the app
 // writes, and its Kind names how many of its vertices mean anything.
 //
-// Its accessors are Offset, A and B; NewCircleShape and NewSegmentShape in
-// utils.go build one.
+// Its accessors are Offset, A and B; NewCircleShape, NewSegmentShape,
+// NewSegmentShapeWithNeighbours, NewPolygonShape, NewBoxShape and
+// NewBoxShapeFor in utils.go build one.
 type Shape = types.Shape
+
+// Polygon is the vertices of a Shape too large to carry them inline: the second
+// Component a Shape of kind ShapePoly needs, on the same Entity beside it.
+// Index copies it into the world cache once a tick and nothing else reads it,
+// so there is no vertex cap at all.
+//
+// It is the polygon constructor's second return value, and a Shape of any other
+// kind comes back with the zero Polygon. A Polygon written by hand is neither
+// hulled nor checked.
+type Polygon = types.Polygon
 
 // ShapeKind is which of the five kinds a Shape is, and it carries the vertex
 // count with it: a count field contradicting its kind cannot be spelled.

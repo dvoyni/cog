@@ -72,8 +72,8 @@
 //
 // Friction and Restitution ship at cp's own defaults of zero, which is why
 // sliding along a wall is exactly v ← v − (v·n)·n and is the solver's own
-// behaviour rather than a rule of its own. Polygons, Sensors as swept Probes,
-// collision groups' own ticket and Joints each arrive with theirs.
+// behaviour rather than a rule of its own. Sensors as swept Probes, collision
+// groups' own ticket and Joints each arrive with theirs.
 //
 // The query surface, in two layers, both exported because a replacement solver
 // lives in another package and is built from exactly these. The pair primitives
@@ -81,12 +81,17 @@
 // world queries Probe, ProbeAll and Overlap are methods on StaticIndex and
 // BodyIndex, two Resources whose locks stay apart. Nothing on either layer
 // takes a duration, a velocity, a func value or an interface, and nothing on
-// either allocates.
+// either allocates — save a pair primitive handed a Polygon of more than
+// thirty-two vertices, which builds it one world-cache run; the step's own path
+// reads the index's slab and never does.
 //
-// The Shape value itself, in its circle and segment kinds. The Polygon kinds,
-// the hulling constructor and the GJK path four of the six pair kinds go
-// through arrive with the Polygon pipeline, and until then a query against one
-// reports no Hit.
+// The Shape value itself, in all five of its kinds: a circle, a segment with
+// its neighbours' tangents, and the three polygon kinds. NewPolygonShape is the
+// one way to a polygon and it always hulls, refusing what the hull changed
+// rather than silently collapsing a concave outline into its hull as cp does; a
+// Shape of more than four vertices carries them in a Polygon Component beside
+// it. Four of the six pair kinds go through GJK, whose expanding hull is two
+// stack buffers where cp allocates one a recursion.
 //
 // # A Force written this tick moves the Body next tick
 //

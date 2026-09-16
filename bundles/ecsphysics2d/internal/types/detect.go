@@ -116,10 +116,20 @@ func (c *Contacts) pair(
 		return
 	}
 
+	// The previous tick's entry is found once, before the narrowphase rather
+	// than after it: GJK warm starts from the simplex it holds, where cp reads
+	// that off the arbiter it is about to update. Everything else it carries is
+	// read below, out of the same lookup.
+	at, wasTouching := c.prevLookup.find(first.entity, second.entity)
+	var cached uint32
+	if wasTouching {
+		cached = c.previous[at].gjkId
+	}
+
 	touch, ok := collideWorld(
 		first.shape, first.transform, worldFirst,
 		second.shape, second.transform, worldSecond,
-		c.nudged,
+		c.nudged, cached,
 	)
 	if !ok {
 		return
@@ -157,6 +167,7 @@ func (c *Contacts) pair(
 	positionB := m.Vec2d{X: partyB.transform.TX, Y: partyB.transform.TY}
 
 	made.Count = uint8(touch.count)
+	made.gjkId = touch.gjkId
 	made.T = 1
 	made.Sensor = first.shape.Sensor || second.shape.Sensor
 	// cp's combination rules, both plain products, so neither depends on which
@@ -185,15 +196,18 @@ func (c *Contacts) pair(
 		}
 	}
 
-	c.carry(&made)
+	c.carry(&made, at, wasTouching)
 	c.append(made, aux)
 }
 
 // carry is cp's Arbiter.Update over the previous tick's entry for the same
-// unordered pair: the phase, the Impulses matched point by point, the cached
-// GJK simplex, and an ignore that has not ended yet.
-func (c *Contacts) carry(made *Contact) {
-	at, found := c.prevLookup.find(made.A, made.B)
+// unordered pair, found at slot at: the phase, the Impulses matched point by
+// point, and an ignore that has not ended yet.
+//
+// The simplex the entry also carries has already been read, by the narrowphase
+// above, and this tick's GJK has converged on a fresher one — so nothing copies
+// it forward here.
+func (c *Contacts) carry(made *Contact, at int32, found bool) {
 	if !found {
 		made.Phase = PhaseBegan
 		return
@@ -201,7 +215,6 @@ func (c *Contacts) carry(made *Contact) {
 	old := &c.previous[at]
 	c.prevAux[at].matched = true
 
-	made.gjkId = old.gjkId
 	if old.phased() {
 		made.Phase = PhaseContinuing
 	} else {

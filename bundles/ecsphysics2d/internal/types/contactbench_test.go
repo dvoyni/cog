@@ -28,7 +28,7 @@ func BenchmarkCollideCircles(b *testing.B) {
 		touch, _ := collideWorld(
 			first, transformFirst, worldFirst[:usedFirst],
 			second, transformSecond, worldSecond[:usedSecond],
-			m.Vec2d{X: 1},
+			m.Vec2d{X: 1}, 0,
 		)
 		sinkDepth = touch.points[0].depth
 	}
@@ -49,7 +49,53 @@ func BenchmarkCollideCircleSegment(b *testing.B) {
 		touch, _ := collideWorld(
 			circle, transformCircle, worldCircle[:usedCircle],
 			wall, transformWall, worldWall[:usedWall],
-			m.Vec2d{X: 1},
+			m.Vec2d{X: 1}, 0,
+		)
+		sinkDepth = touch.points[0].depth
+	}
+}
+
+// BenchmarkCollidePolys and BenchmarkCollideSegments are the GJK path, where
+// the two closed forms above are arithmetic: both pairs here overlap deeply
+// enough to reach EPA, whose hull is the two ping-ponged stack buffers. A cold
+// simplex is passed every iteration, which is the worst case — detection warm
+// starts from the previous tick's.
+func BenchmarkCollidePolys(b *testing.B) {
+	box := NewBoxShape(1, 1, 0)
+	transformFirst := NewTransformRigid(m.Vec2d{}, 0)
+	transformSecond := NewTransformRigid(m.Vec2d{X: 0.1, Y: 0.9}, 0.3)
+	var worldFirst, worldSecond [worldScratchLen]m.Vec2d
+	usedFirst, _ := cacheWorldAt(box, transformFirst, nil, worldFirst[:])
+	usedSecond, _ := cacheWorldAt(box, transformSecond, nil, worldSecond[:])
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		touch, _ := collideWorld(
+			box, transformFirst, worldFirst[:usedFirst],
+			box, transformSecond, worldSecond[:usedSecond],
+			m.Vec2d{X: 1}, 0,
+		)
+		sinkDepth = touch.points[0].depth
+	}
+}
+
+func BenchmarkCollideSegments(b *testing.B) {
+	across := NewSegmentShape(m.Vec2d{Y: -1}, m.Vec2d{Y: 1}, 0.15)
+	along := NewSegmentShape(m.Vec2d{X: -1}, m.Vec2d{X: 1}, 0.1)
+	transformFirst := NewTransformRigid(m.Vec2d{X: 0.3, Y: 0.2}, 0)
+	transformSecond := NewTransformRigid(m.Vec2d{}, 0)
+	var worldFirst, worldSecond [worldScratchLen]m.Vec2d
+	usedFirst, _ := cacheWorldAt(across, transformFirst, nil, worldFirst[:])
+	usedSecond, _ := cacheWorldAt(along, transformSecond, nil, worldSecond[:])
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		touch, _ := collideWorld(
+			across, transformFirst, worldFirst[:usedFirst],
+			along, transformSecond, worldSecond[:usedSecond],
+			m.Vec2d{X: 1}, 0,
 		)
 		sinkDepth = touch.points[0].depth
 	}

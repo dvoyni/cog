@@ -5,6 +5,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 	"github.com/dvoyni/cog/bundles/ecsphysics2d/internal/types"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -16,6 +17,13 @@ type plugin struct {
 	// settings is the Config with its defaults filled in, fixed at Register and
 	// never written again. The Systems close over it.
 	settings settings
+
+	// polygon is the run Index copies a Polygon Component's vertices into
+	// before handing them to an Insert, refilled once per ShapePoly Entity and
+	// never read outside that System. It lives here because a local would be
+	// nil at the top of every tick and would allocate on the hot path; ecs.List
+	// hands out no slice, so there is nothing to point at instead.
+	polygon []m.Vec2d
 }
 
 // New makes the physics plugin. Register ecs beside it, and app above it: the
@@ -48,7 +56,7 @@ const (
 	staticReserve = 4096
 )
 
-// Register resolves the settings, declares the six Components a Body is made
+// Register resolves the settings, declares the seven Components a Body is made
 // of, publishes the two indices, and chains the four Systems in cp's order.
 //
 // The chain is explicit rather than left to the locks. Integrate and Solve
@@ -79,6 +87,10 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	// the shaped movers, and static geometry is the bigger half of that in
 	// every scene anyone has measured. A reserve is a hint, not a cap.
 	ecs.RegisterComponent[ecsphysics2d.Shape](registrar, staticReserve)
+	// Polygon takes the smaller reserve: it is the second Component only a
+	// Shape of more than four vertices needs, and a scene whose every Shape is
+	// one is not a scene anyone has measured.
+	ecs.RegisterComponent[ecsphysics2d.Polygon](registrar, bodyReserve)
 
 	// The two indices, at the cell sizes the settings resolved — two named types
 	// so that their locks stay apart: rebuilding the Bodies write-locks only the
@@ -93,7 +105,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	registrar.Subscribe[ecsphysics2d.IntegrateOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, integrate, step()))
 	registrar.Subscribe[ecsphysics2d.IndexOnUpdate](
-		ecs.ToHandler[app.UpdateEvent](registrar, index)).
+		ecs.ToHandler[app.UpdateEvent](registrar, p.index)).
 		After[ecsphysics2d.IntegrateOnUpdate]()
 	registrar.Subscribe[ecsphysics2d.DetectOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, p.detect, step())).

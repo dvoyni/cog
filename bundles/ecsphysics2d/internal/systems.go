@@ -4,6 +4,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 	"github.com/dvoyni/cog/bundles/ecsphysics2d/internal/types"
+	"github.com/dvoyni/cog/libs/m"
 )
 
 // positionQuery drives Integrate: every Body with a Velocity, Kinematic ones
@@ -65,12 +66,18 @@ type bodyIndexQuery struct {
 // while detection, the heavy part, runs under reads that a gameplay query can
 // overlap. One System doing both would hold the index write through detection.
 //
-// verts is nil at every Insert here: Polygon is a later ticket, and circles and
-// segments carry their geometry in the Shape value itself.
-func index(
+// A ShapePoly's vertices come out of the Polygon Component beside the Shape,
+// probed with ecs.Get and copied into the plugin's own scratch run once per
+// Entity: ecs.List yields copies and hands out no slice, deliberately, so there
+// is nothing to point at. Every other kind carries its geometry in the Shape
+// value itself and reads nil. The scratch lives on the plugin rather than in
+// this frame so that the run it has grown survives the tick — a local would be
+// nil again at every call and would allocate every tick.
+func (p *plugin) index(
 	shapes *ecs.Hooks[ecsphysics2d.Shape, ecs.HookAddedRemoved],
 	places *ecs.Get[ecsphysics2d.Position],
 	statics *ecs.Get[ecsphysics2d.Static],
+	polygons *ecs.Get[ecsphysics2d.Polygon],
 	bodies *ecs.Query[bodyIndexQuery],
 	staticIndex *ecs.Write[*ecsphysics2d.StaticIndex],
 	bodyIndex *ecs.Write[*ecsphysics2d.BodyIndex],
@@ -104,7 +111,8 @@ func index(
 			// way to avoid it is to spawn a Static's Shape, Position and Tag
 			// together, which is what an ordinary Spawn does.
 			if place, ok := places.Of(entity); ok {
-				static.Insert(entity, hook.Value, place.Current, place.Angle, nil)
+				static.Insert(entity, hook.Value, place.Current, place.Angle,
+					p.polygonVerts(polygons, entity, hook.Value))
 			}
 		}
 	}
@@ -112,8 +120,28 @@ func index(
 	body := bodyIndex.Get()
 	body.Clear()
 	for entity, it := range bodies.All() {
-		body.Insert(entity, it.Shape, it.Place.Current, it.Place.Angle, nil)
+		body.Insert(entity, it.Shape, it.Place.Current, it.Place.Angle,
+			p.polygonVerts(polygons, entity, it.Shape))
 	}
+}
+
+// polygonVerts is the run of local vertices an Insert takes: nil for every kind
+// but ShapePoly, and the Polygon Component copied into the plugin's scratch for
+// that one. A ShapePoly with no Polygon beside it copies nothing and is listed
+// in no cell, which is this package's stated-not-checked stance — the way to
+// avoid it is to spawn the Shape and the Polygon the constructor built together.
+func (p *plugin) polygonVerts(
+	polygons *ecs.Get[ecsphysics2d.Polygon], entity ecs.Entity, shape ecsphysics2d.Shape,
+) []m.Vec2d {
+	if shape.Kind != ecsphysics2d.ShapePoly {
+		return nil
+	}
+	polygon, ok := polygons.Of(entity)
+	if !ok {
+		return nil
+	}
+	p.polygon = types.PolygonVerts(p.polygon[:0], shape, polygon)
+	return p.polygon
 }
 
 // detect finds the tick's Contacts by walking the two indices, and is where the
