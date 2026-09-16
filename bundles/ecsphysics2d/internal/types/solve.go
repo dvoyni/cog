@@ -54,6 +54,8 @@ type solver struct {
 	// exactly as cp's dt/prev_dt does. It is 0 before the first solve, which is
 	// cp's own value there.
 	step float64
+	// joints is the Joint half of the gather, in jointsolve.go.
+	joints jointSolver
 }
 
 // VelocityQuery drives the velocity half of Solve: Dynamic bodies only, which
@@ -77,7 +79,7 @@ type VelocityQuery struct {
 // specification lays out and cp runs:
 //
 //  1. build the dense solved-Contact list, with cp's four exclusions;
-//  2. walk the Joints and build the dense Joint list — Joints' own ticket;
+//  2. walk the Joints and build the dense Joint list;
 //  3. assign BodyIndex slots over the Bodies in Contacts and in Joints;
 //  4. gather those Bodies into the dense arrays;
 //  5. PreStep Contacts, then Joints;
@@ -102,12 +104,17 @@ type VelocityQuery struct {
 func Solve(
 	contacts *Contacts,
 	bodies *ecs.Query[VelocityQuery],
+	joints *ecs.Query[JointQuery],
 	dynamics *ecs.Get[Dynamic],
 	velocities *ecs.Set[Velocity],
 	places *ecs.Set[Position],
 	h float64, iterations int, slop, bias float64,
 ) {
 	contacts.beginSolve()
+	// Step 2 and its half of step 3: a jointed Body may touch nothing at all,
+	// so the gather set is the Bodies in solved Contacts together with the
+	// Bodies in Joints, and both are given rows before either is gathered.
+	contacts.gatherJoints(joints, places, velocities)
 
 	// The gather reads the velocity as it stands before integration, which is
 	// the only thing PreStep's bounce can be taken from.
@@ -122,6 +129,7 @@ func Solve(
 	}
 
 	contacts.preStep(h, slop, bias)
+	contacts.preStepJoints(h, velocities)
 
 	for _, it := range bodies.All() {
 		IntegrateVelocity(&it.Body, it.Velocity, it.Force, h)
@@ -135,8 +143,10 @@ func Solve(
 		row.v, row.w = velocity.Linear, velocity.Angular
 	}
 
-	contacts.warmStart(h)
-	contacts.iterate(iterations)
+	coef := contacts.warmStart(h)
+	contacts.warmStartJoints(coef)
+	contacts.iterate(iterations, h)
+	contacts.scatterJoints()
 
 	for i := 1; i < len(contacts.solver.rows); i++ {
 		row := &contacts.solver.rows[i]
@@ -176,9 +186,9 @@ func Solve(
 // dropped and the ones it ignores. The fourth, a pair of Bodies that between
 // them have no mass, needs the gather to have run and is applied in preStep.
 //
-// Step 2, the Joint walk, arrives with Joints. It amends the earlier shape of
-// the gather set, which was the Bodies in solved Contacts: a jointed Body may
-// touch nothing at all.
+// Step 2, the Joint walk, follows in gatherJoints. It amends the earlier shape
+// of the gather set, which was the Bodies in solved Contacts: a jointed Body
+// may touch nothing at all.
 func (c *Contacts) beginSolve() {
 	s := &c.solver
 
@@ -336,7 +346,10 @@ func (c *Contacts) preStep(h, slop, bias float64) {
 // split. A Contact that Began is skipped, as cp skips a first contact — a
 // revival out of the cached run carries its accumulated Impulses into the
 // iterations all the same, which is cp's CACHED to FIRST_COLLISION.
-func (c *Contacts) warmStart(h float64) {
+//
+// It returns the coefficient it worked out, because the Joints' warm start
+// spends the same one and this is where the previous tick's step is spent.
+func (c *Contacts) warmStart(h float64) float64 {
 	s := &c.solver
 	var coef float64
 	if s.step != 0 {
@@ -356,15 +369,18 @@ func (c *Contacts) warmStart(h float64) {
 			applyImpulses(first, second, point.r1, point.r2, j.MulS(coef))
 		}
 	}
+	return coef
 }
 
 // iterate is cp's impulse solver: Iterations complete passes over every solved
-// Contact.
-func (c *Contacts) iterate(iterations int) {
+// Contact and then over every gathered Joint — two complete passes an
+// iteration rather than interleaved element by element, as cp does.
+func (c *Contacts) iterate(iterations int, h float64) {
 	for range iterations {
 		for _, at := range c.solver.solved {
 			c.applyImpulse(at)
 		}
+		c.applyJointImpulses(h)
 	}
 }
 

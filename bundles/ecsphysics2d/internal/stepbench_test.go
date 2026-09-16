@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -139,6 +140,134 @@ func populate(t testing.TB, h *harness, n int) {
 // enough apart that they are not all in the same one.
 func gridAt(i int) m.Vec2d {
 	return m.Vec2d{X: float64(i%16) * 1.7, Y: float64(i/16) * 1.7}
+}
+
+// TestTheJointedStepSitsOnTheEnginesAllocationLine is the same measurement over
+// a scene that also has Joints in it, because the Joint half of Solve carries
+// three buffers of its own — the dense Joint rows, the Entity table that
+// answers for a jointed Body detection never saw, and the pair set Index
+// rebuilds — and a buffer that is rebuilt rather than refilled would scale with
+// the Joint count.
+//
+// It fails if the scene finds no Contacts and it fails if the scene's Joints
+// delivered no Impulse, for the same reason: a measurement over an empty list
+// measures the walk and not the work.
+func TestTheJointedStepSitsOnTheEnginesAllocationLine(t *testing.T) {
+	const ticks = 10_000
+
+	measure := func(n int) (float64, int, int, float64) {
+		h := newHarnessWith(t, nil, uint32(3*max(n, 1)))
+		joints, sample := populateJointed(t, h, n)
+		h.game.push = m.Vec2d{X: 10}
+		h.frames(t, 100)
+		touching := len(h.contacts(t))
+		var impulse float64
+		if sample != ecs.NoEntity {
+			impulse = h.joint(t, sample).Joint.Impulse()
+		}
+		mallocs := allocationsDuring(func() {
+			for range ticks {
+				if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
+					t.Fatalf("publishing the update: %v", err)
+				}
+			}
+		})
+		return float64(mallocs) / ticks, touching, joints, impulse
+	}
+
+	empty, _, _, _ := measure(0)
+	small, smallTouching, smallJoints, smallImpulse := measure(256)
+	large, largeTouching, largeJoints, largeImpulse := measure(1024)
+	t.Logf("objects a step: %.3f with nothing, %.3f at N=256 over %d Contacts and %d Joints, "+
+		"%.3f at N=1024 over %d Contacts and %d Joints",
+		empty, small, smallTouching, smallJoints, large, largeTouching, largeJoints)
+	if smallTouching == 0 || largeTouching == 0 {
+		t.Fatal("the measured scene has no Contacts at all, so it measures neither Detect nor Solve")
+	}
+	if smallJoints == 0 || largeJoints == 0 {
+		t.Fatal("the measured scene has no Joints at all, so it measures none of the Joint pass")
+	}
+	if smallImpulse == 0 || largeImpulse == 0 {
+		t.Fatal("the measured scene's Joints delivered no Impulse, so the Joint pass did no work")
+	}
+
+	if small > empty+0.05 {
+		t.Errorf("256 Bodies cost %.3f objects a step against %.3f with none", small, empty)
+	}
+	if large > small+0.05 {
+		t.Errorf("allocation scales with the Body count: %.3f a step at N=256, %.3f at N=1024", small, large)
+	}
+	if large-empty > 0.05 {
+		t.Errorf("the step's own cost is %.3f objects a tick, want none", large-empty)
+	}
+}
+
+// BenchmarkTheJointedStep is the cost of one whole tick over the same scene
+// with Joints in it. Wall-clock is asserted nowhere, here as anywhere else.
+func BenchmarkTheJointedStep(b *testing.B) {
+	for _, n := range []int{256, 1024} {
+		b.Run(fmt.Sprintf("N=%d", n), func(b *testing.B) {
+			h := newHarnessWith(b, nil, uint32(3*n))
+			populateJointed(b, h, n)
+			h.game.push = m.Vec2d{X: 10}
+			h.frames(b, 100)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
+					b.Fatalf("publishing the update: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// populateJointed is the reference scene with a quarter as many pin Joints laid
+// over it, and reports how many it spawned and one of them to read an Impulse
+// off.
+//
+// Each Joint holds two shapeless Bodies of different masses under the same
+// Force, so the pin is really loaded every tick rather than merely walked: two
+// Bodies of the same mass under the same Force accelerate alike and a pin
+// between them does nothing. They carry no Shape, so they are in no index and
+// the Contact half of the measurement is exactly what populate already makes —
+// which is also what puts the jointed Bodies through the Entity table rather
+// than through the slot table, the path a jointed Body that touches nothing
+// takes.
+//
+// Every one of them says its two Bodies do not collide, so JointedPairs is
+// filled and Detect's check is inside the measurement too.
+func populateJointed(t testing.TB, h *harness, n int) (int, ecs.Entity) {
+	t.Helper()
+	if n == 0 {
+		return 0, ecs.NoEntity
+	}
+	populate(t, h, n)
+
+	var first ecs.Entity
+	count := 0
+	for i := range n / 4 {
+		at := gridAt(i)
+		a := h.spawn(t, spawnRequest{
+			Kind:  kindDynamic,
+			Place: ecsphysics2d.Position{Current: at},
+			Body:  dynamic(t, 2, 8, 15, 0.3),
+		})
+		b := h.spawn(t, spawnRequest{
+			Kind:  kindDynamic,
+			Place: ecsphysics2d.Position{Current: at.Add(m.Vec2d{Y: 0.6})},
+			Body:  dynamic(t, 5, 3, 15, 0.3),
+		})
+		joint := ecsphysics2d.NewPinJoint(a, b, m.Vec2d{}, m.Vec2d{}, 0.6)
+		joint.CollideBodies = false
+		e := h.spawn(t, spawnRequest{Kind: kindJoint, Joint: joint})
+		if count == 0 {
+			first = e
+		}
+		count++
+	}
+	return count, first
 }
 
 // allocationsDuring counts the objects f allocates, the way ecs's own frame

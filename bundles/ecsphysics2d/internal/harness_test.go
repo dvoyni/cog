@@ -74,6 +74,11 @@ type (
 		Marker ecsphysics2d.Static
 		Shape  ecsphysics2d.Shape
 	}
+	// jointEntity is a Joint as an app spawns one: an Entity of its own
+	// carrying nothing but the Joint, which holds its two Bodies by Reference.
+	jointEntity struct {
+		Joint ecsphysics2d.Joint
+	}
 )
 
 // bodyKind names which of the sets a spawn carries.
@@ -87,6 +92,7 @@ const (
 	kindShapedBody
 	kindShapedStatic
 	kindPlacelessStatic
+	kindJoint
 )
 
 // spawnCmd creates Bodies. It is a System registered as a command, which is how
@@ -100,6 +106,7 @@ type spawnRequest struct {
 	Velocity ecsphysics2d.Velocity
 	Body     ecsphysics2d.Dynamic
 	Shape    ecsphysics2d.Shape
+	Joint    ecsphysics2d.Joint
 }
 
 type spawnResponse struct{ First ecs.Entity }
@@ -114,6 +121,7 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 		shaped *ecs.Spawn[shapedBody],
 		shapedStatics *ecs.Spawn[shapedStatic],
 		placeless *ecs.Spawn[placelessStatic],
+		joints *ecs.Spawn[jointEntity],
 		answer *ecs.Resp[spawnResponse],
 	) {
 		var first ecs.Entity
@@ -137,6 +145,8 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 				e = shapedStatics.New(shapedStatic{Place: request.Place, Shape: request.Shape})
 			case kindPlacelessStatic:
 				e = placeless.New(placelessStatic{Shape: request.Shape})
+			case kindJoint:
+				e = joints.New(jointEntity{Joint: request.Joint})
 			}
 			if i == 0 {
 				first = e
@@ -306,6 +316,59 @@ func despawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Exe
 	})
 }
 
+// jointCmd reads one Joint back and, when asked, replaces it: the Impulse the
+// last tick delivered and the ratchet's Angle are what a test looks at, and
+// replacing one is how a test changes a motor's rate between ticks.
+type jointCmd kernel.Command[jointRequest, jointResponse]
+
+type jointRequest struct {
+	Entity ecs.Entity
+	Joint  ecsphysics2d.Joint
+	// Replace writes Joint over whatever the Entity holds.
+	Replace bool
+}
+
+type jointResponse struct {
+	Joint ecsphysics2d.Joint
+	Found bool
+}
+
+func jointCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[jointRequest, jointResponse]) {
+	return ecs.ToExecute[jointRequest, jointResponse](registrar, func(
+		request jointRequest,
+		joints *ecs.Set[ecsphysics2d.Joint],
+		answer *ecs.Resp[jointResponse],
+	) {
+		if request.Replace {
+			joints.UpdateFor(request.Entity, request.Joint)
+		}
+		joint, found := joints.Of(request.Entity)
+		answer.Set(jointResponse{Joint: joint, Found: found})
+	})
+}
+
+// jointedCmd asks the JointedPairs Resource what Index built, which is how a
+// test sees the set Detect checks without going through a Contact.
+type jointedCmd kernel.Command[jointedRequest, jointedResponse]
+
+type jointedRequest struct{ A, B ecs.Entity }
+
+type jointedResponse struct {
+	Len int
+	Has bool
+}
+
+func jointedCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[jointedRequest, jointedResponse]) {
+	return ecs.ToExecute[jointedRequest, jointedResponse](registrar, func(
+		request jointedRequest,
+		pairs *ecs.Read[*ecsphysics2d.JointedPairs],
+		answer *ecs.Resp[jointedResponse],
+	) {
+		set := pairs.Get()
+		answer.Set(jointedResponse{Len: set.Len(), Has: set.Has(request.A, request.B)})
+	})
+}
+
 // filterOnUpdate is the app's filter System — cp's Begin and PreSolve — ordered
 // into the one gap the specification puts it in.
 type filterOnUpdate kernel.Subscription[app.UpdateEvent]
@@ -363,6 +426,8 @@ func (g *game) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[indexCmd](indexCmdImpl(registrar))
 	registrar.HandleCommand[contactsCmd](contactsCmdImpl(registrar))
 	registrar.HandleCommand[despawnCmd](despawnCmdImpl(registrar))
+	registrar.HandleCommand[jointCmd](jointCmdImpl(registrar))
+	registrar.HandleCommand[jointedCmd](jointedCmdImpl(registrar))
 	registrar.Subscribe[pushOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, func(q *ecs.Query[pushQuery]) {
 		for _, it := range q.All() {
 			it.Force.Force = it.Force.Force.Add(g.push)
@@ -551,6 +616,36 @@ func (h *harness) despawn(t testing.TB, e ecs.Entity) {
 	if _, err := h.kernel.ExecuteCommand[despawnCmd](despawnRequest{Entity: e}); err != nil {
 		t.Fatalf("despawning %v: %v", e, err)
 	}
+}
+
+// joint reads one Joint back as it stands now.
+func (h *harness) joint(t testing.TB, e ecs.Entity) jointResponse {
+	t.Helper()
+	response, err := h.kernel.ExecuteCommand[jointCmd](jointRequest{Entity: e})
+	if err != nil {
+		t.Fatalf("reading the Joint %v: %v", e, err)
+	}
+	return response
+}
+
+// setJoint replaces one Joint from outside a tick.
+func (h *harness) setJoint(t testing.TB, e ecs.Entity, joint ecsphysics2d.Joint) {
+	t.Helper()
+	if _, err := h.kernel.ExecuteCommand[jointCmd](jointRequest{
+		Entity: e, Joint: joint, Replace: true,
+	}); err != nil {
+		t.Fatalf("writing the Joint %v: %v", e, err)
+	}
+}
+
+// jointedPairs is what Index built out of the Joint walk.
+func (h *harness) jointedPairs(t testing.TB, a, b ecs.Entity) jointedResponse {
+	t.Helper()
+	response, err := h.kernel.ExecuteCommand[jointedCmd](jointedRequest{A: a, B: b})
+	if err != nil {
+		t.Fatalf("asking the jointed pairs: %v", err)
+	}
+	return response
 }
 
 // circle is the Shape every index test spawns with: the smallest thing that

@@ -78,13 +78,13 @@ func BenchmarkDetect(b *testing.B) {
 			// Warm the two entry buffers and the two maps, so what is measured is
 			// the steady state and not the tick that grew them.
 			for range 8 {
-				Collide(contacts, bodies, statics, 3)
+				Collide(contacts, bodies, statics, noJoints, 3)
 			}
 
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				Collide(contacts, bodies, statics, 3)
+				Collide(contacts, bodies, statics, noJoints, 3)
 			}
 			b.StopTimer()
 			b.ReportMetric(float64(contacts.Len()), "contacts")

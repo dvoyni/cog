@@ -19,8 +19,12 @@ import "github.com/dvoyni/cog/libs/m"
 //   - there are no collision handlers to look up, so cp's per-touching-pair
 //     lookup-key allocation has nothing to allocate.
 //
-// persistence is cp's collisionPersistence in ticks.
-func Collide(contacts *Contacts, bodies *BodyIndex, statics *StaticIndex, persistence int) {
+// jointed is the set of pairs a Joint holds apart, which Index built from the
+// Joint Query; persistence is cp's collisionPersistence in ticks.
+func Collide(
+	contacts *Contacts, bodies *BodyIndex, statics *StaticIndex,
+	jointed *JointedPairs, persistence int,
+) {
 	contacts.beginTick()
 
 	moving, still := &bodies.index, &statics.index
@@ -62,6 +66,7 @@ func Collide(contacts *Contacts, bodies *BodyIndex, statics *StaticIndex, persis
 					contacts.pair(
 						first, worldFirst, int32(slot),
 						second, moving.world(second), other,
+						jointed,
 					)
 				}
 			}
@@ -81,6 +86,7 @@ func Collide(contacts *Contacts, bodies *BodyIndex, statics *StaticIndex, persis
 					contacts.pair(
 						first, worldFirst, int32(slot),
 						second, still.world(second), -1,
+						jointed,
 					)
 				}
 			}
@@ -102,10 +108,10 @@ func (idx *index) world(e *entry) []m.Vec2d { return idx.slab[e.world : e.world+
 func (c *Contacts) pair(
 	first *entry, worldFirst []m.Vec2d, firstSlot int32,
 	second *entry, worldSecond []m.Vec2d, secondSlot int32,
+	jointed *JointedPairs,
 ) {
-	// cp's QueryReject, less the two clauses the layout answers: a Shape never
-	// shares an Entity with another Shape, and the Joint exclusion arrives with
-	// Joints.
+	// cp's QueryReject, less the one clause the layout answers: a Shape never
+	// shares an Entity with another Shape.
 	if !collides(
 		first.shape.CollisionBits, first.shape.CollidesWith,
 		second.shape.CollisionBits, second.shape.CollidesWith,
@@ -113,6 +119,13 @@ func (c *Contacts) pair(
 		return
 	}
 	if !first.box.Intersects(second.box) {
+		return
+	}
+	// cp's QueryRejectConstraints, in the one place it can be: the Contact is
+	// never created and never reported, which is what cp's QueryReject means —
+	// no arbiter, and therefore no Begin. The gate is one branch for a scene
+	// with no such Joint.
+	if jointed.Len() > 0 && jointed.Has(first.entity, second.entity) {
 		return
 	}
 
