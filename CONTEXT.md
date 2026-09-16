@@ -501,8 +501,12 @@ The point a Body moves and turns about, which is the Body's position itself. A S
 _Avoid_: Centre of mass, pivot, origin, anchor
 
 **Shape**:
-The one region a Body occupies: a circle, an axis-aligned box, or a segment. A point is a circle of radius 0. A Body has at most one.
-_Avoid_: Collider, fixture, hull
+The one convex region a Body occupies, named by its kind: a circle, a segment, or a Polygon. A point is a circle of radius 0, and a box is a Polygon of four vertices that turns with the Body. Any kind may be rounded, which thickens it by a radius everywhere rather than adding a second Shape, so a rounded segment is a capsule. A Body has at most one, and an outline that is not convex is a chain of segments, one Body each, never one Shape.
+_Avoid_: Collider, fixture, concave shape
+
+**Polygon**:
+A Shape bounded by straight edges between its vertices, always convex and always wound the same way. A triangle and a box are the small ones. Vertices describing a dent do not make a Polygon, and nothing is quietly rounded off to pretend they do: what comes back is a point, saying why, so a mistake is never mistaken for the region that was asked for.
+_Avoid_: Mesh, hull (that is the outline it makes, not the Shape), n-gon, vertex buffer
 
 **CollisionBits**:
 Which collision groups a Shape is in; it may be in several, and a Shape in none of them collides with nothing. An Entity with no Shape collides with nothing either. A query names the groups it is in the same way. Rules about a particular pair, such as a projectile passing its own caster, are not groups.
