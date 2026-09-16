@@ -48,4 +48,32 @@
 // and lives in libs/m, because every Component and query exposes it to gameplay
 // code and a physics-owned vector would make gameplay import physics for vector
 // maths.
+//
+// And a Body that moves: Position, Velocity, Force, Dynamic and the Static Tag,
+// with the four Systems the step is chained on app.UpdateEvent in cp's own
+// order — IntegrateOnUpdate, IndexOnUpdate, DetectOnUpdate, SolveOnUpdate.
+// Index and Detect are empty until there are indices and Contacts; Integrate
+// moves every Body with a Velocity, and Solve integrates every Dynamic body's
+// velocity from its Force.
+//
+// # A Force written this tick moves the Body next tick
+//
+// Positions integrate first, which is cp's order and not Box2D's. The Force an
+// app's System writes this tick is turned into velocity by Solve at the end of
+// the same tick, and that velocity is spent by the next tick's Integrate. Only
+// Force pays this: a Velocity written directly is immediate.
+//
+// # A Body's kind is said by its Components
+//
+// Dynamic present is a Dynamic body; a Velocity with no Dynamic is Kinematic;
+// the Static Tag is Static and carries no Velocity. There is no Kind field, no
+// Kinematic Tag and no FixedRotation Tag, and nothing compares a mass against
+// an infinity to find out.
+//
+// # Units
+//
+// SI throughout, and per second rather than per tick: metres, kilograms,
+// seconds, radians; Force in newtons and Torque in newton-metres; Damping and
+// the solver's bias as rates in 1/s. Integration is exponential in the Damping
+// rates, which is exact and stable at any step.
 package ecsphysics2d
