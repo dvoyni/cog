@@ -823,11 +823,15 @@ implementing this key.
   alternation costs a draw each way.
 - Any key change flushes, which is what preserves draw order.
 
-Two draws remain unbatched, and neither is unbatched because of anything in this
-contract: `drawTiledSprite` (`bundles/canvas/plugin.go:416`) and `emitTextureQuad`
-(`:509`). The texture-sprite one is
-[canvas: one sprite shader source with an atlas/texture variant](https://github.com/dvoyni/cog/issues/149),
-out of scope. `emitTrianglesDirect`'s bail-outs are dissolved by the triangles
+**No draw escapes a batcher any more.** `drawTiledSprite` and `emitTextureQuad`
+(`bundles/canvas/internal/plugin.go`) built their quad and then called
+`OpQueue.Draw` directly, so a nine-slice over a texture cost nine draws. They
+join `trianglesBatch` like every other triangle draw as of
+[canvas: texture-sourced and tiled sprites bypass the triangles batcher](https://github.com/dvoyni/cog/issues/149),
+which needed nothing from this contract beyond what it already says: their
+texture and sampler go into the shading's parameters, and the parameter key
+hashes both by identity, so one texture and one sampler merge and a second of
+either splits. `emitTrianglesDirect`'s bail-outs are dissolved by the triangles
 key above, and `drawEntry` is deleted.
 
 ### What a caller sees at the wall
@@ -866,7 +870,7 @@ in the negative. This section exists so that #28's title does not invite a
 re-open.
 
 **Nothing moves off the uniform block** — not sprites, not triangles, not texture
-draws, not the two unbatched escapes.
+draws, not the tiled and texture quads canvas builds itself.
 
 **1. Moving would delete the extension mechanism this contract is built on.** gfx
 cannot pack named parameters into a storage struct — `ShaderResource.Members` is
@@ -928,9 +932,10 @@ ops, not GPU draws, and is read only by tests. The measurement #28 and
 [Batch draws that carry a custom material](https://github.com/dvoyni/cog/issues/146)
 both asked for is not executable, and **no counter is built for this**.
 
-The bound is recorded instead: uniform-carrying draws per frame ≤ batch flushes +
-unbatched escapes, where flushes are bounded by layers × sprite/triangle
-alternations. Batching only ever reduces the count, so the ~50–100 measured today
+The bound is recorded instead: uniform-carrying draws per frame ≤ batch flushes,
+where flushes are bounded by layers × sprite/triangle alternations. It read
+"+ unbatched escapes" until the tiled and texture quads joined the triangles
+batcher; losing that term only lowers it. Batching only ever reduces the count, so the ~50–100 measured today
 is an **upper** bound on the post-batching number, and a decision that survives
 its upper bound does not need the exact one. The absence of the measurement is a
 recorded position, not a gap.

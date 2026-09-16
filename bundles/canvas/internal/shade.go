@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/bundles/canvas/internal/types"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -32,6 +33,52 @@ func (p *plugin) shadeSprite(materials *types.ScopeMaterials, material *gfx.Mate
 	p.shared = append(p.shared, scope...)
 	shading.arrays, shading.shared = p.arrays, p.shared
 	shading.sharedKey = gfx.FingerprintParams(shading.shared)
+	return shading
+}
+
+// builtinQuadLayoutID is the vertex-layout identity the plugin's own quads carry
+// into the triangles batcher.
+//
+// An app's DrawTriangles op takes its layout id from the recording queue, which
+// hands them out from zero in first-use order, so a negative constant can never
+// collide with one. The plugin's quads are built here rather than recorded
+// there and have no queue-assigned id to use; sharing one constant is what lets
+// consecutive texture or tiled quads recognise each other as the same layout.
+//
+// The cost is that a quad never merges with an app's own DrawTriangles call
+// even where that call used canvas.Vertex and the identical shading. That case
+// would need the built-in layout to have one identity across both sources -
+// types.TrianglesOp.BuiltinLayout already reports it - and it is a merge that
+// has never existed rather than one this loses.
+const builtinQuadLayoutID = -1
+
+// shadeQuad resolves the shading of one quad the plugin emits itself: a
+// texture-sourced sprite or a tiled one.
+//
+// The texture and the sampler go into the shading's parameters rather than being
+// appended at the draw site, and that is the whole reason these quads batch. A
+// parameter list is fingerprinted by value, and gfx hashes a texture parameter by
+// its identity and a sampler parameter by its whole filter and address state, so
+// two quads over one texture and one sampler agree on the key and merge, while a
+// second texture or a repeat-versus-clamp difference splits them. Neither needs a
+// key field of canvas's own, and neither can be forgotten: the value is in the
+// list the batcher already keys on.
+//
+// The viewport, layer transform and clip rect are deliberately absent. They are
+// batch state, not op state - the batcher holds them as key fields and prepends
+// them at flush - and naming them here would put two writers on one parameter.
+func (p *plugin) shadeQuad(
+	material *gfx.MaterialDescr, fingerprint uint64, texture gfx.TextureDescr, sampler gfx.SamplerDesc,
+	params, scope []gfx.ParameterDescr,
+) trianglesShading {
+	p.quadParams = append(p.quadParams[:0],
+		gfx.TextureParam(canvas.TextureSlot, texture),
+		gfx.SamplerParam(canvas.SamplerSlot, sampler),
+	)
+	p.quadParams = append(p.quadParams, params...)
+	p.quadParams = append(p.quadParams, scope...)
+	shading := trianglesShading{material: material, fingerprint: fingerprint, params: p.quadParams}
+	shading.paramsKey = gfx.FingerprintParams(shading.params)
 	return shading
 }
 

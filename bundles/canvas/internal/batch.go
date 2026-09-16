@@ -201,11 +201,15 @@ type trianglesShading struct {
 	paramsKey   uint64
 }
 
-// trianglesBatch concatenates the vertices of consecutive DrawTriangles ops that
+// trianglesBatch concatenates the vertices of consecutive triangle draws that
 // share a vertex layout, a layer transform, a clip and their whole shading -
 // material and parameter values alike - emitting them as one draw. This
 // collapses the game's many small textured-quad ops (tiles, borders, walls,
 // sprites) into far fewer draws.
+//
+// Its ops are not only the app's DrawTriangles calls. The two quads canvas
+// builds itself - a tiled sprite and a texture-sourced one - are triangle draws
+// in the built-in layout and join here too, under builtinQuadLayoutID.
 //
 // Naming a material is not itself a reason to leave the batch. Two draws
 // carrying the same custom material at the same values are one draw, under the
