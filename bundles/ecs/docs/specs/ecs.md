@@ -2285,8 +2285,22 @@ because they are what a future proposal has to beat
    affordance or [#260](https://github.com/dvoyni/cog/issues/260) pulled into
    v1.
 
-   Adding it later therefore needs, in order: **deferred structural change
-   first** (a hard prerequisite, not an optimisation); a **splittability rule
+   **Correction, measured.** This entry said deferred structural change was a
+   hard prerequisite. It is not, and the mistake was to treat the affordance and
+   the split as competing for the same loop. A loop that may be split is a loop
+   that **cannot restructure at all**: the splittability rule below disqualifies
+   `Set[T]`, `Spawn[S]`, `WriteableEntities` and `Remove[T]` outright, and what
+   is left holds `read{*Entities}`, which every route to a Store declares — so no
+   other System can move a row under it either. The 500/1000 measurement stands
+   and is what rules out splitting a loop that restructures; it says nothing
+   about one that cannot. [#260](https://github.com/dvoyni/cog/issues/260) is
+   needed only for a split loop that also wants structural change, which the rule
+   already refuses. Measured end to end on a real engine in
+   [#278](https://github.com/dvoyni/cog/issues/278), which returned a go: at 5 000
+   Entities and ~104 ns an Entity, 4.74x against serial, allocating what the
+   serial frame allocates.
+
+   Adding it later therefore needs, in order: a **splittability rule
    over the System signature**, which cog is unusually well placed to derive at
    registration because the signature *already is* the out-of-band declaration
    every other engine makes the author write by hand (`Query` including pointer
