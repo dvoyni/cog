@@ -48,4 +48,17 @@
 // and lives in libs/m, because every Component and query exposes it to gameplay
 // code and a physics-owned vector would make gameplay import physics for vector
 // maths.
+//
+// The query surface, in two layers, both exported because a replacement solver
+// lives in another package and is built from exactly these. The pair primitives
+// ProbeShape, Penetration and ClosestPoint are free functions over values. The
+// world queries Probe, ProbeAll and Overlap are methods on StaticIndex and
+// BodyIndex, two Resources whose locks stay apart. Nothing on either layer
+// takes a duration, a velocity, a func value or an interface, and nothing on
+// either allocates.
+//
+// The Shape value itself, in its circle and segment kinds. The Polygon kinds,
+// the hulling constructor and the GJK path four of the six pair kinds go
+// through arrive with the Polygon pipeline, and until then a query against one
+// reports no Hit.
 package ecsphysics2d

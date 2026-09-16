@@ -1,0 +1,634 @@
+package types
+
+import (
+	"math"
+
+	"github.com/dvoyni/cog/bundles/ecs"
+	"github.com/dvoyni/cog/libs/m"
+)
+
+// defaultCellSize is the documented default for both indices, tuned for a
+// metre-scaled world: dense crowds are cheapest around 1 m and long merged
+// walls around 4 to 8 m, and 2 m is best or close to it for every frequent
+// query on the reference workload. It is a default, not a content assumption,
+// and it is what a non-positive cell size falls back to.
+const defaultCellSize = 2.0
+
+// defaultBuckets is where a fresh index's hash table starts. It doubles
+// whenever the listings outgrow it.
+const defaultBuckets = 256
+
+// StaticIndex holds the Entities carrying the Static Tag: geometry that never
+// changes in place, world-cached once when it is inserted and never again.
+//
+// It is a kernel Resource of its own type, apart from BodyIndex, so that
+// rebuilding the Bodies write-locks only the Bodies and a line-of-sight query
+// never waits for it. Which index a query asks is the caller's choice.
+//
+// Its queries are reads and hold no per-query state, so any number of them run
+// together.
+type StaticIndex struct{ index }
+
+// BodyIndex holds every other Entity with a Shape, Kinematic and Dynamic alike,
+// and is rebuilt from the Bodies' positions each tick. Shapeless Bodies are in
+// neither index.
+type BodyIndex struct{ index }
+
+// NewStaticIndex is an empty static index with that cell size in metres. A cell
+// size of 0 or less takes the documented default of 2 m.
+func NewStaticIndex(cellSize float64) *StaticIndex {
+	idx := &StaticIndex{}
+	idx.init(cellSize)
+	return idx
+}
+
+// NewBodyIndex is an empty Body index with that cell size in metres. A cell
+// size of 0 or less takes the documented default of 2 m.
+func NewBodyIndex(cellSize float64) *BodyIndex {
+	idx := &BodyIndex{}
+	idx.init(cellSize)
+	return idx
+}
+
+// entry is one Shape in an index: the Entity a query hands back, the Shape
+// itself, the bounding box the grid keys on, and the world cache beside it —
+// the transform, and the run of the index's world slab holding the world-space
+// geometry the closed forms read.
+//
+// The cache is here rather than in a Component because adding or removing a
+// Component is a structural change taking the frame-wide write on the Entities,
+// and because mirroring derived data doubles the memory. Being internal it is
+// free of the Shape's inline vertex cap.
+type entry struct {
+	entity                    ecs.Entity
+	shape                     Shape
+	box                       BB
+	transform                 Transform
+	world, worldLen, worldCap int32
+	left, bottom              int32
+	right, top                int32
+	live                      bool
+}
+
+// link is one listing of an entry in one hash bucket, in a flat arena rather
+// than cp's pooled linked bins behind a sync.Pool: the leaf holds a slot, and
+// the slot holds a caller-owned ecs.Entity, which is what makes an index legal
+// beside an ECS.
+type link struct{ entry, next int32 }
+
+// index is the hashed uniform grid behind both Resources. The structure is not
+// part of the contract — no signature names a cell — so a BVH can replace it
+// later. It replaces cp's BBTree, which never rebalances, has no Optimize and
+// whose Reindex panics.
+//
+// Cells are hashed, so there is no world extent and memory follows the Shapes
+// rather than the world. A Shape is listed in every cell its box covers, and a
+// cell holds a slot rather than a copy, so a scan tests each Shape once however
+// many cells it spans.
+type index struct {
+	cellSize    float64
+	inverseCell float64
+
+	entries     []entry
+	freeEntries []int32
+	slots       map[ecs.Entity]int32
+
+	buckets   []int32
+	links     []link
+	freeLinks []int32
+	listings  int
+
+	// slab is the world cache's vectors for every entry, which is what keeps
+	// the cache free of the Shape's inline vertex cap.
+	slab []m.Vec2d
+}
+
+func (idx *index) init(cellSize float64) {
+	if !(cellSize > 0) {
+		cellSize = defaultCellSize
+	}
+	idx.cellSize = cellSize
+	idx.inverseCell = 1 / cellSize
+	idx.slots = make(map[ecs.Entity]int32)
+	idx.buckets = make([]int32, defaultBuckets)
+	idx.clearBuckets()
+}
+
+// CellSize is the grid's cell size in metres.
+func (idx *index) CellSize() float64 { return idx.cellSize }
+
+// Len is how many Shapes the index holds.
+func (idx *index) Len() int { return len(idx.slots) }
+
+// Insert puts an Entity's Shape into the index, placed at a position and an
+// angle, replacing whatever the index held for that Entity. The world cache is
+// built here and never again, which is what "a static is cached once, at
+// insert" means; a Body index is Cleared and refilled each tick instead.
+//
+// verts is the Polygon Component's vertices and is nil for every kind but Poly.
+func (idx *index) Insert(entity ecs.Entity, shape Shape, at m.Vec2d, angle float64, verts []m.Vec2d) {
+	if entity == ecs.NoEntity {
+		return
+	}
+	idx.Remove(entity)
+
+	needed := int32(worldLenFor(shape))
+	slot := idx.allocEntry()
+	if needed > idx.entries[slot].worldCap {
+		// The abandoned run is reclaimed by the next Clear, which resets the
+		// slab without giving its capacity back.
+		idx.entries[slot].world = int32(len(idx.slab))
+		idx.entries[slot].worldCap = needed
+		for range needed {
+			idx.slab = append(idx.slab, m.Vec2d{})
+		}
+	}
+
+	e := &idx.entries[slot]
+	e.entity = entity
+	e.shape = shape
+	e.transform = NewTransformRigid(at, angle)
+	e.live = true
+
+	used, box := cacheWorldAt(shape, e.transform, verts, idx.slab[e.world:e.world+e.worldCap])
+	e.worldLen = int32(used)
+	e.box = box
+
+	idx.slots[entity] = slot
+	idx.list(slot)
+}
+
+// Remove takes an Entity's Shape out of the index and does nothing when the
+// index does not hold it.
+func (idx *index) Remove(entity ecs.Entity) {
+	slot, ok := idx.slots[entity]
+	if !ok {
+		return
+	}
+	idx.unlist(slot)
+	idx.entries[slot].live = false
+	idx.entries[slot].entity = ecs.NoEntity
+	delete(idx.slots, entity)
+	idx.freeEntries = append(idx.freeEntries, slot)
+}
+
+// Clear empties the index, keeping every buffer it has grown so that refilling
+// it allocates nothing. It is how the Body index is rebuilt each tick.
+func (idx *index) Clear() {
+	idx.entries = idx.entries[:0]
+	idx.freeEntries = idx.freeEntries[:0]
+	idx.links = idx.links[:0]
+	idx.freeLinks = idx.freeLinks[:0]
+	idx.slab = idx.slab[:0]
+	idx.listings = 0
+	clear(idx.slots)
+	idx.clearBuckets()
+}
+
+// Probe moves a circle of that radius from one point to another and reports the
+// nearest Hit, or false when it meets nothing. Line of sight is that bool.
+//
+// bits and collidesWith are the groups the Prober is in and the groups it looks
+// for, and both sides must agree; exclude is the one Entity the Probe ignores,
+// which is what a Body Probing from inside its own Shape needs. A Probe that
+// starts overlapping reports T = 0, and a zero-length Probe is legal.
+func (idx *index) Probe(
+	from, to m.Vec2d, radius float64,
+	bits, collidesWith uint32, exclude ecs.Entity,
+) (Hit, bool) {
+	_, hit, ok := idx.probeWalk(nil, true, from, to, radius, bits, collidesWith, exclude)
+	return hit, ok
+}
+
+// ProbeAll appends every Hit along the Probe to dst, ordered by T, and returns
+// it. The caller owns the slice, which is the scratch an ordering needs and the
+// reason there is no iterator: a Resource concurrent readers share can hold no
+// per-query state.
+//
+// The idiom is dst = idx.ProbeAll(dst[:0], …), which settles to no allocation
+// once the buffer is big enough.
+func (idx *index) ProbeAll(
+	dst []Hit, from, to m.Vec2d, radius float64,
+	bits, collidesWith uint32, exclude ecs.Entity,
+) []Hit {
+	dst, _, _ = idx.probeWalk(dst, false, from, to, radius, bits, collidesWith, exclude)
+	return dst
+}
+
+// Overlap appends every Entity the placed Shape touches to dst, unordered, and
+// returns it. It counts as touching exactly what Contact detection counts, so a
+// point query is a circle of radius 0 and two radius-0 segments crossing is a
+// question for Probe rather than for Overlap.
+//
+// verts is the Polygon Component's vertices and is nil for every kind but Poly.
+func (idx *index) Overlap(
+	dst []ecs.Entity, shape Shape, at m.Vec2d, angle float64, verts []m.Vec2d,
+	bits, collidesWith uint32, exclude ecs.Entity,
+) []ecs.Entity {
+	var world [worldScratchLen]m.Vec2d
+	transform := NewTransformRigid(at, angle)
+	used, box := cacheWorldAt(shape, transform, verts, world[:])
+	if used == 0 {
+		return dst
+	}
+
+	left, bottom := idx.cell(box.L), idx.cell(box.B)
+	right, top := idx.cell(box.R), idx.cell(box.T)
+
+	for i := left; i <= right; i++ {
+		for j := bottom; j <= top; j++ {
+			for cursor := idx.buckets[idx.bucket(i, j)]; cursor >= 0; cursor = idx.links[cursor].next {
+				e := &idx.entries[idx.links[cursor].entry]
+				if !firstScannedCell(e, i, j, left, bottom) {
+					continue
+				}
+				if e.entity == exclude || !collides(bits, collidesWith, e.shape.CollisionBits, e.shape.CollidesWith) {
+					continue
+				}
+				if !box.Intersects(e.box) {
+					continue
+				}
+				if _, _, ok := penetrateWorld(
+					shape, transform, world[:used],
+					e.shape, e.transform, idx.slab[e.world:e.world+e.worldLen],
+				); ok {
+					dst = append(dst, e.entity)
+				}
+			}
+		}
+	}
+	return dst
+}
+
+// probeWalk is the broadphase descent both Probes share: cp's grid walk, one
+// cell at a time in increasing order of the Probe's fraction, narrowing on each
+// candidate with the closed forms.
+//
+// first shortens the walk as the nearest Hit improves, which is cp's
+// SegmentQueryFirst; otherwise every Hit is inserted into dst in order of T,
+// which is also what keeps a Shape spanning several cells from being reported
+// twice. The nearest Probe needs no such guard, a repeated test giving the same
+// answer.
+func (idx *index) probeWalk(
+	dst []Hit, first bool, from, to m.Vec2d, radius float64,
+	bits, collidesWith uint32, exclude ecs.Entity,
+) ([]Hit, Hit, bool) {
+	walk := probing{
+		dst:          dst,
+		first:        first,
+		start:        len(dst),
+		from:         from,
+		to:           to,
+		radius:       radius,
+		bits:         bits,
+		collidesWith: collidesWith,
+		exclude:      exclude,
+		box: NewBB(
+			math.Min(from.X, to.X)-radius, math.Min(from.Y, to.Y)-radius,
+			math.Max(from.X, to.X)+radius, math.Max(from.Y, to.Y)+radius,
+		),
+		exit: 1,
+	}
+
+	// The broadphase inflates by the query radius before descending, which is
+	// cp's defect 5 fixed — in C too, where the un-inflated ray reaches the
+	// index and a Probe with a radius misses roughly a fifth of its Hits. In a
+	// grid the inflation is a band of cells around the cells the ray crosses,
+	// wide enough that no cell the swept circle reaches is missed. At radius 0
+	// the band is the one cell and the walk is cp's own.
+	//
+	// Only the first step scans the whole band: every step after it adds the one
+	// row or column its move brought into reach, the rest having been scanned
+	// already.
+	reach := int32(0)
+	if radius > 0 {
+		reach = int32(radius*idx.inverseCell) + 1
+		walk.band = true
+	}
+
+	// cp's grid walk, after "raytracing on a grid": step to whichever of the
+	// next vertical and next horizontal cell boundary comes first.
+	a := from.MulS(idx.inverseCell)
+	b := to.MulS(idx.inverseCell)
+	cellX, cellY := floorCell(a.X), floorCell(a.Y)
+
+	var xInc, yInc int32
+	var firstVertical, firstHorizontal float64
+
+	if b.X > a.X {
+		xInc = 1
+		firstHorizontal = math.Floor(a.X+1.0) - a.X
+	} else {
+		xInc = -1
+		firstHorizontal = a.X - math.Floor(a.X)
+	}
+	if b.Y > a.Y {
+		yInc = 1
+		firstVertical = math.Floor(a.Y+1.0) - a.Y
+	} else {
+		yInc = -1
+		firstVertical = a.Y - math.Floor(a.Y)
+	}
+
+	dx, dy := math.Abs(b.X-a.X), math.Abs(b.Y-a.Y)
+	dtdx, dtdy := infinity, infinity
+	if dx != 0 {
+		dtdx = 1.0 / dx
+	}
+	if dy != 0 {
+		dtdy = 1.0 / dy
+	}
+
+	nextHorizontal, nextVertical := dtdx, dtdy
+	if firstHorizontal != 0 {
+		nextHorizontal = firstHorizontal * dtdx
+	}
+	if firstVertical != 0 {
+		nextVertical = firstVertical * dtdy
+	}
+
+	var t float64
+	for i := cellX - reach; i <= cellX+reach; i++ {
+		for j := cellY - reach; j <= cellY+reach; j++ {
+			idx.probeCell(&walk, i, j)
+		}
+	}
+
+	for {
+		steppedInY := nextVertical < nextHorizontal
+		if steppedInY {
+			cellY += yInc
+			t = nextVertical
+			nextVertical += dtdy
+		} else {
+			cellX += xInc
+			t = nextHorizontal
+			nextHorizontal += dtdx
+		}
+		if t >= walk.exit {
+			break
+		}
+
+		if steppedInY {
+			j := cellY + yInc*reach
+			for i := cellX - reach; i <= cellX+reach; i++ {
+				idx.probeCell(&walk, i, j)
+			}
+		} else {
+			i := cellX + xInc*reach
+			for j := cellY - reach; j <= cellY+reach; j++ {
+				idx.probeCell(&walk, i, j)
+			}
+		}
+	}
+
+	return walk.dst, walk.best, walk.found
+}
+
+// probing is one Probe's state on the stack while the walk runs. It is not
+// state an index holds: a Resource concurrent readers share can hold none, and
+// that is why ordering needs the caller's own slice.
+type probing struct {
+	dst          []Hit
+	first        bool
+	start        int
+	from, to     m.Vec2d
+	radius       float64
+	bits         uint32
+	collidesWith uint32
+	exclude      ecs.Entity
+	// box is the whole Probe's own bounding box, grown by its radius: the first
+	// and cheapest rejection of a candidate that merely shares a cell.
+	box   BB
+	best  Hit
+	found bool
+	exit  float64
+	// band is set while the walk is scanning cells beside the ray rather than
+	// the ray's own, which only a Probe with a radius does.
+	band bool
+}
+
+// probeCell narrows on every candidate listed in one cell.
+func (idx *index) probeCell(walk *probing, i, j int32) {
+	if walk.band {
+		// The band is a whole cell wide whatever the radius, so a cell in it may
+		// be out of the swept circle's reach altogether. The cell's own box,
+		// grown by the radius, says which, and it costs far less than testing
+		// what the cell holds.
+		left, bottom := float64(i)*idx.cellSize, float64(j)*idx.cellSize
+		grown := NewBB(
+			left-walk.radius, bottom-walk.radius,
+			left+idx.cellSize+walk.radius, bottom+idx.cellSize+walk.radius,
+		)
+		if !grown.IntersectsSegment(walk.from, walk.to) {
+			return
+		}
+	}
+
+	for cursor := idx.buckets[idx.bucket(i, j)]; cursor >= 0; cursor = idx.links[cursor].next {
+		e := &idx.entries[idx.links[cursor].entry]
+		if e.entity == walk.exclude ||
+			!collides(walk.bits, walk.collidesWith, e.shape.CollisionBits, e.shape.CollidesWith) {
+			continue
+		}
+		// The leaf rejection, the Probe's own box against the entry's. It is the
+		// same inflation the descent makes, and it keeps a closed form off a
+		// Shape that merely shares a cell, at four comparisons.
+		if !walk.box.Intersects(e.box) {
+			continue
+		}
+		hit, ok := probeWorld(walk.from, walk.to, walk.radius, e.shape, idx.slab[e.world:e.world+e.worldLen])
+		if !ok {
+			continue
+		}
+		hit.Entity = e.entity
+
+		if walk.first {
+			if !walk.found || hit.T < walk.best.T {
+				walk.best, walk.found = hit, true
+				walk.exit = hit.T
+			}
+			continue
+		}
+		walk.dst = insertHit(walk.dst, walk.start, hit)
+	}
+}
+
+// insertHit puts a Hit into the run this call appended, in order of T, unless
+// the Entity is already there — which is how a Shape listed in several cells is
+// reported once without an index keeping a per-query stamp as cp's handles do.
+func insertHit(dst []Hit, start int, hit Hit) []Hit {
+	for i := start; i < len(dst); i++ {
+		if dst[i].Entity == hit.Entity {
+			return dst
+		}
+	}
+	dst = append(dst, hit)
+	for i := len(dst) - 1; i > start && dst[i-1].T > dst[i].T; i-- {
+		dst[i-1], dst[i] = dst[i], dst[i-1]
+	}
+	return dst
+}
+
+// firstScannedCell reports whether this is the one cell of a rectangle scan at
+// which an entry is tested: the corner of the overlap between the entry's cells
+// and the scanned ones. It replaces cp's per-handle stamp, which a Resource
+// concurrent readers share cannot keep.
+func firstScannedCell(e *entry, i, j, scanLeft, scanBottom int32) bool {
+	return i == max(e.left, scanLeft) && j == max(e.bottom, scanBottom)
+}
+
+func (idx *index) allocEntry() int32 {
+	if n := len(idx.freeEntries); n > 0 {
+		slot := idx.freeEntries[n-1]
+		idx.freeEntries = idx.freeEntries[:n-1]
+		return slot
+	}
+	idx.entries = append(idx.entries, entry{})
+	return int32(len(idx.entries) - 1)
+}
+
+// cell is which cell a world coordinate is in. The clamp is a guard cp has no
+// need of, its cell index being an int: a NaN or an infinite coordinate would
+// otherwise make the conversion platform-defined rather than merely wrong.
+func (idx *index) cell(v float64) int32 { return floorCell(v * idx.inverseCell) }
+
+func floorCell(v float64) int32 {
+	f := math.Floor(v)
+	switch {
+	case math.IsNaN(f):
+		return 0
+	case f >= math.MaxInt32:
+		return math.MaxInt32
+	case f <= math.MinInt32:
+		return math.MinInt32
+	}
+	return int32(f)
+}
+
+// finiteBB reports whether every edge of a box is a number.
+func finiteBB(bb BB) bool {
+	return !math.IsNaN(bb.L) && !math.IsNaN(bb.B) && !math.IsNaN(bb.R) && !math.IsNaN(bb.T) &&
+		!math.IsInf(bb.L, 0) && !math.IsInf(bb.B, 0) && !math.IsInf(bb.R, 0) && !math.IsInf(bb.T, 0)
+}
+
+// bucket is cp's hashFunc, which mixes the two cell coordinates and folds them
+// into the table. Two cells may share a bucket; every candidate is checked
+// against its own box, so a collision costs a test and never an answer.
+func (idx *index) bucket(i, j int32) int {
+	return int((uint(int(i))*1640531513 ^ uint(int(j))*2654435789) % uint(len(idx.buckets)))
+}
+
+func (idx *index) clearBuckets() {
+	for i := range idx.buckets {
+		idx.buckets[i] = -1
+	}
+}
+
+// list puts an entry into every cell its box covers, growing the table first
+// when the listings would outgrow it.
+func (idx *index) list(slot int32) {
+	e := &idx.entries[slot]
+	if e.worldLen == 0 || !finiteBB(e.box) {
+		// A Shape placed at a NaN or an infinity is listed in no cell at all,
+		// rather than in every cell between the two ends of the grid; cp never
+		// meets this, its own index being a tree over the box itself. A Shape
+		// of a kind with no world cache yet — the Polygon kinds, until the
+		// Polygon pipeline lands — is listed in none either, rather than all of
+		// them at the origin.
+		e.left, e.bottom, e.right, e.top = 0, 0, -1, -1
+		return
+	}
+	e.left, e.bottom = idx.cell(e.box.L), idx.cell(e.box.B)
+	e.right, e.top = idx.cell(e.box.R), idx.cell(e.box.T)
+
+	cells := (int(e.right-e.left) + 1) * (int(e.top-e.bottom) + 1)
+	if idx.listings+cells > len(idx.buckets) {
+		idx.growBuckets(idx.listings + cells)
+		return
+	}
+	idx.pushCells(slot)
+}
+
+func (idx *index) pushCells(slot int32) {
+	e := &idx.entries[slot]
+	for i := e.left; i <= e.right; i++ {
+		for j := e.bottom; j <= e.top; j++ {
+			bucket := idx.bucket(i, j)
+			if idx.bucketHolds(bucket, slot) {
+				// Two of this entry's cells hash alike; one listing is enough,
+				// which is cp's containsHandle test.
+				continue
+			}
+			idx.buckets[bucket] = idx.allocLink(slot, idx.buckets[bucket])
+			idx.listings++
+		}
+	}
+}
+
+func (idx *index) bucketHolds(bucket int, slot int32) bool {
+	for at := idx.buckets[bucket]; at >= 0; at = idx.links[at].next {
+		if idx.links[at].entry == slot {
+			return true
+		}
+	}
+	return false
+}
+
+func (idx *index) allocLink(slot, next int32) int32 {
+	if n := len(idx.freeLinks); n > 0 {
+		at := idx.freeLinks[n-1]
+		idx.freeLinks = idx.freeLinks[:n-1]
+		idx.links[at] = link{entry: slot, next: next}
+		return at
+	}
+	idx.links = append(idx.links, link{entry: slot, next: next})
+	return int32(len(idx.links) - 1)
+}
+
+// unlist takes an entry out of every cell it was listed in.
+func (idx *index) unlist(slot int32) {
+	e := &idx.entries[slot]
+	for i := e.left; i <= e.right; i++ {
+		for j := e.bottom; j <= e.top; j++ {
+			bucket := idx.bucket(i, j)
+			previous := int32(-1)
+			for at := idx.buckets[bucket]; at >= 0; at = idx.links[at].next {
+				if idx.links[at].entry != slot {
+					previous = at
+					continue
+				}
+				if previous < 0 {
+					idx.buckets[bucket] = idx.links[at].next
+				} else {
+					idx.links[previous].next = idx.links[at].next
+				}
+				idx.freeLinks = append(idx.freeLinks, at)
+				idx.listings--
+				break
+			}
+		}
+	}
+}
+
+// growBuckets doubles the table until it holds the wanted listings twice over
+// and lists every live entry again.
+func (idx *index) growBuckets(wanted int) {
+	size := len(idx.buckets)
+	for size < wanted*2 {
+		size *= 2
+	}
+	if size != len(idx.buckets) {
+		idx.buckets = make([]int32, size)
+	}
+	idx.clearBuckets()
+	idx.links = idx.links[:0]
+	idx.freeLinks = idx.freeLinks[:0]
+	idx.listings = 0
+
+	for slot := range idx.entries {
+		if idx.entries[slot].live {
+			idx.pushCells(int32(slot))
+		}
+	}
+}

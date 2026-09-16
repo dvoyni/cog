@@ -49,6 +49,61 @@ func NewBBForCircle(position m.Vec2d, radius float64) BB {
 	return types.NewBBForCircle(position, radius)
 }
 
+// NewCircleShape is a circle of that radius about an offset from the Body's
+// Position, which is its centre of gravity. A radius of 0 is a point. Both
+// collision fields start at every group, as cp's shapes do.
+func NewCircleShape(radius float64, offset m.Vec2d) Shape {
+	return types.NewCircleShape(radius, offset)
+}
+
+// NewSegmentShape is the segment from a to b, both local to the Body's
+// Position, fattened by that radius — which makes it a capsule. Both collision
+// fields start at every group.
+func NewSegmentShape(a, b m.Vec2d, radius float64) Shape {
+	return types.NewSegmentShape(a, b, radius)
+}
+
+// NewStaticIndex is an empty static index with that cell size in metres. A cell
+// size of 0 or less takes the documented default of 2 m, which is tuned for a
+// metre-scaled world rather than assumed of one.
+func NewStaticIndex(cellSize float64) *StaticIndex { return types.NewStaticIndex(cellSize) }
+
+// NewBodyIndex is an empty Body index with that cell size in metres, with the
+// same default as NewStaticIndex.
+func NewBodyIndex(cellSize float64) *BodyIndex { return types.NewBodyIndex(cellSize) }
+
+// ProbeShape moves a circle of that radius from one point to another against
+// one Shape placed at a position and an angle, and reports the first Hit. It is
+// the pair primitive behind an index's Probe, over values and touching no
+// engine state, so its Hit names no Entity.
+//
+// verts is the Polygon Component's vertices and is nil for every kind but
+// ShapePoly, which a Shape cannot carry inline.
+func ProbeShape(
+	from, to m.Vec2d, radius float64,
+	shape Shape, at m.Vec2d, angle float64, verts []m.Vec2d,
+) (Hit, bool) {
+	return types.ProbeShape(from, to, radius, shape, at, angle, verts)
+}
+
+// Penetration is how deeply two placed Shapes overlap and which way apart, or
+// false when they do not. There is no Overlaps boolean beside it: this ok is
+// it. The normal points from a towards b, and on coincident centres it is zero
+// with ok true, choosing a direction being the caller's.
+func Penetration(
+	a Shape, atA m.Vec2d, angleA float64, vertsA []m.Vec2d,
+	b Shape, atB m.Vec2d, angleB float64, vertsB []m.Vec2d,
+) (m.Vec2d, float64, bool) {
+	return types.Penetration(a, atA, angleA, vertsA, b, atB, angleB, vertsB)
+}
+
+// ClosestPoint is the point on a Shape's surface nearest a point, the Shape
+// placed at a position and an angle. Nearest is not a query of its own: it is
+// an Overlap and a loop keeping the app's own predicate and this distance.
+func ClosestPoint(p m.Vec2d, shape Shape, at m.Vec2d, angle float64, verts []m.Vec2d) m.Vec2d {
+	return types.ClosestPoint(p, shape, at, angle, verts)
+}
+
 // MomentForCircle is the moment of inertia of a circle of that mass, with r1
 // and r2 the inner and outer radii. A solid circle has an inner radius of 0,
 // and offset moves it off the centre of gravity.
