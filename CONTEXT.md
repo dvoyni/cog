@@ -529,7 +529,7 @@ One of the at most two places a Contact touches, each with where it is, how deep
 _Avoid_: Manifold (that is the pair of them together, and the game never needs a word for it), contact patch, feature, collision point
 
 **Impulse**:
-How much push a Contact delivered at one of its points: a Force acting for an instant rather than over a second, which is what a game asks when it wants to know how hard something was hit.
+How much push was delivered in an instant, rather than a Force spread over a second, which is what a game asks when it wants to know how hard something was hit. A Contact reports one at each of its points, and a Joint reports the one it delivered holding its two Bodies together — which is how a game notices a Joint under a load worth breaking.
 _Avoid_: Force (it is not one), momentum transfer, hit strength
 
 **Friction**:
@@ -543,6 +543,18 @@ _Avoid_: Bounciness, elasticity, bounce, springiness, coefficient of restitution
 **Damping**:
 How fast a Dynamic body's velocity decays on its own, as a rate per second; its Angular velocity decays by an angular Damping of its own. It is what makes a pushed thing stop and a spun thing settle when nothing else holds it back. It is a rate, not the share of velocity kept each second. It slows a Body wherever it is, touching nothing, which is what separates it from Friction.
 _Avoid_: Drag, damping ratio, Friction (a Contact's, not a Body's)
+
+**Joint**:
+A rule the game sets that holds two Bodies to each other: at a fixed distance, about a shared pivot, within a range of Angles, turning in step. It is an Entity of its own rather than something a Body carries, because one Body may be held by several. It has nothing to do with the two Bodies touching — what it holds is where they are and how fast they move, enforced each tick by pushing them. A Joint may also be told to let its two Bodies pass through each other, which is what makes a jointed figure of limbs possible.
+_Avoid_: Constraint, link, connection, hinge, weld
+
+**Spring**:
+A Joint that pushes its two Bodies towards a rest distance, or a rest Angle, harder the further they are from it, and settles instead of swinging for ever by an Absorption of its own. It is the one kind of Joint that holds nothing: it only pushes, so anything else acting on the two Bodies can win against it.
+_Avoid_: Damper, elastic, rubber band, soft constraint
+
+**Absorption**:
+How strongly a Spring resists its two ends moving apart or together, as force per unit of that speed. It is what makes a Spring settle rather than swing for ever. It belongs to one Spring, which separates it from Damping, a Body's wherever it is, and from Friction, a Contact's where two Shapes touch.
+_Avoid_: Damping, damping ratio, damper, drag
 
 **Probe**:
 Moving a circle, possibly of radius 0, in a straight line from one position to another, and finding what it touches on the way. Line of sight is one use of a Probe, not another operation.
