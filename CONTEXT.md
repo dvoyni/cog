@@ -528,6 +528,10 @@ _Avoid_: Collision, collision event, manifold, touch
 One of the at most two places a Contact touches, each with where it is, how deep the two Shapes overlap there, and the Impulse the physics delivered there. Two is enough because two convex Shapes meet along a line at most, and its two ends say everything its middle would. A Contact involving a round Shape has one.
 _Avoid_: Manifold (that is the pair of them together, and the game never needs a word for it), contact patch, feature, collision point
 
+**Slop**:
+How far two Shapes are allowed to overlap and be left alone: a small distance the physics never bothers to push out. It exists because driving every overlap to exactly nothing makes resting Bodies jitter against each other for ever, and leaving a sliver settles them. It is why a Body at rest sits slightly inside whatever holds it up, and it is one distance for the whole world rather than anything a Shape carries.
+_Avoid_: Skin, margin, tolerance, penetration allowance, linear slop
+
 **Impulse**:
 How much push was delivered in an instant, rather than a Force spread over a second, which is what a game asks when it wants to know how hard something was hit. A Contact reports one at each of its points, and a Joint reports the one it delivered holding its two Bodies together — which is how a game notices a Joint under a load worth breaking.
 _Avoid_: Force (it is not one), momentum transfer, hit strength
