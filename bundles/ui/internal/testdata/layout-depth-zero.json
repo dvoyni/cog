@@ -1,0 +1,72 @@
+{"subtree":0,"maxDepth":0}
+{
+  "elements": [
+    {
+      "index": 0,
+      "parent": -1,
+      "id": "grid",
+      "active": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 300,
+        "height": 200
+      },
+      "contentRect": {
+        "x": 6,
+        "y": 4,
+        "width": 288,
+        "height": 192
+      },
+      "clipRect": {
+        "x": 0,
+        "y": 0,
+        "width": 400,
+        "height": 300
+      },
+      "layer": 10,
+      "drawOrder": 0,
+      "state": [
+        "hovered"
+      ],
+      "declared": {
+        "width": {
+          "value": 300
+        },
+        "minWidth": {
+          "value": 10
+        },
+        "height": {
+          "value": 200
+        },
+        "maxHeight": {
+          "value": 0.9,
+          "relative": true
+        },
+        "paddingLeft": {
+          "value": 6
+        },
+        "paddingRight": {
+          "value": 6
+        },
+        "paddingTop": {
+          "value": 4
+        },
+        "paddingBottom": {
+          "value": 4
+        },
+        "layout": "grid",
+        "gap": {
+          "value": 0.1,
+          "relative": true
+        },
+        "columns": 2,
+        "rows": 2
+      }
+    }
+  ],
+  "count": 6,
+  "omitted": 5,
+  "subtree": 0,
+  "maxDepth": 0
+}

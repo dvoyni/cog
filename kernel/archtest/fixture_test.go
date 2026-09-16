@@ -403,10 +403,10 @@ func TestTiers_AnExtensionRootFileOutsideItsAllowlistFails(t *testing.T) {
 	requireOne(t, violations, "extensions/e/commands.go: extensions/e holds commands.go", ruleExtensionFiles)
 }
 
-// Tests, non-Go files and a docs/ directory are outside the allowlist.
+// Tests and a docs/ directory are outside the allowlist.
 func TestTiers_ASlotRootHoldingEveryAllowedFilePasses(t *testing.T) {
 	files := map[string]string{
-		"slots/s/README.md":        "# s\n",
+		"slots/s/docs/README.md":   "# s\n",
 		"slots/s/docs/specs/s.md":  "# s\n",
 		"slots/s/queue_test.go":    "package s\n",
 		"slots/s/external_test.go": "package s_test\n",

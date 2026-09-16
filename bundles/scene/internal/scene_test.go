@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"io/fs"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -22,11 +23,14 @@ import (
 // to encode. Everything scene decides is decided before this is reached, which
 // is what makes the whole ticket assertable with no GPU.
 type testBackend struct {
-	nextTexture gfx.TextureID
-	nextBuffer  gfx.BufferID
-	nextID      uint32
-	passes      []gfx.PassDesc
-	presents    int
+	// shaderLayouts is each compiled shader's narrowed stand-in layout, kept
+	// per id because the scene variants declare different bindings.
+	shaderLayouts map[gfx.ShaderID]gfx.ShaderLayout
+	nextTexture   gfx.TextureID
+	nextBuffer    gfx.BufferID
+	nextID        uint32
+	passes        []gfx.PassDesc
+	presents      int
 	// draws, bindings and bakes are what the frame actually asked the GPU to
 	// do, which is where the pass-relative instance slices and the one upload
 	// per arena become assertable.
@@ -157,12 +161,44 @@ func (b *testBackend) NewSampler(gfx.SamplerDesc) (gfx.SamplerID, error) {
 	return gfx.SamplerID(b.nextID), nil
 }
 func (b *testBackend) FreeSampler(gfx.SamplerID) {}
-func (b *testBackend) NewShader(gfx.ShaderDesc) (gfx.ShaderID, error) {
+func (b *testBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 	b.nextID++
-	return gfx.ShaderID(b.nextID), nil
+	id := gfx.ShaderID(b.nextID)
+	if b.shaderLayouts == nil {
+		b.shaderLayouts = map[gfx.ShaderID]gfx.ShaderLayout{}
+	}
+	b.shaderLayouts[id] = layoutOf(desc)
+	return id, nil
 }
-func (b *testBackend) FreeShader(gfx.ShaderID)                    {}
-func (b *testBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout { return testShaderLayout }
+func (b *testBackend) FreeShader(gfx.ShaderID) {}
+func (b *testBackend) ShaderLayout(id gfx.ShaderID) gfx.ShaderLayout {
+	if layout, ok := b.shaderLayouts[id]; ok {
+		return layout
+	}
+	return testShaderLayout
+}
+
+// layoutOf narrows the stand-in layout to the bindings this variant's flattened
+// source actually declares, which is what reflection would report. It matters
+// because the variants differ in exactly that: scene.wgsl declares the skinning
+// and morph bindings only under SCENE_SKIN and SCENE_MORPH, and binds group 2
+// only on the draws whose variant has it. A stand-in that declared all three on
+// every shader would have every unskinned draw dropped for an unfilled storage
+// binding, which is what gfx now reports rather than swallows.
+func layoutOf(desc gfx.ShaderDesc) gfx.ShaderLayout {
+	if len(desc.Code) == 0 {
+		return testShaderLayout
+	}
+	code := string(desc.Code)
+	layout := testShaderLayout
+	layout.Resources = nil
+	for _, resource := range testShaderLayout.Resources {
+		if strings.Contains(code, resource.Name) {
+			layout.Resources = append(layout.Resources, resource)
+		}
+	}
+	return layout
+}
 func (b *testBackend) NewPipeline(gfx.PipelineDesc) (gfx.PipelineID, error) {
 	b.nextID++
 	return gfx.PipelineID(b.nextID), nil

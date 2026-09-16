@@ -750,7 +750,7 @@ silence; the hold is the end of the drift.
 
 From [#200](https://github.com/dvoyni/cog/issues/200) §3. This is a **named,
 local exception** to a `kernel` rule that remains in force everywhere else, and
-it is written here rather than in `kernel/README.md` for exactly that reason.
+it is written here rather than in `kernel/docs/README.md` for exactly that reason.
 
 `kernel`'s rule stands as written: a handle is scoped to the dispatch that
 received it, and retaining it is a bug. **The broker retains the `Executioner`
@@ -983,7 +983,7 @@ existence.
 Two methods, and nothing else about the engine's encapsulation is relaxed. From
 [#200](https://github.com/dvoyni/cog/issues/200) §§1–2 and
 [#210](https://github.com/dvoyni/cog/issues/210) §2. These belong in
-`kernel/README.md` and its public API index, not here; they are listed because
+`kernel/docs/README.md` and its public API index, not here; they are listed because
 this family does not compile without them.
 
 ```go

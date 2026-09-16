@@ -91,11 +91,14 @@ func TestAnUnskinnedDrawBindsNoGroupTwo(t *testing.T) {
 			t.Errorf("%s was bound %d times; a static draw declares none of group 2", name, len(bound))
 		}
 	}
-	// sceneAnim is still supplied on every draw. The static variant does not
-	// declare it, so it simply goes unread: prepareParameterPlan walks the
-	// reflected layout, so a parameter no longer declared is never visited.
-	if bound := h.backend.buffersBoundTo("sceneAnim"); len(bound) == 0 {
-		t.Error("sceneAnim was not supplied")
+	// sceneAnim is still supplied on every draw, but the static variant does
+	// not declare it - anim.wgsl's body sits behind #if SCENE_SKIN|SCENE_MORPH
+	// - so it simply goes unread: prepareParameterPlan walks the reflected
+	// layout, and a parameter nothing declares is never visited. Nothing binds
+	// it here, and a draw that does declare it is asserted in the morph tests,
+	// which decode the block they read back.
+	if bound := h.backend.buffersBoundTo("sceneAnim"); len(bound) != 0 {
+		t.Errorf("sceneAnim was bound %d times; the static variant declares none", len(bound))
 	}
 	instance := firstInstance(t, h)
 	if instance.Flags&sceneNoSkin == 0 {

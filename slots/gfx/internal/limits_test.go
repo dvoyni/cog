@@ -41,9 +41,13 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 	backend := &fakeBackend{layout: &layout}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
+	// The nine bindings share one name, so one parameter fills them all. They
+	// have to be filled: an unsupplied storage binding is fatal to the draw,
+	// and this test is about a draw that renders despite the diagnostic.
+	records := gfx.BufferParam("records", gfx.BufferWithBytes([]byte{1, 2, 3, 4}, true))
 	for range 2 {
 		w := recordList(t, k)
-		w.Draw(triangle(), testMaterial(), gfx.MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), testMaterial(records), gfx.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}

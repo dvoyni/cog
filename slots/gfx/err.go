@@ -69,6 +69,38 @@ func (e ErrParameterKindMismatch) Error() string {
 		e.Shader, e.Declared, e.Parameter, e.Supplied)
 }
 
+// ErrStorageBufferUnsupplied reports a declared storage binding that no draw
+// parameter fills, either because none names it or because the one that does
+// carries a buffer that was never baked.
+//
+// The draw is dropped. Textures and samplers fall back - an unresolved texture
+// renders white and an unset sampler clamps and filters linearly - but a
+// storage buffer has no fallback worth having: nothing is emitted for the
+// binding, the group comes up one entry short of its layout, CreateBindGroup
+// refuses it and the draw encodes with no bindings for that group at all. A
+// zero-length dummy would not save it either, because the binding is validated
+// against the size the shader's own declaration needs.
+type ErrStorageBufferUnsupplied struct {
+	Shader    string
+	Parameter string
+	Group     int
+	Binding   int
+	// Unbaked separates the two ways in: false when no parameter names the
+	// binding, true when one does and its buffer has no id. They are different
+	// mistakes - a material that forgot a parameter against one that handed
+	// over a buffer it never baked - and the fix differs with them.
+	Unbaked bool
+}
+
+func (e ErrStorageBufferUnsupplied) Error() string {
+	cause := "no parameter supplies it"
+	if e.Unbaked {
+		cause = "the parameter that names it supplies an unbaked buffer"
+	}
+	return fmt.Sprintf("gfx: shader %q declares a storage buffer named %q at group %d binding %d, and %s",
+		e.Shader, e.Parameter, e.Group, e.Binding, cause)
+}
+
 // ErrVertexInputUnsupplied reports a shader input no attribute of the bound
 // vertex layout fills. The draw is dropped: WebGPU hands the input
 // (0, 0, 0, 1) and the software rasterizer hands it a zero value, so what

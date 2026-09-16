@@ -533,7 +533,7 @@ The mechanism is one branch inside a function that already exists.
   action and a step count, a response carrying paused-ness and the ticks
   advanced.
 
-**`slots/app/README.md`**
+**`slots/app/docs/README.md`**
 
 - Document it as an engine feature with its stated limits: the `time.Now()`
   non-guarantee, *stop but not slow*, that pause stops the tick and not the
@@ -571,7 +571,7 @@ The mechanism is one branch inside a function that already exists.
 - `TimeRequest`/`TimeResponse`, the `Func` body with its own deadline, and the
   description string reproduced above.
 
-**`extensions/gogpu/README.md`**
+**`extensions/gogpu/docs/README.md`**
 
 - The accumulator branch, the discard-on-pause, step semantics, the atomics, and
   the step-coalescing rule.

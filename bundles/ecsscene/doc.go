@@ -27,8 +27,8 @@
 // data with no methods, so there is no internal/types.
 //
 // A game whose drawables are shaped differently writes its own recording
-// System and does not register this plugin. README.md is the API, and its
-// prohibitions are what a second binding has to keep true.
+// System and does not register this plugin. docs/README.md is the API, and
+// its prohibitions are what a second binding has to keep true.
 //
 // The Components are in types.go.
 package ecsscene

@@ -14,6 +14,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -66,8 +67,8 @@ type drawsRequest struct {
 	// question is whether cog controls it.
 	Path string `json:"path,omitempty" jsonschema:"absolute path ending in .json; omit to get the JSON inline"`
 	// FromLayer and ToLayer bound the layers reported, inclusive.
-	FromLayer *int `json:"fromLayer,omitempty" jsonschema:"lowest layer to include; omit for no lower bound"`
-	ToLayer   *int `json:"toLayer,omitempty" jsonschema:"highest layer to include; omit for no upper bound"`
+	FromLayer m.Maybe[int] `json:"fromLayer,omitzero" jsonschema:"lowest layer to include; omit for no lower bound"`
+	ToLayer   m.Maybe[int] `json:"toLayer,omitzero" jsonschema:"highest layer to include; omit for no upper bound"`
 	// Kinds and Vertices are the other two filter axes. They travel with the
 	// arm, because the filter is what bounds the work done inside the tick.
 	Kinds    []string `json:"kinds,omitempty" jsonschema:"keep only these kinds: sprite, text, triangles"`
@@ -226,10 +227,11 @@ func validateDrawsRequest(request drawsRequest) (canvas.ArmDrawsRequest, error) 
 	if err := validateSnapshotPath(request.Path); err != nil {
 		return canvas.ArmDrawsRequest{}, err
 	}
-	if request.FromLayer != nil && request.ToLayer != nil && *request.FromLayer > *request.ToLayer {
+	from, bounded := request.FromLayer.Get()
+	to, capped := request.ToLayer.Get()
+	if bounded && capped && from > to {
 		return canvas.ArmDrawsRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
-			"fromLayer %d is above toLayer %d, which keeps no layer at all",
-			*request.FromLayer, *request.ToLayer)}
+			"fromLayer %d is above toLayer %d, which keeps no layer at all", from, to)}
 	}
 	arm := canvas.ArmDrawsRequest{
 		FromLayer: request.FromLayer, ToLayer: request.ToLayer, Vertices: request.Vertices,

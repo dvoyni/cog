@@ -83,8 +83,9 @@ func (p *plugin) expandModels(
 			anim.Skin.Bound = anim.Skin.Bound && primitive.Skinned
 			anim.Skin.Morphed = anim.Skin.Morphed && primitive.Morph.Morphed()
 			material, record := owned.Variants[types.VariantFor(anim.Skin.Bound, anim.Skin.Morphed)], &owned.Record
+			key := types.MaterialKey(0)
 			if model.Material != nil {
-				material, record = model.Material, nil
+				material, record, key = model.Material, nil, model.MaterialKey
 			}
 			// A morphed model packs a block per primitive rather than per
 			// call, because the four morph words and the sparse weight list
@@ -108,11 +109,12 @@ func (p *plugin) expandModels(
 				}
 				p.modelWorlds[at] = world.Mul(primitive.Local)
 				types.OpQueueAppendDraw(write, types.DrawRecord{
-					Layers:   model.Layers,
-					Matrix:   &p.modelWorlds[at],
-					Material: material,
-					Mesh:     primitive.Mesh,
-					Pbr:      record,
+					Layers:      model.Layers,
+					Matrix:      &p.modelWorlds[at],
+					Material:    material,
+					MaterialKey: key,
+					Mesh:        primitive.Mesh,
+					Pbr:         record,
 					// The overrides ride on the draw's gfx parameters, which
 					// is where every name the entry's shader declares is
 					// resolved, and are marked as also addressing the record,

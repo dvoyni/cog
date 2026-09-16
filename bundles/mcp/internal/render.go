@@ -2,9 +2,11 @@ package internal
 
 import (
 	"reflect"
+	"strings"
 
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/google/jsonschema-go/jsonschema"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -58,7 +60,10 @@ func collect(providers []kernel.ContributedAdapter[mcp.Provider]) ([]offered, er
 // from the Go types, so a provider never writes one and tool-definition drift
 // is structural rather than a promise.
 func render(all []offered) ([]*sdk.Tool, error) {
-	overrides := textSchemas(all)
+	overrides, err := typeSchemas(all)
+	if err != nil {
+		return nil, err
+	}
 	tools := make([]*sdk.Tool, 0, len(all))
 	for _, one := range all {
 		tool, err := renderTool(one, overrides)
@@ -117,34 +122,45 @@ func payloadSchema(
 
 var textValuedType = reflect.TypeFor[mcp.TextValued]()
 
-// textSchemas walks every request and response type once and renders each
-// mcp.TextValued type it reaches as the string it actually crosses the wire as.
-// This is the only place the broker inspects a provider's types for anything
-// beyond their shape, and what it learns is a string set, never a meaning.
-func textSchemas(all []offered) map[reflect.Type]*jsonschema.Schema {
+// maybeType is one instantiation of m.Maybe, read for the package and the
+// generic name every other instantiation shares.
+var maybeType = reflect.TypeFor[m.Maybe[struct{}]]()
+
+// typeSchemas walks every request and response type once and renders the two
+// kinds of type whose wire form is not their Go shape: each mcp.TextValued type
+// as the string it actually crosses the wire as, and each m.Maybe as the
+// nullable value it crosses as. This is the only place the broker inspects a
+// provider's types for anything beyond their shape, and what it learns is a
+// string set or an element type, never a meaning.
+func typeSchemas(all []offered) (map[reflect.Type]*jsonschema.Schema, error) {
 	overrides := map[reflect.Type]*jsonschema.Schema{}
 	seen := map[reflect.Type]struct{}{}
 	for _, one := range all {
-		walkTextValued(one.capability.RequestType(), seen, overrides)
-		walkTextValued(one.capability.ResponseType(), seen, overrides)
+		for _, payload := range []reflect.Type{one.capability.RequestType(), one.capability.ResponseType()} {
+			if err := walkOverrides(payload, seen, overrides); err != nil {
+				return nil, mcp.ErrMalformedCapability{
+					Provider: string(one.provider), Capability: one.capability.Name(), Err: err,
+				}
+			}
+		}
 	}
 	if len(overrides) == 0 {
-		return nil
+		return nil, nil
 	}
-	return overrides
+	return overrides, nil
 }
 
-// walkTextValued descends through pointers, slices, arrays, maps and struct
+// walkOverrides descends through pointers, slices, arrays, maps and struct
 // fields, so a type is found wherever it is nested rather than only at the top
 // level.
-func walkTextValued(
+func walkOverrides(
 	payload reflect.Type, seen map[reflect.Type]struct{}, overrides map[reflect.Type]*jsonschema.Schema,
-) {
+) error {
 	if payload == nil {
-		return
+		return nil
 	}
 	if _, visited := seen[payload]; visited {
-		return
+		return nil
 	}
 	seen[payload] = struct{}{}
 
@@ -153,22 +169,61 @@ func walkTextValued(
 		// what the agent sends.
 		overrides[payload] = schema
 		overrides[reflect.PointerTo(payload)] = schema
-		return
+		return nil
+	}
+
+	if element, ok := maybeElement(payload); ok {
+		// A Maybe's value is an unexported field the walk below would not
+		// reach, so its element is walked first and the Maybe then renders as
+		// a pointer to it would: the element's schema with null admitted.
+		if err := walkOverrides(element, seen, overrides); err != nil {
+			return err
+		}
+		schema, err := jsonschema.ForType(reflect.PointerTo(element), &jsonschema.ForOptions{TypeSchemas: overrides})
+		if err != nil {
+			return err
+		}
+		overrides[payload] = schema
+		overrides[reflect.PointerTo(payload)] = schema
+		return nil
 	}
 
 	switch payload.Kind() {
 	case reflect.Pointer, reflect.Slice, reflect.Array:
-		walkTextValued(payload.Elem(), seen, overrides)
+		return walkOverrides(payload.Elem(), seen, overrides)
 	case reflect.Map:
-		walkTextValued(payload.Key(), seen, overrides)
-		walkTextValued(payload.Elem(), seen, overrides)
+		if err := walkOverrides(payload.Key(), seen, overrides); err != nil {
+			return err
+		}
+		return walkOverrides(payload.Elem(), seen, overrides)
 	case reflect.Struct:
 		for i := range payload.NumField() {
 			if field := payload.Field(i); field.IsExported() {
-				walkTextValued(field.Type, seen, overrides)
+				if err := walkOverrides(field.Type, seen, overrides); err != nil {
+					return err
+				}
 			}
 		}
 	}
+	return nil
+}
+
+// maybeElement reports whether payload is an instantiation of m.Maybe, and the
+// type it holds. reflect has no generic origin to compare, so an instantiation
+// is recognised by m's package and the name every one of them starts with.
+func maybeElement(payload reflect.Type) (reflect.Type, bool) {
+	if payload.Kind() != reflect.Struct || payload.PkgPath() != maybeType.PkgPath() {
+		return nil, false
+	}
+	generic := maybeType.Name()[:strings.IndexByte(maybeType.Name(), '[')+1]
+	if !strings.HasPrefix(payload.Name(), generic) {
+		return nil, false
+	}
+	get, ok := payload.MethodByName("Get")
+	if !ok {
+		return nil, false
+	}
+	return get.Type.Out(0), true
 }
 
 // textSchema renders one mcp.TextValued type: the strings it accepts, plus a

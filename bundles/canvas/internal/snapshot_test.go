@@ -348,7 +348,7 @@ func TestADrawsSnapshotReportsEachLayersWindowTargetAndClear(t *testing.T) {
 	}
 	// Without the window an op's coordinates mean nothing: they are in the
 	// layer's own world space, not the viewport's.
-	if world.Window == nil || *world.Window != (canvas.RectView{X: -8, Y: -6, Width: 16, Height: 12}) {
+	if world.Window != m.Some(canvas.RectView{X: -8, Y: -6, Width: 16, Height: 12}) {
 		t.Errorf("window = %+v, want the rectangle SetLayerTransform was given", world.Window)
 	}
 	if world.Aspect != "overlap" {
@@ -395,7 +395,7 @@ func TestTriangleVerticesAreSummarisedUntilAnOpIsNamed(t *testing.T) {
 		t.Errorf("vertexCount = %d, want the six recorded", triangles.VertexCount)
 	}
 	want := canvas.RectView{X: -5, Y: -5, Width: 20, Height: 30}
-	if triangles.Bounds == nil || *triangles.Bounds != want {
+	if triangles.Bounds != m.Some(want) {
 		t.Errorf("bounds = %+v, want %+v", triangles.Bounds, want)
 	}
 
@@ -433,7 +433,7 @@ func TestAFilteredDrawsSnapshotKeepsSourceIndicesAndNamesWhatItDropped(t *testin
 		t.Fatalf("unfiltered snapshot: %v", err)
 	}
 	upper := 3
-	filtered, err := rig.runDraws(drawsRequest{FromLayer: &upper})
+	filtered, err := rig.runDraws(drawsRequest{FromLayer: m.Some(upper)})
 	if err != nil {
 		t.Fatalf("filtered snapshot: %v", err)
 	}
@@ -458,7 +458,7 @@ func TestAFilteredDrawsSnapshotKeepsSourceIndicesAndNamesWhatItDropped(t *testin
 		t.Errorf("filtered totals = %d ops / %d layers, want the whole frame's %d / %d",
 			filtered.OpCount, filtered.LayerCount, whole.OpCount, whole.LayerCount)
 	}
-	if filtered.FromLayer == nil || *filtered.FromLayer != upper {
+	if filtered.FromLayer != m.Some(upper) {
 		t.Errorf("the response does not echo the layer filter it was armed with: %+v",
 			filtered.FromLayer)
 	}
@@ -696,7 +696,7 @@ func TestADrawsSnapshotRefusesARequestItCannotHonour(t *testing.T) {
 		{"relative path", drawsRequest{Path: filepath.Join("draws", "one.json")}, "absolute"},
 		{"wrong extension", drawsRequest{Path: filepath.Join(t.TempDir(), "draws.txt")}, ".json"},
 		{"unknown kind", drawsRequest{Kinds: []string{"sprites"}}, "not a draw kind"},
-		{"inverted range", drawsRequest{FromLayer: &from, ToLayer: &to}, "keeps no layer"},
+		{"inverted range", drawsRequest{FromLayer: m.Some(from), ToLayer: m.Some(to)}, "keeps no layer"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := drawsSnapshot(rig.k, test.request)

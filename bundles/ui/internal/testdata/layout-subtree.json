@@ -1,0 +1,113 @@
+{"subtree":2}
+{
+  "elements": [
+    {
+      "index": 2,
+      "parent": 0,
+      "id": "flex",
+      "active": true,
+      "rect": {
+        "x": 168.40001,
+        "y": 4,
+        "width": 2,
+        "height": 0
+      },
+      "contentRect": {
+        "x": 168.40001,
+        "y": 4,
+        "width": 2,
+        "height": 0
+      },
+      "clipRect": {
+        "x": 0,
+        "y": 0,
+        "width": 300,
+        "height": 200
+      },
+      "layer": 10,
+      "drawOrder": 1,
+      "state": [
+        "hovered"
+      ],
+      "declared": {
+        "layout": "horizontal",
+        "gap": {
+          "value": 2
+        },
+        "wrap": true,
+        "childrenArrangement": "spaceBetween"
+      }
+    },
+    {
+      "index": 3,
+      "parent": 2,
+      "active": true,
+      "rect": {
+        "x": 168.40001,
+        "y": 4,
+        "width": 0,
+        "height": 0
+      },
+      "contentRect": {
+        "x": 168.40001,
+        "y": 4,
+        "width": 0,
+        "height": 0
+      },
+      "clipRect": {
+        "x": 168.40001,
+        "y": 4,
+        "width": 2,
+        "height": 0
+      },
+      "layer": 10,
+      "drawOrder": 2,
+      "state": [
+        "hovered"
+      ],
+      "declared": {
+        "width": {
+          "value": 0
+        },
+        "shrink": 1
+      }
+    },
+    {
+      "index": 4,
+      "parent": 2,
+      "active": true,
+      "rect": {
+        "x": 170.40001,
+        "y": 4,
+        "width": 0,
+        "height": 0
+      },
+      "contentRect": {
+        "x": 170.40001,
+        "y": 4,
+        "width": 0,
+        "height": 0
+      },
+      "clipRect": {
+        "x": 168.40001,
+        "y": 4,
+        "width": 2,
+        "height": 0
+      },
+      "layer": 10,
+      "drawOrder": 3,
+      "state": [
+        "hovered"
+      ],
+      "declared": {
+        "height": {
+          "value": 0.5,
+          "relative": true
+        }
+      }
+    }
+  ],
+  "count": 6,
+  "omitted": 3,
+  "subtree": 2
+}

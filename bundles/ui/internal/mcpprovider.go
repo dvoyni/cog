@@ -13,6 +13,7 @@ import (
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/bundles/ui"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -72,8 +73,8 @@ type layoutRequest struct {
 	Path string `json:"path,omitempty" jsonschema:"absolute path ending in .json; omit to get the JSON inline"`
 	// Subtree and MaxDepth are the two axes a tree wants, and they travel with
 	// the arm because the filter is what bounds the work done inside the tick.
-	Subtree  *int `json:"subtree,omitempty" jsonschema:"index of the element to report, with its descendants; omit for the whole tree"`
-	MaxDepth *int `json:"maxDepth,omitempty" jsonschema:"how many levels below the reported root to keep; 0 is that element alone"`
+	Subtree  m.Maybe[int] `json:"subtree,omitzero" jsonschema:"index of the element to report, with its descendants; omit for the whole tree"`
+	MaxDepth m.Maybe[int] `json:"maxDepth,omitzero" jsonschema:"how many levels below the reported root to keep; 0 is that element alone"`
 }
 
 // layoutResponse is one tick's resolved element tree, the three coordinate
@@ -230,15 +231,15 @@ func validateLayoutRequest(request layoutRequest) (ui.ArmLayoutRequest, error) {
 	if err := validateSnapshotPath(request.Path); err != nil {
 		return ui.ArmLayoutRequest{}, err
 	}
-	if request.Subtree != nil && *request.Subtree < 0 {
+	if subtree, ok := request.Subtree.Get(); ok && subtree < 0 {
 		return ui.ArmLayoutRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
 			"subtree %d is negative; an element index is its position in the tree, counted from 0",
-			*request.Subtree)}
+			subtree)}
 	}
-	if request.MaxDepth != nil && *request.MaxDepth < 0 {
+	if depth, ok := request.MaxDepth.Get(); ok && depth < 0 {
 		return ui.ArmLayoutRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
 			"maxDepth %d is negative, which keeps no element at all; 0 keeps the root alone",
-			*request.MaxDepth)}
+			depth)}
 	}
 	return ui.ArmLayoutRequest{Subtree: request.Subtree, MaxDepth: request.MaxDepth}, nil
 }

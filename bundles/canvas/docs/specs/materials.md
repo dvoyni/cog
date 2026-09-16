@@ -301,7 +301,7 @@ against the route it replaces, and the uniform payload *shrinks* from 176 B to
 `DefaultMaterial()` is **repointed** at the surviving material rather than
 deleted. That keeps an exported symbol nothing currently calls (cheap), gives a
 caller a way to name explicitly what `nil` means, and makes
-`bundles/canvas/README.md:61` true again rather than merely deleting a false claim.
+`bundles/canvas/docs/README.md:61` true again rather than merely deleting a false claim.
 Passing `DefaultMaterial()` must batch identically to passing `nil`; see
 [Batching](#batching).
 
@@ -1226,7 +1226,7 @@ against this.
   about groups or bindings must go through `naga.Parse` + `wgsl.Lower`, not
   through it.
 
-**`bundles/canvas/README.md`**
+**`bundles/canvas/docs/README.md`**
 
 - `:61`'s "A nil material uses the built-in sprite material" becomes true rather
   than deleted: a nil material batches the sprite into the built-in instanced

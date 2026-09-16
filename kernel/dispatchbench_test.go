@@ -156,3 +156,38 @@ func BenchmarkPublishEventThreeSubscribers(b *testing.B) {
 		}
 	}
 }
+
+type benchExclusiveCmd Command[benchRequest, benchResponse]
+
+func benchExclusiveCmdImpl() (Lock, Execute[benchRequest, benchResponse]) {
+	var counter Write[benchCounter]
+	return func(access ResourceAccess) {
+			counter = access.GetWrite[benchCounter]()
+			access.Exclusive()
+		}, func(_ Kernel, request benchRequest) (benchResponse, error) {
+			counter.Set(counter.Get() + 1)
+			return benchResponse{sum: request.a + request.b + request.c}, nil
+		}
+}
+
+// BenchmarkExecuteExclusiveCommand is BenchmarkExecuteCommand with one extra
+// declaration, so the gap between them is what Exclusive costs the handler that
+// declares it: one more key across the coordinator's compatible, lock and
+// unlock. Every handler that declares nothing is unaffected, because each of
+// those loops ranges over the request's own maps.
+func BenchmarkExecuteExclusiveCommand(b *testing.B) {
+	engine := benchEngine(b, func(r *Registrar) error {
+		r.InitResource(benchCounter(0))
+		r.HandleCommand[benchExclusiveCmd](benchExclusiveCmdImpl)
+		return nil
+	})
+	k := engine.Executioner()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; b.Loop(); i++ {
+		if _, err := k.ExecuteCommand[benchExclusiveCmd](benchRequest{a: i, b: 1, c: 2}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

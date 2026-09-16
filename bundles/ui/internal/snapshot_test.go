@@ -347,7 +347,7 @@ func TestALayoutSnapshotReportsWhatResolvedBesideWhatWasDeclared(t *testing.T) {
 	if !root.Active {
 		t.Error("the root laid out and is reported inactive")
 	}
-	if root.Declared == nil || root.Declared.Width == nil || root.Declared.Width.Value != 200 {
+	if root.Declared == nil || root.Declared.Width != m.Some(ui.SizeView{Value: 200}) {
 		t.Fatalf("root declared = %+v, want the width it was written with", root.Declared)
 	}
 	if root.Declared.Layout != "vertical" {
@@ -358,17 +358,17 @@ func TestALayoutSnapshotReportsWhatResolvedBesideWhatWasDeclared(t *testing.T) {
 	// The pairing this capability exists for: a stretch and a height declared
 	// together, beside the rect they actually produced.
 	child := response.Elements[1]
-	if child.Declared == nil || child.Declared.Stretch == nil || *child.Declared.Stretch != 1 {
+	if child.Declared == nil || child.Declared.Stretch != m.Some[float32](1) {
 		t.Fatalf("a declared = %+v, want the stretch it was written with", child.Declared)
 	}
-	if child.Declared.Height == nil || child.Declared.Height.Value != 20 {
+	if child.Declared.Height != m.Some(ui.SizeView{Value: 20}) {
 		t.Fatalf("a declared height = %+v, want the 20 it was written with",
 			child.Declared.Height)
 	}
 	// Declared layer is an offset from the root's base; the resolved one is
 	// the canvas layer it records into. Reporting only one of them makes the
 	// other unrecoverable.
-	if child.Declared.Layer == nil || *child.Declared.Layer != 3 {
+	if child.Declared.Layer != m.Some(3) {
 		t.Fatalf("a declared layer = %v, want the offset it was written with",
 			child.Declared.Layer)
 	}
@@ -395,10 +395,11 @@ func TestALayoutSnapshotReportsWhatResolvedBesideWhatWasDeclared(t *testing.T) {
 	// last because it put itself on a higher layer.
 	orders := make([]int, 0, len(response.Elements))
 	for _, element := range response.Elements {
-		if element.DrawOrder == nil {
+		order, ok := element.DrawOrder.Get()
+		if !ok {
 			t.Fatalf("element %d is active and reports no draw order", element.Index)
 		}
-		orders = append(orders, *element.DrawOrder)
+		orders = append(orders, order)
 	}
 	if !slices.Equal(orders, []int{0, 5, 1, 2, 3, 4}) {
 		t.Errorf("draw orders = %v, want a last because its layer is higher", orders)
@@ -433,7 +434,7 @@ func TestASubtreeFilterIsAContiguousRangeWhoseParentLinksResolve(t *testing.T) {
 	rig.fixture.on(aSmallTree(nil))
 	subtree := 2
 
-	response, err := rig.runLayout(layoutRequest{Subtree: &subtree})
+	response, err := rig.runLayout(layoutRequest{Subtree: m.Some(subtree)})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -475,7 +476,7 @@ func TestAMaxDepthFilterKeepsWholeAncestriesAndSaysWhatItDropped(t *testing.T) {
 	rig.fixture.on(aSmallTree(nil))
 	depth := 1
 
-	response, err := rig.runLayout(layoutRequest{MaxDepth: &depth})
+	response, err := rig.runLayout(layoutRequest{MaxDepth: m.Some(depth)})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -606,8 +607,8 @@ func TestAnElementLayoutDroppedIsReportedInactiveRatherThanLeftOut(t *testing.T)
 	if overflowed.ID != "overflowed" {
 		t.Errorf("the dropped child is %q, want it named", overflowed.ID)
 	}
-	if overflowed.DrawOrder != nil {
-		t.Errorf("an inactive element reports draw order %d, want none", *overflowed.DrawOrder)
+	if order, ok := overflowed.DrawOrder.Get(); ok {
+		t.Errorf("an inactive element reports draw order %d, want none", order)
 	}
 }
 
@@ -806,8 +807,8 @@ func TestALayoutSnapshotRefusesARequestItCannotHonour(t *testing.T) {
 	}{
 		{"relative path", layoutRequest{Path: filepath.Join("ui", "one.json")}, "absolute"},
 		{"wrong extension", layoutRequest{Path: filepath.Join(t.TempDir(), "ui.txt")}, ".json"},
-		{"negative subtree", layoutRequest{Subtree: &negative}, "negative"},
-		{"negative depth", layoutRequest{MaxDepth: &deep}, "keeps no element"},
+		{"negative subtree", layoutRequest{Subtree: m.Some(negative)}, "negative"},
+		{"negative depth", layoutRequest{MaxDepth: m.Some(deep)}, "keeps no element"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := layoutSnapshot(rig.k, test.request)
@@ -826,7 +827,7 @@ func TestALayoutSnapshotRefusesARequestItCannotHonour(t *testing.T) {
 	// knows how large it is. It still comes back as words rather than as an
 	// empty array reading as a subtree that laid out nothing.
 	t.Run("subtree past the end", func(t *testing.T) {
-		_, err := rig.runLayout(layoutRequest{Subtree: &missing})
+		_, err := rig.runLayout(layoutRequest{Subtree: m.Some(missing)})
 		var refusal mcp.Unavailable
 		if !errors.As(err, &refusal) {
 			t.Fatalf("answered %v, want words an agent can act on", err)

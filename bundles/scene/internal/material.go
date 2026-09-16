@@ -1,9 +1,6 @@
 package internal
 
 import (
-	"encoding/binary"
-	"hash/maphash"
-
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -31,29 +28,6 @@ type materialEntry struct {
 	blend bool
 }
 
-// materialKey identifies one caller material by content: a fingerprint of each
-// entry's tag and gfx material - shader source-or-path, pipeline state and
-// parameter bytes. A caller-supplied gfx.MaterialDescr has no id of its own,
-// and keying by the slice's backing instead would hand the spec's own idiom,
-// Material{{Descr: descr}} built inline per draw, a fresh id every draw and so
-// never sort two of them together. The hash costs one map probe per draw that
-// names a material, once per frame, and nothing for the bundled PBR.
-type materialKey uint64
-
-var materialSeed = maphash.MakeSeed()
-
-func materialKeyOf(material scene.Material) materialKey {
-	var h maphash.Hash
-	h.SetSeed(materialSeed)
-	var buf [8]byte
-	for i := range material {
-		h.WriteString(string(types.MaterialTagOf(material[i])))
-		binary.LittleEndian.PutUint64(buf[:], material[i].Descr.Fingerprint())
-		h.Write(buf[:])
-	}
-	return materialKey(h.Sum64())
-}
-
 // internedMaterial is one material resolved against every tag it serves.
 // entries and ids are indexed by tagID, so a draw's per-pass cost is one array
 // read plus a negative-means-skip test.
@@ -71,7 +45,7 @@ type materialTable struct {
 	tagNames []scene.PassTag
 	// keys and interned are the frame's materials. Both keep their backing
 	// across frames, so a steady frame interns without allocating.
-	keys     map[materialKey]int32
+	keys     map[types.MaterialKey]int32
 	interned []internedMaterial
 	nextID   uint32
 }
@@ -81,7 +55,7 @@ type materialTable struct {
 // variant with no map probe at all.
 func (t *materialTable) reset(bundled [types.VariantCount]scene.Material) {
 	if t.keys == nil {
-		t.keys = map[materialKey]int32{}
+		t.keys = map[types.MaterialKey]int32{}
 		t.tags = map[scene.PassTag]tagID{}
 	}
 	clear(t.keys)
@@ -136,11 +110,19 @@ func (t *materialTable) entry(interned int32, tag tagID) (materialEntry, bool) {
 // checking its tags the first time the frame sees it. It is called once per
 // recorded draw per frame, before any pass walks them, which is what keeps the
 // fingerprint and the map probe out of the per-pass path.
-func (t *materialTable) intern(report func(error), material scene.Material, variant types.ShaderVariant) int32 {
+//
+// key is the material's content key when the recording already took it, and
+// zero when nothing did - a model's own materials - in which case it is taken
+// here. A draw naming a material pays the fingerprint once either way.
+func (t *materialTable) intern(
+	report func(error), material scene.Material, key types.MaterialKey, variant types.ShaderVariant,
+) int32 {
 	if material == nil {
 		return int32(variant)
 	}
-	key := materialKeyOf(material)
+	if key == 0 {
+		key = types.MaterialKeyOf(material)
+	}
 	if index, ok := t.keys[key]; ok {
 		return index
 	}

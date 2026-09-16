@@ -5,14 +5,14 @@ raw changes through one command; gameplay can poll the `State` resource or
 subscribe to discrete events without depending on a windowing implementation.
 
 input is a **Bundle**: it requires no Adapter, and contributes one to mcp's
-collected Port. The vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the
+collected Port. The vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the
 decision in
-[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+[ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
 input has the declaration-root shape of
-[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
 
 - **`bundles/input`** is the root, and holds declarations only: `ApplyCmd`,
   `SynthesizeCmd` and `StateCmd` with their requests and responses, the four
@@ -265,5 +265,5 @@ agent converts from a capture's pixels itself using the two sizes the capture
 response carries.
 
 The description prose the agent reads is reproduced in full in
-[`docs/specs/mcp.md`](docs/specs/mcp.md), so it is reviewed as prompt text. The
-feature half is in [`docs/specs/input.md`](docs/specs/input.md).
+[`specs/mcp.md`](specs/mcp.md), so it is reviewed as prompt text. The
+feature half is in [`specs/input.md`](specs/input.md).

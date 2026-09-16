@@ -7,13 +7,13 @@ over the Model Context Protocol.
 
 mcp is a **Bundle**: it requires no Adapter, collects every Adapter provided for
 its `ProviderPort`, and contributes one of its own. The vocabulary is in
-[`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+[`CONTEXT.md`](../../../CONTEXT.md) and the decision in
+[ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
 mcp has the declaration-root shape of
-[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
 
 - **`bundles/mcp`** is the root, and holds declarations only: the `Provider`
   interface and `ProviderPort`, `Capability`, `Option`, `TextValued`, the
@@ -274,7 +274,8 @@ owns the description prose and nothing else that reaches the wire.
   contributed, fails composition.
 - **Schemas** are inferred from the request and response types, with
   `mcp.TextValued` types overridden by the string schema they actually cross the
-  wire as.
+  wire as, and each `m.Maybe[T]` rendered as a pointer to `T` would be: `T`'s
+  schema with `null` admitted.
 - **Annotations**: `ReadOnlyHint` is the provider's statement,
   `DestructiveHint` is always false and never derived from `!readOnly`,
   `OpenWorldHint` is always false, `IdempotentHint` is left alone.
@@ -342,5 +343,5 @@ mcpserver: claude mcp add --transport http cog http://127.0.0.1:7654/mcp
 
 ## Specification
 
-[`docs/specs/mcp.md`](docs/specs/mcp.md) specifies the extension point, and
-[`docs/specs/broker.md`](docs/specs/broker.md) the broker and its transport.
+[`specs/mcp.md`](specs/mcp.md) specifies the extension point, and
+[`specs/broker.md`](specs/broker.md) the broker and its transport.

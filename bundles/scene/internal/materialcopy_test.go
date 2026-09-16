@@ -63,6 +63,137 @@ func TestMutatingAMeshMaterialParameterAfterRecordingChangesNothingDrawn(t *test
 	}
 }
 
+// A material shared across draws is rewritten in place between two of them in
+// one frame, and only the later draw sees it. The first and third draws name
+// the original content - the third through a material rebuilt from a copy of
+// the original parameters - and the second names the rewritten one. Each draw
+// carries its own instance count so its batch is found after the sort.
+//
+// A frame that reused one copy of a shared material by slice identity would
+// hand the second draw the first draw's copy, and all three would be one
+// material.
+func TestMutatingASharedMeshMaterialBetweenDrawsChangesOnlyTheLaterDraw(t *testing.T) {
+	var ref scene.MeshRef
+	h := newHarness(t, func(q *scene.OpQueue) {
+		q.Camera(testCamera, testCameraDescr())
+		params := pbrTestParams(1)
+		original := slices.Clone(params)
+		shared := materialOver(params)
+		q.Mesh(0, ref, scene.MeshDraw{Material: shared, NeverCull: true, Transforms: instances(1)})
+		params[0] = gfx.FloatParam("key", 9)
+		q.Mesh(0, ref, scene.MeshDraw{Material: shared, NeverCull: true, Transforms: instances(2)})
+		q.Mesh(0, ref, scene.MeshDraw{Material: materialOver(original), NeverCull: true, Transforms: instances(3)})
+	})
+	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
+	h.frame()
+
+	ids := materialIDsByInstanceCount(t, h.passes()[0].Batches, 3)
+	if ids[1] != ids[3] {
+		t.Fatalf("first and third draws have material ids %d and %d, want one: both name the original content", ids[1], ids[3])
+	}
+	if ids[2] == ids[1] {
+		t.Fatalf("second draw has the first draw's material id %d, want its own: it names the rewritten material", ids[2])
+	}
+}
+
+// A Model call reuses a shared replacement Material's copy by the same rule.
+// Every primitive of one draw binds the replacement, so each instance count
+// names one material across both primitives.
+func TestMutatingASharedModelMaterialBetweenDrawsChangesOnlyTheLaterDraw(t *testing.T) {
+	h := newHarnessWithFiles(t, modelFiles(glb(t, twoMaterialModel(t))), func(q *scene.OpQueue) {
+		q.Camera(cameraMain, modelCamera())
+		params := pbrTestParams(1)
+		original := slices.Clone(params)
+		shared := materialOver(params)
+		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Material: shared, Transforms: instances(1)})
+		params[0] = gfx.FloatParam("key", 9)
+		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Material: shared, Transforms: instances(2)})
+		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Material: materialOver(original), Transforms: instances(3)})
+	})
+	h.frameUntil(t, "the three model draws to pack", func() bool {
+		return len(h.passes()) == 1 && h.passes()[0].Instances == 2*(1+2+3)
+	})
+
+	ids := materialIDsByInstanceCount(t, h.passes()[0].Batches, 3)
+	if ids[1] != ids[3] {
+		t.Fatalf("first and third draws have material ids %d and %d, want one: both name the original content", ids[1], ids[3])
+	}
+	if ids[2] == ids[1] {
+		t.Fatalf("second draw has the first draw's material id %d, want its own: it names the rewritten material", ids[2])
+	}
+}
+
+// A frame's copies do not outlive it. Each frame draws a material of its own,
+// then a material shared by every frame; the shared one's copy from an earlier
+// frame sits in an arena since rewritten, and a draw handed it would bind
+// whatever that frame put there instead.
+func TestASharedMeshMaterialIsCopiedAfreshEachFrame(t *testing.T) {
+	var ref scene.MeshRef
+	shared := opaqueMaterial(1)
+	frame := 0
+	h := newHarness(t, func(q *scene.OpQueue) {
+		q.Camera(testCamera, testCameraDescr())
+		frame++
+		q.Mesh(0, ref, scene.MeshDraw{Material: opaqueMaterial(float32(100 + frame)), NeverCull: true, Transforms: instances(1)})
+		q.Mesh(0, ref, scene.MeshDraw{Material: shared, NeverCull: true, Transforms: instances(2)})
+	})
+	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
+
+	for range 4 {
+		h.frame()
+		if errs := h.errors(); len(errs) != 0 {
+			t.Fatalf("frame %d reported %v", frame, errs)
+		}
+		var sharedCopy scene.Material
+		for _, op := range h.ops() {
+			if op.Kind == scene.OpMesh && len(op.Draw.Transforms) == 2 {
+				sharedCopy = op.Draw.Material
+			}
+		}
+		if types.MaterialKeyOf(sharedCopy) != types.MaterialKeyOf(shared) {
+			t.Fatalf("frame %d's shared draw binds a material other than the shared one", frame)
+		}
+	}
+}
+
+// materialOver builds a one-entry opaque material over params, aliasing them, so
+// a caller that rewrites params rewrites the material.
+func materialOver(params []gfx.ParameterDescr) scene.Material {
+	return scene.Material{{Descr: gfx.MaterialWithState(
+		gfx.ShaderWithResource(types.SceneShaderPath), gfx.StateOpaque3D(), params...,
+	)}}
+}
+
+// instances is n transforms, for a draw whose batch is told apart by its
+// instance count.
+func instances(n int) []scene.Transform {
+	transforms := make([]scene.Transform, n)
+	for i := range transforms {
+		transforms[i] = scene.At(float32(i), 0, 0)
+	}
+	return transforms
+}
+
+// materialIDsByInstanceCount reads each batch's material id by its instance
+// count, requiring every count to agree on one id and every count from 1 to
+// draws to be present.
+func materialIDsByInstanceCount(t *testing.T, batches []scene.BatchView, draws int) map[int]uint32 {
+	t.Helper()
+	ids := map[int]uint32{}
+	for _, batch := range batches {
+		if id, seen := ids[batch.InstanceCount]; seen && id != batch.MaterialID {
+			t.Fatalf("batches of %d instances have material ids %d and %d, want one", batch.InstanceCount, id, batch.MaterialID)
+		}
+		ids[batch.InstanceCount] = batch.MaterialID
+	}
+	for n := 1; n <= draws; n++ {
+		if _, ok := ids[n]; !ok {
+			t.Fatalf("no batch of %d instances among %v", n, batches)
+		}
+	}
+	return ids
+}
+
 // A Model call copies its replacement Material the same way.
 func TestMutatingAModelMaterialAfterRecordingChangesNothingDrawn(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, twoMaterialModel(t))), func(q *scene.OpQueue) {

@@ -65,9 +65,18 @@ clamp and its catch-up cap (`Step`, `MaxFrame`, `MaxPending`) are app's
 ## Errors
 
 The root's `err.go` declares the errors the plugin reports that a caller may
-match: `ErrInvalidConfig`, and `ErrDepthOnlyPassUnsupported`, reported once
-per run for a depth-only pass the selected backend declines to encode. The time
-errors are app's.
+match: `ErrInvalidConfig`; `ErrDepthOnlyPassUnsupported`, reported once
+per run for a depth-only pass the selected backend declines to encode; and
+`ErrBindGroupRefused{Shader, Group}`, reported once per shader and group for a
+bind group the device would not create. The time errors are app's.
+
+A refused bind group leaves every draw through it encoding with nothing bound
+for that group, which renders wrongly or not at all. gfx catches the bindings it
+can see before they get here - see *ErrStorageBufferUnsupplied* in gfx's README
+- so what reaches this backstop is the route only the backend knows: a binding
+gfx did emit, filled by a resource this backend no longer holds, released or
+left over from a device ago. Both refusals reach the update thread the same way,
+through `takeRefusal`, because the render thread holds no kernel handle.
 
 ## App's MainLoop
 
@@ -97,7 +106,7 @@ of its own:
 
 app turns that frame time into fixed-step ticks and publishes every app event;
 pause, step, hold, tick numbering and the `app_time` tool are app's, in
-[`slots/app`](../../slots/app/README.md).
+[`slots/app`](../../../slots/app/docs/README.md).
 
 ## Commands Executed
 

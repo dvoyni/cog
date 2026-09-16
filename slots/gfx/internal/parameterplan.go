@@ -46,6 +46,10 @@ type plannedResource struct {
 	group   int
 	binding int
 	param   parameterRef
+	// name is the binding's declared name, kept because a binding no parameter
+	// names has no parameter to read it off, and the report has to say which
+	// one went unfilled.
+	name string
 }
 
 // plannedSampler is one reflected sampler binding and the parameter that fills
@@ -116,7 +120,7 @@ func (t *translator) prepareParameterPlan(shader gfx.ShaderID, label string, lay
 		}
 		entry.plan.checkKind(label, resource.Name, ref, material, draw, declared)
 		entry.plan.resources = append(entry.plan.resources, plannedResource{
-			kind: kind, group: resource.Group, binding: resource.Binding, param: ref,
+			kind: kind, group: resource.Group, binding: resource.Binding, param: ref, name: resource.Name,
 		})
 	}
 

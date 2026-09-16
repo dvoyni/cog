@@ -163,6 +163,9 @@ type ModelDrawRecord struct {
 	// theirs.
 	Material  Material
 	Overrides []gfx.ParameterDescr
+	// MaterialKey is Material's content key, taken at record; zero when
+	// Material is nil or empty.
+	MaterialKey MaterialKey
 }
 
 // Model records one draw of the glTF file at path.
@@ -206,7 +209,8 @@ func (q *OpQueue) Model(layers LayerMask, path string, draw ModelDraw) {
 		q.meshes.params = append(q.meshes.params, overrides...)
 		overrides = q.meshes.params[start:len(q.meshes.params):len(q.meshes.params)]
 	}
-	draw.Material = q.meshes.copyMaterial(draw.Material)
+	var key MaterialKey
+	draw.Material, key = q.meshes.copyMaterial(draw.Material)
 	draw.Transforms, draw.Plays, draw.MorphWeights = transforms, plays, weights
 	draw.OverrideParams = overrides
 	q.calls = append(q.calls, Op{Kind: OpModel, Layers: layers, Path: path, Model: draw})
@@ -214,7 +218,7 @@ func (q *OpQueue) Model(layers LayerMask, path string, draw ModelDraw) {
 		Layers: layers, Path: path, Scene: draw.Scene, Node: draw.Node,
 		transform: draw.Transform, transforms: transforms, Plays: plays,
 		MorphWeights: weights, Overridden: overridden,
-		Material: draw.Material, Overrides: overrides,
+		Material: draw.Material, Overrides: overrides, MaterialKey: key,
 	})
 }
 

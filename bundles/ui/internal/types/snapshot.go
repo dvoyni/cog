@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 )
 
 // LayoutView is one tick's element tree with what layout resolved it to,
@@ -33,10 +34,10 @@ type LayoutView struct {
 	// describing. Omitted is what the filter dropped: whatever a snapshot
 	// omits it says it omitted, because a tool that silently truncates cannot
 	// be told from a game that declared nothing.
-	Count    int  `json:"count"`
-	Omitted  int  `json:"omitted,omitempty"`
-	Subtree  *int `json:"subtree,omitempty"`
-	MaxDepth *int `json:"maxDepth,omitempty"`
+	Count    int          `json:"count"`
+	Omitted  int          `json:"omitted,omitempty"`
+	Subtree  m.Maybe[int] `json:"subtree,omitzero"`
+	MaxDepth m.Maybe[int] `json:"maxDepth,omitzero"`
 }
 
 // ElementView is one element: where layout put it, and - where it asked for
@@ -82,7 +83,7 @@ type ElementView struct {
 	// ascending, then declaration order - among the active elements. An
 	// element with no visual holds its place and draws nothing; an inactive
 	// one has no place at all and reports none.
-	DrawOrder *int `json:"drawOrder,omitempty"`
+	DrawOrder m.Maybe[int] `json:"drawOrder,omitzero"`
 	// State is the visual state the element resolved to, named rather than
 	// numbered: the inherited states, the ones the pointer produced, and the
 	// ones the app added or removed. States the app defined for itself above
@@ -108,49 +109,49 @@ type ElementView struct {
 // are opt values that already carry set, so omitting an unset one is exact
 // rather than a guess about zero meaning unset.
 type DeclaredView struct {
-	Width    *SizeView `json:"width,omitempty"`
-	MinWidth *SizeView `json:"minWidth,omitempty"`
-	MaxWidth *SizeView `json:"maxWidth,omitempty"`
+	Width    m.Maybe[SizeView] `json:"width,omitzero"`
+	MinWidth m.Maybe[SizeView] `json:"minWidth,omitzero"`
+	MaxWidth m.Maybe[SizeView] `json:"maxWidth,omitzero"`
 
-	Height    *SizeView `json:"height,omitempty"`
-	MinHeight *SizeView `json:"minHeight,omitempty"`
-	MaxHeight *SizeView `json:"maxHeight,omitempty"`
+	Height    m.Maybe[SizeView] `json:"height,omitzero"`
+	MinHeight m.Maybe[SizeView] `json:"minHeight,omitzero"`
+	MaxHeight m.Maybe[SizeView] `json:"maxHeight,omitzero"`
 
-	Left   *SizeView `json:"left,omitempty"`
-	Right  *SizeView `json:"right,omitempty"`
-	Top    *SizeView `json:"top,omitempty"`
-	Bottom *SizeView `json:"bottom,omitempty"`
+	Left   m.Maybe[SizeView] `json:"left,omitzero"`
+	Right  m.Maybe[SizeView] `json:"right,omitzero"`
+	Top    m.Maybe[SizeView] `json:"top,omitzero"`
+	Bottom m.Maybe[SizeView] `json:"bottom,omitzero"`
 
-	PivotLeft   *SizeView `json:"pivotLeft,omitempty"`
-	PivotRight  *SizeView `json:"pivotRight,omitempty"`
-	PivotTop    *SizeView `json:"pivotTop,omitempty"`
-	PivotBottom *SizeView `json:"pivotBottom,omitempty"`
+	PivotLeft   m.Maybe[SizeView] `json:"pivotLeft,omitzero"`
+	PivotRight  m.Maybe[SizeView] `json:"pivotRight,omitzero"`
+	PivotTop    m.Maybe[SizeView] `json:"pivotTop,omitzero"`
+	PivotBottom m.Maybe[SizeView] `json:"pivotBottom,omitzero"`
 
-	PaddingLeft   *SizeView `json:"paddingLeft,omitempty"`
-	PaddingRight  *SizeView `json:"paddingRight,omitempty"`
-	PaddingTop    *SizeView `json:"paddingTop,omitempty"`
-	PaddingBottom *SizeView `json:"paddingBottom,omitempty"`
+	PaddingLeft   m.Maybe[SizeView] `json:"paddingLeft,omitzero"`
+	PaddingRight  m.Maybe[SizeView] `json:"paddingRight,omitzero"`
+	PaddingTop    m.Maybe[SizeView] `json:"paddingTop,omitzero"`
+	PaddingBottom m.Maybe[SizeView] `json:"paddingBottom,omitzero"`
 
 	// Stretch and Shrink are the flex weights, and they are the pair this
 	// capability exists for: a stretch that did not apply is invisible in a
 	// resolved rect and invisible in the source, and visible only here.
-	Stretch *float32 `json:"stretch,omitempty"`
-	Shrink  *float32 `json:"shrink,omitempty"`
+	Stretch m.Maybe[float32] `json:"stretch,omitzero"`
+	Shrink  m.Maybe[float32] `json:"shrink,omitzero"`
 	// Align is how the element asked to be placed across its parent's axis,
 	// and Layer the offset it asked for from its root's base layer.
-	Align string `json:"align,omitempty"`
-	Layer *int   `json:"layer,omitempty"`
+	Align string       `json:"align,omitempty"`
+	Layer m.Maybe[int] `json:"layer,omitzero"`
 	// Layout, Gap, Wrap, Columns, Rows, ChildrenArrangement and
 	// ChildrenAlignment are what the element declared about its children
 	// rather than about itself - the other half of why a child ended up where
 	// it did.
-	Layout              string    `json:"layout,omitempty"`
-	Gap                 *SizeView `json:"gap,omitempty"`
-	Wrap                bool      `json:"wrap,omitempty"`
-	Columns             *int      `json:"columns,omitempty"`
-	Rows                *int      `json:"rows,omitempty"`
-	ChildrenArrangement string    `json:"childrenArrangement,omitempty"`
-	ChildrenAlignment   string    `json:"childrenAlignment,omitempty"`
+	Layout              string            `json:"layout,omitempty"`
+	Gap                 m.Maybe[SizeView] `json:"gap,omitzero"`
+	Wrap                bool              `json:"wrap,omitempty"`
+	Columns             m.Maybe[int]      `json:"columns,omitzero"`
+	Rows                m.Maybe[int]      `json:"rows,omitzero"`
+	ChildrenArrangement string            `json:"childrenArrangement,omitempty"`
+	ChildrenAlignment   string            `json:"childrenAlignment,omitempty"`
 	// The opt-outs. Each one is a silent way for an element to behave
 	// differently from its neighbours, which is exactly what a snapshot is
 	// read to find.
@@ -200,14 +201,14 @@ type RectView struct {
 // rendering one element allocates its declared block and marshals its
 // userData. What it does not bound is the two int slices below, which are one
 // pass over the tree each and no allocation per element.
-func LayoutViewOf(context *Processor, subtree, maxDepth *int) (LayoutView, error) {
+func LayoutViewOf(context *Processor, subtree, maxDepth m.Maybe[int]) (LayoutView, error) {
 	nodes := context.nodes
 	view := LayoutView{
 		Count: len(nodes), Subtree: subtree, MaxDepth: maxDepth,
 	}
 	start, end := 0, len(nodes)
-	if subtree != nil {
-		root := *subtree
+	root, rooted := subtree.Get()
+	if rooted {
 		if root < 0 || root >= len(nodes) {
 			return LayoutView{}, ErrLayoutNoSuchElement{Index: root, Count: len(nodes)}
 		}
@@ -216,13 +217,14 @@ func LayoutViewOf(context *Processor, subtree, maxDepth *int) (LayoutView, error
 
 	depths := depthsOf(nodes)
 	base := 0
-	if subtree != nil {
+	if rooted {
 		base = depths[start]
 	}
 	order := drawOrdersOf(context)
 
+	depth, capped := maxDepth.Get()
 	for index := start; index < end; index++ {
-		if maxDepth != nil && depths[index]-base > *maxDepth {
+		if capped && depths[index]-base > depth {
 			continue
 		}
 		view.Elements = append(view.Elements, elementViewOf(index, &nodes[index], order[index]))
@@ -275,7 +277,7 @@ func elementViewOf(index int, node *layoutNode, drawOrder int) ElementView {
 		UserData:    userDataView(element.userData),
 	}
 	if drawOrder >= 0 {
-		view.DrawOrder = &drawOrder
+		view.DrawOrder = m.Some(drawOrder)
 	}
 	if element.visual != nil {
 		view.Visual = visualTypeName(element.visual)
@@ -297,22 +299,20 @@ func elementViewOf(index int, node *layoutNode, drawOrder int) ElementView {
 func declaredViewOf(element *Element) (DeclaredView, bool) {
 	var view DeclaredView
 	declared := false
-	length := func(target **SizeView, value opt[size]) {
-		if value.set {
-			*target = &SizeView{Value: value.v.value, Relative: value.v.relative}
+	length := func(target *m.Maybe[SizeView], value m.Maybe[size]) {
+		if length, ok := value.Get(); ok {
+			*target = m.Some(SizeView{Value: length.value, Relative: length.relative})
 			declared = true
 		}
 	}
-	weight := func(target **float32, value opt[float32]) {
-		if value.set {
-			copied := value.v
-			*target, declared = &copied, true
+	weight := func(target *m.Maybe[float32], value m.Maybe[float32]) {
+		if value.Present() {
+			*target, declared = value, true
 		}
 	}
-	count := func(target **int, value opt[int]) {
-		if value.set {
-			copied := value.v
-			*target, declared = &copied, true
+	count := func(target *m.Maybe[int], value m.Maybe[int]) {
+		if value.Present() {
+			*target, declared = value, true
 		}
 	}
 	named := func(target *string, set bool, value string) {
@@ -355,12 +355,12 @@ func declaredViewOf(element *Element) (DeclaredView, bool) {
 	count(&view.Columns, element.columns)
 	count(&view.Rows, element.rows)
 
-	named(&view.Align, element.align.set, alignmentName(element.align.v))
+	named(&view.Align, element.align.Present(), alignmentName(element.align.Or(AlignStart)))
 	named(&view.Layout, element.layout != LayoutNone, layoutName(element.layout))
-	named(&view.ChildrenArrangement, element.childrenArrangement.set,
-		arrangementName(element.childrenArrangement.v))
-	named(&view.ChildrenAlignment, element.childrenAlignment.set,
-		alignmentName(element.childrenAlignment.v))
+	named(&view.ChildrenArrangement, element.childrenArrangement.Present(),
+		arrangementName(element.childrenArrangement.Or(ArrangeStart)))
+	named(&view.ChildrenAlignment, element.childrenAlignment.Present(),
+		alignmentName(element.childrenAlignment.Or(AlignStart)))
 
 	flag(&view.Wrap, element.wrap)
 	flag(&view.IgnoreLayout, element.ignoreLayout)

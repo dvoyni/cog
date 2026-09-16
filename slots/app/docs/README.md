@@ -8,15 +8,15 @@ hold and tick numbering behind them.
 app is a **Slot**: it ships its own declarations and implementation, and works
 only once a `MainLoop` **Adapter** fills its required `MainLoopPort`. The MainLoop is
 the platform main loop, and `gogpu` provides it on the desktop and the web. The
-vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
+[ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 app declares no Resources: the viewport, its resource and its commands belong to
 `gfx`.
 
 ## Packages
 
 app has the declaration-root shape of
-[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
 
 - **`slots/app`** is the root, and holds declarations only: the events, the
   commands, `MainLoop` and `MainLoopPort`, `Loop` and `TimeAction`, `Config`, the
@@ -290,7 +290,7 @@ anything is armed.
   it.
 
 The description prose the agent reads is reproduced in full in
-[`docs/specs/mcp.md`](docs/specs/mcp.md), so it is reviewed as prompt text.
+[`specs/mcp.md`](specs/mcp.md), so it is reviewed as prompt text.
 
 ## Events
 

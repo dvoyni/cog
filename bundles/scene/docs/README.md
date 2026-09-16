@@ -12,11 +12,11 @@ publishes those decisions back as `Passes`.
 
 This README is the API. `bundles/scene/docs/specs/scene.md` is the design record — what each rule is
 for and what was rejected to get there — and
-[`.github/instructions/scene.instructions.md`](../../.github/instructions/scene.instructions.md)
+[`.github/instructions/scene.instructions.md`](../../../.github/instructions/scene.instructions.md)
 is the traps a caller hits that neither the compiler nor a plausible-looking zero
 value warns about.
 
-[`docs/specs/mesh.md`](docs/specs/mesh.md) specifies **what a mesh stores** — the
+[`specs/mesh.md`](specs/mesh.md) specifies **what a mesh stores** — the
 vertex layout and the precision of each attribute, which attributes a mesh may
 omit, how wide its indices are, how morph deltas are packed, and what the bundled
 PBR requires of a mesh handed to it. Its **Index width** section is implemented:
@@ -44,13 +44,13 @@ deltas over the vendored corpus against 385.8 KiB, because 92% of the float
 store was exactly zero.
 
 scene is a **Bundle**: it requires no Adapter and contributes none. The
-vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
+[ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
 scene has the declaration-root shape of
-[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
 
 - **`bundles/scene`** is the root, and holds declarations only: the `*OpQueue`
   and `*Lookup` resources with `LookupAccess`, the recording vocabulary
@@ -187,7 +187,9 @@ call.** Scene copies into its frame arena before returning, so a hot-loop caller
 reuses one backing array. A draw's `Material` is copied too — its tag entries
 and each entry's parameters, though not the `m.Blob` bytes a parameter carries,
 which are static by contract — so a material may be rebuilt or rewritten the
-moment the call returns.
+moment the call returns. A material named by many draws is copied once a frame:
+the copy is found again by content, so rewriting a shared material between two
+draws still reaches the later one.
 
 ### Transform
 
@@ -364,7 +366,7 @@ control.
 A nil `Material` is the bundled PBR, so every draw literal that omits the field
 is untouched. The hand-written one-entry case is `scene.Material{{Descr: descr}}`.
 Materials are keyed by content, so two equal ones batch together however each
-was built, and each recording call copies the one it names.
+was built, and each frame copies each distinct one once.
 A duplicate tag in one `Material` is reported and the first entry wins.
 
 An entry is a whole `gfx.MaterialDescr` rather than a shader, because pipeline

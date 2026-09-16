@@ -198,7 +198,7 @@ func discardErrors(error) {}
 // own resolves to the bundled variant its mesh needs; these tests use the static
 // one, which is what a buffer-built mesh takes.
 func resolve(table *materialTable, report func(error), material scene.Material, tag tagID) (materialEntry, bool) {
-	return table.entry(table.intern(report, material, types.VariantStatic), tag)
+	return table.entry(table.intern(report, material, 0, types.VariantStatic), tag)
 }
 
 // A caller-supplied gfx.MaterialDescr has no id of its own, so materials intern

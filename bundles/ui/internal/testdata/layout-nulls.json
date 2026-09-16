@@ -1,0 +1,265 @@
+{}
+{
+  "elements": [
+    {
+      "index": 0,
+      "parent": -1,
+      "id": "grid",
+      "active": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 300,
+        "height": 200
+      },
+      "contentRect": {
+        "x": 6,
+        "y": 4,
+        "width": 288,
+        "height": 192
+      },
+      "clipRect": {
+        "x": 0,
+        "y": 0,
+        "width": 400,
+        "height": 300
+      },
+      "layer": 10,
+      "drawOrder": 0,
+      "state": [
+        "hovered"
+      ],
+      "declared": {
+        "width": {
+          "value": 300
+        },
+        "minWidth": {
+          "value": 10
+        },
+        "height": {
+          "value": 200
+        },
+        "maxHeight": {
+          "value": 0.9,
+          "relative": true
+        },
+        "paddingLeft": {
+          "value": 6
+        },
+        "paddingRight": {
+          "value": 6
+        },
+        "paddingTop": {
+          "value": 4
+        },
+        "paddingBottom": {
+          "value": 4
+        },
+        "layout": "grid",
+        "gap": {
+          "value": 0.1,
+          "relative": true
+        },
+        "columns": 2,
+        "rows": 2
+      }
+    },
+    {
+      "index": 1,
+      "parent": 0,
+      "id": "pinned",
+      "active": true,
+      "rect": {
+        "x": 6,
+        "y": 80.6,
+        "width": 10,
+        "height": 10
+      },
+      "contentRect": {
+        "x": 6,
+        "y": 80.6,
+        "width": 10,
+        "height": 10
+      },
+      "clipRect": {
+        "x": 0,
+        "y": 0,
+        "width": 300,
+        "height": 200
+      },
+      "layer": 12,
+      "drawOrder": 5,
+      "state": [
+        "hovered"
+      ],
+      "visual": "*ui.snapshotTestVisual",
+      "declared": {
+        "left": {
+          "value": 5
+        },
+        "right": {
+          "value": 0.1,
+          "relative": true
+        },
+        "top": {
+          "value": 3
+        },
+        "bottom": {
+          "value": 0.2,
+          "relative": true
+        },
+        "pivotLeft": {
+          "value": 1
+        },
+        "pivotTop": {
+          "value": 0.5,
+          "relative": true
+        },
+        "stretch": 2,
+        "shrink": 0,
+        "align": "end",
+        "layer": 2
+      }
+    },
+    {
+      "index": 2,
+      "parent": 0,
+      "id": "flex",
+      "active": true,
+      "rect": {
+        "x": 168.40001,
+        "y": 4,
+        "width": 2,
+        "height": 0
+      },
+      "contentRect": {
+        "x": 168.40001,
+        "y": 4,
+        "width": 2,
+        "height": 0
+      },
+      "clipRect": {
+        "x": 0,
+        "y": 0,
+        "width": 300,
+        "height": 200
+      },
+      "layer": 10,
+      "drawOrder": 1,
+      "state": [
+        "hovered"
+      ],
+      "declared": {
+        "layout": "horizontal",
+        "gap": {
+          "value": 2
+        },
+        "wrap": true,
+        "childrenArrangement": "spaceBetween"
+      }
+    },
+    {
+      "index": 3,
+      "parent": 2,
+      "active": true,
+      "rect": {
+        "x": 168.40001,
+        "y": 4,
+        "width": 0,
+        "height": 0
+      },
+      "contentRect": {
+        "x": 168.40001,
+        "y": 4,
+        "width": 0,
+        "height": 0
+      },
+      "clipRect": {
+        "x": 168.40001,
+        "y": 4,
+        "width": 2,
+        "height": 0
+      },
+      "layer": 10,
+      "drawOrder": 2,
+      "state": [
+        "hovered"
+      ],
+      "declared": {
+        "width": {
+          "value": 0
+        },
+        "shrink": 1
+      }
+    },
+    {
+      "index": 4,
+      "parent": 2,
+      "active": true,
+      "rect": {
+        "x": 170.40001,
+        "y": 4,
+        "width": 0,
+        "height": 0
+      },
+      "contentRect": {
+        "x": 170.40001,
+        "y": 4,
+        "width": 0,
+        "height": 0
+      },
+      "clipRect": {
+        "x": 168.40001,
+        "y": 4,
+        "width": 2,
+        "height": 0
+      },
+      "layer": 10,
+      "drawOrder": 3,
+      "state": [
+        "hovered"
+      ],
+      "declared": {
+        "height": {
+          "value": 0.5,
+          "relative": true
+        }
+      }
+    },
+    {
+      "index": 5,
+      "parent": 0,
+      "active": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "contentRect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "clipRect": {
+        "x": 0,
+        "y": 0,
+        "width": 300,
+        "height": 200
+      },
+      "layer": 10,
+      "drawOrder": 4,
+      "state": [
+        "hovered"
+      ],
+      "declared": {
+        "height": {
+          "value": 0
+        },
+        "ignoreLayout": true
+      }
+    }
+  ],
+  "count": 6
+}

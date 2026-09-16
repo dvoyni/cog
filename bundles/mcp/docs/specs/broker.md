@@ -366,6 +366,14 @@ for `mcp.TextValued` implementors — see
 That walk is the only place the broker inspects a provider's types for anything
 beyond their shape, and it learns a string set, never a meaning.
 
+The same walk renders each `m.Maybe[T]` it reaches as `jsonschema.ForType` would
+render `*T`: `T`'s schema, with its own overrides applied, and `null` admitted
+([#312](https://github.com/dvoyni/cog/issues/312)). A Maybe crosses JSON as the
+nullable value a pointer did, and inference left alone would read its
+unexported fields as an empty object. An instantiation is recognised by `m`'s
+package and the generic name, since `reflect` has no generic origin to compare,
+and `T` is `Get`'s first result.
+
 **Annotations** map as
 [mcp §Annotations](mcp.md#annotations) states:
 `ReadOnlyHint = readOnly`, `DestructiveHint` always false, `OpenWorldHint`
@@ -678,7 +686,7 @@ paths of [#359](https://github.com/dvoyni/cog/issues/359).
 **`bundles/mcp/internal/render.go`**
 
 - Capability → tool: name, schemas via `jsonschema.ForType`, the `TextValued`
-  walk building `ForOptions.TypeSchemas`, annotation mapping.
+  and `m.Maybe` walk building `ForOptions.TypeSchemas`, annotation mapping.
 - Validation: deferred `err`, duplicate name within a plugin, non-`object`
   schema root. All to `kernel.ReportError`.
 
@@ -705,6 +713,10 @@ paths of [#359](https://github.com/dvoyni/cog/issues/359).
 - A dispatch that returns `ErrSchedulerStopped{}` renders as an `Unavailable`,
   not as a `ReportError`.
 - The `TextValued` walk finds a type nested inside a slice of structs.
+- An `m.Maybe` renders as the pointer it replaced, a Maybe of a struct and a
+  slice of Maybes included.
+- The whole tool list of a full cog composition, read over a client, matches
+  `kernel/archtest/testdata/toolschemas.json`.
 
 **`CONTEXT.md`** — nothing. Every term this package touches is already defined;
 *transport*, *port* and *session* are HTTP and MCP vocabulary, not cog's, and a

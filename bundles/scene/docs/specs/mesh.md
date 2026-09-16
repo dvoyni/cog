@@ -1435,7 +1435,7 @@ scene compiled against them.
   argument, the address formula. What stays in `scene.md` is the plumbing that is
   untouched: one buffer per model, the per-node weight slots, the CPU-side blend.
   **Two specs describing one layout is how they drift.**
-- `bundles/scene/README.md` gains the pointer to this document.
+- `bundles/scene/docs/README.md` gains the pointer to this document.
 - `CONTEXT.md` gains **Vertex layout**, **Named layout**, **Authoring vertex**,
   **Storage vertex**, **Sparse target** and **Live span**. The glossary defines
   `Variant`, `Supply` and `Define` and defines no mesh or morph vocabulary at
@@ -1491,6 +1491,10 @@ repeated here so a reader of the spec alone does not re-propose them.
 - **The two silent-failure defects the prototype hit and could not explain** —
   [#184](https://github.com/dvoyni/cog/issues/184) and
   [#185](https://github.com/dvoyni/cog/issues/185). Defects rather than design
-  questions. The second is the honest answer to *"what would `gfx` have had to
-  check"*: **nothing** — the layout and the shader agreed, the formats were legal,
-  and the data still did not arrive.
+  questions. The second, once reproduced, was not a vertex defect at all: the
+  attribute arrived intact, and the prototype's decode multiplied it by a
+  module-scope `const vec2` that naga's SPIR-V backend handed the shader as zero
+  — [#181](https://github.com/dvoyni/cog/issues/181) in a second shader, built in
+  a module that had not inherited cog's naga override. It is not an answer to
+  *"what would `gfx` have had to check"*; a build-time SPIR-V check of the
+  generated shader would have caught it.

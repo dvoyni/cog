@@ -42,8 +42,10 @@ this document says otherwise. [Required work](#required-work) is the checklist
 it was built from and now records what is still open. The zero-allocation
 prototype that produced the numbers below lived on the throwaway branch
 `proto/ecs-zero-alloc` and is gone; the benchmarks that replaced it are in the
-package. **The sections Hooks changed describe a design not yet built**, and
-[Required work](#required-work) lists those items as open under *Since Hooks*.
+package. The sections Hooks changed are built as well: [Required
+work](#required-work) records them under *Since Hooks*, and the package's README
+carries their measured cost under [*What a Hook
+costs*](../README.md#what-a-hook-costs).
 
 **Two things here are younger than the rest, and each is marked where it
 appears.** The first: the Component rule was relaxed after the package shipped.
@@ -476,7 +478,7 @@ read, write and stored cases tested again one List further in:
 | `Set` through a value retained past the `All()` that yielded it | **panics**, naming the run |
 | `Set` through the caller's own copy, after the value entered a Store | **panics** — `ListOf` copies, but `Set` shares |
 | `Set` through a `Set[C].Of` copy | **panics**, naming `Ref` |
-| `Set` on an array a second Component holds while its first owner still holds it | **panics**, naming both — *since Hooks, not yet built* |
+| `Set` on an array a second Component holds while its first owner still holds it | **panics**, naming both |
 | `Set` through a Hooks value, at any time | **panics**, naming `Hooks[T, K]` — see [`hooks.md`](hooks.md#a-value-that-holds-a-list) |
 | any of the above, on a List inside another List's elements | the same as the flat case — the stamp walks nested Lists |
 | registering a `Hooks[C, HookAddedChanged]` or `Hooks[C, HookAll]` reader of a Component with implicit padding, between fields, at the tail, or inside a nested struct or array | **panics** at registration, naming the Component, the field the gap follows or "at the end", the byte count, and the `_ [N]byte` field that fixes it — see [`hooks.md`](hooks.md#changed-is-a-difference-in-bytes) |
@@ -944,7 +946,7 @@ when the app asks, through [`ecs.ShrinkCmd`](#giving-memory-back).
 
 ## Giving memory back
 
-*Since Hooks, not yet built.* **Nothing in the ECS gives memory back on its own,
+*Since Hooks.* **Nothing in the ECS gives memory back on its own,
 and the app gives it back with one Command**
 ([A Hooks reader that falls behind: what bounds its
 log](https://github.com/dvoyni/cog/issues/381)). A Store keeps its high-water
@@ -1299,6 +1301,19 @@ Cost agrees. Per-Entity dispatch is 2.40 ns per entity per system against a
 0.59 ns loop step, where per-Query dispatch is 87–142 ns **once per System per
 tick** — 0.09% of a 30 Hz frame at 200 Systems.
 
+### A System is not re-entrant
+
+A System's arguments, its event or request cell and `ToExecute`'s single `Resp`
+are allocated once, at registration, which is what makes a System cost nothing a
+tick. Two invocations of one System therefore must never overlap.
+
+The kernel enforces it rather than the caller promising it: every System's
+`Lock` declares `ResourceAccess.Exclusive()`, which excludes a System against
+itself alone and leaves it concurrent with every other System. A System that
+writes a Store would be serialised against itself by that write in any case; the
+declaration is what covers a **read-only** System, whose lock set holds no write
+for the scheduler to serialise on.
+
 ### What a signature may contain
 
 This is contract, not convention. A System takes any number of:
@@ -1605,7 +1620,8 @@ never reaches an appended entry. So `UpdateFor` is how a Component is added;
 **On a Store a Changed Hook watches, a `*T` Query field, `Ref` and `UpdateFor`
 copy the rows they hand out**, for the compare at the writer's run end. That is a
 cost the reader puts on every writer of `T`, and it is priced in
-[`hooks.md`](hooks.md#what-it-costs). *Since Hooks, not yet built.*
+[`hooks.md`](hooks.md#what-it-costs), and measured in the README's [*What a Hook
+costs*](../README.md#what-a-hook-costs). *Since Hooks.*
 
 **`Set[T].MarkChanged(e)` forces a Changed record for `e`** at the writer's run end, for a
 write the compare cannot see, such as a `Set` on a List nested in another List's
@@ -2282,8 +2298,22 @@ because they are what a future proposal has to beat
    affordance or [#260](https://github.com/dvoyni/cog/issues/260) pulled into
    v1.
 
-   Adding it later therefore needs, in order: **deferred structural change
-   first** (a hard prerequisite, not an optimisation); a **splittability rule
+   **Correction, measured.** This entry said deferred structural change was a
+   hard prerequisite. It is not, and the mistake was to treat the affordance and
+   the split as competing for the same loop. A loop that may be split is a loop
+   that **cannot restructure at all**: the splittability rule below disqualifies
+   `Set[T]`, `Spawn[S]`, `WriteableEntities` and `Remove[T]` outright, and what
+   is left holds `read{*Entities}`, which every route to a Store declares — so no
+   other System can move a row under it either. The 500/1000 measurement stands
+   and is what rules out splitting a loop that restructures; it says nothing
+   about one that cannot. [#260](https://github.com/dvoyni/cog/issues/260) is
+   needed only for a split loop that also wants structural change, which the rule
+   already refuses. Measured end to end on a real engine in
+   [#278](https://github.com/dvoyni/cog/issues/278), which returned a go: at 5 000
+   Entities and ~104 ns an Entity, 4.74x against serial, allocating what the
+   serial frame allocates.
+
+   Adding it later therefore needs, in order: a **splittability rule
    over the System signature**, which cog is unusually well placed to derive at
    registration because the signature *already is* the out-of-band declaration
    every other engine makes the author write by hand (`Query` including pointer
@@ -2437,8 +2467,8 @@ connotes a slice-like value, which a Query is not.
 The checklist the implementation was built from, in dependency order. It is kept
 because it is the record of what was promised; everything in the three code
 sections below exists in the package, the documentation items are done, and what
-remains open is called out at the end of the verification list and in the
-*Since Hooks* block after it.
+remains open is called out at the end of the verification list. The *Since
+Hooks* block after it is built too.
 
 **`ecs` package — the core**
 
@@ -2492,7 +2522,7 @@ remains open is called out at the end of the verification list and in the
 
 **Documentation**
 
-- `bundles/ecs/README.md`, which is the package's API per the repo's own layout rule.
+- `bundles/ecs/docs/README.md`, which is the package's API per the repo's own layout rule.
 - `README.md`'s package list gains `ecs` when the package exists.
 - `.github/instructions/kernel.instructions.md`'s "Keep `Lock` Straight-Line"
   becomes "Keep `Lock` Deterministic, Total and Final" — full replacement text
@@ -2523,7 +2553,7 @@ remains open is called out at the end of the verification list and in the
   read is a data race, and validation mode catches the ones a run executes while
   the detector would catch the ones that interleave.
 
-**Since Hooks — open, except what is marked built**
+**Since Hooks — built**
 
 The items that change what this document specifies for code naming no Hooks.
 Everything else Hooks need is in [`hooks.md` § Required work](hooks.md#required-work)
@@ -2538,7 +2568,8 @@ and in the implementation tickets under
   ([#388](https://github.com/dvoyni/cog/issues/388)).
 - The shared-array mark registered at the Changed compare, released at the
   removing act ([#268](https://github.com/dvoyni/cog/issues/268),
-  [#386](https://github.com/dvoyni/cog/issues/386)).
+  [#386](https://github.com/dvoyni/cog/issues/386)). **Built**
+  ([#393](https://github.com/dvoyni/cog/issues/393)).
 - ~~`ShrinkCmd` and the generation floor
   ([#381](https://github.com/dvoyni/cog/issues/381)).~~ **Built**: Stores,
   Entities with the generation floor, and a Query's walk

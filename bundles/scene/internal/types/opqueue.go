@@ -237,6 +237,10 @@ type DrawRecord struct {
 	// PBR. Every debug shape leaves it nil, which is what makes a draw literal
 	// that omits the field untouched by the field existing.
 	Material Material
+	// MaterialKey is Material's content key when the recording took it, so the
+	// flush interns without fingerprinting again. Zero means nothing keyed it:
+	// the bundled PBR, a debug shape, a model's own material.
+	MaterialKey MaterialKey
 	// Mesh is the mesh the draw renders, for a draw that names one. The debug
 	// vocabulary leaves it zero and names a shape instead: scene's unit meshes
 	// are baked lazily on first use, so their refs cannot be known at record

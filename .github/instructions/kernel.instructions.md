@@ -6,7 +6,7 @@ applyTo: "**/*.go"
 
 # Kernel Usage
 
-`kernel/README.md` documents the API. These are the rules for using it correctly.
+`kernel/docs/README.md` documents the API. These are the rules for using it correctly.
 Follow them in new and changed code without expanding a focused task into
 unrelated cleanup. Which package a declaration belongs in — the root,
 `internal/types`, `internal/` or the constructor package — and what a root may
@@ -102,6 +102,21 @@ func handler() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 
 Per-invocation state belongs in the `Execute`/`Observe` body. State that must
 persist across invocations belongs in a resource.
+
+**That rule still stands.** `ResourceAccess.Exclusive()` exists for the one case
+it cannot serve — a hot path that may not allocate per invocation — and it does
+not make closure state ordinary. A handler that declares it never runs
+concurrently with itself, because the key is the handler's own identity type, so
+it excludes that handler and nothing else. A handler that write-locks whatever it
+mutates already has this for free: two invocations conflict on that write.
+
+Reach for a resource first. A resource is visible — to `Describe`, to the
+contention report, to `Dump` and to an agent reading the architecture — and
+closure state is visible to none of them. `Exclusive()` makes closure state
+*safe*; it does not make it *legible*. The ECS takes it because a `systemCall`'s
+arguments, its event cell and `ToExecute`'s single `Resp` are allocated once at
+registration precisely so a System costs nothing a tick, and a resource would
+undo that.
 
 ### Keep `Lock` Deterministic and Total
 

@@ -8,10 +8,10 @@ publishes interaction results, and consumes the declaration.
 ## Packages
 
 ui is a **Bundle**: it requires no Adapter and contributes one `McpProvider`.
-The vocabulary is in [`CONTEXT.md`](../../CONTEXT.md) and the decision in
-[ADR 0002](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
+The vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
+[ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 ui has the declaration-root shape of
-[`architecture.instructions.md`](../../.github/instructions/architecture.instructions.md).
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
 
 - **`bundles/ui`** is the root, and holds declarations only: the `*Frame` and
   `*Interactions` resources, `Interaction` and its kinds, the whole Element and
@@ -151,7 +151,7 @@ wants them, and the built-in visuals pass the slot alone. That is deliberate: a
 parameter named at a sprite draw call is **per sprite** and becomes a storage
 array, so a per-scope value belongs on the material itself or on
 `canvas.OpQueue.SetLayerMaterial`, where it is per batch by construction. See
-`bundles/canvas/README.md` for the frequency rules.
+`bundles/canvas/docs/README.md` for the frequency rules.
 
 ### Tint and key colour
 
@@ -556,5 +556,5 @@ that this capability exists for is one an agent checks rather than assumes.
 There is no overlay, and no capability writes content into the game's frame;
 `ui.Overlay` is the layout container and nothing else. The full contract, and
 the argument for the overlay's absence, is in
-[docs/specs/mcp.md](docs/specs/mcp.md), and the capability that document
+[specs/mcp.md](specs/mcp.md), and the capability that document
 specifies is implemented.

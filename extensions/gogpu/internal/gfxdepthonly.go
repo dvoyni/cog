@@ -3,6 +3,7 @@ package internal
 import (
 	"strings"
 
+	cgogpu "github.com/dvoyni/cog/extensions/gogpu"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
@@ -97,4 +98,36 @@ func (b *gfxBackend) takeRefusal() error {
 	err := b.refusal
 	b.refusal = nil
 	return err
+}
+
+// gfxbRefusedGroup is one bind group a shader could not have built. The shader
+// is held by pointer because that is the only identity the render thread has
+// for one, and freeing a shader clears its entries.
+type gfxbRefusedGroup struct {
+	shader *gfxbShader
+	group  int
+}
+
+// noteRefusedBindGroup returns the report for a refused bind group the first
+// time that shader and group are seen, and nothing afterwards. It is separate
+// from flushBinds because the latch is the part with a decision in it, and
+// driving flushBinds itself would take a render pass encoder it never reaches.
+func (b *gfxBackend) noteRefusedBindGroup(shader *gfxbShader, group int) error {
+	key := gfxbRefusedGroup{shader: shader, group: group}
+	if _, seen := b.refusedBindGroups[key]; seen {
+		return nil
+	}
+	b.refusedBindGroups[key] = struct{}{}
+	return cgogpu.ErrBindGroupRefused{Shader: shader.label, Group: group}
+}
+
+// forgetRefusedBindGroups drops a freed shader's latched sites, so the map does
+// not hold a released shader alive and a shader recompiled after an edit is
+// heard from again.
+func (b *gfxBackend) forgetRefusedBindGroups(shader *gfxbShader) {
+	for key := range b.refusedBindGroups {
+		if key.shader == shader {
+			delete(b.refusedBindGroups, key)
+		}
+	}
 }

@@ -60,6 +60,10 @@ _Avoid_: all three.
 Code that is not a plugin and defines none, importing only other Libraries and the kernel.
 _Avoid_: Package, which is every Go directory; util, common
 
+**Asset**:
+Data a plugin loads and holds: named by a path under storage or supplied directly as bytes, decoded, installed into a backend, kept under a key the plugin chooses, and released explicitly. A texture, a model, a sprite, a font face and a sound clip are Assets.
+_Avoid_: Resource, which is engine-coordinated shared state; gfx already spells this meaning "resource" in names that predate the term
+
 **Registrar**:
 A plugin-scoped capability used only during Registration to declare owned contracts and initial resources, and the Adapters the plugin requires, collects or contributes.
 
@@ -166,7 +170,7 @@ A run of bytes treated as static: once the value holding it is built, nothing wr
 _Avoid_: Buffer, which is a GPU object; bytes, for a run that is still being written
 
 **Maybe**:
-A value that may be absent, held inline with no pointer. Its zero value is absent, so an optional field nobody wrote reads as unset, and a present zero stays distinct from it. It is what an optional field of a storable value uses where a pointer would make the value mutable indirection.
+A value that may be absent, held inline with no pointer. Its zero value is absent, so an optional field nobody wrote reads as unset, and a present zero stays distinct from it. It is what an optional field uses where a pointer would make the value mutable indirection, whether the value is stored, compared or rendered for an agent. It crosses JSON as the nullable value it holds, and an agent's tool schema reads it the same way.
 _Avoid_: Option, nullable, pointer-to-mean-optional
 
 **Tag**:
@@ -307,7 +311,7 @@ The name of what a Pass is for, and the key that selects which of a Scene materi
 _Avoid_: Queue, light mode
 
 **Scene material**:
-The set of graphics materials one recorded thing offers, one per Pass tag. A Pass whose tag it has no entry for does not draw that thing. A recording call copies it — its entries and each entry's parameters, but not their Blobs — so the caller may change it the moment the call returns; two equal ones batch together however each was built, because a Scene material is keyed by content.
+The set of graphics materials one recorded thing offers, one per Pass tag. A Pass whose tag it has no entry for does not draw that thing. A recording call copies it — its entries and each entry's parameters, but not their Blobs, and once per frame per distinct content — so the caller may change it the moment the call returns; two equal ones batch together however each was built, because a Scene material is keyed by content.
 _Avoid_: Shader
 
 **Transform**:

@@ -212,6 +212,16 @@ Most resources are pointers mutated in place; `Set` is for the few reassigned
 wholesale. A handler never declares a lock on behalf of a command it dispatches;
 `ResourceAccess.Uses` does that for it.
 
+`ResourceAccess.Exclusive()` declares that the handler never runs concurrently
+with **itself**: a second invocation queues behind the first rather than joining
+it. It excludes that handler and nothing else, because the key is the handler's
+own identity type and no two handlers share one, so it costs no parallelism
+against anybody else. A handler that write-locks whatever it mutates already has
+this for free — two invocations conflict on that write — so `Exclusive` is for
+state no lock reaches, which means mutable state in the factory closure. That is
+forbidden by default; read "The Factory Closure Is Shared" before reaching for
+it. The key names no resource, so it never appears among `Writes`.
+
 `Registrar.Dependency[T]()` returns a resource's value **during registration**,
 from `Register`. It is for a value a plugin registers against rather than runs
 with, such as the ECS authority a Component's Store enrols in. `T` must be owned
@@ -232,7 +242,7 @@ values derived from one. This is a contract, not a checked invariant.
 A **Port** is a declared identity type naming an interface a plugin needs filled;
 an **Adapter** is a declared identity type naming one way of filling it, under
 which a plugin provides a plain value that the engine binds during composition.
-The full rules are in [`docs/specs/ports.md`](docs/specs/ports.md).
+The full rules are in [`specs/ports.md`](specs/ports.md).
 
 Both are declared like commands, as defined types built from a kernel shape:
 
@@ -344,6 +354,11 @@ been folded in — and `Uses` holds the direct edges that explain them. This is
 the one fact in a description that no source file states, because a handler
 deliberately never names the resources behind a command it dispatches.
 
+Both also carry `SelfExclusive`, reporting that the handler declared
+`Exclusive`. It sits apart from `Writes` because it names no resource, and the
+conflict report below pairs distinct handlers only, so this flag is the one
+place a handler's exclusion against itself shows.
+
 ### The conflict report
 
 `ArchitectureDescription.Contention` is the pairwise reading of those same lock
@@ -453,7 +468,7 @@ Go's reflection cannot see aliases, which is why the rule is needed at all:
 - Handlers: `Lock`, `Execute`, `Observe`, `Command`, `Subscription`,
   `CommandConstraint`, `SubscriptionConstraint`.
 - Resources: `ResourceAccess`, `ResourceAccess.GetRead`,
-  `ResourceAccess.GetWrite`, `ResourceAccess.Uses`, `Read[T]`,
-  `Write[T]`.
+  `ResourceAccess.GetWrite`, `ResourceAccess.Uses`,
+  `ResourceAccess.Exclusive`, `Read[T]`, `Write[T]`.
 - Contracts: `PluginName`, `Plugin`, `PluginStarter`, `PluginStopper`,
   `PluginHost`, `ErrorHandler`.

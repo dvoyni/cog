@@ -6,7 +6,7 @@ applyTo: "**/*.go"
 
 # Scene Recording
 
-`bundles/scene/README.md` documents the API and `bundles/scene/docs/specs/scene.md` records why each rule is
+`bundles/scene/docs/README.md` documents the API and `bundles/scene/docs/specs/scene.md` records why each rule is
 what it is. These are the traps a caller hits that neither the compiler nor a
 plausible-looking zero value warns about. Follow them in new and changed code
 without expanding a focused task into unrelated cleanup.
