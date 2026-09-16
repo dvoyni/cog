@@ -277,7 +277,7 @@ func TestTheIndexAndThePairPrimitiveAgreeOverAScatterOfShapes(t *testing.T) {
 	}
 }
 
-func TestAnIndexListsNothingItCannotPlaceOrCannotTestYet(t *testing.T) {
+func TestAnIndexListsNothingItCannotPlaceOrCannotCache(t *testing.T) {
 	idx := NewStaticIndex(2)
 	idx.Insert(testEntity(0), NewCircleShape(1, m.Vec2d{}), m.Vec2d{X: 5}, 0, nil)
 
@@ -286,10 +286,12 @@ func TestAnIndexListsNothingItCannotPlaceOrCannotTestYet(t *testing.T) {
 	idx.Insert(testEntity(1), NewCircleShape(1, m.Vec2d{}), m.Vec2d{X: math.Inf(1)}, 0, nil)
 	idx.Insert(testEntity(2), NewCircleShape(1, m.Vec2d{}), m.Vec2d{Y: math.NaN()}, 0, nil)
 
-	// A kind with no world cache yet would otherwise sit at the origin and be
-	// tested by every query that passes it.
-	quad := Shape{Kind: ShapeQuad, CollisionBits: CollisionBitsAll, CollidesWith: CollisionBitsAll}
-	idx.Insert(testEntity(3), quad, m.Vec2d{}, 0, nil)
+	// A Shape with no world cache at all would otherwise sit at the origin and
+	// be tested by every query that passes it. Every kind but one carries its
+	// vertex count in its kind, so the one left is a ShapePoly whose Polygon
+	// Component never arrived: Insert is handed no vertices and caches nothing.
+	poly := Shape{Kind: ShapePoly, CollisionBits: CollisionBitsAll, CollidesWith: CollisionBitsAll}
+	idx.Insert(testEntity(3), poly, m.Vec2d{}, 0, nil)
 
 	all := idx.ProbeAll(nil, m.Vec2d{X: -20, Y: -20}, m.Vec2d{X: 20, Y: 20}, 0,
 		CollisionBitsAll, CollisionBitsAll, ecs.NoEntity)

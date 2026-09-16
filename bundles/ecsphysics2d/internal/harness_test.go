@@ -74,6 +74,24 @@ type (
 		Marker ecsphysics2d.Static
 		Shape  ecsphysics2d.Shape
 	}
+	// polygonBody and polygonStatic are the two sets a Shape of kind ShapePoly
+	// is spawned from: the Polygon Component rides on the same Entity, which is
+	// where Index reads the vertices from. An inline kind may be spawned from
+	// them too, carrying the zero Polygon, which is harmless.
+	polygonBody struct {
+		Place    ecsphysics2d.Position
+		Velocity ecsphysics2d.Velocity
+		Force    ecsphysics2d.Force
+		Body     ecsphysics2d.Dynamic
+		Shape    ecsphysics2d.Shape
+		Polygon  ecsphysics2d.Polygon
+	}
+	polygonStatic struct {
+		Place   ecsphysics2d.Position
+		Marker  ecsphysics2d.Static
+		Shape   ecsphysics2d.Shape
+		Polygon ecsphysics2d.Polygon
+	}
 )
 
 // bodyKind names which of the sets a spawn carries.
@@ -87,6 +105,8 @@ const (
 	kindShapedBody
 	kindShapedStatic
 	kindPlacelessStatic
+	kindPolygonBody
+	kindPolygonStatic
 )
 
 // spawnCmd creates Bodies. It is a System registered as a command, which is how
@@ -100,6 +120,7 @@ type spawnRequest struct {
 	Velocity ecsphysics2d.Velocity
 	Body     ecsphysics2d.Dynamic
 	Shape    ecsphysics2d.Shape
+	Polygon  ecsphysics2d.Polygon
 }
 
 type spawnResponse struct{ First ecs.Entity }
@@ -114,6 +135,8 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 		shaped *ecs.Spawn[shapedBody],
 		shapedStatics *ecs.Spawn[shapedStatic],
 		placeless *ecs.Spawn[placelessStatic],
+		polygons *ecs.Spawn[polygonBody],
+		polygonStatics *ecs.Spawn[polygonStatic],
 		answer *ecs.Resp[spawnResponse],
 	) {
 		var first ecs.Entity
@@ -137,6 +160,15 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 				e = shapedStatics.New(shapedStatic{Place: request.Place, Shape: request.Shape})
 			case kindPlacelessStatic:
 				e = placeless.New(placelessStatic{Shape: request.Shape})
+			case kindPolygonBody:
+				e = polygons.New(polygonBody{
+					Place: request.Place, Velocity: request.Velocity,
+					Body: request.Body, Shape: request.Shape, Polygon: request.Polygon,
+				})
+			case kindPolygonStatic:
+				e = polygonStatics.New(polygonStatic{
+					Place: request.Place, Shape: request.Shape, Polygon: request.Polygon,
+				})
 			}
 			if i == 0 {
 				first = e

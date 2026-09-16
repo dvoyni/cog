@@ -550,7 +550,7 @@ func collide(t testing.TB, a Shape, atA m.Vec2d, b Shape, atB m.Vec2d) (touching
 	transformB := NewTransformRigid(atB, 0)
 	usedA, _ := cacheWorldAt(a, transformA, nil, worldA[:])
 	usedB, _ := cacheWorldAt(b, transformB, nil, worldB[:])
-	return collideWorld(a, transformA, worldA[:usedA], b, transformB, worldB[:usedB], m.Vec2d{})
+	return collideWorld(a, transformA, worldA[:usedA], b, transformB, worldB[:usedB], m.Vec2d{}, 0)
 }
 
 // detectCoincident runs one tick of detection over two circles sharing a centre

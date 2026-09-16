@@ -22,6 +22,22 @@ type ErrBadMoment = types.ErrBadMoment
 // negative one would amplify velocity every tick until it was an infinity.
 type ErrBadDamping = types.ErrBadDamping
 
+// The three ways NewPolygonShape refuses an outline, each a sentinel a caller
+// compares with errors.Is so that the failure path allocates nothing. A refused
+// outline comes back as a point, which collides with almost nothing and cannot
+// be mistaken for what was asked for.
+//
+// ErrTooFewVertices is an outline of fewer than three vertices.
+// ErrDegenerateOutline is one with no area — coincident or collinear vertices —
+// which is what makes Chipmunk's CentroidForPoly divide by zero.
+// ErrConcaveOutline is one the hull changed, which is the concave case and also
+// the redundant one.
+var (
+	ErrTooFewVertices    = types.ErrTooFewVertices
+	ErrDegenerateOutline = types.ErrDegenerateOutline
+	ErrConcaveOutline    = types.ErrConcaveOutline
+)
+
 // ErrInvalidConfig is returned by the plugin's Register when the config value
 // handed to it is neither nil nor an ecsphysics2d.Config.
 type ErrInvalidConfig struct {

@@ -224,6 +224,11 @@ func (c *Contacts) sensorHit(
 	made.Restitution = sensor.shape.Restitution * other.shape.Restitution
 	made.Points[0] = ContactPoint{Point: hit.Point, Depth: depth, id: pointID(0, 0)}
 
-	c.carry(&made)
+	// The previous tick's entry for this unordered pair, looked up here because
+	// carry takes the slot rather than finding it: the discrete walk reads the
+	// cached simplex out of the same lookup, and a swept Sensor has no simplex
+	// to read but wants the same phase and ignore bookkeeping.
+	at, wasTouching := c.prevLookup.find(made.A, made.B)
+	c.carry(&made, at, wasTouching)
 	c.append(made, contactAux{slotA: sensorSlot, slotB: otherSlot})
 }
