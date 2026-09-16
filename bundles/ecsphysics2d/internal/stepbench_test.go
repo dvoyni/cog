@@ -23,6 +23,11 @@ import (
 // count, so the claim is that the empty engine, N=256 and N=1024 all cost the
 // same. cp allocates 164 objects and 12.5 KB a step at N=256 and 656 and 49.8
 // KB at N=1024; the port allocates none of its own at either size.
+//
+// The measured scene's Shapes carry a Friction and a Restitution, so the
+// material is inside the claim rather than beside it, and the scene is refused
+// outright below if it finds no Contacts at all — a measurement over an empty
+// Contact list would pass without measuring either Detect or Solve.
 func TestTheStepSitsOnTheEnginesAllocationLine(t *testing.T) {
 	const ticks = 10_000
 
@@ -117,7 +122,7 @@ func populate(t testing.TB, h *harness, n int) {
 			Kind:  kindShapedBody,
 			Place: ecsphysics2d.Position{Current: gridAt(i)},
 			Body:  dynamic(t, 2, 8, 15, 0.3),
-			Shape: circle(0.4),
+			Shape: measured(0.4),
 		})
 	}
 	h.spawn(t, spawnRequest{
@@ -129,9 +134,21 @@ func populate(t testing.TB, h *harness, n int) {
 		h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
 			Place: ecsphysics2d.Position{Current: gridAt(i).Add(m.Vec2d{X: 0.75})},
-			Shape: circle(0.4),
+			Shape: measured(0.4),
 		})
 	}
+}
+
+// measured is the Shape the measured scene is made of: a circle carrying a
+// material, so that the Coulomb clamp and the bounce are inside the measurement
+// rather than beside it. Neither changes what the scene settles to — the pairs
+// are pressed straight along their normals, so the tangent stays at zero and a
+// settled pair has no approach left to give back — which is what keeps the
+// Contacts the measurement needs from going away.
+func measured(radius float64) ecsphysics2d.Shape {
+	shape := circle(radius)
+	shape.Friction, shape.Restitution = 0.7, 0.3
+	return shape
 }
 
 // gridAt is where the i-th Shape goes: a 1.7 m grid, the spacing the index's

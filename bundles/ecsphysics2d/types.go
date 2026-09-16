@@ -72,6 +72,11 @@ type Static = types.Static
 //
 // Its accessors are Offset, A and B; NewCircleShape and NewSegmentShape in
 // utils.go build one.
+//
+// Friction and Restitution are plain fields on it, both defaulting to zero as
+// cp's do, and a pair's are their plain products. Neither is validated and
+// neither constructor takes one, so a material is written onto the Shape after
+// it is built.
 type Shape = types.Shape
 
 // ShapeKind is which of the five kinds a Shape is, and it carries the vertex
