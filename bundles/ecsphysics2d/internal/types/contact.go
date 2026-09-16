@@ -316,6 +316,11 @@ type Contacts struct {
 	lookup     pairTable
 	prevLookup pairTable
 
+	// probes is the swept Sensor scratch: the Hits along one Sensor's path,
+	// refilled once a Sensor and kept across ticks, so a steady scene allocates
+	// nothing for the Probe half of detection either.
+	probes []Hit
+
 	// maxSlot is one past the largest BodyIndex slot detection saw, which sizes
 	// the solver's slot table without Solve reading an index of its own.
 	maxSlot int32

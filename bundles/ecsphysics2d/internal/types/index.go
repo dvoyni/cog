@@ -68,6 +68,15 @@ type entry struct {
 	left, bottom              int32
 	right, top                int32
 	live                      bool
+	// swept says this entry is a moving circle Sensor, which Detect Probes
+	// along its path instead of testing where the tick left it. Deciding it
+	// once at insert is what keeps the detection walk's own test a field read.
+	swept bool
+	// previousCentre is where a swept Sensor's circle stood when the tick
+	// began, which is the start of the Probe Detect sweeps it along; the end is
+	// the world cache's own centre. InsertMoving writes it, and it means
+	// nothing unless swept is set.
+	previousCentre m.Vec2d
 }
 
 // link is one listing of an entry in one hash bucket, in a flat arena rather
@@ -148,7 +157,10 @@ func (idx *index) Insert(entity ecs.Entity, shape Shape, at m.Vec2d, angle float
 	e.entity = entity
 	e.shape = shape
 	e.transform = NewTransformRigid(at, angle)
-	e.live = true
+	// A Shape inserted without a path did not move: InsertMoving is the one
+	// thing that sweeps one, and a recycled slot must not inherit the last
+	// Shape's answer.
+	e.live, e.swept = true, false
 
 	used, box := cacheWorldAt(shape, e.transform, verts, idx.slab[e.world:e.world+e.worldCap])
 	e.worldLen = int32(used)

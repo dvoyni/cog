@@ -26,14 +26,20 @@ import (
 func TestTheStepSitsOnTheEnginesAllocationLine(t *testing.T) {
 	const ticks = 10_000
 
-	measure := func(n int) (float64, int) {
+	measure := func(n int) (float64, int, int) {
 		h := newHarnessWith(t, nil, uint32(2*max(n, 1)))
 		populate(t, h, n)
 		h.game.push = m.Vec2d{X: 10}
 		// Warm every pool the first ticks fill, so what is measured is the
 		// steady state and not the first tick.
 		h.frames(t, 100)
-		touching := len(h.contacts(t))
+		list := h.contacts(t)
+		touching, swept := len(list), 0
+		for _, entry := range list {
+			if entry.Sensor {
+				swept++
+			}
+		}
 		mallocs := allocationsDuring(func() {
 			for range ticks {
 				if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
@@ -41,18 +47,25 @@ func TestTheStepSitsOnTheEnginesAllocationLine(t *testing.T) {
 				}
 			}
 		})
-		return float64(mallocs) / ticks, touching
+		return float64(mallocs) / ticks, touching, swept
 	}
 
-	empty, _ := measure(0)
-	small, smallTouching := measure(256)
-	large, largeTouching := measure(1024)
-	t.Logf("objects a step: %.3f with no Bodies, %.3f at N=256 over %d Contacts, "+
-		"%.3f at N=1024 over %d Contacts — the first is the kernel's own dispatch over "+
+	empty, _, _ := measure(0)
+	small, smallTouching, smallSwept := measure(256)
+	large, largeTouching, largeSwept := measure(1024)
+	t.Logf("objects a step: %.3f with no Bodies, %.3f at N=256 over %d Contacts (%d Sensor Hits), "+
+		"%.3f at N=1024 over %d Contacts (%d Sensor Hits) — the first is the kernel's own dispatch over "+
 		"the ten subscriptions this engine composes",
-		empty, small, smallTouching, large, largeTouching)
+		empty, small, smallTouching, smallSwept, large, largeTouching, largeSwept)
 	if smallTouching == 0 || largeTouching == 0 {
 		t.Fatal("the measured scene has no Contacts at all, so it measures neither Detect nor Solve")
+	}
+	// Two earlier rounds measured a scene with nothing in it without noticing,
+	// which is why the emptiness guards are assertions rather than a comment.
+	// The swept Sensors have one of their own: the Probe half of detection is
+	// not on the line unless the scene is Probing something.
+	if smallSwept == 0 || largeSwept == 0 {
+		t.Fatal("the measured scene has no Sensor Hits at all, so it does not measure the Probe half of Detect")
 	}
 
 	if small > empty+0.05 {
@@ -130,6 +143,31 @@ func populate(t testing.TB, h *harness, n int) {
 			Kind:  kindShapedStatic,
 			Place: ecsphysics2d.Position{Current: gridAt(i).Add(m.Vec2d{X: 0.75})},
 			Shape: circle(0.4),
+		})
+	}
+	// A sixteenth of the scene again as swept Sensors, so the Probe half of
+	// Detect is inside the measurement rather than walking past an index with
+	// no Sensor in it.
+	//
+	// Each starts on a Static's own centre and drifts along +X at a tenth of a
+	// metre a second, which keeps it inside the band of Statics for the whole
+	// run and touching one for sixteen seventeenths of it: the Probe is short,
+	// which is the shape a real projectile's is between two ticks, and it
+	// starts inside something often enough that the T = 0 arm is measured too.
+	// They are stacked a couple of centimetres apart in Y within eight columns,
+	// so they Probe each other as well and the pair each of them finds twice is
+	// resolved every tick.
+	//
+	// A mass of a tonne of tonnes is what keeps the game's Force off them
+	// without a Component set of their own: at a tenth of a newton-second per
+	// tonne the whole run adds under two millimetres a second.
+	for i := range n / 16 {
+		h.spawn(t, spawnRequest{
+			Kind:     kindShapedBody,
+			Place:    ecsphysics2d.Position{Current: gridAt(i % 8).Add(m.Vec2d{X: 0.75, Y: 0.02 * float64(i/8)})},
+			Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 0.1}},
+			Body:     dynamic(t, 1e6, 1e6, 0, 0),
+			Shape:    sensorCircle(0.4),
 		})
 	}
 }

@@ -26,6 +26,11 @@ func Collide(contacts *Contacts, bodies *BodyIndex, statics *StaticIndex, persis
 	moving, still := &bodies.index, &statics.index
 	contacts.maxSlot = int32(len(moving.entries))
 
+	// The swept Sensors first, so that one Sensor's entries sit together and in
+	// order of T at the front of the list, ahead of every solid pair — which is
+	// the whole of the ordering the specification asks of the current run.
+	contacts.sweepSensors(bodies, statics)
+
 	for slot := range moving.entries {
 		first := &moving.entries[slot]
 		if !first.live || first.worldLen == 0 {
@@ -103,6 +108,17 @@ func (c *Contacts) pair(
 	first *entry, worldFirst []m.Vec2d, firstSlot int32,
 	second *entry, worldSecond []m.Vec2d, secondSlot int32,
 ) {
+	// A swept Sensor's entries come from its Probe, whose Hits are a superset
+	// of what a discrete test at the tick's end would find, so the discrete
+	// pass leaves every pair it is party to alone. Writing the pair twice is
+	// also what the pair table forbids: it is inserted at most once a tick and
+	// has no replacement path. Only a Body index entry is ever swept, so a
+	// Static party answers false without the caller saying which index it came
+	// from.
+	if first.swept || second.swept {
+		return
+	}
+
 	// cp's QueryReject, less the two clauses the layout answers: a Shape never
 	// shares an Entity with another Shape, and the Joint exclusion arrives with
 	// Joints.
