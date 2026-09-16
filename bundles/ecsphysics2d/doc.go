@@ -52,9 +52,22 @@
 // And a Body that moves: Position, Velocity, Force, Dynamic and the Static Tag,
 // with the four Systems the step is chained on app.UpdateEvent in cp's own
 // order — IntegrateOnUpdate, IndexOnUpdate, DetectOnUpdate, SolveOnUpdate.
-// Index and Detect are empty until there are indices and Contacts; Integrate
-// moves every Body with a Velocity, and Solve integrates every Dynamic body's
-// velocity from its Force.
+// Detect is empty until there are Contacts; Integrate moves every Body with a
+// Velocity, Index keeps the two indices current, and Solve integrates every
+// Dynamic body's velocity from its Force.
+//
+// The query surface, in two layers, both exported because a replacement solver
+// lives in another package and is built from exactly these. The pair primitives
+// ProbeShape, Penetration and ClosestPoint are free functions over values. The
+// world queries Probe, ProbeAll and Overlap are methods on StaticIndex and
+// BodyIndex, two Resources whose locks stay apart. Nothing on either layer
+// takes a duration, a velocity, a func value or an interface, and nothing on
+// either allocates.
+//
+// The Shape value itself, in its circle and segment kinds. The Polygon kinds,
+// the hulling constructor and the GJK path four of the six pair kinds go
+// through arrive with the Polygon pipeline, and until then a query against one
+// reports no Hit.
 //
 // # A Force written this tick moves the Body next tick
 //

@@ -5,6 +5,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -108,6 +109,142 @@ func TestTheDynamicForwarderPassesItsArgumentsThrough(t *testing.T) {
 	var refusal ErrBadMass
 	if _, err := NewDynamic(0, 8, 0, 0); !errors.As(err, &refusal) {
 		t.Errorf("NewDynamic with a mass of 0 returned %v, want an ErrBadMass", err)
+	}
+}
+
+func TestTheShapeAndQueryForwardersPassTheirArgumentsThrough(t *testing.T) {
+	circle := NewCircleShape(1, m.Vec2d{X: 2, Y: 3})
+	if circle.Kind != ShapeCircle || circle.Radius != 1 || circle.Offset() != (m.Vec2d{X: 2, Y: 3}) {
+		t.Fatalf("NewCircleShape = %+v", circle)
+	}
+	segment := NewSegmentShape(m.Vec2d{X: -1}, m.Vec2d{X: 1}, 0.5)
+	if segment.Kind != ShapeSegment || segment.A() != (m.Vec2d{X: -1}) || segment.B() != (m.Vec2d{X: 1}) {
+		t.Fatalf("NewSegmentShape = %+v", segment)
+	}
+	if circle.CollisionBits != CollisionBitsAll || CollisionBitsNone != 0 {
+		t.Fatalf("the collision constants came through as %#x and %#x", circle.CollisionBits, CollisionBitsNone)
+	}
+
+	// from, to, radius, then the Shape and where it is: the Hit is 0.4 of the
+	// way along and its normal faces back down the Probe.
+	hit, ok := ProbeShape(m.Vec2d{}, m.Vec2d{X: 10}, 0, NewCircleShape(1, m.Vec2d{}), m.Vec2d{X: 5}, 0, nil)
+	if !ok || !nearD(hit.T, 0.4) || !vecNear(hit.Normal, m.Vec2d{X: -1}) {
+		t.Fatalf("ProbeShape = %+v, %v, want a Hit at T 0.4 facing (-1, 0)", hit, ok)
+	}
+
+	normal, depth, ok := Penetration(
+		NewCircleShape(1, m.Vec2d{}), m.Vec2d{}, 0, nil,
+		NewCircleShape(1, m.Vec2d{}), m.Vec2d{X: 1.5}, 0, nil)
+	if !ok || !vecNear(normal, m.Vec2d{X: 1}) || !nearD(depth, 0.5) {
+		t.Fatalf("Penetration = %v, %v, %v, want (1, 0), 0.5 and true", normal, depth, ok)
+	}
+
+	if got, want := ClosestPoint(m.Vec2d{X: 5}, NewCircleShape(1, m.Vec2d{}), m.Vec2d{}, 0, nil), (m.Vec2d{X: 1}); !vecNear(got, want) {
+		t.Fatalf("ClosestPoint = %v, want %v", got, want)
+	}
+}
+
+func TestTheIndexForwardersBuildAnIndexTheQueriesReach(t *testing.T) {
+	static := NewStaticIndex(2)
+	body := NewBodyIndex(0) // 0 takes the documented default of 2 m
+
+	wall := ecs.Entity(1)
+	mover := ecs.Entity(2)
+	static.Insert(wall, NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0), m.Vec2d{X: 5}, 0, nil)
+	body.Insert(mover, NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 3}, 0, nil)
+
+	// Which index a query asks is the caller's choice, and the two are apart.
+	hit, ok := static.Probe(m.Vec2d{}, m.Vec2d{X: 10}, 0, CollisionBitsAll, CollisionBitsAll, ecs.NoEntity)
+	if !ok || hit.Entity != wall {
+		t.Fatalf("the static index Probed %+v, %v, want the wall", hit, ok)
+	}
+	hit, ok = body.Probe(m.Vec2d{}, m.Vec2d{X: 10}, 0, CollisionBitsAll, CollisionBitsAll, ecs.NoEntity)
+	if !ok || hit.Entity != mover {
+		t.Fatalf("the Body index Probed %+v, %v, want the mover", hit, ok)
+	}
+
+	hits := static.ProbeAll(nil, m.Vec2d{}, m.Vec2d{X: 10}, 0, CollisionBitsAll, CollisionBitsAll, ecs.NoEntity)
+	if len(hits) != 1 || hits[0].Entity != wall {
+		t.Fatalf("ProbeAll = %+v, want the wall alone", hits)
+	}
+
+	touching := body.Overlap(nil, NewCircleShape(1, m.Vec2d{}), m.Vec2d{X: 3.2}, 0, nil,
+		CollisionBitsAll, CollisionBitsAll, ecs.NoEntity)
+	if len(touching) != 1 || touching[0] != mover {
+		t.Fatalf("Overlap = %v, want the mover alone", touching)
+	}
+	if excluded := body.Overlap(nil, NewCircleShape(1, m.Vec2d{}), m.Vec2d{X: 3.2}, 0, nil,
+		CollisionBitsAll, CollisionBitsAll, mover); len(excluded) != 0 {
+		t.Fatalf("Overlap with the mover excluded = %v, want nothing", excluded)
+	}
+
+	body.Clear()
+	if _, ok := body.Probe(m.Vec2d{}, m.Vec2d{X: 10}, 0, CollisionBitsAll, CollisionBitsAll, ecs.NoEntity); ok {
+		t.Error("a cleared index still Probed something")
+	}
+	static.Remove(wall)
+	if _, ok := static.Probe(m.Vec2d{}, m.Vec2d{X: 10}, 0, CollisionBitsAll, CollisionBitsAll, ecs.NoEntity); ok {
+		t.Error("a removed Entity was still Probed")
+	}
+}
+
+// placement stands in for the Position Component while the Bodies that move are
+// built alongside this. It is here only so the drain below compiles.
+type placement struct {
+	Current m.Vec2d
+	Angle   float64
+}
+
+// drainStaticsIntoTheIndex is the whole of what the Index System does to the
+// static index: one loop over what happened to Shape since it last ran. Statics
+// are world-cached here, at insert, and never again.
+//
+// It is compiled rather than run, because running it needs an Engine, and it
+// names a stand-in for Position because Position is the Bodies ticket's
+// Component. When the two meet, this loop moves into Index with placement
+// replaced by Position and nothing else changed.
+func drainStaticsIntoTheIndex(
+	idx *StaticIndex,
+	hooks *ecs.Hooks[Shape, ecs.HookAddedRemoved],
+	places *ecs.Get[placement],
+) {
+	for entity, hook := range hooks.All() {
+		if hook.IsRemoved() {
+			idx.Remove(entity)
+		}
+		if hook.IsAdded() {
+			if place, ok := places.Of(entity); ok {
+				idx.Insert(entity, hook.Value, place.Current, place.Angle, nil)
+			}
+		}
+	}
+}
+
+func TestTheStaticDrainAndTheBodyRebuildAreTheTwoShapesIndexTakes(t *testing.T) {
+	// The drain above is compiled, not run; what is asserted here is the half
+	// of it the index owns, over the same calls in the same order.
+	static := NewStaticIndex(2)
+	body := NewBodyIndex(2)
+	wall, mover := ecs.Entity(1), ecs.Entity(2)
+
+	// A Shape added: inserted and world-cached once.
+	static.Insert(wall, NewCircleShape(1, m.Vec2d{}), m.Vec2d{X: 5}, 0, nil)
+	// A Shape removed: taken out.
+	static.Insert(ecs.Entity(3), NewCircleShape(1, m.Vec2d{}), m.Vec2d{X: 8}, 0, nil)
+	static.Remove(ecs.Entity(3))
+	if got := static.Len(); got != 1 {
+		t.Fatalf("the static index holds %d after an add and a remove, want 1", got)
+	}
+
+	// The Bodies are rebuilt whole, every tick, from wherever they are now.
+	for tick := range 3 {
+		body.Clear()
+		body.Insert(mover, NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: float64(tick)}, 0, nil)
+	}
+	hits := body.Overlap(nil, NewCircleShape(0.1, m.Vec2d{}), m.Vec2d{X: 2}, 0, nil,
+		CollisionBitsAll, CollisionBitsAll, ecs.NoEntity)
+	if len(hits) != 1 || hits[0] != mover {
+		t.Fatalf("after three rebuilds the mover is at %v, want it where the last tick put it", hits)
 	}
 }
 
