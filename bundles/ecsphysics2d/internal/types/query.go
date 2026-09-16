@@ -645,7 +645,40 @@ func collideCircleSegment(
 	segA, segB, segNormal := world[0], world[1], world[2]
 
 	segDelta := segB.Sub(segA)
-	closestT := clamp01(segDelta.Dot(centre.Sub(segA)) / segDelta.LengthSquared())
+	// The fourth site of defect 6, which the porting index's three do not name:
+	// cp divides by the segment's own squared length unguarded, so a segment
+	// whose two endpoints are the same point — which NewSegmentShape builds
+	// without complaint — is clamp01(0/0), a NaN closestT, and a Contact whose
+	// Normal, Points and Depth are every one of them NaN. It is not the
+	// coincident-centre case: any circle at all against a zero-length segment
+	// gets it. The guard is C's, the one the port already restores at the three
+	// sites the index does name, and it is the same constant.
+	//
+	// Guarded, a zero-length segment is the circle it geometrically is: the
+	// quotient is 0, closest is segA, and the pair is a circle-against-circle
+	// test at the segment's own rounding radius. No other answer changes, so the
+	// cp corpus reads exactly as before.
+	//
+	// The spelling is C's own `if (d > 0)` shape, which the port already uses on
+	// the circle point query's divide, rather than the max(x, CPFLOAT_MIN) it
+	// uses on the two denominators in probePoly and ClosestT. It is the same
+	// guard, and the reason for the difference is measured rather than assumed.
+	//
+	// math.Max carries Go's NaN and signed-zero semantics and compiles to a call:
+	// spelled that way this arm ran about 13% slower than the unguarded one —
+	// 59.9 ns against 52.8 ns a pair — with BenchmarkCollideCircles beside it
+	// flat at 26 ns, which is what says the difference is the guard and not the
+	// run order. Spelled as the branch below it is free: 46.09 ns against the
+	// unguarded 46.51 ns over two further interleaved rounds. All of it is
+	// BenchmarkCollideCircleSegment, A and B built as separate binaries and run
+	// alternately, on an AMD Ryzen 9 7950X3D under go1.27.1 windows/amd64 at
+	// GOMAXPROCS=32 — a whole-frame benchmark here swings about ±10% by run
+	// order, and these absolute numbers moved between rounds while the ratio
+	// within a round did not.
+	var closestT float64
+	if lengthSquared := segDelta.LengthSquared(); lengthSquared > 0 {
+		closestT = clamp01(segDelta.Dot(centre.Sub(segA)) / lengthSquared)
+	}
 	closest := segA.Add(segDelta.MulS(closestT))
 
 	minimum := radius + segment.Radius
@@ -684,10 +717,17 @@ func collideCircleSegment(
 	return touching{}, false
 }
 
-// closestPointOnSegment is cp's Vector.ClosestPointOnSegment.
+// closestPointOnSegment is cp's Vector.ClosestPointOnSegment, with defect 6's
+// guard on the same divide: a zero-length segment — or a Polygon edge whose two
+// vertices coincide — is 0/0 in cp and a NaN surface point out of every point
+// query that reaches it. Guarded, the answer is the one endpoint, which is the
+// whole of what such a segment is.
 func closestPointOnSegment(p, a, b m.Vec2d) m.Vec2d {
 	delta := a.Sub(b)
-	t := clamp01(delta.Dot(p.Sub(b)) / delta.LengthSquared())
+	var t float64
+	if lengthSquared := delta.LengthSquared(); lengthSquared > 0 {
+		t = clamp01(delta.Dot(p.Sub(b)) / lengthSquared)
+	}
 	return b.Add(delta.MulS(t))
 }
 
