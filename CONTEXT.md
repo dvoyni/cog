@@ -521,8 +521,16 @@ A Shape that reports contacts but is never pushed and pushes nothing. Its collis
 _Avoid_: Trigger (a Hook word), ghost, phantom
 
 **Contact**:
-Two Entities whose Shapes touch, found once a tick for each pair their collision groups let collide, whatever kinds of Body they are. A contact is marked as begun this tick, continuing from the last, or ended, so the tick two Entities stop touching is reported too. When one party is a Sensor, the contact also says how far along the Sensor's movement the touch happened. A game may drop a contact for the tick, or ignore the pair until the two come apart; a dropped contact that was continuing is reported as ended.
+Two Entities whose Shapes touch, found once a tick for each pair their collision groups let collide, whatever kinds of Body they are. It holds the at most two Contact points where they meet, and one surface normal for both. A contact is marked as begun this tick, continuing from the last, or ended, so the tick two Entities stop touching is reported too. When one party is a Sensor, the contact also says how far along the Sensor's movement the touch happened. A game may drop a contact for the tick, or ignore the pair until the two come apart; a dropped contact that was continuing is reported as ended.
 _Avoid_: Collision, collision event, manifold, touch
+
+**Contact point**:
+One of the at most two places a Contact touches, each with where it is, how deep the two Shapes overlap there, and the Impulse the physics delivered there. Two is enough because two convex Shapes meet along a line at most, and its two ends say everything its middle would. A Contact involving a round Shape has one.
+_Avoid_: Manifold (that is the pair of them together, and the game never needs a word for it), contact patch, feature, collision point
+
+**Impulse**:
+How much push a Contact delivered at one of its points: a Force acting for an instant rather than over a second, which is what a game asks when it wants to know how hard something was hit.
+_Avoid_: Force (it is not one), momentum transfer, hit strength
 
 **Contact force**:
 The force contact response writes into a Dynamic body and integration consumes, rebuilt from nothing every tick rather than summed across ticks.
