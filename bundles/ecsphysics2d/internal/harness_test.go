@@ -50,9 +50,33 @@ type (
 		Place  ecsphysics2d.Position
 		Marker ecsphysics2d.Static
 	}
+	// shapedBody is a Dynamic Body carrying a Shape, which is the whole of what
+	// puts it in BodyIndex: Index rebuilds that index from these every tick.
+	shapedBody struct {
+		Place    ecsphysics2d.Position
+		Velocity ecsphysics2d.Velocity
+		Force    ecsphysics2d.Force
+		Body     ecsphysics2d.Dynamic
+		Shape    ecsphysics2d.Shape
+	}
+	// shapedStatic is static geometry as an app spawns it: the Shape, the
+	// Position and the Tag in one Spawn, so the Shape hook and the Position
+	// reach Index together.
+	shapedStatic struct {
+		Place  ecsphysics2d.Position
+		Marker ecsphysics2d.Static
+		Shape  ecsphysics2d.Shape
+	}
+	// placelessStatic is the trap the drain states rather than checks: a Static
+	// with a Shape and no Position at all. Its hook is drained once, finds no
+	// Position, and the Entity never enters the index.
+	placelessStatic struct {
+		Marker ecsphysics2d.Static
+		Shape  ecsphysics2d.Shape
+	}
 )
 
-// bodyKind names which of the four sets a spawn carries.
+// bodyKind names which of the sets a spawn carries.
 type bodyKind int
 
 const (
@@ -60,6 +84,9 @@ const (
 	kindForceless
 	kindKinematic
 	kindStatic
+	kindShapedBody
+	kindShapedStatic
+	kindPlacelessStatic
 )
 
 // spawnCmd creates Bodies. It is a System registered as a command, which is how
@@ -72,6 +99,7 @@ type spawnRequest struct {
 	Place    ecsphysics2d.Position
 	Velocity ecsphysics2d.Velocity
 	Body     ecsphysics2d.Dynamic
+	Shape    ecsphysics2d.Shape
 }
 
 type spawnResponse struct{ First ecs.Entity }
@@ -83,6 +111,9 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 		forceless *ecs.Spawn[forcelessBody],
 		kinematics *ecs.Spawn[kinematicBody],
 		statics *ecs.Spawn[staticBody],
+		shaped *ecs.Spawn[shapedBody],
+		shapedStatics *ecs.Spawn[shapedStatic],
+		placeless *ecs.Spawn[placelessStatic],
 		answer *ecs.Resp[spawnResponse],
 	) {
 		var first ecs.Entity
@@ -97,6 +128,15 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 				e = kinematics.New(kinematicBody{Place: request.Place, Velocity: request.Velocity})
 			case kindStatic:
 				e = statics.New(staticBody{Place: request.Place})
+			case kindShapedBody:
+				e = shaped.New(shapedBody{
+					Place: request.Place, Velocity: request.Velocity,
+					Body: request.Body, Shape: request.Shape,
+				})
+			case kindShapedStatic:
+				e = shapedStatics.New(shapedStatic{Place: request.Place, Shape: request.Shape})
+			case kindPlacelessStatic:
+				e = placeless.New(placelessStatic{Shape: request.Shape})
 			}
 			if i == 0 {
 				first = e
@@ -132,6 +172,94 @@ func readCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execut
 		reply.Velocity, _ = velocities.Of(request.Entity)
 		reply.Force, reply.HasForce = forces.Of(request.Entity)
 		answer.Set(reply)
+	})
+}
+
+// shapeCmd gives an Entity a Shape or takes one away after it has been spawned,
+// which is how a test reaches the Hook records the drain reads without spawning
+// a whole Entity for each.
+type shapeCmd kernel.Command[shapeRequest, shapeResponse]
+
+type shapeRequest struct {
+	Entity ecs.Entity
+	Shape  ecsphysics2d.Shape
+	// Drop takes the Shape away instead of writing one.
+	Drop bool
+}
+
+type shapeResponse struct{ Dropped bool }
+
+func shapeCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[shapeRequest, shapeResponse]) {
+	return ecs.ToExecute[shapeRequest, shapeResponse](registrar, func(
+		request shapeRequest,
+		shapes *ecs.Set[ecsphysics2d.Shape],
+		drop *ecs.Remove[ecsphysics2d.Shape],
+		answer *ecs.Resp[shapeResponse],
+	) {
+		if request.Drop {
+			answer.Set(shapeResponse{Dropped: drop.From(request.Entity)})
+			return
+		}
+		shapes.UpdateFor(request.Entity, request.Shape)
+		answer.Set(shapeResponse{})
+	})
+}
+
+// placeCmd writes one Entity's Position from outside a tick, which is what an
+// app does to teleport a Body — and, for a Static, what the spec says does not
+// move it, because a Static is world-cached at insert and never again.
+type placeCmd kernel.Command[placeRequest, placeResponse]
+
+type placeRequest struct {
+	Entity ecs.Entity
+	Place  ecsphysics2d.Position
+}
+
+type placeResponse struct{}
+
+func placeCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[placeRequest, placeResponse]) {
+	return ecs.ToExecute[placeRequest, placeResponse](registrar, func(
+		request placeRequest,
+		places *ecs.Set[ecsphysics2d.Position],
+		answer *ecs.Resp[placeResponse],
+	) {
+		places.UpdateFor(request.Entity, request.Place)
+		answer.Set(placeResponse{})
+	})
+}
+
+// indexCmd asks the two indices what they hold. It reaches them the way any
+// app System does — ecs.Read of each Resource, separately — which is also what
+// shows the two locks really are apart.
+type indexCmd kernel.Command[indexRequest, indexResponse]
+
+type indexRequest struct {
+	// At and Radius are the circle both indices are Overlapped with.
+	At     m.Vec2d
+	Radius float64
+}
+
+type indexResponse struct {
+	StaticLen, BodyLen int
+	Statics, Bodies    []ecs.Entity
+}
+
+func indexCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[indexRequest, indexResponse]) {
+	return ecs.ToExecute[indexRequest, indexResponse](registrar, func(
+		request indexRequest,
+		statics *ecs.Read[*ecsphysics2d.StaticIndex],
+		bodies *ecs.Read[*ecsphysics2d.BodyIndex],
+		answer *ecs.Resp[indexResponse],
+	) {
+		static, body := statics.Get(), bodies.Get()
+		probe := ecsphysics2d.NewCircleShape(request.Radius, m.Vec2d{})
+		all := ecsphysics2d.CollisionBitsAll
+		answer.Set(indexResponse{
+			StaticLen: static.Len(),
+			BodyLen:   body.Len(),
+			Statics:   static.Overlap(nil, probe, request.At, 0, nil, all, all, ecs.NoEntity),
+			Bodies:    body.Overlap(nil, probe, request.At, 0, nil, all, all, ecs.NoEntity),
+		})
 	})
 }
 
@@ -179,6 +307,9 @@ func (g *game) Dependencies() []kernel.PluginName {
 func (g *game) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[spawnCmd](spawnCmdImpl(registrar))
 	registrar.HandleCommand[readCmd](readCmdImpl(registrar))
+	registrar.HandleCommand[shapeCmd](shapeCmdImpl(registrar))
+	registrar.HandleCommand[placeCmd](placeCmdImpl(registrar))
+	registrar.HandleCommand[indexCmd](indexCmdImpl(registrar))
 	registrar.Subscribe[pushOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, func(q *ecs.Query[pushQuery]) {
 		for _, it := range q.All() {
 			it.Force.Force = it.Force.Force.Add(g.push)
@@ -296,6 +427,53 @@ func (h *harness) read(t testing.TB, e ecs.Entity) readResponse {
 		t.Fatalf("reading %v: %v", e, err)
 	}
 	return response
+}
+
+// setShape writes an Entity's Shape from outside a tick, and dropShape takes it
+// away. Each is one act the drain sees as a Hook record on its next run.
+func (h *harness) setShape(t testing.TB, e ecs.Entity, shape ecsphysics2d.Shape) {
+	t.Helper()
+	if _, err := h.kernel.ExecuteCommand[shapeCmd](shapeRequest{Entity: e, Shape: shape}); err != nil {
+		t.Fatalf("giving %v a Shape: %v", e, err)
+	}
+}
+
+func (h *harness) dropShape(t testing.TB, e ecs.Entity) {
+	t.Helper()
+	response, err := h.kernel.ExecuteCommand[shapeCmd](shapeRequest{Entity: e, Drop: true})
+	if err != nil {
+		t.Fatalf("taking %v's Shape away: %v", e, err)
+	}
+	if !response.Dropped {
+		t.Fatalf("%v had no Shape to take away", e)
+	}
+}
+
+// place writes an Entity's Position from outside a tick.
+func (h *harness) place(t testing.TB, e ecs.Entity, at m.Vec2d) {
+	t.Helper()
+	if _, err := h.kernel.ExecuteCommand[placeCmd](placeRequest{
+		Entity: e, Place: ecsphysics2d.Position{Current: at},
+	}); err != nil {
+		t.Fatalf("placing %v: %v", e, err)
+	}
+}
+
+// indexed is what both indices hold, and which Entities each finds under a
+// circle of that radius at that point.
+func (h *harness) indexed(t testing.TB, at m.Vec2d, radius float64) indexResponse {
+	t.Helper()
+	response, err := h.kernel.ExecuteCommand[indexCmd](indexRequest{At: at, Radius: radius})
+	if err != nil {
+		t.Fatalf("asking the indices: %v", err)
+	}
+	return response
+}
+
+// circle is the Shape every index test spawns with: the smallest thing that
+// carries a place and a radius, since Polygons are a later ticket.
+func circle(radius float64) ecsphysics2d.Shape {
+	return ecsphysics2d.NewCircleShape(radius, m.Vec2d{})
 }
 
 // dynamic is the Dynamic a test spawns with, built through the constructor so

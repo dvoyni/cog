@@ -47,14 +47,15 @@ const (
 	staticReserve = 4096
 )
 
-// Register resolves the settings, declares the five Components a Body is made
-// of, and chains the four Systems in cp's order.
+// Register resolves the settings, declares the six Components a Body is made
+// of, publishes the two indices, and chains the four Systems in cp's order.
 //
 // The chain is explicit rather than left to the locks. Integrate and Solve
-// would serialise on Velocity anyway, but Index and Detect are empty today and
-// so lock nothing that would order them, and the order is contract: an app
-// writes Before[IntegrateOnUpdate] and After[DetectOnUpdate] against it now, and
-// those orderings must keep meaning what they mean once the two are filled in.
+// would serialise on Velocity anyway, and Index reads the Position Integrate
+// writes, but Detect is empty today and so locks nothing that would order it,
+// and the order is contract: an app writes Before[IntegrateOnUpdate] and
+// After[DetectOnUpdate] against it now, and those orderings must keep meaning
+// what they mean once Detect is filled in.
 //
 // Every System is fed the step the same way, with ecs.Feed projecting
 // UpdateEvent.Dt, so none of them names where its step came from. Physics runs
@@ -72,6 +73,17 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	ecs.RegisterComponent[ecsphysics2d.Force](registrar, bodyReserve)
 	ecs.RegisterComponent[ecsphysics2d.Dynamic](registrar, bodyReserve)
 	ecs.RegisterComponent[ecsphysics2d.Static](registrar, staticReserve)
+	// Shape takes the larger of the two reserves, because it is the one
+	// Component both kinds of Body carry: its population is the statics plus
+	// the shaped movers, and static geometry is the bigger half of that in
+	// every scene anyone has measured. A reserve is a hint, not a cap.
+	ecs.RegisterComponent[ecsphysics2d.Shape](registrar, staticReserve)
+
+	// The two indices, at the cell sizes the settings resolved — two named types
+	// so that their locks stay apart: rebuilding the Bodies write-locks only the
+	// Bodies, and a line-of-sight Probe on the statics never waits for it.
+	registrar.InitResource(ecsphysics2d.NewStaticIndex(resolved.staticCellSize))
+	registrar.InitResource(ecsphysics2d.NewBodyIndex(resolved.bodyCellSize))
 
 	registrar.Subscribe[ecsphysics2d.IntegrateOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, integrate, step()))

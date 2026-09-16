@@ -216,3 +216,165 @@ func TestTheCouplingCheckHoldsOnThePluginsComponents(t *testing.T) {
 		t.Fatalf("a System declaring ecsphysics2d did not compose: %v", err)
 	}
 }
+
+// The two halves of Index, through a real Engine. The static index is
+// maintained incrementally from the Shape hooks — an added Shape inserted and
+// world-cached once, a removed one taken out — while the Body index is Cleared
+// and refilled whole every tick from wherever Integrate has just left the
+// Bodies.
+func TestTheStaticDrainAndTheBodyRebuildAreTheTwoShapesIndexTakes(t *testing.T) {
+	h := newHarness(t)
+	wall := h.spawn(t, spawnRequest{
+		Kind:  kindShapedStatic,
+		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 5}},
+		Shape: circle(1),
+	})
+	// 60 m/s at a 1/60 s step is one metre a tick, so where the mover should be
+	// after n ticks needs no arithmetic.
+	mover := h.spawn(t, spawnRequest{
+		Kind:     kindShapedBody,
+		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 60}},
+		Body:     dynamic(t, 2, 8, 0, 0),
+		Shape:    circle(0.5),
+	})
+
+	h.frame(t)
+
+	got := h.indexed(t, m.Vec2d{X: 1}, 0.1)
+	if got.StaticLen != 1 || got.BodyLen != 1 {
+		t.Fatalf("the indices hold %d statics and %d Bodies, want one of each", got.StaticLen, got.BodyLen)
+	}
+	if !slices.Equal(got.Bodies, []ecs.Entity{mover}) {
+		t.Errorf("the Body index has %v a metre along, want the mover Index put there after Integrate", got.Bodies)
+	}
+	if statics := h.indexed(t, m.Vec2d{X: 5}, 0.1).Statics; !slices.Equal(statics, []ecs.Entity{wall}) {
+		t.Errorf("the static index has %v where the wall was spawned, want the wall", statics)
+	}
+
+	// Rebuilt whole: the mover is where this tick put it and nowhere it has
+	// been, which a Clear-less index could not say.
+	h.frame(t)
+
+	if bodies := h.indexed(t, m.Vec2d{X: 2}, 0.1).Bodies; !slices.Equal(bodies, []ecs.Entity{mover}) {
+		t.Errorf("after the second tick the Body index has %v two metres along, want the mover", bodies)
+	}
+	stale := h.indexed(t, m.Vec2d{X: 1}, 0.1)
+	if len(stale.Bodies) != 0 {
+		t.Errorf("the Body index still has %v where the mover was last tick, want the rebuild to have dropped it",
+			stale.Bodies)
+	}
+	if stale.BodyLen != 1 {
+		t.Errorf("the Body index holds %d after a rebuild, want the one mover", stale.BodyLen)
+	}
+
+	// A Shape removed is drained out of the static index on the next tick.
+	h.dropShape(t, wall)
+	h.frame(t)
+
+	if got := h.indexed(t, m.Vec2d{X: 5}, 0.1); got.StaticLen != 0 || len(got.Statics) != 0 {
+		t.Errorf("the static index holds %d and found %v after the wall's Shape was removed, want it empty",
+			got.StaticLen, got.Statics)
+	}
+}
+
+// A Shape given to an Entity that already exists is an addition like any other:
+// the drain hears it on its next run and inserts it. This is the path a spawn
+// does not cover, and the one an app takes when it builds geometry in pieces.
+func TestAShapeGivenToALiveStaticIsDrainedInOnTheNextTick(t *testing.T) {
+	h := newHarness(t)
+	wall := h.spawn(t, spawnRequest{
+		Kind:  kindStatic,
+		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 3, Y: 4}},
+	})
+
+	h.frame(t)
+	if got := h.indexed(t, m.Vec2d{X: 3, Y: 4}, 0.1); got.StaticLen != 0 {
+		t.Fatalf("a Static with no Shape is in the index %d times, want none — shapeless Bodies are in neither",
+			got.StaticLen)
+	}
+
+	h.setShape(t, wall, circle(1))
+	h.frame(t)
+
+	if statics := h.indexed(t, m.Vec2d{X: 3, Y: 4}, 0.1).Statics; !slices.Equal(statics, []ecs.Entity{wall}) {
+		t.Errorf("the static index has %v where the wall is, want the wall the drain inserted", statics)
+	}
+}
+
+// Statics are world-cached at insert and never again, so writing a Static's
+// Position does not move it: the app replaces the Entity instead. Nothing here
+// is a check — the index simply never looks at the Position again.
+func TestAStaticIsWorldCachedAtInsertAndMovingItsPositionDoesNothing(t *testing.T) {
+	h := newHarness(t)
+	wall := h.spawn(t, spawnRequest{
+		Kind:  kindShapedStatic,
+		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 5}},
+		Shape: circle(1),
+	})
+
+	h.frame(t)
+	h.place(t, wall, m.Vec2d{X: 50})
+	h.frames(t, 3)
+
+	if statics := h.indexed(t, m.Vec2d{X: 5}, 0.1).Statics; !slices.Equal(statics, []ecs.Entity{wall}) {
+		t.Errorf("the static index has %v where the wall was inserted, want it still cached there", statics)
+	}
+	if moved := h.indexed(t, m.Vec2d{X: 50}, 0.1).Statics; len(moved) != 0 {
+		t.Errorf("the static index followed the wall to %v, want a Static cached once and never again", moved)
+	}
+}
+
+// Which index a Shape goes into is the Static Tag and nothing else. A Body's
+// Shape must never reach the static index: the static index is never Cleared,
+// so one inserted there would stay frozen at its spawn place for ever while the
+// Body itself moved on in BodyIndex.
+func TestAShapedBodyIsRebuiltIntoTheBodyIndexAndNeverTheStaticOne(t *testing.T) {
+	h := newHarness(t)
+	mover := h.spawn(t, spawnRequest{
+		Kind:     kindShapedBody,
+		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 60}},
+		Body:     dynamic(t, 2, 8, 0, 0),
+		Shape:    circle(0.5),
+	})
+
+	h.frames(t, 3)
+
+	got := h.indexed(t, m.Vec2d{X: 3}, 0.1)
+	if got.StaticLen != 0 {
+		t.Errorf("the static index holds %d after three ticks of one Body, want none", got.StaticLen)
+	}
+	if !slices.Equal(got.Bodies, []ecs.Entity{mover}) {
+		t.Errorf("the Body index has %v three metres along, want the mover", got.Bodies)
+	}
+	if ghost := h.indexed(t, m.Vec2d{}, 0.1).Statics; len(ghost) != 0 {
+		t.Errorf("the static index has %v at the mover's spawn place, want nothing left behind", ghost)
+	}
+}
+
+// The one trap in the drain, stated rather than checked: a Static enters the
+// index on its Shape hook and nowhere else, so a Shape that arrives before the
+// Position is skipped, and giving it a Position afterwards is no second chance.
+// Spawning the Shape, the Position and the Tag together is what avoids it.
+func TestAStaticWhoseShapeArrivesWithoutAPositionIsSkippedForGood(t *testing.T) {
+	h := newHarness(t)
+	ghost := h.spawn(t, spawnRequest{Kind: kindPlacelessStatic, Shape: circle(1)})
+
+	h.frame(t)
+	if got := h.indexed(t, m.Vec2d{}, 2); got.StaticLen != 0 {
+		t.Fatalf("a Shape with no Position was indexed %d times, want it skipped", got.StaticLen)
+	}
+
+	// The Position arrives late. The hook has already been drained, so nothing
+	// brings the Entity back.
+	h.place(t, ghost, m.Vec2d{})
+	h.frames(t, 3)
+
+	got := h.indexed(t, m.Vec2d{}, 2)
+	if got.StaticLen != 0 {
+		t.Errorf("a late Position put the Entity in the static index after all: %d held, %v found",
+			got.StaticLen, got.Statics)
+	}
+	if got.BodyLen != 0 {
+		t.Errorf("a Static reached the Body index: %d held", got.BodyLen)
+	}
+}
