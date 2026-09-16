@@ -97,6 +97,43 @@ const (
 	CollisionBitsNone = types.CollisionBitsNone
 )
 
+// Contact is one pair of touching Shapes as the tick found them: the two
+// parties, one normal, the material, and up to two points carrying where they
+// touch, how deeply and the Impulses the solver spent there.
+//
+// It is cp's arbiter as one 320-byte struct, scratch included. A is the Sensor;
+// otherwise the party that is not Static; otherwise the lower Entity, and the
+// Normal is B's surface facing A.
+//
+// The app reads A, B, Normal, each point's Point, Depth, NormalImpulse and
+// TangentImpulse, T, Count, Phase and Sensor; it writes Friction, Restitution,
+// SurfaceVelocity and the two marks, all of which last one tick. Before Solve
+// the Impulses are the previous tick's and after Solve they are this tick's,
+// which is what warm starting means.
+//
+// Its methods are Dropped, Ignored, Drop, Ignore, Other, NormalFor,
+// TotalImpulse and TotalKE.
+type Contact = types.Contact
+
+// ContactPoint is one point of a Contact, 120 bytes. Point is on B's surface
+// and Depth is how deeply the two overlap there; both are stored rather than
+// derived, because the entry holds an ecs.Entity and a method on it cannot
+// reach a position.
+type ContactPoint = types.ContactPoint
+
+// Phase is where a Contact is in its life, and is always on: Began, Continuing
+// or Ended.
+type Phase = types.Phase
+
+// The three phases. They are compared against what survived the previous tick's
+// filters, so a reacting System always sees a pair begin, continue and end in
+// that order however a filter changes its mind between ticks.
+const (
+	PhaseBegan      = types.PhaseBegan
+	PhaseContinuing = types.PhaseContinuing
+	PhaseEnded      = types.PhaseEnded
+)
+
 // Hit is what a Probe reports: the Entity it met, T as the fraction of the
 // Probe at which it met it, the Point on that Shape's surface and the unit
 // Normal there, facing the Prober.

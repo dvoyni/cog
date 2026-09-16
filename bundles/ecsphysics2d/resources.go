@@ -22,3 +22,19 @@ type StaticIndex = types.StaticIndex
 // caller's choice: line of sight against static geometry is a Probe on
 // StaticIndex, and "versus Bodies" is a Probe on this one.
 type BodyIndex = types.BodyIndex
+
+// Contacts is the tick's Contact list, one entry per touching pair, written
+// once a tick by Detect and always on. A filter System reaches it through
+// ecs.Write[*Contacts], ordered After[DetectOnUpdate]().Before[SolveOnUpdate](),
+// and a reacting System after Solve.
+//
+// All is the list and Len is its length; there is no per-Entity index, so
+// "what is this Body touching now" is a walk with the one-party view. Its
+// contents persist until the next Detect, so a System ordered before Integrate
+// legally reads the previous tick's.
+//
+// The buffer carries a third run past the end of All: pairs that have already
+// reported Ended and are carried unreported as Impulse carriers until the
+// persistence window closes, so a pair that flickers apart and back keeps its
+// Impulses. It is rebuilt each tick reusing its buffers and allocates nothing.
+type Contacts = types.Contacts

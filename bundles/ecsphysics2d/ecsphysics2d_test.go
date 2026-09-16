@@ -188,5 +188,54 @@ func TestTheIndexForwardersBuildAnIndexTheQueriesReach(t *testing.T) {
 	}
 }
 
+func TestTheContactAliasCarriesItsMethodsAndItsPhases(t *testing.T) {
+	// The root declares no Contact forwarder — an app never builds one, the
+	// plugin does — so what there is to check is that the alias brings the
+	// methods and the marks with it, which is the whole of a filter's and a
+	// reacting System's surface.
+	first, second := ecs.Entity(11), ecs.Entity(12)
+	var entry Contact
+	entry.A, entry.B = first, second
+	entry.Count = 1
+	entry.Normal = m.Vec2d{Y: 1}
+	entry.Points[0].NormalImpulse = 5
+
+	if got := entry.Other(first); got != second {
+		t.Fatalf("Other(A) = %v, want B", got)
+	}
+	if got := entry.NormalFor(second); !vecNear(got, m.Vec2d{Y: -1}) {
+		t.Fatalf("NormalFor(B) = %v, want the Normal negated", got)
+	}
+	if got := entry.TotalImpulse(); !vecNear(got, m.Vec2d{Y: 5}) {
+		t.Fatalf("TotalImpulse = %v, want the Normal scaled by the Impulse", got)
+	}
+	// PreStep's scratch is unexported, so what the root can reach is the guard:
+	// an entry the solver never PreStepped has no mass at its points, and an
+	// Ended entry keeping its points is what makes that reachable at all.
+	if got := entry.TotalKE(); got != 0 {
+		t.Fatalf("TotalKE on an entry the solver never reached = %v, want none", got)
+	}
+
+	if entry.Dropped() || entry.Ignored() {
+		t.Fatal("a fresh entry arrives marked")
+	}
+	entry.Drop()
+	entry.Ignore()
+	if !entry.Dropped() || !entry.Ignored() {
+		t.Fatal("the marks did not stick")
+	}
+
+	var ended Contact
+	ended.Phase = PhaseEnded
+	ended.Drop()
+	if ended.Dropped() {
+		t.Fatal("an Ended entry was dropped; there is nothing left to take out of")
+	}
+	var fresh Contact
+	if fresh.Phase != PhaseBegan {
+		t.Fatalf("the zero Contact reads as %v, want Began", fresh.Phase)
+	}
+}
+
 func nearD(got, want float64) bool   { return math.Abs(got-want) <= 1e-12 }
 func vecNear(got, want m.Vec2d) bool { return nearD(got.X, want.X) && nearD(got.Y, want.Y) }

@@ -52,9 +52,28 @@
 // And a Body that moves: Position, Velocity, Force, Dynamic and the Static Tag,
 // with the four Systems the step is chained on app.UpdateEvent in cp's own
 // order — IntegrateOnUpdate, IndexOnUpdate, DetectOnUpdate, SolveOnUpdate.
-// Detect is empty until there are Contacts; Integrate moves every Body with a
-// Velocity, Index keeps the two indices current, and Solve integrates every
-// Dynamic body's velocity from its Force.
+// Integrate moves every Body with a Velocity, Index keeps the two indices
+// current, Detect writes the tick's Contacts, and Solve drives them apart.
+//
+// # The step closes for circles
+//
+// Contacts is the tick's Contact list, one entry per touching pair, marked
+// Began, Continuing or Ended and always on. Detect finds circle-against-circle
+// and circle-against-segment through the two indices as cp's closed forms, and
+// Solve runs cp's impulse solver over what a filter left: the dense solved
+// list, the gather through the BodyIndex slot table, PreStep, the velocity
+// integration, the warm start, the Iterations passes, and the de-penetration
+// bias applied as a position delta before it returns.
+//
+// Solve is indivisible, and both sides force it. PreStep computes the bounce
+// from the velocity before integration, which is what stops gravity-fed jitter
+// from eating Restitution, and the warm start must follow the damping, or the
+// cached Impulse is damped away before it does anything.
+//
+// Friction and Restitution ship at cp's own defaults of zero, which is why
+// sliding along a wall is exactly v ← v − (v·n)·n and is the solver's own
+// behaviour rather than a rule of its own. Polygons, Sensors as swept Probes,
+// collision groups' own ticket and Joints each arrive with theirs.
 //
 // The query surface, in two layers, both exported because a replacement solver
 // lives in another package and is built from exactly these. The pair primitives

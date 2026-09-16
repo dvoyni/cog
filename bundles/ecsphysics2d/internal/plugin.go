@@ -3,6 +3,7 @@ package internal
 import (
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+	"github.com/dvoyni/cog/bundles/ecsphysics2d/internal/types"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -51,11 +52,11 @@ const (
 // of, publishes the two indices, and chains the four Systems in cp's order.
 //
 // The chain is explicit rather than left to the locks. Integrate and Solve
-// would serialise on Velocity anyway, and Index reads the Position Integrate
-// writes, but Detect is empty today and so locks nothing that would order it,
-// and the order is contract: an app writes Before[IntegrateOnUpdate] and
-// After[DetectOnUpdate] against it now, and those orderings must keep meaning
-// what they mean once Detect is filled in.
+// would serialise on Velocity anyway, Index reads the Position Integrate
+// writes, and Detect writes the Contact list Solve reads — but the order is
+// contract rather than a consequence: an app writes Before[IntegrateOnUpdate]
+// and After[DetectOnUpdate]().Before[SolveOnUpdate]() against it, and those
+// orderings must keep meaning what they mean whatever the lock sets become.
 //
 // Every System is fed the step the same way, with ecs.Feed projecting
 // UpdateEvent.Dt, so none of them names where its step came from. Physics runs
@@ -85,16 +86,20 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	registrar.InitResource(ecsphysics2d.NewStaticIndex(resolved.staticCellSize))
 	registrar.InitResource(ecsphysics2d.NewBodyIndex(resolved.bodyCellSize))
 
+	// The Contact list, seeded with the one source of randomness in the
+	// package: the direction two exactly coincident Shapes are parted along.
+	registrar.InitResource(types.NewContacts(resolved.seed))
+
 	registrar.Subscribe[ecsphysics2d.IntegrateOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, integrate, step()))
 	registrar.Subscribe[ecsphysics2d.IndexOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, index)).
 		After[ecsphysics2d.IntegrateOnUpdate]()
 	registrar.Subscribe[ecsphysics2d.DetectOnUpdate](
-		ecs.ToHandler[app.UpdateEvent](registrar, detect)).
+		ecs.ToHandler[app.UpdateEvent](registrar, p.detect, step())).
 		After[ecsphysics2d.IndexOnUpdate]()
 	registrar.Subscribe[ecsphysics2d.SolveOnUpdate](
-		ecs.ToHandler[app.UpdateEvent](registrar, solve, step())).
+		ecs.ToHandler[app.UpdateEvent](registrar, p.solve, step())).
 		After[ecsphysics2d.DetectOnUpdate]()
 	return nil
 }
