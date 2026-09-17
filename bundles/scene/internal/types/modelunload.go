@@ -3,6 +3,7 @@ package types
 import (
 	"strings"
 
+	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
@@ -75,21 +76,21 @@ func (la LookupAccess) UnloadAll() {
 // Buffers go through the same pending-release list ReleaseMesh uses, so
 // drainMeshes frees them in the same pass; textures are freed directly, because
 // nothing else in the plugin releases one.
-func (l *Lookup) applyUnloads(releaseTexture func(gfx.TextureDescr)) {
+func (l *Lookup) applyUnloads(k kernel.Kernel, releaseTexture func(gfx.TextureDescr)) {
 	if l.unloadEverything {
 		for path := range l.models {
-			l.unloadModel(path)
+			l.unloadModel(k, path)
 		}
 		for key, texture := range l.textures {
 			releaseTexture(texture)
 			delete(l.textures, key)
-			delete(l.reported, textureReportKey(textureReportPath(key)))
+			k.ForgetReportedError(textureReportKey(textureReportPath(key)))
 		}
 		l.unloadEverything = false
 	}
 	for _, path := range l.unloadModels {
 		key, _ := ModelKey(path)
-		l.unloadModel(key)
+		l.unloadModel(k, key)
 	}
 	l.unloadModels = l.unloadModels[:0]
 	for _, path := range l.unloadTextures {
@@ -97,7 +98,7 @@ func (l *Lookup) applyUnloads(releaseTexture func(gfx.TextureDescr)) {
 		if !ok {
 			continue
 		}
-		l.unloadTexture(key, releaseTexture)
+		l.unloadTexture(k, key, releaseTexture)
 	}
 	l.unloadTextures = l.unloadTextures[:0]
 }
@@ -111,7 +112,7 @@ func (l *Lookup) applyUnloads(releaseTexture func(gfx.TextureDescr)) {
 // next draw, and a load still in flight from before the unload would then match
 // it and install as a ghost - a model nobody asked for, holding buffers nobody
 // will free.
-func (l *Lookup) unloadModel(key string) {
+func (l *Lookup) unloadModel(k kernel.Kernel, key string) {
 	entry, ok := l.models[key]
 	if !ok {
 		return
@@ -126,20 +127,20 @@ func (l *Lookup) unloadModel(key string) {
 	if animation.morphBytes > 0 {
 		l.pendingReleases = append(l.pendingReleases, animation.morphDeltas)
 	}
-	l.clearModelReports(key)
+	l.clearModelReports(k, key)
 	*entry = ModelEntry{Generation: entry.Generation + 1}
 }
 
 // unloadTexture frees every texture the cache holds under one path, whatever
 // colour space or embedded image index it was keyed by.
-func (l *Lookup) unloadTexture(key string, releaseTexture func(gfx.TextureDescr)) {
+func (l *Lookup) unloadTexture(k kernel.Kernel, key string, releaseTexture func(gfx.TextureDescr)) {
 	for cached, texture := range l.textures {
 		if cached.path != key {
 			continue
 		}
 		releaseTexture(texture)
 		delete(l.textures, cached)
-		delete(l.reported, textureReportKey(textureReportPath(cached)))
+		k.ForgetReportedError(textureReportKey(textureReportPath(cached)))
 	}
 }
 
@@ -148,13 +149,12 @@ func (l *Lookup) unloadTexture(key string, releaseTexture func(gfx.TextureDescr)
 //
 // The selector keys carry the selector after a '#' precisely so that two typo'd
 // names in one file are two reports; the cost is that clearing them is a prefix
-// scan rather than one delete. It runs on unload only, which is a cold path.
-func (l *Lookup) clearModelReports(key string) {
-	delete(l.reported, modelReportKey(key))
-	prefix := modelReportKey(key) + "#"
-	for reported := range l.reported {
-		if strings.HasPrefix(reported, prefix) {
-			delete(l.reported, reported)
-		}
-	}
+// scan rather than one delete, which is what ForgetReportedErrors is for. It
+// runs on unload only, which is the cold path that method asks for.
+func (l *Lookup) clearModelReports(k kernel.Kernel, key string) {
+	model := modelReportKey(key)
+	prefix := model + "#"
+	k.ForgetReportedErrors(func(reported string) bool {
+		return reported == model || strings.HasPrefix(reported, prefix)
+	})
 }

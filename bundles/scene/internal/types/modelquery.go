@@ -28,13 +28,6 @@ type ModelRef struct {
 	Node  string
 }
 
-// reportOnce fires one report under a key the lookup has not reported yet,
-// adapting kernel.ReportError's bool return - which says whether the engine
-// should keep running - to the reporting the table does.
-func (la LookupAccess) reportOnce(key string, err error) {
-	la.lookup.reportOnce(func(err error) { la.kernel.ReportError(err) }, key, err)
-}
-
 // modelBox is one primitive's declared axis-aligned bounds. known is false for
 // a primitive whose POSITION accessor carried no min/max, which is what makes
 // the whole model never-cull - and it has to be carried rather than defaulted,
@@ -131,7 +124,7 @@ func (la LookupAccess) Nodes(ref ModelRef, dst []string) ([]string, bool) {
 	}
 	scene, err := entry.scene(ref)
 	if err != nil {
-		la.reportOnce(err.reportKey(), err)
+		la.kernel.ReportErrorOnce(err.reportKey(), err)
 		return dst, false
 	}
 	if ref.Node == "" {
@@ -140,7 +133,7 @@ func (la LookupAccess) Nodes(ref ModelRef, dst []string) ([]string, bool) {
 	named, found := scene.nodes[ref.Node]
 	if !found {
 		err := ErrModelNodeMissing{Model: ref.Path, Scene: ref.Scene, Node: ref.Node}
-		la.reportOnce(err.reportKey(), err)
+		la.kernel.ReportErrorOnce(err.reportKey(), err)
 		return dst, false
 	}
 	return append(dst, scene.order[named.first:named.last]...), true
@@ -212,7 +205,7 @@ func (la LookupAccess) bounds(ref ModelRef) (m.Sphere, m.Box3, bool) {
 	}
 	view, err := entry.View(ref.Path, ref.Scene, ref.Node)
 	if err != nil {
-		la.reportOnce(err.reportKey(), err)
+		la.kernel.ReportErrorOnce(err.reportKey(), err)
 		return m.Sphere{}, m.Box3{}, false
 	}
 	// A selector that matched a real node carrying no geometry has no bound,

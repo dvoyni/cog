@@ -678,9 +678,16 @@ type cachedShader struct {
 }
 
 // report returns the entry's error the first time it is asked and nothing
-// afterwards, following the reportedMissingBackend precedent: a condition true
-// every frame is worth saying once. The caller drops the draw on a zero id
-// rather than on the error, so silence never lets a bad draw through.
+// afterwards: a condition true every frame is worth saying once. The caller
+// drops the draw on a zero id rather than on the error, so silence never lets a
+// bad draw through.
+//
+// This is the translator's own flag rather than kernel.ReportErrorOnce, and so
+// are the failed-pipeline entry, badIndexLengths and unsuppliedBuffers. The
+// translator holds no Kernel: it hands its first error back to the render
+// handler, which reports it. What these dedupe is therefore a return value, not
+// a report - and firstErr carries one error per frame, so a condition that
+// re-reported every frame would mask every later error in every later frame.
 func (c *cachedShader) report() error {
 	if c.err == nil || c.reported {
 		return nil

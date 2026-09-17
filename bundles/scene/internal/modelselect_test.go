@@ -206,6 +206,35 @@ func TestTwoUnmatchedNodesOfOneFileBothReport(t *testing.T) {
 	}
 }
 
+// A selector key hangs off the model's path rather than standing alone, and an
+// unload clears the whole family: the model's own key and every selector
+// recorded under it. Without that, a typo'd node fixed by an edit-and-reload
+// would have nothing to say the second time it was wrong.
+func TestUnloadingAModelClearsItsSelectorReports(t *testing.T) {
+	h := newHarnessWithFiles(t, modelFiles(glb(t, propsFile(t))),
+		drawModel(modelPath, scene.ModelDraw{Node: "crat"}))
+	h.frameUntil(t, "the unmatched node to be reported", func() bool {
+		return countAs[scene.ErrModelNodeMissing](h.errors()) == 1
+	})
+	for range 5 {
+		h.frame()
+	}
+	if got := countAs[scene.ErrModelNodeMissing](h.errors()); got != 1 {
+		t.Fatalf("a typo'd node reported %d times before the unload, want once", got)
+	}
+
+	h.lookup(func(la scene.LookupAccess) { la.UnloadModel(modelPath) })
+	h.frameUntil(t, "the same typo to be reported again after the unload", func() bool {
+		return countAs[scene.ErrModelNodeMissing](h.errors()) == 2
+	})
+	for range 5 {
+		h.frame()
+	}
+	if got := countAs[scene.ErrModelNodeMissing](h.errors()); got != 2 {
+		t.Errorf("reported %d times, want one per episode either side of the unload", got)
+	}
+}
+
 // A node whose authored world transform collapses an axis cannot be re-rooted,
 // so the draw skips and says why rather than drawing through a matrix that is
 // quietly wrong.

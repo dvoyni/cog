@@ -34,9 +34,22 @@ type Engine struct {
 	schedulerDone chan error
 	errorMu       sync.Mutex
 	errorHandler  ErrorHandler
-	terminated    bool
-	ready         chan struct{}
-	readyOnce     sync.Once
+	// reported is the set of keys ReportErrorOnce has already spoken under. It
+	// lives here, under errorMu, so that the dedupe and the report it guards
+	// are taken under one lock: the conditions it gates are noticed from at
+	// least two threads - a lookup on the update thread, a render handler on
+	// the render thread - and the per-plugin maps this replaced each guarded
+	// themselves, or did not.
+	//
+	// The key is boxed, and interface equality includes the dynamic type, so a
+	// plugin's own key type never collides with another's however its values
+	// compare. Entries are dropped only by ForgetReportedError and
+	// ForgetReportedErrors; a condition nobody ever fixes holds one entry for
+	// the engine's life, which is the point.
+	reported   map[any]struct{}
+	terminated bool
+	ready      chan struct{}
+	readyOnce  sync.Once
 }
 
 // New creates an unstarted engine with plugin configuration keyed by name.
@@ -333,6 +346,13 @@ func (e *Engine) reportError(err error) bool {
 	}
 	e.errorMu.Lock()
 	defer e.errorMu.Unlock()
+	return e.reportLocked(err)
+}
+
+// reportLocked is one report with errorMu already held, so that a caller which
+// has more to do under that lock - deduping a key, firing the rest of a burst -
+// does it without releasing and retaking it.
+func (e *Engine) reportLocked(err error) bool {
 	if e.terminated || (e.ctx != nil && e.ctx.Err() != nil) {
 		return true
 	}
@@ -347,6 +367,61 @@ func (e *Engine) reportError(err error) bool {
 		return true
 	}
 	return false
+}
+
+// reportErrorOnce fires a burst of reports the first time key is seen and drops
+// it every time after, reporting whether engine termination was requested.
+//
+// The burst is claimed and fired under one hold of errorMu, so two threads
+// noticing the same condition in the same instant report it once rather than
+// racing between the check and the reports.
+//
+// An empty burst claims nothing: a load that gathered no faults must leave the
+// key free for the one that does.
+func (e *Engine) reportErrorOnce(key any, errs []error) bool {
+	if len(errs) == 0 {
+		return e.terminated
+	}
+	e.errorMu.Lock()
+	defer e.errorMu.Unlock()
+	if e.terminated || (e.ctx != nil && e.ctx.Err() != nil) {
+		return true
+	}
+	if _, done := e.reported[key]; done {
+		return false
+	}
+	if e.reported == nil {
+		e.reported = map[any]struct{}{}
+	}
+	e.reported[key] = struct{}{}
+	terminate := false
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		terminate = e.reportLocked(err) || terminate
+	}
+	return terminate
+}
+
+// forgetReportedError drops one key, so the next report under it speaks again.
+func (e *Engine) forgetReportedError(key any) {
+	e.errorMu.Lock()
+	defer e.errorMu.Unlock()
+	delete(e.reported, key)
+}
+
+// forgetReportedErrors drops every key match accepts. It scans the whole table,
+// which is why the kernel offers it only for the family case a single key
+// cannot express.
+func (e *Engine) forgetReportedErrors(match func(any) bool) {
+	e.errorMu.Lock()
+	defer e.errorMu.Unlock()
+	for key := range e.reported {
+		if match(key) {
+			delete(e.reported, key)
+		}
+	}
 }
 
 func callPluginBoundary(plugin PluginName, boundary string, call func() error) (err error) {

@@ -125,7 +125,10 @@ type gfxBackend struct {
 
 	// refusedDepthOnly records that this backend has already declined a
 	// depth-only pass, and refusal holds the error until the plugin takes it to
-	// report on the update thread. The backend has no kernel handle of its own.
+	// report on the update thread. The backend has no kernel handle of its own,
+	// which is also why this and refusedBindGroups are the backend's own state
+	// rather than kernel.ReportErrorOnce keys: what they gate is the error
+	// parked for takeRefusal to hand over, not a report.
 	refusedDepthOnly bool
 	refusal          error
 	// refusedBindGroups is the set of (shader, group) sites already named, so a

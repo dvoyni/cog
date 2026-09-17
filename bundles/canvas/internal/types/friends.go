@@ -1,6 +1,9 @@
 package types
 
-import "github.com/dvoyni/cog/slots/gfx"
+import (
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/gfx"
+)
 
 // The friend functions: what canvas's internal/ reads from, or does to, a
 // public type's unexported state. Only packages under bundles/canvas can import
@@ -35,7 +38,9 @@ func LookupFonts(v *Lookup) *Atlas { return v.fonts }
 func LookupFontStore(v *Lookup) *FontStore { return v.fontStore }
 
 // LookupApplyUnloads calls Lookup.applyUnloads for canvas's internal/.
-func LookupApplyUnloads(v *Lookup, resources *gfx.ResourceQueue) { v.applyUnloads(resources) }
+func LookupApplyUnloads(v *Lookup, k kernel.Kernel, resources *gfx.ResourceQueue) {
+	v.applyUnloads(k, resources)
+}
 
 // LookupInvalidateFontsOnResize calls Lookup.invalidateFontsOnResize for
 // canvas's internal/.

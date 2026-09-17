@@ -43,9 +43,15 @@ type plugin struct {
 
 	// gfxBackend is gfx's Backend adapter: provided at registration, and
 	// attached to the device once the device exists.
-	gfxBackend             *gfxBackend
-	reportedBackendFailure bool
+	gfxBackend *gfxBackend
 }
+
+// backendAttachFailureKey names the one condition gogpu reports once per
+// engine: the device never became attachable. It is its own type rather than a
+// bare struct{} because the kernel keys its report-once table by the boxed
+// key's dynamic type across every plugin, so two singletons sharing struct{}
+// would be one singleton.
+type backendAttachFailureKey struct{}
 
 // Ensure plugin satisfies the host contract (owns the main thread).
 var _ kernel.PluginHost = (*plugin)(nil)
@@ -224,10 +230,7 @@ func (p *plugin) onDraw(k kernel.Executioner, dc *gogpu.Context) {
 			// The device is created asynchronously, so this is expected until it is
 			// ready; report once so a permanent failure is still visible. The frame
 			// is skipped: nothing is rendered before the backend is Ready.
-			if !p.reportedBackendFailure {
-				p.reportedBackendFailure = true
-				k.ReportError(err)
-			}
+			k.ReportErrorOnce(backendAttachFailureKey{}, err)
 			return
 		}
 	}

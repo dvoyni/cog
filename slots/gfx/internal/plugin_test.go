@@ -1512,8 +1512,8 @@ func TestFailedTextureResourceLoadIsRetried(t *testing.T) {
 	}
 }
 
-// A failed shader is cached as failed and reported once, following the
-// reportedMissingBackend precedent. Without the cache the next frame re-reads
+// A failed shader is cached as failed and reported once. Without the cache the
+// next frame re-reads
 // every source, re-flattens, re-fails and re-reports - at the frame rate. The
 // developer loop is unchanged, because it goes through eviction: fix the file,
 // hot-reload evicts, the next frame retries and reports afresh.

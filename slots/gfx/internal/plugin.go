@@ -39,8 +39,6 @@ type plugin struct {
 	translator *translator
 	// backend is the bound Backend adapter, valid from Start onwards.
 	backend kernel.RequiredAdapter[gfx.Backend]
-	// reportedNotReady is render-thread-only, like the translator caches.
-	reportedNotReady bool
 	// captures is gfx's one capture slot, plugin-owned and self-synchronizing.
 	// See captureState for why it is not a kernel resource.
 	captures captureState
@@ -188,6 +186,13 @@ func acquire(read kernel.Write[*readList], ready kernel.Write[*readyList]) bool 
 	return true
 }
 
+// backendNotReadyKey names the one condition gfx reports once per engine: no
+// backend ever installed. It is its own type rather than a bare struct{}
+// because the kernel's report-once table is keyed across plugins by the boxed
+// key's dynamic type, and every singleton condition sharing struct{} would be
+// one condition.
+type backendNotReadyKey struct{}
+
 // renderOnRender is the app.RenderEvent handler: it acquires the latest list,
 // translates it against the installed Backend, and executes the resulting op
 // stream into the backend's screen framebuffer. It runs on the MainLoop's render
@@ -207,10 +212,7 @@ func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 			list := read.Get()
 			backend := p.backend.Get()
 			if !backend.Ready() {
-				if !p.reportedNotReady {
-					p.reportedNotReady = true
-					return gfx.ErrBackendNotReady{}
-				}
+				k.ReportErrorOnce(backendNotReadyKey{}, gfx.ErrBackendNotReady{})
 				return nil
 			}
 			queue := resources.Get()

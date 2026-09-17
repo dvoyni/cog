@@ -17,8 +17,8 @@ func LayerMaskDrawnBy(v LayerMask, cull LayerMask) bool { return v.drawnBy(cull)
 func LookupAccessLookup(v LookupAccess) *Lookup { return v.lookup }
 
 // LookupApplyUnloads calls Lookup.applyUnloads for scene's internal/.
-func LookupApplyUnloads(v *Lookup, releaseTexture func(gfx.TextureDescr)) {
-	v.applyUnloads(releaseTexture)
+func LookupApplyUnloads(v *Lookup, k kernel.Kernel, releaseTexture func(gfx.TextureDescr)) {
+	v.applyUnloads(k, releaseTexture)
 }
 
 // LookupDefaults reads Lookup.defaults for scene's internal/'s tests.
@@ -37,10 +37,10 @@ func LookupEnsureUnit(v *Lookup, shape unitShape, bake BakeFunc) MeshRef {
 
 // LookupInstallModel calls Lookup.installModel for scene's internal/.
 func LookupInstallModel(
-	v *Lookup, report func(error), path string, generation uint32,
+	v *Lookup, k kernel.Kernel, path string, generation uint32,
 	loaded *LoadedModel, failure error, resources *gfx.ResourceQueue,
 ) {
-	v.installModel(report, path, generation, loaded, failure, resources)
+	v.installModel(k, path, generation, loaded, failure, resources)
 }
 
 // LookupMesh calls Lookup.mesh for scene's internal/.
@@ -54,11 +54,6 @@ func LookupModelEntry(v *Lookup, key string) *ModelEntry { return v.modelEntry(k
 
 // LookupPendingMeshes reads Lookup.pendingMeshes for scene's internal/'s tests.
 func LookupPendingMeshes(v *Lookup) []pendingMesh { return v.pendingMeshes }
-
-// LookupReportOnce calls Lookup.reportOnce for scene's internal/.
-func LookupReportOnce(v *Lookup, report func(error), key string, errs ...error) {
-	v.reportOnce(report, key, errs...)
-}
 
 // LookupRequestModel calls Lookup.requestModel for scene's internal/.
 func LookupRequestModel(v *Lookup, k kernel.Kernel, path string) (*ModelEntry, bool) {

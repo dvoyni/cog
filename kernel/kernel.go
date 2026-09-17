@@ -55,6 +55,63 @@ func (k Kernel) ReportError(err error) bool {
 	return k.bound().reportError(err)
 }
 
+// ReportErrorOnce sends errs to the centralized error handler the first time it
+// is called under key, and drops them every time after. It reports whether the
+// handler asked for engine termination, exactly as ReportError does.
+//
+// It exists because a condition that is true every frame - a missing sprite, a
+// backend that never came up, a model whose node name is a typo - is worth
+// saying once and is noise at the frame rate. Say it under a key that names the
+// condition, and forget that key when the condition could have changed.
+//
+// The burst is gated as a whole rather than per error, so one load reporting a
+// missing texture and an unbounded primitive reports both facts while a second
+// load of the same path repeats neither. Passing no errors claims nothing.
+//
+// The key is any comparable value, and it must be comparable because it is a
+// map key; distinct key types never collide, however their values compare, so a
+// plugin naming its own type owns its own namespace. A plugin sharing a type
+// with another - two plugins keyed by string - shares one, which is what the
+// "sprite:" and "model:" prefixes on those keys are for. A singleton condition
+// therefore names its own empty struct type rather than a bare struct{}, or
+// every singleton in the engine is one condition.
+//
+// What does not belong here: a dedupe whose quiet is scoped to something
+// narrower than the engine, and a dedupe that gates an error the holder
+// returns rather than reports. A per-frame set cleared every frame wants a map
+// of its own, not a family forgotten through the whole table each frame; and a
+// render-thread object with no Kernel - gfx's translator, an Adapter's backend
+// - hands its error back to whoever does hold one, so what it dedupes is its
+// own return value rather than a report.
+func (k Kernel) ReportErrorOnce[T comparable](key T, errs ...error) bool {
+	return k.bound().reportErrorOnce(key, errs)
+}
+
+// ForgetReportedError clears key, so the next ReportErrorOnce under it reports
+// again. A path that failed, was fixed and reloaded must be able to speak.
+//
+// Forgetting is not optional for a condition that can be repaired: without the
+// paired call, a sprite that failed to load once stays silent about failing
+// again for the engine's life. A condition that cannot be repaired - a backend
+// that never installed - simply never calls it.
+func (k Kernel) ForgetReportedError[T comparable](key T) {
+	k.bound().forgetReportedError(key)
+}
+
+// ForgetReportedErrors clears every key of type T that match accepts, for the
+// family a single key cannot name: a model whose selector keys hang off its
+// path, cleared together when the model unloads.
+//
+// match is never shown a key of another type, so a plugin clearing a family of
+// its own keys cannot reach another plugin's. It scans the whole table, so it
+// belongs on a cold path - an unload, not a frame.
+func (k Kernel) ForgetReportedErrors[T comparable](match func(T) bool) {
+	k.bound().forgetReportedErrors(func(key any) bool {
+		typed, ok := key.(T)
+		return ok && match(typed)
+	})
+}
+
 // PublishEvent starts one event publication and returns its completion handle.
 // Subscribers whose dependencies are satisfied run concurrently; separate
 // publications are independent and may interleave. Publishing is

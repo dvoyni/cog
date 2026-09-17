@@ -28,14 +28,11 @@ type FontMetrics struct {
 // a scoped LookupAccess; the resource itself never retains filesystem or GPU
 // handles. Deferred unloads are applied by the Canvas flush at the frame boundary.
 type Lookup struct {
-	config      Config
-	sprites     *Atlas
-	fonts       *Atlas
-	fontStore   *FontStore
-	spriteSizes map[string]m.Vec2i
-	// reported suppresses repeated error reports for the same resource until it
-	// next loads successfully or is unloaded.
-	reported             map[string]struct{}
+	config               Config
+	sprites              *Atlas
+	fonts                *Atlas
+	fontStore            *FontStore
+	spriteSizes          map[string]m.Vec2i
 	unloadSprites        []string
 	unloadFonts          []string
 	lastFramebufferScale float32
@@ -54,23 +51,26 @@ func NewSizedLookup(config Config) *Lookup {
 		fonts:       NewAtlas(config),
 		fontStore:   NewFontStore(),
 		spriteSizes: map[string]m.Vec2i{},
-		reported:    map[string]struct{}{},
 	}
 }
 
 // applyUnloads evicts sprites and fonts queued for release since the last frame.
 // It runs at the Canvas flush boundary, after any draw ops recorded this frame
 // have already been resolved, so a same-frame unload never dangles a live draw.
-func (l *Lookup) applyUnloads(resources *gfx.ResourceQueue) {
+//
+// It takes the kernel because an unload is half of report-once: a path that
+// failed and is then unloaded must be able to fail loudly again the next time
+// someone asks for it.
+func (l *Lookup) applyUnloads(k kernel.Kernel, resources *gfx.ResourceQueue) {
 	for _, path := range l.unloadSprites {
 		l.sprites.releasePath(path, resources)
 		delete(l.spriteSizes, path)
-		delete(l.reported, spriteReportKey(path))
+		k.ForgetReportedError(spriteReportKey(path))
 	}
 	l.unloadSprites = l.unloadSprites[:0]
 	for _, path := range l.unloadFonts {
 		l.unloadFont(path)
-		delete(l.reported, fontReportKey(path))
+		k.ForgetReportedError(fontReportKey(path))
 	}
 	l.unloadFonts = l.unloadFonts[:0]
 }
@@ -127,20 +127,19 @@ func (la LookupAccess) Valid() bool { return la.lookup != nil }
 func spriteReportKey(path string) string { return "sprite:" + path }
 func fontReportKey(path string) string   { return "font:" + path }
 
+// report says a resource's fault once per episode. The kernel holds the keys,
+// so the quiet outlives any one handler scope and a successful load or an
+// unload is what ends it.
 func (la LookupAccess) report(key string, err error) {
 	if la.lookup == nil {
 		return
 	}
-	if _, done := la.lookup.reported[key]; done {
-		return
-	}
-	la.lookup.reported[key] = struct{}{}
-	la.kernel.ReportError(err)
+	la.kernel.ReportErrorOnce(key, err)
 }
 
 func (la LookupAccess) clearReport(key string) {
 	if la.lookup != nil {
-		delete(la.lookup.reported, key)
+		la.kernel.ForgetReportedError(key)
 	}
 }
 

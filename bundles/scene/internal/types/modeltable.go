@@ -108,8 +108,10 @@ type modelMaterial struct {
 	Record   ScenePbrRecord
 }
 
-// modelReportKey and textureReportKey are the report-once keys the load fires
-// under, cleared on a successful load and on unload - canvas's precedent.
+// modelReportKey and textureReportKey are the keys the load's report-once calls
+// name, cleared on a successful load and on unload. The table they key lives on
+// the kernel and is shared with every other plugin that keys by string, which
+// is what the two prefixes separate.
 func modelReportKey(path string) string   { return "model:" + path }
 func textureReportKey(path string) string { return "texture:" + path }
 
@@ -134,8 +136,7 @@ func (l *Lookup) requestModel(k kernel.Kernel, path string) (*ModelEntry, bool) 
 		// again nor rewrites a state an unload has since reset.
 		if entry.State == ModelMissing {
 			entry.State = ModelFailed
-			l.reportOnce(func(err error) { k.ReportError(err) },
-				modelReportKey(key), ErrModelPathInvalid{Model: path})
+			k.ReportErrorOnce(modelReportKey(key), ErrModelPathInvalid{Model: path})
 		}
 		return nil, false
 	}
@@ -177,7 +178,7 @@ func (l *Lookup) modelEntry(key string) *ModelEntry {
 // textures are uploaded in this one call, so there is no frame in which half a
 // model is drawn.
 func (l *Lookup) installModel(
-	report func(error), path string, generation uint32,
+	k kernel.Kernel, path string, generation uint32,
 	loaded *LoadedModel, failure error, resources *gfx.ResourceQueue,
 ) {
 	entry, ok := l.models[path]
@@ -189,7 +190,7 @@ func (l *Lookup) installModel(
 	}
 	if failure != nil {
 		entry.State = ModelFailed
-		l.reportOnce(report, modelReportKey(path), ErrModelUnavailable{Model: path, Err: failure})
+		k.ReportErrorOnce(modelReportKey(path), ErrModelUnavailable{Model: path, Err: failure})
 		return
 	}
 	// A load that completes before the backend is installed goes back to
@@ -200,7 +201,7 @@ func (l *Lookup) installModel(
 		return
 	}
 	defaults := l.ensureDefaults(resources)
-	textures := l.residentTextures(loaded, resources)
+	textures := l.residentTextures(k, loaded, resources)
 	entry.Materials = entry.Materials[:0]
 	for i := range loaded.materials {
 		entry.Materials = append(entry.Materials,
@@ -242,25 +243,29 @@ func (l *Lookup) installModel(
 	entry.State = ModelResident
 	// A successful load clears the model's report key, so a path that failed,
 	// was unloaded and now loads reports again if it breaks again.
-	delete(l.reported, modelReportKey(path))
-	l.reportLoad(report, path, loaded.reports)
+	k.ForgetReportedError(modelReportKey(path))
+	l.reportLoad(k, path, loaded.reports)
 }
 
 // reportLoad fires one load's non-fatal reports under the key each belongs to.
 // A texture keys on the texture rather than on the model, so two models naming
 // one broken image report it once between them - which is the whole reason the
 // keys are two namespaces rather than one.
-func (l *Lookup) reportLoad(report func(error), path string, reports []error) {
+func (l *Lookup) reportLoad(k kernel.Kernel, path string, reports []error) {
 	var model []error
 	for _, err := range reports {
 		var texture ErrModelTextureUnavailable
 		if errors.As(err, &texture) {
-			l.reportOnce(report, textureReportKey(texture.Texture), err)
+			k.ReportErrorOnce(textureReportKey(texture.Texture), err)
 			continue
 		}
 		model = append(model, err)
 	}
-	l.reportOnce(report, modelReportKey(path), model...)
+	// The model's own faults go as one burst, gated as a whole: a load that
+	// reports a missing texture and an unbounded primitive reports both facts,
+	// while a second load of the same path repeats neither. An empty burst
+	// claims nothing, so a clean load leaves the key free.
+	k.ReportErrorOnce(modelReportKey(path), model...)
 }
 
 // residentTextures uploads the model's decoded images, skipping any key the
@@ -268,7 +273,7 @@ func (l *Lookup) reportLoad(report func(error), path string, reports []error) {
 // because the parse holds no Lookup lock; the cost is that two models sharing
 // an external image path both decode it and only the first uploads it.
 func (l *Lookup) residentTextures(
-	loaded *LoadedModel, resources *gfx.ResourceQueue,
+	k kernel.Kernel, loaded *LoadedModel, resources *gfx.ResourceQueue,
 ) []gfx.TextureDescr {
 	if l.textures == nil {
 		l.textures = map[textureKey]gfx.TextureDescr{}
@@ -282,7 +287,7 @@ func (l *Lookup) residentTextures(
 		}
 		// A texture that loads clears its own report key, so an image that was
 		// missing and has since been added reports again if it breaks again.
-		delete(l.reported, textureReportKey(textureReportPath(texture.key)))
+		k.ForgetReportedError(textureReportKey(textureReportPath(texture.key)))
 		// Mips are generated at bake by the backend's CPU box filter, which is
 		// the whole of the no-mipmap-generation-API gap: a minified model
 		// texture without them aliases into noise the moment the camera moves.
@@ -405,26 +410,6 @@ func (l *Lookup) ensureDefaults(resources *gfx.ResourceQueue) PbrDefaults {
 	}
 	l.hasDefaults = true
 	return l.defaults
-}
-
-// reportOnce fires a burst of reports under one key, or drops it because the
-// key has already reported. The burst is gated as a whole rather than per
-// error, so a model that reports a missing texture and an unbounded primitive
-// reports both facts, while a second load of the same path repeats neither.
-func (l *Lookup) reportOnce(report func(error), key string, errs ...error) {
-	if len(errs) == 0 {
-		return
-	}
-	if l.reported == nil {
-		l.reported = map[string]struct{}{}
-	}
-	if _, done := l.reported[key]; done {
-		return
-	}
-	l.reported[key] = struct{}{}
-	for _, err := range errs {
-		report(err)
-	}
 }
 
 // ModelLights appends the KHR_lights_punctual lights the model at path

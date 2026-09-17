@@ -19,9 +19,7 @@ import (
 // contiguous and share a group, so the packer's run scan finds them the way it
 // finds a Mesh call's. Instance-major would interleave two primitives' records
 // and break the contiguity the whole batching path assumes.
-func (p *plugin) expandModels(
-	k kernel.Kernel, report func(error), lookup *scene.Lookup, write *scene.OpQueue,
-) {
+func (p *plugin) expandModels(k kernel.Kernel, lookup *scene.Lookup, write *scene.OpQueue) {
 	models := types.OpQueueFlushModels(write)
 	if len(models) == 0 {
 		return
@@ -43,7 +41,7 @@ func (p *plugin) expandModels(
 		}
 		view, err := entry.View(models[i].Path, models[i].Scene, models[i].Node)
 		if err != nil {
-			types.LookupReportOnce(lookup, report, types.SelectorReportKey(err), err)
+			k.ReportErrorOnce(types.SelectorReportKey(err), err)
 			continue
 		}
 		p.modelViews[i] = view
@@ -53,7 +51,7 @@ func (p *plugin) expandModels(
 	// block appends to an arena and the draw records written below carry only
 	// the offset it returned. It is per model draw rather than per primitive:
 	// one call's primitives share its plays, and so do its instances.
-	p.resolveModelAnimation(report, lookup, models)
+	p.resolveModelAnimation(k, models)
 	p.modelWorlds = grow(p.modelWorlds, worlds)
 	at := 0
 	for i := range models {
@@ -149,12 +147,10 @@ func (p *plugin) expandModels(
 // resolve and before any draw record is written: packing a block appends to
 // the frame's arena, and a record carries only the offset that append
 // returned.
-func (p *plugin) resolveModelAnimation(
-	report func(error), lookup *scene.Lookup, models []types.ModelDrawRecord,
-) {
+func (p *plugin) resolveModelAnimation(k kernel.Kernel, models []types.ModelDrawRecord) {
 	p.modelAnims = grow(p.modelAnims, len(models))
 	p.modelMorphOffsets = p.modelMorphOffsets[:0]
-	once := func(key string, err error) { types.LookupReportOnce(lookup, report, key, err) }
+	once := func(key string, err error) { k.ReportErrorOnce(key, err) }
 	for i := range models {
 		p.modelAnims[i] = types.AnimBinding{Offset: types.SceneNoAnim, MorphAt: -1}
 		view := &p.modelViews[i]

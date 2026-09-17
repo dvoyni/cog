@@ -45,9 +45,6 @@ type Lookup struct {
 	// has no reserved zero value.
 	defaults    PbrDefaults
 	hasDefaults bool
-	// reported suppresses repeated reports for one model or texture path until
-	// it loads successfully or is unloaded - canvas's precedent.
-	reported map[string]struct{}
 	// unloadModels and unloadTextures are the paths UnloadModel and
 	// UnloadTexture gave up, and unloadEverything the flag UnloadAll sets. All
 	// three are applied at the frame boundary rather than at the call, so a

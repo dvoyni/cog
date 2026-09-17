@@ -24,8 +24,14 @@ func testAssets(t testing.TB, spriteWidth, spriteHeight int) fstest.MapFS {
 }
 
 // testLookup builds a LookupAccess backed by an in-memory Lookup over files.
+//
+// The kernel comes from an unstarted engine rather than being the zero value,
+// because the lookup's report-once keys live on the engine now: every resolved
+// sprite forgets its key, so even the paths these tests take reach the kernel.
 func testLookup(files fstest.MapFS) canvas.LookupAccess {
-	return canvas.NewLookupAccess(kernel.Kernel{}, canvas.NewLookup(), storage.NewFileSystem("test", files))
+	engine := kernel.New(nil).Handler(func(error) bool { return false })
+	return canvas.NewLookupAccess(
+		engine.Executioner().Kernel, canvas.NewLookup(), storage.NewFileSystem("test", files))
 }
 
 func testPNG(t testing.TB, width, height int) []byte {

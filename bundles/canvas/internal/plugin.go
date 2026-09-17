@@ -155,14 +155,14 @@ func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			viewport = access.GetRead[*gfx.Viewport]()
 			filesystem = access.GetRead[storage.FileSystem]()
 			lookupResource = access.GetWrite[*canvas.Lookup]()
-		}, func(kernel.Kernel, app.UpdateEvent) error {
-			return p.flushFrame(writeQueue.Get(), gfxQueue.Get(), gfxResourceQueue.Get(),
+		}, func(k kernel.Kernel, _ app.UpdateEvent) error {
+			return p.flushFrame(k, writeQueue.Get(), gfxQueue.Get(), gfxResourceQueue.Get(),
 				viewport.Get(), filesystem.Get(), lookupResource.Get())
 		}
 }
 
 func (p *plugin) flushFrame(
-	write *canvas.OpQueue, gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue,
+	k kernel.Kernel, write *canvas.OpQueue, gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue,
 	view *gfx.Viewport, filesystem storage.FileSystem, lookup *canvas.Lookup,
 ) error {
 	spriteAtlas := types.LookupSprites(lookup)
@@ -172,7 +172,7 @@ func (p *plugin) flushFrame(
 	if !gfxResources.Ready() || view.Width <= 0 || view.Height <= 0 {
 		return nil
 	}
-	types.LookupApplyUnloads(lookup, gfxResources)
+	types.LookupApplyUnloads(lookup, k, gfxResources)
 	types.LookupInvalidateFontsOnResize(lookup, gfxResources, view)
 	if !p.ensureQuad(gfxResources) {
 		return nil

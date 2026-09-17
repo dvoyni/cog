@@ -49,8 +49,7 @@ func installModelCmdImpl() (kernel.Lock, kernel.Execute[installModelRequest, ins
 			lookup = access.GetWrite[*scene.Lookup]()
 			resources = access.GetWrite[*gfx.ResourceQueue]()
 		}, func(k kernel.Kernel, request installModelRequest) (installModelResponse, error) {
-			types.LookupInstallModel(lookup.Get(),
-				func(err error) { k.ReportError(err) }, request.Path, request.Generation,
+			types.LookupInstallModel(lookup.Get(), k, request.Path, request.Generation,
 				request.Model, request.Err, resources.Get(),
 			)
 			return installModelResponse{}, nil

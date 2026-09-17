@@ -180,7 +180,7 @@ func (p *plugin) flushFrame(
 	// passed: the frame that asked has recorded whatever draws it wanted, and
 	// its command buffer has been submitted. The buffers they give up join the
 	// pending releases the drain below frees in the same pass.
-	types.LookupApplyUnloads(lookup, gfxResources.ReleaseTexture)
+	types.LookupApplyUnloads(lookup, k, gfxResources.ReleaseTexture)
 	// The frame's meshes are settled before anything looks at a draw: the
 	// callers' deferred bakes and releases drain, then the frame's temporaries
 	// become records, so every ref a draw names resolves against final state.
@@ -198,7 +198,7 @@ func (p *plugin) flushFrame(
 	p.materials.reset(types.LookupEnsureBundled(lookup, bakeTexture))
 	// Model draws expand into ordinary draw records before anything looks at
 	// one, so culling, sorting and packing are blind to where a draw came from.
-	p.expandModels(k, report, lookup, write)
+	p.expandModels(k, lookup, write)
 	p.prepareDraws(report, lookup, write, bake, types.OpQueueFlushDraws(write))
 	p.preparedLights = prepareLights(report, p.preparedLights, types.OpQueueFlushLights(write))
 	for i := range cameras {
@@ -294,6 +294,12 @@ func (p *plugin) buildTemporaries(report func(error), write *scene.OpQueue) {
 // reportMeshOnce reports one mesh's failure the first time a draw hits it this
 // frame. Keyed by the public id, so a hundred draws of one released mesh are one
 // report and two different meshes are two.
+//
+// It is the plugin's own set rather than kernel.ReportErrorOnce because the
+// quiet it wants lasts one frame, not one episode: the set is cleared at the
+// top of every flush, and asking the kernel to forget a family per frame would
+// scan the engine's whole table per frame for a condition that is already one
+// map lookup here.
 func (p *plugin) reportMeshOnce(report func(error), ref scene.MeshRef, err error) {
 	if _, seen := p.meshReported[ref.ID()]; seen {
 		return
