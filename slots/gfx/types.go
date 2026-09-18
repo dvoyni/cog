@@ -45,14 +45,9 @@ type ShaderSegment = types.ShaderSegment
 
 // TextureDescr describes a texture by resource path (TextureWithResource),
 // inline pixel bytes (TextureWithBytes), or a texture returned by
-// ResourceQueue.BakeTexture.
+// ResourceQueue.BakeTexture. The three are told apart by which field is set,
+// which is why there are no source markers beside it.
 type TextureDescr = types.TextureDescr
-
-const (
-	TextureSourceResource = types.TextureSourceResource
-	TextureSourceBytes    = types.TextureSourceBytes
-	TextureSourceBaked    = types.TextureSourceBaked
-)
 
 // BufferDescr describes a GPU buffer from inline bytes (BufferWithBytes) or a
 // baked storage buffer returned by ResourceQueue.BakeBuffer.

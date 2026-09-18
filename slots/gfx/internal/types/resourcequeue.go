@@ -89,10 +89,7 @@ func (q *ResourceQueue) allocateTexture(width, height, layers int, format Textur
 		TexW: width, TexH: height, TexLayers: layers, Format: format,
 		Renderable: renderable,
 	})
-	return TextureDescr{
-		source: TextureSourceBaked, id: id,
-		width: width, height: height, format: format,
-	}
+	return TextureDescr{Params: TextureDescrParams{id: id, width: width, height: height, format: format}}
 }
 
 // UpdateTexture queues a pixel upload into one texture layer and region.
@@ -101,7 +98,7 @@ func (q *ResourceQueue) UpdateTexture(texture TextureDescr, layer int, region Re
 		pixels = append([]byte(nil), pixels...)
 	}
 	q.ops = append(q.ops, Op{
-		Kind: OpUpdateTexture, TextureID: texture.id,
+		Kind: OpUpdateTexture, TextureID: texture.Params.id,
 		TexLayer: layer, Region: region, Bytes: pixels,
 	})
 }
@@ -110,7 +107,7 @@ func (q *ResourceQueue) UpdateTexture(texture TextureDescr, layer int, region Re
 // copyData snapshots pixels when true; when false, the caller must keep them
 // unchanged until consumed. mipmaps generates a full mip chain at bake time.
 func (q *ResourceQueue) ReBakeTexture(texture TextureDescr, width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
-	return q.bakeTexture(texture.id, width, height, format, pixels, copyData, mipmaps)
+	return q.bakeTexture(texture.Params.id, width, height, format, pixels, copyData, mipmaps)
 }
 
 func (q *ResourceQueue) bakeTexture(id TextureID, width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
@@ -126,7 +123,7 @@ func (q *ResourceQueue) bakeTexture(id TextureID, width, height int, format Text
 
 // ReleaseTexture queues a durable release for texture.
 func (q *ResourceQueue) ReleaseTexture(texture TextureDescr) {
-	q.ops = append(q.ops, Op{Kind: OpReleaseTexture, TextureID: texture.id})
+	q.ops = append(q.ops, Op{Kind: OpReleaseTexture, TextureID: texture.Params.id})
 }
 
 func (q *ResourceQueue) releaseCachedResource(path string) {

@@ -7,9 +7,25 @@ import (
 	"math"
 	"slices"
 
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
+
+// frame is the three values one dispatch of translate carries all the way down
+// to a cache: the kernel a load reports its failures through, the filesystem it
+// reads from, and the backend it mints handles on.
+//
+// They travel as one struct threaded by pointer because they would otherwise
+// grow six signatures by two parameters each, and they travel per dispatch
+// rather than as translator fields because none of the three may be retained
+// past the handler that granted it.
+type frame struct {
+	k       kernel.Kernel
+	fsys    fs.FS
+	backend gfx.Backend
+}
 
 // uniformMax caps a per-draw shader-parameter block.
 const uniformMax = 256
@@ -63,12 +79,15 @@ func stripIndexKeyOf(topology gfx.PrimitiveTopology, width gfx.IndexWidth) strip
 // baked resource ID. It is owned by the plugin and used only on the driver's
 // render thread inside ConsumeCmd.
 type translator struct {
-	shaders        map[gfx.ShaderDescr]*cachedShader
-	pipelines      map[pipelineKey]gfx.PipelineID
-	samplers       map[gfx.SamplerDesc]gfx.SamplerID
-	uarena         []byte
-	layouts        map[gfx.ShaderID]gfx.ShaderLayout
-	textures       map[string]gfx.TextureDescr
+	shaders   map[gfx.ShaderDescr]*cachedShader
+	pipelines map[pipelineKey]gfx.PipelineID
+	samplers  map[gfx.SamplerDesc]gfx.SamplerID
+	uarena    []byte
+	layouts   map[gfx.ShaderID]gfx.ShaderLayout
+	// textures is the path-texture cache. It is a translator field like every
+	// other cache here, reached only on the render thread, so what protects it
+	// is the confinement rather than a lock of its own.
+	textures       *assets.Cache[types.TextureDescrParams, textureUser, texture]
 	parameterPlans map[parameterPlanBucketKey][]cachedParameterPlan
 	ops            gfx.Queue
 	// Pass bookkeeping, reused each frame: the run order of the frame's passes
@@ -114,7 +133,7 @@ func newTranslator() *translator {
 		pipelines:         map[pipelineKey]gfx.PipelineID{},
 		samplers:          map[gfx.SamplerDesc]gfx.SamplerID{},
 		layouts:           map[gfx.ShaderID]gfx.ShaderLayout{},
-		textures:          map[string]gfx.TextureDescr{},
+		textures:          assets.New[types.TextureDescrParams, textureUser, texture](textureLoader{}),
 		parameterPlans:    map[parameterPlanBucketKey][]cachedParameterPlan{},
 		textureUsage:      map[gfx.TextureID]gfx.TextureUsage{},
 		badIndexLengths:   map[indexLengthKey]struct{}{},
@@ -127,10 +146,17 @@ func newTranslator() *translator {
 // the next translate call. It returns the first error encountered; valid draws
 // are still translated.
 func (t *translator) translate(
-	queue *gfx.OpQueue, persistent []types.Op, backend gfx.Backend, files func() fs.FS,
+	k kernel.Kernel, queue *gfx.OpQueue, persistent []types.Op, backend gfx.Backend, files func() fs.FS,
 	capture gfx.CaptureDesc, capturing bool,
 ) (*gfx.Queue, error) {
 	t.ops.Reset()
+
+	// files() is called once, here, rather than once per cache miss. Handing
+	// storage.FileSystem out as an fs.FS boxes it - 32 bytes, measured - and a
+	// cache wants it materialised before every Get rather than only behind the
+	// probe both ensure* functions used to do themselves. Paid per frame that is
+	// nothing; paid per hit it is once a texture parameter and once a draw.
+	f := &frame{k: k, fsys: files(), backend: backend}
 
 	need := len(types.OpQueueOps(queue)) * uniformMax
 	if cap(t.uarena) < need {
@@ -166,11 +192,11 @@ func (t *translator) translate(
 				continue
 			}
 			if op.Kind == types.OpReleaseCachedResource {
-				t.releaseCachedResource(backend, op.Path)
+				t.releaseCachedResource(f, op.Path)
 				continue
 			}
 			if op.Kind == types.OpFreeCachedResources {
-				t.freeCachedResources(backend)
+				t.freeCachedResources(f)
 				continue
 			}
 			if op.Kind == types.OpAllocateTexture {
@@ -189,7 +215,7 @@ func (t *translator) translate(
 	translateResources(persistent)
 	translateResources(types.OpQueueOps(queue))
 
-	t.translatePasses(queue, backend, files, &uoff, &firstErr, capture, capturing)
+	t.translatePasses(f, queue, &uoff, &firstErr, capture, capturing)
 
 	// A report that did not stop anything is still worth surfacing, but only
 	// behind an error that did.
@@ -204,7 +230,7 @@ func (t *translator) translate(
 // translatePasses runs the frame's passes in Order, merging the runs that are
 // indistinguishable from one longer pass, and emits each one's draws.
 func (t *translator) translatePasses(
-	queue *gfx.OpQueue, backend gfx.Backend, files func() fs.FS, uoff *int, firstErr *error,
+	f *frame, queue *gfx.OpQueue, uoff *int, firstErr *error,
 	capture gfx.CaptureDesc, capturing bool,
 ) {
 	passes, ops := types.OpQueuePasses(queue), types.OpQueueOps(queue)
@@ -235,11 +261,11 @@ func (t *translator) translatePasses(
 		}
 		presents = presents || head.Target.IsScreen()
 		t.transitionRun(queue, head, i, last)
-		t.ops.BeginPass(t.gpuPassDesc(backend, head, tail))
+		t.ops.BeginPass(t.gpuPassDesc(f.backend, head, tail))
 		for j := i; j <= last; j++ {
 			pass := &passes[t.passOrder[j]]
 			for _, index := range t.passDrawOps(t.passOrder[j]) {
-				t.translateDraw(&ops[index], pass.Desc, backend, files, uoff, firstErr)
+				t.translateDraw(f, &ops[index], pass.Desc, uoff, firstErr)
 			}
 		}
 		t.ops.EndPass()
@@ -317,8 +343,10 @@ func (t *translator) collectSampled(params []gfx.ParameterDescr) {
 		if types.ParameterKind(p) != types.ParamTexture {
 			continue
 		}
+		// Only a baked texture carries an id, so the id is the whole test: a
+		// path or an inline run has nothing an attachment could collide with.
 		texture := types.ParameterTextureRef(p)
-		if types.TextureSource(texture) != gfx.TextureSourceBaked || texture.ID() == 0 {
+		if texture.ID() == 0 {
 			continue
 		}
 		if !slices.Contains(t.runSampled, texture.ID()) {
@@ -381,7 +409,7 @@ func (t *translator) gpuPassDesc(backend gfx.Backend, head, tail gfx.PassDescr) 
 }
 
 // translateDraw emits one draw into the currently open pass.
-func (t *translator) translateDraw(op *types.Op, pass gfx.PassDescr, backend gfx.Backend, files func() fs.FS, uoff *int, firstErr *error) {
+func (t *translator) translateDraw(f *frame, op *types.Op, pass gfx.PassDescr, uoff *int, firstErr *error) {
 	m := &op.Mesh
 	stride := types.MeshStride(m)
 	vertices, indices := types.MeshVertices(m), types.MeshIndices(m)
@@ -402,7 +430,7 @@ func (t *translator) translateDraw(op *types.Op, pass gfx.PassDescr, backend gfx
 	// one that reports it: the error surfaces once, the draw is dropped every
 	// time. ErrShaderExceedsWebLimits stays the only report in gfx that drops
 	// nothing at all.
-	shaderID, err := t.ensureShader(backend, files, op.Material.Shader())
+	shaderID, err := t.ensureShader(f, op.Material.Shader())
 	if err != nil && *firstErr == nil {
 		*firstErr = err
 	}
@@ -413,7 +441,7 @@ func (t *translator) translateDraw(op *types.Op, pass gfx.PassDescr, backend gfx
 	// A vertex layout that does not supply what the shader reads is fatal to
 	// the draw on the same terms a shader failure is: it reports on the frame
 	// that built the pipeline and drops the draw on every frame after it.
-	pipeline, err := t.ensurePipeline(backend, shaderID, label, m, op.Material.State(), pass)
+	pipeline, err := t.ensurePipeline(f.backend, shaderID, label, m, op.Material.State(), pass)
 	if err != nil && *firstErr == nil {
 		*firstErr = err
 	}
@@ -421,7 +449,7 @@ func (t *translator) translateDraw(op *types.Op, pass gfx.PassDescr, backend gfx
 		return
 	}
 
-	layout := t.shaderLayout(backend, shaderID)
+	layout := t.shaderLayout(f.backend, shaderID)
 	plan := t.prepareParameterPlan(shaderID, label, layout, op.Material.Params(), op.Params)
 	if plan.mismatch != nil {
 		if *firstErr == nil {
@@ -451,7 +479,7 @@ func (t *translator) translateDraw(op *types.Op, pass gfx.PassDescr, backend gfx
 		*uoff += uniformMax
 		t.ops.SetParams(u)
 	}
-	t.emitResources(backend, files, op.Params, op.Material.Params(), plan)
+	t.emitResources(f, op.Params, op.Material.Params(), plan)
 	t.ops.SetVertexBuffer(vertices.ID(), 0)
 
 	instances := op.Instances
@@ -555,7 +583,7 @@ func sampledAttachment(plan *parameterPlan, drawParams, materialParams []gfx.Par
 		if p == nil || types.ParameterKind(p) != types.ParamTexture {
 			continue
 		}
-		if texture := types.ParameterTextureRef(p); types.TextureSource(texture) == gfx.TextureSourceBaked && attachment(texture.ID()) {
+		if texture := types.ParameterTextureRef(p); attachment(texture.ID()) {
 			return p.Name(), true
 		}
 	}
@@ -613,7 +641,7 @@ func (t *translator) passDrawCount(pass int) int {
 // emitResources binds each reflected texture/sampler resource, matching its name
 // to a material parameter (defaulting to the white texture / a clamp+linear
 // sampler when unset), so every binding the shader declares is provided.
-func (t *translator) emitResources(backend gfx.Backend, files func() fs.FS, drawParams, materialParams []gfx.ParameterDescr, plan *parameterPlan) {
+func (t *translator) emitResources(f *frame, drawParams, materialParams []gfx.ParameterDescr, plan *parameterPlan) {
 	// Each reflected sampler is filled by the parameter of its own name, and
 	// falls back to the zero descriptor - clamp and linear - when unset.
 	for i := range plan.samplers {
@@ -622,7 +650,7 @@ func (t *translator) emitResources(backend gfx.Backend, files func() fs.FS, draw
 		if p := sampler.param.value(materialParams, drawParams); p != nil && types.ParameterKind(p) == types.ParamSampler {
 			desc = types.ParameterSampler(p)
 		}
-		t.ops.SetSampler(t.ensureSampler(backend, desc), sampler.group, sampler.binding)
+		t.ops.SetSampler(t.ensureSampler(f.backend, desc), sampler.group, sampler.binding)
 	}
 	for i := range plan.resources {
 		resource := &plan.resources[i]
@@ -637,30 +665,34 @@ func (t *translator) emitResources(backend gfx.Backend, files func() fs.FS, draw
 		}
 		textureID := gfx.TextureID(0)
 		if p != nil && types.ParameterKind(p) == types.ParamTexture {
-			textureID = t.ensureTexture(backend, files, types.ParameterTexture(p))
+			textureID = t.ensureTexture(f, types.ParameterTexture(p))
 		}
 		t.ops.SetTexture(textureID, resource.group, resource.binding)
 	}
 }
 
-func (t *translator) ensureTexture(backend gfx.Backend, files func() fs.FS, descr gfx.TextureDescr) gfx.TextureID {
-	if types.TextureSource(&descr) == gfx.TextureSourceBaked {
-		return descr.ID()
+// ensureTexture resolves one texture parameter to the id its binding is set
+// from.
+//
+// The three descriptor cases split here, and only one of them is a cache's: a
+// baked texture already carries its id and needs nothing, an inline run was
+// baked into one when the frame was recorded, and a path is what the cache is
+// for.
+func (t *translator) ensureTexture(f *frame, descr gfx.TextureDescr) gfx.TextureID {
+	if id := descr.ID(); id != 0 {
+		return id
 	}
-	if types.TextureSource(&descr) != gfx.TextureSourceResource {
+	if descr.Path() == "" {
 		return 0
 	}
-	if baked, ok := t.textures[descr.Path()]; ok {
-		return baked.ID()
-	}
-	width, height, pixels, ok := types.LoadTextureResource(files(), descr.Path())
-	if !ok {
-		return 0
-	}
-	id := backend.NewTexture()
-	t.ops.BakeTexture(id, width, height, descr.Format(), pixels, false)
-	t.textures[descr.Path()] = types.BakedTexture(id, 0, 0)
-	return id
+	return t.textures.Get(f.k, assets.Descr[types.TextureDescrParams](descr), f.fsys, t.textureUser(f)).id
+}
+
+// textureUser is what the texture loader is handed on every call. The op queue
+// is the translator's own, so a bake or a release the loader emits lands in the
+// frame being built exactly where the translator used to put it itself.
+func (t *translator) textureUser(f *frame) textureUser {
+	return textureUser{backend: f.backend, ops: &t.ops}
 }
 
 // cachedShader is one module in the translator's shader cache: the backend id
@@ -696,7 +728,7 @@ func (c *cachedShader) report() error {
 	return c.err
 }
 
-func (t *translator) ensureShader(backend gfx.Backend, files func() fs.FS, descr gfx.ShaderDescr) (gfx.ShaderID, error) {
+func (t *translator) ensureShader(f *frame, descr gfx.ShaderDescr) (gfx.ShaderID, error) {
 	if cached, ok := t.shaders[descr]; ok {
 		return cached.id, cached.report()
 	}
@@ -706,7 +738,7 @@ func (t *translator) ensureShader(backend gfx.Backend, files func() fs.FS, descr
 	// to N, which is the same shape as today's hitch rather than a new class of
 	// problem: if it ever bites, it bites the first frame a material appears,
 	// which is already true.
-	flattened, err := types.FlattenShader(files(), descr)
+	flattened, err := types.FlattenShader(f.fsys, descr)
 	// The include set is recorded on failure as well as on success, so that a
 	// failed entry evicts like any other and the developer loop stays: fix the
 	// file, hot-reload evicts, the next frame retries and reports afresh.
@@ -716,7 +748,7 @@ func (t *translator) ensureShader(backend gfx.Backend, files func() fs.FS, descr
 		cached.err = err
 		return 0, cached.report()
 	}
-	id, err := backend.NewShader(gfx.ShaderDesc{Code: []byte(flattened.Text), Label: label})
+	id, err := f.backend.NewShader(gfx.ShaderDesc{Code: []byte(flattened.Text), Label: label})
 	if err != nil {
 		// Nothing the backend said is rewritten and no line number is parsed out
 		// of its message: gfx appends the rendered segment table and lets the
@@ -728,17 +760,17 @@ func (t *translator) ensureShader(backend gfx.Backend, files func() fs.FS, descr
 	// Every shader gfx reflects is measured, not only an engine's bundled ones:
 	// a caller-supplied material is what actually gets bound at draw time. The
 	// shader is cached, so this reports once rather than once a frame.
-	if diagnostic := checkWebLimits(label, t.shaderLayout(backend, id), backend.Limits()); diagnostic != nil && t.diagnostic == nil {
+	if diagnostic := checkWebLimits(label, t.shaderLayout(f.backend, id), f.backend.Limits()); diagnostic != nil && t.diagnostic == nil {
 		t.diagnostic = diagnostic
 	}
 	return id, nil
 }
 
-func (t *translator) releaseCachedResource(backend gfx.Backend, path string) {
-	if texture, ok := t.textures[path]; ok {
-		t.ops.ReleaseTexture(texture.ID())
-		delete(t.textures, path)
-	}
+func (t *translator) releaseCachedResource(f *frame, path string) {
+	// A path names exactly one texture entry, because TextureWithResource is the
+	// only way one is made and it takes no options - so the key a Free names is
+	// the key a Get made, and the report that entry filed is forgotten with it.
+	t.textures.Free(f.k, assets.Descr[types.TextureDescrParams](gfx.TextureWithResource(path)), t.textureUser(f))
 	// Eviction scans the forward index rather than probing one descriptor,
 	// because three things break that probe under the preprocessor: a path may
 	// root several variants, a path may be an included source of modules rooted
@@ -750,7 +782,7 @@ func (t *translator) releaseCachedResource(backend gfx.Backend, path string) {
 	// flatten already produces.
 	for descr, cached := range t.shaders {
 		if slices.Contains(cached.sources, path) {
-			t.releaseShader(backend, descr, cached)
+			t.releaseShader(f.backend, descr, cached)
 		}
 	}
 }
@@ -780,24 +812,21 @@ func (t *translator) releaseShader(backend gfx.Backend, descr gfx.ShaderDescr, c
 	backend.FreeShader(cached.id)
 }
 
-func (t *translator) freeCachedResources(backend gfx.Backend) {
-	for _, texture := range t.textures {
-		t.ops.ReleaseTexture(texture.ID())
-	}
+func (t *translator) freeCachedResources(f *frame) {
+	t.textures.FreeAll(f.k, t.textureUser(f))
 	for _, pipeline := range t.pipelines {
 		if pipeline != 0 {
-			backend.FreePipeline(pipeline)
+			f.backend.FreePipeline(pipeline)
 		}
 	}
 	for _, cached := range t.shaders {
 		if cached.id != 0 {
-			backend.FreeShader(cached.id)
+			f.backend.FreeShader(cached.id)
 		}
 	}
 	for _, sampler := range t.samplers {
-		backend.FreeSampler(sampler)
+		f.backend.FreeSampler(sampler)
 	}
-	clear(t.textures)
 	clear(t.pipelines)
 	clear(t.shaders)
 	clear(t.samplers)

@@ -1,22 +1,23 @@
 package types
 
 import (
+	"bytes"
 	"image"
 	"image/draw"
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
 	"io/fs"
+
+	"github.com/dvoyni/cog/libs/assets"
 )
 
-func LoadTextureResource(filesystem fs.FS, name string) (width, height int, pixels []byte, ok bool) {
-	file, err := filesystem.Open(name)
-	if err != nil {
-		return 0, 0, nil, false
-	}
-	defer file.Close()
-
-	decoded, _, err := image.Decode(file)
+// DecodeTexture turns an encoded image into the straight RGBA run a bake wants.
+// It takes the bytes rather than a path because the read is the Library's: by
+// the time a texture load reaches here the file has been opened, read and found,
+// and what is left is the decode - which is the loader's own.
+func DecodeTexture(data assets.Blob) (width, height int, pixels []byte, ok bool) {
+	decoded, _, err := image.Decode(bytes.NewReader(data.Data()))
 	if err != nil {
 		return 0, 0, nil, false
 	}

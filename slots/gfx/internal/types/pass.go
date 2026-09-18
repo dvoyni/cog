@@ -69,8 +69,8 @@ func ScreenTarget() TargetDescr { return TargetDescr{kind: TargetScreen} }
 // must have been allocated Renderable.
 func TextureTarget(texture TextureDescr, mip, layer int) TargetDescr {
 	return TargetDescr{
-		kind: TargetTexture, texture: texture.id, mip: mip, layer: layer,
-		width: texture.width, height: texture.height,
+		kind: TargetTexture, texture: texture.Params.id, mip: mip, layer: layer,
+		width: texture.Params.width, height: texture.Params.height,
 	}
 }
 
@@ -120,7 +120,7 @@ func DepthNone() DepthDescr { return DepthDescr{kind: DepthKindNone} }
 // DepthTarget renders depth into a texture, which must be FormatDepth32F and
 // Renderable.
 func DepthTarget(texture TextureDescr) DepthDescr {
-	return DepthDescr{kind: DepthKindTexture, texture: texture.id, width: texture.width, height: texture.height}
+	return DepthDescr{kind: DepthKindTexture, texture: texture.Params.id, width: texture.Params.width, height: texture.Params.height}
 }
 
 // PassDescr declares one render pass: where it draws, in what order, and what

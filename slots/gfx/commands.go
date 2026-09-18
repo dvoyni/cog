@@ -18,6 +18,11 @@ type AcquireResponse struct{ Advanced bool }
 // ReleaseCachedResourceCmd queues release of translator-owned texture and
 // shader caches matching Path. Cleanup runs on the render thread before the
 // latest frame; a later use of the path loads it again.
+//
+// It is also the only retry there is. A read that failed is cached as failed and
+// reported once, so a path whose file was missing stays missing as far as gfx is
+// concerned until this command drops the entry - which also forgets the report,
+// so the next attempt can speak again.
 type ReleaseCachedResourceCmd kernel.Command[ReleaseCachedResourceRequest, ReleaseCachedResourceResponse]
 type ReleaseCachedResourceRequest struct{ Path string }
 type ReleaseCachedResourceResponse struct{}

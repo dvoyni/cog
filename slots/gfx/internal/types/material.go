@@ -100,12 +100,14 @@ func (p *ParameterDescr) fingerprint(h *maphash.Hash) {
 	writeUint(h, uint64(p.kind))
 	switch p.kind {
 	case ParamTexture:
+		// The three cases are disjoint, so the id, the path and the blob say
+		// between them which one this is: there is no source term to fold in.
 		t := &p.texture
-		writeUint(h, uint64(t.source)|uint64(t.id)<<8)
-		h.WriteString(t.path)
-		writeUint(h, uint64(t.width)|uint64(t.height)<<32)
-		writeUint(h, uint64(t.format)|boolBit(t.mipmaps)<<8)
-		maphash.WriteComparable(h, t.pixels)
+		writeUint(h, uint64(t.Params.id))
+		h.WriteString(t.Name)
+		writeUint(h, uint64(t.Params.width)|uint64(t.Params.height)<<32)
+		writeUint(h, uint64(t.Params.format)|boolBit(t.Params.mipmaps)<<8)
+		maphash.WriteComparable(h, t.Blob)
 	case ParamBuffer:
 		b := &p.buffer
 		writeUint(h, uint64(b.source)|uint64(b.id)<<8)

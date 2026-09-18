@@ -562,12 +562,15 @@ func BenchmarkTranslateSteadyState(b *testing.B) {
 			gfx.ColorParam("tint", m.Color{R: 0.5, A: 1}),
 		)
 	}
-	translator.translate(&queue, nil, backend, noFiles, gfx.CaptureDesc{}, false)
+	// The zero Kernel is legal here because nothing this frame reaches it: every
+	// texture in the material is already baked, so no cache loads and no failure
+	// is reported. A kernel is only ever touched on a miss.
+	translator.translate(kernel.Kernel{}, &queue, nil, backend, noFiles, gfx.CaptureDesc{}, false)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		translator.translate(&queue, nil, backend, noFiles, gfx.CaptureDesc{}, false)
+		translator.translate(kernel.Kernel{}, &queue, nil, backend, noFiles, gfx.CaptureDesc{}, false)
 	}
 }
 
@@ -1011,7 +1014,11 @@ func TestOpQueueBakesInlineMaterialAndDrawParameters(t *testing.T) {
 	for _, param := range append(draw.Material.Params(), draw.Params...) {
 		switch types.ParameterKind(&param) {
 		case types.ParamTexture:
-			if types.TextureSource(types.ParameterTextureRef(&param)) == gfx.TextureSourceBytes || types.TexturePixels(types.ParameterTextureRef(&param)).Len() != 0 {
+			// An inline run is baked into a temporary texture at record time
+			// and comes back as an id; a path is left alone for the render
+			// thread's cache. Either way no pixels survive the recording.
+			texture := types.ParameterTextureRef(&param)
+			if texture.Blob.Len() != 0 || (texture.Path() == "" && texture.ID() == 0) {
 				t.Errorf("texture param %q was not remapped to a baked ID", param.Name())
 			}
 		case types.ParamBuffer:
@@ -1415,8 +1422,10 @@ func TestReleaseCachedResourceReleasesPathAndAllowsReload(t *testing.T) {
 	w.Draw(triangle(), material, gfx.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
-	if len(p.translator.textures) != 1 || len(p.translator.shaders) != 1 || len(p.translator.pipelines) != 1 {
-		t.Fatalf("initial caches = textures %d shaders %d pipelines %d, want 1 each", len(p.translator.textures), len(p.translator.shaders), len(p.translator.pipelines))
+	// The texture cache is asked about through what a game can see - one upload
+	// for one path - rather than by reaching into the table that holds it.
+	if backend.uploads != 1 || len(p.translator.shaders) != 1 || len(p.translator.pipelines) != 1 {
+		t.Fatalf("initial uploads/shaders/pipelines = (%d, %d, %d), want 1 each", backend.uploads, len(p.translator.shaders), len(p.translator.pipelines))
 	}
 	k.ExecuteCommand[gfx.ReleaseCachedResourceCmd](gfx.ReleaseCachedResourceRequest{})
 	k.ExecuteCommand[gfx.ReleaseCachedResourceCmd](gfx.ReleaseCachedResourceRequest{Path: "hero.png"})
@@ -1425,7 +1434,7 @@ func TestReleaseCachedResourceReleasesPathAndAllowsReload(t *testing.T) {
 	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
-	if len(p.translator.textures) != 0 || len(p.translator.shaders) != 0 || len(p.translator.pipelines) != 0 || len(p.translator.layouts) != 0 || len(p.translator.parameterPlans) != 0 {
+	if len(p.translator.shaders) != 0 || len(p.translator.pipelines) != 0 || len(p.translator.layouts) != 0 || len(p.translator.parameterPlans) != 0 {
 		t.Fatal("path release retained translator cache entries")
 	}
 	if len(backend.freedShaders) != 1 || len(backend.freedPipelines) != 1 {
@@ -1461,9 +1470,16 @@ func TestFreeCachedResourcesClearsTranslatorOwnedCachesOnly(t *testing.T) {
 	), gfx.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
-	cachedTexture := p.translator.textures["hero.png"]
-	if cachedTexture.ID() == 0 || cachedTexture.ID() == explicit.ID() {
-		t.Fatalf("cached/explicit texture IDs = (%d, %d), want distinct nonzero IDs", cachedTexture.ID(), explicit.ID())
+	// The cached texture is observable as the bake this frame emitted that the
+	// game did not ask for by hand, which is all the test needs to name it.
+	cachedTexture := gfx.TextureID(0)
+	for i := range backend.lastOps {
+		if backend.lastOps[i].kind == opBakeTexture && backend.lastOps[i].texture != explicit.ID() {
+			cachedTexture = backend.lastOps[i].texture
+		}
+	}
+	if cachedTexture == 0 {
+		t.Fatalf("no cached texture bake beside the explicit one (%d)", explicit.ID())
 	}
 
 	k.ExecuteCommand[gfx.FreeCachedResourcesCmd](gfx.FreeCachedResourcesRequest{})
@@ -1480,35 +1496,69 @@ func TestFreeCachedResourcesClearsTranslatorOwnedCachesOnly(t *testing.T) {
 		t.Fatal("global cached cleanup did not release exactly one cached texture")
 	}
 	for i := range backend.lastOps {
-		if backend.lastOps[i].kind == opReleaseTexture && backend.lastOps[i].texture != cachedTexture.ID() {
-			t.Fatalf("global cleanup released texture %d, want cached texture %d (explicit %d)", backend.lastOps[i].texture, cachedTexture.ID(), explicit.ID())
+		if backend.lastOps[i].kind == opReleaseTexture && backend.lastOps[i].texture != cachedTexture {
+			t.Fatalf("global cleanup released texture %d, want cached texture %d (explicit %d)", backend.lastOps[i].texture, cachedTexture, explicit.ID())
 		}
 	}
 }
 
-func TestFailedTextureResourceLoadIsRetried(t *testing.T) {
+// A failed texture read is cached as failed and reported once, which is the
+// behaviour the shader cache always had and the texture cache never did: a
+// missing file used to be re-opened and fully re-decoded every frame, forever,
+// reported nowhere.
+//
+// This replaces TestFailedTextureResourceLoadIsRetried, which asserted that
+// every-frame re-read as a feature. The rename is the point: a behaviour was
+// deliberately given up, and release is the only lever that retries now.
+func TestFailedTextureIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	files := fstest.MapFS{}
 	filesystem := &countingFS{FS: files}
 	p := newPlugin()
-	k := newTestKernelWithFS(t, p, filesystem)
+	errorsReported := 0
+	k := newTestKernelWith(t, p, filesystem, func(error) bool {
+		errorsReported++
+		return false
+	})
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	material := testMaterial(gfx.TextureParam("MainTexture", gfx.TextureWithResource("later.png")))
-
-	for attempt := range 2 {
+	draw := func() {
 		w := recordList(t, k)
 		w.Draw(triangle(), material, gfx.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
-		if attempt == 0 {
-			if len(p.translator.textures) != 0 {
-				t.Fatal("failed texture load was cached")
-			}
-			files["later.png"] = &fstest.MapFile{Data: testPNG(t)}
-		}
 	}
-	if filesystem.opens != 2 || len(p.translator.textures) != 1 || backend.uploads != 1 {
-		t.Fatalf("retry opens/cache/uploads = (%d, %d, %d), want (2, 1, 1)", filesystem.opens, len(p.translator.textures), backend.uploads)
+	release := func() {
+		k.ExecuteCommand[gfx.ReleaseCachedResourceCmd](gfx.ReleaseCachedResourceRequest{Path: "later.png"})
+	}
+
+	draw()
+	if filesystem.opens != 1 || errorsReported != 1 || backend.uploads != 0 {
+		t.Fatalf("first frame opens/errors/uploads = (%d, %d, %d), want (1, 1, 0)", filesystem.opens, errorsReported, backend.uploads)
+	}
+
+	// The second frame neither re-opens nor re-reports: the entry says what
+	// happened, and the binding falls back to id 0 on the strength of it.
+	draw()
+	if filesystem.opens != 1 || errorsReported != 1 {
+		t.Fatalf("second frame opens/errors = (%d, %d), want (1, 1)", filesystem.opens, errorsReported)
+	}
+
+	// Releasing the path drops the entry and forgets the report it filed, so the
+	// path is opened again and the failure is said afresh instead of swallowed.
+	release()
+	draw()
+	if filesystem.opens != 2 || errorsReported != 2 {
+		t.Fatalf("after eviction opens/errors = (%d, %d), want (2, 2)", filesystem.opens, errorsReported)
+	}
+
+	// And with the file finally in place, the same release is what makes the
+	// retry upload rather than fail again.
+	files["later.png"] = &fstest.MapFile{Data: testPNG(t)}
+	release()
+	draw()
+	if filesystem.opens != 3 || backend.uploads != 1 || errorsReported != 2 {
+		t.Fatalf("after the fix opens/uploads/errors = (%d, %d, %d), want (3, 1, 2)", filesystem.opens, backend.uploads, errorsReported)
 	}
 }
 
