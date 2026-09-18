@@ -231,8 +231,19 @@ func (p *plugin) flushFrame(
 	// the first sprite that needs it. The atlas batch is keyed on the texture, so
 	// a texel that landed in a second array would split every fill away from
 	// every sprite it draws with; reserving it first is what keeps them in one
-	// instanced draw. A frame whose texel does not pack draws nothing.
-	types.LookupResolveSprite(fr.lookup, fr.k, "", fr.fsys, fr.resources)
+	// instanced draw.
+	//
+	// A frame whose texel does not pack draws nothing, which is what the
+	// reservation inside the old insert did by refusing every sprite behind it.
+	// Nothing reaches this today - reserving first means the packer has room when
+	// the texel is asked for, and no verb here frees the texel on its own - so it
+	// holds the invariant rather than a path. It is here because the alternative
+	// is half a frame: every fill, line and stroke vanishing while the sprites
+	// beside them still draw, which hides the misconfiguration instead of showing
+	// it.
+	if white := types.LookupResolveSprite(fr.lookup, fr.k, "", fr.fsys, fr.resources); white.Width <= 0 {
+		return nil
+	}
 	p.layers = p.layers[:0]
 	ops := types.OpQueueLayers(write)
 	for layerID, value := range ops {

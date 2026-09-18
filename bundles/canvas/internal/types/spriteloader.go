@@ -117,6 +117,15 @@ func (spriteLoader) Free(value AtlasEntry, user spriteUser) {
 	user.packer.freeEntry(value, user.resources)
 }
 
+// StandaloneEntry is a full-image texture kept outside the atlas so it can be
+// sampled with repeat addressing for tiled sprites. The zero value is an image
+// that did not load, and a tiled draw handed one draws nothing.
+type StandaloneEntry struct {
+	Texture gfx.TextureDescr
+	Width   int
+	Height  int
+}
+
 // standaloneLoader decodes a sprite into a full-image texture of its own, kept
 // outside the atlas so tiled sprites can sample it with repeat addressing.
 type standaloneLoader struct{}

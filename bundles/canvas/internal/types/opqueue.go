@@ -2,9 +2,7 @@ package types
 
 import (
 	"math"
-	pathpkg "path"
 	"reflect"
-	"strings"
 	"unsafe"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -361,51 +359,6 @@ func (w *OpQueue) shape(layerID Layer, transform SpriteTransform, draw ShapeDraw
 	w.paramArena = append(w.paramArena, draw.Params...)
 	op.Params = w.paramArena[start:]
 	w.record(layerID, DrawOp{Kind: DrawSpriteKind, Sprite: op})
-}
-
-// SpritePath validates one sprite path where it enters canvas and says what to
-// draw for it: the cleaned path, or - with invalid set - the path exactly as it
-// was written, for the caller to report once and then draw nothing. An invalid
-// path never reaches a cache, so nothing is keyed on it and nothing is opened
-// for it.
-//
-// The empty path is not invalid: it names the white texel every fill, line and
-// stroke draws with, and is the one sprite canvas resolves without opening
-// anything. "." is invalid, because it names a directory where a file belongs -
-// it used to clean to the empty path and draw a silent white quad.
-func SpritePath(path string) (recorded string, invalid bool) {
-	if path == "" {
-		return "", false
-	}
-	clean, ok := ValidateResourcePath(path)
-	if !ok {
-		return path, true
-	}
-	return clean, false
-}
-
-// ValidateResourcePath normalizes a resource path and rejects empty, absolute,
-// NUL-bearing, or root-escaping inputs, so every path canvas opens has been
-// through one rule and one security boundary.
-//
-// The empty path is refused here and given its meaning by each caller, because
-// the callers disagree about it: a draw reads it as the white texel, and a
-// measurement has nothing to measure.
-func ValidateResourcePath(path string) (string, bool) {
-	if path == "" || strings.ContainsRune(path, 0) {
-		return "", false
-	}
-	cleaned := pathpkg.Clean(strings.ReplaceAll(path, "\\", "/"))
-	if cleaned == "" || cleaned == "." {
-		return "", false
-	}
-	if strings.HasPrefix(cleaned, "/") {
-		return "", false
-	}
-	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return "", false
-	}
-	return cleaned, true
 }
 
 // Text records a text draw. An empty fontPath is resolved to DefaultFontPath

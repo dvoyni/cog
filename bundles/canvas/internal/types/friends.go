@@ -35,6 +35,10 @@ func OpQueueInspect(v *OpQueue, layerID Layer, op *DrawOp) Op { return v.inspect
 // internal/, decoding and packing it on first use. The empty path is the white
 // texel solid fills draw with.
 //
+// path must already have been through SpritePath: the cache is keyed on it, so a
+// path that has not been cleaned would be a second entry for one file and an
+// invalid one would be an entry nothing can ever ask for again.
+//
 // A zero entry is a sprite that did not load - a missing file, an image that
 // would not decode, or one the packer refused - and the draw that asked for it
 // draws nothing. It is cached as it is, so nothing is re-opened on a later
@@ -47,7 +51,17 @@ func LookupResolveSprite(v *Lookup, k kernel.Kernel, path string, fsys fs.FS, re
 // LookupResolveStandalone returns the full-image texture a tiled sprite samples
 // with repeat addressing, for canvas's internal/, decoding and baking it on
 // first use.
+//
+// path carries SpritePath's precondition and one more: it must name a file.
+// There is nothing for the empty path to mean here - the white texel is one texel
+// and tiling it repeats nothing - and letting it through would hand the loader an
+// empty blob, report an undecodable image and cache a failure under a descriptor
+// no caller can name. The refusal is the guard rather than a comment because the
+// draw path's own empty-path check is two call sites away.
 func LookupResolveStandalone(v *Lookup, k kernel.Kernel, path string, fsys fs.FS, resources *gfx.ResourceQueue) StandaloneEntry {
+	if path == "" {
+		return StandaloneEntry{}
+	}
 	return v.tiled.Get(k, assets.Descr[tiledDescrParams]{Name: path}, fsys, resources)
 }
 

@@ -25,14 +25,6 @@ type AtlasEntry struct {
 	slot       m.Vec4i
 }
 
-// StandaloneEntry is a full-image texture kept outside the atlas so it can be
-// sampled with repeat addressing for tiled sprites.
-type StandaloneEntry struct {
-	Texture gfx.TextureDescr
-	Width   int
-	Height  int
-}
-
 // insertion is one image handed to the packer: its pixels and their size, the
 // border to surround them with, whether to extrude the edge texels into that
 // border, and whether the entry's uv rectangle collapses to the centre of a

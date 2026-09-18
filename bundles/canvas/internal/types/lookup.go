@@ -140,18 +140,6 @@ func NewLookupAccess(k kernel.Kernel, lookup *Lookup, filesystem storage.FileSys
 // Valid reports whether the facade is backed by a live Lookup.
 func (la LookupAccess) Valid() bool { return la.lookup != nil }
 
-// invalidSpritePath is the report-once key canvas speaks an unusable sprite path
-// under. It is canvas's own type, so it shares a namespace with nothing: the
-// Library reports a failed read under the descriptor itself, and a path this
-// refuses never becomes one.
-type invalidSpritePath string
-
-// ReportInvalidSpritePath says once that a path canvas was asked to draw is not
-// one it will open, for canvas's internal/.
-func ReportInvalidSpritePath(k kernel.Kernel, path string) {
-	k.ReportErrorOnce(invalidSpritePath(path), fmt.Errorf("canvas: invalid sprite path %q", path))
-}
-
 func fontReportKey(path string) string { return "font:" + path }
 
 // report says a resource's fault once per episode. The kernel holds the keys,
@@ -302,6 +290,13 @@ func (la LookupDeviceAccess) Valid() bool { return la.lookup != nil }
 // It frees at the call, with no queue in front of it: asking for the sprite
 // again is a reload rather than an error, and that is also the one lever a
 // terminal failure has.
+//
+// It names a file and only a file. The white texel is named by its bytes and has
+// no path to pass here, so the one sprite this cannot free is the one canvas
+// generates - a texel that failed to pack stays failed, and UnloadAll at a level
+// boundary is what frees it. A texel only fails to pack when the atlas is
+// already over its byte budget, which is the development-stage error the whole
+// refusal is.
 func (la LookupDeviceAccess) UnloadSprite(path string) {
 	if la.lookup == nil {
 		return
@@ -312,7 +307,7 @@ func (la LookupDeviceAccess) UnloadSprite(path string) {
 		return
 	}
 	l := la.lookup
-	l.sprites.Free(la.kernel, assets.Descr[spriteDescrParams]{Name: clean},
+	l.sprites.Free(la.kernel, spriteDescr(clean),
 		spriteUser{packer: l.spritePacker, resources: la.resources})
 	l.tiled.Free(la.kernel, assets.Descr[tiledDescrParams]{Name: clean}, la.resources)
 	l.spriteSizes.Free(la.kernel, assets.Descr[sizeDescrParams]{Name: clean}, struct{}{})

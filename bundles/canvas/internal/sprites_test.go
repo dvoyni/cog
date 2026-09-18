@@ -86,6 +86,31 @@ func TestTheWhiteTexelIsReservedBeforeAnyLayersOps(t *testing.T) {
 	}
 }
 
+// UnloadSprite names a file, and the texel is named by its bytes, so the one
+// sprite it cannot free is the one canvas generates. The empty path is refused
+// and reported rather than quietly freeing something, and the texel stays
+// resident - the residual this leaves, and what UnloadAll answers.
+func TestUnloadSpriteCannotNameTheGeneratedTexel(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{}}
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, errs, backend := testKernelCapturing(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.FillRect(0, m.Rect{Width: 4, Height: 4}, canvas.ShapeDraw{Color: m.Color{R: 1, A: 1}})
+	})
+	runFrame(k)
+	probeLookupDevice(k, func(la canvas.LookupDeviceAccess) { la.UnloadSprite("") })
+	runFrame(k)
+
+	if len(*errs) != 1 {
+		t.Fatalf("reported errors = %d, want the refused empty path: %v", len(*errs), *errs)
+	}
+	if len(backend.releasedTextures) != 0 {
+		t.Fatalf("released textures = %v, want the texel's array kept", backend.releasedTextures)
+	}
+	if len(backend.updates) != 1 {
+		t.Fatalf("texel uploads = %d, want the one reservation still standing", len(backend.updates))
+	}
+}
+
 // The texel is named by its bytes rather than by a sentinel path, and the bytes
 // are a const, so every frame's descriptor is one identity and one cache entry.
 // Counted through uploads rather than by comparing two descriptors: a blob's
@@ -218,6 +243,40 @@ func TestSpriteSizeAnswersFromTheHeaderTierEvenWhenTheSpriteIsResident(t *testin
 	if filesystem.opens != 2 {
 		t.Fatalf("opens after the measurement = %d, want the header read the sprite tier cannot answer",
 			filesystem.opens)
+	}
+}
+
+// A failure is cached like any other value, so unloading one hands the packer a
+// zero entry to free. It must reclaim nothing: the zero entry's array index is
+// zero, which is a live array, and treating it as a slot would return a bogus
+// rectangle to the free list and count an occupant off an array that never had
+// one - eventually releasing an array still full of sprites.
+func TestFreeingASpriteThatNeverPackedReclaimsNothing(t *testing.T) {
+	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}}
+	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernelCapturing(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "gone.png", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+		write.Sprite(0, "also-gone.png", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+	})
+	runFrame(k)
+	// Two of them, because the array holds two real occupants - the white texel
+	// and the sprite - so two bogus reclaims are what would count it empty.
+	probeLookupDevice(k, func(la canvas.LookupDeviceAccess) {
+		la.UnloadSprite("gone.png")
+		la.UnloadSprite("also-gone.png")
+	})
+	runFrame(k)
+
+	if len(backend.releasedTextures) != 0 {
+		t.Fatalf("released textures = %v, want the array holding the white texel and the sprite kept",
+			backend.releasedTextures)
+	}
+	if len(backend.allocations) != 1 {
+		t.Fatalf("texture arrays = %d, want the one that never emptied", len(backend.allocations))
+	}
+	if instances := spriteInstances(backend); len(instances) == 0 {
+		t.Fatal("the resident sprite stopped drawing after a failed sibling was unloaded")
 	}
 }
 
