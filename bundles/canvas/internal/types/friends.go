@@ -65,11 +65,23 @@ func LookupResolveStandalone(v *Lookup, k kernel.Kernel, path string, fsys fs.FS
 	return v.tiled.Get(k, assets.Descr[tiledDescrParams]{Name: path}, fsys, resources)
 }
 
-// LookupFontStore reads Lookup.fontStore for canvas's internal/.
-func LookupFontStore(v *Lookup) *FontStore { return v.fontStore }
+// LookupFace bakes (or reuses) one font face for canvas's internal/, parsing the
+// file on first use and returning nil when it cannot be baked.
+//
+// px is the rasterization size the flush computed, not a logical one: the draw
+// path bakes at the on-screen pixel size so text stays crisp, and each size is
+// its own entry over one parsed source.
+//
+// path is the path the queue recorded, which Text has already resolved - the
+// empty path became the built-in default there, so nothing arrives here asking
+// for a font with no name.
+func LookupFace(v *Lookup, k kernel.Kernel, path string, px int, fsys fs.FS) *Font {
+	return v.font(k, path, px, fsys)
+}
 
 // LookupInvalidateFontsOnResize calls Lookup.invalidateFontsOnResize for
-// canvas's internal/.
-func LookupInvalidateFontsOnResize(v *Lookup, resources *gfx.ResourceQueue, view *gfx.Viewport) {
-	v.invalidateFontsOnResize(resources, view)
+// canvas's internal/. It takes the kernel because freeing the faces forgets what
+// they reported.
+func LookupInvalidateFontsOnResize(v *Lookup, k kernel.Kernel, resources *gfx.ResourceQueue, view *gfx.Viewport) {
+	v.invalidateFontsOnResize(k, resources, view)
 }

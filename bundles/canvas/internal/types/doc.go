@@ -1,9 +1,9 @@
 // Package types declares the concrete types canvas's root aliases, and the
 // machinery behind them: the recording vocabulary and the two resources,
 // OpQueue and Lookup, with their recording, measuring and unloading methods; the
-// consume side of the queue; the sprite asset caches with their loaders, the two
-// atlas packers behind them, the font store and inline-text parsing; Config,
-// which the packers hold; the halo profile; and the built-in materials.
+// consume side of the queue; the five asset caches with their loaders, the two
+// atlas packers behind them, and inline-text parsing; Config, which the packers
+// hold; the halo profile; and the built-in materials.
 //
 // A type whose unexported state the plugin reads (OpQueue, Lookup, LookupAccess,
 // LookupDeviceAccess) is declared here with its fields unexported and aliased in the
