@@ -97,6 +97,13 @@ func (fr *frame) icon(path string) types.AtlasEntry {
 	return types.LookupResolveSprite(fr.lookup, fr.k, recorded, fr.fsys, fr.resources)
 }
 
+// face bakes (or reuses) one font face at a rasterization size. The path is the
+// one the queue recorded, and Text resolved the empty path to the built-in
+// default when it recorded it, so nothing arrives here unnamed.
+func (fr *frame) face(path string, px int) *types.Font {
+	return types.LookupFace(fr.lookup, fr.k, path, px, fr.fsys)
+}
+
 // New creates the canvas plugin. Configure it with a canvas.Config under
 // canvas.Name.
 func New() kernel.Plugin { return &plugin{} }
@@ -212,12 +219,11 @@ func (p *plugin) flushFrame(
 	k kernel.Kernel, write *canvas.OpQueue, gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue,
 	view *gfx.Viewport, filesystem storage.FileSystem, lookup *canvas.Lookup,
 ) error {
-	fonts := types.LookupFontStore(lookup)
 	defer types.OpQueueReset(write)
 	if !gfxResources.Ready() || view.Width <= 0 || view.Height <= 0 {
 		return nil
 	}
-	types.LookupInvalidateFontsOnResize(lookup, gfxResources, view)
+	types.LookupInvalidateFontsOnResize(lookup, k, gfxResources, view)
 	if !p.ensureQuad(gfxResources) {
 		return nil
 	}
@@ -281,7 +287,7 @@ func (p *plugin) flushFrame(
 				p.drawSprite(gfxWrite, fr, surf, transform, value.Ops[i].Clip, value.Ops[i].HasClip, materials, &value.Ops[i].Sprite)
 			case types.DrawTextKind:
 				p.tris.flush(gfxWrite)
-				p.drawText(gfxWrite, fr, surf, fonts, transform, value.Ops[i].Clip, value.Ops[i].HasClip, materials, &value.Ops[i].Text)
+				p.drawText(gfxWrite, fr, surf, transform, value.Ops[i].Clip, value.Ops[i].HasClip, materials, &value.Ops[i].Text)
 			case types.DrawTrianglesKind:
 				p.batch.flush(gfxWrite, p.quad)
 				op := &value.Ops[i].Triangles
@@ -777,14 +783,14 @@ func paramColorOr(params []gfx.ParameterDescr, name string, def m.Color) m.Color
 	return def
 }
 
-func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, fonts *types.FontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, shading *spriteShading, op *types.TextOp) {
+func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, shading *spriteShading, op *types.TextOp) {
 	if op.Draw.Size <= 0 || op.Text == "" || op.FontPath == "" {
 		return
 	}
 	// Rasterize glyphs at the on-screen pixel size (layer scale x framebuffer
 	// scale), then lay them out in logical units so text stays crisp at any scale.
 	px := max(1, int(math.Round(float64(op.Draw.Size*textRasterScale(layerTransform, surf)))))
-	face := fonts.Face(fr.fsys, op.FontPath, px)
+	face := fr.face(op.FontPath, px)
 	if face == nil {
 		return
 	}
@@ -796,7 +802,7 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, fo
 			end++
 		}
 		line := op.Text[start:end]
-		width := types.GlyphLineWidth(fr.lookup, px, face, line, fr.resources) * toLogical
+		width := types.GlyphLineWidth(fr.lookup, face, line, fr.resources) * toLogical
 		x := op.Draw.Position.X
 		switch op.Draw.Align {
 		case canvas.AlignCenter:
@@ -807,7 +813,7 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, fo
 		var previous rune
 		first := true
 		for _, character := range line {
-			glyph, ok := types.LoadGlyph(fr.lookup, px, character, face, fr.resources)
+			glyph, ok := types.LoadGlyph(fr.lookup, character, face, fr.resources)
 			if !ok {
 				continue
 			}
@@ -834,12 +840,12 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, fo
 }
 
 // drawText expands inline icons and wraps lines before drawing glyph runs.
-func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, fonts *types.FontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.TextOp) {
+func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.TextOp) {
 	if op.Draw.Size <= 0 || op.Text == "" || op.FontPath == "" {
 		return
 	}
 	px := max(1, int(math.Round(float64(op.Draw.Size*textRasterScale(layerTransform, surf)))))
-	face := fonts.Face(fr.fsys, op.FontPath, px)
+	face := fr.face(op.FontPath, px)
 	if face == nil {
 		return
 	}
@@ -859,13 +865,13 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, fonts 
 				width += p.iconWidth(fr, segment.Text, capHeight)
 				continue
 			}
-			width += types.GlyphLineWidth(fr.lookup, px, face, segment.Text, fr.resources) * toLogical
+			width += types.GlyphLineWidth(fr.lookup, face, segment.Text, fr.resources) * toLogical
 		}
 		return width
 	}
 	lines := types.ParseInlineText(op.Text)
 	if op.Draw.WordWrapping && types.ValidWrapWidth(op.Draw.WrapWidth) {
-		wrap := p.wrapMeasure(fr, fonts, op.FontPath, op.Draw.Size, measure)
+		wrap := p.wrapMeasure(fr, op.FontPath, op.Draw.Size, measure)
 		lines = types.WrapInlineText(lines, op.Draw.WrapWidth, wrap)
 	}
 	y := op.Draw.Position.Y
@@ -896,9 +902,9 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, fonts 
 			run := types.TextOp{FontPath: op.FontPath, Text: segment.Text, Draw: canvas.TextDraw{
 				Position: m.Vec2{X: x, Y: y}, Size: op.Draw.Size, Color: op.Draw.Color, Align: canvas.AlignLeft,
 			}}
-			p.drawGlyphRun(gfxWrite, fr, surf, fonts, layerTransform, clip, hasClip, &shading, &run)
+			p.drawGlyphRun(gfxWrite, fr, surf, layerTransform, clip, hasClip, &shading, &run)
 
-			x += types.GlyphLineWidth(fr.lookup, px, face, segment.Text, fr.resources) * toLogical
+			x += types.GlyphLineWidth(fr.lookup, face, segment.Text, fr.resources) * toLogical
 		}
 		y += lineHeight
 	}
@@ -912,9 +918,9 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, fonts 
 // spill its last word onto a line the element has no room for. Wrapping with the
 // logical face keeps the drawn breaks identical to the measured ones; when that
 // face is unavailable the rasterized measurement stands in.
-func (p *plugin) wrapMeasure(fr *frame, fonts *types.FontStore, fontPath string, size float32, fallback func([]types.InlineSegment) float32) func([]types.InlineSegment) float32 {
+func (p *plugin) wrapMeasure(fr *frame, fontPath string, size float32, fallback func([]types.InlineSegment) float32) func([]types.InlineSegment) float32 {
 	px := max(1, int(math.Round(float64(size))))
-	face := fonts.Face(fr.fsys, fontPath, px)
+	face := fr.face(fontPath, px)
 	if face == nil {
 		return fallback
 	}

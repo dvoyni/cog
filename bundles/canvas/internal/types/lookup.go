@@ -9,6 +9,7 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/storage"
+	"golang.org/x/image/font/opentype"
 )
 
 // FontMetrics reports a font's vertical metrics at a given size, in logical
@@ -21,17 +22,17 @@ type FontMetrics struct {
 	CapHeight  float32
 }
 
-// Lookup is the single Canvas-owned resource that holds canvas's asset caches,
-// the two packers behind them, and the font store. Callers acquire it as a write
-// dependency and operate on it through a scoped LookupAccess or
-// LookupDeviceAccess; the resource itself never retains filesystem or GPU
-// handles.
+// Lookup is the single Canvas-owned resource that holds canvas's asset caches
+// and the two packers behind them. Callers acquire it as a write dependency and
+// operate on it through a scoped LookupAccess or LookupDeviceAccess; the
+// resource itself never retains filesystem or GPU handles.
 //
-// Three of its tables are assets.Cache instances - sprites, the standalone
-// textures tiled sprites sample, and the header-only sizes every layout measures
-// against. Each loads through the Library, each caches whatever its load
-// produced, and none of them retries: a sprite that failed is reported once and
-// stays failed until it is unloaded.
+// All five of its tables are assets.Cache instances - sprites, the standalone
+// textures tiled sprites sample, the header-only sizes every layout measures
+// against, parsed font sources, and the faces baked from them. Each loads
+// through the Library, each caches whatever its load produced, and none of them
+// retries: a sprite that failed is reported once and stays failed until it is
+// unloaded.
 type Lookup struct {
 	// spritePacker and glyphPacker are the shelf allocators, free lists,
 	// tombstoned array indices and byte counters the sprite and glyph sides pack
@@ -44,7 +45,13 @@ type Lookup struct {
 	tiled       *assets.Cache[tiledDescrParams, *gfx.ResourceQueue, StandaloneEntry]
 	spriteSizes *assets.Cache[sizeDescrParams, struct{}, m.Vec2i]
 
-	fontStore            *FontStore
+	// fontSources and fontFaces are the font store: a file parsed once, and the
+	// faces baked from it at each pixel size text is rasterized at. They are two
+	// caches rather than one because their release rules differ - see
+	// unloadFont and invalidateFontsOnResize, which are the two rules.
+	fontSources *assets.Cache[sourceDescrParams, struct{}, *opentype.Font]
+	fontFaces   *assets.Cache[faceDescrParams, fontUser, *Font]
+
 	lastFramebufferScale float32
 }
 
@@ -55,7 +62,7 @@ func NewLookup() *Lookup { return NewSizedLookup(WithDefaults(Config{})) }
 // NewSizedLookup builds an empty Lookup resource sized by config, which is
 // already complete.
 //
-// The three loaders are built here, once, and outlive every handler: they are
+// The five loaders are built here, once, and outlive every handler: they are
 // stateless, and everything lock-bound - the kernel, the filesystem, the packer
 // and the resource queue - arrives on the call that needs it.
 func NewSizedLookup(config Config) *Lookup {
@@ -65,7 +72,8 @@ func NewSizedLookup(config Config) *Lookup {
 		sprites:      assets.New[spriteDescrParams, spriteUser, AtlasEntry](spriteLoader{}),
 		tiled:        assets.New[tiledDescrParams, *gfx.ResourceQueue, StandaloneEntry](standaloneLoader{}),
 		spriteSizes:  assets.New[sizeDescrParams, struct{}, m.Vec2i](spriteSizeLoader{}),
-		fontStore:    NewFontStore(),
+		fontSources:  assets.New[sourceDescrParams, struct{}, *opentype.Font](fontSourceLoader{}),
+		fontFaces:    assets.New[faceDescrParams, fontUser, *Font](fontFaceLoader{}),
 	}
 }
 
@@ -82,31 +90,58 @@ func spriteDescr(path string) assets.Descr[spriteDescrParams] {
 	return assets.Descr[spriteDescrParams]{Name: path}
 }
 
-// unloadFont drops a font's baked faces and parsed source so their CPU memory is
-// reclaimed and a later load re-reads the file. The glyph atlas pages are not
-// freed per font; the whole glyph atlas is released together on a framebuffer
-// scale change (invalidateFontsOnResize), which is the only time glyph pages
-// need reclaiming.
-func (l *Lookup) unloadFont(path string) {
-	for key, cached := range l.fontStore.fonts {
-		if key.path == path {
-			_ = cached.Face.Close()
-			delete(l.fontStore.fonts, key)
-		}
-	}
-	delete(l.fontStore.sources, path)
+// font bakes (or reuses) the face at path at px pixels, parsing the file on
+// first use. It returns nil when the file cannot be read, is not a font, or
+// will not bake at that size.
+//
+// The face tier is what a caller asks for and the source tier is what it
+// reaches through, so a face that is already baked touches one table and opens
+// nothing.
+func (l *Lookup) font(k kernel.Kernel, path string, px int, fsys fs.FS) *Font {
+	return l.fontFaces.Get(k,
+		assets.Descr[faceDescrParams]{Params: faceDescrParams{path: path, px: px}},
+		fsys, l.fontUser())
 }
 
-// invalidateFontsOnResize drops the glyph atlas and baked faces when the
+// fontUser is the face loader's pass-through: one pointer, built per call so
+// nothing lock-bound is retained, and passed by value so the frame path pays no
+// allocation for it.
+func (l *Lookup) fontUser() fontUser { return fontUser{sources: l.fontSources} }
+
+// unloadFont drops every face baked from a font and the parsed source behind
+// them, so their CPU memory is reclaimed and a later draw re-reads the file.
+//
+// This is the release rule that makes the font store two caches. Freeing the
+// faces is a predicate over entries rather than a set of keys, because the
+// caller knows the path and not the sizes anything was ever baked at; freeing
+// the source is one key. A hand-written scan over a table keyed by path and
+// size is what this replaces.
+//
+// The glyph atlas pages are not freed per font: the whole glyph atlas is
+// released together on a framebuffer scale change, which is the only time glyph
+// pages are reclaimed at all.
+func (l *Lookup) unloadFont(k kernel.Kernel, path string) {
+	l.fontFaces.FreeWhere(k, l.fontUser(), func(d assets.Descr[faceDescrParams], _ *Font) bool {
+		return d.Params.path == path
+	})
+	l.fontSources.Free(k, assets.Descr[sourceDescrParams]{Name: path}, struct{}{})
+}
+
+// invalidateFontsOnResize drops the glyph atlas and every baked face when the
 // framebuffer/logical scale changes, so glyphs re-rasterize at full resolution.
-func (l *Lookup) invalidateFontsOnResize(resources *gfx.ResourceQueue, view *gfx.Viewport) {
+//
+// It is the other release rule, and the one that decides the shape: every face
+// goes and every parsed source stays, so nothing is re-read from storage and
+// nothing is re-parsed - only re-baked. A single cache keyed by path, with the
+// faces inside its value, cannot say this at all.
+func (l *Lookup) invalidateFontsOnResize(k kernel.Kernel, resources *gfx.ResourceQueue, view *gfx.Viewport) {
 	scale := float32(1)
 	if view.Width > 0 && view.FramebufferWidth > 0 {
 		scale = view.FramebufferWidth / view.Width
 	}
 	if l.lastFramebufferScale != 0 && scale != l.lastFramebufferScale {
 		l.glyphPacker.releaseAll(resources)
-		ClearFontFaces(l.fontStore)
+		l.fontFaces.FreeAll(k, l.fontUser())
 	}
 	l.lastFramebufferScale = scale
 }
@@ -139,24 +174,6 @@ func NewLookupAccess(k kernel.Kernel, lookup *Lookup, filesystem storage.FileSys
 
 // Valid reports whether the facade is backed by a live Lookup.
 func (la LookupAccess) Valid() bool { return la.lookup != nil }
-
-func fontReportKey(path string) string { return "font:" + path }
-
-// report says a resource's fault once per episode. The kernel holds the keys,
-// so the quiet outlives any one handler scope and a successful load or an
-// unload is what ends it.
-func (la LookupAccess) report(key string, err error) {
-	if la.lookup == nil {
-		return
-	}
-	la.kernel.ReportErrorOnce(key, err)
-}
-
-func (la LookupAccess) clearReport(key string) {
-	if la.lookup != nil {
-		la.kernel.ForgetReportedError(key)
-	}
-}
 
 // SpriteSize returns a sprite's intrinsic pixel size, reading its header on first
 // use. It does not require the GPU queue to be ready. On an invalid path or a
@@ -328,16 +345,21 @@ func (la LookupDeviceAccess) UnloadFont(path string) {
 	path = ResolveFontPath(path)
 	clean, ok := ValidateResourcePath(path)
 	if !ok {
-		la.kernel.ReportErrorOnce(fontReportKey(path), fmt.Errorf("canvas: invalid font path %q", path))
+		la.kernel.ReportErrorOnce(invalidFontPath(path), fmt.Errorf("canvas: invalid font path %q", path))
 		return
 	}
-	la.lookup.unloadFont(clean)
-	la.kernel.ForgetReportedError(fontReportKey(clean))
+	la.lookup.unloadFont(la.kernel, clean)
 }
 
-// face bakes (or reuses) a font face at the given logical size, reporting once on
-// failure. It needs only the filesystem, never the GPU queue. An empty path bakes
-// the built-in default font, so measurement matches what Text will draw.
+// face bakes (or reuses) a font face at the given logical size. It needs only
+// the filesystem, never the GPU queue. An empty path bakes the built-in default
+// font, so measurement matches what Text will draw.
+//
+// A path this rule refuses is reported here and never reaches a cache. Every
+// other fault is the caches' own to say, each once per episode until a Free: the
+// Library reports a file it could not read, the source loader a file that is not
+// a font, and the face loader a size it will not bake at. What is returned for
+// all three is nil, because a broken font is not substituted.
 func (la LookupAccess) face(path string, size int) *Font {
 	if la.lookup == nil {
 		return nil
@@ -345,16 +367,11 @@ func (la LookupAccess) face(path string, size int) *Font {
 	path = ResolveFontPath(path)
 	clean, ok := ValidateResourcePath(path)
 	if !ok || size <= 0 {
-		la.report(fontReportKey(path), fmt.Errorf("canvas: invalid font path %q or size %d", path, size))
+		la.kernel.ReportErrorOnce(invalidFontPath(path),
+			fmt.Errorf("canvas: invalid font path %q or size %d", path, size))
 		return nil
 	}
-	face := la.lookup.fontStore.Face(la.fsys, clean, size)
-	if face == nil {
-		la.report(fontReportKey(clean), fmt.Errorf("canvas: font %q could not be loaded", clean))
-		return nil
-	}
-	la.clearReport(fontReportKey(clean))
-	return face
+	return la.lookup.font(la.kernel, clean, size, la.fsys)
 }
 
 // MeasureLine returns the logical advance width of one line (kerning included).

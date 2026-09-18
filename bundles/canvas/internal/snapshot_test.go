@@ -23,6 +23,7 @@ import (
 	"github.com/dvoyni/cog/slots/gfx/gfxplugin"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
+	"golang.org/x/image/font/gofont/goregular"
 )
 
 // canvas_draws answers "nothing is on screen; was it even recorded, and on
@@ -164,12 +165,15 @@ func newDrawsRig(t *testing.T) *drawsRig {
 	fixture := &snapshotFixture{}
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{}.
-			// The sprites these tests record exist, because a sprite that does
-			// not is reported now rather than skipped in silence, and this rig
-			// treats every reported error as fatal.
+			// The sprites and the font these tests record all exist, because an
+			// asset that does not is reported now rather than skipped in
+			// silence, and this rig treats every reported error as fatal. The
+			// font joined them when the font store became two caches: a missing
+			// font used to fail nowhere on the draw path.
 			WithReadFS("test", 10, fstest.MapFS{
 				"images/hero.png":  &fstest.MapFile{Data: pngBytes(t, 4, 4)},
 				"images/other.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)},
+				"fonts/body.ttf":   &fstest.MapFile{Data: goregular.TTF},
 			}),
 		canvas.Name: canvas.Config{},
 	}).Handler(func(err error) bool {

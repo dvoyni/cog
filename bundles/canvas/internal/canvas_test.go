@@ -296,6 +296,14 @@ type lookupDeviceProbeRequest struct {
 }
 type lookupDeviceProbeResponse struct{}
 
+// framePropeCmd runs a callback with the flush's own frame context - the kernel,
+// the read filesystem and the Lookup - so a test can drive a draw-path helper
+// that resolves assets the way flushFrame does, rather than standing a fake
+// store up beside it.
+type frameProbeCmd kernel.Command[frameProbeRequest, frameProbeResponse]
+type frameProbeRequest struct{ run func(*frame) }
+type frameProbeResponse struct{}
+
 // readFileProbeCmd reads a path from storage.FileSystem under its read lock,
 // standing in for production code that reads the resource directly.
 type readFileProbeCmd kernel.Command[readFileProbeRequest, readFileProbeResponse]
@@ -328,6 +336,7 @@ func (p recordCanvasPlugin) Register(registrar *kernel.Registrar, _ any) error {
 	})
 	registrar.HandleCommand[lookupProbeCmd](lookupProbeCmdImpl)
 	registrar.HandleCommand[lookupDeviceProbeCmd](lookupDeviceProbeCmdImpl)
+	registrar.HandleCommand[frameProbeCmd](frameProbeCmdImpl)
 	registrar.HandleCommand[readFileProbeCmd](readFileProbeCmdImpl)
 	return nil
 }
@@ -356,6 +365,19 @@ func lookupDeviceProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupDeviceProbeRe
 		}
 }
 
+func frameProbeCmdImpl() (kernel.Lock, kernel.Execute[frameProbeRequest, frameProbeResponse]) {
+	var lookup kernel.Write[*canvas.Lookup]
+	var filesystem kernel.Read[storage.FileSystem]
+	return func(access kernel.ResourceAccess) {
+			lookup = access.GetWrite[*canvas.Lookup]()
+			filesystem = access.GetRead[storage.FileSystem]()
+		}, func(k kernel.Kernel, req frameProbeRequest) (frameProbeResponse, error) {
+			fr := frame{k: k, fsys: filesystem.Get(), lookup: lookup.Get()}
+			req.run(&fr)
+			return frameProbeResponse{}, nil
+		}
+}
+
 func readFileProbeCmdImpl() (kernel.Lock, kernel.Execute[readFileProbeRequest, readFileProbeResponse]) {
 	var filesystem kernel.Read[storage.FileSystem]
 	return func(access kernel.ResourceAccess) {
@@ -376,6 +398,14 @@ func probeLookup(k kernel.Executioner, fn func(canvas.LookupAccess)) {
 func probeLookupDevice(k kernel.Executioner, fn func(canvas.LookupDeviceAccess)) {
 	k.ExecuteCommand[lookupDeviceProbeCmd](lookupDeviceProbeRequest{run: fn})
 }
+
+// probeFrame executes fn with a flush-shaped frame inside a canvas handler. It
+// carries no resource queue, so it drives the helpers that resolve without
+// uploading.
+func probeFrame(k kernel.Executioner, fn func(*frame)) {
+	k.ExecuteCommand[frameProbeCmd](frameProbeRequest{run: fn})
+}
+
 func testKernel(t testing.TB, filesystem fs.FS, config canvas.Config, record func(*canvas.OpQueue)) (kernel.Executioner, *plugin, *testBackend) {
 	return testKernelHandler(t, filesystem, config, record, func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)

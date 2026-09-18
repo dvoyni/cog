@@ -3,38 +3,20 @@ package types
 import (
 	"image"
 	"image/color"
-	"io/fs"
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 )
 
-type fontKey struct {
-	path string
-	px   int
-}
-
 // Font is one font baked at one pixel size: its face, the glyphs rasterized from
-// it so far, and its line height in those pixels.
+// it so far, and its line height in those pixels. It is what the face cache
+// holds, and it is held by pointer because Glyphs is a mutable per-face memo.
 type Font struct {
 	Face       font.Face
 	Glyphs     map[rune]Glyph
 	LineHeight float32
-}
-
-// FontStore caches parsed font sources by path and baked faces by path and
-// pixel size.
-type FontStore struct {
-	fonts   map[fontKey]*Font
-	sources map[string]*opentype.Font
-}
-
-// NewFontStore builds an empty store.
-func NewFontStore() *FontStore {
-	return &FontStore{fonts: map[fontKey]*Font{}, sources: map[string]*opentype.Font{}}
 }
 
 // Glyph is one rasterized rune: where it sits in the glyph atlas, its offset
@@ -59,45 +41,12 @@ func ResolveFontPath(path string) string {
 	return path
 }
 
-// Face bakes (or reuses) the font at path at px pixels, parsing its source on
-// first use. It returns nil when the file cannot be read or parsed.
-func (s *FontStore) Face(filesystem fs.FS, path string, px int) *Font {
-	key := fontKey{path: path, px: px}
-	if cached, ok := s.fonts[key]; ok {
-		return cached
-	}
-	parsed, ok := s.sources[path]
-	if !ok {
-		data, err := fs.ReadFile(filesystem, path)
-		if err != nil {
-			return nil
-		}
-		parsed, err = opentype.Parse(data)
-		if err != nil {
-			return nil
-		}
-		s.sources[path] = parsed
-	}
-	face, err := opentype.NewFace(parsed, &opentype.FaceOptions{
-		Size: float64(px), DPI: 72, Hinting: font.HintingFull,
-	})
-	if err != nil {
-		return nil
-	}
-	result := &Font{
-		Face: face, Glyphs: map[rune]Glyph{},
-		LineHeight: float32(face.Metrics().Height.Ceil()),
-	}
-	s.fonts[key] = result
-	return result
-}
-
 // LoadGlyph returns one rune of a baked face, rasterizing it into the glyph atlas
 // on first use.
 //
 // The glyph side is a packer with no table: face.Glyphs is the index, and always
 // was. What the packer places is memoised there and nowhere else.
-func LoadGlyph(lookup *Lookup, px int, character rune, face *Font, resources *gfx.ResourceQueue) (Glyph, bool) {
+func LoadGlyph(lookup *Lookup, character rune, face *Font, resources *gfx.ResourceQueue) (Glyph, bool) {
 	if glyph, ok := face.Glyphs[character]; ok {
 		return glyph, true
 	}
@@ -142,12 +91,12 @@ func LoadGlyph(lookup *Lookup, px int, character rune, face *Font, resources *gf
 
 // GlyphLineWidth is the advance width of one line of a baked face in its own
 // pixels, rasterizing any glyph it has not met yet.
-func GlyphLineWidth(lookup *Lookup, px int, face *Font, text string, resources *gfx.ResourceQueue) float32 {
+func GlyphLineWidth(lookup *Lookup, face *Font, text string, resources *gfx.ResourceQueue) float32 {
 	var width float32
 	var previous rune
 	first := true
 	for _, character := range text {
-		glyph, ok := LoadGlyph(lookup, px, character, face, resources)
+		glyph, ok := LoadGlyph(lookup, character, face, resources)
 		if !ok {
 			continue
 		}
@@ -159,12 +108,4 @@ func GlyphLineWidth(lookup *Lookup, px int, face *Font, text string, resources *
 		first = false
 	}
 	return width
-}
-
-// ClearFontFaces closes baked faces but keeps parsed sources for re-baking.
-func ClearFontFaces(fonts *FontStore) {
-	for _, cached := range fonts.fonts {
-		_ = cached.Face.Close()
-	}
-	clear(fonts.fonts)
 }

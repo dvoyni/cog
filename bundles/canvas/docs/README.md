@@ -37,7 +37,7 @@ canvas has the declaration-root shape of
   declares no plugin, and it is what every other package imports.
 - **`bundles/canvas/internal/types`** declares `OpQueue` with its recording
   methods and the consume side the flush reads, `Lookup` with its two facades and
-  the asset caches, packers and font store behind them, inline text parsing, the
+  the five asset caches and two packers behind them, inline text parsing, the
   recording vocabulary, `Config` (which the packers hold), `HaloProfile`, and the
   built-in and halo materials. The root aliases what it exposes.
 - **`bundles/canvas/internal`** is the plugin: its `New`, the resolution of
@@ -90,11 +90,12 @@ shaders and default font. Register `storage` before `canvas`. A typical order is
 
 - `*OpQueue`: frame-local recording surface. Canvas consumes and resets it on
   `app.UpdateEvent`.
-- `*Lookup`: the single persistent resource holding canvas's asset caches - the
-  sprite atlas, the standalone textures tiled sprites sample, and the sprite
-  headers layout measures against - with the two packers behind them and the font
-  store. It also owns the framebuffer-scale font invalidation. Query and mutate it
-  only through a scoped `LookupAccess` or `LookupDeviceAccess`.
+- `*Lookup`: the single persistent resource holding canvas's five asset caches -
+  the sprite atlas, the standalone textures tiled sprites sample, the sprite
+  headers layout measures against, parsed font sources and the faces baked from
+  them - with the two packers behind them. It also owns the framebuffer-scale font
+  invalidation. Query and mutate it only through a scoped `LookupAccess` or
+  `LookupDeviceAccess`.
 
 Gameplay normally writes only `*OpQueue`. Sizing and measurement go through
 `*Lookup` (plus `storage.FileSystem`) via a `LookupAccess`; unloading goes through
@@ -547,8 +548,8 @@ specifies is implemented.
 ## Lookup API
 
 Sizing, text measurement, and resource lifecycle go through `*canvas.Lookup`,
-the single persistent resource that owns canvas's asset caches, its two packers
-and the font store. Because a resource must not retain filesystem or GPU handles
+the single persistent resource that owns canvas's five asset caches and its two
+packers. Because a resource must not retain filesystem or GPU handles
 past its lock scope, callers acquire a handler-scoped facade instead - and there
 are two of them, because measuring needs the filesystem and unloading needs the
 device:

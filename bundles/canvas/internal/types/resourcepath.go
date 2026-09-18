@@ -70,3 +70,10 @@ type invalidSpritePath string
 func ReportInvalidSpritePath(k kernel.Kernel, path string) {
 	k.ReportErrorOnce(invalidSpritePath(path), fmt.Errorf("canvas: invalid sprite path %q", path))
 }
+
+// invalidFontPath is the report-once key canvas speaks an unusable font path or
+// size under, and it is canvas's own type for the same reason invalidSpritePath
+// is: the kernel's report table is keyed by type, so a type of its own shares a
+// namespace with nothing - not with the descriptors the Library reports failed
+// reads under, and not with the plain string keys other plugins spell.
+type invalidFontPath string
