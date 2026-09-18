@@ -397,9 +397,12 @@ and physical `FramebufferWidth`/`FramebufferHeight`.
   and `InlineBytes()`.
 - `TextureDescr`: build with `TextureWithResource` or `TextureWithBytes`, or use
   `ResourceQueue`; inspect with `ID()`, `Path()`, `Size()`, `Format()`,
-  `Mipmaps()` and `PixelBytes()`. Both constructors take a
+  `Mipmaps()` and `PixelBytes()`. Only `TextureWithBytes` takes a
   `gfx.TextureFormat`, which says whether the texels are light or a gamma-encoded
-  picker value; the same path in two formats is two textures.
+  picker value. `TextureWithResource` hardcodes sRGB and generates no mipmaps,
+  because the loader decodes PNG and JPEG and both are gamma-encoded by
+  definition - so a path has no second format to be two textures under, and the
+  path alone identifies what it names.
 - `ShaderDescr`: build with `ShaderWithResource` or `ShaderWithText`; inspect
   with `Path()` and `Supply()`. One path under two supplies is two shaders, so
   the supply is part of the identity rather than a detail beside it.
@@ -711,10 +714,11 @@ like any other write-then-read pair; a screen capture declares none, because
 the frame buffer is the one attachment gfx never names and the backend places
 that barrier itself.
 
-`BufferSourceBytes`, `BufferSourceBaked`, `ShaderSourceText`,
-`ShaderSourceResource`, `TextureSourceResource`, `TextureSourceBytes`, and
-`TextureSourceBaked` are exported source-marker constants; normal callers use
-descriptor constructors instead.
+`BufferSourceBytes`, `BufferSourceBaked`, `ShaderSourceText` and
+`ShaderSourceResource` are exported source-marker constants; normal callers use
+descriptor constructors instead. `TextureDescr` has none: its three cases are
+told apart by which of its fields carries the answer - a baked id, a path, or
+inline pixels - and a marker would only restate that.
 
 ## Math
 

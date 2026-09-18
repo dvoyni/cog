@@ -289,8 +289,10 @@ func TestATemporaryTargetHandsBackTheTextureItRendersInto(t *testing.T) {
 	if texture.Format() != gfx.FormatRGBA8Srgb {
 		t.Errorf("texture format = %v, want FormatRGBA8Srgb", texture.Format())
 	}
-	if types.TextureSource(&texture) != gfx.TextureSourceBaked {
-		t.Errorf("texture source = %v, want TextureSourceBaked", types.TextureSource(&texture))
+	// A baked texture is the one case that carries an id and no path, which is
+	// what the descriptor says instead of a source marker.
+	if texture.Path() != "" || texture.PixelBytes() != 0 {
+		t.Errorf("texture reads as path %q with %d inline bytes, want a baked id alone", texture.Path(), texture.PixelBytes())
 	}
 }
 

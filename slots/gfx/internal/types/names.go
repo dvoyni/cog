@@ -10,16 +10,20 @@ import "strconv"
 // falling back to a legal-looking name, so a member added without touching
 // this file is visible instead of mislabelled.
 
-func TextureSourceName(source textureSource) string {
-	switch source {
-	case TextureSourceResource:
-		return "resource"
-	case TextureSourceBytes:
-		return "bytes"
-	case TextureSourceBaked:
+// TextureSourceName spells how a descriptor resolves. There is no enum behind
+// it any more: the three cases are disjoint fields, so the name is read off
+// whichever one carries the answer. A descriptor carrying none of them names no
+// texture at all, and says so rather than reading as a path that is empty.
+func TextureSourceName(texture TextureDescr) string {
+	switch {
+	case texture.Params.id != 0:
 		return "baked"
+	case texture.Name != "":
+		return "resource"
+	case texture.Blob.Len() != 0:
+		return "bytes"
 	}
-	return UnknownName(int(source))
+	return "none"
 }
 
 func BufferSourceName(source bufferSource) string {

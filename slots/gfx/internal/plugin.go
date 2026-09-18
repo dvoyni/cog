@@ -218,7 +218,7 @@ func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 			queue := resources.Get()
 			capture, capturing := p.captures.target()
 			ops, err := p.translator.translate(
-				list.OpQueue, types.ResourceQueueOps(queue), backend, files, capture, capturing)
+				k, list.OpQueue, types.ResourceQueueOps(queue), backend, files, capture, capturing)
 			if err != nil {
 				k.ReportError(err)
 			}
@@ -238,8 +238,14 @@ func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 }
 
 // readFiles declares a read lock on storage's FileSystem inside a handler's
-// lock, and returns what reads it. The read happens only when called, so a
-// frame that loads nothing boxes nothing.
+// lock, and returns what reads it.
+//
+// The box it returns is not free - handing storage.FileSystem out as an fs.FS
+// costs 32 bytes, measured - which is why translate calls this exactly once, at
+// the top of the frame, and threads the result down. It used to be called behind
+// each cache's own miss probe, and a frame that loaded nothing boxed nothing;
+// the caches now want the filesystem in hand before every lookup, so leaving it
+// there would have moved the cost from once a miss to once a hit.
 func readFiles(access kernel.ResourceAccess) func() fs.FS {
 	filesystem := access.GetRead[storage.FileSystem]()
 	return func() fs.FS { return filesystem.Get() }

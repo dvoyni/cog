@@ -70,8 +70,8 @@ func TestFingerprintSeesTextureBufferAndMatrixParameters(t *testing.T) {
 	}{
 		{"texture path", Material(shader, TextureParam("t", TextureWithResource("a.png"))),
 			Material(shader, TextureParam("t", TextureWithResource("b.png")))},
-		{"texture id", Material(shader, TextureParam("t", TextureDescr{id: 1})),
-			Material(shader, TextureParam("t", TextureDescr{id: 2}))},
+		{"texture id", Material(shader, TextureParam("t", BakedTexture(1, 0, 0))),
+			Material(shader, TextureParam("t", BakedTexture(2, 0, 0)))},
 		{"buffer id", Material(shader, BufferParam("b", BufferDescr{source: BufferSourceBaked, id: 1})),
 			Material(shader, BufferParam("b", BufferDescr{source: BufferSourceBaked, id: 2}))},
 		{"buffer range", Material(shader, BufferRangeParam("b", BufferDescr{source: BufferSourceBaked, id: 1}, 0, 256)),

@@ -89,8 +89,15 @@ func (a *testAdapter) TextureView(texture gfx.TextureID, mip, layer int) gfx.Tex
 	return a.get().TextureView(texture, mip, layer)
 }
 
+// emptyFS is built once rather than per call, because translate now materialises
+// the filesystem at the top of every frame: a fresh fstest.MapFS{} there would
+// put its 48-byte map in every benchmark result and measure the fixture instead
+// of the translation. The frame's real box is storage.FileSystem's 32 bytes, and
+// it shows where a real engine pays it - canvas's flush benchmarks.
+var emptyFS = fstest.MapFS{}
+
 // noFiles is the filesystem of a translation that loads nothing.
-func noFiles() fs.FS { return fstest.MapFS{} }
+func noFiles() fs.FS { return emptyFS }
 
 // gfx is a Slot: it requires exactly one Backend adapter, so a composition
 // that has none fails before anything starts, rather than rendering nothing

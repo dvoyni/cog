@@ -185,7 +185,7 @@ type TextureView struct {
 // TextureViewOf renders one texture descriptor.
 func TextureViewOf(texture TextureDescr) TextureView {
 	view := TextureView{
-		Source:  TextureSourceName(TextureSource(&texture)),
+		Source:  TextureSourceName(texture),
 		Path:    texture.Path(),
 		ID:      texture.ID(),
 		Format:  texture.Format().Name(),

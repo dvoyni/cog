@@ -127,11 +127,10 @@ func TargetMip(v *TargetDescr) int { return v.mip }
 // TargetTextureOf reads TargetDescr.texture for gfx's internal/.
 func TargetTextureOf(v *TargetDescr) TextureID { return v.texture }
 
-// TexturePixels reads TextureDescr.pixels for gfx's internal/.
-func TexturePixels(v *TextureDescr) assets.Blob { return v.pixels }
-
-// TextureSource reads TextureDescr.source for gfx's internal/.
-func TextureSource(v *TextureDescr) textureSource { return v.source }
+// TextureParamsFormat reads TextureDescrParams.format for gfx's internal/. The
+// texture loader lives in internal/, because it needs a gfx.Backend, and the
+// bake parameters a Load is handed keep their fields unexported.
+func TextureParamsFormat(v TextureDescrParams) TextureFormat { return v.format }
 
 // VertexAttrOffset reads VertexAttr.offset for gfx's internal/.
 func VertexAttrOffset(v *VertexAttr) int { return v.offset }

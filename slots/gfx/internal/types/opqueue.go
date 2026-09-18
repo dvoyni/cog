@@ -240,13 +240,19 @@ func (q *OpQueue) bakeBufferIfNeeded(buffer BufferDescr, kind BufferKind) Buffer
 }
 
 func (q *OpQueue) bakeTextureIfNeeded(texture TextureDescr) TextureDescr {
-	if texture.source == TextureSourceBaked || texture.source == TextureSourceResource {
+	// A baked texture already carries its id, and a path names one the render
+	// thread resolves against its own cache. Only inline pixels are this
+	// queue's to upload.
+	if texture.Params.id != 0 || texture.Name != "" {
 		return texture
 	}
-	if texture.width <= 0 || texture.height <= 0 || texture.pixels.Len() == 0 {
+	if texture.Params.width <= 0 || texture.Params.height <= 0 || texture.Blob.Len() == 0 {
 		return TextureDescr{}
 	}
-	return q.temporaryTexture(texture.width, texture.height, texture.format, texture.pixels.Data(), texture.copyData, texture.mipmaps)
+	return q.temporaryTexture(
+		texture.Params.width, texture.Params.height, texture.Params.format,
+		texture.Blob.Data(), texture.Params.copyData, texture.Params.mipmaps,
+	)
 }
 
 func (q *OpQueue) temporaryBuffer(kind BufferKind, data []byte, copyData bool) BufferDescr {
@@ -316,10 +322,7 @@ func (q *OpQueue) TemporaryTarget(width, height int, format TextureFormat) (Targ
 		Kind: OpAllocateTexture, TextureID: id,
 		TexW: width, TexH: height, TexLayers: 1, Format: format, Renderable: true,
 	})
-	texture := TextureDescr{
-		source: TextureSourceBaked, id: id,
-		width: width, height: height, format: format,
-	}
+	texture := TextureDescr{Params: TextureDescrParams{id: id, width: width, height: height, format: format}}
 	return TextureTarget(texture, 0, 0), texture
 }
 
