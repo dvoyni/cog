@@ -10,7 +10,7 @@ import (
 
 // Lookup is the single scene-owned persistent resource. It holds everything
 // that outlives a frame — loaded models, baked pose and morph buffers, the
-// path-keyed texture cache, buffer-built meshes and scene's own unit meshes —
+// texture cache, buffer-built meshes and scene's own unit meshes —
 // plus the deferred bakes and buffer releases the flush applies at the frame
 // boundary.
 //
@@ -41,10 +41,12 @@ type Lookup struct {
 	unit [shapeCount]MeshRef
 	// models is the model cache, keyed by the path that is a model's only cache
 	// key, and textures the scene-owned texture cache every loaded model's
-	// materials bind out of. Neither is refcounted: nothing unloads
-	// automatically, so there is nothing for a count to drive.
+	// materials bind out of. They are two caches rather than two tiers of one,
+	// and their params types are two types for the same reason. Neither is
+	// refcounted: nothing unloads automatically, so there is nothing for a
+	// count to drive.
 	models   *assets.Cache[ModelDescrParams, modelUser, *residentModel]
-	textures map[textureKey]gfx.TextureDescr
+	textures *assets.Cache[textureDescrParams, textureUser, gfx.TextureDescr]
 	// poseBytes and morphBytes are the GPU memory every loaded model's baked
 	// poses and morph deltas occupy, added by a load and subtracted by a free.
 	// They are counters rather than a walk because the two queries reporting
@@ -72,7 +74,11 @@ func NewLookup() *Lookup { return NewSizedLookup(WithDefaults(Config{})) }
 // NewSizedLookup builds an empty Lookup for config, which is already complete.
 // The plugin creates its own this way from its resolved configuration.
 func NewSizedLookup(config Config) *Lookup {
-	return &Lookup{config: config, models: assets.New(modelLoader{})}
+	return &Lookup{
+		config:   config,
+		models:   assets.New(modelLoader{}),
+		textures: assets.New(textureLoader{}),
+	}
 }
 
 // LookupAccess is the scoped facade for everything about a Lookup that neither

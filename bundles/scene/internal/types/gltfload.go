@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"math"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -49,7 +48,7 @@ type LoadedModel struct {
 	geometries []gltfGeometry
 	primitives []loadedPrimitive
 	materials  []loadedMaterial
-	textures   []loadedTexture
+	textures   []textureDescr
 	lights     []ModelLight
 	// scenes mirrors the file's scenes array entry for entry, each holding the
 	// contiguous range of primitives its walk produced. Every scene is
@@ -203,8 +202,8 @@ type loadedMaterial struct {
 	record ScenePbrRecord
 	state  gfx.MaterialState
 	// slots index LoadedModel.textures, or missingTexture for a slot the file
-	// left empty or whose image could not be decoded. Both bind the same 1x1
-	// default, which is what makes a partial failure a resident model.
+	// left empty or named no readable image for. Both fall back to the slot's
+	// own 1x1 default, which is what makes a partial failure a resident model.
 	slots    [pbrSlotCount]int
 	samplers [pbrSlotCount]gfx.SamplerDesc
 }
@@ -230,7 +229,7 @@ const defaultMaterial = -1
 type modelConverter struct {
 	doc      *gltf.Document
 	path     string
-	textures *textureLoader
+	textures *textureRequests
 	model    LoadedModel
 	// geometries interns the converted primitives, keyed by where they came
 	// from rather than by their bytes: hashing a megabyte of vertices to find a
@@ -294,12 +293,10 @@ type modelConverter struct {
 	boundsReported bool
 }
 
-// convertDocument converts one parsed document. filesystem resolves external
-// image URIs and may be nil, in which case a file naming one loses that texture
-// to the 1x1 default and says so.
-func convertDocument(
-	doc *gltf.Document, path string, filesystem fs.FS, sampleRate int,
-) (*LoadedModel, error) {
+// convertDocument converts one parsed document. It opens nothing: an external
+// image is named here and read by the Library when the texture cache misses it,
+// which is why this half of the load needs no filesystem at all.
+func convertDocument(doc *gltf.Document, path string, sampleRate int) (*LoadedModel, error) {
 	if err := checkRequiredExtensions(doc); err != nil {
 		return nil, err
 	}
@@ -309,7 +306,7 @@ func convertDocument(
 	converter := &modelConverter{
 		doc:         doc,
 		path:        path,
-		textures:    newTextureLoader(doc, filesystem, path),
+		textures:    newTextureRequests(doc, path),
 		geometries:  map[geometryKey]int{},
 		variants:    map[materialVariant]int{},
 		visited:     map[int]bool{},
@@ -338,7 +335,7 @@ func convertDocument(
 	// until every scene is flattened.
 	converter.packMorphDeltas()
 	converter.bakeAnimation()
-	converter.model.textures = converter.textures.textures
+	converter.model.textures = converter.textures.descrs
 	converter.model.reports = append(converter.model.reports, converter.textures.reports...)
 	return &converter.model, nil
 }

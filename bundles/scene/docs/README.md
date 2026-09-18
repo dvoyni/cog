@@ -147,7 +147,7 @@ zero `LayerMask` means every layer; a nil `Material` means the bundled PBR.
 - `*OpQueue` — frame-local recording surface. Scene consumes and republishes it
   on `app.UpdateEvent`.
 - `*Lookup` — the single persistent resource: loaded models, baked pose and
-  morph buffers, the path-keyed texture cache, buffer-built meshes and scene's
+  morph buffers, the texture cache, buffer-built meshes and scene's
   own unit meshes, plus the deferred bakes and buffer releases the flush applies
   at the frame boundary. Query and mutate it only through a scoped
   `LookupAccess` or `LookupDeviceAccess`.
@@ -677,7 +677,7 @@ once per handler, because handing it out as an interface allocates.
 | `TotalPoseBytes()` / `TotalMorphBytes()` | plain | `int` | Lookup-wide running counters; no `ok`, and they load nothing. |
 | `BakeMesh` / `UpdateMesh` / `ReleaseMesh` | plain | — | Buffer-built mesh lifecycle. |
 | `UnloadModel(path)` | plain | — | Geometry, poses and material records, freed at the call. **Does not cascade to textures.** |
-| `UnloadTexture(path)` | device | — | Every texture that path baked. Checks no loaded model. |
+| `UnloadTexture(path)` | device | — | Every colour-space variant and embedded image that path baked. Checks no loaded model. |
 | `UnloadAll()` | device | — | Every loaded model and cached texture. |
 
 **Every query returns `(value, ok)` and every query loads.** `ok` means only

@@ -9,10 +9,17 @@ package assets
 //
 // Name wins when it is set. The key is {Name, Params} when Name is not empty
 // and {Blob, Params} otherwise, so a Blob supplied beside a Name is a payload
-// the Library does not read - it is bytes the loader may want, not part of the
-// identity. You named it, you own the name: two callers supplying different
-// bytes under one Name get whichever arrived first, exactly as a path already
-// behaves.
+// rather than part of the identity: it is the bytes Load is handed in place of
+// a read, and the path the Name spells is not opened. You named it, you own the
+// name: two callers supplying different bytes under one Name get whichever
+// arrived first, exactly as a path already behaves.
+//
+// That payload is what lets an asset inside a container be named at all. A
+// GLB-embedded image has no path of its own and its bytes are already in hand
+// inside the model's parse, so it is named by the model and carries those bytes
+// - where a bare Name would make the Library read the whole container and the
+// loader re-parse it to reach image N, and a bare Blob would move the key with
+// every parse and strand the entry the last one made.
 //
 // For a blob-named asset the bytes are the identity, with everything Blob's own
 // doc says about what that costs a call site that builds them fresh.
@@ -26,7 +33,8 @@ type Descr[P comparable] struct {
 	// Name is a storage path, and is empty when the asset is named by its Blob.
 	Name string
 	// Blob is the bytes, when the caller holds them. Beside a Name it is a
-	// payload rather than part of the key.
+	// payload rather than part of the key, and it is still what gets loaded:
+	// a descriptor carrying one is never read from storage.
 	Blob Blob
 	// Params are the bake parameters that make one source several assets: the
 	// size a font is baked at, the colour space a texture is uploaded in, the

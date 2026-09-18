@@ -51,6 +51,12 @@ func (la LookupAccess) UnloadModel(path string) {
 // path names the container, so unloading it releases every image embedded in
 // it.
 //
+// That is a predicate over entries rather than a key, which is what FreeWhere
+// is: the caller cannot name the variants, and the descriptor the table keys
+// already carries the answer. Each freed entry's own report key is forgotten
+// with it, so the Library's read failure for a picture that has since been
+// added can speak again.
+//
 // Nothing checks whether a loaded model still binds them. This is the lever for
 // a texture whose models are already gone, and using it while one is loaded
 // leaves that model's bind groups pointing at freed textures.
@@ -65,7 +71,10 @@ func (la LookupDeviceAccess) UnloadTexture(path string) {
 	if !ok {
 		return
 	}
-	la.lookup.unloadTexture(la.kernel, key, la.resources.ReleaseTexture)
+	l := la.lookup
+	l.textures.FreeWhere(la.kernel, textureUser{resources: la.resources},
+		func(d textureDescr, _ gfx.TextureDescr) bool { return d.Name == key })
+	l.clearTextureReports(la.kernel, key)
 }
 
 // UnloadAll frees every loaded model and every cached texture. It is the level
@@ -83,30 +92,32 @@ func (la LookupDeviceAccess) UnloadAll() {
 	}
 	l := la.lookup
 	l.models.FreeAll(la.kernel, modelUser{lookup: l})
-	// The model report keys are the kernel's rather than the cache's - a
-	// selector key hangs off a path with a '#' - so they are cleared as their
-	// own family, in the one prefix scan an unload is allowed.
+	l.textures.FreeAll(la.kernel, textureUser{resources: la.resources})
+	// Scene's own report keys are the kernel's rather than either cache's - a
+	// selector key hangs off a path with a '#', and so does an embedded
+	// picture's - so both families are cleared as families, in the one prefix
+	// scan an unload is allowed.
 	la.kernel.ForgetReportedErrors(func(reported string) bool {
-		return strings.HasPrefix(reported, "model:")
+		return strings.HasPrefix(reported, modelReportPrefix) ||
+			strings.HasPrefix(reported, textureReportPrefix)
 	})
-	for key, texture := range l.textures {
-		la.resources.ReleaseTexture(texture)
-		delete(l.textures, key)
-		la.kernel.ForgetReportedError(textureReportKey(textureReportPath(key)))
-	}
 }
 
-// unloadTexture frees every texture the cache holds under one path, whatever
-// colour space or embedded image index it was keyed by.
-func (l *Lookup) unloadTexture(k kernel.Kernel, key string, releaseTexture func(gfx.TextureDescr)) {
-	for cached, texture := range l.textures {
-		if cached.path != key {
-			continue
-		}
-		releaseTexture(texture)
-		delete(l.textures, cached)
-		k.ForgetReportedError(textureReportKey(textureReportPath(cached)))
-	}
+// clearTextureReports drops one path's texture report key and every embedded
+// image's key hanging off it, so a picture that was broken, was fixed and is
+// asked for again reports again if it breaks again.
+//
+// It is the string-keyed half of report-once, and it is here rather than inside
+// the cache because this namespace is the one dedup no cache can express: one
+// broken image bound in two colour spaces is two entries and one fact. The
+// cache forgets its own keys - the descriptors the Library reported its read
+// failures under - inside FreeWhere.
+func (l *Lookup) clearTextureReports(k kernel.Kernel, path string) {
+	texture := textureReportKey(path)
+	prefix := texture + "#"
+	k.ForgetReportedErrors(func(reported string) bool {
+		return reported == texture || strings.HasPrefix(reported, prefix)
+	})
 }
 
 // clearModelReports drops one model's report key and every selector key hanging

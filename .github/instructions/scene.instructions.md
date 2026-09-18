@@ -17,6 +17,14 @@ nothing, a stale mesh ref, a light with no cone — each costs its own draw, is
 reported once, and is stood in for by nothing. A frame with a hole in it is the
 correct picture.
 
+The one stated exception is a **texture the file named and scene could not
+get**. There is no draw to skip — the model is sound and the rest of it is
+worth seeing — so the slot binds a placeholder instead: **magenta** for a colour
+slot, because a missing base colour rendering white looks deliberate, and the
+slot's own 1×1 default for a data slot, because magenta as a normal map is a
+surface lit from nowhere. An **empty** slot is not this case and still binds the
+plain default: the file said nothing, and nothing is the right picture.
+
 ## Wiring
 
 Compose scene with what it depends on — storage and its `PermanentFS` Adapter,
@@ -177,8 +185,12 @@ Unloads are the caller's lever and cascade to nothing. `UnloadModel` releases
 geometry, poses and material records but **not textures** — with no refcount the
 lookup cannot know whether another loaded model binds the same image by path.
 `UnloadTexture` is the separate lever and checks no loaded model, so it is for a
-texture whose models are already gone. `UnloadModel` is also the only retry
-there is: a failed load is terminal and clears there and nowhere else.
+texture whose models are already gone; it frees every colour-space variant and
+every embedded image the path baked, because the path is the whole of what a
+caller can name. `UnloadModel` is the only retry there is for a model, and
+`UnloadTexture` is the only one for a picture: a failed load is terminal and
+clears there and nowhere else, so a broken image that has been fixed on disk
+needs both.
 
 ## Animation Is Stateless And Positional
 
