@@ -291,6 +291,7 @@ has to reproduce a halo.
 | the **material** | one value per batch | a member of the uniform block, which a custom shader may append to |
 | a **sprite draw** | one value per sprite | one storage buffer per parameter name, at group 2, indexed by `@builtin(instance_index)` |
 | a **triangles draw** | per material | the uniform block; two values are two draws |
+| a **triangles vertex** | one value per vertex | a member of the caller's own `TVertex`, at a `@location` its shader declares |
 
 Draw-parameter *values* are not in the sprite key, so two sprites differing only
 in one still merge. Their *names* are: every sprite contributes exactly one
@@ -301,6 +302,13 @@ A triangle batch is concatenated vertices with **no instance index**, so the
 sprite path's arrays have nothing to hang on. A parameter named at a
 `DrawTriangles` call is therefore per material, and two values are two draws.
 That is a rule, not a shortcoming of the key.
+
+A value that must **vary between draws** goes in the vertex instead.
+`DrawTriangles` is generic over `TVertex VertexLayout` so the caller can carry
+whatever per-vertex data their shader reads: a hundred quads each with their own
+`fill` are a hundred draws if `fill` is a draw parameter, and one draw if it is a
+member of the caller's vertex struct - same layout, same material, no
+parameters.
 
 Naming one value at two frequencies — a name the shader declares as a uniform
 member, passed at a sprite draw call — is an authoring error, and gfx reports it

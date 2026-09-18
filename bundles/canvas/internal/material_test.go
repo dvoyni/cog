@@ -54,6 +54,33 @@ func TestTrianglesDifferingInAParameterValueSplit(t *testing.T) {
 	}
 }
 
+// The door in the wall that per-material leaves standing, and the reason
+// "batch triangle draws carrying per-draw parameters" closed as answered rather
+// than built: a value that must vary between draws goes in the caller's vertex
+// type, not in a draw parameter. The same three draws carrying it as a
+// parameter are three draws - TestTrianglesDifferingInAParameterValueSplit -
+// and carrying it per vertex they are one, with no engine mechanism between
+// them.
+func TestTrianglesVaryingAValuePerVertexStillMerge(t *testing.T) {
+	custom := gfx.MaterialWithState(gfx.ShaderWithText("fn perVertexMark() {}"), gfx.StateOverlay2D())
+	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
+		for i := range 3 {
+			fill := float32(i) / 3
+			x := float32(i) * 8
+			verts := []customTriangleVertex{
+				{Position: m.Vec2{X: x, Y: 0}, Data: m.Vec4{X: fill}},
+				{Position: m.Vec2{X: x + 4, Y: 0}, Data: m.Vec4{X: fill}},
+				{Position: m.Vec2{X: x, Y: 4}, Data: m.Vec4{X: fill}},
+			}
+			write.DrawTriangles(0, verts, &custom)
+		}
+	})
+	runFrame(k)
+	if backend.draws != 1 {
+		t.Fatalf("draws = %d, want 1: a value carried per vertex does not split the batch", backend.draws)
+	}
+}
+
 // An unrecognised parameter name used to be a reason to bail out of the batch.
 // It is a key field now, so two draws that agree on it are one draw.
 func TestTrianglesWithAnUnrecognisedParameterStillBatch(t *testing.T) {

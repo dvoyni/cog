@@ -612,14 +612,38 @@ This is the rule everything about batching sits on, so it comes first.
 | the **material** | one value per batch | a member of the uniform block, which a custom shader may append to |
 | a **sprite draw** | one value per sprite | one storage buffer per parameter name, at group 2, indexed by `@builtin(instance_index)` |
 | a **triangles draw** | per material | the uniform block; two values are two materials |
+| a **triangles vertex** | one value per vertex | a member of the caller's own `TVertex`, at a `@location` its shader declares |
 
 A triangle batch is concatenated vertices with **no instance index**, so the
 sprite path's per-instance arrays have nothing to hang on. A parameter named at a
 `DrawTriangles` call is therefore per-material: two draws with different values
-are two draws. That is what the code does today; here it is deliberate rather
-than accidental. The rework that would remove the asymmetry is
-[canvas: batch triangle draws that carry a custom material or per-draw parameters](https://github.com/dvoyni/cog/issues/157),
-out of scope.
+are two draws.
+
+**A value that must vary between draws goes in the vertex, and that is the whole
+answer.** `DrawTriangles` is generic over `TVertex VertexLayout` precisely so the
+caller can carry whatever per-vertex data their shader reads. A hundred health
+bars, each with its own `fill`, are a hundred draws if `fill` is a draw
+parameter and **one draw** if it is a member of the caller's vertex struct: same
+layout id, same material, no parameters, so `keyMatches` merges them. The
+asymmetry with the sprite path is therefore in the *spelling* and not in what
+either family can express.
+
+**Rejected: per-vertex parameter arrays.** Giving a triangles draw parameter the
+sprite treatment would mean canvas replicating the value once per vertex into a
+buffer of its own, bound at group 2 and read through `@builtin(vertex_index)` -
+which is 0-based within the batch, since the flush draws non-indexed from offset
+zero. It works, and it was rejected anyway. It stores exactly the bytes a vertex
+member stores, in a second buffer instead of the one the caller already fills;
+it costs a frequency marker on `gfx.ParameterDescr`, which gfx has no other
+reason to carry; it costs `VertexOut` a `canvasVertex: u32` so a fragment stage
+can index the array; and it buys a caller nothing they cannot write today. A
+mechanism that duplicates an existing one is a second way to be right, and that
+is a cost with no matching benefit.
+
+**The one producer that cannot reach a vertex member is canvas's own.**
+`drawTiledSprite` and `emitTextureQuad` build their quads under
+`builtinQuadLayoutID` with no caller to declare a type - and they carry no
+varying value either, so the exception is empty.
 
 ### Per-instance parameter arrays
 
@@ -852,8 +876,9 @@ each is a wall the caller meets rather than a cost they pay unknowingly:
   per distinct shape and adds nothing per draw. Item 2 of
   [#158](https://github.com/dvoyni/cog/issues/158).
 - **Triangles draws whose parameter values differ still split.** Per-material by
-  rule; three draws a frame in the fade's conversion plan against eighteen sprite
-  sites.
+  rule, and the wall has a door: the value belongs in the caller's `TVertex`,
+  where it costs one draw instead of many. See
+  [Parameters and their frequency](#parameters-and-their-frequency).
 
 ### Cost
 
@@ -1272,12 +1297,13 @@ Recorded so nobody reopens them believing they were overlooked.
   frozen-record rule is affordable, and confusing the two is the specific mistake
   this bullet exists to prevent.
 
-- **Batching triangle draws that carry per-draw parameters that must vary within
-  the batch** —
-  [canvas: batch triangle draws that carry a custom material or per-draw parameters](https://github.com/dvoyni/cog/issues/157).
-  A triangle batch is concatenated vertices with no instance index, so the sprite
-  path's arrays have nothing to hang on. The interim rule is documented above;
-  the cost of deferring is three draws a frame against eighteen sprite sites.
+- **Batching triangle draws whose parameter values must vary within the batch** —
+  [canvas: batch triangle draws that carry a custom material or per-draw parameters](https://github.com/dvoyni/cog/issues/157),
+  **closed as answered rather than deferred.** A triangle batch has no instance
+  index, but it does not need one: the caller owns `TVertex`, and a value that
+  varies per draw is a member of it. The rejected per-vertex-array shape, and why
+  a vertex member dominates it, are recorded under
+  [Parameters and their frequency](#parameters-and-their-frequency).
 
 - **The gfx-side companions** —
   [#158](https://github.com/dvoyni/cog/issues/158). The rules are stated here;
