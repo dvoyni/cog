@@ -138,13 +138,13 @@ type ModelLight struct {
 // ModelDrawRecord is one recorded Model call. It is kept apart from DrawRecord
 // because a model draw expands into one draw per primitive at flush time, and
 // the expansion needs the path to be resolved against residency first - a
-// non-resident model contributes no draws at all.
+// unloaded model contributes no draws at all.
 type ModelDrawRecord struct {
 	Layers LayerMask
 	Path   string
-	// scene and node are the draw's selectors, resolved against the resident
-	// entry at expansion rather than at record: the path may not be resident
-	// yet, and a selector means nothing until it is.
+	// scene and node are the draw's selectors, resolved against the loaded
+	// model at expansion rather than at record: the file is not read until the
+	// flush, and a selector means nothing until it is.
 	Scene, Node string
 	transform   Transform
 	// transforms aliases the recording's transform arena, never the caller's
@@ -170,19 +170,17 @@ type ModelDrawRecord struct {
 
 // Model records one draw of the glTF file at path.
 //
-// Loading is asynchronous and a non-resident model is skipped, never
-// substituted: the first call of a path enqueues a load and draws nothing that
-// frame, and there is no placeholder. Drawing the same path every frame while
-// it loads enqueues exactly one command, because an in-flight path is a state
-// rather than an absence. A path that failed to load is never retried - a typo
-// must not spawn a load command every frame forever - and clears only on
-// unload.
+// Loading is synchronous and a model that could not be loaded is skipped, never
+// substituted: the flush this call is recorded into reads, parses and uploads
+// the file, so the model draws in this same frame - and a large file hitches
+// it. Preload is the lever that moves that cost somewhere the game chose. A
+// path that failed is never loaded again - a typo must not re-read the file
+// every frame forever - and clears only on unload, where there is no
+// placeholder either way.
 //
-// Failures report once through kernel.ReportError. Because the report fires
-// from the load command's goroutine it lands a frame or more after the draw
-// that triggered it, so an error can outlive the draw call that caused it: a
-// caller that draws a bad path once and never again still gets exactly one
-// report.
+// Failures report once through kernel.ReportError, from the flush that hit
+// them: the read failure from the asset library, under the descriptor, and
+// everything the decode finds wrong from scene, under the path.
 func (q *OpQueue) Model(layers LayerMask, path string, draw ModelDraw) {
 	transforms := draw.Transforms
 	if len(transforms) > 0 {

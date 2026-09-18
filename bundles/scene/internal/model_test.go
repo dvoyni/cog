@@ -6,6 +6,8 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io/fs"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -65,25 +67,34 @@ func drawModel(path string, draw scene.ModelDraw) func(*scene.OpQueue) {
 	}
 }
 
-// A non-resident model is skipped, never substituted: the first frame draws
-// nothing at all, and residency lands some frames later.
-func TestAModelDrawsNothingUntilItIsResident(t *testing.T) {
+// A model draws in the frame that named it. The flush reads, parses and
+// uploads the file inside the expansion, so there is no frame in which the draw
+// is merely pending - and a large file hitches that frame, which is the cost
+// this design takes and which Preload is the lever for.
+func TestAModelDrawsInTheFrameThatNamedIt(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, onePrimitiveModel(t))),
 		drawModel(modelPath, scene.ModelDraw{}))
 	h.frame()
-	if passes := h.passes(); len(passes) != 1 || passes[0].Instances != 0 {
-		t.Fatalf("first frame packed %v, want nothing while the load is in flight", passes)
-	}
-	h.frameUntil(t, "the model to become resident", func() bool {
-		passes := h.passes()
-		return len(passes) == 1 && passes[0].Instances == 1
-	})
 	passes := h.passes()
+	if len(passes) != 1 || passes[0].Instances != 1 {
+		t.Fatalf("first frame packed %v, want the model drawn in it", passes)
+	}
 	if len(passes[0].Batches) != 1 {
 		t.Fatalf("batches = %v, want one per primitive", passes[0].Batches)
 	}
 	if passes[0].Batches[0].MeshID == 0 {
 		t.Error("a model primitive must carry a real mesh id, which is the sort key")
+	}
+}
+
+// A model that could not be loaded is skipped, never substituted. The loader's
+// default is nil and a nil model expands into no primitives, so the frame has a
+// hole in it and nothing was stood in for the file.
+func TestAModelThatFailedToLoadDrawsNothing(t *testing.T) {
+	h := newHarnessWithFiles(t, fstest.MapFS{}, drawModel("models/absent.glb", scene.ModelDraw{}))
+	h.frame()
+	if passes := h.passes(); len(passes) != 1 || passes[0].Instances != 0 {
+		t.Fatalf("packed %v, want nothing at all: skip, never substitute", passes)
 	}
 }
 
@@ -206,26 +217,26 @@ func TestAModelDrawFoldsTheDrawTransformOverTheFlattenedMatrix(t *testing.T) {
 	}
 }
 
-// A path that does not exist fails wholesale and never retries: a typo must not
-// spawn a load command every frame forever.
+// A path that does not exist fails terminally and never retries: a typo must
+// not re-read the file every frame forever.
+//
+// The read is the Library's, so the failure is the Library's to report - once,
+// under the descriptor that named it - and what the cache keeps is the loader's
+// nil default, which is the entry that makes the second frame read nothing.
 func TestAMissingModelReportsOnceAndNeverRetries(t *testing.T) {
 	h := newHarnessWithFiles(t, fstest.MapFS{}, drawModel("models/absent.glb", scene.ModelDraw{}))
-	h.frameUntil(t, "the failure to be reported", func() bool {
-		var unavailable scene.ErrModelUnavailable
-		return anyErrorAs(h.errors(), &unavailable)
-	})
 	for i := 0; i < 20; i++ {
 		h.frame()
 	}
 	reports := 0
 	for _, err := range h.errors() {
-		var unavailable scene.ErrModelUnavailable
-		if errors.As(err, &unavailable) {
+		if errors.Is(err, fs.ErrNotExist) && strings.Contains(err.Error(), "models/absent.glb") {
 			reports++
 		}
 	}
-	if reports != 1 {
-		t.Fatalf("a missing model reported %d times over 20-odd frames, want once", reports)
+	if reports != 1 || len(h.errors()) != 1 {
+		t.Fatalf("a missing model reported %v over 20-odd frames, want the read failure once",
+			h.errors())
 	}
 }
 
@@ -304,9 +315,10 @@ func TestAModelBindsItsEmbeddedTexture(t *testing.T) {
 	}
 }
 
-// Every query fires the same idempotent load a draw does, so a caller polling
-// this eventually gets an answer rather than polling an empty list forever.
-func TestModelLightsTriggerTheLoadAndReturnTheFilesLights(t *testing.T) {
+// Every query loads the file it names, in the call that asks. There is no
+// polling: the first query either answers or says why it cannot, because the
+// read, the parse and the upload all finish inside it.
+func TestModelLightsLoadTheFileAndReturnItsLights(t *testing.T) {
 	doc := onePrimitiveModel(t)
 	doc.ExtensionsUsed = []string{"KHR_lights_punctual"}
 	doc.Extensions = gltf.Extensions{"KHR_lights_punctual": map[string]any{
@@ -317,18 +329,10 @@ func TestModelLightsTriggerTheLoadAndReturnTheFilesLights(t *testing.T) {
 
 	var lights []scene.ModelLight
 	var ok bool
-	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{run: func(la scene.LookupAccess) {
-		lights, ok = la.ModelLights(modelPath, nil)
-	}})
-	if ok {
-		t.Fatal("the first query cannot be resident; it triggers the load")
+	h.device(func(la scene.LookupDeviceAccess) { lights, ok = la.ModelLights(modelPath, nil) })
+	if !ok {
+		t.Fatal("the first query loads the model and answers about it")
 	}
-	h.frameUntil(t, "the model to become resident", func() bool {
-		h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{run: func(la scene.LookupAccess) {
-			lights, ok = la.ModelLights(modelPath, nil)
-		}})
-		return ok
-	})
 	if len(lights) != 1 || lights[0].Name != "bulb" || lights[0].Descr.Intensity != 2 {
 		t.Fatalf("lights = %+v, want the file's one bulb", lights)
 	}

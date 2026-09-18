@@ -81,25 +81,26 @@ func validateResourcePath(path string) (string, bool) {
 	return cleaned, true
 }
 
-// State reports one path's residency, and is the only way to tell "wait" from
-// "never coming": every other query answers ok = false for both, and a loading
-// screen watching only ok hangs forever on a typo.
+// State reports whether one path is loaded, and why it is not when it is not:
+// nil for a loaded model, and the load's own failure otherwise. It is the only
+// call that tells "not there" from "never coming" - every other query answers
+// ok = false for both, and a loading screen watching only ok hangs forever on a
+// typo.
 //
-// It fires the same idempotent load a draw fires, like every query here, so a
-// caller who polls State alone still gets the model. That makes ModelMissing
-// unobservable through this call on a valid path - the state exists as the
-// table's zero value and as what an unload resets a slot to, and the very act
-// of asking moves it to ModelLoading.
-func (la LookupAccess) State(path string) ModelState {
+// It is an error rather than a state word because the load runs inside the call
+// that asks for it, so there is no in-flight state left to name: by the time
+// this returns, the model is either loaded or it failed. A HUD prints the
+// reason.
+//
+// It fires the same load a draw fires, like every query here, so a caller who
+// polls State alone still gets the model - and pays for it here rather than at
+// the first draw.
+func (la LookupDeviceAccess) State(path string) error {
 	if !la.Valid() {
-		return ModelMissing
+		return ErrModelUnavailable{Model: path, Err: errLookupUnavailable}
 	}
-	la.lookup.requestModel(la.kernel, path)
-	key, _ := ModelKey(path)
-	if entry, ok := la.lookup.models[key]; ok {
-		return entry.State
-	}
-	return ModelMissing
+	_, err := la.lookup.model(la.kernel, la.fsys, la.resources, path)
+	return err
 }
 
 // Nodes appends the names of the addressable nodes in a ref's scene, in the
@@ -114,15 +115,15 @@ func (la LookupAccess) State(path string) ModelState {
 // A degenerate node - one whose authored world transform collapsed an axis, so
 // a draw of it is skipped - still lists here. Its names are a real answer;
 // only re-rooting it is impossible, which is Bounds's and AABB's problem.
-func (la LookupAccess) Nodes(ref ModelRef, dst []string) ([]string, bool) {
+func (la LookupDeviceAccess) Nodes(ref ModelRef, dst []string) ([]string, bool) {
 	if !la.Valid() {
 		return dst, false
 	}
-	entry, ok := la.lookup.requestModel(la.kernel, ref.Path)
+	model, ok := la.resolve(ref.Path)
 	if !ok {
 		return dst, false
 	}
-	scene, err := entry.scene(ref)
+	scene, err := model.scene(ref)
 	if err != nil {
 		la.kernel.ReportErrorOnce(err.reportKey(), err)
 		return dst, false
@@ -163,7 +164,7 @@ func (la LookupAccess) Nodes(ref ModelRef, dst []string) ([]string, bool) {
 // differ and the union is the tighter of the two, since transforming a sphere
 // is exact where refitting a box around rotated corners is not; where nothing
 // rotates the box can be the tighter one, and neither dominates in general.
-func (la LookupAccess) Bounds(ref ModelRef) (m.Vec4, bool) {
+func (la LookupDeviceAccess) Bounds(ref ModelRef) (m.Vec4, bool) {
 	sphere, _, ok := la.bounds(ref)
 	if !ok {
 		return m.Vec4{}, false
@@ -179,7 +180,7 @@ func (la LookupAccess) Bounds(ref ModelRef) (m.Vec4, bool) {
 // Publishing only the box would be a regression - a sphere derived from one is
 // its circumsphere, up to sqrt(3) loose - and publishing only the sphere would
 // cost a caller who wants to intersect a box the box.
-func (la LookupAccess) AABB(ref ModelRef) (min, max m.Vec3, ok bool) {
+func (la LookupDeviceAccess) AABB(ref ModelRef) (min, max m.Vec3, ok bool) {
 	_, box, ok := la.bounds(ref)
 	if !ok {
 		return m.Vec3{}, m.Vec3{}, false
@@ -195,15 +196,12 @@ func (la LookupAccess) AABB(ref ModelRef) (min, max m.Vec3, ok bool) {
 // and makes the whole answer false. A bound over the rest of the model would be
 // a real-looking number that the unbounded piece sticks out of, which is worse
 // than no answer: the caller cannot see the hole.
-func (la LookupAccess) bounds(ref ModelRef) (m.Sphere, m.Box3, bool) {
-	if !la.Valid() {
-		return m.Sphere{}, m.Box3{}, false
-	}
-	entry, ok := la.lookup.requestModel(la.kernel, ref.Path)
+func (la LookupDeviceAccess) bounds(ref ModelRef) (m.Sphere, m.Box3, bool) {
+	model, ok := la.resolve(ref.Path)
 	if !ok {
 		return m.Sphere{}, m.Box3{}, false
 	}
-	view, err := entry.View(ref.Path, ref.Scene, ref.Node)
+	view, err := model.View(ref.Path, ref.Scene, ref.Node)
 	if err != nil {
 		la.kernel.ReportErrorOnce(err.reportKey(), err)
 		return m.Sphere{}, m.Box3{}, false
@@ -219,7 +217,7 @@ func (la LookupAccess) bounds(ref ModelRef) (m.Sphere, m.Box3, bool) {
 	var box m.Box3
 	first := true
 	for i := start; i < end; i++ {
-		bound := entry.boxes[i]
+		bound := model.boxes[i]
 		if !bound.known {
 			return m.Sphere{}, m.Box3{}, false
 		}
@@ -249,7 +247,7 @@ func (la LookupAccess) bounds(ref ModelRef) (m.Sphere, m.Box3, bool) {
 // matched nothing. It is the half of view() that a name query needs: Nodes
 // answers for a degenerate node that view() would reject, and re-rooting is
 // what view() adds on top.
-func (e *ModelEntry) scene(ref ModelRef) (*loadedScene, ModelSelectorError) {
+func (e *residentModel) scene(ref ModelRef) (*loadedScene, ModelSelectorError) {
 	selected := e.defaultScene
 	if ref.Scene != "" {
 		selected = -1

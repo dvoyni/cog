@@ -1,17 +1,21 @@
 package types
 
 import (
+	"io/fs"
+
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // Lookup is the single scene-owned persistent resource. It holds everything
-// that outlives a frame — resident models, baked pose and morph buffers, the
+// that outlives a frame — loaded models, baked pose and morph buffers, the
 // path-keyed texture cache, buffer-built meshes and scene's own unit meshes —
-// plus the deferred unloads and bakes the flush applies at the frame boundary.
+// plus the deferred bakes and buffer releases the flush applies at the frame
+// boundary.
 //
 // It never retains a filesystem or GPU handle of its own. Query and mutate it
-// only through a scoped LookupAccess.
+// only through a scoped LookupAccess or LookupDeviceAccess.
 type Lookup struct {
 	config Config
 	// meshes is the dense mesh table every MeshRef indexes, and a ref's id is
@@ -28,31 +32,31 @@ type Lookup struct {
 	// the backing would rewrite an upload still in flight.
 	staging       []byte
 	pendingMeshes []pendingMesh
-	// pendingReleases are the buffers ReleaseMesh gave up, freed at the frame
-	// boundary so nothing the frame already recorded draws from a dead buffer.
+	// pendingReleases are the buffers ReleaseMesh and a model's free gave up,
+	// released at the frame boundary so nothing the frame already recorded
+	// draws from a dead buffer.
 	pendingReleases []gfx.BufferDescr
 	// unit holds scene's own meshes - the box, sphere and plane the debug
 	// vocabulary draws - each baked on first use.
 	unit [shapeCount]MeshRef
-	// models is the model table, keyed by the path that is a model's only cache
-	// key, and textures the scene-owned texture cache every resident model's
+	// models is the model cache, keyed by the path that is a model's only cache
+	// key, and textures the scene-owned texture cache every loaded model's
 	// materials bind out of. Neither is refcounted: nothing unloads
 	// automatically, so there is nothing for a count to drive.
-	models   map[string]*ModelEntry
+	models   *assets.Cache[ModelDescrParams, modelUser, *residentModel]
 	textures map[textureKey]gfx.TextureDescr
+	// poseBytes and morphBytes are the GPU memory every loaded model's baked
+	// poses and morph deltas occupy, added by a load and subtracted by a free.
+	// They are counters rather than a walk because the two queries reporting
+	// them are what a memory HUD reads every frame, and because a cache has no
+	// walk to offer.
+	poseBytes  int
+	morphBytes int
 	// defaults are the two 1x1 textures every empty PBR slot binds, baked on
 	// first use. hasDefaults rather than a zero test because a baked descriptor
 	// has no reserved zero value.
 	defaults    PbrDefaults
 	hasDefaults bool
-	// unloadModels and unloadTextures are the paths UnloadModel and
-	// UnloadTexture gave up, and unloadEverything the flag UnloadAll sets. All
-	// three are applied at the frame boundary rather than at the call, so a
-	// same-frame unload never frees geometry the frame has already recorded a
-	// draw against.
-	unloadModels     []string
-	unloadTextures   []string
-	unloadEverything bool
 	// bundled is the bundled PBR material once per shader variant, built on
 	// first use around the two default textures. It is not a package-level value because those textures
 	// are baked resources: the backend may not be Ready() at startup, and a
@@ -67,13 +71,24 @@ func NewLookup() *Lookup { return NewSizedLookup(WithDefaults(Config{})) }
 
 // NewSizedLookup builds an empty Lookup for config, which is already complete.
 // The plugin creates its own this way from its resolved configuration.
-func NewSizedLookup(config Config) *Lookup { return &Lookup{config: config} }
+func NewSizedLookup(config Config) *Lookup {
+	return &Lookup{config: config, models: assets.New(modelLoader{})}
+}
 
-// LookupAccess is the scoped facade every query and mutation of a Lookup goes
-// through. Acquire a *Lookup write dependency in a handler, build one with
-// NewLookupAccess, and pass it to consumers for the duration of that handler.
-// Never store the result: the handles behind it are valid only while the
-// handler holds its lock.
+// LookupAccess is the scoped facade for everything about a Lookup that neither
+// loads a model nor frees a GPU texture: the mesh verbs, UnloadModel and the
+// two memory totals. Acquire a *Lookup write dependency in a handler, build one
+// with NewLookupAccess, and pass it to consumers for the duration of that
+// handler. Never store the result: the handles behind it are valid only while
+// the handler holds its lock.
+//
+// Two dependencies, and the split is why. A model load now runs inside the call
+// that asks for it, so every verb that can load needs the filesystem and the
+// resource queue at the call - and one consumer of this facade is an ECS System
+// whose entire use of it is two BakeMesh calls. Making that System declare a
+// gfx write to bake a cube would serialise it against canvas's flush, scene's
+// flush and gfx, so the loading half is LookupDeviceAccess and this half costs
+// its caller exactly what it always did.
 type LookupAccess struct {
 	kernel kernel.Kernel
 	lookup *Lookup
@@ -81,18 +96,56 @@ type LookupAccess struct {
 
 // NewLookupAccess builds a scoped facade. Call it inside a handler that holds
 // the *Lookup write lock.
-//
-// Two dependencies, not three: it takes no storage.FileSystem, unlike canvas's
-// equivalent, because scene's load command opens, parses and bakes the file
-// itself holding no locks. A consumer system therefore declares one fewer
-// resource than canvas's, which reads as an oversight unless it is said out
-// loud.
 func NewLookupAccess(k kernel.Kernel, lookup *Lookup) LookupAccess {
 	return LookupAccess{kernel: k, lookup: lookup}
 }
 
 // Valid reports whether the facade is backed by a live Lookup.
 func (la LookupAccess) Valid() bool { return la.lookup != nil }
+
+// LookupDeviceAccess is the scoped facade for everything that needs the device:
+// Preload, State and the model queries, every one of which loads, and the two
+// unload verbs that free a GPU texture at the call.
+//
+// It is named for what it carries rather than for what it does, which is the
+// convention canvas's facade of the same name follows from the opposite
+// direction - there the loading half is the cheap one and the unloading half is
+// the device's. The constraint is the device either way, and a consumer reading
+// two plugins sees the same word.
+//
+// Build one inside a handler holding *Lookup write, storage.FileSystem read and
+// *gfx.ResourceQueue write. The filesystem arrives already converted to an
+// fs.FS, because handing a storage.FileSystem out as an interface boxes and
+// that box is worth paying once a frame rather than once a call.
+type LookupDeviceAccess struct {
+	kernel    kernel.Kernel
+	lookup    *Lookup
+	fsys      fs.FS
+	resources *gfx.ResourceQueue
+}
+
+// NewLookupDeviceAccess builds the device facade. Call it inside a handler that
+// holds the *Lookup write lock, the filesystem read lock and the resource queue
+// write lock.
+func NewLookupDeviceAccess(
+	k kernel.Kernel, lookup *Lookup, fsys fs.FS, resources *gfx.ResourceQueue,
+) LookupDeviceAccess {
+	return LookupDeviceAccess{kernel: k, lookup: lookup, fsys: fsys, resources: resources}
+}
+
+// Valid reports whether the facade is backed by a live Lookup.
+func (la LookupDeviceAccess) Valid() bool { return la.lookup != nil }
+
+// resolve is what every query here begins with: the model at path, loaded if it
+// is not loaded yet, and whether there is one to answer about. Why there is not
+// is State's business, and the report has already been made.
+func (la LookupDeviceAccess) resolve(path string) (*residentModel, bool) {
+	if !la.Valid() {
+		return nil, false
+	}
+	model, err := la.lookup.model(la.kernel, la.fsys, la.resources, path)
+	return model, err == nil
+}
 
 // ensureBundled builds the bundled PBR's four variants the first time something
 // draws, baking the two 1x1 default textures they bind into every absent slot,

@@ -27,60 +27,84 @@ func boundsModel(t testing.TB) *gltf.Document {
 	return doc
 }
 
-// residentBoundsModel loads boundsModel and returns a harness with it resident,
-// so a query test asserts the answer rather than the wait.
+// residentBoundsModel loads boundsModel and returns a harness with it loaded,
+// so a query test asserts the answer rather than the load.
 func residentBoundsModel(t testing.TB) *harness {
 	t.Helper()
 	return residentModel(t, boundsModel(t))
 }
 
-// residentModel loads one document and returns a harness with it resident.
+// residentModel loads one document and returns a harness with it loaded. There
+// is nothing to wait for: Preload reads, parses and uploads before it returns,
+// which is what makes it the lever a loading screen pulls.
 func residentModel(t testing.TB, doc *gltf.Document) *harness {
 	t.Helper()
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*scene.OpQueue) {})
-	h.lookup(func(la scene.LookupAccess) { la.Preload(modelPath) })
-	h.frameUntil(t, "the model to become resident", func() bool {
-		var state scene.ModelState
-		h.lookup(func(la scene.LookupAccess) { state = la.State(modelPath) })
-		return state == scene.ModelResident
+	h.device(func(la scene.LookupDeviceAccess) {
+		la.Preload(modelPath)
+		if err := la.State(modelPath); err != nil {
+			t.Fatalf("Preload left %q unloaded: %v", modelPath, err)
+		}
 	})
 	return h
 }
 
-// State is what tells a loading screen "wait" from "never coming", and it fires
-// the same load a draw does - so a caller who polls only State still gets the
-// model, rather than polling ModelMissing forever.
-func TestStateFiresTheLoadAndReachesResident(t *testing.T) {
+// State is what tells a loading screen "not there" from "never coming", and it
+// fires the same load a draw does - so a caller who polls only State gets the
+// model, and gets it in the call that asked.
+//
+// nil is loaded. There is no state word left to return, because there is no
+// in-flight state to name: by the time State returns, the read, the parse and
+// every upload have happened.
+func TestStateLoadsTheFileAndAnswersNil(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
-	var first scene.ModelState
-	h.lookup(func(la scene.LookupAccess) { first = la.State(modelPath) })
-	if first != scene.ModelLoading {
-		t.Fatalf("the first State = %v, want ModelLoading: the query fires the load", first)
+	var first error
+	h.device(func(la scene.LookupDeviceAccess) { first = la.State(modelPath) })
+	if first != nil {
+		t.Fatalf("the first State = %v, want nil: the query loads the file", first)
 	}
-	h.frameUntil(t, "the model to become resident", func() bool {
-		var state scene.ModelState
-		h.lookup(func(la scene.LookupAccess) { state = la.State(modelPath) })
-		return state == scene.ModelResident
-	})
 }
 
-// An invalid path never reaches a load command, so nothing in the goroutine can
-// ever report it. The facade has to validate where the caller is standing.
-func TestAnInvalidPathIsFailedSynchronously(t *testing.T) {
+// A model whose file is not there is terminal and says why. The Library owns
+// the read and reports it once; State turns the entry it cached into the reason
+// a HUD prints.
+func TestStateNamesTheReasonAModelIsNotThere(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
-	var state scene.ModelState
-	h.lookup(func(la scene.LookupAccess) { state = la.State("../escape.glb") })
-	if state != scene.ModelFailed {
-		t.Fatalf("State(%q) = %v, want ModelFailed without waiting a frame", "../escape.glb", state)
+	const missing = "models/absent.glb"
+	var err error
+	h.device(func(la scene.LookupDeviceAccess) { err = la.State(missing) })
+	if err == nil {
+		t.Fatal("State on a file that is not there must not answer nil")
+	}
+	if len(h.errors()) != 1 {
+		t.Fatalf("reported %v, want the failed read reported exactly once", h.errors())
+	}
+	// Terminal means terminal: a second query neither reloads nor reports
+	// again, because the entry the failure left is the record that it ran.
+	h.device(func(la scene.LookupDeviceAccess) { err = la.State(missing) })
+	if err == nil || len(h.errors()) != 1 {
+		t.Fatalf("second query: err %v, reports %v; want one report and still failed", err, h.errors())
+	}
+}
+
+// An invalid path never enters the cache at all: it is refused where the caller
+// is standing, with no entry and no tombstone behind it, so a typo is
+// permanently a typo.
+func TestAnInvalidPathIsRefusedBeforeTheCache(t *testing.T) {
+	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
+	var err error
+	h.device(func(la scene.LookupDeviceAccess) { err = la.State("../escape.glb") })
+	if _, ok := err.(scene.ErrModelPathInvalid); !ok {
+		t.Fatalf("State(%q) = %v, want the invalid path refused at once", "../escape.glb", err)
 	}
 	if _, ok := reportedAs[scene.ErrModelPathInvalid](h.errors()); !ok {
 		t.Fatalf("reported %v, want the invalid path reported at once", h.errors())
 	}
 	// Terminal means terminal: a second query neither reports again nor
-	// enqueues anything.
-	h.lookup(func(la scene.LookupAccess) { state = la.State("../escape.glb") })
-	if state != scene.ModelFailed || len(h.errors()) != 1 {
-		t.Fatalf("second query: state %v, reports %v; want one report and still failed", state, h.errors())
+	// loads anything.
+	h.device(func(la scene.LookupDeviceAccess) { err = la.State("../escape.glb") })
+	if err == nil || len(h.errors()) != 1 {
+		t.Fatalf("second query: err %v, reports %v; want one report and still refused", err, h.errors())
 	}
 }
 
@@ -91,7 +115,7 @@ func TestNodesListsTheSceneDepthFirst(t *testing.T) {
 	h := residentBoundsModel(t)
 	var names []string
 	var ok bool
-	h.lookup(func(la scene.LookupAccess) { names, ok = la.Nodes(scene.ModelRef{Path: modelPath}, nil) })
+	h.device(func(la scene.LookupDeviceAccess) { names, ok = la.Nodes(scene.ModelRef{Path: modelPath}, nil) })
 	if !ok {
 		t.Fatal("a resident model's node list is real")
 	}
@@ -105,7 +129,7 @@ func TestNodesListsTheSceneDepthFirst(t *testing.T) {
 func TestNodesListsOneSubtree(t *testing.T) {
 	h := residentBoundsModel(t)
 	var whole, leaf []string
-	h.lookup(func(la scene.LookupAccess) {
+	h.device(func(la scene.LookupDeviceAccess) {
 		whole, _ = la.Nodes(scene.ModelRef{Path: modelPath, Node: "root"}, nil)
 		leaf, _ = la.Nodes(scene.ModelRef{Path: modelPath, Node: "crate"}, nil)
 	})
@@ -123,7 +147,7 @@ func TestBoundsAndAABBAreLocalSpacePostRerooting(t *testing.T) {
 	h := residentBoundsModel(t)
 	var whole, node m.Vec4
 	var sceneMin, sceneMax, nodeMin, nodeMax m.Vec3
-	h.lookup(func(la scene.LookupAccess) {
+	h.device(func(la scene.LookupDeviceAccess) {
 		whole, _ = la.Bounds(scene.ModelRef{Path: modelPath})
 		sceneMin, sceneMax, _ = la.AABB(scene.ModelRef{Path: modelPath})
 		node, _ = la.Bounds(scene.ModelRef{Path: modelPath, Node: "crate"})
@@ -174,8 +198,8 @@ func TestAnimatingANodeDoesNotMoveItsBounds(t *testing.T) {
 	} {
 		var stillMin, stillMax, movingMin, movingMax m.Vec3
 		var stillOK, movingOK bool
-		still.lookup(func(la scene.LookupAccess) { stillMin, stillMax, stillOK = la.AABB(ref) })
-		moving.lookup(func(la scene.LookupAccess) { movingMin, movingMax, movingOK = la.AABB(ref) })
+		still.device(func(la scene.LookupDeviceAccess) { stillMin, stillMax, stillOK = la.AABB(ref) })
+		moving.device(func(la scene.LookupDeviceAccess) { movingMin, movingMax, movingOK = la.AABB(ref) })
 		if !stillOK || !movingOK {
 			t.Fatalf("AABB(%+v) answered %v still and %v animated", ref, stillOK, movingOK)
 		}
@@ -195,13 +219,8 @@ func TestBoundsIsFalseWhenThePrimitiveDeclaredNone(t *testing.T) {
 	position := doc.Meshes[0].Primitives[0].Attributes[gltf.POSITION]
 	doc.Accessors[position].Min, doc.Accessors[position].Max = nil, nil
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*scene.OpQueue) {})
-	h.lookup(func(la scene.LookupAccess) { la.Preload(modelPath) })
-	h.frameUntil(t, "the model to become resident", func() bool {
-		var state scene.ModelState
-		h.lookup(func(la scene.LookupAccess) { state = la.State(modelPath) })
-		return state == scene.ModelResident
-	})
-	h.lookup(func(la scene.LookupAccess) {
+	h.device(func(la scene.LookupDeviceAccess) {
+		la.Preload(modelPath)
 		if _, ok := la.Bounds(scene.ModelRef{Path: modelPath}); ok {
 			t.Error("a model whose POSITION declared no min/max has no bound to report")
 		}
@@ -218,7 +237,7 @@ func TestAnUnmatchedNodeIsFalseAndReportsOnce(t *testing.T) {
 	h := residentBoundsModel(t)
 	var names []string
 	var ok bool
-	h.lookup(func(la scene.LookupAccess) {
+	h.device(func(la scene.LookupDeviceAccess) {
 		names, ok = la.Nodes(scene.ModelRef{Path: modelPath, Node: "typo"}, []string{"kept"})
 		_, _ = la.Bounds(scene.ModelRef{Path: modelPath, Node: "typo"})
 	})
@@ -243,7 +262,7 @@ func TestAnUnmatchedNodeIsFalseAndReportsOnce(t *testing.T) {
 // both rather than the first swallowing the second.
 func TestAnUnmatchedSceneIsFalse(t *testing.T) {
 	h := residentBoundsModel(t)
-	h.lookup(func(la scene.LookupAccess) {
+	h.device(func(la scene.LookupDeviceAccess) {
 		if _, ok := la.Nodes(scene.ModelRef{Path: modelPath, Scene: "nope"}, nil); ok {
 			t.Error("an unmatched scene is not a real answer")
 		}
@@ -253,20 +272,16 @@ func TestAnUnmatchedSceneIsFalse(t *testing.T) {
 	}
 }
 
-// Every query fires the load, so a caller who never calls Preload still gets an
-// answer eventually rather than polling an empty list forever.
-func TestAQueryOnAMissingPathFiresTheLoad(t *testing.T) {
+// Every query loads, so a caller who never calls Preload still gets an answer -
+// in the call that asked, rather than after polling an empty list for frames.
+func TestAQueryOnAnUnloadedPathLoadsIt(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
 	var names []string
 	var ok bool
-	h.lookup(func(la scene.LookupAccess) { names, ok = la.Nodes(scene.ModelRef{Path: modelPath}, nil) })
-	if ok || names != nil {
-		t.Fatalf("the first query cannot be resident: %v %v", names, ok)
+	h.device(func(la scene.LookupDeviceAccess) { names, ok = la.Nodes(scene.ModelRef{Path: modelPath}, nil) })
+	if !ok {
+		t.Fatal("the query alone must bring the model in")
 	}
-	h.frameUntil(t, "the query alone to bring the model in", func() bool {
-		h.lookup(func(la scene.LookupAccess) { names, ok = la.Nodes(scene.ModelRef{Path: modelPath}, nil) })
-		return ok
-	})
 	if len(names) != 3 {
 		t.Fatalf("nodes = %v, want the three the file names", names)
 	}

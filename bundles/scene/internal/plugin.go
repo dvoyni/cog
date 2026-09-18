@@ -108,10 +108,6 @@ func (p *plugin) Register(registrar *kernel.Registrar, value any) error {
 	registrar.InitResource(types.NewSizedLookup(config))
 	registrar.Subscribe[scene.FlushOnUpdate](p.flush).
 		Last().Before[gfx.PresentOnUpdate]()
-	// The load's two hops: the parse, which holds only the filesystem, and the
-	// upload, which holds the Lookup and the resource queue and nothing else.
-	registrar.HandleCommand[types.LoadModelCmd](loadModelCmdImpl)
-	registrar.HandleCommand[installModelCmd](installModelCmdImpl)
 	return nil
 }
 
@@ -131,21 +127,29 @@ func (p *plugin) Start(k kernel.Executioner) error {
 // thread — gfx renders from a latest-wins snapshot, so there is no mechanism
 // for it and no need for one, because a frustum needs aspect, not pixel size,
 // and gfx.Viewport already carries the exact aspect here.
+//
+// The filesystem read is here because a model draw loads the file it names, in
+// the frame that named it. It is the one lock this plugin added for that, and
+// it serialises against nothing a frame does: storage.FileSystem is write-locked
+// only by storage's own three mount commands, and canvas's flush, ui's update
+// and gfx's render already hold it as a read.
 func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var writeQueue kernel.Write[*scene.OpQueue]
 	var lookupResource kernel.Write[*scene.Lookup]
 	var gfxQueue kernel.Write[*gfx.OpQueue]
 	var gfxResourceQueue kernel.Write[*gfx.ResourceQueue]
 	var viewport kernel.Read[*gfx.Viewport]
+	var filesystem kernel.Read[storage.FileSystem]
 	return func(access kernel.ResourceAccess) {
 			writeQueue = access.GetWrite[*scene.OpQueue]()
 			lookupResource = access.GetWrite[*scene.Lookup]()
 			gfxQueue = access.GetWrite[*gfx.OpQueue]()
 			gfxResourceQueue = access.GetWrite[*gfx.ResourceQueue]()
 			viewport = access.GetRead[*gfx.Viewport]()
+			filesystem = access.GetRead[storage.FileSystem]()
 		}, func(k kernel.Kernel, _ app.UpdateEvent) error {
 			p.flushFrame(k, writeQueue.Get(), lookupResource.Get(),
-				gfxQueue.Get(), gfxResourceQueue.Get(), viewport.Get())
+				gfxQueue.Get(), gfxResourceQueue.Get(), viewport.Get(), filesystem.Get())
 			return nil
 		}
 }
@@ -153,6 +157,7 @@ func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 func (p *plugin) flushFrame(
 	k kernel.Kernel, write *scene.OpQueue, lookup *scene.Lookup,
 	gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue, view *gfx.Viewport,
+	filesystem storage.FileSystem,
 ) {
 	cameras := types.OpQueueBeginFlush(write)
 	defer types.OpQueueEndFlush(write)
@@ -176,11 +181,6 @@ func (p *plugin) flushFrame(
 		return gfxResources.BakeTexture(width, height, format, pixels, true, false)
 	}
 	report := func(err error) { k.ReportError(err) }
-	// Unloads land here, at the boundary the caller who queued them has already
-	// passed: the frame that asked has recorded whatever draws it wanted, and
-	// its command buffer has been submitted. The buffers they give up join the
-	// pending releases the drain below frees in the same pass.
-	types.LookupApplyUnloads(lookup, k, gfxResources.ReleaseTexture)
 	// The frame's meshes are settled before anything looks at a draw: the
 	// callers' deferred bakes and releases drain, then the frame's temporaries
 	// become records, so every ref a draw names resolves against final state.
@@ -198,7 +198,9 @@ func (p *plugin) flushFrame(
 	p.materials.reset(types.LookupEnsureBundled(lookup, bakeTexture))
 	// Model draws expand into ordinary draw records before anything looks at
 	// one, so culling, sorting and packing are blind to where a draw came from.
-	p.expandModels(k, lookup, write)
+	// Anything a draw names and the cache does not hold is read, parsed and
+	// uploaded right here, which is the hitch Preload exists to move.
+	p.expandModels(k, lookup, write, filesystem, gfxResources)
 	p.prepareDraws(report, lookup, write, bake, types.OpQueueFlushDraws(write))
 	p.preparedLights = prepareLights(report, p.preparedLights, types.OpQueueFlushLights(write))
 	for i := range cameras {

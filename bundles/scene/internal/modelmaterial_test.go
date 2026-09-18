@@ -1,10 +1,12 @@
 package internal
 
 import (
+	"io/fs"
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
+	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
@@ -61,10 +63,9 @@ func TestAPlainModelDrawBindsTheFilesRecordsWithNoCopy(t *testing.T) {
 	if len(records) != 2 {
 		t.Fatalf("expanded to %d draws, want one per primitive", len(records))
 	}
-	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
-		key, _ := types.ModelKey(modelPath)
-		entry := types.LookupModelEntry(lookup, key)
-		if entry == nil || len(entry.Materials) != 2 {
+	h.model(func(lookup *scene.Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue) {
+		entry, ok := types.LookupModel(lookup, k, fsys, resources, modelPath)
+		if !ok || len(entry.Materials) != 2 {
 			t.Fatalf("entry = %v, want the two materials the file declares", entry)
 		}
 		for i := range records {
@@ -76,7 +77,7 @@ func TestAPlainModelDrawBindsTheFilesRecordsWithNoCopy(t *testing.T) {
 				t.Errorf("draw %d binds a copied Material, want the entry's own", i)
 			}
 		}
-	}})
+	})
 }
 
 // OverrideParams merges by name over each primitive's own record, and it
@@ -138,15 +139,14 @@ func TestOverrideParamsKeepTheFilesTexturesAndReachTheDrawsParameters(t *testing
 			}
 		}
 	}
-	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
-		key, _ := types.ModelKey(modelPath)
-		entry := types.LookupModelEntry(lookup, key)
+	h.model(func(lookup *scene.Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue) {
+		entry, _ := types.LookupModel(lookup, k, fsys, resources, modelPath)
 		for i := range records {
 			if &records[i].Material[0] != &entry.Materials[i].Variants[types.VariantStatic][0] {
 				t.Errorf("draw %d binds a copied Material, want the file's textures kept", i)
 			}
 		}
-	}})
+	})
 }
 
 // The caller's parameter array is copied into the frame's own arena, so a

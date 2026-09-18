@@ -12,7 +12,7 @@ plausible-looking zero value warns about. Follow them in new and changed code
 without expanding a focused task into unrelated cleanup.
 
 Scene's house rule, and the one that explains most of what follows: **skip,
-never substitute**. A model that is not resident, a selector that matches
+never substitute**. A model that could not be loaded, a selector that matches
 nothing, a stale mesh ref, a light with no cone — each costs its own draw, is
 reported once, and is stood in for by nothing. A frame with a hole in it is the
 correct picture.
@@ -33,7 +33,8 @@ plugins := []kernel.Plugin{
 
 Only the composition root imports `sceneplugin`. Recording code imports the
 root, `scene`, and nothing else: `*scene.OpQueue`, `*scene.Lookup`,
-`scene.NewLookupAccess` and every descriptor are there. A recorder that must run
+`scene.NewLookupAccess`, `scene.NewLookupDeviceAccess` and every descriptor are
+there. A recorder that must run
 before scene's flush in the same tick orders itself
 `Before[scene.FlushOnUpdate]()`; one that asks for no order already runs before
 it, because the flush is registered `Last()`. Configuration, when a caller
@@ -119,38 +120,51 @@ whole of what layers do, and it is the one thing nothing else in scene can
 express — a frustum outline drawn once, seen by the minimap and declined by the
 camera it describes, is one draw and one exclusion.
 
-## Residency Lands At The Frame Boundary
+## Loading Happens Where You Stand
 
-A draw of a path that is not resident **draws nothing** and enqueues exactly one
-load however many frames name it. Wire the empty case into the picture — a bare
-pad under every model slot — so a frame in progress reads as loading rather than
-as broken.
+**A model loads in the call that names it.** A draw of a path the cache does not
+hold is read, parsed, decoded and uploaded inside scene's flush, so the model is
+drawn in that same frame — and a large file **hitches** it, holding both gfx
+queues while it does. That is a stated property of the design, not a bug to
+profile.
 
-Every residency change and every unload lands at the next frame boundary, not at
-the call. Three consequences worth writing down:
+`Preload(path)` is the lever: the same load, fired without a draw, so the hitch
+lands in a loading screen the app chose. A path that could not be loaded draws
+nothing, so wire the empty case into the picture — a bare pad under every model
+slot — and it reads as a hole rather than as broken.
 
-- `UnloadModel` followed by `Preload` in one handler is a **no-op**: the unload
-  has not landed yet, so the preload sees the old entry. A retry straddles the
-  boundary.
-- Residency flips one frame earlier than the bakes reach the backend, so a
-  texture count read the instant `State` says resident is the count from the
-  frame before.
+Freeing is immediate too. Three consequences worth writing down:
+
+- `UnloadModel` followed by `Preload` in one handler is a **real retry**: the
+  free lands at the call, so the preload behind it loads afresh.
+- An unload during an update is followed by scene's own flush in the same tick,
+  and that flush **reloads** anything the frame still draws. A free followed by a
+  get is a reload, not an error; only the GPU buffers wait for the frame
+  boundary, which is what keeps a recorded draw off a dead buffer.
 - A residency snapshot read inside an update handler is on the **near side of
   scene's flush**, which runs after it. Judging a flush result against it
   compares two different frames.
-
-Move the decode into a loading screen the app controls with `Preload`, which is
-the same idempotent load a draw fires, fired without one.
 
 ## Queries Answer About Now
 
 Every lookup query returns `(value, ok)` and every query **triggers the load**,
 exactly as a draw does.
 
-`ok` means only **"this value is real"**. It is false for a path still loading
-and false for a path that will never arrive, so a loading screen watching `ok`
-alone hangs forever on a typo. `State(path)` is the only call that tells the two
-apart, and it is what a wait loop watches.
+`ok` means only **"this value is real"**. It is false for a file that could not
+be read and false for a selector that matched nothing, so a loading screen
+watching `ok` alone can never say why. `State(path)` returns an `error` — `nil`
+when the model loaded, and the load's own failure otherwise — and it is the only
+call that can print a reason.
+
+**The facade is two facades.** `scene.NewLookupAccess(k, lookup)` carries
+`BakeMesh`, `UpdateMesh`, `ReleaseMesh`, `UnloadModel` and the two memory
+totals, and costs its caller one resource. Everything that loads — `Preload`,
+`State` and every query — plus `UnloadTexture` and `UnloadAll` is on
+`scene.NewLookupDeviceAccess(k, lookup, fsys, resources)`, which needs
+`storage.FileSystem` read and `*gfx.ResourceQueue` write beside the Lookup. **An
+ECS System that only bakes a mesh must use the first**: declaring a gfx write to
+bake a cube serialises that System against canvas's flush, scene's flush and
+gfx.
 
 `Bounds` and `AABB` answer in local space after re-rooting, and about the **rest
 pose** for anything drawn through the pose buffer — a glTF skin, and equally a
@@ -161,10 +175,10 @@ either.
 
 Unloads are the caller's lever and cascade to nothing. `UnloadModel` releases
 geometry, poses and material records but **not textures** — with no refcount the
-lookup cannot know whether another resident model binds the same image by path.
-`UnloadTexture` is the separate lever and checks no resident model, so it is for
-a texture whose models are already gone. `UnloadModel` is also the only retry
-there is: a failed path is terminal and clears there and nowhere else.
+lookup cannot know whether another loaded model binds the same image by path.
+`UnloadTexture` is the separate lever and checks no loaded model, so it is for a
+texture whose models are already gone. `UnloadModel` is also the only retry
+there is: a failed load is terminal and clears there and nowhere else.
 
 ## Animation Is Stateless And Positional
 
@@ -286,8 +300,9 @@ a whole hot loop.
 ## Verification
 
 `go test ./cmd/scene/...` in `cog-examples` runs the whole acceptance suite with
-no GPU, because culling, sorting and packing all happen in the update-thread
-flush and the result is published as `Passes`. Assert on those numbers.
+no GPU, because loading, culling, sorting and packing all happen in the
+update-thread flush and the result is published as `Passes`. Assert on those
+numbers.
 
 One contract a desktop run passes while saying nothing about, needing
 `bash cmd/web/build.sh <demo>` and a browser: the **storage-buffer budget** (a

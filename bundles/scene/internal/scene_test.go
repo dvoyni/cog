@@ -287,19 +287,27 @@ type inspectCmd kernel.Command[inspectRequest, inspectResponse]
 type inspectRequest struct{ run func(*scene.OpQueue) }
 type inspectResponse struct{}
 
-// lookupProbeCmd runs a callback with a valid scoped LookupAccess.
+// lookupProbeCmd runs a callback with a valid scoped facade, either half.
 type lookupProbeCmd kernel.Command[lookupProbeRequest, lookupProbeResponse]
 type lookupProbeRequest struct {
 	run func(scene.LookupAccess)
-	// files is the separate probe readFile needs. LookupAccess carries no
-	// filesystem any more - that is the facade's whole "two dependencies, not
-	// three" - so a test that wants to read a mounted file asks for one here.
+	// device is the loading half. Preload, State and every query moved onto it
+	// when the load moved inside the call that asks for it, so a test that
+	// drives one asks for this facade rather than the other.
+	device func(scene.LookupDeviceAccess)
+	// files is the separate probe readFile needs. Neither facade hands its
+	// filesystem back, so a test that wants to read a mounted file asks for one
+	// here.
 	files func(storage.FileSystem)
-	// lookup hands over the table itself, which is how a test asserts that a
-	// draw record points at the resident entry rather than at a copy of it.
-	// Nothing outside this package can ask that question, and it is the whole
-	// of "binds the file's records directly".
+	// lookup hands over the resource itself, which is how a test asserts on
+	// state no facade exposes.
 	lookup func(*scene.Lookup)
+	// model hands over the resource together with what it takes to reach one
+	// loaded model, which is how a test asserts that a draw record points at
+	// the cache's own value rather than at a copy of it. Nothing outside this
+	// package can ask that question, and it is the whole of "binds the file's
+	// records directly".
+	model func(*scene.Lookup, kernel.Kernel, fs.FS, *gfx.ResourceQueue)
 }
 type lookupProbeResponse struct{}
 
@@ -338,9 +346,11 @@ func inspectCmdImpl() (kernel.Lock, kernel.Execute[inspectRequest, inspectRespon
 func lookupProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupProbeRequest, lookupProbeResponse]) {
 	var lookup kernel.Write[*scene.Lookup]
 	var filesystem kernel.Read[storage.FileSystem]
+	var resources kernel.Write[*gfx.ResourceQueue]
 	return func(access kernel.ResourceAccess) {
 			lookup = access.GetWrite[*scene.Lookup]()
 			filesystem = access.GetRead[storage.FileSystem]()
+			resources = access.GetWrite[*gfx.ResourceQueue]()
 		}, func(k kernel.Kernel, req lookupProbeRequest) (lookupProbeResponse, error) {
 			if req.files != nil {
 				req.files(filesystem.Get())
@@ -348,8 +358,15 @@ func lookupProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupProbeRequest, looku
 			if req.run != nil {
 				req.run(scene.NewLookupAccess(k, lookup.Get()))
 			}
+			if req.device != nil {
+				req.device(scene.NewLookupDeviceAccess(
+					k, lookup.Get(), fs.FS(filesystem.Get()), resources.Get()))
+			}
 			if req.lookup != nil {
 				req.lookup(lookup.Get())
+			}
+			if req.model != nil {
+				req.model(lookup.Get(), k, fs.FS(filesystem.Get()), resources.Get())
 			}
 			return lookupProbeResponse{}, nil
 		}
@@ -450,9 +467,11 @@ func (h *harness) frame() {
 	h.kernel.PublishEvent(app.RenderEvent{}).Wait()
 }
 
-// frameUntil runs frames until ready, which is how a test waits on an
-// asynchronous load: the parse and the upload are two commands on their own
-// goroutines, so residency lands some frames after the draw that asked for it.
+// frameUntil runs frames until ready. A load is synchronous now, so a model
+// draw is resident in the frame that named it; what still takes frames is
+// everything that lands at the frame boundary - the deferred bakes and the
+// buffer releases - and the very first frames, before the viewport and the
+// backend are up.
 func (h *harness) frameUntil(t testing.TB, what string, ready func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

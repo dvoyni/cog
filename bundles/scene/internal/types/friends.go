@@ -1,6 +1,8 @@
 package types
 
 import (
+	"io/fs"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -16,11 +18,6 @@ func LayerMaskDrawnBy(v LayerMask, cull LayerMask) bool { return v.drawnBy(cull)
 // LookupAccessLookup reads LookupAccess.lookup for scene's internal/'s tests.
 func LookupAccessLookup(v LookupAccess) *Lookup { return v.lookup }
 
-// LookupApplyUnloads calls Lookup.applyUnloads for scene's internal/.
-func LookupApplyUnloads(v *Lookup, k kernel.Kernel, releaseTexture func(gfx.TextureDescr)) {
-	v.applyUnloads(k, releaseTexture)
-}
-
 // LookupDefaults reads Lookup.defaults for scene's internal/'s tests.
 func LookupDefaults(v *Lookup) PbrDefaults { return v.defaults }
 
@@ -35,30 +32,24 @@ func LookupEnsureUnit(v *Lookup, shape unitShape, bake BakeFunc) MeshRef {
 	return v.ensureUnit(shape, bake)
 }
 
-// LookupInstallModel calls Lookup.installModel for scene's internal/.
-func LookupInstallModel(
-	v *Lookup, k kernel.Kernel, path string, generation uint32,
-	loaded *LoadedModel, failure error, resources *gfx.ResourceQueue,
-) {
-	v.installModel(k, path, generation, loaded, failure, resources)
-}
-
 // LookupMesh calls Lookup.mesh for scene's internal/.
 func LookupMesh(v *Lookup, ref MeshRef) (MeshRecord, bool) { return v.mesh(ref) }
 
 // LookupMeshes reads Lookup.meshes for scene's internal/'s tests.
 func LookupMeshes(v *Lookup) []MeshRecord { return v.meshes }
 
-// LookupModelEntry calls Lookup.modelEntry for scene's internal/'s tests.
-func LookupModelEntry(v *Lookup, key string) *ModelEntry { return v.modelEntry(key) }
+// LookupModel calls Lookup.model for scene's internal/, which loads the path if
+// the cache holds no entry for it. The reason a model is absent is State's to
+// report, so this reduces it to the bool the expansion and the tests need.
+func LookupModel(
+	v *Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue, path string,
+) (*residentModel, bool) {
+	model, err := v.model(k, fsys, resources, path)
+	return model, err == nil
+}
 
 // LookupPendingMeshes reads Lookup.pendingMeshes for scene's internal/'s tests.
 func LookupPendingMeshes(v *Lookup) []pendingMesh { return v.pendingMeshes }
-
-// LookupRequestModel calls Lookup.requestModel for scene's internal/.
-func LookupRequestModel(v *Lookup, k kernel.Kernel, path string) (*ModelEntry, bool) {
-	return v.requestModel(k, path)
-}
 
 // LookupStaging reads Lookup.staging for scene's internal/'s tests.
 func LookupStaging(v *Lookup) []byte { return v.staging }

@@ -16,10 +16,11 @@ import "github.com/dvoyni/cog/bundles/scene/internal/types"
 type OpQueue = types.OpQueue
 
 // Lookup is the single scene-owned persistent resource. It holds everything
-// that outlives a frame — resident models, baked pose and morph buffers, the
+// that outlives a frame — loaded models, baked pose and morph buffers, the
 // path-keyed texture cache, buffer-built meshes and scene's own unit meshes —
-// plus the deferred unloads and bakes the flush applies at the frame boundary.
+// plus the deferred bakes and buffer releases the flush applies at the frame
+// boundary.
 //
 // It never retains a filesystem or GPU handle of its own. Query and mutate it
-// only through a scoped LookupAccess.
+// only through a scoped LookupAccess or LookupDeviceAccess.
 type Lookup = types.Lookup

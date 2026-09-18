@@ -1,14 +1,25 @@
 package internal
 
 import (
+	"io/fs"
+
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/gfx"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
 // expandModels turns the frame's model draws into ordinary draw records, one
-// per primitive per instance, and enqueues a load for every path that is not
-// resident yet.
+// per primitive per instance, loading every path it names that the cache does
+// not already hold.
+//
+// The load runs here, in this handler, holding these locks: the read, the JSON
+// parse, the image decodes and every upload. A large file hitches the frame it
+// was first named in, which is the cost this design takes deliberately and
+// which Preload is the lever for. A path that does not load expands into no
+// primitives at all - skip, never substitute - and the reason was reported
+// where it was found.
 //
 // The expansion appends to the draws the flush is already consuming rather than
 // carrying a parallel list, so culling, sorting, batching and inspection are
@@ -19,11 +30,20 @@ import (
 // contiguous and share a group, so the packer's run scan finds them the way it
 // finds a Mesh call's. Instance-major would interleave two primitives' records
 // and break the contiguity the whole batching path assumes.
-func (p *plugin) expandModels(k kernel.Kernel, lookup *scene.Lookup, write *scene.OpQueue) {
+func (p *plugin) expandModels(
+	k kernel.Kernel, lookup *scene.Lookup, write *scene.OpQueue,
+	filesystem storage.FileSystem, resources *gfx.ResourceQueue,
+) {
 	models := types.OpQueueFlushModels(write)
 	if len(models) == 0 {
 		return
 	}
+	// The one boxed filesystem the frame pays for. Handing a storage.FileSystem
+	// out as an fs.FS allocates 32 bytes, and a Get needs it materialised
+	// before the call, so it is converted once here rather than once per model
+	// draw. A frame with no model draws has already returned above, so it pays
+	// nothing at all.
+	fsys := fs.FS(filesystem)
 	// The world matrices are sized in one pass before any of them is written,
 	// because a draw record points into this arena and appending to it while
 	// records already point at it would move the backing under them. The
@@ -35,11 +55,11 @@ func (p *plugin) expandModels(k kernel.Kernel, lookup *scene.Lookup, write *scen
 	worlds := 0
 	for i := range models {
 		p.modelViews[i] = types.ModelView{}
-		entry, ok := types.LookupRequestModel(lookup, k, models[i].Path)
+		model, ok := types.LookupModel(lookup, k, fsys, resources, models[i].Path)
 		if !ok {
 			continue
 		}
-		view, err := entry.View(models[i].Path, models[i].Scene, models[i].Node)
+		view, err := model.View(models[i].Path, models[i].Scene, models[i].Node)
 		if err != nil {
 			k.ReportErrorOnce(types.SelectorReportKey(err), err)
 			continue

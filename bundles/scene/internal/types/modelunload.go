@@ -7,12 +7,18 @@ import (
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
-// UnloadModel queues one path's geometry, baked poses and material records for
-// release at the next frame boundary. Unloading an absent path is a no-op, and
-// a later draw or query of an unloaded path loads it again.
+// UnloadModel gives up one path's geometry, baked poses and material records.
+// Unloading an absent path is a no-op, and a later draw or query of an unloaded
+// path loads it again.
+//
+// It frees at the call, and the entry leaves the cache at the call, so a draw
+// recorded earlier in the same tick reloads the model at the flush rather than
+// drawing a freed one. A free followed by a get is a reload, not an error. The
+// GPU buffers themselves still go through the pending-release queue the flush
+// drains at the frame boundary, which is the same queue ReleaseMesh uses.
 //
 // It does not cascade to textures. With no refcount the lookup cannot know
-// whether another resident model binds the same image by path, and freeing one
+// whether another loaded model binds the same image by path, and freeing one
 // that is still bound is a dead texture in a live bind group rather than a
 // missing picture. UnloadTexture is the separate, deliberate lever.
 //
@@ -21,18 +27,22 @@ import (
 // never reached a load at all - is UnloadModel followed by Preload. There is no
 // Retry, because a Retry that did not first free would be a second name for the
 // idempotent load that already exists.
+//
+// It needs no device, which is why it is here rather than on the device facade:
+// a model's own handles are buffers, and buffers already have a queue.
 func (la LookupAccess) UnloadModel(path string) {
 	if !la.Valid() {
 		return
 	}
-	// The raw string is queued rather than the cleaned one, because an invalid
-	// path has no cleaned form and is recorded in the table under exactly what
-	// the caller passed. ModelKey collapses the two cases again at the boundary.
-	la.lookup.unloadModels = append(la.lookup.unloadModels, path)
+	// ModelKey collapses the two cases: a valid path unloads under its cleaned
+	// form, and an invalid one has no entry to free but does have a report key
+	// recorded under exactly what the caller passed.
+	key, _ := ModelKey(path)
+	la.lookup.clearModelReports(la.kernel, key)
+	la.lookup.models.Free(la.kernel, modelDescr{Name: key}, modelUser{lookup: la.lookup})
 }
 
-// UnloadTexture queues one image path's GPU textures for release at the next
-// frame boundary.
+// UnloadTexture frees one image path's GPU textures.
 //
 // Every texture the path baked goes, not one: colour space is part of a
 // texture's cache key because it is the binding slot's property rather than the
@@ -41,94 +51,49 @@ func (la LookupAccess) UnloadModel(path string) {
 // path names the container, so unloading it releases every image embedded in
 // it.
 //
-// Nothing checks whether a resident model still binds them. This is the lever
-// for a texture whose models are already gone, and using it while one is
-// resident leaves that model's bind groups pointing at freed textures.
-func (la LookupAccess) UnloadTexture(path string) {
+// Nothing checks whether a loaded model still binds them. This is the lever for
+// a texture whose models are already gone, and using it while one is loaded
+// leaves that model's bind groups pointing at freed textures.
+//
+// Releasing a texture needs the queue at the call, which is what puts this verb
+// on the device facade and leaves UnloadModel on the other one.
+func (la LookupDeviceAccess) UnloadTexture(path string) {
 	if !la.Valid() {
 		return
 	}
-	la.lookup.unloadTextures = append(la.lookup.unloadTextures, path)
-}
-
-// UnloadAll queues every resident model and every cached texture for release at
-// the next frame boundary. It is the level teardown, and it is a flag rather
-// than a walk because the table it would walk can still change before the
-// boundary arrives.
-//
-// Buffer-built meshes are not in it: those are the caller's own handles, minted
-// by BakeMesh and released by ReleaseMesh, and a lookup-wide sweep has no way
-// to tell the caller its refs went stale. Nor are scene's own unit meshes or the
-// two default textures, which are the plugin's and would have to be re-baked on
-// the very next frame.
-func (la LookupAccess) UnloadAll() {
-	if la.Valid() {
-		la.lookup.unloadEverything = true
-	}
-}
-
-// applyUnloads frees everything the frame's callers gave up. It runs at the
-// flush, before the frame's own draws are looked at and after the previous
-// frame's commands have been submitted, which is the whole reason unloading is
-// queued: a model freed at the call would be freed under draws the caller had
-// already recorded against it.
-//
-// Buffers go through the same pending-release list ReleaseMesh uses, so
-// drainMeshes frees them in the same pass; textures are freed directly, because
-// nothing else in the plugin releases one.
-func (l *Lookup) applyUnloads(k kernel.Kernel, releaseTexture func(gfx.TextureDescr)) {
-	if l.unloadEverything {
-		for path := range l.models {
-			l.unloadModel(k, path)
-		}
-		for key, texture := range l.textures {
-			releaseTexture(texture)
-			delete(l.textures, key)
-			k.ForgetReportedError(textureReportKey(textureReportPath(key)))
-		}
-		l.unloadEverything = false
-	}
-	for _, path := range l.unloadModels {
-		key, _ := ModelKey(path)
-		l.unloadModel(k, key)
-	}
-	l.unloadModels = l.unloadModels[:0]
-	for _, path := range l.unloadTextures {
-		key, ok := ModelKey(path)
-		if !ok {
-			continue
-		}
-		l.unloadTexture(k, key, releaseTexture)
-	}
-	l.unloadTextures = l.unloadTextures[:0]
-}
-
-// unloadModel retires one table slot: its meshes and animation buffers are
-// queued for release, its report keys are cleared, and the entry is reset to
-// missing with a bumped generation.
-//
-// The slot is reset rather than deleted, and that is what the generation
-// counter is for. A deleted slot would be re-minted at generation one by the
-// next draw, and a load still in flight from before the unload would then match
-// it and install as a ghost - a model nobody asked for, holding buffers nobody
-// will free.
-func (l *Lookup) unloadModel(k kernel.Kernel, key string) {
-	entry, ok := l.models[key]
+	key, ok := ModelKey(path)
 	if !ok {
 		return
 	}
-	for _, ref := range entry.meshes {
-		l.releaseMesh(ref)
+	la.lookup.unloadTexture(la.kernel, key, la.resources.ReleaseTexture)
+}
+
+// UnloadAll frees every loaded model and every cached texture. It is the level
+// teardown, and it spares three things: buffer-built meshes, which are the
+// caller's own handles minted by BakeMesh and released by ReleaseMesh, with no
+// way for a lookup-wide sweep to tell the caller its refs went stale; scene's
+// own unit meshes; and the two default textures, which are the plugin's and
+// would have to be re-baked on the very next frame.
+//
+// It walks what is loaded at the call. A model asked for after it and before
+// the frame ends was deliberately asked for, and survives.
+func (la LookupDeviceAccess) UnloadAll() {
+	if !la.Valid() {
+		return
 	}
-	animation := &entry.animation
-	if animation.poseBytes > 0 {
-		l.pendingReleases = append(l.pendingReleases, animation.poses, animation.skinJoints)
+	l := la.lookup
+	l.models.FreeAll(la.kernel, modelUser{lookup: l})
+	// The model report keys are the kernel's rather than the cache's - a
+	// selector key hangs off a path with a '#' - so they are cleared as their
+	// own family, in the one prefix scan an unload is allowed.
+	la.kernel.ForgetReportedErrors(func(reported string) bool {
+		return strings.HasPrefix(reported, "model:")
+	})
+	for key, texture := range l.textures {
+		la.resources.ReleaseTexture(texture)
+		delete(l.textures, key)
+		la.kernel.ForgetReportedError(textureReportKey(textureReportPath(key)))
 	}
-	if animation.morphBytes > 0 {
-		l.pendingReleases = append(l.pendingReleases, animation.morphDeltas)
-	}
-	l.clearModelReports(k, key)
-	*entry = ModelEntry{Generation: entry.Generation + 1}
 }
 
 // unloadTexture frees every texture the cache holds under one path, whatever
@@ -151,6 +116,10 @@ func (l *Lookup) unloadTexture(k kernel.Kernel, key string, releaseTexture func(
 // names in one file are two reports; the cost is that clearing them is a prefix
 // scan rather than one delete, which is what ForgetReportedErrors is for. It
 // runs on unload only, which is the cold path that method asks for.
+//
+// The cache forgets its own key - the descriptor the Library reported the read
+// failure under - inside Free, which is the other half of report-once and is
+// why Free takes a kernel at all.
 func (l *Lookup) clearModelReports(k kernel.Kernel, key string) {
 	model := modelReportKey(key)
 	prefix := model + "#"

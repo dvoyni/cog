@@ -2,10 +2,12 @@ package internal
 
 import (
 	"errors"
+	"io/fs"
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
+	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -41,6 +43,18 @@ func (h *harness) bake(vertices []scene.Vertex, indices []uint32, topology gfx.P
 
 func (h *harness) lookup(run func(scene.LookupAccess)) {
 	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{run: run})
+}
+
+// device is lookup for the loading half of the facade, which is what Preload,
+// State and every model query moved onto.
+func (h *harness) device(run func(scene.LookupDeviceAccess)) {
+	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{device: run})
+}
+
+// model hands a test the cache's own value for one path, which is what an
+// assertion about binding the file's records rather than a copy of them needs.
+func (h *harness) model(run func(*scene.Lookup, kernel.Kernel, fs.FS, *gfx.ResourceQueue)) {
+	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{model: run})
 }
 
 // reportedAs finds the first reported error of a given type.

@@ -1,38 +1,68 @@
 package types
 
 import (
+	"bytes"
 	"errors"
+	"io/fs"
+	"path"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
+	"github.com/qmuntal/gltf"
 )
 
-// ModelState is one path's residency. It is a state rather than an absence
-// precisely so that an in-flight load is distinguishable from a path nobody has
-// asked for: a model drawn every frame while it loads must enqueue exactly one
-// command.
-type ModelState uint8
+// ModelDescrParams is empty, and that is the whole statement: a model's path is
+// its only cache key.
+//
+// The pose sample rate used to ride the load request, for the stated reason
+// that the parse held no Lookup. The load runs inside the cache now and the
+// Lookup is in hand, so the rate comes off the configuration and never enters
+// the key - which is right, because it is startup configuration fixed for the
+// Lookup's life and a key carrying it would have exactly one value forever.
+type ModelDescrParams struct{}
 
-const (
-	// ModelMissing is a path the table has no entry for at all. It is the zero
-	// value so that a map miss reads as missing without a second test.
-	ModelMissing ModelState = iota
-	ModelLoading
-	ModelResident
-	// ModelFailed is terminal. It never retries, and it clears only on unload -
-	// a typo'd path must not spawn a load command every frame forever.
-	ModelFailed
-)
+// modelDescr names one model file: the path, and nothing else there is to say.
+type modelDescr = assets.Descr[ModelDescrParams]
 
-// ModelEntry is one path's slot in the model table.
-type ModelEntry struct {
-	State ModelState
-	// Generation makes an unload while a load is in flight discard the
-	// completing load rather than let it become resident as a ghost.
-	Generation uint32
+// modelUser is what the model loader needs that a handler holds: the Lookup it
+// mints mesh slots and texture entries in, and the resource queue it uploads
+// through. A loader is stateless and long-lived, so both arrive per call and
+// neither is retained.
+//
+// path rides here too, and it is the one member that is not a handler's. The
+// Library hands Load the bytes and the parameters but not the descriptor, and
+// the parse needs the path three times over - to resolve a .gltf file's
+// relative buffer and image URIs against its own directory, to key the textures
+// it decodes, and to name the model in every error it produces. So the caller
+// that spells the descriptor spells the path here as well; Free and Default
+// never read it.
+type modelUser struct {
+	lookup    *Lookup
+	resources *gfx.ResourceQueue
+	path      string
+}
+
+// modelLoader decodes one glTF file into a resident model, uploads it, and
+// releases one. It is stateless: everything it touches arrives through the
+// kernel, the filesystem and the user the cache hands it.
+type modelLoader struct{}
+
+// residentModel is one loaded model file. It is what the cache stores, and it
+// is immutable once Load returns.
+//
+// A model that failed to parse is an otherwise-zero value carrying err, cached
+// like any other so the parse runs one time per path until a free. A model
+// whose file could not be read at all is not this type but the loader's nil
+// default, because the Library owns that read and its failure.
+type residentModel struct {
+	// err is the load's own failure, and non-nil makes every other member
+	// meaningless. It is what State returns, so a HUD prints the reason rather
+	// than a state word.
+	err error
 	// primitives is the flattened, subtree-contiguous list a draw expands into,
-	// and materials the records they bind, both owned by this entry and shared
+	// and materials the records they bind, both owned by this model and shared
 	// by every draw of the path.
 	primitives []modelPrimitive
 	Materials  []modelMaterial
@@ -44,7 +74,7 @@ type ModelEntry struct {
 	// by the cold facade.
 	boxes []modelBox
 	// meshes are the distinct mesh slots the load claimed, one per glTF
-	// primitive rather than one per placement. An unload frees these, and it has
+	// primitive rather than one per placement. A free releases these, and it has
 	// to be this list rather than a walk of primitives: two nodes sharing a mesh
 	// hold the same ref, and releasing it twice would retire whatever slot the
 	// first release handed back.
@@ -58,8 +88,8 @@ type ModelEntry struct {
 	// neverCull is set when a primitive's POSITION accessor declared no
 	// min/max, which leaves the whole model with no bound to cull against.
 	neverCull bool
-	// animation is the model's baked animation once it is resident: the clip
-	// table the packer reads and the two group 2 buffers its draws bind.
+	// animation is the model's baked animation: the clip table the packer reads
+	// and the two group 2 buffers its draws bind.
 	animation ResidentAnimation
 }
 
@@ -109,102 +139,181 @@ type modelMaterial struct {
 }
 
 // modelReportKey and textureReportKey are the keys the load's report-once calls
-// name, cleared on a successful load and on unload. The table they key lives on
-// the kernel and is shared with every other plugin that keys by string, which
-// is what the two prefixes separate.
+// name, cleared on unload. The table they key lives on the kernel and is shared
+// with every other plugin that keys by string, which is what the two prefixes
+// separate. The Library's own read failure is keyed by the descriptor instead,
+// which is a type of its own and therefore a namespace of its own.
 func modelReportKey(path string) string   { return "model:" + path }
 func textureReportKey(path string) string { return "texture:" + path }
 
-// requestModel returns one path's entry when it is resident and enqueues a load
-// when it is not. It is the one way a path enters residency, so a draw and a
-// query reach the same command and Preload is an optimisation rather than a
-// step a caller can forget.
+// errBackendNotReady is the one non-terminal reason a model is not resident: a
+// draw or a query arrived before the graphics backend existed, so nothing was
+// read, nothing was uploaded and nothing was cached. The next frame asks again,
+// which is why it is neither reported nor remembered.
+var errBackendNotReady = errors.New("the graphics backend is not ready yet")
+
+// errModelNotRead is why a model whose entry is the loader's nil default is not
+// resident. The Library performs the read for a path-named asset and reports
+// its own failure once, under the descriptor, and it does not tell the loader
+// what went wrong - so what scene can say is that the file was not read, and
+// the report the engine already has carries the reason.
+var errModelNotRead = errors.New("the file could not be read")
+
+// errLookupUnavailable is what a query answers with when its facade is backed
+// by no Lookup at all: the (value, false) every other query returns, spelled as
+// the error the one query that returns an error has to return instead.
+var errLookupUnavailable = errors.New("the scene lookup is not available")
+
+// model resolves one path to the model drawn for it, loading it if the cache
+// holds no entry, and says why there is none when there is none.
 //
-// A loading path enqueues nothing: the entry is the record that a command is
-// already in flight. A failed path enqueues nothing either, and that is the
-// whole of "never retries".
+// This is the one way a path enters residency, so a draw, a query and Preload
+// all reach the same load and Preload is an optimisation rather than a step a
+// caller can forget. The load is synchronous: the read, the parse, the image
+// decodes and every upload finish before this returns, which is the cost this
+// design accepts and which Preload is the lever for.
 //
-// An invalid path is failed here, synchronously, rather than by the load. It
-// never reaches a load command at all, so the report-from-the-goroutine rule
-// cannot see it, and without this every query on it would return a silent false
-// forever. One state machine, rather than a set of bad strings beside it.
-func (l *Lookup) requestModel(k kernel.Kernel, path string) (*ModelEntry, bool) {
-	key, valid := ModelKey(path)
-	entry := l.modelEntry(key)
+// An invalid path never reaches the cache. It is refused here, reported once,
+// and leaves no entry and no tombstone behind, so a typo is permanently a typo
+// and unloading the string the caller passed is what clears the report.
+//
+// A backend that is not up yet is the other refusal, and it is the one that
+// does not stick: nothing is cached, so the next frame loads for real. Baking
+// against an absent backend would panic, and caching the failure would make a
+// startup race terminal.
+func (l *Lookup) model(
+	k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue, modelPath string,
+) (*residentModel, error) {
+	key, valid := ModelKey(modelPath)
 	if !valid {
-		// Only a missing entry is failed, so the second query neither reports
-		// again nor rewrites a state an unload has since reset.
-		if entry.State == ModelMissing {
-			entry.State = ModelFailed
-			k.ReportErrorOnce(modelReportKey(key), ErrModelPathInvalid{Model: path})
-		}
-		return nil, false
+		err := ErrModelPathInvalid{Model: modelPath}
+		k.ReportErrorOnce(modelReportKey(key), err)
+		return nil, err
 	}
-	switch entry.State {
-	case ModelResident:
-		return entry, true
-	case ModelLoading, ModelFailed:
-		return nil, false
+	if resources == nil || !resources.Ready() {
+		return nil, ErrModelUnavailable{Model: modelPath, Err: errBackendNotReady}
 	}
-	entry.State = ModelLoading
-	k.ExecuteCommandAsync[LoadModelCmd](LoadModelRequest{
-		Path: key, Generation: entry.Generation, SampleRate: l.config.PoseSampleRate,
-	})
-	return nil, false
+	loaded := l.models.Get(k, modelDescr{Name: key}, fsys,
+		modelUser{lookup: l, resources: resources, path: key})
+	if loaded == nil {
+		return nil, ErrModelUnavailable{Model: modelPath, Err: errModelNotRead}
+	}
+	if loaded.err != nil {
+		return nil, loaded.err
+	}
+	return loaded, nil
 }
 
-// modelEntry returns the table slot for a key, minting a missing one. The
-// generation starts at one so that zero stays "no entry ever existed", and it
-// only ever climbs: an unload resets the slot rather than deleting it, because
-// a fresh slot would restart the count and let a load still in flight from
-// before the unload install into it as a ghost.
-func (l *Lookup) modelEntry(key string) *ModelEntry {
-	if entry, ok := l.models[key]; ok {
-		return entry
-	}
-	if l.models == nil {
-		l.models = map[string]*ModelEntry{}
-	}
-	entry := &ModelEntry{Generation: 1}
-	l.models[key] = entry
-	return entry
-}
-
-// installModel takes one completed load into residency, or records the failure
-// that ended it. It runs holding the Lookup and the resource queue, and it is
-// the only place either is touched by a load.
+// Load parses one file and takes it into residency, or records the failure that
+// ended it. The Library has already read the bytes, so data is the file whole
+// and no second open happens here.
 //
-// Residency is atomic: geometry, material records and every one of the model's
-// textures are uploaded in this one call, so there is no frame in which half a
-// model is drawn.
+// Residency is atomic: geometry, material records, every one of the model's
+// textures and both animation buffers are uploaded before this returns, so
+// there is no frame in which half a model is drawn.
+//
+// Whatever it returns is cached, a failure included, so a file that does not
+// parse is parsed one time until a free - which is the whole of "never
+// retries", and UnloadModel followed by Preload is the way back.
+func (modelLoader) Load(
+	k kernel.Kernel, data assets.Blob, _ ModelDescrParams, fsys fs.FS, user modelUser,
+) *residentModel {
+	loaded, err := parseModel(data, user.path, fsys, user.lookup.config.PoseSampleRate)
+	if err != nil {
+		failure := ErrModelUnavailable{Model: user.path, Err: err}
+		k.ReportErrorOnce(modelReportKey(user.path), failure)
+		return &residentModel{err: failure}
+	}
+	return user.lookup.installModel(k, user.path, loaded, user.resources)
+}
+
+// Default is nil, and a nil model expands into no primitives, so "skip, never
+// substitute" survives as a null object rather than as a special case. Nothing
+// is stood in for; the loudness comes from the report the Library has already
+// made, not from the pixels.
+func (modelLoader) Default(modelDescr, modelUser) *residentModel { return nil }
+
+// Free gives up one model's geometry, baked poses and morph deltas. The mesh
+// slots retire at once, so a ref to one goes stale immediately; their buffers
+// join the pending releases the flush drains at the frame boundary, which is
+// the same queue ReleaseMesh uses and the reason nothing the frame has already
+// recorded draws from a dead buffer.
+//
+// It does not cascade to textures. With no refcount the Lookup cannot know
+// whether another resident model binds the same image by path, and freeing one
+// that is still bound is a dead texture in a live bind group rather than a
+// missing picture. UnloadTexture is the separate, deliberate lever.
+func (modelLoader) Free(value *residentModel, user modelUser) {
+	if value == nil {
+		return
+	}
+	l := user.lookup
+	for _, ref := range value.meshes {
+		l.releaseMesh(ref)
+	}
+	animation := &value.animation
+	if animation.poseBytes > 0 {
+		l.pendingReleases = append(l.pendingReleases, animation.poses, animation.skinJoints)
+	}
+	if animation.morphBytes > 0 {
+		l.pendingReleases = append(l.pendingReleases, animation.morphDeltas)
+	}
+	l.poseBytes -= animation.poseBytes
+	l.morphBytes -= animation.morphBytes
+}
+
+// parseModel decodes and converts one file's bytes. Everything it returns is
+// scene's own types: the gltf.Document is dropped here, so it never appears in
+// scene's API and never outlives the load that read it.
+func parseModel(
+	data assets.Blob, modelPath string, fsys fs.FS, sampleRate int,
+) (*LoadedModel, error) {
+	// The decoder resolves a .gltf file's external buffers against the model's
+	// own directory, which is what glTF's relative URIs are relative to. Images
+	// are not the decoder's business, so the texture loader resolves those
+	// itself, against the whole filesystem and the full storage path.
+	decoder := gltf.NewDecoderFS(bytes.NewReader(data.Data()), directoryFS(fsys, path.Dir(modelPath)))
+	document := new(gltf.Document)
+	if err := decoder.Decode(document); err != nil {
+		return nil, err
+	}
+	return convertDocument(document, modelPath, fsys, sampleRate)
+}
+
+// directoryFS presents one directory of the filesystem as its own root, which
+// is the shape the glTF decoder wants for relative URIs. A directory that
+// cannot be subsetted - "." at the root - is the filesystem itself.
+func directoryFS(fsys fs.FS, dir string) fs.FS {
+	if dir == "" || dir == "." {
+		return fsys
+	}
+	sub, err := fs.Sub(fsys, dir)
+	if err != nil {
+		return fsys
+	}
+	return sub
+}
+
+// installModel uploads one parsed model and builds the value the cache keeps.
+//
+// It runs inside Load, holding whatever the handler that called Get holds -
+// the Lookup and the resource queue, because those are what a device facade
+// carries. Nothing here is deferred: the uploads are what make residency
+// atomic.
 func (l *Lookup) installModel(
-	k kernel.Kernel, path string, generation uint32,
-	loaded *LoadedModel, failure error, resources *gfx.ResourceQueue,
-) {
-	entry, ok := l.models[path]
-	// An unload while the load was in flight bumped the generation, so this
-	// result belongs to a model nobody asked for any more and is dropped rather
-	// than installed as a ghost.
-	if !ok || entry.Generation != generation || entry.State != ModelLoading {
-		return
-	}
-	if failure != nil {
-		entry.State = ModelFailed
-		k.ReportErrorOnce(modelReportKey(path), ErrModelUnavailable{Model: path, Err: failure})
-		return
-	}
-	// A load that completes before the backend is installed goes back to
-	// missing rather than to failed: there is nothing wrong with the file, and
-	// the next draw should try again.
-	if !resources.Ready() {
-		entry.State = ModelMissing
-		return
-	}
+	k kernel.Kernel, modelPath string, loaded *LoadedModel, resources *gfx.ResourceQueue,
+) *residentModel {
 	defaults := l.ensureDefaults(resources)
 	textures := l.residentTextures(k, loaded, resources)
-	entry.Materials = entry.Materials[:0]
+	model := &residentModel{
+		Materials:    make([]modelMaterial, 0, len(loaded.materials)),
+		lights:       loaded.lights,
+		scenes:       loaded.scenes,
+		defaultScene: loaded.defaultScene,
+		neverCull:    loaded.neverCull,
+	}
 	for i := range loaded.materials {
-		entry.Materials = append(entry.Materials,
+		model.Materials = append(model.Materials,
 			bindModelMaterial(&loaded.materials[i], textures, defaults))
 	}
 	// Geometry is baked once per distinct glTF primitive and placed once per
@@ -214,9 +323,9 @@ func (l *Lookup) installModel(
 	for i := range loaded.geometries {
 		meshes[i] = l.bakeModelGeometry(&loaded.geometries[i], resources)
 	}
-	entry.meshes = append(entry.meshes[:0], meshes...)
-	entry.primitives = entry.primitives[:0]
-	entry.boxes = entry.boxes[:0]
+	model.meshes = meshes
+	model.primitives = make([]modelPrimitive, 0, len(loaded.primitives))
+	model.boxes = make([]modelBox, 0, len(loaded.primitives))
 	for i := range loaded.primitives {
 		primitive := &loaded.primitives[i]
 		geometry := &loaded.geometries[primitive.geometry]
@@ -225,7 +334,7 @@ func (l *Lookup) installModel(
 			Skinned: primitive.skinned, Joint: primitive.joint,
 			Plain: primitive.plain, Morph: primitive.morph,
 		}
-		entry.boxes = append(entry.boxes,
+		model.boxes = append(model.boxes,
 			modelBox{box: geometry.box, rest: primitive.rest, known: geometry.hasBox})
 		if geometry.hasBox {
 			// The sphere stays in the primitive's own space, unflattened,
@@ -234,17 +343,16 @@ func (l *Lookup) installModel(
 			// resolveBounds path a buffer-built mesh takes.
 			placed.Bounds = geometry.box.Sphere()
 		}
-		entry.primitives = append(entry.primitives, placed)
+		model.primitives = append(model.primitives, placed)
 	}
-	entry.lights = loaded.lights
-	entry.scenes, entry.defaultScene = loaded.scenes, loaded.defaultScene
-	entry.neverCull = loaded.neverCull
-	entry.animation = l.residentAnimation(loaded, resources)
-	entry.State = ModelResident
-	// A successful load clears the model's report key, so a path that failed,
-	// was unloaded and now loads reports again if it breaks again.
-	k.ForgetReportedError(modelReportKey(path))
-	l.reportLoad(k, path, loaded.reports)
+	model.animation = l.residentAnimation(loaded, resources)
+	// The two totals are running counters rather than a walk of the table,
+	// which is what makes TotalPoseBytes and TotalMorphBytes O(1) and what
+	// removes their need for a residency test that no longer exists.
+	l.poseBytes += model.animation.poseBytes
+	l.morphBytes += model.animation.morphBytes
+	l.reportLoad(k, modelPath, loaded.reports)
+	return model
 }
 
 // reportLoad fires one load's non-fatal reports under the key each belongs to.
@@ -269,9 +377,7 @@ func (l *Lookup) reportLoad(k kernel.Kernel, path string, reports []error) {
 }
 
 // residentTextures uploads the model's decoded images, skipping any key the
-// cache already holds. The cache is consulted here rather than during the parse
-// because the parse holds no Lookup lock; the cost is that two models sharing
-// an external image path both decode it and only the first uploads it.
+// cache already holds.
 func (l *Lookup) residentTextures(
 	k kernel.Kernel, loaded *LoadedModel, resources *gfx.ResourceQueue,
 ) []gfx.TextureDescr {
@@ -341,7 +447,7 @@ func bindModelMaterial(
 // Model geometry lives in the same mesh table as BakeMesh's, rather than in a
 // table of its own, because the sort key is a dense meshID and BatchView
 // reports one: a second id space would either collide in the key or need a
-// third source bit. It also means unloading a model releases its meshes through
+// third source bit. It also means freeing a model releases its meshes through
 // the machinery that already exists.
 //
 // The bounding sphere is not taken from the pack even though the pack computes
@@ -413,32 +519,30 @@ func (l *Lookup) ensureDefaults(resources *gfx.ResourceQueue) PbrDefaults {
 }
 
 // ModelLights appends the KHR_lights_punctual lights the model at path
-// declares, in its own space, and reports whether they are real. A path that is
-// not resident yet returns dst untouched and triggers the same load a draw
-// does, so a caller who polls this on successive frames eventually gets an
-// answer rather than polling an empty list forever.
+// declares, in its own space, and reports whether they are real. A path that
+// does not load returns dst untouched.
 //
 // Nothing converts a light automatically. This is the read an app makes once at
 // startup to place a file's lamps as its own PointLight and SpotLight calls,
 // which is why it is a cold dst-append rather than something on the per-frame
-// path. It joins the rest of the lookup facade when that lands.
-func (la LookupAccess) ModelLights(path string, dst []ModelLight) ([]ModelLight, bool) {
-	if !la.Valid() {
-		return dst, false
-	}
-	entry, ok := la.lookup.requestModel(la.kernel, path)
+// path.
+func (la LookupDeviceAccess) ModelLights(path string, dst []ModelLight) ([]ModelLight, bool) {
+	model, ok := la.resolve(path)
 	if !ok {
 		return dst, false
 	}
-	return append(dst, entry.lights...), true
+	return append(dst, model.lights...), true
 }
 
-// Preload loads the model at path without drawing it, so an app can move a
-// decode into a loading screen it controls. It is the same idempotent command a
-// draw fires: preloading a resident, loading or failed path does nothing.
-func (la LookupAccess) Preload(path string) {
+// Preload loads the model at path without drawing it, so an app can move the
+// hitch a synchronous load costs into a loading screen it controls.
+//
+// It is the same load a draw fires, fired without one, and it is idempotent:
+// preloading a resident or a failed path does nothing, because the entry is the
+// record that the load already ran.
+func (la LookupDeviceAccess) Preload(path string) {
 	if la.Valid() {
-		la.lookup.requestModel(la.kernel, path)
+		la.lookup.model(la.kernel, la.fsys, la.resources, path)
 	}
 }
 
@@ -499,8 +603,8 @@ func needsAnimatedReroot(loaded *LoadedModel) bool {
 }
 
 // Joints appends the names of the model's joints, in the model's own joint
-// order, and reports whether they are real. A path that is not resident yet
-// returns dst untouched and triggers the same load a draw does.
+// order, and reports whether they are real. A path that does not load returns
+// dst untouched.
 //
 // Names only, no hierarchy. A joint's parent is a question about the file's
 // node graph, which scene drops at load: the pose buffer holds bone world
@@ -509,15 +613,12 @@ func needsAnimatedReroot(loaded *LoadedModel) bool {
 //
 // An unnamed joint contributes an empty string rather than being skipped, so
 // the slice stays indexed by joint rather than searched.
-func (la LookupAccess) Joints(path string, dst []string) ([]string, bool) {
-	if !la.Valid() {
-		return dst, false
-	}
-	entry, ok := la.lookup.requestModel(la.kernel, path)
+func (la LookupDeviceAccess) Joints(path string, dst []string) ([]string, bool) {
+	model, ok := la.resolve(path)
 	if !ok {
 		return dst, false
 	}
-	return append(dst, entry.animation.JointNames...), true
+	return append(dst, model.animation.JointNames...), true
 }
 
 // Clips appends the model's animation clips, name and duration, and reports
@@ -527,18 +628,15 @@ func (la LookupAccess) Joints(path string, dst []string) ([]string, bool) {
 // know when a one-shot play has ended, and that is the one piece of clip state
 // gameplay cannot compute for itself: a play carries a time the caller
 // advanced, and only the clip knows how long it runs.
-func (la LookupAccess) Clips(path string, dst []ClipInfo) ([]ClipInfo, bool) {
-	if !la.Valid() {
-		return dst, false
-	}
-	entry, ok := la.lookup.requestModel(la.kernel, path)
+func (la LookupDeviceAccess) Clips(path string, dst []ClipInfo) ([]ClipInfo, bool) {
+	model, ok := la.resolve(path)
 	if !ok {
 		return dst, false
 	}
-	for i := range entry.animation.Clips {
+	for i := range model.animation.Clips {
 		dst = append(dst, ClipInfo{
-			Name:     entry.animation.Clips[i].Name,
-			Duration: entry.animation.Clips[i].Duration,
+			Name:     model.animation.Clips[i].Name,
+			Duration: model.animation.Clips[i].Duration,
 		})
 	}
 	return dst, true
@@ -551,37 +649,32 @@ func (la LookupAccess) Clips(path string, dst []ClipInfo) ([]ClipInfo, bool) {
 //
 // The per-joint records are not in it. They are one small array per model
 // rather than the per-frame cost this query exists to make visible.
-func (la LookupAccess) PoseBytes(path string) (int, bool) {
-	if !la.Valid() {
-		return 0, false
-	}
-	entry, ok := la.lookup.requestModel(la.kernel, path)
+func (la LookupDeviceAccess) PoseBytes(path string) (int, bool) {
+	model, ok := la.resolve(path)
 	if !ok {
 		return 0, false
 	}
-	return entry.animation.poseBytes, true
+	return model.animation.poseBytes, true
 }
 
 // TotalPoseBytes reports the baked pose memory of every resident model. It
 // triggers no load and has no ok: it is a sum over what is resident now, and
 // zero is a true answer when nothing is.
+//
+// It is a counter the load adds to and the free subtracts from rather than a
+// walk of the table, which is what makes it O(1) - and, because it needs no
+// device and no filesystem to answer, what keeps it on the facade an ECS System
+// can build.
 func (la LookupAccess) TotalPoseBytes() int {
 	if !la.Valid() {
 		return 0
 	}
-	total := 0
-	for _, entry := range la.lookup.models {
-		if entry.State == ModelResident {
-			total += entry.animation.poseBytes
-		}
-	}
-	return total
+	return la.lookup.poseBytes
 }
 
 // MorphTargets appends the names of the model's morph targets, in the flattened
 // order MorphWeights is positional over, and reports whether they are real. A
-// path that is not resident yet returns dst untouched and triggers the same load
-// a draw does.
+// path that does not load returns dst untouched.
 //
 // The list is one entry per target of every morphed node in depth-first node
 // order, so a file whose head mesh hangs off two nodes appears here as two runs
@@ -591,15 +684,12 @@ func (la LookupAccess) TotalPoseBytes() int {
 // An unnamed target contributes an empty string rather than being skipped: glTF
 // carries target names only as the extras convention, so a file that names none
 // still has to keep the slice indexed by slot rather than searched.
-func (la LookupAccess) MorphTargets(path string, dst []string) ([]string, bool) {
-	if !la.Valid() {
-		return dst, false
-	}
-	entry, ok := la.lookup.requestModel(la.kernel, path)
+func (la LookupDeviceAccess) MorphTargets(path string, dst []string) ([]string, bool) {
+	model, ok := la.resolve(path)
 	if !ok {
 		return dst, false
 	}
-	return append(dst, entry.animation.targetNames...), true
+	return append(dst, model.animation.targetNames...), true
 }
 
 // MorphBytes reports how much GPU memory one model's morph deltas occupy, and
@@ -609,29 +699,19 @@ func (la LookupAccess) MorphTargets(path string, dst []string) ([]string, bool) 
 // is targets x vertices x 16 x popcount(mask), so it scales with the shapes a
 // file carries and with how many attributes each deforms, not with what is
 // playing. The weight grid is not in it - that never reaches the GPU.
-func (la LookupAccess) MorphBytes(path string) (int, bool) {
-	if !la.Valid() {
-		return 0, false
-	}
-	entry, ok := la.lookup.requestModel(la.kernel, path)
+func (la LookupDeviceAccess) MorphBytes(path string) (int, bool) {
+	model, ok := la.resolve(path)
 	if !ok {
 		return 0, false
 	}
-	return entry.animation.morphBytes, true
+	return model.animation.morphBytes, true
 }
 
-// TotalMorphBytes reports the morph delta memory of every resident model. It
-// triggers no load and has no ok: it is a sum over what is resident now, and
-// zero is a true answer when nothing is.
+// TotalMorphBytes reports the morph delta memory of every resident model, under
+// the same counter rule TotalPoseBytes follows.
 func (la LookupAccess) TotalMorphBytes() int {
 	if !la.Valid() {
 		return 0
 	}
-	total := 0
-	for _, entry := range la.lookup.models {
-		if entry.State == ModelResident {
-			total += entry.animation.morphBytes
-		}
-	}
-	return total
+	return la.lookup.morphBytes
 }
