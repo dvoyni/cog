@@ -20,7 +20,7 @@ const testSampleRate = 60
 // convertTest converts a document at the default sample rate.
 func convertTest(t *testing.T, doc *gltf.Document) *LoadedModel {
 	t.Helper()
-	model, err := convertDocument(doc, "m.glb", nil, testSampleRate)
+	model, err := convertDocument(doc, "m.glb", testSampleRate)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -655,7 +655,7 @@ func TestASkinPastTheJointCapFailsTheModelAtLoad(t *testing.T) {
 	if model := convertTest(t, jointCappedDoc(sceneMaxSkinJoints)); model.animation.jointCount != sceneMaxSkinJoints {
 		t.Fatalf("a skin at the cap baked %d joints, want %d", model.animation.jointCount, sceneMaxSkinJoints)
 	}
-	_, err := convertDocument(jointCappedDoc(sceneMaxSkinJoints+1), "m.glb", nil, testSampleRate)
+	_, err := convertDocument(jointCappedDoc(sceneMaxSkinJoints+1), "m.glb", testSampleRate)
 	if err == nil {
 		t.Fatal("a skin one joint past the cap loaded, want the model refused")
 	}
@@ -687,7 +687,7 @@ func TestTwoSkinsPastTheJointCapBetweenThemFailTheModelAtLoad(t *testing.T) {
 		doc.Nodes = append(doc.Nodes, &gltf.Node{Name: fmt.Sprintf("other%d", i)})
 	}
 	doc.Skins = append(doc.Skins, &gltf.Skin{Name: "second", Joints: second})
-	if _, err := convertDocument(doc, "m.glb", nil, testSampleRate); err == nil {
+	if _, err := convertDocument(doc, "m.glb", testSampleRate); err == nil {
 		t.Fatal("two skins claiming 257 joints between them loaded, want the model refused")
 	}
 	// Joints are claimed per node, so two skins over the *same* bones claim
@@ -695,7 +695,7 @@ func TestTwoSkinsPastTheJointCapBetweenThemFailTheModelAtLoad(t *testing.T) {
 	// vertex can name, not what the file declares.
 	shared := jointCappedDoc(sceneMaxSkinJoints)
 	shared.Skins = append(shared.Skins, &gltf.Skin{Name: "second", Joints: shared.Skins[0].Joints})
-	if _, err := convertDocument(shared, "m.glb", nil, testSampleRate); err != nil {
+	if _, err := convertDocument(shared, "m.glb", testSampleRate); err != nil {
 		t.Errorf("two skins over one set of bones were refused: %v", err)
 	}
 }

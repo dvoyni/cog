@@ -279,8 +279,11 @@ From [#444](https://github.com/dvoyni/cog/issues/444), amended by
 [scene migration](https://github.com/dvoyni/cog/issues/447).
 
 **`Name` wins when it is set.** The key is `{Name, Params}` when `Name != ""`
-and `{Blob, Params}` otherwise. A `Blob` supplied beside a `Name` is a **payload
-the Library therefore does not read**, not part of the identity.
+and `{Blob, Params}` otherwise. A `Blob` supplied beside a `Name` is a
+**payload**, not part of the identity — and a payload is what `Load` is handed
+**in place of a read**: the file the `Name` spells is not opened. Read it as a
+rule about both halves, because it is one. The key ignores the bytes; the load
+uses them and nothing else.
 
 The rule in one line: **you named it, you own the name.** Two callers supplying
 different bytes under one `Name` get whichever arrived first, which is exactly
@@ -392,8 +395,10 @@ both cases the answer was to delete the question rather than to add the verb.
 ## Loading
 
 **The Library reads; the loader decodes.** The Library opens `Name` through
-`fsys` and hands the bytes to `Load` as a `Blob`. A descriptor with no `Name`
-skips the read, because the bytes are already in hand.
+`fsys` and hands the bytes to `Load` as a `Blob`. A descriptor **carrying a
+`Blob` skips the read**, with or without a `Name`, because the bytes are already
+in hand — which is what lets an asset inside a container be named by that
+container and read from nobody.
 
 **Everything finishes inside `Load`.** `T` is immutable and nothing is ever
 pending in the cache. A plugin that wants asynchrony puts it **in front of**
@@ -1033,8 +1038,8 @@ sequence it was built for.
 ### The white texel, and why its reservation moves
 
 It is **blob-named**: `Name == ""`, `Blob = assets.NewBlobFromString("\xff\xff\xff\xff")`,
-`Params{generated: true}`. `Name` cannot be set, because the Library reads `Name`
-when set and there is no file. `whiteAtlasKey` and its sentinel namespace inside a
+`Params{generated: true}`. `Name` is not set, because there is no file and
+nothing to name one after. `whiteAtlasKey` and its sentinel namespace inside a
 string key space delete.
 
 The reservation prologue — `insert` recursing into itself — moves into

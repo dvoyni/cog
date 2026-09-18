@@ -120,9 +120,9 @@ func TestABlobNamedAssetSkipsTheRead(t *testing.T) {
 	}
 }
 
-// You named it, you own the name. A Blob beside a Name is a payload the Library
-// does not read, so two descriptors differing only in their Blob are one entry
-// and the first one's value is what both get.
+// You named it, you own the name. A Blob beside a Name is a payload: it is the
+// key that ignores it, not the load, so two descriptors differing only in their
+// Blob are one entry and the first one's bytes are what both get.
 func TestNameWinsAndTheBlobBesideItIsPayload(t *testing.T) {
 	k, _ := reportingKernel()
 	fsys := fstest.MapFS{"models/crate.glb": &fstest.MapFile{Data: []byte("from the path")}}
@@ -132,14 +132,52 @@ func TestNameWinsAndTheBlobBesideItIsPayload(t *testing.T) {
 	first := cache.Get(k, assets.Descr[bake]{Name: "models/crate.glb", Blob: assets.NewBlobFromString("mine")}, fsys, nil)
 	second := cache.Get(k, assets.Descr[bake]{Name: "models/crate.glb", Blob: assets.NewBlobFromString("yours")}, fsys, nil)
 
-	if first.body != "from the path" {
-		t.Fatalf("Load saw %q, want the file the Name pointed at", first.body)
+	if first.body != "mine" {
+		t.Fatalf("Load saw %q, want the payload supplied beside the name", first.body)
 	}
 	if second != first {
 		t.Fatalf("a second Blob under one Name produced %+v, want the first arrival", second)
 	}
 	if l.loads != 1 {
 		t.Fatalf("%d loads, want the Name alone to be the key", l.loads)
+	}
+}
+
+// A payload is read from nobody. The container an embedded asset is named by is
+// never opened to reach it, which is the whole reason a Blob may ride beside a
+// Name: the alternative is the Library reading a GLB per image and the loader
+// re-parsing it to find image N.
+func TestAPayloadBesideANameIsNeverReadFromStorage(t *testing.T) {
+	k, reported := reportingKernel()
+	l := &loader{}
+	cache := assets.New[bake, *device, face](l)
+
+	// The name does not exist and is never opened, so nothing is reported and
+	// the loader still sees the caller's own bytes.
+	got := cache.Get(k, assets.Descr[bake]{
+		Name: "models/crate.glb", Blob: assets.NewBlobFromString("image 0"),
+	}, fstest.MapFS{}, nil)
+
+	if got.body != "image 0" {
+		t.Fatalf("Load saw %q, want the bytes the caller already held", got.body)
+	}
+	if len(*reported) != 0 {
+		t.Fatalf("reported %v, want no read and therefore no read failure", *reported)
+	}
+}
+
+// A path with no payload is still read, and a read that fails is still the
+// Library's own to report - the payload rule narrows which descriptors reach
+// the filesystem and changes nothing about what happens when one does.
+func TestANameWithNoPayloadIsStillRead(t *testing.T) {
+	k, _ := reportingKernel()
+	fsys := fstest.MapFS{"models/crate.glb": &fstest.MapFile{Data: []byte("from the path")}}
+	l := &loader{}
+	cache := assets.New[bake, *device, face](l)
+
+	got := cache.Get(k, assets.Descr[bake]{Name: "models/crate.glb"}, fsys, nil)
+	if got.body != "from the path" {
+		t.Fatalf("Load saw %q, want the file the Name pointed at", got.body)
 	}
 }
 

@@ -25,11 +25,19 @@ func (e ErrModelUnavailable) Error() string {
 
 func (e ErrModelUnavailable) Unwrap() error { return e.Err }
 
-// ErrModelTextureUnavailable reports one texture of an otherwise sound model.
-// The model still becomes resident and the slot binds the 1x1 default, because
-// a model with one flat texture is a model you can see and fix, where a model
-// dropped over a missing picture is a hole in the level with nothing in it to
-// point at.
+// ErrModelTextureUnavailable reports one texture of an otherwise sound model:
+// a texture index the file has nothing at, an image it holds no bytes for, or
+// a picture that opened and would not decode. A picture whose file could not be
+// read at all is the asset library's own report, under the descriptor.
+//
+// The model still becomes resident either way, because a model with one wrong
+// texture is a model you can see and fix, where a model dropped over a missing
+// picture is a hole in the level with nothing in it to point at. What the slot
+// binds is magenta for a colour slot and its own 1x1 default for a data one -
+// magenta as a normal map is a surface lit from nowhere.
+//
+// It is reported once per picture rather than once per model, so two models
+// naming one broken image report it once between them.
 type ErrModelTextureUnavailable struct {
 	Model   string
 	Texture string
@@ -37,7 +45,7 @@ type ErrModelTextureUnavailable struct {
 }
 
 func (e ErrModelTextureUnavailable) Error() string {
-	return fmt.Sprintf("scene: texture %q of model %q binds the default because %v",
+	return fmt.Sprintf("scene: texture %q of model %q binds a placeholder because %v",
 		e.Texture, e.Model, e.Err)
 }
 

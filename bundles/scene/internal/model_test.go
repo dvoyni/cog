@@ -255,36 +255,6 @@ func TestARequiredExtensionFailsTheModelWholesale(t *testing.T) {
 	}
 }
 
-// A model that parses but is missing a texture still becomes resident, with the
-// slot bound to the 1x1 white texel.
-func TestAModelMissingATextureStaysResident(t *testing.T) {
-	doc := onePrimitiveModel(t)
-	doc.Images = []*gltf.Image{{URI: "absent.png"}}
-	doc.Textures = []*gltf.Texture{{Source: gltf.Index(0)}}
-	doc.Materials = []*gltf.Material{{PBRMetallicRoughness: &gltf.PBRMetallicRoughness{
-		BaseColorTexture: &gltf.TextureInfo{Index: 0},
-	}}}
-	doc.Meshes[0].Primitives[0].Material = gltf.Index(0)
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, scene.ModelDraw{}))
-	h.frameUntil(t, "the model to become resident", func() bool {
-		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
-	})
-	var missing scene.ErrModelTextureUnavailable
-	if !anyErrorAs(h.errors(), &missing) {
-		t.Fatalf("errors = %v, want a texture report", h.errors())
-	}
-	// All five slots and all five samplers bound, because WGSL requires every
-	// declared binding bound and gfx does no preprocessing.
-	for _, slot := range types.PbrSlots {
-		if len(h.backend.texturesBoundTo(slot.Texture)) == 0 {
-			t.Errorf("%s was never bound", slot.Texture)
-		}
-		if len(h.backend.samplersBoundTo(slot.Sampler)) == 0 {
-			t.Errorf("%s was never bound", slot.Sampler)
-		}
-	}
-}
-
 // An embedded image reaches the GPU as its own texture, so the model's base
 // colour is the file's picture rather than the 1x1 default every empty slot
 // binds.

@@ -38,10 +38,14 @@ func New[P comparable, U any, T any](loader Loader[P, U, T]) *Cache[P, U, T] {
 
 // Get returns the asset d names, loading it if the table has no entry for it.
 //
-// The Library reads and the loader decodes: a descriptor with a Name is opened
-// through fsys and its bytes handed to Load, and one without skips the read,
-// because the bytes are already in hand. Neither k nor fsys is retained past
-// the call.
+// The Library reads and the loader decodes: a descriptor with a Name and no
+// payload is opened through fsys and its bytes handed to Load. A descriptor
+// carrying a Blob skips the read either way, because the bytes are already in
+// hand - and beside a Name that is the whole point of a payload. An asset that
+// lives inside a container the caller has already parsed is named by that
+// container and read from nobody, so the Library never opens the container to
+// reach it and the loader never re-parses it. Neither k nor fsys is retained
+// past the call.
 //
 // A read that fails is the Library's own to report, and it reports it once,
 // keyed by the descriptor itself. Load is not called; Default supplies the
@@ -54,7 +58,7 @@ func (c *Cache[P, U, T]) Get(k kernel.Kernel, d Descr[P], fsys fs.FS, user U) T 
 	}
 
 	data := d.Blob
-	if d.Name != "" {
+	if d.Name != "" && data.Len() == 0 {
 		read, err := fs.ReadFile(fsys, d.Name)
 		if err != nil {
 			var zero T

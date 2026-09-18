@@ -46,6 +46,22 @@ type testBackend struct {
 	// baked keeps every uploaded buffer's bytes, so a test can read back the
 	// records scene packed rather than only their offsets.
 	baked map[gfx.BufferID][]byte
+	// bakedTextures and releasedTextures are what the frame asked the GPU to do
+	// with durable textures. They are the only place a test can see how many
+	// times one image reached the GPU, which is what makes the texture cache's
+	// dedup and its unload assertable with no GPU.
+	bakedTextures    []textureBake
+	releasedTextures []gfx.TextureID
+}
+
+// textureBake is one durable texture upload, kept whole so a test can read the
+// placeholder's own pixels back rather than only its id.
+type textureBake struct {
+	id            gfx.TextureID
+	width, height int
+	format        gfx.TextureFormat
+	mipmaps       bool
+	pixels        []byte
 }
 
 // drawCall is one recorded draw, so a test can assert the arguments that reach
@@ -102,6 +118,17 @@ var testShaderLayout = gfx.ShaderLayout{Resources: []gfx.ShaderResource{
 // texturesBoundTo reports the texture bound to one reflected binding on each
 // draw, in the order the frame bound them. A slot nobody bound reports nothing,
 // which is the failure that takes the whole frame's command buffer down.
+// bakeOf reports the durable upload one texture id received, which is how a
+// test reads a placeholder's own pixels back rather than only its id.
+func (b *testBackend) bakeOf(id gfx.TextureID) (textureBake, bool) {
+	for i := len(b.bakedTextures) - 1; i >= 0; i-- {
+		if b.bakedTextures[i].id == id {
+			return b.bakedTextures[i], true
+		}
+	}
+	return textureBake{}, false
+}
+
 func (b *testBackend) texturesBoundTo(name string) []gfx.TextureID {
 	group, binding := bindingOf(name)
 	var found []gfx.TextureID
@@ -242,11 +269,18 @@ func (b *testBackend) BakeBuffer(id gfx.BufferID, _ gfx.BufferKind, _ int, data 
 	}
 	b.baked[id] = append([]byte(nil), data...)
 }
-func (b *testBackend) BakeTexture(gfx.TextureID, int, int, gfx.TextureFormat, []byte, bool) {}
-func (b *testBackend) AllocateTexture(gfx.TextureID, gfx.TextureDesc)                       {}
-func (b *testBackend) UpdateTexture(gfx.TextureID, int, gfx.Region, []byte)                 {}
-func (b *testBackend) SetPipeline(gfx.PipelineID)                                           {}
-func (b *testBackend) SetParams([]byte)                                                     {}
+func (b *testBackend) BakeTexture(
+	id gfx.TextureID, width, height int, format gfx.TextureFormat, pixels []byte, mipmaps bool,
+) {
+	b.bakedTextures = append(b.bakedTextures, textureBake{
+		id: id, width: width, height: height, format: format, mipmaps: mipmaps,
+		pixels: append([]byte(nil), pixels...),
+	})
+}
+func (b *testBackend) AllocateTexture(gfx.TextureID, gfx.TextureDesc)       {}
+func (b *testBackend) UpdateTexture(gfx.TextureID, int, gfx.Region, []byte) {}
+func (b *testBackend) SetPipeline(gfx.PipelineID)                           {}
+func (b *testBackend) SetParams([]byte)                                     {}
 func (b *testBackend) SetTexture(texture gfx.TextureID, group, binding int) {
 	b.textures = append(b.textures, textureBinding{group: group, binding: binding, texture: texture})
 }
@@ -269,8 +303,10 @@ func (b *testBackend) Draw(first, count, instances, firstInstance int, indexed b
 		first: first, count: count, instances: instances, firstInstance: firstInstance, indexed: indexed,
 	})
 }
-func (b *testBackend) ReleaseBuffer(gfx.BufferID)   {}
-func (b *testBackend) ReleaseTexture(gfx.TextureID) {}
+func (b *testBackend) ReleaseBuffer(gfx.BufferID) {}
+func (b *testBackend) ReleaseTexture(id gfx.TextureID) {
+	b.releasedTextures = append(b.releasedTextures, id)
+}
 
 // recordPlugin is the gameplay side of the harness: a separate plugin that
 // locks scene's OpQueue, exactly as a real recorder does. It holds the gfx
@@ -428,6 +464,13 @@ func newHarnessWithErrors(t testing.TB, record func(*scene.OpQueue), reported *[
 // this package growing a testdata directory.
 func newHarnessWithFiles(t testing.TB, files fstest.MapFS, record func(*scene.OpQueue)) *harness {
 	t.Helper()
+	return newHarnessWithFS(t, files, record)
+}
+
+// newHarnessWithFS is newHarnessWithFiles over any filesystem, so a test that
+// wants to watch the reads themselves can wrap the map in one of its own.
+func newHarnessWithFS(t testing.TB, files fs.FS, record func(*scene.OpQueue)) *harness {
+	t.Helper()
 	var reported []error
 	return newHarnessOver(t, files, func(q *scene.OpQueue, _ *gfx.OpQueue) { record(q) }, &reported)
 }
@@ -437,7 +480,7 @@ func newHarnessRecording(t testing.TB, record func(*scene.OpQueue, *gfx.OpQueue)
 }
 
 func newHarnessOver(
-	t testing.TB, files fstest.MapFS,
+	t testing.TB, files fs.FS,
 	record func(*scene.OpQueue, *gfx.OpQueue), reported *[]error,
 ) *harness {
 	t.Helper()
@@ -446,7 +489,7 @@ func newHarnessOver(
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	configs := map[kernel.PluginName]any{
-		storage.Name: storage.Config{}.WithReadFS("test", 10, fs.FS(files)),
+		storage.Name: storage.Config{}.WithReadFS("test", 10, files),
 		scene.Name:   scene.Config{},
 	}
 	engine := kernel.New(configs).

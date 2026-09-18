@@ -143,8 +143,13 @@ type modelMaterial struct {
 // with every other plugin that keys by string, which is what the two prefixes
 // separate. The Library's own read failure is keyed by the descriptor instead,
 // which is a type of its own and therefore a namespace of its own.
-func modelReportKey(path string) string   { return "model:" + path }
-func textureReportKey(path string) string { return "texture:" + path }
+const (
+	modelReportPrefix   = "model:"
+	textureReportPrefix = "texture:"
+)
+
+func modelReportKey(path string) string   { return modelReportPrefix + path }
+func textureReportKey(path string) string { return textureReportPrefix + path }
 
 // errBackendNotReady is the one non-terminal reason a model is not resident: a
 // draw or a query arrived before the graphics backend existed, so nothing was
@@ -224,7 +229,7 @@ func (modelLoader) Load(
 		k.ReportErrorOnce(modelReportKey(user.path), failure)
 		return &residentModel{err: failure}
 	}
-	return user.lookup.installModel(k, user.path, loaded, user.resources)
+	return user.lookup.installModel(k, user.path, loaded, fsys, user.resources)
 }
 
 // Default is nil, and a nil model expands into no primitives, so "skip, never
@@ -277,7 +282,7 @@ func parseModel(
 	if err := decoder.Decode(document); err != nil {
 		return nil, err
 	}
-	return convertDocument(document, modelPath, fsys, sampleRate)
+	return convertDocument(document, modelPath, sampleRate)
 }
 
 // directoryFS presents one directory of the filesystem as its own root, which
@@ -301,10 +306,21 @@ func directoryFS(fsys fs.FS, dir string) fs.FS {
 // carries. Nothing here is deferred: the uploads are what make residency
 // atomic.
 func (l *Lookup) installModel(
-	k kernel.Kernel, modelPath string, loaded *LoadedModel, resources *gfx.ResourceQueue,
+	k kernel.Kernel, modelPath string, loaded *LoadedModel,
+	fsys fs.FS, resources *gfx.ResourceQueue,
 ) *residentModel {
 	defaults := l.ensureDefaults(resources)
-	textures := l.residentTextures(k, loaded, resources)
+	// The pictures resolve through the texture cache, which is where the
+	// double decode went: the parse named them and this is the first thing
+	// that asks for them, so an image another model already uploaded is
+	// neither read nor decoded here. A Get takes the payload the parse
+	// supplied beside an embedded name and ignores it on a hit.
+	textures := make([]gfx.TextureDescr, len(loaded.textures))
+	for i, descr := range loaded.textures {
+		textures[i] = l.textures.Get(k, descr, fsys, textureUser{
+			resources: resources, model: modelPath, name: descr.Name,
+		})
+	}
 	model := &residentModel{
 		Materials:    make([]modelMaterial, 0, len(loaded.materials)),
 		lights:       loaded.lights,
@@ -376,35 +392,6 @@ func (l *Lookup) reportLoad(k kernel.Kernel, path string, reports []error) {
 	k.ReportErrorOnce(modelReportKey(path), model...)
 }
 
-// residentTextures uploads the model's decoded images, skipping any key the
-// cache already holds.
-func (l *Lookup) residentTextures(
-	k kernel.Kernel, loaded *LoadedModel, resources *gfx.ResourceQueue,
-) []gfx.TextureDescr {
-	if l.textures == nil {
-		l.textures = map[textureKey]gfx.TextureDescr{}
-	}
-	resident := make([]gfx.TextureDescr, len(loaded.textures))
-	for i := range loaded.textures {
-		texture := &loaded.textures[i]
-		if existing, ok := l.textures[texture.key]; ok {
-			resident[i] = existing
-			continue
-		}
-		// A texture that loads clears its own report key, so an image that was
-		// missing and has since been added reports again if it breaks again.
-		k.ForgetReportedError(textureReportKey(textureReportPath(texture.key)))
-		// Mips are generated at bake by the backend's CPU box filter, which is
-		// the whole of the no-mipmap-generation-API gap: a minified model
-		// texture without them aliases into noise the moment the camera moves.
-		descr := resources.BakeTexture(
-			texture.width, texture.height, texture.format, texture.pixels, false, true)
-		l.textures[texture.key] = descr
-		resident[i] = descr
-	}
-	return resident
-}
-
 // bindModelMaterial builds the scene material one converted glTF material draws
 // with: the bundled shader, the pipeline state its alphaMode, doubleSided and
 // winding produced, and all ten of the shader's texture and sampler bindings.
@@ -422,7 +409,12 @@ func bindModelMaterial(
 		if slot == NormalSlot {
 			texture = defaults.FlatNormal
 		}
-		if index := loaded.slots[slot]; index >= 0 && index < len(textures) {
+		// A slot whose image did not arrive at all takes the cache's zero
+		// entry, which is the placeholder for a data slot: the picture slots
+		// get magenta and these keep the white texel and the flat normal,
+		// because magenta as a normal map is a surface lit from nowhere.
+		if index := loaded.slots[slot]; index >= 0 && index < len(textures) &&
+			textures[index].ID() != 0 {
 			texture = textures[index]
 		}
 		params = append(params,

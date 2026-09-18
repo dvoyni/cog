@@ -130,7 +130,7 @@ instead. There is no build gate on that check ([wgpu backend capabilities invent
 - `*OpQueue` — frame-local recording surface. Scene consumes and resets it on
   `app.UpdateEvent`.
 - `*Lookup` — the single persistent resource holding resident models, baked pose
-  and morph buffers, the path-keyed texture cache, buffer-built meshes, and the
+  and morph buffers, the texture cache, buffer-built meshes, and the
   built-in unit meshes. It also owns deferred unloads and deferred bakes. Query
   and mutate it only through a scoped `LookupAccess`.
 
@@ -1103,22 +1103,44 @@ no decoder for is cached as an `ErrModelUnavailable` and reported under
 `"model:" + path`. `State(path)` returns whichever of the two applies, and `nil`
 when the model loaded.
 
-**Partial failure binds a fallback.** A model that parses but is missing a
-texture still loads; the missing texture binds a 1×1 white texel and reports
-once. A **rejected required extension** is different — there is no geometry to
-fall back to, so the model fails wholesale.
+**Partial failure binds a placeholder.** A model that parses but is missing a
+texture still loads, and reports once. **What it binds depends on what the slot
+asked for**: a *picture* slot — base colour, emissive — binds **magenta**,
+because a missing base colour rendering white looks deliberate; a *data* slot —
+normal, metallic-roughness, occlusion — keeps its own 1×1 default, because
+magenta as a normal map is a surface lit from nowhere and as
+metallic-roughness it is `metallic=1, roughness=0`, a mirror. A **rejected
+required extension** is different — there is no geometry to fall back to, so the
+model fails wholesale.
 
 **Textures** live in a scene-owned cache, never canvas's atlas (wrap modes, mips
-and per-texture samplers rule the atlas out). Keyed by **resolved storage path**
-and shared across models; GLB-embedded images key on `(modelPath, imageIndex)`.
-**No refcount**: nothing unloads automatically, so there is nothing for a count
-to drive.
+and per-texture samplers rule the atlas out). It is an `assets.Cache` of its own,
+with its own params type: two caches sharing one params type would share one
+report-once namespace. **No refcount**: nothing unloads automatically, so there
+is nothing for a count to drive.
+
+**A texture is named `{path, image index, colour space}`.** An external image is
+named by its **resolved storage path** and shared across every model that binds
+it; a GLB-embedded one has no path of its own, so it is named by its model's
+path and its index — and its bytes ride in the descriptor's payload, which the
+cache takes in place of a read. That is the whole reason the asset library lets a
+`Blob` sit beside a `Name`: the alternative is reading the whole container once
+per embedded image and re-parsing it to reach image N.
+
+**The cache is consulted before the read**, which is what makes two models
+sharing an external image one read and one decode. It used to be consulted after
+the decode, at install time, so the second model decoded a picture it then threw
+away.
 
 **The colour space is part of the key**, because it is the *slot's* property and
 not the image's: base colour and emissive are gamma-encoded pictures, and
 metallic-roughness, normal and occlusion are data. One image bound to both kinds
 of slot is therefore two GPU textures, and it has to be — sampling a normal map
 through an sRGB view is a wrong picture with nothing in the frame to explain it.
+**The material slot itself is not in the key**: one ORM image — occlusion,
+roughness and metalness packed into one picture, which is glTF's standard
+packing — stays one GPU texture, and picking the per-slot fallback stays the
+material binding's business.
 
 **Unload frees at the call, and the entry leaves the cache there.** A free
 followed by a get is a **reload, not an error**, which is what a same-tick
@@ -1760,6 +1782,14 @@ read 1.0 from it. The second is the flat normal `(0.5, 0.5, 1)`. 1×1 rather tha
 larger because uploads go through `queue.WriteTexture`, which carries no 256-byte
 row alignment, and for a constant texel every mip level is identical.
 
+**A slot the file *named* and could not fill is a different case** and does not
+come through here. An empty slot is the file saying nothing, and nothing is the
+right picture; a named picture that did not arrive is a fault, and the colour
+slots say so in magenta. The two meet in one place — the material binding takes
+the texture cache's entry when it has one and falls back to these defaults when
+the entry is the zero descriptor, which is exactly the placeholder a data slot
+gets.
+
 ### Per-slot texture metadata is flattened, not arrayed
 
 Each slot carries a UV-set selector and a `KHR_texture_transform`, declared as
@@ -2249,9 +2279,11 @@ precisely so a caller resolves names to indices **once at startup**.
 - **`UnloadTexture` frees every texture the path baked**, because colour space
   and embedded-image index are part of a texture's cache key while `path` is the
   whole of what a caller can name. For a `.glb` that means every image the
-  container carries. Nothing checks whether a resident model still binds them:
-  this is the lever for a texture whose models are already gone, and the
-  no-cascade wart is what makes the two directions asymmetric.
+  container carries. That is a predicate over entries rather than a key, so it is
+  one `FreeWhere` and each freed entry's report key goes with it. Nothing checks
+  whether a resident model still binds them: this is the lever for a texture
+  whose models are already gone, and the no-cascade wart is what makes the two
+  directions asymmetric.
 - **`UnloadAll` is models and textures, and nothing else.** Buffer-built meshes
   are the caller's own handles — a lookup-wide sweep has no way to tell them
   their `MeshRef`s went stale — and scene's own unit meshes, default textures
