@@ -351,6 +351,68 @@ func (la LookupDeviceAccess) UnloadFont(path string) {
 	la.lookup.unloadFont(la.kernel, clean)
 }
 
+// UnloadAll frees every asset canvas holds: the packed sprites, the standalone
+// textures tiled sprites sample, the measured headers, the parsed font sources
+// and every face baked from them. Each tier's report-once keys go with its
+// entries, so every path canvas ever complained about can speak again.
+//
+// It is memory at a level boundary, not a developer loop. The per-path verbs
+// make a game giving up a level name every sprite and font it ever drew, and a
+// path it forgets stays resident for the process's life with nothing that
+// reports it; this is the one call that needs no list. gfx's
+// FreeCachedResourcesCmd and scene's UnloadAll are the same lever for the same
+// event.
+//
+// It spares nothing. scene's spares the meshes BakeMesh minted, because those
+// are refs a caller holds and a lookup-wide sweep cannot tell it went stale;
+// canvas hands out no such ref. The white texel goes with the rest - it is the
+// one sprite UnloadSprite cannot name, since it is named by its bytes rather
+// than by a path - and the next frame reserves it again before any layer's ops,
+// by construction rather than by luck.
+//
+// It is also the retry lever for a refusal that is contingent rather than
+// permanent. The atlas budget wall depends on what else is resident, and every
+// returned value is cached, so a sprite that found no room caches that refusal
+// terminally and would not pack again however empty the atlas later became.
+// Freeing the level that filled it is a Free, but not on the entry that needs
+// one, and a game would have to name a sprite it has every reason to believe
+// was never loaded. This frees the cached failure along with everything else,
+// on exactly the event the sequence happens at.
+//
+// The residual, stated rather than left to be discovered: a game that unloads
+// per path rather than wholesale keeps that cached failure, because
+// UnloadSprite frees only the paths it is given. So is an invalid path, which
+// is reported where it enters and never reaches a cache, so there is no entry
+// here to free it with.
+//
+// It walks what is loaded at the call. An asset asked for after it and before
+// the frame ends was deliberately asked for, and survives.
+//
+// The glyph atlas pages are not reclaimed, exactly as UnloadFont does not
+// reclaim them: the glyph side is a packer with no table, so nothing knows
+// which slots the freed faces owned, and a framebuffer scale change stays the
+// only thing that gives them back.
+func (la LookupDeviceAccess) UnloadAll() {
+	if la.lookup == nil {
+		return
+	}
+	l := la.lookup
+	// Five caches, five FreeAll calls, and no walk over them: FreeAll is
+	// per-cache because the Library has no verb above one, and each tier's user
+	// value is its own. Freeing a sprite hands its slot back to the packer,
+	// which releases an array once nothing is left in it, so the byte budget the
+	// refusal above was weighed against comes back with them.
+	l.sprites.FreeAll(la.kernel, spriteUser{packer: l.spritePacker, resources: la.resources})
+	l.tiled.FreeAll(la.kernel, la.resources)
+	l.spriteSizes.FreeAll(la.kernel, struct{}{})
+	// The faces first and their sources second, which is the order unloadFont
+	// uses and the order the dependency runs in: a face is baked from what the
+	// source tier holds, so freeing the sources first would leave faces standing
+	// on an asset that had gone.
+	l.fontFaces.FreeAll(la.kernel, l.fontUser())
+	l.fontSources.FreeAll(la.kernel, struct{}{})
+}
+
 // face bakes (or reuses) a font face at the given logical size. It needs only
 // the filesystem, never the GPU queue. An empty path bakes the built-in default
 // font, so measurement matches what Text will draw.

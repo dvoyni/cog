@@ -585,6 +585,16 @@ for the unload half:
 | --- | --- | --- |
 | `UnloadSprite(path)` | — | Frees the path from all three sprite tiers at the call; absent is a no-op. A later draw reloads it. |
 | `UnloadFont(path)` | — | Drops the baked faces and parsed source for the path; glyph pages are freed only by the whole-atlas resize invalidation. |
+| `UnloadAll()` | — | Empties all five caches, sparing nothing - the generated white texel included, which the next frame reserves again before any layer's ops. Glyph pages stay the resize's alone. |
+
+`UnloadAll` is memory at a level boundary, not a developer loop: it is what a
+game giving up a level calls instead of naming every sprite and font it ever
+drew. It is also the only lever that clears a refusal the atlas budget made,
+which is contingent on what else is resident - a sprite that found no room caches
+that refusal terminally, and freeing the level that filled the atlas *per path*
+gives the slots back without freeing the failure. **That is the residual**: a
+game unloading per path keeps the cached failure, and with it keeps a sprite that
+would now fit permanently out of the atlas.
 
 Failures (invalid, missing, or unreadable resources) report once through
 `kernel.ReportError` and return zero values, and they are **terminal**: what a
