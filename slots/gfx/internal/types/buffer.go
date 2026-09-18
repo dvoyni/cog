@@ -1,7 +1,7 @@
 package types
 
 import (
-	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/libs/assets"
 )
 
 // BufferDescr describes a GPU buffer from inline bytes (BufferWithBytes) or a
@@ -12,8 +12,8 @@ type BufferDescr struct {
 	size   int
 	// bytes is static: the descriptor never writes it, and a caller who built
 	// it from a slice they still hold must not either. That is what lets a
-	// Component hold one; see m.Blob.
-	bytes    m.Blob
+	// Component hold one; see assets.Blob.
+	bytes    assets.Blob
 	copyData bool
 }
 
@@ -28,7 +28,7 @@ func (b BufferDescr) Size() int { return b.size }
 // InlineBytes reports how many bytes of inline data the descriptor carries,
 // and zero for a baked buffer. The bytes themselves stay inside it, for the
 // reason TextureDescr.PixelBytes gives.
-func (b BufferDescr) InlineBytes() int { return len(b.bytes) }
+func (b BufferDescr) InlineBytes() int { return b.bytes.Len() }
 
 // bufferSource selects how a BufferDescr is resolved.
 type bufferSource int
@@ -47,13 +47,13 @@ func BakedBuffer(id BufferID, size int) BufferDescr {
 // bytes when recorded if true; when false, the caller must keep them unchanged
 // until the recorded frame is consumed or dropped.
 func BufferWithBytes(data []byte, copyData bool) BufferDescr {
-	return BufferDescr{source: BufferSourceBytes, size: len(data), bytes: data, copyData: copyData}
+	return BufferDescr{source: BufferSourceBytes, size: len(data), bytes: assets.NewBlob(data), copyData: copyData}
 }
 
 // hasData reports whether the descriptor carries geometry: inline bytes or a
 // baked buffer.
 func (b BufferDescr) hasData() bool {
-	return b.source == BufferSourceBaked || len(b.bytes) > 0
+	return b.source == BufferSourceBaked || b.bytes.Len() > 0
 }
 
 // TemporaryBuffer uploads one frame-lifetime storage buffer and returns the

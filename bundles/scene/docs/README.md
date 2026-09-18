@@ -185,7 +185,7 @@ func (q *OpQueue) Passes(dst []PassView) []PassView
 **Every slice field on every descriptor is borrowed for the duration of the
 call.** Scene copies into its frame arena before returning, so a hot-loop caller
 reuses one backing array. A draw's `Material` is copied too — its tag entries
-and each entry's parameters, though not the `m.Blob` bytes a parameter carries,
+and each entry's parameters, though not the `assets.Blob` bytes a parameter carries,
 which are static by contract — so a material may be rebuilt or rewritten the
 moment the call returns. A material named by many draws is copied once a frame:
 the copy is found again by content, so rewriting a shared material between two

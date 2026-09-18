@@ -862,8 +862,9 @@ func writeParamAt(buf []byte, off int, p *gfx.ParameterDescr) {
 			binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(types.ParameterNum(p)))
 		}
 	case types.ParamRaw:
-		if off+len(types.ParameterRaw(p)) <= len(buf) {
-			copy(buf[off:], types.ParameterRaw(p))
+		raw := types.ParameterRaw(p)
+		if off+raw.Len() <= len(buf) {
+			copy(buf[off:], raw.Data())
 		}
 	}
 }

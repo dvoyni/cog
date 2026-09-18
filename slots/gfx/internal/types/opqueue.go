@@ -233,20 +233,20 @@ func (q *OpQueue) bakeParameterIfNeeded(param ParameterDescr) ParameterDescr {
 }
 
 func (q *OpQueue) bakeBufferIfNeeded(buffer BufferDescr, kind BufferKind) BufferDescr {
-	if buffer.source == BufferSourceBaked || len(buffer.bytes) == 0 {
+	if buffer.source == BufferSourceBaked || buffer.bytes.Len() == 0 {
 		return buffer
 	}
-	return q.temporaryBuffer(kind, buffer.bytes, buffer.copyData)
+	return q.temporaryBuffer(kind, buffer.bytes.Data(), buffer.copyData)
 }
 
 func (q *OpQueue) bakeTextureIfNeeded(texture TextureDescr) TextureDescr {
 	if texture.source == TextureSourceBaked || texture.source == TextureSourceResource {
 		return texture
 	}
-	if texture.width <= 0 || texture.height <= 0 || len(texture.pixels) == 0 {
+	if texture.width <= 0 || texture.height <= 0 || texture.pixels.Len() == 0 {
 		return TextureDescr{}
 	}
-	return q.temporaryTexture(texture.width, texture.height, texture.format, texture.pixels, texture.copyData, texture.mipmaps)
+	return q.temporaryTexture(texture.width, texture.height, texture.format, texture.pixels.Data(), texture.copyData, texture.mipmaps)
 }
 
 func (q *OpQueue) temporaryBuffer(kind BufferKind, data []byte, copyData bool) BufferDescr {

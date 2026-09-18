@@ -27,7 +27,7 @@ func NewStore[T any](en *Entities, ids uint32) *Store[T] { return types.NewStore
 
 // Storable reports whether a type may be a Component. The rule it checks is
 // that a Component contains no mutable indirection, transitively: it admits
-// numerics, bools, fixed-size arrays, Entity, structs of those, string, m.Blob
+// numerics, bools, fixed-size arrays, Entity, structs of those, string, assets.Blob
 // and List[T], and refuses pointers, slices, maps, channels, funcs, interfaces
 // and sync types. The error names the offending field by path.
 func Storable(t reflect.Type) error { return types.Storable(t) }

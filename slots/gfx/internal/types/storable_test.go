@@ -8,7 +8,7 @@ import (
 )
 
 // The descriptors a Component holds to name a texture, a buffer or a material
-// parameter are storable: every byte run they carry is an m.Blob, which the ECS
+// parameter are storable: every byte run they carry is an assets.Blob, which the ECS
 // admits on the contract that it is never written after construction.
 func TestDescriptorsAreStorable(t *testing.T) {
 	for _, tp := range []reflect.Type{

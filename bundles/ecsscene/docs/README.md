@@ -213,7 +213,7 @@ or a backend adopted from outside cog — has to keep true, and none of them has
 compiler behind it.
 
 - **A Component holds no mutable indirection, transitively.** Enforced at
-  registration. A string, an `m.Blob` and an `ecs.List` are admitted; a bare
+  registration. A string, an `assets.Blob` and an `ecs.List` are admitted; a bare
   slice is not. Scene's descriptors that keep a slice — `gfx.MaterialDescr`'s
   params, `CameraDescr.Passes` — are therefore spelled out as Component fields
   and rebuilt per draw, which is what `MaterialTag` is.

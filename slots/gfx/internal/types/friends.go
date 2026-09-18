@@ -1,6 +1,7 @@
 package types
 
 import (
+	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -9,7 +10,7 @@ import (
 // these are not public API.
 
 // BufferBytes reads BufferDescr.bytes for gfx's internal/.
-func BufferBytes(v *BufferDescr) m.Blob { return v.bytes }
+func BufferBytes(v *BufferDescr) assets.Blob { return v.bytes }
 
 // BufferSource reads BufferDescr.source for gfx's internal/.
 func BufferSource(v *BufferDescr) bufferSource { return v.source }
@@ -85,7 +86,7 @@ func ParameterMat(v *ParameterDescr) m.Mat4 { return v.mat }
 func ParameterNum(v *ParameterDescr) float32 { return v.num }
 
 // ParameterRaw reads ParameterDescr.raw for gfx's internal/.
-func ParameterRaw(v *ParameterDescr) m.Blob { return v.raw }
+func ParameterRaw(v *ParameterDescr) assets.Blob { return v.raw }
 
 // ParameterSampler reads ParameterDescr.sampler for gfx's internal/.
 func ParameterSampler(v *ParameterDescr) SamplerDesc { return v.sampler }
@@ -127,7 +128,7 @@ func TargetMip(v *TargetDescr) int { return v.mip }
 func TargetTextureOf(v *TargetDescr) TextureID { return v.texture }
 
 // TexturePixels reads TextureDescr.pixels for gfx's internal/.
-func TexturePixels(v *TextureDescr) m.Blob { return v.pixels }
+func TexturePixels(v *TextureDescr) assets.Blob { return v.pixels }
 
 // TextureSource reads TextureDescr.source for gfx's internal/.
 func TextureSource(v *TextureDescr) textureSource { return v.source }

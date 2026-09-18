@@ -9,7 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -53,7 +53,7 @@ func TestStorableAdmitsImmutableIndirectionAndNothingElse(t *testing.T) {
 		{"a pointer", reflect.TypeFor[*inner]()},
 		{"a bare slice", reflect.TypeFor[[]uint32]()},
 		{"a bare byte slice", reflect.TypeFor[[]byte]()},
-		{"a pointer to a blob", reflect.TypeFor[*m.Blob]()},
+		{"a pointer to a blob", reflect.TypeFor[*assets.Blob]()},
 		{"a map", reflect.TypeFor[map[string]int]()},
 		{"an interface", reflect.TypeFor[any]()},
 		{"a channel", reflect.TypeFor[chan int]()},
@@ -90,7 +90,7 @@ func TestABareSliceIsRefusedForTheLockUnitAndSaysSo(t *testing.T) {
 // written after construction.
 type pixels struct {
 	Width, Height int32
-	Bytes         m.Blob
+	Bytes         assets.Blob
 }
 
 // row and grid are a List whose element type holds a List, which validation

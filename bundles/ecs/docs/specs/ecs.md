@@ -212,7 +212,7 @@ and it is what makes [the Store's flat index](#the-store) affordable.
 pointer it holds, it holds to memory nothing can write. That is
 **mechanically checkable**: a `reflect.Type` walk at registration, where cost is
 irrelevant. It permits numerics, bools, fixed-size arrays, `Entity`, structs of
-those, **`string`**, **`m.Blob`** and **`ecs.List[T]`**. It refuses pointers,
+those, **`string`**, **`assets.Blob`** and **`ecs.List[T]`**. It refuses pointers,
 bare slices, maps, channels, funcs, interfaces and `sync` types.
 
 The check reports the offending field **by path**, because the field that fails
@@ -241,7 +241,7 @@ company, and the split is sharp rather than a matter of degree:
 | --- | --- |
 | a `float32`, an `Entity`, a `[32]byte` | no — it is a copy of the bytes |
 | a **`string`** | **no** — the header is a copy and the bytes are immutable |
-| an **`m.Blob`** | **no, by contract** — the bytes are never written after construction, and nothing checks that |
+| an **`assets.Blob`** | **no, by contract** — the bytes are never written after construction, and nothing checks that |
 | a `[]T` | **yes** — the header is a copy and the array is shared |
 | an **`ecs.List[T]`** | only through `Set`, which validation mode checks |
 
@@ -249,7 +249,7 @@ A System holding nothing but `read{C}` writing the Store through a shared
 backing array is a data race **no lock anywhere names**, and it would make the
 claim this document opens with — that under-declaration is unrepresentable —
 false. So `string` is admitted outright, for a property rather than as an
-exception, static bytes are admitted as an [`m.Blob`](#mblob-static-bytes-on-trust)
+exception, static bytes are admitted as an [`assets.Blob`](#assetsblob-static-bytes-on-trust)
 on a contract rather than a property, and a variable-length run is admitted
 only as a [List](#the-list).
 
@@ -434,25 +434,30 @@ through it. The hazard is on the read-out side, and closing it there means a
 deep copy per entity per frame — an allocation on the hot path. Copying at the
 boundary cannot manufacture immutability.
 
-### `m.Blob`: static bytes, on trust
+### `assets.Blob`: static bytes, on trust
 
-**`m.Blob` is admitted by type identity, and it is the one kind admitted on a
-contract rather than a property.** A Blob is a `[]byte` whose documented contract
-is that the bytes a Component holds are never written after construction. A Blob
-that honours it is exactly as safe to hand a reader as a string is. Nothing
-enforces it: a write through a Blob is an ordinary slice write with no method in
-front of it, so **validation mode cannot detect one** — the stamp table watches
-`List.Set`, and there is no `Blob.Set` to watch.
+**`assets.Blob` is admitted by type identity, and it is the one kind admitted on
+a contract rather than a property.** A Blob is a pointer and a length whose
+documented contract is that the bytes a Component holds are never written after
+construction. A Blob that honours it is exactly as safe to hand a reader as a
+string is. Nothing enforces it: `Data()` hands out a live slice and a write
+through it is an ordinary slice write with no method in front of it, so
+**validation mode cannot detect one** — the stamp table watches `List.Set`, and
+there is no `Blob.Set` to watch. What the shape does buy is that both of its
+fields are unexported: a holder can read the run and cannot repoint it.
 
 It is admitted anyway because the bytes engine types carry — a texture's pixels,
 a buffer's contents, a material parameter's raw layout — are static in practice,
 and the alternatives each cost something nothing downstream uses. A `List[byte]`
 would copy megabytes on construction and could not adopt an arena. A `string`
 would copy on the way in and again on the way out to every API that takes bytes,
-where a `Blob` converts to and from `[]byte` for free. So `gfx`'s descriptors
-hold Blobs and are Components as they stand. Recognition is by identity, so a
-caller's own named `[]byte` type is still a slice and is still refused; `ecs`
-imports `m` for the identity, which is a leaf package and makes no cycle.
+where a `Blob` converts to and from `[]byte` for free — still free, but no
+longer implicit: `assets.NewBlob` wraps a `[]byte` without copying it and
+`Data()` unwraps one, and every holder names the conversion where it builds one.
+So `gfx`'s descriptors hold Blobs and are Components as they stand. Recognition
+is by identity, so a caller's own named `[]byte` type is still a slice and is
+still refused; `ecs` imports `assets` for the identity, which the import table
+allows and which makes no cycle.
 
 **`PointerFree` still refuses a Blob**, so a Store holding one is scanned, takes
 the typed copy, and zeroes a vacated row — the same three mechanisms a string or
@@ -512,7 +517,7 @@ What it does not catch is stated in `validate_on.go` rather than left to be
 discovered: a write through `unsafe`; a write by a callee the value was passed
 to, which is reported against whoever called `Set`; a List whose array was
 evicted from the bounded table, which a nested List fills faster; a write
-through an `m.Blob`, which has no method to check; and anything a run never
+through an `assets.Blob`, which has no method to check; and anything a run never
 executes. Two more since Hooks:
 
 - **A second owner on a Store no Changed Hook reads.** The shared-array mark is
@@ -671,7 +676,7 @@ recording vocabulary:
 | `scene.Material`, `gfx.MaterialDescr` | rejected — a slice, and a descriptor holding one |
 | `scene.ClipPlay` | **legal** — `.Clip` is a `string` |
 | `scene.ModelRef` | **legal** — `.Path` is a `string` |
-| `scene.Pass`, `gfx.ParameterDescr` | **legal** — clears are `m.Maybe`, bytes are `m.Blob` |
+| `scene.Pass`, `gfx.ParameterDescr` | **legal** — clears are `m.Maybe`, bytes are `assets.Blob` |
 | **`scene.MeshRef`** | **legal Component** — already a dense id and a generation |
 | **`scene.LayerMask`, `scene.CameraID`** | **legal Component** |
 

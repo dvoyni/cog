@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"math"
 
+	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -28,7 +29,7 @@ type ParameterDescr struct {
 	// shader reads it. It is validated against WGSL's alignment rules once per
 	// type at construction, so nothing downstream re-derives a layout from it.
 	// It is static, for the reason BufferDescr.bytes gives.
-	raw m.Blob
+	raw assets.Blob
 }
 
 // ParamKind tags the variant stored in a ParameterDescr.
@@ -168,7 +169,7 @@ func (p ParameterDescr) BufferRange() (offset, size int, ok bool) {
 // out the way one shader reads them, so nothing outside can do anything with
 // them but forward them, and a reader that only wants to know how much is
 // travelling gets the number without the copy.
-func (p ParameterDescr) RawLen() (int, bool) { return len(p.raw), p.kind == ParamRaw }
+func (p ParameterDescr) RawLen() (int, bool) { return p.raw.Len(), p.kind == ParamRaw }
 
 // HasValue reports whether the parameter carries bytes a shader reads out of its
 // uniform block, as opposed to a binding it attaches to a bind group. It is the
@@ -190,7 +191,7 @@ func (p ParameterDescr) ValueSize() int {
 	case ParamFloat:
 		return 4
 	case ParamRaw:
-		return len(p.raw)
+		return p.raw.Len()
 	}
 	return 0
 }
@@ -220,7 +221,7 @@ func (p ParameterDescr) AppendValue(dst []byte) ([]byte, bool) {
 		binary.LittleEndian.PutUint32(buf[:4], math.Float32bits(p.num))
 		return append(dst, buf[:4]...), true
 	case ParamRaw:
-		return append(dst, p.raw...), true
+		return append(dst, p.raw.Data()...), true
 	}
 	return dst, false
 }

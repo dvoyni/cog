@@ -1,7 +1,7 @@
 package types
 
 import (
-	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/libs/assets"
 )
 
 // TextureDescr describes a texture by resource path (TextureWithResource),
@@ -13,7 +13,7 @@ type TextureDescr struct {
 	width, height int
 	format        TextureFormat
 	// pixels is static, for the reason BufferDescr.bytes gives.
-	pixels   m.Blob
+	pixels   assets.Blob
 	copyData bool
 	mipmaps  bool
 	id       TextureID
@@ -42,7 +42,7 @@ func (t TextureDescr) Mipmaps() bool { return t.mipmaps }
 // carries, and zero for a texture named by path or already baked. The pixels
 // themselves stay inside the descriptor - a caller wanting to know that an
 // upload is a megabyte should not have to hold the megabyte to find out.
-func (t TextureDescr) PixelBytes() int { return len(t.pixels) }
+func (t TextureDescr) PixelBytes() int { return t.pixels.Len() }
 
 // textureSource selects how a TextureDescr is resolved.
 type textureSource int
@@ -75,6 +75,6 @@ func TextureWithResource(path string) TextureDescr {
 func TextureWithBytes(width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
 	return TextureDescr{
 		source: TextureSourceBytes, width: width, height: height, format: format,
-		pixels: pixels, copyData: copyData, mipmaps: mipmaps,
+		pixels: assets.NewBlob(pixels), copyData: copyData, mipmaps: mipmaps,
 	}
 }

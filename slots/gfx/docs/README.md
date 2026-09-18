@@ -429,7 +429,7 @@ and physical `FramebufferWidth`/`FramebufferHeight`.
 
 **`BufferDescr`, `TextureDescr` and `ParameterDescr` are storable**: an ECS
 Component may hold one as it stands. Every byte run they carry — a buffer's
-inline bytes, a texture's pixels, a raw parameter's layout — is an `m.Blob`,
+inline bytes, a texture's pixels, a raw parameter's layout — is an `assets.Blob`,
 which the ECS admits on the contract that nothing writes the bytes after the
 descriptor is built. The constructors still take a `[]byte`, and converting is
 free; the contract is the caller's to keep, and nothing checks it.

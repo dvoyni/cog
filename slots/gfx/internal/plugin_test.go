@@ -898,8 +898,8 @@ func TestDrawStoresTemporaryBufferIDsWithoutInlineGeometry(t *testing.T) {
 	if types.MeshVertices(&draw.Mesh).ID() == 0 || draw.Mesh.VertexCount() != 3 {
 		t.Fatalf("draw vertex resource = (%d, %d), want nonzero ID and 3 vertices", types.MeshVertices(&draw.Mesh).ID(), draw.Mesh.VertexCount())
 	}
-	if len(types.BufferBytes(types.MeshVerticesRef(&draw.Mesh))) != 0 {
-		t.Fatalf("draw retained %d inline vertex bytes", len(types.BufferBytes(types.MeshVerticesRef(&draw.Mesh))))
+	if types.BufferBytes(types.MeshVerticesRef(&draw.Mesh)).Len() != 0 {
+		t.Fatalf("draw retained %d inline vertex bytes", types.BufferBytes(types.MeshVerticesRef(&draw.Mesh)).Len())
 	}
 	if len(types.OpQueueTemporaryBuffers(&queue)) != 1 || !types.OpQueueTemporaryBuffers(&queue)[0].Used {
 		t.Fatal("draw did not lease one temporary vertex buffer")
@@ -1011,11 +1011,11 @@ func TestOpQueueBakesInlineMaterialAndDrawParameters(t *testing.T) {
 	for _, param := range append(draw.Material.Params(), draw.Params...) {
 		switch types.ParameterKind(&param) {
 		case types.ParamTexture:
-			if types.TextureSource(types.ParameterTextureRef(&param)) == gfx.TextureSourceBytes || len(types.TexturePixels(types.ParameterTextureRef(&param))) != 0 {
+			if types.TextureSource(types.ParameterTextureRef(&param)) == gfx.TextureSourceBytes || types.TexturePixels(types.ParameterTextureRef(&param)).Len() != 0 {
 				t.Errorf("texture param %q was not remapped to a baked ID", param.Name())
 			}
 		case types.ParamBuffer:
-			if types.BufferSource(types.ParameterBufferRef(&param)) != gfx.BufferSourceBaked || types.ParameterBuffer(&param).ID() == 0 || len(types.BufferBytes(types.ParameterBufferRef(&param))) != 0 {
+			if types.BufferSource(types.ParameterBufferRef(&param)) != gfx.BufferSourceBaked || types.ParameterBuffer(&param).ID() == 0 || types.BufferBytes(types.ParameterBufferRef(&param)).Len() != 0 {
 				t.Errorf("buffer param %q was not remapped to a baked ID", param.Name())
 			}
 		}
