@@ -6,14 +6,6 @@ import (
 	"strings"
 )
 
-// ErrShaderNotFound is reported to the kernel when a draw's shader source is
-// unavailable from storage.FileSystem.
-type ErrShaderNotFound struct{ Name string }
-
-func (e ErrShaderNotFound) Error() string {
-	return fmt.Sprintf("gfx: shader source %q unavailable", e.Name)
-}
-
 // ErrShaderSource reports a shader the preprocessor refused, or one the backend
 // refused after flattening.
 //

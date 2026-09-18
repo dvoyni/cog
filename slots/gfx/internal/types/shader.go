@@ -4,23 +4,27 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/dvoyni/cog/libs/assets"
 )
 
-// ShaderDescr describes a shader by inline source text (ShaderWithText) or a
-// resource path (ShaderWithResource), resolved to bytes by the renderer.
+// ShaderDescrParams is everything about a shader that is neither its path nor
+// its inline text: the supply the preprocessor resolves the source against, and
+// the message for a supply that has no legal spelling.
 //
-// A descriptor also carries its supply - the defines and const values the
-// preprocessor resolves the source against. A root source plus one supply is
-// one variant, and two supplies over one path are two shaders, so the supply is
-// part of the descriptor's identity everywhere identity is decided.
-type ShaderDescr struct {
-	source     shaderSource
-	textOrPath string
+// Its fields are unexported on purpose, and here that is what keeps the one
+// invariant that matters. ShaderDescr's own fields are exported, so anyone can
+// write a descriptor down - but only with a zero Params, which is exactly
+// ShaderWithResource(path) with no options: canonical, legal, harmless. What
+// must not be forgeable is supply, because its canonical spelling is
+// load-bearing - a hand-written one that spells two different supplies the same
+// way puts them in one cache entry, and one of them then draws the wrong module.
+type ShaderDescrParams struct {
 	// supply is the canonical spelling of the descriptor's defines and consts:
 	// entries sorted by name and joined with "\n", a define written NAME and a
 	// const NAME=value. It is canonicalised at construction into one comparable
-	// string so that ShaderDescr stays a plain value, stays a map key, and stays
-	// constructible before any Plugin or Backend exists.
+	// string so that ShaderDescr stays a plain value, stays a cache key, and
+	// stays constructible before any Plugin or Backend exists.
 	supply string
 	// supplyMalformed carries the message for a supply that has no legal
 	// spelling - an empty name, or a const value containing a newline - and is
@@ -35,13 +39,26 @@ type ShaderDescr struct {
 	supplyMalformed string
 }
 
-// shaderSource selects how a ShaderDescr's textOrPath is interpreted.
-type shaderSource int
-
-const (
-	ShaderSourceText shaderSource = iota
-	ShaderSourceResource
-)
+// ShaderDescr describes a shader by inline source text (ShaderWithText) or a
+// resource path (ShaderWithResource), resolved to bytes by the renderer.
+//
+// It is an assets.Descr: Name is the resource path, Blob is the inline text -
+// wrapped, never copied - and Params is the supply. That is also what makes it
+// the key of gfx's shader cache rather than merely the request handed to one.
+//
+// The two cases are disjoint and are told apart by which field carries the
+// answer: a Name for a path, a Blob for inline text. There is no source enum,
+// because it restated exactly that.
+//
+// A descriptor also carries its supply - the defines and const values the
+// preprocessor resolves the source against. A root source plus one supply is
+// one variant, and two supplies over one path are two shaders, so the supply is
+// part of the descriptor's identity everywhere identity is decided.
+//
+// A defined type inherits no methods from the type it is defined over, so every
+// accessor below is gfx's own and the descriptor offers precisely the surface it
+// always did - the text in particular stays unofferable.
+type ShaderDescr assets.Descr[ShaderDescrParams]
 
 // ShaderOption is one entry of a shader's supply: a define or a const. Build it
 // with ShaderDefine or ShaderConst.
@@ -68,15 +85,30 @@ func ShaderConst(name, value string) ShaderOption {
 }
 
 // ShaderWithText describes a shader from inline source bytes (e.g. WGSL).
+//
+// The text is wrapped rather than copied, so what identifies it is the run of
+// bytes and not their spelling: a string literal, a const or a package var
+// resolves to one address every evaluation and is therefore one cache entry
+// however many times it is written down. A string computed afresh per call is a
+// fresh allocation, a fresh identity and a fresh entry with it - the same rule
+// assets.NewBlob already carries, and the reason this routes through the string
+// rather than through []byte(text), which allocates a backing array per
+// conversion and would make every call its own module.
 func ShaderWithText(text string, opts ...ShaderOption) ShaderDescr {
 	supply, malformed := canonicalSupply(opts)
-	return ShaderDescr{source: ShaderSourceText, textOrPath: text, supply: supply, supplyMalformed: malformed}
+	return ShaderDescr{
+		Blob:   assets.NewBlobFromString(text),
+		Params: ShaderDescrParams{supply: supply, supplyMalformed: malformed},
+	}
 }
 
 // ShaderWithResource describes a shader loaded from storage.FileSystem.
 func ShaderWithResource(path string, opts ...ShaderOption) ShaderDescr {
 	supply, malformed := canonicalSupply(opts)
-	return ShaderDescr{source: ShaderSourceResource, textOrPath: path, supply: supply, supplyMalformed: malformed}
+	return ShaderDescr{
+		Name:   path,
+		Params: ShaderDescrParams{supply: supply, supplyMalformed: malformed},
+	}
 }
 
 // canonicalSupply renders one option list as the comparable supply string, and
@@ -139,26 +171,21 @@ func malformedSupplyEntry(entry ShaderOption) string {
 // empty for one built from inline text. The text itself is not offered back:
 // a whole shader source is not an identity, and nothing outside gfx can do
 // with it what FlattenShader already does.
-func (d ShaderDescr) Path() string {
-	if d.source != ShaderSourceResource {
-		return ""
-	}
-	return d.textOrPath
-}
+func (d ShaderDescr) Path() string { return d.Name }
 
 // Supply reports the canonical spelling of the descriptor's defines and
 // consts - entries sorted by name and joined with newlines, a define written
 // NAME and a const NAME=value. It is part of the shader's identity: one path
 // under two supplies is two shaders.
-func (d ShaderDescr) Supply() string { return d.supply }
+func (d ShaderDescr) Supply() string { return d.Params.supply }
 
 // supplyEntries splits the canonical supply back into its defines and consts.
 // It is meaningful only for a supply that is not malformed.
 func (d ShaderDescr) supplyEntries() []ShaderOption {
-	if d.supply == "" {
+	if d.Params.supply == "" {
 		return nil
 	}
-	lines := strings.Split(d.supply, "\n")
+	lines := strings.Split(d.Params.supply, "\n")
 	entries := make([]ShaderOption, 0, len(lines))
 	for _, line := range lines {
 		if name, value, ok := strings.Cut(line, "="); ok {
@@ -173,12 +200,12 @@ func (d ShaderDescr) supplyEntries() []ShaderOption {
 // ShaderLabel names a shader in a report: its root path, or gfx.shader for
 // inline text, followed by its supply.
 func ShaderLabel(descr ShaderDescr) string {
-	root := "gfx.shader"
-	if descr.source == ShaderSourceResource {
-		root = descr.textOrPath
+	root := descr.Name
+	if root == "" {
+		root = inlineShaderName
 	}
-	if descr.supply == "" {
+	if descr.Params.supply == "" {
 		return root
 	}
-	return root + " [" + strings.ReplaceAll(descr.supply, "\n", " ") + "]"
+	return root + " [" + strings.ReplaceAll(descr.Params.supply, "\n", " ") + "]"
 }

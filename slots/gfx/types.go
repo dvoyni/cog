@@ -5,18 +5,15 @@ import "github.com/dvoyni/cog/slots/gfx/internal/types"
 // The recording descriptors. Build them with the constructors in utils.go.
 
 // ShaderDescr describes a shader by inline source text (ShaderWithText) or a
-// resource path (ShaderWithResource), resolved to bytes by the renderer.
+// resource path (ShaderWithResource), resolved to bytes by the renderer. The
+// two cases are told apart by which field carries the answer, so there is no
+// source enum to read.
 //
 // A descriptor also carries its supply - the defines and const values the
 // preprocessor resolves the source against. A root source plus one supply is
 // one variant, and two supplies over one path are two shaders, so the supply is
 // part of the descriptor's identity everywhere identity is decided.
 type ShaderDescr = types.ShaderDescr
-
-const (
-	ShaderSourceText     = types.ShaderSourceText
-	ShaderSourceResource = types.ShaderSourceResource
-)
 
 // ShaderOption is one entry of a shader's supply: a define or a const. Build it
 // with ShaderDefine or ShaderConst.

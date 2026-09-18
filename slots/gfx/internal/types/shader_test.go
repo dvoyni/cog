@@ -12,8 +12,8 @@ func TestSupplyCanonicalisesSortedByName(t *testing.T) {
 		ShaderDefine("SCENE_MORPH"),
 	)
 	want := "SCENE_MAX_LIGHTS=16\nSCENE_MORPH\nSCENE_SKIN"
-	if descr.supply != want {
-		t.Fatalf("supply = %q, want %q", descr.supply, want)
+	if descr.Params.supply != want {
+		t.Fatalf("supply = %q, want %q", descr.Params.supply, want)
 	}
 }
 
@@ -23,7 +23,7 @@ func TestSupplyIsOrderIndependent(t *testing.T) {
 	a := ShaderWithResource("s.wgsl", ShaderDefine("B"), ShaderConst("A", "1"))
 	b := ShaderWithResource("s.wgsl", ShaderConst("A", "1"), ShaderDefine("B"))
 	if a != b {
-		t.Fatalf("%q and %q differ", a.supply, b.supply)
+		t.Fatalf("%q and %q differ", a.Params.supply, b.Params.supply)
 	}
 }
 
@@ -32,12 +32,12 @@ func TestSupplyIsOrderIndependent(t *testing.T) {
 // effective supply and must not produce two keys for it.
 func TestSupplyDuplicatesResolveLastWins(t *testing.T) {
 	descr := ShaderWithResource("s.wgsl", ShaderConst("N", "4"), ShaderConst("N", "16"))
-	if descr.supply != "N=16" {
-		t.Fatalf("supply = %q, want %q", descr.supply, "N=16")
+	if descr.Params.supply != "N=16" {
+		t.Fatalf("supply = %q, want %q", descr.Params.supply, "N=16")
 	}
 	other := ShaderWithResource("s.wgsl", ShaderDefine("N"), ShaderConst("N", "16"))
 	if other != descr {
-		t.Fatalf("supplies differing only in the losing duplicate produced %q and %q", other.supply, descr.supply)
+		t.Fatalf("supplies differing only in the losing duplicate produced %q and %q", other.Params.supply, descr.Params.supply)
 	}
 }
 
@@ -76,12 +76,12 @@ func TestMalformedSupplyIsRecordedNotPanicked(t *testing.T) {
 		"newline in value":  ShaderWithResource("s.wgsl", ShaderConst("A", "x\ny")),
 	}
 	for name, descr := range tests {
-		if descr.supplyMalformed == "" {
+		if descr.Params.supplyMalformed == "" {
 			t.Errorf("%s: constructed a malformed supply with no complaint recorded", name)
 		}
 	}
-	if ok := ShaderWithResource("s.wgsl", ShaderConst("A", "x")); ok.supplyMalformed != "" {
-		t.Fatalf("a well-formed supply was reported malformed: %q", ok.supplyMalformed)
+	if ok := ShaderWithResource("s.wgsl", ShaderConst("A", "x")); ok.Params.supplyMalformed != "" {
+		t.Fatalf("a well-formed supply was reported malformed: %q", ok.Params.supplyMalformed)
 	}
 }
 
@@ -92,8 +92,8 @@ func TestMalformedSupplyIsRecordedNotPanicked(t *testing.T) {
 func TestNewlineValueStaysDistinctFromTheDefinePairItSpells(t *testing.T) {
 	bad := ShaderWithResource("s.wgsl", ShaderConst("A", "x\nB"))
 	good := ShaderWithResource("s.wgsl", ShaderConst("A", "x"), ShaderDefine("B"))
-	if bad.supply != good.supply {
-		t.Fatalf("the two no longer canonicalise alike: %q and %q", bad.supply, good.supply)
+	if bad.Params.supply != good.Params.supply {
+		t.Fatalf("the two no longer canonicalise alike: %q and %q", bad.Params.supply, good.Params.supply)
 	}
 	if bad == good {
 		t.Fatal("a malformed supply shares a cache key with the well-formed pair it spells")

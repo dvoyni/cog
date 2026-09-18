@@ -1214,6 +1214,12 @@ func TestConsumeTranslatesDraws(t *testing.T) {
 	}
 }
 
+// The module is built once across three frames although testMaterial builds a
+// fresh descriptor for every draw. Inline text is identified by the run of bytes
+// it wraps, not copied and not hashed, so a literal is one address and one entry
+// however many descriptors are written around it - which is why ShaderWithText
+// routes through the string rather than through []byte(text), whose conversion
+// would allocate a fresh identity per call and a cache entry per draw.
 func TestConsumeCachesShaderAndPipeline(t *testing.T) {
 	p := newPlugin()
 	k := newTestKernel(t, p)
@@ -1422,10 +1428,11 @@ func TestReleaseCachedResourceReleasesPathAndAllowsReload(t *testing.T) {
 	w.Draw(triangle(), material, gfx.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
-	// The texture cache is asked about through what a game can see - one upload
-	// for one path - rather than by reaching into the table that holds it.
-	if backend.uploads != 1 || len(p.translator.shaders) != 1 || len(p.translator.pipelines) != 1 {
-		t.Fatalf("initial uploads/shaders/pipelines = (%d, %d, %d), want 1 each", backend.uploads, len(p.translator.shaders), len(p.translator.pipelines))
+	// Both caches are asked about through what a game can see - one upload and
+	// one module built for one path each - rather than by reaching into the
+	// tables that hold them.
+	if backend.uploads != 1 || backend.shaders != 1 || len(p.translator.pipelines) != 1 {
+		t.Fatalf("initial uploads/shaders/pipelines = (%d, %d, %d), want 1 each", backend.uploads, backend.shaders, len(p.translator.pipelines))
 	}
 	k.ExecuteCommand[gfx.ReleaseCachedResourceCmd](gfx.ReleaseCachedResourceRequest{})
 	k.ExecuteCommand[gfx.ReleaseCachedResourceCmd](gfx.ReleaseCachedResourceRequest{Path: "hero.png"})
@@ -1434,7 +1441,7 @@ func TestReleaseCachedResourceReleasesPathAndAllowsReload(t *testing.T) {
 	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
-	if len(p.translator.shaders) != 0 || len(p.translator.pipelines) != 0 || len(p.translator.layouts) != 0 || len(p.translator.parameterPlans) != 0 {
+	if len(p.translator.pipelines) != 0 || len(p.translator.layouts) != 0 || len(p.translator.parameterPlans) != 0 {
 		t.Fatal("path release retained translator cache entries")
 	}
 	if len(backend.freedShaders) != 1 || len(backend.freedPipelines) != 1 {
@@ -1486,7 +1493,7 @@ func TestFreeCachedResourcesClearsTranslatorOwnedCachesOnly(t *testing.T) {
 	w = recordList(t, k)
 	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
-	if len(p.translator.shaders) != 0 || len(p.translator.pipelines) != 0 || len(p.translator.samplers) != 0 || len(p.translator.layouts) != 0 || len(p.translator.parameterPlans) != 0 {
+	if len(p.translator.pipelines) != 0 || len(p.translator.samplers) != 0 || len(p.translator.layouts) != 0 || len(p.translator.parameterPlans) != 0 {
 		t.Fatal("global cleanup retained translator-owned caches")
 	}
 	if len(backend.freedShaders) != 1 || len(backend.freedPipelines) != 1 || len(backend.freedSamplers) != 1 {
@@ -1563,10 +1570,10 @@ func TestFailedTextureIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 }
 
 // A failed shader is cached as failed and reported once. Without the cache the
-// next frame re-reads
-// every source, re-flattens, re-fails and re-reports - at the frame rate. The
-// developer loop is unchanged, because it goes through eviction: fix the file,
-// hot-reload evicts, the next frame retries and reports afresh.
+// next frame re-reads every source, re-flattens, re-fails and re-reports - at
+// the frame rate. Releasing the path is what retries it, and nothing in the
+// engine issues that release: the command below is the lever, and a game is the
+// only thing that pulls it.
 func TestFailedShaderIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	files := fstest.MapFS{}
 	filesystem := &countingFS{FS: files}
@@ -1595,9 +1602,6 @@ func TestFailedShaderIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	}
 
 	draw()
-	if len(p.translator.shaders) != 1 {
-		t.Fatalf("failed shader entries cached = %d, want 1", len(p.translator.shaders))
-	}
 	if filesystem.opens != 1 || errorsReported != 1 || backend.shaders != 0 {
 		t.Fatalf("first frame opens/errors/shaders = (%d, %d, %d), want (1, 1, 0)", filesystem.opens, errorsReported, backend.shaders)
 	}
@@ -1609,14 +1613,16 @@ func TestFailedShaderIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 		t.Fatalf("second frame opens/errors = (%d, %d), want (1, 1)", filesystem.opens, errorsReported)
 	}
 
-	// The path was recorded even though it could not be opened, which is what
-	// lets the hot-reload of the file the author just wrote clear the failure.
+	// The path was recorded as the failed entry's one source even though it could
+	// not be opened, which is what makes a release naming it reach the failure at
+	// all: a failed entry has to evict like any other, or a coarse release leaves
+	// failures behind it.
 	files["later.wgsl"] = &fstest.MapFile{Data: []byte("const marker = 1;")}
 	k.ExecuteCommand[gfx.ReleaseCachedResourceCmd](gfx.ReleaseCachedResourceRequest{Path: "later.wgsl"})
 	draw()
-	if filesystem.opens != 2 || len(p.translator.shaders) != 1 || backend.shaders != 1 || errorsReported != 1 {
-		t.Fatalf("after eviction opens/cache/shaders/errors = (%d, %d, %d, %d), want (2, 1, 1, 1)",
-			filesystem.opens, len(p.translator.shaders), backend.shaders, errorsReported)
+	if filesystem.opens != 2 || backend.shaders != 1 || errorsReported != 1 {
+		t.Fatalf("after eviction opens/shaders/errors = (%d, %d, %d), want (2, 1, 1)",
+			filesystem.opens, backend.shaders, errorsReported)
 	}
 }
 
@@ -1646,19 +1652,63 @@ func TestEvictionScansTheForwardIncludeSet(t *testing.T) {
 	}
 	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
-	if len(p.translator.shaders) != 3 {
-		t.Fatalf("cached modules = %d, want 3", len(p.translator.shaders))
+	if backend.shaders != 3 {
+		t.Fatalf("modules built = %d, want 3", backend.shaders)
 	}
 
 	k.ExecuteCommand[gfx.ReleaseCachedResourceCmd](gfx.ReleaseCachedResourceRequest{Path: "shared.wgsl"})
 	w = recordList(t, k)
 	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
-	if len(p.translator.shaders) != 0 {
-		t.Fatalf("releasing an included source left %d modules cached", len(p.translator.shaders))
-	}
+	// Every one of the three went, which is what handing all three ids back says:
+	// an entry the release missed would still be holding its module.
 	if len(backend.freedShaders) != 3 {
 		t.Fatalf("freed %d backend shaders, want 3", len(backend.freedShaders))
+	}
+}
+
+// An inline shader with no #include has an empty source set, so no path can
+// name it: flatten notes a source only for a resource root and for the includes
+// it walks. FreeCachedResourcesCmd is its release, and it is the only one.
+//
+// It gains no second route. Noting the inline root under the name a report calls
+// it by would make it evictable, and that is a sentinel inside a namespace of
+// real paths - inventing a path for the one thing defined by not having one is
+// the wrong direction.
+func TestAnInlineShaderWithNoIncludeIsReachedOnlyByTheGlobalFree(t *testing.T) {
+	filesystem := &countingFS{FS: fstest.MapFS{
+		"root.wgsl": &fstest.MapFile{Data: []byte("const root = 1;")},
+	}}
+	p := newPlugin()
+	k := newTestKernelWithFS(t, p, filesystem)
+	backend := &fakeBackend{}
+	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
+
+	w := recordList(t, k)
+	w.Draw(triangle(), gfx.Material(gfx.ShaderWithResource("root.wgsl")))
+	w.Draw(triangle(), gfx.Material(gfx.ShaderWithText("const inline = 1;")))
+	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	k.PublishEvent(app.RenderEvent{}).Wait()
+	if backend.shaders != 2 {
+		t.Fatalf("modules built = %d, want 2", backend.shaders)
+	}
+
+	// The one path in the frame evicts the module rooted at it and leaves the
+	// inline one, which no path reaches.
+	k.ExecuteCommand[gfx.ReleaseCachedResourceCmd](gfx.ReleaseCachedResourceRequest{Path: "root.wgsl"})
+	w = recordList(t, k)
+	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	k.PublishEvent(app.RenderEvent{}).Wait()
+	if len(backend.freedShaders) != 1 {
+		t.Fatalf("releasing a path freed %d modules, want 1", len(backend.freedShaders))
+	}
+
+	k.ExecuteCommand[gfx.FreeCachedResourcesCmd](gfx.FreeCachedResourcesRequest{})
+	w = recordList(t, k)
+	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	k.PublishEvent(app.RenderEvent{}).Wait()
+	if len(backend.freedShaders) != 2 {
+		t.Fatalf("the global free left the inline module resident: freed %d, want 2", len(backend.freedShaders))
 	}
 }
 
@@ -1847,9 +1897,8 @@ func TestEachVariantIsItsOwnModuleUnderItsOwnLabel(t *testing.T) {
 	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
-	if len(p.translator.shaders) != 4 || backend.shaders != 4 {
-		t.Fatalf("four supplies cached %d modules and built %d, want 4 and 4",
-			len(p.translator.shaders), backend.shaders)
+	if backend.shaders != 4 {
+		t.Fatalf("four supplies built %d modules, want 4", backend.shaders)
 	}
 	want := []string{
 		"scene.wgsl",

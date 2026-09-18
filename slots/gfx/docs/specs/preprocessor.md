@@ -833,7 +833,7 @@ type ShaderLocation struct {
 ```
 
 One type, not fifteen structs. gfx's convention is a struct per failure
-(`ErrShaderNotFound`, `ErrDrawSamplesAttachment`, `ErrShaderExceedsWebLimits`),
+(`ErrDrawSamplesAttachment`, `ErrShaderExceedsWebLimits`, `ErrPipelineFailed`),
 and that convention earns its keep when a caller might branch on the failure.
 **Nothing can recover from any preprocessor error**, so nothing ever will
 branch, and fifteen exported types plus a `Kind` enum would be pure surface.
@@ -930,9 +930,10 @@ report in gfx.
 **A failed shader is cached as failed**, keyed on the same `(root, supply)`,
 with its module→sources set recorded even on failure so eviction clears it like
 any other entry. Today a failure caches nothing, so the next frame re-reads ten
-files, re-flattens, re-fails and re-reports — at the frame rate. The developer
-loop is unchanged: fix the file, hot-reload evicts, the next frame retries and
-reports afresh.
+files, re-flattens, re-fails and re-reports — at the frame rate. Recording the
+set on failure is what makes a failed entry evict like any other, so a coarse
+release does not leave failures behind it; the release is the only retry there
+is, and nothing in the engine issues one.
 
 **The error is reported once, not once a frame**, following
 `p.reportedNotReady` (`extensions/gfx/gfximpl/plugin.go`) — the existing precedent for a
@@ -983,7 +984,8 @@ byte-identical to what compiled, because it is the same call.
 A malformed supply surfaces at **flatten**, not at construction. A constructor
 that panics turns a typo in a material declaration into a crash on a code path
 that today cannot fail, and gfx's convention is that a bad descriptor surfaces
-at translate time — `ErrShaderNotFound` is exactly this shape.
+at translate time — a shader whose path names no file is exactly this shape,
+and it now surfaces from the cache's own read rather than from the flattener.
 
 **The exception is duplicate names in the supply**, which must be resolved
 *before* the key string exists: two option lists differing only in the losing

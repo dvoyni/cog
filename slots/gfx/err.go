@@ -6,10 +6,6 @@ import (
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
-// ErrShaderNotFound is reported to the kernel when a draw's shader source is
-// unavailable from storage.FileSystem.
-type ErrShaderNotFound = types.ErrShaderNotFound
-
 // ErrShaderExceedsWebLimits reports a shader that fits the device it is running
 // on but not the WebGPU floor every browser guarantees. It is a portability
 // report, not a failure: the shader is kept and the frame renders, because

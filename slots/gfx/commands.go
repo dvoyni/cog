@@ -19,6 +19,14 @@ type AcquireResponse struct{ Advanced bool }
 // shader caches matching Path. Cleanup runs on the render thread before the
 // latest frame; a later use of the path loads it again.
 //
+// A shader matches on membership rather than on its name: every module whose
+// flatten read Path goes, whether Path rooted it or was included into it. So a
+// shader built from inline text goes too, if it included the path - but one
+// built from inline text with no #include has no source to match and no path
+// this command can name. FreeCachedResourcesCmd is its only release, and no
+// name is invented to give it a second one: a path for the one thing defined by
+// not having one would be a sentinel inside a namespace of real paths.
+//
 // It is also the only retry there is. A read that failed is cached as failed and
 // reported once, so a path whose file was missing stays missing as far as gfx is
 // concerned until this command drops the entry - which also forgets the report,

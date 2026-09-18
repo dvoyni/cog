@@ -2,6 +2,7 @@ package types
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/slots/storage"
 )
 
@@ -870,7 +872,20 @@ func flattenedLines(text string) []string {
 
 // flattenText is FlattenShader over any filesystem: the preprocessor's test
 // surface, without the storage type the exported function is spelled with.
+//
+// It performs the root read the cache performs in the engine, which is the one
+// thing FlattenShader no longer does for itself: a descriptor naming a path
+// reaches it with the root's bytes already in the Blob. A root that is not there
+// is the Library's failure in the engine and this helper's here, and either way
+// it never reaches the preprocessor.
 func flattenText(filesystem fs.FS, descr ShaderDescr) (string, ShaderSourceMap, error) {
+	if descr.Name != "" {
+		code, ok := loadShaderResource(filesystem, descr.Name)
+		if !ok {
+			return "", ShaderSourceMap{}, fmt.Errorf("shader root %q: %w", descr.Name, fs.ErrNotExist)
+		}
+		descr.Blob = assets.NewBlob(code)
+	}
 	flattened, err := FlattenShader(filesystem, descr)
 	return flattened.Text, flattened.SourceMap, err
 }

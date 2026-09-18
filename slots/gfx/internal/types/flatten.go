@@ -24,7 +24,15 @@ type flattenedShader struct {
 	Sources   []string
 }
 
-// FlattenShader is FlattenShader with the include set the translator needs.
+// FlattenShader splices one module's root and its includes into the single
+// source a backend compiles, and hands back the include set the translator
+// evicts by.
+//
+// descr.Blob carries the root's text, whether it was inline all along or was
+// read from descr.Name before the call: the root read belongs to whoever owns
+// the cache entry, and by the time a load runs it has already happened. So no
+// failure here is a missing root - every one of them is the preprocessor
+// refusing what it was given.
 func FlattenShader(filesystem fs.FS, descr ShaderDescr) (flattenedShader, error) {
 	f := &flattener{
 		filesystem: filesystem,
@@ -97,15 +105,12 @@ func (f *flattener) run() (string, ShaderSourceMap, error) {
 	// a crash on a path that today cannot fail. It has no source location at
 	// all, and an empty At is the encoding: Shader already carries the supply, so
 	// no sentinel source name is invented.
-	if f.descr.supplyMalformed != "" {
-		return "", ShaderSourceMap{}, ErrShaderSource{Shader: f.label, Message: f.descr.supplyMalformed}
+	if f.descr.Params.supplyMalformed != "" {
+		return "", ShaderSourceMap{}, ErrShaderSource{Shader: f.label, Message: f.descr.Params.supplyMalformed}
 	}
 	f.readSupply()
 
-	name, text, err := f.rootSource()
-	if err != nil {
-		return "", ShaderSourceMap{}, err
-	}
+	name, text := f.rootSource()
 	if err := f.emitSource(name, text, ShaderLocation{}); err != nil {
 		return "", ShaderSourceMap{}, err
 	}
@@ -137,19 +142,23 @@ func (f *flattener) readSupply() {
 	}
 }
 
-func (f *flattener) rootSource() (name, text string, err error) {
-	if f.descr.source != ShaderSourceResource {
-		return inlineShaderName, f.descr.textOrPath, nil
+// rootSource is the module's root: the text the descriptor carries, under the
+// name the rest of the flatten resolves relative includes and source locations
+// against. It cannot fail, because the read is not its to do - the bytes are in
+// the descriptor either because they were inline or because the cache read them
+// on the way in.
+//
+// The text comes back out of the Blob without a copy, which is the point of
+// routing it through one: a whole WGSL source re-materialised per flatten would
+// undo what caching the module bought.
+func (f *flattener) rootSource() (name, text string) {
+	if f.descr.Name == "" {
+		return inlineShaderName, f.descr.Blob.String()
 	}
-	name = f.descr.textOrPath
-	// The root is noted before it is opened, so that a module which failed
-	// because its root was missing is still evicted when that path is released.
-	f.note(name)
-	code, ok := loadShaderResource(f.filesystem, name)
-	if !ok {
-		return "", "", ErrShaderNotFound{Name: name}
-	}
-	return name, string(code), nil
+	// The root is noted here rather than at the read, so that a module which
+	// failed to flatten is still evicted when its root path is released.
+	f.note(f.descr.Name)
+	return f.descr.Name, f.descr.Blob.String()
 }
 
 // note records one source as participating in this module. The set is what
