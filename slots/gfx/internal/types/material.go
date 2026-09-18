@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"hash/maphash"
 	"math"
-	"unsafe"
 )
 
 // MaterialDescr describes how to shade a mesh: a shader plus named parameters.
@@ -105,13 +104,13 @@ func (p *ParameterDescr) fingerprint(h *maphash.Hash) {
 		writeUint(h, uint64(t.source)|uint64(t.id)<<8)
 		h.WriteString(t.path)
 		writeUint(h, uint64(t.width)|uint64(t.height)<<32)
-		writeUint(h, uint64(t.format)|boolBit(t.mipmaps)<<8|uint64(len(t.pixels))<<16)
-		writeUint(h, uint64(uintptr(unsafe.Pointer(unsafe.SliceData(t.pixels)))))
+		writeUint(h, uint64(t.format)|boolBit(t.mipmaps)<<8)
+		maphash.WriteComparable(h, t.pixels)
 	case ParamBuffer:
 		b := &p.buffer
 		writeUint(h, uint64(b.source)|uint64(b.id)<<8)
-		writeUint(h, uint64(b.size)|uint64(len(b.bytes))<<32)
-		writeUint(h, uint64(uintptr(unsafe.Pointer(unsafe.SliceData(b.bytes)))))
+		writeUint(h, uint64(b.size))
+		maphash.WriteComparable(h, b.bytes)
 		writeUint(h, uint64(p.bufferOffset)|uint64(p.bufferSize)<<32)
 	case ParamColor:
 		writeFloats(h, p.color.R, p.color.G, p.color.B, p.color.A)

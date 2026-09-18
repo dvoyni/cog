@@ -166,7 +166,7 @@ A fixed-length run of values a Component may hold, and the only way a Component 
 _Avoid_: Slice, array, vector, buffer. A bare slice in a Component is refused, and the word for the fixed-size Go array a Component may also hold is just an array.
 
 **Blob**:
-A run of bytes treated as static: once the value holding it is built, nothing writes the bytes again. It is how an engine value carrying pixels, a buffer's contents or a parameter's raw layout says so, and the one slice a Component may hold outright. The ECS admits it on that contract rather than on a property it can check, and Validation mode cannot see a write through one.
+A run of bytes treated as static: once the value holding it is built, nothing writes the bytes again. It is how an engine value carrying pixels, a buffer's contents or a parameter's raw layout says so, and the one run of bytes a Component may hold outright. Its identity is the run rather than the contents: two allocations spelling the same bytes are two Blobs, and re-wrapping the same one is one Blob, which is what lets a value holding one be compared and used as a cache key. The ECS admits it on that contract rather than on a property it can check, and Validation mode cannot see a write through one.
 _Avoid_: Buffer, which is a GPU object; bytes, for a run that is still being written
 
 **Maybe**:

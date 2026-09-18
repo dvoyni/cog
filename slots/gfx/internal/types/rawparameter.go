@@ -6,6 +6,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -32,7 +33,7 @@ func RawParameter[T any](name string, value T) ParameterDescr {
 	size := int(unsafe.Sizeof(value))
 	raw := make([]byte, size)
 	copy(raw, unsafe.Slice((*byte)(unsafe.Pointer(&value)), size))
-	return ParameterDescr{name: name, kind: ParamRaw, raw: raw}
+	return ParameterDescr{name: name, kind: ParamRaw, raw: assets.NewBlob(raw)}
 }
 
 // rawLayouts caches one validation per type. The check walks the struct by

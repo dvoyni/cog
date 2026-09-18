@@ -354,9 +354,9 @@ nothing new, and it is named for the Hook kind, not "dirty".
 
 **Why bytes are exact.** A `string` cannot be written in place. A `List` change
 shows in its header ([below](#a-list-shows-its-changes-in-its-header)). A write
-through an `m.Blob` already breaks the Blob's contract. So a byte compare raises
+through an `assets.Blob` already breaks the Blob's contract. So a byte compare raises
 no false alarm for any kind a Component may hold, and there is no call a System
-can forget to make. **Two misses are stated:** a write through an `m.Blob`, and
+can forget to make. **Two misses are stated:** a write through an `assets.Blob`, and
 a `List` nested in another `List`'s element (the Gap below).
 
 **Gap: a `List` nested in another `List`'s element.** `At` returns a copy of
@@ -639,7 +639,7 @@ The mutex is held only by readers of the same Store, only to fold and to
 compact, and never by a writer or across a System's body.
 
 **Removed values stay alive until the last reader passes them.** A removal's
-copy of `T`, and whatever a `string`, `List` or `m.Blob` in it points to, is
+copy of `T`, and whatever a `string`, `List` or `assets.Blob` in it points to, is
 reachable until the run end of the last reader of that Store whose copy included
 the record. So `TestARemovedRowDoesNotKeepItsValueAlive` holds for the Store and
 not for the log.
@@ -784,11 +784,11 @@ builds only.
   pointer keys keep a removed `List`'s array reachable until the table evicts it,
   past the log's compaction. The retention test uses a `string` for that reason.
 
-### `string` and `m.Blob`
+### `string` and `assets.Blob`
 
 - **`string`** needs nothing: it is immutable, and its retention until the last
   reader's run end is stated [above](#the-log-and-the-locks-it-is-appended-under).
-- **`m.Blob`** cannot be checked. A removal's `Value` keeps the Blob's bytes alive
+- **`assets.Blob`** cannot be checked. A removal's `Value` keeps the Blob's bytes alive
   until the last reader of `T` passes the removal. An owner that recycles those
   bytes after a despawn breaks the contract that already says "never", and a
   reader sees the damage as a corrupted removal value.

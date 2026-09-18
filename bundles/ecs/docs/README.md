@@ -58,7 +58,7 @@ an `internal` package under its enclosing package.
 
 ## Dependencies
 
-- Go packages: the standard library, `kernel`, and `m` for `m.Blob`
+- Go packages: the standard library, `kernel`, and `assets` for `assets.Blob`
 - Plugin dependencies: none
 - Configuration: `ecs.Config`, whose `PrewarmEntities` is how many Entities
   the authority reserves room for up front — a hint, not a limit; a zero field
@@ -268,7 +268,7 @@ func PointerFree(t reflect.Type) error // the fast-path property
 pointer it holds, it holds to memory nothing can write. That is mechanically
 checkable: one walk, run once when the type is registered. It permits numerics,
 bools, fixed-size arrays, `Entity`, structs of those, **`string`**,
-**`m.Blob`** and **`ecs.List[T]`**; it refuses pointers, bare slices, maps,
+**`assets.Blob`** and **`ecs.List[T]`**; it refuses pointers, bare slices, maps,
 channels, funcs and interfaces.
 
 **The rule is about the lock unit, not the collector.** A read yields a copy,
@@ -279,18 +279,20 @@ the copy is not itself a write handle:
 | --- | --- |
 | a number, an `Entity`, a `[32]byte` | no |
 | a **`string`** | **no** — the header is a copy and the bytes are immutable |
-| an **`m.Blob`** | **no, by contract** — its bytes are never written after construction |
+| an **`assets.Blob`** | **no, by contract** — its bytes are never written after construction |
 | a `[]T` | **yes** — refused for exactly this |
 | an **`ecs.List[T]`** | only through `Set`, which validation mode checks |
 
 Copying and serialisation come second, and a string satisfies both: it stays
 meaningful after the thing it was copied from is gone, and it encodes trivially.
 
-**`m.Blob` is admitted on trust.** It is a `[]byte` whose contract is that the
-bytes a Component holds are never written after construction, recognised by
-type identity — a named `[]byte` of your own is still refused. Nothing checks
-the contract, and validation mode cannot see a write through a Blob, because a
-Blob has no method to watch. It is admitted because the bytes engine types carry
+**`assets.Blob` is admitted on trust.** It is a pointer and a length whose
+contract is that the bytes a Component holds are never written after
+construction, recognised by type identity — a named `[]byte` of your own is
+still refused. Nothing checks the contract: `Data()` hands out a live slice, and
+validation mode cannot see a write through it, because a Blob has no mutator to
+watch. Both of its fields are unexported, so a holder can read the run and
+cannot repoint it. It is admitted because the bytes engine types carry
 — a texture's pixels, a buffer's contents, a parameter's raw layout — are static
 in practice, and a `List[byte]` would copy them for a guarantee nothing uses.
 That is what makes `gfx.ParameterDescr`, `TextureDescr` and `BufferDescr`
@@ -378,7 +380,7 @@ It catches a write through a read field or a `Get`, a write through a value
 retained past the `All()` that yielded it, and a write through the caller's own
 copy after that value entered a Store — and each of those one List further in,
 for a List whose elements hold Lists. It does not see a write through an
-`m.Blob`. Without the tag `validate` is a constant
+`assets.Blob`. Without the tag `validate` is a constant
 `false`, so a release build contains no branch, no table and no load for any of
 it.
 

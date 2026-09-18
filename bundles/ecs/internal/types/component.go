@@ -6,7 +6,7 @@ import (
 	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/libs/assets"
 )
 
 // componentClass is one Component type as registration left it: how wide one
@@ -159,7 +159,7 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 //
 // Every pointer a Component holds, it holds to memory nothing can write. That
 // admits numerics, bools, fixed-size arrays, Entity, structs of those, string,
-// m.Blob and List[T]; it refuses pointers, slices, maps, channels, funcs,
+// assets.Blob and List[T]; it refuses pointers, slices, maps, channels, funcs,
 // interfaces and sync types.
 //
 // The rule it replaced was "a Component contains no pointers, transitively",
@@ -180,17 +180,22 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 // and a slice is admitted only as a List, whose backing array is unexported and
 // whose one mutator is checked. See list.go.
 //
-// m.Blob is the one exception to that, and it is admitted on trust rather than
-// on a property. A Blob is a []byte whose contract is that nothing writes it
-// after construction, which is exactly the property a string has by
-// construction - so a Blob honouring its contract is as safe to hand a reader
-// as a string is. Nothing here can check the contract: a write through a Blob
-// is an ordinary slice write with no method in front of it, and validation mode
-// does not see it. It is admitted anyway because the engine's bytes - a
+// assets.Blob is the one exception to that, and it is admitted on trust rather
+// than on a property. A Blob is a pointer and a length whose contract is that
+// nothing writes the bytes after construction, which is exactly the property a
+// string has by construction - so a Blob honouring its contract is as safe to
+// hand a reader as a string is. Nothing here can check the contract: Data()
+// hands out a live slice, a write through it is an ordinary slice write with no
+// method in front of it, and validation mode does not see it. What the shape
+// does buy is that both fields are unexported, so a holder can read the run and
+// cannot repoint it. It is admitted anyway because the engine's bytes - a
 // texture's pixels, a buffer's contents, a parameter's raw layout - are static
 // in practice, and a List would copy them on construction for a guarantee
-// nothing downstream uses. It is recognised by type identity, so a caller's own
-// named []byte is still a slice and is still refused.
+// nothing downstream uses. Conversion is still free - NewBlob wraps a []byte
+// without copying it and Data() unwraps one - but it is no longer implicit: a
+// []byte does not assign to a Blob, so every holder names the conversion where
+// it builds one. It is recognised by type identity, so a caller's own named
+// []byte is still a slice and is still refused.
 //
 // The error names the offending field by path, because the field that fails is
 // usually several structs down and naming only the Component is useless:
@@ -203,8 +208,8 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 // does not.
 func Storable(t reflect.Type) error { return storable(t, kernel.TypeName(t)) }
 
-// blobType is m.Blob, the static byte run Storable admits by identity.
-var blobType = reflect.TypeFor[m.Blob]()
+// blobType is assets.Blob, the static byte run Storable admits by identity.
+var blobType = reflect.TypeFor[assets.Blob]()
 
 func storable(t reflect.Type, path string) error {
 	if t == blobType {
@@ -238,7 +243,7 @@ func storable(t reflect.Type, path string) error {
 		return nil
 	default:
 		return fmt.Errorf(
-			"%s is a %s, which is mutable indirection: a Component may hold a pointer only to memory nothing can write, so a string is admitted, static bytes belong in an m.Blob, a variable-length run belongs in an ecs.List, and everything else is a child Entity",
+			"%s is a %s, which is mutable indirection: a Component may hold a pointer only to memory nothing can write, so a string is admitted, static bytes belong in an assets.Blob, a variable-length run belongs in an ecs.List, and everything else is a child Entity",
 			path, t.Kind())
 	}
 }

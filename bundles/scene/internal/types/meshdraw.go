@@ -31,7 +31,7 @@ type MeshDraw struct {
 	// It is copied into the frame's own arenas at record - its tag entries and
 	// each entry's parameters - so a caller may reuse or change it the moment
 	// the call returns. The bytes a parameter carries are not copied: they are
-	// m.Blobs, static by contract.
+	// assets.Blobs, static by contract.
 	Material Material
 	// Params are extra gfx parameters bound to every instance of this draw, on
 	// top of the three ranges scene binds itself. They are for what a custom

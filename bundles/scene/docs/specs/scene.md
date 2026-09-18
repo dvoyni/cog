@@ -217,7 +217,7 @@ q.Box(0, scene.At(0, 0, 0), m.NewColorSrgb(0.42, 0.71, 0.94, 1))
 call.** Scene copies into its frame arena before returning, so a hot-loop caller
 reuses one backing array. That includes a draw's `Material` — its tag entries
 and each entry's parameters — but not the bytes a parameter carries, which are
-`m.Blob`s and static by contract; see [Materials are copied at
+`assets.Blob`s and static by contract; see [Materials are copied at
 record](#materials-are-copied-at-record).
 
 ### Transform
@@ -723,7 +723,7 @@ gone, and a caller may reuse or rewrite a material the moment the call returns.
 A nil `Material` stays nil, because nil is the bundled PBR.
 
 **The bytes a parameter carries are not copied.** A texture's pixels, a buffer's
-contents and a raw parameter's layout are `m.Blob`s, static by contract, so the
+contents and a raw parameter's layout are `assets.Blob`s, static by contract, so the
 copy is of descriptors and never of megabytes.
 
 **Batching is unchanged.** A caller material is interned per frame by content
