@@ -17,6 +17,7 @@ import (
 	"reflect"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 )
 
 // Engine is the composed microkernel. Its registry is built during sequential
@@ -48,8 +49,15 @@ type Engine struct {
 	// the engine's life, which is the point.
 	reported   map[any]struct{}
 	terminated bool
-	ready      chan struct{}
-	readyOnce  sync.Once
+	// failure carries the terminating cause for the dispatch path to read. It
+	// mirrors terminated, which only the locked paths read, because runTask
+	// consults it on every command and every subscriber run: taking errorMu
+	// there would put one shared mutex across every parallel handler in the
+	// engine. It is written under errorMu wherever terminated is set, so the
+	// two never disagree, and read with a single relaxed load.
+	failure   atomic.Pointer[error]
+	ready     chan struct{}
+	readyOnce sync.Once
 }
 
 // New creates an unstarted engine with plugin configuration keyed by name.
@@ -82,8 +90,22 @@ func (e *Engine) Handler(errorHandler ErrorHandler) *Engine {
 	return e
 }
 
-// Ready is closed after Run has started the scheduler and attempted plugin startup.
+// Ready is closed after Run has started the scheduler and attempted plugin
+// startup. It says the attempt is over, not that it succeeded: a composition
+// that failed closes Ready too, so a caller that waits on it asks Err what it
+// woke up to.
 func (e *Engine) Ready() <-chan struct{} { return e.ready }
+
+// Err reports the cause that terminated the engine, or nil while it is live,
+// the way context.Err does. A failed composition and a plugin panic mid-run
+// both answer here, and it is the same cause a refused dispatch returns inside
+// ErrEngineTerminated. It takes no lock and is safe from any goroutine.
+func (e *Engine) Err() error {
+	if cause := e.failure.Load(); cause != nil {
+		return *cause
+	}
+	return nil
+}
 
 // WithPlugins validates, orders, and registers plugins before Run starts them.
 func (e *Engine) WithPlugins(plugins ...Plugin) *Engine {
@@ -169,8 +191,21 @@ func (e *Engine) dependencyClosure(plugins []Plugin) map[PluginName]map[PluginNa
 
 func (e *Engine) failComposition(err error) {
 	e.reportError(err)
+	e.errorMu.Lock()
 	e.terminated = true
+	e.recordFailureLocked(err)
+	e.errorMu.Unlock()
 	e.markReady()
+}
+
+// recordFailureLocked publishes the terminating cause to the dispatch path,
+// keeping the first one: the error that terminated the engine is the one worth
+// reporting, and whatever it knocked over afterwards is not.
+func (e *Engine) recordFailureLocked(err error) {
+	if err == nil || e.failure.Load() != nil {
+		return
+	}
+	e.failure.Store(&err)
 }
 
 func (e *Engine) markReady() { e.readyOnce.Do(func() { close(e.ready) }) }
@@ -241,6 +276,9 @@ func orderPlugins(plugins []Plugin) ([]Plugin, []PluginName) {
 // Run starts plugins in dependency order, runs the optional Host, and stops
 // successfully started plugins in reverse order. Without a Host it blocks until
 // ctx is canceled.
+//
+// An engine whose composition failed never starts: Run returns at once, and Err
+// carries the cause for the caller that waited on Ready.
 func (e *Engine) Run(ctx context.Context) *Engine {
 	if e.terminated || e.ctx != nil {
 		return e
@@ -305,7 +343,9 @@ func (e *Engine) Run(ctx context.Context) *Engine {
 
 // Executioner returns a root Executioner for dispatching from outside a plugin,
 // such as from a composition root or a test. It holds no locks, so commands
-// acquire their own declared set from the scheduler.
+// acquire their own declared set from the scheduler. On a terminated engine
+// everything it dispatches is refused with ErrEngineTerminated, so a caller that
+// went ahead after Ready closed reads the cause rather than a plugin's panic.
 func (e *Engine) Executioner() Executioner { return e.executioner(e.ctx) }
 
 // executioner builds a root Executioner: bound to ctx, holding no locks, so
@@ -317,15 +357,33 @@ func (e *Engine) executioner(ctx context.Context) Executioner {
 	return Executioner{Kernel{engine: e, ctx: ctx, scope: ctx, bounded: ctx == e.ctx}}
 }
 
-// runTask executes one scheduled unit of work. Before Run there is no coordinator
-// to grant locks, so the task runs directly; registration is single-threaded and
-// an engine whose composition failed must fail its dispatches rather than block
-// forever on a channel nobody is reading.
+// runTask executes one scheduled unit of work. It is the one funnel every
+// dispatch passes: commands through dispatch, events through runPublication.
+//
+// A terminated engine refuses here, before the task runs, so no plugin code is
+// entered on an engine whose composition never bound its handles.
+//
+// Before Run there is no coordinator to grant locks, so the task runs directly.
+// That path is for a healthy engine that has not started yet - registration is
+// single-threaded - which is why the refusal keys on termination and not on the
+// absent scheduler.
 func (e *Engine) runTask(t task, ctx context.Context) error {
+	if refused := e.refusal(); refused != nil {
+		return refused
+	}
 	if e.ctx == nil {
 		return t.run(ctx)
 	}
 	return e.scheduler.execute(t, ctx)
+}
+
+// refusal is what a dispatch on a terminated engine gets, or nil while the
+// engine is live. One relaxed load and no lock: it sits on the dispatch path.
+func (e *Engine) refusal() error {
+	if cause := e.failure.Load(); cause != nil {
+		return ErrEngineTerminated{Cause: *cause}
+	}
+	return nil
 }
 
 func (e *Engine) observeShutdownError(err error) {
@@ -361,6 +419,7 @@ func (e *Engine) reportLocked(err error) bool {
 	terminate := errors.As(err, &panicErr) || handlerTerminate
 	if terminate {
 		e.terminated = true
+		e.recordFailureLocked(err)
 		if e.cancel != nil {
 			e.cancel(err)
 		}

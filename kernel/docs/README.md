@@ -36,6 +36,21 @@ scheduler, calls each `PluginStarter` in dependency order, runs zero or one
 implement only the lifecycle capabilities they need. A headless engine blocks
 until cancellation.
 
+`Ready` is closed once that attempt is over, whether it succeeded or not: a
+composition that failed closes it too, so nobody waiting on it blocks forever.
+It is not a success signal. `Err` is: nil while the engine is live, the
+terminating cause once it is not, the way `context.Err` reads. A root that waits
+on `Ready` before dispatching asks `Err` what it woke up to.
+
+A terminated engine refuses every dispatch. Composition stops at the plugin
+whose `Register` failed, so its handles were never bound and its later plugins
+never registered at all; running a handler there would fail somewhere arbitrary,
+chosen by plugin order. Instead `ExecuteCommand`, `ExecuteCommandAsync` and
+`PublishEvent` return `ErrEngineTerminated` wrapping the cause, without entering
+plugin code. The same holds once a reported panic or a terminating error handler
+ends a running engine. A dispatch made before `Run` on a healthy engine still
+runs: the refusal keys on termination, not on the scheduler being absent.
+
 `PluginName` identifies plugins and keys their values in the configuration map.
 
 ```go
@@ -302,6 +317,9 @@ handler restores the terminating default.
 Exported error types:
 
 - `ErrSchedulerStopped`: work was submitted after cancellation.
+- `ErrEngineTerminated`: a dispatch was refused because the engine had
+  terminated, whether at composition or during the run. `Cause` is the
+  terminating error and `Unwrap` reaches it.
 - `ErrConflictingPluginName`: two registered plugins use the same name.
 - `ErrMissingPluginDependency`: a plugin's declared dependency is absent.
 - `ErrPluginDependencyCycle`: plugin dependencies cannot be ordered.
@@ -447,7 +465,8 @@ Go's reflection cannot see aliases, which is why the rule is needed at all:
 ## Public API Index
 
 - Composition: `New`, `Engine`, `Engine.Handler`, `Engine.WithPlugins`,
-  `Engine.Run`, `Engine.Ready`, `Engine.Executioner`, `Engine.Describe`, `Dump`,
+  `Engine.Run`, `Engine.Ready`, `Engine.Err`, `Engine.Executioner`,
+  `Engine.Describe`, `Dump`,
   `ArchitectureDescription`.
 - Introspection: `PluginDescription`, `ResourceDescription`,
   `CommandDescription`, `SubscriptionDescription`, `ContentionDescription`,

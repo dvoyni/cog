@@ -13,6 +13,22 @@ func (ErrSchedulerStopped) Error() string {
 	return "scheduler has stopped"
 }
 
+// ErrEngineTerminated is returned by a dispatch the engine refused because it
+// had already terminated: a composition that failed, or a plugin panic or a
+// terminating error handler during the run. The refusal happens before any
+// plugin code is entered, so the caller reads the cause rather than whatever a
+// handler would have tripped over next. Cause is that terminating error, and
+// Unwrap reaches it.
+type ErrEngineTerminated struct {
+	Cause error
+}
+
+func (e ErrEngineTerminated) Error() string {
+	return fmt.Sprintf("kernel: engine terminated, refusing dispatch: %v", e.Cause)
+}
+
+func (e ErrEngineTerminated) Unwrap() error { return e.Cause }
+
 // ErrConflictingPluginName is returned by Run when two plugins share a name.
 type ErrConflictingPluginName struct {
 	PluginName PluginName

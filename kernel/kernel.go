@@ -122,7 +122,10 @@ func (k Kernel) PublishEvent[TEvent any](event TEvent) *Publication {
 	plan := engine.registry.publications[reflect.TypeFor[TEvent]()]
 	publication := newPublication(k.scope)
 	if plan == nil || len(plan.nodes) == 0 {
-		publication.complete(nil)
+		// A composition that failed never built its publication plans, so the
+		// event would otherwise report a silent success to a caller whose
+		// subscribers were never wired.
+		publication.complete(engine.refusal())
 		return publication
 	}
 
@@ -157,7 +160,11 @@ func (k Kernel) ExecuteCommandAsync[
 	engine := k.bound()
 	cmd, ok := engine.registry.commands[reflect.TypeFor[TCommand]()]
 	if !ok {
-		engine.reportError(ErrExecutingUnknownCommand[TCommand]{})
+		// A terminated engine reported its cause once already, and an async
+		// dispatch has no caller to hand a refusal to, so it simply drops.
+		if engine.refusal() == nil {
+			engine.reportError(ErrExecutingUnknownCommand[TCommand]{})
+		}
 		return
 	}
 	scope, bounded := k.scope, k.bounded
@@ -209,6 +216,13 @@ func (e Executioner) ExecuteCommand[
 	cmd, ok := engine.registry.commands[reflect.TypeFor[TCommand]()]
 	if !ok {
 		var zero TResponse
+		// A composition that failed stopped registering where it failed, so a
+		// command is missing here for two very different reasons. Answering
+		// with the termination names the cause instead of the symptom that
+		// plugin order happened to produce.
+		if refused := engine.refusal(); refused != nil {
+			return zero, refused
+		}
 		return zero, ErrExecutingUnknownCommand[TCommand]{}
 	}
 
