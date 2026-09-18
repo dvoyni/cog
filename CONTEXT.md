@@ -330,11 +330,11 @@ _Avoid_: Path, query
 The discarding of a selected node's authored world transform, so that the node's subtree is placed by the recording call's own transform instead.
 
 **Residency**:
-One model path's position in the load cycle: never asked for, loading, resident, or terminally failed.
-_Avoid_: Cache state, load status
+Whether a model path is loaded and drawable. It is not a cycle and has no in-flight state: the load runs inside the call that asks for it, so by the time that call returns the model is either loaded or it failed, terminally, with the reason it failed.
+_Avoid_: Cache state, load status, loading state
 
 **Frame boundary**:
-The point between two frames at which every deferred change to persistent scene state becomes visible — residency, unloads, and geometry bakes alike.
+The point between two frames at which the geometry a caller staged is uploaded and the buffers it gave up are released. Loading and unloading are not deferred to it: both happen where the caller stands.
 
 **Rest pose**:
 A model's placement with no animation playing: its authored hierarchy resolved once. It is what a bounds query answers about, whatever the frame is playing.

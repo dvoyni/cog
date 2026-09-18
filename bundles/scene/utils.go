@@ -1,9 +1,12 @@
 package scene
 
 import (
+	"io/fs"
+
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // The coordinate helpers are pure package-level functions, callable on any
@@ -108,14 +111,26 @@ func LookAt(eye, target, up m.Vec3) Transform { return types.LookAt(eye, target,
 // embedders build one to drive a LookupAccess directly.
 func NewLookup() *Lookup { return types.NewLookup() }
 
-// NewLookupAccess builds a scoped facade. Call it inside a handler that holds
-// the *Lookup write lock.
+// NewLookupAccess builds the scoped facade for everything that neither loads a
+// model nor frees a GPU texture. Call it inside a handler that holds the
+// *Lookup write lock.
 //
-// Two dependencies, not three: it takes no storage.FileSystem, unlike canvas's
-// equivalent, because scene's load command opens, parses and bakes the file
-// itself holding no locks. A consumer system therefore declares one fewer
-// resource than canvas's, which reads as an oversight unless it is said out
-// loud.
+// Two dependencies, and that is what the facade split buys: a consumer that
+// only bakes meshes, unloads a model or reads the memory totals declares one
+// resource, where the loading half declares three.
 func NewLookupAccess(k kernel.Kernel, lookup *Lookup) LookupAccess {
 	return types.NewLookupAccess(k, lookup)
+}
+
+// NewLookupDeviceAccess builds the scoped facade for Preload, State, the model
+// queries and the two unload verbs that free a GPU texture. Call it inside a
+// handler that holds the *Lookup write lock, the storage.FileSystem read lock
+// and the *gfx.ResourceQueue write lock.
+//
+// fsys is the storage filesystem, which satisfies fs.FS. Convert it once per
+// handler rather than per call: handing it out as an interface allocates.
+func NewLookupDeviceAccess(
+	k kernel.Kernel, lookup *Lookup, fsys fs.FS, resources *gfx.ResourceQueue,
+) LookupDeviceAccess {
+	return types.NewLookupDeviceAccess(k, lookup, fsys, resources)
 }

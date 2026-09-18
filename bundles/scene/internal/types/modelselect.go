@@ -62,7 +62,7 @@ func (e ErrModelNodeDegenerate) reportKey() string { return "model:" + e.Model +
 // unmatched node does not become the whole scene: one typo'd node name
 // rendering an entire building at the origin is the worse failure of the two,
 // and it is the one a report cannot make visible.
-func (e *ModelEntry) View(path, scene, node string) (ModelView, ModelSelectorError) {
+func (e *residentModel) View(path, scene, node string) (ModelView, ModelSelectorError) {
 	selected := e.defaultScene
 	if scene != "" {
 		selected = -1

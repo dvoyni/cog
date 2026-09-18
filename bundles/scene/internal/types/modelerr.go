@@ -2,16 +2,18 @@ package types
 
 import "fmt"
 
-// ErrModelUnavailable reports a model that could not be loaded at all: the file
-// is missing, it does not parse, it declares no scenes, or it requires an
-// extension scene has no decoder for. The path is left in the failed state and
-// never retried, so a typo does not spawn a load command every frame forever;
-// UnloadModel is the only way back.
+// ErrModelUnavailable reports a model the decode refused: it does not parse, it
+// declares no scenes, or it requires an extension scene has no decoder for. The
+// failure is cached as the model, so the file is never read again - a typo must
+// not re-read it every frame forever - and UnloadModel is the only way back.
 //
-// The report fires from the load command's goroutine, so it lands a frame or
-// more after the draw that triggered it. An error can therefore outlive the
-// draw call that caused it, and a caller who draws a bad path once and never
-// again still gets exactly one report.
+// A file that could not be read at all is not this: the read is the asset
+// library's, and so is its report, which wraps the underlying error and names
+// the path. State returns whichever of the two applies.
+//
+// The report fires from the handler whose call triggered the load - the flush
+// for a draw, the caller's own handler for a query - so it cannot outlive the
+// call that caused it.
 type ErrModelUnavailable struct {
 	Model string
 	Err   error
@@ -71,9 +73,10 @@ func (e ErrModelBoundsMissing) Error() string {
 }
 
 // ErrModelPathInvalid is a path that is not a resource path at all - empty,
-// absolute, NUL-bearing or escaping the mount root. It is reported from the
-// caller's own stack rather than from a load, because such a path never reaches
-// a load command: nothing downstream would ever have anything to say about it.
+// absolute, NUL-bearing or escaping the mount root. Such a path never reaches
+// the cache: it is refused where the caller is standing, leaving no entry and
+// no tombstone, so a typo is permanently a typo until UnloadModel clears the
+// report under the string that was passed.
 type ErrModelPathInvalid struct{ Model string }
 
 func (e ErrModelPathInvalid) Error() string {

@@ -325,7 +325,7 @@ func TestTheLookupReportsClipsJointsAndPoseBytes(t *testing.T) {
 	var joints []string
 	var bytes int
 	h.frameUntil(t, "the model to become resident", func() bool {
-		h.lookup(func(access scene.LookupAccess) {
+		h.device(func(access scene.LookupDeviceAccess) {
 			clips, _ = access.Clips(modelPath, clips[:0])
 			joints, _ = access.Joints(modelPath, joints[:0])
 			bytes, _ = access.PoseBytes(modelPath)
@@ -361,7 +361,7 @@ func TestAStaticModelBakesNoPosesAndBindsNone(t *testing.T) {
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
-	h.lookup(func(access scene.LookupAccess) {
+	h.device(func(access scene.LookupDeviceAccess) {
 		if got, _ := access.PoseBytes(modelPath); got != 0 {
 			t.Errorf("PoseBytes = %d, want none for a file with no animation", got)
 		}

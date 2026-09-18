@@ -258,23 +258,6 @@ type ModelLight = types.ModelLight
 // and MorphTargets is one flattened list that Node re-rooting does not renumber.
 type ModelRef = types.ModelRef
 
-// ModelState is one path's residency. It is a state rather than an absence
-// precisely so that an in-flight load is distinguishable from a path nobody has
-// asked for: a model drawn every frame while it loads must enqueue exactly one
-// command.
-type ModelState = types.ModelState
-
-const (
-	// ModelMissing is a path the table has no entry for at all. It is the zero
-	// value so that a map miss reads as missing without a second test.
-	ModelMissing  = types.ModelMissing
-	ModelLoading  = types.ModelLoading
-	ModelResident = types.ModelResident
-	// ModelFailed is terminal. It never retries, and it clears only on unload -
-	// a typo'd path must not spawn a load command every frame forever.
-	ModelFailed = types.ModelFailed
-)
-
 // ClipPlay is one animation clip playing on one model draw.
 //
 // Animation is stateless: nothing in scene advances Time, and no play survives
@@ -350,9 +333,17 @@ type PassView = types.PassView
 // instance so its entries keep their own depths.
 type BatchView = types.BatchView
 
-// LookupAccess is the scoped facade every query and mutation of a Lookup goes
-// through. Acquire a *Lookup write dependency in a handler, build one with
-// NewLookupAccess, and pass it to consumers for the duration of that handler.
-// Never store the result: the handles behind it are valid only while the
-// handler holds its lock.
+// LookupAccess is the scoped facade for everything about a Lookup that neither
+// loads a model nor frees a GPU texture: the mesh verbs, UnloadModel and the
+// two memory totals. Acquire a *Lookup write dependency in a handler, build one
+// with NewLookupAccess, and pass it to consumers for the duration of that
+// handler. Never store the result: the handles behind it are valid only while
+// the handler holds its lock.
 type LookupAccess = types.LookupAccess
+
+// LookupDeviceAccess is the scoped facade for everything about a Lookup that
+// needs the device: Preload, State and the model queries, all of which load,
+// and the two unload verbs that free a GPU texture at the call. Acquire
+// *Lookup write, storage.FileSystem read and *gfx.ResourceQueue write in a
+// handler, build one with NewLookupDeviceAccess, and never store the result.
+type LookupDeviceAccess = types.LookupDeviceAccess

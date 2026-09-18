@@ -1058,37 +1058,55 @@ model's own, and a mesh that wants a colour names a `Material`.
 
 ### Loading
 
-**Loading is asynchronous and a non-resident model is skipped, never
-substituted.** A draw of a non-resident path enqueues a load through
-`kernel.ExecuteCommandAsync` and draws nothing this frame — no placeholder.
+**Loading is synchronous, and a model that could not be loaded is skipped,
+never substituted.** A draw of a path the cache does not hold reads, parses,
+decodes and uploads it inside the flush that recorded the draw, so the model is
+drawn in that same frame. A path that could not be loaded draws nothing — no
+placeholder.
 
-**The load is two commands, not one**, because the kernel grants a command its
-declared locks for the whole of its body. The first parses, decodes and bakes
-CPU-side holding only the **filesystem read lock** — a shared lock nothing in
-scene's flush takes, so it blocks a filesystem writer and nothing else — and
-dispatches the second, which acquires `*gfx.ResourceQueue` **and `*Lookup`**
-write for the length of the upload alone. A single command would have had to
-hold the `Lookup` across the parse, which is the lock every frame needs.
+**The hitch is a property of this design, not an accident.** The JSON parse, the
+image decodes, tangent generation and the vertex pack all run inside scene's
+flush, holding `Write[*gfx.ResourceQueue]` and `Write[*gfx.OpQueue]`, so a large
+file costs the frame that first named it several hundred milliseconds and
+canvas's flush waits behind it. **`Preload(path)` is the lever**: it is the same
+load, fired without a draw, so an app moves the cost into a loading screen it
+controls. A game that skips `Preload` takes the hitch on first draw, which is
+what gfx and canvas already do.
 
-Synchronous loading, canvas's model, was rejected: applied to a 47 MiB model or
-a 24-joint three-clip rig it is a multi-hundred-millisecond hitch mid-frame.
-`Preload(path)` is the same command fired without a draw, so an app moves the
-hitch into a loading screen it controls. The honest limit: on `js/wasm` there is
-no parallelism, so a decode still occupies the one thread; the win is desktop,
-plus a draw call that never blocks anywhere.
+This replaces a two-command asynchronous load and the four-valued state machine
+that described it. What was bought back is everything that existed only to
+describe a load in flight: the `Missing → Loading → Resident → Failed` states,
+the per-entry generation counter, the ghost rule that needed it, and the release
+queue. There is no load in flight, so none of them has anything left to say.
 
-**Residency is atomic and per path**, in `loading | resident | failed`. A model
-becomes resident only when geometry, baked poses, material records **and every
-one of its textures** are uploaded in that one command — there is no half-drawn
-model. An in-flight path is a state, not an absence, so a model drawn every
-frame while loading enqueues exactly one command. **`failed` never retries**: a
-typo'd path must not spawn a load command every frame forever, and the state
-clears only on unload.
+**The load runs where the caller stands.** Scene's flush holds
+`Read[storage.FileSystem]`, converted to an `fs.FS` once per frame rather than
+once per model draw — handing a `storage.FileSystem` out as an interface
+allocates — and a frame with no model draws pays nothing for it. It is the one
+lock this design added, and it serialises against nothing a frame does:
+`storage.FileSystem` is write-locked only by storage's own three mount commands.
+
+**Residency is atomic and per path.** A model is drawable only when geometry,
+baked poses, material records **and every one of its textures** are uploaded,
+all of which happen before the call that asked for it returns — there is no
+half-drawn model. **A failure never retries**: a typo'd path must not re-read the
+file every frame forever, so whatever the load produced is cached, a failure
+included, and it clears only on unload.
+
+**Failure has two halves and they report differently.** The read is the asset
+library's, so a file that cannot be opened is the library's failure to report —
+once, keyed by the descriptor, wrapping the underlying error so
+`errors.Is(err, fs.ErrNotExist)` still answers — and what the cache keeps is the
+loader's `nil` default. Everything the loader itself finds wrong is scene's:
+a file that does not parse, declares no scenes or requires an extension scene has
+no decoder for is cached as an `ErrModelUnavailable` and reported under
+`"model:" + path`. `State(path)` returns whichever of the two applies, and `nil`
+when the model loaded.
 
 **Partial failure binds a fallback.** A model that parses but is missing a
-texture still becomes resident; the missing texture binds a 1×1 white texel and
-reports once. A **rejected required extension** is different — there is no
-geometry to fall back to, so the model fails wholesale.
+texture still loads; the missing texture binds a 1×1 white texel and reports
+once. A **rejected required extension** is different — there is no geometry to
+fall back to, so the model fails wholesale.
 
 **Textures** live in a scene-owned cache, never canvas's atlas (wrap modes, mips
 and per-texture samplers rule the atlas out). Keyed by **resolved storage path**
@@ -1102,27 +1120,15 @@ metallic-roughness, normal and occlusion are data. One image bound to both kinds
 of slot is therefore two GPU textures, and it has to be — sampling a normal map
 through an sRGB view is a wrong picture with nothing in the frame to explain it.
 
-**The cache is consulted at upload, not at parse**, because the parse holds no
-`Lookup` lock. The cost is that two models naming one external image both decode
-it and only the first uploads it; within a model the decode is deduplicated by
-the same key, which is what makes `TextureSettingsTest`'s three images back nine
-textures with three decodes.
-
-**Unload is explicit and lands at the frame boundary**, so a same-frame unload
-never dangles a live draw. `UnloadModel` frees geometry, baked poses and
-material records **only — it does not cascade to textures**, because with no
-refcount it cannot know whether another resident model shares them by path.
-Unloading an absent path is a no-op. Each entry carries a **generation counter**,
-so an unload while a load is in flight makes the completing load discard its
-result rather than become resident as a ghost. A later draw of an unloaded path
-reloads it.
-
-**Failures report once** through `kernel.ReportError`, keyed `"model:"+path` and
-`"texture:"+path`, cleared on a successful load and on unload — canvas's
-precedent. Because the report fires from the load command's goroutine it lands a
-frame or more after the draw that triggered it: **an error can outlive the draw
-call that caused it**, and a caller who draws a bad path once and never again
-still gets exactly one report.
+**Unload frees at the call, and the entry leaves the cache there.** A free
+followed by a get is a **reload, not an error**, which is what a same-tick
+unload becomes: the frame's own draws load the path again at the flush. What
+still lands at the frame boundary is only the GPU buffers, through the same
+pending-release list `ReleaseMesh` uses, so nothing the frame already recorded
+draws from a dead buffer. `UnloadModel` frees geometry, baked poses and material
+records **only — it does not cascade to textures**, because with no refcount it
+cannot know whether another loaded model shares them by path. Unloading an
+absent path is a no-op.
 
 **Bounds** come from the POSITION accessor `min`/`max`, which glTF requires,
 computed per primitive in the flattened local space and expanded by the summed
@@ -2087,17 +2093,10 @@ Sorting is per pass, so a crate visible to two cameras is packed twice regardles
 ([Model lookup facade](https://github.com/dvoyni/cog/issues/21))
 
 ```go
-la := scene.NewLookupAccess(kernel, lookup) // no FileSystem
+la := scene.NewLookupAccess(kernel, lookup)                          // bakes, unloads a model, reads the totals
+dev := scene.NewLookupDeviceAccess(kernel, lookup, fsys, resources)  // everything that loads, and the texture unloads
 
 type ModelRef struct{ Path, Scene, Node string } // mirrors ModelDraw's selectors
-
-type ModelState uint8
-const (
-    ModelMissing ModelState = iota
-    ModelLoading
-    ModelResident
-    ModelFailed
-)
 
 type ClipInfo struct {
     Name     string
@@ -2105,33 +2104,36 @@ type ClipInfo struct {
 }
 ```
 
-Bind `access.GetWrite[*scene.Lookup]()` in the handler's `Lock`, then use:
+Bind `access.GetWrite[*scene.Lookup]()` in the handler's `Lock` for the first,
+and `storage.FileSystem` read plus `*gfx.ResourceQueue` write beside it for the
+second, then use:
 
-| Method | Result | Notes |
-| --- | --- | --- |
-| `State(path) ModelState` | residency | the only way to tell *wait* from *never coming*; it fires the load like every other query, so `ModelMissing` is not one of its answers on a valid path |
-| `Preload(path)` | — | the load command fired without a draw; no return |
-| `Nodes(ref, dst) ([]string, bool)` | node names | a non-empty `Node` lists that subtree, the node itself first; the order is the flatten's depth-first order, never sorted |
-| `Bounds(ref) (m.Vec4, bool)` | xyz centre, w radius | local space post-re-rooting; **rest pose for anything drawn through the pose buffer**, which is a skin *and* an animated node's own mesh |
-| `AABB(ref) (min, max m.Vec3, ok bool)` | axis-aligned box | same space and pose rules |
-| `Joints(path, dst) ([]string, bool)` | joint names | names only; count is `len` |
-| `Clips(path, dst) ([]ClipInfo, bool)` | clip names and durations | |
-| `MorphTargets(path, dst) ([]string, bool)` | target names | one flattened list per path, depth-first node order |
-| `PoseBytes(path) (int, bool)` | GPU pose memory | |
-| `MorphBytes(path) (int, bool)` | GPU delta memory | |
-| `TotalPoseBytes() int` | — | no bool: a sum over residents is always real |
-| `TotalMorphBytes() int` | — | |
-| `BakeMesh` / `UpdateMesh` / `ReleaseMesh` | see [Buffer-built meshes](#buffer-built-meshes) | |
-| `UnloadModel(path)` / `UnloadTexture(path)` / `UnloadAll()` | — | queued, applied at the frame boundary |
+| Method | Facade | Result | Notes |
+| --- | --- | --- | --- |
+| `State(path) error` | device | nil, or why not | the only call that says *why* a model is not there; it loads like every other query, so by the time it answers the model is loaded or it failed |
+| `Preload(path)` | device | — | the same load, fired without a draw; no return |
+| `ModelLights(path, dst) ([]ModelLight, bool)` | device | the file's lamps | data; nothing converts one automatically |
+| `Nodes(ref, dst) ([]string, bool)` | device | node names | a non-empty `Node` lists that subtree, the node itself first; the order is the flatten's depth-first order, never sorted |
+| `Bounds(ref) (m.Vec4, bool)` | device | xyz centre, w radius | local space post-re-rooting; **rest pose for anything drawn through the pose buffer**, which is a skin *and* an animated node's own mesh |
+| `AABB(ref) (min, max m.Vec3, ok bool)` | device | axis-aligned box | same space and pose rules |
+| `Joints(path, dst) ([]string, bool)` | device | joint names | names only; count is `len` |
+| `Clips(path, dst) ([]ClipInfo, bool)` | device | clip names and durations | |
+| `MorphTargets(path, dst) ([]string, bool)` | device | target names | one flattened list per path, depth-first node order |
+| `PoseBytes(path) (int, bool)` | device | GPU pose memory | |
+| `MorphBytes(path) (int, bool)` | device | GPU delta memory | |
+| `TotalPoseBytes() int` | plain | — | a running counter, O(1); no bool, because a sum over what is loaded is always real |
+| `TotalMorphBytes() int` | plain | — | the same counter rule |
+| `BakeMesh` / `UpdateMesh` / `ReleaseMesh` | plain | see [Buffer-built meshes](#buffer-built-meshes) | |
+| `UnloadModel(path)` | plain | — | frees at the call; its buffers go at the frame boundary |
+| `UnloadTexture(path)` / `UnloadAll()` | device | — | free a GPU texture at the call, which is what puts them on the device half |
 
-### Every query returns `(value, ok)`, and every query triggers the load
+### Every query returns `(value, ok)`, and every query loads
 
-This is the facade's real contract. A query on a `missing` path fires the **same
-idempotent load command a draw fires**, so a path enters residency exactly one
-way and `Preload` is an optimisation for callers who cannot tolerate a first
-frame without the answer, **not a step you can forget**. Inert queries have a
-silent and *permanent* failure mode: a caller who forgets `Preload` polls an
-empty list forever with nothing to observe.
+This is the facade's real contract. A query on a path the cache does not hold
+runs the **same load a draw runs**, so a path is loaded exactly one way and
+`Preload` is a lever for *where the cost lands*, **not a step you can forget**.
+Inert queries would have a silent and *permanent* failure mode: a caller who
+forgot `Preload` would poll an empty list forever with nothing to observe.
 
 `ok` means **"this value is real"**, and nothing finer. It is false for an
 invalid path, a missing path just queued, a loading path, a failed path, and a
@@ -2141,19 +2143,20 @@ still-loading model and a resident model with no skeleton, which is the whole
 point of a memory report. When `ok` is false the `dst`-append accessors return
 `dst` **untouched**, not a zeroed slice.
 
-`ok` deliberately conflates *wait* with *never coming*, which is what keeps
-**`State(path)` load-bearing**: `failed` is terminal, so a loading screen
-watching only `ok` hangs forever on a typo'd path. There is no `Pending()`
-aggregate — a caller polling a preload list it already holds can count residents
-itself.
+`ok` says only *this value is real*, so it cannot say why it is not — which is
+what keeps **`State(path)` load-bearing**: failure is terminal, and a loading
+screen watching only `ok` can never print a reason. There is no `Pending()`
+aggregate and nothing to poll: a load has finished by the time the call that
+asked for it returns.
 
-**`State` is a query, so it fires the load too.** That is the rule applied
-without an exception, and it is what makes a loading screen that polls only
-`State` work rather than spin. The consequence is that **`ModelMissing` is never
-what `State` returns for a valid path**: asking moves the path to `ModelLoading`
-in the same call. It stays in the enum as the table's zero value and as the
-state an unload resets a slot to — the state a path is *in* between being
-unloaded and being asked about, not a state a caller can observe.
+**`State` returns an `error`, not a state word.** `nil` is loaded, and anything
+else is the failure the load itself produced — the library's read failure, or
+scene's own `ErrModelUnavailable`. A two-valued enum would have been a bool
+wearing a costume, and a bool would have thrown away the one thing a HUD wants
+to show.
+
+**`State` is a query, so it loads too.** That is the rule applied without an
+exception, and it is what makes a loading screen that calls only `State` work.
 
 ### Selectors, and what is not here
 
@@ -2230,11 +2233,10 @@ precisely so a caller resolves names to indices **once at startup**.
 
 ### Failure edges
 
-- **An invalid path never reaches a load command**, so the report-from-the-goroutine
-  rule cannot see it and every query would return a silent `false` forever. The
-  facade therefore validates **synchronously** (canvas's `validateResourcePath`
-  rules) and records the path as `ModelFailed` — one state machine rather than a
-  `reported` set beside it.
+- **An invalid path never enters the cache at all.** The facade validates it
+  where the caller is standing (canvas's `validateResourcePath` rules), reports
+  it once and returns — no entry, no tombstone — so a typo is permanently a typo
+  and `UnloadModel` on the string the caller passed is what clears the report.
 - **An unmatched `Scene`/`Node` on a resident model** returns `ok = false` and
   reports once, keyed `"model:" + path + "#" + node`. An unload clears every key
   under that path's prefix, not just `"model:" + path`, so a file that failed on
@@ -2254,27 +2256,36 @@ precisely so a caller resolves names to indices **once at startup**.
   are the caller's own handles — a lookup-wide sweep has no way to tell them
   their `MeshRef`s went stale — and scene's own unit meshes, default textures
   and null skin would be re-baked on the very next frame.
-- **An unloaded slot is reset, not deleted.** A deleted slot would be re-minted
-  at generation one by the next draw, and a load still in flight from before the
-  unload would match it and install as a ghost. Resetting is what makes the
-  generation counter monotonic per path, which is the whole of the rule.
-- **Unload is the only retry lever.** `failed` clears only on unload, so
-  `UnloadModel(p)` on a failed path lets the next draw or query retry, including
-  recovery from an invalid path once the string is fixed. There is no
-  `Retry`/`Reload`: it is `UnloadModel` + `Preload`.
+- **An unloaded entry is deleted, not reset.** There is no load in flight for a
+  tombstone to defeat, so the slot simply goes and the next draw or query loads
+  the path afresh. (`MeshRef.generation` is a different mechanism, guarding a
+  caller's own handles, and is untouched.)
+- **Unload is the only retry lever.** A failure clears only on unload, so
+  `UnloadModel(p)` on a failed path lets the next draw or query load it again,
+  including recovery from an invalid path once the string is fixed. There is no
+  `Retry`/`Reload`: it is `UnloadModel` + `Preload`, and because freeing is
+  immediate the two may be called in that order in one handler.
 
-### Two dependencies, not three
+### The facade splits, so no System pays for loading
 
-`NewLookupAccess(k kernel.Kernel, lookup *Lookup)` takes **no `storage.FileSystem`**,
-unlike canvas's equivalent, because scene's load command opens, parses and bakes
-the file itself holding no locks. A consumer system declares one fewer resource
-than canvas's. This is stated because the asymmetry reads as an oversight
-otherwise.
+Every verb that can load needs an `fs.FS` and the resource queue at the call,
+because the load runs there. Putting all of them on one facade would have made
+`NewLookupAccess` four dependencies — and one of its consumers is an **ECS
+System whose entire use of it is two `BakeMesh` calls**. That System would have
+had to declare `*ecs.Write[*gfx.ResourceQueue]` to bake a cube, serialising it
+against canvas's flush, scene's flush and gfx. **Widening an ECS System's lock
+set is rejected outright in this repo, not traded off.**
 
-**Canvas is left inconsistent on purpose.** Canvas loads *synchronously*, so a
-canvas `ok` would mean "valid and decodable" — the same shape over a different
-predicate, which is worse than no convention
-([canvas: async loading and the (value, ok) query contract](https://github.com/dvoyni/cog/issues/50)).
+So `NewLookupAccess(k, lookup)` keeps its two dependencies and carries the mesh
+verbs, `UnloadModel` and the two totals, and
+`NewLookupDeviceAccess(k, lookup, fsys, resources)` carries everything that
+loads plus the two unload verbs that free a GPU texture. The cost becomes
+visible where it belongs — in each consumer's own `Lock` closure.
+
+**`LookupDeviceAccess` is a convention, not a local choice.** Canvas splits the
+*opposite* halves under the same name: there the loading half is cheap and the
+unloading half is the device's. Both are named for what they carry, because the
+constraint is the device either way.
 
 ---
 
@@ -3537,12 +3548,14 @@ with no visible change) and **pack** the three `.gltf`-only assets the set needs
 three CC0.
 
 **Deliberately broken assets are committed**, because otherwise the most
-dangerous contract here — a non-resident model is skipped, never substituted —
-has no demo that ever sees a failure. Two cases, which `State(path)` must tell
-apart: a path that does not exist, failing **synchronously**; and
-`assets/broken/truncated.glb`, a valid header with the binary chunk cut short,
-generated by `cmd/prepare-assets` so it is not a mystery blob either, failing
-**asynchronously** and terminally, with unload the only retry lever.
+dangerous contract here — a model that could not be loaded is skipped, never
+substituted — has no demo that ever sees a failure. Two cases, which
+`State(path)` tells apart by what each error wraps: a path that does not exist,
+whose read failure is the asset library's; and `assets/broken/truncated.glb`, a
+valid header with the binary chunk cut short, generated by `cmd/prepare-assets`
+so it is not a mystery blob either, whose parse failure is scene's own. Both are
+terminal, both happen in the call that asked, and unload is the only retry
+lever.
 
 ### Findings the demo set carries
 

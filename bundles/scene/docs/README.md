@@ -53,20 +53,20 @@ scene has the declaration-root shape of
 [`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
 
 - **`bundles/scene`** is the root, and holds declarations only: the `*OpQueue`
-  and `*Lookup` resources with `LookupAccess`, the recording vocabulary
+  and `*Lookup` resources with `LookupAccess` and `LookupDeviceAccess`, the recording vocabulary
   (`Transform`, `CameraID`, `CameraDescr`, `ProjectionKind`, `Pass`, `PassTag`,
   `LayerMask`, `Material`, `MaterialTag`, `Vertex`, `VertexLayout`, `MeshRef`,
   `MeshDraw`, `ModelDraw`, `ClipPlay`, `LightDescr`, …), the model query types
-  (`ModelRef`, `ModelState`, `ModelLight`, `ClipInfo`), the inspection views
+  (`ModelRef`, `ModelLight`, `ClipInfo`), the inspection views
   (`Op`, `PassView`, `BatchView`), `VertexDecodePath`, `Config`, the `Err*`
   types, `Name` and the ordering identity `FlushOnUpdate`. Its functions —
-  `At`, `LookAt`, `Layer`, `NewLookup`, `NewLookupAccess` and the coordinate
+  `At`, `LookAt`, `Layer`, `NewLookup`, `NewLookupAccess`, `NewLookupDeviceAccess` and the coordinate
   helpers (`ViewProjection`, `WorldToScreen`, `ScreenToWorld`, `ScreenToRay`) —
   are forwarders in `utils.go`. It declares no plugin, and it is what every
   other package imports.
 - **`bundles/scene/internal/types`** declares `OpQueue` with its recording
-  methods and the consume side the flush reads, `Lookup` and `LookupAccess` with
-  the model table, residency and unloads, the mesh table and its deferred bakes,
+  methods and the consume side the flush reads, `Lookup` with its two scoped
+  facades, the model cache and the unloads, the mesh table and its deferred bakes,
   the glTF loader and the animation and morph bakes behind them, the vertex
   packing, the recording vocabulary, `Config` (which the Lookup holds), the
   bundled PBR material, and the camera maths the flush and the coordinate
@@ -146,14 +146,17 @@ zero `LayerMask` means every layer; a nil `Material` means the bundled PBR.
 
 - `*OpQueue` — frame-local recording surface. Scene consumes and republishes it
   on `app.UpdateEvent`.
-- `*Lookup` — the single persistent resource: resident models, baked pose and
+- `*Lookup` — the single persistent resource: loaded models, baked pose and
   morph buffers, the path-keyed texture cache, buffer-built meshes and scene's
-  own unit meshes, plus the deferred bakes and unloads the flush applies at the
-  frame boundary. Query and mutate it only through a scoped `LookupAccess`.
+  own unit meshes, plus the deferred bakes and buffer releases the flush applies
+  at the frame boundary. Query and mutate it only through a scoped
+  `LookupAccess` or `LookupDeviceAccess`.
 
-Gameplay normally writes only `*OpQueue`. Residency, mesh baking, bounds queries
-and unloading go through `*Lookup` via a `LookupAccess`; scene's own flush
-handler also writes `*Lookup` to drain bakes and apply unloads.
+Gameplay normally writes only `*OpQueue`. Mesh baking and `UnloadModel` go
+through `*Lookup` via a `LookupAccess`; loading, the model queries and the
+texture unloads go through a `LookupDeviceAccess`, which needs the filesystem
+and the resource queue beside it. Scene's own flush writes `*Lookup` to load the
+models the frame named and to drain its bakes.
 
 ## Recording API
 
@@ -418,23 +421,21 @@ hundred draw calls — and the instances share the draw's animation.
 
 ### Residency
 
-Loading is asynchronous and idempotent. A draw of a path that is not resident
-**draws nothing** — no placeholder, no substitute — and enqueues exactly one load
-however many frames name it.
+Loading is synchronous and idempotent. A draw of a path the cache does not hold
+reads, parses and uploads it inside the flush that recorded the draw, so the
+model is drawn in that same frame — and a large file **hitches** that frame. A
+path that could not be loaded **draws nothing**: no placeholder, no substitute.
 
-```go
-const (
-	ModelMissing ModelState = iota // no entry; the zero value
-	ModelLoading
-	ModelResident
-	ModelFailed // terminal; clears only on UnloadModel
-)
-```
+`LookupDeviceAccess.Preload(path)` is the same load fired without a draw, and it
+is the lever: it moves the cost into a loading screen the app controls. A game
+that skips it takes the cost on first draw.
 
-Every residency change lands at a **frame boundary**, not at the call. So does
-every unload. `LookupAccess.Preload(path)` is the same idempotent load a draw
-fires, fired without one, which is how a decode moves into a loading screen the
-app controls.
+Failure is terminal and reported once. `State(path)` returns `nil` for a model
+that loaded and the load's own failure otherwise — a wrapped `fs.ErrNotExist`
+for a file that is not there, `ErrModelUnavailable` for one that does not parse
+— so a HUD prints a reason rather than a state word. `UnloadModel` is the only
+way back, and because freeing is immediate, `UnloadModel` followed by `Preload`
+in one handler is a real retry.
 
 ## Buffer-Built Meshes
 
@@ -649,34 +650,39 @@ resource must not retain filesystem or GPU handles past its lock scope, so
 callers acquire a handler-scoped facade:
 
 ```go
-la := scene.NewLookupAccess(kernel, lookup) // two dependencies, not three
+la := scene.NewLookupAccess(kernel, lookup)                          // one resource
+dev := scene.NewLookupDeviceAccess(kernel, lookup, fsys, resources)  // three
 ```
 
-Bind `access.GetWrite[*scene.Lookup]()` in the handler's `Lock`. Unlike canvas's
-equivalent it takes **no `storage.FileSystem`**: scene's load command opens,
-parses and bakes the file itself holding no locks.
+**Two facades, because loading needs the device.** A load now runs inside the
+call that asks for it, so every verb that can load needs an `fs.FS` and the
+resource queue at the call. Putting them all on one facade would make a consumer
+that only bakes a mesh declare a `*gfx.ResourceQueue` write — which for an ECS
+System means serialising against canvas's flush, scene's flush and gfx. So the
+loading half is its own facade, and `fsys` is the storage filesystem converted
+once per handler, because handing it out as an interface allocates.
 
-| Method | Result | Notes |
-| --- | --- | --- |
-| `State(path) ModelState` | residency | The only way to tell "wait" from "never coming". |
-| `Preload(path)` | — | The same idempotent load a draw fires. |
-| `Nodes(ref, dst) ([]string, bool)` | addressable node names | Depth-first, the hierarchy's own order. Unnamed nodes are absent. |
-| `Bounds(ref) (m.Vec4, bool)` | xyz centre, w radius | Local space post-re-rooting; the **rest pose** for anything drawn through the pose buffer. |
-| `AABB(ref) (min, max m.Vec3, bool)` | axis-aligned box | Same space and same pose rules as `Bounds`. |
-| `Joints(path, dst) ([]string, bool)` | joint names in joint order | Names only; no hierarchy. |
-| `Clips(path, dst) ([]ClipInfo, bool)` | name and duration | Duration is what tells a caller a one-shot play has ended. |
-| `MorphTargets(path, dst) ([]string, bool)` | target names | The flattened order `MorphWeights` is positional over. |
-| `ModelLights(path, dst) ([]ModelLight, bool)` | the file's punctual lights | In the model's own space; nothing converts one automatically. |
-| `PoseBytes(path)` / `MorphBytes(path)` | `(int, bool)` | Per-model GPU memory. |
-| `TotalPoseBytes()` / `TotalMorphBytes()` | `int` | Lookup-wide sums; no `ok`, and they trigger no load. |
-| `BakeMesh` / `UpdateMesh` / `ReleaseMesh` | — | Buffer-built mesh lifecycle. |
-| `UnloadModel(path)` | — | Geometry, poses and material records. **Does not cascade to textures.** |
-| `UnloadTexture(path)` | — | Every texture that path baked. Checks no resident model. |
-| `UnloadAll()` | — | Every resident model and cached texture. |
+| Method | Facade | Result | Notes |
+| --- | --- | --- | --- |
+| `State(path) error` | device | `nil`, or why not | The only call that says *why* a model is not there. |
+| `Preload(path)` | device | — | The same load a draw runs, run without one. |
+| `Nodes(ref, dst) ([]string, bool)` | device | addressable node names | Depth-first, the hierarchy's own order. Unnamed nodes are absent. |
+| `Bounds(ref) (m.Vec4, bool)` | device | xyz centre, w radius | Local space post-re-rooting; the **rest pose** for anything drawn through the pose buffer. |
+| `AABB(ref) (min, max m.Vec3, bool)` | device | axis-aligned box | Same space and same pose rules as `Bounds`. |
+| `Joints(path, dst) ([]string, bool)` | device | joint names in joint order | Names only; no hierarchy. |
+| `Clips(path, dst) ([]ClipInfo, bool)` | device | name and duration | Duration is what tells a caller a one-shot play has ended. |
+| `MorphTargets(path, dst) ([]string, bool)` | device | target names | The flattened order `MorphWeights` is positional over. |
+| `ModelLights(path, dst) ([]ModelLight, bool)` | device | the file's punctual lights | In the model's own space; nothing converts one automatically. |
+| `PoseBytes(path)` / `MorphBytes(path)` | device | `(int, bool)` | Per-model GPU memory. |
+| `TotalPoseBytes()` / `TotalMorphBytes()` | plain | `int` | Lookup-wide running counters; no `ok`, and they load nothing. |
+| `BakeMesh` / `UpdateMesh` / `ReleaseMesh` | plain | — | Buffer-built mesh lifecycle. |
+| `UnloadModel(path)` | plain | — | Geometry, poses and material records, freed at the call. **Does not cascade to textures.** |
+| `UnloadTexture(path)` | device | — | Every texture that path baked. Checks no loaded model. |
+| `UnloadAll()` | device | — | Every loaded model and cached texture. |
 
-**Every query returns `(value, ok)` and every query triggers the load.** `ok`
-means only "this value is real": it is false for a path still loading and for one
-that will never arrive, which is why `State` exists. A `ModelRef` is a struct
+**Every query returns `(value, ok)` and every query loads.** `ok` means only
+"this value is real": it is false for a path that could not be read and for a
+selector that matched nothing alike, which is why `State` exists. A `ModelRef` is a struct
 rather than three bare strings because the bare form has a transposition bug that
 compiles.
 
@@ -753,7 +759,7 @@ scene helper functions.
 Everything scene refuses is reported through `kernel.ReportError` as a typed
 error value, and the frame carries on. The house rules behind them:
 
-- **Skip, never substitute.** A model that is not resident, a selector that
+- **Skip, never substitute.** A model that could not be loaded, a selector that
   matches nothing, a mesh ref that has gone stale, a light with no cone — each
   costs its own draw and nothing else. Nothing is stood in for.
 - **Report once.** Load failures key on the path, so a model drawn every frame
@@ -762,14 +768,15 @@ error value, and the frame carries on. The house rules behind them:
   rather than substituting a plausible value that would hide the caller's bug
   behind a degenerate projection.
 
-A load report fires from the load command's goroutine, so it lands a frame or
-more after the draw that triggered it.
+A load report fires from the handler whose call triggered the load — the flush
+for a draw, the caller's own handler for a query or a `Preload`.
 
 ## Event Subscribed
 
 `scene.FlushOnUpdate` subscribes to `app.UpdateEvent`. It writes the scene
-`*OpQueue` and `*Lookup`, reads `gfx.Viewport`, and writes `gfx.OpQueue` and
-`gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
+`*OpQueue` and `*Lookup`, reads `gfx.Viewport` and `storage.FileSystem` — the
+latter because a model draw loads the file it names — and writes `gfx.OpQueue`
+and `gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
 `gfx.PresentOnUpdate`, exactly as canvas is: gameplay records first, canvas
 and scene emit graphics draws second, gfx presents last. The identity is
 declared in the root so a recorder can order itself

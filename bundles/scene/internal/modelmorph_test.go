@@ -186,7 +186,7 @@ func TestAModelWithNoShapesPacksNoMorphList(t *testing.T) {
 	if bound := h.backend.buffersBoundTo("sceneMorphDeltas"); len(bound) != 0 {
 		t.Errorf("a static model bound deltas %d times, want never", len(bound))
 	}
-	h.lookup(func(access scene.LookupAccess) {
+	h.device(func(access scene.LookupDeviceAccess) {
 		if got, _ := access.MorphBytes(modelPath); got != 0 {
 			t.Errorf("MorphBytes = %d, want none for a file with no targets", got)
 		}
@@ -201,7 +201,7 @@ func TestTheLookupReportsMorphTargetsAndBytes(t *testing.T) {
 	var names []string
 	var bytes int
 	h.frameUntil(t, "the model to become resident", func() bool {
-		h.lookup(func(access scene.LookupAccess) {
+		h.device(func(access scene.LookupDeviceAccess) {
 			names, _ = access.MorphTargets(modelPath, names[:0])
 			bytes, _ = access.MorphBytes(modelPath)
 		})

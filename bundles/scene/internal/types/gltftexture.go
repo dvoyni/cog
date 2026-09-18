@@ -66,11 +66,12 @@ const missingTexture = -1
 // textureLoader decodes the images one model's materials name, once per key,
 // and collects the reports for slots that could not be filled.
 //
-// It is a per-load value rather than a lookup query because the load holds no
-// Lookup lock: the cache is consulted at install time, where a key that is
-// already resident drops the pixels this decoded. Decoding an image a resident
-// model already uploaded is the cost of parsing without the lock, and it is
-// paid only when two models share an external image path.
+// It is a per-load value rather than a lookup query because the decode runs
+// before the upload: the scene-wide texture cache is consulted at install time,
+// where a key it already holds drops the pixels this decoded. Decoding an image
+// another model already uploaded is what that costs, and it is paid only when
+// two models share an external image path. Reopening this table as a cache of
+// its own is what removes it.
 type textureLoader struct {
 	doc       *gltf.Document
 	fsys      fs.FS
