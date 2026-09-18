@@ -3,6 +3,8 @@ package internal
 import "embed"
 
 const (
+	// builtinMountID is the storage mount the embedded files below are served
+	// under.
 	builtinMountID = "builtin:canvas"
 
 	// defaultFontLicensePath is embedded and mounted beside the font because
