@@ -63,6 +63,9 @@ error handling.
     localStorage in a browser.
 - [`m`](libs/m): immutable vectors, rectangles, colors, matrices, quaternions,
     scalar helpers, and splines. Angles use radians.
+- [`assets`](libs/assets/docs/README.md): one cache for loaded assets, keyed by a
+    comparable descriptor — a static run of bytes, a descriptor, a stateless
+    loader, and the four verbs a plugin caches an asset family with.
 - [`gfx`](slots/gfx/docs/README.md): driver-neutral rendering queues, resources, viewport,
     backend contract, frame capture, and per-tick snapshots.
 - [`canvas`](bundles/canvas/docs/README.md): layered 2D sprites, text, primitives, and custom
