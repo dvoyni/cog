@@ -23,23 +23,23 @@ canvas has the declaration-root shape of
 [`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
 
 - **`bundles/canvas`** is the root, and holds declarations only: the `*OpQueue`
-  and `*Lookup` resources with `LookupAccess` and `FontMetrics`, the recording
+  and `*Lookup` resources with `LookupAccess`, `LookupDeviceAccess` and
+  `FontMetrics`, the recording
   vocabulary (`Layer`, `SpriteTransform`, `SpriteFrame`, `TextDraw`,
   `ShapeDraw`, `Vertex`, `VertexLayout`, `AspectMode`, `TextAlign`),
   `MaterialSet` and `HaloProfile`, the reserved slot names and published WGSL
   paths, `SpriteInstance`, `Op`, `ArmDrawsCmd` with `DrawsSnapshot` and its view
   types, `Config`, the `McpProvider` Adapter, the `ErrDraws…` errors, `Name` and
   the ordering identity `FlushOnUpdate`. Its functions — `NewLookup`,
-  `NewLookupAccess`, the coordinate helpers (`LayerTransform`, `WorldToScreen`,
+  `NewLookupAccess`, `NewLookupDeviceAccess`, the coordinate helpers (`LayerTransform`, `WorldToScreen`,
   `ScreenToWorld`), `DefaultKeyColor`, the built-in material constructors,
   `DefaultHaloProfile` and `HaloMaterialSet` — are forwarders in `utils.go`. It
   declares no plugin, and it is what every other package imports.
 - **`bundles/canvas/internal/types`** declares `OpQueue` with its recording
-  methods and the consume side the flush reads, `Lookup` and `LookupAccess` with
-  the sprite and glyph atlases, the font store and the sprite-size cache behind
-  them, inline text parsing, the recording vocabulary, `Config` (which the
-  atlases hold), `HaloProfile`, and the built-in and halo materials. The root
-  aliases what it exposes.
+  methods and the consume side the flush reads, `Lookup` with its two facades and
+  the asset caches, packers and font store behind them, inline text parsing, the
+  recording vocabulary, `Config` (which the packers hold), `HaloProfile`, and the
+  built-in and halo materials. The root aliases what it exposes.
 - **`bundles/canvas/internal`** is the plugin: its `New`, the resolution of
   `canvas.Config`, the flush that turns a recording into gfx draws, the sprite
   and triangle batchers and their scratch, the draw-snapshot slot and its two
@@ -90,14 +90,16 @@ shaders and default font. Register `storage` before `canvas`. A typical order is
 
 - `*OpQueue`: frame-local recording surface. Canvas consumes and resets it on
   `app.UpdateEvent`.
-- `*Lookup`: the single persistent resource holding the sprite atlas, glyph
-  atlas, font store, and cached sprite metadata. It also owns deferred unloads
-  and the framebuffer-scale font invalidation. Query and mutate it only through a
-  scoped `LookupAccess`.
+- `*Lookup`: the single persistent resource holding canvas's asset caches - the
+  sprite atlas, the standalone textures tiled sprites sample, and the sprite
+  headers layout measures against - with the two packers behind them and the font
+  store. It also owns the framebuffer-scale font invalidation. Query and mutate it
+  only through a scoped `LookupAccess` or `LookupDeviceAccess`.
 
-Gameplay normally writes only `*OpQueue`. Sizing, measurement, and unloading go
-through `*Lookup` (plus `storage.FileSystem`) via a `LookupAccess`; the flush handler
-also writes `*Lookup` to resolve lazy sprites and apply deferred unloads.
+Gameplay normally writes only `*OpQueue`. Sizing and measurement go through
+`*Lookup` (plus `storage.FileSystem`) via a `LookupAccess`; unloading goes through
+`*Lookup` (plus `*gfx.ResourceQueue`) via a `LookupDeviceAccess`. The flush handler
+also writes `*Lookup` to resolve lazy sprites.
 
 ## Drawing API
 
@@ -545,13 +547,21 @@ specifies is implemented.
 ## Lookup API
 
 Sizing, text measurement, and resource lifecycle go through `*canvas.Lookup`,
-the single persistent resource that owns the sprite atlas, glyph atlas, and font
-store. Because a resource must not retain filesystem or GPU handles past its lock
-scope, callers acquire a handler-scoped facade instead:
+the single persistent resource that owns canvas's asset caches, its two packers
+and the font store. Because a resource must not retain filesystem or GPU handles
+past its lock scope, callers acquire a handler-scoped facade instead - and there
+are two of them, because measuring needs the filesystem and unloading needs the
+device:
 
 ```go
 la := canvas.NewLookupAccess(kernel, lookup, filesystem)
+device := canvas.NewLookupDeviceAccess(kernel, lookup, resources)
 ```
+
+The split is what keeps loading off the lock set of a handler that only lays a
+page out: `LookupAccess` reads sprite headers and font files, and nothing it
+carries touches the GPU. `scene` splits its own facade under the same two names,
+because the constraint in both plugins is the device.
 
 `canvas.NewLookup()` builds a free-standing `*Lookup` at the default atlas sizes,
 for a test or an embedder that drives a `LookupAccess` without composing the
@@ -562,21 +572,31 @@ in the handler's `Lock`, then use:
 
 | Method | Result | Notes |
 | --- | --- | --- |
-| `SpriteSize(path) m.Vec2` | intrinsic pixel size | Reads the image header; no GPU upload. A resident atlas entry's decoded size wins. |
+| `SpriteSize(path) m.Vec2` | intrinsic pixel size | Reads the image header; no GPU upload. It is the header and only the header: a sprite already packed into the atlas is still measured by what its file said. |
 | `FontMetrics(path, size int) FontMetrics` | `Ascent, Descent, LineHeight, XHeight, CapHeight` | Logical pixels. |
 | `MeasureTextSize(path, size int, text string) m.Vec2` | measured size | Multi-line; width is the widest line. `${path}` tokens size to cap height. |
 | `MeasureWrappedTextSize(path, size int, text string, width float32) m.Vec2` | wrapped size | Wraps words at width and splits oversized words between runes. |
-| `UnloadSprite(path)` | — | Deferred to the next frame boundary; absent is a no-op. |
+
+Bind `access.GetWrite[*canvas.Lookup]()` and `access.GetWrite[*gfx.ResourceQueue]()`
+for the unload half:
+
+| Method | Result | Notes |
+| --- | --- | --- |
+| `UnloadSprite(path)` | — | Frees the path from all three sprite tiers at the call; absent is a no-op. A later draw reloads it. |
 | `UnloadFont(path)` | — | Drops the baked faces and parsed source for the path; glyph pages are freed only by the whole-atlas resize invalidation. |
 
 Failures (invalid, missing, or unreadable resources) report once through
-`kernel.ReportError` and return zero values; the report clears on the next
-successful load or unload. Paths are normalized (`\` to `/`, `path.Clean`) and
-empty, absolute, NUL-bearing, or root-escaping paths are rejected. Font sizes are
-integer cache keys; returned dimensions and metrics are `float32` logical pixels.
-An empty string measures as one line's height. Unloaded sprite regions are
-reclaimed for reuse, and a fully empty sprite atlas array is released; glyph
-pages are freed only by the whole-glyph-atlas resize invalidation.
+`kernel.ReportError` and return zero values, and they are **terminal**: what a
+load produced is what the cache holds, so a missing sprite is opened once, said
+once, and not opened again. Unloading it is the retry lever, and it forgets the
+report with the entry. Paths are normalized (`\` to `/`, `path.Clean`) and empty,
+absolute, NUL-bearing, or root-escaping paths are rejected; an invalid path is
+reported where it enters and never reaches a cache. An empty sprite path is not a
+failure - it is the white texel every fill draws with. Font sizes are integer
+cache keys; returned dimensions and metrics are `float32` logical pixels. An empty
+string measures as one line's height. Unloaded sprite regions are reclaimed for
+reuse, and a fully empty sprite atlas array is released; glyph pages are freed
+only by the whole-glyph-atlas resize invalidation.
 
 ## Event Subscribed
 

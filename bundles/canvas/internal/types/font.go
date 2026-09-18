@@ -1,14 +1,12 @@
 package types
 
 import (
-	"fmt"
 	"image"
 	"image/color"
 	"io/fs"
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
-	"github.com/dvoyni/cog/slots/storage"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
@@ -63,7 +61,7 @@ func ResolveFontPath(path string) string {
 
 // Face bakes (or reuses) the font at path at px pixels, parsing its source on
 // first use. It returns nil when the file cannot be read or parsed.
-func (s *FontStore) Face(filesystem storage.FileSystem, path string, px int) *Font {
+func (s *FontStore) Face(filesystem fs.FS, path string, px int) *Font {
 	key := fontKey{path: path, px: px}
 	if cached, ok := s.fonts[key]; ok {
 		return cached
@@ -96,7 +94,10 @@ func (s *FontStore) Face(filesystem storage.FileSystem, path string, px int) *Fo
 
 // LoadGlyph returns one rune of a baked face, rasterizing it into the glyph atlas
 // on first use.
-func LoadGlyph(atlas *Atlas, fontPath string, px int, character rune, face *Font, resources *gfx.ResourceQueue) (Glyph, bool) {
+//
+// The glyph side is a packer with no table: face.Glyphs is the index, and always
+// was. What the packer places is memoised there and nowhere else.
+func LoadGlyph(lookup *Lookup, px int, character rune, face *Font, resources *gfx.ResourceQueue) (Glyph, bool) {
 	if glyph, ok := face.Glyphs[character]; ok {
 		return glyph, true
 	}
@@ -126,9 +127,10 @@ func LoadGlyph(atlas *Atlas, fontPath string, px int, character rune, face *Font
 			pixels[i*4+2] = 255
 			pixels[i*4+3] = coverage.Pix[i]
 		}
-		key := fmt.Sprintf("\x01%s\x00%d\x00%d", fontPath, px, character)
-		entry, placed := atlas.insert(key, atlasGlyph, width, height, pixels, 1, false, resources)
-		if !placed {
+		entry, refusal := lookup.glyphPacker.insert(insertion{
+			pixels: pixels, width: width, height: height, padding: 1,
+		}, resources)
+		if refusal != packPlaced {
 			return Glyph{}, false
 		}
 		glyph.Entry = entry
@@ -140,12 +142,12 @@ func LoadGlyph(atlas *Atlas, fontPath string, px int, character rune, face *Font
 
 // GlyphLineWidth is the advance width of one line of a baked face in its own
 // pixels, rasterizing any glyph it has not met yet.
-func GlyphLineWidth(atlas *Atlas, fontPath string, px int, face *Font, text string, resources *gfx.ResourceQueue) float32 {
+func GlyphLineWidth(lookup *Lookup, px int, face *Font, text string, resources *gfx.ResourceQueue) float32 {
 	var width float32
 	var previous rune
 	first := true
 	for _, character := range text {
-		glyph, ok := LoadGlyph(atlas, fontPath, px, character, face, resources)
+		glyph, ok := LoadGlyph(lookup, px, character, face, resources)
 		if !ok {
 			continue
 		}

@@ -8,10 +8,12 @@ import "github.com/dvoyni/cog/bundles/canvas/internal/types"
 // alone.
 type OpQueue = types.OpQueue
 
-// Lookup is the single Canvas-owned resource that holds the sprite atlas, glyph
-// atlas, font store, and the cached sprite metadata behind sizing and text
-// measurement. Callers acquire it as a write dependency and operate on it
-// through a scoped LookupAccess; the resource itself never retains filesystem or
-// GPU handles. Deferred unloads are applied by the Canvas flush at the frame
-// boundary.
+// Lookup is the single Canvas-owned resource that holds canvas's asset caches -
+// the sprite atlas, the standalone textures tiled sprites sample, and the sprite
+// headers sizing and text measurement answer from - with the two atlas packers
+// behind them and the font store. Callers acquire it as a write dependency and
+// operate on it through a scoped LookupAccess for the measuring verbs or a
+// LookupDeviceAccess for the unloading ones; the resource itself never retains
+// filesystem or GPU handles. An unload frees at the call, and a later draw
+// reloads what it freed.
 type Lookup = types.Lookup

@@ -2,6 +2,7 @@ package internal
 
 import (
 	"encoding/binary"
+	"io/fs"
 	"math"
 	"slices"
 
@@ -48,6 +49,52 @@ type plugin struct {
 	// self-synchronizing. See snapshotState for why it is not a kernel
 	// resource.
 	snapshots snapshotState
+
+	// frame is the flush's frame-scoped context, held here so a steady-state
+	// frame allocates nothing for it. flushFrame fills it and empties it again.
+	frame frame
+}
+
+// frame is what one flush holds for the whole of a frame and every draw under it
+// needs: the kernel a load reports through, the read filesystem, the resource
+// queue an upload goes to, and the Lookup the caches and the packers live on.
+//
+// The filesystem is boxed into its interface once here rather than at each
+// resolve: storage.FileSystem is a struct, and handing one to an interface
+// parameter allocates every time it is done, which on the per-sprite path is an
+// allocation per sprite per frame.
+//
+// None of the four may outlive the handler that granted them, so flushFrame
+// empties this again on the way out. A kernel read out of an emptied frame
+// panics, which is what makes a leak loud rather than stale.
+type frame struct {
+	k         kernel.Kernel
+	fsys      fs.FS
+	resources *gfx.ResourceQueue
+	lookup    *canvas.Lookup
+}
+
+// sprite resolves one recorded sprite to its atlas entry. A path canvas will not
+// open was marked invalid where it entered the queue, so it is reported here and
+// never reaches a cache; a zero entry, however it arose, draws nothing.
+func (fr *frame) sprite(op *types.SpriteOp) types.AtlasEntry {
+	if op.InvalidPath {
+		types.ReportInvalidSpritePath(fr.k, op.Path)
+		return types.AtlasEntry{}
+	}
+	return types.LookupResolveSprite(fr.lookup, fr.k, op.Path, fr.fsys, fr.resources)
+}
+
+// icon resolves an inline icon's atlas entry. An icon path enters canvas inside
+// the text it is written in rather than at a Sprite call, so this is where it is
+// validated.
+func (fr *frame) icon(path string) types.AtlasEntry {
+	recorded, invalid := types.SpritePath(path)
+	if invalid {
+		types.ReportInvalidSpritePath(fr.k, recorded)
+		return types.AtlasEntry{}
+	}
+	return types.LookupResolveSprite(fr.lookup, fr.k, recorded, fr.fsys, fr.resources)
 }
 
 // New creates the canvas plugin. Configure it with a canvas.Config under
@@ -165,20 +212,38 @@ func (p *plugin) flushFrame(
 	k kernel.Kernel, write *canvas.OpQueue, gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue,
 	view *gfx.Viewport, filesystem storage.FileSystem, lookup *canvas.Lookup,
 ) error {
-	spriteAtlas := types.LookupSprites(lookup)
-	fontAtlas := types.LookupFonts(lookup)
 	fonts := types.LookupFontStore(lookup)
 	defer types.OpQueueReset(write)
 	if !gfxResources.Ready() || view.Width <= 0 || view.Height <= 0 {
 		return nil
 	}
-	types.LookupApplyUnloads(lookup, k, gfxResources)
 	types.LookupInvalidateFontsOnResize(lookup, gfxResources, view)
 	if !p.ensureQuad(gfxResources) {
 		return nil
 	}
-	spriteAtlas.BeginFrame()
-	fontAtlas.BeginFrame()
+	p.frame = frame{k: k, fsys: filesystem, resources: gfxResources, lookup: lookup}
+	fr := &p.frame
+	// Nothing the frame carries may outlive this handler, and a kernel read out
+	// of the zero value panics, so a draw that kept hold of one fails loudly
+	// rather than reporting through a stale kernel.
+	defer func() { p.frame = frame{} }()
+	// The white texel is packed before any layer's ops rather than lazily beside
+	// the first sprite that needs it. The atlas batch is keyed on the texture, so
+	// a texel that landed in a second array would split every fill away from
+	// every sprite it draws with; reserving it first is what keeps them in one
+	// instanced draw.
+	//
+	// A frame whose texel does not pack draws nothing, which is what the
+	// reservation inside the old insert did by refusing every sprite behind it.
+	// Nothing reaches this today - reserving first means the packer has room when
+	// the texel is asked for, and no verb here frees the texel on its own - so it
+	// holds the invariant rather than a path. It is here because the alternative
+	// is half a frame: every fill, line and stroke vanishing while the sprites
+	// beside them still draw, which hides the misconfiguration instead of showing
+	// it.
+	if white := types.LookupResolveSprite(fr.lookup, fr.k, "", fr.fsys, fr.resources); white.Width <= 0 {
+		return nil
+	}
 	p.layers = p.layers[:0]
 	ops := types.OpQueueLayers(write)
 	for layerID, value := range ops {
@@ -213,10 +278,10 @@ func (p *plugin) flushFrame(
 		for i := range value.Ops {
 			switch value.Ops[i].Kind {
 			case types.DrawSpriteKind:
-				p.drawSprite(gfxWrite, spriteAtlas, gfxResources, filesystem, surf, transform, value.Ops[i].Clip, value.Ops[i].HasClip, materials, &value.Ops[i].Sprite)
+				p.drawSprite(gfxWrite, fr, surf, transform, value.Ops[i].Clip, value.Ops[i].HasClip, materials, &value.Ops[i].Sprite)
 			case types.DrawTextKind:
 				p.tris.flush(gfxWrite)
-				p.drawText(gfxWrite, spriteAtlas, fontAtlas, gfxResources, filesystem, surf, fonts, transform, value.Ops[i].Clip, value.Ops[i].HasClip, materials, &value.Ops[i].Text)
+				p.drawText(gfxWrite, fr, surf, fonts, transform, value.Ops[i].Clip, value.Ops[i].HasClip, materials, &value.Ops[i].Text)
 			case types.DrawTrianglesKind:
 				p.batch.flush(gfxWrite, p.quad)
 				op := &value.Ops[i].Triangles
@@ -326,7 +391,7 @@ func (p *plugin) ensureQuad(resources *gfx.ResourceQueue) bool {
 	return true
 }
 
-func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, atlas *types.Atlas, gfxResources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.SpriteOp) {
+func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.SpriteOp) {
 	// Recording order is the contract, so a sprite closes every batch whose
 	// pending draw would otherwise land after it - but only the batches it
 	// cannot itself join. A texture-sourced or tiled sprite is a quad in the
@@ -346,12 +411,12 @@ func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, atlas *types.Atlas, gfxResour
 			t.TileX, t.TileY = false, false
 		} else {
 			p.batch.flush(gfxWrite, p.quad)
-			p.drawTiledSprite(gfxWrite, atlas, gfxResources, filesystem, surf, t, layerTransform, clip, hasClip, materials, op)
+			p.drawTiledSprite(gfxWrite, fr, surf, t, layerTransform, clip, hasClip, materials, op)
 			return
 		}
 	}
-	entry, ok := atlas.ResolveSprite(op.Path, filesystem, gfxResources)
-	if !ok {
+	entry := fr.sprite(op)
+	if entry.Width <= 0 || entry.Height <= 0 {
 		return
 	}
 	// The sprite is going to the atlas batch, which no triangle draw can join,
@@ -436,9 +501,13 @@ func splitNineSliceAxis(length, leading, trailing float32) [4]float32 {
 // drawTiledSprite renders a sprite that repeats on one or both axes. It samples a
 // standalone repeat texture through the textured-triangle path, so it ignores the
 // sprite material and Frame; Scale controls logical tile size and tint becomes vertex color.
-func (p *plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, atlas *types.Atlas, gfxResources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, t canvas.SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.SpriteOp) {
-	entry, ok := atlas.ResolveStandalone(op.Path, filesystem, gfxResources)
-	if !ok {
+func (p *plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, t canvas.SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.SpriteOp) {
+	if op.InvalidPath {
+		types.ReportInvalidSpritePath(fr.k, op.Path)
+		return
+	}
+	entry := types.LookupResolveStandalone(fr.lookup, fr.k, op.Path, fr.fsys, fr.resources)
+	if entry.Width <= 0 || entry.Height <= 0 {
 		return
 	}
 	size := t.Size
@@ -708,14 +777,14 @@ func paramColorOr(params []gfx.ParameterDescr, name string, def m.Color) m.Color
 	return def
 }
 
-func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, atlas *types.Atlas, resources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, fonts *types.FontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, shading *spriteShading, op *types.TextOp) {
+func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, fonts *types.FontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, shading *spriteShading, op *types.TextOp) {
 	if op.Draw.Size <= 0 || op.Text == "" || op.FontPath == "" {
 		return
 	}
 	// Rasterize glyphs at the on-screen pixel size (layer scale x framebuffer
 	// scale), then lay them out in logical units so text stays crisp at any scale.
 	px := max(1, int(math.Round(float64(op.Draw.Size*textRasterScale(layerTransform, surf)))))
-	face := fonts.Face(filesystem, op.FontPath, px)
+	face := fonts.Face(fr.fsys, op.FontPath, px)
 	if face == nil {
 		return
 	}
@@ -727,7 +796,7 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, atlas *types.Atlas, resourc
 			end++
 		}
 		line := op.Text[start:end]
-		width := types.GlyphLineWidth(atlas, op.FontPath, px, face, line, resources) * toLogical
+		width := types.GlyphLineWidth(fr.lookup, px, face, line, fr.resources) * toLogical
 		x := op.Draw.Position.X
 		switch op.Draw.Align {
 		case canvas.AlignCenter:
@@ -738,7 +807,7 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, atlas *types.Atlas, resourc
 		var previous rune
 		first := true
 		for _, character := range line {
-			glyph, ok := types.LoadGlyph(atlas, op.FontPath, px, character, face, resources)
+			glyph, ok := types.LoadGlyph(fr.lookup, px, character, face, fr.resources)
 			if !ok {
 				continue
 			}
@@ -765,12 +834,12 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, atlas *types.Atlas, resourc
 }
 
 // drawText expands inline icons and wraps lines before drawing glyph runs.
-func (p *plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *types.Atlas, resources *gfx.ResourceQueue, filesystem storage.FileSystem, surf surface, fonts *types.FontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.TextOp) {
+func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, fonts *types.FontStore, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.TextOp) {
 	if op.Draw.Size <= 0 || op.Text == "" || op.FontPath == "" {
 		return
 	}
 	px := max(1, int(math.Round(float64(op.Draw.Size*textRasterScale(layerTransform, surf)))))
-	face := fonts.Face(filesystem, op.FontPath, px)
+	face := fonts.Face(fr.fsys, op.FontPath, px)
 	if face == nil {
 		return
 	}
@@ -787,16 +856,16 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *types.A
 		var width float32
 		for _, segment := range line {
 			if segment.Icon {
-				width += p.iconWidth(spriteAtlas, segment.Text, capHeight, filesystem, resources)
+				width += p.iconWidth(fr, segment.Text, capHeight)
 				continue
 			}
-			width += types.GlyphLineWidth(fontAtlas, op.FontPath, px, face, segment.Text, resources) * toLogical
+			width += types.GlyphLineWidth(fr.lookup, px, face, segment.Text, fr.resources) * toLogical
 		}
 		return width
 	}
 	lines := types.ParseInlineText(op.Text)
 	if op.Draw.WordWrapping && types.ValidWrapWidth(op.Draw.WrapWidth) {
-		wrap := p.wrapMeasure(spriteAtlas, resources, filesystem, fonts, op.FontPath, op.Draw.Size, measure)
+		wrap := p.wrapMeasure(fr, fonts, op.FontPath, op.Draw.Size, measure)
 		lines = types.WrapInlineText(lines, op.Draw.WrapWidth, wrap)
 	}
 	y := op.Draw.Position.Y
@@ -811,8 +880,8 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *types.A
 		}
 		for _, segment := range line {
 			if segment.Icon {
-				entry, ok := spriteAtlas.ResolveSprite(types.NormalizeResourcePath(segment.Text), filesystem, resources)
-				if !ok {
+				entry := fr.icon(segment.Text)
+				if entry.Width <= 0 || entry.Height <= 0 {
 					continue
 				}
 				width := capHeight * float32(entry.Width) / float32(entry.Height)
@@ -827,9 +896,9 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *types.A
 			run := types.TextOp{FontPath: op.FontPath, Text: segment.Text, Draw: canvas.TextDraw{
 				Position: m.Vec2{X: x, Y: y}, Size: op.Draw.Size, Color: op.Draw.Color, Align: canvas.AlignLeft,
 			}}
-			p.drawGlyphRun(gfxWrite, fontAtlas, resources, filesystem, surf, fonts, layerTransform, clip, hasClip, &shading, &run)
+			p.drawGlyphRun(gfxWrite, fr, surf, fonts, layerTransform, clip, hasClip, &shading, &run)
 
-			x += types.GlyphLineWidth(fontAtlas, op.FontPath, px, face, segment.Text, resources) * toLogical
+			x += types.GlyphLineWidth(fr.lookup, px, face, segment.Text, fr.resources) * toLogical
 		}
 		y += lineHeight
 	}
@@ -843,9 +912,9 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, spriteAtlas, fontAtlas *types.A
 // spill its last word onto a line the element has no room for. Wrapping with the
 // logical face keeps the drawn breaks identical to the measured ones; when that
 // face is unavailable the rasterized measurement stands in.
-func (p *plugin) wrapMeasure(spriteAtlas *types.Atlas, resources *gfx.ResourceQueue, filesystem storage.FileSystem, fonts *types.FontStore, fontPath string, size float32, fallback func([]types.InlineSegment) float32) func([]types.InlineSegment) float32 {
+func (p *plugin) wrapMeasure(fr *frame, fonts *types.FontStore, fontPath string, size float32, fallback func([]types.InlineSegment) float32) func([]types.InlineSegment) float32 {
 	px := max(1, int(math.Round(float64(size))))
-	face := fonts.Face(filesystem, fontPath, px)
+	face := fonts.Face(fr.fsys, fontPath, px)
 	if face == nil {
 		return fallback
 	}
@@ -855,7 +924,7 @@ func (p *plugin) wrapMeasure(spriteAtlas *types.Atlas, resources *gfx.ResourceQu
 		var width float32
 		for _, segment := range line {
 			if segment.Icon {
-				width += p.iconWidth(spriteAtlas, segment.Text, capHeight, filesystem, resources)
+				width += p.iconWidth(fr, segment.Text, capHeight)
 				continue
 			}
 			width += types.MeasureLine(face, segment.Text) * scale
@@ -865,9 +934,9 @@ func (p *plugin) wrapMeasure(spriteAtlas *types.Atlas, resources *gfx.ResourceQu
 }
 
 // iconWidth resolves an inline icon and returns its cap-height-scaled width.
-func (p *plugin) iconWidth(spriteAtlas *types.Atlas, path string, capHeight float32, filesystem storage.FileSystem, resources *gfx.ResourceQueue) float32 {
-	entry, ok := spriteAtlas.ResolveSprite(types.NormalizeResourcePath(path), filesystem, resources)
-	if !ok {
+func (p *plugin) iconWidth(fr *frame, path string, capHeight float32) float32 {
+	entry := fr.icon(path)
+	if entry.Width <= 0 || entry.Height <= 0 {
 		return 0
 	}
 	return capHeight * float32(entry.Width) / float32(entry.Height)

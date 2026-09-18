@@ -2,9 +2,7 @@ package types
 
 import (
 	"math"
-	pathpkg "path"
 	"reflect"
-	"strings"
 	"unsafe"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -15,6 +13,10 @@ import (
 // SpriteOp is one recorded Sprite, SpriteTexture or shape helper, as the flush
 // and inspection read it.
 type SpriteOp struct {
+	// Path is the sprite's storage path, cleaned at record time. It is empty for
+	// the white texel every fill and shape draws with, and when InvalidPath is
+	// set it is the path exactly as the caller wrote it, so what gets reported is
+	// what was written rather than what it cleaned to.
 	Path      string
 	Texture   gfx.TextureDescr
 	Params    []gfx.ParameterDescr
@@ -34,6 +36,11 @@ type SpriteOp struct {
 	// It is not a batch key field: a draw naming no material resolves to the
 	// layer's set or the built-in, and both carry a fingerprint of their own.
 	HasMaterial bool
+	// InvalidPath marks a path canvas will not open: absolute, NUL-bearing,
+	// root-escaping, or a directory rather than a file. Validation runs where the
+	// path enters, so the flush reports it once and draws nothing, and the path
+	// never reaches a cache to be keyed on or read for.
+	InvalidPath bool
 }
 
 // NamedMaterial reports the material this op named, or nil where it named none
@@ -276,7 +283,8 @@ func (w *OpQueue) RemoveClip() {
 }
 
 func (w *OpQueue) Sprite(layerID Layer, texturePath string, transform SpriteTransform, material *gfx.MaterialDescr, params ...gfx.ParameterDescr) {
-	op := SpriteOp{Path: NormalizeResourcePath(texturePath), Transform: transform}
+	op := SpriteOp{Transform: transform}
+	op.Path, op.InvalidPath = SpritePath(texturePath)
 	op.Material, op.Fingerprint, op.HasMaterial, w.materialArena = w.recordMaterial(material)
 	start := len(w.paramArena)
 	w.paramArena = append(w.paramArena, params...)
@@ -351,17 +359,6 @@ func (w *OpQueue) shape(layerID Layer, transform SpriteTransform, draw ShapeDraw
 	w.paramArena = append(w.paramArena, draw.Params...)
 	op.Params = w.paramArena[start:]
 	w.record(layerID, DrawOp{Kind: DrawSpriteKind, Sprite: op})
-}
-
-func NormalizeResourcePath(resourcePath string) string {
-	if resourcePath == "" {
-		return ""
-	}
-	cleaned := pathpkg.Clean(strings.ReplaceAll(resourcePath, "\\", "/"))
-	if cleaned == "." {
-		return ""
-	}
-	return cleaned
 }
 
 // Text records a text draw. An empty fontPath is resolved to DefaultFontPath
