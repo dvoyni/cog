@@ -286,6 +286,16 @@ type lookupProbeCmd kernel.Command[lookupProbeRequest, lookupProbeResponse]
 type lookupProbeRequest struct{ run func(canvas.LookupAccess) }
 type lookupProbeResponse struct{}
 
+// lookupDeviceProbeCmd runs a callback inside a handler that holds the Lookup
+// and gfx resource-queue locks, giving tests a valid scoped LookupDeviceAccess.
+// It is a separate command from lookupProbeCmd because the two facades exist to
+// be locked separately: a caller that only measures declares no queue.
+type lookupDeviceProbeCmd kernel.Command[lookupDeviceProbeRequest, lookupDeviceProbeResponse]
+type lookupDeviceProbeRequest struct {
+	run func(canvas.LookupDeviceAccess)
+}
+type lookupDeviceProbeResponse struct{}
+
 // readFileProbeCmd reads a path from storage.FileSystem under its read lock,
 // standing in for production code that reads the resource directly.
 type readFileProbeCmd kernel.Command[readFileProbeRequest, readFileProbeResponse]
@@ -317,6 +327,7 @@ func (p recordCanvasPlugin) Register(registrar *kernel.Registrar, _ any) error {
 			}
 	})
 	registrar.HandleCommand[lookupProbeCmd](lookupProbeCmdImpl)
+	registrar.HandleCommand[lookupDeviceProbeCmd](lookupDeviceProbeCmdImpl)
 	registrar.HandleCommand[readFileProbeCmd](readFileProbeCmdImpl)
 	return nil
 }
@@ -330,6 +341,18 @@ func lookupProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupProbeRequest, looku
 		}, func(k kernel.Kernel, req lookupProbeRequest) (lookupProbeResponse, error) {
 			req.run(canvas.NewLookupAccess(k, lookup.Get(), filesystem.Get()))
 			return lookupProbeResponse{}, nil
+		}
+}
+
+func lookupDeviceProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupDeviceProbeRequest, lookupDeviceProbeResponse]) {
+	var lookup kernel.Write[*canvas.Lookup]
+	var resources kernel.Write[*gfx.ResourceQueue]
+	return func(access kernel.ResourceAccess) {
+			lookup = access.GetWrite[*canvas.Lookup]()
+			resources = access.GetWrite[*gfx.ResourceQueue]()
+		}, func(k kernel.Kernel, req lookupDeviceProbeRequest) (lookupDeviceProbeResponse, error) {
+			req.run(canvas.NewLookupDeviceAccess(k, lookup.Get(), resources.Get()))
+			return lookupDeviceProbeResponse{}, nil
 		}
 }
 
@@ -347,6 +370,12 @@ func readFileProbeCmdImpl() (kernel.Lock, kernel.Execute[readFileProbeRequest, r
 func probeLookup(k kernel.Executioner, fn func(canvas.LookupAccess)) {
 	k.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{run: fn})
 }
+
+// probeLookupDevice executes fn with a scoped LookupDeviceAccess inside a canvas
+// handler that also holds gfx's resource queue.
+func probeLookupDevice(k kernel.Executioner, fn func(canvas.LookupDeviceAccess)) {
+	k.ExecuteCommand[lookupDeviceProbeCmd](lookupDeviceProbeRequest{run: fn})
+}
 func testKernel(t testing.TB, filesystem fs.FS, config canvas.Config, record func(*canvas.OpQueue)) (kernel.Executioner, *plugin, *testBackend) {
 	return testKernelHandler(t, filesystem, config, record, func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)
@@ -357,13 +386,13 @@ func testKernel(t testing.TB, filesystem fs.FS, config canvas.Config, record fun
 // testKernelCapturing builds a harness whose error handler records reported
 // errors instead of failing, so tests can assert the report-once behavior of the
 // Lookup query API.
-func testKernelCapturing(t testing.TB, filesystem fs.FS, config canvas.Config, record func(*canvas.OpQueue)) (kernel.Executioner, *[]error) {
+func testKernelCapturing(t testing.TB, filesystem fs.FS, config canvas.Config, record func(*canvas.OpQueue)) (kernel.Executioner, *[]error, *testBackend) {
 	var errs []error
-	k, _, _ := testKernelHandler(t, filesystem, config, record, func(err error) bool {
+	k, _, backend := testKernelHandler(t, filesystem, config, record, func(err error) bool {
 		errs = append(errs, err)
 		return false
 	})
-	return k, &errs
+	return k, &errs, backend
 }
 
 // testKernelGfx builds the same harness as testKernel for a recorder that also
@@ -1015,7 +1044,7 @@ func TestUnloadSpriteReloadsOnNextFrame(t *testing.T) {
 		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
 	})
 	runFrame(k)
-	probeLookup(k, func(la canvas.LookupAccess) { la.UnloadSprite("sprite.png") })
+	probeLookupDevice(k, func(la canvas.LookupDeviceAccess) { la.UnloadSprite("sprite.png") })
 	runFrame(k)
 	if filesystem.opens != 2 || len(backend.updates) != 3 {
 		t.Fatalf("path reload opens/updates = (%d,%d), want (2,3)", filesystem.opens, len(backend.updates))
@@ -1531,7 +1560,7 @@ func TestSpriteSizeReadsHeaderWithoutGPUUpload(t *testing.T) {
 func TestLookupReportsMissingAndInvalidPathsOncePerEpisode(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
 	config := canvas.Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
-	k, errs := testKernelCapturing(t, filesystem, config, func(*canvas.OpQueue) {})
+	k, errs, _ := testKernelCapturing(t, filesystem, config, func(*canvas.OpQueue) {})
 	var missing, invalid m.Vec2
 	probeLookup(k, func(la canvas.LookupAccess) {
 		missing = la.SpriteSize("gone.png")
@@ -1597,7 +1626,7 @@ func instanceAt(buffer []byte, i int) []byte {
 // garbage with no diagnostic anywhere.
 func TestASpriteDrawParameterNamingAUniformMemberIsReported(t *testing.T) {
 	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
-	k, errs := testKernelCapturing(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+	k, errs, _ := testKernelCapturing(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
 		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil,
 			gfx.FloatParam("customValue", 7))
 	})

@@ -164,7 +164,7 @@ func TestADrawNamingItsOwnMaterialIgnoresTheLayerSet(t *testing.T) {
 // array the shader never declared.
 func TestTheLayerSetsParametersAreAppliedPerBatch(t *testing.T) {
 	sprite := gfx.MaterialWithState(gfx.ShaderWithText("fn layerSpriteMark() {}"), gfx.StateOverlay2D())
-	k, errs := testKernelCapturing(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
+	k, errs, _ := testKernelCapturing(t, fstest.MapFS{}, trianglesConfig(), func(write *canvas.OpQueue) {
 		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 		write.SetLayerMaterial(0, canvas.MaterialSet{
 			Sprite: &sprite,

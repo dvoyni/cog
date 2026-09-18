@@ -164,7 +164,13 @@ func newDrawsRig(t *testing.T) *drawsRig {
 	fixture := &snapshotFixture{}
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{}.
-			WithReadFS("test", 10, fstest.MapFS{}),
+			// The sprites these tests record exist, because a sprite that does
+			// not is reported now rather than skipped in silence, and this rig
+			// treats every reported error as fatal.
+			WithReadFS("test", 10, fstest.MapFS{
+				"images/hero.png":  &fstest.MapFile{Data: pngBytes(t, 4, 4)},
+				"images/other.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)},
+			}),
 		canvas.Name: canvas.Config{},
 	}).Handler(func(err error) bool {
 		t.Errorf("unexpected kernel error: %v", err)

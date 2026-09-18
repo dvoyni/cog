@@ -69,12 +69,26 @@ const (
 type Op = types.Op
 
 // LookupAccess is a handler-scoped facade over a Lookup. It carries the kernel
-// (for error reporting) and the read filesystem needed to lazily load sprites
-// and fonts, without ever retaining them past the handler's lock scope. Acquire
-// a *Lookup write dependency plus storage.FileSystem in a handler, build a
-// LookupAccess with NewLookupAccess, and pass it to consumers for the duration
-// of that handler.
+// (for error reporting) and the read filesystem needed to lazily read sprite
+// headers and font files, without ever retaining them past the handler's lock
+// scope. Acquire a *Lookup write dependency plus storage.FileSystem in a
+// handler, build a LookupAccess with NewLookupAccess, and pass it to consumers
+// for the duration of that handler.
+//
+// Every verb it carries measures, and none of them touches the device, so a
+// handler that lays a page out declares no *gfx.ResourceQueue and serialises
+// against nothing that draws.
 type LookupAccess = types.LookupAccess
+
+// LookupDeviceAccess is the half of the facade that needs the device: unloading
+// an asset hands its texture, its atlas slot or its array straight back to gfx,
+// so it takes a *gfx.ResourceQueue where LookupAccess takes a filesystem.
+// Acquire a *Lookup and a *gfx.ResourceQueue write dependency in a handler,
+// build one with NewLookupDeviceAccess, and never store the result.
+//
+// scene declares the same split under the same name, because what separates the
+// two facades in both plugins is the device rather than what the verbs do.
+type LookupDeviceAccess = types.LookupDeviceAccess
 
 // FontMetrics reports a font's vertical metrics at a given size, in logical
 // pixels, for baseline placement and inline-icon alignment.

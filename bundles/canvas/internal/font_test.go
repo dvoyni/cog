@@ -8,6 +8,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/libs/m"
+	"golang.org/x/image/font/gofont/goregular"
 )
 
 // TestTheDefaultFontIsMountedWithItsLicence asserts the embedded font reaches
@@ -49,15 +50,18 @@ func TestNoFontPathDrawsWithTheDefaultFont(t *testing.T) {
 		t.Fatalf("draws = %d with no font path, %d naming the default; want the same frame",
 			implicitBackend.draws, explicitBackend.draws)
 	}
-	if len(implicitBackend.updates) != 2 {
-		t.Fatalf("glyph atlas updates = %d, want one rasterized glyph each for 'A' and 'g'",
+	// Three uploads, not two: every frame reserves the white texel before any
+	// layer's ops, so it is the first upload even in a frame that only draws
+	// text. Then one rasterized glyph each for 'A' and 'g'.
+	if len(implicitBackend.updates) != 3 {
+		t.Fatalf("atlas updates = %d, want the white texel plus one rasterized glyph each for 'A' and 'g'",
 			len(implicitBackend.updates))
 	}
 	if len(implicitBackend.updates) != len(explicitBackend.updates) {
 		t.Fatalf("atlas updates = %d with no font path, %d naming the default; want the same glyphs",
 			len(implicitBackend.updates), len(explicitBackend.updates))
 	}
-	if !bytes.Equal(implicitBackend.updates[0].pixels, explicitBackend.updates[0].pixels) {
+	if !bytes.Equal(implicitBackend.updates[1].pixels, explicitBackend.updates[1].pixels) {
 		t.Fatalf("the glyph rasterized from the empty path differs from the one named explicitly")
 	}
 }
@@ -82,11 +86,34 @@ func TestNoFontPathMeasuresWithTheDefaultFont(t *testing.T) {
 	})
 }
 
+// Unloading is immediate now, and it lives on the facade that holds the device
+// rather than on the one ui builds. There is no queue in front of it: the font is
+// dropped at the call, and the next draw re-reads the file.
+func TestUnloadingAFontDropsItAtTheCallAndRereadsOnTheNextDraw(t *testing.T) {
+	const path = "fonts/text.ttf"
+	filesystem := &testFS{FS: fstest.MapFS{path: &fstest.MapFile{Data: goregular.TTF}}}
+	draw := canvas.TextDraw{Position: m.Vec2{X: 10, Y: 40}, Size: 16, Color: m.Color{R: 1, G: 1, B: 1, A: 1}}
+	k, _, _ := testKernel(t, filesystem, canvas.Config{}, func(write *canvas.OpQueue) {
+		write.Text(0, path, "Ag", draw)
+	})
+	runFrame(k)
+	runFrame(k)
+	if filesystem.opens != 1 {
+		t.Fatalf("font opens across two frames = %d, want the one parse", filesystem.opens)
+	}
+
+	probeLookupDevice(k, func(la canvas.LookupDeviceAccess) { la.UnloadFont(path) })
+	runFrame(k)
+	if filesystem.opens != 2 {
+		t.Fatalf("font opens after the unload = %d, want the file re-read", filesystem.opens)
+	}
+}
+
 // TestAMissingFontIsNotSubstituted is the other half of the rule. An empty path
 // asks for the default; a named path that cannot be loaded must keep failing,
 // so a missing asset stays visible instead of rendering in another typeface.
 func TestAMissingFontIsNotSubstituted(t *testing.T) {
-	k, errs := testKernelCapturing(t, fstest.MapFS{}, canvas.Config{}, func(write *canvas.OpQueue) {
+	k, errs, _ := testKernelCapturing(t, fstest.MapFS{}, canvas.Config{}, func(write *canvas.OpQueue) {
 		write.Text(0, "fonts/absent.ttf", "Ag", canvas.TextDraw{Position: m.Vec2{Y: 40}, Size: 16})
 	})
 	runFrame(k)

@@ -41,7 +41,7 @@ func TestWrapMeasureFollowsLayoutMetrics(t *testing.T) {
 		t.Fatalf("rasterized wrapping produced %d lines, want the 2 the drift causes", len(got))
 	}
 
-	wrap := (&plugin{}).wrapMeasure(nil, nil, filesystem, fonts, path, size, rasterized)
+	wrap := (&plugin{}).wrapMeasure(&frame{fsys: filesystem}, fonts, path, size, rasterized)
 	got := types.WrapInlineText(lines, arranged, wrap)
 	if len(got) != 1 || len(got[0]) != 1 || got[0][0].Icon || got[0][0].Text != text {
 		t.Fatalf("layout-measured wrapping = %+v, want the one line %q", got, text)

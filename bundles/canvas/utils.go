@@ -20,6 +20,13 @@ func NewLookupAccess(k kernel.Kernel, lookup *Lookup, filesystem storage.FileSys
 	return types.NewLookupAccess(k, lookup, filesystem)
 }
 
+// NewLookupDeviceAccess builds a scoped facade over the unload verbs. Call it
+// inside a handler that holds the *Lookup and *gfx.ResourceQueue write locks;
+// never store the result.
+func NewLookupDeviceAccess(k kernel.Kernel, lookup *Lookup, resources *gfx.ResourceQueue) LookupDeviceAccess {
+	return types.NewLookupDeviceAccess(k, lookup, resources)
+}
+
 // LayerTransform returns the scale and offset mapping a layer's world
 // coordinates to logical viewport coordinates as world*scale + offset, matching
 // how SetLayerTransform renders. A zero-area window yields the identity. Callers

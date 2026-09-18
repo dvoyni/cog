@@ -2,11 +2,10 @@ package types
 
 import (
 	"fmt"
-	"image"
-	pathpkg "path"
-	"strings"
+	"io/fs"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/storage"
@@ -22,19 +21,30 @@ type FontMetrics struct {
 	CapHeight  float32
 }
 
-// Lookup is the single Canvas-owned resource that holds the sprite atlas, glyph
-// atlas, font store, and the cached sprite metadata behind sizing and text
-// measurement. Callers acquire it as a write dependency and operate on it through
-// a scoped LookupAccess; the resource itself never retains filesystem or GPU
-// handles. Deferred unloads are applied by the Canvas flush at the frame boundary.
+// Lookup is the single Canvas-owned resource that holds canvas's asset caches,
+// the two packers behind them, and the font store. Callers acquire it as a write
+// dependency and operate on it through a scoped LookupAccess or
+// LookupDeviceAccess; the resource itself never retains filesystem or GPU
+// handles.
+//
+// Three of its tables are assets.Cache instances - sprites, the standalone
+// textures tiled sprites sample, and the header-only sizes every layout measures
+// against. Each loads through the Library, each caches whatever its load
+// produced, and none of them retries: a sprite that failed is reported once and
+// stays failed until it is unloaded.
 type Lookup struct {
-	config               Config
-	sprites              *Atlas
-	fonts                *Atlas
+	// spritePacker and glyphPacker are the shelf allocators, free lists,
+	// tombstoned array indices and byte counters the sprite and glyph sides pack
+	// into. They are persistent state outliving every handler, which is why they
+	// live here and travel to the sprite loader in its user value.
+	spritePacker *packer
+	glyphPacker  *packer
+
+	sprites     *assets.Cache[spriteDescrParams, spriteUser, AtlasEntry]
+	tiled       *assets.Cache[tiledDescrParams, *gfx.ResourceQueue, StandaloneEntry]
+	spriteSizes *assets.Cache[sizeDescrParams, struct{}, m.Vec2i]
+
 	fontStore            *FontStore
-	spriteSizes          map[string]m.Vec2i
-	unloadSprites        []string
-	unloadFonts          []string
 	lastFramebufferScale float32
 }
 
@@ -44,35 +54,32 @@ func NewLookup() *Lookup { return NewSizedLookup(WithDefaults(Config{})) }
 
 // NewSizedLookup builds an empty Lookup resource sized by config, which is
 // already complete.
+//
+// The three loaders are built here, once, and outlive every handler: they are
+// stateless, and everything lock-bound - the kernel, the filesystem, the packer
+// and the resource queue - arrives on the call that needs it.
 func NewSizedLookup(config Config) *Lookup {
 	return &Lookup{
-		config:      config,
-		sprites:     NewAtlas(config),
-		fonts:       NewAtlas(config),
-		fontStore:   NewFontStore(),
-		spriteSizes: map[string]m.Vec2i{},
+		spritePacker: newPacker(config),
+		glyphPacker:  newPacker(config),
+		sprites:      assets.New[spriteDescrParams, spriteUser, AtlasEntry](spriteLoader{}),
+		tiled:        assets.New[tiledDescrParams, *gfx.ResourceQueue, StandaloneEntry](standaloneLoader{}),
+		spriteSizes:  assets.New[sizeDescrParams, struct{}, m.Vec2i](spriteSizeLoader{}),
+		fontStore:    NewFontStore(),
 	}
 }
 
-// applyUnloads evicts sprites and fonts queued for release since the last frame.
-// It runs at the Canvas flush boundary, after any draw ops recorded this frame
-// have already been resolved, so a same-frame unload never dangles a live draw.
-//
-// It takes the kernel because an unload is half of report-once: a path that
-// failed and is then unloaded must be able to fail loudly again the next time
-// someone asks for it.
-func (l *Lookup) applyUnloads(k kernel.Kernel, resources *gfx.ResourceQueue) {
-	for _, path := range l.unloadSprites {
-		l.sprites.releasePath(path, resources)
-		delete(l.spriteSizes, path)
-		k.ForgetReportedError(spriteReportKey(path))
+// spriteDescr names one sprite. A path names a file; the empty path names the
+// white texel canvas generates, which is blob-named because there is no file to
+// name it by and a Name the Library would try to open.
+func spriteDescr(path string) assets.Descr[spriteDescrParams] {
+	if path == "" {
+		return assets.Descr[spriteDescrParams]{
+			Blob:   assets.NewBlobFromString(whiteTexel),
+			Params: spriteDescrParams{generated: true},
+		}
 	}
-	l.unloadSprites = l.unloadSprites[:0]
-	for _, path := range l.unloadFonts {
-		l.unloadFont(path)
-		k.ForgetReportedError(fontReportKey(path))
-	}
-	l.unloadFonts = l.unloadFonts[:0]
+	return assets.Descr[spriteDescrParams]{Name: path}
 }
 
 // unloadFont drops a font's baked faces and parsed source so their CPU memory is
@@ -98,34 +105,54 @@ func (l *Lookup) invalidateFontsOnResize(resources *gfx.ResourceQueue, view *gfx
 		scale = view.FramebufferWidth / view.Width
 	}
 	if l.lastFramebufferScale != 0 && scale != l.lastFramebufferScale {
-		l.fonts.releaseAll(resources)
+		l.glyphPacker.releaseAll(resources)
 		ClearFontFaces(l.fontStore)
 	}
 	l.lastFramebufferScale = scale
 }
 
 // LookupAccess is a handler-scoped facade over a Lookup. It carries the kernel
-// (for error reporting) and the read filesystem needed to lazily load sprites and
-// fonts, without ever retaining them past the handler's lock scope. Acquire a
-// *Lookup write dependency plus storage.FileSystem in a handler, build a LookupAccess
-// with NewLookupAccess, and pass it to consumers for the duration of that handler.
+// (for error reporting) and the read filesystem needed to lazily read sprite
+// headers and font files, without ever retaining them past the handler's lock
+// scope. Acquire a *Lookup write dependency plus storage.FileSystem in a
+// handler, build a LookupAccess with NewLookupAccess, and pass it to consumers
+// for the duration of that handler.
+//
+// It measures and it never loads onto the device: every verb it carries answers
+// from a tier whose loader holds no GPU handle at all, which is what lets a
+// handler that lays a page out declare no resource queue.
 type LookupAccess struct {
 	kernel kernel.Kernel
 	lookup *Lookup
-	fs     storage.FileSystem
+	fsys   fs.FS
 }
 
 // NewLookupAccess builds a scoped facade. Call it inside a handler that holds the
 // *Lookup write lock and the storage.FileSystem read lock; never store the result.
+//
+// The filesystem is boxed into its interface here, once per handler, rather than
+// at each read: storage.FileSystem is a struct, and handing one to an interface
+// parameter costs an allocation every time it is done.
 func NewLookupAccess(k kernel.Kernel, lookup *Lookup, filesystem storage.FileSystem) LookupAccess {
-	return LookupAccess{kernel: k, lookup: lookup, fs: filesystem}
+	return LookupAccess{kernel: k, lookup: lookup, fsys: filesystem}
 }
 
 // Valid reports whether the facade is backed by a live Lookup.
 func (la LookupAccess) Valid() bool { return la.lookup != nil }
 
-func spriteReportKey(path string) string { return "sprite:" + path }
-func fontReportKey(path string) string   { return "font:" + path }
+// invalidSpritePath is the report-once key canvas speaks an unusable sprite path
+// under. It is canvas's own type, so it shares a namespace with nothing: the
+// Library reports a failed read under the descriptor itself, and a path this
+// refuses never becomes one.
+type invalidSpritePath string
+
+// ReportInvalidSpritePath says once that a path canvas was asked to draw is not
+// one it will open, for canvas's internal/.
+func ReportInvalidSpritePath(k kernel.Kernel, path string) {
+	k.ReportErrorOnce(invalidSpritePath(path), fmt.Errorf("canvas: invalid sprite path %q", path))
+}
+
+func fontReportKey(path string) string { return "font:" + path }
 
 // report says a resource's fault once per episode. The kernel holds the keys,
 // so the quiet outlives any one handler scope and a successful load or an
@@ -143,35 +170,26 @@ func (la LookupAccess) clearReport(key string) {
 	}
 }
 
-// SpriteSize returns a sprite's intrinsic pixel size, loading its header on first
+// SpriteSize returns a sprite's intrinsic pixel size, reading its header on first
 // use. It does not require the GPU queue to be ready. On an invalid path or a
 // missing/undecodable image it reports once and returns a zero size.
+//
+// It answers from the header tier and from nothing else. It used to prefer a
+// resident atlas entry, so that layout tracked the pixels actually drawn; that
+// read was a non-loading probe of the sprite table, and an asset cache has none -
+// its one read loads. So layout tracks the header, and a file that changed on
+// disk between the header read and the decode is measured as its header said.
 func (la LookupAccess) SpriteSize(path string) m.Vec2 {
 	if la.lookup == nil {
 		return m.Vec2{}
 	}
-	clean, ok := validateResourcePath(path)
+	clean, ok := ValidateResourcePath(path)
 	if !ok {
-		la.report(spriteReportKey(path), fmt.Errorf("canvas: invalid sprite path %q", path))
+		ReportInvalidSpritePath(la.kernel, path)
 		return m.Vec2{}
 	}
-	// A resident atlas entry carries authoritative decoded dimensions; prefer it
-	// so layout tracks the pixels actually drawn even if the file changed.
-	if entry, ok := la.lookup.sprites.entries[clean]; ok {
-		la.clearReport(spriteReportKey(clean))
-		return m.Vec2{X: float32(entry.Width), Y: float32(entry.Height)}
-	}
-	if meta, ok := la.lookup.spriteSizes[clean]; ok {
-		return m.Vec2{X: float32(meta.X), Y: float32(meta.Y)}
-	}
-	width, height, ok := decodeImageHeader(la.fs, clean)
-	if !ok {
-		la.report(spriteReportKey(clean), fmt.Errorf("canvas: sprite %q could not be loaded", clean))
-		return m.Vec2{}
-	}
-	la.lookup.spriteSizes[clean] = m.Vec2i{X: width, Y: height}
-	la.clearReport(spriteReportKey(clean))
-	return m.Vec2{X: float32(width), Y: float32(height)}
+	size := la.lookup.spriteSizes.Get(la.kernel, assets.Descr[sizeDescrParams]{Name: clean}, la.fsys, struct{}{})
+	return m.Vec2{X: float32(size.X), Y: float32(size.Y)}
 }
 
 // FontMetrics returns a font's vertical metrics at size (logical pixels). On an
@@ -251,34 +269,75 @@ func (la LookupAccess) iconWidth(path string, capHeight float32) float32 {
 	return capHeight * size.X / size.Y
 }
 
-// UnloadSprite queues a sprite for release at the next frame boundary. Unloading
-// an absent sprite is a no-op; an invalid path is reported once.
-func (la LookupAccess) UnloadSprite(path string) {
+// LookupDeviceAccess is the other half of the facade: the verbs that need the
+// device. Freeing an asset is immediate and hands its texture, its atlas slot or
+// its array back to gfx at the call, so an unload needs the resource queue where
+// a measurement needs only the filesystem.
+//
+// It is split off rather than folded in so that a handler which only measures -
+// ui's, laying a page out - declares no *gfx.ResourceQueue and serialises against
+// nothing that draws. scene names the same constraint with the same word: what
+// separates the two facades in both plugins is the device.
+type LookupDeviceAccess struct {
+	kernel    kernel.Kernel
+	lookup    *Lookup
+	resources *gfx.ResourceQueue
+}
+
+// NewLookupDeviceAccess builds a scoped facade over the unload verbs. Call it
+// inside a handler that holds the *Lookup and *gfx.ResourceQueue write locks;
+// never store the result. There is no filesystem, because freeing reads nothing.
+func NewLookupDeviceAccess(k kernel.Kernel, lookup *Lookup, resources *gfx.ResourceQueue) LookupDeviceAccess {
+	return LookupDeviceAccess{kernel: k, lookup: lookup, resources: resources}
+}
+
+// Valid reports whether the facade is backed by a live Lookup.
+func (la LookupDeviceAccess) Valid() bool { return la.lookup != nil }
+
+// UnloadSprite releases a sprite from every tier that may hold it - the atlas,
+// the standalone texture a tiled draw samples, and the measured header - and
+// forgets what each of them reported. Unloading an absent sprite is a no-op; an
+// invalid path is reported once.
+//
+// It frees at the call, with no queue in front of it: asking for the sprite
+// again is a reload rather than an error, and that is also the one lever a
+// terminal failure has.
+func (la LookupDeviceAccess) UnloadSprite(path string) {
 	if la.lookup == nil {
 		return
 	}
-	clean, ok := validateResourcePath(path)
+	clean, ok := ValidateResourcePath(path)
 	if !ok {
-		la.report(spriteReportKey(path), fmt.Errorf("canvas: invalid sprite path %q", path))
+		ReportInvalidSpritePath(la.kernel, path)
 		return
 	}
-	la.lookup.unloadSprites = append(la.lookup.unloadSprites, clean)
+	l := la.lookup
+	l.sprites.Free(la.kernel, assets.Descr[spriteDescrParams]{Name: clean},
+		spriteUser{packer: l.spritePacker, resources: la.resources})
+	l.tiled.Free(la.kernel, assets.Descr[tiledDescrParams]{Name: clean}, la.resources)
+	l.spriteSizes.Free(la.kernel, assets.Descr[sizeDescrParams]{Name: clean}, struct{}{})
 }
 
-// UnloadFont queues a font (all sizes) for release at the next frame boundary.
-// Unloading an absent font is a no-op; an invalid path is reported once. An
-// empty path names the built-in default, the same as everywhere else.
-func (la LookupAccess) UnloadFont(path string) {
+// UnloadFont releases a font's parsed source and every face baked from it, so a
+// later draw re-reads the file. Unloading an absent font is a no-op; an invalid
+// path is reported once. An empty path names the built-in default, the same as
+// everywhere else.
+//
+// The glyph atlas slots those faces rasterized into are not reclaimed: the glyph
+// side is a packer with no table, and nothing but a framebuffer scale change
+// knows which slots a font owned. It is the same leak the deferred unload had.
+func (la LookupDeviceAccess) UnloadFont(path string) {
 	if la.lookup == nil {
 		return
 	}
 	path = ResolveFontPath(path)
-	clean, ok := validateResourcePath(path)
+	clean, ok := ValidateResourcePath(path)
 	if !ok {
-		la.report(fontReportKey(path), fmt.Errorf("canvas: invalid font path %q", path))
+		la.kernel.ReportErrorOnce(fontReportKey(path), fmt.Errorf("canvas: invalid font path %q", path))
 		return
 	}
-	la.lookup.unloadFonts = append(la.lookup.unloadFonts, clean)
+	la.lookup.unloadFont(clean)
+	la.kernel.ForgetReportedError(fontReportKey(clean))
 }
 
 // face bakes (or reuses) a font face at the given logical size, reporting once on
@@ -289,12 +348,12 @@ func (la LookupAccess) face(path string, size int) *Font {
 		return nil
 	}
 	path = ResolveFontPath(path)
-	clean, ok := validateResourcePath(path)
+	clean, ok := ValidateResourcePath(path)
 	if !ok || size <= 0 {
 		la.report(fontReportKey(path), fmt.Errorf("canvas: invalid font path %q or size %d", path, size))
 		return nil
 	}
-	face := la.lookup.fontStore.Face(la.fs, clean, size)
+	face := la.lookup.fontStore.Face(la.fsys, clean, size)
 	if face == nil {
 		la.report(fontReportKey(clean), fmt.Errorf("canvas: font %q could not be loaded", clean))
 		return nil
@@ -319,39 +378,4 @@ func MeasureLine(face *Font, text string) float32 {
 		first = false
 	}
 	return width
-}
-
-// decodeImageHeader reads only an image's header to get its pixel size, avoiding a
-// full decode or any GPU upload.
-func decodeImageHeader(filesystem storage.FileSystem, path string) (width, height int, ok bool) {
-	file, err := filesystem.Open(path)
-	if err != nil {
-		return 0, 0, false
-	}
-	defer file.Close()
-	config, _, err := image.DecodeConfig(file)
-	if err != nil {
-		return 0, 0, false
-	}
-	return config.Width, config.Height, true
-}
-
-// validateResourcePath normalizes a resource path and rejects empty, absolute,
-// NUL-bearing, or root-escaping inputs so every Lookup method shares one cache key
-// and security boundary.
-func validateResourcePath(path string) (string, bool) {
-	if path == "" || strings.ContainsRune(path, 0) {
-		return "", false
-	}
-	cleaned := pathpkg.Clean(strings.ReplaceAll(path, "\\", "/"))
-	if cleaned == "" || cleaned == "." {
-		return "", false
-	}
-	if strings.HasPrefix(cleaned, "/") {
-		return "", false
-	}
-	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return "", false
-	}
-	return cleaned, true
 }
