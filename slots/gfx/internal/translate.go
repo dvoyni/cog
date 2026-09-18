@@ -79,7 +79,12 @@ func stripIndexKeyOf(topology gfx.PrimitiveTopology, width gfx.IndexWidth) strip
 // baked resource ID. It is owned by the plugin and used only on the driver's
 // render thread inside ConsumeCmd.
 type translator struct {
-	shaders   map[gfx.ShaderDescr]*cachedShader
+	// shaders is the module cache, keyed on the whole descriptor - a root plus
+	// one supply is one variant - and holding a compiled id or the failure that
+	// stood in for one. It is a translator field like every other cache here,
+	// reached only on the render thread, so what protects it is the confinement
+	// rather than a lock of its own.
+	shaders   *assets.Cache[types.ShaderDescrParams, shaderUser, *shader]
 	pipelines map[pipelineKey]gfx.PipelineID
 	samplers  map[gfx.SamplerDesc]gfx.SamplerID
 	uarena    []byte
@@ -129,7 +134,7 @@ type translator struct {
 
 func newTranslator() *translator {
 	return &translator{
-		shaders:           map[gfx.ShaderDescr]*cachedShader{},
+		shaders:           assets.New[types.ShaderDescrParams, shaderUser, *shader](shaderLoader{}),
 		pipelines:         map[pipelineKey]gfx.PipelineID{},
 		samplers:          map[gfx.SamplerDesc]gfx.SamplerID{},
 		layouts:           map[gfx.ShaderID]gfx.ShaderLayout{},
@@ -695,75 +700,21 @@ func (t *translator) textureUser(f *frame) textureUser {
 	return textureUser{backend: f.backend, ops: &t.ops}
 }
 
-// cachedShader is one module in the translator's shader cache: the backend id
-// when it compiled, the error when it did not, and the sources it was built
-// from, which is what eviction scans.
-//
-// A failed shader is cached as failed, on the same (root, supply) key. Without
-// that, the next frame re-reads every source, re-flattens, re-fails and
-// re-reports - at the frame rate.
-type cachedShader struct {
-	id       gfx.ShaderID
-	err      error
-	sources  []string
-	reported bool
-}
-
-// report returns the entry's error the first time it is asked and nothing
-// afterwards: a condition true every frame is worth saying once. The caller
-// drops the draw on a zero id rather than on the error, so silence never lets a
-// bad draw through.
-//
-// This is the translator's own flag rather than kernel.ReportErrorOnce, and so
-// are the failed-pipeline entry, badIndexLengths and unsuppliedBuffers. The
-// translator holds no Kernel: it hands its first error back to the render
-// handler, which reports it. What these dedupe is therefore a return value, not
-// a report - and firstErr carries one error per frame, so a condition that
-// re-reported every frame would mask every later error in every later frame.
-func (c *cachedShader) report() error {
-	if c.err == nil || c.reported {
-		return nil
-	}
-	c.reported = true
-	return c.err
-}
-
+// ensureShader resolves one material's shader to the module id its draw is
+// encoded against, and to the error that module has to say for itself.
 func (t *translator) ensureShader(f *frame, descr gfx.ShaderDescr) (gfx.ShaderID, error) {
-	if cached, ok := t.shaders[descr]; ok {
-		return cached.id, cached.report()
-	}
-	label := types.ShaderLabel(descr)
-	// Flatten happens here, on the render thread, on a cache miss only - the
-	// first draw of a given (root, supply). The cost changes from one file read
-	// to N, which is the same shape as today's hitch rather than a new class of
-	// problem: if it ever bites, it bites the first frame a material appears,
-	// which is already true.
-	flattened, err := types.FlattenShader(f.fsys, descr)
-	// The include set is recorded on failure as well as on success, so that a
-	// failed entry evicts like any other and the developer loop stays: fix the
-	// file, hot-reload evicts, the next frame retries and reports afresh.
-	cached := &cachedShader{sources: flattened.Sources}
-	t.shaders[descr] = cached
-	if err != nil {
-		cached.err = err
-		return 0, cached.report()
-	}
-	id, err := f.backend.NewShader(gfx.ShaderDesc{Code: []byte(flattened.Text), Label: label})
-	if err != nil {
-		// Nothing the backend said is rewritten and no line number is parsed out
-		// of its message: gfx appends the rendered segment table and lets the
-		// reader subtract.
-		cached.err = types.CompileError(label, err, flattened.SourceMap)
-		return 0, cached.report()
-	}
-	cached.id = id
-	// Every shader gfx reflects is measured, not only an engine's bundled ones:
-	// a caller-supplied material is what actually gets bound at draw time. The
-	// shader is cached, so this reports once rather than once a frame.
-	if diagnostic := checkWebLimits(label, t.shaderLayout(f.backend, id), f.backend.Limits()); diagnostic != nil && t.diagnostic == nil {
-		t.diagnostic = diagnostic
-	}
-	return id, nil
+	cached := t.shaders.Get(
+		f.k, assets.Descr[types.ShaderDescrParams](descr), f.fsys, t.shaderUser(f, descr.Path()),
+	)
+	return cached.id, cached.report()
+}
+
+// shaderUser is what the shader loader is handed on every call. root is the
+// module's path on a load and empty on a free, which is the whole difference
+// between the two: a free reads the value, and only a load needs to be told
+// what the bytes it was given are called.
+func (t *translator) shaderUser(f *frame, root string) shaderUser {
+	return shaderUser{t: t, backend: f.backend, root: root}
 }
 
 func (t *translator) releaseCachedResource(f *frame, path string) {
@@ -771,67 +722,41 @@ func (t *translator) releaseCachedResource(f *frame, path string) {
 	// only way one is made and it takes no options - so the key a Free names is
 	// the key a Get made, and the report that entry filed is forgotten with it.
 	t.textures.Free(f.k, assets.Descr[types.TextureDescrParams](gfx.TextureWithResource(path)), t.textureUser(f))
-	// Eviction scans the forward index rather than probing one descriptor,
-	// because three things break that probe under the preprocessor: a path may
-	// root several variants, a path may be an included source of modules rooted
-	// elsewhere, and a ShaderWithText shader can include resources, so a text
-	// shader is now evictable by a path. A reverse path-to-modules index would be
-	// O(1) instead of O(n), but it is a second structure to keep in sync on every
-	// release for a lookup nobody waits on - eviction is a developer-loop command
-	// and t.shaders holds single digits - and the forward direction is what
-	// flatten already produces.
-	for descr, cached := range t.shaders {
-		if slices.Contains(cached.sources, path) {
-			t.releaseShader(f.backend, descr, cached)
-		}
-	}
-}
-
-func (t *translator) releaseShader(backend gfx.Backend, descr gfx.ShaderDescr, cached *cachedShader) {
-	delete(t.shaders, descr)
-	if cached.id == 0 {
-		return
-	}
-	for key, pipeline := range t.pipelines {
-		if key.shader != cached.id {
-			continue
-		}
-		// A zero entry is the marker for a pipeline that failed to build, not
-		// a resource: there is nothing to hand back.
-		if pipeline != 0 {
-			backend.FreePipeline(pipeline)
-		}
-		delete(t.pipelines, key)
-	}
-	for key := range t.parameterPlans {
-		if key.shader == cached.id {
-			delete(t.parameterPlans, key)
-		}
-	}
-	delete(t.layouts, cached.id)
-	backend.FreeShader(cached.id)
+	// A shader cannot be freed by key, because three things break the probe of
+	// one descriptor: a path may root several variants, a path may be an
+	// included source of modules rooted elsewhere, and a ShaderWithText shader
+	// can include resources, so a text shader is evictable by a path it never
+	// names. The decision is over the value, and the value already holds the
+	// answer - which is what FreeWhere is, and why gfx builds no reverse
+	// path-to-modules index to hold what the include set holds already.
+	t.shaders.FreeWhere(f.k, t.shaderUser(f, ""), func(_ assets.Descr[types.ShaderDescrParams], value *shader) bool {
+		return slices.Contains(value.sources, path)
+	})
 }
 
 func (t *translator) freeCachedResources(f *frame) {
-	t.textures.FreeAll(f.k, t.textureUser(f))
+	// Pipelines and plans go first, and the order is the point. Freeing an entry
+	// runs the loader's cascade, which sweeps both maps for the dead ShaderID;
+	// left full, that is O(shaders x pipelines) across the FreeAll. Emptied
+	// ahead of it, every sweep scans nothing and the pipelines are still handed
+	// back exactly once - here, where the shader ids they were keyed on are
+	// about to stop meaning anything.
 	for _, pipeline := range t.pipelines {
 		if pipeline != 0 {
 			f.backend.FreePipeline(pipeline)
 		}
 	}
-	for _, cached := range t.shaders {
-		if cached.id != 0 {
-			f.backend.FreeShader(cached.id)
-		}
-	}
+	clear(t.pipelines)
+	clear(t.parameterPlans)
+
+	t.textures.FreeAll(f.k, t.textureUser(f))
+	t.shaders.FreeAll(f.k, t.shaderUser(f, ""))
+
 	for _, sampler := range t.samplers {
 		f.backend.FreeSampler(sampler)
 	}
-	clear(t.pipelines)
-	clear(t.shaders)
 	clear(t.samplers)
 	clear(t.layouts)
-	clear(t.parameterPlans)
 	clear(t.badIndexLengths)
 	clear(t.unsuppliedBuffers)
 }

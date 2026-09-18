@@ -58,16 +58,18 @@ func (m MaterialDescr) Shader() ShaderDescr { return m.shader }
 func (m MaterialDescr) Params() []ParameterDescr { return m.params }
 
 // Fingerprint hashes everything that makes one material different from
-// another: the shader by source kind, text-or-path and supply, the pipeline
-// state, and every parameter in order by name, kind and value. Two descriptors with the
-// same content fingerprint the same regardless of which backing their
-// parameters live in, so a recorder that builds its material inline every draw
-// still sorts those draws together.
+// another: the shader by its whole descriptor, the pipeline state, and every
+// parameter in order by name, kind and value. Two descriptors with the same
+// content fingerprint the same regardless of which backing their parameters
+// live in, so a recorder that builds its material inline every draw still sorts
+// those draws together.
 //
-// Inline texture and buffer bytes hash by identity - pointer and length -
-// rather than by content, so two descriptors around different byte slices
-// count as different materials even when the bytes agree. Missing a merge
-// costs a batch; merging two materials that differ would draw the wrong one.
+// Inline bytes - a texture's pixels, a buffer's contents, a shader's text -
+// hash by identity, pointer and length, rather than by content, so two
+// descriptors around different runs count as different materials even when the
+// bytes agree. That is the same identity the caches key on, which is the point:
+// missing a merge costs a batch, and merging two materials that are two cache
+// entries would draw the wrong one.
 //
 // It lives here rather than beside its consumer because the fields it covers
 // are unexported, and a fingerprint that a new field can silently fall out of
@@ -75,13 +77,12 @@ func (m MaterialDescr) Params() []ParameterDescr { return m.params }
 func (m MaterialDescr) Fingerprint() uint64 {
 	var h maphash.Hash
 	h.SetSeed(fingerprintSeed)
-	writeUint(&h, uint64(m.shader.source))
-	h.WriteString(m.shader.textOrPath)
-	// The supply is part of the shader's identity, so it is part of the
-	// material's: without it two materials differing only in their defines
-	// fingerprint the same, merge into one batch, and one of them draws the
-	// wrong module.
-	h.WriteString(m.shader.supply)
+	// The whole descriptor goes in as one comparable value rather than field by
+	// field, because every field of it is part of the shader's identity and so
+	// part of the material's: without the supply, two materials differing only
+	// in their defines fingerprint the same, merge into one batch, and one of
+	// them draws the wrong module.
+	maphash.WriteComparable(&h, m.shader)
 	writeUint(&h, uint64(m.state.Blend)|uint64(m.state.DepthCompare)<<8|
 		uint64(m.state.Cull)<<16|uint64(m.state.FrontFace)<<24|boolBit(m.state.DepthWrite)<<32)
 	for i := range m.params {

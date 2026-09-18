@@ -34,8 +34,10 @@ func flattenShader(t testing.TB, mount storage.MountId, filesystem fs.FS, shader
 		storage.Name: storage.Config{}.WithReadFS(mount, 0, filesystem),
 	}).Handler(func(err error) bool {
 		var source gfx.ErrShaderSource
-		var missing gfx.ErrShaderNotFound
-		if errors.As(err, &source) || errors.As(err, &missing) {
+		// A shader whose source is not there is the asset Library's read failure
+		// now rather than an error type of gfx's own, and it wraps what the open
+		// returned untouched.
+		if errors.As(err, &source) || errors.Is(err, fs.ErrNotExist) {
 			mu.Lock()
 			refusals = append(refusals, err)
 			mu.Unlock()

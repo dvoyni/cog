@@ -405,7 +405,10 @@ and physical `FramebufferWidth`/`FramebufferHeight`.
   path alone identifies what it names.
 - `ShaderDescr`: build with `ShaderWithResource` or `ShaderWithText`; inspect
   with `Path()` and `Supply()`. One path under two supplies is two shaders, so
-  the supply is part of the identity rather than a detail beside it.
+  the supply is part of the identity rather than a detail beside it. Inline text
+  is identified by the run of bytes rather than by its spelling, so a literal, a
+  `const` or a package `var` is one module however often it is written down, and
+  a string computed afresh per call is a module per call.
 - `MeshDescr`: build with `Mesh` or `MeshIndexed` from buffer descriptors,
   topology, and `VertexAttr` values created by `Attr`; inspect with
   `VertexCount()`, `IndexCount()`, `Indexed()`, `IndexWidth()` and `Topology()`.
@@ -714,11 +717,11 @@ like any other write-then-read pair; a screen capture declares none, because
 the frame buffer is the one attachment gfx never names and the backend places
 that barrier itself.
 
-`BufferSourceBytes`, `BufferSourceBaked`, `ShaderSourceText` and
-`ShaderSourceResource` are exported source-marker constants; normal callers use
-descriptor constructors instead. `TextureDescr` has none: its three cases are
-told apart by which of its fields carries the answer - a baked id, a path, or
-inline pixels - and a marker would only restate that.
+`BufferSourceBytes` and `BufferSourceBaked` are exported source-marker
+constants; normal callers use descriptor constructors instead. `TextureDescr`
+and `ShaderDescr` have none: their cases are told apart by which of their fields
+carries the answer - a baked id, a path, or inline pixels for a texture; a path
+or inline text for a shader - and a marker would only restate that.
 
 ## Math
 
@@ -731,8 +734,11 @@ use `m.Vec*`, `m.Rect`, `m.Color`, and column-major `m.Mat4` directly.
 Backend Adapter is ready, and the frame is skipped. A missing Adapter is not a
 gfx error: composition fails with `kernel.ErrMissingAdapter`.
 
-`ErrShaderNotFound{Name}` is reported through the kernel when a resource-backed
-shader cannot be loaded. Its `Error() string` method implements `error`.
+A resource-backed shader whose file cannot be read is reported through the
+kernel by the asset library that performed the read, named by the descriptor
+that failed, and said once per entry: gfx has no error type of its own for it.
+What gfx reports itself is what only gfx can see - `ErrShaderSource` for a
+module the preprocessor or the backend refused.
 
 `ErrParameterKindMismatch{Shader, Parameter, Supplied, Declared}` is reported
 when a parameter's name matches a binding its kind cannot fill, and the draw is
