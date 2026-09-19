@@ -49,6 +49,13 @@ the compiler.
 **A class-like type gets its own file, named after it.** `scheduler` lives in
 `scheduler.go`, `ResourceAccess` in `resourceaccess.go`.
 
+**The file is named for the type, not for the job.** Take the type's name,
+lowercase it, drop nothing: `tickSource` lives in `ticksource.go`, `condParser`
+in `condparser.go`, `shaderLoader` in `shaderloader.go` — not in `tick.go`,
+`condition.go` or `shadercache.go`. A file named after the job is the invitation
+a second class-like type accepts, because the job is broad enough to cover it
+and the type's name would not have been.
+
 **Class-like** means the type has at least one method that does something, as
 opposed to rendering or exposing what it already holds. `Error`, `String`,
 `MarshalJSON`, a plain getter and a plain setter do not count. So every type in

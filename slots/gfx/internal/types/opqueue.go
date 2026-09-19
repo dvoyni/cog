@@ -74,6 +74,25 @@ type temporaryTextureKey struct {
 	renderable bool
 }
 
+// passRecord is one declared pass and the position that breaks Order ties.
+type passRecord struct {
+	Desc PassDescr
+	seq  int
+}
+
+// IDMinter is the half of the Backend a recording queue calls: it reserves
+// logical resource ids, which is CPU-only and safe from the recording thread.
+type IDMinter interface {
+	NewTexture() TextureID
+	NewBuffer() BufferID
+	Ready() bool
+}
+
+// IDSource reaches the Backend adapter. It is read when an id is needed rather
+// than when the queue is built, because a queue is built during registration
+// and the adapter is bound only when composition finishes.
+type IDSource func() IDMinter
+
 // OpQueue records high-level frame commands. All uploads it owns are temporary
 // and may be dropped with the frame. Persistent GPU resources are managed
 // separately through ResourceQueue.
@@ -98,19 +117,6 @@ type OpQueue struct {
 func NewOpQueue(ids IDSource) *OpQueue {
 	return &OpQueue{ids: ids, temporaryTextureFree: map[temporaryTextureKey][]int{}}
 }
-
-// IDMinter is the half of the Backend a recording queue calls: it reserves
-// logical resource ids, which is CPU-only and safe from the recording thread.
-type IDMinter interface {
-	NewTexture() TextureID
-	NewBuffer() BufferID
-	Ready() bool
-}
-
-// IDSource reaches the Backend adapter. It is read when an id is needed rather
-// than when the queue is built, because a queue is built during registration
-// and the adapter is bound only when composition finishes.
-type IDSource func() IDMinter
 
 // Len reports the number of recorded ops.
 func (q *OpQueue) Len() int { return len(q.ops) }
@@ -155,6 +161,34 @@ func (q *OpQueue) Reset() {
 		key := q.temporaryTextures[i].key
 		q.temporaryTextureFree[key] = append(q.temporaryTextureFree[key], i)
 	}
+}
+
+// Pass declares a pass and selects it: every op recorded afterwards appends to
+// it, until another Pass or SetPass call. Passes run in Order, not in the order
+// they were declared.
+func (q *OpQueue) Pass(desc PassDescr) PassRef {
+	q.passes = append(q.passes, passRecord{Desc: desc, seq: len(q.passes)})
+	q.current = len(q.passes) - 1
+	return PassRef(len(q.passes))
+}
+
+// SetPass re-selects a pass declared earlier this frame. An unknown reference
+// is ignored.
+func (q *OpQueue) SetPass(ref PassRef) {
+	if ref > 0 && int(ref) <= len(q.passes) {
+		q.current = int(ref) - 1
+	}
+}
+
+// selectedPass returns the index of the pass ops are appended to, or -1 when no
+// pass is selected. Every draw names a pass: there is no implicit one, because
+// a default screen pass would silently absorb draws that belonged in a camera's
+// target, and it would have to guess an Order.
+func (q *OpQueue) selectedPass() int {
+	if q.current < 0 || q.current >= len(q.passes) {
+		return -1
+	}
+	return q.current
 }
 
 // Draw records a draw op. Parameters are matched to reflected shader constants
@@ -253,6 +287,22 @@ func (q *OpQueue) bakeTextureIfNeeded(texture TextureDescr) TextureDescr {
 		texture.Params.width, texture.Params.height, texture.Params.format,
 		texture.Blob.Data(), texture.Params.copyData, texture.Params.mipmaps,
 	)
+}
+
+// TemporaryBuffer uploads one frame-lifetime storage buffer and returns the
+// baked descriptor for it, so every draw that binds a range of it shares one
+// upload. It is the arena counterpart of TemporaryTarget: BufferWithBytes
+// re-bakes wherever it is recorded, which is right for a buffer one draw owns
+// and wrong for one the whole frame reads.
+//
+// copyData snapshots the bytes when true; when false the caller must keep them
+// unchanged until the recorded frame is consumed or dropped. Its contents do
+// not survive the frame.
+func (q *OpQueue) TemporaryBuffer(data []byte, copyData bool) BufferDescr {
+	if len(data) == 0 {
+		return BufferDescr{}
+	}
+	return q.temporaryBuffer(BufferStorage, data, copyData)
 }
 
 func (q *OpQueue) temporaryBuffer(kind BufferKind, data []byte, copyData bool) BufferDescr {

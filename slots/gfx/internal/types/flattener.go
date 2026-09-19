@@ -99,6 +99,15 @@ type condLine struct {
 	at   ShaderLocation
 }
 
+// lineScan is one line's directive plus the conditional it sits inside.
+type lineScan struct {
+	kind    directiveKind
+	arg     string
+	expr    condExpr
+	openIf  ShaderLocation // the innermost open #if; zero at depth 0
+	nesting int
+}
+
 func (f *flattener) run() (string, ShaderSourceMap, error) {
 	// A malformed supply surfaces here rather than at construction, because a
 	// constructor that panicked would turn a typo in a material declaration into
@@ -253,15 +262,6 @@ func (f *flattener) appendLine(text, source string, sourceLine int, from ShaderL
 	f.segments = append(f.segments, ShaderSegment{
 		OutputStart: outputLine, Length: 1, Source: source, SourceStart: sourceLine, IncludedFrom: from,
 	})
-}
-
-// lineScan is one line's directive plus the conditional it sits inside.
-type lineScan struct {
-	kind    directiveKind
-	arg     string
-	expr    condExpr
-	openIf  ShaderLocation // the innermost open #if; zero at depth 0
-	nesting int
 }
 
 // scanSource validates one source's directive structure before anything is

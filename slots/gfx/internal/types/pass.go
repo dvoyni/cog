@@ -142,40 +142,6 @@ type PassDescr struct {
 // refers to no pass.
 type PassRef int
 
-// passRecord is one declared pass and the position that breaks Order ties.
-type passRecord struct {
-	Desc PassDescr
-	seq  int
-}
-
-// Pass declares a pass and selects it: every op recorded afterwards appends to
-// it, until another Pass or SetPass call. Passes run in Order, not in the order
-// they were declared.
-func (q *OpQueue) Pass(desc PassDescr) PassRef {
-	q.passes = append(q.passes, passRecord{Desc: desc, seq: len(q.passes)})
-	q.current = len(q.passes) - 1
-	return PassRef(len(q.passes))
-}
-
-// SetPass re-selects a pass declared earlier this frame. An unknown reference
-// is ignored.
-func (q *OpQueue) SetPass(ref PassRef) {
-	if ref > 0 && int(ref) <= len(q.passes) {
-		q.current = int(ref) - 1
-	}
-}
-
-// selectedPass returns the index of the pass ops are appended to, or -1 when no
-// pass is selected. Every draw names a pass: there is no implicit one, because
-// a default screen pass would silently absorb draws that belonged in a camera's
-// target, and it would have to guess an Order.
-func (q *OpQueue) selectedPass() int {
-	if q.current < 0 || q.current >= len(q.passes) {
-		return -1
-	}
-	return q.current
-}
-
 // sameAttachments reports whether two passes render into the same places. Two
 // DepthAuto passes count as the same attachment because they share a colour
 // target, and therefore a size, and therefore the backend's one depth texture

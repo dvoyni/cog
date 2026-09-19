@@ -1,22 +1,38 @@
 package types
 
-// Queue owns a translated command sequence. Commands are constructed as local
-// values and appended once. Bakes are hoisted ahead of every pass; render
-// commands belong to the pass that was open when they were recorded.
-//
-// gfx appends to it and a Backend reads it back only by replaying it into its
-// sinks: ReplayBakes, ReplayPasses and ReplayReleases are the whole read side.
-type Queue struct {
-	bakes    []op
-	render   []op
-	releases []op
-	passes   []pass
+// opKind tags the variant of an op.
+type opKind uint8
 
-	// transitions is one flat arena for the whole frame; each pass holds a
-	// half-open range into it, the same way it holds one into render.
-	// transitionsUsed marks how much of it earlier passes already claimed.
-	transitions     []TextureTransition
-	transitionsUsed int
+const (
+	opSetPipeline opKind = iota
+	opSetParams
+	opSetTexture
+	opSetSampler
+	opSetVertexBuffer
+	opSetIndexBuffer
+	opSetBuffer
+	opDraw
+	opBakeBuffer
+	opReleaseBuffer
+	opBakeTexture
+	opReleaseTexture
+	opAllocateTexture
+	opUpdateTexture
+)
+
+// op is one entry in a translated, backend-agnostic op stream produced by gfx
+// and consumed by Backend.Execute. Its storage is a compact per-kind union - one
+// resource slot and five int32 args are reinterpreted per op kind by the
+// appenders and the replay above - so a frame's many ops stay small.
+type op struct {
+	kind   opKind
+	res0   ResourceID // pipeline | vertex/index/uniform buffer | texture | sampler
+	arg0   int32      // offset | first | group | width | layer
+	arg1   int32      // size | count | binding | height | region x
+	arg2   int32      // group | indexed | layers | format | region y
+	arg3   int32      // binding | instances | format | mipmaps | region width
+	arg4   int32      // first instance | renderable | region height
+	params []byte     // params payload, buffer bytes or texture pixels
 }
 
 // pass is a pass descriptor and the half-open range of render commands in it.
@@ -89,6 +105,25 @@ type RenderPass interface {
 type ReleaseSink interface {
 	ReleaseBuffer(BufferID)
 	ReleaseTexture(TextureID)
+}
+
+// Queue owns a translated command sequence. Commands are constructed as local
+// values and appended once. Bakes are hoisted ahead of every pass; render
+// commands belong to the pass that was open when they were recorded.
+//
+// gfx appends to it and a Backend reads it back only by replaying it into its
+// sinks: ReplayBakes, ReplayPasses and ReplayReleases are the whole read side.
+type Queue struct {
+	bakes    []op
+	render   []op
+	releases []op
+	passes   []pass
+
+	// transitions is one flat arena for the whole frame; each pass holds a
+	// half-open range into it, the same way it holds one into render.
+	// transitionsUsed marks how much of it earlier passes already claimed.
+	transitions     []TextureTransition
+	transitionsUsed int
 }
 
 // Reset drops all commands but keeps queue capacity for reuse.
@@ -343,39 +378,4 @@ func (q *Queue) ReplayReleases(sink ReleaseSink) {
 			sink.ReleaseTexture(TextureID(o.res0))
 		}
 	}
-}
-
-// opKind tags the variant of an op.
-type opKind uint8
-
-const (
-	opSetPipeline opKind = iota
-	opSetParams
-	opSetTexture
-	opSetSampler
-	opSetVertexBuffer
-	opSetIndexBuffer
-	opSetBuffer
-	opDraw
-	opBakeBuffer
-	opReleaseBuffer
-	opBakeTexture
-	opReleaseTexture
-	opAllocateTexture
-	opUpdateTexture
-)
-
-// op is one entry in a translated, backend-agnostic op stream produced by gfx
-// and consumed by Backend.Execute. Its storage is a compact per-kind union - one
-// resource slot and five int32 args are reinterpreted per op kind by the
-// appenders and the replay above - so a frame's many ops stay small.
-type op struct {
-	kind   opKind
-	res0   ResourceID // pipeline | vertex/index/uniform buffer | texture | sampler
-	arg0   int32      // offset | first | group | width | layer
-	arg1   int32      // size | count | binding | height | region x
-	arg2   int32      // group | indexed | layers | format | region y
-	arg3   int32      // binding | instances | format | mipmaps | region width
-	arg4   int32      // first instance | renderable | region height
-	params []byte     // params payload, buffer bytes or texture pixels
 }

@@ -60,75 +60,6 @@ type plannedSampler struct {
 	param   parameterRef
 }
 
-type parameterPlan struct {
-	uniformSize int
-	uniforms    []plannedUniform
-	samplers    []plannedSampler
-	resources   []plannedResource
-	// mismatch is the first parameter whose kind cannot fill the binding its
-	// name matched. It is resolved during construction, which is cached per
-	// (shader, parameter shape), so detecting it costs nothing per draw.
-	mismatch error
-}
-
-type parameterPlanBucketKey struct {
-	shader gfx.ShaderID
-	hash   uint64
-}
-
-type cachedParameterPlan struct {
-	materialNames []string
-	drawNames     []string
-	plan          parameterPlan
-}
-
-func (t *translator) prepareParameterPlan(shader gfx.ShaderID, label string, layout gfx.ShaderLayout, material, draw []gfx.ParameterDescr) *parameterPlan {
-	key := parameterPlanBucketKey{shader: shader, hash: parameterShapeHash(material, draw)}
-	bucket := t.parameterPlans[key]
-	for i := range bucket {
-		if parameterShapeEqual(&bucket[i], material, draw) {
-			return &bucket[i].plan
-		}
-	}
-
-	entry := cachedParameterPlan{
-		materialNames: parameterNames(material),
-		drawNames:     parameterNames(draw),
-		plan:          parameterPlan{uniformSize: layout.UniformSize},
-	}
-	entry.plan.uniforms = make([]plannedUniform, len(layout.Uniforms))
-	for i := range layout.Uniforms {
-		member := &layout.Uniforms[i]
-		ref := parameterRefFor(member.Name, material, draw)
-		entry.plan.checkKind(label, member.Name, ref, material, draw, declaredValue)
-		entry.plan.uniforms[i] = plannedUniform{offset: member.Offset, param: ref}
-	}
-	entry.plan.resources = make([]plannedResource, 0, len(layout.Resources))
-	for i := range layout.Resources {
-		resource := &layout.Resources[i]
-		ref := parameterRefFor(resource.Name, material, draw)
-		if resource.Sampler {
-			entry.plan.checkKind(label, resource.Name, ref, material, draw, declaredSampler)
-			entry.plan.samplers = append(entry.plan.samplers, plannedSampler{
-				group: resource.Group, binding: resource.Binding, param: ref,
-			})
-			continue
-		}
-		kind, declared := plannedTexture, declaredTexture
-		if resource.StorageBuffer {
-			kind, declared = plannedBuffer, declaredBuffer
-		}
-		entry.plan.checkKind(label, resource.Name, ref, material, draw, declared)
-		entry.plan.resources = append(entry.plan.resources, plannedResource{
-			kind: kind, group: resource.Group, binding: resource.Binding, param: ref, name: resource.Name,
-		})
-	}
-
-	bucket = append(bucket, entry)
-	t.parameterPlans[key] = bucket
-	return &bucket[len(bucket)-1].plan
-}
-
 // declaredKind is what a reflected binding needs from the parameter that fills
 // it. It is coarser than paramKind on purpose: the shader declares a slot, not a
 // Go constructor, and several constructors legitimately fill one slot.
@@ -163,6 +94,28 @@ func (d declaredKind) accepts(kind types.ParamKind) bool {
 		return kind == types.ParamBuffer
 	}
 	return kind.ValueKind()
+}
+
+type parameterPlan struct {
+	uniformSize int
+	uniforms    []plannedUniform
+	samplers    []plannedSampler
+	resources   []plannedResource
+	// mismatch is the first parameter whose kind cannot fill the binding its
+	// name matched. It is resolved during construction, which is cached per
+	// (shader, parameter shape), so detecting it costs nothing per draw.
+	mismatch error
+}
+
+type parameterPlanBucketKey struct {
+	shader gfx.ShaderID
+	hash   uint64
+}
+
+type cachedParameterPlan struct {
+	materialNames []string
+	drawNames     []string
+	plan          parameterPlan
 }
 
 // checkKind records the first parameter whose kind cannot fill the binding its

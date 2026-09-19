@@ -1,0 +1,181 @@
+package internal
+
+import (
+	"slices"
+
+	"github.com/dvoyni/cog/libs/assets"
+	"github.com/dvoyni/cog/slots/gfx"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+)
+
+// ensureTexture resolves one texture parameter to the id its binding is set
+// from.
+//
+// The three descriptor cases split here, and only one of them is a cache's: a
+// baked texture already carries its id and needs nothing, an inline run was
+// baked into one when the frame was recorded, and a path is what the cache is
+// for.
+func (t *translator) ensureTexture(f *frame, descr gfx.TextureDescr) gfx.TextureID {
+	if id := descr.ID(); id != 0 {
+		return id
+	}
+	if descr.Path() == "" {
+		return 0
+	}
+	return t.textures.Get(f.k, assets.Descr[types.TextureDescrParams](descr), f.fsys, t.textureUserData(f)).id
+}
+
+// textureUserData is what the texture loader is handed on every call. The op queue
+// is the translator's own, so a bake or a release the loader emits lands in the
+// frame being built exactly where the translator used to put it itself.
+func (t *translator) textureUserData(f *frame) textureUserData {
+	return textureUserData{backend: f.backend, ops: &t.ops}
+}
+
+// ensureShader resolves one material's shader to the module id its draw is
+// encoded against, and to the error that module has to say for itself.
+func (t *translator) ensureShader(f *frame, descr gfx.ShaderDescr) (gfx.ShaderID, error) {
+	cached := t.shaders.Get(
+		f.k, assets.Descr[types.ShaderDescrParams](descr), f.fsys, t.shaderUserData(f, descr.Path()),
+	)
+	return cached.id, cached.report()
+}
+
+// shaderUserData is what the shader loader is handed on every call. root is the
+// module's path on a load and empty on a free, which is the whole difference
+// between the two: a free reads the value, and only a load needs to be told
+// what the bytes it was given are called.
+func (t *translator) shaderUserData(f *frame, root string) shaderUserData {
+	return shaderUserData{t: t, backend: f.backend, root: root}
+}
+
+// shaderLayout returns the backend's reflected layout for a shader, cached by id.
+func (t *translator) shaderLayout(backend gfx.Backend, id gfx.ShaderID) gfx.ShaderLayout {
+	if l, ok := t.layouts[id]; ok {
+		return l
+	}
+	l := backend.ShaderLayout(id)
+	t.layouts[id] = l
+	return l
+}
+
+// ensurePipeline returns the cached pipeline for one (shader, mesh layout,
+// state, attachments) combination, building it on a miss.
+//
+// It returns an error only on the miss that produced it, which is what makes
+// report-once-drop-always fall out of the cache that already exists: a failure
+// is cached as the zero id, so every frame after the first finds `ok` true,
+// returns zero and no error, and the caller drops the draw on the zero id
+// exactly as it did before.
+func (t *translator) ensurePipeline(
+	backend gfx.Backend, shader gfx.ShaderID, label string, m *gfx.MeshDescr, state gfx.MaterialState, pass gfx.PassDescr,
+) (gfx.PipelineID, error) {
+	stride := types.MeshStride(m)
+	layout, ok := types.VertexLayoutKeyOf(types.MeshLayout(m))
+	if !ok {
+		return 0, nil
+	}
+	// One colour format exists today, the frame buffer's, and every renderable
+	// texture in the tree is allocated in it - so the sentinel is still right
+	// for every pass that has a colour attachment at all. What is not
+	// interchangeable is having one: a depth-only pass has no colour
+	// attachment, and a pipeline that declares a target it will never be given
+	// is rejected at setPipeline.
+	const colorFormat, depthFormat = gfx.FormatScreen, gfx.FormatDepth32F
+	noColor := pass.Target.IsNone()
+	k := pipelineKey{
+		shader: shader, topology: m.Topology(), state: state,
+		colorFormat: colorFormat, depthFormat: depthFormat, noColor: noColor, layout: layout,
+		stripIndex: stripIndexKeyOf(m.Topology(), m.IndexWidth()),
+	}
+	if id, ok := t.pipelines[k]; ok {
+		return id, nil
+	}
+	// The vertex interface is checked before the backend is asked for anything,
+	// because no backend checks it: gogpu performs no vertex-interface
+	// validation of any kind, the software rasterizer keeps an unsupplied
+	// input's zero value, and WebGPU itself fills the components a format does
+	// not supply with (0, 0, 0, 1).
+	if err := gfx.CheckVertexInterface(label, t.shaderLayout(backend, shader), types.MeshLayout(m)); err != nil {
+		t.pipelines[k] = 0
+		return 0, err
+	}
+	attrs := make([]gfx.VertexAttribute, len(types.MeshLayout(m)))
+	for i := range types.MeshLayout(m) {
+		attrs[i] = gfx.VertexAttribute{Offset: types.VertexAttrOffset(&(types.MeshLayout(m)[i])), Type: types.VertexAttrTyp(&(types.MeshLayout(m)[i])), Location: i}
+	}
+	id, err := backend.NewPipeline(gfx.PipelineDesc{
+		Shader:        shader,
+		Topology:      m.Topology(),
+		State:         state,
+		ColorFormat:   colorFormat,
+		DepthFormat:   depthFormat,
+		NoColorTarget: noColor,
+		Stride:        stride,
+		Attributes:    attrs,
+		IndexWidth:    m.IndexWidth(),
+		Label:         "gfx.pipeline",
+	})
+	if err != nil {
+		t.pipelines[k] = 0
+		return 0, gfx.ErrPipelineFailed{Shader: label, Err: err}
+	}
+	t.pipelines[k] = id
+	return id, nil
+}
+
+func (t *translator) ensureSampler(backend gfx.Backend, desc gfx.SamplerDesc) gfx.SamplerID {
+	if id, ok := t.samplers[desc]; ok {
+		return id
+	}
+	id, err := backend.NewSampler(desc)
+	if err != nil {
+		return 0
+	}
+	t.samplers[desc] = id
+	return id
+}
+
+func (t *translator) releaseCachedResource(f *frame, path string) {
+	// A path names exactly one texture entry, because TextureWithResource is the
+	// only way one is made and it takes no options - so the key a Free names is
+	// the key a Get made, and the report that entry filed is forgotten with it.
+	t.textures.Free(f.k, assets.Descr[types.TextureDescrParams](gfx.TextureWithResource(path)), t.textureUserData(f))
+	// A shader cannot be freed by key, because three things break the probe of
+	// one descriptor: a path may root several variants, a path may be an
+	// included source of modules rooted elsewhere, and a ShaderWithText shader
+	// can include resources, so a text shader is evictable by a path it never
+	// names. The decision is over the value, and the value already holds the
+	// answer - which is what FreeWhere is, and why gfx builds no reverse
+	// path-to-modules index to hold what the include set holds already.
+	t.shaders.FreeWhere(f.k, t.shaderUserData(f, ""), func(_ assets.Descr[types.ShaderDescrParams], value *shader) bool {
+		return slices.Contains(value.sources, path)
+	})
+}
+
+func (t *translator) freeCachedResources(f *frame) {
+	// Pipelines and plans go first, and the order is the point. Freeing an entry
+	// runs the loader's cascade, which sweeps both maps for the dead ShaderID;
+	// left full, that is O(shaders x pipelines) across the FreeAll. Emptied
+	// ahead of it, every sweep scans nothing and the pipelines are still handed
+	// back exactly once - here, where the shader ids they were keyed on are
+	// about to stop meaning anything.
+	for _, pipeline := range t.pipelines {
+		if pipeline != 0 {
+			f.backend.FreePipeline(pipeline)
+		}
+	}
+	clear(t.pipelines)
+	clear(t.parameterPlans)
+
+	t.textures.FreeAll(f.k, t.textureUserData(f))
+	t.shaders.FreeAll(f.k, t.shaderUserData(f, ""))
+
+	for _, sampler := range t.samplers {
+		f.backend.FreeSampler(sampler)
+	}
+	clear(t.samplers)
+	clear(t.layouts)
+	clear(t.badIndexLengths)
+	clear(t.unsuppliedBuffers)
+}

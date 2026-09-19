@@ -2,15 +2,17 @@ package types
 
 import (
 	"cmp"
-	"encoding/json"
 	"errors"
 	"io/fs"
 	"math"
-	"path"
 	"slices"
-
-	"github.com/dvoyni/cog/kernel"
 )
+
+// permanentMount reads the permanent filesystem through the overlay, resolving
+// the Adapter on each open.
+type permanentMount func() PermanentFS
+
+func (p permanentMount) Open(name string) (fs.File, error) { return p().Open(name) }
 
 // FileSystem is the resource value: an immutable snapshot of the overlay plus
 // the permanent filesystem it writes to. permanent is also present in mounts
@@ -24,24 +26,6 @@ import (
 type FileSystem struct {
 	mounts    []ReadMount
 	permanent func() PermanentFS
-}
-
-// Open searches mounts by descending priority. Only fs.ErrNotExist falls
-// through to the next mount; other errors are returned immediately.
-func (f FileSystem) Open(name string) (fs.File, error) {
-	if !fs.ValidPath(name) {
-		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
-	}
-	for _, mount := range f.mounts {
-		file, err := mount.FS.Open(name)
-		if err == nil {
-			return file, nil
-		}
-		if !errors.Is(err, fs.ErrNotExist) {
-			return nil, err
-		}
-	}
-	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
 }
 
 var _ fs.FS = FileSystem{}
@@ -76,11 +60,23 @@ func NewStandaloneFileSystem(id MountId, filesystem fs.FS) FileSystem {
 	return NewFileSystem([]ReadMount{{Id: id, Priority: 0, FS: filesystem}}, nil)
 }
 
-// permanentMount reads the permanent filesystem through the overlay, resolving
-// the Adapter on each open.
-type permanentMount func() PermanentFS
-
-func (p permanentMount) Open(name string) (fs.File, error) { return p().Open(name) }
+// Open searches mounts by descending priority. Only fs.ErrNotExist falls
+// through to the next mount; other errors are returned immediately.
+func (f FileSystem) Open(name string) (fs.File, error) {
+	if !fs.ValidPath(name) {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
+	}
+	for _, mount := range f.mounts {
+		file, err := mount.FS.Open(name)
+		if err == nil {
+			return file, nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+	}
+	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+}
 
 // FileSystemMount reports the filesystem mounted under id.
 func FileSystemMount(f FileSystem, id MountId) (fs.FS, bool) {
@@ -117,114 +113,4 @@ func FileSystemWithoutMount(f FileSystem, id MountId) FileSystem {
 		}
 	}
 	return NewFileSystem(mounts, f.permanent)
-}
-
-// WriteAccess returns the mutating half of the permanent filesystem behind a
-// write lock on FileSystem.
-func WriteAccess(handle kernel.Write[FileSystem]) WriteFS {
-	return writeAccess(handle.Get())
-}
-
-// writeAccess returns the mutating half of f's permanent filesystem. The
-// caller is responsible for holding the write lock f came from.
-func writeAccess(f FileSystem) WriteFS {
-	if f.permanent == nil {
-		return WriteFS{}
-	}
-	return WriteFS{permanent: f.permanent()}
-}
-
-// WriteFS is the mutating half of the permanent filesystem, reachable only
-// through WriteAccess. A zero value has no backend and reports ErrNoWriteAccess
-// instead of panicking, so a handler holding an unbound write handle fails
-// loudly rather than silently writing nowhere.
-type WriteFS struct{ permanent PermanentFS }
-
-func (w WriteFS) WriteFile(name string, data []byte, perm fs.FileMode) error {
-	if w.permanent == nil {
-		return ErrNoWriteAccess{Op: "write", Path: name}
-	}
-	return w.permanent.WriteFile(name, data, perm)
-}
-
-func (w WriteFS) MkdirAll(name string, perm fs.FileMode) error {
-	if w.permanent == nil {
-		return ErrNoWriteAccess{Op: "mkdir", Path: name}
-	}
-	return w.permanent.MkdirAll(name, perm)
-}
-
-func (w WriteFS) Remove(name string) error {
-	if w.permanent == nil {
-		return ErrNoWriteAccess{Op: "remove", Path: name}
-	}
-	return w.permanent.Remove(name)
-}
-
-func (w WriteFS) Rename(oldName, newName string) error {
-	if w.permanent == nil {
-		return ErrNoWriteAccess{Op: "rename", Path: oldName}
-	}
-	return w.permanent.Rename(oldName, newName)
-}
-
-// Values caches the values file. entries is nil until the first load, which
-// distinguishes "not read yet" from "read and empty".
-type Values struct {
-	path    string
-	entries map[string]json.RawMessage
-	dirty   bool
-}
-
-// NewValues returns an empty, unloaded store over the values file at path.
-func NewValues(path string) Values { return Values{path: path} }
-
-// load reads the values file once. A missing file yields an empty store; a
-// malformed one is reported without caching, so a later flush cannot overwrite
-// data we failed to understand.
-func (v Values) load(filesystem FileSystem) (Values, error) {
-	if v.entries != nil {
-		return v, nil
-	}
-	data, err := fs.ReadFile(filesystem, v.path)
-	if err != nil {
-		if !errors.Is(err, fs.ErrNotExist) {
-			return v, err
-		}
-		v.entries = map[string]json.RawMessage{}
-		return v, nil
-	}
-	entries := map[string]json.RawMessage{}
-	if err := json.Unmarshal(data, &entries); err != nil {
-		return v, ErrInvalidValuesFile{Path: v.path, Err: err}
-	}
-	v.entries = entries
-	return v, nil
-}
-
-// flush writes the cache through a temporary file and renames it over the
-// values file, so an interrupted write cannot truncate the previous contents.
-func (v Values) flush(writeFS WriteFS) (Values, error) {
-	if !v.dirty {
-		return v, nil
-	}
-	data, err := json.Marshal(v.entries)
-	if err != nil {
-		return v, err
-	}
-	if parent := path.Dir(v.path); parent != "." {
-		if err := writeFS.MkdirAll(parent, 0o700); err != nil {
-			return v, err
-		}
-	}
-	temporary := v.path + ".tmp"
-	if err := writeFS.WriteFile(temporary, data, 0o600); err != nil {
-		return v, err
-	}
-	if err := writeFS.Rename(temporary, v.path); err != nil {
-		_ = writeFS.Remove(temporary)
-		return v, err
-	}
-	v.dirty = false
-	return v, nil
 }

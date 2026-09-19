@@ -31,6 +31,13 @@ type readyList struct {
 	pending bool
 }
 
+// backendNotReadyKey names the one condition gfx reports once per engine: no
+// backend ever installed. It is its own type rather than a bare struct{}
+// because the kernel's report-once table is keyed across plugins by the boxed
+// key's dynamic type, and every singleton condition sharing struct{} would be
+// one condition.
+type backendNotReadyKey struct{}
+
 // plugin implements renderer v2: a triple-buffered OpQueue pipeline plus a
 // translator that turns high-level draw commands into a backend-agnostic gfx.Queue
 // stream. It owns the translator (render-thread-only caches and dynamic buffers);
@@ -159,37 +166,6 @@ func (p *plugin) presentOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]
 		}
 }
 
-// present swaps the recorded OpQueue into the ready slot and installs the queue
-// previously parked there as the reset writable resource (latest-wins).
-func present(write kernel.Write[*gfx.OpQueue], ready kernel.Write[*readyList]) {
-	rd := ready.Get()
-	recycled := rd.queue
-	recycled.Reset()
-	rd.queue = write.Get()
-	write.Set(recycled)
-	rd.pending = true
-}
-
-// acquire advances the read list to the latest completed list if one is pending,
-// recycling the previous read list into the ready slot.
-func acquire(read kernel.Write[*readList], ready kernel.Write[*readyList]) bool {
-	rd := ready.Get()
-	if !rd.pending {
-		return false
-	}
-	current := read.Get()
-	current.OpQueue, rd.queue = rd.queue, current.OpQueue
-	rd.pending = false
-	return true
-}
-
-// backendNotReadyKey names the one condition gfx reports once per engine: no
-// backend ever installed. It is its own type rather than a bare struct{}
-// because the kernel's report-once table is keyed across plugins by the boxed
-// key's dynamic type, and every singleton condition sharing struct{} would be
-// one condition.
-type backendNotReadyKey struct{}
-
 // renderOnRender is the app.RenderEvent handler: it acquires the latest list,
 // translates it against the installed Backend, and executes the resulting op
 // stream into the backend's screen framebuffer. It runs on the MainLoop's render
@@ -231,6 +207,30 @@ func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 			}
 			types.ResourceQueueReset(queue)
 		}
+}
+
+// present swaps the recorded OpQueue into the ready slot and installs the queue
+// previously parked there as the reset writable resource (latest-wins).
+func present(write kernel.Write[*gfx.OpQueue], ready kernel.Write[*readyList]) {
+	rd := ready.Get()
+	recycled := rd.queue
+	recycled.Reset()
+	rd.queue = write.Get()
+	write.Set(recycled)
+	rd.pending = true
+}
+
+// acquire advances the read list to the latest completed list if one is pending,
+// recycling the previous read list into the ready slot.
+func acquire(read kernel.Write[*readList], ready kernel.Write[*readyList]) bool {
+	rd := ready.Get()
+	if !rd.pending {
+		return false
+	}
+	current := read.Get()
+	current.OpQueue, rd.queue = rd.queue, current.OpQueue
+	rd.pending = false
+	return true
 }
 
 // readFiles declares a read lock on storage's FileSystem inside a handler's

@@ -40,7 +40,7 @@ settle it.
 > loop, which wgpu provides as `wgpu.AppDriver`: app hands it an `app.Loop` from
 > `Start`, wgpu's `onUpdate` flushes input and calls `Loop.Frame` with the frame
 > time, and `onDraw` calls `Loop.WindowSize` and `Loop.Render`. The tick source
-> is `slots/app/internal/tick.go`, the accumulator and the pause branch are
+> is `slots/app/internal/ticksource.go`, the accumulator and the pause branch are
 > `slots/app/internal/loop.go`, and the provider is
 > `slots/app/internal/mcpprovider.go`; citations of moved code below point
 > there. `app.HoldRemaining` and `app.Paused` are gone: every wait for a step,
@@ -106,7 +106,7 @@ pause is the decision to stop feeding it. **No time scaling, no virtual clock,
 no `Time` resource.**
 
 > **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).** `time.Now()` now appears
-> **twice**: the frame pacer, and a hold's deadline in `slots/app/internal/tick.go` — see
+> **twice**: the frame pacer, and a hold's deadline in `slots/app/internal/ticksource.go` — see
 > [A hold decides it](#a-hold-decides-it). The conclusion is unchanged. A hold
 > measures how long an absent agent may keep the engine from stepping, never
 > how far the simulation has moved, so there is still no engine clock, no
@@ -390,7 +390,7 @@ thread. **That boundary already exists and is already crossed with atomics** —
 `alpha` (`slots/app/internal/loop.go`) and gogpu's `frameDtBits`/`frameSeq`
 (`extensions/gogpu/internal/plugin.go`). The pause state, the pending-step count
 and the step-coalescing flag join them as atomics on the tick source
-(`slots/app/internal/tick.go`), written only by the command handler.
+(`slots/app/internal/ticksource.go`), written only by the command handler.
 
 A kernel resource was the alternative and loses concretely: `Frame` is called
 from a MainLoop callback holding an `Executioner`, not a handler holding a lock, so

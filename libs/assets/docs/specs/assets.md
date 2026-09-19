@@ -1189,7 +1189,7 @@ that does not exist and never did:
 
 - `slots/gfx/docs/specs/preprocessor.md:934` — *"The developer loop is unchanged:
   fix the file, hot-reload evicts, the next frame retries and reports afresh."*
-- `slots/gfx/internal/translate.go:710-712` — the same sentence, as the comment
+- `slots/gfx/internal/translator.go:710-712` — the same sentence, as the comment
   justifying why the include set is recorded on failure.
 - `slots/gfx/internal/plugin_test.go:1519` and `:1563` — the test that pins it,
   which stands in for the hot-reload by calling `ReleaseCachedResourceCmd` **by
@@ -1466,7 +1466,7 @@ The checklist to build from, in dependency order. **Nothing here is built.**
   and drops its `unsafe.SliceData` call.
 - Decide the `shader` value-or-pointer question and the compile-error
   report-or-return question together — see the **Gap** above.
-- Delete the hot-reload claims at `preprocessor.md:934`, `translate.go:710-712`,
+- Delete the hot-reload claims at `preprocessor.md:934`, `translator.go:710-712`,
   `plugin_test.go:1519` and `:1563`, replacing the translator comment with the
   evicts-like-any-other reason. Fix `docs/README.md:399-402`.
 - Rewrite and rename `TestFailedTextureResourceLoadIsRetried`.

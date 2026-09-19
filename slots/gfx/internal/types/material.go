@@ -1,10 +1,11 @@
 package types
 
-import (
-	"encoding/binary"
-	"hash/maphash"
-	"math"
-)
+import "hash/maphash"
+
+// fingerprintSeed is fixed for the process, so a fingerprint compares only
+// against others taken in the same process - which is all a per-frame intern
+// needs.
+var fingerprintSeed = maphash.MakeSeed()
 
 // MaterialDescr describes how to shade a mesh: a shader plus named parameters.
 // Build it with Material and the *Param constructors. OpQueue.Draw remaps its
@@ -89,67 +90,6 @@ func (m MaterialDescr) Fingerprint() uint64 {
 		m.params[i].fingerprint(&h)
 	}
 	return h.Sum64()
-}
-
-// fingerprintSeed is fixed for the process, so a fingerprint compares only
-// against others taken in the same process - which is all a per-frame intern
-// needs.
-var fingerprintSeed = maphash.MakeSeed()
-
-func (p *ParameterDescr) fingerprint(h *maphash.Hash) {
-	h.WriteString(p.name)
-	writeUint(h, uint64(p.kind))
-	switch p.kind {
-	case ParamTexture:
-		// The three cases are disjoint, so the id, the path and the blob say
-		// between them which one this is: there is no source term to fold in.
-		t := &p.texture
-		writeUint(h, uint64(t.Params.id))
-		h.WriteString(t.Name)
-		writeUint(h, uint64(t.Params.width)|uint64(t.Params.height)<<32)
-		writeUint(h, uint64(t.Params.format)|boolBit(t.Params.mipmaps)<<8)
-		maphash.WriteComparable(h, t.Blob)
-	case ParamBuffer:
-		b := &p.buffer
-		writeUint(h, uint64(b.source)|uint64(b.id)<<8)
-		writeUint(h, uint64(b.size))
-		maphash.WriteComparable(h, b.bytes)
-		writeUint(h, uint64(p.bufferOffset)|uint64(p.bufferSize)<<32)
-	case ParamColor:
-		writeFloats(h, p.color.R, p.color.G, p.color.B, p.color.A)
-	case ParamFloat:
-		writeFloats(h, p.num)
-	case ParamVec4:
-		writeFloats(h, p.vec.X, p.vec.Y, p.vec.Z, p.vec.W)
-	case ParamMat4:
-		writeFloats(h, p.mat[:]...)
-	case ParamSampler:
-		s := &p.sampler
-		writeUint(h, uint64(s.AddressU)|uint64(s.AddressV)<<8|uint64(s.Mag)<<16|
-			uint64(s.Min)<<24|uint64(s.Mip)<<32|uint64(s.Anisotropy)<<40|
-			boolBit(s.Comparison)<<48|uint64(s.Compare)<<56)
-	}
-}
-
-func writeUint(h *maphash.Hash, value uint64) {
-	var buf [8]byte
-	binary.LittleEndian.PutUint64(buf[:], value)
-	h.Write(buf[:])
-}
-
-func writeFloats(h *maphash.Hash, values ...float32) {
-	var buf [4]byte
-	for _, value := range values {
-		binary.LittleEndian.PutUint32(buf[:], math.Float32bits(value))
-		h.Write(buf[:])
-	}
-}
-
-func boolBit(value bool) uint64 {
-	if value {
-		return 1
-	}
-	return 0
 }
 
 // FingerprintParams hashes a parameter slice in order by name, kind and value,
