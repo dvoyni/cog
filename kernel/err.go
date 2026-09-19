@@ -6,28 +6,12 @@ import (
 )
 
 // ErrSchedulerStopped is returned when work is submitted after the scheduler's
-// context has been canceled.
+// coordinator has stopped, which happens once every plugin has been stopped.
 type ErrSchedulerStopped struct{}
 
 func (ErrSchedulerStopped) Error() string {
 	return "scheduler has stopped"
 }
-
-// ErrEngineTerminated is returned by a dispatch the engine refused because it
-// had already terminated: a composition that failed, or a plugin panic or a
-// terminating error handler during the run. The refusal happens before any
-// plugin code is entered, so the caller reads the cause rather than whatever a
-// handler would have tripped over next. Cause is that terminating error, and
-// Unwrap reaches it.
-type ErrEngineTerminated struct {
-	Cause error
-}
-
-func (e ErrEngineTerminated) Error() string {
-	return fmt.Sprintf("kernel: engine terminated, refusing dispatch: %v", e.Cause)
-}
-
-func (e ErrEngineTerminated) Unwrap() error { return e.Cause }
 
 // ErrConflictingPluginName is returned by Run when two plugins share a name.
 type ErrConflictingPluginName struct {
@@ -207,4 +191,19 @@ type ErrExecutingUnknownCommand[TCommand any] struct {
 
 func (e ErrExecutingUnknownCommand[TCommand]) Error() string {
 	return fmt.Sprintf("trying to execute unknown command %s", TypeName(reflect.TypeFor[TCommand]()))
+}
+
+// ErrPortNotAnInterface is reported when a Port or Adapter declaration names a
+// type argument that is not an interface. A Port is a contract its Adapters
+// implement, so a concrete type cannot be one. Declaration is the registrar call
+// that was given it.
+type ErrPortNotAnInterface struct {
+	Declaration string
+	Port        reflect.Type
+	Interface   reflect.Type
+}
+
+func (e ErrPortNotAnInterface) Error() string {
+	return fmt.Sprintf("kernel: %s type argument %s is built on %s, which is not an interface type",
+		e.Declaration, TypeName(e.Port), TypeName(e.Interface))
 }

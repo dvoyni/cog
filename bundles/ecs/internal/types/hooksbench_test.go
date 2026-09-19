@@ -233,9 +233,7 @@ func TestAHookReaderStaysOnTheAllocationLine(t *testing.T) {
 		}()
 		mallocs := allocationsDuring(func() {
 			for range frames {
-				if err := executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-					t.Fatalf("publishing the update: %v", err)
-				}
+				executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 			}
 		})
 		return float64(mallocs) / frames
@@ -567,9 +565,7 @@ func BenchmarkHookFrame(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
-					if err := executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-						b.Fatalf("publishing the update: %v", err)
-					}
+					executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 				}
 			})
 		}
@@ -666,7 +662,7 @@ func BenchmarkHookWatchCheck(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = run(kernel.Kernel{}, event)
+				run(kernel.Kernel{}, event)
 			}
 		})
 	}

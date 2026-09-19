@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -127,28 +126,29 @@ func (t *tickSource) published(steps int, batch *stepBatch) {
 
 // control applies one time-control request and reports the tick source as the
 // call left it. A step does not return until its ticks have been published, or
-// until ctx ends; steps already requested when it ends are still published,
-// which is why the agent-facing surface caps how many may be asked for.
-func (t *tickSource) control(ctx context.Context, request app.TimeRequest) (app.TimeResponse, error) {
+// until the request's Wait expires; steps already requested when it expires are
+// still published, which is why the agent-facing surface caps how many may be
+// asked for.
+func (t *tickSource) control(request app.TimeRequest) app.TimeResponse {
 	switch request.Action {
 	case app.TimeStatus:
-		return t.state(app.TimeResponse{}), nil
+		return t.state(app.TimeResponse{})
 	case app.TimePause:
-		return t.state(app.TimeResponse{Changed: t.pause()}), nil
+		return t.state(app.TimeResponse{Changed: t.pause()})
 	case app.TimeResume:
-		return t.state(app.TimeResponse{Changed: t.resume()}), nil
+		return t.state(app.TimeResponse{Changed: t.resume()})
 	case app.TimeStep:
-		return t.step(ctx, request)
+		return t.step(request)
 	case app.TimeHold:
 		changed, err := t.hold(time.Now(), request.Hold)
 		if err != nil {
-			return app.TimeResponse{}, err
+			return app.TimeResponse{Err: err}
 		}
-		return t.state(app.TimeResponse{Changed: changed}), nil
+		return t.state(app.TimeResponse{Changed: changed})
 	case app.TimeRelease:
-		return t.state(app.TimeResponse{Changed: t.release(time.Now())}), nil
+		return t.state(app.TimeResponse{Changed: t.release(time.Now())})
 	default:
-		return app.TimeResponse{}, app.ErrUnknownTimeAction{Action: request.Action}
+		return app.TimeResponse{Err: app.ErrUnknownTimeAction{Action: request.Action}}
 	}
 }
 
@@ -246,20 +246,27 @@ func (t *tickSource) holding(now time.Time) bool {
 // step raises the requested ticks and waits for them. Stepping implies
 // pausing: stepping a running engine is meaningless, so the request pauses
 // rather than being refused.
-func (t *tickSource) step(ctx context.Context, request app.TimeRequest) (app.TimeResponse, error) {
+func (t *tickSource) step(request app.TimeRequest) app.TimeResponse {
 	steps := request.Steps
 	if steps < 1 {
 		steps = 1
 	}
 	batch, joined, changed := t.request(steps, request.Join)
 	answer := app.TimeResponse{Changed: changed, Joined: joined}
-	select {
-	case <-batch.done:
-	case <-ctx.Done():
-		return t.state(answer), ctx.Err()
+	if request.Wait <= 0 {
+		<-batch.done
+	} else {
+		expiry := time.NewTimer(request.Wait)
+		select {
+		case <-batch.done:
+			expiry.Stop()
+		case <-expiry.C:
+			answer.Err = app.ErrStepNotPublished{After: request.Wait}
+			return t.state(answer)
+		}
 	}
 	answer.Stepped = batch.published
-	return t.state(answer), nil
+	return t.state(answer)
 }
 
 // request raises steps, or joins the step already pending when join is set,

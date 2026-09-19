@@ -1,7 +1,6 @@
 package kernel
 
 import (
-	"context"
 	"reflect"
 	"runtime/debug"
 	"sync"
@@ -26,24 +25,22 @@ type command struct {
 }
 
 // commandContext carries one command invocation through the scheduler: the locks
-// to acquire, the typed request, and the slot for the typed result. It doubles as
-// the invocation's context.Context, so the scheduler needs no second value.
+// to acquire, the typed request, and the slot for the typed result. It is both
+// the task the scheduler runs and the invocation handed back to that task.
 type commandContext[TRequest any, TResponse any] struct {
-	context.Context
 	engine      *Engine
 	command     *command
-	scope       context.Context
 	read, write map[reflect.Type]struct{}
 	execute     Execute[TRequest, TResponse]
 	request     TRequest
 	result      TResponse
 }
 
-func (c *commandContext[TRequest, TResponse]) locks(context.Context) (read, write map[reflect.Type]struct{}) {
+func (c *commandContext[TRequest, TResponse]) locks() (read, write map[reflect.Type]struct{}) {
 	return c.read, c.write
 }
 
-func (c *commandContext[TRequest, TResponse]) run(context.Context) (err error) {
+func (c *commandContext[TRequest, TResponse]) run(any) (err error) {
 	cmd := c.command
 	// Recovery is inlined rather than routed through callPluginBoundary so the
 	// dispatch path allocates neither a closure nor a boundary string.
@@ -55,22 +52,16 @@ func (c *commandContext[TRequest, TResponse]) run(context.Context) (err error) {
 			}
 		}
 	}()
-	handler := Kernel{
-		engine:  c.engine,
-		ctx:     c,
-		scope:   c.scope,
-		bounded: true,
-	}
-	c.result, err = c.execute(handler, c.request)
-	return err
+	c.result = c.execute(Kernel{engine: c.engine}, c.request)
+	return nil
 }
 
 // release clears the invocation before recycling it, so a finished command does
-// not pin its request, response, or context.
+// not pin its request or response.
 func (c *commandContext[TRequest, TResponse]) release() {
 	var zeroRequest TRequest
 	var zeroResponse TResponse
-	c.Context, c.engine, c.command, c.scope = nil, nil, nil, nil
+	c.engine, c.command = nil, nil
 	c.read, c.write, c.execute = nil, nil, nil
 	c.request, c.result = zeroRequest, zeroResponse
 }
@@ -88,45 +79,36 @@ type usage struct {
 // then reuses the locks the handler already holds.
 func (r ResourceAccess) Uses[
 	TCommand CommandConstraint[TRequest, TResponse], TRequest any, TResponse any,
-]() func(Kernel, TRequest) (TResponse, error) {
+]() func(Kernel, TRequest) TResponse {
 	id := reflect.TypeFor[TCommand]()
 	target := r.uses[id]
 	if target == nil {
 		target = &usage{}
 		r.uses[id] = target
 	}
-	return func(k Kernel, request TRequest) (TResponse, error) {
-		engine := k.bound()
-		ctx := k.ctx
-		var stop func() bool
-		var cancel context.CancelFunc
-		if engine.ctx != nil && !k.bounded {
-			ctx, cancel = context.WithCancel(ctx)
-			stop = context.AfterFunc(engine.ctx, cancel)
-		}
-		response, err := dispatch[TRequest, TResponse](
-			engine, target.command, ctx, k.scope, noLocks, noLocks, request)
-		// Unwound explicitly rather than deferred: dispatch recovers plugin panics
-		// itself, and a defer would cost every dispatch to serve a branch few take.
-		if cancel != nil {
-			stop()
-			cancel()
-		}
-		return response, err
+	return func(k Kernel, request TRequest) TResponse {
+		// noLocks on both sides: composition folded the callee's closure into this
+		// handler's own set, so the caller already holds everything the callee
+		// needs and the nested dispatch acquires nothing.
+		return dispatch[TRequest, TResponse](k.engine, target.command, noLocks, noLocks, request)
 	}
 }
 
 // dispatch runs one command invocation to completion on the calling goroutine,
 // with read and write as the lock set the scheduler must grant it.
+//
+// It answers with the response alone. What can go wrong here is the kernel's
+// own business — a body that panicked, a scheduler that has stopped — and it is
+// reported rather than handed back, because no caller has anything to do with
+// it that reporting has not already done. A dispatch that failed answers with
+// the zero response.
 func dispatch[TRequest any, TResponse any](
-	engine *Engine, cmd *command, ctx, scope context.Context,
+	engine *Engine, cmd *command,
 	read, write map[reflect.Type]struct{}, request TRequest,
-) (TResponse, error) {
+) TResponse {
 	invocation := cmd.invocations.Get().(*commandContext[TRequest, TResponse])
-	invocation.Context = ctx
 	invocation.engine = engine
 	invocation.command = cmd
-	invocation.scope = scope
 	invocation.read, invocation.write = read, write
 	invocation.execute = cmd.execute.(Execute[TRequest, TResponse])
 	invocation.request = request
@@ -136,8 +118,9 @@ func dispatch[TRequest any, TResponse any](
 	invocation.release()
 	cmd.invocations.Put(invocation)
 	if err != nil {
+		engine.reportError(shutdownAside(err))
 		var zero TResponse
-		return zero, err
+		return zero
 	}
-	return response, nil
+	return response
 }

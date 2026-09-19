@@ -43,9 +43,7 @@ func TestASystemIsInvocableAsACommand(t *testing.T) {
 	components.bodies.Set(e, body{X: 1})
 	components.velocities.Set(e, velocity{})
 
-	if _, err := engine.Executioner().ExecuteCommand[nudgeCmd](nudgeRequest{By: 4}); err != nil {
-		t.Fatalf("executing the System as a command: %v", err)
-	}
+	engine.Executioner().ExecuteCommand[nudgeCmd](nudgeRequest{By: 4})
 
 	if value, _ := components.bodies.Get(e); value.X != 5 {
 		t.Fatalf("body is %v after a nudge of 4 from 1, want {5 0}", value)
@@ -82,9 +80,7 @@ func TestASystemInvokedAsACommandMayNameItsRequest(t *testing.T) {
 	components.bodies.Set(e, body{X: 2})
 	components.velocities.Set(e, velocity{})
 
-	if _, err := engine.Executioner().ExecuteCommand[nudgeCmd](nudgeRequest{By: 3}); err != nil {
-		t.Fatalf("executing the System as a command: %v", err)
-	}
+	engine.Executioner().ExecuteCommand[nudgeCmd](nudgeRequest{By: 3})
 	if value, _ := components.bodies.Get(e); value.X != 5 {
 		t.Fatalf("body is %v after a nudge of 3 from 2, want {5 0}", value)
 	}
@@ -125,9 +121,7 @@ func TestTheSameSystemIsBothACommandAndASubscription(t *testing.T) {
 	components.velocities.Set(e, velocity{X: 10})
 
 	frame(t, engine, 0.5)
-	if _, err := engine.Executioner().ExecuteCommand[nudgeCmd](nudgeRequest{By: 0.25}); err != nil {
-		t.Fatalf("executing the System as a command: %v", err)
-	}
+	engine.Executioner().ExecuteCommand[nudgeCmd](nudgeRequest{By: 0.25})
 
 	if value, _ := components.bodies.Get(e); value.X != 7.5 {
 		t.Fatalf("body is %v after a tick of 0.5 and a command of 0.25 at velocity 10, want {7.5 0}", value)
@@ -156,10 +150,7 @@ func TestASystemAnswersThroughItsResponseWrapper(t *testing.T) {
 		components.velocities.Set(e, velocity{})
 	}
 
-	response, err := engine.Executioner().ExecuteCommand[nudgeCmd](nudgeRequest{By: 10})
-	if err != nil {
-		t.Fatalf("executing the System as a command: %v", err)
-	}
+	response := engine.Executioner().ExecuteCommand[nudgeCmd](nudgeRequest{By: 10})
 	// Bodies at 0, 1 and 2, each nudged by 10: 10 + 11 + 12.
 	if response.Moved != 3 || response.Total != 33 {
 		t.Fatalf("the command answered %+v, want {Moved:3 Total:33}", response)
@@ -181,17 +172,11 @@ func TestAResponseIsClearedBetweenInvocations(t *testing.T) {
 	})
 
 	executioner := engine.Executioner()
-	first, err := executioner.ExecuteCommand[nudgeCmd](nudgeRequest{By: 7})
-	if err != nil {
-		t.Fatalf("executing the System as a command: %v", err)
-	}
+	first := executioner.ExecuteCommand[nudgeCmd](nudgeRequest{By: 7})
 	if first.Moved != 1 || first.Total != 7 {
 		t.Fatalf("the first invocation answered %+v, want {Moved:1 Total:7}", first)
 	}
-	second, err := executioner.ExecuteCommand[nudgeCmd](nudgeRequest{By: 0})
-	if err != nil {
-		t.Fatalf("executing the System as a command: %v", err)
-	}
+	second := executioner.ExecuteCommand[nudgeCmd](nudgeRequest{By: 0})
 	if second != (nudgeResponse{}) {
 		t.Fatalf("an invocation that answered nothing returned %+v, want the zero response", second)
 	}
@@ -204,10 +189,7 @@ func TestASystemNamingNoResponseStillAnswersTheZero(t *testing.T) {
 	_, _, engine := newWorld(t, 8, func(registrar *kernel.Registrar) {
 		registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](registrar, func(request nudgeRequest) {}))
 	})
-	response, err := engine.Executioner().ExecuteCommand[nudgeCmd](nudgeRequest{By: 1})
-	if err != nil {
-		t.Fatalf("executing the System as a command: %v", err)
-	}
+	response := engine.Executioner().ExecuteCommand[nudgeCmd](nudgeRequest{By: 1})
 	if response != (nudgeResponse{}) {
 		t.Fatalf("a System naming no response answered %+v, want the zero response", response)
 	}
@@ -276,9 +258,7 @@ func TestAnsweringThroughTheWrapperAllocatesNothing(t *testing.T) {
 		})
 		executioner := engine.Executioner()
 		return testing.AllocsPerRun(1000, func() {
-			if _, err := executioner.ExecuteCommand[nudgeCmd](nudgeRequest{By: 1}); err != nil {
-				t.Fatalf("executing the System as a command: %v", err)
-			}
+			executioner.ExecuteCommand[nudgeCmd](nudgeRequest{By: 1})
 		})
 	}
 	silent := measure(func(request nudgeRequest) {})

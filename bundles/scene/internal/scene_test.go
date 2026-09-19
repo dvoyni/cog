@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"io/fs"
 	"strings"
 	"sync"
@@ -359,9 +358,8 @@ func (p recordPlugin) Register(registrar *kernel.Registrar, _ any) error {
 		return func(access kernel.ResourceAccess) {
 				queue = access.GetWrite[*scene.OpQueue]()
 				gfxQueue = access.GetWrite[*gfx.OpQueue]()
-			}, func(kernel.Kernel, app.UpdateEvent) error {
+			}, func(kernel.Kernel, app.UpdateEvent) {
 				p.record(queue.Get(), gfxQueue.Get())
-				return nil
 			}
 	}).Before[scene.FlushOnUpdate]()
 	registrar.HandleCommand[inspectCmd](inspectCmdImpl)
@@ -373,9 +371,9 @@ func inspectCmdImpl() (kernel.Lock, kernel.Execute[inspectRequest, inspectRespon
 	var queue kernel.Write[*scene.OpQueue]
 	return func(access kernel.ResourceAccess) {
 			queue = access.GetWrite[*scene.OpQueue]()
-		}, func(_ kernel.Kernel, req inspectRequest) (inspectResponse, error) {
+		}, func(_ kernel.Kernel, req inspectRequest) inspectResponse {
 			req.run(queue.Get())
-			return inspectResponse{}, nil
+			return inspectResponse{}
 		}
 }
 
@@ -387,7 +385,7 @@ func lookupProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupProbeRequest, looku
 			lookup = access.GetWrite[*scene.Lookup]()
 			filesystem = access.GetRead[storage.FileSystem]()
 			resources = access.GetWrite[*gfx.ResourceQueue]()
-		}, func(k kernel.Kernel, req lookupProbeRequest) (lookupProbeResponse, error) {
+		}, func(k kernel.Kernel, req lookupProbeRequest) lookupProbeResponse {
 			if req.files != nil {
 				req.files(filesystem.Get())
 			}
@@ -404,7 +402,7 @@ func lookupProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupProbeRequest, looku
 			if req.model != nil {
 				req.model(lookup.Get(), k, fs.FS(filesystem.Get()), resources.Get())
 			}
-			return lookupProbeResponse{}, nil
+			return lookupProbeResponse{}
 		}
 }
 
@@ -486,16 +484,14 @@ func newHarnessOver(
 	t.Helper()
 	backend := &testBackend{}
 	sink := &errorSink{}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	configs := map[kernel.PluginName]any{
 		storage.Name: storage.Config{}.WithReadFS("test", 10, files),
 		scene.Name:   scene.Config{},
 	}
 	engine := kernel.New(configs).
-		Handler(func(err error) bool { sink.add(err); *reported = append(*reported, err); return false }).
+		Handler(func(err error) error { sink.add(err); *reported = append(*reported, err); return nil }).
 		WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, New(), recordPlugin{record: record})
-	go engine.Run(ctx)
+	go engine.Run()
 	<-engine.Ready()
 	k := engine.Executioner()
 	k.PublishEvent(app.InitEvent{}).Wait()

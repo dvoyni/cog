@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -63,24 +62,21 @@ func (p *gamePlugin) Register(registrar *kernel.Registrar, _ any) error {
 func TestNewPublishesTheAuthority(t *testing.T) {
 	game := &gamePlugin{}
 	engine := kernel.New(map[kernel.PluginName]any{ecs.Name: ecs.Config{PrewarmEntities: 16}}).
-		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
+		Handler(func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }).
 		WithPlugins(New(), game)
-	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	t.Cleanup(func() {
-		cancel()
+		engine.Quit()
 		<-stopped
 	})
 	go func() {
 		defer close(stopped)
-		engine.Run(ctx)
+		engine.Run()
 	}()
 	<-engine.Ready()
 
 	for range 3 {
-		if err := engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-			t.Fatalf("publishing the update: %v", err)
-		}
+		engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 	}
 
 	if n := game.positions.Len(); n != 1 {
@@ -103,7 +99,7 @@ func TestNewPublishesTheAuthority(t *testing.T) {
 func TestAMissingAuthorityFailsComposition(t *testing.T) {
 	var failure error
 	kernel.New(nil).
-		Handler(func(err error) bool { failure = errors.Join(failure, err); return true }).
+		Handler(func(err error) error { failure = errors.Join(failure, err); return err }).
 		WithPlugins(&gamePlugin{})
 	if failure == nil {
 		t.Fatalf("a game composed without ecsplugin.New() composed")

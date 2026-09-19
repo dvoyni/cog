@@ -105,9 +105,7 @@ func benchmarkBoundFrame(b *testing.B, n int, subscribe func(*kernel.Registrar))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if err := executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-			b.Fatalf("publishing the update: %v", err)
-		}
+		executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 	}
 }
 
@@ -228,9 +226,7 @@ func TestTheBoundFrameSitsOnTheEnginesAllocationLine(t *testing.T) {
 		}
 		mallocs := allocationsDuring(func() {
 			for range frames {
-				if err := executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-					t.Fatalf("publishing the update: %v", err)
-				}
+				executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 			}
 		})
 		return float64(mallocs) / frames
@@ -278,9 +274,7 @@ func TestWhatPublishingFromASystemCosts(t *testing.T) {
 		}
 		mallocs := allocationsDuring(func() {
 			for range frames {
-				if err := executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-					t.Fatalf("publishing the update: %v", err)
-				}
+				executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 			}
 		})
 		return float64(mallocs) / frames
@@ -305,9 +299,7 @@ func benchmarkCommand(b *testing.B, n int, system any) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := executioner.ExecuteCommand[nudgeCmd](nudgeRequest{By: 1}); err != nil {
-			b.Fatalf("executing the System as a command: %v", err)
-		}
+		executioner.ExecuteCommand[nudgeCmd](nudgeRequest{By: 1})
 	}
 }
 

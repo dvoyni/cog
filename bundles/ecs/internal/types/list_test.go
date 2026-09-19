@@ -187,9 +187,7 @@ func TestASetShowsInTheBytesOfTheComponentHoldingTheList(t *testing.T) {
 
 	e = entities.alloc()
 	rich.inventories.Set(e, inventory{Slots: ListOf([]uint32{1, 2, 3})})
-	if err := engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-		t.Fatalf("publishing the update: %v", err)
-	}
+	engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 	for _, failure := range []string{unchanged, repeated} {
 		if failure != "" {
 			t.Fatal(failure)
@@ -308,9 +306,7 @@ func TestANonTrivialQueryTakesTheTypedCopyAndTheWideShape(t *testing.T) {
 		}, []kernel.PluginName{Name, "components", "rich"}, rich)
 
 	rich.labels.Set(entities.alloc(), labelled{Name: "a name the fill has to copy properly"})
-	if err := engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-		t.Fatalf("publishing the update: %v", err)
-	}
+	engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 
 	if read != "a name the fill has to copy properly" {
 		t.Fatalf("the Query read %q", read)

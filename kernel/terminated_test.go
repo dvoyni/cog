@@ -1,212 +1,93 @@
 package kernel
 
 import (
-	"context"
 	"errors"
 	"testing"
 )
 
 // errRegisterFailed stands in for a Register that finds its environment missing,
-// the way jsfs does without localStorage.
+// the way jsstorage does without localStorage.
 var errRegisterFailed = errors.New("test: backing store is unavailable")
 
-// unboundReader is a plugin whose command handler reads an adapter handle that
-// composition only binds on success, so running the handler on a failed
-// composition panics inside plugin code.
-func unboundReader(ran *bool) *testPlugin {
-	plugin := &testPlugin{name: "reader"}
-	plugin.register = func(r *Registrar) error {
-		backend := r.RequireAdapter[testBackendPort]()
-		r.HandleCommand[testDoubleCmd](executing(func(_ Kernel, request int) (int, error) {
-			*ran = true
-			_ = backend.Get().Label()
-			return request * 2, nil
-		}))
-		return nil
-	}
-	return plugin
-}
-
-// A composition failure closes Ready, so a caller waiting on it goes on to
-// dispatch. That dispatch is refused before the handler runs, and the error
-// names the Register failure rather than the unbound handle the handler would
-// have read.
-func TestKernel_FailedCompositionRefusesDispatchWithoutEnteringPluginCode(t *testing.T) {
-	handlerRan := false
+// An engine whose composition failed answers with the cause from Run, and never
+// starts a plugin. There is no separate place to ask: Run's return value is the
+// whole of what happened.
+func TestKernel_FailedCompositionComesBackFromRun(t *testing.T) {
+	started := false
 	failing := testPlugin{name: "failing", register: func(*Registrar) error { return errRegisterFailed }}
-	e := New(nil).Handler(func(error) bool { return false }).
-		WithPlugins(unboundReader(&handlerRan), failing).
-		Run(context.Background())
+	healthy := testPlugin{name: "healthy", start: func(Executioner) error { started = true; return nil }}
 
-	<-e.Ready()
-	got, err := e.Executioner().ExecuteCommand[testDoubleCmd](21)
+	cause := New(nil).Handler(func(error) error { return nil }).
+		WithPlugins(healthy, failing).
+		Run()
 
-	if handlerRan {
-		t.Fatal("the handler of a plugin whose composition failed was entered")
+	if !errors.Is(cause, errRegisterFailed) {
+		t.Fatalf("Run = %v, want %v", cause, errRegisterFailed)
 	}
-	var terminated ErrEngineTerminated
-	if !errors.As(err, &terminated) {
-		t.Fatalf("err = %v (%T), want ErrEngineTerminated", err, err)
-	}
-	if !errors.Is(err, errRegisterFailed) {
-		t.Fatalf("err = %v, want it to unwrap to the Register failure", err)
-	}
-	if got != 0 {
-		t.Fatalf("got = %d, want the zero response", got)
+	if started {
+		t.Fatal("a plugin started on an engine whose composition failed")
 	}
 }
 
-// The refusal keys on termination, not on the absent scheduler: a healthy engine
-// still runs a dispatch made before Run, where there is no coordinator and the
-// task runs directly.
+// The scheduler is live from New, so a dispatch before Run runs rather than
+// waiting for a coordinator that does not exist yet.
 func TestKernel_DispatchBeforeRunStillRunsOnAHealthyEngine(t *testing.T) {
 	p := testPlugin{name: "p", register: func(r *Registrar) error {
-		r.HandleCommand[testDoubleCmd](executing(func(_ Kernel, request int) (int, error) {
-			return request * 2, nil
-		}))
+		r.HandleCommand[testDoubleCmd](executing(func(_ Kernel, request int) int { return request * 2 }))
 		return nil
 	}}
-	e := New(nil).Handler(func(err error) bool {
+	e := New(nil).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(p)
+	t.Cleanup(e.Quit)
 
-	got, err := e.Executioner().ExecuteCommand[testDoubleCmd](21)
-	if err != nil || got != 42 {
-		t.Fatalf("got = %d, %v; want 42, nil", got, err)
-	}
-	if e.Err() != nil {
-		t.Fatalf("Err = %v, want nil on a healthy engine", e.Err())
+	if got := e.Executioner().ExecuteCommand[testDoubleCmd](21); got != 42 {
+		t.Fatalf("got = %d, want 42", got)
 	}
 }
 
-// A subscriber panic is reported, and a reported panic terminates the engine.
-// Every dispatch after it is refused with the same error, unwrapping to the
-// panic rather than to whatever the next handler would have tripped over.
-func TestKernel_DispatchAfterAMidRunPanicIsRefused(t *testing.T) {
-	type panicEvent struct{}
-	handlerRan := false
-	p := testPlugin{name: "p", register: func(r *Registrar) error {
-		r.Subscribe[testHandlerA[panicEvent]](observing(func(Kernel, panicEvent) error {
-			panic("test: subscriber exploded")
-		}))
-		r.HandleCommand[testDoubleCmd](executing(func(_ Kernel, request int) (int, error) {
-			handlerRan = true
-			return request * 2, nil
-		}))
+// A verdict terminates the run and becomes what Run answers with. The cause is
+// the first verdict rather than whatever it knocked over afterwards, and every
+// report still reaches the handler.
+func TestKernel_AVerdictBecomesWhatRunReturns(t *testing.T) {
+	boom := errors.New("mid-run boom")
+	later := errors.New("knocked over afterwards")
+	quit := make(chan struct{})
+	host := &testHostPlugin{
+		name: "host",
+		run:  func() error { <-quit; return nil },
+		quit: func() { close(quit) },
+	}
+	p := testPlugin{name: "p", start: func(k Executioner) error {
+		k.ReportError(boom)
+		k.ReportError(later)
 		return nil
 	}}
-	e := startEngineWithHandler(t, func(error) bool { return false }, p)
 
-	if err := e.Executioner().PublishEvent(panicEvent{}).Wait(); err == nil {
-		t.Fatal("panicking subscriber returned no error")
-	}
+	var seen []error
+	cause := New(nil).Handler(func(err error) error { seen = append(seen, err); return err }).
+		WithPlugins(p, host).
+		Run()
 
-	_, err := e.Executioner().ExecuteCommand[testDoubleCmd](21)
-	if handlerRan {
-		t.Fatal("a handler ran on an engine a panic had terminated")
+	if !errors.Is(cause, boom) {
+		t.Fatalf("Run = %v, want the first verdict %v", cause, boom)
 	}
-	var terminated ErrEngineTerminated
-	if !errors.As(err, &terminated) {
-		t.Fatalf("err = %v (%T), want ErrEngineTerminated", err, err)
-	}
-	var panicErr ErrPluginPanic
-	if !errors.As(err, &panicErr) {
-		t.Fatalf("err = %v, want it to unwrap to the plugin panic", err)
+	if len(seen) != 2 || !errors.Is(seen[1], later) {
+		t.Fatalf("handler saw %v, want both reports in order", seen)
 	}
 }
 
-// Err is the signal next to Ready: nil while the engine is live, the terminating
-// cause once it is not, whether that cause was a failed Register or a panic.
-func TestKernel_ErrReportsTheTerminatingCause(t *testing.T) {
-	failing := testPlugin{name: "failing", register: func(*Registrar) error { return errRegisterFailed }}
-	failed := New(nil).Handler(func(error) bool { return false }).WithPlugins(failing)
-	<-failed.Ready()
-	if err := failed.Err(); !errors.Is(err, errRegisterFailed) {
-		t.Fatalf("Err = %v, want the Register failure", err)
-	}
-
-	type panicEvent struct{}
-	p := testPlugin{name: "p", register: func(r *Registrar) error {
-		r.Subscribe[testHandlerA[panicEvent]](observing(func(Kernel, panicEvent) error {
-			panic("test: subscriber exploded")
-		}))
-		return nil
-	}}
-	live := startEngineWithHandler(t, func(error) bool { return false }, p)
-	if err := live.Err(); err != nil {
-		t.Fatalf("Err = %v, want nil while the engine is live", err)
-	}
-	if err := live.Executioner().PublishEvent(panicEvent{}).Wait(); err == nil {
-		t.Fatal("panicking subscriber returned no error")
-	}
-	var panicErr ErrPluginPanic
-	if err := live.Err(); !errors.As(err, &panicErr) {
-		t.Fatalf("Err = %v, want the plugin panic", err)
-	}
-}
-
-// A publication on a terminated engine reaches no subscriber, and the refusal
-// carries the same cause a command's would.
-func TestKernel_FailedCompositionRefusesPublication(t *testing.T) {
-	type terminatedEvent struct{}
-	observed := false
-	watcher := testPlugin{name: "watcher", register: func(r *Registrar) error {
-		r.Subscribe[testHandlerA[terminatedEvent]](observing(func(Kernel, terminatedEvent) error {
-			observed = true
-			return nil
-		}))
-		return nil
-	}}
-	failing := testPlugin{name: "failing", register: func(*Registrar) error { return errRegisterFailed }}
-	e := New(nil).Handler(func(error) bool { return false }).
-		WithPlugins(watcher, failing).
-		Run(context.Background())
-
-	<-e.Ready()
-	if err := e.Executioner().PublishEvent(terminatedEvent{}).Wait(); !errors.Is(err, errRegisterFailed) {
-		t.Fatalf("publication error = %v, want the Register failure", err)
-	}
-	if observed {
-		t.Fatal("a subscriber ran on a terminated engine")
-	}
-}
-
-// Composition stops registering at the plugin whose Register failed, so a
-// command declared after that plugin is simply absent. The dispatch names the
-// termination rather than reporting the command unknown, so the caller reads
-// the same cause whichever side of the failure its plugin sat on.
-func TestKernel_TerminatedEngineNamesTheCauseRatherThanAnUnknownCommand(t *testing.T) {
-	failing := testPlugin{name: "failing", register: func(*Registrar) error { return errRegisterFailed }}
-	late := testPlugin{name: "late", register: func(r *Registrar) error {
-		r.HandleCommand[testDoubleCmd](executing(func(_ Kernel, request int) (int, error) {
-			return request * 2, nil
-		}))
-		return nil
-	}}
-	e := New(nil).Handler(func(error) bool { return false }).
-		WithPlugins(failing, late).
-		Run(context.Background())
-
-	<-e.Ready()
-	_, err := e.Executioner().ExecuteCommand[testDoubleCmd](21)
-
-	var terminated ErrEngineTerminated
-	if !errors.As(err, &terminated) {
-		t.Fatalf("err = %v (%T), want ErrEngineTerminated", err, err)
-	}
-	if !errors.Is(err, errRegisterFailed) {
-		t.Fatalf("err = %v, want it to unwrap to the Register failure", err)
-	}
-}
-
-// An unknown command on a healthy engine still says so: the refusal replaces
-// that error only when the engine is terminated.
+// An unknown command is the kernel's own failure on a healthy engine, so it is
+// reported like any other.
 func TestKernel_HealthyEngineStillReportsAnUnknownCommand(t *testing.T) {
-	e := startEngine(t, testPlugin{name: "p"})
-	_, err := e.Executioner().ExecuteCommand[testMissingCmd](struct{}{})
+	var handled error
+	e := startEngineWithHandler(t, func(err error) error { handled = err; return nil })
+
+	e.Executioner().ExecuteCommand[testMissingCmd](struct{}{})
+
 	var unknown ErrExecutingUnknownCommand[testMissingCmd]
-	if !errors.As(err, &unknown) {
-		t.Fatalf("err = %v (%T), want ErrExecutingUnknownCommand", err, err)
+	if !errors.As(handled, &unknown) {
+		t.Fatalf("handled = %v, want an unknown-command report", handled)
 	}
 }

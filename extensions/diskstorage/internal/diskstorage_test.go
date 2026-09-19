@@ -3,7 +3,6 @@
 package internal
 
 import (
-	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -35,12 +34,12 @@ func TestValuesRoundTripAndSurviveARestart(t *testing.T) {
 	config := diskstorage.Config{AppId: "cog-diskstorage-test"}
 
 	first := start(t, config)
-	if _, err := first.kernel.ExecuteCommand[storage.AccessValuesCmd](storage.SetValue("volume", 0.25)); err != nil {
-		t.Fatal(err)
+	if answer := first.kernel.ExecuteCommand[storage.AccessValuesCmd](storage.SetValue("volume", 0.25)); answer.Err != nil {
+		t.Fatal(answer.Err)
 	}
 	volume := 1.0
-	if response, err := first.kernel.ExecuteCommand[storage.AccessValuesCmd](storage.GetValue("volume", 1.0, &volume)); err != nil || !response.Found || volume != 0.25 {
-		t.Fatalf("GetValue = %v (found %v), %v; want 0.25 found", volume, response.Found, err)
+	if response := first.kernel.ExecuteCommand[storage.AccessValuesCmd](storage.GetValue("volume", 1.0, &volume)); response.Err != nil || !response.Found || volume != 0.25 {
+		t.Fatalf("GetValue = %v (found %v), %v; want 0.25 found", volume, response.Found, response.Err)
 	}
 	first.stop()
 
@@ -51,9 +50,9 @@ func TestValuesRoundTripAndSurviveARestart(t *testing.T) {
 	second := start(t, config)
 	defer second.stop()
 	volume = 1.0
-	response, err := second.kernel.ExecuteCommand[storage.AccessValuesCmd](storage.GetValue("volume", 1.0, &volume))
-	if err != nil {
-		t.Fatal(err)
+	response := second.kernel.ExecuteCommand[storage.AccessValuesCmd](storage.GetValue("volume", 1.0, &volume))
+	if response.Err != nil {
+		t.Fatal(response.Err)
 	}
 	if !response.Found || volume != 0.25 {
 		t.Fatalf("after a restart GetValue = %v (found %v), want 0.25 found", volume, response.Found)
@@ -65,9 +64,9 @@ func TestAnInvalidAppIdIsRejected(t *testing.T) {
 	for _, appId := range []string{".", "..", "a/b", filepath.Join("a", "b"), filepath.Join(t.TempDir(), "abs")} {
 		t.Run(appId, func(t *testing.T) {
 			var reported []error
-			kernel.New(map[kernel.PluginName]any{diskstorage.Name: diskstorage.Config{AppId: appId}}).Handler(func(err error) bool {
+			kernel.New(map[kernel.PluginName]any{diskstorage.Name: diskstorage.Config{AppId: appId}}).Handler(func(err error) error {
 				reported = append(reported, err)
-				return true
+				return err
 			}).WithPlugins(storageplugin.New(), New())
 
 			var invalid diskstorage.ErrInvalidAppId
@@ -83,9 +82,9 @@ func TestAnInvalidAppIdIsRejected(t *testing.T) {
 func TestAConfigThatIsNotAConfigIsRejected(t *testing.T) {
 	isolateDataDir(t)
 	var reported []error
-	kernel.New(map[kernel.PluginName]any{diskstorage.Name: "feuds"}).Handler(func(err error) bool {
+	kernel.New(map[kernel.PluginName]any{diskstorage.Name: "feuds"}).Handler(func(err error) error {
 		reported = append(reported, err)
-		return true
+		return err
 	}).WithPlugins(storageplugin.New(), New())
 
 	var invalid diskstorage.ErrInvalidConfig
@@ -156,21 +155,20 @@ type running struct {
 // it to shut down, as a process exit would.
 func start(t *testing.T, config diskstorage.Config) running {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(map[kernel.PluginName]any{diskstorage.Name: config}).
-		Handler(func(err error) bool {
+		Handler(func(err error) error {
 			t.Errorf("unexpected kernel error: %v", err)
-			return true
+			return err
 		}).
 		WithPlugins(storageplugin.New(), New())
 	done := make(chan struct{})
 	go func() {
-		engine.Run(ctx)
+		engine.Run()
 		close(done)
 	}()
 	<-engine.Ready()
 	return running{kernel: engine.Executioner(), stop: func() {
-		cancel()
+		engine.Quit()
 		<-done
 	}}
 }

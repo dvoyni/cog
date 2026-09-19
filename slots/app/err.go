@@ -40,3 +40,16 @@ type ErrHoldTooLong struct {
 func (e ErrHoldTooLong) Error() string {
 	return fmt.Sprintf("app: hold of %s exceeds the maximum of %s", e.For, e.Max)
 }
+
+// ErrStepNotPublished is returned by the TimeCmd handler when a TimeStep's Wait
+// expires before the ticks it raised were published. It is an expected outcome
+// rather than a fault: a paused engine that nothing renders has no frame to
+// publish them in, and the agent-facing surface maps it to words. The ticks
+// stay raised and are published by the next frame.
+type ErrStepNotPublished struct {
+	After time.Duration
+}
+
+func (e ErrStepNotPublished) Error() string {
+	return fmt.Sprintf("app: the step was not published within %s", e.After)
+}

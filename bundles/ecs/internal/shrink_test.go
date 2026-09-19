@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"reflect"
 	"runtime"
 	"testing"
@@ -17,7 +16,7 @@ import (
 // naming a Store.
 func TestThePluginRegistersShrinkUnderTheAuthorityAlone(t *testing.T) {
 	engine := kernel.New(nil).
-		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
+		Handler(func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }).
 		WithPlugins(New(), &gamePlugin{})
 
 	for _, command := range engine.Describe().Commands {
@@ -133,45 +132,33 @@ func TestAShrunkWorldReturnsToItsSteadyState(t *testing.T) {
 	measure := func(hooks, shrink bool) float64 {
 		game := &steadyGame{hooks: hooks}
 		engine := kernel.New(map[kernel.PluginName]any{ecs.Name: ecs.Config{PrewarmEntities: 64}}).
-			Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
+			Handler(func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }).
 			WithPlugins(New(), game)
-		ctx, cancel := context.WithCancel(context.Background())
 		stopped := make(chan struct{})
 		t.Cleanup(func() {
-			cancel()
+			engine.Quit()
 			<-stopped
 		})
 		go func() {
 			defer close(stopped)
-			engine.Run(ctx)
+			engine.Run()
 		}()
 		<-engine.Ready()
 		executioner := engine.Executioner()
 		run := func(n int) {
 			for range n {
-				if err := executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-					t.Fatalf("publishing the update: %v", err)
-				}
-			}
-		}
-		execute := func(err error) {
-			if err != nil {
-				t.Fatalf("executing a command: %v", err)
+				executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 			}
 		}
 
-		_, err := executioner.ExecuteCommand[growCmd](1_000)
-		execute(err)
+		executioner.ExecuteCommand[growCmd](1_000)
 		run(100)
-		_, err = executioner.ExecuteCommand[growCmd](20_000)
-		execute(err)
+		executioner.ExecuteCommand[growCmd](20_000)
 		run(1)
-		_, err = executioner.ExecuteCommand[cutCmd](1_000)
-		execute(err)
+		executioner.ExecuteCommand[cutCmd](1_000)
 		run(1)
 		if shrink {
-			released, err := executioner.ExecuteCommand[ecs.ShrinkCmd](ecs.ShrinkRequest{})
-			execute(err)
+			released := executioner.ExecuteCommand[ecs.ShrinkCmd](ecs.ShrinkRequest{})
 			if released.Stores == 0 || released.Entities == 0 || released.Scratch == 0 {
 				t.Fatalf("the zero request after a spike released %+v, want Stores, Entities and Scratch above 0", released)
 			}

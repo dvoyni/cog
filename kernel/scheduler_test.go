@@ -1,8 +1,6 @@
 package kernel
 
 import (
-	"context"
-	"errors"
 	"reflect"
 	"runtime"
 	"sync"
@@ -21,29 +19,25 @@ type testTask struct {
 	write   map[reflect.Type]struct{}
 	started chan struct{}
 	release chan struct{}
-	fn      func(ctx context.Context) error
+	fn      func() error
 	err     error
 }
 
-func (tt *testTask) locks(ctx context.Context) (read, write map[reflect.Type]struct{}) {
+func (tt *testTask) locks() (read, write map[reflect.Type]struct{}) {
 	return tt.read, tt.write
 }
 
-func (tt *testTask) run(ctx context.Context) error {
+func (tt *testTask) run(any) error {
 	if tt.started != nil {
 		close(tt.started)
 	}
 	if tt.fn != nil {
-		if err := tt.fn(ctx); err != nil {
+		if err := tt.fn(); err != nil {
 			return err
 		}
 	}
 	if tt.release != nil {
-		select {
-		case <-tt.release:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		<-tt.release
 	}
 	return tt.err
 }
@@ -86,12 +80,17 @@ func set(names ...string) map[reflect.Type]struct{} {
 	return m
 }
 
+// schedule runs one task through the coordinator, which is what the engine's
+// runTask does for a task that asks for locks.
+func schedule(s *scheduler, t task) error {
+	read, write := t.locks()
+	return s.execute(t, nil, read, write)
+}
+
 func startScheduler(t *testing.T) *scheduler {
 	t.Helper()
 	s := newScheduler()
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = s.run(ctx) }()
-	t.Cleanup(cancel)
+	t.Cleanup(s.shutdown)
 	return s
 }
 
@@ -119,8 +118,8 @@ func TestScheduler_ReadersOverlap(t *testing.T) {
 
 	r1 := blockingTask(set("R"), nil)
 	r2 := blockingTask(set("R"), nil)
-	go func() { _ = s.execute(r1, context.Background()) }()
-	go func() { _ = s.execute(r2, context.Background()) }()
+	go func() { _ = schedule(s, r1) }()
+	go func() { _ = schedule(s, r2) }()
 
 	// If reads were incorrectly exclusive, only one would start.
 	mustStart(t, r1.started, time.Second)
@@ -135,11 +134,11 @@ func TestScheduler_WriterExcludesReader(t *testing.T) {
 	s := startScheduler(t)
 
 	w := blockingTask(nil, set("R"))
-	go func() { _ = s.execute(w, context.Background()) }()
+	go func() { _ = schedule(s, w) }()
 	mustStart(t, w.started, time.Second)
 
 	r := blockingTask(set("R"), nil)
-	go func() { _ = s.execute(r, context.Background()) }()
+	go func() { _ = schedule(s, r) }()
 	mustNotStart(t, r.started, 50*time.Millisecond)
 
 	close(w.release)
@@ -152,11 +151,11 @@ func TestScheduler_WritersExclusiveSameResource(t *testing.T) {
 	s := startScheduler(t)
 
 	w1 := blockingTask(nil, set("R"))
-	go func() { _ = s.execute(w1, context.Background()) }()
+	go func() { _ = schedule(s, w1) }()
 	mustStart(t, w1.started, time.Second)
 
 	w2 := blockingTask(nil, set("R"))
-	go func() { _ = s.execute(w2, context.Background()) }()
+	go func() { _ = schedule(s, w2) }()
 	mustNotStart(t, w2.started, 50*time.Millisecond)
 
 	close(w1.release)
@@ -168,13 +167,13 @@ func TestScheduler_WaitingWriterBlocksLaterReader(t *testing.T) {
 	s := startScheduler(t)
 
 	activeReader := blockingTask(set("R"), nil)
-	go func() { _ = s.execute(activeReader, context.Background()) }()
+	go func() { _ = schedule(s, activeReader) }()
 	mustStart(t, activeReader.started, time.Second)
 
 	writer := &lockRequest{write: set("R"), granted: make(chan struct{})}
 	s.acquire <- writer
 	laterReader := blockingTask(set("R"), nil)
-	go func() { _ = s.execute(laterReader, context.Background()) }()
+	go func() { _ = schedule(s, laterReader) }()
 	mustNotStart(t, laterReader.started, 50*time.Millisecond)
 
 	close(activeReader.release)
@@ -189,13 +188,13 @@ func TestScheduler_UnrelatedRequestPassesBlockedRequest(t *testing.T) {
 	s := startScheduler(t)
 
 	activeReader := blockingTask(set("R"), nil)
-	go func() { _ = s.execute(activeReader, context.Background()) }()
+	go func() { _ = schedule(s, activeReader) }()
 	mustStart(t, activeReader.started, time.Second)
 
 	writer := &lockRequest{write: set("R"), granted: make(chan struct{})}
 	s.acquire <- writer
 	unrelated := blockingTask(nil, set("B"))
-	go func() { _ = s.execute(unrelated, context.Background()) }()
+	go func() { _ = schedule(s, unrelated) }()
 	mustStart(t, unrelated.started, time.Second)
 
 	close(unrelated.release)
@@ -210,8 +209,8 @@ func TestScheduler_DifferentResourcesParallel(t *testing.T) {
 
 	a := blockingTask(nil, set("A"))
 	b := blockingTask(nil, set("B"))
-	go func() { _ = s.execute(a, context.Background()) }()
-	go func() { _ = s.execute(b, context.Background()) }()
+	go func() { _ = schedule(s, a) }()
+	go func() { _ = schedule(s, b) }()
 
 	mustStart(t, a.started, time.Second)
 	mustStart(t, b.started, time.Second)
@@ -234,12 +233,12 @@ func TestScheduler_WritersSerialized(t *testing.T) {
 			defer wg.Done()
 			task := &testTask{
 				write: set("R"),
-				fn: func(context.Context) error {
+				fn: func() error {
 					counter++ // safe only if writers are exclusive
 					return nil
 				},
 			}
-			_ = s.execute(task, context.Background())
+			_ = schedule(s, task)
 		}()
 	}
 	wg.Wait()
@@ -249,117 +248,13 @@ func TestScheduler_WritersSerialized(t *testing.T) {
 	}
 }
 
-// schedule runs a batch sequentially, preserving order.
-func TestScheduler_ScheduleRunsInOrder(t *testing.T) {
-	s := startScheduler(t)
-
-	var order []int
-	done := make(chan struct{})
-	var tasks []task
-	for i := 0; i < 5; i++ {
-		i := i
-		tasks = append(tasks, &testTask{
-			fn: func(context.Context) error {
-				order = append(order, i)
-				return nil
-			},
-		})
-	}
-	tasks = append(tasks, &testTask{
-		fn: func(context.Context) error { close(done); return nil },
-	})
-
-	s.schedule(tasks, context.Background(), nil)
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for batch")
-	}
-	if len(order) != 5 {
-		t.Fatalf("order = %v, want 5 tasks", order)
-	}
-	for i, v := range order {
-		if v != i {
-			t.Fatalf("order = %v, want sequential", order)
-		}
-	}
-}
-
-// schedule stops at the first failing task.
-func TestScheduler_ScheduleStopsOnError(t *testing.T) {
-	s := startScheduler(t)
-
-	sentinel := ErrSchedulerStopped{} // any non-nil error
-	var ran []int
-	done := make(chan struct{})
-	errCh := make(chan error, 1)
-	tasks := []task{
-		&testTask{fn: func(context.Context) error { ran = append(ran, 0); return nil }},
-		&testTask{fn: func(context.Context) error { ran = append(ran, 1); close(done); return sentinel }},
-		&testTask{fn: func(context.Context) error { ran = append(ran, 2); return nil }},
-	}
-
-	s.schedule(tasks, context.Background(), func(err error) bool {
-		errCh <- err
-		return true
-	})
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for batch")
-	}
-	if len(ran) != 2 {
-		t.Fatalf("ran = %v, want the batch to stop after the failing task", ran)
-	}
-	if err := <-errCh; !errors.Is(err, sentinel) {
-		t.Fatalf("reported error = %v, want %v", err, sentinel)
-	}
-}
-
-// Canceling a task that is waiting for a lock withdraws it cleanly and frees the
-// resource for later tasks.
-func TestScheduler_CancelWhileWaiting(t *testing.T) {
-	s := startScheduler(t)
-
-	w := blockingTask(nil, set("R"))
-	go func() { _ = s.execute(w, context.Background()) }()
-	mustStart(t, w.started, time.Second)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() { errCh <- s.execute(blockingTask(set("R"), nil), ctx) }()
-
-	cancel() // the reader is still pending behind the writer
-
-	select {
-	case err := <-errCh:
-		if err != context.Canceled {
-			t.Fatalf("err = %v, want context.Canceled", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("canceled task did not return")
-	}
-
-	// The withdrawn request must not have leaked the lock: after the writer
-	// releases, a fresh reader can acquire R.
-	close(w.release)
-	r := blockingTask(set("R"), nil)
-	go func() { _ = s.execute(r, context.Background()) }()
-	mustStart(t, r.started, time.Second)
-	close(r.release)
-}
-
 // Once the coordinator stops, execute returns ErrSchedulerStopped instead of
 // blocking forever.
 func TestScheduler_StoppedReturnsError(t *testing.T) {
 	s := newScheduler()
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = s.run(ctx) }()
+	s.shutdown() // coordinator has exited
 
-	cancel()
-	<-s.done // coordinator has exited
-
-	err := s.execute(&testTask{}, context.Background())
+	err := schedule(s, &testTask{write: set("R")})
 	if _, ok := err.(ErrSchedulerStopped); !ok {
 		t.Fatalf("err = %v, want ErrSchedulerStopped", err)
 	}
@@ -376,8 +271,8 @@ func TestScheduler_SingleThreaded(t *testing.T) {
 	// Readers still overlap.
 	r1 := blockingTask(set("R"), nil)
 	r2 := blockingTask(set("R"), nil)
-	go func() { _ = s.execute(r1, context.Background()) }()
-	go func() { _ = s.execute(r2, context.Background()) }()
+	go func() { _ = schedule(s, r1) }()
+	go func() { _ = schedule(s, r2) }()
 	mustStart(t, r1.started, time.Second)
 	mustStart(t, r2.started, time.Second)
 	close(r1.release)
@@ -385,10 +280,10 @@ func TestScheduler_SingleThreaded(t *testing.T) {
 
 	// A writer still excludes a reader.
 	w := blockingTask(nil, set("W"))
-	go func() { _ = s.execute(w, context.Background()) }()
+	go func() { _ = schedule(s, w) }()
 	mustStart(t, w.started, time.Second)
 	rd := blockingTask(set("W"), nil)
-	go func() { _ = s.execute(rd, context.Background()) }()
+	go func() { _ = schedule(s, rd) }()
 	mustNotStart(t, rd.started, 50*time.Millisecond)
 	close(w.release)
 	mustStart(t, rd.started, time.Second)

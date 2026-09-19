@@ -133,15 +133,15 @@ func layoutSnapshot(k kernel.Executioner, request layoutRequest) (layoutResponse
 				"the directory for %s could not be created: %v", request.Path, err)}
 		}
 	}
-	status, err := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
-	if err != nil {
-		return layoutResponse{}, layoutRefusal(err)
+	status := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
+	if status.Err != nil {
+		return layoutResponse{}, layoutRefusal(status.Err)
 	}
 	paused := status.Paused
 
-	armed, err := k.ExecuteCommand[ui.ArmLayoutCmd](armRequest)
-	if err != nil {
-		return layoutResponse{}, layoutRefusal(err)
+	armed := k.ExecuteCommand[ui.ArmLayoutCmd](armRequest)
+	if armed.Err != nil {
+		return layoutResponse{}, layoutRefusal(armed.Err)
 	}
 	response := layoutResponse{SnapshotView: gfx.SnapshotViewOf(armed.Viewport)}
 	// The arm is placed first so that the tick the step produces is one that
@@ -163,8 +163,6 @@ func layoutSnapshot(k kernel.Executioner, request layoutRequest) (layoutResponse
 		response.LayoutView, response.Tick = snapshot.Layout, snapshot.Tick
 	case <-deadline.C:
 		return layoutResponse{}, layoutRefusal(nil)
-	case <-k.Context().Done():
-		return layoutResponse{}, layoutRefusal(k.Context().Err())
 	}
 
 	if request.Path != "" {
@@ -192,24 +190,23 @@ func layoutSnapshot(k kernel.Executioner, request layoutRequest) (layoutResponse
 // tick, so charging it against the stall deadline would turn the mechanism
 // that makes pairing reliable into the thing that breaks it.
 func stepForSnapshot(k kernel.Executioner) (stepped, joined bool, err error) {
-	status, err := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
-	if err != nil {
-		return false, false, layoutRefusal(err)
+	status := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
+	if status.Err != nil {
+		return false, false, layoutRefusal(status.Err)
 	}
 	wait := layoutDeadline + status.HoldFor
-	ctx, cancel := context.WithTimeout(k.Context(), wait)
-	defer cancel()
-	answer, err := k.WithContext(ctx).ExecuteCommand[app.TimeCmd](app.TimeRequest{
-		Action: app.TimeStep, Steps: 1, Join: true,
+	answer := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{
+		Action: app.TimeStep, Steps: 1, Join: true, Wait: wait,
 	})
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
+	if answer.Err != nil {
+		var notPublished app.ErrStepNotPublished
+		if errors.As(answer.Err, &notPublished) {
 			return false, false, mcp.Unavailable{Reason: fmt.Sprintf(
 				"the paused game published no tick within %s — the window may be minimised, the "+
 					"game may have stopped drawing, or a hold may still be open; the step will "+
 					"run when the window closes", wait)}
 		}
-		return false, false, layoutRefusal(err)
+		return false, false, layoutRefusal(answer.Err)
 	}
 	return answer.Stepped > 0, answer.Joined, nil
 }

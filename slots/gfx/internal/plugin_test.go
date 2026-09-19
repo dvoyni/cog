@@ -2,7 +2,6 @@ package internal
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"errors"
 	"image"
@@ -430,9 +429,9 @@ func recordCmdImpl() (kernel.Lock, kernel.Execute[recordRequest, recordResponse]
 	var queue kernel.Write[*gfx.OpQueue]
 	return func(access kernel.ResourceAccess) {
 			queue = access.GetWrite[*gfx.OpQueue]()
-		}, func(_ kernel.Kernel, req recordRequest) (recordResponse, error) {
+		}, func(_ kernel.Kernel, req recordRequest) recordResponse {
 			req.fn(queue.Get())
-			return recordResponse{}, nil
+			return recordResponse{}
 		}
 }
 
@@ -440,9 +439,9 @@ func recordResourcesCmdImpl() (kernel.Lock, kernel.Execute[recordResourcesReques
 	var queue kernel.Write[*gfx.ResourceQueue]
 	return func(access kernel.ResourceAccess) {
 			queue = access.GetWrite[*gfx.ResourceQueue]()
-		}, func(_ kernel.Kernel, req recordResourcesRequest) (recordResourcesResponse, error) {
+		}, func(_ kernel.Kernel, req recordResourcesRequest) recordResourcesResponse {
 			req.fn(queue.Get())
-			return recordResourcesResponse{}, nil
+			return recordResourcesResponse{}
 		}
 }
 func newTestKernel(t *testing.T, p *plugin) kernel.Executioner {
@@ -451,9 +450,9 @@ func newTestKernel(t *testing.T, p *plugin) kernel.Executioner {
 
 func newTestKernelWithFS(t *testing.T, p *plugin, filesystem fs.FS) kernel.Executioner {
 	t.Helper()
-	return newTestKernelWith(t, p, filesystem, func(err error) bool {
+	return newTestKernelWith(t, p, filesystem, func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	})
 }
 
@@ -463,21 +462,20 @@ func newTestKernelWithFS(t *testing.T, p *plugin, filesystem fs.FS) kernel.Execu
 // that follow it.
 func newTestKernelWithErrors(t *testing.T, p *plugin, report func(error)) kernel.Executioner {
 	t.Helper()
-	return newTestKernelWith(t, p, fstest.MapFS{}, func(err error) bool {
+	return newTestKernelWith(t, p, fstest.MapFS{}, func(err error) error {
 		report(err)
-		return false
+		return nil
 	})
 }
 
 func newTestKernelWith(t *testing.T, p *plugin, filesystem fs.FS, handler kernel.ErrorHandler) kernel.Executioner {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	config := map[kernel.PluginName]any{
 		storage.Name: storage.Config{}.WithReadFS("test", 10, filesystem),
 	}
 	engine := kernel.New(config).Handler(handler).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, p, testPlugin{})
-	go engine.Run(ctx)
+	go engine.Run()
+	t.Cleanup(engine.Quit)
 	<-engine.Ready()
 	return engine.Executioner()
 }
@@ -1522,9 +1520,9 @@ func TestFailedTextureIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	filesystem := &countingFS{FS: files}
 	p := newPlugin()
 	errorsReported := 0
-	k := newTestKernelWith(t, p, filesystem, func(error) bool {
+	k := newTestKernelWith(t, p, filesystem, func(err error) error {
 		errorsReported++
-		return false
+		return nil
 	})
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -1578,17 +1576,16 @@ func TestFailedShaderIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	files := fstest.MapFS{}
 	filesystem := &countingFS{FS: files}
 	p := newPlugin()
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	errorsReported := 0
 	config := map[kernel.PluginName]any{
 		storage.Name: storage.Config{}.WithReadFS("test", 10, filesystem),
 	}
-	engine := kernel.New(config).Handler(func(error) bool {
+	engine := kernel.New(config).Handler(func(err error) error {
 		errorsReported++
-		return false
+		return nil
 	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, p, testPlugin{})
-	go engine.Run(ctx)
+	go engine.Run()
+	t.Cleanup(engine.Quit)
 	<-engine.Ready()
 	k := engine.Executioner()
 	backend := &fakeBackend{}
@@ -1929,9 +1926,9 @@ func TestABackendCompileFailureCarriesTheSegmentTable(t *testing.T) {
 	}}
 	p := newPlugin()
 	var reported []error
-	k := newTestKernelWith(t, p, filesystem, func(err error) bool {
+	k := newTestKernelWith(t, p, filesystem, func(err error) error {
 		reported = append(reported, err)
-		return false
+		return nil
 	})
 	backend := &fakeBackend{shaderErr: errors.New("gogpu: parse error: line 3, column 12: expected ';'")}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})

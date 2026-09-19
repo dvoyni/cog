@@ -343,16 +343,12 @@ func TestATagNeverRecordsChanged(t *testing.T) {
 	components.disableds.Set(held, disabled{})
 	fresh = entities.alloc()
 	for range 2 {
-		if _, err := engine.Executioner().ExecuteCommand[tagWriteCmd](hookRequest{}); err != nil {
-			t.Fatalf("running the writer: %v", err)
-		}
+		engine.Executioner().ExecuteCommand[tagWriteCmd](hookRequest{})
 	}
 	if kinds := kindsIn(components.disableds.hooks); !slices.Equal(kinds, []string{"added+changed"}) {
 		t.Fatalf("writing a Tag recorded %v, want only the one addition", kinds)
 	}
-	if _, err := engine.Executioner().ExecuteCommand[tagReadCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the reader: %v", err)
-	}
+	engine.Executioner().ExecuteCommand[tagReadCmd](hookRequest{})
 	want := []string{fmt.Sprintf("%v added=true changed=true", fresh)}
 	if !slices.Equal(got, want) {
 		t.Fatalf("HookAddedChanged on a Tag delivered %v, want %v", got, want)
@@ -466,16 +462,12 @@ func TestAListSetThroughTheStoredListRecordsChanged(t *testing.T) {
 			}
 		}
 	}
-	if _, err := engine.Executioner().ExecuteCommand[packedWriteCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the writer: %v", err)
-	}
+	engine.Executioner().ExecuteCommand[packedWriteCmd](hookRequest{})
 	counts := changesIn(owner.packed.hooks)
 	if counts[byRef] != 1 || counts[byField] != 1 || len(counts) != 2 {
 		t.Fatalf("the log holds Changed records %v, want one each for %v and %v", counts, byRef, byField)
 	}
-	if _, err := engine.Executioner().ExecuteCommand[packedReadCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the reader: %v", err)
-	}
+	engine.Executioner().ExecuteCommand[packedReadCmd](hookRequest{})
 	slices.Sort(got)
 	want := []string{fmt.Sprintf("%v true [1 2]", byRef), fmt.Sprintf("%v true [1 9]", byField)}
 	slices.Sort(want)
@@ -932,20 +924,14 @@ func TestExplicitPaddingRecordsNoChangedForEqualFieldValues(t *testing.T) {
 	execute := func(what string, f func()) []int {
 		t.Helper()
 		step = f
-		if _, err := engine.Executioner().ExecuteCommand[paddingWriteCmd](hookRequest{}); err != nil {
-			t.Fatalf("%s: running the writer: %v", what, err)
-		}
+		engine.Executioner().ExecuteCommand[paddingWriteCmd](hookRequest{})
 		counts := make([]int, len(runners))
 		for k, runner := range runners {
 			counts[k] = runner.changes()
 		}
-		if _, err := engine.Executioner().ExecuteCommand[paddingReadCmd](hookRequest{}); err != nil {
-			t.Fatalf("%s: running the reader: %v", what, err)
-		}
+		engine.Executioner().ExecuteCommand[paddingReadCmd](hookRequest{})
 		if !validate {
-			if _, err := engine.Executioner().ExecuteCommand[paddingImplicitReadCmd](hookRequest{}); err != nil {
-				t.Fatalf("%s: running the implicit reader: %v", what, err)
-			}
+			engine.Executioner().ExecuteCommand[paddingImplicitReadCmd](hookRequest{})
 		}
 		return counts
 	}

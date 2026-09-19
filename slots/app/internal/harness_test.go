@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -71,43 +70,38 @@ func (*observer) Dependencies() []kernel.PluginName { return []kernel.PluginName
 
 func (o *observer) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.Subscribe[observeUpdate](func() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-		return nil, func(_ kernel.Kernel, event app.UpdateEvent) error {
+		return nil, func(_ kernel.Kernel, event app.UpdateEvent) {
 			o.mu.Lock()
 			defer o.mu.Unlock()
 			o.updates = append(o.updates, event)
-			return nil
 		}
 	})
 	registrar.Subscribe[observeRender](func() (kernel.Lock, kernel.Observe[app.RenderEvent]) {
-		return nil, func(_ kernel.Kernel, event app.RenderEvent) error {
+		return nil, func(_ kernel.Kernel, event app.RenderEvent) {
 			o.mu.Lock()
 			defer o.mu.Unlock()
 			o.renders = append(o.renders, event)
-			return nil
 		}
 	})
 	registrar.Subscribe[observeInit](func() (kernel.Lock, kernel.Observe[app.InitEvent]) {
-		return nil, func(kernel.Kernel, app.InitEvent) error {
+		return nil, func(kernel.Kernel, app.InitEvent) {
 			o.mu.Lock()
 			defer o.mu.Unlock()
 			o.lifecycle = append(o.lifecycle, "init")
-			return nil
 		}
 	})
 	registrar.Subscribe[observeQuit](func() (kernel.Lock, kernel.Observe[app.QuitEvent]) {
-		return nil, func(kernel.Kernel, app.QuitEvent) error {
+		return nil, func(kernel.Kernel, app.QuitEvent) {
 			o.mu.Lock()
 			defer o.mu.Unlock()
 			o.lifecycle = append(o.lifecycle, "quit")
-			return nil
 		}
 	})
 	registrar.Subscribe[observeWindowSize](func() (kernel.Lock, kernel.Observe[app.WindowSizeChangeEvent]) {
-		return nil, func(_ kernel.Kernel, event app.WindowSizeChangeEvent) error {
+		return nil, func(_ kernel.Kernel, event app.WindowSizeChangeEvent) {
 			o.mu.Lock()
 			defer o.mu.Unlock()
 			o.sizes = append(o.sizes, event)
-			return nil
 		}
 	})
 	return nil
@@ -126,17 +120,16 @@ type tickHarness struct {
 func newTickHarness(t *testing.T, config app.Config) *tickHarness {
 	t.Helper()
 	harness := &tickHarness{t: t, plugin: New().(*plugin), mainLoop: &fakeMainLoop{}, observer: &observer{}}
-	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(map[kernel.PluginName]any{app.Name: config}).
-		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
+		Handler(func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }).
 		WithPlugins(harness.plugin, mainLoopAdapter{harness.mainLoop}, harness.observer)
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
-		engine.Run(ctx)
+		engine.Run()
 	}()
 	t.Cleanup(func() {
-		cancel()
+		engine.Quit()
 		select {
 		case <-stopped:
 		case <-time.After(5 * time.Second):
@@ -196,11 +189,9 @@ func (h *tickHarness) rendered() []app.RenderEvent {
 
 func (h *tickHarness) control(request app.TimeRequest) app.TimeResponse {
 	h.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	response, err := h.k.WithContext(ctx).ExecuteCommand[app.TimeCmd](request)
-	if err != nil {
-		h.t.Fatalf("%v: %v", request.Action, err)
+	response := h.k.ExecuteCommand[app.TimeCmd](request)
+	if response.Err != nil {
+		h.t.Fatalf("%v: %v", request.Action, response.Err)
 	}
 	return response
 }

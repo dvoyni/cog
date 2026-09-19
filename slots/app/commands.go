@@ -65,6 +65,16 @@ type TimeRequest struct {
 	// refuses anything above the cap with ErrHoldTooLong rather than silently
 	// shortening it: a hold nobody ends is an engine nothing can step.
 	Hold time.Duration
+	// Wait bounds how long a TimeStep waits for the ticks it raised to be
+	// published; zero waits indefinitely. It is a deadline on the work rather
+	// than on the caller's patience, which is why it travels in the request:
+	// the engine has no ambient lifetime to inherit one from, and only the
+	// caller knows how long the tick it asked for is worth waiting for.
+	//
+	// A step whose Wait expires answers ErrStepNotPublished. The ticks it
+	// raised are still published, which is why the agent-facing surface caps
+	// how many may be asked for.
+	Wait time.Duration
 }
 
 // TimeResponse reports the tick source as this call left it. Every action
@@ -103,4 +113,9 @@ type TimeResponse struct {
 	// because the caller that needs to know is the one that comes back to a
 	// window it thought it still had.
 	HoldExpired bool
+	// Err is the outcome the tick source refused this call with: an action it
+	// does not know, a hold longer than it will honour, or a step whose Wait
+	// expired. They are things the caller asked for and can act on, so they
+	// answer here rather than being reported.
+	Err error
 }

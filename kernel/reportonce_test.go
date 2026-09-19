@@ -13,9 +13,9 @@ import (
 func collectingEngine(t *testing.T) (*Engine, *[]error) {
 	t.Helper()
 	var reported []error
-	e := startEngineWithHandler(t, func(err error) bool {
+	e := startEngineWithHandler(t, func(err error) error {
 		reported = append(reported, err)
-		return false
+		return nil
 	})
 	return e, &reported
 }
@@ -25,9 +25,7 @@ func TestKernel_ReportErrorOnceReportsOnlyTheFirstTime(t *testing.T) {
 	k := e.Executioner().Kernel
 	boom := errors.New("boom")
 	for range 5 {
-		if k.ReportErrorOnce("sprite:hero.png", boom) {
-			t.Fatal("a non-terminating handler asked for termination")
-		}
+		k.ReportErrorOnce("sprite:hero.png", boom)
 	}
 	if len(*reported) != 1 || !errors.Is((*reported)[0], boom) {
 		t.Fatalf("reported %v, want one boom", *reported)
@@ -131,24 +129,14 @@ func TestKernel_ForgetReportedErrorsSeesOnlyItsOwnKeyType(t *testing.T) {
 	}
 }
 
-func TestKernel_ReportErrorOnceReportsTermination(t *testing.T) {
+// A report answers nothing, so what a terminating handler decided is observed
+// where the decision lands: in the cause, not at the call site.
+func TestKernel_ReportErrorOnceReachesATerminatingHandler(t *testing.T) {
 	var handled error
-	e := startEngineWithHandler(t, func(err error) bool { handled = err; return true })
+	e := startEngineWithHandler(t, func(err error) error { handled = err; return err })
 	boom := errors.New("boom")
-	if !e.Executioner().Kernel.ReportErrorOnce("key", boom) {
-		t.Fatal("a terminating handler was not reported as one")
-	}
+	e.Executioner().Kernel.ReportErrorOnce("key", boom)
 	if !errors.Is(handled, boom) {
 		t.Fatalf("handled %v, want %v", handled, boom)
 	}
-}
-
-func TestKernel_ZeroKernelPanicsOnReportErrorOnce(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("zero Kernel did not panic")
-		}
-	}()
-	var zero Kernel
-	zero.ReportErrorOnce("key", errors.New("boom"))
 }

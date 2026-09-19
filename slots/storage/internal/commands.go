@@ -16,15 +16,15 @@ func setMountCmdImpl() (kernel.Lock, kernel.Execute[storage.SetMountRequest, sto
 	var filesystem kernel.Write[storage.FileSystem]
 	return func(access kernel.ResourceAccess) {
 			filesystem = access.GetWrite[storage.FileSystem]()
-		}, func(_ kernel.Kernel, request storage.SetMountRequest) (storage.SetMountResponse, error) {
+		}, func(_ kernel.Kernel, request storage.SetMountRequest) storage.SetMountResponse {
 			if request.Mount.Id == "" || request.Mount.FS == nil {
-				return storage.SetMountResponse{}, storage.ErrInvalidMount{Id: request.Mount.Id}
+				return storage.SetMountResponse{Err: storage.ErrInvalidMount{Id: request.Mount.Id}}
 			}
 			if request.Mount.Id == storage.PermanentMount {
-				return storage.SetMountResponse{}, storage.ErrReservedMount{Id: request.Mount.Id}
+				return storage.SetMountResponse{Err: storage.ErrReservedMount{Id: request.Mount.Id}}
 			}
 			filesystem.Set(types.FileSystemWithMount(filesystem.Get(), request.Mount))
-			return storage.SetMountResponse{}, nil
+			return storage.SetMountResponse{}
 		}
 }
 
@@ -32,16 +32,16 @@ func removeMountCmdImpl() (kernel.Lock, kernel.Execute[storage.RemoveMountReques
 	var filesystem kernel.Write[storage.FileSystem]
 	return func(access kernel.ResourceAccess) {
 			filesystem = access.GetWrite[storage.FileSystem]()
-		}, func(_ kernel.Kernel, request storage.RemoveMountRequest) (storage.RemoveMountResponse, error) {
+		}, func(_ kernel.Kernel, request storage.RemoveMountRequest) storage.RemoveMountResponse {
 			if request.Id == storage.PermanentMount {
-				return storage.RemoveMountResponse{}, storage.ErrReservedMount{Id: request.Id}
+				return storage.RemoveMountResponse{Err: storage.ErrReservedMount{Id: request.Id}}
 			}
 			current := filesystem.Get()
 			_, found := types.FileSystemMount(current, request.Id)
 			if found {
 				filesystem.Set(types.FileSystemWithoutMount(current, request.Id))
 			}
-			return storage.RemoveMountResponse{Removed: found}, nil
+			return storage.RemoveMountResponse{Removed: found}
 		}
 }
 
@@ -54,9 +54,10 @@ func accessValuesCmdImpl() (kernel.Lock, kernel.Execute[storage.AccessValuesRequ
 	return func(access kernel.ResourceAccess) {
 			filesystem = access.GetWrite[storage.FileSystem]()
 			values = access.GetWrite[storage.Values]()
-		}, func(_ kernel.Kernel, request storage.AccessValuesRequest) (storage.AccessValuesResponse, error) {
+		}, func(_ kernel.Kernel, request storage.AccessValuesRequest) storage.AccessValuesResponse {
 			store, response, err := types.ApplyValues(request, values.Get(), filesystem.Get())
 			values.Set(store)
-			return response, err
+			response.Err = err
+			return response
 		}
 }

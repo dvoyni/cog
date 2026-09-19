@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"math"
 	"sync/atomic"
 	"time"
@@ -30,6 +29,11 @@ type plugin struct {
 	// on wasm) consumes it via the frame sequence and hands it to the Loop's fixed
 	// step. lastDraw is render-thread-only; frameDtBits/frameSeq are atomic;
 	// lastFrameSeq is main-thread-only.
+	// looping is true while the platform loop is running, so Quit asks the App
+	// to leave a loop it is actually in. Quit arrives on another goroutine and
+	// may arrive before Run entered the loop or after it left.
+	looping atomic.Bool
+
 	lastDraw     time.Time
 	frameDtBits  atomic.Uint64
 	frameSeq     atomic.Uint64
@@ -108,14 +112,13 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 }
 
 // Run owns the calling (main) thread: it wires the gogpu callbacks to k, has the
-// Loop app attached publish app.InitEvent, starts a watcher that quits the
-// gogpu App when the engine's context is canceled, then runs the App's blocking
-// main loop, and has the Loop publish app.QuitEvent once it returns. Run returns when the window closes (or the
-// app quits), after which the engine shuts down. The callbacks are wired here
-// rather than in Register because that is where a Kernel first exists; the
-// captured value is immutable, so the main and render threads share it safely.
+// Loop app attached publish app.InitEvent, then runs the App's blocking main
+// loop, and has the Loop publish app.QuitEvent once it returns. Run returns
+// when the window closes, or when Quit asks the App to leave the loop, after
+// which the engine shuts down. The callbacks are wired here rather than in
+// Register because that is where a Kernel first exists; the captured value is
+// immutable, so the main and render threads share it safely.
 func (p *plugin) Run(k kernel.Executioner) error {
-	ctx := k.Context()
 	// Frame clock: hand gogpu's variable OnUpdate to the Loop's fixed step.
 	p.gpu.OnUpdate(func(dt float64) { p.onUpdate(k, dt) })
 	// Per-frame render barrier (app.RenderEvent on the render thread).
@@ -125,16 +128,20 @@ func (p *plugin) Run(k kernel.Executioner) error {
 		return err
 	}
 	defer p.loop.Quit(k)
-	runDone := make(chan struct{})
-	watcherDone := make(chan struct{})
-	go func() {
-		defer close(watcherDone)
-		quitOnCancellation(ctx, runDone, p.gpu.Quit)
-	}()
+	p.looping.Store(true)
 	err := p.gpu.Run()
-	close(runDone)
-	<-watcherDone
+	p.looping.Store(false)
 	return err
+}
+
+// Quit asks the gogpu App to leave its platform loop, which is what returns
+// Run. The engine calls it to stop a running engine, from a goroutine that is
+// not the one inside Run, so it checks that there is a loop to leave: a Quit
+// arriving before Run entered the loop, or after it left, has nothing to do.
+func (p *plugin) Quit() {
+	if p.looping.Load() {
+		p.gpu.Quit()
+	}
 }
 
 // Stop abandons any readback the window closed on. A capture armed in the
@@ -148,19 +155,6 @@ func (p *plugin) Stop(kernel.Executioner) error {
 	return nil
 }
 
-func quitOnCancellation(ctx context.Context, runDone <-chan struct{}, quit func()) {
-	select {
-	case <-runDone:
-		return
-	case <-ctx.Done():
-		select {
-		case <-runDone:
-			return
-		default:
-			quit()
-		}
-	}
-}
 
 // onUpdate runs on the gogpu (main) thread each frame. It flushes batched input,
 // then hands the Loop the real time of any newly rendered frames (measured in

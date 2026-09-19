@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -46,7 +45,7 @@ type snapshotFixture struct {
 	// asserting that both reach the snapshot is asserting about the ordering
 	// rather than about one callback writing twice.
 	record, recordUI func(*canvas.OpQueue)
-	step             func(kernel.Kernel, app.TimeRequest) (app.TimeResponse, error)
+	step             func(kernel.Kernel, app.TimeRequest) app.TimeResponse
 	requests         []app.TimeRequest
 
 	paused atomic.Bool
@@ -90,14 +89,13 @@ func (f *snapshotFixture) recordOnUpdate() (kernel.Lock, kernel.Observe[app.Upda
 	var queue kernel.Write[*canvas.OpQueue]
 	return func(access kernel.ResourceAccess) {
 			queue = access.GetWrite[*canvas.OpQueue]()
-		}, func(kernel.Kernel, app.UpdateEvent) error {
+		}, func(kernel.Kernel, app.UpdateEvent) {
 			f.mu.Lock()
 			record := f.record
 			f.mu.Unlock()
 			if record != nil {
 				record(queue.Get())
 			}
-			return nil
 		}
 }
 
@@ -105,19 +103,18 @@ func (f *snapshotFixture) recordUIOnUpdate() (kernel.Lock, kernel.Observe[app.Up
 	var queue kernel.Write[*canvas.OpQueue]
 	return func(access kernel.ResourceAccess) {
 			queue = access.GetWrite[*canvas.OpQueue]()
-		}, func(kernel.Kernel, app.UpdateEvent) error {
+		}, func(kernel.Kernel, app.UpdateEvent) {
 			f.mu.Lock()
 			record := f.recordUI
 			f.mu.Unlock()
 			if record != nil {
 				record(queue.Get())
 			}
-			return nil
 		}
 }
 
 func (f *snapshotFixture) timeCmdImpl() (kernel.Lock, kernel.Execute[app.TimeRequest, app.TimeResponse]) {
-	return nil, func(k kernel.Kernel, request app.TimeRequest) (app.TimeResponse, error) {
+	return nil, func(k kernel.Kernel, request app.TimeRequest) app.TimeResponse {
 		f.mu.Lock()
 		f.requests = append(f.requests, request)
 		step := f.step
@@ -125,7 +122,7 @@ func (f *snapshotFixture) timeCmdImpl() (kernel.Lock, kernel.Execute[app.TimeReq
 		if request.Action == app.TimeStep && step != nil {
 			return step(k, request)
 		}
-		return app.TimeResponse{Paused: f.paused.Load()}, nil
+		return app.TimeResponse{Paused: f.paused.Load()}
 	}
 }
 
@@ -138,7 +135,7 @@ func (f *snapshotFixture) set(slot *func(*canvas.OpQueue), record func(*canvas.O
 	*slot = record
 }
 
-func (f *snapshotFixture) onStep(step func(kernel.Kernel, app.TimeRequest) (app.TimeResponse, error)) {
+func (f *snapshotFixture) onStep(step func(kernel.Kernel, app.TimeRequest) app.TimeResponse) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.step = step
@@ -161,7 +158,6 @@ type drawsRig struct {
 
 func newDrawsRig(t *testing.T) *drawsRig {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
 	fixture := &snapshotFixture{}
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{}.
@@ -176,15 +172,15 @@ func newDrawsRig(t *testing.T) *drawsRig {
 				"fonts/body.ttf":   &fstest.MapFile{Data: goregular.TTF},
 			}),
 		canvas.Name: canvas.Config{},
-	}).Handler(func(err error) bool {
+	}).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appStandIn{fixture}, gfxplugin.New(), backendAdapter{&testBackend{}}, New(), fixture)
 	stopped := make(chan struct{})
-	go func() { engine.Run(ctx); close(stopped) }()
+	go func() { engine.Run(); close(stopped) }()
 	<-engine.Ready()
 	t.Cleanup(func() {
-		cancel()
+		engine.Quit()
 		<-stopped
 	})
 
@@ -510,9 +506,9 @@ func TestADrawsSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 		close(ticked)
 	}()
 	<-entered
-	armed, err := rig.k.ExecuteCommand[canvas.ArmDrawsCmd](canvas.ArmDrawsRequest{})
-	if err != nil {
-		t.Fatalf("arm: %v", err)
+	armed := rig.k.ExecuteCommand[canvas.ArmDrawsCmd](canvas.ArmDrawsRequest{})
+	if armed.Err != nil {
+		t.Fatalf("arm: %v", armed.Err)
 	}
 	close(release)
 	<-ticked
@@ -544,8 +540,8 @@ func TestADrawsSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 
 func TestASecondDrawsSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 	rig := newDrawsRig(t)
-	if _, err := rig.k.ExecuteCommand[canvas.ArmDrawsCmd](canvas.ArmDrawsRequest{}); err != nil {
-		t.Fatalf("first arm: %v", err)
+	if answer := rig.k.ExecuteCommand[canvas.ArmDrawsCmd](canvas.ArmDrawsRequest{}); answer.Err != nil {
+		t.Fatalf("first arm: %v", answer.Err)
 	}
 
 	_, err := drawsSnapshot(rig.k, drawsRequest{})
@@ -559,13 +555,13 @@ func TestASecondDrawsSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 
 	// A capture and the other packages' snapshots are separate slots. Refusing
 	// across kinds would destroy the one thing arming them together is for.
-	if _, err := rig.k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{}); err != nil {
-		t.Fatalf("a frame snapshot was refused while a draw snapshot was in flight: %v", err)
+	if answer := rig.k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{}); answer.Err != nil {
+		t.Fatalf("a frame snapshot was refused while a draw snapshot was in flight: %v", answer.Err)
 	}
-	if _, err := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
+	if answer := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
 		Target: gfx.CaptureDesc{Screen: true},
-	}); err != nil {
-		t.Fatalf("a capture was refused while a draw snapshot was in flight: %v", err)
+	}); answer.Err != nil {
+		t.Fatalf("a capture was refused while a draw snapshot was in flight: %v", answer.Err)
 	}
 }
 
@@ -575,9 +571,9 @@ func TestADrawsSnapshotUnderPausePerformsOneStepAndSaysSo(t *testing.T) {
 	rig.fixture.on(func(queue *canvas.OpQueue) {
 		queue.Text(1, "fonts/body.ttf", "frozen", canvas.TextDraw{Size: 10})
 	})
-	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
+	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) app.TimeResponse {
 		k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
-		return app.TimeResponse{Paused: true, Stepped: 1}, nil
+		return app.TimeResponse{Paused: true, Stepped: 1}
 	})
 
 	// No tick is driven here: a paused engine runs none of its own, so the step
@@ -615,9 +611,9 @@ func TestADrawsSnapshotJoiningAPendingStepSaysThatToo(t *testing.T) {
 	rig.fixture.on(func(queue *canvas.OpQueue) {
 		queue.Text(1, "fonts/body.ttf", "shared", canvas.TextDraw{Size: 10})
 	})
-	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
+	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) app.TimeResponse {
 		k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
-		return app.TimeResponse{Paused: true, Stepped: 1, Joined: true}, nil
+		return app.TimeResponse{Paused: true, Stepped: 1, Joined: true}
 	})
 
 	response, err := drawsSnapshot(rig.k, drawsRequest{})
@@ -641,9 +637,9 @@ func TestADrawsSnapshotNamesTheTickItDescribes(t *testing.T) {
 	rig.fixture.on(func(queue *canvas.OpQueue) {
 		queue.Text(1, "fonts/body.ttf", "shared", canvas.TextDraw{Size: 10})
 	})
-	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
+	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) app.TimeResponse {
 		k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60, Tick: 97}).Wait()
-		return app.TimeResponse{Paused: true, Stepped: 1}, nil
+		return app.TimeResponse{Paused: true, Stepped: 1}
 	})
 
 	response, err := drawsSnapshot(rig.k, drawsRequest{})
@@ -863,9 +859,9 @@ func gfxResourceProbeCmdImpl() (kernel.Lock, kernel.Execute[gfxResourceProbeRequ
 	var resources kernel.Write[*gfx.ResourceQueue]
 	return func(access kernel.ResourceAccess) {
 			resources = access.GetWrite[*gfx.ResourceQueue]()
-		}, func(_ kernel.Kernel, request gfxResourceProbeRequest) (gfxResourceProbeResponse, error) {
+		}, func(_ kernel.Kernel, request gfxResourceProbeRequest) gfxResourceProbeResponse {
 			request.run(resources.Get())
-			return gfxResourceProbeResponse{}, nil
+			return gfxResourceProbeResponse{}
 		}
 }
 

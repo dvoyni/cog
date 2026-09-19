@@ -140,9 +140,9 @@ func captureScreen(k kernel.Executioner, request captureScreenRequest) (captureS
 	if err := validateCaptureSpan(amount, interval); err != nil {
 		return captureScreenResponse{}, err
 	}
-	status, err := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
-	if err != nil {
-		return captureScreenResponse{}, captureRefusal(err, amount, interval)
+	status := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
+	if status.Err != nil {
+		return captureScreenResponse{}, captureRefusal(status.Err, amount, interval)
 	}
 	paused := status.Paused
 	if amount > 1 && paused {
@@ -154,11 +154,11 @@ func captureScreen(k kernel.Executioner, request captureScreenRequest) (captureS
 			"the directory for %s could not be created: %v", request.Path, err)}
 	}
 
-	armed, err := k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
+	armed := k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
 		Target: gfx.CaptureDesc{Screen: true}, Amount: amount, Interval: interval, Paused: paused,
 	})
-	if err != nil {
-		return captureScreenResponse{}, captureRefusal(err, amount, interval)
+	if armed.Err != nil {
+		return captureScreenResponse{}, captureRefusal(armed.Err, amount, interval)
 	}
 	return collectCapture(k, armed, request.Path, numbered, amount, interval)
 }
@@ -200,8 +200,6 @@ func collectCapture(
 				continue
 			}
 		case <-deadline.C:
-		case <-k.Context().Done():
-			refused = k.Context().Err()
 		}
 		break
 	}
@@ -392,24 +390,26 @@ func frameSnapshot(k kernel.Executioner, request frameSnapshotRequest) (frameSna
 				"the directory for %s could not be created: %v", request.Path, err)}
 		}
 	}
-	status, err := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
-	if err != nil {
-		return frameSnapshotResponse{}, frameRefusal(err)
+	status := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
+	if status.Err != nil {
+		return frameSnapshotResponse{}, frameRefusal(status.Err)
 	}
 	paused := status.Paused
 
-	armed, err := k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{Pass: request.Pass})
-	if err != nil {
-		return frameSnapshotResponse{}, frameRefusal(err)
+	armed := k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{Pass: request.Pass})
+	if armed.Err != nil {
+		return frameSnapshotResponse{}, frameRefusal(armed.Err)
 	}
 	response := frameSnapshotResponse{SnapshotView: gfx.SnapshotViewOf(armed.Viewport)}
 	// The arm is placed first so that the tick the step produces is one that
 	// began after it. Joining a step another arm already raised is what makes
 	// three snapshots armed together describe one tick instead of three.
 	if paused {
-		if response.Stepped, response.Joined, err = stepForSnapshot(k); err != nil {
+		stepped, joined, err := stepForSnapshot(k)
+		if err != nil {
 			return frameSnapshotResponse{}, err
 		}
+		response.Stepped, response.Joined = stepped, joined
 	}
 
 	deadline := time.NewTimer(frameDeadline)
@@ -422,8 +422,6 @@ func frameSnapshot(k kernel.Executioner, request frameSnapshotRequest) (frameSna
 		response.FrameView, response.Tick = snapshot.Frame, snapshot.Tick
 	case <-deadline.C:
 		return frameSnapshotResponse{}, frameRefusal(nil)
-	case <-k.Context().Done():
-		return frameSnapshotResponse{}, frameRefusal(k.Context().Err())
 	}
 
 	if request.Path != "" {
@@ -448,24 +446,23 @@ func frameSnapshot(k kernel.Executioner, request frameSnapshotRequest) (frameSna
 // tick, so charging it against the stall deadline would turn the mechanism
 // that makes pairing reliable into the thing that breaks it.
 func stepForSnapshot(k kernel.Executioner) (stepped, joined bool, err error) {
-	status, err := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
-	if err != nil {
-		return false, false, frameRefusal(err)
+	status := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
+	if status.Err != nil {
+		return false, false, frameRefusal(status.Err)
 	}
 	wait := frameDeadline + status.HoldFor
-	ctx, cancel := context.WithTimeout(k.Context(), wait)
-	defer cancel()
-	answer, err := k.WithContext(ctx).ExecuteCommand[app.TimeCmd](app.TimeRequest{
-		Action: app.TimeStep, Steps: 1, Join: true,
+	answer := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{
+		Action: app.TimeStep, Steps: 1, Join: true, Wait: wait,
 	})
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
+	if answer.Err != nil {
+		var notPublished app.ErrStepNotPublished
+		if errors.As(answer.Err, &notPublished) {
 			return false, false, mcp.Unavailable{Reason: fmt.Sprintf(
 				"the paused game published no tick within %s — the window may be minimised, the "+
 					"game may have stopped drawing, or a hold may still be open; the step will "+
 					"run when the window closes", wait)}
 		}
-		return false, false, frameRefusal(err)
+		return false, false, frameRefusal(answer.Err)
 	}
 	return answer.Stepped > 0, answer.Joined, nil
 }

@@ -118,9 +118,7 @@ func TestAResourceHandleIsRefreshedPerTick(t *testing.T) {
 	frame(t, engine, 1)
 	// Replacing the cell's value is what Write.Set is for, and it is the one
 	// case a handle captured at registration would get wrong.
-	if err := engine.Executioner().PublishEvent(replaceEvent{with: second}).Wait(); err != nil {
-		t.Fatalf("publishing the replacement: %v", err)
-	}
+	engine.Executioner().PublishEvent(replaceEvent{with: second}).Wait()
 	frame(t, engine, 1)
 
 	if len(seen) != 2 || seen[0] != 1 || seen[1] != 2 {
@@ -168,7 +166,7 @@ func composeAndFail(t *testing.T, subscribe func(*kernel.Registrar)) string {
 	t.Helper()
 	var failure error
 	kernel.New(nil).
-		Handler(func(err error) bool { failure = err; return true }).
+		Handler(func(err error) error { failure = err; return err }).
 		WithPlugins(
 			authority{ids: 8},
 			&componentsPlugin{ids: 8},

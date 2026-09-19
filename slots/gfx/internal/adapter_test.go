@@ -30,9 +30,9 @@ type attachBackendRequest struct{ Backend gfx.Backend }
 type attachBackendResponse struct{}
 
 func (a *testAdapter) attachBackendCmdImpl() (kernel.Lock, kernel.Execute[attachBackendRequest, attachBackendResponse]) {
-	return nil, func(_ kernel.Kernel, request attachBackendRequest) (attachBackendResponse, error) {
+	return nil, func(_ kernel.Kernel, request attachBackendRequest) attachBackendResponse {
 		a.backend.Store(&request.Backend)
-		return attachBackendResponse{}, nil
+		return attachBackendResponse{}
 	}
 }
 
@@ -106,9 +106,9 @@ func TestACompositionWithoutABackendAdapterFails(t *testing.T) {
 	var reported []error
 	kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{},
-	}).Handler(func(err error) bool {
+	}).Handler(func(err error) error {
 		reported = append(reported, err)
-		return true
+		return err
 	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, newPlugin())
 
 	var missing kernel.ErrMissingAdapter

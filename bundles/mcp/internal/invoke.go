@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
@@ -28,14 +29,33 @@ func (p *plugin) handle(capability mcp.Capability) sdk.ToolHandler {
 			}
 		}
 
-		// The deadline and the agent's own hang-up reach the dispatch through
-		// one handle: WithContext unbinds the executioner from the engine
-		// context, and ExecuteCommand re-links engine cancellation itself, so a
-		// dispatch dies on either lifetime with no bookkeeping in the body.
-		ctx, cancel := context.WithTimeout(ctx, p.config.Timeout)
-		defer cancel()
+		// The deadline and the agent's hang-up are the broker's business, not
+		// the engine's: a capability body runs to completion whatever the agent
+		// does, so the broker races it rather than trying to cut it short. A
+		// body that outruns either answers nobody, and its result is dropped.
+		type outcome struct {
+			response any
+			err      error
+		}
+		answered := make(chan outcome, 1)
+		go func() {
+			response, err := capability.Invoke(p.executioner, payload.Interface())
+			answered <- outcome{response, err}
+		}()
 
-		response, err := capability.Invoke(p.executioner.WithContext(ctx), payload.Interface())
+		expiry := time.NewTimer(p.config.Timeout)
+		defer expiry.Stop()
+		var result outcome
+		select {
+		case result = <-answered:
+		case <-expiry.C:
+			return refuse(mcp.Unavailable{Reason: fmt.Sprintf(
+				"the tool did not answer within %s", p.config.Timeout)}), nil
+		case <-ctx.Done():
+			return refuse(mcp.Unavailable{Reason: "the request was abandoned"}), nil
+		}
+
+		response, err := result.response, result.err
 		if err != nil {
 			if unavailable, expected := p.classify(err); expected {
 				return refuse(unavailable), nil

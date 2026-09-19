@@ -14,11 +14,11 @@ func (p *plugin) armDrawsCmdImpl() (kernel.Lock, kernel.Execute[canvas.ArmDrawsR
 	var viewport kernel.Read[*gfx.Viewport]
 	return func(access kernel.ResourceAccess) {
 			viewport = access.GetRead[*gfx.Viewport]()
-		}, func(_ kernel.Kernel, request canvas.ArmDrawsRequest) (canvas.ArmDrawsResponse, error) {
+		}, func(_ kernel.Kernel, request canvas.ArmDrawsRequest) canvas.ArmDrawsResponse {
 			live, err := p.snapshots.arm(request)
 			if err != nil {
-				return canvas.ArmDrawsResponse{}, err
+				return canvas.ArmDrawsResponse{Err: err}
 			}
-			return canvas.ArmDrawsResponse{Done: live.done, Viewport: *viewport.Get()}, nil
+			return canvas.ArmDrawsResponse{Done: live.done, Viewport: *viewport.Get()}
 		}
 }

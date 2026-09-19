@@ -140,12 +140,15 @@ type hookWorld struct {
 	act        func(set *Set[collider], remove *Remove[collider])
 	restack    func(r restacking)
 	walk       func(q *Query[colliderQuery], set *Set[collider], remove *Remove[collider])
+	// reported is the last error the handler saw, which is where a System's
+	// panic arrives now that a dispatch does not hand one back.
+	reported error
 }
 
 func newHookWorld(t *testing.T, reader any, also ...func(*kernel.Registrar)) *hookWorld {
 	t.Helper()
 	w := &hookWorld{}
-	w.entities, w.components, w.engine = newWorld(t, 64, func(registrar *kernel.Registrar) {
+	w.entities, w.components, w.engine = newWorldHandling(t, 64, func(registrar *kernel.Registrar) {
 		registrar.HandleCommand[hookActCmd](ToExecute[hookRequest, hookResponse](registrar,
 			func(set *Set[collider], remove *Remove[collider]) { w.act(set, remove) }))
 		registrar.HandleCommand[hookRestackCmd](ToExecute[hookRequest, hookResponse](registrar,
@@ -158,6 +161,12 @@ func newHookWorld(t *testing.T, reader any, also ...func(*kernel.Registrar)) *ho
 		for _, subscribe := range also {
 			subscribe(registrar)
 		}
+	}, nil, func(err error) error {
+		// A reader that falls behind panics, and the kernel reports that panic
+		// rather than handing it back to the dispatch. These tests are about the
+		// panic, so the world keeps it instead of failing on it.
+		w.reported = err
+		return nil
 	})
 	return w
 }
@@ -165,9 +174,7 @@ func newHookWorld(t *testing.T, reader any, also ...func(*kernel.Registrar)) *ho
 func (w *hookWorld) write(t *testing.T, act func(set *Set[collider], remove *Remove[collider])) {
 	t.Helper()
 	w.act = act
-	if _, err := w.engine.Executioner().ExecuteCommand[hookActCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the writer: %v", err)
-	}
+	w.engine.Executioner().ExecuteCommand[hookActCmd](hookRequest{})
 }
 
 // walked runs a System holding every write route to collider at once: a
@@ -175,25 +182,19 @@ func (w *hookWorld) write(t *testing.T, act func(set *Set[collider], remove *Rem
 func (w *hookWorld) walked(t *testing.T, walk func(q *Query[colliderQuery], set *Set[collider], remove *Remove[collider])) {
 	t.Helper()
 	w.walk = walk
-	if _, err := w.engine.Executioner().ExecuteCommand[hookWalkCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the walking writer: %v", err)
-	}
+	w.engine.Executioner().ExecuteCommand[hookWalkCmd](hookRequest{})
 }
 
 // structural runs a System that spawns and despawns.
 func (w *hookWorld) structural(t *testing.T, restack func(r restacking)) {
 	t.Helper()
 	w.restack = restack
-	if _, err := w.engine.Executioner().ExecuteCommand[hookRestackCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the structural writer: %v", err)
-	}
+	w.engine.Executioner().ExecuteCommand[hookRestackCmd](hookRequest{})
 }
 
 func (w *hookWorld) read(t *testing.T) {
 	t.Helper()
-	if _, err := w.engine.Executioner().ExecuteCommand[hookReadCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the reader: %v", err)
-	}
+	w.engine.Executioner().ExecuteCommand[hookReadCmd](hookRequest{})
 }
 
 // TestEachKindSetDeliversWhatItsTableSays is hooks.md § The eight kind sets for
@@ -359,9 +360,7 @@ func TestASpawnRecordsOnEveryWatchedStoreItCarriesAndNoOther(t *testing.T) {
 				}
 			}))
 	})
-	if _, err := engine.Executioner().ExecuteCommand[hookSpawnEveryCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the spawner: %v", err)
-	}
+	engine.Executioner().ExecuteCommand[hookSpawnEveryCmd](hookRequest{})
 
 	spawnedKinds := kindSpawned | kindAdded | kindChanged
 	for _, log := range []struct {
@@ -385,9 +384,7 @@ func TestASpawnRecordsOnEveryWatchedStoreItCarriesAndNoOther(t *testing.T) {
 		t.Fatal("solid, which nobody reads, has a log")
 	}
 
-	if _, err := engine.Executioner().ExecuteCommand[hookReadCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the reader: %v", err)
-	}
+	engine.Executioner().ExecuteCommand[hookReadCmd](hookRequest{})
 	if bodies != 1 || homings != 1 || colliders != 0 {
 		t.Fatalf("the readers were given %d bodies, %d homings and %d colliders, want 1, 1 and 0", bodies, homings, colliders)
 	}
@@ -562,9 +559,7 @@ func (p *hookOwnerPlugin) write(t *testing.T, engine *kernel.Engine,
 ) {
 	t.Helper()
 	p.act = act
-	if _, err := engine.Executioner().ExecuteCommand[hookOwnerActCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the owner's writer: %v", err)
-	}
+	engine.Executioner().ExecuteCommand[hookOwnerActCmd](hookRequest{})
 }
 
 // TestAReaderRegisteredAfterAWriterSeesItsActs is hooks.md § How recording is
@@ -587,9 +582,7 @@ func TestAReaderRegisteredAfterAWriterSeesItsActs(t *testing.T) {
 		set.UpdateFor(e, namedComponent{Name: "first"})
 		remove.From(e)
 	})
-	if _, err := engine.Executioner().ExecuteCommand[hookReadCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the reader: %v", err)
-	}
+	engine.Executioner().ExecuteCommand[hookReadCmd](hookRequest{})
 
 	want := []string{fmt.Sprintf("%v added=true first", e), fmt.Sprintf("%v added=false first", e)}
 	if fmt.Sprint(names) != fmt.Sprint(want) {
@@ -611,7 +604,7 @@ func TestHooksOverAnUnregisteredComponentFailsComposition(t *testing.T) {
 	} {
 		var failure error
 		kernel.New(nil).
-			Handler(func(err error) bool { failure = err; return true }).
+			Handler(func(err error) error { failure = err; return err }).
 			WithPlugins(
 				authority{ids: 8},
 				&componentsPlugin{ids: 8},
@@ -926,15 +919,11 @@ func TestARemovedValueLivesUntilTheLastReaderPassesIt(t *testing.T) {
 	if collected(3) {
 		t.Fatal("the string was released while no reader had run")
 	}
-	if _, err := engine.Executioner().ExecuteCommand[hookFirstReadCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the first reader: %v", err)
-	}
+	engine.Executioner().ExecuteCommand[hookFirstReadCmd](hookRequest{})
 	if collected(3) {
 		t.Fatal("the string was released after the first reader, while the last had not run")
 	}
-	if _, err := engine.Executioner().ExecuteCommand[hookLastReadCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the last reader: %v", err)
-	}
+	engine.Executioner().ExecuteCommand[hookLastReadCmd](hookRequest{})
 	if !insideLast {
 		t.Fatal("the string was released during the last reader's run")
 	}

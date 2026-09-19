@@ -23,7 +23,7 @@ it as app's `app.MainLoop` Adapter, provides gfx's `gfx.Backend` Adapter, and fe
 - Subscribed kernel events: none
 
 Register dependencies before gogpu, and compose `appplugin.New()`: app is
-the Slot gogpu's MainLoop fills. `Run(ctx)` owns the calling thread and blocks in
+the Slot gogpu's MainLoop fills. `Run` owns the calling thread and blocks in
 the platform main loop until the window closes, `app.QuitCmd` runs, or the
 context is canceled.
 

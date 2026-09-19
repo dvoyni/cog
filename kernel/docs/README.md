@@ -17,39 +17,42 @@ The package has two faces, split by phase.
 owns the plugin set, registry, scheduler, and lifetime.
 
 `Kernel` is the runtime handle. It is a small value created per dispatch and
-passed by value, never as a pointer. It carries the engine and the invocation
-context. It is scoped to one dispatch, so retaining it past the handler that
-received it is a bug. The zero `Kernel` panics on every method.
+passed by value, never as a pointer. It carries the engine it belongs to and
+nothing else. It is scoped to one dispatch, so retaining it past the handler
+that received it is a bug. There is no `context.Context` anywhere in the kernel:
+cog is a standalone application, not a service, and a deadline that matters
+belongs to the plugin that has one.
 
 ```go
 engine := kernel.New(config).
     Handler(handleError).
     WithPlugins(plugins...)
-engine.Run(ctx)
+cause := engine.Run()
 ```
 
 `New` creates an unstarted engine. `WithPlugins` validates the complete
 dependency graph, orders plugins with stable caller-order ties, calls
-`Register`, and finalizes ownership and subscription DAGs. `Run` starts the
-scheduler, calls each `PluginStarter` in dependency order, runs zero or one
-`PluginHost`, and calls each active `PluginStopper` in reverse order. Plugins
-implement only the lifecycle capabilities they need. A headless engine blocks
-until cancellation.
+`Register`, and finalizes ownership and subscription DAGs. `Run` calls each
+`PluginStarter` in dependency order, runs zero or one `PluginHost`, and calls
+each active `PluginStopper` in reverse order. Plugins implement only the
+lifecycle capabilities they need. It blocks, and answers how the run ended: nil
+on an ordinary quit, the initialization failure of a composition that never
+started, or the first error the handler terminated on.
 
-`Ready` is closed once that attempt is over, whether it succeeded or not: a
-composition that failed closes it too, so nobody waiting on it blocks forever.
-It is not a success signal. `Err` is: nil while the engine is live, the
-terminating cause once it is not, the way `context.Err` reads. A root that waits
-on `Ready` before dispatching asks `Err` what it woke up to.
+`Engine.Quit` asks a running engine to stop. A headless engine returns once
+every started plugin has stopped; one with a Host cannot, because the Host owns
+the blocking loop, so `PluginHost.Quit` asks it to leave. app implements that by
+asking its MainLoop to quit.
 
-A terminated engine refuses every dispatch. Composition stops at the plugin
-whose `Register` failed, so its handles were never bound and its later plugins
-never registered at all; running a handler there would fail somewhere arbitrary,
-chosen by plugin order. Instead `ExecuteCommand`, `ExecuteCommandAsync` and
-`PublishEvent` return `ErrEngineTerminated` wrapping the cause, without entering
-plugin code. The same holds once a reported panic or a terminating error handler
-ends a running engine. A dispatch made before `Run` on a healthy engine still
-runs: the refusal keys on termination, not on the scheduler being absent.
+`Ready` is closed once the startup attempt is over, whether it succeeded or not:
+a composition that failed closes it too, so nobody waiting on it blocks forever.
+It is not a success signal, and there is no second place to ask — what went
+wrong is what `Run` returns.
+
+**Nothing is refused for being late.** A dispatch that started finishes, a
+dispatch arriving during shutdown runs until the scheduler stops, and the engine
+keeps no liveness flag for anyone to consult. The scheduler is live from `New`,
+so a dispatch before `Run` runs too.
 
 `PluginName` identifies plugins and keys their values in the configuration map.
 
@@ -62,12 +65,15 @@ type Plugin interface {
 
 type PluginStarter interface { Plugin; Start(Executioner) error }
 type PluginStopper interface { Plugin; Stop(Executioner) error }
-type PluginHost    interface { Plugin; Run(Executioner) error }
+type PluginHost    interface { Plugin; Run(Executioner) error; Quit() }
 ```
 
-Lifecycle methods receive an `Executioner` rather than a `context.Context`; use
-`Kernel.Context()` where a context is needed. `Stop` receives one carrying the
-shutdown context, which outlives engine cancellation.
+Lifecycle methods receive an `Executioner`. `Stop`'s still dispatches: the
+scheduler stops after every `Stop` has run, so shutdown work is talking to a
+live engine. `Executioner.Quitting` is a channel closed when the engine is asked
+to stop, for a plugin that owns something outside the engine — a listening
+socket, a worker it started in `Start` — and has to stop accepting before the
+engine tears down.
 
 A plugin reaches another plugin only through a typed command, a published
 event, a locked resource, or an Adapter bound to it at composition. The engine
@@ -80,9 +86,9 @@ wants the contributors to a Port it declares collects them with
 A command or subscription is a **factory** returning two closures:
 
 ```go
-type Lock                     func(ResourceAccess)
-type Execute[TRequest, TResponse any] func(Kernel, TRequest) (TResponse, error)
-type Observe[TEvent any]              func(Kernel, TEvent) error
+type Lock                             func(ResourceAccess)
+type Execute[TRequest, TResponse any] func(Kernel, TRequest) TResponse
+type Observe[TEvent any]              func(Kernel, TEvent)
 
 type Command[TRequest, TResponse any] = func() (Lock, Execute[TRequest, TResponse])
 type Subscription[TEvent any]         = func() (Lock, Observe[TEvent])
@@ -91,6 +97,10 @@ type Subscription[TEvent any]         = func() (Lock, Observe[TEvent])
 The factory runs **once, at registration**. Its `Lock` binds resource handles;
 its `Execute` or `Observe` is cached and reused for every later invocation. A
 nil `Lock` declares no resources.
+
+A body returns a response, or nothing. There is no error channel: a failure the
+caller should act on is part of the response, and a failure nobody can act on
+goes to `ReportError`. That is what stops a body saying the same thing twice.
 
 Requesting a handle is what declares the lock, so a handler cannot declare a
 resource it does not use, or use one it did not declare. There is no separate
@@ -117,10 +127,10 @@ func loadCmdImpl() (kernel.Lock, kernel.Execute[LoadRequest, LoadResponse]) {
     return func(access kernel.ResourceAccess) {
             config = access.GetRead[Config]()
             cache = access.GetWrite[*Cache]()
-        }, func(k kernel.Kernel, request LoadRequest) (LoadResponse, error) {
+        }, func(k kernel.Kernel, request LoadRequest) LoadResponse {
             _ = config.Get()
             cache.Get().Store(request.Name)
-            return LoadResponse{}, nil
+            return LoadResponse{}
         }
 }
 
@@ -142,12 +152,11 @@ A handler declares the commands it dispatches in its `Lock`, exactly as it
 declares resources:
 
 ```go
-var load func(kernel.Kernel, LoadRequest) (LoadResponse, error)
+var load func(kernel.Kernel, LoadRequest) LoadResponse
 return func(access kernel.ResourceAccess) {
         load = access.Uses[LoadCmd]()
-    }, func(k kernel.Kernel, event app.UpdateEvent) error {
-        _, err := load(k, LoadRequest{Name: "level"})
-        return err
+    }, func(k kernel.Kernel, event app.UpdateEvent) {
+        load(k, LoadRequest{Name: "level"})
     }
 ```
 
@@ -157,9 +166,12 @@ callee's resources. The dispatch then reuses the locks the handler already
 holds, which keeps lock acquisition atomic and one-shot. A `Uses` cycle, or
 `Uses` of an unregistered command, fails composition.
 
+Because the fold is static, a declared dispatch asks the scheduler for nothing,
+and the kernel runs it directly rather than paying a coordinator round-trip for
+a decision finalisation already took. It costs what the dispatch it wraps costs.
+
 `Kernel.ExecuteCommandAsync` needs no declaration. It runs the command as an
-independent top-level task that acquires its own locks, returns nothing, and
-sends any error to the centralized error handler. Because the task runs after
+independent top-level task that acquires its own locks and returns nothing. Because the task runs after
 the caller's locks are gone, its request must not carry anything derived from a
 locked resource.
 
@@ -167,9 +179,12 @@ locked resource.
 engine mints an `Executioner`, for plugin lifecycle methods and host callbacks:
 they run outside any handler, so every command they dispatch acquires its own
 set from the scheduler. A handler receives a plain `Kernel` and therefore cannot
-dispatch except through `Uses` or `ExecuteCommandAsync`.
+dispatch except through `Uses` or `ExecuteCommandAsync`. That is what makes the
+deadlock unrepresentable: a handler holding locks has no way to ask for more.
 
-Use `Kernel.WithContext(ctx)` to add a caller deadline or cancellation scope.
+`ExecuteCommand` answers with the response alone. A dispatch the kernel could
+not perform — an unregistered command, a body that panicked — is reported, and
+the caller receives the zero response.
 
 ## Events
 
@@ -183,9 +198,8 @@ func update() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
     var state kernel.Write[*State]
     return func(access kernel.ResourceAccess) {
             state = access.GetWrite[*State]()
-        }, func(k kernel.Kernel, event app.UpdateEvent) error {
+        }, func(k kernel.Kernel, event app.UpdateEvent) {
             state.Get().Step(event.Dt)
-            return nil
         }
 }
 
@@ -200,13 +214,19 @@ registrar.Subscribe[updateHandler](update).First()
 
 `Kernel.PublishEvent` returns a `Publication`. Ready subscribers run
 concurrently subject to resource locks. `Before`/`After` dependencies wait for
-predecessor completion; descendants of failed subscribers are skipped. First and
-Last are concurrent phase groups and may have dependencies within their own
-group. Discarding the handle is asynchronous; `Publication.Wait` is a barrier.
+predecessor completion. First and Last are concurrent phase groups and may have
+dependencies within their own group. Discarding the handle is asynchronous;
+`Publication.Wait` is a barrier and answers nothing.
 
-Publishing is fire-and-forget: the publication is bounded by the publisher's
-lifetime scope, not by the invocation that published it, so an event published
-from inside a command outlives that command's return.
+A panic is the only subscriber failure a publication can see, and descendants of
+a subscriber that panicked are skipped. One that merely reports has still
+completed, and its dependents run: reporting says what went wrong and says
+nothing about whether the work downstream can go ahead. Where the answer is no,
+it belongs in state the dependent reads.
+
+Publishing is fire-and-forget: the publication outlives the invocation that
+published it, so an event published from inside a command outlives that
+command's return.
 
 ## Resources
 
@@ -309,17 +329,33 @@ anything but an Adapter type does not compile.
 
 ## Errors
 
-`ErrorHandler func(error) bool` receives serialized errors. Returning true
-cancels the engine; returning false permits recovery where possible.
-`Engine.Handler` sets it, `Kernel.ReportError` invokes it directly, and a nil
-handler restores the terminating default.
+`ErrorHandler func(error) error` receives serialized errors and decides what
+they mean. Returning nil keeps the engine running; returning an error terminates
+it, and that error is what `Run` answers with. `Engine.Handler` sets it, a nil
+handler restores the default, and `Kernel.ReportError` is what reaches it.
+
+**The handler is the only place termination is decided.** The engine has no
+opinion of its own about any error, including a plugin panic: that opinion lives
+in the default handler, which logs everything and terminates on `ErrPluginPanic`
+alone. A game that wants a different rule installs its own handler.
+
+`ReportError` and `ReportErrorOnce` answer nothing. What happens next is the
+handler's decision, and the reporter has finished with the failure either way.
+`ReportErrorOnce` fires a burst the first time it is called under a key and
+drops it thereafter; `ForgetReportedError` and `ForgetReportedErrors` let a key
+speak again once the condition it named could have changed.
+
+Code without a `Kernel` — a render-thread object, an Adapter's backend — hands
+its error back to code that has one. The engine recovers only the goroutines it
+started; a plugin that spawns its own owns their failures.
 
 Exported error types:
 
-- `ErrSchedulerStopped`: work was submitted after cancellation.
-- `ErrEngineTerminated`: a dispatch was refused because the engine had
-  terminated, whether at composition or during the run. `Cause` is the
-  terminating error and `Unwrap` reaches it.
+- `ErrSchedulerStopped`: work was submitted after the coordinator stopped. It is
+  not reported: a dispatch arriving after shutdown is the engine ending, not a
+  failure in the thing that dispatched.
+- `ErrPortNotAnInterface`: a Port or Adapter declaration names a type argument
+  that is not an interface.
 - `ErrConflictingPluginName`: two registered plugins use the same name.
 - `ErrMissingPluginDependency`: a plugin's declared dependency is absent.
 - `ErrPluginDependencyCycle`: plugin dependencies cannot be ordered.
@@ -340,7 +376,8 @@ Exported error types:
 - `ErrNilAdapter`: a plugin provides a nil Adapter; it names the plugin and the
   Adapter type.
 - `ErrUnavailableDependency`: `Dependency` was asked for a resource with no
-  initial value or an undeclared owner; it arrives inside `ErrPluginPanic`.
+  initial value or an undeclared owner. It is returned to the caller, whose
+  `Register` propagates it.
 - `ErrPluginPanic`: a plugin boundary panicked; includes owner and stack.
 - `ErrSubscriptionCycle`: event ordering contains a cycle; its fields expose
   the event and subscription types.
@@ -465,16 +502,17 @@ Go's reflection cannot see aliases, which is why the rule is needed at all:
 ## Public API Index
 
 - Composition: `New`, `Engine`, `Engine.Handler`, `Engine.WithPlugins`,
-  `Engine.Run`, `Engine.Ready`, `Engine.Err`, `Engine.Executioner`,
+  `Engine.Run`, `Engine.Quit`, `Engine.Ready`, `Engine.Executioner`,
   `Engine.Describe`, `Dump`,
   `ArchitectureDescription`.
 - Introspection: `PluginDescription`, `ResourceDescription`,
   `CommandDescription`, `SubscriptionDescription`, `ContentionDescription`,
   `ResourceContention`, `PhaseContention`, `HandlerConflict`, `HandlerRef`,
   `PortDescription`, `AdapterDescription`, `TypeName`.
-- Runtime: `Kernel`, `Kernel.Context`, `Kernel.WithContext`,
-  `Kernel.ExecuteCommandAsync`, `Kernel.PublishEvent`, `Kernel.ReportError`,
-  `Executioner`, `Executioner.ExecuteCommand`, `Executioner.Describe`,
+- Runtime: `Kernel`, `Kernel.ExecuteCommandAsync`, `Kernel.PublishEvent`,
+  `Kernel.ReportError`, `Kernel.ReportErrorOnce`, `Kernel.ForgetReportedError`,
+  `Kernel.ForgetReportedErrors`, `Executioner`, `Executioner.ExecuteCommand`,
+  `Executioner.Quitting`, `Executioner.Describe`,
   `Publication`, `Publication.Wait`.
 - Registration: `Registrar`, `Registrar.InitResource`,
   `Registrar.Dependency`, `Registrar.HandleCommand`, `Registrar.Subscribe`,

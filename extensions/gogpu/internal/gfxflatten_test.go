@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"errors"
 	"io/fs"
 	"sync"
@@ -28,11 +27,9 @@ func flattenShader(t testing.TB, mount storage.MountId, filesystem fs.FS, shader
 		mu       sync.Mutex
 		refusals []error
 	)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{}.WithReadFS(mount, 0, filesystem),
-	}).Handler(func(err error) bool {
+	}).Handler(func(err error) error {
 		var source gfx.ErrShaderSource
 		// A shader whose source is not there is the asset Library's read failure
 		// now rather than an error type of gfx's own, and it wraps what the open
@@ -42,9 +39,9 @@ func flattenShader(t testing.TB, mount storage.MountId, filesystem fs.FS, shader
 			refusals = append(refusals, err)
 			mu.Unlock()
 		}
-		return true
+		return err
 	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), flattenRecorder{backend: backend, shader: shader})
-	go engine.Run(ctx)
+	go engine.Run()
 	<-engine.Ready()
 	k := engine.Executioner()
 	k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
@@ -86,12 +83,11 @@ func (r flattenRecorder) Register(registrar *kernel.Registrar, _ any) error {
 		var queue kernel.Write[*gfx.OpQueue]
 		return func(access kernel.ResourceAccess) {
 				queue = access.GetWrite[*gfx.OpQueue]()
-			}, func(kernel.Kernel, app.UpdateEvent) error {
+			}, func(kernel.Kernel, app.UpdateEvent) {
 				q := queue.Get()
 				q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthNone()})
 				vertices := gfx.BufferWithBytes(make([]byte, 12), true)
 				q.Draw(gfx.Mesh(vertices, gfx.TopologyTriangleList, gfx.Attr(0, gfx.Float32x3)), gfx.Material(r.shader))
-				return nil
 			}
 	})
 	return nil

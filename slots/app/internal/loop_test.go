@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"errors"
 	"math"
 	"slices"
@@ -19,7 +18,7 @@ func almostEqual(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
 func compose(config map[kernel.PluginName]any, plugins ...kernel.Plugin) error {
 	var failure error
 	kernel.New(config).
-		Handler(func(err error) bool { failure = errors.Join(failure, err); return false }).
+		Handler(func(err error) error { failure = errors.Join(failure, err); return nil }).
 		WithPlugins(plugins...)
 	return failure
 }
@@ -49,15 +48,14 @@ func TestApp_RegistersUnderTheRootsName(t *testing.T) {
 // any Host's Run: a MainLoop never enters its loop without one.
 func TestApp_StartAttachesTheLoopBeforeTheEngineIsReady(t *testing.T) {
 	mainLoop := &fakeMainLoop{}
-	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(nil).
-		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
+		Handler(func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }).
 		WithPlugins(New(), mainLoopAdapter{mainLoop})
 	stopped := make(chan struct{})
-	go func() { defer close(stopped); engine.Run(ctx) }()
+	go func() { defer close(stopped); engine.Run() }()
 	<-engine.Ready()
 	attached := mainLoop.attached()
-	cancel()
+	engine.Quit()
 	<-stopped
 
 	if attached == nil {
@@ -69,9 +67,7 @@ func TestApp_StartAttachesTheLoopBeforeTheEngineIsReady(t *testing.T) {
 func TestApp_QuitCmdQuitsTheMainLoop(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
-	if _, err := harness.k.ExecuteCommand[app.QuitCmd](app.QuitRequest{}); err != nil {
-		t.Fatalf("quit: %v", err)
-	}
+	harness.k.ExecuteCommand[app.QuitCmd](app.QuitRequest{})
 	if quits := harness.mainLoop.quits.Load(); quits != 1 {
 		t.Errorf("the MainLoop was asked to quit %d times, want 1", quits)
 	}

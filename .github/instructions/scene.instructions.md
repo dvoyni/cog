@@ -60,7 +60,7 @@ asset path, a cap it means to exceed — installs its own handler with a named
 allow-list and returns false for the entries on it:
 
 ```go
-kernel.New(config).Handler(demo.report).WithPlugins(plugins...).Run(ctx)
+kernel.New(config).Handler(demo.report).WithPlugins(plugins...).Run()
 ```
 
 ## The Zero Values Are The API

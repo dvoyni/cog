@@ -21,7 +21,7 @@ func TestTheDefaultFontIsMountedWithItsLicence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read embedded file %q: %v", path, err)
 		}
-		got, _ := k.ExecuteCommand[readFileProbeCmd](readFileProbeRequest{Name: path})
+		got := k.ExecuteCommand[readFileProbeCmd](readFileProbeRequest{Name: path})
 		if !bytes.Equal(got.Data, want) {
 			t.Fatalf("mounted file %q differs from the embedded source", path)
 		}

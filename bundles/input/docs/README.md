@@ -136,7 +136,7 @@ What to expect at the edges:
   to report. Releasing a key that is not down stays a silent no-op.
 - **One batch folds under one lock hold**, so another source's pointer move
   cannot land between a `move` and the `key_down` after it.
-- **The wait is outside every lock**, and it is a select on `k.Context()`: a
+- **The wait is outside every lock**, and it is a plain timer: a
   caller that hangs up stops the sequence at the next delay rather than running
   it out.
 - **A delay shorter than a frame may not separate ticks**, and while the engine

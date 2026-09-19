@@ -26,20 +26,20 @@ func archInnerCmdImpl() (kernel.Lock, kernel.Execute[archInnerRequest, archInner
 	var counter kernel.Write[archCounter]
 	return func(access kernel.ResourceAccess) {
 			counter = access.GetWrite[archCounter]()
-		}, func(kernel.Kernel, archInnerRequest) (archInnerResponse, error) {
+		}, func(kernel.Kernel, archInnerRequest) archInnerResponse {
 			_ = counter.Get()
-			return archInnerResponse{}, nil
+			return archInnerResponse{}
 		}
 }
 
 // archOuterCmdImpl names the command, never the resource behind it.
 func archOuterCmdImpl() (kernel.Lock, kernel.Execute[archOuterRequest, archOuterResponse]) {
-	var inner func(kernel.Kernel, archInnerRequest) (archInnerResponse, error)
+	var inner func(kernel.Kernel, archInnerRequest) archInnerResponse
 	return func(access kernel.ResourceAccess) {
 			inner = access.Uses[archInnerCmd]()
-		}, func(k kernel.Kernel, _ archOuterRequest) (archOuterResponse, error) {
-			_, err := inner(k, archInnerRequest{})
-			return archOuterResponse{}, err
+		}, func(k kernel.Kernel, _ archOuterRequest) archOuterResponse {
+			inner(k, archInnerRequest{})
+			return archOuterResponse{}
 		}
 }
 

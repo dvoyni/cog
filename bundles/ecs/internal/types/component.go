@@ -104,7 +104,12 @@ type componentClass struct {
 // It panics if C names mutable indirection, naming the offending field by path.
 // The plugin boundary turns that into a composition failure naming the plugin.
 func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C] {
-	en := registrar.Dependency[*Entities]()
+	en, err := registrar.Dependency[*Entities]()
+	if err != nil {
+		// The plugin boundary turns this into a composition failure naming the
+		// plugin, the same way it does the Storable refusal below.
+		panic(err)
+	}
 	componentType := reflect.TypeFor[C]()
 	if err := Storable(componentType); err != nil {
 		panic("ecs: " + err.Error())

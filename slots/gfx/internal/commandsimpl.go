@@ -15,9 +15,9 @@ func (p *plugin) presentCmdImpl() (kernel.Lock, kernel.Execute[gfx.PresentReques
 	return func(access kernel.ResourceAccess) {
 			write = access.GetWrite[*gfx.OpQueue]()
 			ready = access.GetWrite[*readyList]()
-		}, func(kernel.Kernel, gfx.PresentRequest) (gfx.PresentResponse, error) {
+		}, func(kernel.Kernel, gfx.PresentRequest) gfx.PresentResponse {
 			present(write, ready)
-			return gfx.PresentResponse{}, nil
+			return gfx.PresentResponse{}
 		}
 }
 
@@ -28,8 +28,8 @@ func (p *plugin) acquireCmdImpl() (kernel.Lock, kernel.Execute[gfx.AcquireReques
 	return func(access kernel.ResourceAccess) {
 			read = access.GetWrite[*readList]()
 			ready = access.GetWrite[*readyList]()
-		}, func(kernel.Kernel, gfx.AcquireRequest) (gfx.AcquireResponse, error) {
-			return gfx.AcquireResponse{Advanced: acquire(read, ready)}, nil
+		}, func(kernel.Kernel, gfx.AcquireRequest) gfx.AcquireResponse {
+			return gfx.AcquireResponse{Advanced: acquire(read, ready)}
 		}
 }
 
@@ -37,9 +37,9 @@ func (p *plugin) releaseCachedResourceCmdImpl() (kernel.Lock, kernel.Execute[gfx
 	var resources kernel.Write[*gfx.ResourceQueue]
 	return func(access kernel.ResourceAccess) {
 			resources = access.GetWrite[*gfx.ResourceQueue]()
-		}, func(_ kernel.Kernel, request gfx.ReleaseCachedResourceRequest) (gfx.ReleaseCachedResourceResponse, error) {
+		}, func(_ kernel.Kernel, request gfx.ReleaseCachedResourceRequest) gfx.ReleaseCachedResourceResponse {
 			types.ResourceQueueReleaseCachedResource(resources.Get(), request.Path)
-			return gfx.ReleaseCachedResourceResponse{}, nil
+			return gfx.ReleaseCachedResourceResponse{}
 		}
 }
 
@@ -47,9 +47,9 @@ func (p *plugin) freeCachedResourcesCmdImpl() (kernel.Lock, kernel.Execute[gfx.F
 	var resources kernel.Write[*gfx.ResourceQueue]
 	return func(access kernel.ResourceAccess) {
 			resources = access.GetWrite[*gfx.ResourceQueue]()
-		}, func(kernel.Kernel, gfx.FreeCachedResourcesRequest) (gfx.FreeCachedResourcesResponse, error) {
+		}, func(kernel.Kernel, gfx.FreeCachedResourcesRequest) gfx.FreeCachedResourcesResponse {
 			types.ResourceQueueFreeCachedResources(resources.Get())
-			return gfx.FreeCachedResourcesResponse{}, nil
+			return gfx.FreeCachedResourcesResponse{}
 		}
 }
 
@@ -61,12 +61,12 @@ func (p *plugin) armCaptureCmdImpl() (kernel.Lock, kernel.Execute[gfx.ArmCapture
 	var viewport kernel.Read[*gfx.Viewport]
 	return func(access kernel.ResourceAccess) {
 			viewport = access.GetRead[*gfx.Viewport]()
-		}, func(_ kernel.Kernel, request gfx.ArmCaptureRequest) (gfx.ArmCaptureResponse, error) {
+		}, func(_ kernel.Kernel, request gfx.ArmCaptureRequest) gfx.ArmCaptureResponse {
 			live, err := p.captures.arm(request)
 			if err != nil {
-				return gfx.ArmCaptureResponse{}, err
+				return gfx.ArmCaptureResponse{Err: err}
 			}
-			return gfx.ArmCaptureResponse{Done: live.done, Viewport: *viewport.Get()}, nil
+			return gfx.ArmCaptureResponse{Done: live.done, Viewport: *viewport.Get()}
 		}
 }
 
@@ -78,12 +78,12 @@ func (p *plugin) armFrameCmdImpl() (kernel.Lock, kernel.Execute[gfx.ArmFrameRequ
 	var viewport kernel.Read[*gfx.Viewport]
 	return func(access kernel.ResourceAccess) {
 			viewport = access.GetRead[*gfx.Viewport]()
-		}, func(_ kernel.Kernel, request gfx.ArmFrameRequest) (gfx.ArmFrameResponse, error) {
+		}, func(_ kernel.Kernel, request gfx.ArmFrameRequest) gfx.ArmFrameResponse {
 			live, err := p.snapshots.arm(request)
 			if err != nil {
-				return gfx.ArmFrameResponse{}, err
+				return gfx.ArmFrameResponse{Err: err}
 			}
-			return gfx.ArmFrameResponse{Done: live.done, Viewport: *viewport.Get()}, nil
+			return gfx.ArmFrameResponse{Done: live.done, Viewport: *viewport.Get()}
 		}
 }
 
@@ -93,12 +93,12 @@ func setViewportCmdImpl() (kernel.Lock, kernel.Execute[gfx.SetViewportRequest, g
 	return func(access kernel.ResourceAccess) {
 			preference = access.GetRead[*desiredViewport]()
 			current = access.GetWrite[*gfx.Viewport]()
-		}, func(_ kernel.Kernel, request gfx.SetViewportRequest) (gfx.SetViewportResponse, error) {
+		}, func(_ kernel.Kernel, request gfx.SetViewportRequest) gfx.SetViewportResponse {
 			viewport := resolveViewport(request.Width, request.Height, *preference.Get())
 			viewport.FramebufferWidth = request.FramebufferWidth
 			viewport.FramebufferHeight = request.FramebufferHeight
 			*current.Get() = viewport
-			return gfx.SetViewportResponse{Viewport: viewport}, nil
+			return gfx.SetViewportResponse{Viewport: viewport}
 		}
 }
 
@@ -108,7 +108,7 @@ func setDesiredViewportCmdImpl() (kernel.Lock, kernel.Execute[gfx.SetDesiredView
 	return func(access kernel.ResourceAccess) {
 			stored = access.GetWrite[*desiredViewport]()
 			current = access.GetWrite[*gfx.Viewport]()
-		}, func(_ kernel.Kernel, request gfx.SetDesiredViewportRequest) (gfx.SetDesiredViewportResponse, error) {
+		}, func(_ kernel.Kernel, request gfx.SetDesiredViewportRequest) gfx.SetDesiredViewportResponse {
 			preference := desiredViewport{
 				mode: request.Mode, width: request.Width, height: request.Height, size: request.Size,
 			}
@@ -123,7 +123,7 @@ func setDesiredViewportCmdImpl() (kernel.Lock, kernel.Execute[gfx.SetDesiredView
 			viewport.FramebufferWidth = current.Get().FramebufferWidth
 			viewport.FramebufferHeight = current.Get().FramebufferHeight
 			*current.Get() = viewport
-			return gfx.SetDesiredViewportResponse{Viewport: viewport}, nil
+			return gfx.SetDesiredViewportResponse{Viewport: viewport}
 		}
 }
 

@@ -226,7 +226,7 @@ the one thing this whole effort's Notes rule out. So the splitting, validation
 and waiting live in an exported plain function, and the agent-facing capability
 is a one-line adapter over it.
 
-**The wait is a `select` on `k.Context().Done()`, not a `time.Sleep`.** That is
+**The wait is a timer, taken outside every lock.** That is
 what makes the broker's "the timeout bounds the wait" true rather than
 aspirational: a caller that hangs up stops the sequence at the next delay
 instead of running it out.
@@ -459,7 +459,7 @@ A checklist for an implementation session.
 **`bundles/input/play.go`** (new)
 
 - `Play`, with validation up front, the batching rule, and the `select` on
-  `k.Context().Done()` between batches.
+  a timer between batches.
 
 **`bundles/input/key.go`** (new, or into `contract.go`)
 

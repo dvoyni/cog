@@ -153,15 +153,11 @@ func TestAMarkRecordsANestedListSet(t *testing.T) {
 				set.MarkChanged(written)
 			}
 		}
-		if _, err := engine.Executioner().ExecuteCommand[nestedWriteCmd](hookRequest{}); err != nil {
-			t.Fatalf("%s: running the writer: %v", what, err)
-		}
+		engine.Executioner().ExecuteCommand[nestedWriteCmd](hookRequest{})
 	}
 	read := func() {
 		t.Helper()
-		if _, err := engine.Executioner().ExecuteCommand[nestedReadCmd](hookRequest{}); err != nil {
-			t.Fatalf("running the reader: %v", err)
-		}
+		engine.Executioner().ExecuteCommand[nestedReadCmd](hookRequest{})
 	}
 
 	run("unmarked", false, 0, 7)
@@ -260,9 +256,7 @@ func TestATagNeverRecordsAMarkedChange(t *testing.T) {
 	held := entities.alloc()
 	components.disableds.Set(held, disabled{})
 	for range 2 {
-		if _, err := engine.Executioner().ExecuteCommand[tagWriteCmd](hookRequest{}); err != nil {
-			t.Fatalf("running the writer: %v", err)
-		}
+		engine.Executioner().ExecuteCommand[tagWriteCmd](hookRequest{})
 	}
 	if kinds := kindsIn(components.disableds.hooks); len(kinds) != 0 {
 		t.Fatalf("marking a Tag recorded %v, want nothing", kinds)

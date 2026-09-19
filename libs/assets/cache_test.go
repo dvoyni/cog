@@ -70,9 +70,9 @@ func (l *loader) Free(value face, userData *device) {
 // keys and the handler it calls, both of which exist from New.
 func reportingKernel() (kernel.Kernel, *[]error) {
 	var reported []error
-	engine := kernel.New(nil).Handler(func(err error) bool {
+	engine := kernel.New(nil).Handler(func(err error) error {
 		reported = append(reported, err)
-		return false
+		return nil
 	})
 	return engine.Executioner().Kernel, &reported
 }

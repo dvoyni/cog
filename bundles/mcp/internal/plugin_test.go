@@ -81,17 +81,16 @@ func runEngine(t *testing.T, plugins ...kernel.Plugin) <-chan error {
 func runConfigured(t *testing.T, config any, plugins ...kernel.Plugin) <-chan error {
 	t.Helper()
 	reported := make(chan error, 8)
-	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(map[kernel.PluginName]any{mcp.Name: config}).
-		Handler(func(err error) bool { reported <- err; return true }).
+		Handler(func(err error) error { reported <- err; return err }).
 		WithPlugins(plugins...)
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
-		engine.Run(ctx)
+		engine.Run()
 	}()
 	t.Cleanup(func() {
-		cancel()
+		engine.Quit()
 		select {
 		case <-stopped:
 		case <-time.After(10 * time.Second):
@@ -371,19 +370,18 @@ func TestBroker_ShutsDownBeforeAnyProviderStops(t *testing.T) {
 		}
 	}}
 
-	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(map[kernel.PluginName]any{mcp.Name: testConfig}).
-		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
+		Handler(func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }).
 		WithPlugins(broker, provider)
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
-		engine.Run(ctx)
+		engine.Run()
 	}()
 	<-engine.Ready()
 	endpoint := broker.endpoint()
 
-	cancel()
+	engine.Quit()
 	select {
 	case drained := <-drainedBeforeStop:
 		if !drained {

@@ -36,11 +36,7 @@ func Command[
 ](name, description string, opts ...Option) Capability {
 	return newCapability[TRequest, TResponse](name, description, opts,
 		func(k kernel.Executioner, request any) (any, error) {
-			response, err := k.ExecuteCommand[TCommand, TRequest, TResponse](*request.(*TRequest))
-			if err != nil {
-				return nil, err
-			}
-			return response, nil
+			return k.ExecuteCommand[TCommand, TRequest, TResponse](*request.(*TRequest)), nil
 		})
 }
 

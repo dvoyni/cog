@@ -33,19 +33,22 @@ var _ app.Loop = (*loop)(nil)
 
 func newLoop(config app.Config) *loop { return &loop{config: config} }
 
-// Init publishes app.InitEvent and waits for its subscribers.
+// Init publishes app.InitEvent and waits for its subscribers. A subscriber that
+// failed reported it; Init answers nil so that startup carries on, and the
+// handler decides what the failure meant.
 func (l *loop) Init(k kernel.Executioner) error {
-	return k.PublishEvent(app.InitEvent{}).Wait()
+	k.PublishEvent(app.InitEvent{}).Wait()
+	return nil
 }
 
 // Quit publishes app.QuitEvent and waits for its subscribers.
 func (l *loop) Quit(k kernel.Executioner) {
-	_ = k.PublishEvent(app.QuitEvent{}).Wait()
+	k.PublishEvent(app.QuitEvent{}).Wait()
 }
 
 // WindowSize publishes app.WindowSizeChangeEvent and waits for its subscribers.
 func (l *loop) WindowSize(k kernel.Executioner, width, height float32) {
-	_ = k.PublishEvent(app.WindowSizeChangeEvent{Width: width, Height: height}).Wait()
+	k.PublishEvent(app.WindowSizeChangeEvent{Width: width, Height: height}).Wait()
 }
 
 // Frame publishes one fixed app.UpdateEvent per whole Step accumulated, each
@@ -71,7 +74,7 @@ func (l *loop) Frame(k kernel.Executioner, dt float64) {
 		// Every tick carries its own number, so that whatever a subscriber
 		// records inside one can name the tick it describes.
 		e.Tick = l.ticks.next()
-		_ = k.PublishEvent(e).Wait()
+		k.PublishEvent(e).Wait()
 	}
 	if paused {
 		l.ticks.published(steps, batch)
@@ -81,7 +84,7 @@ func (l *loop) Frame(k kernel.Executioner, dt float64) {
 // Render publishes app.RenderEvent carrying the interpolation factor the last
 // Frame left, and waits for its subscribers.
 func (l *loop) Render(k kernel.Executioner) {
-	_ = k.PublishEvent(app.RenderEvent{Alpha: l.loadAlpha()}).Wait()
+	k.PublishEvent(app.RenderEvent{Alpha: l.loadAlpha()}).Wait()
 }
 
 // accumulate folds dt (clamped to MaxFrame) into the fixed-step accumulator and

@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -135,21 +134,21 @@ func timeControl(k kernel.Executioner, request TimeRequest) (TimeResponse, error
 	// A step waits for a frame, and a hold is somebody's deliberate decision
 	// to postpone one, so the wait that names a stalled engine is extended by
 	// however long the window may stay open. Nothing else here waits at all.
+	var wait time.Duration
 	if action == app.TimeStep {
-		status, err := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
-		if err != nil {
-			return TimeResponse{}, timeFailure(err)
+		status := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
+		if status.Err != nil {
+			return TimeResponse{}, timeFailure(status.Err)
 		}
-		ctx, cancel := context.WithTimeout(k.Context(), stepDeadline+status.HoldFor)
-		defer cancel()
-		k = k.WithContext(ctx)
+		wait = stepDeadline + status.HoldFor
 	}
-	answer, err := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{
+	answer := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{
 		Action: action, Steps: request.Steps,
 		Hold: time.Duration(request.Ms) * time.Millisecond,
+		Wait: wait,
 	})
-	if err != nil {
-		return TimeResponse{}, timeFailure(err)
+	if answer.Err != nil {
+		return TimeResponse{}, timeFailure(answer.Err)
 	}
 	if refusal, refused := timeRefusal(action, answer); refused {
 		return TimeResponse{}, refusal
@@ -169,7 +168,8 @@ func timeControl(k kernel.Executioner, request TimeRequest) (TimeResponse, error
 // The domain refusals the tick source raises are expected outcomes rather
 // than faults, so they read as prose here; anything else travels as it is.
 func timeFailure(err error) error {
-	if errors.Is(err, context.DeadlineExceeded) {
+	var notPublished app.ErrStepNotPublished
+	if errors.As(err, &notPublished) {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"no tick was published within %s — the window may be minimised, the game may have "+
 				"stopped rendering, or a hold may still be open; the steps will run when it "+

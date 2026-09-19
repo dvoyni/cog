@@ -279,13 +279,16 @@ type declaringSystem kernel.Subscription[app.UpdateEvent]
 func TestAnAccessorDeclaresTheAuthorityItselfAndItsStore(t *testing.T) {
 	getter, setter, remover := &Get[body]{}, &Set[collider]{}, &Remove[solid]{}
 	_, _, engine := newWorld(t, 8, func(registrar *kernel.Registrar) {
-		entities := registrar.Dependency[*Entities]()
+		entities, err := registrar.Dependency[*Entities]()
+		if err != nil {
+			t.Fatalf("reading the world: %v", err)
+		}
 		registrar.Subscribe[declaringSystem](func() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			return func(access kernel.ResourceAccess) {
 				getter.prepare(entities, access)
 				setter.prepare(entities, access)
 				remover.prepare(entities, access)
-			}, func(kernel.Kernel, app.UpdateEvent) error { return nil }
+			}, func(kernel.Kernel, app.UpdateEvent) {}
 		})
 	})
 
@@ -539,7 +542,7 @@ func TestAnAccessorOverAnUnregisteredComponentFailsComposition(t *testing.T) {
 		t.Run(accessor.name, func(t *testing.T) {
 			var failure error
 			kernel.New(nil).
-				Handler(func(err error) bool { failure = err; return true }).
+				Handler(func(err error) error { failure = err; return err }).
 				WithPlugins(
 					authority{ids: 8},
 					&componentsPlugin{ids: 8},

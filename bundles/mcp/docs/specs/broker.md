@@ -171,9 +171,14 @@ MaxRequestBodyBytes:          4 MiB   (the default)
 Protocol revision `2026-07-28` is served over streamable HTTP **only** when
 `Stateless = true`, and `PropagateRequestCancellation` — which ties a tool
 handler's context to the HTTP request's — takes effect only at that revision. So
-statelessness is what makes
-[#204](https://github.com/dvoyni/cog/issues/204) §3 true: `k.WithContext(req.Context())`
-means *the agent hung up* only in stateless mode.
+statelessness is what makes the request context mean *the agent hung up*.
+
+That context stays on the broker's side of the seam. The kernel has none, so the
+broker cannot hand the agent's lifetime to a dispatch; it races the request
+context and its own timeout against the dispatch instead, and answers the agent
+itself. A capability body that outruns either runs to completion and its result
+is dropped, because Go cannot interrupt a body that is already running — which
+was true before this and is the reason the timeout existed at all.
 
 **Statelessness costs exactly two things, and both were already decided against.**
 Server→client requests are rejected outright — but the only one cog would want
@@ -246,7 +251,7 @@ At `Start` the broker, in order:
 3. Validates every capability and renders it as a tool.
 4. Retains the `Start` executioner (see
    [mcp §The retained executioner](mcp.md#the-retained-executioner)).
-5. Listens, and starts one goroutine waiting on `k.Context().Done()`.
+5. Listens, and starts one goroutine waiting on `k.Quitting()`.
 
 **A known flaw, stated rather than left to be found.** Knowing *which*
 providers there are at `Start` is not the same as those providers having
@@ -292,7 +297,7 @@ got wrong by someone reimplementing it:
 > that cancellation — and `app.QuitEvent` still fires only when a driver runs
 > the loop, so the conclusion below stands.
 
-So: the broker runs one goroutine on `k.Context().Done()` that calls
+So: the broker runs one goroutine on `k.Quitting()` that calls
 `Server.Shutdown`. That fires before any `Stop`, is independent of listing
 order, and needs no dependency on anything. `Stop` closes the listener as a
 belt-and-braces second call.
@@ -404,9 +409,11 @@ capabilities must be declared *before* `Connect` or clients are never told.
 Per call, on the HTTP goroutine:
 
 1. `reflect.New(c.RequestType())` and unmarshal the arguments into it.
-2. `k2 := k.WithContext(ctx)` where `ctx` is the request context, then
-   `context.WithTimeout(ctx, cfg.Timeout)`.
-3. `c.Invoke(k2, req)`.
+2. `c.Invoke(k, req)` on its own goroutine, and a `time.Timer` of `cfg.Timeout`
+   beside it.
+3. Whichever answers first wins: the body's result, a timeout refusal, or a
+   refusal because the request context was cancelled. The body is never cut
+   short; a result nobody is waiting for is dropped.
 4. On `mcp.Unavailable`, return an ordinary tool result with `IsError` set and
    `Reason` as the text.
 5. On any other error, `kernel.ReportError` and return a generic failure — no

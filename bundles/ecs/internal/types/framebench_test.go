@@ -21,7 +21,7 @@ func handWritten() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			entities = access.GetRead[*Entities]()
 			bodies = access.GetWrite[*Store[body]]()
 			velocities = access.GetRead[*Store[velocity]]()
-		}, func(_ kernel.Kernel, _ app.UpdateEvent) error {
+		}, func(_ kernel.Kernel, _ app.UpdateEvent) {
 			_ = entities
 			driver, probed := bodies.Get(), velocities.Get()
 			for row := len(driver.owners) - 1; row >= 0; row-- {
@@ -32,7 +32,6 @@ func handWritten() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 				driver.dense[row].X += probed.dense[other].X
 				driver.dense[row].Y += probed.dense[other].Y
 			}
-			return nil
 		}
 }
 
@@ -78,9 +77,7 @@ func subscribeActive(registrar *kernel.Registrar) {
 // frame publishes one real app.UpdateEvent and waits for it, which is the whole
 // frame: publish, acquire every declared lock, run every System, wait.
 func frame(tb testing.TB, engine *kernel.Engine, dt float64) {
-	if err := engine.Executioner().PublishEvent(app.UpdateEvent{Dt: dt}).Wait(); err != nil {
-		tb.Fatalf("publishing the update: %v", err)
-	}
+	engine.Executioner().PublishEvent(app.UpdateEvent{Dt: dt}).Wait()
 }
 
 func benchmarkFrame(b *testing.B, n int, subscribe func(*kernel.Registrar)) {
@@ -100,9 +97,7 @@ func benchmarkFrameWith(b *testing.B, n int, subscribe func(*kernel.Registrar),
 	// variables in runtime.KeepAlive, which pinned an accumulator to memory and
 	// made two iteration shapes differing by 4x look identical.
 	for i := 0; i < b.N; i++ {
-		if err := executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-			b.Fatalf("publishing the update: %v", err)
-		}
+		executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 	}
 }
 
@@ -151,9 +146,7 @@ func TestTheFrameSitsOnTheEnginesAllocationLine(t *testing.T) {
 		}
 		mallocs := allocationsDuring(func() {
 			for range frames {
-				if err := executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-					t.Fatalf("publishing the update: %v", err)
-				}
+				executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 			}
 		})
 		return float64(mallocs) / frames

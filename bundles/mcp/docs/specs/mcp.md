@@ -279,15 +279,19 @@ with exported accessors for the broker. Four decisions inside it:
   The broker collects the failures at `Start`, which is also what converts the
   SDK's own `AddTool` panic into an ordinary cog composition failure.
 
-**`invoke` receives an `Executioner` already bound to the agent's request
-context.** The broker does `k.WithContext(req.Context())` per call, so there is
-no separate `context.Context` parameter; `k.Context()` carries it.
-`Kernel.WithContext` sets `bounded = false` (`kernel/kernel.go:47`), after which
-`ExecuteCommand` re-links engine cancellation with
-`context.AfterFunc(engine.ctx, cancel)` (`kernel/kernel.go:154`). One handle
-therefore carries two lifetimes with no bookkeeping: a dispatch dies on
-**either** the agent hanging up (including the client's five-minute idle abort)
-**or** engine shutdown.
+**`invoke` receives a plain `Executioner`, carrying no lifetime at all.** The
+kernel has no context, so neither of the two lifetimes a call used to inherit
+reaches the dispatch: the broker holds both and decides for itself.
+
+It runs the body on its own goroutine and races three things — the body's
+answer, its configured timeout, and the agent hanging up (including the client's
+five-minute idle abort). The first to arrive is what the agent is told. The body
+itself always runs to completion, which is what it did before too: a deadline
+never interrupted a running command handler, it only stopped the broker waiting.
+
+Engine shutdown is the broker's business as well. `Executioner.Quitting` closes
+before any `Stop` runs, which is when the broker closes its listener; dispatch
+keeps working while it drains, because the scheduler stops last of all.
 
 Capability names are validated `^[a-z][a-z0-9_]*$` at construction. The broker
 renders the tool name as `<plugin>_<capability>`; see

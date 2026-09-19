@@ -45,9 +45,7 @@ func TestOneSystemRunsUnderTwoUnrelatedEvents(t *testing.T) {
 	components.velocities.Set(e, velocity{X: 10})
 
 	frame(t, engine, 0.5)
-	if err := engine.Executioner().PublishEvent(fixedTick{Step: 0.25}).Wait(); err != nil {
-		t.Fatalf("publishing the fixed tick: %v", err)
-	}
+	engine.Executioner().PublishEvent(fixedTick{Step: 0.25}).Wait()
 
 	if value, _ := components.bodies.Get(e); value.X != 7.5 {
 		t.Fatalf("body is %v after an update of 0.5 and a fixed tick of 0.25 at velocity 10, want {7.5 0}", value)

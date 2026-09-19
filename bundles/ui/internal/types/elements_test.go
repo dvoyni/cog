@@ -29,7 +29,7 @@ func testAssets(t testing.TB, spriteWidth, spriteHeight int) fstest.MapFS {
 // because the lookup's report-once keys live on the engine now: every resolved
 // sprite forgets its key, so even the paths these tests take reach the kernel.
 func testLookup(files fstest.MapFS) canvas.LookupAccess {
-	engine := kernel.New(nil).Handler(func(error) bool { return false })
+	engine := kernel.New(nil).Handler(func(err error) error { return nil })
 	return canvas.NewLookupAccess(
 		engine.Executioner().Kernel, canvas.NewLookup(), storage.NewFileSystem("test", files))
 }

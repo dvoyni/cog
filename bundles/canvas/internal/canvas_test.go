@@ -2,7 +2,6 @@ package internal
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"image"
 	"image/color"
@@ -308,7 +307,10 @@ type frameProbeResponse struct{}
 // standing in for production code that reads the resource directly.
 type readFileProbeCmd kernel.Command[readFileProbeRequest, readFileProbeResponse]
 type readFileProbeRequest struct{ Name string }
-type readFileProbeResponse struct{ Data []byte }
+type readFileProbeResponse struct {
+	Data []byte
+	Err  error
+}
 
 func (p recordCanvasPlugin) Name() kernel.PluginName { return "canvas-test-recorder" }
 
@@ -324,14 +326,13 @@ func (p recordCanvasPlugin) Register(registrar *kernel.Registrar, _ any) error {
 		return func(access kernel.ResourceAccess) {
 				queue = access.GetWrite[*canvas.OpQueue]()
 				gfxQueue = access.GetWrite[*gfx.OpQueue]()
-			}, func(_ kernel.Kernel, _ app.UpdateEvent) error {
+			}, func(_ kernel.Kernel, _ app.UpdateEvent) {
 				if p.record != nil {
 					p.record(queue.Get())
 				}
 				if p.recordGfx != nil {
 					p.recordGfx(queue.Get(), gfxQueue.Get())
 				}
-				return nil
 			}
 	})
 	registrar.HandleCommand[lookupProbeCmd](lookupProbeCmdImpl)
@@ -347,9 +348,9 @@ func lookupProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupProbeRequest, looku
 	return func(access kernel.ResourceAccess) {
 			lookup = access.GetWrite[*canvas.Lookup]()
 			filesystem = access.GetRead[storage.FileSystem]()
-		}, func(k kernel.Kernel, req lookupProbeRequest) (lookupProbeResponse, error) {
+		}, func(k kernel.Kernel, req lookupProbeRequest) lookupProbeResponse {
 			req.run(canvas.NewLookupAccess(k, lookup.Get(), filesystem.Get()))
-			return lookupProbeResponse{}, nil
+			return lookupProbeResponse{}
 		}
 }
 
@@ -359,9 +360,9 @@ func lookupDeviceProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupDeviceProbeRe
 	return func(access kernel.ResourceAccess) {
 			lookup = access.GetWrite[*canvas.Lookup]()
 			resources = access.GetWrite[*gfx.ResourceQueue]()
-		}, func(k kernel.Kernel, req lookupDeviceProbeRequest) (lookupDeviceProbeResponse, error) {
+		}, func(k kernel.Kernel, req lookupDeviceProbeRequest) lookupDeviceProbeResponse {
 			req.run(canvas.NewLookupDeviceAccess(k, lookup.Get(), resources.Get()))
-			return lookupDeviceProbeResponse{}, nil
+			return lookupDeviceProbeResponse{}
 		}
 }
 
@@ -371,10 +372,10 @@ func frameProbeCmdImpl() (kernel.Lock, kernel.Execute[frameProbeRequest, framePr
 	return func(access kernel.ResourceAccess) {
 			lookup = access.GetWrite[*canvas.Lookup]()
 			filesystem = access.GetRead[storage.FileSystem]()
-		}, func(k kernel.Kernel, req frameProbeRequest) (frameProbeResponse, error) {
+		}, func(k kernel.Kernel, req frameProbeRequest) frameProbeResponse {
 			fr := frame{k: k, fsys: filesystem.Get(), lookup: lookup.Get()}
 			req.run(&fr)
-			return frameProbeResponse{}, nil
+			return frameProbeResponse{}
 		}
 }
 
@@ -382,9 +383,9 @@ func readFileProbeCmdImpl() (kernel.Lock, kernel.Execute[readFileProbeRequest, r
 	var filesystem kernel.Read[storage.FileSystem]
 	return func(access kernel.ResourceAccess) {
 			filesystem = access.GetRead[storage.FileSystem]()
-		}, func(_ kernel.Kernel, req readFileProbeRequest) (readFileProbeResponse, error) {
+		}, func(_ kernel.Kernel, req readFileProbeRequest) readFileProbeResponse {
 			data, err := fs.ReadFile(filesystem.Get(), req.Name)
-			return readFileProbeResponse{Data: data}, err
+			return readFileProbeResponse{Data: data, Err: err}
 		}
 }
 
@@ -407,9 +408,9 @@ func probeFrame(k kernel.Executioner, fn func(*frame)) {
 }
 
 func testKernel(t testing.TB, filesystem fs.FS, config canvas.Config, record func(*canvas.OpQueue)) (kernel.Executioner, *plugin, *testBackend) {
-	return testKernelHandler(t, filesystem, config, record, func(err error) bool {
+	return testKernelHandler(t, filesystem, config, record, func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	})
 }
 
@@ -418,9 +419,9 @@ func testKernel(t testing.TB, filesystem fs.FS, config canvas.Config, record fun
 // Lookup query API.
 func testKernelCapturing(t testing.TB, filesystem fs.FS, config canvas.Config, record func(*canvas.OpQueue)) (kernel.Executioner, *[]error, *testBackend) {
 	var errs []error
-	k, _, backend := testKernelHandler(t, filesystem, config, record, func(err error) bool {
+	k, _, backend := testKernelHandler(t, filesystem, config, record, func(err error) error {
 		errs = append(errs, err)
-		return false
+		return nil
 	})
 	return k, &errs, backend
 }
@@ -429,29 +430,27 @@ func testKernelCapturing(t testing.TB, filesystem fs.FS, config canvas.Config, r
 // needs gfx's queue - the one an app allocating its own render target holds.
 func testKernelGfx(t testing.TB, filesystem fs.FS, config canvas.Config, record func(*canvas.OpQueue, *gfx.OpQueue)) (kernel.Executioner, *plugin, *testBackend) {
 	t.Helper()
-	return testKernelRecorder(t, filesystem, config, recordCanvasPlugin{recordGfx: record}, func(err error) bool {
+	return testKernelRecorder(t, filesystem, config, recordCanvasPlugin{recordGfx: record}, func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	})
 }
 
-func testKernelHandler(t testing.TB, filesystem fs.FS, config canvas.Config, record func(*canvas.OpQueue), onError func(error) bool) (kernel.Executioner, *plugin, *testBackend) {
+func testKernelHandler(t testing.TB, filesystem fs.FS, config canvas.Config, record func(*canvas.OpQueue), onError func(error) error) (kernel.Executioner, *plugin, *testBackend) {
 	t.Helper()
 	return testKernelRecorder(t, filesystem, config, recordCanvasPlugin{record: record}, onError)
 }
 
-func testKernelRecorder(t testing.TB, filesystem fs.FS, config canvas.Config, recorder recordCanvasPlugin, onError func(error) bool) (kernel.Executioner, *plugin, *testBackend) {
+func testKernelRecorder(t testing.TB, filesystem fs.FS, config canvas.Config, recorder recordCanvasPlugin, onError func(error) error) (kernel.Executioner, *plugin, *testBackend) {
 	t.Helper()
 	canvasPlugin := &plugin{}
 	backend := &testBackend{capture: true}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	configs := map[kernel.PluginName]any{
 		storage.Name: storage.Config{}.WithReadFS("test", 10, filesystem),
 		canvas.Name:  config,
 	}
 	engine := kernel.New(configs).Handler(onError).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, canvasPlugin, recorder)
-	go engine.Run(ctx)
+	go engine.Run()
 	<-engine.Ready()
 	k := engine.Executioner()
 	k.PublishEvent(app.InitEvent{}).Wait()
@@ -473,7 +472,7 @@ func TestPluginMountsBuiltInShaders(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read embedded shader %q: %v", path, err)
 		}
-		got, _ := k.ExecuteCommand[readFileProbeCmd](readFileProbeRequest{Name: path})
+		got := k.ExecuteCommand[readFileProbeCmd](readFileProbeRequest{Name: path})
 		if !bytes.Equal(got.Data, want) {
 			t.Fatalf("mounted shader %q differs from embedded source", path)
 		}

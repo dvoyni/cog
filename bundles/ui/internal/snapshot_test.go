@@ -1,7 +1,6 @@
 package internal
 
 import (
-	stdcontext "context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -87,7 +86,7 @@ type layoutLastHandler kernel.Subscription[app.UpdateEvent]
 type layoutFixture struct {
 	mu       sync.Mutex
 	declare  func(*ui.Frame)
-	step     func(kernel.Kernel, app.TimeRequest) (app.TimeResponse, error)
+	step     func(kernel.Kernel, app.TimeRequest) app.TimeResponse
 	requests []app.TimeRequest
 
 	paused atomic.Bool
@@ -128,7 +127,7 @@ func (f *layoutFixture) buildOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateE
 	var frame kernel.Write[*ui.Frame]
 	return func(access kernel.ResourceAccess) {
 			frame = access.GetWrite[*ui.Frame]()
-		}, func(kernel.Kernel, app.UpdateEvent) error {
+		}, func(kernel.Kernel, app.UpdateEvent) {
 			f.live.Store(true)
 			f.mu.Lock()
 			declare := f.declare
@@ -136,7 +135,6 @@ func (f *layoutFixture) buildOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateE
 			if declare != nil {
 				declare(frame.Get())
 			}
-			return nil
 		}
 }
 
@@ -145,14 +143,13 @@ func (f *layoutFixture) buildOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateE
 // After[ui.ProcessOnUpdate] and stays in the default phase, so a marshal that
 // saw the flag up ran inside the window the tree is valid in.
 func (f *layoutFixture) endOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	return nil, func(kernel.Kernel, app.UpdateEvent) error {
+	return nil, func(kernel.Kernel, app.UpdateEvent) {
 		f.live.Store(false)
-		return nil
 	}
 }
 
 func (f *layoutFixture) timeCmdImpl() (kernel.Lock, kernel.Execute[app.TimeRequest, app.TimeResponse]) {
-	return nil, func(k kernel.Kernel, request app.TimeRequest) (app.TimeResponse, error) {
+	return nil, func(k kernel.Kernel, request app.TimeRequest) app.TimeResponse {
 		f.mu.Lock()
 		f.requests = append(f.requests, request)
 		step := f.step
@@ -160,7 +157,7 @@ func (f *layoutFixture) timeCmdImpl() (kernel.Lock, kernel.Execute[app.TimeReque
 		if request.Action == app.TimeStep && step != nil {
 			return step(k, request)
 		}
-		return app.TimeResponse{Paused: f.paused.Load()}, nil
+		return app.TimeResponse{Paused: f.paused.Load()}
 	}
 }
 
@@ -170,7 +167,7 @@ func (f *layoutFixture) on(declare func(*ui.Frame)) {
 	f.declare = declare
 }
 
-func (f *layoutFixture) onStep(step func(kernel.Kernel, app.TimeRequest) (app.TimeResponse, error)) {
+func (f *layoutFixture) onStep(step func(kernel.Kernel, app.TimeRequest) app.TimeResponse) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.step = step
@@ -193,19 +190,18 @@ type layoutRig struct {
 
 func newLayoutRig(t *testing.T) *layoutRig {
 	t.Helper()
-	ctx, cancel := stdcontext.WithCancel(stdcontext.Background())
 	fixture := &layoutFixture{}
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{},
-	}).Handler(func(err error) bool {
+	}).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appStandIn{fixture}, inputplugin.New(), gfxplugin.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), fixture)
 	stopped := make(chan struct{})
-	go func() { engine.Run(ctx); close(stopped) }()
+	go func() { engine.Run(); close(stopped) }()
 	<-engine.Ready()
 	t.Cleanup(func() {
-		cancel()
+		engine.Quit()
 		<-stopped
 	})
 
@@ -617,9 +613,9 @@ func TestALayoutSnapshotDescribesATickThatBeganAfterTheRequest(t *testing.T) {
 	rig.fixture.on(func(frame *ui.Frame) { frame.Add(0, ui.NewElement().ID("before")) })
 	rig.tick()
 
-	armed, err := rig.k.ExecuteCommand[ui.ArmLayoutCmd](ui.ArmLayoutRequest{})
-	if err != nil {
-		t.Fatalf("arm: %v", err)
+	armed := rig.k.ExecuteCommand[ui.ArmLayoutCmd](ui.ArmLayoutRequest{})
+	if armed.Err != nil {
+		t.Fatalf("arm: %v", armed.Err)
 	}
 	select {
 	case <-armed.Done:
@@ -646,8 +642,8 @@ func TestALayoutSnapshotDescribesATickThatBeganAfterTheRequest(t *testing.T) {
 
 func TestASecondLayoutSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 	rig := newLayoutRig(t)
-	if _, err := rig.k.ExecuteCommand[ui.ArmLayoutCmd](ui.ArmLayoutRequest{}); err != nil {
-		t.Fatalf("first arm: %v", err)
+	if answer := rig.k.ExecuteCommand[ui.ArmLayoutCmd](ui.ArmLayoutRequest{}); answer.Err != nil {
+		t.Fatalf("first arm: %v", answer.Err)
 	}
 
 	_, err := layoutSnapshot(rig.k, layoutRequest{})
@@ -663,16 +659,16 @@ func TestASecondLayoutSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 	// across kinds would destroy the one thing arming them together is for,
 	// and with all three siblings built the whole claim can be asserted rather
 	// than half of it.
-	if _, err := rig.k.ExecuteCommand[canvas.ArmDrawsCmd](canvas.ArmDrawsRequest{}); err != nil {
-		t.Errorf("a draw snapshot was refused while a layout snapshot was in flight: %v", err)
+	if answer := rig.k.ExecuteCommand[canvas.ArmDrawsCmd](canvas.ArmDrawsRequest{}); answer.Err != nil {
+		t.Errorf("a draw snapshot was refused while a layout snapshot was in flight: %v", answer.Err)
 	}
-	if _, err := rig.k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{}); err != nil {
-		t.Errorf("a frame snapshot was refused while a layout snapshot was in flight: %v", err)
+	if answer := rig.k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{}); answer.Err != nil {
+		t.Errorf("a frame snapshot was refused while a layout snapshot was in flight: %v", answer.Err)
 	}
-	if _, err := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
+	if answer := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
 		Target: gfx.CaptureDesc{Screen: true},
-	}); err != nil {
-		t.Errorf("a capture was refused while a layout snapshot was in flight: %v", err)
+	}); answer.Err != nil {
+		t.Errorf("a capture was refused while a layout snapshot was in flight: %v", answer.Err)
 	}
 }
 
@@ -680,9 +676,9 @@ func TestALayoutSnapshotUnderPausePerformsOneStepAndSaysSo(t *testing.T) {
 	rig := newLayoutRig(t)
 	rig.fixture.paused.Store(true)
 	rig.fixture.on(func(frame *ui.Frame) { frame.Add(0, ui.NewElement().ID("frozen")) })
-	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
+	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) app.TimeResponse {
 		k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
-		return app.TimeResponse{Paused: true, Stepped: 1}, nil
+		return app.TimeResponse{Paused: true, Stepped: 1}
 	})
 
 	// No tick is driven here: a paused engine runs none of its own, so the
@@ -718,9 +714,9 @@ func TestALayoutSnapshotJoiningAPendingStepSaysThatToo(t *testing.T) {
 	rig := newLayoutRig(t)
 	rig.fixture.paused.Store(true)
 	rig.fixture.on(func(frame *ui.Frame) { frame.Add(0, ui.NewElement().ID("shared")) })
-	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
+	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) app.TimeResponse {
 		k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
-		return app.TimeResponse{Paused: true, Stepped: 1, Joined: true}, nil
+		return app.TimeResponse{Paused: true, Stepped: 1, Joined: true}
 	})
 
 	response, err := layoutSnapshot(rig.k, layoutRequest{})
@@ -742,9 +738,9 @@ func TestALayoutSnapshotNamesTheTickItDescribes(t *testing.T) {
 	rig := newLayoutRig(t)
 	rig.fixture.paused.Store(true)
 	rig.fixture.on(func(frame *ui.Frame) { frame.Add(0, ui.NewElement().ID("shared")) })
-	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
+	rig.fixture.onStep(func(k kernel.Kernel, _ app.TimeRequest) app.TimeResponse {
 		k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60, Tick: 97}).Wait()
-		return app.TimeResponse{Paused: true, Stepped: 1}, nil
+		return app.TimeResponse{Paused: true, Stepped: 1}
 	})
 
 	response, err := layoutSnapshot(rig.k, layoutRequest{})

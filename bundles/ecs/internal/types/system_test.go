@@ -1,7 +1,6 @@
 package types
 
 import (
-	"context"
 	"reflect"
 	"slices"
 	"strings"
@@ -47,7 +46,11 @@ func (p *componentsPlugin) Name() kernel.PluginName { return "components" }
 func (p *componentsPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 
 func (p *componentsPlugin) Register(registrar *kernel.Registrar, _ any) error {
-	p.world = registrar.Dependency[*Entities]()
+	world, err := registrar.Dependency[*Entities]()
+	if err != nil {
+		return err
+	}
+	p.world = world
 	p.bodies = RegisterComponent[body](registrar, p.ids)
 	p.velocities = RegisterComponent[velocity](registrar, p.ids)
 	p.colliders = RegisterComponent[collider](registrar, p.ids)
@@ -108,14 +111,23 @@ func newWorldWith(t testing.TB, ids uint32, subscribe func(*kernel.Registrar),
 	deps []kernel.PluginName, bound ...kernel.Plugin,
 ) (*Entities, *componentsPlugin, *kernel.Engine) {
 	t.Helper()
+	return newWorldHandling(t, ids, subscribe, deps,
+		func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }, bound...)
+}
+
+// newWorldHandling is newWorldWith with the error handler chosen by the caller,
+// for the tests whose subject is an error: a handler body reports rather than
+// returning now, so a test that asserts on a failure has to be the thing that
+// catches it.
+func newWorldHandling(t testing.TB, ids uint32, subscribe func(*kernel.Registrar),
+	deps []kernel.PluginName, handler kernel.ErrorHandler, bound ...kernel.Plugin,
+) (*Entities, *componentsPlugin, *kernel.Engine) {
+	t.Helper()
 	components := &componentsPlugin{ids: ids}
 	plugins := []kernel.Plugin{authority{ids: ids}, components}
 	plugins = append(plugins, bound...)
 	plugins = append(plugins, &systemsPlugin{deps: deps, subscribe: subscribe})
-	engine := kernel.New(nil).
-		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
-		WithPlugins(plugins...)
-	ctx, cancel := context.WithCancel(context.Background())
+	engine := kernel.New(nil).Handler(handler).WithPlugins(plugins...)
 	// The cleanup waits for Run to return rather than only cancelling it. A
 	// dying engine allocates while it winds down, and several tests here count
 	// allocations with MemStats, which counts every goroutine's — so an engine
@@ -123,12 +135,12 @@ func newWorldWith(t testing.TB, ids uint32, subscribe func(*kernel.Registrar),
 	// a number this package's whole verification strategy rests on.
 	stopped := make(chan struct{})
 	t.Cleanup(func() {
-		cancel()
+		engine.Quit()
 		<-stopped
 	})
 	go func() {
 		defer close(stopped)
-		engine.Run(ctx)
+		engine.Run()
 	}()
 	<-engine.Ready()
 	return components.world, components, engine
@@ -148,9 +160,7 @@ func TestAComponentMoves(t *testing.T) {
 		components.velocities.Set(e, velocity{X: 1, Y: 2})
 	}
 
-	if err := engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-		t.Fatalf("publishing the update: %v", err)
-	}
+	engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 
 	for i, e := range moved {
 		value, ok := components.bodies.Get(e)
@@ -202,9 +212,7 @@ func TestAQueryOnlyVisitsEntitiesHavingEveryComponent(t *testing.T) {
 	components.bodies.Set(bodyOnly, body{})
 	components.velocities.Set(velocityOnly, velocity{X: 1})
 
-	if err := engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-		t.Fatalf("publishing the update: %v", err)
-	}
+	engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 
 	if value, _ := components.bodies.Get(both); value.X != 1 {
 		t.Fatalf("the entity with both Components was not visited: %v", value)
@@ -251,7 +259,7 @@ func TestEveryHandlerTouchingAStoreReadsEntities(t *testing.T) {
 func TestAQueryOverAnUnregisteredComponentFailsComposition(t *testing.T) {
 	var failure error
 	kernel.New(nil).
-		Handler(func(err error) bool { failure = err; return true }).
+		Handler(func(err error) error { failure = err; return err }).
 		WithPlugins(
 			authority{ids: 8},
 			&componentsPlugin{ids: 8},
@@ -290,7 +298,7 @@ func (orphanPlugin) Register(registrar *kernel.Registrar, _ any) error {
 func TestAComponentRegisteredWithoutDependingOnEcsFailsComposition(t *testing.T) {
 	var failure error
 	kernel.New(nil).
-		Handler(func(err error) bool { failure = err; return true }).
+		Handler(func(err error) error { failure = err; return err }).
 		WithPlugins(authority{ids: 8}, orphanPlugin{})
 
 	if failure == nil {
