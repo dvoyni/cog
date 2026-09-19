@@ -137,6 +137,16 @@ type systemCall[E any] struct {
 	// spawns are the Spawn parameters' checks, one per Spawn, each covering
 	// every Store its Component set carries.
 	spawns []*spawnGate
+	// armed says the gates and the Spawn gates have been checked. A Store's
+	// watched kinds are written in one place, Hooks.prepare, and every reader
+	// registers before any System runs, so what a check computes is fixed by
+	// the time the first run makes it and is the same answer every run after.
+	// The first run pays for the walk and no later one does, which is what
+	// takes the check off the per-run cost of a writer nothing watches.
+	//
+	// It is not hoisted to lock, because that is where the answer is not yet
+	// known: a writer may register before the reader that watches its Store.
+	armed bool
 	// copies are the System's row copies for Changed, one per Store it is handed
 	// rows of with write access, shared by every handle on that Store and
 	// compared when its run ends. Each one's gate is among gates.
@@ -173,6 +183,7 @@ func (c *systemCall[E]) lock(access kernel.ResourceAccess) {
 	// drift as parameter kinds change.
 	access.Exclusive()
 	c.gates, c.readers, c.spawns, c.copies = c.gates[:0], c.readers[:0], c.spawns[:0], c.copies[:0]
+	c.armed = false
 	// writer names this System on the Changed records its run end appends, and
 	// is what its own Hooks readers skip.
 	writer := c.entities.nextWriter()
@@ -261,13 +272,11 @@ func (c *systemCall[E]) call(handle kernel.Kernel, driven E) {
 	}
 	// The watched kinds are fixed before any System runs, and a writer reads
 	// them here rather than at registration, because the reader that watches
-	// its Store may register after it. A reader's copy is fixed before the body
+	// its Store may register after it. Fixed means fixed, so the first run is
+	// the only one that reads them. A reader's copy is fixed before the body
 	// and cleared after, so a System's own acts appear in its next run.
-	for _, gate := range c.gates {
-		gate.check()
-	}
-	for _, spawn := range c.spawns {
-		spawn.check()
+	if !c.armed {
+		c.arm()
 	}
 	for _, reader := range c.readers {
 		reader.beginRun()
@@ -279,8 +288,15 @@ func (c *systemCall[E]) call(handle kernel.Kernel, driven E) {
 	// A change is recorded at the writer's run end, after every write the run
 	// made, and after this System's readers took their copies, which is why none
 	// of them is given it.
+	//
+	// taken is tested here and not only inside compare, because compare is far
+	// past the inlining budget: a run that copied nothing would otherwise pay a
+	// real call per Store to be told there is nothing to compare. compare keeps
+	// its own guard, since the tests call it directly.
 	for _, copied := range c.copies {
-		copied.compare()
+		if copied.taken {
+			copied.compare()
+		}
 	}
 	if validate {
 		c.pace.end()
@@ -288,6 +304,24 @@ func (c *systemCall[E]) call(handle kernel.Kernel, driven E) {
 	for _, reader := range c.readers {
 		reader.endRun()
 	}
+}
+
+// arm makes every writer handle's check of its Store's watched kinds, once, on
+// the System's first run. It is a method rather than a loop in call so that
+// call carries one test and one call it never makes again, instead of two
+// loops it walks every run.
+//
+// What it computes cannot change afterwards: Hooks.prepare is the only writer
+// of a Store's watched kinds, it runs at registration, and registration is
+// closed before any System runs.
+func (c *systemCall[E]) arm() {
+	for _, gate := range c.gates {
+		gate.check()
+	}
+	for _, spawn := range c.spawns {
+		spawn.check()
+	}
+	c.armed = true
 }
 
 // prepareSystem is the classification, and the classification is contract.

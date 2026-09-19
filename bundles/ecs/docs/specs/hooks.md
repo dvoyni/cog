@@ -865,26 +865,39 @@ and the parallel frame ([#385](https://github.com/dvoyni/cog/issues/385) §6).
 | nothing watching: `UpdateFor` add plus `Remove.From` | ≤ +1.0 ns | +0.55 | +0.30 (7.69 → 7.99) |
 | nothing watching: Spawn with 2 fields | ≤ +1.0 ns | +0.8 | +0.02 (16.68 → 16.70) |
 | nothing watching: Despawn with six enrolled Stores | ≤ +2.0 ns | +1.65 | −0.29 (21.02 → 20.73); +1.28 when [#391](https://github.com/dvoyni/cog/issues/391) measured it |
-| the watch check at run start, on an unwatched Store | ≤ 1 ns per handle per run | not measured | **missed**: 2.08 per `Set` or `Remove`, 2.75 per Spawn field, 4.1 per `*T` Query field; accepted by the owner |
+| the watch check at run start, on an unwatched Store | ≤ 1 ns per handle per run | not measured | **met**: 0.28 per `Set` or `Remove`, 0.44 per Spawn field, 0.85 per `*T` Query field ([#403](https://github.com/dvoyni/cog/issues/403)); missed at 2.08 / 2.75 / 4.1 when first measured |
 | Query frame at 1k and 10k, nothing watching | ≤ +3% | unchanged | +1.9% at 1k, +2.2% at 10k |
 | `churn` + `move` + reader at 10k | ≤ 1.10× its empty-System control | 1.04× | 1.06× |
 
-**The watch check missed its budget, and the owner accepted the figures**
-([#395](https://github.com/dvoyni/cog/issues/395)). Measured with
-`BenchmarkHookWatchCheck`, one System run called by hand on Stores nothing
-watches, interleaved against 50043cd over seven rounds. The cost is more than one
-load and one bit test per handle:
+**The watch check missed its budget when it was first measured, and meets it now.**
+It is measured with `BenchmarkHookWatchCheck`, one System run called by hand on
+Stores nothing watches, interleaved against 50043cd.
 
-- a `Set` holds two gates, its own and its Store's row copy, and each check
-  stores its flag;
-- every writer's Store pays a `rowCopy.compare` call at run end, which does not
-  inline, even when nothing was copied;
-- a `*T` Query field also pays a loop over its row copies in `bind`;
-- the System call's loops over Spawns and readers run empty.
+[#395](https://github.com/dvoyni/cog/issues/395) measured 2.08 ns per `Set` or
+`Remove`, 2.75 per Spawn field and 4.1 per `*T` Query field. **The owner accepted
+those figures and sent the work to a separate ticket** rather than let a missed
+budget change the design, and
+[#403](https://github.com/dvoyni/cog/issues/403) brought them to 0.28, 0.44 and
+0.85 without changing the design: the same records, the same locks, the same
+run-start and run-end points.
 
-Bringing it down toward 1 ns per handle per run is
-[ecs: Hooks watch check on unwatched writers down toward 1 ns per handle per
-run](https://github.com/dvoyni/cog/issues/403).
+What was paying for it, and why neither cost had to be paid:
+
+- **The check ran at every run start.** A Store's watched kinds are written in
+  one place, `Hooks.prepare`, and it runs at registration, so the answer is
+  fixed by the time the first run asks for it. The check is made on a System's
+  first run now and never again. It cannot be hoisted further back, to
+  registration, because that is the one moment the answer is not yet known: a
+  writer may register before the reader that watches its Store.
+- **`rowCopy.compare` was called per Store at run end even when nothing was
+  copied**, and it does not inline. Its `taken` flag is tested at the call site
+  now, so a run that copied nothing pays a load and a branch per Store.
+
+Two other costs the breakdown named were left alone, because the budget is met
+without them and each is a change for nothing: a `Set`'s two gates are checked
+once per System now rather than once per run, so sharing them buys nothing, and
+skipping `bind`'s loop over its row copies was built, measured **slower** on the
+very arm it targets, and reverted.
 
 - **How a budget is checked:** by hand, in the build, with interleaved A/B runs,
   five or more. The reference is **the parent of the first Hooks commit**, not a
@@ -1069,8 +1082,8 @@ row.
   `Remove.From`, in Spawn once per watched Store carried, and in Despawn through
   one capture per watched Store, with the unwatched Despawn path unchanged.
   Nothing inside `Store.add` or `Store.remove`.
-- The watch check at each writer's run start, for a `*T` Query field, `Set[T]`,
-  `Remove[T]` and `Spawn[S]`.
+- The watch check at each writer's first run start, for a `*T` Query field,
+  `Set[T]`, `Remove[T]` and `Spawn[S]`.
 - Changed: the whole-Store copy when a `*T` Query binds, the per-row copy for
   `Ref` and `UpdateFor`, the compare and append at run end, the writer identity
   that keeps a System from seeing its own Changed, and row-copy buffers kept

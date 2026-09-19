@@ -70,7 +70,8 @@ type Spawn[S any] struct {
 	fields []spawnField
 	// hooks is whether this run's spawns are recorded on any Store the Component
 	// set carries: on when a Hooks reader watches one of them for Spawns,
-	// additions or changes. Checked when each run starts. See hooks.go.
+	// additions or changes. Checked when the System's first run starts. See
+	// hooks.go.
 	hooks spawnGate
 }
 

@@ -34,7 +34,7 @@ import (
 // Its buffers are allocated on the System's first watched run and kept until
 // ShrinkCmd releases them, so steady state allocates nothing.
 type rowCopy struct {
-	// gate is the System's check, at each run start, of whether the Store is
+	// gate is the System's check, on its first run, of whether the Store is
 	// watched for Changed. A Component with no fields never records Changed,
 	// so its mask is empty and it is never on.
 	gate  hookGate

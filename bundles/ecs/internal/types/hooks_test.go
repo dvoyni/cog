@@ -932,3 +932,50 @@ func TestARemovedValueLivesUntilTheLastReaderPassesIt(t *testing.T) {
 	}
 	runtime.KeepAlive(owner.store)
 }
+
+// TestAWriterRegisteredBeforeItsReaderRecordsOnItsFirstRun is the invariant the
+// run-start check rests on, held at the one moment that can break it.
+//
+// A writer's check of its Store's watched kinds is made on the System's first
+// run and never again, because Hooks.prepare is the only writer of those kinds
+// and registration is closed before any System runs. The order that would
+// falsify it is the one the check exists for: the reader registering after the
+// writer. newHookWorld registers it that way, so each writer's very first run —
+// the run that makes its check — must already see the watch, and every kind of
+// writer handle must: an accessor's addition, a Spawn's field, and a *T Query
+// field's change. Each is read straight after its run, so what is asserted is
+// that first run and not a later one.
+func TestAWriterRegisteredBeforeItsReaderRecordsOnItsFirstRun(t *testing.T) {
+	var all []heard
+	w := newHookWorld(t, func(h *Hooks[collider, HookAll]) { all = nil; listen(h, &all, radius) })
+	a := w.entities.alloc()
+
+	// The Set and Remove System's first run: an addition through an accessor.
+	w.write(t, func(set *Set[collider], remove *Remove[collider]) {
+		set.UpdateFor(a, collider{Radius: 2})
+	})
+	w.read(t)
+	expectHeard(t, "the accessor writer's first run", all, []heard{{a, "added+changed", 2}})
+
+	// The structural System's first run: a Spawn field.
+	var spawned Entity
+	w.structural(t, func(r restacking) {
+		spawned = r.armed.New(armedSet{Collider: collider{Radius: 3}})
+	})
+	w.read(t)
+	expectHeard(t, "the structural writer's first run", all, []heard{{spawned, "spawned+added+changed", 3}})
+
+	// The walking System's first run: a *collider Query field's change.
+	w.walked(t, func(q *Query[colliderQuery], set *Set[collider], remove *Remove[collider]) {
+		for _, c := range q.All() {
+			c.Collider.Radius += 10
+		}
+	})
+	w.read(t)
+	// The order is the Store's rows, which is what the whole-Store copy
+	// compares in, and not the Query's backwards walk.
+	expectHeard(t, "the Query writer's first run", all, []heard{
+		{a, "changed", 12},
+		{spawned, "changed", 13},
+	})
+}

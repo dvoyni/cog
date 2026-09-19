@@ -291,9 +291,12 @@ func (l *hookLog[T]) bytes() uintptr {
 
 // hookGate is a writer handle's check of its Store's watched kinds. The Store's
 // watched kinds are fixed when registration closes, and a writer may register
-// before the reader that watches its Store, so the check is made when each run
-// of the writer's System starts: one load and one bit test per handle per run.
-// The act then tests on alone.
+// before the reader that watches its Store, so the check is made when a run of
+// the writer's System starts rather than at registration.
+//
+// It is made on the first run only, because fixed at registration means the
+// answer cannot change afterwards: see systemCall.armed. The act then tests on
+// alone, and an unwatched writer's runs after the first pay nothing at all.
 type hookGate struct {
 	watch *hookKind
 	mask  hookKind

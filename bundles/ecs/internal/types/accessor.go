@@ -290,8 +290,8 @@ func declareComponent[T any](en *Entities, access kernel.ResourceAccess, accesso
 }
 
 // gateFor is a writer handle's check of T's watched kinds, bound to the Store
-// at registration and armed at each run start. declareComponent has already
-// refused an unregistered T.
+// at registration and armed on its System's first run. declareComponent has
+// already refused an unregistered T.
 func gateFor[T any](en *Entities, mask hookKind) hookGate {
 	store := en.classOf(reflect.TypeFor[T]()).store.(*Store[T])
 	return hookGate{watch: &store.watch, mask: mask}

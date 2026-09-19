@@ -1339,6 +1339,13 @@ in `hooksbench_test.go` and `hooksmarkbench_test.go`. **The reference commit is
 [50043cd](https://github.com/dvoyni/cog/commit/50043cd)**, the parent of the
 first Hooks commit.
 
+**[*Nothing watching*](#nothing-watching) below is re-measured** on the build
+[#403](https://github.com/dvoyni/cog/issues/403) left, which is where the watch
+check came within its budget. That session ran faster than the one the other
+tables were taken in, so its absolute times are lower throughout; the A/B
+differences are what compare. Every other table is as
+[#395](https://github.com/dvoyni/cog/issues/395) measured it at 6ab00a5.
+
 Figures are medians of five runs. Four things change that:
 
 - **A budget row is an A/B:** test binaries of 50043cd and of the build,
@@ -1359,38 +1366,48 @@ counted exactly: allocations, lock sets, occupancy, record counts and sizes.
 
 | against 50043cd | 50043cd | build | change | budget |
 | --- | --- | --- | --- | --- |
-| `UpdateFor` add plus `Remove.From` | 7.69 ns | 7.99 ns | +0.30 ns | ≤ +1.0 ns |
-| `Spawn[S].New`, two fields | 16.68 ns | 16.70 ns | +0.02 ns | ≤ +1.0 ns |
-| `Despawn`, six enrolled Stores | 21.02 ns | 20.73 ns | −0.29 ns | ≤ +2.0 ns |
-| a two-Component Query frame, 1 000 | 9 268 ns | 9 443 ns | +1.9% | ≤ +3% |
-| a two-Component Query frame, 10 000 | 43 717 ns | 44 665 ns | +2.2% | ≤ +3% |
-| **the watch check, per handle per run: `Set` or `Remove`** | 187.4 ns | 212.4 ns | **+2.08 ns** | ≤ 1 ns, **missed** |
-| **…a `*T` Query field** | 78.04 ns | 86.25 ns | **+4.1 ns** | ≤ 1 ns, **missed** |
-| **…a field of a Spawn's Component set** | 68.66 ns | 74.16 ns | **+2.75 ns** | ≤ 1 ns, **missed** |
-| …a System naming no writer handle | 62.71 ns | 62.84 ns | +0.13 ns | |
+| `UpdateFor` add plus `Remove.From` | 7.70 ns | 8.31 ns | +0.62 ns | ≤ +1.0 ns |
+| `Spawn[S].New`, two fields | 15.39 ns | 15.49 ns | +0.10 ns | ≤ +1.0 ns |
+| `Despawn`, six enrolled Stores | 19.53 ns | 18.96 ns | −0.57 ns | ≤ +2.0 ns |
+| a two-Component Query frame, 1 000 | 8 453 ns | 8 210 ns | −2.9% | ≤ +3% |
+| a two-Component Query frame, 10 000 | 38 687 ns | 38 411 ns | −0.7% | ≤ +3% |
+| **the watch check, per handle per run: `Set` or `Remove`** | 189.8 ns | 193.3 ns | **+0.28 ns** | ≤ 1 ns |
+| **…a `*T` Query field** | 79.45 ns | 81.37 ns | **+0.85 ns** | ≤ 1 ns |
+| **…a field of a Spawn's Component set** | 69.70 ns | 70.81 ns | **+0.44 ns** | ≤ 1 ns |
+| …a System naming no writer handle | 63.39 ns | 63.08 ns | −0.31 ns | |
 
 `Despawn`'s figure moves with code placement. [#389](https://github.com/dvoyni/cog/issues/389)
 measured a 1.6 ns placement effect on it and the owner accepted it, and
-[#391](https://github.com/dvoyni/cog/issues/391) measured +1.28 ns. The five
-figures above are within budget.
+[#391](https://github.com/dvoyni/cog/issues/391) measured +1.28 ns. Every figure
+above is within budget.
 
-**The watch check is over its budget, and the owner accepted the figures.**
-`BenchmarkHookWatchCheck` calls one run of a System by hand on Stores nothing
-watches. The body does nothing but bind what it holds.
+**The watch check is within its budget.** `BenchmarkHookWatchCheck` calls one run
+of a System by hand on Stores nothing watches. The body does nothing but bind
+what it holds. Its rows are medians of the per-round difference over 25 pooled
+rounds, because the difference between two times this close is smaller than the
+spread of either.
 - **The Set and Remove row** holds a `Set` and a `Remove` on each of six Stores:
   twelve handles.
 - **The Query row** is two `*T` fields.
 - **The Spawn row** is a Component set of two fields.
 
-An unwatched writer pays more than one load and one bit test per handle:
-- a `Set` holds two gates, its own and its Store's row copy, and each check
-  stores its flag;
-- every Store a writer holds rows of pays a `rowCopy.compare` call at run end,
-  which does not inline, even when nothing was copied;
-- a `*T` field also pays a loop over its row copies in `bind`.
+**It was 2–4 ns per handle per run when [#395](https://github.com/dvoyni/cog/issues/395)
+first published it**, over the budget, and the owner accepted those figures and
+sent the work to [#403](https://github.com/dvoyni/cog/issues/403). Two things
+were paying it, and neither had to:
 
-Bringing it down is [#403](https://github.com/dvoyni/cog/issues/403). It is paid
-per handle per run, never per row.
+- **The check ran at every run start.** A Store's watched kinds are written in
+  one place, `Hooks.prepare`, at registration, so what the check computes cannot
+  change after the first run makes it. It is made once now, on the System's
+  first run, and no later run pays for it.
+- **`rowCopy.compare` was called for every Store at run end**, even when the run
+  copied no row, and it is far past the inlining budget. The `taken` flag it
+  opens with is tested at the call site now, so an unwatched writer's run end is
+  a load and a branch per Store instead of a call.
+
+Measured against the build this ticket started from, that is 14.8 ns off the
+twelve-handle run, 3.1 ns off the two `*T` fields and 2.4 ns off the two Spawn
+fields. It is paid per handle per run, never per row.
 
 #### Recording
 
