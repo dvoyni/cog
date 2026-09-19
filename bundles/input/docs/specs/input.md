@@ -104,14 +104,14 @@ shapes, not domain concepts.
   blocks have deliberate gaps — letters use 1–26 of `[1..31]`.
 - **`input` cannot convert coordinates.** `gfx.Viewport` is gfx's resource,
   `checkCoupling` demands a declared dependency to lock a foreign one
-  (`kernel/registrar.go:211-235`), and `input.Dependencies()` is `nil`.
+  (`kernel/registry.go`, `checkCoupling`), and `input.Dependencies()` is `nil`.
 - **Nothing in cog consumes `KeyEvent`, `TextEvent` or `State.Text()`**, and
   nothing consumes `ScrollChange`. `ui` reads pointer state only.
 - **The input seam has no owner token.** `gogpu` is the only dispatcher today,
   once per frame at the start of `onUpdate` (`extensions/gogpu/internal/input.go:98-105`), and there
   is no once-per-frame guard and no rejection path. `Uses[input.ApplyCmd]`
   couples a caller to the command but **not** to input's resources
-  (`kernel/registrar.go:113-116`), so two sources serialize rather than
+  (`kernel/registry.go`, `finalize`), so two sources serialize rather than
   conflict. Per-tick edges roll in `handleUpdateEvent`, registered `.First()`
   (`bundles/input/plugin.go:29`).
 

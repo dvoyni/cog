@@ -2,34 +2,7 @@ package kernel
 
 import (
 	"reflect"
-	"slices"
 )
-
-// registry stores the resources, commands, and subscriptions available to an
-// Engine. It is built during sequential plugin registration; afterward Run
-// finalizes ordering and the dispatch paths only read it.
-type registry struct {
-	resources     map[reflect.Type]*resource
-	commands      map[reflect.Type]*command
-	subscriptions map[reflect.Type][]subscription
-	publications  map[reflect.Type]*publicationPlan
-	// adapterDeclarations and adapterContributions are appended in registration
-	// order, which is plugin order, and bound by finalize.
-	adapterDeclarations  []*adapterDeclaration
-	adapterContributions map[reflect.Type][]adapterContribution
-	// err is the first fault registration found. Composition stops at it: one
-	// error, named where it happened, beats a list whose order has to be
-	// manufactured.
-	err error
-}
-
-// fail records the first fault and keeps it. Later ones are what the first
-// knocked over, and saying them would bury it.
-func (r *registry) fail(err error) {
-	if r.err == nil {
-		r.err = err
-	}
-}
 
 // Registrar is a plugin-scoped capability used only during registration.
 type Registrar struct {
@@ -149,159 +122,87 @@ func (r *Registrar) Subscribe[
 	return sub
 }
 
-// finalize validates resources, checks that every declared lock is owned by the
-// locking plugin or one of its declared dependencies, resolves Uses declarations,
-// binds Adapters to the Ports that declared them, and compiles each event's
-// subscription DAG.
-// It stops at the first fault and answers with it. The walks below are ordered
-// by type rather than by map iteration, so the first fault a broken
-// composition hits is the same one on every run — which is what the old sort
-// over the joined error messages was really for.
-func (r *registry) finalize(dependencies map[PluginName]map[PluginName]struct{}) error {
-	if r.err != nil {
-		return r.err
-	}
-	for _, resourceType := range sortedTypes(r.resources) {
-		if !r.resources[resourceType].initialized {
-			return ErrMissingResource{Type: resourceType}
-		}
-	}
-	// Coupling is checked before Uses widens the lock sets: a declared dispatch
-	// couples the handler to the command, never to the resources behind it.
-	for _, id := range sortedTypes(r.commands) {
-		cmd := r.commands[id]
-		if err := r.checkCoupling(dependencies, cmd.owner, cmd.resources); err != nil {
-			return err
-		}
-	}
-	for _, eventType := range sortedTypes(r.subscriptions) {
-		for _, task := range r.subscriptions[eventType] {
-			owner, access := task.coupling()
-			if err := r.checkCoupling(dependencies, owner, access); err != nil {
-				return err
-			}
-		}
-	}
-	if err := r.resolveUses(); err != nil {
-		return err
-	}
-	if err := r.bindAdapters(); err != nil {
-		return err
-	}
-	for _, eventType := range sortedTypes(r.subscriptions) {
-		plan, cycle := buildPublicationPlan(r.subscriptions[eventType])
-		if cycle != nil {
-			return ErrSubscriptionCycle{EventType: eventType, SubscriptionTypes: cycle}
-		}
-		r.publications[eventType] = plan
-	}
-	return nil
-}
-
-// usesState tracks a command's position in the depth-first walk of Uses edges.
-type usesState uint8
-
-const (
-	usesUnvisited usesState = iota
-	usesVisiting
-	usesResolved
-)
-
-// resolveUses binds every Uses declaration to its registered command and folds
-// that command's lock closure into the declaring handler's set, so a handler
-// holds the locks of everything it dispatches. Commands are walked depth-first,
-// which makes the union transitive and exposes cycles.
-func (r *registry) resolveUses() error {
-	var failure error
-	state := make(map[reflect.Type]usesState, len(r.commands))
-	var path []reflect.Type
-
-	var resolveCommand func(cmd *command)
-	resolveAccess := func(declaring reflect.Type, access *ResourceAccess) {
-		for _, id := range sortedTypes(access.uses) {
-			target, registered := r.commands[id]
-			if !registered {
-				if failure == nil {
-					failure = ErrUsingUnknownCommand{Declaring: declaring, Command: id}
-				}
-				continue
-			}
-			access.uses[id].command = target
-			resolveCommand(target)
-			access.absorb(target.resources)
-		}
-	}
-	resolveCommand = func(cmd *command) {
-		switch state[cmd.id] {
-		case usesResolved:
-			return
-		case usesVisiting:
-			if failure == nil {
-				failure = ErrUsingCommandCycle{
-					Commands: append(append([]reflect.Type(nil), path...), cmd.id),
-				}
-			}
+// RequireAdapter declares that this plugin needs exactly one Adapter for the
+// required Port P. Composition binds it after every Register; none fails with
+// ErrMissingAdapter and several with ErrDuplicateAdapter. The binding adds no
+// plugin dependency. It panics if P is not built on an interface type.
+func (r *Registrar) RequireAdapter[P RequiredPortConstraint[I], I any]() RequiredAdapter[I] {
+	binding := &requiredBinding[I]{}
+	r.declarePort[P, I](false, func(contributions []adapterContribution) {
+		if len(contributions) != 1 {
 			return
 		}
-		state[cmd.id] = usesVisiting
-		path = append(path, cmd.id)
-		resolveAccess(cmd.id, cmd.resources)
-		path = path[:len(path)-1]
-		state[cmd.id] = usesResolved
-	}
-
-	for _, id := range sortedTypes(r.commands) {
-		resolveCommand(r.commands[id])
-	}
-	for _, eventType := range sortedTypes(r.subscriptions) {
-		for _, task := range r.subscriptions[eventType] {
-			_, access := task.coupling()
-			resolveAccess(task.orderID(), access)
-		}
-	}
-	return failure
+		binding.adapter = contributions[0].value.(I)
+		binding.bound = true
+	})
+	return RequiredAdapter[I]{binding: binding}
 }
 
-// sortedTypes orders a type-keyed map so composition walks it the same way every
-// run, which keeps reported cycles stable.
-func sortedTypes[T any](values map[reflect.Type]T) []reflect.Type {
-	ids := make([]reflect.Type, 0, len(values))
-	for id := range values {
-		ids = append(ids, id)
-	}
-	slices.SortFunc(ids, compareTypes)
-	return ids
+// CollectAdapters declares that this plugin takes every Adapter provided for the
+// collected Port P, zero included. Composition binds them after every Register,
+// in plugin order, each with the name of the plugin that provided it. The
+// binding adds no plugin dependency. It panics if P is not built on an
+// interface type.
+func (r *Registrar) CollectAdapters[P CollectedPortConstraint[I], I any]() CollectedAdapters[I] {
+	binding := &collectedBinding[I]{}
+	r.declarePort[P, I](true, func(contributions []adapterContribution) {
+		binding.adapters = make([]ContributedAdapter[I], 0, len(contributions))
+		for _, contribution := range contributions {
+			binding.adapters = append(binding.adapters, ContributedAdapter[I]{
+				Plugin: contribution.plugin, Adapter: contribution.value.(I),
+			})
+		}
+		binding.bound = true
+	})
+	return CollectedAdapters[I]{binding: binding}
 }
 
-// checkCoupling reports every locked resource whose owner the locking plugin did
-// not declare a dependency on. Uninitialized cells are skipped because
-// ErrMissingResource already names them.
-func (r *registry) checkCoupling(
-	dependencies map[PluginName]map[PluginName]struct{}, owner PluginName, access *ResourceAccess,
-) error {
-	if access == nil {
-		return nil
+// ProvideAdapter contributes adapter as the Adapter A, to the Port A is built
+// on. The parameter has that Port's interface type, so the compiler checks that
+// adapter implements it. An Adapter no plugin requires or collects is not an
+// error. A nil adapter is refused with ErrNilAdapter and contributes nothing; a
+// typed nil, such as a nil pointer, is not nil. It panics if the Port is not
+// built on an interface type.
+//
+// Go infers type parameters from a call's arguments before it reads their
+// constraints, so a concrete adapter must already have the interface type:
+// convert it, as in ProvideAdapter[GfxBackend](gfx.Backend(device)), or pass a
+// value declared with that type.
+func (r *Registrar) ProvideAdapter[A AdapterConstraint[P], P portConstraint[K, I], K portKind, I any](adapter I) {
+	id := reflect.TypeFor[A]()
+	if _, err := portInterface[I]("ProvideAdapter", id); err != nil {
+		r.registry.fail(err)
+		return
 	}
-	allowed := dependencies[owner]
-	check := func(resourceType reflect.Type) error {
-		cell := r.resources[resourceType]
-		if cell == nil || !cell.initialized || cell.owner == owner {
-			return nil
-		}
-		if _, ok := allowed[cell.owner]; ok {
-			return nil
-		}
-		return ErrUndeclaredDependency{Plugin: owner, Owner: cell.owner, Resource: resourceType}
+	if any(adapter) == nil {
+		r.registry.fail(ErrNilAdapter{Plugin: r.owner, Adapter: id})
+		return
 	}
-	for _, resourceType := range sortedTypes(access.read) {
-		if err := check(resourceType); err != nil {
-			return err
+	port := reflect.TypeFor[P]()
+	r.registry.adapterContributions[port] = append(r.registry.adapterContributions[port],
+		adapterContribution{plugin: r.owner, adapter: id, value: adapter})
+}
+
+func (r *Registrar) declarePort[P any, I any](collects bool, bind func([]adapterContribution)) {
+	declaration := "RequireAdapter"
+	if collects {
+		declaration = "CollectAdapters"
+	}
+	port := reflect.TypeFor[P]()
+	iface, err := portInterface[I](declaration, port)
+	if err != nil {
+		r.registry.fail(err)
+		return
+	}
+	for _, existing := range r.registry.adapterDeclarations {
+		if existing.port == port && existing.owner == r.owner {
+			r.registry.fail(ErrDuplicateRegistration{
+				Kind: "port declaration", Type: port, Owner: r.owner, Existing: existing.owner,
+			})
+			return
 		}
 	}
-	for _, resourceType := range sortedTypes(access.write) {
-		if err := check(resourceType); err != nil {
-			return err
-		}
-	}
-	return nil
+	r.registry.adapterDeclarations = append(r.registry.adapterDeclarations, &adapterDeclaration{
+		port: port, iface: iface, owner: r.owner, collects: collects, bind: bind,
+	})
 }

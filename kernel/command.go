@@ -66,34 +66,6 @@ func (c *commandContext[TRequest, TResponse]) release() {
 	c.request, c.result = zeroRequest, zeroResponse
 }
 
-// usage is what a Uses declaration returns to its dispatcher closure. command is
-// filled at composition, once every plugin has registered, so a Uses declaration
-// does not depend on registration order.
-type usage struct {
-	command *command
-}
-
-// Uses declares that this handler dispatches TCommand and returns the dispatcher
-// to call it with. Composition folds TCommand's lock closure into this handler's
-// own set, so the caller never names the callee's resources, and the dispatch
-// then reuses the locks the handler already holds.
-func (r ResourceAccess) Uses[
-	TCommand CommandConstraint[TRequest, TResponse], TRequest any, TResponse any,
-]() func(Kernel, TRequest) TResponse {
-	id := reflect.TypeFor[TCommand]()
-	target := r.uses[id]
-	if target == nil {
-		target = &usage{}
-		r.uses[id] = target
-	}
-	return func(k Kernel, request TRequest) TResponse {
-		// noLocks on both sides: composition folded the callee's closure into this
-		// handler's own set, so the caller already holds everything the callee
-		// needs and the nested dispatch acquires nothing.
-		return dispatch[TRequest, TResponse](k.engine, target.command, noLocks, noLocks, request)
-	}
-}
-
 // dispatch runs one command invocation to completion on the calling goroutine,
 // with read and write as the lock set the scheduler must grant it.
 //

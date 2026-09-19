@@ -98,11 +98,14 @@ type handlerAccess struct {
 }
 
 // describeContention computes the conflict report from registry state that
-// finalize has already frozen. Subscriptions are read from the subscription
+// finalize has already frozen. It is a function over a registry rather than a
+// method on one: the report is analysis of what registration left behind, not
+// behaviour the registry offers, and it belongs beside the views below that are
+// already plain functions. Subscriptions are read from the subscription
 // list rather than from the compiled publication plans, so the report survives
 // a composition that failed to compile one event's DAG.
-func (r *registry) describeContention() ContentionDescription {
-	handlers := r.handlerAccesses()
+func describeContention(r *registry) ContentionDescription {
+	handlers := handlerAccesses(r)
 	return ContentionDescription{
 		Resources: resourceContention(r, handlers),
 		Handlers:  handlerConflicts(handlers),
@@ -112,7 +115,7 @@ func (r *registry) describeContention() ContentionDescription {
 
 // handlerAccesses collects every handler holding a lock set, in the order every
 // view renders them, so the whole report reads the same way on every run.
-func (r *registry) handlerAccesses() []handlerAccess {
+func handlerAccesses(r *registry) []handlerAccess {
 	handlers := make([]handlerAccess, 0, len(r.commands))
 	commands := 0
 	for _, id := range sortedTypes(r.commands) {

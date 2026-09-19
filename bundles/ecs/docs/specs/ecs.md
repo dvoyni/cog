@@ -2349,7 +2349,9 @@ guarantees that regime; 512 Entities over 257 archetypes was measured reserving
 
 **`World` as a kernel resource — unsound, not merely unnecessary.** Resources are
 keyed by `reflect.TypeFor[T]()` and **nothing normalises pointer-ness**: there is
-no `Elem()` call in `resource.go`, `registrar.go` or `scheduler.go`. So
+no `Elem()` call anywhere a resource is keyed — not in `resource.go`,
+`resourceaccess.go`, `registry.go` or `scheduler.go`; the only `Elem()` in the
+package renders type names. So
 `Read[World]` and `Write[*World]` are two unrelated cells that **do not exclude
 each other**, and the structural guarantee fails *silently*. The general rule
 this generalises to, and which the implementation must hold: **one spelling per
