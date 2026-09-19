@@ -45,21 +45,21 @@ type loader struct {
 	onFree func(freed face)
 }
 
-func (l *loader) Load(_ kernel.Kernel, data assets.Blob, params bake, _ fs.FS, user *device) face {
+func (l *loader) Load(_ kernel.Kernel, data assets.Blob, params bake, _ fs.FS, userData *device) face {
 	l.loads++
-	l.devices = append(l.devices, user)
+	l.devices = append(l.devices, userData)
 	return face{body: data.String(), variant: params.Variant}
 }
 
-func (l *loader) Default(d assets.Descr[bake], user *device) face {
+func (l *loader) Default(d assets.Descr[bake], userData *device) face {
 	l.defaults++
-	l.devices = append(l.devices, user)
+	l.devices = append(l.devices, userData)
 	return face{body: d.Name, variant: d.Params.Variant, missing: true}
 }
 
-func (l *loader) Free(value face, user *device) {
+func (l *loader) Free(value face, userData *device) {
 	l.freed = append(l.freed, value)
-	l.devices = append(l.devices, user)
+	l.devices = append(l.devices, userData)
 	if l.onFree != nil {
 		l.onFree(value)
 	}

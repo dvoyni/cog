@@ -37,11 +37,11 @@ type Lookup struct {
 	// spritePacker and glyphPacker are the shelf allocators, free lists,
 	// tombstoned array indices and byte counters the sprite and glyph sides pack
 	// into. They are persistent state outliving every handler, which is why they
-	// live here and travel to the sprite loader in its user value.
+	// live here and travel to the sprite loader in its user data.
 	spritePacker *packer
 	glyphPacker  *packer
 
-	sprites     *assets.Cache[spriteDescrParams, spriteUser, AtlasEntry]
+	sprites     *assets.Cache[spriteDescrParams, spriteUserData, AtlasEntry]
 	tiled       *assets.Cache[tiledDescrParams, *gfx.ResourceQueue, StandaloneEntry]
 	spriteSizes *assets.Cache[sizeDescrParams, struct{}, m.Vec2i]
 
@@ -50,7 +50,7 @@ type Lookup struct {
 	// caches rather than one because their release rules differ - see
 	// unloadFont and invalidateFontsOnResize, which are the two rules.
 	fontSources *assets.Cache[sourceDescrParams, struct{}, *opentype.Font]
-	fontFaces   *assets.Cache[faceDescrParams, fontUser, *Font]
+	fontFaces   *assets.Cache[faceDescrParams, fontUserData, *Font]
 
 	lastFramebufferScale float32
 }
@@ -69,11 +69,11 @@ func NewSizedLookup(config Config) *Lookup {
 	return &Lookup{
 		spritePacker: newPacker(config),
 		glyphPacker:  newPacker(config),
-		sprites:      assets.New[spriteDescrParams, spriteUser, AtlasEntry](spriteLoader{}),
+		sprites:      assets.New[spriteDescrParams, spriteUserData, AtlasEntry](spriteLoader{}),
 		tiled:        assets.New[tiledDescrParams, *gfx.ResourceQueue, StandaloneEntry](standaloneLoader{}),
 		spriteSizes:  assets.New[sizeDescrParams, struct{}, m.Vec2i](spriteSizeLoader{}),
 		fontSources:  assets.New[sourceDescrParams, struct{}, *opentype.Font](fontSourceLoader{}),
-		fontFaces:    assets.New[faceDescrParams, fontUser, *Font](fontFaceLoader{}),
+		fontFaces:    assets.New[faceDescrParams, fontUserData, *Font](fontFaceLoader{}),
 	}
 }
 
@@ -100,13 +100,13 @@ func spriteDescr(path string) assets.Descr[spriteDescrParams] {
 func (l *Lookup) font(k kernel.Kernel, path string, px int, fsys fs.FS) *Font {
 	return l.fontFaces.Get(k,
 		assets.Descr[faceDescrParams]{Params: faceDescrParams{path: path, px: px}},
-		fsys, l.fontUser())
+		fsys, l.fontUserData())
 }
 
-// fontUser is the face loader's pass-through: one pointer, built per call so
+// fontUserData is the face loader's pass-through: one pointer, built per call so
 // nothing lock-bound is retained, and passed by value so the frame path pays no
 // allocation for it.
-func (l *Lookup) fontUser() fontUser { return fontUser{sources: l.fontSources} }
+func (l *Lookup) fontUserData() fontUserData { return fontUserData{sources: l.fontSources} }
 
 // unloadFont drops every face baked from a font and the parsed source behind
 // them, so their CPU memory is reclaimed and a later draw re-reads the file.
@@ -121,7 +121,7 @@ func (l *Lookup) fontUser() fontUser { return fontUser{sources: l.fontSources} }
 // released together on a framebuffer scale change, which is the only time glyph
 // pages are reclaimed at all.
 func (l *Lookup) unloadFont(k kernel.Kernel, path string) {
-	l.fontFaces.FreeWhere(k, l.fontUser(), func(d assets.Descr[faceDescrParams], _ *Font) bool {
+	l.fontFaces.FreeWhere(k, l.fontUserData(), func(d assets.Descr[faceDescrParams], _ *Font) bool {
 		return d.Params.path == path
 	})
 	l.fontSources.Free(k, assets.Descr[sourceDescrParams]{Name: path}, struct{}{})
@@ -141,7 +141,7 @@ func (l *Lookup) invalidateFontsOnResize(k kernel.Kernel, resources *gfx.Resourc
 	}
 	if l.lastFramebufferScale != 0 && scale != l.lastFramebufferScale {
 		l.glyphPacker.releaseAll(resources)
-		l.fontFaces.FreeAll(k, l.fontUser())
+		l.fontFaces.FreeAll(k, l.fontUserData())
 	}
 	l.lastFramebufferScale = scale
 }
@@ -325,7 +325,7 @@ func (la LookupDeviceAccess) UnloadSprite(path string) {
 	}
 	l := la.lookup
 	l.sprites.Free(la.kernel, spriteDescr(clean),
-		spriteUser{packer: l.spritePacker, resources: la.resources})
+		spriteUserData{packer: l.spritePacker, resources: la.resources})
 	l.tiled.Free(la.kernel, assets.Descr[tiledDescrParams]{Name: clean}, la.resources)
 	l.spriteSizes.Free(la.kernel, assets.Descr[sizeDescrParams]{Name: clean}, struct{}{})
 }
@@ -399,17 +399,17 @@ func (la LookupDeviceAccess) UnloadAll() {
 	l := la.lookup
 	// Five caches, five FreeAll calls, and no walk over them: FreeAll is
 	// per-cache because the Library has no verb above one, and each tier's user
-	// value is its own. Freeing a sprite hands its slot back to the packer,
-	// which releases an array once nothing is left in it, so the byte budget the
+	// data is its own. Freeing a sprite hands its slot back to the packer, which
+	// releases an array once nothing is left in it, so the byte budget the
 	// refusal above was weighed against comes back with them.
-	l.sprites.FreeAll(la.kernel, spriteUser{packer: l.spritePacker, resources: la.resources})
+	l.sprites.FreeAll(la.kernel, spriteUserData{packer: l.spritePacker, resources: la.resources})
 	l.tiled.FreeAll(la.kernel, la.resources)
 	l.spriteSizes.FreeAll(la.kernel, struct{}{})
 	// The faces first and their sources second, which is the order unloadFont
 	// uses and the order the dependency runs in: a face is baked from what the
 	// source tier holds, so freeing the sources first would leave faces standing
 	// on an asset that had gone.
-	l.fontFaces.FreeAll(la.kernel, l.fontUser())
+	l.fontFaces.FreeAll(la.kernel, l.fontUserData())
 	l.fontSources.FreeAll(la.kernel, struct{}{})
 }
 

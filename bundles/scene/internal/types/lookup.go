@@ -45,8 +45,8 @@ type Lookup struct {
 	// and their params types are two types for the same reason. Neither is
 	// refcounted: nothing unloads automatically, so there is nothing for a
 	// count to drive.
-	models   *assets.Cache[ModelDescrParams, modelUser, *residentModel]
-	textures *assets.Cache[textureDescrParams, textureUser, gfx.TextureDescr]
+	models   *assets.Cache[ModelDescrParams, modelUserData, *residentModel]
+	textures *assets.Cache[textureDescrParams, textureUserData, gfx.TextureDescr]
 	// poseBytes and morphBytes are the GPU memory every loaded model's baked
 	// poses and morph deltas occupy, added by a load and subtracted by a free.
 	// They are counters rather than a walk because the two queries reporting

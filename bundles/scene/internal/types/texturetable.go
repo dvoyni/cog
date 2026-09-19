@@ -67,14 +67,14 @@ type textureDescr = assets.Descr[textureDescrParams]
 // a storage path of its own, where the path is the whole identity.
 const externalImage = -1
 
-// textureUser is what the texture loader needs that only a handler holds: the
+// textureUserData is what the texture loader needs that only a handler holds: the
 // resource queue it bakes and releases through.
 //
 // model and name ride with it because Load is not handed the descriptor, and a
 // decode failure names both the file that asked for the picture and the picture
 // that broke. Free and Default read neither, so a free passes them empty - the
 // same shape the model loader carries its path in.
-type textureUser struct {
+type textureUserData struct {
 	resources *gfx.ResourceQueue
 	model     string
 	name      string
@@ -96,14 +96,14 @@ type textureLoader struct{}
 // Whatever this returns is cached, the placeholder included, so a broken
 // picture is decoded one time per entry until an UnloadTexture.
 func (textureLoader) Load(
-	k kernel.Kernel, data assets.Blob, params textureDescrParams, _ fs.FS, user textureUser,
+	k kernel.Kernel, data assets.Blob, params textureDescrParams, _ fs.FS, userData textureUserData,
 ) gfx.TextureDescr {
 	decoded, _, err := image.Decode(bytes.NewReader(data.Data()))
 	if err != nil {
-		named := textureReportPath(user.name, params.image)
+		named := textureReportPath(userData.name, params.image)
 		k.ReportErrorOnce(textureReportKey(named),
-			ErrModelTextureUnavailable{Model: user.model, Texture: named, Err: err})
-		return placeholderTexture(params, user.resources)
+			ErrModelTextureUnavailable{Model: userData.model, Texture: named, Err: err})
+		return placeholderTexture(params, userData.resources)
 	}
 	bounds := decoded.Bounds()
 	rgba := image.NewNRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
@@ -117,23 +117,23 @@ func (textureLoader) Load(
 	// without them aliases into noise the moment the camera moves. The pixels
 	// are handed over rather than copied - they are this decode's private
 	// buffer and nothing reads them again.
-	return user.resources.BakeTexture(bounds.Dx(), bounds.Dy(), format, rgba.Pix, false, true)
+	return userData.resources.BakeTexture(bounds.Dx(), bounds.Dy(), format, rgba.Pix, false, true)
 }
 
 // Default supplies the value for a picture whose file could not be read. The
 // Library has already reported that, and it never says what went wrong here:
 // what gets drawn is a separate question from what gets said.
-func (textureLoader) Default(d textureDescr, user textureUser) gfx.TextureDescr {
-	return placeholderTexture(d.Params, user.resources)
+func (textureLoader) Default(d textureDescr, userData textureUserData) gfx.TextureDescr {
+	return placeholderTexture(d.Params, userData.resources)
 }
 
 // Free hands one baked texture back through the resource queue, which is the
 // same release the hand-written unload scan emitted before. A placeholder for a
 // data slot is the zero descriptor and had nothing baked for it, so there is
 // nothing to hand back.
-func (textureLoader) Free(value gfx.TextureDescr, user textureUser) {
+func (textureLoader) Free(value gfx.TextureDescr, userData textureUserData) {
 	if value.ID() != 0 {
-		user.resources.ReleaseTexture(value)
+		userData.resources.ReleaseTexture(value)
 	}
 }
 

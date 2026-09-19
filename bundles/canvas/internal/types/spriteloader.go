@@ -54,14 +54,14 @@ type tiledDescrParams struct{}
 
 type sizeDescrParams struct{}
 
-// spriteUser is what the sprite loader needs that it may not hold itself: the
+// spriteUserData is what the sprite loader needs that it may not hold itself: the
 // packer, which outlives every handler and lives on the Lookup, and the resource
 // queue of the handler doing the loading.
 //
 // It travels by value rather than behind a pointer, because a Get on the sprite
 // tier happens per sprite per frame and building one on the heap each time would
 // put an allocation on the frame path.
-type spriteUser struct {
+type spriteUserData struct {
 	packer    *packer
 	resources *gfx.ResourceQueue
 }
@@ -75,7 +75,7 @@ type spriteLoader struct{}
 // is its own to say: the Library owns the read, so what is left is an image that
 // will not decode and the packer's two refusals. Each of them runs once by
 // construction, because whatever this returns is the entry until a Free.
-func (spriteLoader) Load(k kernel.Kernel, data assets.Blob, params spriteDescrParams, _ fs.FS, user spriteUser) AtlasEntry {
+func (spriteLoader) Load(k kernel.Kernel, data assets.Blob, params spriteDescrParams, _ fs.FS, userData spriteUserData) AtlasEntry {
 	source := insertion{pixels: data.Data(), width: 1, height: 1, centreUV: true}
 	if !params.generated {
 		width, height, pixels, err := decodeImage(data)
@@ -85,17 +85,17 @@ func (spriteLoader) Load(k kernel.Kernel, data assets.Blob, params spriteDescrPa
 		}
 		source = insertion{pixels: pixels, width: width, height: height, padding: spritePadding, extrude: true}
 	}
-	entry, refusal := user.packer.insert(source, user.resources)
+	entry, refusal := userData.packer.insert(source, userData.resources)
 	switch refusal {
 	case packTooLarge:
 		k.ReportError(fmt.Errorf("canvas: sprite %dx%d padded to %dx%d does not fit a %d-texel atlas page",
 			source.width, source.height,
 			source.width+2*source.padding, source.height+2*source.padding,
-			user.packer.config.AtlasSize))
+			userData.packer.config.AtlasSize))
 		return AtlasEntry{}
 	case packOverBudget:
 		k.ReportError(fmt.Errorf("canvas: sprite %dx%d does not fit the atlas: %d bytes of texture arrays already allocated against a %d-byte budget",
-			source.width, source.height, user.packer.bytes, user.packer.config.MaxAtlasBytes))
+			source.width, source.height, userData.packer.bytes, userData.packer.config.MaxAtlasBytes))
 		return AtlasEntry{}
 	}
 	return entry
@@ -107,14 +107,14 @@ func (spriteLoader) Load(k kernel.Kernel, data assets.Blob, params spriteDescrPa
 // the file - and in ui the element was already laid out at zero by the
 // measurement tier, so the placeholder would paint outside a box of size zero.
 // The loudness is the report, not the pixels.
-func (spriteLoader) Default(assets.Descr[spriteDescrParams], spriteUser) AtlasEntry {
+func (spriteLoader) Default(assets.Descr[spriteDescrParams], spriteUserData) AtlasEntry {
 	return AtlasEntry{}
 }
 
 // Free returns the entry's slot to the packer, which releases the array behind
 // it once nothing is left in it.
-func (spriteLoader) Free(value AtlasEntry, user spriteUser) {
-	user.packer.freeEntry(value, user.resources)
+func (spriteLoader) Free(value AtlasEntry, userData spriteUserData) {
+	userData.packer.freeEntry(value, userData.resources)
 }
 
 // StandaloneEntry is a full-image texture kept outside the atlas so it can be
@@ -159,7 +159,7 @@ func (standaloneLoader) Free(value StandaloneEntry, resources *gfx.ResourceQueue
 }
 
 // spriteSizeLoader reads a sprite's intrinsic pixel size out of its header. It
-// is the measurement tier, and its user value is struct{} - no packer, no
+// is the measurement tier, and its user data is struct{} - no packer, no
 // resource queue, no device of any kind. That is the property that keeps a
 // handler which only lays a page out off the GPU's lock set, and it is a
 // requirement of this tier rather than an accident of what the loader needed.

@@ -84,7 +84,7 @@ type translator struct {
 	// stood in for one. It is a translator field like every other cache here,
 	// reached only on the render thread, so what protects it is the confinement
 	// rather than a lock of its own.
-	shaders   *assets.Cache[types.ShaderDescrParams, shaderUser, *shader]
+	shaders   *assets.Cache[types.ShaderDescrParams, shaderUserData, *shader]
 	pipelines map[pipelineKey]gfx.PipelineID
 	samplers  map[gfx.SamplerDesc]gfx.SamplerID
 	uarena    []byte
@@ -92,7 +92,7 @@ type translator struct {
 	// textures is the path-texture cache. It is a translator field like every
 	// other cache here, reached only on the render thread, so what protects it
 	// is the confinement rather than a lock of its own.
-	textures       *assets.Cache[types.TextureDescrParams, textureUser, texture]
+	textures       *assets.Cache[types.TextureDescrParams, textureUserData, texture]
 	parameterPlans map[parameterPlanBucketKey][]cachedParameterPlan
 	ops            gfx.Queue
 	// Pass bookkeeping, reused each frame: the run order of the frame's passes
@@ -134,11 +134,11 @@ type translator struct {
 
 func newTranslator() *translator {
 	return &translator{
-		shaders:           assets.New[types.ShaderDescrParams, shaderUser, *shader](shaderLoader{}),
+		shaders:           assets.New[types.ShaderDescrParams, shaderUserData, *shader](shaderLoader{}),
 		pipelines:         map[pipelineKey]gfx.PipelineID{},
 		samplers:          map[gfx.SamplerDesc]gfx.SamplerID{},
 		layouts:           map[gfx.ShaderID]gfx.ShaderLayout{},
-		textures:          assets.New[types.TextureDescrParams, textureUser, texture](textureLoader{}),
+		textures:          assets.New[types.TextureDescrParams, textureUserData, texture](textureLoader{}),
 		parameterPlans:    map[parameterPlanBucketKey][]cachedParameterPlan{},
 		textureUsage:      map[gfx.TextureID]gfx.TextureUsage{},
 		badIndexLengths:   map[indexLengthKey]struct{}{},
@@ -690,38 +690,38 @@ func (t *translator) ensureTexture(f *frame, descr gfx.TextureDescr) gfx.Texture
 	if descr.Path() == "" {
 		return 0
 	}
-	return t.textures.Get(f.k, assets.Descr[types.TextureDescrParams](descr), f.fsys, t.textureUser(f)).id
+	return t.textures.Get(f.k, assets.Descr[types.TextureDescrParams](descr), f.fsys, t.textureUserData(f)).id
 }
 
-// textureUser is what the texture loader is handed on every call. The op queue
+// textureUserData is what the texture loader is handed on every call. The op queue
 // is the translator's own, so a bake or a release the loader emits lands in the
 // frame being built exactly where the translator used to put it itself.
-func (t *translator) textureUser(f *frame) textureUser {
-	return textureUser{backend: f.backend, ops: &t.ops}
+func (t *translator) textureUserData(f *frame) textureUserData {
+	return textureUserData{backend: f.backend, ops: &t.ops}
 }
 
 // ensureShader resolves one material's shader to the module id its draw is
 // encoded against, and to the error that module has to say for itself.
 func (t *translator) ensureShader(f *frame, descr gfx.ShaderDescr) (gfx.ShaderID, error) {
 	cached := t.shaders.Get(
-		f.k, assets.Descr[types.ShaderDescrParams](descr), f.fsys, t.shaderUser(f, descr.Path()),
+		f.k, assets.Descr[types.ShaderDescrParams](descr), f.fsys, t.shaderUserData(f, descr.Path()),
 	)
 	return cached.id, cached.report()
 }
 
-// shaderUser is what the shader loader is handed on every call. root is the
+// shaderUserData is what the shader loader is handed on every call. root is the
 // module's path on a load and empty on a free, which is the whole difference
 // between the two: a free reads the value, and only a load needs to be told
 // what the bytes it was given are called.
-func (t *translator) shaderUser(f *frame, root string) shaderUser {
-	return shaderUser{t: t, backend: f.backend, root: root}
+func (t *translator) shaderUserData(f *frame, root string) shaderUserData {
+	return shaderUserData{t: t, backend: f.backend, root: root}
 }
 
 func (t *translator) releaseCachedResource(f *frame, path string) {
 	// A path names exactly one texture entry, because TextureWithResource is the
 	// only way one is made and it takes no options - so the key a Free names is
 	// the key a Get made, and the report that entry filed is forgotten with it.
-	t.textures.Free(f.k, assets.Descr[types.TextureDescrParams](gfx.TextureWithResource(path)), t.textureUser(f))
+	t.textures.Free(f.k, assets.Descr[types.TextureDescrParams](gfx.TextureWithResource(path)), t.textureUserData(f))
 	// A shader cannot be freed by key, because three things break the probe of
 	// one descriptor: a path may root several variants, a path may be an
 	// included source of modules rooted elsewhere, and a ShaderWithText shader
@@ -729,7 +729,7 @@ func (t *translator) releaseCachedResource(f *frame, path string) {
 	// names. The decision is over the value, and the value already holds the
 	// answer - which is what FreeWhere is, and why gfx builds no reverse
 	// path-to-modules index to hold what the include set holds already.
-	t.shaders.FreeWhere(f.k, t.shaderUser(f, ""), func(_ assets.Descr[types.ShaderDescrParams], value *shader) bool {
+	t.shaders.FreeWhere(f.k, t.shaderUserData(f, ""), func(_ assets.Descr[types.ShaderDescrParams], value *shader) bool {
 		return slices.Contains(value.sources, path)
 	})
 }
@@ -749,8 +749,8 @@ func (t *translator) freeCachedResources(f *frame) {
 	clear(t.pipelines)
 	clear(t.parameterPlans)
 
-	t.textures.FreeAll(f.k, t.textureUser(f))
-	t.shaders.FreeAll(f.k, t.shaderUser(f, ""))
+	t.textures.FreeAll(f.k, t.textureUserData(f))
+	t.shaders.FreeAll(f.k, t.shaderUserData(f, ""))
 
 	for _, sampler := range t.samplers {
 		f.backend.FreeSampler(sampler)

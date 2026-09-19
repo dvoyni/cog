@@ -94,7 +94,7 @@ work](#required-work) carries the two `CONTEXT.md` entries that stop being true.
 - **Loader** — the plugin-side half: it decodes bytes into `T`, supplies the
   value for an asset that did not load, and releases one. Stateless and
   long-lived; everything lock-bound arrives per call.
-- **User** (`U`) — a plugin-defined pass-through the cache never inspects,
+- **User data** (`U`) — a plugin-defined pass-through the cache never inspects,
   carrying whatever the loader needs that only a handler holds: a resource
   queue, a backend, a packer.
 - **Cache** — one table of entries for one asset family, generic in `P`, `U` and
@@ -129,19 +129,19 @@ type Descr[P comparable] struct {
 
 // Loader is stateless and long-lived: everything lock-bound arrives per call.
 type Loader[P comparable, U any, T any] interface {
-	Load(k kernel.Kernel, data Blob, params P, fsys fs.FS, user U) T
-	Default(d Descr[P], user U) T
-	Free(value T, user U)
+	Load(k kernel.Kernel, data Blob, params P, fsys fs.FS, userData U) T
+	Default(d Descr[P], userData U) T
+	Free(value T, userData U)
 }
 
 type Cache[P comparable, U any, T any] struct{ /* entries */ }
 
 func New[P comparable, U any, T any](loader Loader[P, U, T]) *Cache[P, U, T]
 
-func (c *Cache[P, U, T]) Get(k kernel.Kernel, d Descr[P], fsys fs.FS, user U) T
-func (c *Cache[P, U, T]) Free(k kernel.Kernel, d Descr[P], user U)
-func (c *Cache[P, U, T]) FreeAll(k kernel.Kernel, user U)
-func (c *Cache[P, U, T]) FreeWhere(k kernel.Kernel, user U, match func(Descr[P], T) bool)
+func (c *Cache[P, U, T]) Get(k kernel.Kernel, d Descr[P], fsys fs.FS, userData U) T
+func (c *Cache[P, U, T]) Free(k kernel.Kernel, d Descr[P], userData U)
+func (c *Cache[P, U, T]) FreeAll(k kernel.Kernel, userData U)
+func (c *Cache[P, U, T]) FreeWhere(k kernel.Kernel, userData U, match func(Descr[P], T) bool)
 ```
 
 `Descr`'s fields are **exported**; a `P` type's own fields generally are not,
@@ -345,7 +345,7 @@ lock-bound arrives per call:
   past the handler's lock scope."* `Load` receives it too, so a loader that needs
   more than one file — a shader reading its root plus N includes discovered by its
   own contents — can open the rest.
-- **`user U`** — the plugin-defined pass-through: a `*gfx.ResourceQueue`, a
+- **`userData U`** — the plugin-defined pass-through: a `*gfx.ResourceQueue`, a
   backend, a packer, a `*Lookup`. The cache never inspects it.
 
 `U` is what lets the loader be built once instead of rebuilt per handler, which
@@ -475,7 +475,7 @@ hands its error back to whoever does hold one."*
 ### `Default` is a value, never an error
 
 ```go
-Default(d Descr[P], user U) T
+Default(d Descr[P], userData U) T
 ```
 
 **A method, not a field**, so it can ask a device for its 1×1 magenta at call
@@ -794,9 +794,9 @@ describe a load that is in flight, and after this there is none.
 type ModelDescrParams struct{}                          // the path is the whole key
 type textureDescrParams struct{ image int; srgb bool }  // unexported
 
-type modelUser struct{ lookup *Lookup; resources *gfx.ResourceQueue }
+type modelUserData struct{ lookup *Lookup; resources *gfx.ResourceQueue }
 
-// models:   assets.Cache[ModelDescrParams,   *modelUser,         *residentModel]
+// models:   assets.Cache[ModelDescrParams,   *modelUserData,     *residentModel]
 // textures: assets.Cache[textureDescrParams, *gfx.ResourceQueue, textureEntry]
 ```
 
@@ -823,7 +823,7 @@ cache, since `UnloadModel` deliberately does not cascade to textures.
 **The texture table reopens as a real cache.** The previous map ruled `l.textures`
 a bake-dedup table that stays a plain field; that is reversed, and the release
 side is why. `UnloadTexture(path)` frees every variant a path baked, which is
-`FreeWhere(k, user, func(d, _) bool { return d.Name == path })` exactly — so
+`FreeWhere(k, userData, func(d, _) bool { return d.Name == path })` exactly — so
 `unloadTexture`'s hand-written scan and both report-key loops delete, along with
 `l.textures`, `residentTextures` and `textureKey`. It also kills a stated defect:
 *"two models sharing an external image path both decode it and only the first
@@ -939,13 +939,13 @@ table at all.
 type spriteDescrParams struct{ generated bool }   // the white texel's case
 type fontDescrParams struct{ px int }
 
-type spriteUser struct{ packer *packer; resources *gfx.ResourceQueue }
+type spriteUserData struct{ packer *packer; resources *gfx.ResourceQueue }
 
-// sprites:  assets.Cache[spriteDescrParams, *spriteUser,        AtlasEntry]
+// sprites:  assets.Cache[spriteDescrParams, *spriteUserData,    AtlasEntry]
 // tiled:    assets.Cache[struct{},          *gfx.ResourceQueue, StandaloneEntry]
 // sizes:    assets.Cache[struct{},          struct{},           m.Vec2i]
 // sources:  assets.Cache[struct{},          struct{},           *opentype.Font]
-// faces:    assets.Cache[fontDescrParams,   *fontUser,          *Font]
+// faces:    assets.Cache[fontDescrParams,   *fontUserData,      *Font]
 ```
 
 `AtlasEntry` and `StandaloneEntry` are held **by value**: nothing mutates either
@@ -1059,8 +1059,8 @@ Sources keyed `{Name: path}` to `*opentype.Font`; faces keyed
 inside its own `Load` — a different cache, which is allowed.
 
 The release side is why this shape. `unloadFont(path)` is
-`faces.FreeWhere(k, user, func(d, _) bool { return d.Name == path })` plus
-`sources.Free(k, {Name: path}, user)`, which is `FreeWhere`'s second use.
+`faces.FreeWhere(k, userData, func(d, _) bool { return d.Name == path })` plus
+`sources.Free(k, {Name: path}, userData)`, which is `FreeWhere`'s second use.
 `invalidateFontsOnResize` is `faces.FreeAll()` with the sources kept — `ClearFontFaces`
 verbatim, *"closes baked faces but keeps parsed sources for re-baking"* — plus the
 glyph packer's `releaseAll`. **One cache keyed by path with the faces inside `T`
@@ -1301,7 +1301,7 @@ replaced closures with an interface.
 Mechanically sound, and it throws the error away and makes reporting optional,
 which is the defect the Library exists to make impossible.
 
-**`Default` gaining the error and becoming `Failed(err, params, user)`.**
+**`Default` gaining the error and becoming `Failed(err, params, userData)`.**
 Recommended and rejected: once the Library reports, the loader has nothing to do
 with the error.
 
@@ -1425,9 +1425,9 @@ The checklist to build from, in dependency order. **Nothing here is built.**
   `Len`, `Blob{}` as the canonical empty, and the doc comments carrying the
   *built once and kept* rule and the read-only-write hazard.
 - `Descr[P comparable]` with exported fields, and the `Name`-wins key rule.
-- `Loader[P, U, T]` — `Load(k, data, params, fsys, user)`, `Default(d, user)`,
-  `Free(value, user)` — with the *must not free on its own cache* rule on the
-  interface.
+- `Loader[P, U, T]` — `Load(k, data, params, fsys, userData)`,
+  `Default(d, userData)`, `Free(value, userData)` — with the *must not free on
+  its own cache* rule on the interface.
 - `Cache[P, U, T]`, `New`, and `Get`, `Free`, `FreeAll`, `FreeWhere`, the last
   three collecting and removing before they free.
 - The read, the `ReportErrorOnce` under the `Descr` key, and the paired
