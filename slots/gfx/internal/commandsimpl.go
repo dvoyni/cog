@@ -97,7 +97,7 @@ func setViewportCmdImpl() (kernel.Lock, kernel.Execute[gfx.SetViewportRequest, g
 			viewport := resolveViewport(request.Width, request.Height, *preference.Get())
 			viewport.FramebufferWidth = request.FramebufferWidth
 			viewport.FramebufferHeight = request.FramebufferHeight
-			*current.Get() = viewport
+			current.Set(&viewport)
 			return gfx.SetViewportResponse{Viewport: viewport}
 		}
 }
@@ -118,11 +118,11 @@ func setDesiredViewportCmdImpl() (kernel.Lock, kernel.Execute[gfx.SetDesiredView
 			if !valid {
 				preference = desiredViewport{}
 			}
-			*stored.Get() = preference
+			stored.Set(&preference)
 			viewport := resolveViewport(current.Get().WindowWidth, current.Get().WindowHeight, preference)
 			viewport.FramebufferWidth = current.Get().FramebufferWidth
 			viewport.FramebufferHeight = current.Get().FramebufferHeight
-			*current.Get() = viewport
+			current.Set(&viewport)
 			return gfx.SetDesiredViewportResponse{Viewport: viewport}
 		}
 }

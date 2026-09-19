@@ -106,8 +106,6 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	p.config = cfg
 
 	p.gpu = gogpu.NewApp(gogpuConfig(cfg))
-	// Bridge gogpu input events into the input contract.
-	p.wireInput()
 	return nil
 }
 
@@ -123,6 +121,8 @@ func (p *plugin) Run(k kernel.Executioner) error {
 	p.gpu.OnUpdate(func(dt float64) { p.onUpdate(k, dt) })
 	// Per-frame render barrier (app.RenderEvent on the render thread).
 	p.gpu.OnDraw(func(dc *gogpu.Context) { p.onDraw(k, dc) })
+	// Bridge gogpu input events into the input contract.
+	p.wireInput(k)
 
 	if err := p.loop.Init(k); err != nil {
 		return err

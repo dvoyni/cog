@@ -57,5 +57,7 @@ func publish(k kernel.Kernel, c input.Change) {
 		k.PublishEvent(input.ScrollEvent{Dx: types.ChangeDx(&c), Dy: types.ChangeDy(&c)})
 	case types.ChangeKindText:
 		k.PublishEvent(input.TextEvent{Rune: types.ChangeRune(&c)})
+	case types.ChangeKindClipboardPaste:
+		k.PublishEvent(input.ClipboardPasteEvent{Text: types.ChangeText(&c)})
 	}
 }

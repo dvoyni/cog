@@ -243,8 +243,9 @@ value := handle.Get()      // Read[T] or Write[T]
 handle.Set(replacement)    // Write[T] only
 ```
 
-Most resources are pointers mutated in place; `Set` is for the few reassigned
-wholesale. A handler never declares a lock on behalf of a command it dispatches;
+`Get` gives read only access, on a `Write` handle too: a resource is replaced
+with `Set`, never by assigning through what `Get` returns. A handler never
+declares a lock on behalf of a command it dispatches;
 `ResourceAccess.Uses` does that for it.
 
 `ResourceAccess.Exclusive()` declares that the handler never runs concurrently

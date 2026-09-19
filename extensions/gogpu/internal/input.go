@@ -9,15 +9,17 @@ import (
 // wireInput connects gogpu's EventSource to the input contract. Each callback
 // appends an input.Change to a main-thread-local batch that flushInput hands to
 // the input plugin once per frame. The callbacks and flushInput both run on the
-// gogpu main thread, so the batch needs no lock.
-func (p *plugin) wireInput() {
+// gogpu main thread, so the batch needs no lock. Run wires it, because that is
+// where the Kernel a callback reports through first exists.
+func (p *plugin) wireInput(k kernel.Executioner) {
 	es := p.gpu.EventSource()
 
-	es.OnKeyPress(func(k gpucontext.Key, m gpucontext.Modifiers) {
-		p.pending = append(p.pending, input.KeyChange(mapKey(k), mapMods(m), true))
+	es.OnKeyPress(func(key gpucontext.Key, m gpucontext.Modifiers) {
+		p.pending = append(p.pending, input.KeyChange(mapKey(key), mapMods(m), true))
+		p.pasteOnKeyPress(k, mapKey(key), mapMods(m))
 	})
-	es.OnKeyRelease(func(k gpucontext.Key, m gpucontext.Modifiers) {
-		p.pending = append(p.pending, input.KeyChange(mapKey(k), mapMods(m), false))
+	es.OnKeyRelease(func(key gpucontext.Key, m gpucontext.Modifiers) {
+		p.pending = append(p.pending, input.KeyChange(mapKey(key), mapMods(m), false))
 	})
 	es.OnTextInput(func(text string) {
 		for _, r := range text {
@@ -46,6 +48,7 @@ func (p *plugin) wireInput() {
 	es.OnScroll(func(dx, dy float64) {
 		p.pending = append(p.pending, input.ScrollChange(dx, dy))
 	})
+	p.wirePaste()
 }
 
 func pointerChanges(event gpucontext.PointerEvent) []input.Change {

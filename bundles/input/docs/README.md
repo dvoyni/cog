@@ -72,6 +72,7 @@ Drivers construct changes with:
 - `PointerChange(pos)`
 - `ScrollChange(dx, dy)`
 - `TextChange(rune)`
+- `ClipboardPasteChange(text)`
 
 `Change` intentionally has no exported fields; consumers do not inspect driver
 input batches.
@@ -154,8 +155,9 @@ What to expect at the edges:
 - `PointerEvent{Pos}` for pointer movement.
 - `ScrollEvent{Dx, Dy}` for scroll deltas.
 - `TextEvent{Rune}` for each text-input rune.
+- `ClipboardPasteEvent{Text}` for each clipboard paste.
 
-The root declares all four event types and the plugin publishes them.
+The root declares all five event types and the plugin publishes them.
 Neither subscribes to them.
 
 ## Event Subscribed
@@ -179,9 +181,11 @@ root; only the plugin folds changes into it and advances it. Subscribers should 
 - `Pointer() Pos`: current logical-window pointer position.
 - `Scroll() (dx, dy float64)`: accumulated scroll for this tick.
 - `Text() []rune`: text entered during this tick.
+- `ClipboardPaste() (string, bool)`: text pasted from the clipboard during this
+  tick, and whether anything was. Two pastes in one tick keep the later.
 
-Pressed state and pointer position are live. Edge, scroll, and text values are
-tick-scoped.
+Pressed state and pointer position are live. Edge, scroll, text and paste values
+are tick-scoped.
 
 ## Keys And Modifiers
 

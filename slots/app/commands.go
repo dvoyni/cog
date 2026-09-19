@@ -17,6 +17,19 @@ type QuitRequest struct{}
 // QuitResponse is the empty response from QuitCmd.
 type QuitResponse struct{}
 
+// ClipboardWriteCmd puts text on the system clipboard through the MainLoop.
+// Reading the clipboard is not a command: a browser hands pasted text only to
+// the paste itself, so pasted text arrives as input (input.ClipboardPasteEvent
+// and input.State.ClipboardPaste) wherever it can arrive at all.
+type ClipboardWriteCmd kernel.Command[ClipboardWriteRequest, ClipboardWriteResponse]
+
+// ClipboardWriteRequest carries the text to put on the clipboard.
+type ClipboardWriteRequest struct{ Text string }
+
+// ClipboardWriteResponse carries the failure when the platform refused the
+// write.
+type ClipboardWriteResponse struct{ Err error }
+
 // TimeCmd controls the engine's tick source: it pauses the update loop,
 // resumes it, steps it a named number of ticks, and reports which of those is
 // true. The app plugin handles it, because the tick source is part of the loop

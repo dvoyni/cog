@@ -22,6 +22,8 @@ type fakeMainLoop struct {
 func (d *fakeMainLoop) Attach(loop app.Loop) { d.loop.Store(&loop) }
 func (d *fakeMainLoop) Quit()                { d.quits.Add(1) }
 
+func (d *fakeMainLoop) ClipboardWrite(string) error { return nil }
+
 // attached is the Loop app handed over, or nil when it handed none.
 func (d *fakeMainLoop) attached() app.Loop {
 	if loop := d.loop.Load(); loop != nil {

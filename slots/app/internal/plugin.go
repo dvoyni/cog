@@ -42,6 +42,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	}
 	p.loop = newLoop(withDefaults(cfg))
 	registrar.HandleCommand[app.QuitCmd](p.quitCmdImpl)
+	registrar.HandleCommand[app.ClipboardWriteCmd](p.clipboardWriteCmdImpl)
 	registrar.HandleCommand[app.TimeCmd](p.timeCmdImpl)
 	registrar.ProvideAdapter[app.McpProvider](mcp.Provider(provider{}))
 	return nil

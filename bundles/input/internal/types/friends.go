@@ -31,6 +31,9 @@ func ChangePos(v *Change) Pos { return v.pos }
 // ChangeRune reads Change.r for input's internal/.
 func ChangeRune(v *Change) rune { return v.r }
 
+// ChangeText reads Change.text for input's internal/.
+func ChangeText(v *Change) string { return v.text }
+
 // StateAdvance calls State.advance for input's internal/.
 func StateAdvance(v *State) { v.advance() }
 

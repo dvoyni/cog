@@ -39,7 +39,7 @@ There is no `internal/types`: nothing app declares is aliased.
 - Implements: `kernel.PluginStarter`
 - Subscribed kernel events: none
 
-A plugin that dispatches `QuitCmd` or `TimeCmd` declares `app.Name` as a
+A plugin that dispatches `QuitCmd`, `ClipboardWriteCmd` or `TimeCmd` declares `app.Name` as a
 dependency, which is what guarantees the command its handler: gfx, canvas and ui
 do for their snapshot capabilities, and a game does for quitting. Subscribing to
 app's events needs no dependency, because an event nobody publishes is simply
@@ -65,6 +65,7 @@ plugins := []kernel.Plugin{
 type MainLoop interface {
     Attach(loop Loop)
     Quit()
+    ClipboardWrite(text string) error
 }
 
 type MainLoopPort kernel.RequiredPort[MainLoop]
@@ -82,8 +83,9 @@ The loop is split along what varies by platform. **The MainLoop** runs the platf
 main loop: it owns the window and the OS thread, measures real frame time, and
 reads input. **app** owns everything else: the fixed-step accumulator, render
 interpolation, the tick source and publishing every event. The two interfaces
-face opposite ways: app calls the `MainLoop`, only to hand over its `Loop` and to
-quit, and the `MainLoop` calls the `Loop`, every frame.
+face opposite ways: app calls the `MainLoop`, only to hand over its `Loop`, to
+quit and to write the clipboard, and the `MainLoop` calls the `Loop`, every
+frame.
 
 - **app hands over its `Loop` from `Start`** with `MainLoop.Attach`. Every `Start`
   runs before the Host's `Run`, so a MainLoop never enters its loop without one.
@@ -99,6 +101,8 @@ quit, and the `MainLoop` calls the `Loop`, every frame.
   it, and calls `WindowSize` before it resolves the frame's viewport.
 - **`QuitCmd` calls `MainLoop.Quit`**, from whatever goroutine dispatched it, so
   `Quit` must be safe on any goroutine.
+- **`ClipboardWriteCmd` calls `MainLoop.ClipboardWrite`**, from whatever
+  goroutine dispatched it, under the same rule.
 - **Composition fails without a MainLoop**, with `kernel.ErrMissingAdapter`
   naming `app.MainLoopPort`.
 
@@ -146,6 +150,20 @@ once the request is made, not once the loop has stopped. `QuitRequest` and
 ```go
 quit := access.Uses[app.QuitCmd]()   // in the handler's Lock
 ```
+
+### `ClipboardWriteCmd`
+
+```go
+type ClipboardWriteCmd kernel.Command[ClipboardWriteRequest, ClipboardWriteResponse]
+```
+
+Puts `ClipboardWriteRequest.Text` on the system clipboard through the MainLoop;
+`ClipboardWriteResponse.Err` carries the platform's refusal. The handler takes
+no locks. A browser accepts the write only shortly after a user gesture, so a
+game dispatches it from the tick that handled the key or click that asked for
+it. There is no read command: a browser hands the clipboard only to a paste, so
+pasted text arrives as input, `input.ClipboardPasteEvent` and
+`input.State.ClipboardPaste`.
 
 ### `TimeCmd`
 

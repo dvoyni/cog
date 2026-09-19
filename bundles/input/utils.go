@@ -17,6 +17,9 @@ func ScrollChange(dx, dy float64) Change { return types.ScrollChange(dx, dy) }
 // TextChange builds a text-input change for one rune.
 func TextChange(r rune) Change { return types.TextChange(r) }
 
+// ClipboardPasteChange builds a change for text pasted from the clipboard.
+func ClipboardPasteChange(text string) Change { return types.ClipboardPasteChange(text) }
+
 // ParseKey resolves a key name, or the "#<n>" printed form of an unnamed key.
 // It is exported because a name for a key is something config files and debug
 // tools want as much as an agent does.

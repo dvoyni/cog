@@ -14,6 +14,13 @@ func (p *plugin) quitCmdImpl() (kernel.Lock, kernel.Execute[app.QuitRequest, app
 	}
 }
 
+// clipboardWriteCmdImpl hands the text to the MainLoop's clipboard.
+func (p *plugin) clipboardWriteCmdImpl() (kernel.Lock, kernel.Execute[app.ClipboardWriteRequest, app.ClipboardWriteResponse]) {
+	return nil, func(_ kernel.Kernel, request app.ClipboardWriteRequest) app.ClipboardWriteResponse {
+		return app.ClipboardWriteResponse{Err: p.mainLoop.Get().ClipboardWrite(request.Text)}
+	}
+}
+
 // timeCmdImpl controls the tick source: it pauses update ticks, resumes them,
 // steps a named number of them, and reports which is true.
 //

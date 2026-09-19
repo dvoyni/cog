@@ -25,5 +25,6 @@ type testAppMainLoop kernel.Adapter[app.MainLoopPort]
 // idleMainLoop is a MainLoop with no loop of its own to attach to or stop.
 type idleMainLoop struct{}
 
-func (idleMainLoop) Attach(app.Loop) {}
-func (idleMainLoop) Quit()           {}
+func (idleMainLoop) Attach(app.Loop)             {}
+func (idleMainLoop) ClipboardWrite(string) error { return nil }
+func (idleMainLoop) Quit()                       {}

@@ -16,6 +16,8 @@ type State struct {
 	scrollDx     float64
 	scrollDy     float64
 	text         []rune
+	paste        string
+	pasted       bool
 
 	// pending accumulation since the last tick (written by Apply)
 	pendPressed  map[Key]struct{}
@@ -23,6 +25,8 @@ type State struct {
 	pendScrollDx float64
 	pendScrollDy float64
 	pendText     []rune
+	pendPaste    string
+	pendPasted   bool
 
 	pointer Pos
 }
@@ -59,6 +63,10 @@ func (s *State) apply(c Change) {
 		s.pendScrollDy += c.dy
 	case ChangeKindText:
 		s.pendText = append(s.pendText, c.r)
+	case ChangeKindClipboardPaste:
+		// Two pastes in one tick keep the later: a paste is the clipboard's
+		// content, and the later one is what the clipboard holds.
+		s.pendPaste, s.pendPasted = c.text, true
 	}
 }
 
@@ -69,11 +77,13 @@ func (s *State) advance() {
 	s.justReleased = s.pendReleased
 	s.scrollDx, s.scrollDy = s.pendScrollDx, s.pendScrollDy
 	s.text = s.pendText
+	s.paste, s.pasted = s.pendPaste, s.pendPasted
 
 	s.pendPressed = map[Key]struct{}{}
 	s.pendReleased = map[Key]struct{}{}
 	s.pendScrollDx, s.pendScrollDy = 0, 0
 	s.pendText = nil
+	s.pendPaste, s.pendPasted = "", false
 }
 
 // Pressed reports whether k is currently held down.
@@ -93,6 +103,10 @@ func (s *State) Scroll() (dx, dy float64) { return s.scrollDx, s.scrollDy }
 
 // Text returns the runes typed during the current tick.
 func (s *State) Text() []rune { return s.text }
+
+// ClipboardPaste returns the text pasted from the clipboard during the current
+// tick, and whether anything was.
+func (s *State) ClipboardPaste() (string, bool) { return s.paste, s.pasted }
 
 // held is the down-set of the picture of the seam every input capability
 // answers with (input.StateResponse), which pairs it with the live pointer:

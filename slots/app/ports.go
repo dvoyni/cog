@@ -21,6 +21,10 @@ type MainLoop interface {
 	// shuts the engine down. app calls it for QuitCmd, from whatever goroutine
 	// dispatched the command, so it must be safe to call from any goroutine.
 	Quit()
+	// ClipboardWrite puts text on the system clipboard. app calls it for
+	// ClipboardWriteCmd, from whatever goroutine dispatched the command, so it
+	// must be safe to call from any goroutine.
+	ClipboardWrite(text string) error
 }
 
 // MainLoopPort is the Port app requires exactly one Adapter for: the platform

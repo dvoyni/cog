@@ -15,3 +15,6 @@ type ScrollEvent struct{ Dx, Dy float64 }
 
 // TextEvent is published for each applied text change.
 type TextEvent struct{ Rune rune }
+
+// ClipboardPasteEvent is published for each applied clipboard paste.
+type ClipboardPasteEvent struct{ Text string }
