@@ -60,12 +60,12 @@ func ShrinkCommand() (kernel.Lock, kernel.Execute[ShrinkRequest, ShrinkResponse]
 			contacts = access.GetWrite[*Contacts]()
 			statics = access.GetWrite[*StaticIndex]()
 			bodies = access.GetWrite[*BodyIndex]()
-		}, func(_ kernel.Kernel, request ShrinkRequest) (ShrinkResponse, error) {
+		}, func(_ kernel.Kernel, request ShrinkRequest) ShrinkResponse {
 			var released ShrinkResponse
 			released.add(contacts.Get().shrink(request))
 			released.add(statics.Get().shrink(request))
 			released.add(bodies.Get().shrink(request))
-			return released, nil
+			return released
 		}
 }
 

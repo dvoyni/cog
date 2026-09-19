@@ -5,12 +5,12 @@
 // a lock scheduler.
 //
 // The Engine owns composition and lifetime. Everything a plugin does at runtime
-// goes through a Kernel: a small value created for each dispatch that carries
-// the engine, the invocation context, and the caller's held locks.
+// goes through a Kernel: a small value created for each dispatch, carrying the
+// engine it belongs to. A run ends when the Host returns, which Quit asks it to
+// do, or when a reported error terminates it.
 package kernel
 
 import (
-	"context"
 	"errors"
 	"iter"
 	"log"
@@ -24,17 +24,14 @@ import (
 // plugin registration and read afterward; its scheduler serializes resource
 // access; and ctx bounds its lifetime.
 type Engine struct {
-	config        map[PluginName]any
-	pluginNames   map[PluginName]struct{}
-	registry      *registry
-	scheduler     *scheduler
-	ctx           context.Context
-	cancel        context.CancelCauseFunc
-	plugins       []Plugin
-	host          PluginHost
-	schedulerDone chan error
-	errorMu       sync.Mutex
-	errorHandler  ErrorHandler
+	config       map[PluginName]any
+	pluginNames  map[PluginName]struct{}
+	registry     *registry
+	scheduler    *scheduler
+	plugins      []Plugin
+	host         PluginHost
+	errorMu      sync.Mutex
+	errorHandler ErrorHandler
 	// reported is the set of keys ReportErrorOnce has already spoken under. It
 	// lives here, under errorMu, so that the dedupe and the report it guards
 	// are taken under one lock: the conditions it gates are noticed from at
@@ -47,17 +44,21 @@ type Engine struct {
 	// compare. Entries are dropped only by ForgetReportedError and
 	// ForgetReportedErrors; a condition nobody ever fixes holds one entry for
 	// the engine's life, which is the point.
-	reported   map[any]struct{}
-	terminated bool
-	// failure carries the terminating cause for the dispatch path to read. It
-	// mirrors terminated, which only the locked paths read, because runTask
-	// consults it on every command and every subscriber run: taking errorMu
-	// there would put one shared mutex across every parallel handler in the
-	// engine. It is written under errorMu wherever terminated is set, so the
-	// two never disagree, and read with a single relaxed load.
-	failure   atomic.Pointer[error]
+	reported map[any]struct{}
+	// cause is the first non-nil verdict of the engine's life, and what Run
+	// returns. It is written under errorMu and read once Run's goroutines have
+	// joined. composition is the initialization failure, settled before any of
+	// them exist.
+	cause       error
+	composition error
+
 	ready     chan struct{}
 	readyOnce sync.Once
+	// quit is closed by Quit and by a terminating report. It is what a Run
+	// without a Host blocks on, and what tells a running engine to unwind.
+	quit     chan struct{}
+	quitOnce sync.Once
+	running  atomic.Bool
 }
 
 // New creates an unstarted engine with plugin configuration keyed by name.
@@ -68,6 +69,7 @@ func New(config map[PluginName]any) *Engine {
 		scheduler:    newScheduler(),
 		errorHandler: defaultErrorHandler,
 		ready:        make(chan struct{}),
+		quit:         make(chan struct{}),
 	}
 	e.registry = &registry{
 		resources:     map[reflect.Type]*resource{},
@@ -90,22 +92,10 @@ func (e *Engine) Handler(errorHandler ErrorHandler) *Engine {
 	return e
 }
 
-// Ready is closed after Run has started the scheduler and attempted plugin
-// startup. It says the attempt is over, not that it succeeded: a composition
-// that failed closes Ready too, so a caller that waits on it asks Err what it
-// woke up to.
+// Ready is closed after Run has attempted plugin startup. It says the attempt
+// is over, not that it succeeded: a composition that failed closes Ready too,
+// and what it failed with is what Run returns.
 func (e *Engine) Ready() <-chan struct{} { return e.ready }
-
-// Err reports the cause that terminated the engine, or nil while it is live,
-// the way context.Err does. A failed composition and a plugin panic mid-run
-// both answer here, and it is the same cause a refused dispatch returns inside
-// ErrEngineTerminated. It takes no lock and is safe from any goroutine.
-func (e *Engine) Err() error {
-	if cause := e.failure.Load(); cause != nil {
-		return *cause
-	}
-	return nil
-}
 
 // WithPlugins validates, orders, and registers plugins before Run starts them.
 func (e *Engine) WithPlugins(plugins ...Plugin) *Engine {
@@ -155,8 +145,8 @@ func (e *Engine) WithPlugins(plugins ...Plugin) *Engine {
 			return e
 		}
 	}
-	if errs := e.registry.finalize(closure); len(errs) > 0 {
-		e.failComposition(errors.Join(errs...))
+	if err := e.registry.finalize(closure); err != nil {
+		e.failComposition(err)
 		return e
 	}
 	e.plugins = accepted
@@ -189,23 +179,13 @@ func (e *Engine) dependencyClosure(plugins []Plugin) map[PluginName]map[PluginNa
 	return closure
 }
 
+// failComposition records the initialization failure Run answers with. It runs
+// during WithPlugins, which is single-threaded, and reports it too, so that the
+// handler says it the way it says everything else.
 func (e *Engine) failComposition(err error) {
+	e.composition = err
 	e.reportError(err)
-	e.errorMu.Lock()
-	e.terminated = true
-	e.recordFailureLocked(err)
-	e.errorMu.Unlock()
 	e.markReady()
-}
-
-// recordFailureLocked publishes the terminating cause to the dispatch path,
-// keeping the first one: the error that terminated the engine is the one worth
-// reporting, and whatever it knocked over afterwards is not.
-func (e *Engine) recordFailureLocked(err error) {
-	if err == nil || e.failure.Load() != nil {
-		return
-	}
-	e.failure.Store(&err)
 }
 
 func (e *Engine) markReady() { e.readyOnce.Do(func() { close(e.ready) }) }
@@ -277,24 +257,18 @@ func orderPlugins(plugins []Plugin) ([]Plugin, []PluginName) {
 // successfully started plugins in reverse order. Without a Host it blocks until
 // ctx is canceled.
 //
-// An engine whose composition failed never starts: Run returns at once, and Err
-// carries the cause for the caller that waited on Ready.
-func (e *Engine) Run(ctx context.Context) *Engine {
-	if e.terminated || e.ctx != nil {
-		return e
+// It answers how the run ended: nil on an ordinary quit, the initialization
+// failure of a composition that never started, or the first error the handler
+// terminated on.
+func (e *Engine) Run() error {
+	if e.composition != nil {
+		return e.composition
 	}
-	e.ctx, e.cancel = context.WithCancelCause(ctx)
-	e.schedulerDone = make(chan error, 1)
-	go func() {
-		err := e.scheduler.run(e.ctx)
-		if err != nil && !isCancellation(err) {
-			e.reportError(err)
-		}
-		e.schedulerDone <- err
-		e.cancel(nil)
-	}()
+	if !e.running.CompareAndSwap(false, true) {
+		return e.terminatingCause()
+	}
 
-	runtime := e.executioner(e.ctx)
+	runtime := e.executioner()
 	// started is the prefix of the plugin list that Run is responsible for
 	// stopping: every plugin up to, but not including, the one whose Start failed.
 	started := e.plugins
@@ -308,19 +282,33 @@ func (e *Engine) Run(ctx context.Context) *Engine {
 		}
 	}
 	e.markReady()
-	if len(started) == len(e.plugins) && e.ctx.Err() == nil {
+	if len(started) == len(e.plugins) && !e.quitting() {
 		if e.host != nil {
-			if err := callPluginBoundary(e.host.Name(), "Run", func() error {
+			// The Host owns a blocking loop, so something has to ask it to leave
+			// one when the engine is told to stop or a report terminates the run.
+			// It happens here rather than at the point of the verdict, so that
+			// plugin code is never entered while the report lock is held.
+			returned := make(chan struct{})
+			go func() {
+				select {
+				case <-e.quit:
+					e.host.Quit()
+				case <-returned:
+				}
+			}()
+			err := callPluginBoundary(e.host.Name(), "Run", func() error {
 				return e.host.Run(runtime)
-			}); err != nil {
+			})
+			close(returned)
+			if err != nil {
 				e.reportError(err)
 			}
 		} else {
-			<-e.ctx.Done()
+			<-e.quit
 		}
 	}
-	e.cancel(nil)
-	shutdown := e.executioner(context.WithoutCancel(ctx))
+	e.markQuit()
+	shutdown := e.executioner()
 	stoppers := make([]PluginStopper, 0, len(started))
 	for _, stopper := range pluginsOf[PluginStopper](started) {
 		stoppers = append(stoppers, stopper)
@@ -335,26 +323,50 @@ func (e *Engine) Run(ctx context.Context) *Engine {
 		}
 	}
 	if err := errors.Join(shutdownErrs...); err != nil {
-		e.observeShutdownError(err)
+		e.reportError(err)
 	}
-	<-e.schedulerDone
-	return e
+	e.scheduler.shutdown()
+	return e.terminatingCause()
+}
+
+// terminatingCause reports the first non-nil verdict, or nil on an ordinary
+// quit. It is the whole of what an engine remembers about how it ended.
+func (e *Engine) terminatingCause() error {
+	e.errorMu.Lock()
+	defer e.errorMu.Unlock()
+	return e.cause
+}
+
+// Quit asks a running engine to stop, with no failure. A Run without a Host
+// returns once every started plugin has stopped; a Run with one asks the Host
+// to leave its loop first, because the Host owns that loop and only it can
+// leave it. It is safe from any goroutine and safe to call twice.
+func (e *Engine) Quit() { e.markQuit() }
+
+// markQuit closes the quit channel exactly once.
+func (e *Engine) markQuit() { e.quitOnce.Do(func() { close(e.quit) }) }
+
+// quitting reports whether the engine has been asked to stop.
+func (e *Engine) quitting() bool {
+	select {
+	case <-e.quit:
+		return true
+	default:
+		return false
+	}
 }
 
 // Executioner returns a root Executioner for dispatching from outside a plugin,
 // such as from a composition root or a test. It holds no locks, so commands
-// acquire their own declared set from the scheduler. On a terminated engine
-// everything it dispatches is refused with ErrEngineTerminated, so a caller that
-// went ahead after Ready closed reads the cause rather than a plugin's panic.
-func (e *Engine) Executioner() Executioner { return e.executioner(e.ctx) }
+// acquire their own declared set from the scheduler. Nothing it dispatches is
+// refused for being late: work runs until the scheduler stops, and how the run
+// ended is what Run answers with.
+func (e *Engine) Executioner() Executioner { return e.executioner() }
 
-// executioner builds a root Executioner: bound to ctx, holding no locks, so
-// commands it dispatches acquire their own from the scheduler.
-func (e *Engine) executioner(ctx context.Context) Executioner {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return Executioner{Kernel{engine: e, ctx: ctx, scope: ctx, bounded: ctx == e.ctx}}
+// executioner builds a root Executioner: it holds no locks, so commands it
+// dispatches acquire their own from the scheduler.
+func (e *Engine) executioner() Executioner {
+	return Executioner{Kernel{engine: e}}
 }
 
 // runTask executes one scheduled unit of work. It is the one funnel every
@@ -367,69 +379,56 @@ func (e *Engine) executioner(ctx context.Context) Executioner {
 // That path is for a healthy engine that has not started yet - registration is
 // single-threaded - which is why the refusal keys on termination and not on the
 // absent scheduler.
-func (e *Engine) runTask(t task, ctx context.Context) error {
-	if refused := e.refusal(); refused != nil {
-		return refused
+func (e *Engine) runTask(t task, invocation any) error {
+	// An empty lock set can never conflict with anything, so the coordinator has
+	// no decision to take: a declared dispatch was granted its callee's locks at
+	// composition, and a command declaring none asks for none. Going to the
+	// coordinator anyway costs a channel round-trip to be told what finalisation
+	// already settled - 1113 ns against 0.49 ns for the call itself, which is why
+	// the ECS wrote Uses off. This changes no lock decision; it declines to pay
+	// for one already taken.
+	read, write := t.locks()
+	if len(read) == 0 && len(write) == 0 {
+		if e.scheduler.stopped() {
+			return ErrSchedulerStopped{}
+		}
+		return t.run(invocation)
 	}
-	if e.ctx == nil {
-		return t.run(ctx)
-	}
-	return e.scheduler.execute(t, ctx)
+	return e.scheduler.execute(t, invocation, read, write)
 }
 
-// refusal is what a dispatch on a terminated engine gets, or nil while the
-// engine is live. One relaxed load and no lock: it sits on the dispatch path.
-func (e *Engine) refusal() error {
-	if cause := e.failure.Load(); cause != nil {
-		return ErrEngineTerminated{Cause: *cause}
-	}
-	return nil
-}
-
-func (e *Engine) observeShutdownError(err error) {
-	e.errorMu.Lock()
-	defer e.errorMu.Unlock()
-	e.errorHandler(err)
-}
-
-// reportError sends err to the centralized error handler and reports whether it
-// requested engine termination. Handler calls are serialized; a terminating
-// error becomes the engine cancellation cause.
-func (e *Engine) reportError(err error) bool {
+// reportError sends err to the centralized error handler. Handler calls are
+// serialized, and the first error the handler terminates on is the one Run
+// answers with.
+func (e *Engine) reportError(err error) {
 	if err == nil {
-		return e.terminated
-	}
-	if e.ctx != nil && e.ctx.Err() != nil && isCancellation(err) {
-		return true
+		return
 	}
 	e.errorMu.Lock()
 	defer e.errorMu.Unlock()
-	return e.reportLocked(err)
+	e.reportLocked(err)
 }
 
 // reportLocked is one report with errorMu already held, so that a caller which
 // has more to do under that lock - deduping a key, firing the rest of a burst -
 // does it without releasing and retaking it.
-func (e *Engine) reportLocked(err error) bool {
-	if e.terminated || (e.ctx != nil && e.ctx.Err() != nil) {
-		return true
+//
+// Every report reaches the handler, including one arriving after the engine is
+// already going down: silence there would hide whatever the first failure
+// knocked over. Only the first non-nil verdict becomes the cause.
+func (e *Engine) reportLocked(err error) {
+	verdict := e.errorHandler(err)
+	if verdict == nil {
+		return
 	}
-	var panicErr ErrPluginPanic
-	handlerTerminate := e.errorHandler(err)
-	terminate := errors.As(err, &panicErr) || handlerTerminate
-	if terminate {
-		e.terminated = true
-		e.recordFailureLocked(err)
-		if e.cancel != nil {
-			e.cancel(err)
-		}
-		return true
+	if e.cause == nil {
+		e.cause = verdict
 	}
-	return false
+	e.markQuit()
 }
 
 // reportErrorOnce fires a burst of reports the first time key is seen and drops
-// it every time after, reporting whether engine termination was requested.
+// it every time after.
 //
 // The burst is claimed and fired under one hold of errorMu, so two threads
 // noticing the same condition in the same instant report it once rather than
@@ -437,30 +436,24 @@ func (e *Engine) reportLocked(err error) bool {
 //
 // An empty burst claims nothing: a load that gathered no faults must leave the
 // key free for the one that does.
-func (e *Engine) reportErrorOnce(key any, errs []error) bool {
+func (e *Engine) reportErrorOnce(key any, errs []error) {
 	if len(errs) == 0 {
-		return e.terminated
+		return
 	}
 	e.errorMu.Lock()
 	defer e.errorMu.Unlock()
-	if e.terminated || (e.ctx != nil && e.ctx.Err() != nil) {
-		return true
-	}
 	if _, done := e.reported[key]; done {
-		return false
+		return
 	}
 	if e.reported == nil {
 		e.reported = map[any]struct{}{}
 	}
 	e.reported[key] = struct{}{}
-	terminate := false
 	for _, err := range errs {
-		if err == nil {
-			continue
+		if err != nil {
+			e.reportLocked(err)
 		}
-		terminate = e.reportLocked(err) || terminate
 	}
-	return terminate
 }
 
 // forgetReportedError drops one key, so the next report under it speaks again.
@@ -483,6 +476,19 @@ func (e *Engine) forgetReportedErrors(match func(any) bool) {
 	}
 }
 
+// shutdownAside drops ErrSchedulerStopped and passes everything else through.
+// A dispatch that arrives after the coordinator has gone is the engine ending,
+// not a failure in the thing that dispatched: Quit is an ordinary end, and a
+// report would turn every in-flight call at shutdown into a fault the handler
+// has to recognise and forgive.
+func shutdownAside(err error) error {
+	var stopped ErrSchedulerStopped
+	if errors.As(err, &stopped) {
+		return nil
+	}
+	return err
+}
+
 func callPluginBoundary(plugin PluginName, boundary string, call func() error) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -492,11 +498,19 @@ func callPluginBoundary(plugin PluginName, boundary string, call func() error) (
 	return call()
 }
 
-func isCancellation(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-}
-
-func defaultErrorHandler(err error) bool {
+// defaultErrorHandler is the engine's opinion of last resort, and it is only an
+// opinion: a game that installs its own replaces it whole.
+//
+// It says every error out loud and terminates on a plugin panic alone. A panic
+// means a handler stopped in the middle of what it was doing, so whatever it
+// was mutating is in a state nobody described. Anything else - a missing
+// texture, a model that would not parse - is a thing a game is expected to
+// survive, and terminating on it would make the frame rate a liability.
+func defaultErrorHandler(err error) error {
 	log.Printf("kernel: %v", err)
-	return true
+	var panicErr ErrPluginPanic
+	if errors.As(err, &panicErr) {
+		return err
+	}
+	return nil
 }

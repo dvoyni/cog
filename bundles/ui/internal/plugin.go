@@ -72,9 +72,8 @@ func (p *plugin) Stop(kernel.Executioner) error {
 // armSnapshotOnUpdate admits a waiting snapshot to the tick that has just
 // begun. It declares no resources: the snapshot slot carries its own lock.
 func (p *plugin) armSnapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	return nil, func(kernel.Kernel, app.UpdateEvent) error {
+	return nil, func(kernel.Kernel, app.UpdateEvent) {
 		p.snapshots.beginTick()
-		return nil
 	}
 }
 
@@ -93,9 +92,8 @@ func (p *plugin) snapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent
 	var processorResource kernel.Read[*processor]
 	return func(access kernel.ResourceAccess) {
 			processorResource = access.GetRead[*processor]()
-		}, func(_ kernel.Kernel, event app.UpdateEvent) error {
+		}, func(_ kernel.Kernel, event app.UpdateEvent) {
 			p.snapshots.record(processorResource.Get(), event.Tick)
-			return nil
 		}
 }
 
@@ -120,7 +118,7 @@ func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			queueResource = access.GetWrite[*canvas.OpQueue]()
 			lookupResource = access.GetWrite[*canvas.Lookup]()
 			filesystem = access.GetRead[storage.FileSystem]()
-		}, func(k kernel.Kernel, _ app.UpdateEvent) error {
+		}, func(k kernel.Kernel, _ app.UpdateEvent) {
 			frame := frameResource.Get()
 			interactions := interactionsResource.Get()
 			processor := processorResource.Get()
@@ -155,7 +153,6 @@ func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			}, queue)
 
 			types.PublishInteractions(&processor.Processor, interactions)
-			return nil
 		}
 }
 

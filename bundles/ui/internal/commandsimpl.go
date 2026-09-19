@@ -21,11 +21,11 @@ func (p *plugin) armLayoutCmdImpl() (kernel.Lock, kernel.Execute[ui.ArmLayoutReq
 	var viewport kernel.Read[*gfx.Viewport]
 	return func(access kernel.ResourceAccess) {
 			viewport = access.GetRead[*gfx.Viewport]()
-		}, func(_ kernel.Kernel, request ui.ArmLayoutRequest) (ui.ArmLayoutResponse, error) {
+		}, func(_ kernel.Kernel, request ui.ArmLayoutRequest) ui.ArmLayoutResponse {
 			live, err := p.snapshots.arm(request)
 			if err != nil {
-				return ui.ArmLayoutResponse{}, err
+				return ui.ArmLayoutResponse{Err: err}
 			}
-			return ui.ArmLayoutResponse{Done: live.done, Viewport: *viewport.Get()}, nil
+			return ui.ArmLayoutResponse{Done: live.done, Viewport: *viewport.Get()}
 		}
 }

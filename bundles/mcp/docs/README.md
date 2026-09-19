@@ -226,7 +226,7 @@ In `Register` the broker declares `CollectAdapters[mcp.ProviderPort]()` and
 provides its own as `mcp.McpProvider`. At `Start` it reads the bound set, which the engine completed
 during composition, calls `Capabilities()` on each exactly once, validates and renders every capability as a tool, retains
 the `Start` executioner, listens, and starts one goroutine waiting on
-`k.Context().Done()`.
+`k.Quitting()`.
 
 The transport position is one decision rather than four knobs:
 

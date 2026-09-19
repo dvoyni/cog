@@ -37,9 +37,7 @@ func TestTheSweptSensorAgainstPolygonsSitsOnTheEnginesAllocationLine(t *testing.
 		}
 		mallocs := allocationsDuring(func() {
 			for range ticks {
-				if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
-					t.Fatalf("publishing the update: %v", err)
-				}
+				h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait()
 			}
 		})
 		return float64(mallocs) / ticks, touching, swept
@@ -142,9 +140,7 @@ func BenchmarkTheSweptSensorAgainstPolygons(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
-					b.Fatalf("publishing the update: %v", err)
-				}
+				h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait()
 			}
 		})
 	}

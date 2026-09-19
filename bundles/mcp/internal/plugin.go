@@ -171,7 +171,7 @@ func (p *plugin) Start(k kernel.Executioner) error {
 
 	p.stop = make(chan struct{})
 	p.drained = make(chan struct{})
-	go p.watch(k.Context())
+	go p.watch(k.Quitting())
 
 	// One line at startup turns "what was the URL" into copy-paste.
 	log.Printf("mcpserver: claude mcp add --transport http %s %s", serverName, p.endpoint())
@@ -199,19 +199,20 @@ func (p *plugin) Stop(kernel.Executioner) error {
 	return nil
 }
 
-// watch closes the server on engine-context cancellation rather than in Stop.
-// Three facts decide this, and they are the part of the design most likely to
-// be got wrong by someone reimplementing it. Run cancels the engine context
-// before the Stop loop, after which every dispatch fails, so a broker waiting
-// for Stop would be serving an engine that can no longer execute anything. Stop
-// order is reverse start order, so a dependency-less broker listed first stops
-// last. And declaring a dependency on app, or on anything, to force the
-// ordering would buy nothing: a dependency orders Stop, and every Stop runs
-// after that cancellation.
-func (p *plugin) watch(engine context.Context) {
+// watch closes the server as soon as the engine is asked to stop, rather than
+// in Stop. Stop order is reverse start order, so a dependency-less broker
+// listed first stops last — and declaring a dependency on app, or on anything,
+// to force the ordering would buy nothing, because a dependency orders Stop and
+// the broker would still be accepting requests while the plugins those requests
+// reach were tearing down. Quitting closes before any Stop runs, which is
+// exactly the edge this needs.
+//
+// Dispatch still works after that point: the scheduler stops last of all, so a
+// handler already running drains against a live engine rather than a dead one.
+func (p *plugin) watch(quitting <-chan struct{}) {
 	defer close(p.drained)
 	select {
-	case <-engine.Done():
+	case <-quitting:
 	case <-p.stop:
 	}
 	p.close()

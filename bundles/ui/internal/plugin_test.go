@@ -1,7 +1,6 @@
 package internal
 
 import (
-	stdcontext "context"
 	"reflect"
 	"slices"
 	"testing"
@@ -66,7 +65,7 @@ func (consumer *pluginTestConsumer) build() (kernel.Lock, kernel.Observe[app.Upd
 	var frameResource kernel.Write[*ui.Frame]
 	return func(access kernel.ResourceAccess) {
 			frameResource = access.GetWrite[*ui.Frame]()
-		}, func(_ kernel.Kernel, _ app.UpdateEvent) error {
+		}, func(_ kernel.Kernel, _ app.UpdateEvent) {
 			frame := frameResource.Get()
 			if consumer.tick == 0 {
 				frame.Add(10, ui.NewElement().
@@ -77,20 +76,16 @@ func (consumer *pluginTestConsumer) build() (kernel.Lock, kernel.Observe[app.Upd
 					Visual(consumer.visual, nil))
 			}
 			consumer.tick++
-			return nil
 		}
 }
 
 func TestPluginMapsWindowPointerToLogicalViewport(t *testing.T) {
-	runContext, cancel := stdcontext.WithCancel(stdcontext.Background())
-	defer cancel()
-
 	consumer := &pluginTestConsumer{visual: &pluginTestVisual{}, left: 40, top: 30}
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{},
-	}).Handler(func(err error) bool {
+	}).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(
 		storageplugin.New(), permanentAdapter{},
 		appplugin.New(), mainLoopAdapter{},
@@ -101,7 +96,8 @@ func TestPluginMapsWindowPointerToLogicalViewport(t *testing.T) {
 		New(),
 		consumer,
 	)
-	go engine.Run(runContext)
+	go engine.Run()
+	t.Cleanup(engine.Quit)
 	<-engine.Ready()
 	k := engine.Executioner()
 
@@ -130,7 +126,7 @@ func (consumer *pluginTestConsumer) observe() (kernel.Lock, kernel.Observe[app.U
 	return func(access kernel.ResourceAccess) {
 			frameResource = access.GetRead[*ui.Frame]()
 			interactionsResource = access.GetRead[*ui.Interactions]()
-		}, func(_ kernel.Kernel, _ app.UpdateEvent) error {
+		}, func(_ kernel.Kernel, _ app.UpdateEvent) {
 			frame := frameResource.Get()
 			interactions := interactionsResource.Get()
 			values := make([]ui.Interaction, 0)
@@ -139,21 +135,17 @@ func (consumer *pluginTestConsumer) observe() (kernel.Lock, kernel.Observe[app.U
 			}
 			consumer.observed = append(consumer.observed, values)
 			consumer.frameLengths = append(consumer.frameLengths, len(types.FrameRoots(frame)))
-			return nil
 		}
 }
 
 func TestPluginProcessesAndClearsEveryUpdate(t *testing.T) {
-	runContext, cancel := stdcontext.WithCancel(stdcontext.Background())
-	defer cancel()
-
 	visual := &pluginTestVisual{}
 	consumer := &pluginTestConsumer{visual: visual}
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{},
-	}).Handler(func(err error) bool {
+	}).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(
 		storageplugin.New(), permanentAdapter{},
 		appplugin.New(), mainLoopAdapter{},
@@ -164,7 +156,8 @@ func TestPluginProcessesAndClearsEveryUpdate(t *testing.T) {
 		New(),
 		consumer,
 	)
-	go engine.Run(runContext)
+	go engine.Run()
+	t.Cleanup(engine.Quit)
 	<-engine.Ready()
 	k := engine.Executioner()
 
@@ -218,17 +211,15 @@ func TestPluginProcessesAndClearsEveryUpdate(t *testing.T) {
 // tick, and one tick's down and up on one target is what ui turns into
 // InteractionClick — so an agent needs no compound click step.
 func TestPluginSeesAScriptedClickAsAClick(t *testing.T) {
-	runContext, cancel := stdcontext.WithCancel(stdcontext.Background())
-	defer cancel()
-
 	consumer := &pluginTestConsumer{visual: &pluginTestVisual{}}
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{},
-	}).Handler(func(err error) bool {
+	}).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, inputplugin.New(), gfxplugin.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
-	go engine.Run(runContext)
+	go engine.Run()
+	t.Cleanup(engine.Quit)
 	<-engine.Ready()
 	k := engine.Executioner()
 
@@ -257,17 +248,15 @@ func TestPluginSeesAScriptedClickAsAClick(t *testing.T) {
 // between them is a drag: the capture follows the pointer off the target, so
 // the release still reports Up and reports no click.
 func TestPluginSeesAScriptedDragAsADrag(t *testing.T) {
-	runContext, cancel := stdcontext.WithCancel(stdcontext.Background())
-	defer cancel()
-
 	consumer := &pluginTestConsumer{visual: &pluginTestVisual{}}
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{},
-	}).Handler(func(err error) bool {
+	}).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, inputplugin.New(), gfxplugin.New(), backendAdapter{&detachedBackend{}}, canvasplugin.New(), New(), consumer)
-	go engine.Run(runContext)
+	go engine.Run()
+	t.Cleanup(engine.Quit)
 	<-engine.Ready()
 	k := engine.Executioner()
 
@@ -321,10 +310,7 @@ func TestPluginSeesAScriptedDragAsADrag(t *testing.T) {
 // waits on the contract rather than on a sleep.
 func scriptedButtonHeld(t *testing.T, k kernel.Executioner) bool {
 	t.Helper()
-	seam, err := k.ExecuteCommand[input.StateCmd](input.StateRequest{})
-	if err != nil {
-		t.Fatalf("state: %v", err)
-	}
+	seam := k.ExecuteCommand[input.StateCmd](input.StateRequest{})
 	return slices.Contains(seam.Down, input.KeyMouseLeft)
 }
 

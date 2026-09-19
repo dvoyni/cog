@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -25,9 +24,8 @@ func (probePlugin) Dependencies() []kernel.PluginName { return []kernel.PluginNa
 func (p probePlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[probeCmd](probeCmdImpl)
 	registrar.Subscribe[testKeyEventHandler](func() (kernel.Lock, kernel.Observe[input.KeyEvent]) {
-		return nil, func(_ kernel.Kernel, event input.KeyEvent) error {
+		return nil, func(_ kernel.Kernel, event input.KeyEvent) {
 			p.keyc <- event
-			return nil
 		}
 	})
 	return nil
@@ -37,24 +35,23 @@ func probeCmdImpl() (kernel.Lock, kernel.Execute[probeRequest, probeResponse]) {
 	var state kernel.Read[*input.State]
 	return func(access kernel.ResourceAccess) {
 			state = access.GetRead[*input.State]()
-		}, func(kernel.Kernel, probeRequest) (probeResponse, error) {
+		}, func(kernel.Kernel, probeRequest) probeResponse {
 			s := state.Get()
-			return probeResponse{Pressed: s.Pressed(input.KeyA), Just: s.JustPressed(input.KeyA)}, nil
+			return probeResponse{Pressed: s.Pressed(input.KeyA), Just: s.JustPressed(input.KeyA)}
 		}
 }
 
 // End-to-end: Apply folds a key press into State and publishes KeyEvent; an
 // app.UpdateEvent rolls the edge so JustPressed shows up when polled.
 func TestInputPluginApplyPollAndEvent(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	keyc := make(chan input.KeyEvent, 8)
-	engine := kernel.New(nil).Handler(func(err error) bool {
+	engine := kernel.New(nil).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(New(), probePlugin{keyc: keyc})
-	go engine.Run(ctx)
+	go engine.Run()
+	t.Cleanup(engine.Quit)
 	<-engine.Ready()
 	k := engine.Executioner()
 	// Apply a key-down batch.
@@ -84,9 +81,6 @@ func TestInputPluginApplyPollAndEvent(t *testing.T) {
 
 func probe(t *testing.T, k kernel.Executioner) probeResponse {
 	t.Helper()
-	response, err := k.ExecuteCommand[probeCmd](probeRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	response := k.ExecuteCommand[probeCmd](probeRequest{})
 	return response
 }

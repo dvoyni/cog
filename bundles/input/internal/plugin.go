@@ -41,9 +41,8 @@ func advanceOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var state kernel.Write[*input.State]
 	return func(access kernel.ResourceAccess) {
 			state = access.GetWrite[*input.State]()
-		}, func(kernel.Kernel, app.UpdateEvent) error {
+		}, func(kernel.Kernel, app.UpdateEvent) {
 			types.StateAdvance(state.Get())
-			return nil
 		}
 }
 

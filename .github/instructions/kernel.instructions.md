@@ -28,8 +28,8 @@ func loadCmdImpl() (kernel.Lock, kernel.Execute[LoadRequest, LoadResponse]) {
 	return func(access kernel.ResourceAccess) {
 			store = access.GetRead[DataStore]()
 			cache = access.GetWrite[*Cache]()
-		}, func(k kernel.Kernel, request LoadRequest) (LoadResponse, error) {
-			return LoadResponse{Data: store.Get().Load(request.Name)}, nil
+		}, func(k kernel.Kernel, request LoadRequest) LoadResponse {
+			return LoadResponse{Data: store.Get().Load(request.Name)}
 		}
 }
 ```
@@ -93,9 +93,8 @@ read-only lock sets run concurrently. The one exception is a dispatcher bound by
 // WRONG: counter is shared across concurrent invocations.
 func handler() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	counter := 0
-	return nil, func(k kernel.Kernel, e app.UpdateEvent) error {
+	return nil, func(k kernel.Kernel, e app.UpdateEvent) {
 		counter++
-		return nil
 	}
 }
 ```
@@ -186,9 +185,8 @@ func (p *plugin) subscribe() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var state kernel.Write[*State]
 	return func(access kernel.ResourceAccess) {
 			state = access.GetWrite[*State]()
-		}, func(k kernel.Kernel, _ app.UpdateEvent) error {
+		}, func(k kernel.Kernel, _ app.UpdateEvent) {
 			p.state = state.Get()   // escapes the lock scope
-			return nil
 		}
 }
 ```
@@ -224,9 +222,14 @@ defer func() { state.kernel = kernel.Kernel{} }()
 
 ## The Kernel Value
 
-`kernel.Kernel` is a per-dispatch value. Pass it by value; never take its
-address, store it, or capture it in anything that outlives the handler. The zero
-value panics, which is what makes a stale field fail loudly.
+`kernel.Kernel` is a per-dispatch value carrying the engine and nothing else.
+Pass it by value; never take its address, store it, or capture it in anything
+that outlives the handler.
+
+There is no context on it. cog is a standalone application: nothing cancels it
+from outside, and a deadline that describes the work belongs in the request that
+asks for the work. A deadline that describes the caller's patience stays with
+the caller and never enters the engine.
 
 Where a callback from a foreign library needs it, capture it in a closure created
 inside the lifecycle method that received it, rather than storing it on the
@@ -239,20 +242,56 @@ func (p *plugin) Run(k kernel.Executioner) error {
 }
 ```
 
+A plugin that owns something outside the engine — a listening socket, a worker
+it started in `Start` — stops accepting on `kernel.Executioner.Quitting`, a
+channel closed when the engine is asked to stop. It says nothing about dispatch:
+work in flight finishes, and the scheduler stops last of all, so a plugin
+draining in `Stop` is still talking to a live engine.
+
+## Errors
+
+**There is one way to report a failure: `Kernel.ReportError`, or
+`ReportErrorOnce` for a condition that is true every frame.** A handler body
+returns a response, or nothing. It has no error to return, which is what stops
+it saying the same thing twice.
+
+Where the failure goes depends on who can act on it:
+
+- **The caller can act on it** — a mount id that is reserved, an arm that found
+  one already in flight, a step whose wait expired. It is part of the response:
+  a field, a status, a `Maybe`. Name the field `Err` when it is an error.
+- **Nobody can act on it** — a texture that would not decode, a backend that
+  never came up. Report it. What happens next is the error handler's decision,
+  and `ReportError` answers nothing.
+
+`ErrorHandler` is `func(error) error`: nil keeps the engine running, and any
+error terminates it and becomes what `Run` returns. The engine has no opinion of
+its own, including about a plugin panic — that opinion lives in the default
+handler, which logs everything and terminates on `ErrPluginPanic` alone.
+
+**The engine recovers only the goroutines it started.** A plugin that spawns its
+own owns their panics and their errors: recover and report through the
+`Executioner` its lifecycle method received, or hand the error back over a
+channel to code that holds a `Kernel`. Code with no handle at all — a
+render-thread object inside a foreign library — stashes its error for whoever
+does hold one, which is what gogpu's backend does.
+
 ## Commands And Dispatch
 
 A handler dispatches a command only through a dispatcher it declared in its
 `Lock`:
 
 ```go
-var setDesiredViewport func(kernel.Kernel, gfx.SetDesiredViewportRequest) (gfx.SetDesiredViewportResponse, error)
+var setDesiredViewport func(kernel.Kernel, gfx.SetDesiredViewportRequest) gfx.SetDesiredViewportResponse
 return func(access kernel.ResourceAccess) {
 		setDesiredViewport = access.Uses[gfx.SetDesiredViewportCmd]()
-	}, func(k kernel.Kernel, _ app.WindowSizeChangeEvent) error {
-		_, err := setDesiredViewport(k, gfx.SetDesiredViewportRequest{Width: 100, Height: 100})
-		return err
+	}, func(k kernel.Kernel, _ app.WindowSizeChangeEvent) {
+		setDesiredViewport(k, gfx.SetDesiredViewportRequest{Width: 100, Height: 100})
 	}
 ```
+
+A declared dispatch costs what the dispatch it wraps costs: the fold is static,
+so it asks the scheduler for nothing and the kernel runs it directly.
 
 Composition folds that command's lock closure into the handler's own set, so the
 handler never names the callee's resources and the dispatch reuses locks it
@@ -269,9 +308,9 @@ locked resource, and its error goes to the central error handler.
 lifecycle methods and host callbacks get an `Executioner`; a handler receives a
 plain `Kernel` and cannot obtain one.
 
-Return system failures through `error`. Put expected outcomes in the response.
-Do not report an error and also return it; it is reported once at an event,
-lifecycle, or host boundary.
+Put expected outcomes in the response and report the rest, per § Errors above.
+`Executioner.ExecuteCommand` answers with the response alone: a dispatch the
+kernel could not perform is reported, and the caller receives the zero response.
 
 ## Events
 
@@ -281,7 +320,11 @@ when zero or more independent plugins may react.
 Publishing is fire-and-forget and outlives the invocation that published it, so
 publishing from inside a command handler is safe. Waiting on that publication
 from inside the same handler is not, if any subscriber needs a lock the handler
-holds.
+holds. `Publication.Wait` answers nothing.
+
+A subscriber that reports has still completed, and its dependents run. Only a
+subscriber that panicked blocks them. Where one subscriber's failure means the
+next must not run, say so in state the next one reads.
 
 Use `First`, `Last`, `Before`, and `After` only for real completion
 dependencies, never to express a preference. Ready subscribers run concurrently.

@@ -65,33 +65,30 @@ func (w *hookSpikeWorld) written(tb testing.TB, write func(q *Query[colliderQuer
 	tb.Helper()
 	w.write = write
 	w.run(tb, func(x kernel.Executioner) error {
-		_, err := x.ExecuteCommand[spikeWriteCmd](hookRequest{})
-		return err
+		x.ExecuteCommand[spikeWriteCmd](hookRequest{})
+		return nil
 	})
 }
 
 func (w *hookSpikeWorld) read(tb testing.TB) {
 	tb.Helper()
 	w.run(tb, func(x kernel.Executioner) error {
-		_, err := x.ExecuteCommand[spikeReadCmd](hookRequest{})
-		return err
+		x.ExecuteCommand[spikeReadCmd](hookRequest{})
+		return nil
 	})
 }
 
 func (w *hookSpikeWorld) readLate(tb testing.TB) {
 	tb.Helper()
 	w.run(tb, func(x kernel.Executioner) error {
-		_, err := x.ExecuteCommand[spikeLateCmd](hookRequest{})
-		return err
+		x.ExecuteCommand[spikeLateCmd](hookRequest{})
+		return nil
 	})
 }
 
 func (w *hookSpikeWorld) shrink(tb testing.TB, request ShrinkRequest) ShrinkResponse {
 	tb.Helper()
-	response, err := w.engine.Executioner().ExecuteCommand[shrinkCmd](request)
-	if err != nil {
-		tb.Fatalf("executing the shrink: %v", err)
-	}
+	response := w.engine.Executioner().ExecuteCommand[shrinkCmd](request)
 	return response
 }
 

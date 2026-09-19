@@ -26,7 +26,7 @@ type ModelDescrParams struct{}
 // modelDescr names one model file: the path, and nothing else there is to say.
 type modelDescr = assets.Descr[ModelDescrParams]
 
-// modelUser is what the model loader needs that a handler holds: the Lookup it
+// modelUserData is what the model loader needs that a handler holds: the Lookup it
 // mints mesh slots and texture entries in, and the resource queue it uploads
 // through. A loader is stateless and long-lived, so both arrive per call and
 // neither is retained.
@@ -38,7 +38,7 @@ type modelDescr = assets.Descr[ModelDescrParams]
 // it decodes, and to name the model in every error it produces. So the caller
 // that spells the descriptor spells the path here as well; Free and Default
 // never read it.
-type modelUser struct {
+type modelUserData struct {
 	lookup    *Lookup
 	resources *gfx.ResourceQueue
 	path      string
@@ -46,7 +46,7 @@ type modelUser struct {
 
 // modelLoader decodes one glTF file into a resident model, uploads it, and
 // releases one. It is stateless: everything it touches arrives through the
-// kernel, the filesystem and the user the cache hands it.
+// kernel, the filesystem and the user data the cache hands it.
 type modelLoader struct{}
 
 // residentModel is one loaded model file. It is what the cache stores, and it
@@ -199,7 +199,7 @@ func (l *Lookup) model(
 		return nil, ErrModelUnavailable{Model: modelPath, Err: errBackendNotReady}
 	}
 	loaded := l.models.Get(k, modelDescr{Name: key}, fsys,
-		modelUser{lookup: l, resources: resources, path: key})
+		modelUserData{lookup: l, resources: resources, path: key})
 	if loaded == nil {
 		return nil, ErrModelUnavailable{Model: modelPath, Err: errModelNotRead}
 	}
@@ -221,22 +221,22 @@ func (l *Lookup) model(
 // parse is parsed one time until a free - which is the whole of "never
 // retries", and UnloadModel followed by Preload is the way back.
 func (modelLoader) Load(
-	k kernel.Kernel, data assets.Blob, _ ModelDescrParams, fsys fs.FS, user modelUser,
+	k kernel.Kernel, data assets.Blob, _ ModelDescrParams, fsys fs.FS, userData modelUserData,
 ) *residentModel {
-	loaded, err := parseModel(data, user.path, fsys, user.lookup.config.PoseSampleRate)
+	loaded, err := parseModel(data, userData.path, fsys, userData.lookup.config.PoseSampleRate)
 	if err != nil {
-		failure := ErrModelUnavailable{Model: user.path, Err: err}
-		k.ReportErrorOnce(modelReportKey(user.path), failure)
+		failure := ErrModelUnavailable{Model: userData.path, Err: err}
+		k.ReportErrorOnce(modelReportKey(userData.path), failure)
 		return &residentModel{err: failure}
 	}
-	return user.lookup.installModel(k, user.path, loaded, fsys, user.resources)
+	return userData.lookup.installModel(k, userData.path, loaded, fsys, userData.resources)
 }
 
 // Default is nil, and a nil model expands into no primitives, so "skip, never
 // substitute" survives as a null object rather than as a special case. Nothing
 // is stood in for; the loudness comes from the report the Library has already
 // made, not from the pixels.
-func (modelLoader) Default(modelDescr, modelUser) *residentModel { return nil }
+func (modelLoader) Default(modelDescr, modelUserData) *residentModel { return nil }
 
 // Free gives up one model's geometry, baked poses and morph deltas. The mesh
 // slots retire at once, so a ref to one goes stale immediately; their buffers
@@ -248,11 +248,11 @@ func (modelLoader) Default(modelDescr, modelUser) *residentModel { return nil }
 // whether another resident model binds the same image by path, and freeing one
 // that is still bound is a dead texture in a live bind group rather than a
 // missing picture. UnloadTexture is the separate, deliberate lever.
-func (modelLoader) Free(value *residentModel, user modelUser) {
+func (modelLoader) Free(value *residentModel, userData modelUserData) {
 	if value == nil {
 		return
 	}
-	l := user.lookup
+	l := userData.lookup
 	for _, ref := range value.meshes {
 		l.releaseMesh(ref)
 	}
@@ -317,7 +317,7 @@ func (l *Lookup) installModel(
 	// supplied beside an embedded name and ignores it on a hit.
 	textures := make([]gfx.TextureDescr, len(loaded.textures))
 	for i, descr := range loaded.textures {
-		textures[i] = l.textures.Get(k, descr, fsys, textureUser{
+		textures[i] = l.textures.Get(k, descr, fsys, textureUserData{
 			resources: resources, model: modelPath, name: descr.Name,
 		})
 	}

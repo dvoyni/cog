@@ -402,7 +402,7 @@ func TestTheHaloNumbersItsGroupsByKind(t *testing.T) {
 // named by no exported constant.
 func TestTheHaloSourceIsMountedButNotPublished(t *testing.T) {
 	k, _, _ := testKernel(t, fstest.MapFS{}, canvas.Config{}, func(*canvas.OpQueue) {})
-	got, _ := k.ExecuteCommand[readFileProbeCmd](readFileProbeRequest{Name: types.HaloShaderPath})
+	got := k.ExecuteCommand[readFileProbeCmd](readFileProbeRequest{Name: types.HaloShaderPath})
 	if !bytes.Equal(got.Data, readBuiltinSource(t, types.HaloShaderPath)) {
 		t.Fatalf("%s is not mounted; the material's own shader would not resolve", types.HaloShaderPath)
 	}

@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -85,13 +84,12 @@ func newPairingRig(t *testing.T) *pairingRig {
 		t: t, app: New().(*plugin), mainLoop: &fakeMainLoop{},
 		caps: map[string]mcp.Capability{}, backend: newPairingBackend(),
 	}
-	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{},
 		app.Name:     tickTestConfig(),
-	}).Handler(func(err error) bool {
+	}).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(
 		storageplugin.New(), permanentAdapter{}, rig.app, mainLoopAdapter{rig.mainLoop},
 		inputplugin.New(), gfxplugin.New(), canvasplugin.New(), uiplugin.New(),
@@ -100,10 +98,10 @@ func newPairingRig(t *testing.T) *pairingRig {
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
-		engine.Run(ctx)
+		engine.Run()
 	}()
 	t.Cleanup(func() {
-		cancel()
+		engine.Quit()
 		select {
 		case <-stopped:
 		case <-time.After(10 * time.Second):

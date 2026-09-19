@@ -8,7 +8,7 @@ Cog Engine provides typed runtime systems and the Feuds game. This glossary reco
 The composition root. It exists once, owns the plugin set, registry, scheduler, and lifetime, and is built before startup.
 
 **Kernel**:
-The runtime handle a plugin uses during one dispatch. It is a value carrying its engine and invocation context, and it is scoped to the handler that received it.
+The runtime handle a plugin uses during one dispatch. It is a value carrying its engine and nothing else, and it is scoped to the handler that received it. It carries no context: cog is a standalone application, so a deadline that describes the work travels in the request that asks for the work.
 
 **Executioner**:
 A superset of the kernel that can also dispatch a command synchronously without declaring it. Only the engine mints one, for plugin lifecycle methods and host callbacks, which run outside any handler and so hold no locks.
@@ -73,6 +73,22 @@ The lifecycle phase in which a plugin declares the contracts and initial resourc
 **Startup**:
 The optional lifecycle phase in which a plugin begins operating after all registrations have been finalized.
 
+**Report**:
+A failure handed to the centralized error handler through the Kernel. It is not a return value and carries no answer back: the reporter has finished with the failure. It is the only way a failure nobody can act on travels.
+_Avoid_: raise, throw, propagate
+
+**Verdict**:
+What the error handler answers to one Report. Nil continues; any error terminates the engine. It is the only place termination is decided — the engine has no opinion of its own, including about a plugin panic.
+
+**Cause**:
+The error Run returns. It is the first non-nil Verdict of the engine's life, or the initialization failure that stopped startup. There is exactly one, and whatever it knocked over afterwards is not it.
+
+**Termination point**:
+One of exactly two places an engine's life can end: initialization, or a Verdict. Nothing else ends it, and neither refuses work already in flight.
+
+**Quit**:
+The ordinary end of a run, with no Cause: something asked the engine to stop, and a Host is asked to leave its loop. A Quit is not a Termination point, because nothing failed.
+
 **Host**:
 The single plugin that owns the application's blocking runtime loop, which the engine runs on the calling thread. It is a role the kernel gives one plugin, not a kind: the plugin playing it is still a Slot, an Extension or a Bundle.
 _Avoid_: System plugin. A System is the ECS's term for a func run over matching Entities, and has nothing to do with the Host.
@@ -99,7 +115,7 @@ One delivery of an event value to its subscribers. Separate publications may exe
 An immutable value delivered to subscribers. Mutable shared payload belongs in a Resource.
 
 **Subscription dependency**:
-A completion-order constraint within one event publication. A dependent subscriber cannot begin until its prerequisites complete successfully.
+A completion-order constraint within one event publication. A dependent subscriber cannot begin until its prerequisites complete. A subscriber that Reports has still completed; only one that panicked blocks its dependents.
 
 **Publication handle**:
 The completion result of an event publication. Callers may discard it or wait for every runnable subscriber to finish.

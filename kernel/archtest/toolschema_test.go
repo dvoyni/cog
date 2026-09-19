@@ -39,22 +39,21 @@ var update = flag.Bool("update", false, "rewrite the golden files from what the 
 // it is a golden-file diff somebody has to mean.
 func TestToolSchemas_WhatAnAgentReadsIsPinned(t *testing.T) {
 	addr := freeAddr(t)
-	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{},
 		mcp.Name:     mcp.Config{Addr: addr, Path: "/mcp"},
-	}).Handler(func(err error) bool {
+	}).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(
 		storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
 		inputplugin.New(), animplugin.New(), canvasplugin.New(), sceneplugin.New(), uiplugin.New(),
 		ecsplugin.New(), ecssceneplugin.New(), mcpplugin.New(),
 	)
 	stopped := make(chan struct{})
-	go func() { engine.Run(ctx); close(stopped) }()
+	go func() { engine.Run(); close(stopped) }()
 	t.Cleanup(func() {
-		cancel()
+		engine.Quit()
 		<-stopped
 	})
 	<-engine.Ready()

@@ -117,6 +117,9 @@ type ArmCaptureResponse struct {
 	// window resized inside the capture's two-frame window reports a stale
 	// window size but never mis-describes the image.
 	Viewport Viewport
+	// Err is the outcome an arm was refused with: a request the capture state
+	// would not take, or one that arrived while another was already armed.
+	Err error
 }
 
 // ArmFrameCmd arms one frame snapshot and hands back the wait. It is ordinary
@@ -149,4 +152,7 @@ type ArmFrameResponse struct {
 	// read for itself. A resize between the arm and the tick it binds to is a
 	// stated non-guarantee, exactly as it is for a capture.
 	Viewport Viewport
+	// Err is the outcome an arm was refused with, exactly as it is for a
+	// capture.
+	Err error
 }

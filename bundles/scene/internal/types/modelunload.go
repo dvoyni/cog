@@ -39,7 +39,7 @@ func (la LookupAccess) UnloadModel(path string) {
 	// recorded under exactly what the caller passed.
 	key, _ := ModelKey(path)
 	la.lookup.clearModelReports(la.kernel, key)
-	la.lookup.models.Free(la.kernel, modelDescr{Name: key}, modelUser{lookup: la.lookup})
+	la.lookup.models.Free(la.kernel, modelDescr{Name: key}, modelUserData{lookup: la.lookup})
 }
 
 // UnloadTexture frees one image path's GPU textures.
@@ -72,7 +72,7 @@ func (la LookupDeviceAccess) UnloadTexture(path string) {
 		return
 	}
 	l := la.lookup
-	l.textures.FreeWhere(la.kernel, textureUser{resources: la.resources},
+	l.textures.FreeWhere(la.kernel, textureUserData{resources: la.resources},
 		func(d textureDescr, _ gfx.TextureDescr) bool { return d.Name == key })
 	l.clearTextureReports(la.kernel, key)
 }
@@ -91,8 +91,8 @@ func (la LookupDeviceAccess) UnloadAll() {
 		return
 	}
 	l := la.lookup
-	l.models.FreeAll(la.kernel, modelUser{lookup: l})
-	l.textures.FreeAll(la.kernel, textureUser{resources: la.resources})
+	l.models.FreeAll(la.kernel, modelUserData{lookup: l})
+	l.textures.FreeAll(la.kernel, textureUserData{resources: la.resources})
 	// Scene's own report keys are the kernel's rather than either cache's - a
 	// selector key hangs off a path with a '#', and so does an embedded
 	// picture's - so both families are cleared as families, in the one prefix

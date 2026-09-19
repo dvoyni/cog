@@ -59,10 +59,7 @@ func spiked(t *testing.T) *spikedWorld {
 
 func (w *spikedWorld) shrink(t *testing.T, request ShrinkRequest) ShrinkResponse {
 	t.Helper()
-	response, err := w.engine.Executioner().ExecuteCommand[shrinkCmd](request)
-	if err != nil {
-		t.Fatalf("executing the shrink: %v", err)
-	}
+	response := w.engine.Executioner().ExecuteCommand[shrinkCmd](request)
 	return response
 }
 

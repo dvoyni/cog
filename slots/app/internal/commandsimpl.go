@@ -8,9 +8,9 @@ import (
 // quitCmdImpl asks the MainLoop to stop the platform loop, which unwinds the Host's
 // Run and shuts the engine down.
 func (p *plugin) quitCmdImpl() (kernel.Lock, kernel.Execute[app.QuitRequest, app.QuitResponse]) {
-	return nil, func(kernel.Kernel, app.QuitRequest) (app.QuitResponse, error) {
+	return nil, func(kernel.Kernel, app.QuitRequest) app.QuitResponse {
 		p.mainLoop.Get().Quit()
-		return app.QuitResponse{}, nil
+		return app.QuitResponse{}
 	}
 }
 
@@ -22,7 +22,7 @@ func (p *plugin) quitCmdImpl() (kernel.Lock, kernel.Execute[app.QuitRequest, app
 // ticks, and it holds nothing that the tick, or the frame carrying it, could
 // need.
 func (p *plugin) timeCmdImpl() (kernel.Lock, kernel.Execute[app.TimeRequest, app.TimeResponse]) {
-	return nil, func(k kernel.Kernel, request app.TimeRequest) (app.TimeResponse, error) {
-		return p.loop.ticks.control(k.Context(), request)
+	return nil, func(k kernel.Kernel, request app.TimeRequest) app.TimeResponse {
+		return p.loop.ticks.control(request)
 	}
 }

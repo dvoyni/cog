@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"io/fs"
 	"sync"
 	"testing"
@@ -158,9 +157,9 @@ func inspectCmdImpl() (kernel.Lock, kernel.Execute[inspectRequest, inspectRespon
 	var queue kernel.Read[*scene.OpQueue]
 	return func(access kernel.ResourceAccess) {
 			queue = access.GetRead[*scene.OpQueue]()
-		}, func(_ kernel.Kernel, request inspectRequest) (inspectResponse, error) {
+		}, func(_ kernel.Kernel, request inspectRequest) inspectResponse {
 			request.Run(queue.Get())
-			return inspectResponse{}, nil
+			return inspectResponse{}
 		}
 }
 
@@ -178,14 +177,14 @@ func bakeCmdImpl() (kernel.Lock, kernel.Execute[bakeRequest, bakeResponse]) {
 	var lookup kernel.Write[*scene.Lookup]
 	return func(access kernel.ResourceAccess) {
 			lookup = access.GetWrite[*scene.Lookup]()
-		}, func(k kernel.Kernel, _ bakeRequest) (bakeResponse, error) {
+		}, func(k kernel.Kernel, _ bakeRequest) bakeResponse {
 			vertices := []scene.Vertex{
 				{Position: m.Vec3{X: -1, Y: -1}, Normal: m.Vec3{Z: 1}},
 				{Position: m.Vec3{X: 1, Y: -1}, Normal: m.Vec3{Z: 1}},
 				{Position: m.Vec3{Y: 1}, Normal: m.Vec3{Z: 1}},
 			}
 			la := scene.NewLookupAccess(k, lookup.Get())
-			return bakeResponse{Ref: la.BakeMesh(vertices, []uint32{0, 1, 2}, gfx.TopologyTriangleList)}, nil
+			return bakeResponse{Ref: la.BakeMesh(vertices, []uint32{0, 1, 2}, gfx.TopologyTriangleList)}
 		}
 }
 
@@ -259,21 +258,20 @@ func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gfx.Ba
 		ecs.Name:     ecs.Config{PrewarmEntities: ids},
 	}
 	engine := kernel.New(configs).
-		Handler(func(err error) bool { sink.add(err); return false }).
+		Handler(func(err error) error { sink.add(err); return nil }).
 		WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, sceneplugin.New(),
 			ecsplugin.New(), New(), &gamePlugin{})
-	ctx, cancel := context.WithCancel(context.Background())
 	// The cleanup waits for Run to return rather than only cancelling it: a
 	// dying engine allocates while it winds down, and the allocation claims here
 	// count every goroutine's mallocs.
 	stopped := make(chan struct{})
 	t.Cleanup(func() {
-		cancel()
+		engine.Quit()
 		<-stopped
 	})
 	go func() {
 		defer close(stopped)
-		engine.Run(ctx)
+		engine.Run()
 	}()
 	<-engine.Ready()
 	k := engine.Executioner()
@@ -285,9 +283,7 @@ func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gfx.Ba
 // every declared lock, run every System and every flush, wait.
 func (h *harness) frame(t testing.TB) {
 	t.Helper()
-	if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait(); err != nil {
-		t.Fatalf("publishing the update: %v", err)
-	}
+	h.kernel.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
 }
 
 func (h *harness) spawn(t testing.TB, request spawnRequest) ecs.Entity {
@@ -295,25 +291,20 @@ func (h *harness) spawn(t testing.TB, request spawnRequest) ecs.Entity {
 	if request.Count == 0 {
 		request.Count = 1
 	}
-	response, err := h.kernel.ExecuteCommand[spawnCmd](request)
-	if err != nil {
-		t.Fatalf("spawning %d Entities: %v", request.Count, err)
-	}
+	response := h.kernel.ExecuteCommand[spawnCmd](request)
 	return response.First
 }
 
 func (h *harness) despawn(t testing.TB, e ecs.Entity) {
 	t.Helper()
-	if _, err := h.kernel.ExecuteCommand[despawnCmd](despawnRequest{Entity: e}); err != nil {
-		t.Fatalf("despawning: %v", err)
-	}
+	h.kernel.ExecuteCommand[despawnCmd](despawnRequest{Entity: e})
 }
 
 func (h *harness) bake(t testing.TB) scene.MeshRef {
 	t.Helper()
-	response, err := h.kernel.ExecuteCommand[bakeCmd](bakeRequest{})
-	if err != nil || response.Ref.ID() == 0 {
-		t.Fatalf("baking a mesh: ref %v, %v", response.Ref, err)
+	response := h.kernel.ExecuteCommand[bakeCmd](bakeRequest{})
+	if response.Ref.ID() == 0 {
+		t.Fatalf("baking a mesh: ref %v", response.Ref)
 	}
 	return response.Ref
 }
@@ -324,11 +315,9 @@ func (h *harness) bake(t testing.TB) scene.MeshRef {
 func (h *harness) ops(t testing.TB, kinds ...scene.OpKind) []scene.Op {
 	t.Helper()
 	var all []scene.Op
-	if _, err := h.kernel.ExecuteCommand[inspectCmd](inspectRequest{Run: func(q *scene.OpQueue) {
+	h.kernel.ExecuteCommand[inspectCmd](inspectRequest{Run: func(q *scene.OpQueue) {
 		all = q.Ops(nil)
-	}}); err != nil {
-		t.Fatalf("inspecting the queue: %v", err)
-	}
+	}})
 	var out []scene.Op
 	for _, op := range all {
 		for _, kind := range kinds {
@@ -344,10 +333,8 @@ func (h *harness) ops(t testing.TB, kinds ...scene.OpKind) []scene.Op {
 func (h *harness) passes(t testing.TB) []scene.PassView {
 	t.Helper()
 	var out []scene.PassView
-	if _, err := h.kernel.ExecuteCommand[inspectCmd](inspectRequest{Run: func(q *scene.OpQueue) {
+	h.kernel.ExecuteCommand[inspectCmd](inspectRequest{Run: func(q *scene.OpQueue) {
 		out = q.Passes(nil)
-	}}); err != nil {
-		t.Fatalf("inspecting the queue: %v", err)
-	}
+	}})
 	return out
 }

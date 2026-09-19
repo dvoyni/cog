@@ -28,8 +28,8 @@ func shrinkCommand() (kernel.Lock, kernel.Execute[ShrinkRequest, ShrinkResponse]
 	var entities kernel.Write[*Entities]
 	return func(access kernel.ResourceAccess) {
 			entities = access.GetWrite[*Entities]()
-		}, func(_ kernel.Kernel, request ShrinkRequest) (ShrinkResponse, error) {
-			return entities.Get().shrink(request), nil
+		}, func(_ kernel.Kernel, request ShrinkRequest) ShrinkResponse {
+			return entities.Get().shrink(request)
 		}
 }
 

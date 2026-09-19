@@ -36,9 +36,9 @@ func (l testLabel) Label() string { return string(l) }
 // composeForTest runs WithPlugins and returns every error composition reported.
 func composeForTest(plugins ...Plugin) (*Engine, error) {
 	var handled []error
-	e := New(nil).Handler(func(err error) bool {
+	e := New(nil).Handler(func(err error) error {
 		handled = append(handled, err)
-		return true
+		return err
 	}).WithPlugins(plugins...)
 	return e, errors.Join(handled...)
 }
@@ -366,7 +366,9 @@ func TestPorts_GetBeforeFinalizationPanics(t *testing.T) {
 
 // A Port built on a type that is not an interface is refused by each of the
 // three declarations.
-func TestPorts_NonInterfacePortPanics(t *testing.T) {
+// A Port built on a concrete type is a registration fault like any other: it
+// is collected and comes back from composition, not thrown.
+func TestPorts_NonInterfacePortFailsComposition(t *testing.T) {
 	type labelPort RequiredPort[testLabel]
 	type labelsPort CollectedPort[*testLabel]
 	type labelAdapter Adapter[labelPort]
@@ -386,12 +388,12 @@ func TestPorts_NonInterfacePortPanics(t *testing.T) {
 
 			_, err := composeForTest(p)
 
-			var panicked ErrPluginPanic
-			if !errors.As(err, &panicked) || panicked.Plugin != "p" || panicked.Boundary != "Register" {
-				t.Fatalf("composition error = %v, want a Register panic from p", err)
+			var notAnInterface ErrPortNotAnInterface
+			if !errors.As(err, &notAnInterface) {
+				t.Fatalf("composition error = %v, want ErrPortNotAnInterface", err)
 			}
-			if message := fmt.Sprint(panicked.Recovered); !strings.Contains(message, "not an interface") {
-				t.Fatalf("panic = %q, want it to say the type is not an interface", message)
+			if !strings.Contains(notAnInterface.Error(), "not an interface") {
+				t.Fatalf("error = %q, want it to say the type is not an interface", notAnInterface)
 			}
 		})
 	}

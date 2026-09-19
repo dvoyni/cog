@@ -33,8 +33,7 @@ func advanceOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var timelines kernel.Write[*anim.Timelines]
 	return func(access kernel.ResourceAccess) {
 			timelines = access.GetWrite[*anim.Timelines]()
-		}, func(_ kernel.Kernel, event app.UpdateEvent) error {
+		}, func(_ kernel.Kernel, event app.UpdateEvent) {
 			types.TimelinesAdvance(timelines.Get(), float32(event.Dt))
-			return nil
 		}
 }

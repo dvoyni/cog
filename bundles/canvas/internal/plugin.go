@@ -152,9 +152,8 @@ func (p *plugin) Stop(kernel.Executioner) error {
 // armSnapshotOnUpdate admits a waiting snapshot to the tick that has just
 // begun. It declares no resources: the snapshot slot carries its own lock.
 func (p *plugin) armSnapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	return nil, func(kernel.Kernel, app.UpdateEvent) error {
+	return nil, func(kernel.Kernel, app.UpdateEvent) {
 		p.snapshots.beginTick()
-		return nil
 	}
 }
 
@@ -178,9 +177,8 @@ func (p *plugin) snapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent
 	var queue kernel.Read[*canvas.OpQueue]
 	return func(access kernel.ResourceAccess) {
 			queue = access.GetRead[*canvas.OpQueue]()
-		}, func(_ kernel.Kernel, event app.UpdateEvent) error {
+		}, func(_ kernel.Kernel, event app.UpdateEvent) {
 			p.snapshots.record(queue.Get(), event.Tick)
-			return nil
 		}
 }
 
@@ -189,10 +187,9 @@ func (p *plugin) snapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent
 // both are in place for the first frame without depending on app
 // publishing an event.
 func (p *plugin) Start(k kernel.Executioner) error {
-	_, err := k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{Mount: storage.ReadMount{
+	return k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{Mount: storage.ReadMount{
 		Id: builtinMountID, Priority: math.MaxInt, FS: builtinFS,
-	}})
-	return err
+	}}).Err
 }
 
 func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
@@ -209,8 +206,8 @@ func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			viewport = access.GetRead[*gfx.Viewport]()
 			filesystem = access.GetRead[storage.FileSystem]()
 			lookupResource = access.GetWrite[*canvas.Lookup]()
-		}, func(k kernel.Kernel, _ app.UpdateEvent) error {
-			return p.flushFrame(k, writeQueue.Get(), gfxQueue.Get(), gfxResourceQueue.Get(),
+		}, func(k kernel.Kernel, _ app.UpdateEvent) {
+			p.flushFrame(k, writeQueue.Get(), gfxQueue.Get(), gfxResourceQueue.Get(),
 				viewport.Get(), filesystem.Get(), lookupResource.Get())
 		}
 }

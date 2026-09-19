@@ -1,7 +1,6 @@
 package kernel
 
 import (
-	"context"
 	"reflect"
 	"strings"
 	"sync"
@@ -63,9 +62,9 @@ func (g *gate) awaitEntries(t *testing.T, want int, within time.Duration) int {
 // handler's Lock, so each test supplies exactly the declaration it is pinning.
 func gatedCommand(g *gate, lock Lock) Command[int, int] {
 	return func() (Lock, Execute[int, int]) {
-		return lock, func(_ Kernel, request int) (int, error) {
+		return lock, func(_ Kernel, request int) int {
 			g.enter(request)
-			return request, nil
+			return request
 		}
 	}
 }
@@ -79,10 +78,7 @@ func dispatchConcurrently[TCommand CommandConstraint[int, int]](
 	responses := make(chan int, len(requests))
 	for _, request := range requests {
 		go func() {
-			response, err := engine.Executioner().ExecuteCommand[TCommand, int, int](request)
-			if err != nil {
-				return
-			}
+			response := engine.Executioner().ExecuteCommand[TCommand, int, int](request)
 			responses <- response
 		}()
 	}
@@ -169,9 +165,8 @@ func TestKernel_AnExclusiveSubscriptionDoesNotOverlapItself(t *testing.T) {
 		register: func(r *Registrar) error {
 			r.Subscribe[exclusiveSub](func() (Lock, Observe[int]) {
 				return func(access ResourceAccess) { access.Exclusive() },
-					func(_ Kernel, event int) error {
+					func(_ Kernel, event int) {
 						g.enter(event)
-						return nil
 					}
 			})
 			return nil
@@ -201,13 +196,13 @@ func TestKernel_UsesAbsorbsTheCalleesExclusion(t *testing.T) {
 		register: func(r *Registrar) error {
 			r.HandleCommand[exclusiveInnerCmd](func() (Lock, Execute[int, int]) {
 				return func(access ResourceAccess) { access.Exclusive() },
-					func(_ Kernel, request int) (int, error) { return request, nil }
+					func(_ Kernel, request int) int { return request }
 			})
 			r.HandleCommand[usesExclusiveCmd](func() (Lock, Execute[int, int]) {
-				var inner func(Kernel, int) (int, error)
+				var inner func(Kernel, int) int
 				return func(access ResourceAccess) {
 						inner = access.Uses[exclusiveInnerCmd, int, int]()
-					}, func(k Kernel, request int) (int, error) {
+					}, func(k Kernel, request int) int {
 						g.enter(request)
 						return inner(k, request)
 					}
@@ -228,10 +223,8 @@ func TestKernel_UsesAbsorbsTheCalleesExclusion(t *testing.T) {
 // a handler's identity type is not something anybody can contend for, and an
 // agent reading the architecture must not see one listed among real resources.
 func TestKernel_DescribeReportsExclusiveWithoutNamingItAResource(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	engine := New(nil).
-		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
+		Handler(func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }).
 		WithPlugins(testPlugin{
 			name: "described",
 			register: func(r *Registrar) error {
@@ -241,18 +234,19 @@ func TestKernel_DescribeReportsExclusiveWithoutNamingItAResource(t *testing.T) {
 				r.HandleCommand[openCmd](gatedCommand(newGate(), nil))
 				r.HandleCommand[exclusiveInnerCmd](func() (Lock, Execute[int, int]) {
 					return func(access ResourceAccess) { access.Exclusive() },
-						func(_ Kernel, request int) (int, error) { return request, nil }
+						func(_ Kernel, request int) int { return request }
 				})
 				r.HandleCommand[usesExclusiveCmd](func() (Lock, Execute[int, int]) {
-					var inner func(Kernel, int) (int, error)
+					var inner func(Kernel, int) int
 					return func(access ResourceAccess) {
 						inner = access.Uses[exclusiveInnerCmd, int, int]()
-					}, func(k Kernel, request int) (int, error) { return inner(k, request) }
+					}, func(k Kernel, request int) int { return inner(k, request) }
 				})
 				return nil
 			},
 		})
-	go engine.Run(ctx)
+	go engine.Run()
+	t.Cleanup(engine.Quit)
 	<-engine.Ready()
 
 	commands := map[reflect.Type]CommandDescription{}
@@ -297,10 +291,10 @@ func TestKernel_AnExclusiveCommandAnswersEachCallerItsOwnRequest(t *testing.T) {
 		register: func(r *Registrar) error {
 			r.HandleCommand[exclusiveCmd](func() (Lock, Execute[int, int]) {
 				return func(access ResourceAccess) { access.Exclusive() },
-					func(_ Kernel, request int) (int, error) {
+					func(_ Kernel, request int) int {
 						*answer = request
 						time.Sleep(time.Microsecond)
-						return *answer, nil
+						return *answer
 					}
 			})
 			return nil
@@ -314,11 +308,7 @@ func TestKernel_AnExclusiveCommandAnswersEachCallerItsOwnRequest(t *testing.T) {
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			response, err := engine.Executioner().ExecuteCommand[exclusiveCmd, int, int](request)
-			if err != nil {
-				wrong <- [2]int{request, -1}
-				return
-			}
+			response := engine.Executioner().ExecuteCommand[exclusiveCmd, int, int](request)
 			if response != request {
 				wrong <- [2]int{request, response}
 			}
@@ -336,10 +326,8 @@ func TestKernel_AnExclusiveCommandAnswersEachCallerItsOwnRequest(t *testing.T) {
 // only place a reader sees an exclusion at all: the conflict report pairs
 // distinct handlers, so it never mentions one.
 func TestKernel_DumpNamesTheExclusiveHandler(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	engine := New(nil).
-		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
+		Handler(func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }).
 		WithPlugins(testPlugin{
 			name: "dumped",
 			register: func(r *Registrar) error {
@@ -350,7 +338,8 @@ func TestKernel_DumpNamesTheExclusiveHandler(t *testing.T) {
 				return nil
 			},
 		})
-	go engine.Run(ctx)
+	go engine.Run()
+	t.Cleanup(engine.Quit)
 	<-engine.Ready()
 
 	for _, line := range strings.Split(Dump(engine), "\n") {

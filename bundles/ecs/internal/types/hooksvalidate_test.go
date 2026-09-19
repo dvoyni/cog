@@ -192,17 +192,13 @@ func newHookListWorld(t *testing.T) *hookListWorld {
 func (w *hookListWorld) writer(t *testing.T, write func(lw listWrite)) {
 	t.Helper()
 	w.write = write
-	if _, err := w.engine.Executioner().ExecuteCommand[hookListWriteCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the writer: %v", err)
-	}
+	w.engine.Executioner().ExecuteCommand[hookListWriteCmd](hookRequest{})
 }
 
 func (w *hookListWorld) reader(t *testing.T, read func(pouches *Hooks[pouch, HookAll], shelves *Hooks[shelf, HookAll])) {
 	t.Helper()
 	w.read = read
-	if _, err := w.engine.Executioner().ExecuteCommand[hookListReadCmd](hookRequest{}); err != nil {
-		t.Fatalf("running the reader: %v", err)
-	}
+	w.engine.Executioner().ExecuteCommand[hookListReadCmd](hookRequest{})
 }
 
 // hookKindOf renders the one kind a test tells records apart by.

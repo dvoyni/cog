@@ -54,9 +54,7 @@ func capture(t *testing.T, ids uint32) (*Query[moveQuery], *componentsPlugin, *E
 	entities, components, engine := newWorld(t, ids, func(registrar *kernel.Registrar) {
 		registrar.Subscribe[moveSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery]) { query = q }))
 	})
-	if err := engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-		t.Fatalf("publishing the update: %v", err)
-	}
+	engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 	return query, components, entities, engine
 }
 

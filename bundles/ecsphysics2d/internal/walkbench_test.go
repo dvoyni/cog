@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -88,9 +87,7 @@ func benchmarkWalk(b *testing.B, subscribe func(*kernel.Registrar)) {
 			// The classic b.N form, deliberately: testing.B.Loop is rejected in
 			// this repo for pinning loop variables through runtime.KeepAlive.
 			for range b.N {
-				if err := executioner.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
-					b.Fatalf("publishing the update: %v", err)
-				}
+				executioner.PublishEvent(app.UpdateEvent{Dt: tick}).Wait()
 			}
 		})
 	}
@@ -140,37 +137,30 @@ func newWalkWorld(b *testing.B, n int, subscribe func(*kernel.Registrar)) kernel
 	}
 	var failure error
 	engine := kernel.New(configs).
-		Handler(func(err error) bool { failure = err; return false }).
+		Handler(func(err error) error { failure = err; return nil }).
 		WithPlugins(appplugin.New(), mainLoopAdapter{}, ecsplugin.New(), &walkGame{subscribe: subscribe})
-	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	b.Cleanup(func() {
-		cancel()
+		engine.Quit()
 		<-stopped
 	})
 	go func() {
 		defer close(stopped)
-		engine.Run(ctx)
+		engine.Run()
 	}()
 	<-engine.Ready()
 	if failure != nil {
 		b.Fatalf("composing the engine: %v", failure)
 	}
 	executioner := engine.Executioner()
-	if err := executioner.PublishEvent(app.InitEvent{}).Wait(); err != nil {
-		b.Fatalf("publishing the init: %v", err)
-	}
+	executioner.PublishEvent(app.InitEvent{}).Wait()
 	if n > 0 {
-		if _, err := executioner.ExecuteCommand[walkSpawnCmd](n); err != nil {
-			b.Fatalf("spawning %d Bodies: %v", n, err)
-		}
+		executioner.ExecuteCommand[walkSpawnCmd](n)
 	}
 	// A hundred warm frames, so what is measured is a walk over Stores that
 	// have stopped growing.
 	for range 100 {
-		if err := executioner.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
-			b.Fatalf("publishing the update: %v", err)
-		}
+		executioner.PublishEvent(app.UpdateEvent{Dt: tick}).Wait()
 	}
 	return executioner
 }

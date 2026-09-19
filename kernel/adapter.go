@@ -119,9 +119,12 @@ func (r *Registrar) CollectAdapters[P CollectedPortConstraint[I], I any]() Colle
 // value declared with that type.
 func (r *Registrar) ProvideAdapter[A AdapterConstraint[P], P portConstraint[K, I], K portKind, I any](adapter I) {
 	id := reflect.TypeFor[A]()
-	portInterface[I]("ProvideAdapter", id)
+	if _, err := portInterface[I]("ProvideAdapter", id); err != nil {
+		r.registry.fail(err)
+		return
+	}
 	if any(adapter) == nil {
-		r.registry.errs = append(r.registry.errs, ErrNilAdapter{Plugin: r.owner, Adapter: id})
+		r.registry.fail(ErrNilAdapter{Plugin: r.owner, Adapter: id})
 		return
 	}
 	port := reflect.TypeFor[P]()
@@ -135,10 +138,14 @@ func (r *Registrar) declarePort[P any, I any](collects bool, bind func([]adapter
 		declaration = "CollectAdapters"
 	}
 	port := reflect.TypeFor[P]()
-	iface := portInterface[I](declaration, port)
+	iface, err := portInterface[I](declaration, port)
+	if err != nil {
+		r.registry.fail(err)
+		return
+	}
 	for _, existing := range r.registry.adapterDeclarations {
 		if existing.port == port && existing.owner == r.owner {
-			r.registry.errs = append(r.registry.errs, ErrDuplicateRegistration{
+			r.registry.fail(ErrDuplicateRegistration{
 				Kind: "port declaration", Type: port, Owner: r.owner, Existing: existing.owner,
 			})
 			return
@@ -149,41 +156,40 @@ func (r *Registrar) declarePort[P any, I any](collects bool, bind func([]adapter
 	})
 }
 
-// portInterface returns I's type, panicking when I is not an interface: a Port
-// is a contract its Adapters implement, never a concrete type. named is the Port
-// or Adapter type the declaration was given, for the message.
-func portInterface[I any](declaration string, named reflect.Type) reflect.Type {
+// portInterface returns I's type, and the fault when I is not an interface: a
+// Port is a contract its Adapters implement, never a concrete type. named is the
+// Port or Adapter type the declaration was given, for the message.
+//
+// It reports rather than panicking because it has no value it owes anyone: the
+// declaration simply does not happen, and composition answers with the reason.
+func portInterface[I any](declaration string, named reflect.Type) (reflect.Type, error) {
 	iface := reflect.TypeFor[I]()
 	if iface.Kind() != reflect.Interface {
-		panic(fmt.Sprintf("kernel: %s type argument %s is built on %s, which is not an interface type",
-			declaration, TypeName(named), TypeName(iface)))
+		return nil, ErrPortNotAnInterface{Declaration: declaration, Port: named, Interface: iface}
 	}
-	return iface
+	return iface, nil
 }
 
 // bindAdapters hands every declaration the contributions for its Port and
 // reports each required Port that has none or several. Contributions were
 // appended during sequential registration, so they are already in plugin order.
-func (r *registry) bindAdapters() []error {
-	var errs []error
+func (r *registry) bindAdapters() error {
 	for _, declaration := range r.adapterDeclarations {
 		contributions := r.adapterContributions[declaration.port]
 		if !declaration.collects {
 			switch len(contributions) {
 			case 0:
-				errs = append(errs, ErrMissingAdapter{Plugin: declaration.owner, Port: declaration.port})
-				continue
+				return ErrMissingAdapter{Plugin: declaration.owner, Port: declaration.port}
 			case 1:
 			default:
-				errs = append(errs, ErrDuplicateAdapter{
+				return ErrDuplicateAdapter{
 					Plugin: declaration.owner, Port: declaration.port, Adapters: describeAdapters(contributions),
-				})
-				continue
+				}
 			}
 		}
 		declaration.bind(contributions)
 	}
-	return errs
+	return nil
 }
 
 func describeAdapters(contributions []adapterContribution) []AdapterDescription {

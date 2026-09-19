@@ -51,7 +51,7 @@ func New[P comparable, U any, T any](loader Loader[P, U, T]) *Cache[P, U, T] {
 // keyed by the descriptor itself. Load is not called; Default supplies the
 // value, and that value is cached like any other, so the failure is terminal
 // until a Free.
-func (c *Cache[P, U, T]) Get(k kernel.Kernel, d Descr[P], fsys fs.FS, user U) T {
+func (c *Cache[P, U, T]) Get(k kernel.Kernel, d Descr[P], fsys fs.FS, userData U) T {
 	key := d.key()
 	if value, ok := c.entries[key]; ok {
 		return value
@@ -69,14 +69,14 @@ func (c *Cache[P, U, T]) Get(k kernel.Kernel, d Descr[P], fsys fs.FS, user U) T 
 			// working for anyone who wants the distinction the Library does
 			// not draw.
 			k.ReportErrorOnce(key, fmt.Errorf("asset %T not found by path %q: %w", zero, d.Name, err))
-			value := c.loader.Default(d, user)
+			value := c.loader.Default(d, userData)
 			c.entries[key] = value
 			return value
 		}
 		data = NewBlob(read)
 	}
 
-	value := c.loader.Load(k, data, d.Params, fsys, user)
+	value := c.loader.Load(k, data, d.Params, fsys, userData)
 	c.entries[key] = value
 	return value
 }
@@ -88,7 +88,7 @@ func (c *Cache[P, U, T]) Get(k kernel.Kernel, d Descr[P], fsys fs.FS, user U) T 
 // report-once key is forgotten with it, so a path that failed, was fixed and
 // was asked for again can speak. Freeing an entry the table does not hold does
 // nothing.
-func (c *Cache[P, U, T]) Free(k kernel.Kernel, d Descr[P], user U) {
+func (c *Cache[P, U, T]) Free(k kernel.Kernel, d Descr[P], userData U) {
 	key := d.key()
 	value, ok := c.entries[key]
 	if !ok {
@@ -96,7 +96,7 @@ func (c *Cache[P, U, T]) Free(k kernel.Kernel, d Descr[P], user U) {
 	}
 	delete(c.entries, key)
 	k.ForgetReportedError(key)
-	c.loader.Free(value, user)
+	c.loader.Free(value, userData)
 }
 
 // FreeAll releases every entry in the table, immediately.
@@ -109,7 +109,7 @@ func (c *Cache[P, U, T]) Free(k kernel.Kernel, d Descr[P], user U) {
 // The whole family's report-once keys go with it, which is a full scan of the
 // kernel's table and belongs where this verb already belongs - an unload, not a
 // frame.
-func (c *Cache[P, U, T]) FreeAll(k kernel.Kernel, user U) {
+func (c *Cache[P, U, T]) FreeAll(k kernel.Kernel, userData U) {
 	freed := make([]T, 0, len(c.entries))
 	for _, value := range c.entries {
 		freed = append(freed, value)
@@ -118,7 +118,7 @@ func (c *Cache[P, U, T]) FreeAll(k kernel.Kernel, user U) {
 	k.ForgetReportedErrors(func(Descr[P]) bool { return true })
 
 	for _, value := range freed {
-		c.loader.Free(value, user)
+		c.loader.Free(value, userData)
 	}
 }
 
@@ -133,7 +133,7 @@ func (c *Cache[P, U, T]) FreeAll(k kernel.Kernel, user U) {
 //
 // match is shown the descriptor as the table keys it, which is the descriptor a
 // Free would name, not whatever payload a Get supplied beside it.
-func (c *Cache[P, U, T]) FreeWhere(k kernel.Kernel, user U, match func(d Descr[P], value T) bool) {
+func (c *Cache[P, U, T]) FreeWhere(k kernel.Kernel, userData U, match func(d Descr[P], value T) bool) {
 	var keys []Descr[P]
 	var freed []T
 	for key, value := range c.entries {
@@ -148,6 +148,6 @@ func (c *Cache[P, U, T]) FreeWhere(k kernel.Kernel, user U, match func(d Descr[P
 	}
 
 	for _, value := range freed {
-		c.loader.Free(value, user)
+		c.loader.Free(value, userData)
 	}
 }

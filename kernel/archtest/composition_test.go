@@ -33,7 +33,7 @@ import (
 func TestTypeName_NamesEveryTypeInAFullCogCompositionUniquely(t *testing.T) {
 	var failure error
 	engine := kernel.New(map[kernel.PluginName]any{storage.Name: storage.Config{}}).
-		Handler(func(err error) bool { failure = errors.Join(failure, err); return false }).
+		Handler(func(err error) error { failure = errors.Join(failure, err); return nil }).
 		WithPlugins(
 			storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
 			inputplugin.New(), animplugin.New(), canvasplugin.New(), sceneplugin.New(), uiplugin.New(),

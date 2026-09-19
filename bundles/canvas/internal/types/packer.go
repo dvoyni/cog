@@ -106,7 +106,7 @@ type freeSlot struct {
 // reaches the packer directly.
 //
 // It is persistent state that must outlive a handler, so it lives on the Lookup
-// and travels to the sprite loader in the loader's user value. The Lookup holds
+// and travels to the sprite loader in the loader's user data. The Lookup holds
 // two, one for sprites and one for glyphs, and each carries its own config and
 // so its own byte budget.
 type packer struct {

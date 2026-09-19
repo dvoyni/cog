@@ -58,7 +58,7 @@ func subscribeHomingHandWritten(registrar *kernel.Registrar) {
 				entities = access.GetRead[*Entities]()
 				bodies = access.GetWrite[*Store[body]]()
 				homings = access.GetRead[*Store[homing]]()
-			}, func(_ kernel.Kernel, _ app.UpdateEvent) error {
+			}, func(_ kernel.Kernel, _ app.UpdateEvent) {
 				_ = entities
 				driver, probed := homings.Get(), bodies.Get()
 				for row := len(driver.owners) - 1; row >= 0; row-- {
@@ -73,7 +73,6 @@ func subscribeHomingHandWritten(registrar *kernel.Registrar) {
 					}
 					probed.dense[near].Y += probed.dense[far].X
 				}
-				return nil
 			}
 	})
 }
@@ -235,9 +234,7 @@ func TestTheAccessorsStayOnTheEnginesAllocationLine(t *testing.T) {
 		}
 		mallocs := allocationsDuring(func() {
 			for range frames {
-				if err := executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-					t.Fatalf("publishing the update: %v", err)
-				}
+				executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 			}
 		})
 		return float64(mallocs) / frames

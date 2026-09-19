@@ -115,10 +115,9 @@ func (p *plugin) Register(registrar *kernel.Registrar, value any) error {
 // has registered and before the host loop, so the shader is in place for the
 // first frame without depending on app publishing an event.
 func (p *plugin) Start(k kernel.Executioner) error {
-	_, err := k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{Mount: storage.ReadMount{
+	return k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{Mount: storage.ReadMount{
 		Id: shaderMountID, Priority: math.MaxInt, FS: shaderFS,
-	}})
-	return err
+	}}).Err
 }
 
 // flush binds the resources the frame's decisions need. Everything scene
@@ -147,10 +146,9 @@ func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			gfxResourceQueue = access.GetWrite[*gfx.ResourceQueue]()
 			viewport = access.GetRead[*gfx.Viewport]()
 			filesystem = access.GetRead[storage.FileSystem]()
-		}, func(k kernel.Kernel, _ app.UpdateEvent) error {
+		}, func(k kernel.Kernel, _ app.UpdateEvent) {
 			p.flushFrame(k, writeQueue.Get(), lookupResource.Get(),
 				gfxQueue.Get(), gfxResourceQueue.Get(), viewport.Get(), filesystem.Get())
-			return nil
 		}
 }
 

@@ -26,22 +26,21 @@ type playHarness struct {
 
 func newPlayHarness(t *testing.T) *playHarness {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 
 	probe := &playProbe{}
-	engine := kernel.New(nil).Handler(func(err error) bool {
+	engine := kernel.New(nil).Handler(func(err error) error {
 		// A caller hanging up cancels whatever its dispatch still had in
 		// flight, an event publication included. That is the behaviour under
 		// test rather than a fault, and it can surface after the test that
 		// caused it has returned.
 		if errors.Is(err, context.Canceled) {
-			return false
+			return nil
 		}
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(New(), pausedHost{}, probe)
-	go engine.Run(ctx)
+	go engine.Run()
+	t.Cleanup(engine.Quit)
 	<-engine.Ready()
 	return &playHarness{t: t, k: engine.Executioner(), probe: probe}
 }
@@ -50,19 +49,15 @@ func newPlayHarness(t *testing.T) *playHarness {
 // rather than through internals.
 func (h *playHarness) seam() input.StateResponse {
 	h.t.Helper()
-	response, err := h.k.ExecuteCommand[input.StateCmd](input.StateRequest{})
-	if err != nil {
-		h.t.Fatalf("state: %v", err)
-	}
-	return response
+	return h.k.ExecuteCommand[input.StateCmd](input.StateRequest{})
 }
 
 // step advances the paused engine, the way app_time step does.
 func (h *playHarness) step(ticks int) {
 	h.t.Helper()
-	if _, err := h.k.ExecuteCommand[app.TimeCmd](
-		app.TimeRequest{Action: app.TimeStep, Steps: ticks}); err != nil {
-		h.t.Fatalf("step: %v", err)
+	if answer := h.k.ExecuteCommand[app.TimeCmd](
+		app.TimeRequest{Action: app.TimeStep, Steps: ticks}); answer.Err != nil {
+		h.t.Fatalf("step: %v", answer.Err)
 	}
 }
 
@@ -86,15 +81,15 @@ func (pausedHost) Name() kernel.PluginName           { return app.Name }
 func (pausedHost) Dependencies() []kernel.PluginName { return nil }
 func (pausedHost) Register(r *kernel.Registrar, _ any) error {
 	r.HandleCommand[app.TimeCmd](func() (kernel.Lock, kernel.Execute[app.TimeRequest, app.TimeResponse]) {
-		return nil, func(k kernel.Kernel, request app.TimeRequest) (app.TimeResponse, error) {
+		return nil, func(k kernel.Kernel, request app.TimeRequest) app.TimeResponse {
 			if request.Action != app.TimeStep {
-				return app.TimeResponse{Paused: true}, nil
+				return app.TimeResponse{Paused: true}
 			}
 			steps := max(request.Steps, 1)
 			for range steps {
 				k.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
 			}
-			return app.TimeResponse{Paused: true, Stepped: steps}, nil
+			return app.TimeResponse{Paused: true, Stepped: steps}
 		}
 	})
 	return nil
@@ -126,19 +121,17 @@ func (*playProbe) Dependencies() []kernel.PluginName { return []kernel.PluginNam
 func (p *playProbe) Register(r *kernel.Registrar, _ any) error {
 	r.Subscribe[playProbeTickHandler](p.sample)
 	r.Subscribe[playProbeKeyHandler](func() (kernel.Lock, kernel.Observe[input.KeyEvent]) {
-		return nil, func(_ kernel.Kernel, event input.KeyEvent) error {
+		return nil, func(_ kernel.Kernel, event input.KeyEvent) {
 			p.mu.Lock()
 			defer p.mu.Unlock()
 			p.keys = append(p.keys, event)
-			return nil
 		}
 	})
 	r.Subscribe[playProbeTextHandler](func() (kernel.Lock, kernel.Observe[input.TextEvent]) {
-		return nil, func(_ kernel.Kernel, event input.TextEvent) error {
+		return nil, func(_ kernel.Kernel, event input.TextEvent) {
 			p.mu.Lock()
 			defer p.mu.Unlock()
 			p.text = append(p.text, event.Rune)
-			return nil
 		}
 	})
 	return nil
@@ -150,7 +143,7 @@ func (p *playProbe) sample() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var state kernel.Read[*input.State]
 	return func(access kernel.ResourceAccess) {
 			state = access.GetRead[*input.State]()
-		}, func(kernel.Kernel, app.UpdateEvent) error {
+		}, func(kernel.Kernel, app.UpdateEvent) {
 			s := state.Get()
 			p.mu.Lock()
 			defer p.mu.Unlock()
@@ -160,7 +153,6 @@ func (p *playProbe) sample() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 				JustReleased: s.JustReleased(p.probed),
 				Text:         string(s.Text()),
 			})
-			return nil
 		}
 }
 
@@ -304,39 +296,6 @@ func TestPlay_TheWaitHappensOutsideEveryLock(t *testing.T) {
 	}
 }
 
-// A caller that hangs up stops the sequence at the next delay rather than
-// running it out — and nothing unwinds what already landed, which is the
-// stuck key the caps exist to bound.
-func TestPlay_AHangUpStopsTheSequenceAtTheNextDelay(t *testing.T) {
-	harness := newPlayHarness(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	played := make(chan error, 1)
-	go func() {
-		_, err := input.Play(harness.k.WithContext(ctx), []input.Action{
-			{Do: input.ActionKeyDown, Key: input.KeyW},
-			{Do: input.ActionDelay, Ms: 9000},
-			{Do: input.ActionKeyUp, Key: input.KeyW},
-		})
-		played <- err
-	}()
-	waitFor(t, "the first batch to land", func() bool { return held(harness.seam(), input.KeyW) })
-	cancel()
-
-	select {
-	case err := <-played:
-		if !errors.Is(err, context.Canceled) {
-			t.Errorf("the sequence ended with %v, want the caller's cancellation", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("the sequence ran its delay out after the caller hung up")
-	}
-	if !held(harness.seam(), input.KeyW) {
-		t.Error("something released the key; nothing is undone when a caller disconnects")
-	}
-}
-
 // One batch folds under one lock hold, so a human's mouse move cannot land
 // between a move and the step after it — and the answer is read from that same
 // hold, so nothing that happens afterwards can rewrite it.
@@ -414,8 +373,8 @@ func TestPlay_ModifiersComeFromTheLiveDownSetAfterTheFold(t *testing.T) {
 func TestPlay_UnderPauseAKeyIsHeldForExactlyOneTick(t *testing.T) {
 	harness := newPlayHarness(t)
 	harness.probe.watch(input.KeyW)
-	if status, err := harness.k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus}); err != nil || !status.Paused {
-		t.Fatalf("the harness engine answered %+v, %v, want a paused tick source", status, err)
+	if status := harness.k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus}); status.Err != nil || !status.Paused {
+		t.Fatalf("the harness engine answered %+v, %v, want a paused tick source", status, status.Err)
 	}
 
 	harness.play(input.Action{Do: input.ActionKeyDown, Key: input.KeyW})

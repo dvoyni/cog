@@ -11,13 +11,13 @@ func TestViewportFixedWidth(t *testing.T) {
 	k.ExecuteCommand[gfx.SetDesiredViewportCmd](
 		gfx.SetDesiredViewportRequest{Mode: gfx.ViewportFixedWidth, Size: 1280})
 
-	response, _ := k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{Width: 1920, Height: 1080})
+	response := k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{Width: 1920, Height: 1080})
 	want := gfx.Viewport{Width: 1280, Height: 720, WindowWidth: 1920, WindowHeight: 1080}
 	if response.Viewport != want {
 		t.Errorf("viewport = %#v, want %#v", response.Viewport, want)
 	}
 
-	response, _ = k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{Width: 500, Height: 1000})
+	response = k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{Width: 500, Height: 1000})
 	want = gfx.Viewport{Width: 1280, Height: 2560, WindowWidth: 500, WindowHeight: 1000}
 	if response.Viewport != want {
 		t.Errorf("portrait viewport = %#v, want %#v", response.Viewport, want)
@@ -26,13 +26,13 @@ func TestViewportFixedWidth(t *testing.T) {
 
 func TestViewportCarriesFramebufferSizeAcrossPreferenceChanges(t *testing.T) {
 	k := newTestKernel(t, newPlugin())
-	response, _ := k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
+	response := k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
 		Width: 1280, Height: 720, FramebufferWidth: 2560, FramebufferHeight: 1440,
 	})
 	if response.Viewport.FramebufferWidth != 2560 || response.Viewport.FramebufferHeight != 1440 {
 		t.Fatalf("framebuffer = %vx%v, want 2560x1440", response.Viewport.FramebufferWidth, response.Viewport.FramebufferHeight)
 	}
-	desiredResponse, _ := k.ExecuteCommand[gfx.SetDesiredViewportCmd](gfx.SetDesiredViewportRequest{
+	desiredResponse := k.ExecuteCommand[gfx.SetDesiredViewportCmd](gfx.SetDesiredViewportRequest{
 		Mode: gfx.ViewportFit, Width: 1280, Height: 720,
 	})
 	if desiredResponse.Viewport.FramebufferWidth != 2560 || desiredResponse.Viewport.FramebufferHeight != 1440 {
@@ -45,7 +45,7 @@ func TestViewportFixedHeight(t *testing.T) {
 	k.ExecuteCommand[gfx.SetDesiredViewportCmd](
 		gfx.SetDesiredViewportRequest{Mode: gfx.ViewportFixedHeight, Size: 720})
 
-	response, _ := k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{Width: 1000, Height: 1000})
+	response := k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{Width: 1000, Height: 1000})
 	want := gfx.Viewport{Width: 720, Height: 720, WindowWidth: 1000, WindowHeight: 1000}
 	if response.Viewport != want {
 		t.Errorf("viewport = %#v, want %#v", response.Viewport, want)
@@ -71,7 +71,7 @@ func TestViewportFitAndCover(t *testing.T) {
 			k.ExecuteCommand[gfx.SetDesiredViewportCmd](
 				gfx.SetDesiredViewportRequest{Mode: test.mode, Width: 1280, Height: 720})
 
-			response, _ := k.ExecuteCommand[gfx.SetViewportCmd](
+			response := k.ExecuteCommand[gfx.SetViewportCmd](
 				gfx.SetViewportRequest{Width: test.width, Height: test.height})
 			if response.Viewport != test.want {
 				t.Errorf("viewport = %#v, want %#v", response.Viewport, test.want)

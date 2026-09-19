@@ -10,10 +10,12 @@ import (
 // wrote.
 func laggingReader(h *Hooks[collider, HookAddedRemoved]) {}
 
-// readerError runs the reader and reports what running it returned.
+// readerError runs the reader and reports what running it reported, clearing
+// it so that the next run starts from nothing.
 func (w *hookWorld) readerError() error {
-	_, err := w.engine.Executioner().ExecuteCommand[hookReadCmd](hookRequest{})
-	return err
+	w.reported = nil
+	w.engine.Executioner().ExecuteCommand[hookReadCmd](hookRequest{})
+	return w.reported
 }
 
 // appendingRuns runs the writer n times, each run appending two records to

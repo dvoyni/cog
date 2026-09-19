@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"errors"
 	"io/fs"
 	"reflect"
@@ -17,9 +16,9 @@ import (
 // composition without one fails before anything starts.
 func TestStorageWithoutAnAdapterFailsWithErrMissingAdapter(t *testing.T) {
 	var reported []error
-	kernel.New(nil).Handler(func(err error) bool {
+	kernel.New(nil).Handler(func(err error) error {
 		reported = append(reported, err)
-		return true
+		return err
 	}).WithPlugins(New())
 
 	var missing kernel.ErrMissingAdapter
@@ -40,13 +39,13 @@ func TestPermanentMountIsReserved(t *testing.T) {
 	}
 
 	k := testKernel(t, storage.Config{}, newMemoryFS())
-	if _, err := k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{
+	if answer := k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{
 		Mount: storage.ReadMount{Id: storage.PermanentMount, Priority: 1, FS: fstest.MapFS{}},
-	}); !errors.As(err, &reserved) {
-		t.Fatalf("SetMountCmd error = %v, want ErrReservedMount", err)
+	}); !errors.As(answer.Err, &reserved) {
+		t.Fatalf("SetMountCmd error = %v, want ErrReservedMount", answer.Err)
 	}
-	if _, err := k.ExecuteCommand[storage.RemoveMountCmd](storage.RemoveMountRequest{Id: storage.PermanentMount}); !errors.As(err, &reserved) {
-		t.Fatalf("RemoveMountCmd error = %v, want ErrReservedMount", err)
+	if answer := k.ExecuteCommand[storage.RemoveMountCmd](storage.RemoveMountRequest{Id: storage.PermanentMount}); !errors.As(answer.Err, &reserved) {
+		t.Fatalf("RemoveMountCmd error = %v, want ErrReservedMount", answer.Err)
 	}
 }
 
@@ -85,13 +84,13 @@ func TestValueRoundTripThroughOneWriteLock(t *testing.T) {
 	permanent := newMemoryFS()
 	k := testKernel(t, storage.Config{}, permanent)
 
-	if _, err := k.ExecuteCommand[storage.AccessValuesCmd](storage.SetValue("volume", 0.25)); err != nil {
-		t.Fatal(err)
+	if answer := k.ExecuteCommand[storage.AccessValuesCmd](storage.SetValue("volume", 0.25)); answer.Err != nil {
+		t.Fatal(answer.Err)
 	}
 	volume := 1.0
-	response, err := k.ExecuteCommand[storage.AccessValuesCmd](storage.GetValue("volume", 1.0, &volume))
-	if err != nil {
-		t.Fatal(err)
+	response := k.ExecuteCommand[storage.AccessValuesCmd](storage.GetValue("volume", 1.0, &volume))
+	if response.Err != nil {
+		t.Fatal(response.Err)
 	}
 	if !response.Found || volume != 0.25 {
 		t.Fatalf("GetValue = %v (found %v), want 0.25 found", volume, response.Found)
@@ -104,22 +103,21 @@ func TestValueRoundTripThroughOneWriteLock(t *testing.T) {
 func TestAZeroValueRequestIsRejected(t *testing.T) {
 	k := testKernel(t, storage.Config{}, newMemoryFS())
 	var invalid storage.ErrInvalidValueRequest
-	if _, err := k.ExecuteCommand[storage.AccessValuesCmd](storage.AccessValuesRequest{}); !errors.As(err, &invalid) {
-		t.Fatalf("zero request error = %v, want ErrInvalidValueRequest", err)
+	if answer := k.ExecuteCommand[storage.AccessValuesCmd](storage.AccessValuesRequest{}); !errors.As(answer.Err, &invalid) {
+		t.Fatalf("zero request error = %v, want ErrInvalidValueRequest", answer.Err)
 	}
 }
 
 func testKernel(t *testing.T, config storage.Config, permanent storage.PermanentFS) kernel.Executioner {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	engine := kernel.New(map[kernel.PluginName]any{storage.Name: config}).
-		Handler(func(err error) bool {
+		Handler(func(err error) error {
 			t.Errorf("unexpected kernel error: %v", err)
-			return true
+			return err
 		}).
 		WithPlugins(New(), adapterPlugin{permanent: permanent}, readerPlugin{})
-	go engine.Run(ctx)
+	go engine.Run()
+	t.Cleanup(engine.Quit)
 	<-engine.Ready()
 	return engine.Executioner()
 }
@@ -154,9 +152,9 @@ func (readerPlugin) Register(registrar *kernel.Registrar, _ any) error {
 		var filesystem kernel.Read[storage.FileSystem]
 		return func(access kernel.ResourceAccess) {
 				filesystem = access.GetRead[storage.FileSystem]()
-			}, func(_ kernel.Kernel, request readFileRequest) (readFileResponse, error) {
+			}, func(_ kernel.Kernel, request readFileRequest) readFileResponse {
 				request.read(filesystem.Get())
-				return readFileResponse{}, nil
+				return readFileResponse{}
 			}
 	})
 	return nil

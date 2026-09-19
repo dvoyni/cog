@@ -1,67 +1,36 @@
 package kernel
 
-import (
-	"context"
-	"errors"
-	"sync"
-)
-
-// Publication is the completion result of one event publication. It retains the
-// context it was published with, which already bounds subscriber work.
+// Publication is the completion handle of one event publication. It says when
+// every runnable subscriber has finished, and nothing else: a subscriber that
+// failed reported the failure itself.
 type Publication struct {
-	ctx  context.Context
 	done chan struct{}
-	mu   sync.Mutex
-	err  error
 }
 
-func newPublication(ctx context.Context) *Publication {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return &Publication{ctx: ctx, done: make(chan struct{})}
+func newPublication() *Publication {
+	return &Publication{done: make(chan struct{})}
 }
 
-func (p *Publication) complete(err error) {
-	p.mu.Lock()
-	p.err = err
-	p.mu.Unlock()
-	close(p.done)
-}
+// complete is called once, by the goroutine running the publication.
+func (p *Publication) complete() { close(p.done) }
 
-// Wait blocks until all runnable subscribers finish, or until the publishing
-// context is canceled.
-func (p *Publication) Wait() error {
-	select {
-	case <-p.done:
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		return p.err
-	case <-p.ctx.Done():
-		return p.ctx.Err()
-	}
-}
+// Wait blocks until all runnable subscribers finish. It answers nothing: a
+// subscriber that failed reported it, and the publisher has no part in that.
+func (p *Publication) Wait() { <-p.done }
 
 type publicationResult struct {
 	node int
 	err  error
 }
 
-// invocationContext is the context a publication hands to each subscriber. The
-// concrete type is the generic eventContext for the event being published.
-type invocationContext interface {
-	context.Context
-}
-
-func (e *Engine) runPublication(plan *publicationPlan, ctx invocationContext, publication *Publication) {
+func (e *Engine) runPublication(plan *publicationPlan, invocation any, publication *Publication) {
 	// One subscriber is the common case, and it has no ordering to resolve: run it
 	// on this goroutine and skip the scratch slices, result channel, and fan-out.
 	if len(plan.nodes) == 1 {
-		err := e.runTask(plan.nodes[0].task, ctx)
-		if err != nil {
-			e.reportError(err)
+		if err := e.runTask(plan.nodes[0].task, invocation); err != nil {
+			e.reportError(shutdownAside(err))
 		}
-		publication.complete(err)
+		publication.complete()
 		return
 	}
 
@@ -69,11 +38,10 @@ func (e *Engine) runPublication(plan *publicationPlan, ctx invocationContext, pu
 	blocked := make([]bool, len(plan.nodes))
 	results := make(chan publicationResult, len(plan.nodes))
 	completed := 0
-	var errs []error
 
 	launch := func(node int) {
 		go func() {
-			results <- publicationResult{node: node, err: e.runTask(plan.nodes[node].task, ctx)}
+			results <- publicationResult{node: node, err: e.runTask(plan.nodes[node].task, invocation)}
 		}()
 	}
 	for i, node := range plan.nodes {
@@ -92,7 +60,7 @@ func (e *Engine) runPublication(plan *publicationPlan, ctx invocationContext, pu
 			if remaining[dependent] != 0 {
 				continue
 			}
-			if blocked[dependent] || ctx.Err() != nil {
+			if blocked[dependent] {
 				finish(dependent, true)
 			} else {
 				launch(dependent)
@@ -103,10 +71,9 @@ func (e *Engine) runPublication(plan *publicationPlan, ctx invocationContext, pu
 	for completed < len(plan.nodes) {
 		result := <-results
 		if result.err != nil {
-			errs = append(errs, result.err)
-			e.reportError(result.err)
+			e.reportError(shutdownAside(result.err))
 		}
 		finish(result.node, result.err != nil)
 	}
-	publication.complete(errors.Join(errs...))
+	publication.complete()
 }

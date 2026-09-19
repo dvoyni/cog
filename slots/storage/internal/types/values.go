@@ -8,7 +8,10 @@ import "encoding/json"
 type AccessValuesRequest struct{ op valueOp }
 
 // AccessValuesResponse reports whether the operation found its key.
-type AccessValuesResponse struct{ Found bool }
+type AccessValuesResponse struct {
+	Found bool
+	Err   error
+}
 
 // ApplyValues runs request against store: it validates, applies, and flushes
 // the result through filesystem's permanent filesystem when the operation

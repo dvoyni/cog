@@ -45,7 +45,7 @@ func OpQueueInspect(v *OpQueue, layerID Layer, op *DrawOp) Op { return v.inspect
 // frame; the failure was reported when it happened.
 func LookupResolveSprite(v *Lookup, k kernel.Kernel, path string, fsys fs.FS, resources *gfx.ResourceQueue) AtlasEntry {
 	return v.sprites.Get(k, spriteDescr(path), fsys,
-		spriteUser{packer: v.spritePacker, resources: resources})
+		spriteUserData{packer: v.spritePacker, resources: resources})
 }
 
 // LookupResolveStandalone returns the full-image texture a tiled sprite samples

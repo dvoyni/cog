@@ -61,9 +61,8 @@ func ToHandler[E any](
 ) func() (kernel.Lock, kernel.Observe[E]) {
 	call := prepareSystem(registrar, system, feeds, "event", nil)
 	return func() (kernel.Lock, kernel.Observe[E]) {
-		return call.lock, func(handle kernel.Kernel, event E) error {
+		return call.lock, func(handle kernel.Kernel, event E) {
 			call.call(handle, event)
-			return nil
 		}
 	}
 }
@@ -100,9 +99,9 @@ func ToExecute[Req any, Res any](
 	answer := new(Resp[Res])
 	call := prepareSystem(registrar, system, feeds, "request", answer)
 	return func() (kernel.Lock, kernel.Execute[Req, Res]) {
-		return call.lock, func(handle kernel.Kernel, request Req) (Res, error) {
+		return call.lock, func(handle kernel.Kernel, request Req) Res {
 			call.call(handle, request)
-			return answer.take(), nil
+			return answer.take()
 		}
 	}
 }
@@ -418,7 +417,11 @@ func prepareSystem[E any](
 	call.args = args
 	// Last, so a signature outside the contract is refused before the world is
 	// asked for: the refusal names the System, which is the more useful sentence.
-	call.entities = registrar.Dependency[*Entities]()
+	entities, err := registrar.Dependency[*Entities]()
+	if err != nil {
+		panic(err)
+	}
+	call.entities = entities
 	return call
 }
 

@@ -109,11 +109,9 @@ func newDrawingHarness(t testing.TB, ids uint32) *harness {
 	t.Helper()
 	files := fstest.MapFS{crateModel: &fstest.MapFile{Data: crateGLB(t)}}
 	h := newHarnessWith(t, files, ids, &stubBackend{})
-	if _, err := h.kernel.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
+	h.kernel.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
 		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
-	}); err != nil {
-		t.Fatalf("setting the viewport: %v", err)
-	}
+	})
 	h.spawn(t, spawnRequest{
 		Place:  ecsscene.Transform(scene.LookAt(m.Vec3{Z: 30}, m.Vec3{}, m.Vec3{Y: 1})),
 		Camera: &ecsscene.Camera{FovY: 1.0472, Near: 0.1, Far: 200},

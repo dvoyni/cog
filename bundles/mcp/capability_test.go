@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -23,9 +22,9 @@ func (p echoPlugin) Dependencies() []kernel.PluginName { return nil }
 
 func (p echoPlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[echoCmd](func() (kernel.Lock, kernel.Execute[echoRequest, echoResponse]) {
-		return nil, func(_ kernel.Kernel, request echoRequest) (echoResponse, error) {
+		return nil, func(_ kernel.Kernel, request echoRequest) echoResponse {
 			*p.seen = request
-			return echoResponse{Text: request.Text + "!"}, nil
+			return echoResponse{Text: request.Text + "!"}
 		}
 	})
 	return nil
@@ -33,13 +32,12 @@ func (p echoPlugin) Register(registrar *kernel.Registrar, _ any) error {
 
 func startEngine(t *testing.T, plugins ...kernel.Plugin) *kernel.Engine {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	engine := kernel.New(nil).Handler(func(err error) bool {
+	engine := kernel.New(nil).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(plugins...)
-	go engine.Run(ctx)
+	go engine.Run()
+	t.Cleanup(engine.Quit)
 	<-engine.Ready()
 	return engine
 }

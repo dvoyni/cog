@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -487,11 +486,10 @@ func (g *game) Register(registrar *kernel.Registrar, _ any) error {
 func (g *game) probe(registrar *kernel.Registrar) {
 	record := func(name string) func() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 		return func() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-			return nil, func(kernel.Kernel, app.UpdateEvent) error {
+			return nil, func(kernel.Kernel, app.UpdateEvent) {
 				g.mu.Lock()
 				defer g.mu.Unlock()
 				g.order = append(g.order, name)
-				return nil
 			}
 		}
 	}
@@ -534,26 +532,23 @@ func newHarnessWith(t testing.TB, config any, ids uint32) *harness {
 	physics, world := New().(*plugin), &game{}
 	var failure error
 	engine := kernel.New(configs).
-		Handler(func(err error) bool { failure = err; return false }).
+		Handler(func(err error) error { failure = err; return nil }).
 		WithPlugins(appplugin.New(), mainLoopAdapter{}, ecsplugin.New(), physics, world)
-	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	t.Cleanup(func() {
-		cancel()
+		engine.Quit()
 		<-stopped
 	})
 	go func() {
 		defer close(stopped)
-		engine.Run(ctx)
+		engine.Run()
 	}()
 	<-engine.Ready()
 	if failure != nil {
 		t.Fatalf("composing the engine: %v", failure)
 	}
 	k := engine.Executioner()
-	if err := k.PublishEvent(app.InitEvent{}).Wait(); err != nil {
-		t.Fatalf("publishing the init: %v", err)
-	}
+	k.PublishEvent(app.InitEvent{}).Wait()
 	return &harness{kernel: k, game: world, plugin: physics}
 }
 
@@ -561,9 +556,7 @@ func newHarnessWith(t testing.TB, config any, ids uint32) *harness {
 // every declared lock, run every System, wait.
 func (h *harness) frame(t testing.TB) {
 	t.Helper()
-	if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
-		t.Fatalf("publishing the update: %v", err)
-	}
+	h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait()
 }
 
 func (h *harness) frames(t testing.TB, n int) {
@@ -575,19 +568,13 @@ func (h *harness) frames(t testing.TB, n int) {
 
 func (h *harness) spawn(t testing.TB, request spawnRequest) ecs.Entity {
 	t.Helper()
-	response, err := h.kernel.ExecuteCommand[spawnCmd](request)
-	if err != nil {
-		t.Fatalf("spawning: %v", err)
-	}
+	response := h.kernel.ExecuteCommand[spawnCmd](request)
 	return response.First
 }
 
 func (h *harness) read(t testing.TB, e ecs.Entity) readResponse {
 	t.Helper()
-	response, err := h.kernel.ExecuteCommand[readCmd](readRequest{Entity: e})
-	if err != nil {
-		t.Fatalf("reading %v: %v", e, err)
-	}
+	response := h.kernel.ExecuteCommand[readCmd](readRequest{Entity: e})
 	return response
 }
 
@@ -595,17 +582,12 @@ func (h *harness) read(t testing.TB, e ecs.Entity) readResponse {
 // away. Each is one act the drain sees as a Hook record on its next run.
 func (h *harness) setShape(t testing.TB, e ecs.Entity, shape ecsphysics2d.Shape) {
 	t.Helper()
-	if _, err := h.kernel.ExecuteCommand[shapeCmd](shapeRequest{Entity: e, Shape: shape}); err != nil {
-		t.Fatalf("giving %v a Shape: %v", e, err)
-	}
+	h.kernel.ExecuteCommand[shapeCmd](shapeRequest{Entity: e, Shape: shape})
 }
 
 func (h *harness) dropShape(t testing.TB, e ecs.Entity) {
 	t.Helper()
-	response, err := h.kernel.ExecuteCommand[shapeCmd](shapeRequest{Entity: e, Drop: true})
-	if err != nil {
-		t.Fatalf("taking %v's Shape away: %v", e, err)
-	}
+	response := h.kernel.ExecuteCommand[shapeCmd](shapeRequest{Entity: e, Drop: true})
 	if !response.Dropped {
 		t.Fatalf("%v had no Shape to take away", e)
 	}
@@ -614,69 +596,51 @@ func (h *harness) dropShape(t testing.TB, e ecs.Entity) {
 // place writes an Entity's Position from outside a tick.
 func (h *harness) place(t testing.TB, e ecs.Entity, at m.Vec2d) {
 	t.Helper()
-	if _, err := h.kernel.ExecuteCommand[placeCmd](placeRequest{
+	h.kernel.ExecuteCommand[placeCmd](placeRequest{
 		Entity: e, Place: ecsphysics2d.Position{Current: at},
-	}); err != nil {
-		t.Fatalf("placing %v: %v", e, err)
-	}
+	})
 }
 
 // indexed is what both indices hold, and which Entities each finds under a
 // circle of that radius at that point.
 func (h *harness) indexed(t testing.TB, at m.Vec2d, radius float64) indexResponse {
 	t.Helper()
-	response, err := h.kernel.ExecuteCommand[indexCmd](indexRequest{At: at, Radius: radius})
-	if err != nil {
-		t.Fatalf("asking the indices: %v", err)
-	}
+	response := h.kernel.ExecuteCommand[indexCmd](indexRequest{At: at, Radius: radius})
 	return response
 }
 
 // contacts is the tick's Contact list as the app sees it.
 func (h *harness) contacts(t testing.TB) []ecsphysics2d.Contact {
 	t.Helper()
-	response, err := h.kernel.ExecuteCommand[contactsCmd](contactsRequest{})
-	if err != nil {
-		t.Fatalf("reading the Contacts: %v", err)
-	}
+	response := h.kernel.ExecuteCommand[contactsCmd](contactsRequest{})
 	return response.Contacts
 }
 
 // despawn retires an Entity from outside a tick.
 func (h *harness) despawn(t testing.TB, e ecs.Entity) {
 	t.Helper()
-	if _, err := h.kernel.ExecuteCommand[despawnCmd](despawnRequest{Entity: e}); err != nil {
-		t.Fatalf("despawning %v: %v", e, err)
-	}
+	h.kernel.ExecuteCommand[despawnCmd](despawnRequest{Entity: e})
 }
 
 // joint reads one Joint back as it stands now.
 func (h *harness) joint(t testing.TB, e ecs.Entity) jointResponse {
 	t.Helper()
-	response, err := h.kernel.ExecuteCommand[jointCmd](jointRequest{Entity: e})
-	if err != nil {
-		t.Fatalf("reading the Joint %v: %v", e, err)
-	}
+	response := h.kernel.ExecuteCommand[jointCmd](jointRequest{Entity: e})
 	return response
 }
 
 // setJoint replaces one Joint from outside a tick.
 func (h *harness) setJoint(t testing.TB, e ecs.Entity, joint ecsphysics2d.Joint) {
 	t.Helper()
-	if _, err := h.kernel.ExecuteCommand[jointCmd](jointRequest{
+	h.kernel.ExecuteCommand[jointCmd](jointRequest{
 		Entity: e, Joint: joint, Replace: true,
-	}); err != nil {
-		t.Fatalf("writing the Joint %v: %v", e, err)
-	}
+	})
 }
 
 // jointedPairs is what Index built out of the Joint walk.
 func (h *harness) jointedPairs(t testing.TB, a, b ecs.Entity) jointedResponse {
 	t.Helper()
-	response, err := h.kernel.ExecuteCommand[jointedCmd](jointedRequest{A: a, B: b})
-	if err != nil {
-		t.Fatalf("asking the jointed pairs: %v", err)
-	}
+	response := h.kernel.ExecuteCommand[jointedCmd](jointedRequest{A: a, B: b})
 	return response
 }
 
@@ -727,7 +691,7 @@ func (*mover) Register(registrar *kernel.Registrar, _ any) error {
 func composeWithMover(deps []kernel.PluginName) error {
 	var failure error
 	kernel.New(map[kernel.PluginName]any{}).
-		Handler(func(err error) bool { failure = errors.Join(failure, err); return false }).
+		Handler(func(err error) error { failure = errors.Join(failure, err); return nil }).
 		WithPlugins(appplugin.New(), mainLoopAdapter{}, ecsplugin.New(), New(), &mover{deps: deps})
 	return failure
 }

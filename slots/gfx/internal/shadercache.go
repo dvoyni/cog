@@ -62,7 +62,7 @@ func (s *shader) report() error {
 	return s.err
 }
 
-// shaderUser is what the shader loader needs that only the render handler
+// shaderUserData is what the shader loader needs that only the render handler
 // holds. It is U, the cache's opaque pass-through, so it travels per call and
 // the loader stores none of it.
 //
@@ -70,7 +70,7 @@ func (s *shader) report() error {
 // both reach further into it than a texture's do: Load writes t.layouts through
 // shaderLayout and may set t.diagnostic, and Free sweeps t.pipelines and
 // t.parameterPlans for the dead id.
-type shaderUser struct {
+type shaderUserData struct {
 	t       *translator
 	backend gfx.Backend
 	// root is the storage path of the module being loaded, and empty for inline
@@ -96,9 +96,9 @@ type shaderLoader struct{}
 // The kernel is unused: every failure here is gfx's own and is returned through
 // the entry rather than reported, which is the decision report() records.
 func (shaderLoader) Load(
-	_ kernel.Kernel, data assets.Blob, params types.ShaderDescrParams, fsys fs.FS, user shaderUser,
+	_ kernel.Kernel, data assets.Blob, params types.ShaderDescrParams, fsys fs.FS, userData shaderUserData,
 ) *shader {
-	descr := types.ShaderDescr{Name: user.root, Blob: data, Params: params}
+	descr := types.ShaderDescr{Name: userData.root, Blob: data, Params: params}
 	label := types.ShaderLabel(descr)
 	// Flatten happens here, on the render thread, on a cache miss only - the
 	// first draw of a given (root, supply). The cost changes from one file read
@@ -115,7 +115,7 @@ func (shaderLoader) Load(
 		value.err = err
 		return value
 	}
-	id, err := user.backend.NewShader(gfx.ShaderDesc{Code: []byte(flattened.Text), Label: label})
+	id, err := userData.backend.NewShader(gfx.ShaderDesc{Code: []byte(flattened.Text), Label: label})
 	if err != nil {
 		// Nothing the backend said is rewritten and no line number is parsed out
 		// of its message: gfx appends the rendered segment table and lets the
@@ -127,9 +127,9 @@ func (shaderLoader) Load(
 	// Every shader gfx reflects is measured, not only an engine's bundled ones:
 	// a caller-supplied material is what actually gets bound at draw time. The
 	// shader is cached, so this reports once rather than once a frame.
-	limits := user.backend.Limits()
-	if diagnostic := checkWebLimits(label, user.t.shaderLayout(user.backend, id), limits); diagnostic != nil && user.t.diagnostic == nil {
-		user.t.diagnostic = diagnostic
+	limits := userData.backend.Limits()
+	if diagnostic := checkWebLimits(label, userData.t.shaderLayout(userData.backend, id), limits); diagnostic != nil && userData.t.diagnostic == nil {
+		userData.t.diagnostic = diagnostic
 	}
 	return value
 }
@@ -140,7 +140,7 @@ func (shaderLoader) Load(
 //
 // The root path is still recorded as the entry's one source, so a failed module
 // evicts by path exactly as a compiled one does.
-func (shaderLoader) Default(d assets.Descr[types.ShaderDescrParams], _ shaderUser) *shader {
+func (shaderLoader) Default(d assets.Descr[types.ShaderDescrParams], _ shaderUserData) *shader {
 	return &shader{sources: []string{d.Name}}
 }
 
@@ -151,11 +151,11 @@ func (shaderLoader) Default(d assets.Descr[types.ShaderDescrParams], _ shaderUse
 //
 // It is also why freeCachedResources clears pipelines and plans before it frees
 // the entries: run per entry over full maps, this is O(shaders x pipelines).
-func (shaderLoader) Free(value *shader, user shaderUser) {
+func (shaderLoader) Free(value *shader, userData shaderUserData) {
 	if value.id == 0 {
 		return
 	}
-	t := user.t
+	t := userData.t
 	for key, pipeline := range t.pipelines {
 		if key.shader != value.id {
 			continue
@@ -163,7 +163,7 @@ func (shaderLoader) Free(value *shader, user shaderUser) {
 		// A zero entry is the marker for a pipeline that failed to build, not
 		// a resource: there is nothing to hand back.
 		if pipeline != 0 {
-			user.backend.FreePipeline(pipeline)
+			userData.backend.FreePipeline(pipeline)
 		}
 		delete(t.pipelines, key)
 	}
@@ -173,5 +173,5 @@ func (shaderLoader) Free(value *shader, user shaderUser) {
 		}
 	}
 	delete(t.layouts, value.id)
-	user.backend.FreeShader(value.id)
+	userData.backend.FreeShader(value.id)
 }

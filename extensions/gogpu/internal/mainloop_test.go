@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"math"
 	"sync"
 	"testing"
@@ -50,11 +49,11 @@ func (*mainLoopHarness) Dependencies() []kernel.PluginName { return nil }
 
 func (h *mainLoopHarness) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[input.ApplyCmd](func() (kernel.Lock, kernel.Execute[input.ApplyRequest, input.ApplyResponse]) {
-		return nil, func(_ kernel.Kernel, request input.ApplyRequest) (input.ApplyResponse, error) {
+		return nil, func(_ kernel.Kernel, request input.ApplyRequest) input.ApplyResponse {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			h.applied = append(h.applied, request.Changes...)
-			return input.ApplyResponse{}, nil
+			return input.ApplyResponse{}
 		}
 	})
 	return nil
@@ -68,14 +67,13 @@ func (h *mainLoopHarness) appliedChanges() []input.Change {
 
 func TestMainLoop_UpdateFlushesInputThenHandsTheLoopTheFrameTime(t *testing.T) {
 	harness := &mainLoopHarness{}
-	ctx, cancel := context.WithCancel(context.Background())
 	engine := kernel.New(nil).
-		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
+		Handler(func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }).
 		WithPlugins(harness)
 	stopped := make(chan struct{})
-	go func() { defer close(stopped); engine.Run(ctx) }()
+	go func() { defer close(stopped); engine.Run() }()
 	t.Cleanup(func() {
-		cancel()
+		engine.Quit()
 		select {
 		case <-stopped:
 		case <-time.After(5 * time.Second):

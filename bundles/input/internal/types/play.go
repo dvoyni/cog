@@ -50,11 +50,7 @@ func Play(k kernel.Executioner, actions []Action) (StateResponse, error) {
 				return StateResponse{}, err
 			}
 		}
-		applied, err := k.ExecuteCommand[SynthesizeCmd](SynthesizeRequest{Actions: one.actions})
-		if err != nil {
-			return StateResponse{}, err
-		}
-		seam = applied
+		seam = k.ExecuteCommand[SynthesizeCmd](SynthesizeRequest{Actions: one.actions})
 	}
 	return seam, nil
 }
@@ -98,15 +94,11 @@ func plan(actions []Action) []batch {
 // is stated rather than discovered: a delay shorter than a frame may not
 // separate ticks, and while the engine is paused no delay separates anything at
 // all, because the per-tick edges roll on a tick and nothing else.
-func wait(k kernel.Executioner, delay time.Duration) error {
+func wait(_ kernel.Executioner, delay time.Duration) error {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-k.Context().Done():
-		return k.Context().Err()
-	}
+	<-timer.C
+	return nil
 }
 
 // check runs every refusal before the first batch, so a sequence is refused

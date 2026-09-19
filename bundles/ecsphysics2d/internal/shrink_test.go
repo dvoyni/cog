@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"reflect"
 	"runtime"
 	"testing"
@@ -21,7 +20,7 @@ import (
 // Component Store and not the id authority.
 func TestThePluginRegistersShrinkOverItsOwnResourcesAlone(t *testing.T) {
 	engine := kernel.New(nil).
-		Handler(func(err error) bool { t.Errorf("unexpected kernel error: %v", err); return true }).
+		Handler(func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }).
 		WithPlugins(appplugin.New(), mainLoopAdapter{}, ecsplugin.New(), New())
 
 	want := map[reflect.Type]bool{
@@ -75,10 +74,7 @@ func TestAShrunkPhysicsWorldReturnsToItsSteadyState(t *testing.T) {
 		world.run(t, 2)
 
 		if shrink {
-			released, err := world.kernel.ExecuteCommand[ecsphysics2d.ShrinkCmd](ecsphysics2d.ShrinkRequest{})
-			if err != nil {
-				t.Fatalf("executing the shrink: %v", err)
-			}
+			released := world.kernel.ExecuteCommand[ecsphysics2d.ShrinkCmd](ecsphysics2d.ShrinkRequest{})
 			t.Logf("the zero request after a %d Body spike released %+v", spikeBodies, released)
 			if released.Contacts == 0 || released.Indices == 0 || released.WorldCache == 0 {
 				t.Fatalf("the zero request after a spike released %+v, want Contacts, Indices and WorldCache above 0",
@@ -139,59 +135,46 @@ func newShrinkWorld(t testing.TB) *shrinkWorld {
 	}
 	var failure error
 	engine := kernel.New(configs).
-		Handler(func(err error) bool { failure = err; return false }).
+		Handler(func(err error) error { failure = err; return nil }).
 		WithPlugins(appplugin.New(), mainLoopAdapter{}, ecsplugin.New(), New(), game)
-	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	t.Cleanup(func() {
-		cancel()
+		engine.Quit()
 		<-stopped
 	})
 	go func() {
 		defer close(stopped)
-		engine.Run(ctx)
+		engine.Run()
 	}()
 	<-engine.Ready()
 	if failure != nil {
 		t.Fatalf("composing the engine: %v", failure)
 	}
 	k := engine.Executioner()
-	if err := k.PublishEvent(app.InitEvent{}).Wait(); err != nil {
-		t.Fatalf("publishing the init: %v", err)
-	}
+	k.PublishEvent(app.InitEvent{}).Wait()
 	return &shrinkWorld{kernel: k, game: game}
 }
 
 func (w *shrinkWorld) run(t testing.TB, ticks int) {
 	t.Helper()
 	for range ticks {
-		if err := w.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
-			t.Fatalf("publishing the update: %v", err)
-		}
+		w.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait()
 	}
 }
 
 func (w *shrinkWorld) grow(t testing.TB, to int) {
 	t.Helper()
-	if _, err := w.kernel.ExecuteCommand[shrinkGrowCmd](to); err != nil {
-		t.Fatalf("growing the scene to %d: %v", to, err)
-	}
+	w.kernel.ExecuteCommand[shrinkGrowCmd](to)
 }
 
 func (w *shrinkWorld) cut(t testing.TB, keep int) {
 	t.Helper()
-	if _, err := w.kernel.ExecuteCommand[shrinkCutCmd](keep); err != nil {
-		t.Fatalf("cutting the scene to %d: %v", keep, err)
-	}
+	w.kernel.ExecuteCommand[shrinkCutCmd](keep)
 }
 
 func (w *shrinkWorld) touching(t testing.TB) int {
 	t.Helper()
-	count, err := w.kernel.ExecuteCommand[shrinkCountCmd](struct{}{})
-	if err != nil {
-		t.Fatalf("counting the Contacts: %v", err)
-	}
-	return count
+	return w.kernel.ExecuteCommand[shrinkCountCmd](struct{}{})
 }
 
 type (

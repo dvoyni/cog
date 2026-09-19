@@ -207,7 +207,7 @@ func TestAComponentSetOverAnUnregisteredComponentFailsComposition(t *testing.T) 
 	}
 	var failure error
 	kernel.New(nil).
-		Handler(func(err error) bool { failure = err; return true }).
+		Handler(func(err error) error { failure = err; return err }).
 		WithPlugins(
 			authority{ids: 8},
 			&componentsPlugin{ids: 8},
@@ -234,7 +234,7 @@ func TestAComponentSetFieldIsAComponentValue(t *testing.T) {
 	type pointerSet struct{ Body *body }
 	var failure error
 	kernel.New(nil).
-		Handler(func(err error) bool { failure = err; return true }).
+		Handler(func(err error) error { failure = err; return err }).
 		WithPlugins(
 			authority{ids: 8},
 			&componentsPlugin{ids: 8},

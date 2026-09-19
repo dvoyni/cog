@@ -60,9 +60,7 @@ func benchmarkSatchelFrame(b *testing.B, system any) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if err := executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-			b.Fatal(err)
-		}
+		executioner.PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 	}
 }
 

@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -64,12 +63,12 @@ func TestConfigSettersChain(t *testing.T) {
 func TestPluginInitRejectsWrongConfigType(t *testing.T) {
 	var err error
 	kernel.New(map[kernel.PluginName]any{cgogpu.Name: 123}).
-		Handler(func(got error) bool {
+		Handler(func(got error) error {
 			err = got
-			return true
+			return got
 		}).
 		WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), gfxplugin.New(), inputplugin.New(), New()).
-		Run(context.Background())
+		Run()
 	var invalid cgogpu.ErrInvalidConfig
 	if !errors.As(err, &invalid) {
 		t.Fatalf("err = %v, want ErrInvalidConfig", err)

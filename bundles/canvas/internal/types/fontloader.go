@@ -47,18 +47,18 @@ type faceDescrParams struct {
 	px   int
 }
 
-// fontUser is what the face loader needs that it does not hold itself: the
+// fontUserData is what the face loader needs that it does not hold itself: the
 // source cache it re-enters inside its own Load. Re-entering a *different*
 // cache is what the Library allows and what this tier is built on.
 //
 // It travels by value: it is one pointer, a face Get happens per text op per
 // frame, and building one on the heap each time would put an allocation on the
 // frame path.
-type fontUser struct {
+type fontUserData struct {
 	sources *assets.Cache[sourceDescrParams, struct{}, *opentype.Font]
 }
 
-// fontSourceLoader parses a font file. Its user value is struct{} - no packer,
+// fontSourceLoader parses a font file. Its user data is struct{} - no packer,
 // no resource queue, no device - because a parsed font is CPU memory and
 // nothing else, which is what keeps a handler that only measures text off the
 // GPU's lock set.
@@ -102,8 +102,8 @@ type fontFaceLoader struct{}
 // A source that did not load bakes no face and says nothing further: the source
 // tier already reported it, once, and repeating it per size is what a second
 // report would be.
-func (fontFaceLoader) Load(k kernel.Kernel, _ assets.Blob, params faceDescrParams, fsys fs.FS, user fontUser) *Font {
-	source := user.sources.Get(k, assets.Descr[sourceDescrParams]{Name: params.path}, fsys, struct{}{})
+func (fontFaceLoader) Load(k kernel.Kernel, _ assets.Blob, params faceDescrParams, fsys fs.FS, userData fontUserData) *Font {
+	source := userData.sources.Get(k, assets.Descr[sourceDescrParams]{Name: params.path}, fsys, struct{}{})
 	if source == nil {
 		return nil
 	}
@@ -124,12 +124,12 @@ func (fontFaceLoader) Load(k kernel.Kernel, _ assets.Blob, params faceDescrParam
 // read for it and has no read to fail. It is a nil face for the same reason
 // Load returns one, so the two answers agree if the Library ever gains a way to
 // call it.
-func (fontFaceLoader) Default(assets.Descr[faceDescrParams], fontUser) *Font { return nil }
+func (fontFaceLoader) Default(assets.Descr[faceDescrParams], fontUserData) *Font { return nil }
 
 // Free closes the baked face. The glyph atlas slots that face rasterized into
 // are not reclaimed here: the glyph side is a packer with no table, and nothing
 // but a framebuffer scale change knows which slots a face owned.
-func (fontFaceLoader) Free(value *Font, _ fontUser) {
+func (fontFaceLoader) Free(value *Font, _ fontUserData) {
 	if value == nil {
 		return
 	}

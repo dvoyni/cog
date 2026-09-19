@@ -44,4 +44,7 @@ type ArmDrawsResponse struct {
 	// for itself. A resize between the arm and the tick it binds to is a stated
 	// non-guarantee, exactly as it is for a capture.
 	Viewport gfx.Viewport
+	// Err is the outcome an arm was refused with, exactly as it is for a gfx
+	// capture.
+	Err error
 }

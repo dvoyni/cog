@@ -47,9 +47,7 @@ func listWorld(t *testing.T, subscribe func(*kernel.Registrar)) {
 	lists := &listsPlugin{ids: 16}
 	_, _, engine := newWorldWith(t, 16, subscribe,
 		[]kernel.PluginName{Name, "components", "lists"}, lists)
-	if err := engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-		t.Fatalf("publishing the update: %v", err)
-	}
+	engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 }
 
 // recovered runs body and reports the panic message it produced, or the empty
@@ -339,9 +337,7 @@ func worldOfOne(t *testing.T, lists *listsPlugin, subscribe func(*kernel.Registr
 	entities, _, engine := newWorldWith(t, 16, subscribe,
 		[]kernel.PluginName{Name, "components", "lists"}, lists)
 	seed(entities)
-	if err := engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait(); err != nil {
-		t.Fatalf("publishing the update: %v", err)
-	}
+	engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 }
 
 func twoByTwo() grid {

@@ -82,11 +82,7 @@ func TestConcurrentInvocationsOfAReadOnlySystemEachAnswerTheirOwnRequest(t *test
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			response, err := engine.Executioner().ExecuteCommand[countCmd](countRequest{Tag: tag})
-			if err != nil {
-				t.Errorf("executing the System as a command: %v", err)
-				return
-			}
+			response := engine.Executioner().ExecuteCommand[countCmd](countRequest{Tag: tag})
 			if response.Tag != tag || response.N != entityCount {
 				wrong <- response
 			}

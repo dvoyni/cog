@@ -157,7 +157,7 @@ plugins := []kernel.Plugin{
 
 kernel.New(config).
     WithPlugins(plugins...).
-    Run(ctx)
+    Run()
 ```
 
 `kernel.New` returns an `*Engine`: the composition root that owns the plugin set,

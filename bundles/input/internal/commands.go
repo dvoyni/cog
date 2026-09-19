@@ -12,13 +12,13 @@ func applyCmdImpl() (kernel.Lock, kernel.Execute[input.ApplyRequest, input.Apply
 	var state kernel.Write[*input.State]
 	return func(access kernel.ResourceAccess) {
 			state = access.GetWrite[*input.State]()
-		}, func(k kernel.Kernel, request input.ApplyRequest) (input.ApplyResponse, error) {
+		}, func(k kernel.Kernel, request input.ApplyRequest) input.ApplyResponse {
 			s := state.Get()
 			for _, c := range request.Changes {
 				types.StateApply(s, c)
 				publish(k, c)
 			}
-			return input.ApplyResponse{}, nil
+			return input.ApplyResponse{}
 		}
 }
 
@@ -31,12 +31,12 @@ func synthesizeCmdImpl() (kernel.Lock, kernel.Execute[input.SynthesizeRequest, i
 	var state kernel.Write[*input.State]
 	return func(access kernel.ResourceAccess) {
 			state = access.GetWrite[*input.State]()
-		}, func(k kernel.Kernel, request input.SynthesizeRequest) (input.StateResponse, error) {
+		}, func(k kernel.Kernel, request input.SynthesizeRequest) input.StateResponse {
 			s := state.Get()
 			for _, action := range request.Actions {
 				synthesize(k, s, action)
 			}
-			return snapshot(s), nil
+			return snapshot(s)
 		}
 }
 
@@ -98,8 +98,8 @@ func stateCmdImpl() (kernel.Lock, kernel.Execute[input.StateRequest, input.State
 	var state kernel.Read[*input.State]
 	return func(access kernel.ResourceAccess) {
 			state = access.GetRead[*input.State]()
-		}, func(kernel.Kernel, input.StateRequest) (input.StateResponse, error) {
-			return snapshot(state.Get()), nil
+		}, func(kernel.Kernel, input.StateRequest) input.StateResponse {
+			return snapshot(state.Get())
 		}
 }
 

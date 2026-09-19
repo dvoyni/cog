@@ -73,7 +73,7 @@ type layoutReaderSystem kernel.Subscription[app.UpdateEvent]
 func composeLayoutReader(system any) error {
 	var failure error
 	kernel.New(nil).
-		Handler(func(err error) bool { failure = err; return true }).
+		Handler(func(err error) error { failure = err; return err }).
 		WithPlugins(
 			authority{ids: 8},
 			&componentsPlugin{ids: 8},

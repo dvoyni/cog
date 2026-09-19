@@ -111,18 +111,16 @@ func (p *plugin) Stop(kernel.Executioner) error {
 // admitCapture admits a waiting capture to the tick that has just begun. It
 // declares no resources: the capture slot carries its own lock.
 func (p *plugin) admitCapture() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	return nil, func(kernel.Kernel, app.UpdateEvent) error {
+	return nil, func(kernel.Kernel, app.UpdateEvent) {
 		p.captures.beginTick()
-		return nil
 	}
 }
 
 // admitFrame admits a waiting frame snapshot to the tick that has just
 // begun. It declares no resources: the snapshot slot carries its own lock.
 func (p *plugin) admitFrame() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	return nil, func(kernel.Kernel, app.UpdateEvent) error {
+	return nil, func(kernel.Kernel, app.UpdateEvent) {
 		p.snapshots.beginTick()
-		return nil
 	}
 }
 
@@ -152,13 +150,12 @@ func (p *plugin) presentOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]
 			write = access.GetWrite[*gfx.OpQueue]()
 			ready = access.GetWrite[*readyList]()
 			resources = access.GetRead[*gfx.ResourceQueue]()
-		}, func(_ kernel.Kernel, event app.UpdateEvent) error {
+		}, func(_ kernel.Kernel, event app.UpdateEvent) {
 			p.snapshots.record(write.Get(), resources.Get(), event.Tick)
 			present(write, ready)
 			// Bound beside the queue swap, so the capture rides the ready slot
 			// rather than one particular queue.
 			p.captures.endTick()
-			return nil
 		}
 }
 
@@ -207,13 +204,13 @@ func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 			ready = access.GetWrite[*readyList]()
 			resources = access.GetWrite[*gfx.ResourceQueue]()
 			files = readFiles(access)
-		}, func(k kernel.Kernel, _ app.RenderEvent) error {
+		}, func(k kernel.Kernel, _ app.RenderEvent) {
 			acquire(read, ready)
 			list := read.Get()
 			backend := p.backend.Get()
 			if !backend.Ready() {
 				k.ReportErrorOnce(backendNotReadyKey{}, gfx.ErrBackendNotReady{})
-				return nil
+				return
 			}
 			queue := resources.Get()
 			capture, capturing := p.captures.target()
@@ -233,7 +230,6 @@ func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 				p.captures.encoded()
 			}
 			types.ResourceQueueReset(queue)
-			return nil
 		}
 }
 

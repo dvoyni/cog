@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"slices"
 	"testing"
 
@@ -42,11 +41,11 @@ func seedCmdImpl() (kernel.Lock, kernel.Execute[seedRequest, seedResponse]) {
 	var timelines kernel.Write[*anim.Timelines]
 	return func(access kernel.ResourceAccess) {
 			timelines = access.GetWrite[*anim.Timelines]()
-		}, func(kernel.Kernel, seedRequest) (seedResponse, error) {
+		}, func(kernel.Kernel, seedRequest) seedResponse {
 			tl := timelines.Get().Get(probeKey{})
 			tl.Cue("hello")
 			tl.Add("id", anim.LerpFloat(0, 1), anim.Over(1))
-			return seedResponse{}, nil
+			return seedResponse{}
 		}
 }
 
@@ -54,7 +53,7 @@ func probeCmdImpl() (kernel.Lock, kernel.Execute[probeRequest, probeResponse]) {
 	var timelines kernel.Read[*anim.Timelines]
 	return func(access kernel.ResourceAccess) {
 			timelines = access.GetRead[*anim.Timelines]()
-		}, func(kernel.Kernel, probeRequest) (probeResponse, error) {
+		}, func(kernel.Kernel, probeRequest) probeResponse {
 			tl := timelines.Get().Lookup(probeKey{})
 			_, _, state := tl.Query[anim.Lerp[float32]]("id")
 			return probeResponse{
@@ -62,27 +61,24 @@ func probeCmdImpl() (kernel.Lock, kernel.Execute[probeRequest, probeResponse]) {
 				State: state,
 				Idle:  tl.Idle(),
 				Fired: slices.Collect(tl.Fired[string]()),
-			}, nil
+			}
 		}
 }
 
 // End-to-end: the plugin advances the seeded timeline on each app.UpdateEvent,
 // fires the cue for exactly one tick, and drops the track once it has passed.
 func TestAnimPluginAdvancesOnUpdate(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
-	engine := kernel.New(nil).Handler(func(err error) bool {
+	engine := kernel.New(nil).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(New(), probePlugin{})
-	go engine.Run(ctx)
+	go engine.Run()
+	t.Cleanup(engine.Quit)
 	<-engine.Ready()
 	k := engine.Executioner()
 
-	if _, err := k.ExecuteCommand[seedCmd](seedRequest{}); err != nil {
-		t.Fatal(err)
-	}
+	k.ExecuteCommand[seedCmd](seedRequest{})
 	if response := probe(t, k); response.Value != 0 || response.State != anim.StateActive || response.Idle || len(response.Fired) != 0 {
 		t.Fatalf("before any tick: %+v, want value 0 active, not idle, no cues", response)
 	}
@@ -105,9 +101,5 @@ func TestAnimPluginAdvancesOnUpdate(t *testing.T) {
 
 func probe(t *testing.T, k kernel.Executioner) probeResponse {
 	t.Helper()
-	response, err := k.ExecuteCommand[probeCmd](probeRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return response
+	return k.ExecuteCommand[probeCmd](probeRequest{})
 }

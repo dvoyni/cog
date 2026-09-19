@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"errors"
 	"image/color"
 	"image/png"
@@ -44,19 +43,18 @@ type captureRig struct {
 
 func newCaptureRig(t *testing.T) *captureRig {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
 	renderer, clock, gate, flush := newPlugin(), &timePlugin{}, &gatePlugin{}, &flushPlugin{}
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{},
-	}).Handler(func(err error) bool {
+	}).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(storageplugin.New(), permanentAdapter{}, renderer, clock, gate, flush, testPlugin{})
 	stopped := make(chan struct{})
-	go func() { engine.Run(ctx); close(stopped) }()
+	go func() { engine.Run(); close(stopped) }()
 	<-engine.Ready()
 	t.Cleanup(func() {
-		cancel()
+		engine.Quit()
 		<-stopped
 	})
 
@@ -138,7 +136,7 @@ type timePlugin struct {
 	// step, when set, is what a TimeStep does. A fixture host publishes the
 	// ticks the real tick source would; nil means a step reports and does
 	// nothing, which is what the capture tests want.
-	step func(kernel.Kernel, app.TimeRequest) (app.TimeResponse, error)
+	step func(kernel.Kernel, app.TimeRequest) app.TimeResponse
 	// requests records what was asked of the tick source, so a test can assert
 	// on the shape of the step a capability raised rather than only on its
 	// effect.
@@ -154,7 +152,7 @@ func (t *timePlugin) Register(r *kernel.Registrar, _ any) error {
 }
 
 func (t *timePlugin) timeCmdImpl() (kernel.Lock, kernel.Execute[app.TimeRequest, app.TimeResponse]) {
-	return nil, func(k kernel.Kernel, request app.TimeRequest) (app.TimeResponse, error) {
+	return nil, func(k kernel.Kernel, request app.TimeRequest) app.TimeResponse {
 		t.mu.Lock()
 		t.requests = append(t.requests, request)
 		step := t.step
@@ -162,13 +160,13 @@ func (t *timePlugin) timeCmdImpl() (kernel.Lock, kernel.Execute[app.TimeRequest,
 		if request.Action == app.TimeStep && step != nil {
 			return step(k, request)
 		}
-		return app.TimeResponse{Paused: t.paused.Load()}, nil
+		return app.TimeResponse{Paused: t.paused.Load()}
 	}
 }
 
 // onStep installs what a step does, and asked reports what the tick source was
 // asked for.
-func (t *timePlugin) onStep(step func(kernel.Kernel, app.TimeRequest) (app.TimeResponse, error)) {
+func (t *timePlugin) onStep(step func(kernel.Kernel, app.TimeRequest) app.TimeResponse) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.step = step
@@ -198,13 +196,12 @@ func (g *gatePlugin) Register(r *kernel.Registrar, _ any) error {
 }
 
 func (g *gatePlugin) gateOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	return nil, func(kernel.Kernel, app.UpdateEvent) error {
+	return nil, func(kernel.Kernel, app.UpdateEvent) {
 		if g.entered == nil {
-			return nil
+			return
 		}
 		g.entered <- struct{}{}
 		<-g.release
-		return nil
 	}
 }
 
@@ -297,11 +294,11 @@ func TestACaptureBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 		close(ticked)
 	}()
 	<-rig.gate.entered
-	armed, err := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
+	armed := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
 		Target: gfx.CaptureDesc{Screen: true},
 	})
-	if err != nil {
-		t.Fatalf("arm: %v", err)
+	if armed.Err != nil {
+		t.Fatalf("arm: %v", armed.Err)
 	}
 	release()
 	<-ticked
@@ -352,39 +349,38 @@ func TestNoCaptureCostsTheRenderNothing(t *testing.T) {
 
 func TestASecondCaptureWhileOneIsInFlightIsRefused(t *testing.T) {
 	rig := newCaptureRig(t)
-	if _, err := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
+	if answer := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
 		Target: gfx.CaptureDesc{Screen: true},
-	}); err != nil {
-		t.Fatalf("first arm: %v", err)
+	}); answer.Err != nil {
+		t.Fatalf("first arm: %v", answer.Err)
 	}
-	_, err := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
+	second := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
 		Target: gfx.CaptureDesc{Screen: true},
 	})
-	if !errors.Is(err, gfx.ErrCaptureBusy{}) {
-		t.Fatalf("second arm = %v, want it refused as busy rather than queued", err)
+	if !errors.Is(second.Err, gfx.ErrCaptureBusy{}) {
+		t.Fatalf("second arm = %v, want it refused as busy rather than queued", second.Err)
 	}
 }
 
 func TestACaptureAbandonedByShutdownArrivesOnItsChannel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
 	renderer := newPlugin()
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{},
-	}).Handler(func(err error) bool {
+	}).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, renderer, testPlugin{})
 	stopped := make(chan struct{})
-	go func() { engine.Run(ctx); close(stopped) }()
+	go func() { engine.Run(); close(stopped) }()
 	<-engine.Ready()
 
-	armed, err := engine.Executioner().ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
+	armed := engine.Executioner().ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
 		Target: gfx.CaptureDesc{Screen: true},
 	})
-	if err != nil {
-		t.Fatalf("arm: %v", err)
+	if armed.Err != nil {
+		t.Fatalf("arm: %v", armed.Err)
 	}
-	cancel()
+	engine.Quit()
 	<-stopped
 
 	select {
@@ -569,11 +565,11 @@ func TestABurstUnderPauseIsRefusedInWords(t *testing.T) {
 	}
 
 	// gfx refuses it on its own terms too, for the callers that are not an agent.
-	_, armErr := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
+	arm := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
 		Target: gfx.CaptureDesc{Screen: true}, Amount: 4, Paused: true,
 	})
-	if !errors.Is(armErr, gfx.ErrCaptureBurstPaused{}) {
-		t.Fatalf("paused burst arm = %v, want it refused", armErr)
+	if !errors.Is(arm.Err, gfx.ErrCaptureBurstPaused{}) {
+		t.Fatalf("paused burst arm = %v, want it refused", arm.Err)
 	}
 }
 
@@ -583,10 +579,10 @@ func TestATextureCaptureDeclaresItsTransition(t *testing.T) {
 	withResourceQueue(t, rig.k, func(resources *gfx.ResourceQueue) {
 		target = resources.AllocateTexture(64, 64, 1, gfx.FormatRGBA8)
 	})
-	if _, err := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
+	if answer := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
 		Target: gfx.CaptureDesc{Texture: target.ID()},
-	}); err != nil {
-		t.Fatalf("arm: %v", err)
+	}); answer.Err != nil {
+		t.Fatalf("arm: %v", answer.Err)
 	}
 	q := recordRaw(t, rig.k)
 	q.Pass(gfx.PassDescr{

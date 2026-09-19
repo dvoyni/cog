@@ -49,14 +49,13 @@ func (f *flushPlugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEve
 	var queue kernel.Write[*gfx.OpQueue]
 	return func(access kernel.ResourceAccess) {
 			queue = access.GetWrite[*gfx.OpQueue]()
-		}, func(kernel.Kernel, app.UpdateEvent) error {
+		}, func(kernel.Kernel, app.UpdateEvent) {
 			f.mu.Lock()
 			record := f.record
 			f.mu.Unlock()
 			if record != nil {
 				record(queue.Get())
 			}
-			return nil
 		}
 }
 
@@ -295,9 +294,9 @@ func TestAFrameSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 		close(ticked)
 	}()
 	<-rig.gate.entered
-	armed, err := rig.k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{})
-	if err != nil {
-		t.Fatalf("arm: %v", err)
+	armed := rig.k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{})
+	if armed.Err != nil {
+		t.Fatalf("arm: %v", armed.Err)
 	}
 	release()
 	<-ticked
@@ -329,8 +328,8 @@ func TestAFrameSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 
 func TestASecondFrameSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 	rig := newCaptureRig(t)
-	if _, err := rig.k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{}); err != nil {
-		t.Fatalf("first arm: %v", err)
+	if answer := rig.k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{}); answer.Err != nil {
+		t.Fatalf("first arm: %v", answer.Err)
 	}
 
 	_, err := callFrame(rig.k, frameSnapshotRequest{})
@@ -344,19 +343,19 @@ func TestASecondFrameSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 
 	// A capture and the other packages' snapshots are separate slots. Refusing
 	// across kinds would destroy the pairing arming them together is for.
-	if _, err := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
+	if answer := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
 		Target: gfx.CaptureDesc{Screen: true},
-	}); err != nil {
-		t.Fatalf("a capture was refused while a frame snapshot was in flight: %v", err)
+	}); answer.Err != nil {
+		t.Fatalf("a capture was refused while a frame snapshot was in flight: %v", answer.Err)
 	}
 }
 
 func TestAFrameSnapshotUnderPausePerformsOneStepAndSaysSo(t *testing.T) {
 	rig := newCaptureRig(t)
 	rig.clock.paused.Store(true)
-	rig.clock.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
+	rig.clock.onStep(func(k kernel.Kernel, _ app.TimeRequest) app.TimeResponse {
 		k.PublishEvent(app.UpdateEvent{Last: true}).Wait()
-		return app.TimeResponse{Paused: true, Stepped: 1}, nil
+		return app.TimeResponse{Paused: true, Stepped: 1}
 	})
 	// Recorded before the call and never ticked away: a paused engine runs no
 	// tick of its own, so the step the capability raises is the only one.
@@ -393,9 +392,9 @@ func TestAFrameSnapshotUnderPausePerformsOneStepAndSaysSo(t *testing.T) {
 func TestAFrameSnapshotJoiningAPendingStepSaysThatToo(t *testing.T) {
 	rig := newCaptureRig(t)
 	rig.clock.paused.Store(true)
-	rig.clock.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
+	rig.clock.onStep(func(k kernel.Kernel, _ app.TimeRequest) app.TimeResponse {
 		k.PublishEvent(app.UpdateEvent{Last: true}).Wait()
-		return app.TimeResponse{Paused: true, Stepped: 1, Joined: true}, nil
+		return app.TimeResponse{Paused: true, Stepped: 1, Joined: true}
 	})
 	frozen := recordRaw(t, rig.k)
 	frozen.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Label: "shared"})
@@ -418,9 +417,9 @@ func TestAFrameSnapshotJoiningAPendingStepSaysThatToo(t *testing.T) {
 func TestAFrameSnapshotNamesTheTickItDescribes(t *testing.T) {
 	rig := newCaptureRig(t)
 	rig.clock.paused.Store(true)
-	rig.clock.onStep(func(k kernel.Kernel, _ app.TimeRequest) (app.TimeResponse, error) {
+	rig.clock.onStep(func(k kernel.Kernel, _ app.TimeRequest) app.TimeResponse {
 		k.PublishEvent(app.UpdateEvent{Last: true, Tick: 97}).Wait()
-		return app.TimeResponse{Paused: true, Stepped: 1}, nil
+		return app.TimeResponse{Paused: true, Stepped: 1}
 	})
 	frozen := recordRaw(t, rig.k)
 	frozen.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Label: "shared"})

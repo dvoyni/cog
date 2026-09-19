@@ -1,8 +1,8 @@
 package kernel
 
 import (
-	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -33,15 +33,13 @@ type testCounterResource int
 type testLateResource int
 type testContendedResource int
 
-type invocationContextKey struct{}
-
 // observing and executing wrap a bare body as a factory that declares no locks.
-func observing[TEvent any](body func(Kernel, TEvent) error) func() (Lock, Observe[TEvent]) {
+func observing[TEvent any](body func(Kernel, TEvent)) func() (Lock, Observe[TEvent]) {
 	return func() (Lock, Observe[TEvent]) { return nil, body }
 }
 
 func executing[TRequest any, TResponse any](
-	body func(Kernel, TRequest) (TResponse, error),
+	body func(Kernel, TRequest) TResponse,
 ) Command[TRequest, TResponse] {
 	return func() (Lock, Execute[TRequest, TResponse]) { return nil, body }
 }
@@ -81,7 +79,7 @@ func subscribeForTest[TEvent any](
 	registry *Registrar, name string,
 	lock Lock,
 	before, after []string,
-	body func(Kernel, TEvent) error,
+	body func(Kernel, TEvent),
 ) {
 	factory := func() (Lock, Observe[TEvent]) { return lock, body }
 	var subscription *Ordering[TEvent]
@@ -135,23 +133,30 @@ func (p testPlugin) Stop(kernel Executioner) error {
 type testHostPlugin struct {
 	name PluginName
 	run  func() error
+	quit func()
 }
 
 func (p *testHostPlugin) Name() PluginName               { return p.name }
 func (p *testHostPlugin) Dependencies() []PluginName     { return nil }
 func (p *testHostPlugin) Register(*Registrar, any) error { return nil }
 func (p *testHostPlugin) Run(Executioner) error          { return p.run() }
+func (p *testHostPlugin) Quit() {
+	if p.quit != nil {
+		p.quit()
+	}
+}
 
-type publishingHostPlugin struct{}
+type publishingHostPlugin struct{ quit chan struct{} }
 
 func (p *publishingHostPlugin) Name() PluginName               { return "publishing-system" }
 func (p *publishingHostPlugin) Dependencies() []PluginName     { return nil }
 func (p *publishingHostPlugin) Register(*Registrar, any) error { return nil }
 func (p *publishingHostPlugin) Run(kernel Executioner) error {
 	kernel.PublishEvent(1)
-	<-kernel.Context().Done()
+	<-p.quit
 	return nil
 }
+func (p *publishingHostPlugin) Quit() { close(p.quit) }
 
 // configPlugin captures the config it is handed at Init, for config-passing tests.
 type configPlugin struct {
@@ -195,29 +200,26 @@ func (p stopOnlyPlugin) Stop(Executioner) error {
 // startEngine builds an engine bound to a test-scoped context.
 func startEngine(t *testing.T, plugins ...Plugin) *Engine {
 	t.Helper()
-	return startEngineWithHandler(t, func(err error) bool {
+	return startEngineWithHandler(t, func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}, plugins...)
 }
 
 func startEngineWithHandler(t *testing.T, handler ErrorHandler, plugins ...Plugin) *Engine {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	e := New(nil).Handler(handler).WithPlugins(plugins...)
-	go e.Run(ctx)
+	go e.Run()
+	t.Cleanup(e.Quit)
 	<-e.Ready()
 	return e
 }
 
-// publishForTest publishes under a bounded context, so a stuck subscriber fails
-// the publication instead of hanging the test.
+// publishForTest publishes and hands back the completion handle. A stuck
+// subscriber hangs the publication, which the test's own deadline catches.
 func publishForTest[TEvent any](t *testing.T, engine *Engine, event TEvent) *Publication {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	t.Cleanup(cancel)
-	return engine.Executioner().WithContext(ctx).PublishEvent(event)
+	return engine.Executioner().PublishEvent(event)
 }
 
 // waitFor blocks until the async event batch signals completion (or times out).
@@ -235,10 +237,9 @@ func waitFor(t *testing.T, done <-chan struct{}) {
 // Subscriptions run in topological order derived from their before/after edges.
 func TestKernel_SubscriptionsRunInTopologicalOrder(t *testing.T) {
 	var order []string
-	record := func(name string) func(Kernel, int) error {
-		return func(Kernel, int) error {
+	record := func(name string) func(Kernel, int) {
+		return func(Kernel, int) {
 			order = append(order, name)
-			return nil
 		}
 	}
 
@@ -248,9 +249,8 @@ func TestKernel_SubscriptionsRunInTopologicalOrder(t *testing.T) {
 		subscribeForTest[int](registry, "c", nil, nil, []string{"b"}, record("c"))
 		subscribeForTest[int](registry, "a", nil, nil, nil, record("a"))
 		subscribeForTest[int](registry, "b", nil, nil, []string{"a"}, record("b"))
-		registry.Subscribe[testHandlerDone[int]](observing(func(Kernel, int) error {
+		registry.Subscribe[testHandlerDone[int]](observing(func(Kernel, int) {
 			close(done)
-			return nil
 		})).Last()
 		return nil
 	}}
@@ -269,15 +269,13 @@ func TestKernel_IndependentSubscribersRunConcurrently(t *testing.T) {
 	startedB := make(chan struct{})
 	release := make(chan struct{})
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
-		registry.Subscribe[testHandlerA[int]](observing(func(Kernel, int) error {
+		registry.Subscribe[testHandlerA[int]](observing(func(Kernel, int) {
 			close(startedA)
 			<-release
-			return nil
 		}))
-		registry.Subscribe[testHandlerB[int]](observing(func(Kernel, int) error {
+		registry.Subscribe[testHandlerB[int]](observing(func(Kernel, int) {
 			close(startedB)
 			<-release
-			return nil
 		}))
 		return nil
 	}}
@@ -294,59 +292,20 @@ func TestKernel_IndependentSubscribersRunConcurrently(t *testing.T) {
 	waitStarted(startedA)
 	waitStarted(startedB)
 	close(release)
-	if err := publication.Wait(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestKernel_SubscriberReceivesPublicationContext(t *testing.T) {
-	got := false
-	p := testPlugin{name: "p", register: func(registry *Registrar) error {
-		registry.Subscribe[testHandlerA[int]](observing(func(k Kernel, _ int) error {
-			got = k.Context() != nil
-			return nil
-		}))
-		return nil
-	}}
-	e := startEngine(t, p)
-	if err := publishForTest(t, e, 1).Wait(); err != nil {
-		t.Fatal(err)
-	}
-	if !got {
-		t.Fatal("subscriber received nil context")
-	}
-}
-
-func TestKernel_PublicationContextCancelsSubscriber(t *testing.T) {
-	p := testPlugin{name: "p", register: func(registry *Registrar) error {
-		registry.Subscribe[testHandlerA[int]](observing(func(k Kernel, _ int) error {
-			<-k.Context().Done()
-			return k.Context().Err()
-		}))
-		return nil
-	}}
-	e := startEngineWithHandler(t, func(error) bool { return false }, p)
-	ctx, cancel := context.WithCancel(context.Background())
-	publication := e.Executioner().WithContext(ctx).PublishEvent(1)
-	cancel()
-	if err := publication.Wait(); !errors.Is(err, context.Canceled) {
-		t.Fatalf("publication error = %v, want context.Canceled", err)
-	}
+	publication.Wait()
 }
 
 func TestKernel_SubscriptionsSortAfterAllPluginsInit(t *testing.T) {
 	var order []string
 	first := testPlugin{name: "first", register: func(registry *Registrar) error {
-		registry.Subscribe[testHandlerFirst[int]](observing(func(Kernel, int) error {
+		registry.Subscribe[testHandlerFirst[int]](observing(func(Kernel, int) {
 			order = append(order, "first")
-			return nil
 		})).After[testHandlerLast[int]]()
 		return nil
 	}}
 	later := testPlugin{name: "later", register: func(registry *Registrar) error {
-		registry.Subscribe[testHandlerLast[int]](observing(func(Kernel, int) error {
+		registry.Subscribe[testHandlerLast[int]](observing(func(Kernel, int) {
 			order = append(order, "later")
-			return nil
 		}))
 		return nil
 	}}
@@ -361,12 +320,12 @@ func TestKernel_SubscriptionsSortAfterAllPluginsInit(t *testing.T) {
 func TestKernel_DescribeReportsOwnersAndSubscriptionDependencies(t *testing.T) {
 	provider := testPlugin{name: "provider", register: func(registry *Registrar) error {
 		registry.InitResource(testCounterResource(1))
-		registry.HandleCommand[testDoubleCmd](executing(func(Kernel, int) (int, error) { return 0, nil }))
-		registry.Subscribe[testHandlerA[int]](observing(func(Kernel, int) error { return nil }))
+		registry.HandleCommand[testDoubleCmd](executing(func(Kernel, int) int { return 0 }))
+		registry.Subscribe[testHandlerA[int]](observing(func(Kernel, int) {}))
 		return nil
 	}}
 	consumer := testPlugin{name: "consumer", deps: []PluginName{"provider"}, register: func(registry *Registrar) error {
-		registry.Subscribe[testHandlerB[int]](observing(func(Kernel, int) error { return nil })).
+		registry.Subscribe[testHandlerB[int]](observing(func(Kernel, int) {})).
 			After[testHandlerA[int]]()
 		return nil
 	}}
@@ -407,9 +366,8 @@ func TestKernel_ResourceHandleBoundBeforeInitializationObservesValue(t *testing.
 		registry.Subscribe[testHandlerReader[int]](func() (Lock, Observe[int]) {
 			return func(access ResourceAccess) {
 					late = access.GetRead[testLateResource]()
-				}, func(Kernel, int) error {
+				}, func(Kernel, int) {
 					got = int(late.Get())
-					return nil
 				}
 		})
 		registry.InitResource(testLateResource(42))
@@ -432,9 +390,8 @@ func TestKernel_DeclaredDependencyMayLockAnotherPluginsResource(t *testing.T) {
 		registry.Subscribe[testHandlerReader[int]](func() (Lock, Observe[int]) {
 			return func(access ResourceAccess) {
 					late = access.GetRead[testLateResource]()
-				}, func(Kernel, int) error {
+				}, func(Kernel, int) {
 					got = int(late.Get())
-					return nil
 				}
 		})
 		return nil
@@ -456,12 +413,12 @@ func TestKernel_MissingDeclaredResourceFailsFinalization(t *testing.T) {
 		registry.Subscribe[testHandlerReader[int]](func() (Lock, Observe[int]) {
 			return func(access ResourceAccess) {
 				access.GetRead[testLateResource]()
-			}, func(Kernel, int) error { return nil }
+			}, func(Kernel, int) {}
 		})
 		return nil
 	}}
 	var handled error
-	New(nil).Handler(func(err error) bool { handled = err; return true }).WithPlugins(p)
+	New(nil).Handler(func(err error) error { handled = err; return err }).WithPlugins(p)
 	var missing ErrMissingResource
 	if !errors.As(handled, &missing) || missing.Type != reflect.TypeFor[testLateResource]() {
 		t.Fatalf("handled = %v, want missing testLateResource", handled)
@@ -479,21 +436,18 @@ func TestKernel_ResourceReadWrite(t *testing.T) {
 		subscribeForTest(registry, "writer",
 			func(access ResourceAccess) { writable = access.GetWrite[testCounterResource]() },
 			nil, nil,
-			func(_ Kernel, event int) error {
+			func(_ Kernel, event int) {
 				writable.Set(testCounterResource(event * 2))
-				return nil
 			})
 		var readable Read[testCounterResource]
 		subscribeForTest(registry, "reader",
 			func(access ResourceAccess) { readable = access.GetRead[testCounterResource]() },
 			nil, []string{"writer"},
-			func(Kernel, int) error {
+			func(Kernel, int) {
 				got = int(readable.Get())
-				return nil
 			})
-		registry.Subscribe[testHandlerDone[int]](observing(func(Kernel, int) error {
+		registry.Subscribe[testHandlerDone[int]](observing(func(Kernel, int) {
 			close(done)
-			return nil
 		})).Last()
 		return nil
 	}}
@@ -516,13 +470,11 @@ func TestKernel_ResourceInitialValue(t *testing.T) {
 		subscribeForTest(registry, "reader",
 			func(access ResourceAccess) { readable = access.GetRead[testCounterResource]() },
 			nil, nil,
-			func(Kernel, int) error {
+			func(Kernel, int) {
 				got = int(readable.Get())
-				return nil
 			})
-		registry.Subscribe[testHandlerDone[int]](observing(func(Kernel, int) error {
+		registry.Subscribe[testHandlerDone[int]](observing(func(Kernel, int) {
 			close(done)
-			return nil
 		})).Last()
 		return nil
 	}}
@@ -544,7 +496,7 @@ func TestKernel_RegistrationFailureStopsInitialization(t *testing.T) {
 		return nil
 	}}
 	var handled error
-	New(nil).Handler(func(err error) bool { handled = err; return false }).WithPlugins(failing, following)
+	New(nil).Handler(func(err error) error { handled = err; return nil }).WithPlugins(failing, following)
 	if !errors.Is(handled, boom) || initialized {
 		t.Fatalf("handled error = %v, following initialized = %v", handled, initialized)
 	}
@@ -553,15 +505,14 @@ func TestKernel_RegistrationFailureStopsInitialization(t *testing.T) {
 func TestKernel_PluginStartExecutesCommandsAfterRegistration(t *testing.T) {
 	got := 0
 	provider := testPlugin{name: "provider", register: func(registry *Registrar) error {
-		registry.HandleCommand[testDoubleCmd](executing(func(Kernel, int) (int, error) {
-			return 42, nil
+		registry.HandleCommand[testDoubleCmd](executing(func(Kernel, int) int {
+			return 42
 		}))
 		return nil
 	}}
 	consumer := testPlugin{name: "consumer", deps: []PluginName{"provider"}, start: func(k Executioner) error {
-		var err error
-		got, err = k.ExecuteCommand[testDoubleCmd](0)
-		return err
+		got = k.ExecuteCommand[testDoubleCmd](0)
+		return nil
 	}}
 
 	startEngine(t, consumer, provider)
@@ -577,7 +528,7 @@ func TestKernel_DuplicateResourceRegistrationFails(t *testing.T) {
 		return nil
 	}}
 	var handled error
-	New(nil).Handler(func(err error) bool { handled = err; return true }).WithPlugins(p)
+	New(nil).Handler(func(err error) error { handled = err; return err }).WithPlugins(p)
 	var duplicate ErrDuplicateRegistration
 	if !errors.As(handled, &duplicate) || duplicate.Kind != "resource" {
 		t.Fatalf("handled error = %v, want duplicate resource registration", handled)
@@ -617,18 +568,17 @@ func TestKernel_ExecuteCommand(t *testing.T) {
 		registry.HandleCommand[testDoubleCmd](func() (Lock, Execute[int, int]) {
 			return func(access ResourceAccess) {
 					counter = access.GetWrite[testCounterResource]()
-				}, func(_ Kernel, request int) (int, error) {
+				}, func(_ Kernel, request int) int {
 					counter.Set(testCounterResource(request))
-					return int(counter.Get()) * 2, nil
+					return int(counter.Get()) * 2
 				}
 		})
 		return nil
 	}}
 
 	e := startEngine(t, p)
-	got, err := e.Executioner().ExecuteCommand[testDoubleCmd](21)
-	if err != nil || got != 42 {
-		t.Fatalf("got = %d, %v; want 42, nil", got, err)
+	if got := e.Executioner().ExecuteCommand[testDoubleCmd](21); got != 42 {
+		t.Fatalf("got = %d, want 42", got)
 	}
 }
 
@@ -642,24 +592,20 @@ func TestKernel_UsesGrantsNestedDispatch(t *testing.T) {
 		registry.HandleCommand[testDoubleCmd](func() (Lock, Execute[int, int]) {
 			return func(access ResourceAccess) {
 				counter = access.GetWrite[testCounterResource]()
-			}, func(Kernel, int) (int, error) { return int(counter.Get()), nil }
+			}, func(Kernel, int) int { return int(counter.Get()) }
 		})
-		var double func(Kernel, int) (int, error)
+		var double func(Kernel, int) int
 		registry.Subscribe[testHandlerA[int]](func() (Lock, Observe[int]) {
 			return func(access ResourceAccess) {
 					double = access.Uses[testDoubleCmd]()
-				}, func(k Kernel, _ int) error {
-					value, err := double(k, 0)
-					got = value
-					return err
+				}, func(k Kernel, _ int) {
+					got = double(k, 0)
 				}
 		})
 		return nil
 	}}
 	e := startEngine(t, p)
-	if err := publishForTest(t, e, 1).Wait(); err != nil {
-		t.Fatal(err)
-	}
+	publishForTest(t, e, 1).Wait()
 	if got != 7 {
 		t.Fatalf("command response = %d, want 7", got)
 	}
@@ -679,19 +625,19 @@ func TestKernel_UsesWidensLockSetTransitively(t *testing.T) {
 		registry.HandleCommand[testFailCmd](func() (Lock, Execute[struct{}, int]) {
 			return func(access ResourceAccess) {
 				access.GetWrite[testLateResource]()
-			}, func(Kernel, struct{}) (int, error) { return 0, nil }
+			}, func(Kernel, struct{}) int { return 0 }
 		})
 		registry.HandleCommand[testOtherDoubleCmd](func() (Lock, Execute[int, int]) {
 			return func(access ResourceAccess) {
 				access.GetRead[testCounterResource]()
 				access.Uses[testFailCmd]()
-			}, func(Kernel, int) (int, error) { return 0, nil }
+			}, func(Kernel, int) int { return 0 }
 		})
 		registry.HandleCommand[testDoubleCmd](func() (Lock, Execute[int, int]) {
 			return func(access ResourceAccess) {
 				access.GetWrite[testCounterResource]()
 				access.Uses[testOtherDoubleCmd]()
-			}, func(Kernel, int) (int, error) { return 0, nil }
+			}, func(Kernel, int) int { return 0 }
 		})
 		return nil
 	}}
@@ -712,16 +658,16 @@ func TestKernel_UsesCycleFailsComposition(t *testing.T) {
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
 		registry.HandleCommand[testDoubleCmd](func() (Lock, Execute[int, int]) {
 			return func(access ResourceAccess) { access.Uses[testOtherDoubleCmd]() },
-				func(Kernel, int) (int, error) { return 0, nil }
+				func(Kernel, int) int { return 0 }
 		})
 		registry.HandleCommand[testOtherDoubleCmd](func() (Lock, Execute[int, int]) {
 			return func(access ResourceAccess) { access.Uses[testDoubleCmd]() },
-				func(Kernel, int) (int, error) { return 0, nil }
+				func(Kernel, int) int { return 0 }
 		})
 		return nil
 	}}
 	var handled error
-	New(nil).Handler(func(err error) bool { handled = err; return true }).WithPlugins(p)
+	New(nil).Handler(func(err error) error { handled = err; return err }).WithPlugins(p)
 	var cycle ErrUsingCommandCycle
 	if !errors.As(handled, &cycle) || len(cycle.Commands) < 2 {
 		t.Fatalf("handled error = %v, want ErrUsingCommandCycle", handled)
@@ -732,12 +678,12 @@ func TestKernel_UsesUnknownCommandFailsComposition(t *testing.T) {
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
 		registry.HandleCommand[testDoubleCmd](func() (Lock, Execute[int, int]) {
 			return func(access ResourceAccess) { access.Uses[testMissingCmd]() },
-				func(Kernel, int) (int, error) { return 0, nil }
+				func(Kernel, int) int { return 0 }
 		})
 		return nil
 	}}
 	var handled error
-	New(nil).Handler(func(err error) bool { handled = err; return true }).WithPlugins(p)
+	New(nil).Handler(func(err error) error { handled = err; return err }).WithPlugins(p)
 	var unknown ErrUsingUnknownCommand
 	if !errors.As(handled, &unknown) || unknown.Command != reflect.TypeFor[testMissingCmd]() {
 		t.Fatalf("handled error = %v, want ErrUsingUnknownCommand for testMissingCmd", handled)
@@ -747,13 +693,12 @@ func TestKernel_UsesUnknownCommandFailsComposition(t *testing.T) {
 // A Uses declaration binds after every plugin has registered, so the command may
 // be registered by a plugin that comes later.
 func TestKernel_UsesResolvesRegardlessOfRegistrationOrder(t *testing.T) {
-	var got int
 	user := testPlugin{name: "user", deps: []PluginName{"provider"}, register: func(registry *Registrar) error {
-		var double func(Kernel, int) (int, error)
+		var double func(Kernel, int) int
 		registry.HandleCommand[testOtherDoubleCmd](func() (Lock, Execute[int, int]) {
 			return func(access ResourceAccess) {
 					double = access.Uses[testDoubleCmd]()
-				}, func(k Kernel, request int) (int, error) {
+				}, func(k Kernel, request int) int {
 					return double(k, request)
 				}
 		})
@@ -765,15 +710,14 @@ func TestKernel_UsesResolvesRegardlessOfRegistrationOrder(t *testing.T) {
 		registry.HandleCommand[testDoubleCmd](func() (Lock, Execute[int, int]) {
 			return func(access ResourceAccess) {
 				counter = access.GetWrite[testCounterResource]()
-			}, func(Kernel, int) (int, error) { return int(counter.Get()) * 2, nil }
+			}, func(Kernel, int) int { return int(counter.Get()) * 2 }
 		})
 		return nil
 	}}
 
 	e := startEngine(t, user, provider)
-	got, err := e.Executioner().ExecuteCommand[testOtherDoubleCmd](0)
-	if err != nil || got != 42 {
-		t.Fatalf("response = %d, %v; want 42, nil", got, err)
+	if got := e.Executioner().ExecuteCommand[testOtherDoubleCmd](0); got != 42 {
+		t.Fatalf("response = %d, want 42", got)
 	}
 }
 
@@ -787,21 +731,18 @@ func TestKernel_ExecuteCommandAsyncAcquiresOwnLocks(t *testing.T) {
 		registry.HandleCommand[testDoubleCmd](func() (Lock, Execute[int, int]) {
 			return func(access ResourceAccess) {
 					counter = access.GetWrite[testCounterResource]()
-				}, func(Kernel, int) (int, error) {
+				}, func(Kernel, int) int {
 					applied <- int(counter.Get())
-					return 0, nil
+					return 0
 				}
 		})
-		registry.Subscribe[testHandlerA[int]](observing(func(k Kernel, _ int) error {
+		registry.Subscribe[testHandlerA[int]](observing(func(k Kernel, _ int) {
 			k.ExecuteCommandAsync[testDoubleCmd](0)
-			return nil
 		}))
 		return nil
 	}}
 	e := startEngine(t, p)
-	if err := publishForTest(t, e, 1).Wait(); err != nil {
-		t.Fatal(err)
-	}
+	publishForTest(t, e, 1).Wait()
 	select {
 	case got := <-applied:
 		if got != 7 {
@@ -812,129 +753,116 @@ func TestKernel_ExecuteCommandAsyncAcquiresOwnLocks(t *testing.T) {
 	}
 }
 
-func TestKernel_ExecuteCommandAsyncReportsErrors(t *testing.T) {
+// An async dispatch has no caller to answer, so what goes wrong inside it
+// reaches the handler and nowhere else. A body cannot return a failure now, so
+// the failure with nowhere else to go is a panic.
+func TestKernel_ExecuteCommandAsyncReportsWhatGoesWrong(t *testing.T) {
 	boom := errors.New("async boom")
 	errCh := make(chan error, 1)
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
-		registry.HandleCommand[testFailCmd](executing(func(Kernel, struct{}) (int, error) { return 0, boom }))
-		registry.Subscribe[testHandlerA[int]](observing(func(k Kernel, _ int) error {
+		registry.HandleCommand[testFailCmd](executing(func(Kernel, struct{}) int { panic(boom) }))
+		registry.Subscribe[testHandlerA[int]](observing(func(k Kernel, _ int) {
 			k.ExecuteCommandAsync[testFailCmd](struct{}{})
-			return nil
 		}))
 		return nil
 	}}
-	e := startEngineWithHandler(t, func(err error) bool { errCh <- err; return false }, p)
-	if err := publishForTest(t, e, 1).Wait(); err != nil {
-		t.Fatal(err)
-	}
+	e := startEngineWithHandler(t, func(err error) error { errCh <- err; return nil }, p)
+	publishForTest(t, e, 1).Wait()
 	select {
 	case got := <-errCh:
-		if !errors.Is(got, boom) {
-			t.Fatalf("handled error = %v, want %v", got, boom)
+		var panicked ErrPluginPanic
+		if !errors.As(got, &panicked) || panicked.Recovered != error(boom) {
+			t.Fatalf("handled error = %v, want a plugin panic carrying %v", got, boom)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for asynchronous command error")
 	}
 }
 
-func TestKernel_ZeroKernelPanics(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("zero Kernel did not panic")
-		}
-	}()
-	var zero Kernel
-	zero.ReportError(errors.New("boom"))
-}
-
 func TestKernel_CommandTypesWithSameSignatureAreIndependent(t *testing.T) {
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
-		registry.HandleCommand[testDoubleCmd](executing(func(Kernel, int) (int, error) { return 1, nil }))
-		registry.HandleCommand[testOtherDoubleCmd](executing(func(Kernel, int) (int, error) { return 2, nil }))
+		registry.HandleCommand[testDoubleCmd](executing(func(Kernel, int) int { return 1 }))
+		registry.HandleCommand[testOtherDoubleCmd](executing(func(Kernel, int) int { return 2 }))
 		return nil
 	}}
 	e := startEngine(t, p)
-	first, firstErr := e.Executioner().ExecuteCommand[testDoubleCmd](0)
-	second, secondErr := e.Executioner().ExecuteCommand[testOtherDoubleCmd](0)
-	if firstErr != nil || secondErr != nil || first != 1 || second != 2 {
-		t.Fatalf("responses = %d/%v, %d/%v; want 1/nil, 2/nil", first, firstErr, second, secondErr)
+	first := e.Executioner().ExecuteCommand[testDoubleCmd](0)
+	second := e.Executioner().ExecuteCommand[testOtherDoubleCmd](0)
+	if first != 1 || second != 2 {
+		t.Fatalf("responses = %d, %d; want 1, 2", first, second)
 	}
 }
 
 func TestKernel_DuplicateCommandRegistrationFails(t *testing.T) {
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
-		registry.HandleCommand[testDoubleCmd](executing(func(Kernel, int) (int, error) { return 1, nil }))
-		registry.HandleCommand[testDoubleCmd](executing(func(Kernel, int) (int, error) { return 2, nil }))
+		registry.HandleCommand[testDoubleCmd](executing(func(Kernel, int) int { return 1 }))
+		registry.HandleCommand[testDoubleCmd](executing(func(Kernel, int) int { return 2 }))
 		return nil
 	}}
 	var handled error
-	New(nil).Handler(func(err error) bool { handled = err; return true }).WithPlugins(p)
+	New(nil).Handler(func(err error) error { handled = err; return err }).WithPlugins(p)
 	var duplicate ErrDuplicateRegistration
 	if !errors.As(handled, &duplicate) || duplicate.Kind != "command" {
 		t.Fatalf("handled error = %v, want duplicate command registration", handled)
 	}
 }
 
-func TestKernel_ExecuteCommandReturnsSystemError(t *testing.T) {
+// A body has no error to return, so a failure nobody can act on is reported and
+// the response says what it can. The caller reads the response; the handler
+// reads the failure.
+func TestKernel_ACommandBodyReportsWhatItCannotAnswer(t *testing.T) {
 	boom := errors.New("command boom")
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
-		registry.HandleCommand[testFailCmd](executing(func(Kernel, struct{}) (int, error) { return 99, boom }))
+		registry.HandleCommand[testFailCmd](executing(func(k Kernel, _ struct{}) int {
+			k.ReportError(boom)
+			return 99
+		}))
 		return nil
 	}}
 	var handled error
-	e := startEngineWithHandler(t, func(err error) bool { handled = err; return false }, p)
+	e := startEngineWithHandler(t, func(err error) error { handled = err; return nil }, p)
 
-	got, err := e.Executioner().ExecuteCommand[testFailCmd](struct{}{})
-	if got != 0 {
-		t.Fatalf("response = %d, want zero", got)
+	if got := e.Executioner().ExecuteCommand[testFailCmd](struct{}{}); got != 99 {
+		t.Fatalf("response = %d, want 99: a reported failure does not take the answer away", got)
 	}
-	if !errors.Is(err, boom) || handled != nil {
-		t.Fatalf("returned error = %v, handled error = %v; want boom returned only", err, handled)
+	if !errors.Is(handled, boom) {
+		t.Fatalf("handled error = %v, want %v", handled, boom)
 	}
 }
 
-func TestKernel_CommandPanicReturnsTypedFault(t *testing.T) {
+// A panicking body is recovered and reported as a typed fault naming the plugin;
+// the caller gets the zero response and is told nothing else.
+func TestKernel_CommandPanicIsReportedAsATypedFault(t *testing.T) {
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
-		registry.HandleCommand[testPanicCmd](executing(func(Kernel, struct{}) (int, error) {
+		registry.HandleCommand[testPanicCmd](executing(func(Kernel, struct{}) int {
 			panic("boom")
 		}))
 		return nil
 	}}
-	e := startEngine(t, p)
-
-	_, err := e.Executioner().ExecuteCommand[testPanicCmd](struct{}{})
-	var panicErr ErrPluginPanic
-	if !errors.As(err, &panicErr) || panicErr.Plugin != "p" || len(panicErr.Stack) == 0 {
-		t.Fatalf("error = %#v, want typed plugin panic with stack", err)
-	}
-}
-
-func TestKernel_CommandReceivesInvocationContext(t *testing.T) {
-	p := testPlugin{name: "p", register: func(registry *Registrar) error {
-		registry.HandleCommand[testDoubleCmd](executing(func(k Kernel, _ int) (int, error) {
-			return k.Context().Value(invocationContextKey{}).(int), nil
-		}))
-		return nil
-	}}
-	e := startEngine(t, p)
-	ctx := context.WithValue(context.Background(), invocationContextKey{}, 42)
-	got, err := e.Executioner().WithContext(ctx).ExecuteCommand[testDoubleCmd](0)
-	if err != nil || got != 42 {
-		t.Fatalf("response = %d, %v; want 42, nil", got, err)
-	}
-}
-
-func TestKernel_ExecuteUnknownCommandReturnsError(t *testing.T) {
 	var handled error
-	e := startEngineWithHandler(t, func(err error) bool { handled = err; return false })
+	e := startEngineWithHandler(t, func(err error) error { handled = err; return nil }, p)
 
-	got, err := e.Executioner().ExecuteCommand[testMissingCmd](struct{}{})
-	if got != 0 {
+	if got := e.Executioner().ExecuteCommand[testPanicCmd](struct{}{}); got != 0 {
+		t.Fatalf("response = %d, want zero after a panic", got)
+	}
+	var panicErr ErrPluginPanic
+	if !errors.As(handled, &panicErr) || panicErr.Plugin != "p" || len(panicErr.Stack) == 0 {
+		t.Fatalf("handled = %#v, want typed plugin panic with stack", handled)
+	}
+}
+
+// A dispatch the kernel cannot perform is the kernel's own failure, so it goes
+// where every other failure goes.
+func TestKernel_ExecuteUnknownCommandIsReported(t *testing.T) {
+	var handled error
+	e := startEngineWithHandler(t, func(err error) error { handled = err; return nil })
+
+	if got := e.Executioner().ExecuteCommand[testMissingCmd](struct{}{}); got != 0 {
 		t.Fatalf("response = %d, want zero", got)
 	}
 	var unknown ErrExecutingUnknownCommand[testMissingCmd]
-	if !errors.As(err, &unknown) || handled != nil {
-		t.Fatalf("returned error = %v, handled error = %v; want unknown command returned only", err, handled)
+	if !errors.As(handled, &unknown) {
+		t.Fatalf("handled error = %v, want an unknown-command report", handled)
 	}
 }
 
@@ -943,7 +871,7 @@ func TestKernel_ExecuteUnknownCommandReturnsError(t *testing.T) {
 func TestKernel_MissingPluginDependencyIsReported(t *testing.T) {
 	var handled error
 	dependent := testPlugin{name: "dependent", deps: []PluginName{"absent"}, register: func(*Registrar) error { return nil }}
-	New(nil).Handler(func(err error) bool { handled = err; return true }).WithPlugins(dependent)
+	New(nil).Handler(func(err error) error { handled = err; return err }).WithPlugins(dependent)
 
 	var missing ErrMissingPluginDependency
 	if !errors.As(handled, &missing) {
@@ -956,7 +884,7 @@ func TestKernel_MissingPluginDependencyIsReported(t *testing.T) {
 
 func TestKernel_CompositionFailureClosesReadyEvenWhenHandlerContinues(t *testing.T) {
 	dependent := testPlugin{name: "dependent", deps: []PluginName{"absent"}}
-	e := New(nil).Handler(func(error) bool { return false }).WithPlugins(dependent)
+	e := New(nil).Handler(func(err error) error { return nil }).WithPlugins(dependent)
 	select {
 	case <-e.Ready():
 	default:
@@ -978,9 +906,9 @@ func TestKernel_PluginsInitializeInDependencyOrder(t *testing.T) {
 	unrelated := testPlugin{name: "unrelated", register: record("unrelated")}
 	provider := testPlugin{name: "provider", register: record("provider")}
 
-	New(nil).Handler(func(err error) bool {
+	New(nil).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(dependent, unrelated, provider)
 
 	want := []PluginName{"unrelated", "provider", "dependent"}
@@ -1000,13 +928,14 @@ func TestKernel_DependencyReadsADependencysResourceAtRegistration(t *testing.T) 
 		return nil
 	}}
 	dependent := testPlugin{name: "dependent", deps: []PluginName{"provider"}, register: func(r *Registrar) error {
-		fromRegister = r.Dependency[*authority]()
-		return nil
+		var err error
+		fromRegister, err = r.Dependency[*authority]()
+		return err
 	}}
 
-	New(nil).Handler(func(err error) bool {
+	New(nil).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(dependent, provider)
 
 	if fromRegister != published {
@@ -1035,19 +964,16 @@ func TestKernel_DependencyRefusesAnUndeclaredOrMissingResource(t *testing.T) {
 				return nil
 			}}
 			dependent := testPlugin{name: "dependent", deps: tc.deps, register: func(r *Registrar) error {
-				r.Dependency[*authority]()
-				return nil
+				_, err := r.Dependency[*authority]()
+				return err
 			}}
-			var handled error
-			New(nil).Handler(func(err error) bool { handled = err; return true }).WithPlugins(provider, dependent)
+			cause := New(nil).Handler(func(error) error { return nil }).
+				WithPlugins(provider, dependent).
+				Run()
 
-			var panicked ErrPluginPanic
-			if !errors.As(handled, &panicked) {
-				t.Fatalf("handled error = %v, want ErrPluginPanic", handled)
-			}
-			unavailable, ok := panicked.Recovered.(ErrUnavailableDependency)
-			if !ok {
-				t.Fatalf("recovered = %v, want ErrUnavailableDependency", panicked.Recovered)
+			var unavailable ErrUnavailableDependency
+			if !errors.As(cause, &unavailable) {
+				t.Fatalf("Run = %v, want ErrUnavailableDependency", cause)
 			}
 			want := ErrUnavailableDependency{Plugin: "dependent", Resource: reflect.TypeFor[*authority](), Owner: tc.owner}
 			if unavailable != want {
@@ -1069,7 +995,7 @@ func TestKernel_PluginDependencyCycleIsReportedBeforeInitialization(t *testing.T
 	}}
 
 	var handled error
-	New(nil).Handler(func(err error) bool { handled = err; return true }).WithPlugins(first, second)
+	New(nil).Handler(func(err error) error { handled = err; return err }).WithPlugins(first, second)
 	var cycle ErrPluginDependencyCycle
 	if !errors.As(handled, &cycle) {
 		t.Fatalf("handled error = %v, want ErrPluginDependencyCycle", handled)
@@ -1095,12 +1021,11 @@ func TestKernel_StartsInDependencyOrderAndStopsInReverse(t *testing.T) {
 		order = append(order, "stop-second")
 		return nil
 	}}
-	ctx, cancel := context.WithCancel(context.Background())
 	e := New(nil).WithPlugins(second, first)
 	done := make(chan struct{})
-	go func() { e.Run(ctx); close(done) }()
+	go func() { e.Run(); close(done) }()
 	<-e.Ready()
-	cancel()
+	e.Quit()
 	<-done
 
 	want := []string{"start-first", "start-second", "stop-second", "stop-first"}
@@ -1109,40 +1034,44 @@ func TestKernel_StartsInDependencyOrderAndStopsInReverse(t *testing.T) {
 	}
 }
 
-// Stop's Kernel outlives engine cancellation, so shutdown work still has one.
-func TestKernel_StopReceivesLiveShutdownContext(t *testing.T) {
+// The scheduler stops after every Stop has run, so shutdown work can still
+// dispatch: a plugin that flushes in Stop is talking to a live engine.
+func TestKernel_StopCanStillDispatch(t *testing.T) {
 	var stopErr error
-	p := testPlugin{name: "p", stop: func(k Executioner) error {
-		stopErr = k.Context().Err()
+	p := testPlugin{name: "p", register: func(r *Registrar) error {
+		r.HandleCommand[testDoubleCmd](executing(func(_ Kernel, request int) int { return request * 2 }))
+		return nil
+	}, stop: func(k Executioner) error {
+		if got := k.ExecuteCommand[testDoubleCmd](21); got != 42 {
+			stopErr = fmt.Errorf("dispatch from Stop answered %d, want 42", got)
+		}
 		return nil
 	}}
-	ctx, cancel := context.WithCancel(context.Background())
 	e := New(nil).WithPlugins(p)
 	done := make(chan struct{})
-	go func() { e.Run(ctx); close(done) }()
+	go func() { e.Run(); close(done) }()
 	<-e.Ready()
-	cancel()
+	e.Quit()
 	<-done
 	if stopErr != nil {
-		t.Fatalf("shutdown context error = %v, want nil", stopErr)
+		t.Fatalf("dispatch from Stop failed: %v", stopErr)
 	}
 }
 
 func TestKernel_OptionalLifecycleCapabilitiesAreIndependent(t *testing.T) {
 	started := false
 	stopped := false
-	ctx, cancel := context.WithCancel(context.Background())
 	e := New(nil).WithPlugins(
 		startOnlyPlugin{name: "starter", started: &started},
 		stopOnlyPlugin{name: "stopper", stopped: &stopped},
 	)
 	done := make(chan struct{})
-	go func() { e.Run(ctx); close(done) }()
+	go func() { e.Run(); close(done) }()
 	<-e.Ready()
 	if !started {
 		t.Fatal("PluginStarter.Start was not called")
 	}
-	cancel()
+	e.Quit()
 	<-done
 	if !stopped {
 		t.Fatal("PluginStopper.Stop was not called")
@@ -1167,7 +1096,7 @@ func TestKernel_StartFailureStopsOnlyStartedPlugins(t *testing.T) {
 		return nil
 	}}
 	var handled error
-	New(nil).Handler(func(err error) bool { handled = err; return false }).WithPlugins(third, second, first).Run(context.Background())
+	New(nil).Handler(func(err error) error { handled = err; return nil }).WithPlugins(third, second, first).Run()
 	if !errors.Is(handled, boom) || !reflect.DeepEqual(order, []string{"stop-first"}) {
 		t.Fatalf("handled = %v, lifecycle order = %v", handled, order)
 	}
@@ -1185,13 +1114,12 @@ func TestKernel_ShutdownAttemptsAllPluginsAndAggregatesErrors(t *testing.T) {
 		stopped = append(stopped, "second")
 		return secondErr
 	}}
-	ctx, cancel := context.WithCancel(context.Background())
 	var handled error
-	e := New(nil).Handler(func(err error) bool { handled = err; return false }).WithPlugins(second, first)
+	e := New(nil).Handler(func(err error) error { handled = err; return nil }).WithPlugins(second, first)
 	done := make(chan struct{})
-	go func() { e.Run(ctx); close(done) }()
+	go func() { e.Run(); close(done) }()
 	<-e.Ready()
-	cancel()
+	e.Quit()
 	<-done
 
 	if !reflect.DeepEqual(stopped, []string{"second", "first"}) {
@@ -1206,7 +1134,7 @@ func TestKernel_MultipleHostsFailComposition(t *testing.T) {
 	first := &testHostPlugin{name: "first", run: func() error { return nil }}
 	second := &testHostPlugin{name: "second", run: func() error { return nil }}
 	var handled error
-	New(nil).Handler(func(err error) bool { handled = err; return true }).WithPlugins(first, second)
+	New(nil).Handler(func(err error) error { handled = err; return err }).WithPlugins(first, second)
 	var multiple ErrMultipleHosts
 	if !errors.As(handled, &multiple) {
 		t.Fatalf("handled = %v, want ErrMultipleHosts", handled)
@@ -1219,19 +1147,20 @@ func TestKernel_HostRunsThenShutsDown(t *testing.T) {
 	ran := false
 	sp := &testHostPlugin{name: "sys", run: func() error { ran = true; return nil }}
 
-	e := New(nil).Handler(func(err error) bool {
+	e := New(nil).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
-	}).WithPlugins(sp).Run(context.Background())
+		return err
+	}).WithPlugins(sp)
+	if cause := e.Run(); cause != nil {
+		t.Fatalf("Run = %v, want nil after an ordinary host return", cause)
+	}
 	if !ran {
 		t.Fatal("host plugin Run was not called")
 	}
 
-	// Run blocked until the host returned, then canceled the engine ctx.
-	select {
-	case <-e.ctx.Done():
-	case <-time.After(time.Second):
-		t.Fatal("engine context not canceled after host returned")
+	// Run blocked until the host returned, then marked the engine quitting.
+	if !e.quitting() {
+		t.Fatal("engine still running after the host returned")
 	}
 }
 
@@ -1241,7 +1170,7 @@ func TestKernel_HostRunError(t *testing.T) {
 	sp := &testHostPlugin{name: "sys", run: func() error { return sentinel }}
 
 	var got error
-	New(nil).Handler(func(err error) bool { got = err; return true }).WithPlugins(sp).Run(context.Background())
+	New(nil).Handler(func(err error) error { got = err; return err }).WithPlugins(sp).Run()
 	if !errors.Is(got, sentinel) {
 		t.Fatalf("handled error = %v, want %v", got, sentinel)
 	}
@@ -1252,14 +1181,14 @@ func TestKernel_HostRunError(t *testing.T) {
 func TestKernel_AsyncSubscriberErrorTerminatesRun(t *testing.T) {
 	boom := errors.New("async boom")
 	subscriber := testPlugin{name: "subscriber", register: func(registry *Registrar) error {
-		registry.Subscribe[testHandlerFail[int]](observing(func(Kernel, int) error { return boom }))
+		registry.Subscribe[testHandlerFail[int]](observing(func(k Kernel, _ int) { k.ReportError(boom) }))
 		return nil
 	}}
 
 	var got error
-	New(nil).Handler(func(err error) bool { got = err; return true }).
-		WithPlugins(subscriber, &publishingHostPlugin{}).
-		Run(context.Background())
+	New(nil).Handler(func(err error) error { got = err; return err }).
+		WithPlugins(subscriber, &publishingHostPlugin{quit: make(chan struct{})}).
+		Run()
 	if !errors.Is(got, boom) {
 		t.Fatalf("handled error = %v, want %v", got, boom)
 	}
@@ -1269,14 +1198,13 @@ func TestKernel_AsyncSubscriberErrorTerminatesRun(t *testing.T) {
 func TestKernel_AsyncSubscriberErrorHandledWithoutHost(t *testing.T) {
 	boom := errors.New("async boom")
 	subscriber := testPlugin{name: "subscriber", register: func(registry *Registrar) error {
-		registry.Subscribe[testHandlerFail[int]](observing(func(Kernel, int) error { return boom }))
+		registry.Subscribe[testHandlerFail[int]](observing(func(k Kernel, _ int) { k.ReportError(boom) }))
 		return nil
 	}}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	errCh := make(chan error, 1)
-	e := New(nil).Handler(func(err error) bool { errCh <- err; return true }).WithPlugins(subscriber)
-	go e.Run(ctx)
+	e := New(nil).Handler(func(err error) error { errCh <- err; return err }).WithPlugins(subscriber)
+	go e.Run()
+	t.Cleanup(e.Quit)
 	<-e.Ready()
 
 	e.Executioner().PublishEvent(1)
@@ -1290,24 +1218,30 @@ func TestKernel_AsyncSubscriberErrorHandledWithoutHost(t *testing.T) {
 	}
 }
 
-// A failed subscriber blocks its dependency descendants even when the central
-// handler elects to keep the engine running.
-func TestKernel_EventFailureSkipsDependents(t *testing.T) {
+// A subscriber that panicked blocks its dependency descendants even when the
+// central handler elects to keep the engine running.
+//
+// A panic is the only subscriber failure a publication can see. A subscriber
+// that merely reports has still completed, and its dependents run: reporting
+// says what went wrong, and says nothing about whether the work that depended
+// on this subscriber can go ahead. Only the subscriber knows that, and if the
+// answer is no it belongs in state the dependent reads.
+func TestKernel_EventPanicSkipsDependents(t *testing.T) {
 	boom := errors.New("handled boom")
 	ran := false
 	subscriber := testPlugin{name: "subscriber", register: func(registry *Registrar) error {
-		registry.Subscribe[testHandlerFail[int]](observing(func(Kernel, int) error { return boom }))
-		registry.Subscribe[testHandlerContinue[int]](observing(func(Kernel, int) error {
+		registry.Subscribe[testHandlerFail[int]](observing(func(Kernel, int) { panic(boom) }))
+		registry.Subscribe[testHandlerContinue[int]](observing(func(Kernel, int) {
 			ran = true
-			return nil
 		})).After[testHandlerFail[int]]()
 		return nil
 	}}
 	var got error
-	e := startEngineWithHandler(t, func(err error) bool { got = err; return false }, subscriber)
-	err := publishForTest(t, e, 1).Wait()
-	if !errors.Is(got, boom) || !errors.Is(err, boom) || ran {
-		t.Fatalf("handled error = %v, publication error = %v, dependent ran = %v", got, err, ran)
+	e := startEngineWithHandler(t, func(err error) error { got = err; return nil }, subscriber)
+	publishForTest(t, e, 1).Wait()
+	var panicked ErrPluginPanic
+	if !errors.As(got, &panicked) || ran {
+		t.Fatalf("handled error = %v, dependent ran = %v", got, ran)
 	}
 }
 
@@ -1315,28 +1249,26 @@ func TestKernel_ErrorHandlerCanContinueAsyncEventBatch(t *testing.T) {
 	boom := errors.New("handled boom")
 	ran := false
 	subscriber := testPlugin{name: "subscriber", register: func(registry *Registrar) error {
-		registry.Subscribe[testHandlerFail[int]](observing(func(Kernel, int) error { return boom }))
-		registry.Subscribe[testHandlerContinue[int]](observing(func(Kernel, int) error {
+		registry.Subscribe[testHandlerFail[int]](observing(func(Kernel, int) { panic(boom) }))
+		registry.Subscribe[testHandlerContinue[int]](observing(func(Kernel, int) {
 			ran = true
-			return nil
 		})).After[testHandlerFail[int]]()
 		return nil
 	}}
 	errCh := make(chan error, 1)
-	e := startEngineWithHandler(t, func(err error) bool { errCh <- err; return false }, subscriber)
+	e := startEngineWithHandler(t, func(err error) error { errCh <- err; return nil }, subscriber)
 
 	publication := publishForTest(t, e, 1)
 	select {
 	case got := <-errCh:
-		if !errors.Is(got, boom) {
-			t.Fatalf("handled error = %v, want %v", got, boom)
+		var panicked ErrPluginPanic
+		if !errors.As(got, &panicked) {
+			t.Fatalf("handled error = %v, want a plugin panic carrying %v", got, boom)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for handled error")
 	}
-	if err := publication.Wait(); !errors.Is(err, boom) {
-		t.Fatalf("publication error = %v, want %v", err, boom)
-	}
+	publication.Wait()
 	if ran {
 		t.Fatal("dependent subscriber ran after predecessor failure")
 	}
@@ -1344,7 +1276,7 @@ func TestKernel_ErrorHandlerCanContinueAsyncEventBatch(t *testing.T) {
 
 // A cyclic before/after constraint is rejected at construction time.
 func TestKernel_SubscriptionCycleDetected(t *testing.T) {
-	noop := observing(func(Kernel, int) error { return nil })
+	noop := observing(func(Kernel, int) {})
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
 		registry.Subscribe[testHandlerA[int]](noop).After[testHandlerB[int]]()
 		registry.Subscribe[testHandlerB[int]](noop).After[testHandlerA[int]]()
@@ -1352,7 +1284,7 @@ func TestKernel_SubscriptionCycleDetected(t *testing.T) {
 	}}
 
 	var err error
-	New(nil).Handler(func(got error) bool { err = got; return true }).WithPlugins(p)
+	New(nil).Handler(func(got error) error { err = got; return got }).WithPlugins(p)
 	var cycleErr ErrSubscriptionCycle
 	if !errors.As(err, &cycleErr) {
 		t.Fatalf("err = %v, want ErrSubscriptionCycle", err)
@@ -1363,12 +1295,12 @@ func TestKernel_DuplicateSubscriptionRegistrationFails(t *testing.T) {
 	oldRan := false
 	newRan := false
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
-		registry.Subscribe[testHandlerReplace[int]](observing(func(Kernel, int) error { oldRan = true; return nil }))
-		registry.Subscribe[testHandlerReplace[int]](observing(func(Kernel, int) error { newRan = true; return nil }))
+		registry.Subscribe[testHandlerReplace[int]](observing(func(Kernel, int) { oldRan = true }))
+		registry.Subscribe[testHandlerReplace[int]](observing(func(Kernel, int) { newRan = true }))
 		return nil
 	}}
 	var handled error
-	New(nil).Handler(func(err error) bool { handled = err; return true }).WithPlugins(p)
+	New(nil).Handler(func(err error) error { handled = err; return err }).WithPlugins(p)
 	var duplicate ErrDuplicateRegistration
 	if !errors.As(handled, &duplicate) || duplicate.Kind != "subscription" {
 		t.Fatalf("handled error = %v, want duplicate subscription registration", handled)
@@ -1383,12 +1315,11 @@ func TestKernel_DuplicateSubscriptionRegistrationFails(t *testing.T) {
 func TestKernel_WildcardOrdering(t *testing.T) {
 	var order []string
 	var orderMu sync.Mutex
-	record := func(name string) func(Kernel, int) error {
-		return func(Kernel, int) error {
+	record := func(name string) func(Kernel, int) {
+		return func(Kernel, int) {
 			orderMu.Lock()
 			defer orderMu.Unlock()
 			order = append(order, name)
-			return nil
 		}
 	}
 
@@ -1398,9 +1329,8 @@ func TestKernel_WildcardOrdering(t *testing.T) {
 		registry.Subscribe[testHandlerA[int]](observing(record("a")))
 		registry.Subscribe[testHandlerFirst[int]](observing(record("first"))).First()
 		registry.Subscribe[testHandlerB[int]](observing(record("b")))
-		registry.Subscribe[testHandlerDone[int]](observing(func(Kernel, int) error {
+		registry.Subscribe[testHandlerDone[int]](observing(func(Kernel, int) {
 			close(done)
-			return nil
 		})).Last()
 		return nil
 	}}
@@ -1421,10 +1351,9 @@ func TestKernel_WildcardOrdering(t *testing.T) {
 
 func TestKernel_FirstAndLastPhasesAllowInternalDependencies(t *testing.T) {
 	var order []string
-	record := func(name string) func(Kernel, int) error {
-		return func(Kernel, int) error {
+	record := func(name string) func(Kernel, int) {
+		return func(Kernel, int) {
 			order = append(order, name)
-			return nil
 		}
 	}
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
@@ -1436,9 +1365,7 @@ func TestKernel_FirstAndLastPhasesAllowInternalDependencies(t *testing.T) {
 		return nil
 	}}
 	e := startEngine(t, p)
-	if err := publishForTest(t, e, 1).Wait(); err != nil {
-		t.Fatal(err)
-	}
+	publishForTest(t, e, 1).Wait()
 	want := []string{"first-a", "first-b", "ordinary", "last-a", "last-b"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("order = %v, want %v", order, want)
@@ -1457,13 +1384,11 @@ func TestKernel_EventTypesDispatchIndependently(t *testing.T) {
 	var gotInt int
 	var gotString string
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
-		registry.Subscribe[testHandlerInt[int]](observing(func(_ Kernel, event int) error {
+		registry.Subscribe[testHandlerInt[int]](observing(func(_ Kernel, event int) {
 			gotInt = event
-			return nil
 		}))
-		registry.Subscribe[testHandlerString[string]](observing(func(_ Kernel, event string) error {
+		registry.Subscribe[testHandlerString[string]](observing(func(_ Kernel, event string) {
 			gotString = event
-			return nil
 		}))
 		return nil
 	}}
@@ -1479,8 +1404,8 @@ func TestKernel_EventTypesDispatchIndependently(t *testing.T) {
 func TestKernel_PublicationWaitBlocksUntilDone(t *testing.T) {
 	var ran int
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
-		registry.Subscribe[testHandlerA[int]](observing(func(Kernel, int) error { ran++; return nil }))
-		registry.Subscribe[testHandlerB[int]](observing(func(Kernel, int) error { ran++; return nil })).
+		registry.Subscribe[testHandlerA[int]](observing(func(Kernel, int) { ran++ }))
+		registry.Subscribe[testHandlerB[int]](observing(func(Kernel, int) { ran++ })).
 			After[testHandlerA[int]]()
 		return nil
 	}}
@@ -1492,38 +1417,35 @@ func TestKernel_PublicationWaitBlocksUntilDone(t *testing.T) {
 	}
 }
 
+// A subscriber's failure goes to the handler; the publication only says when
+// every subscriber has finished.
 func TestKernel_PublicationHandlesSubscriberError(t *testing.T) {
 	boom := errors.New("boom")
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
-		registry.Subscribe[testHandlerA[int]](observing(func(Kernel, int) error { return boom }))
+		registry.Subscribe[testHandlerA[int]](observing(func(k Kernel, _ int) { k.ReportError(boom) }))
 		return nil
 	}}
 
 	var got error
-	e := startEngineWithHandler(t, func(err error) bool { got = err; return false }, p)
-	err := publishForTest(t, e, 1).Wait()
+	e := startEngineWithHandler(t, func(err error) error { got = err; return nil }, p)
+	publishForTest(t, e, 1).Wait()
 	if !errors.Is(got, boom) {
 		t.Fatalf("handled error = %v, want boom", got)
-	}
-	if !errors.Is(err, boom) {
-		t.Fatalf("publication error = %v, want boom", err)
 	}
 }
 
 func TestKernel_PublicationWithoutSubscribersCompletes(t *testing.T) {
 	e := startEngine(t, testPlugin{name: "p", register: func(*Registrar) error { return nil }})
-	if err := publishForTest(t, e, 1).Wait(); err != nil {
-		t.Fatal(err)
-	}
+	publishForTest(t, e, 1).Wait()
 }
 
 // Configure gives each plugin its own entry from the map, keyed by plugin name.
 func TestKernel_PluginReceivesConfig(t *testing.T) {
 	var got any
 	p := configPlugin{name: "p", got: &got}
-	New(map[PluginName]any{"p": 42}).Handler(func(err error) bool {
+	New(map[PluginName]any{"p": 42}).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
-		return true
+		return err
 	}).WithPlugins(p)
 	if got != 42 {
 		t.Fatalf("config = %v, want 42", got)
@@ -1540,18 +1462,18 @@ func TestKernel_DescribeReportsResolvedLockClosure(t *testing.T) {
 		registry.InitResource(testLateResource(0))
 		registry.HandleCommand[testFailCmd](func() (Lock, Execute[struct{}, int]) {
 			return func(access ResourceAccess) { access.GetWrite[testLateResource]() },
-				func(Kernel, struct{}) (int, error) { return 0, nil }
+				func(Kernel, struct{}) int { return 0 }
 		})
 		registry.HandleCommand[testDoubleCmd](func() (Lock, Execute[int, int]) {
 			return func(access ResourceAccess) {
 				access.GetRead[testCounterResource]()
 				access.Uses[testFailCmd]()
-			}, func(Kernel, int) (int, error) { return 0, nil }
+			}, func(Kernel, int) int { return 0 }
 		})
 		registry.Subscribe[testHandlerA[int]](func() (Lock, Observe[int]) {
-			var double func(Kernel, int) (int, error)
+			var double func(Kernel, int) int
 			return func(access ResourceAccess) { double = access.Uses[testDoubleCmd]() },
-				func(k Kernel, event int) error { _, err := double(k, event); return err }
+				func(k Kernel, event int) { double(k, event) }
 		})
 		return nil
 	}}
@@ -1610,14 +1532,14 @@ func contendingPlugin() testPlugin {
 		subscribeForTest[int](registry, "a", func(access ResourceAccess) {
 			access.GetWrite[testCounterResource]()
 			access.GetWrite[testContendedResource]()
-		}, nil, nil, func(Kernel, int) error { return nil })
+		}, nil, nil, func(Kernel, int) {})
 		subscribeForTest[int](registry, "b", func(access ResourceAccess) {
 			access.GetWrite[testCounterResource]()
 			access.GetRead[testContendedResource]()
-		}, nil, nil, func(Kernel, int) error { return nil })
+		}, nil, nil, func(Kernel, int) {})
 		subscribeForTest[int](registry, "c", func(access ResourceAccess) {
 			access.GetWrite[testCounterResource]()
-		}, nil, nil, func(Kernel, int) error { return nil })
+		}, nil, nil, func(Kernel, int) {})
 		return nil
 	}}
 }
@@ -1691,16 +1613,16 @@ func TestKernel_DescribeReportsPhaseSerialisation(t *testing.T) {
 		for _, name := range []string{"a", "b", "c"} {
 			subscribeForTest[int](registry, name, func(access ResourceAccess) {
 				access.GetWrite[testCounterResource]()
-			}, nil, nil, func(Kernel, int) error { return nil })
+			}, nil, nil, func(Kernel, int) {})
 		}
 		// One writer against two readers: the readers can still overlap.
 		subscribeForTest[string](registry, "a", func(access ResourceAccess) {
 			access.GetWrite[testLateResource]()
-		}, nil, nil, func(Kernel, string) error { return nil })
+		}, nil, nil, func(Kernel, string) {})
 		for _, name := range []string{"b", "c"} {
 			subscribeForTest[string](registry, name, func(access ResourceAccess) {
 				access.GetRead[testLateResource]()
-			}, nil, nil, func(Kernel, string) error { return nil })
+			}, nil, nil, func(Kernel, string) {})
 		}
 		return nil
 	}}
@@ -1740,13 +1662,13 @@ func TestKernel_DescribeContentionCoversCommandsAndSparesReaders(t *testing.T) {
 		registry.InitResource(testLateResource(0))
 		registry.HandleCommand[testDoubleCmd](func() (Lock, Execute[int, int]) {
 			return func(access ResourceAccess) { access.GetWrite[testCounterResource]() },
-				func(Kernel, int) (int, error) { return 0, nil }
+				func(Kernel, int) int { return 0 }
 		})
 		for _, name := range []string{"a", "b"} {
 			subscribeForTest[int](registry, name, func(access ResourceAccess) {
 				access.GetRead[testCounterResource]()
 				access.GetWrite[testLateResource]()
-			}, nil, nil, func(Kernel, int) error { return nil })
+			}, nil, nil, func(Kernel, int) {})
 		}
 		return nil
 	}}
@@ -1821,10 +1743,10 @@ func TestKernel_DumpReportsAbsenceOfContention(t *testing.T) {
 		registry.InitResource(testCounterResource(0))
 		subscribeForTest[int](registry, "a", func(access ResourceAccess) {
 			access.GetRead[testCounterResource]()
-		}, nil, nil, func(Kernel, int) error { return nil })
+		}, nil, nil, func(Kernel, int) {})
 		subscribeForTest[int](registry, "b", func(access ResourceAccess) {
 			access.GetRead[testCounterResource]()
-		}, nil, nil, func(Kernel, int) error { return nil })
+		}, nil, nil, func(Kernel, int) {})
 		return nil
 	}}
 	if dump := Dump(New(nil).WithPlugins(p)); !strings.Contains(dump, "contention:\n  none\n") {
@@ -1840,8 +1762,8 @@ func TestKernel_DumpCountsTheHandlerPairsItDoesNotList(t *testing.T) {
 	p := testPlugin{name: "p", register: func(registry *Registrar) error {
 		registry.InitResource(testCounterResource(0))
 		for _, name := range []string{"a", "b", "c", "writer", "reader"} {
-			subscribeForTest[int](registry, name, lock, nil, nil, func(Kernel, int) error { return nil })
-			subscribeForTest[string](registry, name, lock, nil, nil, func(Kernel, string) error { return nil })
+			subscribeForTest[int](registry, name, lock, nil, nil, func(Kernel, int) {})
+			subscribeForTest[string](registry, name, lock, nil, nil, func(Kernel, string) {})
 		}
 		return nil
 	}}

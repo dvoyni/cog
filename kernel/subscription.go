@@ -1,7 +1,6 @@
 package kernel
 
 import (
-	"context"
 	"reflect"
 	"runtime/debug"
 )
@@ -39,6 +38,14 @@ func (s *Ordering[TEvent]) Last() *Ordering[TEvent] {
 	return s
 }
 
+// ordered is implemented by items that can be topologically sorted by their
+// Before/After constraints. ID must uniquely identify an item within the set.
+type ordered[ID comparable] interface {
+	orderID() ID
+	orderBefore() []ID
+	orderAfter() []ID
+}
+
 type subscription interface {
 	task
 	ordered[reflect.Type]
@@ -55,12 +62,12 @@ func (s *Ordering[TEvent]) coupling() (PluginName, *ResourceAccess) {
 	return s.owner, s.resources
 }
 
-func (s *Ordering[TEvent]) locks(context.Context) (read, write map[reflect.Type]struct{}) {
+func (s *Ordering[TEvent]) locks() (read, write map[reflect.Type]struct{}) {
 	return s.resources.read, s.resources.write
 }
 
-func (s *Ordering[TEvent]) run(ctx context.Context) (err error) {
-	invocation := ctx.(*eventContext[TEvent])
+func (s *Ordering[TEvent]) run(invocation any) (err error) {
+	event := invocation.(*eventContext[TEvent])
 	// Recovery is inlined rather than routed through callPluginBoundary so the
 	// dispatch path allocates neither a closure nor a boundary string.
 	defer func() {
@@ -71,21 +78,15 @@ func (s *Ordering[TEvent]) run(ctx context.Context) (err error) {
 			}
 		}
 	}()
-	handler := Kernel{
-		engine:  invocation.engine,
-		ctx:     invocation,
-		scope:   invocation.scope,
-		bounded: true,
-	}
-	return s.observe(handler, invocation.event)
+	s.observe(Kernel{engine: event.engine}, event.event)
+	return nil
 }
 
-// eventContext carries a published event through the scheduler to each subscriber.
-// It is generic so the event value stays typed from PublishEvent to Observe.
+// eventContext carries a published event through the scheduler to each
+// subscriber. It is generic so the event value stays typed from PublishEvent to
+// Observe.
 type eventContext[TEvent any] struct {
-	context.Context
 	engine *Engine
-	scope  context.Context
 	event  TEvent
 }
 

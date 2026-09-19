@@ -128,9 +128,11 @@ func TestInvoke_UnparseableArgumentsRefuseInWords(t *testing.T) {
 // The deadline bounds the wait, not the work: the agent gets a clean refusal
 // instead of burning its session on the client's idle abort.
 func TestInvoke_TimeoutRefusesInWords(t *testing.T) {
-	capability := mcp.Func("slow", "", func(k kernel.Executioner, _ echoRequest) (echoResponse, error) {
-		<-k.Context().Done()
-		return echoResponse{}, k.Context().Err()
+	// The body outlives the broker's deadline and answers nobody: the broker
+	// races its own timer and refuses, and this result is dropped.
+	capability := mcp.Func("slow", "", func(_ kernel.Executioner, _ echoRequest) (echoResponse, error) {
+		time.Sleep(time.Second)
+		return echoResponse{}, nil
 	})
 	broker := testBroker()
 	reported := runConfigured(t, mcp.Config{Addr: "127.0.0.1:0", Timeout: 20 * time.Millisecond},

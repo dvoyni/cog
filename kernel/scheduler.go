@@ -1,7 +1,6 @@
 package kernel
 
 import (
-	"context"
 	"reflect"
 	"sync"
 )
@@ -13,9 +12,12 @@ import (
 // the scheduler will wait until the lock is released before executing the task.
 // Lock for read allows multiple tasks to read the same resource concurrently,
 // but only one task can write to a resource at a time.
+//
+// run receives the invocation the task was scheduled with: its own
+// commandContext for a command, the event's eventContext for a subscription.
 type task interface {
-	locks(ctx context.Context) (read, write map[reflect.Type]struct{})
-	run(ctx context.Context) error
+	locks() (read, write map[reflect.Type]struct{})
+	run(invocation any) error
 }
 
 // lockRequest is a worker goroutine's request to the coordinator (run) for a set
@@ -35,25 +37,36 @@ var lockRequests = sync.Pool{
 	New: func() any { return &lockRequest{granted: make(chan struct{}, 1)} },
 }
 
+// scheduler is live from the moment it is created until shutdown: there is
+// always a coordinator, so no caller has to ask whether one exists yet.
+//
+// stop asks the coordinator to return; done says it has. A caller that would
+// otherwise block on a dead coordinator selects on done and gets
+// ErrSchedulerStopped instead.
 type scheduler struct {
-	acquire chan *lockRequest
-	release chan *lockRequest
-	done    chan struct{}
+	acquire  chan *lockRequest
+	release  chan *lockRequest
+	stop     chan struct{}
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 func newScheduler() *scheduler {
-	return &scheduler{
+	s := &scheduler{
 		acquire: make(chan *lockRequest),
 		release: make(chan *lockRequest),
+		stop:    make(chan struct{}),
 		done:    make(chan struct{}),
 	}
+	go s.run()
+	return s
 }
 
 // run is the coordinator. It owns all lock bookkeeping, so no mutexes are needed:
 // every mutation of the lock tables happens in this single goroutine. It blocks
 // on a select, yielding the OS thread so worker goroutines make progress even
-// under GOMAXPROCS=1. It returns when ctx is canceled.
-func (s *scheduler) run(ctx context.Context) error {
+// under GOMAXPROCS=1. It returns when shutdown is called.
+func (s *scheduler) run() {
 	defer close(s.done)
 
 	readers := map[reflect.Type]int{}
@@ -141,8 +154,8 @@ func (s *scheduler) run(ctx context.Context) error {
 
 	for {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-s.stop:
+			return
 		case req := <-s.acquire:
 			pending = append(pending, req)
 			dispatch()
@@ -167,37 +180,34 @@ func (s *scheduler) run(ctx context.Context) error {
 	}
 }
 
-// schedule fans a batch of tasks out to run asynchronously: it returns
-// immediately and the tasks run in order on a background goroutine as their
-// locks become available. Task errors are passed to onError; true stops the
-// batch, while false continues it. Batches submitted from different goroutines
-// run concurrently, subject to their locks.
-func (s *scheduler) schedule[TTask task](tasks []TTask, ctx context.Context, onError func(error) bool) {
-	go func() {
-		for _, t := range tasks {
-			if err := s.execute(t, ctx); err != nil {
-				if onError == nil || onError(err) {
-					return
-				}
-			}
-		}
-	}()
+// shutdown asks the coordinator to return and waits until it has. It is
+// idempotent, so a second call on an engine that already stopped is free.
+func (s *scheduler) shutdown() {
+	s.stopOnce.Do(func() { close(s.stop) })
+	<-s.done
+}
+
+// stopped reports whether the coordinator has returned, for a caller deciding
+// whether it may run work without asking for locks.
+func (s *scheduler) stopped() bool {
+	select {
+	case <-s.done:
+		return true
+	default:
+		return false
+	}
 }
 
 // execute acquires the task's resource locks from the coordinator, runs the task
 // in the current goroutine, then releases the locks. It blocks until the task
 // completes. Blocking on the grant channel yields to other goroutines, which is
 // what keeps the single-threaded coordination model live.
-func (s *scheduler) execute(t task, ctx context.Context) error {
-	read, write := t.locks(ctx)
+func (s *scheduler) execute(t task, invocation any, read, write map[reflect.Type]struct{}) error {
 	req := lockRequests.Get().(*lockRequest)
 	req.read, req.write = read, write
 
 	select {
 	case s.acquire <- req:
-	case <-ctx.Done():
-		recycleLockRequest(req)
-		return ctx.Err()
 	case <-s.done:
 		recycleLockRequest(req)
 		return ErrSchedulerStopped{}
@@ -206,17 +216,12 @@ func (s *scheduler) execute(t task, ctx context.Context) error {
 	// From here the coordinator owns req and is the only side that may recycle it.
 	select {
 	case <-req.granted:
-	case <-ctx.Done():
-		// Withdraw: the coordinator removes it if still pending, or releases the
-		// locks if it was granted in the meantime.
-		s.post(s.release, req)
-		return ctx.Err()
 	case <-s.done:
 		return ErrSchedulerStopped{}
 	}
 
 	defer s.post(s.release, req)
-	return t.run(ctx)
+	return t.run(invocation)
 }
 
 // recycleLockRequest returns a request to the pool. A withdrawn request may still

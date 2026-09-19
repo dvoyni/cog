@@ -49,9 +49,7 @@ func TestTheStepSitsOnTheEnginesAllocationLine(t *testing.T) {
 		}
 		mallocs := allocationsDuring(func() {
 			for range ticks {
-				if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
-					t.Fatalf("publishing the update: %v", err)
-				}
+				h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait()
 			}
 		})
 		return float64(mallocs) / ticks, touching, swept
@@ -107,9 +105,7 @@ func TestThePolygonStepSitsOnTheEnginesAllocationLineToo(t *testing.T) {
 		touching := len(h.contacts(t))
 		mallocs := allocationsDuring(func() {
 			for range ticks {
-				if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
-					t.Fatalf("publishing the update: %v", err)
-				}
+				h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait()
 			}
 		})
 		return float64(mallocs) / ticks, touching
@@ -196,9 +192,7 @@ func BenchmarkThePolygonStep(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
-					b.Fatalf("publishing the update: %v", err)
-				}
+				h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait()
 			}
 		})
 	}
@@ -219,9 +213,7 @@ func BenchmarkTheStep(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
-					b.Fatalf("publishing the update: %v", err)
-				}
+				h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait()
 			}
 		})
 	}
@@ -341,9 +333,7 @@ func TestTheJointedStepSitsOnTheEnginesAllocationLine(t *testing.T) {
 		}
 		mallocs := allocationsDuring(func() {
 			for range ticks {
-				if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
-					t.Fatalf("publishing the update: %v", err)
-				}
+				h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait()
 			}
 		})
 		return float64(mallocs) / ticks, touching, joints, impulse
@@ -389,9 +379,7 @@ func BenchmarkTheJointedStep(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				if err := h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait(); err != nil {
-					b.Fatalf("publishing the update: %v", err)
-				}
+				h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait()
 			}
 		})
 	}
