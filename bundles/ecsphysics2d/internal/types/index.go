@@ -85,6 +85,29 @@ type entry struct {
 // beside an ECS.
 type link struct{ entry, next int32 }
 
+// probing is one Probe's state on the stack while the walk runs. It is not
+// state an index holds: a Resource concurrent readers share can hold none, and
+// that is why ordering needs the caller's own slice.
+type probing struct {
+	dst          []Hit
+	first        bool
+	start        int
+	from, to     m.Vec2d
+	radius       float64
+	bits         uint32
+	collidesWith uint32
+	exclude      ecs.Entity
+	// box is the whole Probe's own bounding box, grown by its radius: the first
+	// and cheapest rejection of a candidate that merely shares a cell.
+	box   BB
+	best  Hit
+	found bool
+	exit  float64
+	// band is set while the walk is scanning cells beside the ray rather than
+	// the ray's own, which only a Probe with a radius does.
+	band bool
+}
+
 // index is the hashed uniform grid behind both Resources. The structure is not
 // part of the contract — no signature names a cell — so a BVH can replace it
 // later. It replaces cp's BBTree, which never rebalances, has no Optimize and
@@ -273,6 +296,9 @@ func (idx *index) Overlap(
 	return dst
 }
 
+// world is an entry's run of the index's world-cache slab.
+func (idx *index) world(e *entry) []m.Vec2d { return idx.slab[e.world : e.world+e.worldLen] }
+
 // probeWalk is the broadphase descent both Probes share: cp's grid walk, one
 // cell at a time in increasing order of the Probe's fraction, narrowing on each
 // candidate with the closed forms.
@@ -398,29 +424,6 @@ func (idx *index) probeWalk(
 	return walk.dst, walk.best, walk.found
 }
 
-// probing is one Probe's state on the stack while the walk runs. It is not
-// state an index holds: a Resource concurrent readers share can hold none, and
-// that is why ordering needs the caller's own slice.
-type probing struct {
-	dst          []Hit
-	first        bool
-	start        int
-	from, to     m.Vec2d
-	radius       float64
-	bits         uint32
-	collidesWith uint32
-	exclude      ecs.Entity
-	// box is the whole Probe's own bounding box, grown by its radius: the first
-	// and cheapest rejection of a candidate that merely shares a cell.
-	box   BB
-	best  Hit
-	found bool
-	exit  float64
-	// band is set while the walk is scanning cells beside the ray rather than
-	// the ray's own, which only a Probe with a radius does.
-	band bool
-}
-
 // probeCell narrows on every candidate listed in one cell.
 func (idx *index) probeCell(walk *probing, i, j int32) {
 	if walk.band {
@@ -467,30 +470,6 @@ func (idx *index) probeCell(walk *probing, i, j int32) {
 	}
 }
 
-// insertHit puts a Hit into the run this call appended, in order of T, unless
-// the Entity is already there — which is how a Shape listed in several cells is
-// reported once without an index keeping a per-query stamp as cp's handles do.
-func insertHit(dst []Hit, start int, hit Hit) []Hit {
-	for i := start; i < len(dst); i++ {
-		if dst[i].Entity == hit.Entity {
-			return dst
-		}
-	}
-	dst = append(dst, hit)
-	for i := len(dst) - 1; i > start && dst[i-1].T > dst[i].T; i-- {
-		dst[i-1], dst[i] = dst[i], dst[i-1]
-	}
-	return dst
-}
-
-// firstScannedCell reports whether this is the one cell of a rectangle scan at
-// which an entry is tested: the corner of the overlap between the entry's cells
-// and the scanned ones. It replaces cp's per-handle stamp, which a Resource
-// concurrent readers share cannot keep.
-func firstScannedCell(e *entry, i, j, scanLeft, scanBottom int32) bool {
-	return i == max(e.left, scanLeft) && j == max(e.bottom, scanBottom)
-}
-
 func (idx *index) allocEntry() int32 {
 	if n := len(idx.freeEntries); n > 0 {
 		slot := idx.freeEntries[n-1]
@@ -505,25 +484,6 @@ func (idx *index) allocEntry() int32 {
 // need of, its cell index being an int: a NaN or an infinite coordinate would
 // otherwise make the conversion platform-defined rather than merely wrong.
 func (idx *index) cell(v float64) int32 { return floorCell(v * idx.inverseCell) }
-
-func floorCell(v float64) int32 {
-	f := math.Floor(v)
-	switch {
-	case math.IsNaN(f):
-		return 0
-	case f >= math.MaxInt32:
-		return math.MaxInt32
-	case f <= math.MinInt32:
-		return math.MinInt32
-	}
-	return int32(f)
-}
-
-// finiteBB reports whether every edge of a box is a number.
-func finiteBB(bb BB) bool {
-	return !math.IsNaN(bb.L) && !math.IsNaN(bb.B) && !math.IsNaN(bb.R) && !math.IsNaN(bb.T) &&
-		!math.IsInf(bb.L, 0) && !math.IsInf(bb.B, 0) && !math.IsInf(bb.R, 0) && !math.IsInf(bb.T, 0)
-}
 
 // bucket is cp's hashFunc, which mixes the two cell coordinates and folds them
 // into the table. Two cells may share a bucket; every candidate is checked
@@ -644,4 +604,47 @@ func (idx *index) growBuckets(wanted int) {
 			idx.pushCells(int32(slot))
 		}
 	}
+}
+
+// insertHit puts a Hit into the run this call appended, in order of T, unless
+// the Entity is already there — which is how a Shape listed in several cells is
+// reported once without an index keeping a per-query stamp as cp's handles do.
+func insertHit(dst []Hit, start int, hit Hit) []Hit {
+	for i := start; i < len(dst); i++ {
+		if dst[i].Entity == hit.Entity {
+			return dst
+		}
+	}
+	dst = append(dst, hit)
+	for i := len(dst) - 1; i > start && dst[i-1].T > dst[i].T; i-- {
+		dst[i-1], dst[i] = dst[i], dst[i-1]
+	}
+	return dst
+}
+
+// firstScannedCell reports whether this is the one cell of a rectangle scan at
+// which an entry is tested: the corner of the overlap between the entry's cells
+// and the scanned ones. It replaces cp's per-handle stamp, which a Resource
+// concurrent readers share cannot keep.
+func firstScannedCell(e *entry, i, j, scanLeft, scanBottom int32) bool {
+	return i == max(e.left, scanLeft) && j == max(e.bottom, scanBottom)
+}
+
+func floorCell(v float64) int32 {
+	f := math.Floor(v)
+	switch {
+	case math.IsNaN(f):
+		return 0
+	case f >= math.MaxInt32:
+		return math.MaxInt32
+	case f <= math.MinInt32:
+		return math.MinInt32
+	}
+	return int32(f)
+}
+
+// finiteBB reports whether every edge of a box is a number.
+func finiteBB(bb BB) bool {
+	return !math.IsNaN(bb.L) && !math.IsNaN(bb.B) && !math.IsNaN(bb.R) && !math.IsNaN(bb.T) &&
+		!math.IsInf(bb.L, 0) && !math.IsInf(bb.B, 0) && !math.IsInf(bb.R, 0) && !math.IsInf(bb.T, 0)
 }

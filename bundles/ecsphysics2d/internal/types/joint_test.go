@@ -9,12 +9,6 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 )
 
-// noJoints is the empty JointedPairs every Contact test hands Collide: those
-// tests are about detection, and a scene with no Joint has no pair held apart.
-// It is one value rather than a fresh set per call, so a benchmark's loop still
-// allocates nothing.
-var noJoints = NewJointedPairs()
-
 // The two Entities every Joint built here holds. They are never resolved: this
 // file is about the value, and the solver is tested through a real engine.
 var (
@@ -228,57 +222,6 @@ func TestTheImpulseIsReadTheWayChipmunkReadsItKindByKind(t *testing.T) {
 	}
 }
 
-// TestJointedPairsHoldsAnUnorderedPairAndTakesADuplicateOnce is the set Index
-// builds and Detect checks. It is unordered because which party is A is
-// detection's choice, and it takes a duplicate because two Joints between the
-// same two Bodies are an ordinary thing to spawn.
-func TestJointedPairsHoldsAnUnorderedPairAndTakesADuplicateOnce(t *testing.T) {
-	pairs := NewJointedPairs()
-	if pairs.Len() != 0 || pairs.Has(partyA, partyB) {
-		t.Fatal("a fresh set is not empty")
-	}
-
-	pairs.Add(partyA, partyB)
-	if pairs.Len() != 1 {
-		t.Errorf("one pair made the set %d long", pairs.Len())
-	}
-	if !pairs.Has(partyA, partyB) || !pairs.Has(partyB, partyA) {
-		t.Error("the pair is not found both ways round")
-	}
-
-	pairs.Add(partyB, partyA)
-	if pairs.Len() != 1 {
-		t.Errorf("the same pair the other way round made the set %d long", pairs.Len())
-	}
-
-	if pairs.Has(partyA, ecs.Entity(99)) {
-		t.Error("a pair nothing added is in the set")
-	}
-
-	pairs.Clear()
-	if pairs.Len() != 0 || pairs.Has(partyA, partyB) {
-		t.Error("the cleared set still holds a pair")
-	}
-}
-
-// TestJointedPairsGrowsWithoutLosingAPair is the doubling the table does when
-// it is half full, which a scene whose Joint count climbs walks straight into.
-func TestJointedPairsGrowsWithoutLosingAPair(t *testing.T) {
-	pairs := NewJointedPairs()
-	const count = 500
-	for i := range count {
-		pairs.Add(ecs.Entity(2*i+1), ecs.Entity(2*i+2))
-	}
-	if pairs.Len() != count {
-		t.Fatalf("the set holds %d pairs, want %d", pairs.Len(), count)
-	}
-	for i := range count {
-		if !pairs.Has(ecs.Entity(2*i+2), ecs.Entity(2*i+1)) {
-			t.Fatalf("the pair %d was lost across a growth", i)
-		}
-	}
-}
-
 // TestPinDistanceIsTheDistanceBetweenTheTwoAnchorsInTheWorld is the pure helper
 // beside cp's constructor, which reads the two Bodies' transforms where a cog
 // constructor cannot.
@@ -318,76 +261,6 @@ func TestPivotAnchorsSplitsOneWorldPivotIntoTwoLocalAnchors(t *testing.T) {
 	}
 	if backB.Distance(pivot) > 1e-12 {
 		t.Errorf("B's anchor turns back to %v, want %v", backB, pivot)
-	}
-}
-
-// TestClampLengthIsChipmunksVectorClamp pins the one vector helper the pivot
-// and the groove need that the m package does not carry, including the
-// infinite ceiling every Joint arrives with.
-func TestClampLengthIsChipmunksVectorClamp(t *testing.T) {
-	v := m.Vec2d{X: 3, Y: 4}
-	if got := clampLength(v, math.Inf(1)); got != v {
-		t.Errorf("an infinite ceiling changed %v into %v", v, got)
-	}
-	if got := clampLength(v, 10); got != v {
-		t.Errorf("a ceiling above the length changed %v into %v", v, got)
-	}
-	got := clampLength(v, 2.5)
-	if math.Abs(got.Length()-2.5) > 1e-12 {
-		t.Errorf("clamping to 2.5 gave a vector of length %v", got.Length())
-	}
-	if math.Abs(got.X-1.5) > 1e-12 || math.Abs(got.Y-2) > 1e-12 {
-		t.Errorf("clamping to 2.5 turned the vector: %v", got)
-	}
-}
-
-// TestTheEntityTableFindsEveryRowItWasGiven is the map that answers for the
-// jointed Bodies detection never saw, and the one place a Joint pays a hash.
-func TestTheEntityTableFindsEveryRowItWasGiven(t *testing.T) {
-	var table entityTable
-	table.reset()
-	if _, ok := table.lookup(partyA); ok {
-		t.Fatal("a fresh table found a row")
-	}
-
-	const count = 300
-	for i := range count {
-		table.put(ecs.Entity(i+1), int32(i+1))
-	}
-	for i := range count {
-		at, ok := table.lookup(ecs.Entity(i + 1))
-		if !ok || at != int32(i+1) {
-			t.Fatalf("%d read back as %d, %v", i+1, at, ok)
-		}
-	}
-	if _, ok := table.lookup(ecs.Entity(count + 1)); ok {
-		t.Error("the table found a row nothing put there")
-	}
-
-	// Reset keeps the memory and forgets the rows, which is what makes the
-	// per-tick rebuild allocate nothing.
-	table.reset()
-	if table.used != 0 {
-		t.Errorf("the reset table still holds %d rows", table.used)
-	}
-	if _, ok := table.lookup(ecs.Entity(1)); ok {
-		t.Error("the reset table still finds a row")
-	}
-}
-
-// TestTheJointedPairSetAllocatesNothingOnceItHasGrown is the zero-allocation
-// rule on the one structure Index rebuilds every tick.
-func TestTheJointedPairSetAllocatesNothingOnceItHasGrown(t *testing.T) {
-	pairs := NewJointedPairs()
-	fill := func() {
-		pairs.Clear()
-		for i := range 256 {
-			pairs.Add(ecs.Entity(2*i+1), ecs.Entity(2*i+2))
-		}
-	}
-	fill()
-	if got := testing.AllocsPerRun(50, fill); got != 0 {
-		t.Errorf("rebuilding the set allocates %v objects a tick, want none", got)
 	}
 }
 

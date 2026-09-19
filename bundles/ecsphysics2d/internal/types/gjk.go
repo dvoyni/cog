@@ -96,62 +96,6 @@ func newMinkowskiPoint(a, b supportPoint) minkowskiPoint {
 	}
 }
 
-// supportPointFor is cp's three SupportPointFuncs — CircleSupportPoint,
-// SegmentSupportPoint and PolySupportPoint — as one switch on the family over
-// the world cache. This is where cp's two func fields and their type assertions
-// went.
-func supportPointFor(kind ShapeKind, world []m.Vec2d, n m.Vec2d) supportPoint {
-	switch kind {
-	case ShapeCircle:
-		return supportPoint{p: world[0]}
-	case ShapeSegment:
-		if world[0].Dot(n) > world[1].Dot(n) {
-			return supportPoint{p: world[0]}
-		}
-		return supportPoint{p: world[1], index: 1}
-	}
-	verts, _ := polyWorld(world)
-	i := polySupportIndex(verts, n)
-	return supportPoint{p: verts[i], index: uint32(i)}
-}
-
-// shapePoint is cp's Shape.Point: the support point a cached index names, for
-// the warm start. cp's own clamp on a Polygon whose vertex count changed is
-// kept, and it is what makes a cached id that belonged to the other party of a
-// same-kind pair merely a poor guess rather than a panic — the port's index
-// slots are rebuilt every tick, where cp's arbiter fixes which Shape is which.
-func shapePoint(kind ShapeKind, world []m.Vec2d, i uint32) supportPoint {
-	switch kind {
-	case ShapeCircle:
-		return supportPoint{p: world[0]}
-	case ShapeSegment:
-		if i == 0 {
-			return supportPoint{p: world[0]}
-		}
-		return supportPoint{p: world[1], index: 1}
-	}
-	verts, _ := polyWorld(world)
-	index := uint32(0)
-	if i < uint32(len(verts)) {
-		index = i
-	}
-	return supportPoint{p: verts[index], index: index}
-}
-
-// polySupportIndex is cp's PolySupportPointIndex: which vertex is farthest
-// along an axis.
-func polySupportIndex(verts []m.Vec2d, n m.Vec2d) int {
-	maximum := -infinity
-	index := 0
-	for i := range verts {
-		if d := verts[i].Dot(n); d > maximum {
-			maximum = d
-			index = i
-		}
-	}
-	return index
-}
-
 // closestTo is cp's MinkowskiPoint.ClosestPoints: the closest points on the two
 // Shapes given the closest edge of their Minkowski difference to the origin.
 func (v0 minkowskiPoint) closestTo(v1 minkowskiPoint) closestPoints {
@@ -181,26 +125,6 @@ func (v0 minkowskiPoint) closestTo(v1 minkowskiPoint) closestPoints {
 	d2 := p.Length()
 	n2 := p.MulS(1 / (d2 + smallestNormal))
 	return closestPoints{a: pa, b: pb, n: n2, d: d2, id: id}
-}
-
-// pointGreater is cp's Vector.PointGreater, lerpT its LerpT, closestDist its
-// ClosestDist and checkAxis its CheckAxis. They live here rather than in libs/m
-// because they are GJK's own predicates and mean nothing to gameplay code.
-func pointGreater(a, b, c m.Vec2d) bool {
-	return (b.Y-a.Y)*(a.X+b.X-2*c.X) > (b.X-a.X)*(a.Y+b.Y-2*c.Y)
-}
-
-func lerpT(a, b m.Vec2d, t float64) m.Vec2d {
-	half := 0.5 * t
-	return a.MulS(0.5 - half).Add(b.MulS(0.5 + half))
-}
-
-func closestDist(a, b m.Vec2d) float64 {
-	return lerpT(a, b, a.ClosestT(b)).LengthSquared()
-}
-
-func checkAxis(v0, v1, p, n m.Vec2d) bool {
-	return p.Dot(n) <= math.Max(v0.Dot(n), v1.Dot(n))
 }
 
 // gjk is cp's GJK: the closest points between two Shapes, warm started from the
@@ -374,246 +298,78 @@ func epaRecurse(
 	return v0.closestTo(v1)
 }
 
-// edgePoint is one end of a support edge. cp keeps a hash there, mixed from the
-// Shape's pointer and the vertex index, and carries the comment that matching
-// on it could trigger false positives; the port keeps the vertex index itself,
-// because a Contact's A and B already fix the two Shapes and the id only has to
-// tell one pair's at most two points apart.
-type edgePoint struct {
-	p     m.Vec2d
-	index uint32
+// supportPointFor is cp's three SupportPointFuncs — CircleSupportPoint,
+// SegmentSupportPoint and PolySupportPoint — as one switch on the family over
+// the world cache. This is where cp's two func fields and their type assertions
+// went.
+func supportPointFor(kind ShapeKind, world []m.Vec2d, n m.Vec2d) supportPoint {
+	switch kind {
+	case ShapeCircle:
+		return supportPoint{p: world[0]}
+	case ShapeSegment:
+		if world[0].Dot(n) > world[1].Dot(n) {
+			return supportPoint{p: world[0]}
+		}
+		return supportPoint{p: world[1], index: 1}
+	}
+	verts, _ := polyWorld(world)
+	i := polySupportIndex(verts, n)
+	return supportPoint{p: verts[i], index: uint32(i)}
 }
 
-// edge is cp's Edge: the face of one Shape that faces the collision, its two
-// ends in world space, its rounding radius and its outward normal.
-type edge struct {
-	a, b   edgePoint
-	radius float64
-	n      m.Vec2d
+// shapePoint is cp's Shape.Point: the support point a cached index names, for
+// the warm start. cp's own clamp on a Polygon whose vertex count changed is
+// kept, and it is what makes a cached id that belonged to the other party of a
+// same-kind pair merely a poor guess rather than a panic — the port's index
+// slots are rebuilt every tick, where cp's arbiter fixes which Shape is which.
+func shapePoint(kind ShapeKind, world []m.Vec2d, i uint32) supportPoint {
+	switch kind {
+	case ShapeCircle:
+		return supportPoint{p: world[0]}
+	case ShapeSegment:
+		if i == 0 {
+			return supportPoint{p: world[0]}
+		}
+		return supportPoint{p: world[1], index: 1}
+	}
+	verts, _ := polyWorld(world)
+	index := uint32(0)
+	if i < uint32(len(verts)) {
+		index = i
+	}
+	return supportPoint{p: verts[index], index: index}
 }
 
-// supportEdgeForSegment is cp's SupportEdgeForSegment, over the world cache.
-func supportEdgeForSegment(radius float64, world []m.Vec2d, n m.Vec2d) edge {
-	segA, segB, segN := world[0], world[1], world[2]
-	if segN.Dot(n) > 0 {
-		return edge{
-			a:      edgePoint{p: segA, index: 0},
-			b:      edgePoint{p: segB, index: 1},
-			radius: radius,
-			n:      segN,
+// polySupportIndex is cp's PolySupportPointIndex: which vertex is farthest
+// along an axis.
+func polySupportIndex(verts []m.Vec2d, n m.Vec2d) int {
+	maximum := -infinity
+	index := 0
+	for i := range verts {
+		if d := verts[i].Dot(n); d > maximum {
+			maximum = d
+			index = i
 		}
 	}
-	return edge{
-		a:      edgePoint{p: segB, index: 1},
-		b:      edgePoint{p: segA, index: 0},
-		radius: radius,
-		n:      segN.Negate(),
-	}
+	return index
 }
 
-// supportEdgeForPoly is cp's SupportEdgeForPoly, over the world cache: whichever
-// of the two faces meeting the support vertex faces the collision more squarely.
-func supportEdgeForPoly(radius float64, world []m.Vec2d, n m.Vec2d) edge {
-	verts, normals := polyWorld(world)
-	count := len(verts)
-
-	i1 := polySupportIndex(verts, n)
-	i0 := (i1 - 1 + count) % count
-	i2 := (i1 + 1) % count
-
-	if n.Dot(normals[i1]) > n.Dot(normals[i2]) {
-		return edge{
-			a:      edgePoint{p: verts[i0], index: uint32(i0)},
-			b:      edgePoint{p: verts[i1], index: uint32(i1)},
-			radius: radius,
-			n:      normals[i1],
-		}
-	}
-	return edge{
-		a:      edgePoint{p: verts[i1], index: uint32(i1)},
-		b:      edgePoint{p: verts[i2], index: uint32(i2)},
-		radius: radius,
-		n:      normals[i2],
-	}
+// pointGreater is cp's Vector.PointGreater, lerpT its LerpT, closestDist its
+// ClosestDist and checkAxis its CheckAxis. They live here rather than in libs/m
+// because they are GJK's own predicates and mean nothing to gameplay code.
+func pointGreater(a, b, c m.Vec2d) bool {
+	return (b.Y-a.Y)*(a.X+b.X-2*c.X) > (b.X-a.X)*(a.Y+b.Y-2*c.Y)
 }
 
-// contactPoints is cp's ContactPoints: the at most two points where two support
-// edges' surfaces meet, each end of each edge projected onto the other and
-// clamped to it.
-//
-// cp's two 1e-15 denominators are C's CPFLOAT_MIN, weakened in translation;
-// the port restores C's value, which is defect 6.
-func contactPoints(e1, e2 edge, points closestPoints, touch *touching) bool {
-	if points.d > e1.radius+e2.radius {
-		return false
-	}
-
-	n := points.n
-	touch.normal = n
-
-	dE1A := e1.a.p.Cross(n)
-	dE1B := e1.b.p.Cross(n)
-	dE2A := e2.a.p.Cross(n)
-	dE2B := e2.b.p.Cross(n)
-
-	e1Denom := 1 / (dE1B - dE1A + smallestNormal)
-	e2Denom := 1 / (dE2B - dE2A + smallestNormal)
-
-	{
-		p1 := n.MulS(e1.radius).Add(e1.a.p.Lerp(e1.b.p, clamp01((dE2B-dE1A)*e1Denom)))
-		p2 := n.MulS(-e2.radius).Add(e2.a.p.Lerp(e2.b.p, clamp01((dE1A-dE2A)*e2Denom)))
-		if depth := -p2.Sub(p1).Dot(n); depth >= 0 {
-			touch.push(p1, p2, depth, pointID(e1.a.index, e2.b.index))
-		}
-	}
-	{
-		p1 := n.MulS(e1.radius).Add(e1.a.p.Lerp(e1.b.p, clamp01((dE2A-dE1A)*e1Denom)))
-		p2 := n.MulS(-e2.radius).Add(e2.a.p.Lerp(e2.b.p, clamp01((dE1B-dE2A)*e2Denom)))
-		if depth := -p2.Sub(p1).Dot(n); depth >= 0 {
-			touch.push(p1, p2, depth, pointID(e1.b.index, e2.a.index))
-		}
-	}
-
-	return touch.count > 0
+func lerpT(a, b m.Vec2d, t float64) m.Vec2d {
+	half := 0.5 * t
+	return a.MulS(0.5 - half).Add(b.MulS(0.5 + half))
 }
 
-// rotationOf is a rigid transform's rotation as the vector Rotate takes, which
-// is what the segment neighbours' local tangents are turned by on use. cp's
-// CacheData never transforms them, and neither does this.
-func rotationOf(transform Transform) m.Vec2d {
-	return m.Vec2d{X: transform.A, Y: transform.B}
+func closestDist(a, b m.Vec2d) float64 {
+	return lerpT(a, b, a.ClosestT(b)).LengthSquared()
 }
 
-// collideCirclePoly is cp's CircleToPoly, the circle first as cp's kind order
-// requires.
-//
-// The radius sign is defect 1: cp offsets the Polygon's surface point by
-// +poly.r where C has −poly->r, which settles a circle about 2·r too deeply
-// into a rounded Polygon. C's sign is the one here. It is harmless at Polygon
-// radius 0, which is why nobody has met it.
-func collideCirclePoly(
-	circle Shape, worldCircle []m.Vec2d,
-	poly Shape, worldPoly []m.Vec2d,
-	coincident m.Vec2d, cached uint32,
-) (touching, bool) {
-	ctx := support{worldA: worldCircle, worldB: worldPoly, kindA: ShapeCircle, kindB: poly.Kind}
-	points := gjk(ctx,
-		boxForWorld(circle, worldCircle).Centre(),
-		boxForWorld(poly, worldPoly).Centre(), coincident, cached)
-
-	if points.d > circle.Radius+poly.Radius {
-		return touching{}, false
-	}
-
-	var touch touching
-	touch.normal = points.n
-	touch.gjkId = points.id
-	p1 := points.a.Add(points.n.MulS(circle.Radius))
-	p2 := points.b.Add(points.n.MulS(-poly.Radius))
-	touch.push(p1, p2, -p2.Sub(p1).Dot(points.n), pointID(0, 0))
-	return touch, true
-}
-
-// collideSegments is cp's SegmentToSegment. Its end-cap rejection reads the
-// neighbours' tangents, which are dead code in cp because nothing there ever
-// writes them — defect 4 — and are live here, written by the segment
-// constructor that takes the previous and next point.
-func collideSegments(
-	a Shape, transformA Transform, worldA []m.Vec2d,
-	b Shape, transformB Transform, worldB []m.Vec2d,
-	coincident m.Vec2d, cached uint32,
-) (touching, bool) {
-	ctx := support{worldA: worldA, worldB: worldB, kindA: ShapeSegment, kindB: ShapeSegment}
-	points := gjk(ctx,
-		boxForWorld(a, worldA).Centre(),
-		boxForWorld(b, worldB).Centre(), coincident, cached)
-
-	if points.d > a.Radius+b.Radius {
-		return touching{}, false
-	}
-
-	n := points.n
-	rotA, rotB := rotationOf(transformA), rotationOf(transformB)
-	if (points.a != worldA[0] || n.Dot(a.verts[2].Rotate(rotA)) <= 0) &&
-		(points.a != worldA[1] || n.Dot(a.verts[3].Rotate(rotA)) <= 0) &&
-		(points.b != worldB[0] || n.Dot(b.verts[2].Rotate(rotB)) >= 0) &&
-		(points.b != worldB[1] || n.Dot(b.verts[3].Rotate(rotB)) >= 0) {
-		touch := touching{gjkId: points.id}
-		if contactPoints(
-			supportEdgeForSegment(a.Radius, worldA, n),
-			supportEdgeForSegment(b.Radius, worldB, n.Negate()),
-			points, &touch,
-		) {
-			return touch, true
-		}
-	}
-	return touching{}, false
-}
-
-// collideSegmentPoly is cp's SegmentToPoly, the segment first as cp's kind
-// order requires.
-func collideSegmentPoly(
-	segment Shape, transform Transform, worldSegment []m.Vec2d,
-	poly Shape, worldPoly []m.Vec2d,
-	coincident m.Vec2d, cached uint32,
-) (touching, bool) {
-	ctx := support{
-		worldA: worldSegment, worldB: worldPoly,
-		kindA: ShapeSegment, kindB: poly.Kind,
-	}
-	points := gjk(ctx,
-		boxForWorld(segment, worldSegment).Centre(),
-		boxForWorld(poly, worldPoly).Centre(), coincident, cached)
-
-	n := points.n
-	rotation := rotationOf(transform)
-	if points.d-segment.Radius-poly.Radius <= 0 &&
-		(points.a != worldSegment[0] || n.Dot(segment.verts[2].Rotate(rotation)) <= 0) &&
-		(points.a != worldSegment[1] || n.Dot(segment.verts[3].Rotate(rotation)) <= 0) {
-		touch := touching{gjkId: points.id}
-		if contactPoints(
-			supportEdgeForSegment(segment.Radius, worldSegment, n),
-			supportEdgeForPoly(poly.Radius, worldPoly, n.Negate()),
-			points, &touch,
-		) {
-			return touch, true
-		}
-	}
-	return touching{}, false
-}
-
-// collidePolys is cp's PolyToPoly, and is what makes boxes stack.
-func collidePolys(
-	a Shape, worldA []m.Vec2d,
-	b Shape, worldB []m.Vec2d,
-	coincident m.Vec2d, cached uint32,
-) (touching, bool) {
-	ctx := support{worldA: worldA, worldB: worldB, kindA: a.Kind, kindB: b.Kind}
-	points := gjk(ctx,
-		boxForWorld(a, worldA).Centre(),
-		boxForWorld(b, worldB).Centre(), coincident, cached)
-
-	if points.d-a.Radius-b.Radius > 0 {
-		return touching{}, false
-	}
-
-	touch := touching{gjkId: points.id}
-	if contactPoints(
-		supportEdgeForPoly(a.Radius, worldA, points.n),
-		supportEdgeForPoly(b.Radius, worldB, points.n.Negate()),
-		points, &touch,
-	) {
-		return touch, true
-	}
-	return touching{}, false
-}
-
-// push adds one point to a manifold, up to cp's MAX_CONTACTS_PER_ARBITER of
-// two, whatever the vertex count.
-func (t *touching) push(p1, p2 m.Vec2d, depth float64, id uint32) {
-	if t.count >= len(t.points) {
-		return
-	}
-	t.points[t.count] = touchingPoint{p1: p1, p2: p2, depth: depth, id: id}
-	t.count++
+func checkAxis(v0, v1, p, n m.Vec2d) bool {
+	return p.Dot(n) <= math.Max(v0.Dot(n), v1.Dot(n))
 }

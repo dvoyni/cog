@@ -101,9 +101,6 @@ func Collide(
 	contacts.endTick(persistence)
 }
 
-// world is an entry's run of the index's world-cache slab.
-func (idx *index) world(e *entry) []m.Vec2d { return idx.slab[e.world : e.world+e.worldLen] }
-
 // pair is the narrowphase for one candidate pair and, when the two touch, the
 // entry it becomes: which party is A, one normal, the material, and whatever the
 // previous tick's entry for the same unordered pair carries forward.
