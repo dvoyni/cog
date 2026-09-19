@@ -3,6 +3,8 @@ package types
 import (
 	"fmt"
 	"reflect"
+	"runtime"
+	"strings"
 
 	"github.com/dvoyni/cog/kernel"
 )
@@ -26,84 +28,14 @@ type systemParam interface {
 	prepare(en *Entities, access kernel.ResourceAccess)
 }
 
-// ToHandler turns a plain Go func into the factory an ordinary cog subscription
-// already takes, so the ECS contributes no registration API of its own:
-//
-//	registrar.Subscribe[MoveSystem](ecs.ToHandler[app.UpdateEvent](registrar, move,
-//	    ecs.Feed(func(e app.UpdateEvent) float64 { return e.Dt }),
-//	)).After[GravitySystem]()
-//
-// Before, After, First, Last, ownership, Describe and every Err kind work
-// unchanged, and the identity type is the ordinary kernel.Subscription[E] the
-// author writes for any subscription. One subscription per System is also what
-// gives the parallelism: each System's lock set is its own, and the existing
-// scheduler runs disjoint ones concurrently with no new machinery.
-//
-// The System's lock set is the union of what its parameters declare, computed
-// here by walking the func's parameter types. The reflection runs exactly once
-// and never again; what the tick pays is the prepared call.
-//
-// Naming the event is legal and is not the ordinary shape. A System that names
-// one can only ever be subscribed to that one, where the same gameplay should
-// be drivable by a fixed-step tick, a rollback re-simulation or a test harness
-// publishing its own frames. Feed projects what the System actually needs out
-// of the event into an In instead, and the event stays with the adapter, which
-// is already generic over it.
-//
-// The registrar is the one the factory is registered with. It is taken for the
-// world the parameters are planned against, read through Registrar.Dependency,
-// which is why the System's plugin declares a dependency on ecs.
-//
-// See prepareSystem for the classification contract and what happens to a
-// signature that breaks it.
-func ToHandler[E any](
-	registrar *kernel.Registrar, system any, feeds ...Feeder[E],
-) func() (kernel.Lock, kernel.Observe[E]) {
-	call := prepareSystem(registrar, system, feeds, "event", nil)
-	return func() (kernel.Lock, kernel.Observe[E]) {
-		return call.lock, func(handle kernel.Kernel, event E) {
-			call.call(handle, event)
-		}
-	}
+// remover is a Remove parameter, naming the Store it removes from.
+type remover interface {
+	removes(en *Entities) *storeHeader
 }
 
-// ToExecute is ToHandler's command twin, and is what makes a System invocable as
-// a command: the same signature, the same classification, the same lock set,
-// registered with HandleCommand instead of Subscribe.
-//
-//	registrar.HandleCommand[ResetCmd](ecs.ToExecute[ResetRequest, ResetResponse](registrar, reset,
-//	    ecs.Feed(func(r ResetRequest) int { return r.Seed })))
-//
-// The request is what the event is to a subscription: it may be named, and Feed
-// projects out of it so the same System is invocable as a command and drivable
-// by a tick without being written twice.
-//
-// The System still returns nothing — reflect.Value.Call allocates for a callee
-// that does — so it answers through a *Resp[Res] parameter instead, which the
-// builder recognises by type and injects. Naming one is optional: a command that
-// is an order rather than a question takes no Resp and answers the zero value.
-// See Resp.
-//
-// The type parameter is spelled Res rather than Resp only because Resp is the
-// wrapper's own name and a type parameter would shadow it here.
-//
-// The error is always nil. A System has no way to fail that is not a panic, and
-// a panic is already ErrPluginPanic; expected rejection belongs in the response,
-// which is where the kernel asks for it anyway.
-func ToExecute[Req any, Res any](
-	registrar *kernel.Registrar, system any, feeds ...Feeder[Req],
-) func() (kernel.Lock, kernel.Execute[Req, Res]) {
-	// One cell, allocated here and read back on every invocation. It is the only
-	// route a Resp instance reaches a System by, which is what makes the
-	// parameter unambiguous: there is nothing else of that type to inject.
-	answer := new(Resp[Res])
-	call := prepareSystem(registrar, system, feeds, "request", answer)
-	return func() (kernel.Lock, kernel.Execute[Req, Res]) {
-		return call.lock, func(handle kernel.Kernel, request Req) Res {
-			call.call(handle, request)
-			return answer.take()
-		}
-	}
+// ownedReader is a Hooks parameter, told which System it belongs to.
+type ownedReader interface {
+	ownedBy(writer uint32, system string)
 }
 
 // systemCall is one System as registration left it: the reflection is spent
@@ -152,7 +84,7 @@ type systemCall[E any] struct {
 	// compared when its run ends. Each one's gate is among gates.
 	copies []*rowCopy
 	// pace is Validation mode's count of this System's runs on the Hook logs it
-	// can append to, and a release build never fills it. See hookvalidate.go.
+	// can append to, and a release build never fills it. See systempace.go.
 	pace systemPace
 }
 
@@ -230,16 +162,6 @@ func (c *systemCall[E]) enrolPace(param systemParam) {
 	case remover:
 		c.pace.enrol(p.removes(c.entities))
 	}
-}
-
-// remover is a Remove parameter, naming the Store it removes from.
-type remover interface {
-	removes(en *Entities) *storeHeader
-}
-
-// ownedReader is a Hooks parameter, told which System it belongs to.
-type ownedReader interface {
-	ownedBy(writer uint32, system string)
 }
 
 // shareRowCopy is the row copy this System keeps for own's Store: the one an
@@ -322,6 +244,86 @@ func (c *systemCall[E]) arm() {
 		spawn.check()
 	}
 	c.armed = true
+}
+
+// ToHandler turns a plain Go func into the factory an ordinary cog subscription
+// already takes, so the ECS contributes no registration API of its own:
+//
+//	registrar.Subscribe[MoveSystem](ecs.ToHandler[app.UpdateEvent](registrar, move,
+//	    ecs.Feed(func(e app.UpdateEvent) float64 { return e.Dt }),
+//	)).After[GravitySystem]()
+//
+// Before, After, First, Last, ownership, Describe and every Err kind work
+// unchanged, and the identity type is the ordinary kernel.Subscription[E] the
+// author writes for any subscription. One subscription per System is also what
+// gives the parallelism: each System's lock set is its own, and the existing
+// scheduler runs disjoint ones concurrently with no new machinery.
+//
+// The System's lock set is the union of what its parameters declare, computed
+// here by walking the func's parameter types. The reflection runs exactly once
+// and never again; what the tick pays is the prepared call.
+//
+// Naming the event is legal and is not the ordinary shape. A System that names
+// one can only ever be subscribed to that one, where the same gameplay should
+// be drivable by a fixed-step tick, a rollback re-simulation or a test harness
+// publishing its own frames. Feed projects what the System actually needs out
+// of the event into an In instead, and the event stays with the adapter, which
+// is already generic over it.
+//
+// The registrar is the one the factory is registered with. It is taken for the
+// world the parameters are planned against, read through Registrar.Dependency,
+// which is why the System's plugin declares a dependency on ecs.
+//
+// See prepareSystem for the classification contract and what happens to a
+// signature that breaks it.
+func ToHandler[E any](
+	registrar *kernel.Registrar, system any, feeds ...Feeder[E],
+) func() (kernel.Lock, kernel.Observe[E]) {
+	call := prepareSystem(registrar, system, feeds, "event", nil)
+	return func() (kernel.Lock, kernel.Observe[E]) {
+		return call.lock, func(handle kernel.Kernel, event E) {
+			call.call(handle, event)
+		}
+	}
+}
+
+// ToExecute is ToHandler's command twin, and is what makes a System invocable as
+// a command: the same signature, the same classification, the same lock set,
+// registered with HandleCommand instead of Subscribe.
+//
+//	registrar.HandleCommand[ResetCmd](ecs.ToExecute[ResetRequest, ResetResponse](registrar, reset,
+//	    ecs.Feed(func(r ResetRequest) int { return r.Seed })))
+//
+// The request is what the event is to a subscription: it may be named, and Feed
+// projects out of it so the same System is invocable as a command and drivable
+// by a tick without being written twice.
+//
+// The System still returns nothing — reflect.Value.Call allocates for a callee
+// that does — so it answers through a *Resp[Res] parameter instead, which the
+// builder recognises by type and injects. Naming one is optional: a command that
+// is an order rather than a question takes no Resp and answers the zero value.
+// See Resp.
+//
+// The type parameter is spelled Res rather than Resp only because Resp is the
+// wrapper's own name and a type parameter would shadow it here.
+//
+// The error is always nil. A System has no way to fail that is not a panic, and
+// a panic is already ErrPluginPanic; expected rejection belongs in the response,
+// which is where the kernel asks for it anyway.
+func ToExecute[Req any, Res any](
+	registrar *kernel.Registrar, system any, feeds ...Feeder[Req],
+) func() (kernel.Lock, kernel.Execute[Req, Res]) {
+	// One cell, allocated here and read back on every invocation. It is the only
+	// route a Resp instance reaches a System by, which is what makes the
+	// parameter unambiguous: there is nothing else of that type to inject.
+	answer := new(Resp[Res])
+	call := prepareSystem(registrar, system, feeds, "request", answer)
+	return func() (kernel.Lock, kernel.Execute[Req, Res]) {
+		return call.lock, func(handle kernel.Kernel, request Req) Res {
+			call.call(handle, request)
+			return answer.take()
+		}
+	}
 }
 
 // prepareSystem is the classification, and the classification is contract.
@@ -498,4 +500,14 @@ func refusal(systemType, paramType, drivenType reflect.Type, driven string) stri
 	return fmt.Sprintf(
 		"ecs: System %s takes %s, which is not something a System may take; a System takes *ecs.Query, *ecs.Spawn, *ecs.WriteableEntities, *ecs.Get, *ecs.Set, *ecs.Remove, *ecs.Hooks, *ecs.Read, *ecs.Write, *ecs.In, the kernel.Kernel value, at most once the %s value %s, and for a command at most once the *ecs.Resp it answers through",
 		kernel.TypeName(systemType), kernel.TypeName(paramType), driven, kernel.TypeName(drivenType))
+}
+
+// systemName is how a diagnostic names a System: its func's name without the
+// import path, or its signature for a func the runtime cannot name.
+func systemName(fn reflect.Value) string {
+	if f := runtime.FuncForPC(fn.Pointer()); f != nil {
+		name := f.Name()
+		return name[strings.LastIndex(name, "/")+1:]
+	}
+	return kernel.TypeName(fn.Type())
 }

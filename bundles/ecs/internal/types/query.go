@@ -9,71 +9,6 @@ import (
 	"github.com/dvoyni/cog/kernel"
 )
 
-// Query is a System's means of iterating the Entities that have a set of
-// Components. The set is the field list of Q, a struct type whose field types
-// are the Components and whose field pointer-ness is the access mode:
-//
-//	type MoveQuery struct {
-//	    Body     *Body     // write — yields the stored value itself
-//	    Velocity Velocity  // read  — yields a copy
-//	}
-//
-// Nothing else declares that lock set. A read yields a copy because a read
-// yielding a pointer would be a data race against concurrent readers and Go has
-// no pointer-to-const; a fat read Component therefore costs a copy per Entity,
-// which is evidence the Component is too fat rather than a reason for a hatch.
-//
-// Fields are named rather than embedded: two Components with the same base name
-// from different packages cannot both be embedded, and two Components each
-// having a Kind field would make it.Kind an ambiguous selector at the use site,
-// far from the cause. The ECS reads field types and never names, so the names
-// are free to read well.
-//
-// A Query is planned once, at registration, from the Component classes the
-// world holds. It is created by the handler builder and reached only as a
-// parameter of a System, which is what makes under-declaration unrepresentable:
-// the only route to a Store is this, and the field types are the declaration.
-type Query[Q any] struct {
-	// rows is the fill buffer, and it is a field of the Query rather than a
-	// local in All() on purpose. As a local its address reaches an opaque yield
-	// and it escapes — one allocation, 24 B, per Query per tick, invisible in a
-	// microbenchmark because the iterator inlines at the range site there and
-	// visible the moment a real System is called across a package boundary.
-	// Nothing changes semantically: the same buffer was always reused for every
-	// Entity, and the pointer All() yields is valid only for the current step.
-	rows Q
-	// fields is the field table, planned at registration: an offset into rows,
-	// a row width, an access mode, and the baked getter for the Store. bind
-	// puts the driver at index 0 and leaves the rest to be probed.
-	fields []queryField
-	// walk is the owners array of the driver, captured per run. Capturing it is
-	// what makes restructuring the Entity being visited safe under swap-remove:
-	// the array is shared, so a removal is seen, and an append is not.
-	walk []Entity
-	// run is validation mode's handle on this Query's current All(), and is nil
-	// in a release build, where the type it points at is empty and every method
-	// on it does nothing. See validate_on.go.
-	run *runToken
-	// shape is the filler chosen once, at registration, by field count. A
-	// per-field loop costs 2.4x a hand-written one and per-field binder closures
-	// about 5x — and those allocate.
-	//
-	// It is an enum reached through a switch rather than the iterator itself
-	// held as a func field, and that is not a stylistic choice: an indirect call
-	// is opaque to escape analysis, so the yield closure the range statement
-	// builds would escape and the frame would cost two allocations a tick — one
-	// for the closure and one for the loop state it captures. The switch keeps
-	// every call in the chain a known callee, which is what lets the closure
-	// stay on the caller's stack. Measured in situ; invisible in a
-	// microbenchmark, where the whole iterator inlines at the range site.
-	shape uint8
-	// copies is the System's row copy of each Store a *T field writes, one per
-	// Store. When a Hooks reader watches that Store for Changed, bind copies the
-	// whole Store once per run, before any row is handed out; the loop itself is
-	// untouched. See hookchanged.go.
-	copies []*rowCopy
-}
-
 // queryField is one Component of a Query, as registration left it.
 type queryField struct {
 	// get resolves the Store from the handle the Lock bound. It is called once
@@ -155,9 +90,159 @@ type queryCursor struct {
 	write  bool
 }
 
+// row reports the dense row e's value is in, and whether e matches this field.
+// It is one load of the sparse slot and one compare of the generation half: the
+// compare that finds the row is the compare that rejects a stale handle, so
+// liveness is not an extra cost, it is the probe.
+//
+// A Without matches through the same compare rather than beside it: the
+// generation the probe looks for is e's own for a Component field and a With,
+// and the absent generation for a Without, which is one or against a
+// register-held mask. So a Without reaches the same `if !ok { continue }` a
+// Component field does, the loop keeps one probe and one branch per field, and
+// the row a Without hands back is never read, because a filter's row width is
+// zero. See queryCursor.wanted for the invariant that makes it exact.
+//
+// It is kept apart from fill, and both are kept small, because the whole point
+// of the unrolled fillers is that the loop contains no call: a probe that
+// swallowed the fill grew past the inlining budget and cost 8% a frame.
+func (c queryCursor) row(e Entity) (uintptr, bool) {
+	index := e.idx()
+	if int(index) >= len(c.sparse) {
+		// The Store has never held a row for an Entity this high, so it holds
+		// none for e: absence, which is what a Without wanted.
+		return 0, c.wanted == absentGeneration
+	}
+	slot := c.sparse[index]
+	return uintptr(uint32(slot)), uint32(slot>>32) == e.gen()|c.wanted
+}
+
+// fill writes one Component into the buffer: the address of the stored row for
+// a pointer field, a copy of it for a value field.
+//
+// The pointer write goes through unsafe.Pointer and emits no GC write barrier.
+// That is sound here for one reason, which is an invariant rather than an
+// observation: a Query's buffer may only ever hold pointers into a live Store,
+// and a Store is a kernel resource cell held for the engine lifetime, so the
+// pointee is independently reachable whether a barrier fires or not. The safe
+// alternative is a typed setter closure per pointer field, which is the shape
+// that costs about 5x and allocates.
+func (c queryCursor) fill(row uintptr, buffer unsafe.Pointer) {
+	source := unsafe.Add(c.rows, row*c.size)
+	target := unsafe.Add(buffer, c.offset)
+	if c.write {
+		*(*unsafe.Pointer)(target) = source
+		return
+	}
+	// A sized store for the common widths, because a memmove call for eight
+	// bytes costs several times what the copy does. None of this needs a write
+	// barrier: a Component is pointer-free.
+	switch c.size {
+	case 8:
+		*(*uint64)(target) = *(*uint64)(source)
+	case 4:
+		*(*uint32)(target) = *(*uint32)(source)
+	case 16:
+		*(*[2]uint64)(target) = *(*[2]uint64)(source)
+	case 0:
+		// A Tag carries nothing, and nothing lands in the Query. A filter is
+		// planned to this width for the same reason and one more: the blank
+		// field it occupies is a byte of padding, not a place to put a
+		// Component.
+	default:
+		copyRow(target, source, c.size)
+	}
+}
+
+// fillTyped is fill for a Component that is not pointer-free, and the whole of
+// what it changes is that the row is copied by a typed assignment instead of by
+// a sized move through an unsafe.Pointer.
+//
+// That is correctness and not tuning. A sized move writes the row's bytes and
+// emits no write barrier, which is sound for a pointer-free row — the invariant
+// fill documents — and is a pointer store the collector never sees for a row
+// holding a string or a List. The closure is an ordinary `*(*C)(dst) =
+// *(*C)(src)` baked where C was still a type, so the compiler emits whatever
+// barriers the row needs and this package needs to know nothing about them.
+//
+// A write field never reaches here. It fills an address, and an address into a
+// live Store is the one pointer this package may write barrier-free, for the
+// reason fill states.
+func (c queryCursor) fillTyped(row uintptr, buffer unsafe.Pointer, copy func(dst, src unsafe.Pointer)) {
+	if c.size == 0 {
+		return
+	}
+	copy(unsafe.Add(buffer, c.offset), unsafe.Add(c.rows, row*c.size))
+}
+
 // wideShape is the field count at and above which the per-field loop is used
 // instead of an unrolled filler.
 const wideShape = 5
+
+// Query is a System's means of iterating the Entities that have a set of
+// Components. The set is the field list of Q, a struct type whose field types
+// are the Components and whose field pointer-ness is the access mode:
+//
+//	type MoveQuery struct {
+//	    Body     *Body     // write — yields the stored value itself
+//	    Velocity Velocity  // read  — yields a copy
+//	}
+//
+// Nothing else declares that lock set. A read yields a copy because a read
+// yielding a pointer would be a data race against concurrent readers and Go has
+// no pointer-to-const; a fat read Component therefore costs a copy per Entity,
+// which is evidence the Component is too fat rather than a reason for a hatch.
+//
+// Fields are named rather than embedded: two Components with the same base name
+// from different packages cannot both be embedded, and two Components each
+// having a Kind field would make it.Kind an ambiguous selector at the use site,
+// far from the cause. The ECS reads field types and never names, so the names
+// are free to read well.
+//
+// A Query is planned once, at registration, from the Component classes the
+// world holds. It is created by the handler builder and reached only as a
+// parameter of a System, which is what makes under-declaration unrepresentable:
+// the only route to a Store is this, and the field types are the declaration.
+type Query[Q any] struct {
+	// rows is the fill buffer, and it is a field of the Query rather than a
+	// local in All() on purpose. As a local its address reaches an opaque yield
+	// and it escapes — one allocation, 24 B, per Query per tick, invisible in a
+	// microbenchmark because the iterator inlines at the range site there and
+	// visible the moment a real System is called across a package boundary.
+	// Nothing changes semantically: the same buffer was always reused for every
+	// Entity, and the pointer All() yields is valid only for the current step.
+	rows Q
+	// fields is the field table, planned at registration: an offset into rows,
+	// a row width, an access mode, and the baked getter for the Store. bind
+	// puts the driver at index 0 and leaves the rest to be probed.
+	fields []queryField
+	// walk is the owners array of the driver, captured per run. Capturing it is
+	// what makes restructuring the Entity being visited safe under swap-remove:
+	// the array is shared, so a removal is seen, and an append is not.
+	walk []Entity
+	// run is validation mode's handle on this Query's current All(), and is nil
+	// in a release build, where the type it points at is empty and every method
+	// on it does nothing. See validate_on.go.
+	run *runToken
+	// shape is the filler chosen once, at registration, by field count. A
+	// per-field loop costs 2.4x a hand-written one and per-field binder closures
+	// about 5x — and those allocate.
+	//
+	// It is an enum reached through a switch rather than the iterator itself
+	// held as a func field, and that is not a stylistic choice: an indirect call
+	// is opaque to escape analysis, so the yield closure the range statement
+	// builds would escape and the frame would cost two allocations a tick — one
+	// for the closure and one for the loop state it captures. The switch keeps
+	// every call in the chain a known callee, which is what lets the closure
+	// stay on the caller's stack. Measured in situ; invisible in a
+	// microbenchmark, where the whole iterator inlines at the range site.
+	shape uint8
+	// copies is the System's row copy of each Store a *T field writes, one per
+	// Store. When a Hooks reader watches that Store for Changed, bind copies the
+	// whole Store once per run, before any row is handed out; the loop itself is
+	// untouched. See rowcopy.go.
+	copies []*rowCopy
+}
 
 // prepare plans the Query against the world and declares its locks. It runs
 // once, inside the single registration-time call of the handler's Lock.
@@ -351,97 +436,6 @@ func (q *Query[Q]) bind() {
 	if driver != 0 {
 		q.fields[0], q.fields[driver] = q.fields[driver], q.fields[0]
 	}
-}
-
-// row reports the dense row e's value is in, and whether e matches this field.
-// It is one load of the sparse slot and one compare of the generation half: the
-// compare that finds the row is the compare that rejects a stale handle, so
-// liveness is not an extra cost, it is the probe.
-//
-// A Without matches through the same compare rather than beside it: the
-// generation the probe looks for is e's own for a Component field and a With,
-// and the absent generation for a Without, which is one or against a
-// register-held mask. So a Without reaches the same `if !ok { continue }` a
-// Component field does, the loop keeps one probe and one branch per field, and
-// the row a Without hands back is never read, because a filter's row width is
-// zero. See queryCursor.wanted for the invariant that makes it exact.
-//
-// It is kept apart from fill, and both are kept small, because the whole point
-// of the unrolled fillers is that the loop contains no call: a probe that
-// swallowed the fill grew past the inlining budget and cost 8% a frame.
-func (c queryCursor) row(e Entity) (uintptr, bool) {
-	index := e.idx()
-	if int(index) >= len(c.sparse) {
-		// The Store has never held a row for an Entity this high, so it holds
-		// none for e: absence, which is what a Without wanted.
-		return 0, c.wanted == absentGeneration
-	}
-	slot := c.sparse[index]
-	return uintptr(uint32(slot)), uint32(slot>>32) == e.gen()|c.wanted
-}
-
-// fill writes one Component into the buffer: the address of the stored row for
-// a pointer field, a copy of it for a value field.
-//
-// The pointer write goes through unsafe.Pointer and emits no GC write barrier.
-// That is sound here for one reason, which is an invariant rather than an
-// observation: a Query's buffer may only ever hold pointers into a live Store,
-// and a Store is a kernel resource cell held for the engine lifetime, so the
-// pointee is independently reachable whether a barrier fires or not. The safe
-// alternative is a typed setter closure per pointer field, which is the shape
-// that costs about 5x and allocates.
-func (c queryCursor) fill(row uintptr, buffer unsafe.Pointer) {
-	source := unsafe.Add(c.rows, row*c.size)
-	target := unsafe.Add(buffer, c.offset)
-	if c.write {
-		*(*unsafe.Pointer)(target) = source
-		return
-	}
-	// A sized store for the common widths, because a memmove call for eight
-	// bytes costs several times what the copy does. None of this needs a write
-	// barrier: a Component is pointer-free.
-	switch c.size {
-	case 8:
-		*(*uint64)(target) = *(*uint64)(source)
-	case 4:
-		*(*uint32)(target) = *(*uint32)(source)
-	case 16:
-		*(*[2]uint64)(target) = *(*[2]uint64)(source)
-	case 0:
-		// A Tag carries nothing, and nothing lands in the Query. A filter is
-		// planned to this width for the same reason and one more: the blank
-		// field it occupies is a byte of padding, not a place to put a
-		// Component.
-	default:
-		copyRow(target, source, c.size)
-	}
-}
-
-// fillTyped is fill for a Component that is not pointer-free, and the whole of
-// what it changes is that the row is copied by a typed assignment instead of by
-// a sized move through an unsafe.Pointer.
-//
-// That is correctness and not tuning. A sized move writes the row's bytes and
-// emits no write barrier, which is sound for a pointer-free row — the invariant
-// fill documents — and is a pointer store the collector never sees for a row
-// holding a string or a List. The closure is an ordinary `*(*C)(dst) =
-// *(*C)(src)` baked where C was still a type, so the compiler emits whatever
-// barriers the row needs and this package needs to know nothing about them.
-//
-// A write field never reaches here. It fills an address, and an address into a
-// live Store is the one pointer this package may write barrier-free, for the
-// reason fill states.
-func (c queryCursor) fillTyped(row uintptr, buffer unsafe.Pointer, copy func(dst, src unsafe.Pointer)) {
-	if c.size == 0 {
-		return
-	}
-	copy(unsafe.Add(buffer, c.offset), unsafe.Add(c.rows, row*c.size))
-}
-
-// copyRow is the general-width copy, kept out of fill so that fill stays within
-// the inlining budget.
-func copyRow(target, source unsafe.Pointer, size uintptr) {
-	copy(unsafe.Slice((*byte)(target), size), unsafe.Slice((*byte)(source), size))
 }
 
 // The fillers below are the unrolled fill, one per field count, chosen at
@@ -651,4 +645,10 @@ func (q *Query[Q]) release() uintptr {
 	var empty Q
 	q.rows = empty
 	return released
+}
+
+// copyRow is the general-width copy, kept out of fill so that fill stays within
+// the inlining budget.
+func copyRow(target, source unsafe.Pointer, size uintptr) {
+	copy(unsafe.Slice((*byte)(target), size), unsafe.Slice((*byte)(source), size))
 }

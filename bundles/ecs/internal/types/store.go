@@ -25,40 +25,6 @@ type storeCore interface {
 	remove(e Entity) bool
 }
 
-// Store is the holding of every value of one Component type, one per registered
-// type, and the unit a lock is taken on. It is three arrays:
-//
-//	sparse []uint64   // entity index -> generation<<32 | dense index
-//	owners []Entity   // dense index  -> the full entity id
-//	dense  []T        // packed component data
-//
-// len(owners) is the population. There is no separate count, because removal is
-// swap-remove and the packed arrays therefore never contain holes.
-//
-// A Store must be reached as *Store[T]. A value store makes a kernel write
-// handle's Get return a copy, so mutations through it are silently discarded.
-type Store[T any] struct {
-	sparse []uint64
-	owners []Entity
-	dense  []T
-	// trivial is the pointer-free answer for T, and the only thing it decides
-	// is whether a vacated row is zeroed. It sits after the three arrays so the
-	// erased header can mirror it and the two layouts stay identical.
-	trivial bool
-	// lists and owner are what validation mode needs and what a release build
-	// never reads: the Lists in a row and the Lists within their elements, and the
-	// Component's name for the diagnostic.
-	lists []listSite
-	owner string
-	// watch is the union of the kind sets of this Store's Hooks readers, fixed
-	// when registration closes, and hooks is the log they read, nil while
-	// nobody reads. A writer handle reads watch when its System's run starts;
-	// neither is touched by add or remove, which stay leaf functions. See
-	// hooks.go.
-	watch hookKind
-	hooks *hookLog[T]
-}
-
 // storeHeader is what every *Store[T] looks like once T is forgotten, and it is
 // how a Query reaches a Store whose Component type it knows only as a
 // reflect.Type. The first two arrays are typed the same for every T; the rows
@@ -95,6 +61,40 @@ type denseRows struct {
 	data unsafe.Pointer
 	len  int
 	cap  int
+}
+
+// Store is the holding of every value of one Component type, one per registered
+// type, and the unit a lock is taken on. It is three arrays:
+//
+//	sparse []uint64   // entity index -> generation<<32 | dense index
+//	owners []Entity   // dense index  -> the full entity id
+//	dense  []T        // packed component data
+//
+// len(owners) is the population. There is no separate count, because removal is
+// swap-remove and the packed arrays therefore never contain holes.
+//
+// A Store must be reached as *Store[T]. A value store makes a kernel write
+// handle's Get return a copy, so mutations through it are silently discarded.
+type Store[T any] struct {
+	sparse []uint64
+	owners []Entity
+	dense  []T
+	// trivial is the pointer-free answer for T, and the only thing it decides
+	// is whether a vacated row is zeroed. It sits after the three arrays so the
+	// erased header can mirror it and the two layouts stay identical.
+	trivial bool
+	// lists and owner are what validation mode needs and what a release build
+	// never reads: the Lists in a row and the Lists within their elements, and the
+	// Component's name for the diagnostic.
+	lists []listSite
+	owner string
+	// watch is the union of the kind sets of this Store's Hooks readers, fixed
+	// when registration closes, and hooks is the log they read, nil while
+	// nobody reads. A writer handle reads watch when its System's run starts;
+	// neither is touched by add or remove, which stay leaf functions. See
+	// hooks.go.
+	watch hookKind
+	hooks *hookLog[T]
 }
 
 // erase views a typed Store as the header a Query fills from. It is a cast and
@@ -231,6 +231,18 @@ func (s *Store[T]) add(e Entity, value T) {
 
 // Remove takes this Component away from e and reports whether it had one.
 func (s *Store[T]) Remove(e Entity) bool { return s.remove(e) }
+
+// logFor is the Store's log, created by the first reader that registers, which
+// also enrols the Store's Despawn capture: a Despawn is recorded whichever kind
+// is watched. A Store nobody reads has neither.
+func (s *Store[T]) logFor(en *Entities) *hookLog[T] {
+	if s.hooks == nil {
+		s.hooks = &hookLog[T]{trivial: s.trivial}
+		en.captures = append(en.captures, s.captureDespawn)
+		en.enrolHooks(s.hooks.shrink)
+	}
+	return s.hooks
+}
 
 // removeRecorded is Remove.From on a Store watched for removals: T's last value
 // is copied into the log before remove vacates the row. It is a separate

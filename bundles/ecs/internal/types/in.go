@@ -7,6 +7,17 @@ import (
 	"github.com/dvoyni/cog/kernel"
 )
 
+// input is what every *In[T] satisfies whatever T is, so the builder can tell a
+// System naming an input no Feed supplies from a System naming a type the ECS
+// does not hand out at all. The two are different mistakes and deserve
+// different sentences.
+//
+// In is deliberately not a systemParam: the instance a System receives has to
+// be the one its Feeder writes, so it can never be the one reflect.New would
+// make. Leaving it out of that interface is what makes the fallthrough a
+// diagnostic instead of a System reading zero every tick.
+type input interface{ claim() bool }
+
 // In carries a per-tick value into a System without the System naming where it
 // came from, and it is the answer to a System being welded to one event type.
 //
@@ -44,17 +55,6 @@ type In[T any] struct {
 
 // Get returns the value the adapter projected for this tick. Hoist it.
 func (i *In[T]) Get() T { return i.value }
-
-// input is what every *In[T] satisfies whatever T is, so the builder can tell a
-// System naming an input no Feed supplies from a System naming a type the ECS
-// does not hand out at all. The two are different mistakes and deserve
-// different sentences.
-//
-// In is deliberately not a systemParam: the instance a System receives has to
-// be the one its Feeder writes, so it can never be the one reflect.New would
-// make. Leaving it out of that interface is what makes the fallthrough a
-// diagnostic instead of a System reading zero every tick.
-type input interface{ claim() bool }
 
 // claim marks this cell as belonging to one System and reports whether it was
 // free. It runs once per registration, never per tick.

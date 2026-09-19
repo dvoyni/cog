@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"iter"
 	"reflect"
-	"sync"
 	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
@@ -32,7 +31,10 @@ import (
 //
 // A change is recorded at the end of its writer's run, by comparing the bytes
 // of each row the System was handed with write access against a copy taken
-// before it could write them: hookchanged.go.
+// before it could write them: rowcopy.go.
+//
+// The log itself — the records, the values a removal retains, and the
+// compaction that drops what every reader has passed — is hooklog.go.
 
 // hookKind is the set of facts one record carries, all relative to its
 // Component. An act is recorded with every kind true of it.
@@ -153,140 +155,29 @@ func (h *Hook[T]) IsChanged() bool {
 	return h.kinds&kindChanged != 0
 }
 
-// hookRecord is one act in a Store's log, 24 bytes: the full Entity, generation
-// included, so a despawned Entity and the one reusing its index are never
-// folded together; where a removal's copy of T sits among the log's retained
-// values, or -1; the System whose run end recorded a change; and the act's
-// kinds.
-type hookRecord struct {
-	e Entity
-	// value is the absolute position of a removal's retained copy, counted
-	// from the first value the log ever retained, so compaction moves no index.
-	value int64
-	// writer is the System that recorded a change, and 0 on every other record:
-	// a reader skips the changes its own System recorded. It sits in what was
-	// the record's padding.
-	writer uint32
-	kinds  hookKind
-}
-
-// hookRecords is the half of a Store's log that knows no T: the records, and
-// the readers' places in them. hookLog[T] begins with it, so the erased Store
-// header reaches it through the same pointer, which is how a Changed compare
-// that knows its Store only as bytes appends to it.
-type hookRecords struct {
-	mu      sync.Mutex
-	records []hookRecord
-	// base is the absolute position of records[0].
-	base uint64
-	// places is each reader's absolute position: the first record its next run
-	// start takes.
-	places []*uint64
-	// runs is Validation mode's count of the runs that appended to the log,
-	// each counted once at its System's run end. A release build never reads
-	// or writes it. See hookvalidate.go.
-	runs uint64
-}
-
-// changed records a change a writer's run end found in e's bytes. The caller
-// holds the Store's write lock, and has checked the Store watches changes.
-func (r *hookRecords) changed(e Entity, writer uint32) {
-	r.records = append(r.records, hookRecord{e: e, value: -1, writer: writer, kinds: kindChanged})
-}
-
-// hookLog is one watched Store's record of acts. Writers append to records and
-// retained under the Store's write lock and never touch mu. Readers hold the
-// Store's read lock for their whole run, so no append lands while one reads;
-// mu is what two readers of the same Store, running together, share while they
-// fold and compact. It is never held by a writer or across a System's body.
-type hookLog[T any] struct {
-	// hookRecords is first, and must stay first: see hookRecords.
-	hookRecords
-	// retained is the removals' copies of T, and retainedBase the absolute
-	// position of retained[0].
-	retained     []T
-	retainedBase int64
-	// trivial is T's pointer-free answer. A retained copy of a non-trivial T is
-	// zeroed when compaction drops it, so a string or a List it holds is
-	// released.
-	trivial bool
-}
-
-// added records an addition. The caller has checked the Store watches it.
-func (l *hookLog[T]) added(e Entity, kinds hookKind) {
-	l.records = append(l.records, hookRecord{e: e, value: -1, kinds: kinds})
-}
-
-// removed records a removal and retains T's last value, taken at the act. The
-// caller has checked the Store watches it.
-func (l *hookLog[T]) removed(e Entity, row *T, kinds hookKind) {
-	l.retained = append(l.retained, *row)
-	l.records = append(l.records, hookRecord{
-		e: e, value: l.retainedBase + int64(len(l.retained)-1), kinds: kinds,
-	})
-}
-
-// compact drops every record all readers have passed, and the retained values
-// only those records named. Capacity is kept until ShrinkCmd cuts it, so steady
-// state never allocates. Held under mu.
-func (l *hookLog[T]) compact() {
-	least := l.base + uint64(len(l.records))
-	for _, place := range l.places {
-		least = min(least, *place)
-	}
-	passed := int(least - l.base)
-	if passed == 0 {
+// ask is IsX's check: a kind the record's kind set can never deliver panics,
+// because asking is the bug of an index that never removes. A Hook no reader
+// delivered carries no kind set and is not checked.
+func (h *Hook[T]) ask(kind hookKind, method string) {
+	under := deliveredUnder(h.under)
+	if under == 0 {
 		return
 	}
-	firstKept := l.retainedBase + int64(len(l.retained))
-	for i := passed; i < len(l.records); i++ {
-		if l.records[i].value >= 0 {
-			firstKept = l.records[i].value
-			break
-		}
+	const additions, removals = kindSpawned | kindAdded | kindChanged, kindDespawned | kindRemoved
+	possible := under&additions != 0
+	if kind&removals != 0 {
+		possible = under&removals != 0
 	}
-	kept := copy(l.retained, l.retained[firstKept-l.retainedBase:])
-	if !l.trivial {
-		clear(l.retained[kept:])
+	if possible {
+		return
 	}
-	l.retained = l.retained[:kept]
-	l.retainedBase = firstKept
-	kept = copy(l.records, l.records[passed:])
-	l.records = l.records[:kept]
-	l.base = least
-}
-
-// logFor is the Store's log, created by the first reader that registers, which
-// also enrols the Store's Despawn capture: a Despawn is recorded whichever kind
-// is watched. A Store nobody reads has neither.
-func (s *Store[T]) logFor(en *Entities) *hookLog[T] {
-	if s.hooks == nil {
-		s.hooks = &hookLog[T]{trivial: s.trivial}
-		en.captures = append(en.captures, s.captureDespawn)
-		en.enrolHooks(s.hooks.shrink)
+	what := "a removal or a despawn"
+	if kind&removals == 0 {
+		what = "an addition, a spawn or a change"
 	}
-	return s.hooks
-}
-
-// shrink cuts the records and the retained values to their length, and reports
-// the bytes let go. What no reader has passed is the length, so every record a
-// reader has yet to take survives, with its value, at the same absolute
-// position; compaction has already dropped the rest. An array already at its
-// length is left as it is, so a second shrink releases nothing.
-//
-// Only ShrinkCmd calls it, holding write{*Entities}, which excludes every writer
-// that appends and every reader that folds or compacts, so mu is not taken.
-func (l *hookLog[T]) shrink() uintptr {
-	before := l.bytes()
-	l.records = clip(l.records)
-	l.retained = clip(l.retained)
-	return before - l.bytes()
-}
-
-// bytes is what the log's records and retained values hold, by capacity.
-func (l *hookLog[T]) bytes() uintptr {
-	return uintptr(cap(l.records))*unsafe.Sizeof(hookRecord{}) +
-		uintptr(cap(l.retained))*unsafe.Sizeof(*new(T))
+	panic(fmt.Sprintf(
+		"ecs: %s on a Hook[%s] delivered under %s, which never delivers %s, so it can only ever report false: asking is the bug of an index that never removes. Read Hooks[%s, K] under a kind set that delivers what the code asks about",
+		method, kernel.TypeName(reflect.TypeFor[T]()), kindSetName(under), what, kernel.TypeName(reflect.TypeFor[T]())))
 }
 
 // hookGate is a writer handle's check of its Store's watched kinds. The Store's
@@ -411,7 +302,7 @@ type Hooks[T any, K KindSet] struct {
 	// seen, named and system are Validation mode's, and a release build never
 	// sets them: the log's count of appending runs at this reader's last run,
 	// and this parameter's and its System's names for the diagnostics. See
-	// hookvalidate.go.
+	// systempace.go.
 	seen   uint64
 	named  string
 	system string
@@ -567,6 +458,18 @@ func (h *Hooks[T, K]) beginRun() {
 	}
 }
 
+// keepPace is a reader's check at its run start: more than hookPaceLimit
+// counted runs since its last run panics, naming its System and the Store.
+func (h *Hooks[T, K]) keepPace() {
+	runs := h.log.runs
+	if behind := runs - h.seen; behind > hookPaceLimit {
+		panic(fmt.Sprintf(
+			"ecs: System %s reads %s, and its run starts %d counted runs of Systems appending to Store[%s]'s log after its last run, past the %d allowed: a System reading Hooks runs as often as the Systems writing its Component, and one that falls behind holds that log for every reader of it. Move the reader to its writers' event, or pause the writers when the reader pauses",
+			h.system, h.named, behind, kernel.TypeName(reflect.TypeFor[T]()), hookPaceLimit))
+	}
+	h.seen = runs
+}
+
 // endRun compacts what every reader of the Store has passed, then clears this
 // reader's copy, zeroing it first for a non-trivial T so the values it holds
 // are released.
@@ -602,4 +505,17 @@ func (h *Hooks[T, K]) bytes() uintptr {
 	return uintptr(cap(h.out))*unsafe.Sizeof(hookEntry[T]{}) +
 		uintptr(cap(h.fills))*unsafe.Sizeof(int32(0)) +
 		uintptr(cap(h.marks))*unsafe.Sizeof(hookMark{})
+}
+
+// kindSetName names the kind set whose kinds these are.
+func kindSetName(kinds hookKind) string {
+	for _, set := range []KindSet{
+		HookSpawned{}, HookDespawned{}, HookSpawnedDespawned{}, HookAdded{},
+		HookRemoved{}, HookAddedRemoved{}, HookAddedChanged{}, HookAll{},
+	} {
+		if set.kinds() == kinds {
+			return kernel.TypeName(reflect.TypeOf(set))
+		}
+	}
+	return fmt.Sprintf("kinds %05b", kinds)
 }

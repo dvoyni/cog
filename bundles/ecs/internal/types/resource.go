@@ -7,6 +7,10 @@ import (
 	"github.com/dvoyni/cog/kernel"
 )
 
+// storeCoreType is what every *Store[T] satisfies and nothing else does, which
+// is how guardHandle recognises a Store without knowing its Component type.
+var storeCoreType = reflect.TypeFor[storeCore]()
+
 // Read and Write are the System parameters that name a kernel resource, and
 // together they are the whole of the binding mechanism: there is no binding
 // type, no adapter and no registration call of the ECS's own. A System that
@@ -72,10 +76,6 @@ func (w *Write[T]) Get() T { return w.handle.Get() }
 // Set replaces the resource value, for the few resources that are reassigned
 // wholesale rather than mutated in place.
 func (w *Write[T]) Set(value T) { w.handle.Set(value) }
-
-// storeCoreType is what every *Store[T] satisfies and nothing else does, which
-// is how guardHandle recognises a Store without knowing its Component type.
-var storeCoreType = reflect.TypeFor[storeCore]()
 
 // guardHandle refuses the ECS's own cells to a generic resource handle, and the
 // refusal is soundness rather than tidiness.

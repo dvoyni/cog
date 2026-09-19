@@ -1,6 +1,6 @@
 ---
 name: "Go File Layout"
-description: "Use when creating a Go file, adding a type, or deciding which file a type or method belongs in, anywhere outside a plugin root. Covers one-type-per-file, where a type's methods live, splitting a large type, file naming, and declaration order within a file."
+description: "Use when creating a Go file, adding a type, or deciding which file a type or method belongs in, anywhere outside a plugin root. Covers one-type-per-file, where a type's methods live, splitting a large type, file naming including the build-selected `_js`/`_on`/`_off` pairs, and declaration order within a file."
 applyTo: "**/*.go"
 ---
 
@@ -130,9 +130,45 @@ scheduler_grant.go       avoid: reads like a build constraint
 scheduler_js.go          WRONG: builds only on GOOS=js
 ```
 
-**Underscores are reserved** for `_test.go` and for files genuinely selected by
-platform — `_js`, `_windows`, `_desktop` — where the implicit constraint is the
-point.
+**Underscores are reserved** for `_test.go` and for a file the build selects:
+`_js`, `_windows`, `_desktop`, and the `_on`/`_off` pair below. Anywhere else
+the underscore is noise that reads like a constraint.
+
+## Files the build selects
+
+A build-selected file is named for the build it takes, not for its subject.
+
+Two files holding the same declarations under opposite build constraints are
+named `<subject>_<build>.go`, and the suffix says which build takes which:
+`paste_js.go` beside `paste_desktop.go`, `validate_on.go` beside
+`validate_off.go`. Here the underscore is the point, and it is the one place
+the rule above wants one — a reader who sees `validate-on.go` has no reason to
+think the file is conditional, and learns that the other half exists only when
+a build surprises them.
+
+**Use `_on` and `_off` when the two sides are a feature a tag turns on** rather
+than a platform. The tag is explicit, so the suffix is free to be a plain word,
+and `on` and `off` are the right plain words because Go attaches no implicit
+constraint to either — a suffix that is a `GOOS` would add one on top of the
+tag:
+
+```
+validate.go              what both builds share: the vocabulary neither varies
+validate_on.go           //go:build ecs_validate
+validate_off.go          //go:build !ecs_validate
+```
+
+The pair is a contract: whatever the rest of the package names, both files
+declare, so exactly one definition is in every build and no call site is
+written twice. Either side may hold more than that — the on side of `validate`
+holds the stamp table the off side has no use for. What does not vary at all
+goes in the untagged `<subject>.go` beside them.
+
+**One type, one file does not reach inside such a file.** What it holds is
+decided by the build it serves and not by its subject, so the off side's stubs
+and the on side's several types each stay whole. The rule resumes at the file
+boundary: a class-like type that is the same in both builds does not belong in
+the pair at all.
 
 ## Order within a file
 
@@ -173,6 +209,12 @@ one mechanical split rule anybody states, and it measures the wrong thing under
 a type-centric layout — two type files in the same package *should* have
 converging imports, and `bytes`' own `buffer.go` and `reader.go` do. Recorded
 because it is the obvious counter-proposal.
+
+**A dash for the build-selected pair.** `validate-on.go` and `validate-off.go`
+build exactly the same and read as two ordinary files, which is the objection:
+the underscore is what tells a reader the file is one of two and that the other
+one exists. Recorded because the rule above prefers a dash everywhere else, and
+this is the exception to it.
 
 **A numeric size threshold for "tiny".** Rejected in favour of a judgement and a
 question. A line count invites a type to be padded or squeezed to land on the

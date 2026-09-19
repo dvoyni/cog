@@ -2,6 +2,25 @@ package types
 
 import "reflect"
 
+// response is what every *Resp[T] satisfies whatever T is, so the builder can
+// tell a response parameter from a type the ECS does not hand out at all, and
+// can say which answer was named when it is the wrong one.
+//
+// Resp is deliberately not a systemParam, for the same reason In is not: the
+// instance a System receives has to be the one the builder reads back, so it can
+// never be the one reflect.New would make. Leaving it out of that interface is
+// what makes the fallthrough a diagnostic rather than an answer nobody collects.
+type response interface{ answers() reflect.Type }
+
+// responseCell is the cell ToExecute owns and reads back. It is the only route
+// a Resp instance reaches a System by.
+type responseCell interface {
+	response
+	// slot is the parameter type this cell fills and the argument it fills it
+	// with, both fixed at registration.
+	slot() (reflect.Type, reflect.Value)
+}
+
 // Resp is how a System invoked as a command answers, and it is the reason
 // ToExecute is a question and not only an instruction.
 //
@@ -58,27 +77,8 @@ func (r *Resp[T]) take() T {
 	return value
 }
 
-// response is what every *Resp[T] satisfies whatever T is, so the builder can
-// tell a response parameter from a type the ECS does not hand out at all, and
-// can say which answer was named when it is the wrong one.
-//
-// Resp is deliberately not a systemParam, for the same reason In is not: the
-// instance a System receives has to be the one the builder reads back, so it can
-// never be the one reflect.New would make. Leaving it out of that interface is
-// what makes the fallthrough a diagnostic rather than an answer nobody collects.
-type response interface{ answers() reflect.Type }
-
 // answers reports the type this cell holds, for the diagnostics.
 func (r *Resp[T]) answers() reflect.Type { return reflect.TypeFor[T]() }
-
-// responseCell is the cell ToExecute owns and reads back. It is the only route
-// a Resp instance reaches a System by.
-type responseCell interface {
-	response
-	// slot is the parameter type this cell fills and the argument it fills it
-	// with, both fixed at registration.
-	slot() (reflect.Type, reflect.Value)
-}
 
 // slot reports the parameter type and the argument. It runs once, at
 // registration, never per invocation.

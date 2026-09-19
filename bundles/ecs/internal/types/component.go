@@ -9,6 +9,9 @@ import (
 	"github.com/dvoyni/cog/libs/assets"
 )
 
+// blobType is assets.Blob, the static byte run Storable admits by identity.
+var blobType = reflect.TypeFor[assets.Blob]()
+
 // componentClass is one Component type as registration left it: how wide one
 // row is, and the two baked closures that declare a lock on its Store and hand
 // back the erased view a Query fills from.
@@ -212,9 +215,6 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 // bound is small and real. Both cost the collector nothing at all, which a List
 // does not.
 func Storable(t reflect.Type) error { return storable(t, kernel.TypeName(t)) }
-
-// blobType is assets.Blob, the static byte run Storable admits by identity.
-var blobType = reflect.TypeFor[assets.Blob]()
 
 func storable(t reflect.Type, path string) error {
 	if t == blobType {

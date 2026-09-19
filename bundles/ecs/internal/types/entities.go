@@ -1,6 +1,23 @@
 package types
 
-import "reflect"
+import (
+	"reflect"
+	"unsafe"
+)
+
+// shrinkable is everything ShrinkCmd reaches besides the authority's own
+// arrays, and nothing else reads it.
+type shrinkable struct {
+	// stores is every enrolled Store's shrink. It is kept apart from
+	// Entities.stores because a despawn must never pay for it.
+	stores []func() uintptr
+	// scratch is every Query's release, enrolled when the Query is planned, and
+	// every System's row copy's, enrolled when the System shares it.
+	scratch []func() uintptr
+	// hooks is every Hook log's shrink, enrolled when the log is created, and
+	// every reader's release, enrolled when the reader is prepared.
+	hooks []func() uintptr
+}
 
 // Entities is the id authority: it allocates indices, tracks their generations,
 // answers whether a handle is alive, and holds a reference to every Store so a
@@ -68,20 +85,6 @@ type Entities struct {
 	// shrinkable is what ShrinkCmd reaches, enrolled at registration and
 	// created by the first enrolment.
 	shrinkable *shrinkable
-}
-
-// shrinkable is everything ShrinkCmd reaches besides the authority's own
-// arrays, and nothing else reads it.
-type shrinkable struct {
-	// stores is every enrolled Store's shrink. It is kept apart from
-	// Entities.stores because a despawn must never pay for it.
-	stores []func() uintptr
-	// scratch is every Query's release, enrolled when the Query is planned, and
-	// every System's row copy's, enrolled when the System shares it.
-	scratch []func() uintptr
-	// hooks is every Hook log's shrink, enrolled when the log is created, and
-	// every reader's release, enrolled when the reader is prepared.
-	hooks []func() uintptr
 }
 
 // newEntities creates the authority, reserving room for ids indices. The number
@@ -190,17 +193,6 @@ func (en *Entities) despawn(e Entity) bool {
 	return true
 }
 
-// nextGeneration steps a generation, skipping the two values a live entity may
-// never carry: 0, which would make the handle equal to NoEntity, and the
-// all-ones generation a Store writes into an empty sparse slot.
-func nextGeneration(g uint32) uint32 {
-	g++
-	if g == 0 || g == absentGeneration {
-		return 1
-	}
-	return g
-}
-
 // nextWriter names a System as it registers. Names start at 1, so the 0 every
 // record but a change carries names no System.
 func (en *Entities) nextWriter() uint32 {
@@ -227,4 +219,76 @@ func (en *Entities) shrinkables() *shrinkable {
 		en.shrinkable = &shrinkable{}
 	}
 	return en.shrinkable
+}
+
+func (en *Entities) shrink(request ShrinkRequest) ShrinkResponse {
+	var released ShrinkResponse
+	if !request.KeepHooks {
+		for _, shrink := range en.shrinkables().hooks {
+			released.Hooks += shrink()
+		}
+	}
+	if !request.KeepStores {
+		for _, shrink := range en.shrinkables().stores {
+			released.Stores += shrink()
+		}
+	}
+	if !request.KeepEntities {
+		released.Entities = en.shrinkIndices()
+	}
+	if !request.KeepScratch {
+		for _, release := range en.shrinkables().scratch {
+			released.Scratch += release()
+		}
+	}
+	return released
+}
+
+// shrinkIndices drops the free indices at the top of the index space and cuts
+// the generations and the free list to capacity equal to length, reporting the
+// bytes let go.
+func (en *Entities) shrinkIndices() uintptr {
+	before := en.bytes()
+	top := len(en.gens)
+	if len(en.free) > 0 {
+		// A bitmap of the free indices, so finding the unused run at the top
+		// costs one pass over the free list and none over a sorted copy of it.
+		free := make([]uint64, (top+63)/64)
+		for _, index := range en.free {
+			free[index/64] |= 1 << (index % 64)
+		}
+		for top > 0 && free[(top-1)/64]&(1<<((top-1)%64)) != 0 {
+			top--
+		}
+	}
+	// Dropping an index forgets its generation, so the floor takes the highest
+	// generation dropped before the index space is cut.
+	for _, generation := range en.gens[top:] {
+		en.floor = max(en.floor, generation)
+	}
+	kept := en.free[:0]
+	for _, index := range en.free {
+		if int(index) < top {
+			kept = append(kept, index)
+		}
+	}
+	en.free = clip(kept)
+	en.gens = clip(en.gens[:top])
+	return before - en.bytes()
+}
+
+// bytes is what the generations and the free list hold, by capacity.
+func (en *Entities) bytes() uintptr {
+	return uintptr(cap(en.gens)+cap(en.free)) * unsafe.Sizeof(uint32(0))
+}
+
+// nextGeneration steps a generation, skipping the two values a live entity may
+// never carry: 0, which would make the handle equal to NoEntity, and the
+// all-ones generation a Store writes into an empty sparse slot.
+func nextGeneration(g uint32) uint32 {
+	g++
+	if g == 0 || g == absentGeneration {
+		return 1
+	}
+	return g
 }
