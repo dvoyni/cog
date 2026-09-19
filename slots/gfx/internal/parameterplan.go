@@ -50,6 +50,11 @@ type plannedResource struct {
 	// names has no parameter to read it off, and the report has to say which
 	// one went unfilled.
 	name string
+	// view is the dimension a texture binding declares. It is the static half of
+	// the dimension check and a pure function of the shader, so it is cached
+	// here with the rest of the plan; the layer count it is compared against is
+	// a per-draw value and cannot be. Meaningless for a buffer binding.
+	view gfx.TextureViewDimension
 }
 
 // plannedSampler is one reflected sampler binding and the parameter that fills

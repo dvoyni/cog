@@ -410,6 +410,30 @@ anywhere**. The three built-in entry points call it and are the worked example.
 - **The vertex input** `@location(0) quad: vec2<f32>` and the
   `@builtin(instance_index)` read that selects the record.
 - **The reserved sampler and texture names.**
+- **`canvasTexture`'s view dimension**: `texture_2d_array` on the sprite path and
+  `texture_2d` on the triangles and texture paths. A texture whose layer count
+  contradicts the binding's declared dimension is fatal to the draw, so a sprite
+  material declaring the flat spelling refuses every draw over the atlas, and a
+  triangles material declaring the array one refuses every standalone texture.
+
+**The sprite path never binds texture id 0.** Unlike the triangles path, which
+leaves an untextured draw to gfx's white fallback, the sprite path supplies its
+own white: canvas packs a white texel into the atlas and every fill, line and
+stroke samples it. Four guards hold the invariant together, and it is the reason
+nothing in canvas depends on what an unresolved texture renders as on an array
+binding:
+
+- the white texel is packed **before any layer's ops**, and a frame whose texel
+  does not pack draws nothing at all;
+- every sprite, glyph and icon draw returns early on an atlas entry that did not
+  resolve, so an unpacked entry draws nothing rather than binding id 0;
+- the atlas id always comes from `AllocateTexture`, and `LayersPerArray` below
+  two is refused at config validation, so the atlas view is always an array
+  view;
+- canvas prepends its own `canvasTexture` parameter and resolution is
+  first-wins, so a caller-named material cannot displace it.
+
+Changing any one of them puts the sprite path back on the engine's fallback.
 
 Free to change: both entry-point bodies entirely, appended members on the uniform
 block, and additional per-instance parameter arrays at group 2.

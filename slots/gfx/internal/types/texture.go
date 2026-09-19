@@ -15,10 +15,16 @@ import (
 // one gfx never minted.
 type TextureDescrParams struct {
 	width, height int
-	format        TextureFormat
-	mipmaps       bool
-	copyData      bool
-	id            TextureID
+	// layers is how many array layers the texture was asked for, and zero when
+	// the descriptor cannot say. Only an allocation names one, so a bake sets 1
+	// and BakedTexture - an id and nothing behind it - leaves 0. Zero is
+	// deliberately not 1: a check that read it as 1 would call an array texture
+	// flat and refuse a draw that was correct.
+	layers   int
+	format   TextureFormat
+	mipmaps  bool
+	copyData bool
+	id       TextureID
 }
 
 // TextureDescr describes a texture by resource path (TextureWithResource),
@@ -50,6 +56,13 @@ func (t TextureDescr) Path() string { return t.Name }
 // goes on reporting zero afterwards, because a descriptor is the request and a
 // request learns nothing from the load it names.
 func (t TextureDescr) Size() (width, height int) { return t.Params.width, t.Params.height }
+
+// Layers returns how many array layers the texture was allocated with, and zero
+// when the descriptor cannot say - a texture named by path, inline pixels, or a
+// bare baked id. More than one layer is a 2D-array texture, which is what a
+// binding declared texture_2d_array needs; zero means unknown and nothing may
+// conclude from it.
+func (t TextureDescr) Layers() int { return t.Params.layers }
 
 // Format returns the texture's pixel format. A texture loaded from a resource
 // path is always sRGB, because the loader decodes PNG and JPEG and both are

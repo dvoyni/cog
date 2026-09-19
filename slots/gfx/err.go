@@ -97,6 +97,37 @@ func (e ErrStorageBufferUnsupplied) Error() string {
 		e.Shader, e.Parameter, e.Group, e.Binding, cause)
 }
 
+// ErrTextureViewDimensionMismatch reports a texture parameter whose view
+// dimension cannot fill the binding its name matched: a single-layer texture
+// supplied where the shader declared texture_2d_array, or an array texture
+// where it declared texture_2d.
+//
+// The draw is dropped. This is the one texture case that does not fall back: an
+// unfilled or unresolved texture stands for "not there yet" - still loading, or
+// never named - and white is the right picture for it at either dimension. A
+// texture that is there and is the wrong shape is an authoring error the caller
+// can fix, and substituting white for it would hide a mistake rather than show
+// a state.
+//
+// A descriptor that cannot report its layer count is exempt rather than judged.
+// Only an allocation names one, so a bare baked id says nothing, and refusing a
+// correct draw over a descriptor's silence is the worse direction for a fatal
+// error. The backend's refused bind group stays the backstop beneath it.
+type ErrTextureViewDimensionMismatch struct {
+	Shader    string
+	Parameter string
+	Group     int
+	Binding   int
+	Declared  string // the view dimension the shader declared
+	Supplied  string // the view dimension the parameter's texture carries
+}
+
+func (e ErrTextureViewDimensionMismatch) Error() string {
+	return fmt.Sprintf(
+		"gfx: shader %q declares %s named %q at group %d binding %d, but the draw supplied a %s texture",
+		e.Shader, e.Declared, e.Parameter, e.Group, e.Binding, e.Supplied)
+}
+
 // ErrVertexInputUnsupplied reports a shader input no attribute of the bound
 // vertex layout fills. The draw is dropped: WebGPU hands the input
 // (0, 0, 0, 1) and the software rasterizer hands it a zero value, so what

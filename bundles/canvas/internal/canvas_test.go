@@ -136,13 +136,33 @@ func (b *testBackend) ShaderLayout(id gfx.ShaderID) gfx.ShaderLayout {
 	// to the draw - gfx reports it rather than letting the short bind group go
 	// silently - so declaring `instances` against the triangles shader, or
 	// `wobble` against anything but a per-instance array, would drop draws that
-	// render perfectly well in production. Samplers and textures fall back, so
-	// the union costs nothing there.
+	// render perfectly well in production. Samplers fall back, so the union
+	// costs nothing there.
+	//
+	// canvasTexture's view dimension is narrowed for the same reason, and unlike
+	// the rest of the union it is read off the source rather than assumed. It is
+	// texture_2d_array on the sprite path and texture_2d on the triangles and
+	// texture paths - the two families can never be one module precisely because
+	// they declare it differently - and a texture whose layer count contradicts
+	// the declared dimension is fatal to the draw. Standing the union's array
+	// dimension against the texture path would refuse every standalone
+	// single-layer texture, which renders perfectly well in production.
+	//
+	// The union's own dimension is the sprite path's, because that is the shape
+	// it otherwise stands in for, and a source that declares nothing at all - as
+	// every stub here does - is standing in for a sprite material over the
+	// atlas. Only a source that positively declares the flat binding narrows it.
+	// `texture_2d<` and not `texture_2d` is what distinguishes the two: the
+	// array spelling contains the flat one.
 	source := b.shaderSources[id]
+	array := !strings.Contains(source, "texture_2d<")
 	kept := layout.Resources[:0:0]
 	for _, resource := range layout.Resources {
 		if resource.StorageBuffer && !strings.Contains(source, resource.Name) {
 			continue
+		}
+		if resource.Name == canvas.TextureSlot && !array {
+			resource.TextureView = gfx.TextureView2D
 		}
 		kept = append(kept, resource)
 	}

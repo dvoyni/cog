@@ -473,17 +473,38 @@ lives in plan construction, which is cached per `(shader, parameter shape)`, so
 it costs nothing per draw. A name that matched no binding is not a mismatch:
 gfx drops a parameter no shader declared, which is ordinary.
 
-**A binding no parameter fills behaves by kind, and only one kind is fatal.** A
-shader declares three sorts of binding and an unfilled one used to fail three
-different ways, only one of them deliberate:
+**A binding behaves by kind when no parameter fills it, and by shape when one
+does.** A shader declares three sorts of binding and an unfilled one used to
+fail three different ways, only one of them deliberate. Two cases are fatal:
+an unfilled storage buffer, and a texture supplied at a dimension its binding
+did not declare.
 
 - **Sampler** — falls back to the zero `SamplerDesc`: clamp and linear.
-- **Texture** — falls back to a 1x1 opaque white texture. This one is
-  load-bearing beyond a forgotten parameter: a texture resource that has not
-  finished loading, or failed to, resolves the same way, so white is what an
-  unresolved texture renders as rather than a licence to omit the parameter.
-  The fallback is a plain 2D view, so it does not hold for a binding declared
-  `texture_2d_array` — see [#410](https://github.com/dvoyni/cog/issues/410).
+- **Texture** — falls back to a 1x1 opaque white texture, at whichever view
+  dimension the binding declares. This one is load-bearing beyond a forgotten
+  parameter: a texture resource that has not finished loading, or failed to,
+  resolves the same way, so white is what an unresolved texture renders as
+  rather than a licence to omit the parameter. The backend keeps two views of
+  the one white texel, 2D and 2D-array, because a binding declared
+  `texture_2d_array` refuses a 2D view outright — and a refused bind group is
+  not white, it is nothing. In WGSL an out-of-range `array_index` is clamped, so
+  every layer a shader asks the array white for lands on the one texel.
+- **Texture of the wrong shape** — the draw is dropped and
+  `ErrTextureViewDimensionMismatch` is reported. This is the one texture case
+  with no fallback, and the line it draws is between *not there yet* and *there
+  and wrong*: an unfilled or unresolved binding stands for a state, and white is
+  the right picture for it, while a single-layer texture supplied where the
+  shader declared `texture_2d_array` is an authoring error the caller can fix.
+  Substituting white there would hide the mistake instead of showing a state. A
+  descriptor that cannot report its layer count is exempt rather than judged:
+  only an allocation names one, so a bare baked id says nothing, and refusing a
+  correct draw over a descriptor's silence is the worse direction for a fatal
+  error. Beneath it the backend still refuses the bind group it cannot build.
+
+  **Rejected: leaving the fallback 2D-only and documenting the exception.**
+  `TextureViewDimension` has exactly two values, so the second white is one
+  `CreateTextureView` over a texture that already exists — the exception cost
+  a paragraph and bought nothing.
 - **Storage buffer** — the draw is dropped and `ErrStorageBufferUnsupplied` is
   reported. There is no fallback worth having: nothing is emitted for the
   binding, the group comes up one entry short of its layout, `CreateBindGroup`
@@ -491,12 +512,13 @@ different ways, only one of them deliberate:
   zero-length dummy would not save it, because the binding is validated against
   the size the shader's own declaration needs.
 
-The storage case covers a binding no parameter names **and** a parameter that
-names it while carrying a buffer nothing baked; the message says which. It is
-reported once per `(shader, parameter)` and the draw is dropped every time,
-because a material that misses a binding misses it until someone fixes the
-material, and the frame reports only its first error — so saying it every frame
-would mask every later error in every later frame.
+Every fatal case is reported once per `(shader, parameter)`, and the storage one
+covers a binding no parameter names **and** a parameter that names it while
+carrying a buffer nothing baked; the message says which. The draw is dropped
+every time and the report comes once, because a material that misses a binding
+misses it until someone fixes the material, and the frame reports only its first
+error — so saying it every frame would mask every later error in every later
+frame.
 
 Beneath all of that, the backend reports a bind group the device refused, once
 per `(shader, group)`, as `gogpu.ErrBindGroupRefused`. It is the backstop for

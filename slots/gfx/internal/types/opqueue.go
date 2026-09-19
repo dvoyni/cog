@@ -372,7 +372,9 @@ func (q *OpQueue) TemporaryTarget(width, height int, format TextureFormat) (Targ
 		Kind: OpAllocateTexture, TextureID: id,
 		TexW: width, TexH: height, TexLayers: 1, Format: format, Renderable: true,
 	})
-	texture := TextureDescr{Params: TextureDescrParams{id: id, width: width, height: height, format: format}}
+	texture := TextureDescr{Params: TextureDescrParams{
+		id: id, width: width, height: height, layers: 1, format: format,
+	}}
 	return TextureTarget(texture, 0, 0), texture
 }
 

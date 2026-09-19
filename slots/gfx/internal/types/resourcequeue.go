@@ -89,7 +89,9 @@ func (q *ResourceQueue) allocateTexture(width, height, layers int, format Textur
 		TexW: width, TexH: height, TexLayers: layers, Format: format,
 		Renderable: renderable,
 	})
-	return TextureDescr{Params: TextureDescrParams{id: id, width: width, height: height, format: format}}
+	return TextureDescr{Params: TextureDescrParams{
+		id: id, width: width, height: height, layers: layers, format: format,
+	}}
 }
 
 // UpdateTexture queues a pixel upload into one texture layer and region.
@@ -118,7 +120,10 @@ func (q *ResourceQueue) bakeTexture(id TextureID, width, height int, format Text
 		Kind: OpBakeTexture, TextureID: id, TexW: width, TexH: height,
 		Format: format, Mipmaps: mipmaps, Bytes: pixels,
 	})
-	return BakedTexture(id, width, height)
+	// A bake is one layer by construction: it takes a single pixel run and no op
+	// gives it more. Saying so keeps every path-loaded texture answerable, which
+	// is the case a draw against a texture_2d_array binding actually meets.
+	return TextureDescr{Params: TextureDescrParams{id: id, width: width, height: height, layers: 1}}
 }
 
 // ReleaseTexture queues a durable release for texture.

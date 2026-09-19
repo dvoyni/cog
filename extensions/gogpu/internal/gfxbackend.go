@@ -62,7 +62,13 @@ type gfxBackend struct {
 	// with render targets allocates nothing per pass.
 	barriers []wgpu.TextureBarrier
 
-	white          *gfxbTexture
+	white *gfxbTexture
+	// whiteArray is a second view of white's own texture, declared at
+	// TextureViewDimension2DArray with one layer, because a binding declared
+	// texture_2d_array refuses a 2D view outright rather than sampling it. In
+	// WGSL an out-of-range array_index is clamped, so every layer a shader asks
+	// for lands on the one white texel.
+	whiteArray     *wgpu.TextureView
 	defaultSampler *wgpu.Sampler
 
 	uniforms []*wgpu.Buffer
@@ -145,19 +151,6 @@ type gfxbTexture struct {
 	view *wgpu.TextureView
 }
 
-// gfxbShader is a compiled shader module, its reflected uniform layout, and the
-// GPU bind-group + pipeline layouts built from reflection.
-type gfxbShader struct {
-	// label is the shader's name as it was compiled, kept so a refusal at draw
-	// time can say which shader it was; nothing else on the render thread knows
-	// a shader by anything but its pointer.
-	label      string
-	module     *wgpu.ShaderModule
-	layout     gfx.ShaderLayout
-	bgLayouts  []*wgpu.BindGroupLayout // indexed by bind group
-	pipeLayout *wgpu.PipelineLayout
-}
-
 // gfxbPipeline is a render pipeline plus the shader it was built from (whose
 // reflected layout drives bind-group construction at draw time).
 type gfxbPipeline struct {
@@ -204,7 +197,11 @@ func (s *gfxRenderPass) SetParams(params []byte) {
 }
 
 func (s *gfxRenderPass) SetTexture(texture gfx.TextureID, group, binding int) {
-	view, textureID, generation := s.backend.textureBinding(texture)
+	dimension := gfx.TextureView2D
+	if s.shader != nil {
+		dimension = s.shader.textureViewDimension(group, binding)
+	}
+	view, textureID, generation := s.backend.textureBinding(texture, dimension)
 	s.backend.addEntry(group, gfxbBindEntry{
 		key:    gfxbBindingKey{kind: gfxbBindTexture, binding: uint16(binding), id: textureID, generation: generation},
 		native: wgpu.BindGroupEntry{Binding: uint32(binding), TextureView: view},
@@ -249,8 +246,9 @@ func (s *gfxRenderPass) SetBuffer(group, binding int, id gfx.BufferID, offset, s
 }
 
 func (s *gfxRenderPass) Draw(first, count, instances, firstInstance int, indexed bool) {
-	if s.shader != nil {
-		s.backend.flushBinds(s.pass, s.shader)
+	if s.shader != nil && !s.backend.flushBinds(s.pass, s.shader) {
+		s.backend.resetAcc()
+		return
 	}
 	if instances < 1 {
 		instances = 1
@@ -335,6 +333,17 @@ func (b *gfxBackend) attach(dp gogpu.DeviceProvider, backend string) error {
 		return err
 	}
 	b.white = &gfxbTexture{tex: view.Texture(), view: view}
+	b.whiteArray, err = b.device.CreateTextureView(b.white.tex, &wgpu.TextureViewDescriptor{
+		Label:           "gfx.textureView.array",
+		Format:          gputypes.TextureFormatRGBA8Unorm,
+		Dimension:       gputypes.TextureViewDimension2DArray,
+		Aspect:          gputypes.TextureAspectAll,
+		MipLevelCount:   1,
+		ArrayLayerCount: 1,
+	})
+	if err != nil {
+		return err
+	}
 	b.screenID = gfx.TextureViewID(b.id())
 	b.ready.Store(true)
 	return nil
@@ -498,7 +507,7 @@ func (b *gfxBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 		module.Release()
 		return 0, fmt.Errorf("gogpu: shader %q reflection failed: %w", label, err)
 	}
-	sh := &gfxbShader{label: label, module: module, layout: layout}
+	sh := newGfxbShader(label, module, layout)
 	if err := b.buildShaderLayouts(sh); err != nil {
 		module.Release()
 		return 0, fmt.Errorf("gogpu: shader %q layout build failed: %w", label, err)
@@ -946,8 +955,12 @@ func (b *gfxBackend) addEntry(group int, e gfxbBindEntry) {
 	b.acc[group] = append(b.acc[group], e)
 }
 
-// flushBinds reuses or creates one bind group per group with pending entries.
-func (b *gfxBackend) flushBinds(rp *wgpu.RenderPassEncoder, shader *gfxbShader) {
+// flushBinds reuses or creates one bind group per group with pending entries,
+// and reports whether every one of them bound. A false is the caller's cue to
+// drop the draw: a group that did not bind leaves its bindings unset, and
+// encoding into that produces a second validation error over the first.
+func (b *gfxBackend) flushBinds(rp *wgpu.RenderPassEncoder, shader *gfxbShader) bool {
+	bound := true
 	for g := range b.acc {
 		if len(b.acc[g]) == 0 || g >= len(shader.bgLayouts) || shader.bgLayouts[g] == nil {
 			continue
@@ -964,6 +977,7 @@ func (b *gfxBackend) flushBinds(rp *wgpu.RenderPassEncoder, shader *gfxbShader) 
 			if err := b.noteRefusedBindGroup(shader, g); err != nil && b.refusal == nil {
 				b.refusal = err
 			}
+			bound = false
 			continue
 		}
 		for len(b.bound) <= g {
@@ -975,6 +989,7 @@ func (b *gfxBackend) flushBinds(rp *wgpu.RenderPassEncoder, shader *gfxbShader) 
 		rp.SetBindGroup(uint32(g), bg, nil)
 		b.bound[g] = bg
 	}
+	return bound
 }
 
 // uniform returns the pooled uniform buffer at index i, creating it on demand. A
@@ -993,9 +1008,18 @@ func (b *gfxBackend) uniform(i int) *wgpu.Buffer {
 	return b.uniforms[i]
 }
 
-func (b *gfxBackend) textureBinding(id gfx.TextureID) (*wgpu.TextureView, uint32, uint32) {
+// textureBinding resolves a texture id to the view a binding of the given
+// declared dimension is filled from. An id this backend does not hold is every
+// unresolved texture - one still loading, one that failed to load, and a
+// binding no parameter named - and it takes the white of that dimension.
+func (b *gfxBackend) textureBinding(
+	id gfx.TextureID, dimension gfx.TextureViewDimension,
+) (*wgpu.TextureView, uint32, uint32) {
 	if texture, ok := b.bakedTextures[id]; ok {
 		return texture.view, uint32(id), b.textureGenerations[id]
+	}
+	if dimension == gfx.TextureView2DArray {
+		return b.whiteArray, 0, 0
 	}
 	return b.white.view, 0, 0
 }

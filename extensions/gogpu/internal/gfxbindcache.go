@@ -39,6 +39,12 @@ type gfxbBindBucketKey struct {
 type gfxbCachedBindGroup struct {
 	bindings []gfxbBindingKey
 	group    *wgpu.BindGroup
+	// failed records that CreateBindGroup refused these bindings, so the refusal
+	// is remembered rather than re-attempted every draw of every frame - the
+	// same report-once-drop-always the pipeline cache takes. It is a flag rather
+	// than a nil group because both invalidation loops release unconditionally,
+	// and a nil standing for failure would make one missed guard a crash.
+	failed bool
 }
 
 type gfxbBindGroupCache struct {
@@ -76,13 +82,14 @@ func (c *gfxbBindGroupCache) get(shader *gfxbShader, group int, entries []gfxbBi
 		bindings[i] = entries[i].key
 	}
 	groupValue, err := c.create(shader.bgLayouts[group], native)
-	if err != nil {
-		return nil
-	}
 	c.entries[bucketKey] = append(c.entries[bucketKey], gfxbCachedBindGroup{
 		bindings: bindings,
 		group:    groupValue,
+		failed:   err != nil,
 	})
+	if err != nil {
+		return nil
+	}
 	return groupValue
 }
 
@@ -94,7 +101,9 @@ func (c *gfxbBindGroupCache) invalidateResource(kind gfxbBindKind, id uint32) {
 			if slices.ContainsFunc(cached.bindings, func(binding gfxbBindingKey) bool {
 				return binding.kind == kind && binding.id == id
 			}) {
-				c.release(cached.group)
+				if !cached.failed {
+					c.release(cached.group)
+				}
 				continue
 			}
 			kept = append(kept, cached)
@@ -114,7 +123,9 @@ func (c *gfxbBindGroupCache) invalidateShader(shader *gfxbShader) {
 			continue
 		}
 		for i := range bucket {
-			c.release(bucket[i].group)
+			if !bucket[i].failed {
+				c.release(bucket[i].group)
+			}
 		}
 		delete(c.entries, bucketKey)
 	}

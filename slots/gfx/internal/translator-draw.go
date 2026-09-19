@@ -69,6 +69,12 @@ func (t *translator) translateDraw(f *frame, op *types.Op, pass gfx.PassDescr, u
 		}
 		return
 	}
+	if resource, layers, ok := mismatchedTextureView(plan, op.Params, op.Material.Params()); ok {
+		if err := t.reportTextureView(shaderID, label, resource, layers); err != nil && *firstErr == nil {
+			*firstErr = err
+		}
+		return
+	}
 	t.ops.SetPipeline(pipeline)
 	// A shader that declares no uniform block gets no uniform binding and no
 	// pooled buffer. Emitting one anyway puts an entry in a group the pipeline
@@ -147,6 +153,79 @@ func (t *translator) reportUnsuppliedBuffer(shader gfx.ShaderID, label string, r
 		Shader: label, Parameter: resource.name,
 		Group: resource.group, Binding: resource.binding, Unbaked: unbaked,
 	}
+}
+
+// mismatchedTextureView returns the first texture binding a draw fills with a
+// texture of the wrong view dimension, and the layer count that said so. It
+// walks the same slice unsuppliedBuffer does, for the same reason: the declared
+// dimension is the plan's, and the layer count facing it is this draw's.
+//
+// A binding no parameter fills is not a mismatch - that is the white fallback,
+// and white is a picture at either dimension. Neither is a descriptor reporting
+// zero layers: only an allocation names a count, so zero means the descriptor
+// cannot say, and refusing a draw over a descriptor's silence would be a false
+// fatal.
+func mismatchedTextureView(
+	plan *parameterPlan, drawParams, materialParams []gfx.ParameterDescr,
+) (*plannedResource, int, bool) {
+	for i := range plan.resources {
+		resource := &plan.resources[i]
+		if resource.kind != plannedTexture {
+			continue
+		}
+		p := resource.param.value(materialParams, drawParams)
+		if p == nil {
+			continue
+		}
+		// The kind is already settled in plan.mismatch, so a parameter that is
+		// here at all is a texture; only its shape is still in question.
+		layers := types.ParameterTexture(p).Layers()
+		if layers == 0 {
+			continue
+		}
+		if (layers > 1) != (resource.view == gfx.TextureView2DArray) {
+			return resource, layers, true
+		}
+	}
+	return nil, 0, false
+}
+
+// reportTextureView returns the report for a texture binding filled at the
+// wrong dimension the first time that binding is seen, and nothing on the
+// frames after it. The draw is dropped either way, on reportUnsuppliedBuffer's
+// terms.
+func (t *translator) reportTextureView(
+	shader gfx.ShaderID, label string, resource *plannedResource, layers int,
+) error {
+	key := textureViewKey{shader: shader, parameter: resource.name}
+	if _, seen := t.textureViewMismatches[key]; seen {
+		return nil
+	}
+	t.textureViewMismatches[key] = struct{}{}
+	return gfx.ErrTextureViewDimensionMismatch{
+		Shader: label, Parameter: resource.name,
+		Group: resource.group, Binding: resource.binding,
+		Declared: textureViewName(resource.view), Supplied: textureViewNameOfLayers(layers),
+	}
+}
+
+// textureViewName renders a declared dimension the way the shader spells it, so
+// the report can be matched against the source it names.
+func textureViewName(view gfx.TextureViewDimension) string {
+	if view == gfx.TextureView2DArray {
+		return "texture_2d_array"
+	}
+	return "texture_2d"
+}
+
+// textureViewNameOfLayers renders what a texture's layer count makes it, which
+// is how a supplied texture's dimension is known: more than one layer is an
+// array texture and one is flat.
+func textureViewNameOfLayers(layers int) string {
+	if layers > 1 {
+		return "texture_2d_array"
+	}
+	return "single-layer"
 }
 
 // sampledAttachment names the first texture parameter a draw samples that its
@@ -248,6 +327,7 @@ func (t *translator) prepareParameterPlan(shader gfx.ShaderID, label string, lay
 		entry.plan.checkKind(label, resource.Name, ref, material, draw, declared)
 		entry.plan.resources = append(entry.plan.resources, plannedResource{
 			kind: kind, group: resource.Group, binding: resource.Binding, param: ref, name: resource.Name,
+			view: resource.TextureView,
 		})
 	}
 

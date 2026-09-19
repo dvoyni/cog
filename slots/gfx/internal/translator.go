@@ -86,6 +86,15 @@ type unsuppliedBufferKey struct {
 	parameter string
 }
 
+// textureViewKey is one texture binding already reported as filled by a
+// texture of the wrong view dimension. It is shaped like unsuppliedBufferKey
+// and for the same reason: one shader may declare several texture bindings, and
+// each is its own fault.
+type textureViewKey struct {
+	shader    gfx.ShaderID
+	parameter string
+}
+
 // translator turns an OpQueue into a gfx.Queue, lazily creating and caching
 // backend shaders/pipelines/samplers and resolves every texture and buffer to a
 // baked resource ID. It is owned by the plugin and used only on the driver's
@@ -142,6 +151,11 @@ type translator struct {
 	// plan, because a plan is keyed by parameter shape and two materials of
 	// one shape carrying different buffers are two faults.
 	unsuppliedBuffers map[unsuppliedBufferKey]struct{}
+	// textureViewMismatches is the set of texture bindings already reported as
+	// filled at the wrong view dimension, on unsuppliedBuffers' terms: the
+	// mistake lives in the material until someone edits it, and the frame
+	// carries only its first error.
+	textureViewMismatches map[textureViewKey]struct{}
 }
 
 func newTranslator() *translator {
@@ -155,6 +169,8 @@ func newTranslator() *translator {
 		textureUsage:      map[gfx.TextureID]gfx.TextureUsage{},
 		badIndexLengths:   map[indexLengthKey]struct{}{},
 		unsuppliedBuffers: map[unsuppliedBufferKey]struct{}{},
+
+		textureViewMismatches: map[textureViewKey]struct{}{},
 	}
 }
 
