@@ -97,57 +97,6 @@ type handlerAccess struct {
 	access *ResourceAccess
 }
 
-// describeContention computes the conflict report from registry state that
-// finalize has already frozen. It is a function over a registry rather than a
-// method on one: the report is analysis of what registration left behind, not
-// behaviour the registry offers, and it belongs beside the views below that are
-// already plain functions. Subscriptions are read from the subscription
-// list rather than from the compiled publication plans, so the report survives
-// a composition that failed to compile one event's DAG.
-func describeContention(r *registry) ContentionDescription {
-	handlers := handlerAccesses(r)
-	return ContentionDescription{
-		Resources: resourceContention(r, handlers),
-		Handlers:  handlerConflicts(handlers),
-		Phases:    phaseContention(handlers),
-	}
-}
-
-// handlerAccesses collects every handler holding a lock set, in the order every
-// view renders them, so the whole report reads the same way on every run.
-func handlerAccesses(r *registry) []handlerAccess {
-	handlers := make([]handlerAccess, 0, len(r.commands))
-	commands := 0
-	for _, id := range sortedTypes(r.commands) {
-		cmd := r.commands[id]
-		if cmd.resources == nil {
-			continue
-		}
-		commands++
-		handlers = append(handlers, handlerAccess{
-			ref:    HandlerRef{Kind: "command", Type: cmd.id, Owner: cmd.owner},
-			access: cmd.resources,
-		})
-	}
-	for _, eventType := range sortedTypes(r.subscriptions) {
-		for _, task := range r.subscriptions[eventType] {
-			owner, access := task.coupling()
-			if access == nil {
-				continue
-			}
-			handlers = append(handlers, handlerAccess{
-				ref: HandlerRef{
-					Kind: "subscription", Type: task.orderID(), Owner: owner, Event: eventType,
-				},
-				phase:  subscriptionPhase(task),
-				access: access,
-			})
-		}
-	}
-	slices.SortFunc(handlers[commands:], func(a, b handlerAccess) int { return compareRefs(a.ref, b.ref) })
-	return handlers
-}
-
 // sharedResources reports the resources two lock sets serialise on, in type
 // order. Two readers never serialise; a write on either side against any hold on
 // the other always does. GetWrite deletes the type from read, so the two maps of

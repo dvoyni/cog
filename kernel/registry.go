@@ -199,6 +199,54 @@ func (r *registry) bindAdapters() error {
 	return nil
 }
 
+// describeContention computes the conflict report from registry state that
+// finalize has already frozen. Subscriptions are read from the subscription
+// list rather than from the compiled publication plans, so the report survives
+// a composition that failed to compile one event's DAG.
+func (r *registry) describeContention() ContentionDescription {
+	handlers := r.handlerAccesses()
+	return ContentionDescription{
+		Resources: resourceContention(r, handlers),
+		Handlers:  handlerConflicts(handlers),
+		Phases:    phaseContention(handlers),
+	}
+}
+
+// handlerAccesses collects every handler holding a lock set, in the order every
+// view renders them, so the whole report reads the same way on every run.
+func (r *registry) handlerAccesses() []handlerAccess {
+	handlers := make([]handlerAccess, 0, len(r.commands))
+	commands := 0
+	for _, id := range sortedTypes(r.commands) {
+		cmd := r.commands[id]
+		if cmd.resources == nil {
+			continue
+		}
+		commands++
+		handlers = append(handlers, handlerAccess{
+			ref:    HandlerRef{Kind: "command", Type: cmd.id, Owner: cmd.owner},
+			access: cmd.resources,
+		})
+	}
+	for _, eventType := range sortedTypes(r.subscriptions) {
+		for _, task := range r.subscriptions[eventType] {
+			owner, access := task.coupling()
+			if access == nil {
+				continue
+			}
+			handlers = append(handlers, handlerAccess{
+				ref: HandlerRef{
+					Kind: "subscription", Type: task.orderID(), Owner: owner, Event: eventType,
+				},
+				phase:  subscriptionPhase(task),
+				access: access,
+			})
+		}
+	}
+	slices.SortFunc(handlers[commands:], func(a, b handlerAccess) int { return compareRefs(a.ref, b.ref) })
+	return handlers
+}
+
 // sortedTypes orders a type-keyed map so composition walks it the same way every
 // run, which keeps reported cycles stable.
 func sortedTypes[T any](values map[reflect.Type]T) []reflect.Type {

@@ -17,8 +17,3 @@ func (p *Publication) complete() { close(p.done) }
 // Wait blocks until all runnable subscribers finish. It answers nothing: a
 // subscriber that failed reported it, and the publisher has no part in that.
 func (p *Publication) Wait() { <-p.done }
-
-type publicationResult struct {
-	node int
-	err  error
-}

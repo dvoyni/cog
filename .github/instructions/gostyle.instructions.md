@@ -82,6 +82,30 @@ ended up with four methods in `adapter.go`.
   they need. No new named types.
 - each extra file's name **leads with the type's name**, so a directory listing
   sorts the pieces together.
+- **split by functionality, not by function.** An extra file holding one method
+  is a file too many. `Engine` divides into composition — what runs once, before
+  `Run` — reporting, and dispatch, and each of those names a thing the type
+  does. If the only name you can find for an extra file is "the rest", the split
+  is wrong and the method belongs back in the type's own file.
+
+The file the type is named after keeps the type and its life: its constructor,
+the methods that define what it *is*. What leaves is work that has its own
+subject.
+
+### Never turn a method into a function to move it
+
+A receiver moved into the parameter list is the same method in the wrong place,
+and it defeats the rule above while appearing to satisfy it:
+
+```go
+func (e *Engine) Describe() ArchitectureDescription   // a method on Engine
+func describeArchitecture(e *Engine) ...              // the same method, lying
+```
+
+If a method is awkward where the rule puts it, the split is wrong — fix the
+split. A function earns its shape by taking what it actually needs: the views in
+`contention.go` take a `[]handlerAccess` and are genuinely functions, while
+`describeContention` takes the whole registry and is genuinely a method on one.
 
 ### Never use an underscore in that name
 
