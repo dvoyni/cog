@@ -162,8 +162,6 @@ func (ray Ray) Transform(matrix Mat4) Ray {
 	return NewRay(matrix.TransformPoint(ray.Origin), matrix.TransformDirection(ray.Dir))
 }
 
-func (matrix Mat4) TransformRay(ray Ray) Ray { return ray.Transform(matrix) }
-
 // IntersectSphere returns the distance to the nearest hit in front of the
 // origin. A ray starting inside the sphere returns zero.
 func (ray Ray) IntersectSphere(sphere Sphere) (t float32, ok bool) {

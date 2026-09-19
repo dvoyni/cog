@@ -40,16 +40,14 @@ func LerpAngle(from, to, amount float32) float32 {
 	return from + NormalizeAngle(to-from)*amount
 }
 
-func (v Vec2) Rotate(angle float32) Vec2 {
-	sine, cosine := float32(math.Sin(float64(angle))), float32(math.Cos(float64(angle)))
-	return Vec2{v.X*cosine - v.Y*sine, v.X*sine + v.Y*cosine}
-}
+func sqrt(value float32) float32  { return float32(math.Sqrt(float64(value))) }
+func round(value float32) float32 { return float32(math.Round(float64(value))) }
+func floor(value float32) float32 { return float32(math.Floor(float64(value))) }
+func ceil(value float32) float32  { return float32(math.Ceil(float64(value))) }
 
-func (v Vec2) MoveTowards(target Vec2, maximumDistance float32) Vec2 {
-	delta := target.Sub(v)
-	distance := delta.Length()
-	if distance == 0 || (maximumDistance >= 0 && distance <= maximumDistance) {
-		return target
+func abs32(value float32) float32 {
+	if value < 0 {
+		return -value
 	}
-	return v.Add(delta.MulS(maximumDistance / distance))
+	return value
 }

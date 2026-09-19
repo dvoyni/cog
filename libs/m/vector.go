@@ -128,6 +128,23 @@ func (v Vec2) Floor() Vec2                          { return Vec2{floor(v.X), fl
 func (v Vec2) Ceil() Vec2                           { return Vec2{ceil(v.X), ceil(v.Y)} }
 func (v Vec2) Int() Vec2i                           { return Vec2i{int(v.X), int(v.Y)} }
 
+// Vec2d widens to float64, which is what physics wants.
+func (v Vec2) Vec2d() Vec2d { return Vec2d{float64(v.X), float64(v.Y)} }
+
+func (v Vec2) Rotate(angle float32) Vec2 {
+	sine, cosine := float32(math.Sin(float64(angle))), float32(math.Cos(float64(angle)))
+	return Vec2{v.X*cosine - v.Y*sine, v.X*sine + v.Y*cosine}
+}
+
+func (v Vec2) MoveTowards(target Vec2, maximumDistance float32) Vec2 {
+	delta := target.Sub(v)
+	distance := delta.Length()
+	if distance == 0 || (maximumDistance >= 0 && distance <= maximumDistance) {
+		return target
+	}
+	return v.Add(delta.MulS(maximumDistance / distance))
+}
+
 func (v Vec3) Add(other Vec3) Vec3 { return Vec3{v.X + other.X, v.Y + other.Y, v.Z + other.Z} }
 func (v Vec3) Sub(other Vec3) Vec3 { return Vec3{v.X - other.X, v.Y - other.Y, v.Z - other.Z} }
 func (v Vec3) Mul(other Vec3) Vec3 { return Vec3{v.X * other.X, v.Y * other.Y, v.Z * other.Z} }
@@ -374,8 +391,3 @@ func scalar4i(name string, values []int) (int, int, int, int) {
 	}
 	panic("m." + name + " expects one or four values")
 }
-
-func sqrt(value float32) float32  { return float32(math.Sqrt(float64(value))) }
-func round(value float32) float32 { return float32(math.Round(float64(value))) }
-func floor(value float32) float32 { return float32(math.Floor(float64(value))) }
-func ceil(value float32) float32  { return float32(math.Ceil(float64(value))) }

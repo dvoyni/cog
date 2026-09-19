@@ -34,37 +34,6 @@ func NewColorSrgb8(red, green, blue, alpha uint8) Color {
 	return NewColorSrgb(float32(red)*scale, float32(green)*scale, float32(blue)*scale, float32(alpha)*scale)
 }
 
-// Srgb is the inverse of NewColorSrgb, returning gamma-encoded components and
-// the unconverted alpha.
-func (color Color) Srgb() (red, green, blue, alpha float32) {
-	return linearToSrgb(color.R), linearToSrgb(color.G), linearToSrgb(color.B), color.A
-}
-
-// Srgb8 is the inverse of NewColorSrgb8, clamping to [0, 1] and rounding to the
-// nearest byte.
-func (color Color) Srgb8() (red, green, blue, alpha uint8) {
-	return toByte(linearToSrgb(color.R)), toByte(linearToSrgb(color.G)), toByte(linearToSrgb(color.B)), toByte(color.A)
-}
-
-// srgbToLinear applies the sRGB electro-optical transfer function. Every input
-// at or below the linear segment, negatives included, takes the linear branch,
-// so extrapolated components never become NaN.
-func srgbToLinear(value float32) float32 {
-	if value <= 0.04045 {
-		return value / 12.92
-	}
-	return float32(math.Pow(float64((value+0.055)/1.055), 2.4))
-}
-
-func linearToSrgb(value float32) float32 {
-	if value <= 0.0031308 {
-		return value * 12.92
-	}
-	return float32(1.055*math.Pow(float64(value), 1/2.4) - 0.055)
-}
-
-func toByte(value float32) uint8 { return uint8(round(Clamp01(value) * 255)) }
-
 // NewColorHSLA creates a color from a hue in radians and saturation,
 // lightness, and alpha in [0, 1]. Hue wraps to [0, 2*Pi); the other components
 // are clamped. HSL is a model over gamma-encoded RGB everywhere it is used, so
@@ -100,6 +69,18 @@ func NewColorHSLA(hue, saturation, lightness, alpha float32) Color {
 	return NewColorSrgb(red+match, green+match, blue+match, alpha)
 }
 
+// Srgb is the inverse of NewColorSrgb, returning gamma-encoded components and
+// the unconverted alpha.
+func (color Color) Srgb() (red, green, blue, alpha float32) {
+	return linearToSrgb(color.R), linearToSrgb(color.G), linearToSrgb(color.B), color.A
+}
+
+// Srgb8 is the inverse of NewColorSrgb8, clamping to [0, 1] and rounding to the
+// nearest byte.
+func (color Color) Srgb8() (red, green, blue, alpha uint8) {
+	return toByte(linearToSrgb(color.R)), toByte(linearToSrgb(color.G)), toByte(linearToSrgb(color.B)), toByte(color.A)
+}
+
 // Hsla returns hue in radians in [0, 2*Pi), saturation and lightness in
 // [0, 1], and the color's alpha. Achromatic colors have zero hue. Like
 // NewColorHSLA it works in sRGB space, converting the components on the way in.
@@ -125,15 +106,6 @@ func (color Color) Hsla() (hue, saturation, lightness, alpha float32) {
 	}
 	hue = wrapHue(hue * math.Pi / 3)
 	return hue, saturation, lightness, alpha
-}
-
-func wrapHue(hue float32) float32 {
-	const turn = 2 * math.Pi
-	hue = float32(math.Mod(float64(hue), turn))
-	if hue < 0 {
-		hue += turn
-	}
-	return hue
 }
 
 // Add sums two colors in linear space, where light adds up.
@@ -178,4 +150,32 @@ func (color Color) Fade(alpha float32) Color {
 func (color Color) Opacity(factor float32) Color {
 	color.A *= Clamp(factor, 0, 1)
 	return color
+}
+
+// srgbToLinear applies the sRGB electro-optical transfer function. Every input
+// at or below the linear segment, negatives included, takes the linear branch,
+// so extrapolated components never become NaN.
+func srgbToLinear(value float32) float32 {
+	if value <= 0.04045 {
+		return value / 12.92
+	}
+	return float32(math.Pow(float64((value+0.055)/1.055), 2.4))
+}
+
+func linearToSrgb(value float32) float32 {
+	if value <= 0.0031308 {
+		return value * 12.92
+	}
+	return float32(1.055*math.Pow(float64(value), 1/2.4) - 0.055)
+}
+
+func toByte(value float32) uint8 { return uint8(round(Clamp01(value) * 255)) }
+
+func wrapHue(hue float32) float32 {
+	const turn = 2 * math.Pi
+	hue = float32(math.Mod(float64(hue), turn))
+	if hue < 0 {
+		hue += turn
+	}
+	return hue
 }

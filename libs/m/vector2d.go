@@ -107,9 +107,6 @@ func (v Vec2d) ClosestT(other Vec2d) float64 {
 // Vec2 narrows to float32, which is what a render copy wants.
 func (v Vec2d) Vec2() Vec2 { return Vec2{float32(v.X), float32(v.Y)} }
 
-// Vec2d widens to float64, which is what physics wants.
-func (v Vec2) Vec2d() Vec2d { return Vec2d{float64(v.X), float64(v.Y)} }
-
 func scalar2d(name string, values []float64) (float64, float64) {
 	if len(values) == 1 {
 		return values[0], values[0]

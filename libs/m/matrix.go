@@ -214,6 +214,10 @@ func (matrix Mat4) TransformDirection(direction Vec3) Vec3 {
 	}
 }
 
+// TransformRay is Ray.Transform with the receiver on the other side, for call
+// sites that read as a chain of matrices.
+func (matrix Mat4) TransformRay(ray Ray) Ray { return ray.Transform(matrix) }
+
 // InverseAffine inverts a matrix whose last row is (0, 0, 0, 1) by cofactor
 // expansion of the upper-left block, allocating nothing. The general Inverse
 // allocates five slices per call, which is too much per instance per frame.
@@ -477,11 +481,4 @@ func eliminateSquare(matrix []float32, size int) ([]float32, float32) {
 		}
 	}
 	return matrix, determinant
-}
-
-func abs32(value float32) float32 {
-	if value < 0 {
-		return -value
-	}
-	return value
 }
