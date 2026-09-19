@@ -456,7 +456,9 @@ simply never delivered, and subscribers are ordered with `First`, `Last`,
 
 Place a declaration by **what it is**, not by the feature it belongs to. Which
 files a root may hold, by kind, is `architecture.instructions.md` § What A Root
-Holds; this is what goes in each.
+Holds; this is what goes in each. **This section governs a root only** —
+everywhere else, including every package under one, is
+[`gostyle.instructions.md`](gostyle.instructions.md).
 
 In a **root**:
 
@@ -482,15 +484,15 @@ In a **root**:
 A root's only other code is an inline anchor beside the aliases it anchors,
 `types.go` in gfx; architecture.instructions.md has the rule.
 
-In **`internal/types`**: a file per declared type or family, named for it
-(`state.go`, `opqueue.go`), and the plain functions giving `internal/` what
-exported methods do not.
-
-In **`internal/`** no layout is enforced. By convention: `plugin.go` for the unexported `plugin`, `New`, `Name`, `Dependencies`,
-`Register` and compact subscription wiring; `commandsimpl.go` for command
-registration and every command handler; `mcpprovider.go` for the unexported
-`provider`, its capabilities and their unexported request and response types. A
-Resource only the implementation touches stays unexported there.
+Below a root — `internal/`, `internal/types`, the constructor package — the
+layout is [`gostyle.instructions.md`](gostyle.instructions.md): a file per
+class-like type, named for it, with that type's methods in it. By convention
+`internal/` also has `plugin.go` for the unexported `plugin`, `New`, `Name`,
+`Dependencies`, `Register` and compact subscription wiring; `commandsimpl.go`
+for command registration and every command handler; and `mcpprovider.go` for the
+unexported `provider`, its capabilities and their unexported request and
+response types. A Resource only the implementation touches stays unexported
+there.
 
 The **constructor package** is a single file holding `New`.
 
