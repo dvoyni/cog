@@ -246,3 +246,33 @@ func TestATiledSpriteNamesTheSameSpriteMaterialAndMerges(t *testing.T) {
 		t.Fatalf("draws = %d, want one material named by both to be one batch", backend.draws)
 	}
 }
+
+// A flip and a tile compose. entryUV swaps the sub-rect's bounds for a flip, so
+// a flipped tiled sprite carries frame.x above frame.z - and the wrap needs no
+// case for it, because the span it divides by goes negative exactly as the
+// offset does and the quotient stays in 0..1. The repeat count is untouched: a
+// flip says which way the tile faces, not how many of it there are.
+func TestAFlippedTiledSpriteSwapsItsBoundsAndKeepsItsRepeat(t *testing.T) {
+	filesystem := fstest.MapFS{"edge.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}
+	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "edge.png", canvas.SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true}, nil)
+		write.Sprite(0, "edge.png", canvas.SpriteTransform{
+			Position: m.Vec2{Y: 8}, Size: m.Vec2{X: 12, Y: 4}, TileX: true, FlipX: true,
+		}, nil)
+	})
+	runFrame(k)
+	buffer := spriteInstances(backend)[0]
+	plain, flipped := instanceAt(buffer, 0), instanceAt(buffer, 1)
+	// frame uv packs at offset 32: X=32, Y=36, Z=40, W=44.
+	if floatAt(flipped, 32) != floatAt(plain, 40) || floatAt(flipped, 40) != floatAt(plain, 32) {
+		t.Errorf("flipped frame u = (%v,%v), want the plain one's bounds swapped (%v,%v)",
+			floatAt(flipped, 32), floatAt(flipped, 40), floatAt(plain, 40), floatAt(plain, 32))
+	}
+	if floatAt(flipped, 36) != floatAt(plain, 36) || floatAt(flipped, 44) != floatAt(plain, 44) {
+		t.Error("FlipX moved the v bounds, want only u swapped")
+	}
+	if rx := floatAt(flipped, 68); rx != floatAt(plain, 68) || rx != 3 {
+		t.Errorf("flipped repeatX = %v, want the plain one's 3: a flip is not a repeat", rx)
+	}
+}
