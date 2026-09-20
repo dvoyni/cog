@@ -2,7 +2,8 @@
 // Buses, with all of the arithmetic computed here and none of it below. A game
 // records operations into one Queue resource under its write lock, sound
 // flushes that queue once a tick - drain, apply in recorded order, compute,
-// Emit - and reads back three live views: the Voices, the Clips and the Device.
+// Emit - and reads back four live views: the Voices, the Clips, the Buses and
+// the Device.
 //
 // It is the machine, not a convenience layer. bundles/ecsaudio drives the same
 // queue from ECS and reimplements nothing; a game without ECS records into the

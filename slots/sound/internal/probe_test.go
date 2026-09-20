@@ -42,24 +42,34 @@ func recordCmdImpl() (kernel.Lock, kernel.Execute[recordRequest, recordResponse]
 
 // probeCmd answers what the live view says now.
 type probeCmd kernel.Command[probeRequest, probeResponse]
-type probeRequest struct{ Voice sound.Voice }
+type probeRequest struct {
+	Voice sound.Voice
+	Bus   sound.Bus
+}
 type probeResponse struct {
-	Live   int
-	Info   sound.VoiceInfo
-	Found  bool
-	All    []sound.VoiceInfo
-	Device sound.Device
+	Live      int
+	Info      sound.VoiceInfo
+	Found     bool
+	All       []sound.VoiceInfo
+	Device    sound.Device
+	BusVolume float32
 }
 
 func probeCmdImpl() (kernel.Lock, kernel.Execute[probeRequest, probeResponse]) {
 	var voices kernel.Read[*sound.Voices]
+	var buses kernel.Read[*sound.Buses]
 	var device kernel.Read[*sound.Device]
 	return func(access kernel.ResourceAccess) {
 			voices = access.GetRead[*sound.Voices]()
+			buses = access.GetRead[*sound.Buses]()
 			device = access.GetRead[*sound.Device]()
 		}, func(_ kernel.Kernel, request probeRequest) probeResponse {
 			live := voices.Get()
-			response := probeResponse{Live: live.Len(), Device: *device.Get()}
+			response := probeResponse{
+				Live:      live.Len(),
+				Device:    *device.Get(),
+				BusVolume: buses.Get().Volume(request.Bus),
+			}
 			response.Info, response.Found = live.Info(request.Voice)
 			for info := range live.All() {
 				response.All = append(response.All, info)

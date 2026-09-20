@@ -29,20 +29,22 @@ type flushScratch struct {
 //
 //  1. drain TakePrepared into the clip table;
 //  2. apply the tick's operations, in the order they were recorded;
-//  3. compute - bind the Clips that became resident, advance every playhead;
+//  3. compute - bind the Clips that became resident, advance every playhead,
+//     fold each Bus's volume into each Voice's gain;
 //  4. Emit once.
 //
 // Draining first is what makes a release recorded against an in-flight prepare
 // cost nothing: by the time the completion arrives its entry is gone, so no
 // ClipID is ever minted only to be destroyed.
 //
-// It holds a write lock on all four resources at once, which is what "flushed
+// It holds a write lock on all five resources at once, which is what "flushed
 // once per tick, atomically" means in lock terms: no recorder can be mid-append
 // while the queue is drained, and no reader can see half a tick's Voices.
 func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var queue kernel.Write[*sound.Queue]
 	var voices kernel.Write[*sound.Voices]
 	var clips kernel.Write[*sound.Clips]
+	var buses kernel.Write[*sound.Buses]
 	var device kernel.Write[*sound.Device]
 	var scratch kernel.Write[*flushScratch]
 	var filesystem kernel.Read[storage.FileSystem]
@@ -50,6 +52,7 @@ func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) 
 			queue = access.GetWrite[*sound.Queue]()
 			voices = access.GetWrite[*sound.Voices]()
 			clips = access.GetWrite[*sound.Clips]()
+			buses = access.GetWrite[*sound.Buses]()
 			device = access.GetWrite[*sound.Device]()
 			scratch = access.GetWrite[*flushScratch]()
 			filesystem = access.GetRead[storage.FileSystem]()
@@ -59,11 +62,12 @@ func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) 
 			types.BatchReset(&work.batch)
 			work.endings = work.endings[:0]
 
-			recorded, live, table := queue.Get(), voices.Get(), clips.Get()
+			recorded, live, table, groups := queue.Get(), voices.Get(), clips.Get(), buses.Get()
 			types.ClipsDrain(table, k, backend)
-			apply(k, backend, filesystem, recorded, live, table, &work.endings)
+			apply(k, backend, filesystem, recorded, live, table, groups, &work.endings)
 			types.VoicesResolve(live, table, &work.endings)
 			types.VoicesAdvance(live, event.Dt, &work.endings)
+			types.VoicesFoldBuses(live, groups)
 
 			types.VoicesCollect(live, &work.batch)
 			backend.Emit(&work.batch)
@@ -101,6 +105,7 @@ func apply(
 	recorded *sound.Queue,
 	live *sound.Voices,
 	table *sound.Clips,
+	groups *sound.Buses,
 	endings *[]types.Ending,
 ) {
 	var files fs.FS
@@ -115,7 +120,14 @@ func apply(
 			types.VoicesStop(live, op.Voice, endings)
 		case types.OpSetVoice:
 			types.VoicesSet(live, op.Voice, op.Params)
+		case types.OpStopBus:
+			types.VoicesStopBus(live, op.Bus, endings)
 		}
 	}
+
+	// The tick's Bus volumes land where the ordered operations end, because a
+	// volume is not one of them: it is coalesced, and the tick's last word on a
+	// Bus is the only one every Voice on it could be folded with.
+	types.BusesApply(groups, recorded)
 	types.QueueReset(recorded)
 }

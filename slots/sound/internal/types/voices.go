@@ -30,6 +30,12 @@ type VoiceInfo struct {
 	Params Params
 	// Paused is Params.Paused resolved, so a reader does not have to.
 	Paused bool
+	// Audibility is the final computed gain before panning - volume x bus, and
+	// in a later slice x falloff x cone. It is the scalar stealing ranks on,
+	// and it is what a game's test asserts: that the alarm is playing, on the
+	// right Bus, audible at 0.4 rather than 0. The gain matrix is not here,
+	// because panning is engine arithmetic pinned once by sound's own tests.
+	Audibility float32
 }
 
 // slotState is what one entry of the fixed table currently is.
@@ -55,6 +61,13 @@ type voiceSlot struct {
 	voice Voice
 	clip  ClipRef
 	bus   Bus
+	// busGain is the volume of the Voice's Bus as of the last fold. It is held
+	// here rather than looked up so that one pass both computes the gain and
+	// notices that it moved, which is the whole of what re-emitting the Voices
+	// on a Bus costs. It is zero on a slot the fold has not reached yet - every
+	// slot in the flush that started its Voice, and that Voice is owed a
+	// VoiceStart in that same flush anyway.
+	busGain float32
 	// params is the Voice's current Params, last value winning.
 	params Params
 	// offset is where in the Clip the Voice begins, in seconds. It is kept
@@ -88,24 +101,35 @@ type voiceSlot struct {
 // info renders the slot as the view shows it.
 func (s *voiceSlot) info() VoiceInfo {
 	return VoiceInfo{
-		Voice:    s.voice,
-		Clip:     s.clip,
-		Bus:      s.bus,
-		Playhead: float32(s.playhead),
-		Duration: float32(s.duration),
-		Params:   s.params,
-		Paused:   s.params.Paused.Or(false),
+		Voice:      s.voice,
+		Clip:       s.clip,
+		Bus:        s.bus,
+		Playhead:   float32(s.playhead),
+		Duration:   float32(s.duration),
+		Params:     s.params,
+		Paused:     s.params.Paused.Or(false),
+		Audibility: s.audibility(),
 	}
 }
+
+// audibility is the Voice's final gain before panning: its own volume folded
+// with its Bus's, and in a later slice with its falloff and its cone. It is one
+// scalar rather than anything read off the gain matrix, which is what makes
+// "quietest" and "furthest from the Listener" one policy rather than two, and
+// what gives a non-positional Voice a rank without a special rule.
+func (s *voiceSlot) audibility() float32 { return s.params.Volume.Or(1) * s.busGain }
 
 // voiceParams is what the slot looks like below the seam.
 //
 // A Voice with no position is non-positional and heard centred: no falloff, no
-// cone and no panning, so the matrix is the identity scaled by the volume - one
-// row for a mono Clip, a diagonal for a stereo one. The W3C equations that fill
-// it for a Positional Voice are issue 479.
+// cone and no panning, so the matrix is the identity scaled by its audibility -
+// one row for a mono Clip, a diagonal for a stereo one. The W3C equations that
+// fill it for a Positional Voice are issue 479.
+//
+// The Bus is already inside that scalar and appears nowhere below: an Adapter
+// does not know Buses exist, and there is no second place a volume is decided.
 func (s *voiceSlot) voiceParams() VoiceParams {
-	volume := s.params.Volume.Or(1)
+	volume := s.audibility()
 	var gains [2][2]float32
 	if s.channels >= 2 {
 		gains[0][0], gains[1][1] = volume, volume
@@ -193,7 +217,7 @@ func (v *Voices) start(op Operation, clip clipFacts, endings *[]Ending) {
 		state:    slotLive,
 		voice:    op.Voice,
 		clip:     op.Clip,
-		bus:      op.Params.Bus.Or(Master),
+		bus:      op.Params.Bus.Or(Master).resolve(),
 		params:   op.Params,
 		offset:   float64(op.Offset),
 		playhead: float64(op.Offset),
@@ -226,9 +250,47 @@ func (v *Voices) set(voice Voice, params Params) {
 	}
 	slot.params = slot.params.merge(params)
 	if bus, ok := params.Bus.Get(); ok {
-		slot.bus = bus
+		slot.bus = bus.resolve()
 	}
 	slot.changed = true
+}
+
+// stopBus ends every Voice on a Bus, with ReasonStopped rather than a member of
+// its own. Master stops everything, because every Bus is directly under it.
+//
+// It is a stop over a set and nothing more: a Voice it reaches ends exactly as
+// a Stop naming it would have ended it, and a Voice that began and ended inside
+// one tick is still never audible.
+func (v *Voices) stopBus(bus Bus, endings *[]Ending) {
+	for i := range v.slots {
+		slot := &v.slots[i]
+		if slot.state != slotLive || (bus != Master && slot.bus != bus) {
+			continue
+		}
+		slot.state = slotEnded
+		v.live--
+		*endings = append(*endings, Ending{Voice: slot.voice, Reason: ReasonStopped})
+	}
+}
+
+// foldBuses folds each Bus's volume into each Voice's gain, which is the whole
+// of what a Bus is: sound decides the volume once, here, above the seam, and
+// nothing about a Bus appears in a Batch, a VoiceStart or a VoiceParams.
+//
+// The cost is stated rather than optimised away: a Bus volume change re-emits
+// every Voice on that Bus, bounded by MaxVoices and so by at most 64 entries in
+// one batch. That is nothing against the alternative, which is a second place
+// volume is decided - and the Voices that were already at that volume are not
+// re-emitted, because a fold that did not move is not a change.
+func (v *Voices) foldBuses(buses *Buses) {
+	for i := range v.slots {
+		slot := &v.slots[i]
+		if slot.state != slotLive || slot.busGain == buses.volumes[slot.bus] {
+			continue
+		}
+		slot.busGain = buses.volumes[slot.bus]
+		slot.changed = true
+	}
 }
 
 // resolve binds every Voice still waiting on its Clip, and ends the ones whose

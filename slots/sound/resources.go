@@ -35,6 +35,18 @@ type Clips = types.Clips
 // Access it only while a handler holds its declared resource lock.
 type Voices = types.Voices
 
+// Buses is every Bus's volume as of the last flush, read the way the Voices
+// are. A settings screen reads it to draw its slider where the player left it,
+// and records SetBus on the Queue to move it; there is no mutator here, and no
+// Mute, because a game persists its settings anyway and a shadow copy inside
+// sound invites "muted by whom".
+//
+// A Bus's volume is folded into every Voice on it before the batch leaves, so
+// nothing about a Bus reaches an Adapter at all.
+//
+// Access it only while a handler holds its declared resource lock.
+type Buses = types.Buses
+
 // Device reports the sound device as it is now: whether anything is audible,
 // which Adapter got it, and the rate, channels and real latency it runs at. It
 // is read-only, because a game neither opens nor chooses a Device; it only
