@@ -50,9 +50,11 @@ type rampSource struct {
 	frames   int64
 	channels int
 	at       int64
-	// opened and seeks count what the tier asked of it, which is how a resume
-	// that re-places chunks is told apart from one that restarts a decoder.
-	seeks int
+	// opened, seeks and closes count what the tier asked of it, which is how a
+	// resume that re-places chunks is told apart from one that restarts a
+	// decoder.
+	seeks  int
+	closes int
 }
 
 func (r *rampSource) read(dst []float32) (int, error) {
@@ -81,6 +83,11 @@ func (r *rampSource) seek(frame int64) error {
 	r.at = frame
 	return nil
 }
+
+// closed counts the closes, because the tier promises a decoder is given back
+// with the Voice that opened it - which is a leak of two js.Funcs a play on the
+// WebCodecs route where it is not.
+func (r *rampSource) close() { r.closes++ }
 
 // rampClip builds a streamed Clip over a ramp, at the context's own rate. It is
 // a clipData made by hand rather than through Prepare because what is under test

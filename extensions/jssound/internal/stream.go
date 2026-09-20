@@ -48,18 +48,17 @@ import (
 // timeline - which is the only place a seam is free. resample.go says what goes
 // wrong if it is not.
 //
-// WebCodecs AudioDecoder("vorbis"), which would put the decode on the browser's
-// own thread where Chromium has one, is not here. It needs the Ogg packets
-// handed over raw with the three Vorbis setup headers as the decoder's
-// description, in a byte layout no specification this Extension can test
-// against pins down, and Safari has no Vorbis in WebCodecs at all - so it would
-// be an unverifiable second route behind a capability probe that already has a
-// verified first one. It is a later ticket, and the shape here is ready for it:
-// a streamReader is an interface, and the route would be a second opener.
+// Where the browser has a WebCodecs AudioDecoder that takes Vorbis, the decode
+// itself is the browser's rather than wasm's and happens on a thread of its own:
+// webcodecs.go is that second streamSource, and the demux above is still ours
+// because an AudioDecoder knows nothing about Ogg. The Go decoder is what a
+// browser without it falls back to - Safari has no Vorbis in WebCodecs at all -
+// so both routes ship and a probe picks.
 //
 // Nothing here runs on the audio thread, which is true of this whole Extension:
 // the browser owns that thread on the far side of the node graph, and Go cannot
-// reach it.
+// reach it. What a WebCodecs decoder is off is the main thread, which is the
+// one this Adapter shares with the game's tick.
 
 const (
 	// decodeChunk is how many source frames one decode asks the decoder for.
@@ -98,6 +97,12 @@ type streamSource interface {
 	// seek moves to a source frame. The bytes are an in-memory Blob, which is
 	// seekable, so this is sample-exact rather than page-accurate.
 	seek(frame int64) error
+	// close gives back whatever the decoder holds that a garbage collection
+	// will not: the browser's own decoder object and the two js.Funcs it
+	// answers through. The Go decoder holds neither and closes to nothing,
+	// which is why this is on the interface rather than on the one type that
+	// needs it - the tier must not have to ask which decoder it got.
+	close()
 }
 
 // opener opens a decoder over a Clip's retained bytes.
@@ -119,6 +124,10 @@ func openOgg(encoded assets.Blob) (streamSource, error) {
 func (s *oggSource) read(dst []float32) (int, error) { return s.reader.Read(dst) }
 
 func (s *oggSource) seek(frame int64) error { return s.reader.SetPosition(frame) }
+
+// close has nothing to give back: a Go decoder over a Go slice is collected
+// with the Voice that held it.
+func (s *oggSource) close() {}
 
 // chunk is one scheduled unit: an AudioBuffer at the context rate, and where its
 // first frame sits in the run's own output-frame numbering.
@@ -282,6 +291,12 @@ func (s *streamer) fill(audio *webAudio, clip *clipData, ctxRate int, from int64
 		s.finish()
 		return
 	}
+	// The decoder outlives nothing: it is opened on this goroutine and given
+	// back when this goroutine returns, whether the Clip ended, the Voice was
+	// stopped or the decode failed. A browser's AudioDecoder and its two
+	// callbacks are the one thing in this Adapter a garbage collection will not
+	// take back, so a Voice that forgot this would leak one per play.
+	defer decoder.close()
 	loopStart, loopEnd := clip.sourceLoopBounds()
 	if !loop || loopEnd <= loopStart {
 		loop, loopEnd = false, clip.frames
