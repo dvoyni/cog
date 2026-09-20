@@ -52,6 +52,15 @@ func VoicesFoldBuses(v *Voices, buses *Buses) { v.foldBuses(buses) }
 // on a Bus is the one every Voice on it is folded with.
 func BusesApply(b *Buses, q *Queue) { b.apply(q.busVolumeSets()) }
 
+// VoicesSeek applies one recorded Seek for sound's internal/.
+func VoicesSeek(v *Voices, voice Voice, offset float32, endings *[]Ending) {
+	v.seek(voice, offset, endings)
+}
+
+// VoicesSetEnginePaused records an engine Pause over the whole table and
+// reports whether it changed anything, for sound's internal/.
+func VoicesSetEnginePaused(v *Voices, paused bool) bool { return v.setEnginePaused(paused) }
+
 // VoicesResolve binds the Voices whose Clips became resident and ends the ones
 // whose Clips failed, for sound's internal/.
 func VoicesResolve(v *Voices, clips *Clips, endings *[]Ending) { v.resolve(clips.lookup, endings) }

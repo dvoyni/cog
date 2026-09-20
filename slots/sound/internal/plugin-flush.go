@@ -130,6 +130,8 @@ func apply(
 			types.VoicesSet(live, op.Voice, op.Params)
 		case types.OpStopBus:
 			types.VoicesStopBus(live, op.Bus, endings)
+		case types.OpSeek:
+			types.VoicesSeek(live, op.Voice, op.Offset, endings)
 		}
 	}
 

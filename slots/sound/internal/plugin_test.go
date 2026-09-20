@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/sound"
@@ -377,6 +378,272 @@ func TestTheDeviceIsPolledEveryFlush(t *testing.T) {
 	got := h.probe(sound.NoVoice).Device
 	if !got.Ready || got.Name != "fake" || got.SampleRate != 48000 || got.Channels != 2 {
 		t.Fatalf("the Device reads %+v after a flush", got)
+	}
+}
+
+// A Seek is block-accurate and never sample-accurate: in our Mixer it is a
+// cursor move, and in Web Audio it is a fresh start(when, offset), so promising
+// sample-exactness would foreclose that Adapter. What crosses the seam is
+// exactly that - a VoiceStart carrying an Offset - and the offset a game says
+// in float32 seconds is a time.Duration by the time an Adapter sees it.
+func TestASeekMovesThePlayheadAndCrossesTheSeamAsAStart(t *testing.T) {
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+
+	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	h.tick()
+
+	h.record(func(queue *sound.Queue) { queue.Seek(voice, 2.5) })
+	h.tick()
+
+	// Within a tick of where it was asked for, and never nearer than that: the
+	// seek lands the playhead and the same flush advances it by one step.
+	got := h.probe(voice)
+	if want := float32(2.5 + step); got.Info.Playhead != want {
+		t.Fatalf("the seeked playhead is %v, want %v", got.Info.Playhead, want)
+	}
+
+	batch := h.backend.emitted()[1]
+	if len(batch.Starts) != 1 {
+		t.Fatalf("the seeking tick produced %d starts, want the one a Seek is", len(batch.Starts))
+	}
+	if got := batch.Starts[0].Offset; got != 2500*time.Millisecond {
+		t.Fatalf("the start carries an offset of %v, want 2.5s", got)
+	}
+	if len(batch.Updates) != 0 {
+		t.Fatalf("the seeking tick produced %d updates beside its start", len(batch.Updates))
+	}
+}
+
+// A negative offset clamps to zero rather than being refused: no operation
+// returns an error, and there is nowhere to put one. Past the end is the Clip
+// reaching its end, which is what it is called when a playhead gets there by
+// itself.
+func TestASeekClampsBelowZeroAndEndsAOneShotPastTheEnd(t *testing.T) {
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+
+	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	h.tick()
+
+	h.record(func(queue *sound.Queue) { queue.Seek(voice, -3) })
+	h.tick()
+	if got := h.probe(voice); got.Info.Playhead != step {
+		t.Fatalf("a seek to -3 left the playhead at %v, want a clamp to zero and one step", got.Info.Playhead)
+	}
+
+	h.record(func(queue *sound.Queue) { queue.Seek(voice, 9) })
+	h.tick()
+	if got := h.probe(voice); got.Found {
+		t.Fatalf("%v survived a seek past the end of a four-second Clip", voice)
+	}
+	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != sound.ReasonFinished {
+		t.Fatalf("ended as %v/%v, want %v/finished", ended.Voice, ended.Reason, voice)
+	}
+}
+
+// A looping Voice never ends by itself: it publishes nothing until a stop, a
+// steal, a failure or a release reaches it. Loop reaches the Adapter on the
+// start, and a seek past the end wraps to the loop start rather than to zero -
+// which is the same place until a Clip's Loop Region reaches sound, and is
+// written as the loop start so that it stops being the same place by itself.
+func TestALoopingVoiceWrapsAndNeverEndsByItself(t *testing.T) {
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 0.5, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+
+	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
+
+	// A hundred ticks is three whole passes of a half-second Clip and four
+	// ticks into the fourth.
+	for range 100 {
+		h.tick()
+	}
+	h.noEnding()
+
+	got := h.probe(voice)
+	if !got.Found {
+		t.Fatalf("%v ended by itself, and a looping Voice never does", voice)
+	}
+	if want := float32(4 * step); got.Info.Playhead != want {
+		t.Fatalf("the looping playhead is %v after a hundred ticks, want %v", got.Info.Playhead, want)
+	}
+	if start := h.backend.emitted()[0].Starts[0]; !start.Loop {
+		t.Fatal("the start that crossed the seam does not loop")
+	}
+
+	h.record(func(queue *sound.Queue) { queue.Seek(voice, 9) })
+	h.tick()
+	if got := h.probe(voice); !got.Found || got.Info.Playhead != step {
+		t.Fatalf("a seek past the end of a looping Voice left it at %v (found %v), want the loop start",
+			got.Info.Playhead, got.Found)
+	}
+}
+
+// Loop is a fact of a VoiceStart at the seam and VoiceUpdate has no field for
+// it, so a game that changes its mind about looping restarts the Voice where it
+// stands. The alternative is sound's playhead wrapping while the Adapter's does
+// not: a Voice that goes silent while the view insists it is playing.
+func TestChangingLoopRestartsTheVoiceWhereItStands(t *testing.T) {
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+
+	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	for range 4 {
+		h.tick()
+	}
+
+	h.record(func(queue *sound.Queue) { queue.SetVoice(voice, sound.Params{Loop: m.Some(true)}) })
+	h.tick()
+
+	batch := h.backend.emitted()[4]
+	if len(batch.Starts) != 1 {
+		t.Fatalf("changing Loop produced %d starts, want the one the seam can say it with", len(batch.Starts))
+	}
+	if !batch.Starts[0].Loop {
+		t.Fatal("the restart does not carry the Loop the game just asked for")
+	}
+	if got, want := batch.Starts[0].Offset, time.Duration(4*step*float64(time.Second)); got != want {
+		t.Fatalf("the restart begins at %v, want where the Voice stood at %v", got, want)
+	}
+	if got := h.probe(voice); got.Info.Playhead != float32(5*step) {
+		t.Fatalf("the restarted playhead is %v, want %v", got.Info.Playhead, float32(5*step))
+	}
+}
+
+// Pitch is the Adapter's Rate, and sound scales its own playhead by it. It has
+// to: sound computes the ending from the duration and the rate, and a Voice at
+// twice its rate whose playhead crawled at one would run out in the Mixer half
+// a Clip before sound said so, and be cut there rather than stopped here.
+func TestPitchCrossesTheSeamAsRateAndScalesThePlayhead(t *testing.T) {
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 1, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+
+	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{Pitch: m.Some[float32](2)})
+
+	for tick := 1; tick < 32; tick++ {
+		h.tick()
+		if got := h.probe(voice); !got.Found {
+			t.Fatalf("%v was gone after tick %d, and a second at twice the rate is thirty-two ticks", voice, tick)
+		}
+	}
+	if got := h.probe(voice); got.Info.Playhead != float32(31*2*step) {
+		t.Fatalf("the playhead is %v after 31 ticks at twice the rate, want %v", got.Info.Playhead, 31*2*step)
+	}
+	if got := h.backend.emitted()[0].Starts[0].Params.Rate; got != 2 {
+		t.Fatalf("the start carries a rate of %v, want 2", got)
+	}
+
+	h.tick()
+	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != sound.ReasonFinished {
+		t.Fatalf("ended as %v/%v, want %v/finished", ended.Voice, ended.Reason, voice)
+	}
+}
+
+// An engine Pause suspends rather than silences: the playhead stops and resumes
+// on the same sample, which is why it crosses as VoiceParams.Paused and not as
+// a gain of zero. A game does nothing, because audio subscribes.
+//
+// The engine keeps ticking here, which is what a step under pause does, and
+// nothing advances anyway - a stepped tick that moved a suspended playhead
+// would resume the music somewhere the Adapter is not.
+func TestAnEnginePauseSuspendsEveryVoiceAndResumesItOnTheSameSample(t *testing.T) {
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+
+	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	h.tick()
+
+	h.pause(true)
+	suspended := h.backend.emitted()
+	if len(suspended) != 2 {
+		t.Fatalf("the pause produced %d batches beside the tick's, want one", len(suspended)-1)
+	}
+	if updates := suspended[1].Updates; len(updates) != 1 || !updates[0].Params.Paused {
+		t.Fatalf("the pause emitted %+v, want one update carrying Paused", updates)
+	}
+	if len(suspended[1].Starts) != 0 || len(suspended[1].Stops) != 0 {
+		t.Fatal("the pause started or stopped something, and it suspends rather than ending anything")
+	}
+
+	h.tick()
+	h.tick()
+	paused := h.probe(voice)
+	if !paused.Info.Paused {
+		t.Fatal("the view does not say a Voice under an engine Pause is paused")
+	}
+	if paused.Info.Playhead != step {
+		t.Fatalf("a suspended playhead moved to %v from %v", paused.Info.Playhead, step)
+	}
+	if !paused.Device.Ready {
+		t.Fatal("the Device closed under a pause, and it stays open and is fed silence")
+	}
+
+	h.pause(false)
+	h.tick()
+	if got := h.probe(voice); got.Info.Playhead != 2*step {
+		t.Fatalf("the resumed playhead is %v, want %v", got.Info.Playhead, 2*step)
+	}
+	if got := h.probe(voice); got.Info.Paused {
+		t.Fatal("the view still says the Voice is paused after the engine resumed")
+	}
+}
+
+// An engine Pause is one update per live Voice - at most MaxVoices of them -
+// and no verb. A SuspendAll() at the seam would be a second way to say what the
+// batch already says, and two ways to say one thing can disagree.
+//
+// Params.Paused is what the game itself said, and it survives an engine Pause
+// untouched: resuming the engine must not unpause the Voice a game paused.
+func TestAnEnginePauseIsAnUpdatePerLiveVoiceAndLeavesWhatTheGameSaid(t *testing.T) {
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+
+	var voices []sound.Voice
+	h.record(func(queue *sound.Queue) {
+		for range 3 {
+			voices = append(voices, queue.Play(sound.ClipWithResource(bell), 0, sound.Params{}))
+		}
+	})
+	h.tick()
+	h.record(func(queue *sound.Queue) { queue.SetVoice(voices[0], sound.Params{Paused: m.Some(true)}) })
+	h.tick()
+
+	h.pause(true)
+	batch := h.backend.emitted()[2]
+	if len(batch.Updates) != len(voices) {
+		t.Fatalf("the pause emitted %d updates for %d live Voices", len(batch.Updates), len(voices))
+	}
+	if len(batch.Updates) > sound.DefaultMaxVoices {
+		t.Fatalf("the pause emitted %d updates, more than the cap", len(batch.Updates))
+	}
+
+	h.pause(false)
+	got := h.probe(voices[0])
+	if !got.Info.Paused {
+		t.Fatal("the resume unpaused a Voice the game had paused itself")
+	}
+	if paused, ok := got.Info.Params.Paused.Get(); !ok || !paused {
+		t.Fatalf("the game's own Paused reads %v (set %v) after an engine Pause came and went", paused, ok)
+	}
+	if got := h.probe(voices[1]); got.Info.Paused {
+		t.Fatal("a Voice nothing paused is still paused after the engine resumed")
+	}
+}
+
+// Pause beats not-ready. A pause while the Device is not ready suspends
+// everything, the playhead rule included - which is the one place the rule that
+// a playhead advances whether or not anyone can hear it does not hold.
+func TestAnEnginePauseBeatsADeviceThatIsNotReady(t *testing.T) {
+	backend := newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000})
+	backend.device = sound.Device{Name: "fake"}
+	h := newHarness(t, backend, sound.Config{}, clipBytes)
+
+	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	h.tick()
+	h.pause(true)
+	for range 4 {
+		h.tick()
+	}
+
+	got := h.probe(voice)
+	if got.Device.Ready {
+		t.Fatal("the fixture Device reports itself ready")
+	}
+	if got.Info.Playhead != step {
+		t.Fatalf("a playhead moved to %v under a pause with no Device, want %v", got.Info.Playhead, step)
 	}
 }
 

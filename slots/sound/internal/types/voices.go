@@ -28,7 +28,12 @@ type VoiceInfo struct {
 	Duration float32
 	// Params is what the Voice is set to now.
 	Params Params
-	// Paused is Params.Paused resolved, so a reader does not have to.
+	// Paused is whether this Voice is suspended, so a reader does not have to
+	// resolve it: its own Params.Paused, or an engine Pause, which suspends
+	// every Voice at once. What the game itself asked for stays readable on
+	// Params, so the two are never confused - but a reader asking whether this
+	// playhead is moving is answered about the playhead and not about who
+	// stopped it.
 	Paused bool
 	// Audibility is the final computed gain before panning - volume x bus, and
 	// in a later slice x falloff x cone. It is the scalar stealing ranks on,
@@ -99,7 +104,7 @@ type voiceSlot struct {
 }
 
 // info renders the slot as the view shows it.
-func (s *voiceSlot) info() VoiceInfo {
+func (s *voiceSlot) info(enginePaused bool) VoiceInfo {
 	return VoiceInfo{
 		Voice:      s.voice,
 		Clip:       s.clip,
@@ -107,8 +112,53 @@ func (s *voiceSlot) info() VoiceInfo {
 		Playhead:   float32(s.playhead),
 		Duration:   float32(s.duration),
 		Params:     s.params,
-		Paused:     s.params.Paused.Or(false),
+		Paused:     s.suspended(enginePaused),
 		Audibility: s.audibility(),
+	}
+}
+
+// looping is whether this Voice repeats rather than ending. With no Loop Region
+// on the Clip it repeats the whole of it, which is what every Clip says today.
+func (s *voiceSlot) looping() bool { return s.params.Loop.Or(false) }
+
+// loopStart is where a looping Voice repeats from, in seconds. The Loop Region
+// a Clip can declare is the Adapter's parse and reaches sound on PreparedClip;
+// until sound reads it, every loop is the whole Clip and every wrap is to zero.
+func (s *voiceSlot) loopStart() float64 { return 0 }
+
+// rate is the playback rate this Voice advances at, 1 being the Clip's own. A
+// negative Pitch would run a Voice backwards off the front of its buffer and
+// sound never sends one; zero is a legitimate freeze.
+func (s *voiceSlot) rate() float32 {
+	rate := s.params.Pitch.Or(1)
+	if rate < 0 {
+		return 0
+	}
+	return rate
+}
+
+// suspended is whether this Voice's playhead is stopped: the game paused it, or
+// the engine did. An engine Pause suspends every Voice, the playhead rule
+// included, and it beats a Device that is not ready - nothing advances.
+func (s *voiceSlot) suspended(enginePaused bool) bool {
+	return enginePaused || s.params.Paused.Or(false)
+}
+
+// wrap brings a looping Voice's playhead back inside its span. It loops rather
+// than clamping because a looping Voice never ends by itself, and it subtracts
+// in a loop rather than taking a remainder so that a rate that overshoots by
+// several spans in one tick still lands inside one.
+func (s *voiceSlot) wrap() {
+	span := s.duration - s.loopStart()
+	if span <= 0 {
+		s.playhead = s.loopStart()
+		return
+	}
+	for s.playhead >= s.duration {
+		s.playhead -= span
+	}
+	if s.playhead < s.loopStart() {
+		s.playhead = s.loopStart()
 	}
 }
 
@@ -128,7 +178,7 @@ func (s *voiceSlot) audibility() float32 { return s.params.Volume.Or(1) * s.busG
 //
 // The Bus is already inside that scalar and appears nowhere below: an Adapter
 // does not know Buses exist, and there is no second place a volume is decided.
-func (s *voiceSlot) voiceParams() VoiceParams {
+func (s *voiceSlot) voiceParams(enginePaused bool) VoiceParams {
 	volume := s.audibility()
 	var gains [2][2]float32
 	if s.channels >= 2 {
@@ -136,7 +186,7 @@ func (s *voiceSlot) voiceParams() VoiceParams {
 	} else {
 		gains[0][0], gains[0][1] = volume, volume
 	}
-	return VoiceParams{Gains: gains, Rate: 1, Paused: s.params.Paused.Or(false)}
+	return VoiceParams{Gains: gains, Rate: s.rate(), Paused: s.suspended(enginePaused)}
 }
 
 // Voices is sound's live Voice view: a fixed table of slots, written once a
@@ -149,6 +199,11 @@ func (s *voiceSlot) voiceParams() VoiceParams {
 type Voices struct {
 	slots []voiceSlot
 	live  int
+	// enginePaused is an engine Pause standing over the whole table. It is one
+	// flag rather than a field per slot because an engine Pause is not a
+	// property of a Voice: a Voice played under one is suspended from its first
+	// tick without anybody having said so about it.
+	enginePaused bool
 }
 
 // NewVoices builds the table at its fixed size. The size is sound's cap, and
@@ -169,7 +224,7 @@ func (v *Voices) Info(voice Voice) (VoiceInfo, bool) {
 	if slot == nil {
 		return VoiceInfo{}, false
 	}
-	return slot.info(), true
+	return slot.info(v.enginePaused), true
 }
 
 // All yields every live Voice, in slot order.
@@ -179,7 +234,7 @@ func (v *Voices) All() iter.Seq[VoiceInfo] {
 			if v.slots[i].state != slotLive {
 				continue
 			}
-			if !yield(v.slots[i].info()) {
+			if !yield(v.slots[i].info(v.enginePaused)) {
 				return
 			}
 		}
@@ -243,16 +298,88 @@ func (v *Voices) stop(voice Voice, endings *[]Ending) {
 }
 
 // set applies one recorded SetVoice. An absent field is unchanged.
+//
+// Changing Loop on a Voice the Adapter already holds restarts it where it
+// stands. Loop is a fact of a VoiceStart at the seam and VoiceUpdate has no
+// field for it, so a restart carrying the new flag is the only sentence the
+// seam can say; the alternative is sound's playhead wrapping while the
+// Adapter's does not, which is a Voice that goes silent while the view insists
+// it is playing. It costs a block-accurate discontinuity at the moment the game
+// toggles looping, which is what a Seek costs and for the same reason.
 func (v *Voices) set(voice Voice, params Params) {
 	slot := v.slotOf(voice)
 	if slot == nil {
 		return
 	}
+	looping := slot.looping()
 	slot.params = slot.params.merge(params)
 	if bus, ok := params.Bus.Get(); ok {
 		slot.bus = bus.resolve()
 	}
 	slot.changed = true
+	if slot.looping() != looping && !slot.pending {
+		slot.offset = slot.playhead
+		slot.started = true
+	}
+}
+
+// seek moves a Voice's playhead. It is a no-op on a Voice that is gone.
+//
+// A negative offset clamps to zero. An offset past the end ends a one-shot with
+// ReasonFinished and wraps a looping Voice to its loop start, never to zero -
+// which is the same thing today, and stops being so when a Clip's Loop Region
+// reaches here.
+//
+// What crosses the seam is a VoiceStart carrying the new Offset, which is how a
+// web Adapter's sample-accurate start(when, offset) is reached without the seam
+// ever naming a sample. A Voice still waiting on its Clip is seeked by moving
+// the offset it will start from: it has no playhead to move and no start to
+// re-emit, and it was going to begin from its offset with no catch-up anyway.
+func (v *Voices) seek(voice Voice, offset float32, endings *[]Ending) {
+	slot := v.slotOf(voice)
+	if slot == nil {
+		return
+	}
+	at := float64(offset)
+	if at < 0 {
+		at = 0
+	}
+	if slot.pending {
+		slot.offset, slot.playhead = at, at
+		return
+	}
+	if at >= slot.duration {
+		if !slot.looping() {
+			slot.playhead = slot.duration
+			slot.state = slotEnded
+			v.live--
+			*endings = append(*endings, Ending{Voice: voice, Reason: ReasonFinished})
+			return
+		}
+		at = slot.loopStart()
+	}
+	slot.offset, slot.playhead = at, at
+	slot.started = true
+}
+
+// setEnginePaused records an engine Pause over the whole table and reports
+// whether it changed anything.
+//
+// It marks every live Voice as owed an update, because that is all an engine
+// Pause is at the seam: an update for every live Voice, at most MaxVoices
+// entries and no special path. A SuspendAll verb would be a second way to say
+// what the batch already says, and two ways to say one thing can disagree.
+func (v *Voices) setEnginePaused(paused bool) bool {
+	if v.enginePaused == paused {
+		return false
+	}
+	v.enginePaused = paused
+	for i := range v.slots {
+		if v.slots[i].state == slotLive {
+			v.slots[i].changed = true
+		}
+	}
+	return true
 }
 
 // stopBus ends every Voice on a Bus, with ReasonStopped rather than a member of
@@ -325,14 +452,29 @@ func (v *Voices) resolve(lookup func(ClipRef) clipFacts, endings *[]Ending) {
 // test's timeline world time rather than the Device's. A paused Voice suspends:
 // the playhead stops and resumes on the same sample. A pending Voice does not
 // advance at all - it starts from its offset when the Clip installs, with no
-// catch-up.
+// catch-up. A looping Voice wraps rather than ending, and never ends by itself.
+//
+// An engine Pause suspends every Voice the same way, the playhead rule
+// included, and it beats a Device that is not ready: nothing advances. It is
+// read here rather than only at the seam because a step under pause still
+// publishes a tick, and a stepped tick that moved a suspended playhead would
+// resume the music somewhere the Adapter is not.
+//
+// It moves by dt scaled by the Voice's rate, which is what keeps sound's ending
+// in step with the Mixer's sample-exact playhead. Unscaled, a Voice at twice
+// its rate would run out in the Mixer after half its duration and be cut there
+// rather than stopped and declicked here.
 func (v *Voices) advance(dt float64, endings *[]Ending) {
 	for i := range v.slots {
 		slot := &v.slots[i]
-		if slot.state != slotLive || slot.pending || slot.params.Paused.Or(false) {
+		if slot.state != slotLive || slot.pending || slot.suspended(v.enginePaused) {
 			continue
 		}
-		slot.playhead += dt
+		slot.playhead += dt * float64(slot.rate())
+		if slot.looping() {
+			slot.wrap()
+			continue
+		}
 		if slot.playhead < slot.duration {
 			continue
 		}
@@ -372,7 +514,8 @@ func (v *Voices) collect(batch *Batch, resync bool) {
 				Slot:   VoiceSlot(i),
 				Clip:   slot.clipID,
 				Offset: time.Duration(slot.offset * float64(time.Second)),
-				Params: slot.voiceParams(),
+				Loop:   slot.looping(),
+				Params: slot.voiceParams(v.enginePaused),
 			})
 			slot.emitted = true
 		case resync:
@@ -385,11 +528,15 @@ func (v *Voices) collect(batch *Batch, resync bool) {
 				Slot:   VoiceSlot(i),
 				Clip:   slot.clipID,
 				Offset: time.Duration(slot.playhead * float64(time.Second)),
-				Params: slot.voiceParams(),
+				Loop:   slot.looping(),
+				Params: slot.voiceParams(v.enginePaused),
 			})
 			slot.emitted = true
 		case slot.changed && slot.emitted:
-			batch.Updates = append(batch.Updates, VoiceUpdate{Slot: VoiceSlot(i), Params: slot.voiceParams()})
+			batch.Updates = append(batch.Updates, VoiceUpdate{
+				Slot:   VoiceSlot(i),
+				Params: slot.voiceParams(v.enginePaused),
+			})
 		}
 	}
 }

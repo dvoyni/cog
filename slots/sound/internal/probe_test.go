@@ -197,6 +197,15 @@ func (h *harness) tick() {
 	h.kernel.PublishEvent(app.UpdateEvent{Dt: step, Last: true}).Wait()
 }
 
+// pause publishes one engine Pause change and waits for every subscriber, so
+// sound has suspended or resumed by the time it returns. It is published by
+// hand for the reason the tick is: sound subscribes to app and depends on
+// nobody for it, so the test owns the pause as it owns the clock.
+func (h *harness) pause(paused bool) {
+	h.t.Helper()
+	h.kernel.PublishEvent(app.PauseChangeEvent{Paused: paused}).Wait()
+}
+
 // probe reads the live view.
 func (h *harness) probe(voice sound.Voice) probeResponse {
 	h.t.Helper()

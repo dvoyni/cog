@@ -18,6 +18,11 @@ const (
 	// with the plays around it: a Play recorded before it is stopped and one
 	// recorded after it is not.
 	OpStopBus
+	// OpSeek moves a Voice's playhead. It is its own operation and not a field
+	// of Params, because "apply in order" and "last value wins" are the same
+	// thing for a parameter and are not for a cursor move: a Seek recorded
+	// before a Stop and a Seek recorded after one are different ticks.
+	OpSeek
 )
 
 // Operation is one recorded operation, kept in the order it was recorded. An
@@ -162,6 +167,23 @@ func (q *Queue) SetBus(bus Bus, volume float32) {
 // switching on ReasonStopped keeps working.
 func (q *Queue) StopBus(bus Bus) {
 	q.ops = append(q.ops, Operation{Kind: OpStopBus, Bus: bus.resolve()})
+}
+
+// Seek moves a Voice's playhead to offset, in seconds. A negative offset
+// clamps to zero; an offset past the end ends a one-shot and wraps a looping
+// Voice to its loop start.
+//
+// It is block-accurate and never sample-accurate. In our Mixer it is a cursor
+// move, and in Web Audio it is a fresh start(when, offset) - promising
+// sample-exactness here would foreclose that Adapter, and the playhead being
+// tick-accurate is the same admission from the other side.
+//
+// It is a no-op on a Voice that no longer exists.
+func (q *Queue) Seek(voice Voice, offset float32) {
+	if voice == NoVoice {
+		return
+	}
+	q.ops = append(q.ops, Operation{Kind: OpSeek, Voice: voice, Offset: offset})
 }
 
 // operations is the tick's recorded operations, in order.

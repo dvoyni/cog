@@ -31,6 +31,29 @@ type RenderEvent struct {
 	Alpha float64
 }
 
+// PauseChangeEvent reports that the tick source started or stopped publishing
+// update ticks. app publishes it from Frame, on the MainLoop's main thread, on
+// the first frame that observes the change and before that frame's ticks - so a
+// subscriber has already acted on the pause by the time a stepped tick reaches
+// it, and has already acted on the resume by the time the frame clock's first
+// tick does.
+//
+// It exists because pause stops app.UpdateEvent and an engine whose only signal
+// is the absence of an event cannot act on one. A Slot that must do something
+// at the moment of a pause - sound suspends every Voice, because a paused game
+// that keeps playing footsteps is a bug in every game that hits it - has
+// nothing to subscribe to otherwise, and polling TimeCmd every drawn frame to
+// ask a question whose answer almost never changes is the shape the tick
+// source's own atomics exist to avoid.
+//
+// It reports the change and not the state: a subscriber is told when pause
+// begins and when it ends, never once per frame that it stands.
+type PauseChangeEvent struct {
+	// Paused is what the tick source has become: true when a pause has just
+	// begun, false when it has just ended.
+	Paused bool
+}
+
 // QuitEvent is published once, after the MainLoop's platform loop returns.
 type QuitEvent struct{}
 

@@ -22,6 +22,11 @@ type loop struct {
 
 	// accum is the unspent frame time in seconds. Main-thread-only.
 	accum float64
+	// announced is the paused-ness the last app.PauseChangeEvent reported, so
+	// that the event marks the change and not the state. Main-thread-only, like
+	// accum: the tick source's own flag is the atomic a command writes, and
+	// this is the frame's memory of what it has already said about it.
+	announced bool
 	// alpha is the render interpolation factor, as atomic float64 bits.
 	alpha atomic.Uint64
 
@@ -60,8 +65,18 @@ func (l *loop) WindowSize(k kernel.Executioner, width, height float32) {
 // published are the steps somebody asked for. Everything else the MainLoop does
 // this frame runs exactly as it does while running, because pause stops the
 // tick and not the frame.
+//
+// A change in paused-ness publishes app.PauseChangeEvent before this frame's
+// ticks. Before, because the subscriber that acts on a pause - sound suspends
+// every Voice - must have acted by the time a stepped tick runs, and the one
+// that acts on a resume must have acted by the time the frame clock's first
+// tick does.
 func (l *loop) Frame(k kernel.Executioner, dt float64) {
 	steps, paused, batch := l.ticks.take()
+	if paused != l.announced {
+		l.announced = paused
+		k.PublishEvent(app.PauseChangeEvent{Paused: paused}).Wait()
+	}
 	if !paused {
 		steps = l.accumulate(dt)
 	}

@@ -54,6 +54,7 @@ type (
 	observeInit       kernel.Subscription[app.InitEvent]
 	observeQuit       kernel.Subscription[app.QuitEvent]
 	observeWindowSize kernel.Subscription[app.WindowSizeChangeEvent]
+	observePause      kernel.Subscription[app.PauseChangeEvent]
 )
 
 // observer records, in order, every app event it is delivered, so a test reads
@@ -63,6 +64,7 @@ type observer struct {
 	updates []app.UpdateEvent
 	renders []app.RenderEvent
 	sizes   []app.WindowSizeChangeEvent
+	pauses  []app.PauseChangeEvent
 	// lifecycle is the order InitEvent and QuitEvent arrived in.
 	lifecycle []string
 }
@@ -104,6 +106,13 @@ func (o *observer) Register(registrar *kernel.Registrar, _ any) error {
 			o.mu.Lock()
 			defer o.mu.Unlock()
 			o.sizes = append(o.sizes, event)
+		}
+	})
+	registrar.Subscribe[observePause](func() (kernel.Lock, kernel.Observe[app.PauseChangeEvent]) {
+		return nil, func(_ kernel.Kernel, event app.PauseChangeEvent) {
+			o.mu.Lock()
+			defer o.mu.Unlock()
+			o.pauses = append(o.pauses, event)
 		}
 	})
 	return nil
@@ -181,6 +190,12 @@ func (h *tickHarness) recorded() []app.UpdateEvent {
 	h.observer.mu.Lock()
 	defer h.observer.mu.Unlock()
 	return append([]app.UpdateEvent(nil), h.observer.updates...)
+}
+
+func (h *tickHarness) paused() []app.PauseChangeEvent {
+	h.observer.mu.Lock()
+	defer h.observer.mu.Unlock()
+	return append([]app.PauseChangeEvent(nil), h.observer.pauses...)
 }
 
 func (h *tickHarness) rendered() []app.RenderEvent {
