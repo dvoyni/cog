@@ -21,8 +21,12 @@ import (
 //		Prepare(token any, encoded assets.Blob) (PreparedClip, bool, error)
 //		TakePrepared() []Prepared
 //		Install(PreparedClip) (ClipID, error)
-//		Destroy(ClipID)
 //	}
+//
+// There is no Destroy. A Clip is released through Batch.Destroys and nowhere
+// else, because only the batch carries an order: the destroy arrives after the
+// stops that precede it, which is what lets an Adapter free a Clip the Mixer
+// has finished with rather than one it is still mixing.
 //
 // What an Adapter owes beyond the signatures is a numbered list in
 // docs/specs/sound.md: nothing decodes on the thread that fills the device

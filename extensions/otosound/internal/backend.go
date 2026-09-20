@@ -22,9 +22,9 @@ var errNotOurClip = errors.New("otosound: install was handed a prepared Clip thi
 // pendingDestroy is a Clip sound has released, held until the Mixer has passed
 // the batch that carried the destroy.
 //
-// This is the whole of "the Mixer never frees". Destroy runs on the tick, and
-// the Mixer may be mid-copy out of that Clip's samples, so the destroy travels
-// as an operation inside the batch - ordered after the stops that precede it,
+// This is the whole of "the Mixer never frees". A release is stated on the tick,
+// and the Mixer may be mid-copy out of that Clip's samples, so the destroy
+// travels as an operation inside the batch - ordered after the stops before it,
 // which is what drops the voice table's references - and the last reference on
 // this side goes only once the applied counter has passed that batch. The Mixer
 // never frees and never reads freed memory; the tick never waits.
@@ -84,9 +84,10 @@ type backend struct {
 	clips  map[sound.ClipID]*clipData
 	lastID sound.ClipID
 
-	// destroyed, staged and pending are one release travelling: marked by
-	// Destroy, recorded into the staging batch by Emit, and held against the
-	// applied counter until the Mixer has passed the batch it went out in.
+	// destroyed, staged and pending are one release travelling: marked by the
+	// Destroys entry that carried it, recorded into the staging batch by the
+	// same Emit, and held against the applied counter until the Mixer has
+	// passed the batch it went out in.
 	destroyed []pendingDestroy
 	staged    []pendingDestroy
 	pending   []pendingDestroy
@@ -337,15 +338,11 @@ func (b *backend) Install(prepared sound.PreparedClip) (sound.ClipID, error) {
 	return b.lastID, nil
 }
 
-// Destroy marks an installed Clip for release. It does not free anything and it
-// does not record the operation: the operation is recorded by the next Emit,
-// after that tick's stops, because a destroy ordered before the stop of a Voice
-// reading the Clip would be a destroy the Mixer had not finished with.
-func (b *backend) Destroy(id sound.ClipID) { b.mark(id) }
-
-// mark moves a Clip out of the table and onto the list of releases the next
-// Emit records. Marking one twice is a no-op, which is what lets Destroy and a
-// Destroys entry in the batch mean the same release rather than two.
+// mark moves a Clip out of the table and onto the list of releases this Emit
+// records, after that tick's stops - because a destroy ordered before the stop
+// of a Voice reading the Clip would be a destroy the Mixer had not finished
+// with. Marking one twice is a no-op, so a batch naming a Clip twice is one
+// release and not two.
 func (b *backend) mark(id sound.ClipID) {
 	clip, ok := b.clips[id]
 	if !ok {

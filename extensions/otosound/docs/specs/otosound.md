@@ -285,8 +285,10 @@ Routine consequences recorded rather than re-asked:
 
 ### The Mixer never frees
 
-`Destroy(ClipID)` runs on the tick, and the Mixer may be mid-copy out of that
-Clip's samples.
+A release is stated on the tick, as a `Batch.Destroys` entry, and the Mixer may
+be mid-copy out of that Clip's samples. There is no `Backend.Destroy` to state
+it any other way ([#484](https://github.com/dvoyni/cog/issues/484)), because the
+batch is the only route with an order.
 
 So a destroy is **an operation inside the batch**, ordered after the stops that
 precede it, and the memory is freed on the tick side only once the Mixer has

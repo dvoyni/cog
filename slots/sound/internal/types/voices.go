@@ -511,6 +511,53 @@ func (v *Voices) stopBus(bus Bus, endings *[]Ending) {
 	}
 }
 
+// stopClip ends every Voice playing one Clip, with ReasonReleased.
+//
+// This is what makes Release mean something. The deferral that would have
+// waited for these Voices to end on their own is retired rather than moved up a
+// layer, and a looping ambience is the sequence that decides it: under deferral
+// its Voice never ends, so the release is never forwarded, the memory never
+// comes back and nothing is reported. A release that quietly does not release
+// is worse than one that stops a sound.
+//
+// A pending Voice is cut the same way and ends ReasonReleased rather than
+// ReasonFailed: nothing failed, the game changed its mind. The fresh rule that
+// holds a failure back a tick does not apply either - a release is the game's
+// own verb, recorded in this tick, so answering it in this tick tells the game
+// nothing it did not already know.
+//
+// Clips are compared with Equal and never with ==, because a ref carrying a
+// path is identified by that path alone whatever bytes it carries beside it,
+// which is the Library's own key rule and the rule sound's own table is spelled
+// with.
+func (v *Voices) stopClip(clip ClipRef, endings *[]Ending) {
+	for i := range v.slots {
+		slot := &v.slots[i]
+		if slot.state != slotLive || !slot.clip.Equal(clip) {
+			continue
+		}
+		slot.state = slotEnded
+		v.live--
+		*endings = append(*endings, Ending{Voice: slot.voice, Reason: ReasonReleased})
+	}
+}
+
+// stopAll ends every live Voice with ReasonReleased, which is what ReleaseAll
+// cuts. It is stopBus(Master) with the other verb's reason, and the reason is
+// the whole difference: a teardown is not a Stop, and a reader that has to tell
+// "it ended" from "I ended it" is told which.
+func (v *Voices) stopAll(endings *[]Ending) {
+	for i := range v.slots {
+		slot := &v.slots[i]
+		if slot.state != slotLive {
+			continue
+		}
+		slot.state = slotEnded
+		v.live--
+		*endings = append(*endings, Ending{Voice: slot.voice, Reason: ReasonReleased})
+	}
+}
+
 // foldBuses folds each Bus's volume into each Voice's gain, which is the whole
 // of what a Bus is: sound decides the volume once, here, above the seam, and
 // nothing about a Bus appears in a Batch, a VoiceStart or a VoiceParams.

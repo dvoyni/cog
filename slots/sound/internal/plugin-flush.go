@@ -28,7 +28,9 @@ type flushScratch struct {
 // in this order, atomically:
 //
 //  1. drain TakePrepared into the clip table;
-//  2. apply the tick's operations, in the order they were recorded;
+//  2. apply the tick's operations, in the order they were recorded - a Play or
+//     a Preload naming an unknown Clip reads its bytes and prepares it here,
+//     and a Release stops the Voices on that Clip and queues its destroy;
 //  3. compute - bind the Clips that became resident, advance every playhead,
 //     fold each Bus's volume into each Voice's gain, and run the W3C equations
 //     over every Voice against the one Listener;
@@ -88,6 +90,9 @@ func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) 
 			arrived := device.Get().Ready && !was
 
 			types.VoicesCollect(live, &work.batch, arrived)
+			// After the Voices, so every stop this tick's releases caused is
+			// already in the batch, ahead of the destroys that follow them.
+			types.ClipsCollect(table, &work.batch)
 			backend.Emit(&work.batch)
 
 			types.VoicesEndTick(live)
@@ -141,6 +146,22 @@ func apply(
 			types.VoicesStopBus(live, op.Bus, endings)
 		case types.OpSeek:
 			types.VoicesSeek(live, op.Voice, op.Offset, endings)
+		case types.OpPreload:
+			if files == nil {
+				files = filesystem.Get()
+			}
+			types.ClipsPreload(table, k, files, backend, op.Clip)
+		case types.OpRelease:
+			// The Voices go first, and that order is the whole of "a release
+			// is atomic within its tick": their stops are collected into the
+			// same batch as the destroy this queues, ahead of it, so the Mixer
+			// never applies a destroy for a Clip it is still mixing - and a
+			// streamed Voice's read-ahead is halted by its own stop.
+			types.VoicesStopClip(live, op.Clip, endings)
+			types.ClipsRelease(table, k, op.Clip)
+		case types.OpReleaseAll:
+			types.VoicesStopAll(live, endings)
+			types.ClipsReleaseAll(table, k)
 		}
 	}
 

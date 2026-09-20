@@ -73,6 +73,13 @@ type VoiceUpdate struct {
 // it in one tick: the victim's stop, and the start that takes its slot over.
 // That is the whole of what "sound stops a slot before it reuses one" asks of
 // an Adapter, and it is why stealing needs no verb of its own down here.
+//
+// Destroys is the only way sound releases a Clip, and there is deliberately no
+// Backend.Destroy beside it. A destroy inside the batch is guaranteed to arrive
+// after the stops that precede it, which is what lets an Adapter free a Clip
+// once the Mixer has passed that batch and never while it is still mixing one;
+// a bare call outside the batch carries no such ordering, and two ways to say
+// one release are what a later reader tries to unify and gets wrong.
 type Batch struct {
 	Starts   []VoiceStart
 	Updates  []VoiceUpdate
@@ -172,9 +179,6 @@ type Backend interface {
 
 	// Install mints the id for a prepared clip. It is Install rather than
 	// Prepare that mints, so the handle comes into existence on sound's tick,
-	// where Destroy is guaranteed to pair with it.
+	// where the destroy that pairs with it is guaranteed to be statable.
 	Install(PreparedClip) (ClipID, error)
-
-	// Destroy releases a clip the Adapter installed.
-	Destroy(ClipID)
 }

@@ -15,11 +15,10 @@ type Queue = types.Queue
 // the encoded bytes. It is read-only to a caller: loading and releasing live
 // inside sound, and there is no handle to a Clip for a game to hold.
 //
-// It carries no reader yet. What gameplay legitimately wants of a Clip is a
-// question rather than a handle - how long is it, how many channels, and is it
-// resident yet - and that question arrives with Preload and Release in issue
-// 484. The resource is here now because the flush writes it, and a resource is
-// where state that outlives a handler belongs.
+// What gameplay legitimately wants of a Clip is a question rather than a handle
+// - how long is it, how many channels, and is it resident yet - and the
+// question is ClipInfoOf, which takes a read handle on this and starts no load.
+// Loading and releasing are Queue verbs: Preload, Release and ReleaseAll.
 //
 // Access it only while a handler holds its declared resource lock.
 type Clips = types.Clips

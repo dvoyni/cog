@@ -148,8 +148,10 @@ func TestEverythingElseIsAcceptedAndKeptNowhere(t *testing.T) {
 	backend := newBackend(48000)
 
 	backend.Voices(64)
-	backend.Emit(&sound.Batch{Starts: []sound.VoiceStart{{Slot: 0, Clip: 1}}})
-	backend.Destroy(1)
+	backend.Emit(&sound.Batch{
+		Starts:   []sound.VoiceStart{{Slot: 0, Clip: 1}},
+		Destroys: []sound.ClipID{1},
+	})
 }
 
 // withoutGranule zeroes the granule position of a stream's last page, which is

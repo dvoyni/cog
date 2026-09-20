@@ -33,6 +33,37 @@ func ClipsResolve(c *Clips, k kernel.Kernel, fsys fs.FS, backend Backend, ref Cl
 	return c.resolve(k, fsys, backend, ref)
 }
 
+// ClipsPreload reads and prepares a Clip nothing is playing yet, for sound's
+// internal/.
+func ClipsPreload(c *Clips, k kernel.Kernel, fsys fs.FS, backend Backend, ref ClipRef) {
+	c.preload(k, fsys, backend, ref)
+}
+
+// ClipsRelease drops one Clip and queues its destroy, for sound's internal/.
+// The flush stops the Voices on that Clip before calling it, so the stops and
+// the destroy land in one batch in that order.
+func ClipsRelease(c *Clips, k kernel.Kernel, ref ClipRef) { c.release(k, ref) }
+
+// ClipsReleaseAll drops every Clip and queues every destroy, for sound's
+// internal/.
+func ClipsReleaseAll(c *Clips, k kernel.Kernel) { c.releaseAll(k) }
+
+// ClipsCollect moves this tick's destroys into the batch, for sound's
+// internal/. It is called after the Voices have been collected, so every stop a
+// release caused is already in the batch ahead of the destroy that follows it.
+func ClipsCollect(c *Clips, batch *Batch) { c.collect(batch) }
+
+// ClipsInfo answers what sound already knows about a Clip and starts nothing,
+// for sound's root - which is where the question is exported from, as
+// ClipInfoOf.
+//
+// It takes the read handle rather than the table, which is what keeps the root
+// function a pure forwarder: storage.WriteAccess is the same shape, and the
+// handle is resolved on this side of the boundary.
+func ClipsInfo(handle kernel.Read[*Clips], ref ClipRef) (ClipInfo, ClipState) {
+	return handle.Get().info(ref)
+}
+
 // VoicesStart applies one recorded play for sound's internal/.
 func VoicesStart(v *Voices, op Operation, clip clipFacts, endings *[]Ending) {
 	v.start(op, clip, endings)
@@ -46,6 +77,15 @@ func VoicesSet(v *Voices, voice Voice, params Params) { v.set(voice, params) }
 
 // VoicesStopBus applies one recorded StopBus for sound's internal/.
 func VoicesStopBus(v *Voices, bus Bus, endings *[]Ending) { v.stopBus(bus, endings) }
+
+// VoicesStopClip ends every Voice playing one Clip with ReasonReleased, for
+// sound's internal/. It runs before the Clip leaves the table, so the stops
+// precede the destroy in the batch they share.
+func VoicesStopClip(v *Voices, clip ClipRef, endings *[]Ending) { v.stopClip(clip, endings) }
+
+// VoicesStopAll ends every live Voice with ReasonReleased, for sound's
+// internal/. It is what ReleaseAll cuts.
+func VoicesStopAll(v *Voices, endings *[]Ending) { v.stopAll(endings) }
 
 // VoicesFoldBuses folds each Bus's volume into each Voice's gain, for sound's
 // internal/.

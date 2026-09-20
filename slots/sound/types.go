@@ -30,6 +30,34 @@ const MaxBuses = types.MaxBuses
 // compare two with Equal.
 type ClipRef = types.ClipRef
 
+// ClipInfo is what a game can ask about a Clip: its duration, its channel count
+// and its own sample rate, and no id. There is no handle to a Clip, because
+// there is nothing a game must load or release; ask with ClipInfoOf.
+type ClipInfo = types.ClipInfo
+
+// State is where a Clip is between being named and being playable. It is
+// returned beside a ClipInfo because a duration of zero and a state of
+// ClipLoading are different answers to different questions - a descriptor that
+// reports a size of zero forever cannot tell "not yet" from "never", and this
+// is here not to repeat that.
+//
+// It is spelled State at this face and ClipState below it, which is the one
+// place the two names differ: the root says sound.State, and the constants keep
+// the one spelling they have everywhere.
+type State = types.ClipState
+
+const (
+	// ClipLoading is a Clip whose prepare is in flight, and also a Clip nothing
+	// has named yet - nothing failed and nothing is resident. Asking never
+	// starts a load; Preload is the verb that changes the answer.
+	ClipLoading State = types.ClipLoading
+	// ClipReady is a Clip a Voice can be started from.
+	ClipReady State = types.ClipReady
+	// ClipFailed is a Clip that could not be read or prepared. It is terminal,
+	// and only a Release clears it.
+	ClipFailed State = types.ClipFailed
+)
+
 // Params is "start like this" to Play and "become this" to SetVoice. An absent
 // field is the default to Play and unchanged to SetVoice.
 type Params = types.Params
