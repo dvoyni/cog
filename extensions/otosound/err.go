@@ -97,6 +97,43 @@ func (ErrNoStreamLength) Error() string {
 	return "otosound: the stream decoded to no frames, so a voice on it could never end"
 }
 
+// ErrLoopRegionIgnored reports a Clip whose LOOPSTART, LOOPLENGTH or LOOPEND
+// comments do not describe a span inside it, so its Loop Region was dropped
+// whole and a looping Voice on it repeats the whole Clip.
+//
+// It is not terminal: the Clip plays, and this is the only notice that it plays
+// without the loop point its author wrote. The region is dropped rather than
+// clamped because a clamped loop sounds like a working loop with the wrong loop
+// point, which is the single hardest audio bug to attribute, and because
+// clamping would make a tag's meaning depend on the Clip it sits in.
+//
+// It is reported once per Clip: a prepare runs once per entry in sound's table,
+// and the notice it queues is drained once.
+type ErrLoopRegionIgnored struct {
+	// Start and End are the span the tags asked for, in sample frames. They are
+	// both zero when Err says no value was read at all.
+	Start, End int64
+	// Frames is the Clip's true length in source frames, taken from the
+	// stream's granule positions rather than from a decoded buffer - which is
+	// what End is too large against.
+	Frames int64
+	// Err is the parse failure, when a tag carried something that is not a
+	// count of frames, and nil when the values parsed and the span did not fit.
+	Err error
+}
+
+func (e ErrLoopRegionIgnored) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf(
+			"otosound: a Clip's loop tags could not be read, so it loops whole: %v", e.Err)
+	}
+	return fmt.Sprintf(
+		"otosound: a Clip's loop region [%d, %d) frames is not inside its %d frames, so it loops whole",
+		e.Start, e.End, e.Frames)
+}
+
+func (e ErrLoopRegionIgnored) Unwrap() error { return e.Err }
+
 // ErrNoStreamFormat reports an Ogg Vorbis stream whose identification header
 // names no sample rate, no channels, or more channels than the Mixer's 2x2 gain
 // matrix can address.

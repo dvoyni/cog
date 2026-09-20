@@ -238,7 +238,7 @@ func TestAClipUnderTheLimitIsResidentAndOneOverItStreams(t *testing.T) {
 // a Clip must not sound different for having been long enough to stream.
 func TestAStreamedClipIsFrameForFrameWhatTheResidentOneWouldHaveBeen(t *testing.T) {
 	encoded := fixture(t)
-	resident, err := decode(encoded, defaultSampleRate)
+	resident, err := decode(encoded, defaultSampleRate, clipFrames)
 	if err != nil {
 		t.Fatalf("decoding the fixture: %v", err)
 	}

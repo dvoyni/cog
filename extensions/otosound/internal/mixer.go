@@ -147,7 +147,16 @@ func (mx *mixer) apply(b *batch) {
 			v.clip = o.clip
 			v.ring = o.ring
 			v.loop = o.loop
-			v.loopStart, v.loopEnd = o.clip.loopBounds()
+			// A Loop Region bounds a looping Voice and nothing else. A one-shot
+			// on a Clip with an intro and a loop plays the intro, the loop and
+			// whatever follows it, and ends at the Clip's end - the region says
+			// where to repeat between, never where the Clip stops. This is the
+			// same branch the read-ahead makes for a streamed Voice, one tier
+			// over.
+			v.loopStart, v.loopEnd = 0, float64(o.clip.frames)
+			if o.loop {
+				v.loopStart, v.loopEnd = o.clip.loopBounds()
+			}
 			v.pos = startFrame(o)
 			v.starved, v.primed = false, false
 			v.rate = rateOf(o.params.Rate)

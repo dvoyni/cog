@@ -5,6 +5,7 @@ import (
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/assets"
+	"github.com/dvoyni/cog/libs/m"
 )
 
 // ClipState is where a Clip is between being named and being playable.
@@ -46,13 +47,19 @@ type ClipInfo struct {
 }
 
 // clipFacts is what sound knows about a Clip: its state, the id the Adapter
-// minted for it, and the three facts a PreparedClip reports.
+// minted for it, and the four facts a PreparedClip reports.
 type clipFacts struct {
 	state    ClipState
 	id       ClipID
 	duration float32
 	channels int
 	rate     int
+	// region is the Clip's Loop Region, in seconds, and is absent when the Clip
+	// declares none - which means the whole Clip. sound keeps it for two
+	// reasons of its own: a looping Voice's playhead wraps at the loop end
+	// rather than at the duration, and a Seek past the end wraps to the loop
+	// start rather than to zero.
+	region m.Maybe[LoopRegion]
 }
 
 // info renders the facts as the question answers them.
@@ -297,7 +304,8 @@ func (c *Clips) drain(k kernel.Kernel, backend Backend) {
 }
 
 // install mints the Clip's id on sound's tick, where a Destroy is guaranteed to
-// pair with it, and records the three facts sound needs to end a Voice on time.
+// pair with it, and records the four facts sound needs to end a Voice on time
+// and to wrap a looping one where its Clip says.
 func (c *Clips) install(k kernel.Kernel, backend Backend, entry *clipEntry, key ClipRef, prepared PreparedClip) {
 	if prepared == nil {
 		c.fail(k, entry, key, ErrClipNotPrepared{Clip: key.describe()})
@@ -318,6 +326,7 @@ func (c *Clips) install(k kernel.Kernel, backend Backend, entry *clipEntry, key 
 		duration: prepared.Duration(),
 		channels: prepared.Channels(),
 		rate:     prepared.SampleRate(),
+		region:   prepared.LoopRegion(),
 	}
 }
 

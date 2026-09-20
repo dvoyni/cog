@@ -97,6 +97,12 @@ type backend struct {
 	// the Mixer can reach.
 	completedMu sync.Mutex
 	completed   []sound.Prepared
+	// droppedRegions is the Loop Regions that were dropped, one per Clip that
+	// declared one it could not have, waiting for the tick handler that holds a
+	// Kernel. It shares completedMu with the completions because it is written
+	// by the same goroutines at the same moment, and one lock that is nowhere
+	// near the Mixer is better than two.
+	droppedRegions []error
 
 	// device is what Device reports. The device side writes it, the tick side
 	// reads it, and it changes under its reader with no notification - which is
@@ -296,6 +302,9 @@ func (b *backend) Prepare(token any, encoded assets.Blob) (sound.PreparedClip, b
 		clip, err := prepare(encoded, rate, limit)
 		b.completedMu.Lock()
 		b.completed = append(b.completed, sound.Prepared{Token: token, Clip: preparedOrNil(clip), Err: err})
+		if clip != nil && clip.ignored != nil {
+			b.droppedRegions = append(b.droppedRegions, clip.ignored)
+		}
 		b.completedMu.Unlock()
 	}()
 	return nil, false, nil
@@ -322,6 +331,27 @@ func (b *backend) TakePrepared() []sound.Prepared {
 	}
 	taken := b.completed
 	b.completed = nil
+	return taken
+}
+
+// takeDroppedRegions returns the Loop Regions dropped since the last call and
+// clears them, so each one is said once and by the one thing in this Extension
+// that holds a Kernel.
+//
+// Draining is what makes it once per Clip. kernel.ReportErrorOnce wants a key
+// that names the condition, and the condition here is a Clip - which the
+// Adapter cannot name: sound's prepare token is opaque, and a ClipID does not
+// exist until Install, a tick after the prepare that found this. A prepare runs
+// once per entry in sound's table and its notice is drained once, so the queue
+// is the dedupe.
+func (b *backend) takeDroppedRegions() []error {
+	b.completedMu.Lock()
+	defer b.completedMu.Unlock()
+	if len(b.droppedRegions) == 0 {
+		return nil
+	}
+	taken := b.droppedRegions
+	b.droppedRegions = nil
 	return taken
 }
 
