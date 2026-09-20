@@ -90,7 +90,9 @@ func TestAScreenDrawStillDeclaresTheFrameBufferAsItsColourTarget(t *testing.T) {
 	if desc.NoColorTarget {
 		t.Error("a screen pass built a pipeline with no colour target")
 	}
-	if desc.ColorFormat != gfx.FormatScreen {
-		t.Errorf("colour format = %v, want FormatScreen", desc.ColorFormat)
+	// The sentinel is resolved where the key is built, so a screen pass and a
+	// pass into a texture of the frame buffer's own format share one pipeline.
+	if desc.ColorFormat != gfx.FrameBufferFormat {
+		t.Errorf("colour format = %v, want the frame buffer's", desc.ColorFormat.Name())
 	}
 }

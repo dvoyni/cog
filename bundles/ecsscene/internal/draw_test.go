@@ -67,6 +67,13 @@ func (b *stubBackend) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
 	return gfx.TextureViewID(1), 1600, 1200
 }
 
+// TextureFormat answers for no texture: this double keeps no descriptors, and
+// gfx falls back to the frame buffer's format for a target it cannot place -
+// which is what every pipeline in this fixture was keyed to anyway.
+func (b *stubBackend) TextureFormat(gfx.TextureID) (gfx.TextureFormat, bool) {
+	return 0, false
+}
+
 func (b *stubBackend) TextureView(gfx.TextureID, int, int) gfx.TextureViewID {
 	return gfx.TextureViewID(b.next())
 }

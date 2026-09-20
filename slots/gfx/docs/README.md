@@ -676,6 +676,7 @@ type Backend interface {
     FreePipeline(PipelineID)
     ScreenFramebuffer() (TextureViewID, int, int)
     TextureView(TextureID, mip, layer int) TextureViewID
+    TextureFormat(TextureID) (TextureFormat, bool)
     Limits() Limits
     Execute(*Queue)
     TakeCapture() (Capture, bool)
@@ -686,6 +687,17 @@ type Backend interface {
 `Ready` reports whether the backend can render. gfx calls nothing but `Ready`,
 `NewTexture` and `NewBuffer` on a backend that is not ready, and `Ready` must
 be safe from any goroutine.
+
+`TextureFormat` reports what format a texture was allocated or baked in, and
+whether the backend knows the texture at all. It is what keys a pipeline to
+the pass it renders into: a pipeline declares its target's format and
+`TargetDescr` carries only an id, so the descriptor a backend already keeps
+per texture is where the format is read from rather than being copied into the
+pass. A texture is unknown until `Execute` replays the bake that allocates it,
+so the frame that allocates a target cannot answer for it and gfx keys that
+frame's pipelines to `FrameBufferFormat`. Nothing is lost: `TextureView`
+returns the zero view on the same condition, leaving the pass with no
+attachment to begin, so the pipeline keyed there never renders.
 
 `TakeCapture` is drained once per frame, immediately after `Execute`, and
 never blocks: what it has ready is the copy the *previous* frame encoded,

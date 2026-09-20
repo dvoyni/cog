@@ -75,14 +75,19 @@ func (t *translator) ensurePipeline(
 	if !ok {
 		return 0, nil
 	}
-	// One colour format exists today, the frame buffer's, and every renderable
-	// texture in the tree is allocated in it - so the sentinel is still right
-	// for every pass that has a colour attachment at all. What is not
-	// interchangeable is having one: a depth-only pass has no colour
-	// attachment, and a pipeline that declares a target it will never be given
-	// is rejected at setPipeline.
-	const colorFormat, depthFormat = gfx.FormatScreen, gfx.FormatDepth32F
+	// A pipeline declares the formats of the attachments it renders into, so
+	// they come from the pass rather than from here. What is not
+	// interchangeable is having a colour attachment at all: a depth-only pass
+	// has none, and a pipeline that declares a target it will never be given is
+	// rejected at setPipeline.
 	noColor := pass.Target.IsNone()
+	colorFormat := t.targetFormat(backend, pass)
+	// FormatDepth32F is the only depth format in the engine: DepthAuto allocates
+	// one, DepthTarget requires one, and the enum holds no other. What a
+	// DepthNone pass needs is to declare no depth attachment rather than a
+	// different format, which the key cannot say yet -
+	// https://github.com/dvoyni/cog/issues/469.
+	const depthFormat = gfx.FormatDepth32F
 	k := pipelineKey{
 		shader: shader, topology: m.Topology(), state: state,
 		colorFormat: colorFormat, depthFormat: depthFormat, noColor: noColor, layout: layout,
@@ -122,6 +127,45 @@ func (t *translator) ensurePipeline(
 	}
 	t.pipelines[k] = id
 	return id, nil
+}
+
+// targetFormat resolves the colour format a pass's pipelines render into.
+//
+// A screen pass resolves the sentinel here rather than carrying it into the
+// key, so that a screen pass and a pass into a texture of the frame buffer's
+// own format share one pipeline instead of building two identical ones - which
+// is the common case while every renderable texture in the tree is allocated
+// FormatRGBA8Srgb. The backend resolves it either way; only the key can tell
+// the difference.
+//
+// A colourless pass has no format to resolve and is keyed by noColor instead.
+//
+// A texture target asks the backend, which is where a texture's descriptor
+// lives, and which cannot answer on the frame the texture is allocated: the
+// bake that creates it is replayed after this frame is translated. That frame
+// falls back to the frame buffer's format, which is what every pipeline was
+// keyed to before this resolved anything, and it costs nothing - the same
+// condition leaves TextureView with no view to return, so the pass is skipped
+// and the pipeline keyed here never renders. The frame after keys the target's
+// real format, which is a different cache entry and the one that draws.
+//
+// Falling back rather than refusing the draw is deliberate. ensurePipeline runs
+// ahead of the checks that report a draw sampling its own attachment and a
+// material missing a storage binding, so a draw dropped here takes their
+// diagnostics with it - and it would take them on exactly the frame a caller
+// first writes the mistake.
+func (t *translator) targetFormat(backend gfx.Backend, pass gfx.PassDescr) gfx.TextureFormat {
+	if pass.Target.IsNone() {
+		return 0
+	}
+	if pass.Target.IsScreen() {
+		return gfx.FormatScreen.Resolve()
+	}
+	texture, _, _, _ := pass.Target.Texture()
+	if format, ok := backend.TextureFormat(texture); ok {
+		return format
+	}
+	return gfx.FormatScreen.Resolve()
 }
 
 func (t *translator) ensureSampler(backend gfx.Backend, desc gfx.SamplerDesc) gfx.SamplerID {

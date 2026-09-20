@@ -827,6 +827,18 @@ func (b *gfxBackend) AllocateTexture(id gfx.TextureID, desc gfx.TextureDesc) {
 	b.allocateTexture(id, desc)
 }
 
+// TextureFormat reports what format a texture was allocated or baked in, from
+// the descriptors this backend already keeps for every texture it owns. A
+// texture it has not created yet - one whose allocation is a bake this same
+// Execute has not replayed - is unknown, which is the condition TextureView
+// answers with the zero view.
+func (b *gfxBackend) TextureFormat(id gfx.TextureID) (gfx.TextureFormat, bool) {
+	if _, ok := b.bakedTextures[id]; !ok {
+		return 0, false
+	}
+	return b.bakedTextureDescs[id].Format, true
+}
+
 func (b *gfxBackend) UpdateTexture(id gfx.TextureID, layer int, region gfx.Region, pixels []byte) {
 	texture, ok := b.bakedTextures[id]
 	desc := b.bakedTextureDescs[id]

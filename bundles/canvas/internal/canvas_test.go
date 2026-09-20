@@ -234,6 +234,13 @@ func (b *testBackend) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
 	return 1, 100, 100
 }
 func (b *testBackend) Limits() gfx.Limits { return gfx.DefaultLimits() }
+// TextureFormat answers for no texture: this double keeps no descriptors, and
+// gfx falls back to the frame buffer's format for a target it cannot place -
+// which is what every pipeline in this fixture was keyed to anyway.
+func (b *testBackend) TextureFormat(gfx.TextureID) (gfx.TextureFormat, bool) {
+	return 0, false
+}
+
 func (b *testBackend) TextureView(texture gfx.TextureID, mip, layer int) gfx.TextureViewID {
 	b.nextID++
 	return gfx.TextureViewID(b.nextID)

@@ -35,6 +35,18 @@ type Backend interface {
 	// baked texture, cached per (texture, mip, layer).
 	TextureView(texture TextureID, mip, layer int) TextureViewID
 
+	// TextureFormat reports the format a texture was allocated or baked in,
+	// and whether the backend knows the texture at all. It is what keys a
+	// pipeline to the pass it renders into: a pipeline declares its target's
+	// format and the descriptor naming that target carries only an id.
+	//
+	// A texture is unknown until Execute replays the bake that allocates it, so
+	// the frame that allocates a target cannot answer for it. gfx keys that
+	// frame's pipelines to FrameBufferFormat and loses nothing by it:
+	// TextureView above returns 0 on the same condition, leaving the pass with
+	// no attachment to begin, so the pipeline keyed there never renders.
+	TextureFormat(texture TextureID) (TextureFormat, bool)
+
 	// Limits reports the device's own limits. gfx checks shaders against
 	// DefaultLimits, the web floor, and never against these: they are here to
 	// say, in the report, what the device this build ran on allowed.

@@ -492,10 +492,11 @@ Two things a caller has to get right:
   to `TextureMaterial()`, which samples and returns; keep that unless you are
   supplying a shader of your own.
 - **Allocate the target `FormatRGBA8Srgb`.** The atlas is sRGB and the engine
-  blends linear, so that format is what everything else canvas draws matches. It
-  is also the only format that works today: gfx keys every pipeline to the frame
-  buffer's colour format regardless of the pass target, which is right while
-  every renderable texture is allocated in it and wrong the moment one is not.
+  blends linear, so that format is what everything else canvas draws matches. A
+  linear target is no longer broken - gfx keys each pipeline to the format of
+  the pass it renders into - but it is still a target canvas draws the wrong
+  colours into, because what canvas samples was decoded on read and would be
+  stored back raw.
 
 ## Inspecting A Recording
 

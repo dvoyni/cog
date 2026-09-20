@@ -32,6 +32,10 @@ func testMaterial(params ...gfx.ParameterDescr) gfx.MaterialDescr {
 // fakeBackend records the calls the translator makes and captures the last
 // executed op stream so tests can assert the translation without a GPU.
 type fakeBackend struct {
+	// formats is what each texture was allocated or baked in, the fake's stand
+	// in for gogpu's bakedTextureDescs: written when a bake is replayed and
+	// dropped on release, so a texture is unknown until its frame's Execute.
+	formats        map[gfx.TextureID]gfx.TextureFormat
 	nextID         uint32
 	nextTex        uint32
 	nextBuf        uint32
@@ -209,6 +213,14 @@ func (b *fakeBackend) Limits() gfx.Limits {
 	}
 }
 
+// TextureFormat answers from the formats recorded when a texture was allocated
+// or baked, which is the backend's own record in gogpu too. A texture whose
+// bake this backend has not replayed yet is unknown, exactly as there.
+func (b *fakeBackend) TextureFormat(id gfx.TextureID) (gfx.TextureFormat, bool) {
+	format, ok := b.formats[id]
+	return format, ok
+}
+
 func (b *fakeBackend) TextureView(texture gfx.TextureID, mip, layer int) gfx.TextureViewID {
 	b.views = append(b.views, [3]int{int(texture), mip, layer})
 	return gfx.TextureViewID(len(b.views))
@@ -270,12 +282,14 @@ func (b *fakeBackend) BakeBuffer(id gfx.BufferID, kind gfx.BufferKind, size int,
 func (b *fakeBackend) BakeTexture(id gfx.TextureID, width, height int, format gfx.TextureFormat, pixels []byte, mipmaps bool) {
 	b.textures++
 	b.uploads++
+	b.recordFormat(id, format)
 	b.lastOps = append(b.lastOps, backendOp{
 		kind: opBakeTexture, texture: id, width: width, height: height, format: format, data: pixels,
 	})
 }
 
 func (b *fakeBackend) AllocateTexture(id gfx.TextureID, desc gfx.TextureDesc) {
+	b.recordFormat(id, desc.Format)
 	b.lastOps = append(b.lastOps, backendOp{
 		kind: opAllocateTexture, texture: id, width: desc.Width, height: desc.Height, layers: desc.Layers,
 		format: desc.Format, renderable: desc.Renderable,
@@ -290,7 +304,15 @@ func (b *fakeBackend) ReleaseBuffer(id gfx.BufferID) {
 	b.lastOps = append(b.lastOps, backendOp{kind: opReleaseBuffer, buffer: id})
 }
 
+func (b *fakeBackend) recordFormat(id gfx.TextureID, format gfx.TextureFormat) {
+	if b.formats == nil {
+		b.formats = map[gfx.TextureID]gfx.TextureFormat{}
+	}
+	b.formats[id] = format
+}
+
 func (b *fakeBackend) ReleaseTexture(id gfx.TextureID) {
+	delete(b.formats, id)
 	b.lastOps = append(b.lastOps, backendOp{kind: opReleaseTexture, texture: id})
 }
 

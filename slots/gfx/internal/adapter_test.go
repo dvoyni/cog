@@ -85,6 +85,9 @@ func (a *testAdapter) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
 func (a *testAdapter) NewPipeline(desc gfx.PipelineDesc) (gfx.PipelineID, error) {
 	return a.get().NewPipeline(desc)
 }
+func (a *testAdapter) TextureFormat(texture gfx.TextureID) (gfx.TextureFormat, bool) {
+	return a.get().TextureFormat(texture)
+}
 func (a *testAdapter) TextureView(texture gfx.TextureID, mip, layer int) gfx.TextureViewID {
 	return a.get().TextureView(texture, mip, layer)
 }

@@ -61,8 +61,8 @@ func TestPipelineDescCarriesStateAndTargetFormats(t *testing.T) {
 	if desc.State != gfx.StateOpaque3D() {
 		t.Errorf("pipeline state = %+v, want StateOpaque3D", desc.State)
 	}
-	if desc.ColorFormat != gfx.FormatScreen {
-		t.Errorf("pipeline colour format = %v, want FormatScreen", desc.ColorFormat)
+	if desc.ColorFormat != gfx.FrameBufferFormat {
+		t.Errorf("pipeline colour format = %v, want the frame buffer's", desc.ColorFormat.Name())
 	}
 	if desc.DepthFormat != gfx.FormatDepth32F {
 		t.Errorf("pipeline depth format = %v, want FormatDepth32F", desc.DepthFormat)

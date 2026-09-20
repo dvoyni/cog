@@ -128,6 +128,13 @@ func (b *flattenBackend) FreePipeline(gfx.PipelineID)                {}
 func (b *flattenBackend) Limits() gfx.Limits                         { return gfx.DefaultLimits() }
 func (b *flattenBackend) Execute(*gfx.Queue)                         {}
 func (b *flattenBackend) TakeCapture() (gfx.Capture, bool)           { return gfx.Capture{}, false }
+// TextureFormat answers for no texture: this double keeps no descriptors, and
+// gfx falls back to the frame buffer's format for a target it cannot place -
+// which is what every pipeline in this fixture was keyed to anyway.
+func (b *flattenBackend) TextureFormat(gfx.TextureID) (gfx.TextureFormat, bool) {
+	return 0, false
+}
+
 func (b *flattenBackend) TextureView(gfx.TextureID, int, int) gfx.TextureViewID {
 	return gfx.TextureViewID(b.id())
 }
