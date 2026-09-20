@@ -166,8 +166,14 @@ func newDrawsRig(t *testing.T) *drawsRig {
 			// silence, and this rig treats every reported error as fatal. The
 			// font joined them when the font store became two caches: a missing
 			// font used to fail nowhere on the draw path.
+			//
+			// hero.png is 32x32 rather than 4x4 for the same reason: the wire
+			// fixture windows it with a Frame of {2,4,18,20}, which never fitted
+			// a 4x4 sheet. That drew nothing and said nothing, so a pin of the
+			// recorded JSON never noticed; a frame that does not fit is reported
+			// now, and the fixture has to mean what it records.
 			WithReadFS("test", 10, fstest.MapFS{
-				"images/hero.png":  &fstest.MapFile{Data: pngBytes(t, 4, 4)},
+				"images/hero.png":  &fstest.MapFile{Data: pngBytes(t, 32, 32)},
 				"images/other.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)},
 				"fonts/body.ttf":   &fstest.MapFile{Data: goregular.TTF},
 			}),

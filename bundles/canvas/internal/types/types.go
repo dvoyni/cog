@@ -76,16 +76,23 @@ type SpriteFrame struct {
 type SpriteTransform struct {
 	Position m.Vec2
 	// Size is the drawn size in logical pixels. A zero component is unset: when both
-	// are unset the size is the texture size times Scale; when exactly one is set the
-	// other is derived from it preserving the texture's aspect ratio.
+	// are unset the size is the source size times Scale; when exactly one is set the
+	// other is derived from it preserving the source's aspect ratio. The source is
+	// what Frame selects, not the whole texture.
 	Size m.Vec2
-	// Scale multiplies the texture size when Size is fully unset. Its zero value
-	// means 1 (natural texture size). It is resolved at flush, so a lazy path sprite
+	// Scale multiplies the source size when Size is fully unset. Its zero value
+	// means 1 (natural source size). It is resolved at flush, so a lazy path sprite
 	// needs no preloaded dimensions.
 	Scale    float32
 	Rotation float32
 	Origin   m.Vec2
-	Frame    SpriteFrame
+	// Frame selects the sub-rectangle of the source the sprite samples, as pixel
+	// insets from each edge. It narrows the source rather than windowing a sprite
+	// of fixed size: an unsized sprite's natural size is the frame's extent, so
+	// Scale means one framed texel per world unit. A frame that leaves no source
+	// draws nothing and is reported. NineSlice measures its insets into the frame;
+	// TileX and TileY ignore it.
+	Frame SpriteFrame
 	// NineSlice splits the source into corners, sides, and center using pixel
 	// insets resolved after the texture dimensions are known. NineSliceScale
 	// controls destination border thickness; zero means one.

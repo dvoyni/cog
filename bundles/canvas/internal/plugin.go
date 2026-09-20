@@ -405,7 +405,7 @@ func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, laye
 	// these two returns rather than above them.
 	if op.HasTexture {
 		p.batch.flush(gfxWrite, p.quad)
-		p.drawTextureSprite(gfxWrite, surf, layerTransform, clip, hasClip, materials, op)
+		p.drawTextureSprite(gfxWrite, fr, surf, layerTransform, clip, hasClip, materials, op)
 		return
 	}
 	t := op.Transform
@@ -422,6 +422,19 @@ func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, laye
 	if entry.Width <= 0 || entry.Height <= 0 {
 		return
 	}
+	// The frame is checked here, before any size is resolved, because this is
+	// where the path and the kernel are both in hand - the altitude the tiled
+	// sprite already reports an unusable path from. Everything downstream may
+	// then assume a frame that fits.
+	//
+	// A bad frame reports alone. The nine-slice insets are measured into the
+	// frame's extent, so on a frame that does not fit their verdict is derived
+	// from a number that means nothing, and reporting it too would raise a
+	// second error that vanishes when the first is fixed.
+	if !frameFits(entry.Width, entry.Height, t.Frame) {
+		types.ReportInvalidSpriteFrame(fr.k, op.Path, entry.Width, entry.Height, t.Frame)
+		return
+	}
 	// The sprite is going to the atlas batch, which no triangle draw can join,
 	// so the pending triangles run closes here. It closes after the resolve
 	// rather than before it: a sprite whose atlas entry does not resolve draws
@@ -435,6 +448,11 @@ func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, laye
 	tint := paramColorOr(op.Params, canvas.TintSlot, m.Color{R: 1, G: 1, B: 1, A: 1})
 	keyColor := paramColorOr(op.Params, canvas.KeyColorSlot, types.DefaultKeyColor())
 	if t.NineSlice != (canvas.SpriteFrame{}) {
+		frameWidth, frameHeight := framedSource(entry.Width, entry.Height, t.Frame)
+		if !insetsFit(frameWidth, frameHeight, t.NineSlice) {
+			types.ReportInvalidSpriteNineSlice(fr.k, op.Path, frameWidth, frameHeight, t.Frame, t.NineSlice)
+			return
+		}
 		nineSliceParts(t, entry.Width, entry.Height, func(part canvas.SpriteTransform) {
 			p.batchEntry(gfxWrite, surf, entry, part, layerTransform, clip, hasClip, &shading, tint, keyColor)
 		})
@@ -449,15 +467,21 @@ func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, laye
 // and centre of a nine-slice are the same arithmetic whether the pixels come
 // from an atlas entry or from a texture of their own.
 //
-// Insets that do not fit the source emit nothing, which is the house rule: a
-// nine-slice whose borders overlap has no correct picture, and drawing an
-// approximate one would hide the authoring mistake.
+// A nine-slice over a framed sprite slices the frame: the insets are measured
+// into the frame's extent and offset by it, so what the parts sample is the
+// frame's span even though the Frame each one carries is absolute against the
+// source. The frame used to be overwritten here and the caller's discarded, so
+// the two features silently did not compose.
+//
+// Both the frame and the insets are assumed to fit. A nine-slice whose borders
+// overlap has no correct picture and an approximate one would hide the
+// authoring mistake, so it is refused - but at drawSprite and
+// drawTextureSprite, which can name the sheet in the report, rather than by
+// returning quietly from here.
 func nineSliceParts(transform canvas.SpriteTransform, width, height int, emit func(canvas.SpriteTransform)) {
+	frame := transform.Frame
+	frameWidth, frameHeight := framedSource(width, height, frame)
 	insets := transform.NineSlice
-	if insets.Left < 0 || insets.Right < 0 || insets.Top < 0 || insets.Bottom < 0 ||
-		insets.Left+insets.Right >= width || insets.Top+insets.Bottom >= height {
-		return
-	}
 	size := spriteSize(width, height, transform)
 	if size.X <= 0 || size.Y <= 0 {
 		return
@@ -468,8 +492,11 @@ func nineSliceParts(transform canvas.SpriteTransform, width, height int, emit fu
 	}
 	destinationX := splitNineSliceAxis(size.X, float32(insets.Left)*scale, float32(insets.Right)*scale)
 	destinationY := splitNineSliceAxis(size.Y, float32(insets.Top)*scale, float32(insets.Bottom)*scale)
-	sourceX := [4]int{0, insets.Left, width - insets.Right, width}
-	sourceY := [4]int{0, insets.Top, height - insets.Bottom, height}
+	// The source columns and rows are cut out of the frame and then said in the
+	// source's own coordinates, because a part's Frame is absolute: what a part
+	// samples is the frame's span, and where it says it is is the whole sheet.
+	sourceX := [4]int{0, insets.Left, frameWidth - insets.Right, frameWidth}
+	sourceY := [4]int{0, insets.Top, frameHeight - insets.Bottom, frameHeight}
 	for row := 0; row < 3; row++ {
 		for column := 0; column < 3; column++ {
 			if transform.NineSliceNoCenter && row == 1 && column == 1 {
@@ -486,8 +513,8 @@ func nineSliceParts(transform canvas.SpriteTransform, width, height int, emit fu
 			part.Origin = m.Vec2{}
 			part.Rotation = 0
 			part.Frame = canvas.SpriteFrame{
-				Left: sourceX[column], Top: sourceY[row],
-				Right: width - sourceX[column+1], Bottom: height - sourceY[row+1],
+				Left: frame.Left + sourceX[column], Top: frame.Top + sourceY[row],
+				Right: width - (frame.Left + sourceX[column+1]), Bottom: height - (frame.Top + sourceY[row+1]),
 			}
 			part.NineSlice = canvas.SpriteFrame{}
 			emit(part)
@@ -577,7 +604,7 @@ func (p *plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface,
 // one draw rather than nine - because what keeps it off the sprite path is the
 // binding type, not anything about the geometry. Two quads over one texture and
 // one sampler are one draw; a second texture splits them.
-func (p *plugin) drawTextureSprite(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.SpriteOp) {
+func (p *plugin) drawTextureSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.SpriteOp) {
 	width, height := op.Texture.Size()
 	if width <= 0 || height <= 0 {
 		// Skip, never substitute. A texture that does not know its size yet - a
@@ -585,7 +612,19 @@ func (p *plugin) drawTextureSprite(gfxWrite *gfx.OpQueue, surf surface, layerTra
 		// pixels for a Frame to cut, and a guessed rectangle is worse than none.
 		return
 	}
+	// The same refusal as the atlas path, at the same altitude and for the same
+	// reason: a frame is checked once, before a size is resolved, while there is
+	// still something to name in the report.
+	if !frameFits(width, height, op.Transform.Frame) {
+		types.ReportInvalidTextureFrame(fr.k, op.Texture, width, height, op.Transform.Frame)
+		return
+	}
 	if op.Transform.NineSlice != (canvas.SpriteFrame{}) {
+		frameWidth, frameHeight := framedSource(width, height, op.Transform.Frame)
+		if !insetsFit(frameWidth, frameHeight, op.Transform.NineSlice) {
+			types.ReportInvalidTextureNineSlice(fr.k, op.Texture, frameWidth, frameHeight, op.Transform.Frame, op.Transform.NineSlice)
+			return
+		}
 		nineSliceParts(op.Transform, width, height, func(part canvas.SpriteTransform) {
 			p.emitTextureQuad(gfxWrite, surf, layerTransform, clip, hasClip, width, height, part, materials, op)
 		})
@@ -721,7 +760,15 @@ func entrySize(entry types.AtlasEntry, transform canvas.SpriteTransform) m.Vec2 
 // dimensions from a transform's explicit size, single-axis size, or uniform
 // scale. It is the one place the rule lives, because a texture-sourced sprite
 // means by Size and Scale exactly what an atlas-sourced one means.
+//
+// A Frame narrows the source first: it says which texels the sprite draws, so
+// it says how many, and Scale means one framed texel per world unit. Sizing
+// from the whole sheet instead stretched a sub-rect over the full image, which
+// is the one thing a transform whose uv is already inset can never want. The
+// frame is assumed to fit - drawSprite and drawTextureSprite refuse and report
+// one that does not before any size is resolved.
 func spriteSize(width, height int, transform canvas.SpriteTransform) m.Vec2 {
+	width, height = framedSource(width, height, transform.Frame)
 	size := transform.Size
 	switch {
 	case size.X != 0 && size.Y != 0:
@@ -961,4 +1008,33 @@ func textRasterScale(layerTransform m.Mat4, surf surface) float32 {
 		layerScale = 1
 	}
 	return layerScale * surf.scale
+}
+
+// framedSource narrows a source's pixel dimensions to the sub-rect a Frame
+// selects. A zero Frame selects the whole source, which is why the common case
+// costs a comparison and nothing else.
+func framedSource(width, height int, frame canvas.SpriteFrame) (int, int) {
+	if frame == (canvas.SpriteFrame{}) {
+		return width, height
+	}
+	return width - frame.Left - frame.Right, height - frame.Top - frame.Bottom
+}
+
+// frameFits reports whether a Frame selects a non-empty sub-rect of a source of
+// the given dimensions. It is the condition entryUV and textureUV already
+// applied silently, lifted out so the draw can refuse and say why.
+func frameFits(width, height int, frame canvas.SpriteFrame) bool {
+	if frame == (canvas.SpriteFrame{}) {
+		return true
+	}
+	return frame.Left >= 0 && frame.Top >= 0 && frame.Right >= 0 && frame.Bottom >= 0 &&
+		frame.Left+frame.Right < width && frame.Top+frame.Bottom < height
+}
+
+// insetsFit reports whether nine-slice insets leave a non-empty middle in a
+// source of the given dimensions. The dimensions are the frame's, not the
+// sheet's: a nine-slice over a framed sprite slices the frame.
+func insetsFit(width, height int, insets canvas.SpriteFrame) bool {
+	return insets.Left >= 0 && insets.Right >= 0 && insets.Top >= 0 && insets.Bottom >= 0 &&
+		insets.Left+insets.Right < width && insets.Top+insets.Bottom < height
 }

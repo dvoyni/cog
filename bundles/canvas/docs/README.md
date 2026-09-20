@@ -144,7 +144,12 @@ coordinates. `AspectMode` is `AspectInscribe`, `AspectOverlap`, or
 `SpriteTransform` exposes `Position`, `Size`, `Scale`, `Rotation`, `Origin`,
 `Frame`, `FlipX`, `FlipY`, `TileX`, `TileY`, and `Filter`. An unset size uses
 the texture's natural dimensions; setting one dimension preserves aspect.
-`SpriteFrame{Left, Top, Right, Bottom}` selects a pixel sub-rectangle.
+`SpriteFrame{Left, Top, Right, Bottom}` selects a pixel sub-rectangle, and it
+narrows what those natural dimensions are: a framed sprite's natural size is the
+frame's extent, so `Scale` means one framed texel per world unit. A `Frame` that
+does not fit its source draws nothing and is reported. A `NineSlice` measures
+its insets into the frame; tiling ignores the frame entirely, because what
+repeats is the texture rather than a window onto it.
 
 `TextDraw` contains `Position`, `Size`, `Color`, `Align`, `WordWrapping`,
 `WrapWidth`, `Material` and `Params`. Its `TextAlign` values are `AlignLeft`,
