@@ -20,6 +20,8 @@
 // sound is a Slot: its plugin, built by soundplugin.New, requires exactly one
 // Backend Adapter through BackendPort, which an Extension provides - otosound
 // on desktop, jssound in a browser, nosound wherever nothing needs to be heard.
+// It contributes one McpProvider of its own, whose single capability lists what
+// is playing, what just ended and whether anything could have been heard at all.
 // A game composes one per platform, in build-tagged files; there is no knob
 // selecting a backend, because which one runs is the target triple's answer.
 //

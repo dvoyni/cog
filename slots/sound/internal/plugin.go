@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/sound"
 	"github.com/dvoyni/cog/slots/sound/internal/types"
@@ -33,8 +34,9 @@ func (p *plugin) Dependencies() []kernel.PluginName {
 }
 
 // Register requires the Backend Adapter, resolves the configuration, registers
-// the six resources and the per-tick batch, and subscribes the flush and the
-// response to an engine Pause.
+// the six resources, the per-tick batch and what the last flush left for the
+// agent-facing listing, subscribes the flush and the response to an engine
+// Pause, and contributes sound's mcp Provider.
 func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	p.backend = registrar.RequireAdapter[sound.BackendPort]()
 
@@ -61,8 +63,11 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	registrar.InitResource(types.NewListener())
 	registrar.InitResource(&sound.Device{})
 	registrar.InitResource(&flushScratch{})
+	registrar.InitResource(&lastFlush{})
+	registrar.HandleCommand[voicesCmd](voicesCmdImpl)
 	registrar.Subscribe[sound.FlushOnUpdate](p.flushOnUpdate).Last()
 	registrar.Subscribe[sound.SuspendOnPauseChange](p.suspendOnPauseChange)
+	registrar.ProvideAdapter[sound.McpProvider](mcp.Provider(provider{}))
 	return nil
 }
 

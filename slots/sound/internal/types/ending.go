@@ -54,4 +54,12 @@ func (r Reason) String() string {
 type Ending struct {
 	Voice  Voice
 	Reason Reason
+	// Clip is what the Voice was playing. It rides here because this is the
+	// only moment it can: the slot is cleared at the end of the flush, and the
+	// endings are read after that, so an ending that did not carry its Clip
+	// could never be told which sound it was about. VoiceEndedEvent does not
+	// carry it - a game holds the handle it played with and already knows -
+	// and the reader that does not is the endings ring, which is why it is
+	// here rather than on the event.
+	Clip ClipRef
 }
