@@ -129,7 +129,10 @@ and call:
 - `FillRect(Layer, m.Rect, ShapeDraw)`, `StrokeRect(Layer, m.Rect, ShapeDraw)`
   and `Line(Layer, start, end m.Vec2, ShapeDraw)` for primitives.
 - `Text(Layer, fontPath, text, TextDraw)` for text with multiline and `${path}`
-  inline-image support. A backslash escapes a literal `${` or `\`.
+  inline-image support. A backslash escapes a literal `${` or `\`. An inline
+  icon takes the run's alpha and not its colour: `TextDraw.Color` colours a
+  glyph, whose atlas entry is white plus coverage, and would modulate an icon,
+  whose texel is already the artwork.
 - `DrawTriangles[TVertex VertexLayout](...)` for a non-indexed triangle list.
 - `Reset()` to discard recorded frame state and `OpCount()` to inspect the
   number of recorded draw operations.

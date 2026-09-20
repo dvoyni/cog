@@ -939,7 +939,12 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerT
 					Position: m.Vec2{X: x, Y: y + ascent - capHeight},
 					Size:     m.Vec2{X: width, Y: capHeight},
 				}
-				p.batchEntry(gfxWrite, surf, entry, transform, layerTransform, clip, hasClip, &shading, m.Color{R: 1, G: 1, B: 1, A: 1}, types.DefaultKeyColor())
+				// The run's alpha and not its colour. Rgb is what colour the ink
+				// is, which a glyph needs because its atlas entry is RGB=255
+				// with coverage in alpha, and an icon does not because its
+				// texel is already the artwork. Alpha is how present the run
+				// is, which is true of anything drawn.
+				p.batchEntry(gfxWrite, surf, entry, transform, layerTransform, clip, hasClip, &shading, m.Color{R: 1, G: 1, B: 1, A: op.Draw.Color.A}, types.DefaultKeyColor())
 				x += width
 				continue
 			}

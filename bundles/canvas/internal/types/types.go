@@ -125,8 +125,29 @@ const (
 )
 
 type TextDraw struct {
-	Position     m.Vec2
-	Size         float32
+	Position m.Vec2
+	Size     float32
+	// Color is the run's ink. A glyph takes it whole; an inline icon takes only
+	// its alpha.
+	//
+	// The field carries two things at once, because m.Color does. Rgb says what
+	// colour the ink is, and for a glyph that is the whole mark: the font atlas
+	// holds RGB=255 with coverage in alpha, so multiplying by tint is literally
+	// what colours the text. An icon's texel is already the artwork, so the same
+	// multiply is a modulation that would destroy it, and white stays the
+	// identity. Alpha says how present the run is, which is true of anything
+	// drawn - a label fading out takes its icon down with it rather than leaving
+	// it riding fully opaque over faded text.
+	//
+	// An inline icon therefore has no way to be given the ink colour, and that is
+	// deliberate rather than missing: a mark that wants the ink colour is a
+	// glyph, and belongs in the font, where it also gets kerning and baseline
+	// handling. Failing that it is a Sprite draw carrying
+	// gfx.ColorParam(TintSlot, ...) beside the text rather than inside it.
+	//
+	// Effects read tint, so this is what they see of an icon: an inline icon
+	// haloes white at the run's alpha - a band that follows the run in presence
+	// and not in colour.
 	Color        m.Color
 	Align        TextAlign
 	WordWrapping bool
