@@ -32,6 +32,26 @@ type Params struct {
 	// Paused stops the Voice advancing without ending it. It suspends rather
 	// than silences: the playhead stops and resumes on the same sample.
 	Paused m.Maybe[bool]
+	// Position is where the sound is, in the game's own units. Positional is
+	// one-way: the first position a Voice receives, at Play or by SetVoice,
+	// makes it positional for the rest of its life. A Voice that should stop
+	// being positional is a new Play, which is why there is no clear verb and
+	// why no operation is ever silently ignored.
+	//
+	// A Voice with no position at all is non-positional and heard centred: no
+	// falloff, no cone and no panning. A UI click is one.
+	Position m.Maybe[m.Vec3]
+	// Orientation is which way the sound points, on the same right-handed,
+	// forward -Z axes the Listener uses. It is read by the Cone and by nothing
+	// else, and a Positional Voice without one is equally loud in every
+	// direction whatever its Cone says.
+	Orientation m.Maybe[m.Quat]
+	// Falloff is how this Voice gets quieter with distance, replaced whole. A
+	// Falloff given to a Voice with no position is kept and takes effect when
+	// it gets one.
+	Falloff m.Maybe[Falloff]
+	// Cone is how this Voice gets quieter off its own axis, replaced whole.
+	Cone m.Maybe[Cone]
 }
 
 // merge returns p with every field next states replacing p's own, which is what
@@ -46,6 +66,18 @@ func (p Params) merge(next Params) Params {
 	}
 	if value, ok := next.Paused.Get(); ok {
 		p.Paused = m.Some(value)
+	}
+	if value, ok := next.Position.Get(); ok {
+		p.Position = m.Some(value)
+	}
+	if value, ok := next.Orientation.Get(); ok {
+		p.Orientation = m.Some(value)
+	}
+	if value, ok := next.Falloff.Get(); ok {
+		p.Falloff = m.Some(value)
+	}
+	if value, ok := next.Cone.Get(); ok {
+		p.Cone = m.Some(value)
 	}
 	return p
 }
