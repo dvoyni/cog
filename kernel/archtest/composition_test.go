@@ -20,9 +20,11 @@ import (
 	"github.com/dvoyni/cog/bundles/mcp/mcpplugin"
 	"github.com/dvoyni/cog/bundles/scene/sceneplugin"
 	"github.com/dvoyni/cog/bundles/ui/uiplugin"
+	"github.com/dvoyni/cog/extensions/nosound/nosoundplugin"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app/appplugin"
 	"github.com/dvoyni/cog/slots/gfx/gfxplugin"
+	"github.com/dvoyni/cog/slots/sound/soundplugin"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
@@ -36,6 +38,7 @@ func TestTypeName_NamesEveryTypeInAFullCogCompositionUniquely(t *testing.T) {
 		Handler(func(err error) error { failure = errors.Join(failure, err); return nil }).
 		WithPlugins(
 			storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
+			soundplugin.New(), nosoundplugin.New(),
 			inputplugin.New(), animplugin.New(), canvasplugin.New(), sceneplugin.New(), uiplugin.New(),
 			ecsplugin.New(), ecssceneplugin.New(), mcpplugin.New(),
 		)
