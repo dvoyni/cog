@@ -113,6 +113,3 @@ func (b *backend) Install(sound.PreparedClip) (sound.ClipID, error) {
 	b.installed++
 	return sound.ClipID(b.installed), nil
 }
-
-// Destroy releases a Clip that was never allocated.
-func (b *backend) Destroy(sound.ClipID) {}

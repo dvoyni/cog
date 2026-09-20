@@ -51,6 +51,9 @@ type fakeBackend struct {
 	completed []sound.Prepared
 	// installs counts the ids handed out; zero is none, so it starts at one.
 	installs uint32
+	// prepares counts the Prepares asked for, which is what "asking never
+	// starts a load" is asserted against.
+	prepares int
 
 	// batches is every batch Emit was handed, copied out of the memory sound
 	// owns and lends for the call.
@@ -100,6 +103,7 @@ func (b *fakeBackend) setReady(ready bool) {
 func (b *fakeBackend) Prepare(token any, _ assets.Blob) (sound.PreparedClip, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.prepares++
 	if b.prepareErr != nil {
 		return nil, false, b.prepareErr
 	}
@@ -125,8 +129,6 @@ func (b *fakeBackend) Install(sound.PreparedClip) (sound.ClipID, error) {
 	return sound.ClipID(b.installs), nil
 }
 
-func (b *fakeBackend) Destroy(sound.ClipID) {}
-
 // finishPrepares moves every deferred prepare into what the next TakePrepared
 // drains, which is how a test says "the goroutine an Adapter spawned has
 // finished" without one.
@@ -144,6 +146,13 @@ func (b *fakeBackend) emitted() []sound.Batch {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]sound.Batch(nil), b.batches...)
+}
+
+// counts is how many Prepares were asked for and how many ids were handed out.
+func (b *fakeBackend) counts() (prepares int, installs uint32) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.prepares, b.installs
 }
 
 func (b *fakeBackend) slotCount() (slots, calls int) {

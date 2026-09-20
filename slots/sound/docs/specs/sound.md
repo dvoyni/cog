@@ -151,7 +151,7 @@ question never contends with the Systems recording operations:
 | Resource | Lock | What it is |
 |---|---|---|
 | `*sound.Queue` | `Write` | Where every operation is recorded. |
-| `*sound.Clips` | `Read` | What `ClipInfo` asks. |
+| `*sound.Clips` | `Read` | What `ClipInfoOf` asks. |
 | `*sound.Voices` | `Read` | The live Voice view. |
 | `*sound.Device` | `Read` | What the Device is now. |
 
@@ -255,7 +255,7 @@ type ListenerParams struct {
 | a Clip | `Preload(ClipRef)` · `Release(ClipRef)` · `ReleaseAll()` |
 
 and four questions, asked of the resources rather than the queue: a Bus's
-volume, the Listener, `ClipInfo`, and the live Voice view.
+volume, the Listener, `ClipInfoOf`, and the live Voice view.
 
 **`Params` is one value of `m.Maybe` fields rather than a set of narrow
 setters**, because the ECS face must reconcile a whole Component in one
@@ -793,7 +793,7 @@ the Adapter still references and the garbage collector is what frees them.
 cache deferred, and a Library that frees immediately cannot have the problem.
 **What survives verbatim, as `sound`'s own:** the token carrying key and epoch,
 the `done` flag, the rule that a prepared value must be garbage-collectable, the
-poll rather than a callback, and `ClipInfo` as a question rather than a handle.
+poll rather than a callback, and `ClipInfoOf` as a question rather than a handle.
 
 ### Two tiers, and which is invisible
 
@@ -866,6 +866,15 @@ It cannot. For a short Clip the next `Play` *is* free. For a long one the first
 has. A guarantee the caller cannot verify and the engine cannot keep is worse
 than the weaker one that is always true.
 
+**For a streamed Clip, stated rather than implied** ([#482](https://github.com/dvoyni/cog/issues/482)'s
+handover): `Preload` reads the bytes and parses the headers, and that is all it
+can do. The first `Play` still opens a decoder of its own and the Voice is
+**silent until its read-ahead ring primes** — residency, with a visible cost, and
+not a free `Play`. **Releasing a streamed Clip while it is playing is safe as
+built**, and for a reason worth saying out loud: `sound` stops the Voices first,
+which halts their read-aheads, and the encoded bytes belong to the asset cache,
+so nothing the destroy frees is anything a decoder still holds.
+
 `Preload` is also the lever for choosing *which* frame eats the read — a loading
 screen rather than the first shot fired.
 
@@ -903,13 +912,27 @@ duration; a pending Voice is not playing anything at all.
 ### Asking about a Clip
 
 ```go
-func ClipInfo(handle kernel.Read[*Clips], ref ClipRef) (ClipInfo, State)
+func ClipInfoOf(handle kernel.Read[*Clips], ref ClipRef) (ClipInfo, State)
 ```
 
 `ClipInfo` carries `{Duration, Channels, SampleRate}` and **no id**. Requirement
 2 is *nothing a game must load or release*, so there is no handle to a Clip, and
 exporting one invites a game to hold it. What gameplay legitimately wants is a
 question, not a handle.
+
+**The function is `ClipInfoOf` and not `ClipInfo`.** One identifier cannot be
+both a function and a type in one package, and the name the spec is really
+pinning is the type's: `gfx` and `storage` both name the free function for the
+question and the type for the answer, and `SnapshotViewOf` returning a
+`SnapshotView` is that shape exactly. Settled in
+[#484](https://github.com/dvoyni/cog/issues/484).
+
+**A Clip nothing has named reports zero facts and `ClipLoading`.** There are
+three states and no fourth for *never asked*: nothing failed and nothing is
+resident, which is what `ClipLoading` says. A game that only ever asks is
+therefore told `ClipLoading` forever — `Preload` is the verb that changes the
+answer, and a question that loaded would be the second read `sound` does not
+have.
 
 **Asking never starts a load.** It reads `sound`'s own table, never the Library,
 because the Library's `Get` is the only read it has and it loads on a miss.
@@ -951,7 +974,11 @@ rule `gfx`, `scene` and `canvas` live by.
   Clip, on any Adapter.**
 - **The stops precede the `Destroy` in the same batch**, so a release is atomic
   within its tick and the Mixer never applies a destroy for a Clip it is still
-  mixing.
+  mixing. The flush does the two in that order — `Voices` first, then the clip
+  table — and the batch is the only route a destroy takes.
+- **A release forgets the Clip's failure**, in `sound`'s report-once table and in
+  the Library's both, which is the whole of *only a release clears it*: a path
+  that failed, was fixed and was named again can be read, and can speak.
 - **A pending Voice is cut the same way**, and ends with `ReasonReleased` rather
   than `ReasonFailed`. Nothing failed; the game changed its mind.
 - **A streamed Voice's read-ahead stops with it.**
@@ -1402,7 +1429,6 @@ type Backend interface {
 	Prepare(token any, encoded assets.Blob) (prepared PreparedClip, done bool, err error)
 	TakePrepared() []Prepared
 	Install(PreparedClip) (ClipID, error)
-	Destroy(ClipID)
 }
 
 type PreparedClip interface {
@@ -1442,8 +1468,19 @@ those four because `VoiceEndedEvent` fires for *every* ending: if it were a bare
 end a Voice, and a game tested under `nosound` would behave differently from the
 same game under `otosound`.
 
+**There is no `Backend.Destroy`.** A Clip is released through `Batch.Destroys`
+and nowhere else, because only the batch carries an order: a destroy inside it
+is guaranteed to arrive after the stops that precede it, and an Adapter frees
+the Clip once its Mixer has passed that batch — which is what makes *the Mixer
+never frees* true. A bare call outside the batch has no such ordering, and two
+ways to say one release are what a later reader tries to unify and gets wrong.
+Settled in [#484](https://github.com/dvoyni/cog/issues/484); `otosound` made
+both routes converge on one idempotent mark, so the one with the argument behind
+it is the one that stayed.
+
 **`Install` mints the id rather than `Prepare`** so that the handle comes into
-existence on `sound`'s tick, where `Destroy` is guaranteed to pair with it. That
+existence on `sound`'s tick, where the destroy that pairs with it is guaranteed
+to be statable. That
 is the same reason for the garbage-collectability rule, and the failing sequence
 is:
 
@@ -1741,7 +1778,7 @@ Nothing below exists. This is the build.
    `VoiceParams`, `VoiceSlot`, `ClipID`, `PreparedClip`, `Prepared`),
    `resources.go` (`Queue`, `Clips`, `Voices`, `Device`), `ports.go` (`Backend`,
    `BackendPort`), `events.go` (`VoiceEndedEvent`, `Reason`), `err.go`,
-   `utils.go` (`ClipInfo`, the `ClipWith*` constructors, `ClipRef.Equal`).
+   `utils.go` (`ClipInfoOf`, the `ClipWith*` constructors, `ClipRef.Equal`).
 2. `internal/` — the queue and its flush, the Voice table and stealing, the
    clip table in front of `assets.Cache`, the W3C equations transcribed from the
    W3C document, the endings ring, the MCP provider.

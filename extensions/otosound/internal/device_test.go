@@ -109,8 +109,7 @@ func TestAReleaseAfterALostDeviceIsFreedAtOnce(t *testing.T) {
 	}}})
 	render(t, b.mixer, 1)
 
-	b.Destroy(id)
-	b.Emit(&sound.Batch{Stops: []sound.VoiceSlot{0}})
+	b.Emit(&sound.Batch{Stops: []sound.VoiceSlot{0}, Destroys: []sound.ClipID{id}})
 	if len(b.pending) != 1 {
 		t.Fatalf("%d releases are held while the Mixer is pulling, want the one it has not passed", len(b.pending))
 	}
@@ -146,8 +145,7 @@ func TestAReleaseIsHeldAgainstTheCounterOnceADeviceComesBack(t *testing.T) {
 	}}})
 	render(t, b.mixer, 1)
 
-	b.Destroy(id)
-	b.Emit(&sound.Batch{Stops: []sound.VoiceSlot{0}})
+	b.Emit(&sound.Batch{Stops: []sound.VoiceSlot{0}, Destroys: []sound.ClipID{id}})
 	b.Emit(&sound.Batch{})
 	if len(b.pending) != 1 {
 		t.Fatalf("%d releases are held after a recovery, want the one the Mixer has not passed", len(b.pending))

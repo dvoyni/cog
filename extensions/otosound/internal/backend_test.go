@@ -187,8 +187,7 @@ func TestAReleasedClipIsHeldUntilTheMixerHasPassedTheBatchThatDestroyedIt(t *tes
 		t.Fatal("the Mixer is not reading the Clip that was installed")
 	}
 
-	b.Destroy(id)
-	b.Emit(&sound.Batch{Stops: []sound.VoiceSlot{0}})
+	b.Emit(&sound.Batch{Stops: []sound.VoiceSlot{0}, Destroys: []sound.ClipID{id}})
 	if len(b.pending) != 1 {
 		t.Fatalf("%d releases are held, want the one the Mixer has not passed", len(b.pending))
 	}
@@ -218,8 +217,7 @@ func TestAReleasedClipIsFreedAtOnceWhileNoMixerHasEverPulled(t *testing.T) {
 		t.Fatalf("installing a prepared Clip: %v", err)
 	}
 
-	b.Destroy(id)
-	b.Emit(&sound.Batch{})
+	b.Emit(&sound.Batch{Destroys: []sound.ClipID{id}})
 	b.Emit(&sound.Batch{})
 
 	if len(b.pending) != 0 {

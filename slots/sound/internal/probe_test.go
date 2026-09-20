@@ -46,6 +46,10 @@ type probeCmd kernel.Command[probeRequest, probeResponse]
 type probeRequest struct {
 	Voice sound.Voice
 	Bus   sound.Bus
+	// Clip is what ClipInfoOf is asked about. It is on the probe rather than a
+	// command of its own because a question asked of a resource is exactly what
+	// a game's own System asks, holding a read lock beside the others.
+	Clip sound.ClipRef
 }
 type probeResponse struct {
 	Live      int
@@ -60,6 +64,9 @@ type probeResponse struct {
 	// operations.
 	ListenerAt     m.Vec3
 	ListenerFacing m.Quat
+	// ClipInfo and ClipState are what ClipInfoOf answered about request.Clip.
+	ClipInfo  sound.ClipInfo
+	ClipState sound.State
 }
 
 func probeCmdImpl() (kernel.Lock, kernel.Execute[probeRequest, probeResponse]) {
@@ -67,11 +74,13 @@ func probeCmdImpl() (kernel.Lock, kernel.Execute[probeRequest, probeResponse]) {
 	var buses kernel.Read[*sound.Buses]
 	var listener kernel.Read[*sound.Listener]
 	var device kernel.Read[*sound.Device]
+	var clips kernel.Read[*sound.Clips]
 	return func(access kernel.ResourceAccess) {
 			voices = access.GetRead[*sound.Voices]()
 			buses = access.GetRead[*sound.Buses]()
 			listener = access.GetRead[*sound.Listener]()
 			device = access.GetRead[*sound.Device]()
+			clips = access.GetRead[*sound.Clips]()
 		}, func(_ kernel.Kernel, request probeRequest) probeResponse {
 			live := voices.Get()
 			heardFrom := listener.Get()
@@ -82,6 +91,7 @@ func probeCmdImpl() (kernel.Lock, kernel.Execute[probeRequest, probeResponse]) {
 				ListenerAt:     heardFrom.Position(),
 				ListenerFacing: heardFrom.Orientation(),
 			}
+			response.ClipInfo, response.ClipState = sound.ClipInfoOf(clips, request.Clip)
 			response.Info, response.Found = live.Info(request.Voice)
 			for info := range live.All() {
 				response.All = append(response.All, info)
@@ -222,6 +232,15 @@ func (h *harness) pause(paused bool) {
 func (h *harness) probe(voice sound.Voice) probeResponse {
 	h.t.Helper()
 	return h.kernel.ExecuteCommand[probeCmd](probeRequest{Voice: voice})
+}
+
+// askClip reads what sound knows about a Clip, under the read lock a game's own
+// System would hold. It starts nothing, which is half of what it is here to
+// prove.
+func (h *harness) askClip(clip sound.ClipRef) (sound.ClipInfo, sound.State) {
+	h.t.Helper()
+	response := h.kernel.ExecuteCommand[probeCmd](probeRequest{Clip: clip})
+	return response.ClipInfo, response.ClipState
 }
 
 // waitEnded takes the next ending, or fails. VoiceEndedEvent is published from

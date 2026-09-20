@@ -27,6 +27,15 @@ const (
 	// thing for a parameter and are not for a cursor move: a Seek recorded
 	// before a Stop and a Seek recorded after one are different ticks.
 	OpSeek
+	// OpPreload reads and prepares a Clip nothing is playing yet.
+	OpPreload
+	// OpRelease drops a Clip, stopping the Voices on it. It is ordered rather
+	// than coalesced for the reason OpStopBus is: it interacts with the plays
+	// around it, and a Play recorded after a Release of the same Clip reloads
+	// it while one recorded before it is cut.
+	OpRelease
+	// OpReleaseAll drops every Clip and cuts every Voice.
+	OpReleaseAll
 )
 
 // Operation is one recorded operation, kept in the order it was recorded. An
@@ -336,6 +345,64 @@ func (q *Queue) Seek(voice Voice, offset float32) {
 		return
 	}
 	q.ops = append(q.ops, Operation{Kind: OpSeek, Voice: voice, Offset: offset})
+}
+
+// Preload records a Clip to be read and prepared without playing it, so that
+// the frame which eats the read is a loading screen rather than the first shot
+// fired. The read happens inside sound's flush, on the tick this was recorded.
+//
+// It promises that the Clip is resident and will not fail. It does not promise
+// that the next Play is free, and it cannot: a Clip short enough to be decoded
+// whole is free to play afterwards, while a longer one is streamed, so its
+// first Play still opens a decoder of its own and is silent until that Voice's
+// read-ahead primes. Which tier a Clip landed in is the Adapter's own business
+// and a game cannot tell, so the guarantee that is always true is the weaker
+// one - a guarantee the caller cannot verify and the engine cannot keep would
+// be worse.
+//
+// It is idempotent in the sense that matters: preloading a Clip already loaded,
+// already loading, or already playing changes nothing.
+func (q *Queue) Preload(clip ClipRef) {
+	q.ops = append(q.ops, Operation{Kind: OpPreload, Clip: clip})
+}
+
+// Release records the end of a Clip: its bytes are dropped and its samples are
+// queued for destruction, and every Voice playing it is stopped, ending with
+// ReasonReleased.
+//
+// Stopping is the side effect and not the verb. The deferral that would have
+// waited for those Voices to end on their own is retired: under it a looping
+// ambience's Voice never ends, so the release is never forwarded, the memory
+// never comes back and nothing is reported. Releasing something still bound is
+// the caller's mistake, which is the rule gfx, scene and canvas already live
+// by, and a release that quietly does not release is worse than one that stops
+// a sound.
+//
+// After the flush that applies it, no Voice is playing that Clip, on any
+// Adapter. That is a guarantee and not a reported property: stopping a Voice
+// needs no cooperation from a buffer's lifetime on either side of the seam.
+//
+// A streamed Clip is safe to release while it is playing, and it is safe for a
+// reason worth stating rather than implying: the Voices go first, which halts
+// their read-aheads, and the encoded bytes belong to the Library, so nothing
+// the destroy frees is anything a decoder still holds.
+//
+// Releasing a Clip nothing has named does nothing. Naming it again afterwards
+// reloads it, which is also the only thing that clears a Clip that failed.
+func (q *Queue) Release(clip ClipRef) {
+	q.ops = append(q.ops, Operation{Kind: OpRelease, Clip: clip})
+}
+
+// ReleaseAll records the end of every Clip, cutting every Voice, which is what
+// a teardown call means. A game that wants one track to bridge a transition
+// releases per Clip and keeps the bridging one, or lets this cut it and starts
+// the bridge afterwards - asking again reloads.
+//
+// Every one of these three is optional. A game that never calls any of them
+// never meets any of this, which is what makes the cheap, honest answer good
+// enough.
+func (q *Queue) ReleaseAll() {
+	q.ops = append(q.ops, Operation{Kind: OpReleaseAll})
 }
 
 // SetListener records where the game is heard from. An absent field is
