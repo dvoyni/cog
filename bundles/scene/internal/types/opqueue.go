@@ -292,7 +292,7 @@ func (r DrawRecord) World() m.Mat4 {
 	if r.Stretch == (m.Vec3{}) {
 		return r.Transform.Mat4()
 	}
-	return m.TRS4(r.Transform.Position, r.Transform.rotation(), r.Stretch.Mul(r.Transform.scale()))
+	return r.Transform.ScaledMat4(r.Stretch)
 }
 
 // PbrRecord builds the bundled PBR record one recorded draw binds.

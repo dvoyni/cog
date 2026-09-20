@@ -214,6 +214,25 @@ func (matrix Mat4) TransformDirection(direction Vec3) Vec3 {
 	}
 }
 
+// Forward, Right and Up are the matrix's basis axes, normalized: the
+// directions a thing standing at this matrix faces along. They are the
+// world's axes, right-handed facing -Z with +Y up, so Forward is the negated
+// third column rather than the third.
+//
+// They are normalized because a scaled matrix's columns are not unit
+// vectors, and every caller of a direction wants a direction.
+func (matrix Mat4) Forward() Vec3 {
+	return Vec3{-matrix[8], -matrix[9], -matrix[10]}.Normalize()
+}
+
+func (matrix Mat4) Right() Vec3 {
+	return Vec3{matrix[0], matrix[1], matrix[2]}.Normalize()
+}
+
+func (matrix Mat4) Up() Vec3 {
+	return Vec3{matrix[4], matrix[5], matrix[6]}.Normalize()
+}
+
 // TransformRay is Ray.Transform with the receiver on the other side, for call
 // sites that read as a chain of matrices.
 func (matrix Mat4) TransformRay(ray Ray) Ray { return ray.Transform(matrix) }
