@@ -1063,6 +1063,23 @@ Headphones come out; the default device changes. This is common, not a fault.
 - **On recovery, Voices resume where the world is *now***, not where it was when
   the Device went away.
 
+**How "where the world is *now*" is said:** the Slot notices `Ready` going true
+on the tick it polls it, and restates every live Voice as a `VoiceStart` at the
+playhead it is at now. A start is the only operation that carries a position, so
+a restart *is* the resync, and it carries that tick's `Params` with it, so no
+update is owed beside it. The cost is bounded by `MaxVoices` — the same bound a
+Bus volume change already pays — and it is paid once per arrival, never per tick.
+
+**This is the Slot's job, not the Adapter's.** An Adapter has no playheads at
+all: `sound` computes them, which is what makes a test's timeline world time
+rather than the Device's. An Adapter left to resync itself could only resume its
+own mixer table where that table stopped, which is where the world *was*.
+
+**It covers all three states and not just loss.** A Device that was never ready
+becoming ready is the same transition and gets the same restart, which is what a
+web game's first click is: every Voice played before it is re-pinned to the
+world, and the ones whose Clips ran out in the meantime have already ended.
+
 This **narrows** what [#300](https://github.com/dvoyni/cog/issues/300) handed
 down: the Device is still the only thing audio reports as a failure, but *losing*
 one is not. Only a machine where a Device never opened at all is.
@@ -1077,6 +1094,12 @@ recovery that restarts many streamed Voices at once pays that many times.
 > close-and-reopen rather than a retry loop that never fires. The shape above
 > does not change either way; what would settle it is a measurement on a machine
 > whose default device is switched mid-run.
+>
+> Recorded in the implementation on `watch` in
+> `extensions/otosound/internal/backend-device.go`, with the exact run that
+> would settle it. **Still outstanding after
+> [#485](https://github.com/dvoyni/cog/issues/485)**, which built the mechanism
+> around it and could not measure it.
 
 ### `sound.Device`
 

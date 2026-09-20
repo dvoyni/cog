@@ -134,12 +134,47 @@ land on the device thread. It is therefore done by the same read-ahead goroutine
 that fill the rings, with the Mixer playing silence for the slots whose rings are
 not yet primed.
 
+**A lost Device frees releases at once again.** A released Clip is held until
+the Mixer's applied counter passes the batch that destroyed it, and a lost
+Device stops that counter for as long as the loss lasts. The device goroutine
+therefore **detaches the ring** when it gives the player up — the same state a
+ring that has never been pulled from is in, meaning the same thing, that nothing
+is mid-copy out of anything — and the tick goes back to freeing immediately.
+Without it every release after a loss is held: a leak rather than a crash,
+bounded by what the game releases, and unbounded in time.
+
+**The order is contract.** `Ready` goes false, then the player is stopped, then
+the ring is detached. Stopping the player is `oto`'s `PauseAndStopReading` and
+not `Pause`: `Pause` keeps reading the source so that playback can resume
+without a gap, and a source still being read is a device thread that still
+exists. `PauseAndStopReading` blocks until an ongoing read finishes and starts
+no other, which is the barrier the detach needs.
+
+**Recovery is a restart per live Voice, and `sound` emits it.** The Slot
+restates every live Voice as a `VoiceStart` at its current playhead on the tick
+it sees `Ready` go true, because a start is the only operation carrying a
+position. For a resident Voice that is an index; for a streamed one it is the
+decoder open and seek priced above, and [#482](https://github.com/dvoyni/cog/issues/482)
+owns keeping that off the device thread.
+
+**Loss is not reported however it presents itself.** Once a Device has been
+ready in this Engine, nothing the device goroutine hits is reportable again —
+not a poll that errors, and not the reattach after it refusing to take a player.
+Both are the same Device being gone, and a game that has already heard something
+must never be told the machine has no sound card.
+
 > **Gap:** `oto` v3's behaviour on a device change was **not measured** in the
 > spike. *The old device keeps being written to, and nothing errors* is a real
 > possibility, in which case the retry loop never fires and `otosound` needs an
 > explicit close-and-reopen instead. What would settle it: a run on a machine
 > whose default device is switched mid-play, watching whether the player's writes
 > begin to fail.
+>
+> Recorded in the implementation on `watch` in
+> `extensions/otosound/internal/backend-device.go`, with the exact run that
+> would settle it. **Still outstanding after
+> [#485](https://github.com/dvoyni/cog/issues/485)**, which built the mechanism
+> around it and could not measure it.
 
 ### Two Engines in one process
 

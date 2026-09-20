@@ -33,8 +33,8 @@ type fakeAudio struct {
 	buffer  time.Duration
 	ignored bool
 
-	opens, plays int
-	source       io.Reader
+	opens, plays, closes int
+	source               io.Reader
 }
 
 func (f *fakeAudio) open(rate int, buffer time.Duration) (facts, error) {
@@ -71,14 +71,46 @@ func (f *fakeAudio) err() error {
 	return f.lost
 }
 
+// close models oto's PauseAndStopReading rather than its Pause: it returns only
+// once nothing is reading the Mixer any more. Nothing in the fixture reads it
+// at all, so what the fixture owes is the count and the honest name.
 func (f *fakeAudio) close() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.source = nil
+	f.closes++
 }
 
 func (f *fakeAudio) openCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.opens
+}
+
+func (f *fakeAudio) playCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.plays
+}
+
+func (f *fakeAudio) closeCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.closes
+}
+
+// unplug is the headphones coming out: the poll starts erroring, and the
+// reattach that follows cannot take a player either, which is what a device
+// that is genuinely gone looks like from here.
+func (f *fakeAudio) unplug(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lost, f.playErr = err, err
+}
+
+// plugBackIn is the device returning.
+func (f *fakeAudio) plugBackIn() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lost, f.playErr = nil, nil
 }

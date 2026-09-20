@@ -92,8 +92,19 @@ type backend struct {
 	failure atomic.Pointer[deviceFailure]
 	ignored atomic.Pointer[otosound.ErrDeviceConfigIgnored]
 
+	// everReady is whether a Device has ever been audible in this Engine. It is
+	// what separates the one condition the Adapter reports - no Device could be
+	// opened at all - from the one it never reports, which is a Device that was
+	// open and went away.
+	everReady atomic.Bool
+
 	audio audio
-	done  chan struct{}
+	// cadence is how long the device goroutine waits between polling an open
+	// Device and between retrying a closed one. It is retryEvery, and it is a
+	// field only so the suite can run a loss and a recovery in milliseconds
+	// instead of seconds; no Config reaches it.
+	cadence time.Duration
+	done    chan struct{}
 	// wg tracks the device goroutine so Stop can wait for it, which is what
 	// keeps a test from leaking one per engine.
 	wg sync.WaitGroup
@@ -114,6 +125,7 @@ func newBackend(cfg otosound.Config, hardware audio) *backend {
 		rate:        rate,
 		clips:       make(map[sound.ClipID]*clipData),
 		audio:       hardware,
+		cadence:     retryEvery,
 		done:        make(chan struct{}),
 	}
 	b.device.Store(&sound.Device{Name: string(otosound.Name)})
@@ -275,6 +287,13 @@ func (b *backend) mark(id sound.ClipID) {
 // mid-copy out of anything, so a release is free immediately. That is what
 // keeps otosound behaving as nosound does under a Device that never opened,
 // rather than retaining every Clip a game ever released.
+//
+// A Device that was pulling and then was lost goes back to exactly that state:
+// the device goroutine detaches the ring once the player has stopped reading,
+// and the applied counter - which has stopped moving and will not move again
+// until a device returns - stops being what a release waits for. Without it,
+// every release after a loss is held for as long as the loss lasts, which is
+// unbounded in time.
 func (b *backend) reclaim() {
 	if len(b.pending) == 0 {
 		return
