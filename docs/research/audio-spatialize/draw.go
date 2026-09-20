@@ -155,7 +155,16 @@ func (p *Demo) drawReadout(q *canvas.OpQueue) {
 	clip := p.clips[p.clip]
 	pos := p.sourcePosition()
 
+	playing := "STOPPED  (space to play)"
+	if mx.Active(0) {
+		playing = "PLAYING"
+		if p.paused {
+			playing = "PAUSED"
+		}
+	}
+
 	lines := []string{
+		fmt.Sprintf("state      %s   peak out %.3f", playing, mx.Peak()),
 		fmt.Sprintf("scenario   %s", p.scenario),
 		fmt.Sprintf("clip       %s  %dch  src %d Hz  %.1fs", clip.Name, clip.Channels, clip.SourceRate, clip.Duration),
 		fmt.Sprintf("device     %s   latency %.1f ms   pending %d", p.device, p.device.Latency(), mx.Pending()),
@@ -180,8 +189,14 @@ func (p *Demo) drawReadout(q *canvas.OpQueue) {
 	y := float32(16)
 	for _, line := range lines {
 		col := colText
-		if len(line) > 10 && line[:10] == "A/B       " {
+		switch {
+		case len(line) > 10 && line[:10] == "A/B       ":
 			col = colSource
+		case len(line) > 10 && line[:10] == "state     ":
+			col = colListener
+			if !mx.Active(0) {
+				col = colWarn
+			}
 		}
 		text(q, m.Vec2{X: 14, Y: y}, 14, col, line)
 		y += 18

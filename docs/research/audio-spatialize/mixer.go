@@ -146,6 +146,10 @@ type Mixer struct {
 	maxBlock atomic.Uint64
 	peak     atomic.Uint64 // float32 bits of the loudest output sample seen
 	clipped  atomic.Uint64
+	// active is a bitmask of the slots that were still sounding at the end of
+	// the last block, so the tick can say whether anything is playing without
+	// reaching into the device thread's voice table.
+	active atomic.Uint32
 }
 
 func NewMixer(rate, channels int) *Mixer {
@@ -169,6 +173,10 @@ func (mx *Mixer) Clipped() uint64    { return mx.clipped.Load() }
 func (mx *Mixer) Peak() float32      { return math.Float32frombits(uint32(mx.peak.Load())) }
 func (mx *Mixer) ResetPeak()         { mx.peak.Store(0); mx.clipped.Store(0) }
 func (mx *Mixer) Pending() int       { return int(mx.write.Load() - mx.read.Load()) }
+
+// Active reports whether a slot was still sounding at the end of the last
+// block.
+func (mx *Mixer) Active(slot int) bool { return mx.active.Load()&(1<<uint(slot)) != 0 }
 
 // ---- the tick side of the seam -------------------------------------------
 
@@ -299,13 +307,18 @@ func (mx *Mixer) Read(buf []byte) (int, error) {
 	}
 
 	// End of block: the ramp has arrived, and a slot that was fading is done.
+	var active uint32
 	for v := range mx.voices {
 		vo := &mx.voices[v]
 		vo.cur = vo.tgt
 		if vo.fading {
 			vo.active, vo.fading, vo.clip = false, false, nil
 		}
+		if vo.active {
+			active |= 1 << uint(v)
+		}
 	}
+	mx.active.Store(active)
 
 	mx.reads.Add(1)
 	mx.frames.Add(uint64(frames))

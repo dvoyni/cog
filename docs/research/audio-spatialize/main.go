@@ -142,6 +142,10 @@ var clipChoices = []clipChoice{
 	{input.Key5, "pianoroll.ogg", "piano roll (STEREO, 176s)", true},
 }
 
+// defaultClip is the 5-cylinder engine: mono, broadband and continuous, which
+// is what judging a pan wants. Index into clipChoices.
+const defaultClip = 2
+
 // scenarioKeys selects a scenario. F1..F5 in the order Scenario declares them.
 var scenarioKeys = []input.Key{
 	input.KeyF1, input.KeyF2, input.KeyF3, input.KeyF4, input.KeyF5,
@@ -165,7 +169,7 @@ type Demo struct {
 	elapsed  float32
 	scenario Scenario
 	clip     int
-	playing  bool
+	started  bool
 	loop     bool
 
 	listener  Listener
@@ -202,7 +206,11 @@ func New(device *Device) (*Demo, error) {
 		volume:   0.8,
 		radius:   4,
 		speed:    0.35,
-		loop:     true,
+		// The 5-cylinder engine, not the bell: judging a pan needs something
+		// continuous, and a 6.5 s one-shot gives you one hit and then silence.
+		// Press 1 for the bell when transients are what you want to hear.
+		clip: defaultClip,
+		loop: true,
 	}
 	for _, c := range clipChoices {
 		clip, err := PrepareOgg(filepath.Join(dir, c.file), c.name, deviceRate)
@@ -211,7 +219,6 @@ func New(device *Device) (*Demo, error) {
 		}
 		d.clips = append(d.clips, clip)
 	}
-	d.loop = clipChoices[0].loop
 	return d, nil
 }
 
@@ -253,6 +260,14 @@ func (p *Demo) tick() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			state := inputState.Get()
 			if state != nil && state.JustPressed(input.KeyEscape) {
 				quit(k, app.QuitRequest{})
+			}
+			// Start on the first tick rather than in New. Nothing can be
+			// recorded before the engine is running, and a prototype that opens
+			// silent and waits to be told to make a sound is a prototype whose
+			// first question is "is it broken?".
+			if !p.started {
+				p.restart()
+				p.started = true
 			}
 			p.readInput(state)
 			if !p.paused {
@@ -364,7 +379,6 @@ func (p *Demo) readInput(state *input.State) {
 		p.restart()
 	case state.JustPressed(input.KeyS):
 		p.device.Mixer.Stop(0)
-		p.playing = false
 	case state.JustPressed(input.KeyL):
 		p.loop = !p.loop
 		p.restart()
@@ -451,7 +465,6 @@ func (p *Demo) readInput(state *input.State) {
 
 func (p *Demo) restart() {
 	p.device.Mixer.Start(0, p.clips[p.clip], p.loop, 0)
-	p.playing = true
 }
 
 func min32(a, b float32) float32 {
