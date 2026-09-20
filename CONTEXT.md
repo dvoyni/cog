@@ -463,6 +463,10 @@ _Avoid_: Sound, sample, audio file. Also Buffer, which is a GPU object.
 A Clip turned into something a Voice can be started from. What that is depends on the Clip: a short one becomes samples every Voice playing it shares, a long one stays as its bytes and a way to read them while it plays. Which, is the backend's own business — a game never sees a Prepared Clip and cannot tell which kind it got.
 _Avoid_: Decoded clip, PCM, stream. Also Buffer, which is a GPU object.
 
+**Loop Region**:
+The span of a Clip a looping Voice repeats between. The Clip declares it and the game never states one, so a Voice told to loop repeats the way its Clip says to; a Clip that declares none repeats whole. It is why an intro can run into a loop at all, and it is the reason a loop has no gap where a track chained on an ending does.
+_Avoid_: Loop point, marker, cue. Also Seek, which is a game moving a Voice rather than a Clip describing itself.
+
 **Voice**:
 One playing instance of a Clip, begun by a play and addressed afterwards by what that play handed back. Any number may play one Clip at once, and a Voice that has ended is addressed by nothing.
 _Avoid_: Sound, source, channel, instance
