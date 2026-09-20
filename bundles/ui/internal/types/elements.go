@@ -476,7 +476,7 @@ func (colorVisual) Draw(_ canvas.LookupAccess, queue *canvas.OpQueue, state Stat
 }
 
 func (textVisual) DefaultSize(lookup canvas.LookupAccess, params TextParams) m.Vec2 {
-	if params.Font.Path == "" || params.Font.Size <= 0 {
+	if params.Font.Size <= 0 {
 		return m.Vec2{}
 	}
 	size := lookup.MeasureTextSize(params.Font.Path, params.Font.Size, params.Text)
@@ -487,7 +487,7 @@ func (textVisual) DefaultSize(lookup canvas.LookupAccess, params TextParams) m.V
 }
 
 func (textVisual) Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, state State, params TextParams) {
-	if queue == nil || params.Font.Path == "" || params.Font.Size <= 0 {
+	if queue == nil || params.Font.Size <= 0 {
 		return
 	}
 	bounds := state.Rect

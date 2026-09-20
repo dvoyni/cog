@@ -13,6 +13,7 @@ import (
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/storage"
+	"golang.org/x/image/font/gofont/goregular"
 )
 
 // testAssets returns an in-memory filesystem with a sprite of the given size.
@@ -20,6 +21,14 @@ func testAssets(t testing.TB, spriteWidth, spriteHeight int) fstest.MapFS {
 	t.Helper()
 	return fstest.MapFS{
 		"sprite.png": &fstest.MapFile{Data: testPNG(t, spriteWidth, spriteHeight)},
+	}
+}
+
+// testFontAssets returns an in-memory filesystem carrying a face at the path an
+// empty Font.Path resolves to, so a text test can measure and draw.
+func testFontAssets() fstest.MapFS {
+	return fstest.MapFS{
+		canvas.DefaultFontPath: &fstest.MapFile{Data: goregular.TTF},
 	}
 }
 
@@ -254,15 +263,58 @@ func TestInteractiveSpriteResolvesPathAndTintIndependently(t *testing.T) {
 	}
 }
 
-func TestTextWithoutFontDrawsNothing(t *testing.T) {
-	visual, payload := Text(TextParams{Text: "Label"})
-	if got := visual.DefaultSize(canvas.LookupAccess{}, payload); got != (m.Vec2{}) {
-		t.Fatalf("DefaultSize = %+v, want zero without a font", got)
+// TestTextWithoutAFontPathDrawsWithTheBuiltInFont is the rule Font documents:
+// an empty Path is a request for the font canvas embeds, so a Font naming only
+// a Size renders rather than disappearing.
+//
+// The lookup here mounts a face at canvas.DefaultFontPath rather than the real
+// embedded one, which canvas alone can reach. That is the whole of ui's part:
+// ui has to hand the empty path down untouched and let the lookup resolve it.
+// That the path resolves to a font actually mounted is canvas's own test.
+func TestTextWithoutAFontPathDrawsWithTheBuiltInFont(t *testing.T) {
+	lookup := testLookup(testFontAssets())
+	visual, payload := Text(TextParams{Text: "Label", Font: Font{Size: 16}})
+
+	got := visual.DefaultSize(lookup, payload)
+	want := lookup.MeasureTextSize(canvas.DefaultFontPath, 16, "Label")
+	if got != want {
+		t.Fatalf("DefaultSize = %+v with no font path, %+v naming the default; want the same size", got, want)
 	}
+	if got == (m.Vec2{}) {
+		t.Fatalf("DefaultSize = %+v, want a real size", got)
+	}
+
 	queue := &canvas.OpQueue{}
-	visual.Draw(canvas.LookupAccess{}, queue, State{Rect: Rect{Width: 80, Height: 20}}, payload)
-	if queue.OpCount() != 0 {
-		t.Fatalf("text op count = %d, want 0 without a font", queue.OpCount())
+	visual.Draw(lookup, queue, State{Rect: Rect{Width: 80, Height: 20}}, payload)
+	ops := queue.Ops(nil)
+	if len(ops) != 1 {
+		t.Fatalf("recorded %d ops, want 1 text op", len(ops))
+	}
+	if ops[0].FontPath != canvas.DefaultFontPath {
+		t.Fatalf("recorded font path %q, want %q", ops[0].FontPath, canvas.DefaultFontPath)
+	}
+}
+
+// TestTextWithoutASizeDrawsNothing is the other half of the same doc comment,
+// and the half that stays: Size has no default, so a label with no size is
+// still nothing. The lookup is a real one with the face mounted, so this can
+// only pass because of the size.
+func TestTextWithoutASizeDrawsNothing(t *testing.T) {
+	lookup := testLookup(testFontAssets())
+	for name, font := range map[string]Font{
+		"no size":        {Path: canvas.DefaultFontPath},
+		"negative size":  {Path: canvas.DefaultFontPath, Size: -1},
+		"nothing at all": {},
+	} {
+		visual, payload := Text(TextParams{Text: "Label", Font: font})
+		if got := visual.DefaultSize(lookup, payload); got != (m.Vec2{}) {
+			t.Errorf("%s: DefaultSize = %+v, want zero", name, got)
+		}
+		queue := &canvas.OpQueue{}
+		visual.Draw(lookup, queue, State{Rect: Rect{Width: 80, Height: 20}}, payload)
+		if queue.OpCount() != 0 {
+			t.Errorf("%s: op count = %d, want 0", name, queue.OpCount())
+		}
 	}
 }
 
