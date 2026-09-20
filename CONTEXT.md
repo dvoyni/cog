@@ -451,17 +451,33 @@ _Avoid_: Glow, outline, shadow
 
 ## Audio
 
+**Device**:
+What makes sound audible: a sound card, or the browser’s audio context. There is one per Engine, and a game neither opens nor chooses it — it only reads whether there is one. A Device may be absent, not ready yet, or lost, and a game sees one thing in all three. Voices play on regardless: a Voice’s playhead advances whether or not anyone can hear it.
+_Avoid_: Output, speaker, sink. Also backend, which is the Adapter beneath the Slot rather than the thing it found.
+
 **Clip**:
-A sound a Voice plays, loaded from a path or from a Blob of encoded bytes and kept until it is released. What named it is what finds it again, so two plays of one path, or of one Blob, play the same Clip — and two Blobs with equal bytes are still two Clips. Releasing is optional: a game that drives sound through Components names Clips and never releases one, and a Voice already playing keeps its Clip whatever is released.
+A sound a Voice plays, loaded from a path or from a Blob of encoded bytes and kept until it is released. What named it is what finds it again, so two plays of one path, or of one Blob, play the same Clip — and two Blobs with equal bytes are still two Clips. Releasing is optional: a game that drives sound through Components names Clips and never releases one. Releasing a Clip stops every Voice playing it, which is why a game that wants a sound to finish simply does not release its Clip.
 _Avoid_: Sound, sample, audio file. Also Buffer, which is a GPU object.
+
+**Prepared Clip**:
+A Clip turned into something a Voice can be started from. What that is depends on the Clip: a short one becomes samples every Voice playing it shares, a long one stays as its bytes and a way to read them while it plays. Which, is the backend's own business — a game never sees a Prepared Clip and cannot tell which kind it got.
+_Avoid_: Decoded clip, PCM, stream. Also Buffer, which is a GPU object.
 
 **Voice**:
 One playing instance of a Clip, begun by a play and addressed afterwards by what that play handed back. Any number may play one Clip at once, and a Voice that has ended is addressed by nothing.
 _Avoid_: Sound, source, channel, instance
 
+**Stealing**:
+What ends a Voice to make room when every slot is taken. The Voice that loses is the least audible one — its own volume through its Bus, its Falloff and its Cone — unless a Priority puts it out of reach, and the play that arrives is as stealable as anything already playing. A game hears about it through the same ending that tells it about a Stop.
+_Avoid_: Voice limit, culling, eviction. Also ducking, which is a game lowering a Bus on purpose.
+
 **Bus**:
 A group of Voices the game declares, sharing one volume. Every Bus sits directly under Master, Buses do not nest, and a Voice that names none plays on Master.
 _Avoid_: Channel, group, mixer track, category
+
+**Mixer**:
+What turns Voices into the samples a Device consumes. It runs outside the Engine, on the Device’s own clock rather than the tick, and nothing that takes a lock reaches it — which is why a game never addresses one and why everything it is told arrives as a whole tick at once.
+_Avoid_: Audio thread, callback, engine. Also Bus, which is a grouping a game declares rather than the thing that does the mixing.
 
 **Listener**:
 The place and facing a Positional Voice is heard from. There is one per Engine, and the game puts it where it wants: audio never looks at a Camera, so a Listener follows one only because something copies it across.
