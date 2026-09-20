@@ -179,6 +179,8 @@ func (p *Demo) drawReadout(q *canvas.OpQueue) {
 			p.falloff.Model, p.falloff.RefDistance, p.falloff.RolloffFactor, p.falloff.MaxDistance),
 		fmt.Sprintf("cone       %s   facing %+.0f deg", conePresets[p.conePre].name, p.orient*180/math.Pi),
 		fmt.Sprintf("rate       %.3f   volume %.2f   radius %.2f   speed %.2f", p.rate, p.volume, p.radius, p.speed),
+		fmt.Sprintf("master bus %.2f (%+.1f dB)   <- NOT the distance model; 9/0 to move it",
+			p.master, 20*math.Log10(float64(max32(p.master, 1e-6)))),
 		"",
 		fmt.Sprintf("A/B        spatialize %s   declick %s   interp %s   downmix %s",
 			onOff(!p.bypass), onOff(mx.Declick()), mx.Interp(), onOff(p.downmix)),
@@ -217,6 +219,7 @@ func (p *Demo) drawKeys(q *canvas.OpQueue) {
 		"F1-F5 scenario   1-5 clip   space (re)play   S stop   L loop   P pause   R reset   Esc quit",
 		"B bypass spatialization   K declick   I interpolator   M downmix stereo   D distance model   C cone",
 		"[ ] refDistance   - = rolloff   , . rate (pitch)   Q E cone facing   Z X path speed   up/down radius   G H listener back-off",
+		"9 0 master bus volume",
 		"shift = fine",
 	}
 	y := float32(632)

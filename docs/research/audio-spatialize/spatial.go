@@ -91,6 +91,15 @@ type Emitter struct {
 	Falloff     Falloff
 	Cone        Cone
 	Volume      float32 // the game's own per-voice gain, before any of this
+	// BusVolume is the voice's bus, which #296 predeclares as Master = 0.
+	// #376 keeps buses off the seam entirely: sound folds the bus's volume into
+	// the matrix, at the cost of re-emitting a bus's voices when it changes. So
+	// it is one more scalar here and nothing at all below.
+	//
+	// Zero reads as unity, which is canvas's habit with a zero scale and ui's
+	// with a zero tint: without it, every caller that does not care about buses
+	// would silently get silence.
+	BusVolume float32
 }
 
 // Spatialized is what one tick of the arithmetic produces for one voice: the
@@ -120,7 +129,11 @@ type Spatialized struct {
 
 // Spatialize is the whole of sound's arithmetic for one voice.
 func Spatialize(e Emitter, l Listener, channels int) Spatialized {
-	volume := e.Volume
+	bus := e.BusVolume
+	if bus == 0 {
+		bus = 1
+	}
+	volume := e.Volume * bus
 	if !e.Positional {
 		// A non-positional voice is centred and unattenuated. It still gets a
 		// matrix, because the seam has no other shape.

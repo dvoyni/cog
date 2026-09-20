@@ -179,6 +179,7 @@ type Demo struct {
 	orient    float32 // cone facing, radians in the horizontal plane
 	rate      float32
 	volume    float32
+	master    float32 // the Master bus, #296's predeclared Bus 0
 	radius    float32
 	speed     float32
 	paused    bool
@@ -204,8 +205,15 @@ func New(device *Device) (*Demo, error) {
 		falloff:  DefaultFalloff(),
 		rate:     1,
 		volume:   0.8,
-		radius:   4,
-		speed:    0.35,
+		// +12 dB on the Master bus. W3C's own defaults put a source at the
+		// default orbit radius of 4 at 1/(1+3) = 0.25, so 0.2 after volume -
+		// about -14 dB before the pan has done anything, which is too quiet to
+		// judge a pan by. This is a real bus rather than a fudge: #296
+		// predeclares Master = 0 and #376 folds a bus's volume into the matrix.
+		// Drop it to 1.00 with 9 to hear what W3C's defaults actually give you.
+		master: 4,
+		radius: 4,
+		speed:  0.35,
 		// The 5-cylinder engine, not the bell: judging a pan needs something
 		// continuous, and a 6.5 s one-shot gives you one hit and then silence.
 		// Press 1 for the bell when transients are what you want to hear.
@@ -331,6 +339,7 @@ func (p *Demo) record() {
 		Falloff:    p.falloff,
 		Cone:       conePresets[p.conePre].cone,
 		Volume:     p.volume,
+		BusVolume:  p.master,
 	}
 	if conePresets[p.conePre].cone.InnerAngle != 360 {
 		e.Orientation = m.Vec3{
@@ -402,7 +411,7 @@ func (p *Demo) readInput(state *input.State) {
 		p.conePre = (p.conePre + 1) % len(conePresets)
 	case state.JustPressed(input.KeyR):
 		p.falloff = DefaultFalloff()
-		p.rate, p.volume, p.conePre = 1, 0.8, 0
+		p.rate, p.volume, p.master, p.conePre = 1, 0.8, 4, 0
 		mx.ResetPeak()
 	}
 
@@ -433,6 +442,12 @@ func (p *Demo) readInput(state *input.State) {
 	}
 	if state.Pressed(input.KeyE) {
 		p.orient += 0.02
+	}
+	if state.Pressed(input.Key9) {
+		p.master = max32(0.25, p.master-0.03*step)
+	}
+	if state.Pressed(input.Key0) {
+		p.master = min32(16, p.master+0.03*step)
 	}
 	if state.Pressed(input.KeyZ) {
 		p.speed = max32(0, p.speed-0.004)
