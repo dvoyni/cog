@@ -20,6 +20,11 @@ type Bus = types.Bus
 // working audio and a working master slider.
 const Master Bus = types.Master
 
+// MaxBuses is how many Buses exist, Master among them. It is a fixed maximum
+// rather than a configured one, and a Bus outside it is Master rather than an
+// error, so a mis-declared constant does not silence a game.
+const MaxBuses = types.MaxBuses
+
 // ClipRef names a Clip: a path read through storage, or encoded Ogg bytes the
 // caller already holds. Build one with ClipWithResource or ClipWithBytes and
 // compare two with Equal.

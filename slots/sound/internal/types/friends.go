@@ -40,6 +40,18 @@ func VoicesStop(v *Voices, voice Voice, endings *[]Ending) { v.stop(voice, endin
 // VoicesSet applies one recorded SetVoice for sound's internal/.
 func VoicesSet(v *Voices, voice Voice, params Params) { v.set(voice, params) }
 
+// VoicesStopBus applies one recorded StopBus for sound's internal/.
+func VoicesStopBus(v *Voices, bus Bus, endings *[]Ending) { v.stopBus(bus, endings) }
+
+// VoicesFoldBuses folds each Bus's volume into each Voice's gain, for sound's
+// internal/.
+func VoicesFoldBuses(v *Voices, buses *Buses) { v.foldBuses(buses) }
+
+// BusesApply installs the tick's coalesced Bus volumes for sound's internal/.
+// It is called where the ordered operations end, so that the tick's last word
+// on a Bus is the one every Voice on it is folded with.
+func BusesApply(b *Buses, q *Queue) { b.apply(q.busVolumeSets()) }
+
 // VoicesResolve binds the Voices whose Clips became resident and ends the ones
 // whose Clips failed, for sound's internal/.
 func VoicesResolve(v *Voices, clips *Clips, endings *[]Ending) { v.resolve(clips.lookup, endings) }

@@ -7,8 +7,8 @@ import (
 	"github.com/dvoyni/cog/slots/storage"
 )
 
-// plugin is sound: the queue, the clip table, the live Voice view, the Device,
-// and the flush that runs once a tick.
+// plugin is sound: the queue, the clip table, the live Voice view, the Bus
+// volumes, the Device, and the flush that runs once a tick.
 type plugin struct {
 	// backend is the bound Backend Adapter, valid from Start onwards.
 	backend kernel.RequiredAdapter[sound.Backend]
@@ -33,7 +33,7 @@ func (p *plugin) Dependencies() []kernel.PluginName {
 }
 
 // Register requires the Backend Adapter, resolves the configuration, registers
-// the four resources and the per-tick batch, and subscribes the flush.
+// the five resources and the per-tick batch, and subscribes the flush.
 func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	p.backend = registrar.RequireAdapter[sound.BackendPort]()
 
@@ -56,6 +56,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	registrar.InitResource(types.NewQueue(p.maxVoices))
 	registrar.InitResource(types.NewVoices(p.maxVoices))
 	registrar.InitResource(types.NewClips())
+	registrar.InitResource(types.NewBuses())
 	registrar.InitResource(&sound.Device{})
 	registrar.InitResource(&flushScratch{})
 	registrar.Subscribe[sound.FlushOnUpdate](p.flushOnUpdate).Last()

@@ -1,5 +1,7 @@
 package types
 
+import "github.com/dvoyni/cog/libs/m"
+
 // OpKind names what one recorded operation does.
 type OpKind uint8
 
@@ -11,6 +13,11 @@ const (
 	OpStop
 	// OpSetVoice restates a Voice's Params.
 	OpSetVoice
+	// OpStopBus ends every Voice on a Bus. It is recorded in order rather than
+	// coalesced away like a Bus volume, because unlike a volume it interacts
+	// with the plays around it: a Play recorded before it is stopped and one
+	// recorded after it is not.
+	OpStopBus
 )
 
 // Operation is one recorded operation, kept in the order it was recorded. An
@@ -20,6 +27,7 @@ const (
 type Operation struct {
 	Kind   OpKind
 	Voice  Voice
+	Bus    Bus
 	Clip   ClipRef
 	Offset float32
 	Params Params
@@ -79,15 +87,25 @@ func (m *minter) release(index uint32) {
 // flushed once per tick, atomically. It is a resource and not a channel: a
 // recorder holds the lock, appends, and is done.
 //
-// Nothing here coalesces. Params are stated as "coalesced within a tick, last
-// value wins", and applying them in the order they were recorded says exactly
-// that - the last SetVoice a tick recorded for a Voice is the last one applied
-// - while keeping Play and Stop in one list with them, which is what makes a
-// Play followed by a SetVoice indistinguishable from a Play that carried the
-// same Params.
+// A Voice's Params do not coalesce here. They are stated as "coalesced within
+// a tick, last value wins", and applying them in the order they were recorded
+// says exactly that - the last SetVoice a tick recorded for a Voice is the last
+// one applied - while keeping Play and Stop in one list with them, which is
+// what makes a Play followed by a SetVoice indistinguishable from a Play that
+// carried the same Params.
+//
+// A Bus volume does coalesce, and the difference is real rather than a
+// preference. A per-Voice param is a value nothing else in the list reads, so
+// the two readings agree; a Bus volume is read by every Voice on that Bus at
+// the end of the tick, so there is exactly one moment it can be read at and a
+// position in the list would mean nothing. What does interact with the list is
+// StopBus, which is why that one is an Operation and this one is a table.
 type Queue struct {
 	ops   []Operation
 	slots minter
+	// busVolumes is the tick's Bus volumes, last value winning, indexed by a
+	// resolved Bus. The flush hands it to Buses and clears it.
+	busVolumes [MaxBuses]m.Maybe[float32]
 }
 
 // NewQueue builds an empty queue over a table of maxVoices slots.
@@ -127,9 +145,35 @@ func (q *Queue) SetVoice(voice Voice, params Params) {
 	q.ops = append(q.ops, Operation{Kind: OpSetVoice, Voice: voice, Params: params})
 }
 
+// SetBus records a Bus's volume, linear, 1 being unity. It is coalesced within
+// the tick, last value winning, so a slider dragged through a hundred values in
+// one tick costs one and the Voices on that Bus are re-emitted once.
+//
+// An out-of-range Bus is Master, the same rule a Play naming one follows.
+func (q *Queue) SetBus(bus Bus, volume float32) {
+	q.busVolumes[bus.resolve()] = m.Some(volume)
+}
+
+// StopBus records the end of every Voice on a Bus. Master stops everything,
+// because every Bus is directly under it.
+//
+// The Voices it ends do so with ReasonStopped rather than a member of its own:
+// StopBus is Stop over a set, splitting it later is additive, and a reader
+// switching on ReasonStopped keeps working.
+func (q *Queue) StopBus(bus Bus) {
+	q.ops = append(q.ops, Operation{Kind: OpStopBus, Bus: bus.resolve()})
+}
+
 // operations is the tick's recorded operations, in order.
 func (q *Queue) operations() []Operation { return q.ops }
 
+// busVolumeSets is the tick's coalesced Bus volumes, by reference so the flush
+// reads them without copying 32 entries.
+func (q *Queue) busVolumeSets() *[MaxBuses]m.Maybe[float32] { return &q.busVolumes }
+
 // reset empties the recording for the next tick, keeping the capacity so a warm
 // engine allocates nothing to record a frame of sound.
-func (q *Queue) reset() { q.ops = q.ops[:0] }
+func (q *Queue) reset() {
+	q.ops = q.ops[:0]
+	q.busVolumes = [MaxBuses]m.Maybe[float32]{}
+}
