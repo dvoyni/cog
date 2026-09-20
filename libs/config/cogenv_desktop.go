@@ -1,6 +1,6 @@
 //go:build !js
 
-package overrides
+package config
 
 // readCogEnv finds nothing off the browser. COG_ENV exists because a page has
 // neither a command line nor an environment to put an override in; a desktop

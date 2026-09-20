@@ -1,4 +1,4 @@
-// Package overrides names a cog engine's configuration from outside the
+// Package config names a cog engine's configuration from outside the
 // binary, so a run can be re-pointed without editing the composition root and
 // rebuilding.
 //
@@ -9,11 +9,14 @@
 // A composition root gains one line, after every contributor has added its
 // entry and before the game parses its own flags:
 //
-//	config := map[kernel.PluginName]any{ /* ... */ }
-//	permanentfs.Configure(config)
-//	config = overrides.Inject(config)
+//	cfg := map[kernel.PluginName]any{ /* ... */ }
+//	permanentfs.Configure(cfg)
+//	cfg = config.Inject(cfg)
 //	flag.Parse()
-//	engine := kernel.New(config).WithPlugins(plugins...)
+//	engine := kernel.New(cfg).WithPlugins(plugins...)
+//
+// The map is named cfg rather than config at a call site, because this
+// package's own name is what it would otherwise shadow.
 //
 // The order matters twice. An override naming a plugin that is not in the map
 // is fatal, so every contributor must have run first; and Inject takes its own
@@ -77,7 +80,7 @@
 //
 // Apply is the same work without the exit, for a test harness or a capture
 // runner that sets values programmatically and must not die.
-package overrides
+package config
 
 import (
 	"fmt"

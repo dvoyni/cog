@@ -1,4 +1,4 @@
-package overrides
+package config
 
 import (
 	"fmt"

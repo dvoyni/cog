@@ -1,6 +1,6 @@
 //go:build js
 
-package overrides
+package config
 
 import "syscall/js"
 

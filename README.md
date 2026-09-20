@@ -66,7 +66,7 @@ error handling.
 - [`assets`](libs/assets/docs/README.md): one cache for loaded assets, keyed by a
     comparable descriptor — a static run of bytes, a descriptor, a stateless
     loader, and the four verbs a plugin caches an asset family with.
-- [`overrides`](libs/overrides): plugin configuration named from outside the
+- [`config`](libs/config): plugin configuration named from outside the
     binary — `--cog.<plugin>.<Field>=<value>`, `COG_<PLUGIN>_<FIELD>`, and a
     `COG_ENV` string in the browser's localStorage — applied by one call at the
     composition root.

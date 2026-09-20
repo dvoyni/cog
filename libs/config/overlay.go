@@ -1,4 +1,4 @@
-package overrides
+package config
 
 import "github.com/dvoyni/cog/kernel"
 
