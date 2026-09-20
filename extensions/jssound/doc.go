@@ -47,24 +47,32 @@
 // still cannot decode it, so no version test can be written. WebCodecs adds no
 // coverage either, because Safari's AudioDecoder reaches the same OS codec.
 //
-// The probe settles the resident tier alone. A streamed Clip is always decoded
-// by jfreymuth/oggvorbis, because decodeAudioData takes a whole file and gives
-// back a whole buffer and there is no browser API that decodes an Ogg Vorbis
-// stream incrementally that every engine has. WebCodecs AudioDecoder("vorbis")
-// is the one that would, on Chromium, and it is a later ticket: it needs the
-// Vorbis packets handed over raw behind a byte layout for the setup headers that
-// no testable specification pins down, and Safari has no Vorbis in WebCodecs at
-// all, so it would be an unverifiable second route behind a verified first one.
+// That probe settles the resident tier. The streamed tier has a second one of
+// its own, and a second decoder behind it. decodeAudioData takes a whole file
+// and gives back a whole buffer, so it cannot stream; WebCodecs
+// AudioDecoder("vorbis") can, and where a browser's takes the configuration a
+// streamed Clip is demuxed in Go and decoded on a thread of the browser's own
+// rather than in wasm on the thread the game's tick is also on. Where it does
+// not - which is every Safari, because its AudioDecoder reaches the same
+// operating system codec that has no Ogg - jfreymuth/oggvorbis decodes in Go
+// exactly as before.
+//
+// Which it is, is AudioDecoder.isConfigSupported asked once at init with the
+// micro-clip's own setup headers, so the question asked is the one the route
+// will ask rather than a codec string. To force the Go decoder in a browser
+// that has the codec, which is how the two are compared in one page, delete
+// AudioDecoder from the global object before the Engine starts.
 //
 // # Two tiers, and which is invisible
 //
 // A Clip whose decoded size fits under Config.DecodedClipLimit is decoded whole
 // into one AudioBuffer and its Voices start from it. A longer one streams: it is
-// demuxed and decoded in Go a few thousand frames at a time, converted to the
-// context's rate through one resampler that spans every chunk, and the chunks
-// are scheduled back to back with start(when, offset) on the context clock. The
-// limit is the same field with the same sentinels and the same 512 KiB default
-// that otosound.Config carries.
+// demuxed in Go and decoded a few thousand frames at a time - by the browser's
+// AudioDecoder where there is one, and in wasm where there is not - converted to
+// the context's rate through one resampler that spans every chunk, and the
+// chunks are scheduled back to back with start(when, offset) on the context
+// clock. The limit is the same field with the same sentinels and the same
+// 512 KiB default that otosound.Config carries.
 //
 // Which tier a Clip landed in is invisible. Both report the same duration, the
 // same channels, the same rate and the same Loop Region, and a game cannot ask -

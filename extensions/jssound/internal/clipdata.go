@@ -300,6 +300,7 @@ func (c *clipData) measure() error {
 	if err != nil {
 		return jssound.ErrNotOggVorbis{Err: err}
 	}
+	defer decoder.close()
 	scratch := make([]float32, decodeChunk*c.channels)
 	var frames int64
 	for {

@@ -24,13 +24,24 @@
 //     producing AudioBuffers a chunk at a time for chain.go to schedule back to
 //     back with start(when, offset) on the context clock. No HTMLMediaElement
 //     is constructed anywhere in this package, and the file says why.
+//   - oggpackets.go walks the Ogg container in Go and folds the three Vorbis
+//     setup headers into the description a decoder configuration carries. The
+//     demux is ours on both streamed routes, because a WebCodecs AudioDecoder
+//     knows nothing about Ogg.
+//   - webcodecs.go is the streamed tier's second decoder, which decodes on a
+//     thread of the browser's own rather than in wasm on the thread the game's
+//     tick is also on. It is behind a probe because Safari has no Vorbis in
+//     WebCodecs at all, and the Go decoder is what a browser without it falls
+//     back to.
 //   - resample.go is the conversion a streamed Voice's chunks go through, which
 //     is what makes a chunk boundary and a loop wrap land on whole context
 //     frames. It is deliberately the same filter otosound uses.
 //   - loopregion.go is the Loop Region parse, deliberately the same arithmetic
 //     otosound and nosound run over the same bytes.
 //   - probe.go is the one-time question "can this browser decode Ogg Vorbis",
-//     and the micro-clip it is asked with.
+//     and the micro-clip it is asked with. The same clip's headers ask the
+//     second one, in webcodecs.go: "does this browser's AudioDecoder take
+//     Vorbis".
 //
 // There is no file for the device thread, and that is the point. The browser
 // owns the audio thread; nothing here can reach it, so sound.md's obligation

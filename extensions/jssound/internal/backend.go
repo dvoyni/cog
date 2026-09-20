@@ -83,6 +83,12 @@ type backend struct {
 	// own callback, which a browser delivers from the event loop and never from
 	// inside a call Go made. So the two cannot be in each other's middle.
 	support oggSupport
+	// codecs is the answer to the second probe: whether this browser's
+	// WebCodecs AudioDecoder takes Vorbis, which is what decides whether a
+	// streamed Clip decodes on a thread of the browser's or in wasm on this
+	// one. It settles beside the Ogg probe and a prepare waits for both,
+	// because both change which route a Clip takes.
+	codecs  codecsSupport
 	waiting []waiting
 
 	// completedMu guards the two queues a callback or a goroutine appends to and
@@ -132,6 +138,7 @@ func newBackend(cfg jssound.Config) *backend {
 	audio.resumeOnGesture(b.gestureTarget, b.stateChanged)
 	b.stateChanged()
 	b.probeOgg()
+	b.probeCodecs()
 	return b
 }
 
@@ -317,13 +324,20 @@ func (b *backend) Prepare(token any, encoded assets.Blob) (sound.PreparedClip, b
 		b.completeUndecoded(held)
 		return nil, false, nil
 	}
-	switch b.support {
-	case oggUnknown:
+	if b.probing() {
 		b.waiting = append(b.waiting, held)
-	default:
+	} else {
 		b.dispatch(held)
 	}
 	return nil, false, nil
+}
+
+// probing reports whether either capability probe is still outstanding. A Clip
+// prepared now would be sent down a route the answer might have changed, which
+// is the probe doing nothing, so it waits instead - at the cost of the first
+// Clip of a session and nothing after it.
+func (b *backend) probing() bool {
+	return b.support == oggUnknown || b.codecs == codecsUnknown
 }
 
 // dispatch sends one prepare down one of three routes, and is the single place
@@ -371,7 +385,7 @@ func (b *backend) dispatch(held waiting) {
 func (b *backend) stream(held waiting) {
 	clip := held.clip
 	if clip.open == nil {
-		clip.open = openOgg
+		clip.open = b.opener()
 	}
 	if ctxRate := b.audio.sampleRate(); ctxRate > 0 && ctxRate != clip.sourceRate {
 		clip.filter = newSincFilter(clip.sourceRate, ctxRate)
@@ -392,7 +406,7 @@ func (b *backend) completeUndecoded(held waiting) {
 		return
 	}
 	if held.clip.open == nil {
-		held.clip.open = openOgg
+		held.clip.open = b.opener()
 	}
 	go func() {
 		if err := held.clip.measure(); err != nil {
@@ -415,17 +429,55 @@ func (b *backend) decodeInBrowser(held waiting) {
 	})
 }
 
-// probeOgg asks the browser the one question, once, by decoding the embedded
-// micro-clip. Everything prepared before it answers waits for the answer.
+// opener is how a streamed Clip on this browser gets its decoders, and is the
+// whole of what the WebCodecs probe changes.
+//
+// It is read at Prepare rather than at each Voice, so a Clip keeps the route it
+// was prepared under for its whole life. That is deliberate: the probe settles
+// once and never moves, and a Clip whose Voices could disagree about which
+// decoder they used would be two tiers inside one tier.
+func (b *backend) opener() opener {
+	if b.codecs == codecsPresent {
+		return openStreamedVorbis
+	}
+	return openOgg
+}
+
+// probeOgg asks the browser whether it decodes Ogg Vorbis, once, by decoding the
+// embedded micro-clip. Everything prepared before it answers waits for it.
 func (b *backend) probeOgg() {
 	b.audio.decode(probeClip,
 		func(js.Value) { b.settleProbe(oggNative) },
 		func(string) { b.settleProbe(oggWasm) })
 }
 
-// settleProbe records the answer and releases everything that was waiting on it.
+// probeCodecs asks the browser whether its WebCodecs AudioDecoder takes Vorbis,
+// with the same micro-clip's own headers. A page with no AudioDecoder at all
+// answers here and now, so the wait this adds is a wait only on a browser that
+// has one.
+func (b *backend) probeCodecs() {
+	probeCodecs(b.settleCodecs)
+}
+
+// settleProbe records the Ogg answer and releases whatever both probes were
+// holding.
 func (b *backend) settleProbe(support oggSupport) {
 	b.support = support
+	b.released()
+}
+
+// settleCodecs records the WebCodecs answer and does the same.
+func (b *backend) settleCodecs(support codecsSupport) {
+	b.codecs = support
+	b.released()
+}
+
+// released dispatches everything that was waiting on the probes, once neither
+// of them is outstanding.
+func (b *backend) released() {
+	if b.probing() {
+		return
+	}
 	held := b.waiting
 	b.waiting = nil
 	for _, one := range held {

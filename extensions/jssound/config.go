@@ -13,10 +13,13 @@ import "time"
 // the output is stereo because panning is. A mono output makes constant-power
 // panning meaningless and a surround one is a different Mixer.
 //
-// And there is no knob for the Ogg decoder. Whether the browser can decode Ogg
-// Vorbis is detected once at init by decoding an embedded micro-clip, never
-// sniffed from a user agent and never configured, because the condition is an
-// operating system's codec support and no string a page can read reports it.
+// And there is no knob for either decoder. Whether the browser can decode Ogg
+// Vorbis, and whether its WebCodecs AudioDecoder takes Vorbis and so can decode
+// a streamed Clip off this thread, are both detected once at init - one by
+// decoding an embedded micro-clip, the other by asking isConfigSupported with
+// that clip's own setup headers. Neither is sniffed from a user agent and
+// neither is configured, because the condition is an operating system's codec
+// support and no string a page can read reports it.
 type Config struct {
 	// LatencyHint is what the AudioContext is asked to trade latency against
 	// power, and reaches it as the latencyHint option in seconds.
