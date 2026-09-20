@@ -1106,6 +1106,47 @@ keep it in registers **stopped the fill inlining and doubled the two-Component
 frame** (37 µs → 73 µs at 10k), and unrolling a three-field path beside the
 two-field one cost about 6% rather than saving any.
 
+**The walk lives inside the closure `All()` returns, not in a method it calls.**
+A filler is far past what the inliner takes from a method — `iterate1` is 186
+cost units and `iterate2` is 331, against a budget of 80, with `fill` alone at 67
+and appearing twice in each — so a `yield` reached through one is an indirect
+call an Entity, and the range statement's own state machine survives into the
+emitted closure beside it. Together that is about **1.1 ns an Entity**, paid by
+every System in the engine whether or not it knows it is on a hot path, and it
+is not inherent to range-over-func: it is the budget. A func literal created and
+called exactly once gets **800** instead of 80, so with the two-field body
+written out inside the literal the whole chain collapses into the call site —
+the literal, the walk, and then the range statement's yield closure inlined into
+the walk in turn, leaving no per-Entity call at all. Measured **0.888 ns an
+Entity** on `BenchmarkFrameQuery10k`, which halves what a Query costs over a
+hand-written loop, **1.860 → 0.952**. The signature does not change and no call
+site moves.
+
+Recorded so the arrangement is not tidied back into a call:
+
+- **Two filler bodies in one literal.** 791 cost units for some shapes and 817
+  for others, and past 800 the literal does not merely lose the win: it compiles
+  as a standalone body that also loses the `row` and `fill` inlining `iterate2`
+  keeps, **+4.8 ns an Entity** — worse than never having tried. Shape 3 fits at
+  553 on its own and is worth 0.665 ns an Entity, so it belongs in a literal of
+  its own, never as a second arm of this one.
+- **The filler held as a `func` field** rather than reached through the shape
+  switch. A regression: an indirect call is opaque to escape analysis, so the
+  yield closure escapes and the frame pays **two allocations a tick**. This is
+  the same finding `Query.shape`'s own comment already carries.
+- **`All()` returning a method value.** Measures identical to today at zero
+  allocations, so it buys nothing — and it becomes the escaping shape the moment
+  `All` gains a second producer.
+- **Shrinking a filler under 80.** Not reachable: `iterate1` is 186 and `fill`
+  alone is 67.
+
+The 800 is a compiler-internal constant rather than a language guarantee, and
+**the allocation-line tests do not see a bust**, because the regression
+allocates nothing — they pass unchanged at 200 B/op and 4 allocs/op on a busted
+build. `queryinline_test.go` is the net instead: it reads the `-gcflags=-m=2`
+verdicts and fails both when the literal stops inlining and when a range body
+stops collapsing into the walk.
+
 ### Filters
 
 **A filter is a blank field**: `_ ecs.Without[Disabled]`. It yields nothing into

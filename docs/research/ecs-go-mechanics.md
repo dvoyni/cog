@@ -91,10 +91,23 @@ From `go build -gcflags='...=-m' ./docs/research/ecs-go-mechanics-bench/`, over
 | nested range-over-func — boxed | both literals escape, plus `#state1` **and** `#state2` |
 
 The package boundary is irrelevant because Go's export data carries inlinable
-function bodies. `All` is 36 cost units against a budget of 80, so it crosses
-packages and still inlines. The two-assignment case is the precise boundary: the
-compiler devirtualizes a func value in a local only while that local has a single
-visible producer.
+function bodies. `All` is 17 cost units and the literal it returns is 36, both
+against a budget of 80, so the pair crosses packages and still inlines. The
+two-assignment case is the precise boundary: the compiler devirtualizes a func
+value in a local only while that local has a single visible producer.
+
+**A literal created and called exactly once is budgeted at 800, not 80.**
+`inlineBudget` gives such a closure ten times the ordinary allowance, and that
+is what decides whether an iterator's *walk* can live inside the literal rather
+than in a method it calls. It matters because a method holding a real filler is
+nowhere near 80 — ecs's `iterate1` is 186 and `iterate2` is 331 — so a `yield`
+reached through one is an indirect call an Entity, and the range statement's
+state machine survives into the emitted closure beside it: about 1.1 ns an
+Entity. Writing the walk into the literal collapses the whole chain, the loop
+body included, into the call site. Measured and recorded in
+`bundles/ecs/docs/specs/ecs.md`, together with what busting the 800 costs —
+which is worse than never having tried, because the standalone body loses
+inlining it had before.
 
 ### 1.3 Allocations per pass (1024 entities)
 
