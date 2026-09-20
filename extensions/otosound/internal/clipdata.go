@@ -4,7 +4,9 @@ package internal
 
 import (
 	"bytes"
+	"io"
 	"math"
+	"time"
 
 	"github.com/dvoyni/cog/extensions/otosound"
 	"github.com/dvoyni/cog/libs/assets"
@@ -13,31 +15,71 @@ import (
 	"github.com/jfreymuth/oggvorbis"
 )
 
-// clipData is a resident Clip: the whole thing decoded once, interleaved, and
-// already converted to the rate the Mixer produces, so that the device thread
-// only ever interpolates for a Voice's Rate and never for a base rate.
+const (
+	// bytesPerSample is one decoded sample as the Mixer holds it, which is what
+	// the decoded size a Clip is measured against is counted in.
+	bytesPerSample = 4
+	// defaultDecodedClipLimit is the limit a Config that names none gets: the
+	// largest decoded size a Clip may have and still be held resident. At
+	// 512 KiB that is 2.97 s mono 44.1 kHz, 1.49 s stereo 44.1 kHz, 1.37 s
+	// stereo 48 kHz.
+	//
+	// It sits deliberately above the 137 KB a decoder costs, which is where
+	// streaming starts to save memory at all. Between the two, memory is
+	// knowingly spent to make Play free: a Clip under the limit is already
+	// samples, so starting a Voice on it is an index rather than 460 us of
+	// decoder.
+	defaultDecodedClipLimit = 512 << 10
+	// neverStream and alwaysStream are the two sentinels DecodedClipLimit takes
+	// beside a size in bytes. One field with sentinels rather than a second
+	// bool beside it, because two fields can disagree and one cannot.
+	neverStream  = -1
+	alwaysStream = -2
+)
+
+// clipData is a prepared Clip, in either tier.
 //
-// It is also the sound.PreparedClip handed back through the Port, which is why
-// the four facts it reports are the source's rather than the device's: a game
+// It is one type for both because both tiers report the same four facts -
+// duration, channels, rate and loop region - and sound must not be able to tell
+// which it got. A second type would be a second thing for the Port to carry and
+// the day something switched on it would be the day the tier stopped being the
+// Adapter's business.
+//
+// A resident Clip is the whole thing decoded once, interleaved, and already
+// converted to the rate the Mixer produces, so that the device thread only ever
+// interpolates for a Voice's Rate and never for a base rate. A streamed Clip is
+// the encoded bytes and a way to open decoders against them; its Voices each
+// get a decoder and a read-ahead ring, and the device thread copies from the
+// ring exactly as it indexes a resident Clip's samples.
+//
+// The four facts it reports are the source's rather than the device's: a game
 // asking a Clip its rate is asking about the file, and an Adapter that answered
 // with the device's would make one Clip two cache entries the day the device
-// changed. Nothing above the seam can tell that the samples were converted.
+// changed. Nothing above the seam can tell that the samples were converted, and
+// nothing above the seam can tell whether there are any samples yet.
 //
 // It is garbage-collectable, which is the Port's rule: a Clip released while
 // its prepare was in flight has its completion dropped with nothing called, so
-// anything needing explicit release would never be freed.
+// anything needing explicit release would never be freed. That holds for the
+// streamed tier too - what it adds is a Blob, which is a pointer and a length
+// into the run the asset cache already holds.
 type clipData struct {
-	// samples are interleaved, channels per frame, at rate.
+	// samples are interleaved, channels per frame, at rate. A streamed Clip has
+	// none: its frames arrive in a Voice's ring.
 	samples []float32
-	// frames is len(samples)/channels, after conversion.
+	// frames is the Clip's length in converted frames - len(samples)/channels
+	// for a resident Clip, and what the source will become for a streamed one.
 	frames int
 	// channels is the source's, one or two. The 2x2 gain matrix addresses no
 	// more than two, so a third is refused in Prepare rather than truncated.
 	channels int
-	// rate is the device rate the samples were converted to.
+	// rate is the device rate the samples are, or will be, converted to.
 	rate int
 	// sourceRate is what the file said, and is what SampleRate reports.
 	sourceRate int
+	// sourceFrames is the file's length in its own frames, which is what a
+	// read-ahead seeks and loops in.
+	sourceFrames int64
 	// duration is the source's length in seconds, computed the way nosound
 	// computes it so that the two Adapters report one Clip identically.
 	duration float32
@@ -46,6 +88,23 @@ type clipData struct {
 	// which is what a Clip with no tag says anyway, so a looping Voice loops
 	// the whole Clip and nothing moves when the tag lands.
 	region m.Maybe[sound.LoopRegion]
+
+	// encoded is the Clip's own bytes, retained by a streamed Clip and dropped
+	// by a resident one the moment it has samples. Retaining costs nothing: a
+	// Blob is a pointer and a length, so it references the same run the asset
+	// cache holds rather than copying it.
+	encoded assets.Blob
+	// filter is the resampler this Clip's frames are converted with, shared by
+	// every read-ahead on it and nil when the file is already at the device's
+	// rate. A resident Clip does not keep one: it was converted once, in
+	// Prepare, and the filter went with the encoded bytes.
+	filter *sincFilter
+	// open is how a Voice on this Clip gets a decoder, and is nil on a resident
+	// Clip - which is what "is this Clip streamed" asks. It is a field rather
+	// than a package function so that a test can stream a Clip it generated
+	// with no Ogg anywhere in it, including one whose decoder panics if the
+	// device thread ever reaches it.
+	open opener
 }
 
 func (c *clipData) Duration() float32 { return c.duration }
@@ -56,10 +115,14 @@ func (c *clipData) SampleRate() int { return c.sourceRate }
 
 func (c *clipData) LoopRegion() m.Maybe[sound.LoopRegion] { return c.region }
 
-// loopBounds is the span in converted frames a looping Voice repeats between:
-// the Clip's Loop Region when it declares one, and the whole Clip otherwise.
-// It is computed once, when a Voice starts, so the device thread never touches
-// a Maybe or a seconds-to-frames conversion inside a block.
+// streams reports whether this Clip's Voices read through a decoder rather than
+// out of a shared buffer.
+func (c *clipData) streams() bool { return c.open != nil }
+
+// loopBounds is the span in converted frames a looping resident Voice repeats
+// between: the Clip's Loop Region when it declares one, and the whole Clip
+// otherwise. It is computed once, when a Voice starts, so the device thread
+// never touches a Maybe or a seconds-to-frames conversion inside a block.
 func (c *clipData) loopBounds() (start, end float64) {
 	end = float64(c.frames)
 	region, ok := c.region.Get()
@@ -77,16 +140,93 @@ func (c *clipData) loopBounds() (start, end float64) {
 	return start, end
 }
 
-// decode turns encoded Ogg Vorbis into a resident Clip at deviceRate. It runs
-// on the goroutine Prepare spawns and never on the tick or the device thread,
-// which is the first obligation an Adapter owes: nothing decodes on the thread
-// that fills the device buffer, and nothing decodes on the thread the game runs
-// on either.
+// sourceLoopBounds is the same span in the source's own frames, which is what a
+// read-ahead seeks in: it loops by seeking the decoder, so the wrap happens
+// before the conversion rather than after it.
+func (c *clipData) sourceLoopBounds() (start, end int64) {
+	end = c.sourceFrames
+	region, ok := c.region.Get()
+	if !ok {
+		return 0, end
+	}
+	start = int64(math.Round(float64(region.Start) * float64(c.sourceRate)))
+	stop := int64(math.Round(float64(region.End) * float64(c.sourceRate)))
+	if stop > start && stop <= end {
+		end = stop
+	}
+	if start < 0 || start >= end {
+		return 0, c.sourceFrames
+	}
+	return start, end
+}
+
+// sourceFrame is where a VoiceStart's Offset lands in the source's own frames,
+// clamped into the Clip so that an offset past the end reads the end rather
+// than seeking off the stream.
+func (c *clipData) sourceFrame(offset time.Duration) int64 {
+	at := int64(offset.Seconds() * float64(c.sourceRate))
+	if at < 0 {
+		return 0
+	}
+	if at > c.sourceFrames {
+		return c.sourceFrames
+	}
+	return at
+}
+
+// prepare turns encoded Ogg Vorbis into a Clip in whichever tier its size asks
+// for. It runs on the goroutine Prepare spawns and never on the tick or the
+// device thread, which is the first obligation an Adapter owes: nothing decodes
+// on the thread that fills the device buffer, and nothing decodes on the thread
+// the game runs on either.
 //
-// It decodes over a bytes.Reader on the bytes it was handed rather than
-// whatever storage opened, because the length is read from the stream's granule
+// The tier is chosen from the decoded size rather than the encoded size,
+// because decoded size is what costs memory - and it is computable before
+// decoding anything, as frames x channels x 4, from the identification header
+// and the end granule position. GetLength reads exactly those two and no setup
+// header, so choosing the tier costs microseconds rather than the 460 the
+// decoder it might not need would have.
+//
+// It reads over a bytes.Reader on the bytes it was handed rather than whatever
+// storage opened, because the length is read from the stream's granule
 // positions and so needs an io.Seeker, which storage.FileSystem.Open does not
 // promise.
+func prepare(encoded assets.Blob, deviceRate, limit int) (*clipData, error) {
+	length, format, err := oggvorbis.GetLength(bytes.NewReader(encoded.Data()))
+	if err != nil {
+		return nil, otosound.ErrNotOggVorbis{Err: err}
+	}
+	if format.SampleRate <= 0 || format.Channels <= 0 || format.Channels > 2 {
+		return nil, otosound.ErrNoStreamFormat{SampleRate: format.SampleRate, Channels: format.Channels}
+	}
+	// A length of zero is a stream whose granule positions say nothing - a
+	// truncated file - and has no computable decoded size, so it streams
+	// whatever the limit says.
+	if length > 0 && !overLimit(limit, length*int64(format.Channels)*bytesPerSample) {
+		return decode(encoded, deviceRate)
+	}
+	return retain(encoded, deviceRate, format.SampleRate, format.Channels, length)
+}
+
+// overLimit reports whether a decoded size is more than a Config will hold
+// resident. Zero is the default limit, -1 refuses to stream anything and -2
+// streams everything.
+func overLimit(limit int, decoded int64) bool {
+	switch limit {
+	case alwaysStream:
+		return true
+	case neverStream:
+		return false
+	case 0:
+		return decoded > defaultDecodedClipLimit
+	default:
+		return decoded > int64(limit)
+	}
+}
+
+// decode is the resident tier: the whole Clip decoded once and converted to the
+// device rate, with the encoded bytes dropped behind it - nothing holds them,
+// because nothing will read them again.
 func decode(encoded assets.Blob, deviceRate int) (*clipData, error) {
 	samples, format, err := oggvorbis.ReadAll(bytes.NewReader(encoded.Data()))
 	if err != nil {
@@ -101,10 +241,11 @@ func decode(encoded assets.Blob, deviceRate int) (*clipData, error) {
 	}
 
 	clip := &clipData{
-		channels:   format.Channels,
-		rate:       deviceRate,
-		sourceRate: format.SampleRate,
-		duration:   float32(frames) / float32(format.SampleRate),
+		channels:     format.Channels,
+		rate:         deviceRate,
+		sourceRate:   format.SampleRate,
+		sourceFrames: int64(frames),
+		duration:     float32(frames) / float32(format.SampleRate),
 	}
 	if format.SampleRate == deviceRate {
 		clip.samples, clip.frames = samples[:frames*format.Channels], frames
@@ -117,39 +258,69 @@ func decode(encoded assets.Blob, deviceRate int) (*clipData, error) {
 	return clip, nil
 }
 
-// convertRate resamples a decoded Clip to the device rate, once, off both the
-// tick and the device thread. Doing it here is what lets the Mixer's Rate be
-// pure pitch: a 44.1 kHz Clip played against a 48 kHz device by interpolating
-// on the device thread would be resampling a base rate, which obligation 3
-// refuses outright.
+// retain is the streamed tier: the encoded bytes kept, the filter its Voices
+// will share built once, and not a sample decoded until a Voice asks for one.
 //
-// This is linear, and it is deliberately the cheap one for now. The
-// Blackman-windowed sinc the specification asks for - 48 taps, cutoff at the
-// lower of the two Nyquists, normalised by the window sum so decimation cannot
-// fold everything above the new Nyquist back into the audible band - lands with
-// the streamed tier in issue 482, whose read-ahead goroutine resamples with the
-// same filter and whose acceptance criterion is the aliasing test this one
-// would fail. Upsampling, which is every case the resident tier meets in
-// practice, is where linear costs least.
-func convertRate(in []float32, channels, frames, from, to int) ([]float32, int) {
-	ratio := float64(to) / float64(from)
-	outFrames := int(float64(frames) * ratio)
-	if outFrames <= 0 {
-		return nil, 0
-	}
-	out := make([]float32, outFrames*channels)
-	for i := range outFrames {
-		at := float64(i) / ratio
-		left := int(at)
-		frac := float32(at - float64(left))
-		right := left + 1
-		if right >= frames {
-			right = frames - 1
+// A length of zero is counted rather than believed. The spec streams such a
+// Clip because there is no decoded size to compare, but a Clip that reported no
+// duration would be worse than that: a zero duration makes the playhead fiction
+// and silently removes ReasonFinished from every Voice that names the Clip, so
+// what a length of zero costs is one scan whose samples are thrown away, and a
+// stream that truly holds no frames is the terminal failure it always was.
+func retain(encoded assets.Blob, deviceRate, sourceRate, channels int, length int64) (*clipData, error) {
+	if length <= 0 {
+		counted, err := scanLength(encoded, channels)
+		if err != nil {
+			return nil, otosound.ErrNotOggVorbis{Err: err}
 		}
-		for c := range channels {
-			a, b := in[left*channels+c], in[right*channels+c]
-			out[i*channels+c] = a + (b-a)*frac
+		if counted <= 0 {
+			return nil, otosound.ErrNoStreamLength{}
+		}
+		length = counted
+	}
+
+	clip := &clipData{
+		channels:     channels,
+		frames:       int(length),
+		rate:         deviceRate,
+		sourceRate:   sourceRate,
+		sourceFrames: length,
+		duration:     float32(length) / float32(sourceRate),
+		encoded:      encoded,
+		open:         openOgg,
+	}
+	if sourceRate != deviceRate {
+		clip.filter = newSincFilter(sourceRate, deviceRate)
+		clip.frames = int(float64(length) * clip.filter.ratio)
+	}
+	if clip.frames <= 0 {
+		return nil, otosound.ErrNoStreamLength{}
+	}
+	return clip, nil
+}
+
+// scanLength counts a stream's frames by decoding it and throwing the samples
+// away. It is the only path in the Adapter that decodes a whole Clip it will
+// not keep, and it runs only for a file whose granule positions carry no
+// length, which is a broken one.
+func scanLength(encoded assets.Blob, channels int) (int64, error) {
+	reader, err := oggvorbis.NewReader(bytes.NewReader(encoded.Data()))
+	if err != nil {
+		return 0, err
+	}
+	scratch := make([]float32, decodeChunk*channels)
+	var frames int64
+	for {
+		read, err := reader.Read(scratch)
+		frames += int64(read / channels)
+		if err == io.EOF {
+			return frames, nil
+		}
+		if err != nil {
+			return frames, err
+		}
+		if read == 0 {
+			return frames, nil
 		}
 	}
-	return out, outFrames
 }

@@ -68,6 +68,9 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	if cfg.BufferSize < 0 {
 		return otosound.ErrInvalidBufferSize{BufferSize: cfg.BufferSize}
 	}
+	if cfg.DecodedClipLimit < alwaysStream {
+		return otosound.ErrInvalidDecodedClipLimit{DecodedClipLimit: cfg.DecodedClipLimit}
+	}
 	p.backend = newBackend(cfg, p.hardware)
 	registrar.ProvideAdapter[otosound.SoundBackend](sound.Backend(p.backend))
 	registrar.Subscribe[reportOnUpdate](p.reportOnUpdate)

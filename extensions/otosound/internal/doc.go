@@ -14,8 +14,14 @@
 //   - mixer.go is everything the device thread runs, and it may touch its own
 //     voice table, the ring through atomics and the prepared Clip data it was
 //     given, and nothing else.
-//   - backend.go, clip.go and device.go are everything the tick and the
-//     goroutines run: the clip table, the decode, and opening the device.
+//   - streamring.go is the other thing the device thread may touch: one
+//     streamed Voice's read-ahead, which is a fixed buffer and two atomic
+//     counters and is filled by somebody else.
+//   - backend.go, clipdata.go, stream.go, resample.go and backend-device.go are
+//     everything the tick and the goroutines run: the clip table, the two
+//     residency tiers, the read-ahead that fills a streamed Voice's ring, the
+//     Blackman-windowed sinc that converts a Clip to the device rate, and
+//     opening the device.
 //
 // The plugin is built only for desktop platforms (!js). It requires no Adapter
 // and provides one, otosound.SoundBackend.

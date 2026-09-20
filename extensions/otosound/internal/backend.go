@@ -53,6 +53,10 @@ type backend struct {
 	// first composition owns it.
 	askedRate   int
 	askedBuffer time.Duration
+	// limit is Config.DecodedClipLimit as it was given, sentinels and all. It
+	// decides the tier a prepared Clip lands in and nothing else; the device
+	// never sees it, and neither does sound.
+	limit int
 
 	// rate is the rate the Mixer produces and a Clip is converted to. It is
 	// settled synchronously, when the context is taken, so that no Clip is ever
@@ -61,6 +65,18 @@ type backend struct {
 
 	ring  *ring
 	mixer *mixer
+
+	// streams is the read-ahead of every streamed Voice, indexed by slot and
+	// sized once at Voices(n). It is the tick's alone: the tick starts a
+	// read-ahead when it stages a start on a streamed Clip and halts it when it
+	// stages that slot's stop, which is how a read-ahead stops with its Voice
+	// however the Voice ended - finished, stolen, released or despawned, all
+	// four of which reach the Adapter as the same stop.
+	//
+	// The Mixer is handed the ring out of one of these and never the stream
+	// itself, so nothing on the device thread can start, stop or wait on a
+	// decoder.
+	streams []*stream
 
 	// clips is the table of installed Clips. It is the tick's alone: a ClipID
 	// is resolved to a pointer when an operation is staged, so the device
@@ -122,6 +138,7 @@ func newBackend(cfg otosound.Config, hardware audio) *backend {
 	b := &backend{
 		askedRate:   rate,
 		askedBuffer: buffer,
+		limit:       cfg.DecodedClipLimit,
 		rate:        rate,
 		clips:       make(map[sound.ClipID]*clipData),
 		audio:       hardware,
@@ -141,6 +158,7 @@ func (b *backend) Voices(n int) {
 	}
 	b.ring = newRing(n)
 	b.mixer = newMixer(b.ring, n)
+	b.streams = make([]*stream, n)
 	b.open()
 }
 
@@ -160,11 +178,13 @@ func (b *backend) Emit(batch *sound.Batch) {
 
 	for i := range batch.Starts {
 		start := &batch.Starts[i]
+		clip := b.clips[start.Clip]
 		b.ring.record(op{
 			kind:   opStart,
 			slot:   start.Slot,
 			id:     start.Clip,
-			clip:   b.clips[start.Clip],
+			clip:   clip,
+			ring:   b.openReadAhead(start.Slot, clip, start.Offset, start.Loop),
 			offset: start.Offset,
 			loop:   start.Loop,
 			params: start.Params,
@@ -176,6 +196,7 @@ func (b *backend) Emit(batch *sound.Batch) {
 	}
 	for _, slot := range batch.Stops {
 		b.ring.record(op{kind: opStop, slot: slot}, coalesce)
+		b.haltReadAhead(slot)
 	}
 	for _, id := range batch.Destroys {
 		b.mark(id)
@@ -201,6 +222,51 @@ func (b *backend) Emit(batch *sound.Batch) {
 	b.reclaim()
 }
 
+// openReadAhead gives a start on a streamed Clip the ring its Voice will read,
+// and reports nil for a resident one - which is the whole of the tier below the
+// seam: everything else about the two is identical, and nothing above here
+// knows there was a choice.
+//
+// It runs on the tick, and what it does there is a goroutine and one ring's
+// worth of allocation. The 460 us of decoder open and the seek that follows are
+// the goroutine's, which is what keeps a recovery affordable: sixty-four
+// streamed Voices restated as starts on the tick the Device came back is
+// sixty-four goroutines opening decoders in parallel, with the Mixer playing
+// silence for each slot until its ring primes, rather than 29 ms of decoder
+// opens on a thread that has 10 ms to fill a buffer.
+//
+// The stream it replaces is halted first. A slot is restarted either because
+// sound stole it - a stop then a start, in that order - or because the Device
+// came back and every live Voice was restated; both leave a read-ahead filling
+// a ring nothing will read again.
+func (b *backend) openReadAhead(slot sound.VoiceSlot, clip *clipData, offset time.Duration, loop bool) *pcmRing {
+	if int(slot) < 0 || int(slot) >= len(b.streams) {
+		return nil
+	}
+	b.haltReadAhead(slot)
+	if clip == nil || !clip.streams() {
+		return nil
+	}
+	opened := newStream(clip, offset, loop)
+	b.streams[slot] = opened
+	return opened.ring
+}
+
+// haltReadAhead stops the read-ahead on a slot, if it has one. It does not wait
+// for the goroutine and it does not free the ring: the Mixer may still be
+// ramping that Voice to silence out of frames the ring already holds, and the
+// ring goes when the voice table drops it, which is the GC's business and never
+// the device thread's.
+func (b *backend) haltReadAhead(slot sound.VoiceSlot) {
+	if int(slot) < 0 || int(slot) >= len(b.streams) {
+		return
+	}
+	if running := b.streams[slot]; running != nil {
+		running.halt()
+		b.streams[slot] = nil
+	}
+}
+
 // Device reports the device as it is now. It is a field read - one atomic load
 // and a copy - which is what lets sound poll it every flush.
 func (b *backend) Device() sound.Device { return *b.device.Load() }
@@ -209,14 +275,20 @@ func (b *backend) Device() sound.Device { return *b.device.Load() }
 // done=false and spawns a goroutine, whose completion lands in a slice
 // TakePrepared drains on the next flush.
 //
-// What it hands back is a []float32 behind a pointer and nothing else, which is
-// the Port's garbage-collectability rule: a Clip released while its prepare is
-// in flight has its completion dropped with nothing called, so anything needing
-// explicit release would never be freed.
+// What it hands back is a []float32 behind a pointer, or the encoded bytes and
+// a way to open decoders against them, and nothing else - which is the Port's
+// garbage-collectability rule: a Clip released while its prepare is in flight
+// has its completion dropped with nothing called, so anything needing explicit
+// release would never be freed.
+//
+// Which of the two it is depends on the Clip's decoded size against
+// DecodedClipLimit, and is decided in prepare, where the headers that make it
+// decidable are read. It is the Adapter's business alone: both tiers report the
+// same four facts, so sound never learns which it got and neither can a game.
 func (b *backend) Prepare(token any, encoded assets.Blob) (sound.PreparedClip, bool, error) {
-	rate := b.rate
+	rate, limit := b.rate, b.limit
 	go func() {
-		clip, err := decode(encoded, rate)
+		clip, err := prepare(encoded, rate, limit)
 		b.completedMu.Lock()
 		b.completed = append(b.completed, sound.Prepared{Token: token, Clip: preparedOrNil(clip), Err: err})
 		b.completedMu.Unlock()

@@ -91,7 +91,7 @@ func (mx *mixer) Read(buf []byte) (int, error) {
 				outL += sl*m00 + sr*m10
 				outR += sl*m01 + sr*m11
 			}
-			if !v.paused {
+			if !v.paused && !v.holding() {
 				v.advance()
 			}
 		}
@@ -145,9 +145,11 @@ func (mx *mixer) apply(b *batch) {
 				continue
 			}
 			v.clip = o.clip
+			v.ring = o.ring
 			v.loop = o.loop
 			v.loopStart, v.loopEnd = o.clip.loopBounds()
 			v.pos = startFrame(o)
+			v.starved, v.primed = false, false
 			v.rate = rateOf(o.params.Rate)
 			v.paused = o.params.Paused
 			v.tgt = o.params.Gains
@@ -206,14 +208,14 @@ func (mx *mixer) settle() {
 	for i := range mx.voices {
 		v := &mx.voices[i]
 		if !v.active {
-			v.clip, v.cur = nil, silent
+			v.clip, v.ring, v.cur = nil, nil, silent
 			continue
 		}
 		v.cur = v.target
 		v.heard = true
 		if v.fading {
 			v.active, v.fading = false, false
-			v.clip, v.cur = nil, silent
+			v.clip, v.ring, v.cur = nil, nil, silent
 		}
 	}
 }

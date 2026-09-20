@@ -258,13 +258,30 @@ func (h *harness) probe(voice sound.Voice) probeResponse {
 // the flush has bound the Clip, which is a play before its Clip is ready doing
 // exactly what the spec says: the Voice exists, addressable and silent, and
 // starts when the Clip installs.
+//
+// It pulls a block between ticks, because a device does. A tick publishes a
+// batch and only a block drains one, so a harness that ticked without pulling
+// would fill the ring in eight ticks and then merge everything after it into
+// the staging batch - including the start the Clip's install emits, which would
+// never be published and the render that follows would be silence. That is the
+// full-ring merge behaving exactly as specified against a device that has
+// stopped pulling; what it is not is what a prepare taking more than eight
+// ticks looks like in a game, where the device pulls on its own clock
+// throughout.
+//
+// The block is pulled after the check, so the tick that installs the Clip and
+// emits its start leaves that start in the ring for the caller's own render.
 func (h *harness) tickUntilPlaying(t *testing.T) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
+	block := make([]byte, testBlock*bytesPerFrame)
 	for time.Now().Before(deadline) {
 		h.tick()
 		if len(h.plugin.backend.clips) > 0 {
 			return
+		}
+		if _, err := h.plugin.backend.mixer.Read(block); err != nil {
+			t.Fatalf("the Mixer failed a Read: %v", err)
 		}
 		time.Sleep(time.Millisecond)
 	}

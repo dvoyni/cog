@@ -198,7 +198,14 @@ func (b *backend) fail(err error) {
 
 // stop closes the device down and waits for its goroutine, so an engine that
 // has shut down leaves nothing running behind it.
+//
+// Every read-ahead goes too. A streamed Voice's goroutine ends with its Voice,
+// and an Engine shutting down ends every Voice there is, whether or not sound
+// got as far as emitting the stops.
 func (b *backend) stop() {
+	for slot := range b.streams {
+		b.haltReadAhead(sound.VoiceSlot(slot))
+	}
 	select {
 	case <-b.done:
 	default:

@@ -28,6 +28,16 @@ func (e ErrInvalidBufferSize) Error() string {
 	return fmt.Sprintf("otosound: invalid BufferSize %v", e.BufferSize)
 }
 
+// ErrInvalidDecodedClipLimit reports a residency limit that is neither a size
+// nor one of the two sentinels. Zero is the default, -1 never streams and -2
+// always streams; anything below -2 names no tier at all.
+type ErrInvalidDecodedClipLimit struct{ DecodedClipLimit int }
+
+func (e ErrInvalidDecodedClipLimit) Error() string {
+	return fmt.Sprintf("otosound: invalid DecodedClipLimit %d, want a size in bytes, 0, -1 or -2",
+		e.DecodedClipLimit)
+}
+
 // ErrDeviceUnavailable reports a Device that could not be opened at all. It is
 // reported once, through kernel.ReportErrorOnce, and after that otosound
 // behaves exactly as nosound does: it accepts everything, plays nothing, and
