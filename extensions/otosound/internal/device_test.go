@@ -175,3 +175,68 @@ func TestADeviceThatNeverOpenedIsReportedOnceHoweverOftenItIsRetried(t *testing.
 		t.Fatal("the Device reports Ready with nothing open")
 	}
 }
+
+// A machine with no output device at all is reported, and it is reported even
+// though the open succeeds and the player would start.
+//
+// That is not a hypothetical fixture. It is oto's Windows driver with no
+// endpoints: WASAPI and WinMM both report a device it cannot find, and rather
+// than failing it installs a null context that takes players, drains the Mixer
+// in real time and reports nil from Err forever. Every signal the Adapter used
+// to have says fine, and the game hears nothing - so the absence is asked about
+// separately, and the fixture models the same shape, which is an open that
+// works and a machine that can play nothing.
+//
+// The player is the other half of the assertion. Nothing may be handed to a
+// device that does not exist: on Windows that is what creates the null context
+// the process is then stuck with, and the Adapter is supposed to be behaving as
+// nosound does.
+func TestAMachineWithNoOutputDeviceIsReportedOnceAndNoPlayerIsTaken(t *testing.T) {
+	hardware := &fakeAudio{buffer: defaultBufferSize, missing: errNoOutputDevice}
+	b := newWatchedBackend(t, hardware)
+
+	failure := b.failure.Load()
+	if failure == nil || !errors.Is(failure.err, errNoOutputDevice) {
+		t.Fatalf("a machine with no output device recorded %v", failure)
+	}
+	if b.Device().Ready {
+		t.Fatal("the Device reports Ready on a machine that can play nothing")
+	}
+	if hardware.openCount() != 0 || hardware.playCount() != 0 {
+		t.Fatalf("a machine with no output device was opened %d times and played %d times, "+
+			"and a context taken under it is silent for the life of the process",
+			hardware.openCount(), hardware.playCount())
+	}
+	probes := hardware.probeCount()
+	waitFor(t, "the machine to be asked again", func() bool { return hardware.probeCount() > probes })
+
+	if got := b.failure.Load(); got != failure {
+		t.Fatal("asking a second time recorded a second failure, and the condition is worth saying once")
+	}
+}
+
+// And the device that was not there turns up: the same retry that was already
+// running finds it, Ready goes true, and nobody is told a second time.
+//
+// This is what the ordering in take is for. The probe runs before the open, so
+// the process reaches this moment with no context created at all and takes a
+// real one; had it opened under the absence, oto would be holding a null
+// context that it never rebuilds and this recovery could not happen.
+func TestADeviceThatAppearsOnAMachineWithNoneIsPickedUpByTheRetry(t *testing.T) {
+	hardware := &fakeAudio{buffer: defaultBufferSize, missing: errNoOutputDevice}
+	b := newWatchedBackend(t, hardware)
+	failure := b.failure.Load()
+
+	hardware.installDevice()
+	device := waitReady(t, b)
+
+	if device.SampleRate != defaultSampleRate || device.Latency != defaultBufferSize {
+		t.Fatalf("the Device that turned up is %+v, want the one the Config asked for", device)
+	}
+	if got := b.failure.Load(); got != failure {
+		t.Fatal("a Device that turned up reported something on the way")
+	}
+	if hardware.playCount() != 1 {
+		t.Fatalf("the player was taken %d times, want the one the recovery needed", hardware.playCount())
+	}
+}

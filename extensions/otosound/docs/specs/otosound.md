@@ -119,6 +119,56 @@ device side writes it; the tick side reads it. It is the one value that genuinel
 crosses in the other direction, and it changes under its reader with no
 notification, which is correct because loss is silent.
 
+### Absence is asked about; it is not inferred from a successful open
+
+**An open that succeeds is not evidence that a device exists.** On Windows,
+`oto` v3.5.0 answers a machine with no endpoints by installing an unexported
+**null context**: a goroutine that drains the mux in real time forever, whose
+`Err` reports `nil`. The open returns no error, the poll on it never will, and
+the single condition this Adapter promises to say out loud is the one it cannot
+see. The game is told `Ready` on a machine that cannot make a sound — silently,
+with every number in the live Voice view still moving.
+
+So the question is asked of the platform rather than of `oto`, and it is asked
+the way `oto`'s own fallback chain asks it, with **both** halves having to say
+no:
+
+- `waveOutGetNumDevs` counts zero WinMM output devices, which is what makes
+  `waveOutOpen` on the wave mapper answer `MMSYSERR_BADDEVICEID`; and
+- `IMMDeviceEnumerator::GetDefaultAudioEndpoint` for a render endpoint fails
+  with a `FACILITY_WIN32` HRESULT — `E_NOTFOUND`, in the case that matters.
+
+Either half alone is a guess, and a false *absent* on a machine that can make a
+sound is a worse answer than the bug it would be fixing. A probe that cannot be
+carried out reports nothing: *I could not find out* is not *there is no device*.
+
+**The probe runs before the open, and that ordering is the load-bearing part.**
+`oto`'s context is created once per process and is never rebuilt, so a context
+created while nothing exists holds that null context for the life of the
+process — and a device plugged in a minute later would never be heard, however
+patiently the Adapter retried. Withholding the open is what leaves the retry
+something to find. It follows that absence needs no lifecycle of its own: *no
+device could be taken* is reported once, retried on the same cadence and finally
+recovered from by exactly the machinery a refused open already had.
+
+**macOS and Linux were checked and need nothing.** `driver_darwin.go` has no
+null anything: a failure to build the `AudioQueue` is joined into the context's
+error and comes straight back out of `Err`, which is what `play` checks before
+it takes a player. `driver_unix.go` tries PulseAudio and falls back to ALSA, and
+when both fail it joins their two errors — no server and no card is exactly the
+case that reaches the join. On both, an open that succeeds means a device, and
+asking again would only add a way to be wrong.
+
+> **Gap:** `darwin` has a *different* silent-but-`Ready` state. An
+> `AudioQueueStart` that fails because the audio session cannot be activated —
+> the app is in the background, another app owns the session, media services are
+> restarting — is retried on a backoff rather than recorded, so the context stays
+> quiet and error-free meanwhile. That is a session being unavailable for a while
+> and not a device being absent, so it sits on the **loss** side of this
+> Adapter's line, where silence is the contract. It is recorded because the line
+> between the two is a judgement and not a measurement, and because a probe here
+> would misreport a backgrounded app as a machine with no sound card.
+
 ### Loss and recovery
 
 Loss is **ordinary and is not reported** — no `ReportError`, not even once.
@@ -643,6 +693,18 @@ and say so.
   composition instead.
 - **The second `Engine` going silent** when it cannot own the context. Which
   composition ran first is a race.
+- **Reading `oto`'s `nullContext`** to tell a silent context from a working one.
+  It is unexported, and reaching it would mean `unsafe` against a field layout
+  no version pins.
+- **Inferring absence from an observable of the null context** — how fast it
+  drains, how long a read takes. Everything it does is what a working device
+  does, at the same rate, by construction.
+- **One half of the Windows probe.** `waveOutGetNumDevs` alone, or the endpoint
+  enumeration alone: each names a machine where `oto`'s *other* driver still
+  starts and the game is audible.
+- **Reporting it upstream instead of fixing it here.** `oto` substituting
+  silence with no way to tell is a gap in its API and is worth filing, but a
+  filed issue leaves every game shipping today silent with nothing said.
 
 ---
 

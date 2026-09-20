@@ -22,6 +22,13 @@ type fakeAudio struct {
 	// openErr, if set, is what every open fails with, which is the Device that
 	// could never be opened.
 	openErr error
+	// missing, if set, is what absent reports: a machine with no output device
+	// at all, whose open and play both succeed anyway. That combination is not
+	// a contrivance - it is precisely oto's Windows driver with no endpoints,
+	// which substitutes a null context that takes players, drains the Mixer and
+	// never errors - and it is the only way to get at it from a test, because
+	// the thing being modelled is unexported one module over.
+	missing error
 	// playErr, if set, is what every play fails with.
 	playErr error
 	// lost, once set, is what err reports, which is the Device that was open
@@ -33,8 +40,15 @@ type fakeAudio struct {
 	buffer  time.Duration
 	ignored bool
 
-	opens, plays, closes int
-	source               io.Reader
+	opens, plays, closes, probes int
+	source                       io.Reader
+}
+
+func (f *fakeAudio) absent() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.probes++
+	return f.missing
 }
 
 func (f *fakeAudio) open(rate int, buffer time.Duration) (facts, error) {
@@ -97,6 +111,21 @@ func (f *fakeAudio) closeCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.closes
+}
+
+func (f *fakeAudio) probeCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.probes
+}
+
+// installDevice is a sound card appearing on a machine that had none: the
+// endpoint the probe asks about is now there, and the open that was being
+// withheld can go ahead.
+func (f *fakeAudio) installDevice() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.missing = nil
 }
 
 // unplug is the headphones coming out: the poll starts erroring, and the
