@@ -53,6 +53,30 @@ type VoiceInfo struct {
 	Distance float32
 }
 
+// VoiceDetail is one live Voice as sound's own mcp capability shows it:
+// everything VoiceInfo carries, and the bearing VoiceInfo deliberately does
+// not.
+//
+// It is declared here and aliased nowhere in slots/sound, so it is reachable
+// only from under slots/sound. That is the narrowest thing that can be true of
+// a fact the game-facing view refuses to carry, and the refusal stands: a
+// game's test asserts what it commanded and what the engine derived from it,
+// never the pan. An agent that cannot hear has no command to assert against,
+// and azimuth is the one field that tells it a 2D Listener was never rotated -
+// 90 degrees on every Positional Voice at once, while every other field looks
+// entirely normal.
+type VoiceDetail struct {
+	VoiceInfo
+	// Azimuth and Elevation are the source's bearing about the Listener, in
+	// degrees, as of the last spatialize pass.
+	//
+	// They are 0 on a non-positional Voice, which is "heard centred" stated as
+	// a number rather than as a special case - the same zero the panner is
+	// handed. A reader that must tell the two apart reads Params.Position,
+	// which is what makes a Voice positional in the first place.
+	Azimuth, Elevation float32
+}
+
 // slotState is what one entry of the fixed table currently is.
 type slotState uint8
 
@@ -96,7 +120,10 @@ type voiceSlot struct {
 	// They are not on VoiceInfo. The view carries audibility and distance and
 	// not the pan: a game's test asserts what it commanded and what the engine
 	// derived from it, and a game checking its sound is on the right side of
-	// the player checks where it put the source, which is its own data.
+	// the player checks where it put the source, which is its own data. They
+	// reach the one reader that has no command to assert against through
+	// VoiceDetail, which sound's mcp capability renders and nothing else can
+	// name.
 	azimuth, elevation float32
 	// distance is how far the Voice is from the Listener, in the game's units.
 	distance float32
@@ -150,6 +177,12 @@ func (s *voiceSlot) info(enginePaused bool) VoiceInfo {
 		Audibility: s.audibility(),
 		Distance:   s.distance,
 	}
+}
+
+// detail renders the slot as the agent-facing capability shows it: the view a
+// game reads, and the bearing that view does not carry.
+func (s *voiceSlot) detail(enginePaused bool) VoiceDetail {
+	return VoiceDetail{VoiceInfo: s.info(enginePaused), Azimuth: s.azimuth, Elevation: s.elevation}
 }
 
 // looping is whether this Voice repeats rather than ending. With no Loop Region
@@ -303,8 +336,20 @@ func NewVoices(maxVoices int) *Voices {
 	return &Voices{slots: make([]voiceSlot, maxVoices)}
 }
 
-// Len reports how many Voices are live.
+// Len reports how many Voices are live. It is correct across a steal: the
+// victim's ending and the replacement's start happen in one flush, and they net
+// to zero.
 func (v *Voices) Len() int { return v.live }
+
+// Cap reports how many Voices may exist at once - the fixed table's size, which
+// is sound's cap and the number the Adapter was told once before any Emit.
+//
+// It sits beside Len rather than being read off Config, so that a reader asking
+// whether the game is at its cap gets both numbers from one read lock. A game
+// at its cap is a game where sounds are being stolen, and that is a different
+// answer from sounds that were never played - which is exactly the distinction
+// two numbers taken a lock apart could lose.
+func (v *Voices) Cap() int { return len(v.slots) }
 
 // Info reports one Voice, and whether it exists. A handle whose generation does
 // not match its slot's addresses nothing, so a game holding a handle across a
@@ -326,6 +371,23 @@ func (v *Voices) All() iter.Seq[VoiceInfo] {
 				continue
 			}
 			if !yield(v.slots[i].info(v.enginePaused)) {
+				return
+			}
+		}
+	}
+}
+
+// details yields every live Voice with its bearing, in slot order. It is the
+// same walk All does, and it exists rather than a bearing on VoiceInfo because
+// the two readers want different things: a game asserts what it commanded, and
+// an agent that cannot hear reads the pan to find a Listener nobody rotated.
+func (v *Voices) details() iter.Seq[VoiceDetail] {
+	return func(yield func(VoiceDetail) bool) {
+		for i := range v.slots {
+			if v.slots[i].state != slotLive {
+				continue
+			}
+			if !yield(v.slots[i].detail(v.enginePaused)) {
 				return
 			}
 		}
@@ -361,7 +423,7 @@ func (v *Voices) slotOf(voice Voice) *voiceSlot {
 func (v *Voices) start(op Operation, clip clipFacts, endings *[]Ending) {
 	index := int(op.Voice.idx())
 	if index >= len(v.slots) {
-		*endings = append(*endings, Ending{Voice: op.Voice, Reason: ReasonStolen})
+		*endings = append(*endings, Ending{Voice: op.Voice, Reason: ReasonStolen, Clip: op.Clip})
 		return
 	}
 	slot := &v.slots[index]
@@ -374,7 +436,7 @@ func (v *Voices) start(op Operation, clip clipFacts, endings *[]Ending) {
 		v.vacated = append(v.vacated, VoiceSlot(index))
 	}
 	if slot.state == slotLive {
-		*endings = append(*endings, Ending{Voice: slot.voice, Reason: ReasonStolen})
+		*endings = append(*endings, Ending{Voice: slot.voice, Reason: ReasonStolen, Clip: slot.clip})
 		v.live--
 	}
 	v.sequence++
@@ -405,7 +467,7 @@ func (v *Voices) stop(voice Voice, endings *[]Ending) {
 	}
 	slot.state = slotEnded
 	v.live--
-	*endings = append(*endings, Ending{Voice: voice, Reason: ReasonStopped})
+	*endings = append(*endings, Ending{Voice: voice, Reason: ReasonStopped, Clip: slot.clip})
 }
 
 // set applies one recorded SetVoice. An absent field is unchanged.
@@ -464,7 +526,7 @@ func (v *Voices) seek(voice Voice, offset float32, endings *[]Ending) {
 			slot.playhead = slot.duration
 			slot.state = slotEnded
 			v.live--
-			*endings = append(*endings, Ending{Voice: voice, Reason: ReasonFinished})
+			*endings = append(*endings, Ending{Voice: voice, Reason: ReasonFinished, Clip: slot.clip})
 			return
 		}
 		at = slot.loopStart()
@@ -507,7 +569,7 @@ func (v *Voices) stopBus(bus Bus, endings *[]Ending) {
 		}
 		slot.state = slotEnded
 		v.live--
-		*endings = append(*endings, Ending{Voice: slot.voice, Reason: ReasonStopped})
+		*endings = append(*endings, Ending{Voice: slot.voice, Reason: ReasonStopped, Clip: slot.clip})
 	}
 }
 
@@ -574,7 +636,7 @@ func (v *Voices) resolve(lookup func(ClipRef) clipFacts, endings *[]Ending) {
 			}
 			slot.state = slotEnded
 			v.live--
-			*endings = append(*endings, Ending{Voice: slot.voice, Reason: ReasonFailed})
+			*endings = append(*endings, Ending{Voice: slot.voice, Reason: ReasonFailed, Clip: slot.clip})
 		}
 	}
 }
@@ -614,7 +676,7 @@ func (v *Voices) advance(dt float64, endings *[]Ending) {
 		slot.playhead = slot.duration
 		slot.state = slotEnded
 		v.live--
-		*endings = append(*endings, Ending{Voice: slot.voice, Reason: ReasonFinished})
+		*endings = append(*endings, Ending{Voice: slot.voice, Reason: ReasonFinished, Clip: slot.clip})
 	}
 }
 

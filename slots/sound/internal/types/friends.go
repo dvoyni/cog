@@ -2,8 +2,10 @@ package types
 
 import (
 	"io/fs"
+	"iter"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 )
 
 // The friend functions: what sound's internal/ reads and drives on a public
@@ -96,3 +98,24 @@ func BatchReset(b *Batch) { b.reset() }
 
 // ClipsDrain installs every prepare that finished, for sound's internal/.
 func ClipsDrain(c *Clips, k kernel.Kernel, backend Backend) { c.drain(k, backend) }
+
+// VoicesDetails yields every live Voice with its bearing, for sound's
+// internal/. It is a friend rather than a method on Voices because the bearing
+// is not the game's to read: the root aliases Voices, and a method would put
+// the pan on the view that exists for a game's own test to assert against.
+func VoicesDetails(v *Voices) iter.Seq[VoiceDetail] { return v.details() }
+
+// ClipRefParts reports what a ClipRef names - a storage path, or the length of
+// the encoded bytes it carries - for sound's internal/. Exactly one of them is
+// meaningful, and a path wins, which is ClipRef's own identity rule.
+//
+// It is a friend rather than a String for the reason describe is unexported: a
+// ClipRef is opaque to a game, and an exported renderer would be a second way
+// to read the path back out of a request.
+func ClipRefParts(r ClipRef) (path string, bytes int) { return r.name, r.blob.Len() }
+
+// ListenerAxes reports the Listener's orientation resolved to its forward and
+// up vectors, for sound's internal/. They are what the W3C equations are
+// handed, and they are the form in which "this 2D game never rotated its
+// Listener" is one glance rather than a quaternion to decompose.
+func ListenerAxes(l *Listener) (front, up m.Vec3) { return l.front, l.up }

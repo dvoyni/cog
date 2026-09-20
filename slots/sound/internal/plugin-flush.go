@@ -40,7 +40,10 @@ type flushScratch struct {
 //
 // It holds a write lock on all six resources at once, which is what "flushed
 // once per tick, atomically" means in lock terms: no recorder can be mid-append
-// while the queue is drained, and no reader can see half a tick's Voices.
+// while the queue is drained, and no reader can see half a tick's Voices. Its
+// own scratch and the record the last flush leaves behind are locked beside
+// them; neither is a resource any System declares, so neither widens what a
+// game contends on.
 func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var queue kernel.Write[*sound.Queue]
 	var voices kernel.Write[*sound.Voices]
@@ -49,6 +52,7 @@ func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) 
 	var listener kernel.Write[*sound.Listener]
 	var device kernel.Write[*sound.Device]
 	var scratch kernel.Write[*flushScratch]
+	var last kernel.Write[*lastFlush]
 	var filesystem kernel.Read[storage.FileSystem]
 	return func(access kernel.ResourceAccess) {
 			queue = access.GetWrite[*sound.Queue]()
@@ -58,6 +62,7 @@ func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) 
 			listener = access.GetWrite[*sound.Listener]()
 			device = access.GetWrite[*sound.Device]()
 			scratch = access.GetWrite[*flushScratch]()
+			last = access.GetWrite[*lastFlush]()
 			filesystem = access.GetRead[storage.FileSystem]()
 		}, func(k kernel.Kernel, event app.UpdateEvent) {
 			backend := p.backend.Get()
@@ -101,7 +106,16 @@ func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) 
 			// here, at the one moment every one of them is settled.
 			types.QueueRank(recorded, live, groups, heardFrom)
 
+			// The ring is written beside the event and in the same pass, so
+			// the two never disagree about what ended: the event is what a
+			// game subscribes to, and the ring is the same fact kept for the
+			// one reader that cannot subscribe to anything. It records the
+			// tick this flush ran on, which is the only moment it is known
+			// here.
+			record := last.Get()
+			record.tick = event.Tick
 			for _, ending := range work.endings {
+				record.record(ending, event.Tick)
 				k.PublishEvent(sound.VoiceEndedEvent{Voice: ending.Voice, Reason: ending.Reason})
 			}
 		}

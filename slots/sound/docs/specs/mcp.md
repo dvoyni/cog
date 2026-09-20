@@ -20,7 +20,65 @@ as amended by [the prototype](https://github.com/dvoyni/cog/issues/304),
 every section cites the tickets it came from. Where a claim rests on something
 unverified it is marked **Gap** and says what would settle it.
 
-**Nothing of this is implemented**, because `sound` is not.
+**This is implemented.** The provider is at
+`slots/sound/internal/mcpprovider.go`, the endings ring at
+`slots/sound/internal/lastflush.go`.
+
+> **Implemented by [#487](https://github.com/dvoyni/cog/issues/487).** It is a
+> rendering of a thing that already existed, so most of what follows is
+> unchanged. Where the code and this document differ, the differences are here.
+>
+> - **The capability is an `mcp.Func` over a command `sound` keeps to itself.**
+>   `voicesCmd`, its request and its response are declared in
+>   `slots/sound/internal/mcpprovider.go` and not in the root. An `mcp.Command`
+>   with zero glue — `input_state`'s shape, and the cheaper one — is rejected
+>   because a command is named by the root that declares it, so its response
+>   would be a game-facing type carrying the endings ring. The ring's whole
+>   justification is that it has exactly one reader, and a type a game can name
+>   is a second one.
+> - **The ring and the flush's `tick` are one resource**, the unexported
+>   `lastFlush`. Requirements 1 and 4 below are written by one pass and read by
+>   one reader, so they are locked together rather than separately. The type is
+>   unexported in a package nothing outside `slots/sound` may import, which is
+>   "no `kernel.Read`-able counterpart and no game-facing type" spelled in the
+>   type system rather than promised in prose.
+> - **`Ending` gained a `Clip`.** The slot is cleared at the end of the flush and
+>   the endings are read after that, so an ending that did not carry its Clip
+>   could never be told which sound it was about. `VoiceEndedEvent` is unchanged:
+>   a game holds the handle it played with and already knows.
+> - **`azimuth` and `elevation` are reached through `VoiceDetail`**, a type in
+>   `internal/types` that `slots/sound` aliases nowhere, yielded by the friend
+>   function `VoicesDetails`. They were already retained on `voiceSlot`; what
+>   #487 added is a way to read them that is not a field on `VoiceInfo`, which
+>   leaves [#467](https://github.com/dvoyni/cog/issues/467) §3 intact rather
+>   than reopening it — the pan is still off the view a game's test asserts
+>   against. Rejected: a per-handle lookup beside `All()`, which is a second walk
+>   of the table for a fact the first walk already had in hand.
+> - **`Voices.Cap()` exists**, beside `Len()`. Threading the plugin's own
+>   `maxVoices` into the provider is rejected: the count and the cap have to come
+>   from one read lock, or a listing can report 65 of 64.
+> - **`voicesInUse` and `maxVoices` are top-level fields**, not `device`'s. The
+>   description prose writes `device.ready` with its block and those two without,
+>   and the cap is `sound`'s rather than the device's.
+> - **`azimuth`, `elevation` and `distance` are `m.Maybe` under `omitzero`**, so
+>   a non-positional Voice omits them and a Voice dead ahead still reports `0`. A
+>   bare `float32` under `omitempty` would have made *heard centred* and *dead
+>   ahead* the same JSON.
+> - **The wire spellings.** `clip` is the storage path, or `blob (N bytes)` for a
+>   Clip named by bytes. `bus` is the integer a game numbers its own Buses with,
+>   `0` being Master, because `sound` has no Bus names to report. `latencyMs` is
+>   milliseconds, because a `time.Duration` marshals as nanoseconds. `endings` is
+>   oldest first — a reader asking whether the alarm sounded before the door
+>   opened reads them in the order the game played them.
+> - **No Voice handle is reported.** The field table below does not name one, and
+>   there is nothing an agent can do with a handle: it cannot stop, seek or
+>   replay a Voice. Correlating one poll's listing with the next one's is left
+>   for whatever asks for it.
+> - **A dispatch that does not happen is refused rather than reported as
+>   silence.** A stopped scheduler answers with the zero response, whose
+>   `maxVoices` is `0` — impossible in a composed engine — and the body turns
+>   that into *the game is shutting down* rather than into a game playing
+>   nothing.
 
 ---
 
@@ -290,18 +348,22 @@ Three things it says on purpose:
 
 ## Required sound changes
 
-Everything, since `sound` does not exist. What this capability specifically
+`sound` exists now, and all five are in it. What this capability specifically
 obliges the Slot to hold:
 
 1. **The endings ring** — a fixed 32-entry ring of `{clip, reason, tick}`, sized
    once at startup, written on every ending beside the `VoiceEndedEvent`. No
-   game-facing type.
+   game-facing type. It is `lastFlush` in `slots/sound/internal`, written in the
+   same pass that publishes the events.
 2. **`azimuth` and `elevation` retained per Positional Voice** for the last
    flush. They are already computed on the way to the gain matrix; what is
-   required is that they are not thrown away.
+   required is that they are not thrown away. `voiceSlot` already kept them, so
+   what #487 added is `VoiceDetail` and the friend that yields it.
 3. **`audibility` retained as the pre-pan scalar**, which stealing needs anyway.
+   It is on `VoiceInfo` already, and the listing reports that number rather than
+   deriving one of its own.
 4. **The flush's `tick` retained**, so the listing can name the moment it
-   describes.
+   describes. It is a field on `lastFlush`, beside the ring.
 5. **The provider** at `slots/sound/internal/mcpprovider.go`, with
    `voicesDescription` as a package constant reproduced above.
 
