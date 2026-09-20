@@ -974,6 +974,34 @@ uniform — because the fix is one shape for both, with no WGSL change and no
 canvas change. It is the cheap answer to "what if the buffer count ever matters",
 in place of the migration.
 
+> **Amended by [#159](https://github.com/dvoyni/cog/issues/159), built as
+> `9d944c5`.** The GPU side is one buffer at 256-strided offsets, staged CPU-side
+> and written once per frame, sized before the frame's encoder from a count the
+> gfx queue now carries. No WGSL change and no canvas change, as stated.
+>
+> **The fix was not one shape for both.** `t.uarena` was deliberately left as it
+> is: resizing it by uniform-carrying ops needs the parameter plans resolved
+> before the arena is allocated, and it saves 256 B of reused Go heap per
+> non-uniform op — 25 KB at 100 ops — against a reordering in the translator's
+> hot path. So there are now **two 256-strided CPU arenas holding the same bytes,
+> one copy apart**: `t.uarena`, gfx-side and indexed by op, and the backend's
+> staging, indexed by slot. Both exist because the `Backend` interface is between
+> them and neither side may reach into the other's memory. Dropping the backend's
+> staging and writing per draw at `slot*256` would remove the duplication and put
+> the N upload calls back, undoing half the point. This is recorded because "there
+> are two copies of this" is what a later reader will try to fix.
+>
+> Two further decisions, both against shapes this specification did not consider.
+> **Dynamic offsets were declined**: because the uniform is alone in group 0 they
+> would collapse it to one bind group for the whole frame, but gogpu's DX12 HAL
+> drops them (`hal/dx12/command.go`, `_ = offsets` under `TODO(#343)`), and DX12
+> is registered on Windows below Vulkan, so a machine without a Vulkan driver
+> would render every draw with slot 0's parameters and say nothing. **No way back
+> down was built**: one buffer at the peak is 25 KB at 100 draws, and
+> `gfx.FrameView.DrawCount` already bounds it at `DrawCount × 256` — so the
+> "no draw counter" position recorded above holds for canvas, but gfx's frame
+> snapshot does report one.
+
 ---
 
 ## Reaching the surfaces that took no material
@@ -1311,7 +1339,9 @@ Recorded so nobody reopens them believing they were overlooked.
 
 - **The uniform pool's growth** —
   [#159](https://github.com/dvoyni/cog/issues/159). Made permanent by the
-  uniform-block decision, and its cheap answer.
+  uniform-block decision, and its cheap answer. **Built** as `9d944c5`; see the
+  amendment under [The arithmetic, and the number this specification records](#the-arithmetic-and-the-number-this-specification-records)
+  for what it settled differently.
 
 - **Finishing gfx's storage-struct member packing** (#9's unfinished half). A gfx
   gap that hurts scene today, independent of anything canvas does. This
