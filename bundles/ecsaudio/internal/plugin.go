@@ -1,0 +1,54 @@
+package internal
+
+import (
+	"github.com/dvoyni/cog/bundles/ecs"
+	"github.com/dvoyni/cog/bundles/ecsaudio"
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/sound"
+)
+
+// plugin is cog's ecs-to-sound binding. Register ecs and sound beside it.
+type plugin struct{}
+
+// New makes the binding. Its Components and System belong to the ecs plugin's
+// world, which it reaches at registration through its dependency on ecs:
+//
+//	kernel.New(config).WithPlugins(
+//	    storageplugin.New(), diskstorageplugin.New(),
+//	    soundplugin.New(), otosoundplugin.New(),
+//	    ecsplugin.New(), ecsaudioplugin.New(), game.New())
+//
+// ecsaudio has no configuration, so there is no Config.
+func New() kernel.Plugin { return plugin{} }
+
+// Name reports the plugin name.
+func (plugin) Name() kernel.PluginName { return ecsaudio.Name }
+
+// Dependencies reports both halves of the binding: the System reads the ECS's
+// Stores and writes sound's queue.
+func (plugin) Dependencies() []kernel.PluginName {
+	return []kernel.PluginName{ecs.Name, sound.Name}
+}
+
+// The populations the Stores reserve for. They are hints, not caps: a Store
+// grows by doubling past its reserve. Emitters outnumber the Entities that are
+// placed for audio alone, and there is one Listener.
+const (
+	emitterReserve  = 256
+	listenerReserve = 4
+)
+
+// Register declares the three Components, the plugin-owned correspondence and
+// the one System. A Component is registered by the plugin that defines its Go
+// type, which is what keeps cog's coupling check working on Component data: the
+// types are declared in ecsaudio's root, and this plugin, shipped in the same
+// Bundle, registers them under ecsaudio.Name.
+func (plugin) Register(registrar *kernel.Registrar, _ any) error {
+	ecs.RegisterComponent[ecsaudio.Emitter](registrar, emitterReserve)
+	ecs.RegisterComponent[ecsaudio.Transform](registrar, emitterReserve)
+	ecs.RegisterComponent[ecsaudio.Listener](registrar, listenerReserve)
+	registrar.InitResource(newTable())
+	registrar.Subscribe[ecsaudio.RecordOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, record))
+	return nil
+}

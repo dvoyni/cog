@@ -15,6 +15,7 @@ import (
 	"github.com/dvoyni/cog/bundles/anim/animplugin"
 	"github.com/dvoyni/cog/bundles/canvas/canvasplugin"
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
+	"github.com/dvoyni/cog/bundles/ecsaudio/ecsaudioplugin"
 	"github.com/dvoyni/cog/bundles/ecsscene/ecssceneplugin"
 	"github.com/dvoyni/cog/bundles/input/inputplugin"
 	"github.com/dvoyni/cog/bundles/mcp/mcpplugin"
@@ -40,7 +41,7 @@ func TestTypeName_NamesEveryTypeInAFullCogCompositionUniquely(t *testing.T) {
 			storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
 			soundplugin.New(), nosoundplugin.New(),
 			inputplugin.New(), animplugin.New(), canvasplugin.New(), sceneplugin.New(), uiplugin.New(),
-			ecsplugin.New(), ecssceneplugin.New(), mcpplugin.New(),
+			ecsplugin.New(), ecssceneplugin.New(), ecsaudioplugin.New(), mcpplugin.New(),
 		)
 	if failure != nil {
 		t.Fatalf("composing every plugin failed: %v", failure)
