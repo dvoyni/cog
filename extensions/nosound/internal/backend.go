@@ -2,6 +2,7 @@ package internal
 
 import (
 	"bytes"
+	"sync"
 
 	"github.com/dvoyni/cog/extensions/nosound"
 	"github.com/dvoyni/cog/libs/assets"
@@ -10,13 +11,14 @@ import (
 	"github.com/jfreymuth/oggvorbis"
 )
 
-// preparedClip is everything nosound keeps of a Clip: the three facts the
+// preparedClip is everything nosound keeps of a Clip: the four facts the
 // contract must be able to report, and no samples. Which kind of prepared Clip
 // an Adapter makes is its own business, and this one's kind is "the header".
 type preparedClip struct {
 	duration float32
 	channels int
 	rate     int
+	region   m.Maybe[sound.LoopRegion]
 }
 
 func (c preparedClip) Duration() float32 { return c.duration }
@@ -25,20 +27,21 @@ func (c preparedClip) Channels() int { return c.channels }
 
 func (c preparedClip) SampleRate() int { return c.rate }
 
-// LoopRegion reports no region, so a looping Voice loops the whole Clip -
-// which is what every Clip with no LOOPSTART tag says, so nothing moves.
-// Reading the tag out of the Vorbis comment header is issue 483.
-func (c preparedClip) LoopRegion() m.Maybe[sound.LoopRegion] {
-	return m.Maybe[sound.LoopRegion]{}
-}
+// LoopRegion reports the span the Clip's own Vorbis comments declare, and
+// absent when it declares none - which means the whole Clip. It comes out of
+// the same header pass that already read the duration, the channels and the
+// rate, so nosound and otosound cannot disagree about a Clip.
+func (c preparedClip) LoopRegion() m.Maybe[sound.LoopRegion] { return c.region }
 
 // backend is the silent Adapter: it accepts every start, update, stop and
 // destroy and keeps none of them, and answers the two questions sound polls.
 //
-// It takes no lock and needs none. sound calls every method of a Backend from
-// its own flush, which holds a write lock on all four of its resources, so the
-// calls are serialized against each other by construction and the id counter
-// below is touched from one goroutine at a time.
+// sound calls every method of a Backend from its own flush, which holds a write
+// lock on all four of its resources, so the calls are serialized against each
+// other by construction and the id counter below is touched from one goroutine
+// at a time. The one lock here guards the one thing something other than the
+// flush reads: the Loop Regions a Clip declared and could not have, which the
+// subscription that holds a Kernel drains.
 type backend struct {
 	// device is what Device reports, built once at registration because none of
 	// it can change: nothing is opened, so nothing can be lost.
@@ -47,6 +50,13 @@ type backend struct {
 	// record: an id must be non-zero and must not repeat, and nothing else
 	// about a Clip is kept.
 	installed uint32
+
+	// droppedMu guards droppedRegions, which is the one thing nosound has to
+	// say out loud and the one place a second goroutine reaches it: Prepare
+	// writes it from sound's flush and the subscription that holds a Kernel
+	// drains it, and the two declare no resource in common to be serialized by.
+	droppedMu      sync.Mutex
+	droppedRegions []error
 }
 
 func newBackend(sampleRate int) *backend {
@@ -96,11 +106,34 @@ func (b *backend) Prepare(_ any, encoded assets.Blob) (sound.PreparedClip, bool,
 	if frames <= 0 {
 		return nil, false, nosound.ErrNoStreamLength{}
 	}
+	frames, region, dropped := clipBounds(encoded, rate, frames, frames)
+	if dropped != nil {
+		b.droppedMu.Lock()
+		b.droppedRegions = append(b.droppedRegions, dropped)
+		b.droppedMu.Unlock()
+	}
 	return preparedClip{
 		duration: float32(frames) / float32(rate),
 		channels: channels,
 		rate:     rate,
+		region:   region,
 	}, true, nil
+}
+
+// takeDroppedRegions returns the Loop Regions dropped since the last call and
+// clears them, so each one is said once and by the one thing in this Extension
+// that holds a Kernel. Draining is what makes it once per Clip: a prepare runs
+// once per entry in sound's table, and the Adapter has no name for a Clip to
+// key kernel.ReportErrorOnce by.
+func (b *backend) takeDroppedRegions() []error {
+	b.droppedMu.Lock()
+	defer b.droppedMu.Unlock()
+	if len(b.droppedRegions) == 0 {
+		return nil
+	}
+	taken := b.droppedRegions
+	b.droppedRegions = nil
+	return taken
 }
 
 // TakePrepared returns nothing, because Prepare is always done.

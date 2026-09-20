@@ -86,13 +86,16 @@ func (p *plugin) Stop(kernel.Executioner) error {
 	return nil
 }
 
-// reportOnUpdate says the two things the device side has to say out loud, each
+// reportOnUpdate says the things the device side has to say out loud, each
 // once. A Device that could never be opened is reported once and the Adapter
 // then behaves as nosound does; a second Engine whose Config could not be
-// honoured is reported once and stays audible. A Device that was open and was
+// honoured is reported once and stays audible; a Clip whose Loop Region did not
+// fit it is reported once and plays without one. A Device that was open and was
 // then lost is reported never.
 //
-// It locks nothing, because it reads two atomics an off-tick goroutine wrote.
+// It locks nothing of the engine's. Two of the three are atomics an off-tick
+// goroutine wrote, and the third is a queue drained under the Adapter's own
+// lock - the one that is nowhere the Mixer can reach.
 func (p *plugin) reportOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	return func(kernel.ResourceAccess) {}, func(k kernel.Kernel, _ app.UpdateEvent) {
 		if failure := p.backend.failure.Load(); failure != nil {
@@ -100,6 +103,11 @@ func (p *plugin) reportOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent])
 		}
 		if ignored := p.backend.ignored.Load(); ignored != nil {
 			k.ReportErrorOnce(deviceConfigIgnoredKey{}, *ignored)
+		}
+		// Reported rather than reported-once: the queue is the dedupe, because
+		// a dropped region names a Clip and the Adapter has no name for one.
+		for _, dropped := range p.backend.takeDroppedRegions() {
+			k.ReportError(dropped)
 		}
 	}
 }

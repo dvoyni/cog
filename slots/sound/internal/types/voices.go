@@ -110,8 +110,14 @@ type voiceSlot struct {
 	// accumulated a tick at a time over minutes, and the view reports float32.
 	playhead float64
 	duration float64
-	channels int
-	clipID   ClipID
+	// loopFrom and loopTo are the span a looping Voice repeats between, in
+	// seconds. They are resolved from the Clip's Loop Region once, when the
+	// Voice binds, so that a tick's wrap is two compares and never a Maybe -
+	// and they are the whole Clip on a Clip that declares no region, which is
+	// what an absent region means and what every untagged Clip says.
+	loopFrom, loopTo float64
+	channels         int
+	clipID           ClipID
 	// born is when this Voice started, counted in Voices rather than measured,
 	// and it is what "ties broken by age, oldest first" reads. A counter rather
 	// than a playhead or a tick number because two Voices played in one tick at
@@ -152,14 +158,23 @@ func (s *voiceSlot) info(enginePaused bool) VoiceInfo {
 	}
 }
 
-// looping is whether this Voice repeats rather than ending. With no Loop Region
-// on the Clip it repeats the whole of it, which is what every Clip says today.
+// looping is whether this Voice repeats rather than ending. It says that the
+// Voice repeats and never where: where is the Clip's to declare, and with no
+// Loop Region on it the Voice repeats the whole of it.
 func (s *voiceSlot) looping() bool { return s.params.Loop.Or(false) }
 
-// loopStart is where a looping Voice repeats from, in seconds. The Loop Region
-// a Clip can declare is the Adapter's parse and reaches sound on PreparedClip;
-// until sound reads it, every loop is the whole Clip and every wrap is to zero.
-func (s *voiceSlot) loopStart() float64 { return 0 }
+// loopStart and loopEnd are the span a looping Voice repeats between, in
+// seconds. They are the Clip's Loop Region where it declares one and the whole
+// Clip where it does not, which is what an absent region means - so a Clip with
+// no tags loops exactly as every Clip looped before the tags existed.
+//
+// A loop point is a fact about a Clip and never a parameter of a Voice: nothing
+// a game says reaches these, and Loop stays the bool it always was. It simply
+// stops meaning repeat the whole Clip and starts meaning repeat the way this
+// Clip says to.
+func (s *voiceSlot) loopStart() float64 { return s.loopFrom }
+
+func (s *voiceSlot) loopEnd() float64 { return s.loopTo }
 
 // rate is the playback rate this Voice advances at, 1 being the Clip's own. A
 // negative Pitch would run a Voice backwards off the front of its buffer and
@@ -183,17 +198,32 @@ func (s *voiceSlot) suspended(enginePaused bool) bool {
 // than clamping because a looping Voice never ends by itself, and it subtracts
 // in a loop rather than taking a remainder so that a rate that overshoots by
 // several spans in one tick still lands inside one.
+//
+// The span it wraps at is the Clip's loop end and not its duration. On a Clip
+// with an intro and a loop those are different places, and a playhead that
+// wrapped at the duration would report the Voice playing through a tail the
+// Adapter stopped playing a bar ago.
 func (s *voiceSlot) wrap() {
-	span := s.duration - s.loopStart()
+	if s.playhead < s.loopEnd() {
+		// Short of the loop end is either the intro or the loop itself, and
+		// neither is a wrap. The intro is the whole point: a looping Voice
+		// starts at the head of the Clip and runs into its loop, so a playhead
+		// before the loop start is carried forwards into it and never lifted
+		// up to it.
+		return
+	}
+	span := s.loopEnd() - s.loopStart()
 	if span <= 0 {
 		s.playhead = s.loopStart()
 		return
 	}
-	for s.playhead >= s.duration {
+	// Subtracting lands inside the span by construction: the playhead is at
+	// least the loop end, so taking whole spans off it cannot fall below the
+	// loop start. It is the same arithmetic the Mixer's own playhead runs, and
+	// the two must agree to the frame or the view describes a different sound
+	// from the one in the room.
+	for s.playhead >= s.loopEnd() {
 		s.playhead -= span
-	}
-	if s.playhead < s.loopStart() {
-		s.playhead = s.loopStart()
 	}
 }
 
@@ -438,8 +468,11 @@ func (v *Voices) set(voice Voice, params Params) {
 //
 // A negative offset clamps to zero. An offset past the end ends a one-shot with
 // ReasonFinished and wraps a looping Voice to its loop start, never to zero -
-// which is the same thing today, and stops being so when a Clip's Loop Region
-// reaches here.
+// which is where the Clip's Loop Region is felt on the game face: a seek off
+// the end of a track with an intro lands in the loop rather than replaying the
+// intro. The end it is past is the Clip's, not the loop's: a seek is where the
+// game asked to be, and a looping Voice put down inside its tail is carried
+// back into its span by the next wrap rather than refused here.
 //
 // What crosses the seam is a VoiceStart carrying the new Offset, which is how a
 // web Adapter's sample-accurate start(when, offset) is reached without the seam
@@ -696,11 +729,25 @@ func (v *Voices) endTick() {
 
 // bind attaches a resident Clip to a Voice that was waiting on it. The Voice
 // starts from its offset: a 300 ms load must not play a footstep's tail.
+//
+// It is also where the Clip's Loop Region becomes two numbers, so that no tick
+// ever unwraps a Maybe: absent is the whole Clip, and a region the Clip's own
+// duration does not contain is the whole Clip too. That last guard is not
+// distrust of the Adapter, which drops a malformed region itself and reports
+// it; it is that wrap subtracts a span in a loop, and a span that is not inside
+// the Clip is a loop with no reason to stop.
 func (s *voiceSlot) bind(clip clipFacts) {
 	s.pending = false
 	s.clipID = clip.id
 	s.duration = float64(clip.duration)
 	s.channels = clip.channels
+	s.loopFrom, s.loopTo = 0, s.duration
+	if region, ok := clip.region.Get(); ok {
+		start, end := float64(region.Start), float64(region.End)
+		if start >= 0 && end > start && end <= s.duration {
+			s.loopFrom, s.loopTo = start, end
+		}
+	}
 	s.playhead = s.offset
 	s.started = true
 }

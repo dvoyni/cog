@@ -14,12 +14,16 @@ type fakeClip struct {
 	duration float32
 	channels int
 	rate     int
+	// region is the Clip's Loop Region, absent unless a test gives it one. An
+	// Adapter parses it out of the file's Vorbis comments; what sound sees is
+	// two numbers in seconds, which is exactly what this hands it.
+	region m.Maybe[sound.LoopRegion]
 }
 
 func (c fakeClip) Duration() float32                     { return c.duration }
 func (c fakeClip) Channels() int                         { return c.channels }
 func (c fakeClip) SampleRate() int                       { return c.rate }
-func (c fakeClip) LoopRegion() m.Maybe[sound.LoopRegion] { return m.Maybe[sound.LoopRegion]{} }
+func (c fakeClip) LoopRegion() m.Maybe[sound.LoopRegion] { return c.region }
 
 // fakeBackend is the Adapter these tests compose: it records what sound handed
 // it and answers what sound polls, so a test asserts about the Slot's own
