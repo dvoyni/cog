@@ -187,8 +187,11 @@ not defer anything.
 2. **Apply the tick's operations**, in the order they were recorded. A `Play` or
    `Preload` naming an unknown Clip reads its bytes and calls `Prepare` here; a
    `Release` stops the Voices on that Clip and queues its `Destroy`.
-3. **Compute**: advance every playhead, resolve stealing, run the equations, and
-   fold each Bus volume into each Voice's gain matrix.
+3. **Compute**: advance every playhead, run the equations, and fold each Bus
+   volume into each Voice's gain matrix. Stealing is *applied* here and not
+   resolved here — the victim was chosen when the play was recorded, because
+   that is where the handle that names its slot was minted. See
+   [Stealing](#stealing).
 4. **`Emit(batch)`** once.
 
 Draining first is what makes a release recorded against an in-flight `Prepare`
@@ -457,6 +460,38 @@ alternative — a play always steals something — means the hundredth footstep 
 bug silences the music, which is the failure the cap exists to prevent. The
 game's code path is identical either way, because there is nowhere to put a
 *your play was refused* case.
+
+**Settled here:** three things this spec asserts cannot all hold at a full
+table — the handle is minted when the play is **recorded**, the handle **is the
+index**, and stealing resolves in the **compute** phase. The minter has no slot
+to hand out at record time and the victim is not chosen until the flush.
+
+**The third one bends.** The victim is chosen when the play is recorded, against
+the table as it stood at the end of the last flush; compute only applies what
+the handle already says. The other two are visible to a game — it holds the
+handle, and every verb resolves through it — while *stealing resolves in
+compute* is visible to nobody: what a game can observe is that the victim is in
+the view until the flush that steals it, and that stays true either way.
+Deferring the mint instead would bend what a game **can** see, because a play
+that might lose would hand back a handle addressing nothing until the next tick,
+`Play` would have two return shapes, and a `Stop` recorded beside it would
+silently miss.
+
+Two consequences, stated rather than left implied:
+
+- **A play can only steal a Voice that was live at the end of the last flush.**
+  It cannot steal a Voice started earlier in its own tick, so a hundred plays on
+  one frame consume at most the slots that existed and the rest lose outright.
+- **The ranking context is one moment.** Every candidate, the incoming play
+  included, is ranked against the same Bus volumes and the same Listener — the
+  ones every other question a recorder asks is already answered from. No two
+  candidates are compared across a frame boundary.
+
+**A recorder holds the queue's write lock and nothing else**, which is why the
+Bus volumes and the Listener are *copied* to where the handle is minted at the
+end of each flush rather than read there. A `Play` that had to lock the `Buses`
+and the `Listener` to rank itself would widen every recorder's lock set, and
+`sound`'s resources are several precisely so that they do not contend.
 
 ### Why a Voice ends
 
@@ -1232,7 +1267,9 @@ type VoiceSlot int
 cannot cross into an Adapter without exporting the accessors
 [#301](https://github.com/dvoyni/cog/issues/301) refused — so it does not cross
 at all. **`sound` guarantees a slot is stopped before it is reused**, so the
-Adapter never sees an ambiguous id and needs no generation of its own. The map
+Adapter never sees an ambiguous id and needs no generation of its own — and a
+steal is where the two land in one batch, which is why `Stops` are applied
+before `Starts`. The map
 between the two is `sound`'s, and it is indexable because the handle's index half
 *is* the slot.
 
@@ -1310,8 +1347,8 @@ duration of the call*.
 type Batch struct {
 	Starts   []VoiceStart
 	Updates  []VoiceUpdate
-	Stops    []VoiceSlot
-	Destroys []ClipID // ordered after the stops that precede them
+	Stops    []VoiceSlot // applied first, before the starts that reuse their slots
+	Destroys []ClipID    // ordered after the stops that precede them
 }
 
 type VoiceStart struct {

@@ -90,13 +90,16 @@ func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) 
 			types.VoicesCollect(live, &work.batch, arrived)
 			backend.Emit(&work.batch)
 
+			types.VoicesEndTick(live)
+
 			// The slots come back only now, after the batch carrying their
 			// stops has been handed over, which is what "a slot is stopped
-			// before sound reuses it" costs: one pass, once a tick.
-			for _, ending := range work.endings {
-				types.QueueRelease(recorded, ending.Voice)
-			}
-			types.VoicesEndTick(live)
+			// before sound reuses it" costs: one pass, once a tick. The same
+			// pass ranks the Voices that stayed, because who loses the cap is
+			// decided when a play is recorded and a recorder holds nothing but
+			// the Queue - the table, the Buses and the Listener are all read
+			// here, at the one moment every one of them is settled.
+			types.QueueRank(recorded, live, groups, heardFrom)
 
 			for _, ending := range work.endings {
 				k.PublishEvent(sound.VoiceEndedEvent{Voice: ending.Voice, Reason: ending.Reason})

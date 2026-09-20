@@ -3,8 +3,6 @@ package types
 import (
 	"iter"
 	"time"
-
-	"github.com/dvoyni/cog/libs/m"
 )
 
 // VoiceInfo is one live Voice as the read-only view shows it: what the game
@@ -114,6 +112,13 @@ type voiceSlot struct {
 	duration float64
 	channels int
 	clipID   ClipID
+	// born is when this Voice started, counted in Voices rather than measured,
+	// and it is what "ties broken by age, oldest first" reads. A counter rather
+	// than a playhead or a tick number because two Voices played in one tick at
+	// one position tie on every other term exactly - a double footstep, two
+	// shell casings, a burst weapon - and a tick number would leave that tie
+	// to be broken by whatever order the table happened to be walked in.
+	born uint64
 	// pending is a Voice whose Clip is not resident yet: addressable, Stop-able
 	// and silent, its playhead not advancing until the Clip installs.
 	pending bool
@@ -205,6 +210,15 @@ func (s *voiceSlot) audibility() float32 {
 	return s.params.Volume.Or(1) * s.busGain * s.spatialGain
 }
 
+// rank is what stealing orders this Voice by. It reads audibility as it stands,
+// which is the audibility a paused Voice would have if it were not paused:
+// pausing neither protects a Voice nor puts it first on the block, and ranking
+// a suspended Voice at zero would make "pause the music for a cutscene" a
+// reliable way to lose the music.
+func (s *voiceSlot) rank() rank {
+	return rank{priority: s.params.Priority.Or(0), audibility: s.audibility(), born: s.born}
+}
+
 // spatialize recomputes what the Listener makes of this Voice: its distance,
 // its bearing, and the falloff and cone that multiply into its audibility. It
 // reports whether any of that moved, which is what re-emits a Voice nothing
@@ -221,19 +235,7 @@ func (s *voiceSlot) spatialize(listener *Listener) bool {
 	if position, ok := s.params.Position.Get(); ok {
 		offset := position.Sub(listener.position)
 		distance = offset.Length()
-
-		gain := distanceGain(s.params.Falloff.Or(Falloff{}).resolve(), float64(distance))
-
-		// A cone needs a facing. W3C's (1,0,0) orientation default is not
-		// inherited, so a Positional Voice that was never turned is equally
-		// loud in every direction whatever its Cone says - which is the only
-		// way a Voice can never be accidentally directional along an axis
-		// nobody chose.
-		if orientation, ok := s.params.Orientation.Get(); ok {
-			forward := orientation.Rotate(m.Vec3{Z: -1})
-			gain *= coneGain(s.params.Cone.Or(Cone{}).resolve(), position, forward, listener.position)
-		}
-		spatial = float32(gain)
+		spatial = s.params.spatialGain(listener.position, distance)
 
 		bearing, height := azimuthElevation(position, listener.position, listener.front, listener.up)
 		azimuth, elevation = float32(bearing), float32(height)
@@ -283,6 +285,16 @@ type Voices struct {
 	// property of a Voice: a Voice played under one is suspended from its first
 	// tick without anybody having said so about it.
 	enginePaused bool
+	// sequence stamps each Voice with the order it was started in, which is
+	// what "ties broken by age" compares. It counts starts rather than ticks,
+	// so two Voices played in one tick are still ordered.
+	sequence uint64
+	// vacated is the slots a start took over from a Voice the Adapter was
+	// holding, so the stop it is owed survives the slot being overwritten in
+	// the same flush. It is what "sound stops a slot before it reuses one"
+	// costs when a steal and its replacement land in one tick, and it keeps
+	// its capacity between ticks.
+	vacated []VoiceSlot
 }
 
 // NewVoices builds the table at its fixed size. The size is sound's cap, and
@@ -340,6 +352,12 @@ func (v *Voices) slotOf(voice Voice) *voiceSlot {
 //
 // A play whose handle names no slot is the incoming play losing the cap. It
 // still got a real handle, and its ending arrives in this same flush.
+//
+// A play whose handle names a slot another Voice is still holding is a ranked
+// steal: the minter chose that slot when the play was recorded, and the Voice
+// on it ends here with ReasonStolen. The choice is not remade here, because the
+// handle already carries it - see minter.mint for why that is where it has to
+// be made.
 func (v *Voices) start(op Operation, clip clipFacts, endings *[]Ending) {
 	index := int(op.Voice.idx())
 	if index >= len(v.slots) {
@@ -347,6 +365,19 @@ func (v *Voices) start(op Operation, clip clipFacts, endings *[]Ending) {
 		return
 	}
 	slot := &v.slots[index]
+	if slot.emitted {
+		// The Adapter is holding a Voice here, so it is stopped before the slot
+		// is reused, whether the Voice it held is being stolen now or ended
+		// earlier in this same tick. Nothing about stealing crosses the seam:
+		// what the Adapter gets is an ordinary stop, ordered before the start
+		// that takes the slot over.
+		v.vacated = append(v.vacated, VoiceSlot(index))
+	}
+	if slot.state == slotLive {
+		*endings = append(*endings, Ending{Voice: slot.voice, Reason: ReasonStolen})
+		v.live--
+	}
+	v.sequence++
 	*slot = voiceSlot{
 		state:    slotLive,
 		voice:    op.Voice,
@@ -355,6 +386,7 @@ func (v *Voices) start(op Operation, clip clipFacts, endings *[]Ending) {
 		params:   op.Params,
 		offset:   float64(op.Offset),
 		playhead: float64(op.Offset),
+		born:     v.sequence,
 		pending:  true,
 		fresh:    true,
 	}
@@ -602,6 +634,11 @@ func (v *Voices) advance(dt float64, endings *[]Ending) {
 // where it was when the Device went away. A start is the only operation that
 // carries a position, so a restart is the resync.
 func (v *Voices) collect(batch *Batch, resync bool) {
+	// The slots a start took over go first, so the stop a stolen Voice is owed
+	// is stated before the start that reuses its slot rather than after it. An
+	// Adapter's table is a fixed array indexed by slot and its two operations
+	// on one entry in one batch are not commutative.
+	batch.Stops = append(batch.Stops, v.vacated...)
 	for i := range v.slots {
 		slot := &v.slots[i]
 		switch {
@@ -645,6 +682,7 @@ func (v *Voices) collect(batch *Batch, resync bool) {
 // endTick clears what only this flush meant: the slots whose Voices ended, and
 // the per-tick flags of the ones that did not.
 func (v *Voices) endTick() {
+	v.vacated = v.vacated[:0]
 	for i := range v.slots {
 		slot := &v.slots[i]
 		switch slot.state {

@@ -18,10 +18,14 @@ func QueueOperations(q *Queue) []Operation { return q.operations() }
 // QueueReset calls Queue.reset for sound's internal/.
 func QueueReset(q *Queue) { q.reset() }
 
-// QueueRelease returns a Voice's slot to Queue's minter for sound's internal/.
-// It is called in the flush that ended the Voice, so the slot cannot be
-// re-minted before the batch carrying its stop has been emitted.
-func QueueRelease(q *Queue, voice Voice) { q.slots.release(voice.idx()) }
+// QueueRank restates Queue's free list, its steal order and the context an
+// incoming play is ranked against, from the table as this flush leaves it, for
+// sound's internal/.
+//
+// It is called after the batch has been handed over, so a slot cannot be
+// re-minted before the stop that vacated it has been emitted, and it is what a
+// recorder reads when the next tick asks who loses the cap.
+func QueueRank(q *Queue, v *Voices, b *Buses, l *Listener) { q.slots.rebuild(v, b, l) }
 
 // ClipsResolve reads and prepares a Clip the table has no entry for, and
 // answers what sound knows about it either way, for sound's internal/.
