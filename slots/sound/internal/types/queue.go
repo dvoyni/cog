@@ -1,6 +1,10 @@
 package types
 
-import "github.com/dvoyni/cog/libs/m"
+import (
+	"slices"
+
+	"github.com/dvoyni/cog/libs/m"
+)
 
 // OpKind names what one recorded operation does.
 type OpKind uint8
@@ -38,6 +42,39 @@ type Operation struct {
 	Params Params
 }
 
+// rank is the key stealing orders Voices by: the lowest (priority, audibility)
+// loses, ties broken by age, oldest first.
+//
+// Priority is a band and not a weight, which is the whole of why it is a
+// separate field compared first rather than a factor folded into audibility: a
+// lower-priority Voice always loses to a higher-priority one whatever the gains
+// say, and a weight would let a loud enough crowd of footsteps outvote music.
+type rank struct {
+	priority   int
+	audibility float32
+	born       uint64
+}
+
+// below reports whether a is stolen before b. It is a total order, because born
+// is unique, which is what makes the tie a contract rather than a symptom of
+// whatever order the table happened to be walked in.
+func (a rank) below(b rank) bool {
+	switch {
+	case a.priority != b.priority:
+		return a.priority < b.priority
+	case a.audibility != b.audibility:
+		return a.audibility < b.audibility
+	default:
+		return a.born < b.born
+	}
+}
+
+// candidate is one occupied slot as the steal order holds it.
+type candidate struct {
+	index uint32
+	key   rank
+}
+
 // minter hands out Voice handles at the moment a play is recorded, so a handle
 // is usable in the same tick that recorded it and there is no command to wait
 // on. It owns the generations, and the live table owns nothing but the handle
@@ -45,6 +82,36 @@ type Operation struct {
 //
 // The table is fixed and generational, so no free list beyond the slots
 // themselves and no map from handle to Voice is needed: the handle is the index.
+//
+// # Where stealing is resolved, and why it is here
+//
+// The spec asserts three things that cannot all hold at a full table: a handle
+// is minted when the play is recorded, the handle is the index, and stealing
+// resolves in the compute phase. The minter has no slot to hand out at record
+// time, and compute has not run yet.
+//
+// The one that bends is the third. The other two are visible to a game - it
+// holds the handle, and every verb resolves through it - while "stealing
+// resolves in compute" is visible to nobody: what a game can observe is that
+// the victim is in the view until the flush that steals it, and that is true
+// either way. And the alternative bends what a game can see: deferring the mint
+// would mean a play that might lose hands back a handle that addresses nothing
+// until the next tick, so Play would have two return shapes and a Stop recorded
+// beside it would silently miss.
+//
+// So the victim is chosen here, when the play is recorded, against the table as
+// it stood at the end of the last flush - which is the same table every other
+// question a recorder asks is answered from, because a Bus volume and the
+// Listener are also read as of the last flush. Two consequences are stated
+// rather than left implied:
+//
+//   - A play can only steal a Voice that was live at the end of the last flush.
+//     A play cannot steal a Voice started earlier in its own tick, so a hundred
+//     plays in one frame consume at most the slots that existed, and the rest
+//     lose outright.
+//   - The ranking context is one moment. Every candidate, the incoming play
+//     included, is ranked against the same Bus volumes and the same Listener,
+//     so no two of them are compared across a frame boundary.
 type minter struct {
 	// generations is each slot's current generation, one per slot, starting at
 	// 0 so the first mint hands out generation 1.
@@ -52,6 +119,17 @@ type minter struct {
 	// free is the slots nothing holds, popped from the end so slot 0 goes first
 	// and a test reads the handles it expects.
 	free []uint32
+	// order is the occupied slots, best first so the one stolen next is popped
+	// from the end the way a free slot is. It is rebuilt once per flush and
+	// consumed by the steals a tick records.
+	order []candidate
+	// busVolumes and listenerAt are the ranking context: what an incoming
+	// play's audibility is computed against, as of the end of the last flush.
+	// They are copied rather than reached for because a recorder holds the
+	// Queue's write lock and nothing else - a Play that had to read the Buses
+	// and the Listener would widen every recorder's lock set to do it.
+	busVolumes [MaxBuses]float32
+	listenerAt m.Vec3
 	// unslotted counts the handles minted for plays that found no slot at all.
 	// They carry index len(generations), which addresses nothing, and their
 	// Voices end with ReasonStolen in the flush that recorded them - the
@@ -67,25 +145,81 @@ func newMinter(maxVoices int) minter {
 	return minter{generations: make([]uint32, maxVoices), free: free}
 }
 
-// mint hands out the next handle, taking a free slot when there is one.
-func (m *minter) mint() Voice {
+// mint hands out the next handle: a free slot when there is one, otherwise the
+// slot of the Voice this play outranks, otherwise a handle that addresses
+// nothing because this play is the one that lost.
+//
+// Bumping the generation of a stolen slot does not disturb the Voice still
+// sitting in it. The live table compares the whole handle, and the slot still
+// holds the victim's, so every operation the rest of this tick records against
+// the victim still finds it - and is applied in order, before the start that
+// takes the slot over.
+func (m *minter) mint(params Params) Voice {
 	if n := len(m.free); n > 0 {
 		index := m.free[n-1]
 		m.free = m.free[:n-1]
-		m.generations[index]++
-		return newVoice(index, m.generations[index])
+		return m.handle(index)
+	}
+	if n := len(m.order); n > 0 && m.order[n-1].key.below(m.incoming(params)) {
+		index := m.order[n-1].index
+		m.order = m.order[:n-1]
+		return m.handle(index)
 	}
 	m.unslotted++
 	return newVoice(uint32(len(m.generations)), m.unslotted)
 }
 
-// release returns a slot to the free list. sound calls it when a Voice ends, in
-// the flush that ended it, so the slot cannot be re-minted until the batch
-// carrying its stop has been emitted.
-func (m *minter) release(index uint32) {
-	if int(index) < len(m.generations) {
-		m.free = append(m.free, index)
+// handle mints the next generation of one slot.
+func (m *minter) handle(index uint32) Voice {
+	m.generations[index]++
+	return newVoice(index, m.generations[index])
+}
+
+// incoming is the rank of a play that has no slot yet. Its age is the largest
+// there is, because it is the youngest thing in the comparison: an incoming
+// play loses only when it is strictly below every Voice on the table, never on
+// a tie, which is the other half of "ties broken by age, oldest first".
+func (m *minter) incoming(params Params) rank {
+	busGain := m.busVolumes[params.Bus.Or(Master).resolve()]
+	return rank{
+		priority:   params.Priority.Or(0),
+		audibility: params.audibility(busGain, m.listenerAt),
+		born:       ^uint64(0),
 	}
+}
+
+// rebuild restates the free list, the steal order and the ranking context from
+// the table. sound calls it once per flush, after the batch carrying this
+// tick's stops has been handed over, which is what "a slot is stopped before
+// sound reuses it" costs.
+//
+// It rebuilds both lists in one pass rather than releasing a slot per ending,
+// so the two can never disagree: a slot is free or it is stealable, never both
+// and never neither. A steal that hands a victim's slot straight to the play
+// that took it is exactly the case a per-ending release got wrong, because the
+// ending names a Voice whose index is already somebody else's.
+func (m *minter) rebuild(live *Voices, buses *Buses, listener *Listener) {
+	m.free, m.order = m.free[:0], m.order[:0]
+	for i := len(live.slots) - 1; i >= 0; i-- {
+		if slot := &live.slots[i]; slot.state == slotLive {
+			m.order = append(m.order, candidate{index: uint32(i), key: slot.rank()})
+		} else {
+			m.free = append(m.free, uint32(i))
+		}
+	}
+	// Best first, so the next victim is the last entry. The order is total, so
+	// which sort this is cannot change the answer.
+	slices.SortFunc(m.order, func(a, b candidate) int {
+		switch {
+		case a.key.below(b.key):
+			return 1
+		case b.key.below(a.key):
+			return -1
+		default:
+			return 0
+		}
+	})
+	m.busVolumes, m.listenerAt = buses.volumes, listener.position
 }
 
 // Queue is where every operation is recorded, under a write lock, and it is
@@ -131,8 +265,20 @@ func NewQueue(maxVoices int) *Queue {
 //
 // offset is where to begin, in seconds. It returns no error: a play that finds
 // no slot still gets a real handle, and its ending arrives in the same flush.
+//
+// At a full table the handle names the slot of the Voice this play outranks,
+// and that Voice ends with ReasonStolen in the flush that applies this play.
+// The Params are read here and not only in the flush because they carry the
+// play's own rank - its Priority, its Volume, its Bus and where it is - and a
+// play that is itself the quietest thing on the table is the one that loses.
+//
+// They stay one ordered list and are still applied in order: this reads them, it
+// does not consume them. The one place a Play followed by a SetVoice is not
+// indistinguishable from a Play that carried the same Params is here, at a full
+// table, because the slot was handed out before the SetVoice was recorded. A
+// game that wants a sound to survive the cap says so on the Play.
 func (q *Queue) Play(clip ClipRef, offset float32, params Params) Voice {
-	voice := q.slots.mint()
+	voice := q.slots.mint(params)
 	q.ops = append(q.ops, Operation{Kind: OpPlay, Voice: voice, Clip: clip, Offset: offset, Params: params})
 	return voice
 }

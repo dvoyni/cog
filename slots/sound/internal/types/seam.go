@@ -67,11 +67,17 @@ type VoiceUpdate struct {
 // Batch is one tick's operations, handed over in a single Emit. It is owned by
 // sound and valid only for the duration of that call, which is gfx.Execute's
 // shape one Slot over.
+//
+// An Adapter applies the stops first, then the starts, then the updates. The
+// fields are not commutative on one slot and a steal states both of them about
+// it in one tick: the victim's stop, and the start that takes its slot over.
+// That is the whole of what "sound stops a slot before it reuses one" asks of
+// an Adapter, and it is why stealing needs no verb of its own down here.
 type Batch struct {
 	Starts   []VoiceStart
 	Updates  []VoiceUpdate
-	Stops    []VoiceSlot
-	Destroys []ClipID // ordered after the stops that precede them
+	Stops    []VoiceSlot // applied first, before the starts that reuse their slots
+	Destroys []ClipID    // ordered after the stops that precede them
 }
 
 // reset empties b for the next tick without giving its capacity back, so a

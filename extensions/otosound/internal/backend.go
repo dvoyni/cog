@@ -158,6 +158,13 @@ func (b *backend) Emit(batch *sound.Batch) {
 	// published beside it - and merging is the only place an update coalesces.
 	coalesce := b.ring.merging()
 
+	// The stops go first. sound stops a slot before it reuses one, and a steal
+	// puts both in one batch: the victim's stop and the start that takes its
+	// slot over. Recorded the other way round, the stop would arrive at the
+	// Mixer after the start and fade out the Voice that had just replaced it.
+	for _, slot := range batch.Stops {
+		b.ring.record(op{kind: opStop, slot: slot}, coalesce)
+	}
 	for i := range batch.Starts {
 		start := &batch.Starts[i]
 		b.ring.record(op{
@@ -173,9 +180,6 @@ func (b *backend) Emit(batch *sound.Batch) {
 	for i := range batch.Updates {
 		update := &batch.Updates[i]
 		b.ring.record(op{kind: opUpdate, slot: update.Slot, params: update.Params}, coalesce)
-	}
-	for _, slot := range batch.Stops {
-		b.ring.record(op{kind: opStop, slot: slot}, coalesce)
 	}
 	for _, id := range batch.Destroys {
 		b.mark(id)

@@ -27,13 +27,16 @@ func TestAHandleIsMintedWhenThePlayIsRecorded(t *testing.T) {
 // one before it does not compare equal to.
 func TestASlotIsHandedOutAgainAtTheNextGeneration(t *testing.T) {
 	queue := NewQueue(1)
+	voices, buses, listener := NewVoices(1), NewBuses(), NewListener()
 
 	first := queue.Play(ClipWithResource("a.ogg"), 0, Params{})
 	if got := first.String(); got != "Voice(0v1)" {
 		t.Fatalf("the first handle renders %s, want Voice(0v1)", got)
 	}
 
-	QueueRelease(queue, first)
+	// The slots come back from the table rather than one ending at a time, so
+	// a flush that leaves the table empty is what frees slot 0 again.
+	QueueRank(queue, voices, buses, listener)
 	second := queue.Play(ClipWithResource("a.ogg"), 0, Params{})
 	if got := second.String(); got != "Voice(0v2)" {
 		t.Fatalf("the recycled slot renders %s, want Voice(0v2)", got)
