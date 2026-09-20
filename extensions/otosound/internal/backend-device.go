@@ -29,8 +29,12 @@ const retryEvery = time.Second
 // against a rate that is not the device's. The only case where the two differ
 // is a second Engine in one process, and by then the context already exists, so
 // the answer is available at once rather than a tick or two later.
+//
+// A machine with no output device at all takes the same branch as an open that
+// was refused, because take makes it the same answer. Nothing here knows the
+// difference and nothing here needs to.
 func (b *backend) open() {
-	settled, err := b.audio.open(b.askedRate, b.askedBuffer)
+	settled, err := b.take()
 	if err != nil {
 		b.fail(err)
 		b.wg.Add(1)
@@ -160,13 +164,36 @@ func (b *backend) watch() bool {
 // opens at exactly the rate every Clip was already prepared against.
 func (b *backend) retry() (facts, bool) {
 	for b.sleep() {
-		settled, err := b.audio.open(b.askedRate, b.askedBuffer)
+		settled, err := b.take()
 		if err != nil {
 			continue
 		}
 		return settled, true
 	}
 	return facts{}, false
+}
+
+// take is the whole of "get a device": ask whether the machine has one, and
+// open it if it does.
+//
+// The two are one step because the answer to the first decides whether the
+// second may happen at all. oto's context is per process and is created once;
+// on a machine with no output device its Windows driver creates one anyway,
+// substituting a silent null context that no caller can tell from a working
+// one and that is never rebuilt. Opening under that condition would trade a
+// wrong answer now for a permanently silent process, so the open is withheld
+// until there is something to open - which is also what leaves the retry above
+// with a device to find when one finally appears.
+//
+// Both failures are the same failure from here: no device could be taken. That
+// is why absence needs no branch of its own in open or attach, and why it is
+// reported, retried and finally recovered from by exactly the machinery a
+// refused open already had.
+func (b *backend) take() (facts, error) {
+	if missing := b.audio.absent(); missing != nil {
+		return facts{}, missing
+	}
+	return b.audio.open(b.askedRate, b.askedBuffer)
 }
 
 // sleep waits one retry interval, or reports false the moment the engine stops.

@@ -118,6 +118,53 @@ func TestADeviceThatCanNotBeOpenedIsReportedOnceAndTheGameRunsOn(t *testing.T) {
 	}
 }
 
+// The same promise on the machine that breaks it: no output device at all, and
+// an open that succeeds anyway.
+//
+// It is the Windows case end to end. oto answers a machine with no endpoints by
+// substituting a null context, so the open returns no error and the poll on it
+// never will, and before this the game was told its Device was Ready while
+// nothing could be heard - the one answer that makes reading sound.Device
+// useless, and a silent one, with every number in the live Voice view still
+// moving. What it should get instead is what a Device that could never be
+// opened gets: said once, and the game runs.
+func TestAMachineWithNoOutputDeviceIsReportedOnceAndTheGameRunsOn(t *testing.T) {
+	reported := make(chan error, 8)
+	h := newHarnessWith(t, &fakeAudio{missing: errNoOutputDevice}, func(err error) error {
+		reported <- err
+		return nil
+	})
+
+	voice := h.play(sound.ClipWithResource("music/pianoroll.ogg"))
+	h.tickUntilPlaying(t)
+	for range 8 {
+		h.tick()
+	}
+
+	if len(reported) != 1 {
+		t.Fatalf("a machine with no output device was reported %d times", len(reported))
+	}
+	var unavailable otosound.ErrDeviceUnavailable
+	if err := <-reported; !errors.As(err, &unavailable) {
+		t.Fatalf("what was reported is %v", err)
+	}
+	info := h.probe(voice)
+	if !info.Found {
+		t.Fatal("the Voice did not survive a machine with no output device")
+	}
+	if info.Device.Ready {
+		t.Fatal("sound reports a ready Device on a machine that can play nothing")
+	}
+	// And the other half of behaving as nosound does: the silence is audible
+	// only in the sense that nothing comes out. The Voice is still playing, and
+	// a game watching its playhead to time something off the music still sees
+	// it move.
+	if info.Info.Playhead <= 0 {
+		t.Fatalf("the playhead is at %v after nine ticks with no device, and it is supposed to run on",
+			info.Info.Playhead)
+	}
+}
+
 // probeCmd reads the live view and the Device.
 type probeCmd kernel.Command[probeRequest, probeResponse]
 type probeRequest struct{ Voice sound.Voice }

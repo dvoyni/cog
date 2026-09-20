@@ -26,6 +26,11 @@ const (
 // happens if the open that should have created one was lost to a shutdown.
 var errNoContext = errors.New("otosound: the audio context was not created")
 
+// errNoOutputDevice is a machine with no audio output device at all. It is what
+// absent reports, and it reaches a game wrapped in ErrDeviceUnavailable, which
+// supplies the "no audio device could be opened" half of the sentence.
+var errNoOutputDevice = errors.New("the machine reports no audio output device at all")
+
 // facts are what taking the device settled. They may differ from what a Config
 // asked for, because the context is per process and the first composition in it
 // owns the rate and the buffer size.
@@ -40,6 +45,25 @@ type facts struct {
 // card could not run in CI, and a process has exactly one oto context to spend,
 // so a test that opened the real one would spend it for every test after it.
 type audio interface {
+	// absent reports a machine with no output device at all, and nil for a
+	// machine that has one or for a question that could not be answered.
+	//
+	// It exists because an open that succeeds is not evidence that a device
+	// does. oto's Windows driver answers a machine with no endpoints by
+	// installing an unexported null context: it drains the mux in real time
+	// forever and its Err reports nil, so the open succeeds, the poll stays
+	// quiet, and the one condition this Adapter promises to say out loud is the
+	// one it cannot see. So it is asked separately, of the platform rather than
+	// of oto.
+	//
+	// It is asked *before* the open and not after it, and that ordering is the
+	// load-bearing part. oto's context is created once per process and is never
+	// rebuilt: a context created while no device exists holds that null context
+	// for the life of the process, so a device plugged in a minute later would
+	// never be heard however patiently the Adapter retried. Refusing to create
+	// the context at all while the machine has nothing is what keeps the retry
+	// able to recover.
+	absent() error
 	// open takes or creates the process-wide context and reports what is
 	// actually in force. It does not wait for the device to become usable, so
 	// it is cheap enough to call from startup.
@@ -75,6 +99,21 @@ var (
 // Engine. Both Engines are audible; what the second one loses is its Config.
 type otoAudio struct {
 	player *oto.Player
+}
+
+func (a *otoAudio) absent() error {
+	contextMu.Lock()
+	created := sharedContext != nil
+	contextMu.Unlock()
+	if created {
+		// The context already exists, so there is no longer anything to
+		// prevent: it was created against a machine that had a device, and a
+		// device that has gone away since is a loss. Loss is not this
+		// question, and answering it here would give the Adapter a second
+		// opinion about the one thing it has promised to stay silent on.
+		return nil
+	}
+	return noOutputDevice()
 }
 
 func (a *otoAudio) open(rate int, buffer time.Duration) (facts, error) {
