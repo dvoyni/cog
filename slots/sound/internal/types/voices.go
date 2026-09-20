@@ -350,7 +350,15 @@ func (v *Voices) advance(dt float64, endings *[]Ending) {
 // A Voice played and ended inside one flush appears in neither, which is the
 // atomic-per-tick promise seen from below: it was never audible, so there is
 // nothing to start and nothing to stop.
-func (v *Voices) collect(batch *Batch) {
+//
+// resync is the Device having just become ready, and it restates every live
+// Voice as a start at the playhead it is at now. It is what "on recovery,
+// Voices resume where the world is now" costs above the seam: the playhead
+// advanced through the outage whether or not anyone could hear it, and an
+// Adapter whose mixer table survived the loss would otherwise resume each Voice
+// where it was when the Device went away. A start is the only operation that
+// carries a position, so a restart is the resync.
+func (v *Voices) collect(batch *Batch, resync bool) {
 	for i := range v.slots {
 		slot := &v.slots[i]
 		switch {
@@ -364,6 +372,19 @@ func (v *Voices) collect(batch *Batch) {
 				Slot:   VoiceSlot(i),
 				Clip:   slot.clipID,
 				Offset: time.Duration(slot.offset * float64(time.Second)),
+				Params: slot.voiceParams(),
+			})
+			slot.emitted = true
+		case resync:
+			// The start carries this tick's Params, so a Voice whose Params
+			// also moved needs no update beside it. A Voice the Adapter never
+			// heard of is started rather than skipped: it is the same
+			// operation either way, and a slot the Adapter has forgotten is
+			// exactly what a restart is for.
+			batch.Starts = append(batch.Starts, VoiceStart{
+				Slot:   VoiceSlot(i),
+				Clip:   slot.clipID,
+				Offset: time.Duration(slot.playhead * float64(time.Second)),
 				Params: slot.voiceParams(),
 			})
 			slot.emitted = true

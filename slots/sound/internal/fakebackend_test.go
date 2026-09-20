@@ -88,6 +88,15 @@ func (b *fakeBackend) Device() sound.Device {
 	return b.device
 }
 
+// setReady is a Device arriving or going away between two ticks, which is the
+// only way any of the three states reaches sound: nothing is pushed, and the
+// flush reads whatever this says next time it asks.
+func (b *fakeBackend) setReady(ready bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.device.Ready = ready
+}
+
 func (b *fakeBackend) Prepare(token any, _ assets.Blob) (sound.PreparedClip, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

@@ -69,7 +69,20 @@ func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) 
 			types.VoicesAdvance(live, event.Dt, &work.endings)
 			types.VoicesFoldBuses(live, groups)
 
-			types.VoicesCollect(live, &work.batch)
+			// Polled once per flush, and it is a field read rather than a
+			// query. The resource is written through its pointer because
+			// replacing it would allocate a Device every tick.
+			//
+			// It is read before the batch is collected so that a Device which
+			// became ready during this tick is resynced in the tick that
+			// noticed it rather than the one after. Ready going false is not
+			// acted on at all: playback keeps being simulated, and loss is
+			// reported to nobody.
+			was := device.Get().Ready
+			*device.Get() = backend.Device()
+			arrived := device.Get().Ready && !was
+
+			types.VoicesCollect(live, &work.batch, arrived)
 			backend.Emit(&work.batch)
 
 			// The slots come back only now, after the batch carrying their
@@ -79,11 +92,6 @@ func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) 
 				types.QueueRelease(recorded, ending.Voice)
 			}
 			types.VoicesEndTick(live)
-
-			// Polled once per flush, and it is a field read rather than a
-			// query. The resource is written through its pointer because
-			// replacing it would allocate a Device every tick.
-			*device.Get() = backend.Device()
 
 			for _, ending := range work.endings {
 				k.PublishEvent(sound.VoiceEndedEvent{Voice: ending.Voice, Reason: ending.Reason})

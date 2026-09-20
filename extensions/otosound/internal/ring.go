@@ -82,6 +82,17 @@ func (r *ring) publish() (uint64, bool) {
 // coalesces.
 func (r *ring) merging() bool { return len(r.staging.ops) > 0 }
 
+// detach records that no device thread exists any more, which is what a lost
+// Device is to everything above the ring: the applied counter has stopped, and
+// a tick that kept freeing behind it would never free again.
+//
+// It is the same state a ring that has never been pulled from is in, and it
+// means the same thing - nothing is mid-copy out of anything - so the tick goes
+// back to freeing a destroyed Clip at once. The caller owes the ordering: the
+// player must have stopped reading before detach is called, or the claim is a
+// guess. otoAudio.close is PauseAndStopReading for exactly that reason.
+func (r *ring) detach() { r.pulled.Store(false) }
+
 // applied reports the sequence the Mixer has applied every batch below. The
 // tick reads it to decide what it may free: a Clip destroyed in batch N is
 // unreferenced by the voice table once N has been applied, because the stops

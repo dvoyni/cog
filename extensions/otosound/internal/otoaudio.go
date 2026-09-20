@@ -50,8 +50,13 @@ type audio interface {
 	// err reports a device that has gone away since play succeeded, which is
 	// polled rather than pushed because oto has nothing to push.
 	err() error
-	// close releases this Engine's player. The context is the process's and
-	// outlives every Engine in it.
+	// close releases this Engine's player and does not return until the player
+	// has stopped reading the Mixer. That last part is contract rather than
+	// detail: the tick frees a destroyed Clip at once whenever no device thread
+	// exists, and "no device thread exists" is true only once the player has
+	// finished whatever read it was in the middle of.
+	//
+	// The context is the process's and outlives every Engine in it.
 	close()
 }
 
@@ -136,6 +141,12 @@ func (a *otoAudio) close() {
 	if a.player == nil {
 		return
 	}
-	a.player.Pause()
+	// PauseAndStopReading rather than Pause. Pause leaves the player reading
+	// the source - oto keeps its buffer full so that Play resumes without a gap
+	// - and a Mixer that is still being read is a device thread that still
+	// exists, which is precisely what the tick is about to assume has gone.
+	// PauseAndStopReading blocks until an ongoing read finishes and does not
+	// start another, which is the barrier ring.detach needs.
+	a.player.PauseAndStopReading()
 	a.player = nil
 }

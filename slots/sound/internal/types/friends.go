@@ -60,7 +60,9 @@ func VoicesResolve(v *Voices, clips *Clips, endings *[]Ending) { v.resolve(clips
 func VoicesAdvance(v *Voices, dt float64, endings *[]Ending) { v.advance(dt, endings) }
 
 // VoicesCollect fills one tick's batch from the table for sound's internal/.
-func VoicesCollect(v *Voices, batch *Batch) { v.collect(batch) }
+// resync restates every live Voice as a start at its current playhead, which is
+// what a Device that has just become ready is owed.
+func VoicesCollect(v *Voices, batch *Batch, resync bool) { v.collect(batch, resync) }
 
 // VoicesEndTick clears what only the finished flush meant, for sound's
 // internal/.
