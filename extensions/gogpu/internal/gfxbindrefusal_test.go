@@ -89,3 +89,62 @@ func TestARefusedBindGroupDropsItsDraw(t *testing.T) {
 		t.Errorf("pending entries after the draw = %d, want the accumulator reset", len(b.acc[0]))
 	}
 }
+
+// A group the shader declares entries for and nothing filled used to be
+// skipped, not refused: flushBinds looped over the accumulator, so a group with
+// no pending entries was not looked at, and the draw encoded with that group
+// left unset. It is the quietest way a draw can be wrong - the refusal
+// machinery that catches a *short* group never fires - and the uniform arena
+// can reach it, because a slot it cannot hand out leaves group 0 empty rather
+// than short.
+func TestADeclaredGroupNothingFilledIsRefused(t *testing.T) {
+	b := newGfxBackend()
+	shader := &gfxbShader{
+		label:      "canvas.wgsl",
+		bgLayouts:  []*wgpu.BindGroupLayout{{}},
+		groupSizes: []int{1},
+	}
+
+	if b.flushBinds(nil, shader) {
+		t.Fatal("a declared group nothing filled bound, want the draw dropped")
+	}
+	if b.refusal == nil {
+		t.Error("an unfilled group went unreported")
+	}
+}
+
+// The inverse, and the reason the check cannot be "the layout is non-nil and
+// the accumulator is empty": buildShaderLayouts creates a layout for every
+// group index below the highest one a shader uses, so an unused middle group
+// has a non-nil layout with no entries in it. A scene shader composed from
+// frame (group 0) and morph (group 2) but not material (group 1) is exactly
+// that, and refusing it would drop every draw of it forever, because a refusal
+// is latched once and dropped always.
+func TestAGroupDeclaringNoEntriesIsSkipped(t *testing.T) {
+	b := newGfxBackend()
+	bg := &wgpu.BindGroup{}
+	b.bindGroups = newGfxBindGroupCache(
+		func(*wgpu.BindGroupLayout, []wgpu.BindGroupEntry) (*wgpu.BindGroup, error) {
+			return bg, nil
+		},
+		func(*wgpu.BindGroup) {},
+	)
+	shader := &gfxbShader{
+		label:      "scene.wgsl",
+		bgLayouts:  []*wgpu.BindGroupLayout{{}, {}, {}},
+		groupSizes: []int{1, 0, 1},
+	}
+	b.addEntry(0, gfxbBindEntry{key: gfxbBindingKey{kind: gfxbBindBuffer, binding: 0, id: 4}})
+	b.addEntry(2, gfxbBindEntry{key: gfxbBindingKey{kind: gfxbBindBuffer, binding: 0, id: 9}})
+	// The encoder is nil, so the two groups that do bind are seeded as already
+	// bound: the redundant-bind filter suppresses their SetBindGroup calls, and
+	// what this observes is the loop's verdict rather than its encoding.
+	b.bound = []*wgpu.BindGroup{bg, nil, bg}
+
+	if !b.flushBinds(nil, shader) {
+		t.Fatal("a group declaring no entries was refused, want it skipped")
+	}
+	if b.refusal != nil {
+		t.Errorf("an empty declared group was reported: %v", b.refusal)
+	}
+}

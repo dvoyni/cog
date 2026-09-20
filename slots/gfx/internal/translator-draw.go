@@ -77,9 +77,9 @@ func (t *translator) translateDraw(f *frame, op *types.Op, pass gfx.PassDescr, u
 	}
 	t.ops.SetPipeline(pipeline)
 	// A shader that declares no uniform block gets no uniform binding and no
-	// pooled buffer. Emitting one anyway puts an entry in a group the pipeline
-	// layout does not have, and CreateBindGroup fails the entry-count rule with
-	// the whole frame's command buffer as the casualty.
+	// slot in the backend's arena. Emitting one anyway puts an entry in a group
+	// the pipeline layout does not have, and CreateBindGroup fails the
+	// entry-count rule with the whole frame's command buffer as the casualty.
 	if plan.uniformSize > 0 {
 		u := t.packParams(t.uarena[*uoff:*uoff+uniformMax], op.Params, op.Material.Params(), plan)
 		*uoff += uniformMax

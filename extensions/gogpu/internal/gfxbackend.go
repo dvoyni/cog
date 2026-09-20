@@ -13,8 +13,11 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
-// gfxbUniformSize is the per-draw shader-parameter uniform buffer size: mat4 MVP
-// plus material params. The renderer writes only the used prefix each draw.
+// gfxbUniformSize is one draw's shader-parameter block - mat4 MVP plus material
+// params - and so the stride the arena hands out slots at. 256 is both the cap
+// on a block and minUniformBufferOffsetAlignment, which is what lets every
+// block in a frame share one buffer: a uniform binding's offset must be a
+// multiple of that alignment, and every slot's is.
 const gfxbUniformSize = 256
 
 // depthFormat is the one depth format the engine uses, renderable and
@@ -71,7 +74,10 @@ type gfxBackend struct {
 	whiteArray     *wgpu.TextureView
 	defaultSampler *wgpu.Sampler
 
-	uniforms []*wgpu.Buffer
+	// uniforms is the frame's shader-parameter blocks: one buffer at 256-strided
+	// offsets, staged CPU-side and written once. It is nil until a device is
+	// attached, and a frame with no uniform-carrying draw never gives it one.
+	uniforms *gfxbUniformArena
 
 	// Per-draw bind-group state: acc holds pending logical/native entries per
 	// group; bindGroups reuses exact resource combinations across frames; bound
@@ -81,10 +87,9 @@ type gfxBackend struct {
 	bindGroups *gfxbBindGroupCache
 	bound      []*wgpu.BindGroup
 
-	// The frame's encoder and per-draw uniform cursor, live only inside Execute
-	// so that every pass writes into the same command buffer.
-	encoder      *wgpu.CommandEncoder
-	uniformIndex int
+	// The frame's encoder, live only inside Execute so that every pass writes
+	// into the same command buffer.
+	encoder *wgpu.CommandEncoder
 
 	// depths are the DepthAuto textures, one per target size, and views caches
 	// renderable views by texture, mip and layer.
@@ -178,22 +183,30 @@ func (s *gfxRenderPass) SetPipeline(id gfx.PipelineID) {
 }
 
 func (s *gfxRenderPass) SetParams(params []byte) {
-	if s.shader == nil {
+	if s.shader == nil || s.backend.uniforms == nil {
 		return
 	}
-	// The uniform cursor is the frame's, not the pass's: every draw in the frame
-	// writes its own buffer so all the writes can precede the single submit.
-	slot := s.backend.uniformIndex
-	buffer := s.backend.uniform(slot)
-	s.backend.uniformIndex++
-	if buffer != nil {
-		_ = s.backend.queue.WriteBuffer(buffer, 0, params)
-		binding := uint32(s.shader.layout.UniformBinding)
-		s.backend.addEntry(s.shader.layout.UniformGroup, gfxbBindEntry{
-			key:    gfxbBindingKey{kind: gfxbBindUniform, binding: uint16(binding), id: uint32(slot), size: gfxbUniformSize},
-			native: wgpu.BindGroupEntry{Binding: binding, Buffer: buffer, Size: gfxbUniformSize},
-		})
+	// The block is staged rather than written: every draw in the frame shares
+	// one buffer, so the whole of it goes in one write before the single submit.
+	// A slot the arena cannot hand out emits no binding, which leaves the
+	// uniform's group unfilled - and flushBinds refuses that and drops the draw,
+	// rather than rendering it with whatever another draw put in the slot.
+	offset, ok := s.backend.uniforms.claim(params)
+	if !ok {
+		return
 	}
+	binding := uint32(s.shader.layout.UniformBinding)
+	s.backend.addEntry(s.shader.layout.UniformGroup, gfxbBindEntry{
+		key: gfxbBindingKey{
+			kind: gfxbBindUniform, binding: uint16(binding),
+			id: gfxbUniformArenaID, generation: s.backend.uniforms.generation,
+			offset: uint32(offset), size: gfxbUniformSize,
+		},
+		native: wgpu.BindGroupEntry{
+			Binding: binding, Buffer: s.backend.uniforms.buffer,
+			Offset: uint64(offset), Size: gfxbUniformSize,
+		},
+	})
 }
 
 func (s *gfxRenderPass) SetTexture(texture gfx.TextureID, group, binding int) {
@@ -317,6 +330,9 @@ func (b *gfxBackend) attach(dp gogpu.DeviceProvider, backend string) error {
 		},
 		func(group *wgpu.BindGroup) { group.Release() },
 	)
+	// After the cache, because the arena drops the cache's entries when it
+	// replaces its buffer.
+	b.uniforms = newGfxbUniformArenaOn(b)
 
 	var err error
 	b.defaultSampler, err = b.device.CreateSampler(&wgpu.SamplerDescriptor{
@@ -790,14 +806,23 @@ func (b *gfxBackend) Execute(queue *gfx.Queue) {
 	b.replacedTextures = b.replacedTextures[:0]
 	queue.ReplayBakes(b)
 
+	// Ahead of the encoder, because a resize replaces the uniform buffer and
+	// drops every bind group naming it: doing that once the encoder is open
+	// would be invalidating groups already recorded into it. The queue's own
+	// count is what makes the size knowable this early.
+	b.uniforms.reset()
+	b.uniforms.reserve(queue.ParamCount())
+
 	encoder, err := b.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{Label: "gfx"})
 	if err != nil {
 		return
 	}
 	b.encoder = encoder
-	b.uniformIndex = 0
 	queue.ReplayPasses(b)
 	b.encoder = nil
+	// After the passes and before the submit: a queue write is ordered against
+	// the submit that follows it, so one write here covers every draw's block.
+	b.uniforms.flush()
 
 	cmd, err := encoder.Finish()
 	if err != nil {
@@ -967,14 +992,37 @@ func (b *gfxBackend) addEntry(group int, e gfxbBindEntry) {
 	b.acc[group] = append(b.acc[group], e)
 }
 
-// flushBinds reuses or creates one bind group per group with pending entries,
+// flushBinds reuses or creates one bind group per group the shader declares,
 // and reports whether every one of them bound. A false is the caller's cue to
 // drop the draw: a group that did not bind leaves its bindings unset, and
 // encoding into that produces a second validation error over the first.
+//
+// It walks the shader's groups rather than the accumulator's, because a group
+// with no pending entries at all is the one case the accumulator cannot show.
+// A group the shader declares bindings for and nothing filled is a refusal like
+// any other: skipping it - which is what walking the accumulator did - encodes
+// the draw with that group unset and reports nothing, the quietest way a draw
+// can be wrong. A group the shader declares nothing for is skipped, because
+// there is nothing there to have gone missing; see gfxbShader.groupSizes for
+// why a shader has such a group at all.
 func (b *gfxBackend) flushBinds(rp *wgpu.RenderPassEncoder, shader *gfxbShader) bool {
 	bound := true
-	for g := range b.acc {
-		if len(b.acc[g]) == 0 || g >= len(shader.bgLayouts) || shader.bgLayouts[g] == nil {
+	groups := len(b.acc)
+	if declared := len(shader.bgLayouts); declared > groups {
+		groups = declared
+	}
+	for g := 0; g < groups; g++ {
+		if g >= len(shader.bgLayouts) || shader.bgLayouts[g] == nil {
+			continue
+		}
+		if g >= len(b.acc) || len(b.acc[g]) == 0 {
+			if shader.declaredEntries(g) == 0 {
+				continue
+			}
+			if err := b.noteRefusedBindGroup(shader, g); err != nil && b.refusal == nil {
+				b.refusal = err
+			}
+			bound = false
 			continue
 		}
 		slices.SortFunc(b.acc[g], func(a, b gfxbBindEntry) int {
@@ -1002,22 +1050,6 @@ func (b *gfxBackend) flushBinds(rp *wgpu.RenderPassEncoder, shader *gfxbShader) 
 		b.bound[g] = bg
 	}
 	return bound
-}
-
-// uniform returns the pooled uniform buffer at index i, creating it on demand. A
-// distinct buffer per draw lets all per-draw writes precede the single submit.
-func (b *gfxBackend) uniform(i int) *wgpu.Buffer {
-	for i >= len(b.uniforms) {
-		buffer, err := b.device.CreateBuffer(&wgpu.BufferDescriptor{
-			Label: "gfx.uniform", Size: gfxbUniformSize,
-			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
-		})
-		if err != nil {
-			return nil
-		}
-		b.uniforms = append(b.uniforms, buffer)
-	}
-	return b.uniforms[i]
 }
 
 // textureBinding resolves a texture id to the view a binding of the given

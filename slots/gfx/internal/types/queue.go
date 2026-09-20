@@ -124,6 +124,12 @@ type Queue struct {
 	// transitionsUsed marks how much of it earlier passes already claimed.
 	transitions     []TextureTransition
 	transitionsUsed int
+
+	// paramOps counts the SetParams this frame recorded. A backend staging the
+	// frame's shader-parameter blocks in one buffer needs room for them all
+	// before it replays the passes, because the first bind group naming that
+	// buffer is created during the replay and cannot outlive a resize.
+	paramOps int
 }
 
 // Reset drops all commands but keeps queue capacity for reuse.
@@ -139,6 +145,7 @@ func (q *Queue) Reset() {
 	clear(q.transitions)
 	q.transitions = q.transitions[:0]
 	q.transitionsUsed = 0
+	q.paramOps = 0
 }
 
 // TransitionTexture records a barrier to place before the next pass opens.
@@ -193,7 +200,16 @@ func (q *Queue) SetPipeline(pipeline PipelineID) {
 func (q *Queue) SetParams(params []byte) {
 	o := op{kind: opSetParams, params: params}
 	q.render = append(q.render, o)
+	q.paramOps++
 }
+
+// ParamCount is how many shader-parameter blocks the frame recorded, which is
+// how many a backend must have room for before it replays the passes.
+//
+// It is an upper bound rather than exact, and errs in the harmless direction: a
+// SetParams recorded outside every pass belongs to a stray draw, which no
+// replay reaches, so the count can only over-reserve.
+func (q *Queue) ParamCount() int { return q.paramOps }
 
 func (q *Queue) SetTexture(texture TextureID, group, binding int) {
 	o := op{
