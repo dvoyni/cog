@@ -190,6 +190,35 @@ func TestLoop_FrameAccumulatesAcrossFrames(t *testing.T) {
 	}
 }
 
+// Pause stops app.UpdateEvent, so an engine whose only signal is the absence of
+// an event cannot act on one. app publishes the change instead, once each way
+// and never once per frame that a pause stands - and before that frame's ticks,
+// so a subscriber has acted on the resume by the time the first tick back
+// reaches it.
+func TestLoop_FramePublishesThePauseItStartsAndTheOneItEnds(t *testing.T) {
+	harness := newTickHarness(t, tickTestConfig())
+
+	harness.frame(0.020)
+	if got := harness.paused(); len(got) != 0 {
+		t.Fatalf("a running engine published %v", got)
+	}
+
+	harness.control(app.TimeRequest{Action: app.TimePause})
+	harness.frame(0.020)
+	harness.frame(0.020)
+	if got := harness.paused(); len(got) != 1 || !got[0].Paused {
+		t.Fatalf("two paused frames published %v, want one pause", got)
+	}
+
+	harness.control(app.TimeRequest{Action: app.TimeResume})
+	harness.frame(0.020)
+	harness.frame(0.020)
+	want := []app.PauseChangeEvent{{Paused: true}, {Paused: false}}
+	if got := harness.paused(); !slices.Equal(got, want) {
+		t.Fatalf("a pause and a resume published %v, want %v", got, want)
+	}
+}
+
 // The zero Config takes the documented defaults.
 func TestConfig_TheZeroConfigTakesTheDefaults(t *testing.T) {
 	got := withDefaults(app.Config{})

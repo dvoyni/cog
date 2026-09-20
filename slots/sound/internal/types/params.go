@@ -29,6 +29,18 @@ type Params struct {
 	Bus m.Maybe[Bus]
 	// Volume is linear, 1 being unity.
 	Volume m.Maybe[float32]
+	// Pitch is the playback rate, 1 being the Clip's own. It reaches the
+	// Adapter as VoiceParams.Rate and it scales the playhead here, so a Voice
+	// at twice its rate ends after half its duration rather than after all of
+	// it with the Adapter having run out long before.
+	//
+	// A negative rate would run a Voice backwards off the front of its buffer
+	// and is clamped to zero, which is a legitimate freeze.
+	Pitch m.Maybe[float32]
+	// Loop makes the Voice repeat the way its Clip says to: a Clip with no Loop
+	// Region says the whole of itself, which is what every Clip says today. A
+	// looping Voice never ends by itself.
+	Loop m.Maybe[bool]
 	// Paused stops the Voice advancing without ending it. It suspends rather
 	// than silences: the playhead stops and resumes on the same sample.
 	Paused m.Maybe[bool]
@@ -43,6 +55,12 @@ func (p Params) merge(next Params) Params {
 	}
 	if value, ok := next.Volume.Get(); ok {
 		p.Volume = m.Some(value)
+	}
+	if value, ok := next.Pitch.Get(); ok {
+		p.Pitch = m.Some(value)
+	}
+	if value, ok := next.Loop.Get(); ok {
+		p.Loop = m.Some(value)
 	}
 	if value, ok := next.Paused.Get(); ok {
 		p.Paused = m.Some(value)

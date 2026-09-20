@@ -115,6 +115,8 @@ func apply(
 			types.VoicesStop(live, op.Voice, endings)
 		case types.OpSetVoice:
 			types.VoicesSet(live, op.Voice, op.Params)
+		case types.OpSeek:
+			types.VoicesSeek(live, op.Voice, op.Offset, endings)
 		}
 	}
 	types.QueueReset(recorded)

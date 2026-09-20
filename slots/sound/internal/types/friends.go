@@ -40,6 +40,15 @@ func VoicesStop(v *Voices, voice Voice, endings *[]Ending) { v.stop(voice, endin
 // VoicesSet applies one recorded SetVoice for sound's internal/.
 func VoicesSet(v *Voices, voice Voice, params Params) { v.set(voice, params) }
 
+// VoicesSeek applies one recorded Seek for sound's internal/.
+func VoicesSeek(v *Voices, voice Voice, offset float32, endings *[]Ending) {
+	v.seek(voice, offset, endings)
+}
+
+// VoicesSetEnginePaused records an engine Pause over the whole table and
+// reports whether it changed anything, for sound's internal/.
+func VoicesSetEnginePaused(v *Voices, paused bool) bool { return v.setEnginePaused(paused) }
+
 // VoicesResolve binds the Voices whose Clips became resident and ends the ones
 // whose Clips failed, for sound's internal/.
 func VoicesResolve(v *Voices, clips *Clips, endings *[]Ending) { v.resolve(clips.lookup, endings) }
