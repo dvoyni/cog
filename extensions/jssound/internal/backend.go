@@ -59,6 +59,10 @@ type backend struct {
 	// timeConstant is the browser's render quantum in seconds, which every ramp
 	// in this Adapter is shaped over.
 	timeConstant float64
+	// limit is Config.DecodedClipLimit as it was given, sentinels and all. It
+	// draws the line between the two tiers, and nothing above the seam can see
+	// which side a Clip fell on.
+	limit int
 
 	// device is what Device reports. It is a plain field written when the
 	// context's state changes, so Device() stays the field read sound polls once
@@ -113,6 +117,7 @@ func newBackend(cfg jssound.Config) *backend {
 		device:        sound.Device{Name: string(jssound.Name)},
 		gestureTarget: gestureTarget(),
 		timeConstant:  minTimeConstant,
+		limit:         cfg.DecodedClipLimit,
 	}
 	audio, err := openContext(cfg.LatencyHint)
 	if err != nil {
@@ -209,6 +214,20 @@ func (b *backend) Emit(batch *sound.Batch) {
 			s.live.update(update.Params, now)
 		}
 	}
+	// The streamed tier's whole scheduling, once per flush and on the same clock
+	// read the batch was applied at: every live Voice is told where the playhead
+	// has reached and every chunk its decode-ahead has finished goes onto the
+	// context clock. A resident Voice's pump does nothing at all.
+	//
+	// It runs after the batch rather than before it, so a Voice that started in
+	// this batch gets its first pump on the tick it started rather than waiting
+	// for the next one, and a Voice stopped in this batch is never pumped again.
+	for i := range b.slots {
+		if live := b.slots[i].live; live != nil {
+			live.pump(now)
+		}
+	}
+
 	// A destroy frees nothing by itself here. The stops before it have already
 	// told every source on that Clip to stop, and the browser keeps an
 	// AudioBuffer alive for as long as a source is still playing it, so the
@@ -288,25 +307,43 @@ func (b *backend) Prepare(token any, encoded assets.Blob) (sound.PreparedClip, b
 	if err != nil {
 		return nil, false, err
 	}
+	held := waiting{token: token, encoded: encoded, clip: clip}
 	if b.audio == nil {
 		// No Web Audio: the Clip is its headers, exactly as nosound's is. It
 		// still completes through the same queue and on the same tick boundary,
 		// so a page with no Device runs a game's audio timeline identically to
-		// one that has it.
-		b.complete(sound.Prepared{Token: token, Clip: clip}, clip)
+		// one that has it. There is no tier either, because there is nothing to
+		// decode into and nothing to schedule.
+		b.completeUndecoded(held)
 		return nil, false, nil
 	}
 	switch b.support {
 	case oggUnknown:
-		b.waiting = append(b.waiting, waiting{token: token, encoded: encoded, clip: clip})
+		b.waiting = append(b.waiting, held)
 	default:
-		b.dispatch(waiting{token: token, encoded: encoded, clip: clip})
+		b.dispatch(held)
 	}
 	return nil, false, nil
 }
 
-// dispatch sends one prepare down the route the probe chose.
+// dispatch sends one prepare down one of three routes, and is the single place
+// the tier is chosen.
+//
+// The tier is decided from the decoded size the headers already give - frames x
+// channels x 4, computed before anything is decoded - which is what makes it a
+// choice rather than a measurement. A Clip whose granule positions named no
+// length has no such size and streams whatever the limit says, exactly as the
+// spec states and exactly as otosound does; its frames are then counted on the
+// goroutine the streamed route spawns.
+//
+// Nothing above this moves. readHeaders already produced the four facts the seam
+// asks for, from the encoded bytes and with no decode, so the tier is a decision
+// about how the samples will arrive and never about what the Clip is.
 func (b *backend) dispatch(held waiting) {
+	if held.clip.unmeasured || overLimit(b.limit, held.clip.decodedBytes()) {
+		b.stream(held)
+		return
+	}
 	if b.support == oggNative {
 		b.decodeInBrowser(held)
 		return
@@ -318,6 +355,50 @@ func (b *backend) dispatch(held waiting) {
 			return
 		}
 		held.clip.buffer = buffer
+		b.complete(sound.Prepared{Token: held.token, Clip: held.clip}, held.clip)
+	}()
+}
+
+// stream is the third route: nothing is decoded at load at all. The Clip keeps
+// its bytes, a way to open decoders over them, and the filter its Voices will
+// share, and a Voice gets its samples a chunk at a time from stream.go.
+//
+// The filter is built from the context's rate, which is not the Device rate
+// being baked into what Prepare returns: an AudioContext's sampleRate is fixed
+// for the life of the context, the samples themselves are converted per Voice at
+// playback, and SampleRate still reports the file's own rate. What the Clip
+// holds is a kernel, not audio.
+func (b *backend) stream(held waiting) {
+	clip := held.clip
+	if clip.open == nil {
+		clip.open = openOgg
+	}
+	if ctxRate := b.audio.sampleRate(); ctxRate > 0 && ctxRate != clip.sourceRate {
+		clip.filter = newSincFilter(clip.sourceRate, ctxRate)
+	}
+	b.completeUndecoded(held)
+}
+
+// completeUndecoded finishes a prepare that decodes nothing: a streamed Clip,
+// and any Clip on a page with no Web Audio.
+//
+// A Clip whose length was never measured is measured here first, on a goroutine,
+// because measuring means decoding and the only other place this could run is
+// sound's flush. It is the one thing the streamed route waits for, and it waits
+// only for a broken file.
+func (b *backend) completeUndecoded(held waiting) {
+	if !held.clip.unmeasured {
+		b.complete(sound.Prepared{Token: held.token, Clip: held.clip}, held.clip)
+		return
+	}
+	if held.clip.open == nil {
+		held.clip.open = openOgg
+	}
+	go func() {
+		if err := held.clip.measure(); err != nil {
+			b.complete(sound.Prepared{Token: held.token, Err: err}, nil)
+			return
+		}
 		b.complete(sound.Prepared{Token: held.token, Clip: held.clip}, held.clip)
 	}()
 }

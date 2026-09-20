@@ -53,6 +53,9 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	if cfg.LatencyHint < 0 {
 		return jssound.ErrInvalidLatencyHint{LatencyHint: cfg.LatencyHint}
 	}
+	if cfg.DecodedClipLimit < alwaysStream {
+		return jssound.ErrInvalidDecodedClipLimit{DecodedClipLimit: cfg.DecodedClipLimit}
+	}
 	p.backend = newBackend(cfg)
 	registrar.ProvideAdapter[jssound.SoundBackend](sound.Backend(p.backend))
 	registrar.Subscribe[reportOnUpdate](p.reportOnUpdate)
