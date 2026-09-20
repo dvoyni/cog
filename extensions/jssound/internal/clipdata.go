@@ -4,6 +4,8 @@ package internal
 
 import (
 	"bytes"
+	"io"
+	"math"
 	"syscall/js"
 
 	"github.com/dvoyni/cog/extensions/jssound"
@@ -24,10 +26,34 @@ const (
 	// at 16.7 ms and this runs at 2.7 ms, so anything sound emitted would be a
 	// step by the time it was heard.
 	renderQuantum = 128
+	// bytesPerSample is one decoded sample as an AudioBuffer holds it, which is
+	// what the decoded size a Clip is measured against is counted in.
+	bytesPerSample = 4
+	// defaultDecodedClipLimit is the limit a Config that names none gets: the
+	// largest decoded size a Clip may have and still be decoded whole. At
+	// 512 KiB that is 2.97 s mono 44.1 kHz, 1.49 s stereo 44.1 kHz, 1.37 s
+	// stereo 48 kHz. It is otosound's figure, unchanged, because the two
+	// Adapters are answering one question about one Clip.
+	defaultDecodedClipLimit = 512 << 10
+	// neverStream and alwaysStream are the two sentinels DecodedClipLimit takes
+	// beside a size in bytes. One field with sentinels rather than a second
+	// bool beside it, because two fields can disagree and one cannot.
+	neverStream  = -1
+	alwaysStream = -2
 )
 
-// clipData is a prepared Clip: an AudioBuffer, and the four facts the seam asks
+// clipData is a prepared Clip in either tier, and the four facts the seam asks
 // a PreparedClip for.
+//
+// It is one type for both tiers because both tiers report the same four facts
+// and sound must not be able to tell which it got. A second type would be a
+// second thing for the Port to carry, and the day something switched on it
+// would be the day the tier stopped being the Adapter's business.
+//
+// A resident Clip is an AudioBuffer the browser or the wasm decoder made once;
+// a streamed Clip is the encoded bytes and a way to open decoders against them,
+// and its Voices each get a decoder, a resampler and a queue of chunk buffers
+// scheduled on the context clock.
 //
 // It is garbage-collectable, which is the Port's rule, and it satisfies it the
 // way sound.md says jssound would: the value is a js.Value, and syscall/js drops
@@ -66,6 +92,28 @@ type clipData struct {
 	// on the Clip rather than being reported where it is found, because a report
 	// needs a Kernel and only the tick holds one.
 	ignored error
+
+	// encoded is the Clip's own bytes. A streamed Clip reads them for as long as
+	// it lives; a resident one is handed them for the header pass and never
+	// looks again. Retaining them costs nothing either way: a Blob is a pointer
+	// and a length, so it references the run the asset Library already holds.
+	encoded assets.Blob
+	// open is how a Voice on this Clip gets a decoder, and is nil on a resident
+	// Clip - which is what "does this Clip stream" asks. It is a field rather
+	// than a package function so that a test can stream a Clip it generated with
+	// no Ogg anywhere in it, which is how a repeated or dropped frame at a loop
+	// point becomes an assertion about frame numbers rather than about floats.
+	open opener
+	// filter converts this Clip's frames to the context rate, shared by every
+	// Voice on it, and is nil when the file is already at that rate. Only a
+	// streamed Clip has one: a resident Clip is an AudioBuffer at the file's own
+	// rate and the browser converts it, seamlessly, because it is one buffer.
+	filter *sincFilter
+	// unmeasured is a Clip whose granule positions named no length. It must
+	// stream - there is no decoded size to compare against a limit - and its
+	// frames are counted before it completes, because a Clip that reported no
+	// duration would be worse than one that streams.
+	unmeasured bool
 }
 
 func (c *clipData) Duration() float32 { return c.duration }
@@ -76,11 +124,50 @@ func (c *clipData) SampleRate() int { return c.sourceRate }
 
 func (c *clipData) LoopRegion() m.Maybe[sound.LoopRegion] { return c.region }
 
+// streams reports whether this Clip's Voices read through a decoder rather than
+// out of one shared AudioBuffer.
+func (c *clipData) streams() bool { return c.open != nil }
+
 // audible reports whether this Clip has samples a Voice could be started from.
 // A Clip prepared with no Web Audio has none, and a start on it is recorded and
 // makes no sound - which is what the Device being absent means everywhere else
 // in this contract too.
-func (c *clipData) audible() bool { return c.buffer.Truthy() }
+//
+// A streamed Clip is audible with no buffer at all: its samples arrive one chunk
+// at a time once a Voice asks for them.
+func (c *clipData) audible() bool { return c.streams() || c.buffer.Truthy() }
+
+// decodedBytes is what this Clip would cost held resident, and is what
+// Config.DecodedClipLimit is compared against. It is computed from the headers
+// before anything is decoded, which is the whole reason the limit is on decoded
+// size at all.
+//
+// The frames counted are the file's rather than the context's, which is the
+// figure otosound compares too. A browser resamples into the output device's
+// rate, so the AudioBuffer really costs this scaled by the context rate over the
+// file's - but that rate moves when the player changes headphones, and a limit
+// whose meaning moved with it would put one Clip on either side of the line on
+// one machine.
+func (c *clipData) decodedBytes() int64 {
+	return c.frames * int64(c.channels) * bytesPerSample
+}
+
+// overLimit reports whether a decoded size is more than a Config will decode
+// whole. Zero is the default limit, -1 refuses to stream anything and -2 streams
+// everything. It is otosound's function, spelled the same way, because the two
+// Adapters must put one Clip in the same tier under the same number.
+func overLimit(limit int, decoded int64) bool {
+	switch limit {
+	case alwaysStream:
+		return true
+	case neverStream:
+		return false
+	case 0:
+		return decoded > defaultDecodedClipLimit
+	default:
+		return decoded > int64(limit)
+	}
+}
 
 // loopSpan is where a looping Voice on this Clip repeats between, in seconds,
 // and is what loopStart and loopEnd on the source node are set to.
@@ -96,6 +183,44 @@ func (c *clipData) loopSpan() (start, end float64) {
 		return 0, float64(c.duration)
 	}
 	return float64(region.Start), float64(region.End)
+}
+
+// sourceLoopBounds is the span a looping streamed Voice repeats between, in the
+// file's own frames. That is the domain the wrap has to happen in: a streamed
+// Voice loops by seeking its decoder, so the wrap is before the conversion
+// rather than after it, and the resampler's window reaches across the join the
+// same way it reaches across a chunk boundary. A loop applied after the
+// conversion would put the filter's edge on the loop point, which is the
+// repeated-or-dropped frame the promise forbids.
+func (c *clipData) sourceLoopBounds() (start, end int64) {
+	end = c.frames
+	region, ok := c.region.Get()
+	if !ok {
+		return 0, end
+	}
+	start = int64(math.Round(float64(region.Start) * float64(c.sourceRate)))
+	stop := int64(math.Round(float64(region.End) * float64(c.sourceRate)))
+	if stop > start && stop <= end {
+		end = stop
+	}
+	if start < 0 || start >= end {
+		return 0, c.frames
+	}
+	return start, end
+}
+
+// sourceFrame is where a position in Clip seconds lands in the file's own
+// frames, clamped into the Clip so that an offset past the end reads the end
+// rather than seeking off the stream.
+func (c *clipData) sourceFrame(seconds float64) int64 {
+	at := int64(seconds * float64(c.sourceRate))
+	if at < 0 {
+		return 0
+	}
+	if at > c.frames {
+		return c.frames
+	}
+	return at
 }
 
 // readHeaders is the one pass over a Clip's own bytes for everything the seam
@@ -117,27 +242,81 @@ func readHeaders(encoded assets.Blob) (*clipData, error) {
 	if format.SampleRate <= 0 || format.Channels <= 0 || format.Channels > outChannels {
 		return nil, jssound.ErrNoStreamFormat{SampleRate: format.SampleRate, Channels: format.Channels}
 	}
-	// A length of zero is a stream whose granule positions say nothing - a
-	// truncated file. otosound streams such a Clip, because a streamed Clip
-	// needs no decoded size; this tier has no such escape, and a Clip of no
-	// duration would make the playhead fiction and silently remove
-	// ReasonFinished from every Voice that named it.
-	if length <= 0 {
-		return nil, jssound.ErrNoStreamLength{}
-	}
-	frames, region, ignored := clipBounds(encoded, format.SampleRate, length, length)
-	if frames <= 0 {
-		return nil, jssound.ErrNoStreamLength{}
-	}
-	return &clipData{
+	clip := &clipData{
 		buffer:     js.Undefined(),
-		duration:   float32(frames) / float32(format.SampleRate),
 		channels:   format.Channels,
 		sourceRate: format.SampleRate,
-		frames:     frames,
-		region:     region,
-		ignored:    ignored,
-	}, nil
+		encoded:    encoded,
+	}
+	// A length of zero is a stream whose granule positions say nothing - a
+	// truncated file. It used to be terminal here, and is not any more: the spec
+	// says a Clip with no computable decoded size streams, which is what
+	// otosound has always done with one, so this Clip streams too and its frames
+	// are counted by measure on the goroutine that was going to decode them
+	// anyway. Counting means decoding, which is why it does not happen here: the
+	// header pass runs inside sound's flush, and the tick is the one thread this
+	// Adapter owes a whole frame to.
+	//
+	// What is not relaxed is a stream that truly holds no frames. A Clip of no
+	// duration would make the playhead and the duration fiction and silently
+	// remove ReasonFinished from every Voice that named it, so measure still
+	// fails such a Clip with the same error this used to return.
+	if length <= 0 {
+		clip.unmeasured = true
+		return clip, nil
+	}
+	if err := clip.resolve(length); err != nil {
+		return nil, err
+	}
+	return clip, nil
+}
+
+// resolve fills in the facts that follow from a length in source frames: the
+// granule-corrected frame count, the duration, and the Loop Region the same one
+// pass over the comment header reads.
+//
+// It is its own step because a Clip whose granule positions named no length
+// reaches it later and from another goroutine, once the frames have been
+// counted, and the two must reach the same answer from the same arithmetic.
+func (c *clipData) resolve(length int64) error {
+	frames, region, ignored := clipBounds(c.encoded, c.sourceRate, length, length)
+	if frames <= 0 {
+		return jssound.ErrNoStreamLength{}
+	}
+	c.frames, c.region, c.ignored = frames, region, ignored
+	c.duration = float32(frames) / float32(c.sourceRate)
+	return nil
+}
+
+// measure counts an unmeasured Clip's frames by decoding it and throwing the
+// samples away, and then resolves it.
+//
+// It is the only path in this Adapter that decodes a whole Clip it will not
+// keep, and it runs only for a file whose granule positions carry no length,
+// which is a broken one. It runs on the goroutine the streamed route spawns,
+// never on the flush.
+func (c *clipData) measure() error {
+	decoder, err := c.open(c.encoded)
+	if err != nil {
+		return jssound.ErrNotOggVorbis{Err: err}
+	}
+	scratch := make([]float32, decodeChunk*c.channels)
+	var frames int64
+	for {
+		read, err := decoder.read(scratch)
+		frames += int64(read / c.channels)
+		if err != nil || read == 0 {
+			if err != nil && err != io.EOF {
+				return jssound.ErrNotOggVorbis{Err: err}
+			}
+			break
+		}
+	}
+	if frames <= 0 {
+		return jssound.ErrNoStreamLength{}
+	}
+	c.unmeasured = false
+	return c.resolve(frames)
 }
 
 // decodeInWasm is the fallback: jfreymuth/oggvorbis decodes the Clip in Go, and

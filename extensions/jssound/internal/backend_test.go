@@ -43,7 +43,15 @@ func fixture(t *testing.T) assets.Blob {
 // and a prepare waits for the probe.
 func started(t *testing.T, f *audioFake, nativeOgg bool) *backend {
 	t.Helper()
-	b := newBackend(jssound.Config{})
+	return startedWith(t, f, nativeOgg, jssound.Config{})
+}
+
+// startedWith is the same, under a Config a test wants to name - which today is
+// only ever DecodedClipLimit, because that is the one field that changes what
+// the Adapter does with a Clip rather than what it asks the context for.
+func startedWith(t *testing.T, f *audioFake, nativeOgg bool, cfg jssound.Config) *backend {
+	t.Helper()
+	b := newBackend(cfg)
 	b.Voices(4)
 	if settled := f.settle(nativeOgg); settled != 1 {
 		t.Fatalf("the Adapter asked for %d decodes at init, want the one probe", settled)

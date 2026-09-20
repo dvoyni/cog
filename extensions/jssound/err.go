@@ -20,6 +20,16 @@ func (e ErrInvalidLatencyHint) Error() string {
 	return fmt.Sprintf("jssound: invalid LatencyHint %v", e.LatencyHint)
 }
 
+// ErrInvalidDecodedClipLimit reports a residency limit that is neither a size
+// nor one of the two sentinels. Zero is the default, -1 never streams and -2
+// always streams; anything below -2 names no tier at all.
+type ErrInvalidDecodedClipLimit struct{ DecodedClipLimit int }
+
+func (e ErrInvalidDecodedClipLimit) Error() string {
+	return fmt.Sprintf("jssound: invalid DecodedClipLimit %d, want a size in bytes, 0, -1 or -2",
+		e.DecodedClipLimit)
+}
+
 // ErrDeviceUnavailable reports a page with no Web Audio at all: no AudioContext
 // constructor, or one that refused to construct. It is reported once, through
 // kernel.ReportErrorOnce, and after that jssound behaves exactly as nosound
@@ -68,8 +78,14 @@ func (e ErrDecodeRefused) Error() string {
 	return fmt.Sprintf("jssound: the browser refused to decode a Clip it reads as ogg vorbis: %s", e.Message)
 }
 
-// ErrNoStreamLength reports an Ogg Vorbis stream whose length reads zero: a
-// truncated file, or one whose last page carries no granule position.
+// ErrNoStreamLength reports an Ogg Vorbis stream that holds no frames at all,
+// counted rather than believed.
+//
+// A last page with no granule position is not this, and used to be: such a file
+// has no computable decoded size, so it now streams - which is what the spec
+// says an unmeasurable Clip does and what otosound has always done - and the
+// stream's frames are counted on the goroutine that was going to decode them
+// anyway. A file that truly decodes to nothing still fails here.
 //
 // It is an error rather than a Clip of no duration on purpose. A zero duration
 // makes the playhead and the duration fiction and silently removes
@@ -77,7 +93,7 @@ func (e ErrDecodeRefused) Error() string {
 type ErrNoStreamLength struct{}
 
 func (ErrNoStreamLength) Error() string {
-	return "jssound: the stream reports no length, so a voice on it could never end"
+	return "jssound: the stream holds no frames, so a voice on it could never end"
 }
 
 // ErrNoStreamFormat reports an Ogg Vorbis stream whose identification header

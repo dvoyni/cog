@@ -47,13 +47,47 @@
 // still cannot decode it, so no version test can be written. WebCodecs adds no
 // coverage either, because Safari's AudioDecoder reaches the same OS codec.
 //
-// # This slice is the resident tier
+// The probe settles the resident tier alone. A streamed Clip is always decoded
+// by jfreymuth/oggvorbis, because decodeAudioData takes a whole file and gives
+// back a whole buffer and there is no browser API that decodes an Ogg Vorbis
+// stream incrementally that every engine has. WebCodecs AudioDecoder("vorbis")
+// is the one that would, on Chromium, and it is a later ticket: it needs the
+// Vorbis packets handed over raw behind a byte layout for the setup headers that
+// no testable specification pins down, and Safari has no Vorbis in WebCodecs at
+// all, so it would be an unverifiable second route behind a verified first one.
 //
-// A Clip is decoded whole into an AudioBuffer and its Voices start from it.
-// Streaming - a MediaElementAudioSourceNode over a Blob URL, for a Clip too long
-// to hold - is a later slice, and the one rule it inherits is written where the
-// bytes become a JS object: a Blob built for any media path carries
-// type "audio/ogg".
+// # Two tiers, and which is invisible
+//
+// A Clip whose decoded size fits under Config.DecodedClipLimit is decoded whole
+// into one AudioBuffer and its Voices start from it. A longer one streams: it is
+// demuxed and decoded in Go a few thousand frames at a time, converted to the
+// context's rate through one resampler that spans every chunk, and the chunks
+// are scheduled back to back with start(when, offset) on the context clock. The
+// limit is the same field with the same sentinels and the same 512 KiB default
+// that otosound.Config carries.
+//
+// Which tier a Clip landed in is invisible. Both report the same duration, the
+// same channels, the same rate and the same Loop Region, and a game cannot ask -
+// which is the command surface's rule holding rather than being reopened.
+//
+// # Not a media element, and the Blob rule that went with it
+//
+// The streamed tier was expected to be a MediaElementAudioSourceNode over a
+// Blob URL, and it is not. A media element was checked and refused for a Clip:
+// Chromium and WebKit implement its loop as a seek, so a looping track through
+// one is not gapless and sound.md's gapless promise could not be kept; WebKit's
+// autoplay gesture gate is per element, so every track would need a gesture of
+// its own rather than the one the context already has; and the element runs on
+// its own clock rather than the AudioContext's, so a chunk could not be landed
+// on a context time and two Voices could not be started together.
+//
+// Nothing in this Extension constructs one, and a test counts it. With no media
+// path there is no Blob of encoded audio either, so the rule that such a Blob
+// must carry type "audio/ogg" - written down against the media route that was
+// then refused - has nothing left to govern and is retired rather than left
+// standing as a rule about code that does not exist. It would come back with
+// WebCodecs only if that route ever needed a Blob, which it does not: an
+// EncodedAudioChunk is bytes and a timestamp.
 //
 // jssound is an Extension. Its root declares only Name, Config, its one Adapter,
 // SoundBackend, and its errors, and is untagged so the declarations build
