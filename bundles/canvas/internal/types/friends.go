@@ -43,9 +43,46 @@ func OpQueueInspect(v *OpQueue, layerID Layer, op *DrawOp) Op { return v.inspect
 // would not decode, or one the packer refused - and the draw that asked for it
 // draws nothing. It is cached as it is, so nothing is re-opened on a later
 // frame; the failure was reported when it happened.
-func LookupResolveSprite(v *Lookup, k kernel.Kernel, path string, fsys fs.FS, resources *gfx.ResourceQueue) AtlasEntry {
-	return v.sprites.Get(k, spriteDescr(path), fsys,
+//
+// tileX and tileY say which axes the draw asking will wrap its uv on, which
+// decides the gutter the entry is packed with and therefore which of the entries
+// this path may hold it gets.
+func LookupResolveSprite(v *Lookup, k kernel.Kernel, path string, fsys fs.FS, resources *gfx.ResourceQueue, tileX, tileY bool) AtlasEntry {
+	return v.sprites.Get(k, spriteDescr(path, spriteFill(tileX, tileY)), fsys,
 		spriteUserData{packer: v.spritePacker, resources: resources})
+}
+
+// spriteFill is the one place the correspondence between "this draw tiles on
+// this axis" and "this entry's gutter wraps on this axis" is written down.
+func spriteFill(tileX, tileY bool) gutterFill {
+	switch {
+	case tileX && tileY:
+		return fillWrapBoth
+	case tileX:
+		return fillWrapX
+	case tileY:
+		return fillWrapY
+	}
+	return fillExtrude
+}
+
+// LookupSpriteFitsAtlas says whether a sprite's padded rectangle fits one atlas
+// page, measured from the header rather than by packing it: the size tier reads
+// a path's dimensions without decoding the whole image, so a tiled draw can pick
+// its route before anything is baked.
+//
+// This is the routing rule for tiling, and it is deliberately a size question
+// rather than a refusal. The packer's refusals are terminal and cache the same
+// zero entry a missing file does, so a draw that tried the atlas and fell back
+// on refusal would already have reported an error it meant to recover from.
+//
+// A path with no header to read measures zero, which fits - so a missing file
+// routes to the atlas and reports there, exactly where an untiled draw of it
+// reports.
+func LookupSpriteFitsAtlas(v *Lookup, k kernel.Kernel, path string, fsys fs.FS) bool {
+	size := v.spriteSizes.Get(k, assets.Descr[sizeDescrParams]{Name: path}, fsys, struct{}{})
+	page := v.spritePacker.config.AtlasSize
+	return size.X+2*spritePadding <= page && size.Y+2*spritePadding <= page
 }
 
 // LookupResolveStandalone returns the full-image texture a tiled sprite samples

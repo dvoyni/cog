@@ -210,7 +210,7 @@ document a missing storage binding fails silently.
       transform1: vec4<f32>, // origin.xy, sine, cosine
       frame:      vec4<f32>, // uv rect (x0, y0, x1, y1)
       tint:       vec4<f32>,
-      misc:       vec4<f32>, // atlasLayer, unused, unused, unused
+      misc:       vec4<f32>, // atlasLayer, repeatX, repeatY, unused
       keyColor:   vec4<f32>,
   };
   ```
@@ -225,6 +225,19 @@ document a missing storage binding fails silently.
   — the exported `SamplerSlot` and `TextureSlot`.
 
 ### What a custom sprite material may change
+
+> **A custom `fs_main` must sample through `canvasTiledUV(in)`, not `in.uv`**
+> ([#440](https://github.com/dvoyni/cog/issues/440)). A tiled sprite repeats a
+> window onto its atlas entry and the wrap that repeats it is per fragment, so a
+> material that samples `in.uv` directly draws every tiled sprite as **one tile
+> stretched across the whole quad**. Nothing reports it: the draw is well formed
+> and the pixels are wrong, and it is invisible wherever the tiled art happens to
+> be translation-invariant — a border rule stretches into an identical border
+> rule, while an ornament stretches visibly. feuds-26's `fade-sprite.wgsl` runs
+> **every** sprite in that game, so it was the first thing this caught.
+>
+> The rest of the contract is unchanged: `in.uv` still means what it always did,
+> and a material with no tiled sprites under it needs no change.
 
 - **The `vs_main` and `fs_main` bodies, entirely.**
 - **Appending members to the uniform block.** This is the mechanism by which a
@@ -331,6 +344,15 @@ The thing carried across is the **instance index**, flat, and not the record or
 any field of it. Every reflected binding is bound `Vertex|Fragment`
 (`extensions/gfx/limits.go:9-10`, `extensions/gogpu/internal/gfxbackend.go:475`), so one `u32` component buys the
 whole 96-byte record where the frame rect alone would cost four:
+
+> **Amended by [#440](https://github.com/dvoyni/cog/issues/440).** The published
+> `VertexOut` now carries that index itself, at `@location(5)`, because the
+> shipped `fs_main` needs the record too: a tiled sprite wraps its uv inside its
+> own atlas sub-rect, which takes `frame` and the repeat counts in `misc.yz`. The
+> rule above is unchanged and is simply exercised by canvas as well as by a
+> material - a widening material still declares a struct of its own, and the one
+> that demonstrates it is still the halo. `VertexOut` spends 6 locations and 14
+> components with the index in it, inside the floor named below.
 
 ```wgsl
 struct HaloVertexOut {
@@ -442,7 +464,7 @@ an inline Go string.
 |---|---|---|
 | `uniforms.wgsl` | `canvas.UniformsPath` | `struct CanvasUniforms` (`canvasViewport`, `canvasLayer`, `canvasClip`) and `@group(0) @binding(0) var<uniform> u` |
 | `clip.wgsl` | `canvas.ClipPath` | `fn canvasClipped(canvasPosition: vec2<f32>) -> bool` |
-| `spritebindings.wgsl` | `canvas.SpriteBindingsPath` | group 1 `canvasSampler` + `canvasTexture: texture_2d_array<f32>`; group 2 `instances`; `struct SpriteInstance`; `struct Instances`; `struct VertexOut` |
+| `spritebindings.wgsl` | `canvas.SpriteBindingsPath` | group 1 `canvasSampler` + `canvasTexture: texture_2d_array<f32>`; group 2 `instances`; `struct SpriteInstance`; `struct Instances`; `struct VertexOut`; `fn canvasTiledUV(in: VertexOut) -> vec2<f32>` |
 | `spritevertex.wgsl` | `canvas.SpriteVertexPath` | includes `spritebindings.wgsl`; declares `vs_main` |
 | `trianglesbindings.wgsl` | `canvas.TrianglesBindingsPath` | group 1 `canvasSampler` + `canvasTexture: texture_2d<f32>`; `struct VertexOut` |
 | `trianglesvertex.wgsl` | `canvas.TrianglesVertexPath` | includes `trianglesbindings.wgsl`; declares `vs_main` |
@@ -645,6 +667,12 @@ is a cost with no matching benefit.
 `builtinQuadLayoutID` with no caller to declare a type - and they carry no
 varying value either, so the exception is empty.
 
+> **Amended by [#440](https://github.com/dvoyni/cog/issues/440).** Still empty,
+> and `drawTiledSprite` now serves only images too large to pack. A tiled sprite
+> that fits an atlas page is an instanced sprite draw like any other, and what it
+> needs per instance - two repeat counts - goes in the spare components of `misc`
+> rather than in a vertex member or a parameter array.
+
 ### Per-instance parameter arrays
 
 A sprite draw parameter whose name is not reserved is collected across every
@@ -805,6 +833,69 @@ protects. Compute it once when the op is recorded, alongside the existing
 on the op — the fingerprint survives that clone by design, because it hashes the
 descriptor's content and not its address. Canvas becomes `Fingerprint()`'s second
 consumer; the first is scene's interning.
+
+### Tiling is a window onto the atlas
+
+Added by [#440](https://github.com/dvoyni/cog/issues/440).
+
+A tiled sprite used to be the one artwork kind that could never join a sprite
+batch. A repeat sampler wraps a whole texture and never a window onto one, so a
+tileable image needed a texture of its own, which meant a quad on the triangles
+path and a batch split on texture identity at every edge of every border.
+
+**The wrap moved into the fragment stage.** `canvasTiledUV` reads the entry's
+sub-rect from `frame` and the repeat counts from `misc.yz`, recovers the quad
+coordinate from `uv` — the vertex stage wrote `mix(frame.xy, frame.zw, quad)`, so
+dividing the offset back out inverts it exactly — and takes `fract` of it scaled
+by the repeats. A tiled sprite is therefore an ordinary instance, and it batches
+with the corners it sits between.
+
+**The gutter is filled per axis**, wrapping the axes that tile so filtering
+across a seam samples the texels the next tile begins with, and extruding the
+rest. That is the same split the repeat sampler made, where `tileSampler`
+repeated only the tiled axes and clamped the others; wrapping both axes of a
+strip that tiles on one lays the far edge's texels along the near edge, which on
+a border side is a thin dark line down its length.
+
+**The gutter is baked, so it is part of the cache key.** `spriteDescrParams`
+carries the fill, so a path can hold up to four entries - extruded, wrap-x,
+wrap-y, wrap-both - and holds only the ones actually drawn.
+
+**An oversized image keeps the old path.** The route is decided from the header
+through the size tier, before anything is packed, because both packer refusals
+are terminal and have already reported by the time a fallback could see them.
+
+#### Rejected
+
+**Wrap-padding every entry, one copy each.** It reads as the cheap version of the
+cache-key change and is not: the gutter an untiled sprite wants is its own edge
+continued, so filling every gutter by wrapping puts a one-texel fringe of the
+*opposite* edge around every sprite in the atlas, visible wherever a quad is not
+texel-aligned. It also collapses `TestOneMissingPathIsOneReportPerTier` from
+three reports to two, because the tiled tier's report is what the wrap-filled
+descriptor now raises.
+
+**Carrying `frame` as a flat `vec4<f32>`.** Four inter-stage components where one
+does, and it opens nothing else in the record to a later reader. The index rule
+above already settles this.
+
+**Making `uv` tile-space.** It would put the wrap in the vertex stage's output
+and let a custom `fs_main` sample it directly — and silently break every custom
+sprite material that exists, since `in.uv` would no longer be a texture
+coordinate. `uv` keeps its meaning; a material that wants tiling calls
+`canvasTiledUV`, and one that does not draws a tiled sprite stretched, which is a
+defined outcome rather than a broken one.
+
+**Resolving a tiled sprite's size through `spriteSize`.** Its aspect fallback
+derives a missing axis from the one it was given, which on a tiled axis would
+mean repeating until the aspect ratio matched — not something a caller can mean.
+A tiled axis must be told its length; a non-tiled one defaults to one framed
+tile.
+
+**Deferred rather than rejected:** one op meaning "a nine-slice whose edges tile"
+is [#490](https://github.com/dvoyni/cog/issues/490). `TileX`/`TileY` and
+`NineSlice` stay mutually exclusive here, and the insets are still dropped in
+silence when both are set.
 
 ### The triangles key
 

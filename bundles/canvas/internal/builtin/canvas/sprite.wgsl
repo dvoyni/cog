@@ -14,6 +14,6 @@
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if canvasClipped(in.canvasPosition) { discard; }
-    let sampled = keyColorRamp(textureSample(canvasTexture, canvasSampler, in.uv, in.atlasLayer), in.keyColor.rgb);
+    let sampled = keyColorRamp(textureSample(canvasTexture, canvasSampler, canvasTiledUV(in), in.atlasLayer), in.keyColor.rgb);
     return sampled * in.tint;
 }

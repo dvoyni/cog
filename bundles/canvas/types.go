@@ -234,7 +234,7 @@ type SpriteInstance struct {
 	Transform1 m.Vec4 // origin.xy, sine, cosine
 	Frame      m.Vec4 // uv rect (x0, y0, x1, y1)
 	Tint       m.Vec4
-	Misc       m.Vec4 // atlasLayer, unused, unused, unused
+	Misc       m.Vec4 // atlasLayer, repeatX, repeatY, unused
 	KeyColor   m.Vec4
 }
 

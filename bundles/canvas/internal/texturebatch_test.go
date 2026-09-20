@@ -70,9 +70,11 @@ func TestATiledAndAPlainTextureSpriteSplit(t *testing.T) {
 	}
 }
 
-// A tiled path sprite draws a standalone repeat texture through the same
-// textured-triangle path, so it batches under the same rule.
-func TestTiledSpritesOverOneStandaloneTextureMerge(t *testing.T) {
+// A tiled path sprite is an atlas entry now, so two of them are two instances of
+// one sprite draw rather than two quads on the triangles path. The count is the
+// same and what produced it is not, which is the point: an atlas draw is one an
+// untiled sprite can join.
+func TestTiledSpritesOverOneAtlasEntryMerge(t *testing.T) {
 	filesystem := fstest.MapFS{"wave.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}
 	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
@@ -81,7 +83,7 @@ func TestTiledSpritesOverOneStandaloneTextureMerge(t *testing.T) {
 	})
 	runFrame(k)
 	if backend.draws != 1 {
-		t.Fatalf("draws = %d, want two tiled quads over one standalone texture in 1 batch", backend.draws)
+		t.Fatalf("draws = %d, want two tiled sprites over one atlas entry in 1 batch", backend.draws)
 	}
 }
 

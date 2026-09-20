@@ -183,7 +183,8 @@ func (p *plugin) batchEntry(gfxWrite *gfx.OpQueue, surf surface, entry types.Atl
 	sine, cosine := sincos(transform.Rotation)
 	t0 := m.Vec4{X: transform.Position.X, Y: transform.Position.Y, Z: size.X, W: size.Y}
 	t1 := m.Vec4{X: transform.Origin.X, Y: transform.Origin.Y, Z: sine, W: cosine}
-	misc := m.Vec4{X: float32(entry.Layer)}
+	repeat := tiledRepeat(entry, transform, size)
+	misc := m.Vec4{X: float32(entry.Layer), Y: repeat.X, Z: repeat.Y}
 	p.batch.add(gfxWrite, p.quad, entry.Texture, layerTransform, clip, hasClip, transform.Filter,
 		surf.size, shading, t0, t1, uv, colorVec(tint), misc, colorVec(keyColor))
 }

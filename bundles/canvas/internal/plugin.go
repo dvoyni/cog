@@ -77,12 +77,14 @@ type frame struct {
 // sprite resolves one recorded sprite to its atlas entry. A path canvas will not
 // open was marked invalid where it entered the queue, so it is reported here and
 // never reaches a cache; a zero entry, however it arose, draws nothing.
-func (fr *frame) sprite(op *types.SpriteOp) types.AtlasEntry {
+// tileX and tileY say which axes the draw will wrap its uv on, which picks the
+// gutter fill of the entry it gets.
+func (fr *frame) sprite(op *types.SpriteOp, tileX, tileY bool) types.AtlasEntry {
 	if op.InvalidPath {
 		types.ReportInvalidSpritePath(fr.k, op.Path)
 		return types.AtlasEntry{}
 	}
-	return types.LookupResolveSprite(fr.lookup, fr.k, op.Path, fr.fsys, fr.resources)
+	return types.LookupResolveSprite(fr.lookup, fr.k, op.Path, fr.fsys, fr.resources, tileX, tileY)
 }
 
 // icon resolves an inline icon's atlas entry. An icon path enters canvas inside
@@ -94,7 +96,7 @@ func (fr *frame) icon(path string) types.AtlasEntry {
 		types.ReportInvalidSpritePath(fr.k, recorded)
 		return types.AtlasEntry{}
 	}
-	return types.LookupResolveSprite(fr.lookup, fr.k, recorded, fr.fsys, fr.resources)
+	return types.LookupResolveSprite(fr.lookup, fr.k, recorded, fr.fsys, fr.resources, false, false)
 }
 
 // face bakes (or reuses) one font face at a rasterization size. The path is the
@@ -244,7 +246,7 @@ func (p *plugin) flushFrame(
 	// is half a frame: every fill, line and stroke vanishing while the sprites
 	// beside them still draw, which hides the misconfiguration instead of showing
 	// it.
-	if white := types.LookupResolveSprite(fr.lookup, fr.k, "", fr.fsys, fr.resources); white.Width <= 0 {
+	if white := types.LookupResolveSprite(fr.lookup, fr.k, "", fr.fsys, fr.resources, false, false); white.Width <= 0 {
 		return nil
 	}
 	p.layers = p.layers[:0]
@@ -410,15 +412,32 @@ func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, laye
 	}
 	t := op.Transform
 	if t.TileX || t.TileY {
-		if op.Path == "" {
+		// Tiling repeats a window onto an atlas entry, wrapped in the fragment
+		// stage - so a tiled sprite is an ordinary sprite that carries repeat
+		// counts, and it takes the ordinary path below. Two cases cannot.
+		//
+		// The generated texel is one texel: there is no window to repeat and no
+		// file to name it by, so tiling it is dropped as it always was.
+		//
+		// A path canvas will not open is not measured either - it has no header
+		// to read - and goes on to the resolve below, which is where an invalid
+		// path has always been reported.
+		//
+		// An image whose padded rectangle is larger than an atlas page has no
+		// entry to wrap inside, and keeps the standalone repeat texture it has
+		// always had. The route is decided from the header rather than by
+		// packing and recovering, because both packer refusals are terminal and
+		// have already reported by the time a fallback could see them.
+		switch {
+		case op.Path == "":
 			t.TileX, t.TileY = false, false
-		} else {
+		case !op.InvalidPath && !types.LookupSpriteFitsAtlas(fr.lookup, fr.k, op.Path, fr.fsys):
 			p.batch.flush(gfxWrite, p.quad)
 			p.drawTiledSprite(gfxWrite, fr, surf, t, layerTransform, clip, hasClip, materials, op)
 			return
 		}
 	}
-	entry := fr.sprite(op)
+	entry := fr.sprite(op, t.TileX, t.TileY)
 	if entry.Width <= 0 || entry.Height <= 0 {
 		return
 	}
@@ -753,7 +772,63 @@ func appendTileVertex(dst []byte, position m.Vec2, color m.Color, uv m.Vec2) []b
 
 // entrySize resolves the on-screen size of an atlas entry.
 func entrySize(entry types.AtlasEntry, transform canvas.SpriteTransform) m.Vec2 {
+	if transform.TileX || transform.TileY {
+		return tiledSize(entry, transform)
+	}
 	return spriteSize(entry.Width, entry.Height, transform)
+}
+
+// tiledSize resolves the on-screen size of a tiled sprite, which does not mean
+// by Size what an untiled one means.
+//
+// A tiled axis must be told how long it is. spriteSize would derive a missing
+// axis from the one it was given, by aspect - and "repeat until the aspect ratio
+// matches" is not something any caller means, so a tiled axis with no Size draws
+// nothing rather than guessing at a length.
+//
+// A non-tiled axis defaults to one tile, which is the framed tile: a Frame says
+// which texels the sprite draws, so after it says how many, and it is the tile
+// that repeats rather than the sheet it was cut from.
+func tiledSize(entry types.AtlasEntry, transform canvas.SpriteTransform) m.Vec2 {
+	tileWidth, tileHeight := framedSource(entry.Width, entry.Height, transform.Frame)
+	scale := transform.Scale
+	if scale == 0 {
+		scale = 1
+	}
+	size := transform.Size
+	if !transform.TileX && size.X == 0 {
+		size.X = float32(tileWidth) * scale
+	}
+	if !transform.TileY && size.Y == 0 {
+		size.Y = float32(tileHeight) * scale
+	}
+	return size
+}
+
+// tiledRepeat is how many times the framed tile repeats on each axis, which the
+// fragment stage wraps the uv by. An axis that does not tile repeats once.
+//
+// One is load-bearing rather than merely correct: the wrap multiplies the quad
+// coordinate by this before taking its fractional part, so a zero here would
+// collapse the sampled rectangle to its top-left corner and paint every sprite,
+// glyph and fill in one texel's colour.
+func tiledRepeat(entry types.AtlasEntry, transform canvas.SpriteTransform, size m.Vec2) m.Vec2 {
+	repeat := m.Vec2{X: 1, Y: 1}
+	if !transform.TileX && !transform.TileY {
+		return repeat
+	}
+	tileWidth, tileHeight := framedSource(entry.Width, entry.Height, transform.Frame)
+	scale := transform.Scale
+	if scale == 0 {
+		scale = 1
+	}
+	if transform.TileX && tileWidth > 0 {
+		repeat.X = size.X / (float32(tileWidth) * scale)
+	}
+	if transform.TileY && tileHeight > 0 {
+		repeat.Y = size.Y / (float32(tileHeight) * scale)
+	}
+	return repeat
 }
 
 // spriteSize resolves the on-screen size of a source of the given pixel

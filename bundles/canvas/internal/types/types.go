@@ -104,11 +104,15 @@ type SpriteTransform struct {
 	// are unaffected.
 	FlipX bool
 	FlipY bool
-	// TileX and TileY repeat the texture across the drawn Size on that axis. A
-	// tiled axis requires an explicit Size; the other axis falls back to the
-	// texture's natural pixel size when Size is unset. Tiling draws through a
-	// standalone repeat texture and the textured-triangle path rather than the
-	// atlas, so Scale, Frame, and Flip are ignored.
+	// TileX and TileY repeat the sprite across the drawn Size on that axis. A
+	// tiled axis requires an explicit Size - it has no natural length to fall
+	// back to - and the other axis falls back to one tile when Size is unset.
+	//
+	// What repeats is a window onto the atlas, wrapped in the fragment stage, so
+	// Scale, Frame and the flips all apply: the tile is the framed sub-rect at
+	// the given scale, and a tiled sprite batches with every other sprite in the
+	// atlas. An image too large to pack keeps a standalone repeat texture and the
+	// textured-triangle path.
 	TileX bool
 	TileY bool
 	// Filter selects sampler minification/magnification filtering. Its zero value

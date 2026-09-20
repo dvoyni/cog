@@ -1217,7 +1217,14 @@ func TestSpriteFlipSwapsUV(t *testing.T) {
 	}
 }
 
-func TestTiledSpriteRepeatsAcrossSizeViaStandaloneTexture(t *testing.T) {
+// A tiled sprite is an atlas entry now, so what repeats is a window onto the
+// atlas and the repeat count rides in the instance record rather than in a uv
+// run past 1. The entry's own sub-rect is unchanged by tiling - that is the
+// whole point, since a uv past 1 is exactly what a shared atlas cannot express.
+//
+// Two opens rather than one: the header the route is decided from and the decode
+// the atlas packs. Both are cached, so a second frame opens nothing.
+func TestTiledSpriteRepeatsInsideItsAtlasEntry(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"wave.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}}
 	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 	tint := m.Color{R: 1, G: 0, B: 0, A: 1}
@@ -1228,47 +1235,55 @@ func TestTiledSpriteRepeatsAcrossSizeViaStandaloneTexture(t *testing.T) {
 	runFrame(k)
 	runFrame(k)
 	if backend.draws != 2 {
-		t.Fatalf("draws = %d, want 2 tiled draws", backend.draws)
+		t.Fatalf("draws = %d, want one sprite draw per frame", backend.draws)
 	}
-	if filesystem.opens != 1 {
-		t.Fatalf("opens = %d, want one cached standalone decode", filesystem.opens)
+	if filesystem.opens != 2 {
+		t.Fatalf("opens = %d, want the header and the decode, both cached after", filesystem.opens)
 	}
-	var vertices []byte
-	for _, buffer := range backend.buffers {
-		if buffer.kind == gfx.BufferVertex && len(buffer.data) == 6*32 {
-			vertices = buffer.data
-		}
+	instance := instanceAt(spriteInstances(backend)[0], 0)
+	if w, h := floatAt(instance, 8), floatAt(instance, 12); w != 12 || h != 4 {
+		t.Errorf("size = (%v,%v), want the tiled width and one tile high", w, h)
 	}
-	if vertices == nil {
-		t.Fatal("tiled sprite vertex buffer was not uploaded")
+	// frame@32 is the entry's uv rect: a 4-wide image in a 16-texel page spans
+	// a quarter of it, tiled or not.
+	if span := floatAt(instance, 40) - floatAt(instance, 32); span != 0.25 {
+		t.Errorf("frame u span = %v, want the entry's own 4/16 rather than a uv run past 1", span)
 	}
-	// Vertex 1 is the top-right corner: position (12,0), uv (12/4, 0) = 3 repeats.
-	if px := floatAt(vertices, 32); px != 12 {
-		t.Fatalf("corner x = %v, want 12", px)
+	// misc@64 is atlasLayer, repeatX, repeatY.
+	if rx := floatAt(instance, 68); rx != 3 {
+		t.Errorf("repeatX = %v, want 12/4 = 3", rx)
 	}
-	if u := floatAt(vertices, 32+24); u != 3 {
-		t.Fatalf("tiled u = %v, want 12/4 = 3 repeats", u)
+	if ry := floatAt(instance, 72); ry != 1 {
+		t.Errorf("repeatY = %v, want 1: an axis that does not tile repeats once", ry)
 	}
-	if r, g := floatAt(vertices, 8), floatAt(vertices, 12); r != 1 || g != 0 {
-		t.Fatalf("vertex color = (%v,%v), want tint baked into color", r, g)
+	if r, g := floatAt(instance, 48), floatAt(instance, 52); r != 1 || g != 0 {
+		t.Errorf("tint = (%v,%v), want the tint in the record", r, g)
 	}
 }
 
-func TestTiledSpriteRepeatsOnlyTiledAxes(t *testing.T) {
+// The wrap is in the fragment stage, so the sampler has nothing left to repeat -
+// and it must not, because the atlas page it addresses holds every other sprite
+// too. What a tiled draw still carries to the sampler is its Filter.
+func TestATiledSpriteSamplesTheAtlasClamped(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"wave.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}}
 	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
 		write.Sprite(0, "wave.png", canvas.SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true, Filter: gfx.FilterNearest}, nil)
 	})
 	runFrame(k)
+	for _, sampler := range backend.samplers {
+		if sampler.AddressU == gfx.AddressRepeat || sampler.AddressV == gfx.AddressRepeat {
+			t.Fatalf("samplers = %+v, want no repeat addressing: the atlas is shared", backend.samplers)
+		}
+	}
 	found := false
 	for _, sampler := range backend.samplers {
-		if sampler.AddressU == gfx.AddressRepeat && sampler.AddressV == gfx.AddressClamp && sampler.Mag == gfx.FilterNearest {
+		if sampler.Mag == gfx.FilterNearest {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("samplers = %+v, want one repeating U only, filtered nearest", backend.samplers)
+		t.Fatalf("samplers = %+v, want the draw's nearest filter to survive the move", backend.samplers)
 	}
 }
 

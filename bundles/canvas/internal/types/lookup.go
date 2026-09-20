@@ -77,17 +77,21 @@ func NewSizedLookup(config Config) *Lookup {
 	}
 }
 
-// spriteDescr names one sprite. A path names a file; the empty path names the
-// white texel canvas generates, which is blob-named because there is no file to
-// name it by and a Name the Library would try to open.
-func spriteDescr(path string) assets.Descr[spriteDescrParams] {
+// spriteDescr names one sprite at one gutter fill. A path names a file; the
+// empty path names the white texel canvas generates, which is blob-named because
+// there is no file to name it by and a Name the Library would try to open.
+//
+// The generated texel ignores the fill it is asked for: it takes no padding, so
+// there is no gutter to fill, and letting the fill into its params would mint a
+// second identical entry for a tiled draw that can never tile one texel anyway.
+func spriteDescr(path string, fill gutterFill) assets.Descr[spriteDescrParams] {
 	if path == "" {
 		return assets.Descr[spriteDescrParams]{
 			Blob:   assets.NewBlobFromString(whiteTexel),
 			Params: spriteDescrParams{generated: true},
 		}
 	}
-	return assets.Descr[spriteDescrParams]{Name: path}
+	return assets.Descr[spriteDescrParams]{Name: path, Params: spriteDescrParams{fill: fill}}
 }
 
 // font bakes (or reuses) the face at path at px pixels, parsing the file on
@@ -324,8 +328,11 @@ func (la LookupDeviceAccess) UnloadSprite(path string) {
 		return
 	}
 	l := la.lookup
-	l.sprites.Free(la.kernel, spriteDescr(clean),
-		spriteUserData{packer: l.spritePacker, resources: la.resources})
+	// Every gutter fill this path was packed at, not one of them: the tier holds
+	// one entry per (path, fill), so freeing the descriptor a draw happens to
+	// spell would leave the other variant resident and unreachable by name.
+	l.sprites.FreeWhere(la.kernel, spriteUserData{packer: l.spritePacker, resources: la.resources},
+		func(d assets.Descr[spriteDescrParams], _ AtlasEntry) bool { return d.Name == clean })
 	l.tiled.Free(la.kernel, assets.Descr[tiledDescrParams]{Name: clean}, la.resources)
 	l.spriteSizes.Free(la.kernel, assets.Descr[sizeDescrParams]{Name: clean}, struct{}{})
 }

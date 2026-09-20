@@ -26,17 +26,55 @@ type AtlasEntry struct {
 }
 
 // insertion is one image handed to the packer: its pixels and their size, the
-// border to surround them with, whether to extrude the edge texels into that
-// border, and whether the entry's uv rectangle collapses to the centre of a
-// single texel.
+// border to surround them with, what fills that border, and whether the entry's
+// uv rectangle collapses to the centre of a single texel.
 type insertion struct {
 	pixels   []byte
 	width    int
 	height   int
 	padding  int
-	extrude  bool
+	fill     gutterFill
 	centreUV bool
 }
+
+// gutterFill is what goes in the border around a packed image, and it is a
+// property of how the image will be *drawn* rather than of the image. Bilinear
+// filtering at the content boundary samples the gutter, so the gutter decides
+// what a sprite's edge blends into, and the two answers are mutually exclusive:
+// an edge that repeats wants the edge it wraps around to, an edge that ends
+// wants its own texels continued.
+//
+// **It is per axis.** An axis that tiles wraps and an axis that does not
+// extrudes, which is the same split the repeat sampler made before the wrap
+// moved into the shader - tileSampler repeated only the tiled axes and clamped
+// the rest. Wrapping both axes of a strip that tiles on one puts the far edge's
+// texels along the near edge, which on a border side is a thin dark line down
+// the length of it.
+//
+// That is why the sprite tier keys its cache by this as well as by path - see
+// spriteDescrParams. Filling every gutter one way would make one of the kinds
+// wrong everywhere.
+type gutterFill uint8
+
+const (
+	// fillTransparent leaves the border zeroed. The generated texel takes it by
+	// taking no padding at all; nothing else uses it.
+	fillTransparent gutterFill = iota
+	// fillExtrude repeats the nearest edge texel outwards on both axes, so
+	// filtering at a page boundary samples the sprite rather than its neighbour.
+	fillExtrude
+	// fillWrapX copies the opposite edge inwards along x and extrudes along y:
+	// the fill for a strip that tiles horizontally.
+	fillWrapX
+	// fillWrapY is its transpose.
+	fillWrapY
+	// fillWrapBoth wraps both axes, for a sprite that tiles on both.
+	fillWrapBoth
+)
+
+// wrapsX and wrapsY say which axes this fill wraps; the others extrude.
+func (f gutterFill) wrapsX() bool { return f == fillWrapX || f == fillWrapBoth }
+func (f gutterFill) wrapsY() bool { return f == fillWrapY || f == fillWrapBoth }
 
 // packRefusal says why the packer would not place an image, or that it did.
 //
@@ -132,7 +170,7 @@ func (p *packer) insert(source insertion, resources *gfx.ResourceQueue) (AtlasEn
 	if refusal != packPlaced {
 		return AtlasEntry{}, refusal
 	}
-	upload := paddedRGBA(source.pixels, source.width, source.height, source.padding, source.extrude)
+	upload := paddedRGBA(source.pixels, source.width, source.height, source.padding, source.fill)
 	array := &p.arrays[arrayIndex]
 	resources.UpdateTexture(array.texture, layer, gfx.Region{
 		X: x, Y: y, Width: slotWidth, Height: slotHeight,
@@ -286,7 +324,7 @@ func (p *packer) releaseAll(resources *gfx.ResourceQueue) {
 	p.bytes = 0
 }
 
-func paddedRGBA(source []byte, width, height, padding int, extrude bool) []byte {
+func paddedRGBA(source []byte, width, height, padding int, fill gutterFill) []byte {
 	if padding == 0 {
 		return append([]byte(nil), source...)
 	}
@@ -296,11 +334,23 @@ func paddedRGBA(source []byte, width, height, padding int, extrude bool) []byte 
 		for x := 0; x < dstWidth; x++ {
 			sourceX, sourceY := x-padding, y-padding
 			inside := sourceX >= 0 && sourceX < width && sourceY >= 0 && sourceY < height
-			if !inside && !extrude {
+			if !inside && fill == fillTransparent {
 				continue
 			}
-			sourceX = min(max(sourceX, 0), width-1)
-			sourceY = min(max(sourceY, 0), height-1)
+			// Euclidean remainder on a wrapped axis: a gutter texel one to the
+			// left of the content is the content's rightmost column, which is
+			// the texel the tile before this one ended on. A clamped axis
+			// continues its own edge instead.
+			if fill.wrapsX() {
+				sourceX = ((sourceX % width) + width) % width
+			} else {
+				sourceX = min(max(sourceX, 0), width-1)
+			}
+			if fill.wrapsY() {
+				sourceY = ((sourceY % height) + height) % height
+			} else {
+				sourceY = min(max(sourceY, 0), height-1)
+			}
 			sourceOffset := (sourceY*width + sourceX) * 4
 			destinationOffset := (y*dstWidth + x) * 4
 			copy(destination[destinationOffset:destinationOffset+4], source[sourceOffset:sourceOffset+4])

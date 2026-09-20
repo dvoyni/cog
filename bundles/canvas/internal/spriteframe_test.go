@@ -296,15 +296,14 @@ func TestABadFrameUnderANineSliceReportsOnlyTheFrame(t *testing.T) {
 	}
 }
 
-// Tiling still ignores Frame. What repeats is the texture and not a window onto
-// it, so a tiled axis samples a standalone repeat texture whole - which is why
-// drawTiledSprite resolves its own size instead of going through spriteSize,
-// and why narrowing spriteSize by the frame had to leave it alone.
+// Tiling reads its Frame now, and the reversal is deliberate. Once what repeats
+// is a window onto an atlas entry, a Frame is simply a smaller window and the
+// arithmetic is the same - so ignoring it would cost a special case rather than
+// save one, and the tile that repeats is the framed tile.
 //
-// The non-tiled axis therefore still falls back to the whole texture's pixel
-// size: 16, not the frame's 4. A frame that does not even fit is ignored here
-// rather than reported, because nothing on this path reads it.
-func TestATiledSpriteStillIgnoresItsFrame(t *testing.T) {
+// The non-tiled axis therefore falls back to the framed height, 4 rather than
+// the sheet's 16, and the repeat count divides by the framed width.
+func TestATiledSpriteRepeatsItsFramedTile(t *testing.T) {
 	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
 	k, errs, backend := testKernelCapturing(t, files, config, func(write *canvas.OpQueue) {
@@ -318,10 +317,33 @@ func TestATiledSpriteStillIgnoresItsFrame(t *testing.T) {
 	runFrame(k)
 
 	if len(*errs) != 0 {
-		t.Fatalf("reported errors = %v, want none: a tiled sprite never reads its frame", *errs)
+		t.Fatalf("reported errors = %v, want none: the frame fits", *errs)
 	}
-	positions, _ := quadVertices(t, backend)
-	if positions[0] != (m.Vec2{}) || positions[2] != (m.Vec2{X: 32, Y: 16}) {
-		t.Errorf("quad corners = %v and %v, want (0,0) to (32,16): the tiled width and the whole texture's height", positions[0], positions[2])
+	instance := instanceAt(spriteInstances(backend)[0], 0)
+	if w, h := floatAt(instance, 8), floatAt(instance, 12); w != 32 || h != 4 {
+		t.Errorf("size = (%v,%v), want (32,4): the tiled width and one framed tile high", w, h)
+	}
+	if rx := floatAt(instance, 68); rx != 8 {
+		t.Errorf("repeatX = %v, want 32/4 = 8 framed tiles", rx)
+	}
+}
+
+// A frame that does not fit is reported on a tiled sprite, where the standalone
+// path used to drop it in silence - the same report an untiled sprite has always
+// raised, from the same guard, because a tiled sprite reaches it now.
+func TestATiledSpriteReportsAFrameThatDoesNotFit(t *testing.T) {
+	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
+	k, errs, _ := testKernelCapturing(t, files, config, func(write *canvas.OpQueue) {
+		write.Sprite(0, "sheet.png", canvas.SpriteTransform{
+			Size:  m.Vec2{X: 32},
+			TileX: true,
+			Frame: canvas.SpriteFrame{Left: 8, Right: 12},
+		}, nil)
+	})
+	runFrame(k)
+
+	if len(*errs) != 1 {
+		t.Fatalf("reported errors = %v, want one: a frame wider than the sheet", *errs)
 	}
 }

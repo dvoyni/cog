@@ -91,7 +91,7 @@ shaders and default font. Register `storage` before `canvas`. A typical order is
 - `*OpQueue`: frame-local recording surface. Canvas consumes and resets it on
   `app.UpdateEvent`.
 - `*Lookup`: the single persistent resource holding canvas's five asset caches -
-  the sprite atlas, the standalone textures tiled sprites sample, the sprite
+  the sprite atlas, the standalone textures oversized tiled sprites sample, the sprite
   headers layout measures against, parsed font sources and the faces baked from
   them - with the two packers behind them. It also owns the framebuffer-scale font
   invalidation. Query and mutate it only through a scoped `LookupAccess` or
@@ -151,8 +151,9 @@ the texture's natural dimensions; setting one dimension preserves aspect.
 narrows what those natural dimensions are: a framed sprite's natural size is the
 frame's extent, so `Scale` means one framed texel per world unit. A `Frame` that
 does not fit its source draws nothing and is reported. A `NineSlice` measures
-its insets into the frame; tiling ignores the frame entirely, because what
-repeats is the texture rather than a window onto it.
+its insets into the frame. Tiling reads the frame too: what repeats is a window
+onto the atlas entry, so the tile a tiled axis repeats is the framed sub-rect,
+and `TileX`/`TileY` cannot be combined with `NineSlice` in one op.
 
 `TextDraw` contains `Position`, `Size`, `Color`, `Align`, `WordWrapping`,
 `WrapWidth`, `Material` and `Params`. Its `TextAlign` values are `AlignLeft`,

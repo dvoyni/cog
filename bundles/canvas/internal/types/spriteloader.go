@@ -32,14 +32,25 @@ const whiteTexel = "\xff\xff\xff\xff"
 // takes none: it is sampled at one point.
 const spritePadding = 2
 
-// spriteDescrParams is the sprite tier's bake parameters, and it has exactly one
-// case to carry: whether the descriptor names the texel canvas generates rather
-// than a file it reads. A generated sprite's bytes are already RGBA, are packed
-// bare, and are sampled at the centre of their one texel.
+// spriteDescrParams is the sprite tier's bake parameters: whether the descriptor
+// names the texel canvas generates rather than a file it reads, and what fills
+// the gutter packed around it. A generated sprite's bytes are already RGBA, are
+// packed bare, and are sampled at the centre of their one texel.
 //
-// The field is unexported, so the only descriptor that can be spelled by hand
-// carries the zero params, which name a file.
-type spriteDescrParams struct{ generated bool }
+// The fill is a bake parameter rather than a draw-time one because it is baked:
+// it decides the pixels in the gutter, so one image drawn tiled and untiled is
+// two entries, not one entry sampled two ways. A path can hold up to four - the
+// fill is per axis - and holds only the ones actually drawn. Those copies are the
+// price, and they buy the alternative's absence: a single gutter filled one way
+// is wrong for whichever kind did not choose it. See gutterFill.
+//
+// The fields are unexported, so the only descriptor that can be spelled by hand
+// carries the zero params, which name a file with a transparent gutter - which
+// is why every reader goes through spriteDescr rather than building one.
+type spriteDescrParams struct {
+	generated bool
+	fill      gutterFill
+}
 
 // tiledDescrParams and sizeDescrParams are empty: neither tier bakes anything,
 // and there is nothing about a request on either that its path does not say.
@@ -83,7 +94,7 @@ func (spriteLoader) Load(k kernel.Kernel, data assets.Blob, params spriteDescrPa
 			k.ReportError(fmt.Errorf("canvas: sprite image could not be decoded: %w", err))
 			return AtlasEntry{}
 		}
-		source = insertion{pixels: pixels, width: width, height: height, padding: spritePadding, extrude: true}
+		source = insertion{pixels: pixels, width: width, height: height, padding: spritePadding, fill: params.fill}
 	}
 	entry, refusal := userData.packer.insert(source, userData.resources)
 	switch refusal {

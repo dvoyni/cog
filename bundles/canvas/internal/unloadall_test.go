@@ -52,10 +52,14 @@ func levelRig(t *testing.T) (k kernel.Executioner, levelOne *atomic.Bool, filesy
 //
 // It is counted in storage opens rather than in table sizes, because a cache has
 // no probe - Get is its only read and it loads on a miss - so the only way to ask
-// whether an entry survived is to ask for it again and watch the file. Four reads
-// build the state: the sprite's full decode, the tiled sprite's own decode, the
-// font file the source tier parses, and the header the measurement tier reads.
-// Eight after the boundary is each of them read a second time.
+// whether an entry survived is to ask for it again and watch the file. Five reads
+// build the state: the sprite's full decode, the tiled sprite's header and its
+// decode, the font file the source tier parses, and the header the measurement
+// tier reads. Ten after the boundary is each of them read a second time.
+//
+// The tiled sprite costs two because it is an atlas entry now: its header is read
+// to decide whether its padded rectangle fits a page, and its pixels are read to
+// pack it. Both are cached, in two different tiers.
 //
 // The font halves are not separable by a count, and do not need to be: the face
 // tier reaches the bytes by re-entering the source cache, so a surviving face
@@ -76,13 +80,13 @@ func TestUnloadAllFreesEveryCache(t *testing.T) {
 	})
 	runFrame(k)
 	probeLookup(k, func(la canvas.LookupAccess) { _ = la.SpriteSize("sprite.png") })
-	if filesystem.opens != 4 {
-		t.Fatalf("opens filling the caches = %d, want the sprite, the tiled sprite, the font and the header",
+	if filesystem.opens != 5 {
+		t.Fatalf("opens filling the caches = %d, want the sprite, the tiled sprite's header and decode, the font and the header",
 			filesystem.opens)
 	}
 	runFrame(k)
 	probeLookup(k, func(la canvas.LookupAccess) { _ = la.SpriteSize("sprite.png") })
-	if filesystem.opens != 4 {
+	if filesystem.opens != 5 {
 		t.Fatalf("opens on a second frame = %d, want every tier to answer from its table", filesystem.opens)
 	}
 
@@ -90,7 +94,7 @@ func TestUnloadAllFreesEveryCache(t *testing.T) {
 
 	runFrame(k)
 	probeLookup(k, func(la canvas.LookupAccess) { _ = la.SpriteSize("sprite.png") })
-	if filesystem.opens != 8 {
+	if filesystem.opens != 10 {
 		t.Fatalf("opens after UnloadAll = %d, want all five caches emptied and every file read again",
 			filesystem.opens)
 	}
