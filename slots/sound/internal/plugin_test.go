@@ -329,7 +329,7 @@ func TestAPlayAndASetVoiceInOneTickReachTheSeamAsOne(t *testing.T) {
 	if len(batch.Updates) != 0 {
 		t.Fatalf("the tick produced %d updates beside the start it folded into", len(batch.Updates))
 	}
-	if got := batch.Starts[0].Params.Gains; got != [2][2]float32{{0.25, 0}, {0, 0.25}} {
+	if got := batch.Starts[0].Params.Gains; !sameGains(got, [2][2]float32{{0.25, 0}, {0, 0.25}}) {
 		t.Fatalf("the start carries gains %v, want the SetVoice's 0.25 on the diagonal", got)
 	}
 }

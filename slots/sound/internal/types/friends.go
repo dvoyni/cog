@@ -47,6 +47,16 @@ func VoicesStopBus(v *Voices, bus Bus, endings *[]Ending) { v.stopBus(bus, endin
 // internal/.
 func VoicesFoldBuses(v *Voices, buses *Buses) { v.foldBuses(buses) }
 
+// VoicesSpatialize runs the W3C equations over every live Voice against the
+// Listener, for sound's internal/.
+func VoicesSpatialize(v *Voices, listener *Listener) { v.spatializeAll(listener) }
+
+// ListenerApply installs the tick's coalesced Listener for sound's internal/.
+// It is called where the ordered operations end, beside the Bus volumes, for
+// the same reason: the tick's last word on the Listener is the only one every
+// Positional Voice could be spatialized against.
+func ListenerApply(l *Listener, q *Queue) { l.apply(q.listenerSet()) }
+
 // BusesApply installs the tick's coalesced Bus volumes for sound's internal/.
 // It is called where the ordered operations end, so that the tick's last word
 // on a Bus is the one every Voice on it is folded with.

@@ -63,7 +63,7 @@ func TestABusVolumeFallsOnItsOwnVoicesAndNoOthers(t *testing.T) {
 	if batch.Updates[0].Slot != 0 {
 		t.Fatalf("the update is for slot %d, want the music's slot 0", batch.Updates[0].Slot)
 	}
-	if got := batch.Updates[0].Params.Gains; got != [2][2]float32{{0.4, 0}, {0, 0.4}} {
+	if got := batch.Updates[0].Params.Gains; !sameGains(got, [2][2]float32{{0.4, 0}, {0, 0.4}}) {
 		t.Fatalf("the update carries gains %v, want the Bus folded in at 0.4", got)
 	}
 }

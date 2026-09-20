@@ -3,6 +3,8 @@ package types
 import (
 	"iter"
 	"time"
+
+	"github.com/dvoyni/cog/libs/m"
 )
 
 // VoiceInfo is one live Voice as the read-only view shows it: what the game
@@ -35,12 +37,22 @@ type VoiceInfo struct {
 	// playhead is moving is answered about the playhead and not about who
 	// stopped it.
 	Paused bool
-	// Audibility is the final computed gain before panning - volume x bus, and
-	// in a later slice x falloff x cone. It is the scalar stealing ranks on,
-	// and it is what a game's test asserts: that the alarm is playing, on the
-	// right Bus, audible at 0.4 rather than 0. The gain matrix is not here,
-	// because panning is engine arithmetic pinned once by sound's own tests.
+	// Audibility is the final computed gain before panning - volume x bus x
+	// falloff x cone. It is the scalar stealing ranks on, and it is what a
+	// game's test asserts: that the alarm is playing, on the right Bus, audible
+	// at 0.4 rather than 0.
+	//
+	// It is never max(L, R) taken off the gain matrix. A source orbiting the
+	// Listener at a constant radius does not move it at all, while every entry
+	// of the matrix moves the whole way; reading it off the matrix would make
+	// "quietest" and "furthest away" two policies that disagree with each other
+	// on a circle. The matrix is not here at all, because panning is engine
+	// arithmetic pinned once by sound's own tests against W3C's numbers.
 	Audibility float32
+	// Distance is how far the Voice is from the Listener, in the game's own
+	// units, as of the last flush. It is 0 on a non-positional Voice, which has
+	// no position to be far from anything.
+	Distance float32
 }
 
 // slotState is what one entry of the fixed table currently is.
@@ -73,6 +85,23 @@ type voiceSlot struct {
 	// slot in the flush that started its Voice, and that Voice is owed a
 	// VoiceStart in that same flush anyway.
 	busGain float32
+	// spatialGain is falloff x cone as of the last spatialize pass, and is 1
+	// on a non-positional Voice. It is held beside busGain for the same reason
+	// busGain is: one pass both computes the gain and notices that it moved,
+	// which is what re-emits a Voice the Listener walked away from without any
+	// operation naming it. It is zero on a slot the pass has not reached yet.
+	spatialGain float32
+	// azimuth and elevation are the source's bearing about the Listener, in
+	// degrees, as of the last spatialize pass. They are retained rather than
+	// recomputed in collect, so that "did the pan move" is one compare.
+	//
+	// They are not on VoiceInfo. The view carries audibility and distance and
+	// not the pan: a game's test asserts what it commanded and what the engine
+	// derived from it, and a game checking its sound is on the right side of
+	// the player checks where it put the source, which is its own data.
+	azimuth, elevation float32
+	// distance is how far the Voice is from the Listener, in the game's units.
+	distance float32
 	// params is the Voice's current Params, last value winning.
 	params Params
 	// offset is where in the Clip the Voice begins, in seconds. It is kept
@@ -114,6 +143,7 @@ func (s *voiceSlot) info(enginePaused bool) VoiceInfo {
 		Params:     s.params,
 		Paused:     s.suspended(enginePaused),
 		Audibility: s.audibility(),
+		Distance:   s.distance,
 	}
 }
 
@@ -163,28 +193,77 @@ func (s *voiceSlot) wrap() {
 }
 
 // audibility is the Voice's final gain before panning: its own volume folded
-// with its Bus's, and in a later slice with its falloff and its cone. It is one
-// scalar rather than anything read off the gain matrix, which is what makes
-// "quietest" and "furthest from the Listener" one policy rather than two, and
-// what gives a non-positional Voice a rank without a special rule.
-func (s *voiceSlot) audibility() float32 { return s.params.Volume.Or(1) * s.busGain }
-
-// voiceParams is what the slot looks like below the seam.
+// with its Bus's, with its falloff and with its cone. It is one scalar rather
+// than anything read off the gain matrix, which is what makes "quietest" and
+// "furthest from the Listener" one policy rather than two, and what gives a
+// non-positional Voice a rank without a special rule.
 //
-// A Voice with no position is non-positional and heard centred: no falloff, no
-// cone and no panning, so the matrix is the identity scaled by its audibility -
-// one row for a mono Clip, a diagonal for a stereo one. The W3C equations that
-// fill it for a Positional Voice are issue 479.
+// Panning is on the far side of this: the matrix is this scalar spread across
+// two ears, so an orbit at a constant radius moves every entry of the matrix
+// and does not move this at all.
+func (s *voiceSlot) audibility() float32 {
+	return s.params.Volume.Or(1) * s.busGain * s.spatialGain
+}
+
+// spatialize recomputes what the Listener makes of this Voice: its distance,
+// its bearing, and the falloff and cone that multiply into its audibility. It
+// reports whether any of that moved, which is what re-emits a Voice nothing
+// named this tick.
+//
+// A Voice with no position is non-positional: no falloff, no cone, and a
+// bearing of 0, which is "heard centred" stated as a number rather than as a
+// special case in the panner. The first position a Voice receives makes it
+// positional for the rest of its life, and Params is where that fact is kept -
+// a Maybe that has been set cannot be unset by a merge, so there is nothing
+// else to remember.
+func (s *voiceSlot) spatialize(listener *Listener) bool {
+	spatial, azimuth, elevation, distance := float32(1), float32(0), float32(0), float32(0)
+	if position, ok := s.params.Position.Get(); ok {
+		offset := position.Sub(listener.position)
+		distance = offset.Length()
+
+		gain := distanceGain(s.params.Falloff.Or(Falloff{}).resolve(), float64(distance))
+
+		// A cone needs a facing. W3C's (1,0,0) orientation default is not
+		// inherited, so a Positional Voice that was never turned is equally
+		// loud in every direction whatever its Cone says - which is the only
+		// way a Voice can never be accidentally directional along an axis
+		// nobody chose.
+		if orientation, ok := s.params.Orientation.Get(); ok {
+			forward := orientation.Rotate(m.Vec3{Z: -1})
+			gain *= coneGain(s.params.Cone.Or(Cone{}).resolve(), position, forward, listener.position)
+		}
+		spatial = float32(gain)
+
+		bearing, height := azimuthElevation(position, listener.position, listener.front, listener.up)
+		azimuth, elevation = float32(bearing), float32(height)
+	}
+
+	if spatial == s.spatialGain && azimuth == s.azimuth && elevation == s.elevation && distance == s.distance {
+		return false
+	}
+	s.spatialGain, s.azimuth, s.elevation, s.distance = spatial, azimuth, elevation, distance
+	return true
+}
+
+// voiceParams is what the slot looks like below the seam: the W3C equalpower
+// matrix for the Voice's bearing, scaled by the one scalar that says how loud
+// it is.
+//
+// A non-positional Voice runs the same equations at a bearing of 0, because
+// "heard centred" is a position on the circle and not a second rule - which is
+// what makes a mono Clip 0.707 in each ear rather than unity in both, and leaves
+// a stereo Clip on its own diagonal.
 //
 // The Bus is already inside that scalar and appears nowhere below: an Adapter
 // does not know Buses exist, and there is no second place a volume is decided.
 func (s *voiceSlot) voiceParams(enginePaused bool) VoiceParams {
+	gains := equalPowerGains(float64(s.azimuth), s.channels >= 2)
 	volume := s.audibility()
-	var gains [2][2]float32
-	if s.channels >= 2 {
-		gains[0][0], gains[1][1] = volume, volume
-	} else {
-		gains[0][0], gains[0][1] = volume, volume
+	for source := range gains {
+		for output := range gains[source] {
+			gains[source][output] *= volume
+		}
 	}
 	return VoiceParams{Gains: gains, Rate: s.rate(), Paused: s.suspended(enginePaused)}
 }
@@ -417,6 +496,28 @@ func (v *Voices) foldBuses(buses *Buses) {
 		}
 		slot.busGain = buses.volumes[slot.bus]
 		slot.changed = true
+	}
+}
+
+// spatializeAll runs the W3C equations over every live Voice against the one
+// Listener, which is where a position turns into a falloff, a cone and a
+// bearing.
+//
+// It is a pass of its own rather than arithmetic inside collect because the
+// Listener moving changes every Positional Voice at once, with no operation
+// naming any of them: a player turning on the spot re-emits the sources around
+// them, and a Voice whose bearing did not move is not re-emitted. That is the
+// same "a fold that did not move is not a change" the Buses run on, which is
+// why the two passes look alike.
+func (v *Voices) spatializeAll(listener *Listener) {
+	for i := range v.slots {
+		slot := &v.slots[i]
+		if slot.state != slotLive {
+			continue
+		}
+		if slot.spatialize(listener) {
+			slot.changed = true
+		}
 	}
 }
 

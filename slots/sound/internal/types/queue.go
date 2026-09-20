@@ -111,6 +111,12 @@ type Queue struct {
 	// busVolumes is the tick's Bus volumes, last value winning, indexed by a
 	// resolved Bus. The flush hands it to Buses and clears it.
 	busVolumes [MaxBuses]m.Maybe[float32]
+	// listener is the tick's Listener changes, merged field by field so that a
+	// System that moves the Listener and one that turns it do not overwrite
+	// each other. It coalesces for the same reason a Bus volume does: every
+	// Positional Voice reads it at the one moment the tick ends, so a position
+	// in the ordered list would mean nothing.
+	listener ListenerParams
 }
 
 // NewQueue builds an empty queue over a table of maxVoices slots.
@@ -186,6 +192,18 @@ func (q *Queue) Seek(voice Voice, offset float32) {
 	q.ops = append(q.ops, Operation{Kind: OpSeek, Voice: voice, Offset: offset})
 }
 
+// SetListener records where the game is heard from. An absent field is
+// unchanged, so a game that only walks never restates the rotation it chose
+// once, and a 2D game sets its QuatRotationX(-Pi/2) at startup and never again.
+//
+// It is coalesced within the tick, field by field, last value winning: every
+// Positional Voice reads the Listener at the one moment the tick ends, so there
+// is exactly one Listener a tick can be heard from.
+//
+// sound never reads a camera. A game, or ecsaudio, copies a camera's Transform
+// across.
+func (q *Queue) SetListener(params ListenerParams) { q.listener = q.listener.merge(params) }
+
 // operations is the tick's recorded operations, in order.
 func (q *Queue) operations() []Operation { return q.ops }
 
@@ -193,9 +211,14 @@ func (q *Queue) operations() []Operation { return q.ops }
 // reads them without copying 32 entries.
 func (q *Queue) busVolumeSets() *[MaxBuses]m.Maybe[float32] { return &q.busVolumes }
 
+// listenerSet is the tick's coalesced Listener, by reference so the flush reads
+// it without copying it.
+func (q *Queue) listenerSet() *ListenerParams { return &q.listener }
+
 // reset empties the recording for the next tick, keeping the capacity so a warm
 // engine allocates nothing to record a frame of sound.
 func (q *Queue) reset() {
 	q.ops = q.ops[:0]
 	q.busVolumes = [MaxBuses]m.Maybe[float32]{}
+	q.listener = ListenerParams{}
 }

@@ -47,6 +47,18 @@ type Voices = types.Voices
 // Access it only while a handler holds its declared resource lock.
 type Buses = types.Buses
 
+// Listener is where the game is heard from as of the last flush, read the way
+// the Buses are. There is one per Engine, at the origin and unrotated before
+// any call, and it is moved by recording SetListener on the Queue.
+//
+// It is a resource of its own for the reason sound's resources are several
+// rather than one: a System asking where the Listener is never contends with
+// the Systems recording operations. sound never reads a camera - a game, or
+// ecsaudio, copies a camera's Transform across.
+//
+// Access it only while a handler holds its declared resource lock.
+type Listener = types.Listener
+
 // Device reports the sound device as it is now: whether anything is audible,
 // which Adapter got it, and the rate, channels and real latency it runs at. It
 // is read-only, because a game neither opens nor chooses a Device; it only

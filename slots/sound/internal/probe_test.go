@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/sound"
 	"github.com/dvoyni/cog/slots/storage"
@@ -53,22 +54,33 @@ type probeResponse struct {
 	All       []sound.VoiceInfo
 	Device    sound.Device
 	BusVolume float32
+	// ListenerAt and ListenerFacing are read from the Listener resource, which
+	// is a resource of its own for the reason the Buses are: a System asking
+	// where the Listener is never contends with the Systems recording
+	// operations.
+	ListenerAt     m.Vec3
+	ListenerFacing m.Quat
 }
 
 func probeCmdImpl() (kernel.Lock, kernel.Execute[probeRequest, probeResponse]) {
 	var voices kernel.Read[*sound.Voices]
 	var buses kernel.Read[*sound.Buses]
+	var listener kernel.Read[*sound.Listener]
 	var device kernel.Read[*sound.Device]
 	return func(access kernel.ResourceAccess) {
 			voices = access.GetRead[*sound.Voices]()
 			buses = access.GetRead[*sound.Buses]()
+			listener = access.GetRead[*sound.Listener]()
 			device = access.GetRead[*sound.Device]()
 		}, func(_ kernel.Kernel, request probeRequest) probeResponse {
 			live := voices.Get()
+			heardFrom := listener.Get()
 			response := probeResponse{
-				Live:      live.Len(),
-				Device:    *device.Get(),
-				BusVolume: buses.Get().Volume(request.Bus),
+				Live:           live.Len(),
+				Device:         *device.Get(),
+				BusVolume:      buses.Get().Volume(request.Bus),
+				ListenerAt:     heardFrom.Position(),
+				ListenerFacing: heardFrom.Orientation(),
 			}
 			response.Info, response.Found = live.Info(request.Voice)
 			for info := range live.All() {

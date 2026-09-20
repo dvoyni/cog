@@ -33,7 +33,7 @@ func (p *plugin) Dependencies() []kernel.PluginName {
 }
 
 // Register requires the Backend Adapter, resolves the configuration, registers
-// the five resources and the per-tick batch, and subscribes the flush and the
+// the six resources and the per-tick batch, and subscribes the flush and the
 // response to an engine Pause.
 func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	p.backend = registrar.RequireAdapter[sound.BackendPort]()
@@ -58,6 +58,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	registrar.InitResource(types.NewVoices(p.maxVoices))
 	registrar.InitResource(types.NewClips())
 	registrar.InitResource(types.NewBuses())
+	registrar.InitResource(types.NewListener())
 	registrar.InitResource(&sound.Device{})
 	registrar.InitResource(&flushScratch{})
 	registrar.Subscribe[sound.FlushOnUpdate](p.flushOnUpdate).Last()

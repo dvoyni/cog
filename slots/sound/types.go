@@ -34,6 +34,29 @@ type ClipRef = types.ClipRef
 // field is the default to Play and unchanged to SetVoice.
 type Params = types.Params
 
+// ListenerParams is "become this" to SetListener. An absent field is unchanged.
+type ListenerParams = types.ListenerParams
+
+// DistanceModel names which of W3C's three distance models a Falloff uses.
+type DistanceModel = types.DistanceModel
+
+// The three W3C distance models. Inverse is the default, and is zero.
+const (
+	DistanceInverse     = types.DistanceInverse
+	DistanceLinear      = types.DistanceLinear
+	DistanceExponential = types.DistanceExponential
+)
+
+// Falloff is how a Positional Voice gets quieter with distance: W3C's
+// PannerNode distance parameters, with the prefixes dropped. Its zero value is
+// the W3C defaults, and units are the game's - set Ref to the world's scale.
+type Falloff = types.Falloff
+
+// Cone is how a Positional Voice gets quieter off its own axis: W3C's
+// PannerNode cone parameters, with the prefixes dropped. Its zero value is the
+// W3C defaults, which are no cone at all.
+type Cone = types.Cone
+
 // LoopRegion is the span a looping Voice repeats between, in seconds. It is a
 // fact about a Clip rather than a parameter of a Voice, declared by the Clip's
 // own Vorbis comments and never by the game.
