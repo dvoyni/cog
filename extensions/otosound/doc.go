@@ -14,6 +14,25 @@
 // converting it to the device rate - runs on a goroutine spawned from Prepare
 // and the Mixer only ever copies, multiplies and interpolates.
 //
+// A Clip becomes samples in one of two tiers, and which one is this Adapter's
+// business alone. A Clip whose decoded size fits under Config.DecodedClipLimit
+// is decoded once at load and its Voices index one shared buffer; a longer one
+// keeps its encoded bytes and streams, a decoder and a read-ahead ring per
+// Voice, filled by a goroutine that decodes and resamples ahead of the Mixer.
+// Neither tier alone is defensible - a five-minute stereo track resident is
+// 21x its encoded size, and a decoder is 460us and 137KB to open, which is more
+// than a footstep's whole decoded form - and both report the same duration,
+// channels, rate and loop region, so sound never learns which it got and
+// neither can a game.
+//
+// The expensive resampler runs offline and the cheap one runs on the device
+// thread. A Clip is converted to the device rate once, with a
+// Blackman-windowed sinc lowpassed when decimating, in Prepare or in a Voice's
+// read-ahead; the device thread only ever interpolates linearly for a Voice's
+// Rate, and never converts a base rate. A 96kHz source decimated by
+// interpolation would fold everything above 24kHz back into the band a listener
+// hears best, which is a defect no amount of mixing afterwards can undo.
+//
 // No tick is lost. A batch is a delta rather than a frame, so the handoff is a
 // ring of preallocated batches published with one atomic store and drained
 // whole at a block boundary, and never gfx's latest-wins triple buffer: two

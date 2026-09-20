@@ -452,6 +452,34 @@ callback only ever copies from rings; the goroutine decodes ahead into them.
 worst case `sound.md` states rather than legislates against, because `sound`
 cannot count what the seam hides from it.
 
+**An underrun advances the playhead; the head of a stream does not.** A Voice
+whose ring has not primed yet holds its playhead rather than advancing through
+silence, because the first fill is a Clip load and a Clip load starts from its
+offset with no catch-up. Once a Voice has sounded, an underrun advances: by then
+it is the Device's rule - a playhead advances whether or not anyone can hear it
+- and a stall that held would put the Voice permanently behind the world it is
+scored to. The head rule is also what keeps a streamed one-shot away from the
+[backstop](#the-voice-table): a playhead a few milliseconds behind `sound`'s
+reaches the Clip's end *after* the Stop that declicks it, never before.
+
+**A streamed Voice's recovery is an ordinary start.** The Slot restates every
+live Voice as a `VoiceStart` at its current playhead
+([#485](https://github.com/dvoyni/cog/issues/485)); for a streamed Voice the
+Adapter halts the read-ahead that was filling the old ring and opens a new one
+at that offset, and that is where the decoder open and the seek happen. The
+Mixer plays silence for the slot until the ring primes, and the playhead holds
+at the head while it does, so nothing of the Clip is lost to the restart. Sixty-
+four of them is sixty-four goroutines rather than 29 ms on the thread that has
+10 ms to fill a buffer, which is what "recovery is a burst" costs once it is
+paid on the right side of the seam.
+
+**A decoder that will not open, or fails mid-Clip, ends the Voice and reports
+nothing.** A Clip failure is terminal and is reported once, at `Prepare`, where
+a Clip that cannot be read is refused outright; a decoder that fails after that
+belongs to a Clip which parsed, installed and has been playing, and the game has
+already been told everything it is owed. What it gets is silence and an ending,
+which is what any Voice that ran out gets.
+
 ---
 
 ## Resampling
@@ -478,6 +506,32 @@ and with the same filter.
 **`Prepare` must not bake the device rate into anything the Clip cache keys on**,
 which is what keeps a device change from costing the cache anything. What it
 returns is rate-converted; what the cache holds is the encoded bytes.
+
+**The cutoff sits at 0.9 of the lower Nyquist rather than on it**, and the
+kernel is stretched to that cutoff rather than truncated at 48 taps. A windowed
+sinc has a transition band of real width - about 5.5/N of the input rate for a
+Blackman window over N taps - and a cutoff placed exactly on the new Nyquist
+puts half of that transition above it, where whatever survives folds. What the
+margin costs is the top tenth of the new band, 21.6 kHz upwards against a 48 kHz
+device, which is above what anyone hears. Upsampling keeps the cutoff at the
+source's own Nyquist and the kernel at 48 taps, because there is nothing above
+it to fold.
+
+> **Measured** (2026-09-20,
+> `TestTheOfflineResamplerDecimatesWithoutFoldingTheBandAboveNyquist`): a 30 kHz
+> tone in a 96 kHz source, decimated to 48 kHz, arrives at 18 kHz **106 dB
+> down**, against a passband flat to **0.00 dB**. The same conversion by the
+> linear interpolation that stood here until
+> [#482](https://github.com/dvoyni/cog/issues/482) folds it at **0 dB** - full
+> amplitude - because at an exact 2:1 ratio every output frame lands on an input
+> frame and the interpolation never runs at all.
+
+**The two tiers are one filter, and it is asserted rather than assumed.** The
+resampler is incremental: `Prepare` drives it in one call and a read-ahead
+drives it a few thousand frames at a time, keeping the window's history across
+the chunks and across a loop's wrap, so a streamed Clip comes out frame for
+frame what the same Clip held resident would have been. A Clip must not sound
+different for having been long enough to stream.
 
 ---
 

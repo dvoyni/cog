@@ -35,7 +35,12 @@ const (
 // A ClipID is resolved to the clip it names on the tick side, at the moment the
 // operation is staged, so the Mixer holds a pointer and never a lookup.
 type op struct {
-	clip   *clipData
+	clip *clipData
+	// ring is the read-ahead a start on a streamed Clip was given, and is nil
+	// on every other operation and on every start on a resident one. The tick
+	// made it, and what travels is the ring alone: the decoder and the
+	// goroutine behind it stay on the side of the seam that may have them.
+	ring   *pcmRing
 	offset time.Duration
 	params sound.VoiceParams
 	id     sound.ClipID

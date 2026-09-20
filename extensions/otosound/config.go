@@ -24,6 +24,32 @@ type Config struct {
 	// a base rate.
 	//   0 means 48000
 	SampleRate int
+	// DecodedClipLimit is the largest decoded size, in bytes, a Clip may have
+	// and still be decoded once at load; a larger Clip streams, with a decoder
+	// and a read-ahead ring per Voice.
+	//   0  means 512 KiB, the default
+	//  -1  means no limit: always decode and cache
+	//  -2  means always stream: never decode at load
+	//   >0 is the limit in bytes
+	//
+	// It is on decoded size rather than encoded size because decoded size is
+	// what costs memory, and it is computable before decoding anything, as
+	// frames x channels x 4 from the identification header and the end granule
+	// position. At 512 KiB that is 2.97 s mono 44.1 kHz, 1.49 s stereo
+	// 44.1 kHz, 1.37 s stereo 48 kHz.
+	//
+	// Neither tier alone is defensible, which is why this is a limit and not a
+	// mode. A five-minute stereo track resident is 101 MiB of float32 against
+	// 4.8 MB encoded, 21x, so music cannot be resident; and opening a decoder
+	// is 460 us and 137 KB, so a footstep cannot pay for one to play a Clip
+	// whose whole decoded form is smaller than the decoder streaming it.
+	//
+	// A Clip whose length reads 0 - a truncated file - streams whatever this
+	// says, because there is no decoded size to compare it against.
+	//
+	// Which tier a Clip landed in is invisible: both report the same duration,
+	// channels, rate and loop region, and a game cannot ask.
+	DecodedClipLimit int
 }
 
 // WithBufferSize sets how much audio the device buffers.
@@ -35,5 +61,12 @@ func (c Config) WithBufferSize(size time.Duration) Config {
 // WithSampleRate sets the rate the Mixer produces and the device consumes.
 func (c Config) WithSampleRate(rate int) Config {
 	c.SampleRate = rate
+	return c
+}
+
+// WithDecodedClipLimit sets the largest decoded size a Clip may have and still
+// be held resident. Zero is 512 KiB, -1 never streams and -2 always streams.
+func (c Config) WithDecodedClipLimit(bytes int) Config {
+	c.DecodedClipLimit = bytes
 	return c
 }

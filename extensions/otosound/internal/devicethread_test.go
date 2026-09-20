@@ -18,7 +18,13 @@ import (
 // there is the prepared Clip data it was given - fields, and one method that is
 // arithmetic over them - which is exactly what the rule allows; the decode
 // beside it is reached only from the goroutine Prepare spawns.
-var deviceThread = []string{"mixer.go", "voice.go", "ring.go", "batch.go"}
+//
+// streamring.go is on it, and stream.go beside it is not. That is the streamed
+// tier's whole shape in one line: the device thread may touch a read-ahead
+// ring, which is a buffer and two atomic counters, and may not touch the
+// decoder, the goroutine or the resampler that fill it. A Voice is handed the
+// ring and never the stream for exactly this reason.
+var deviceThread = []string{"mixer.go", "voice.go", "ring.go", "batch.go", "streamring.go"}
 
 // deviceThreadImports is everything those files may import. sound is on it for
 // its types alone - VoiceSlot, VoiceParams, ClipID - and what the rule forbids
