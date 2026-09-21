@@ -108,6 +108,9 @@ func (d DepthDescr) Size() (width, height int, ok bool) {
 // than borrowing the backend's pooled one or declaring no depth at all.
 func (d DepthDescr) IsTexture() bool { return d.kind == DepthKindTexture }
 
+// IsNone reports whether the pass declares no depth attachment.
+func (d DepthDescr) IsNone() bool { return d.kind == DepthKindNone }
+
 // DepthAuto uses the backend's own depth texture for the target's size. Every
 // DepthAuto pass at a given size shares one texture, so a pass that means to
 // start from a clean depth buffer must clear depth or it inherits whatever the

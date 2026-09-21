@@ -43,6 +43,9 @@ type pipelineKey struct {
 	// in both gets whichever pass reached it first, which is a validation
 	// failure in the other one.
 	noColor bool
+	// noDepth does the same for a DepthNone pass, which has no depth
+	// attachment for a pipeline's depth state to match.
+	noDepth bool
 	layout  types.VertexLayoutKey
 	// stripIndex is the index width a strip topology's pipeline has to declare,
 	// and nothing at all for every other topology. It is the strip format

@@ -33,6 +33,12 @@ type PipelineDesc struct {
 	// A backend that honours this builds no fragment stage, so a depth-only
 	// shader may declare no fs_main at all.
 	NoColorTarget bool
+	// NoDepthTarget is NoColorTarget's depth twin: it builds a pipeline with no
+	// depth state, which is what a draw inside a DepthNone pass needs. Such a
+	// pass declares no depth attachment, and a pipeline that declares one
+	// anyway is rejected at setPipeline for the same reason and with the same
+	// silent loss of the frame. DepthFormat is not read when it is set.
+	NoDepthTarget bool
 	Stride        int
 	Attributes    []VertexAttribute
 	// IndexWidth is the width a strip topology cuts on. WebGPU requires a

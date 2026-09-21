@@ -82,15 +82,14 @@ func (t *translator) ensurePipeline(
 	// rejected at setPipeline.
 	noColor := pass.Target.IsNone()
 	colorFormat := t.targetFormat(backend, pass)
-	// FormatDepth32F is the only depth format in the engine: DepthAuto allocates
-	// one, DepthTarget requires one, and the enum holds no other. What a
-	// DepthNone pass needs is to declare no depth attachment rather than a
-	// different format, which the key cannot say yet -
-	// https://github.com/dvoyni/cog/issues/469.
+	// Depth is the same: FormatDepth32F is the only depth format in the engine
+	// (DepthAuto allocates one, DepthTarget requires one, and the enum holds no
+	// other), so what varies is whether the pass has a depth attachment at all.
+	noDepth := pass.Depth.IsNone()
 	const depthFormat = gfx.FormatDepth32F
 	k := pipelineKey{
 		shader: shader, topology: m.Topology(), state: state,
-		colorFormat: colorFormat, depthFormat: depthFormat, noColor: noColor, layout: layout,
+		colorFormat: colorFormat, depthFormat: depthFormat, noColor: noColor, noDepth: noDepth, layout: layout,
 		stripIndex: stripIndexKeyOf(m.Topology(), m.IndexWidth()),
 	}
 	if id, ok := t.pipelines[k]; ok {
@@ -116,6 +115,7 @@ func (t *translator) ensurePipeline(
 		ColorFormat:   colorFormat,
 		DepthFormat:   depthFormat,
 		NoColorTarget: noColor,
+		NoDepthTarget: noDepth,
 		Stride:        stride,
 		Attributes:    attrs,
 		IndexWidth:    m.IndexWidth(),

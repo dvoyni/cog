@@ -20,13 +20,6 @@ import (
 // multiple of that alignment, and every slot's is.
 const gfxbUniformSize = 256
 
-// depthFormat is the one depth format the engine uses, renderable and
-// sampleable, with no stencil aspect anywhere. The browser WebGPU binding emits
-// stencilLoadOp/stencilStoreOp unless the attachment is stencil-read-only, and
-// WebGPU rejects those on a stencil-less format, so every depth attachment sets
-// StencilReadOnly.
-const depthFormat = gputypes.TextureFormatDepth32Float
-
 // gfxBackend implements gfx.Backend over gogpu/wgpu. TextureID and BufferID key
 // native textures and buffers directly; backend-minted IDs remain only for
 // shaders, pipelines, and samplers. All methods run on the render thread,
@@ -663,14 +656,6 @@ func (b *gfxBackend) NewPipeline(desc gfx.PipelineDesc) (gfx.PipelineID, error) 
 		return 0, errors.New("gfx: unknown shader for pipeline")
 	}
 	module := sh.module
-	// Every pipeline must declare a depth state matching the render pass
-	// attachment (browser WebGPU enforces this). Compare and write are
-	// independent: the transparent pass tests without writing.
-	depth := &wgpu.DepthStencilState{
-		Format:            depthFormat,
-		DepthCompare:      compareFunc(desc.State.DepthCompare),
-		DepthWriteEnabled: desc.State.DepthWrite,
-	}
 	var buffers []gputypes.VertexBufferLayout
 	if desc.Stride > 0 && len(desc.Attributes) > 0 {
 		attrs := make([]gputypes.VertexAttribute, len(desc.Attributes))
@@ -700,7 +685,7 @@ func (b *gfxBackend) NewPipeline(desc gfx.PipelineDesc) (gfx.PipelineID, error) 
 			CullMode:         cullMode(desc.State.Cull),
 			FrontFace:        frontFace(desc.State.FrontFace),
 		},
-		DepthStencil: depth,
+		DepthStencil: depthStencilState(desc),
 		Fragment:     fragmentState(module, desc),
 	})
 	if err != nil {
@@ -709,6 +694,26 @@ func (b *gfxBackend) NewPipeline(desc gfx.PipelineDesc) (gfx.PipelineID, error) 
 	id := gfx.PipelineID(b.id())
 	b.pipelines[id] = &gfxbPipeline{pipeline: pipeline, shader: sh}
 	return id, nil
+}
+
+// depthStencilState builds the pipeline's depth state, and returns nil for a
+// pipeline that has no depth target.
+//
+// A pipeline's depth state and its pass's depth attachment are validated
+// against each other at setPipeline time, as the colour side is: a DepthNone
+// pass has no attachment - passDepth returns nil and BeginPass writes none - so
+// a pipeline declaring one is rejected by browser WebGPU, and native Dawn lets
+// it through, which is why only the browser loses the frame. Compare and write
+// are independent: the transparent pass tests without writing.
+func depthStencilState(desc gfx.PipelineDesc) *wgpu.DepthStencilState {
+	if desc.NoDepthTarget {
+		return nil
+	}
+	return &wgpu.DepthStencilState{
+		Format:            textureFormat(desc.DepthFormat),
+		DepthCompare:      compareFunc(desc.State.DepthCompare),
+		DepthWriteEnabled: desc.State.DepthWrite,
+	}
 }
 
 // fragmentState builds the pipeline's fragment stage, and returns nil for a
