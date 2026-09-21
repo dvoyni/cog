@@ -29,7 +29,7 @@ func NewStore[T any](en *Entities, ids uint32) *Store[T] { return types.NewStore
 // Storable reports whether a type may be a Component. The rule it checks is
 // that a Component contains no mutable indirection, transitively: it admits
 // numerics, bools, fixed-size arrays, Entity, structs of those, string, assets.Blob
-// and List[T], and refuses pointers, slices, maps, channels, funcs, interfaces
+// and m.List[T], and refuses pointers, slices, maps, channels, funcs, interfaces
 // and sync types. The error names the offending field by path.
 func Storable(t reflect.Type) error { return types.Storable(t) }
 
@@ -74,11 +74,3 @@ func ToExecute[Req any, Res any](
 // Feed builds the projection for one In[T] from the event E. Call it at each
 // registration site: a Feeder handed to two Systems is refused.
 func Feed[E any, T any](project func(E) T) Feeder[E] { return types.Feed[E, T](project) }
-
-// NewList copies its arguments into a List. It is the spelling for a literal:
-// ecs.NewList(a, b, c).
-func NewList[T any](values ...T) List[T] { return types.NewList[T](values...) }
-
-// ListOf copies a slice into a List rather than adopting it, so the caller's own
-// header cannot write the List. A nil or empty slice yields the zero List.
-func ListOf[T any](values []T) List[T] { return types.ListOf[T](values) }

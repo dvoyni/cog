@@ -4,7 +4,6 @@ import (
 	"errors"
 	"math"
 
-	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -225,7 +224,7 @@ func NewDynamicForShape(shape Shape, polygon Polygon, density, damping, angularD
 		for i := range verts {
 			verts[i] = verts[i].Sub(centroid)
 		}
-		return body, recentred, Polygon{Verts: ecs.ListOf(verts)}, centroid, nil
+		return body, recentred, Polygon{Verts: m.ListOf(verts)}, centroid, nil
 	}
 	return body, recentred, Polygon{}, centroid, nil
 }

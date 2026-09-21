@@ -97,14 +97,14 @@ type Mesh struct {                             // pointer-free
 }
 
 type Animation struct{ Plays [MaxPlays]scene.ClipPlay } // MaxPlays is 4
-type Params    struct{ Values ecs.List[gfx.ParameterDescr] }
-type Material  struct{ Tags ecs.List[MaterialTag] }
+type Params    struct{ Values m.List[gfx.ParameterDescr] }
+type Material  struct{ Tags m.List[MaterialTag] }
 
 type MaterialTag struct {
     Tag    scene.PassTag
     Shader gfx.ShaderDescr
     State  gfx.MaterialState
-    Params ecs.List[gfx.ParameterDescr]
+    Params m.List[gfx.ParameterDescr]
 }
 
 type Light struct {                            // pointer-free
@@ -124,7 +124,7 @@ type Camera struct {
     SunIntensity                            float32
     AmbientSky, AmbientGround               m.Color
     AmbientIntensity                        float32
-    Passes                                  ecs.List[scene.Pass]
+    Passes                                  m.List[scene.Pass]
 }
 ```
 
@@ -166,7 +166,7 @@ func spawnCrates(sp *ecs.Spawn[Crate]) {
     sp.New(Crate{
         Place: ecsscene.Transform(scene.At(0, 0, -5)),
         Model: ecsscene.Model{Ref: scene.ModelRef{Path: "models/crate.glb"}},
-        Tint:  ecsscene.Params{Values: ecs.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}))},
+        Tint:  ecsscene.Params{Values: m.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}))},
     })
 }
 ```
@@ -213,7 +213,7 @@ or a backend adopted from outside cog — has to keep true, and none of them has
 compiler behind it.
 
 - **A Component holds no mutable indirection, transitively.** Enforced at
-  registration. A string, an `assets.Blob` and an `ecs.List` are admitted; a bare
+  registration. A string, an `assets.Blob` and an `m.List` are admitted; a bare
   slice is not. Scene's descriptors that keep a slice — `gfx.MaterialDescr`'s
   params, `CameraDescr.Passes` — are therefore spelled out as Component fields
   and rebuilt per draw, which is what `MaterialTag` is.

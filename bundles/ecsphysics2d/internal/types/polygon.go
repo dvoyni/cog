@@ -3,7 +3,6 @@ package types
 import (
 	"errors"
 
-	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -19,10 +18,10 @@ import (
 // them, and they are the constructor's output rather than the app's input: a
 // Polygon written by hand is not hulled and is not checked.
 type Polygon struct {
-	// Verts are the convex outline's vertices. ecs.List is the ECS's own answer
+	// Verts are the convex outline's vertices. m.List is the storable answer
 	// to a variable-length run in a Component: it yields copies and hands out no
 	// slice, which is why Index copies rather than pointing at it.
-	Verts ecs.List[m.Vec2d]
+	Verts m.List[m.Vec2d]
 }
 
 // The three ways a Shape constructor refuses an outline. They are sentinels
@@ -144,7 +143,7 @@ func newHulledShape(hull []m.Vec2d, radius float64) (Shape, Polygon, error) {
 		shape.Kind = ShapeQuad
 	default:
 		shape.Kind = ShapePoly
-		return shape, Polygon{Verts: ecs.ListOf(hull)}, nil
+		return shape, Polygon{Verts: m.ListOf(hull)}, nil
 	}
 	copy(shape.verts[:], hull)
 	return shape, Polygon{}, nil
@@ -155,7 +154,7 @@ func newHulledShape(hull []m.Vec2d, radius float64) (Shape, Polygon, error) {
 // ShapePoly and the Shape's own slots for ShapeTri and ShapeQuad, and nothing
 // at all for the two kinds that are not polygons.
 //
-// It exists because ecs.List hands out no slice, deliberately, and a query
+// It exists because m.List hands out no slice, deliberately, and a query
 // primitive cannot take a Component of the ECS's without the types package
 // naming one in a signature the root forwards. The idiom is
 // dst = PolygonVerts(dst[:0], shape, polygon), which settles to no allocation

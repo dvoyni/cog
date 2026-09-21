@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -73,7 +74,7 @@ func TestAWriteThroughAReadIsCaught(t *testing.T) {
 	var caught string
 	listWorld(t, func(registrar *kernel.Registrar) {
 		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[readInventory], spawn *Spawn[inventorySet]) {
-			spawn.New(inventorySet{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
+			spawn.New(inventorySet{Inventory: inventory{Slots: m.ListOf([]uint32{1, 2, 3})}})
 			for _, it := range q.All() {
 				caught = recovered(func() { it.Inventory.Slots.Set(0, 99) })
 			}
@@ -95,7 +96,7 @@ func TestAWriteThroughAWriteIsAllowed(t *testing.T) {
 	var seen uint32
 	listWorld(t, func(registrar *kernel.Registrar) {
 		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[writeInventory], spawn *Spawn[inventorySet]) {
-			spawn.New(inventorySet{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
+			spawn.New(inventorySet{Inventory: inventory{Slots: m.ListOf([]uint32{1, 2, 3})}})
 			for _, it := range q.All() {
 				caught = recovered(func() { it.Inventory.Slots.Set(0, 99) })
 				seen = it.Inventory.Slots.At(0)
@@ -118,8 +119,8 @@ func TestAWriteAfterTheRunIsCaught(t *testing.T) {
 	var caught string
 	listWorld(t, func(registrar *kernel.Registrar) {
 		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[writeInventory], spawn *Spawn[inventorySet]) {
-			spawn.New(inventorySet{Inventory: inventory{Slots: ListOf([]uint32{1, 2, 3})}})
-			var kept List[uint32]
+			spawn.New(inventorySet{Inventory: inventory{Slots: m.ListOf([]uint32{1, 2, 3})}})
+			var kept m.List[uint32]
 			for _, it := range q.All() {
 				kept = it.Inventory.Slots
 			}
@@ -135,7 +136,7 @@ func TestAWriteAfterTheRunIsCaught(t *testing.T) {
 }
 
 // TestTheCallersOwnCopyIsClosedTooIsWhyStoringStamps records the alias a
-// constructor leaves behind. ListOf copies, so the List a caller builds is its
+// constructor leaves behind. m.ListOf copies, so the List a caller builds is its
 // own — until Set copies the header into the Store, at which point the two
 // share one array and the caller's retained value is a write handle on the
 // world.
@@ -143,7 +144,7 @@ func TestTheCallersOwnCopyIsClosedByStoring(t *testing.T) {
 	entities := newEntities(8)
 	store := NewStore[inventory](entities, 8)
 
-	mine := ListOf([]uint32{1, 2, 3})
+	mine := m.ListOf([]uint32{1, 2, 3})
 	if caught := recovered(func() { mine.Set(0, 7) }); caught != "" {
 		t.Fatalf("writing a List the world has never seen was refused: %s", caught)
 	}
@@ -212,8 +213,8 @@ func TestTheCallersOwnNestedCopyIsClosedByStoring(t *testing.T) {
 	entities := newEntities(8)
 	store := NewStore[grid](entities, 8)
 
-	cells := ListOf([]uint32{1, 2})
-	store.Set(entities.alloc(), grid{Rows: NewList(row{Cells: cells})})
+	cells := m.ListOf([]uint32{1, 2})
+	store.Set(entities.alloc(), grid{Rows: m.NewList(row{Cells: cells})})
 	caught := recovered(func() { cells.Set(0, 9) })
 	if !strings.Contains(caught, "already in the world") {
 		t.Fatalf("writing the caller's own alias of a nested stored List: %q", caught)
@@ -236,7 +237,7 @@ func TestASetThroughASetOfCopyIsCaughtAndNamesRef(t *testing.T) {
 		}))
 	}, func(entities *Entities) {
 		e = entities.alloc()
-		lists.inventorys.Set(e, inventory{Slots: ListOf([]uint32{1, 2, 3})})
+		lists.inventorys.Set(e, inventory{Slots: m.ListOf([]uint32{1, 2, 3})})
 	})
 	if caught == "" {
 		t.Fatal("writing a List through a Set.Of copy was allowed")
@@ -292,7 +293,7 @@ func TestASetThroughRefIsAllowed(t *testing.T) {
 		}))
 	}, func(entities *Entities) {
 		e = entities.alloc()
-		lists.inventorys.Set(e, inventory{Slots: ListOf([]uint32{1, 2, 3})})
+		lists.inventorys.Set(e, inventory{Slots: m.ListOf([]uint32{1, 2, 3})})
 		lists.grids.Set(e, twoByTwo())
 	})
 	if flat != "" || nested != "" {
@@ -313,7 +314,7 @@ func TestASetOnAFreshListBeforeUpdateForIsAllowed(t *testing.T) {
 	var e Entity
 	worldOfOne(t, lists, func(registrar *kernel.Registrar) {
 		registrar.Subscribe[listSystem](ToHandler[app.UpdateEvent](registrar, func(set *Set[inventory]) {
-			fresh := inventory{Slots: ListOf([]uint32{1, 2, 3})}
+			fresh := inventory{Slots: m.ListOf([]uint32{1, 2, 3})}
 			caught = recovered(func() { fresh.Slots.Set(0, 42) })
 			set.UpdateFor(e, fresh)
 			value, _ := set.Of(e)
@@ -341,9 +342,9 @@ func worldOfOne(t *testing.T, lists *listsPlugin, subscribe func(*kernel.Registr
 }
 
 func twoByTwo() grid {
-	return grid{Rows: NewList(
-		row{Cells: NewList[uint32](1, 2)},
-		row{Cells: NewList[uint32](3, 4)},
+	return grid{Rows: m.NewList(
+		row{Cells: m.NewList[uint32](1, 2)},
+		row{Cells: m.NewList[uint32](3, 4)},
 	)}
 }
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -16,7 +17,7 @@ import (
 // header, and 36 padded to 40 under a 32-byte one, so the row crosses a size
 // class.
 type satchel struct {
-	Items List[int32]
+	Items m.List[int32]
 	X     float32
 }
 
@@ -54,7 +55,7 @@ func benchmarkSatchelFrame(b *testing.B, system any) {
 	for i := range n {
 		e := entities.alloc()
 		components.bodies.Set(e, body{})
-		plugin.store.Set(e, satchel{Items: NewList[int32](1, 2, 3), X: float32(i)})
+		plugin.store.Set(e, satchel{Items: m.NewList[int32](1, 2, 3), X: float32(i)})
 	}
 	executioner := engine.Executioner()
 	b.ReportAllocs()
@@ -85,7 +86,7 @@ func BenchmarkListHeaderStoreRemoveAdd(b *testing.B) {
 	entities := newEntities(n)
 	store := NewStore[satchel](entities, n)
 	handles := make([]Entity, n)
-	value := satchel{Items: NewList[int32](1, 2, 3)}
+	value := satchel{Items: m.NewList[int32](1, 2, 3)}
 	for i := range handles {
 		handles[i] = entities.alloc()
 		store.Set(handles[i], value)

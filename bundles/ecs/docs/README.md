@@ -25,12 +25,14 @@ ecs has the declaration-root shape of
 - **`bundles/ecs`** is the root, and holds declarations only, which are the
   whole library a System author uses: `Entity`, `NoEntity`, the `Entities` and
   `Store` resources, `Query`, `With` and `Without`, `Spawn` and
-  `WriteableEntities`, the `Get`, `Set` and `Remove` accessors, `List`, `Read`
+  `WriteableEntities`, the `Get`, `Set` and `Remove` accessors, `Read`
   and `Write`, `In` and `Feeder`, `Resp`, `ShrinkCmd` with `ShrinkRequest` and
   `ShrinkResponse`, `Config` and `Name`. Its functions,
   `RegisterComponent`, `NewStore`, `Storable`, `PointerFree`, `ToHandler`,
-  `ToExecute`, `Feed`, `NewList` and `ListOf`, are forwarders in `utils.go`. It
-  declares no plugin, and it is what every other package imports.
+  `ToExecute` and `Feed`, are forwarders in `utils.go`. It declares no plugin,
+  and it is what every other package imports. The List a Component holds is
+  `m.List`, in `libs/m`, so a plugin can make a type storable without importing
+  this package.
 - **`bundles/ecs/internal/types`** declares every one of those types and holds
   the machinery behind them: the authority's allocation, despawn, Store
   enrolment and Component registry, the Store and its type-erased header,
@@ -268,7 +270,7 @@ func PointerFree(t reflect.Type) error // the fast-path property
 pointer it holds, it holds to memory nothing can write. That is mechanically
 checkable: one walk, run once when the type is registered. It permits numerics,
 bools, fixed-size arrays, `Entity`, structs of those, **`string`**,
-**`assets.Blob`** and **`ecs.List[T]`**; it refuses pointers, bare slices, maps,
+**`assets.Blob`** and **`m.List[T]`**; it refuses pointers, bare slices, maps,
 channels, funcs and interfaces.
 
 **The rule is about the lock unit, not the collector.** A read yields a copy,
@@ -281,7 +283,7 @@ the copy is not itself a write handle:
 | a **`string`** | **no** — the header is a copy and the bytes are immutable |
 | an **`assets.Blob`** | **no, by contract** — its bytes are never written after construction |
 | a `[]T` | **yes** — refused for exactly this |
-| an **`ecs.List[T]`** | only through `Set`, which validation mode checks |
+| an **`m.List[T]`** | only through `Set`, which validation mode checks |
 
 Copying and serialisation come second, and a string satisfies both: it stays
 meaningful after the thing it was copied from is gone, and it encodes trivially.
@@ -320,9 +322,15 @@ removed](#naming-an-engine-side-thing-removed).
 `sync` types are not special-cased — a mutex is refused by this walk, and would
 be wrong in a Component anyway, for the same reason `go vet` already says so.
 
-## Variable-length data: `List[T]`
+## Variable-length data: `m.List[T]`
+
+The List is declared in `libs/m`, beside `m.Maybe`, and is spelled `m.List`; the
+ECS keeps what it knows about one — the registration walk admitting it, the
+generation a Changed Hook compares, and the `ecs_validate` check `Set` makes,
+which the ECS installs into `m` when validation mode is built.
 
 ```go
+// package m
 func NewList[T any](values ...T) List[T]
 func ListOf[T any](values []T) List[T]
 

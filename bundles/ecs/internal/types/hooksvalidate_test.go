@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 )
 
 // The Validation checks of hooks.md that only a validating build makes: IsX on
@@ -117,12 +118,12 @@ func TestIsXOnAKindTheSetCanNeverDeliverPanics(t *testing.T) {
 // implicit padding, as a Component watched for Changed must not.
 type (
 	pouch struct {
-		Items List[uint32]
+		Items m.List[uint32]
 		Count uint32
 		_     [4]byte
 	}
-	shelf    struct{ Rows List[shelfRow] }
-	shelfRow struct{ Items List[uint32] }
+	shelf    struct{ Rows m.List[shelfRow] }
+	shelfRow struct{ Items m.List[uint32] }
 )
 
 // listWrite is what the scripted writer holds: Set and Remove on both
@@ -221,17 +222,17 @@ func TestASetThroughAHookValueIsCaught(t *testing.T) {
 	w := newHookListWorld(t)
 	changed, removed := w.entities.alloc(), w.entities.alloc()
 	for _, e := range []Entity{changed, removed} {
-		w.lists.pouches.Set(e, pouch{Items: NewList[uint32](1, 2)})
-		w.lists.shelves.Set(e, shelf{Rows: NewList(shelfRow{Items: NewList[uint32](1, 2)})})
+		w.lists.pouches.Set(e, pouch{Items: m.NewList[uint32](1, 2)})
+		w.lists.shelves.Set(e, shelf{Rows: m.NewList(shelfRow{Items: m.NewList[uint32](1, 2)})})
 	}
 	added := w.entities.alloc()
 	w.writer(t, func(lw listWrite) {
-		lw.pouches.UpdateFor(added, pouch{Items: NewList[uint32](3, 4)})
-		lw.shelves.UpdateFor(added, shelf{Rows: NewList(shelfRow{Items: NewList[uint32](3, 4)})})
+		lw.pouches.UpdateFor(added, pouch{Items: m.NewList[uint32](3, 4)})
+		lw.shelves.UpdateFor(added, shelf{Rows: m.NewList(shelfRow{Items: m.NewList[uint32](3, 4)})})
 		ref, _ := lw.pouches.Ref(changed)
 		ref.Items.Set(0, 7)
 		row, _ := lw.shelves.Ref(changed)
-		row.Rows.Set(0, shelfRow{Items: NewList[uint32](7, 8)})
+		row.Rows.Set(0, shelfRow{Items: m.NewList[uint32](7, 8)})
 		lw.unpack.From(removed)
 		lw.unshelve.From(removed)
 	})
@@ -285,7 +286,7 @@ func TestAHookValueIsTheReadersOwnCopy(t *testing.T) {
 	w := newHookListWorld(t)
 	e := w.entities.alloc()
 	w.writer(t, func(lw listWrite) {
-		lw.pouches.UpdateFor(e, pouch{Items: NewList[uint32](1, 2), Count: 2})
+		lw.pouches.UpdateFor(e, pouch{Items: m.NewList[uint32](1, 2), Count: 2})
 	})
 	var caught string
 	var count uint32
@@ -293,7 +294,7 @@ func TestAHookValueIsTheReadersOwnCopy(t *testing.T) {
 		for _, hook := range pouches.All() {
 			caught = recovered(func() {
 				hook.Value.Count = 9
-				hook.Value.Items = NewList[uint32](5, 6)
+				hook.Value.Items = m.NewList[uint32](5, 6)
 				hook.Value.Items.Set(0, 99)
 			})
 			count = hook.Value.Count
@@ -320,7 +321,7 @@ func TestAHookValueIsTheReadersOwnCopy(t *testing.T) {
 func (w *hookListWorld) holdsItems(t *testing.T, owners ...Entity) {
 	t.Helper()
 	for _, e := range owners {
-		w.lists.pouches.Set(e, pouch{Items: NewList[uint32](1, 2)})
+		w.lists.pouches.Set(e, pouch{Items: m.NewList[uint32](1, 2)})
 	}
 	w.writer(t, func(lw listWrite) {
 		for _, e := range owners {

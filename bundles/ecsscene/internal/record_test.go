@@ -114,11 +114,11 @@ func TestParamsReachAMeshsParamsAndAModelsOverrides(t *testing.T) {
 	fade := gfx.FloatParam("fade", 0.5)
 	h.spawn(t, spawnRequest{
 		Mesh:   &ecsscene.Mesh{Ref: ref},
-		Params: &ecsscene.Params{Values: ecs.NewList(tint, fade)},
+		Params: &ecsscene.Params{Values: m.NewList(tint, fade)},
 	})
 	h.spawn(t, spawnRequest{
 		Model:  &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}},
-		Params: &ecsscene.Params{Values: ecs.NewList(tint)},
+		Params: &ecsscene.Params{Values: m.NewList(tint)},
 	})
 
 	h.frame(t)
@@ -164,15 +164,15 @@ func TestAMaterialsTagsEachKeepTheirOwnParams(t *testing.T) {
 	ref := h.bake(t)
 	forward := gfx.ShaderWithText("forward")
 	shadow := gfx.ShaderWithText("shadow")
-	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref}, Material: &ecsscene.Material{Tags: ecs.NewList(
-		ecsscene.MaterialTag{Shader: forward, State: gfx.StateOpaque3D(), Params: ecs.NewList(
+	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref}, Material: &ecsscene.Material{Tags: m.NewList(
+		ecsscene.MaterialTag{Shader: forward, State: gfx.StateOpaque3D(), Params: m.NewList(
 			gfx.FloatParam("a", 1), gfx.FloatParam("b", 2))},
-		ecsscene.MaterialTag{Tag: "shadow", Shader: shadow, State: gfx.StateTransparent3D(), Params: ecs.NewList(
+		ecsscene.MaterialTag{Tag: "shadow", Shader: shadow, State: gfx.StateTransparent3D(), Params: m.NewList(
 			gfx.FloatParam("c", 3))},
 		ecsscene.MaterialTag{Tag: "outline", Shader: forward},
 	)}})
-	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(1)}, Material: &ecsscene.Material{Tags: ecs.NewList(
-		ecsscene.MaterialTag{Shader: shadow, Params: ecs.NewList(gfx.FloatParam("d", 4))},
+	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(1)}, Material: &ecsscene.Material{Tags: m.NewList(
+		ecsscene.MaterialTag{Shader: shadow, Params: m.NewList(gfx.FloatParam("d", 4))},
 	)}})
 
 	h.frame(t)
@@ -219,7 +219,7 @@ func TestAMaterialsTagsEachKeepTheirOwnParams(t *testing.T) {
 func TestAnAbsentMaterialIsNoMaterial(t *testing.T) {
 	h := newHarness(t)
 	ref := h.bake(t)
-	material := &ecsscene.Material{Tags: ecs.NewList(ecsscene.MaterialTag{Shader: gfx.ShaderWithText("flat")})}
+	material := &ecsscene.Material{Tags: m.NewList(ecsscene.MaterialTag{Shader: gfx.ShaderWithText("flat")})}
 	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(1)}, Material: material})
 	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref}})
 	h.spawn(t, spawnRequest{Model: &ecsscene.Model{Ref: scene.ModelRef{Path: "models/shaded.glb"}}, Material: material})
@@ -315,7 +315,7 @@ func TestACameraRecordsItsPassesWithTheirClears(t *testing.T) {
 		ID: -2, Projection: scene.Perspective, FovY: 1, Near: 0.1, Far: 100,
 		CullMask: scene.Layer(4), SunDirection: m.Vec3{Y: -1}, SunColor: m.White, SunIntensity: 3,
 		AmbientSky: m.Color{B: 1, A: 1}, AmbientGround: m.Color{G: 1, A: 1}, AmbientIntensity: 0.5,
-		Passes: ecs.ListOf(passes),
+		Passes: m.ListOf(passes),
 	}})
 	h.spawn(t, spawnRequest{Camera: &ecsscene.Camera{
 		ID: 5, Projection: scene.Oblique, Height: 20, Shear: 0.5, Near: -50, Far: 50,

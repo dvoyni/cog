@@ -32,7 +32,6 @@ func stampHook(unsafe.Pointer, []listSite, string, string, string)     {}
 func holdLists(*storeHeader, uintptr, []Entity)                        {}
 func releaseLists(*storeHeader, Entity)                                {}
 func releaseEntityLists(Entity)                                        {}
-func checkListWritable(unsafe.Pointer)                                 {}
 
 // hookUnder is the kind set a delivered Hook carries for IsX to check, which a
 // release build does not, so it is zero-size and a Hook is as wide as it was.

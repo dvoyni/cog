@@ -175,7 +175,7 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 //
 // Every pointer a Component holds, it holds to memory nothing can write. That
 // admits numerics, bools, fixed-size arrays, Entity, structs of those, string,
-// assets.Blob and List[T]; it refuses pointers, slices, maps, channels, funcs,
+// assets.Blob and m.List[T]; it refuses pointers, slices, maps, channels, funcs,
 // interfaces and sync types.
 //
 // The rule it replaced was "a Component contains no pointers, transitively",
@@ -256,7 +256,7 @@ func storable(t reflect.Type, path string) error {
 		return nil
 	default:
 		return fmt.Errorf(
-			"%s is a %s, which is mutable indirection: a Component may hold a pointer only to memory nothing can write, so a string is admitted, static bytes belong in an assets.Blob, a variable-length run belongs in an ecs.List, and everything else is a child Entity",
+			"%s is a %s, which is mutable indirection: a Component may hold a pointer only to memory nothing can write, so a string is admitted, static bytes belong in an assets.Blob, a variable-length run belongs in an m.List, and everything else is a child Entity",
 			path, t.Kind())
 	}
 }
