@@ -129,15 +129,15 @@ func (la LookupDeviceAccess) Nodes(ref ModelRef, dst []string) ([]string, bool) 
 		return dst, false
 	}
 	if ref.Node == "" {
-		return append(dst, scene.order...), true
+		return append(dst, scene.Order...), true
 	}
-	named, found := scene.nodes[ref.Node]
+	named, found := scene.Nodes[ref.Node]
 	if !found {
 		err := ErrModelNodeMissing{Model: ref.Path, Scene: ref.Scene, Node: ref.Node}
 		la.kernel.ReportErrorOnce(err.reportKey(), err)
 		return dst, false
 	}
-	return append(dst, scene.order[named.first:named.last]...), true
+	return append(dst, scene.Order[named.First:named.Last]...), true
 }
 
 // Bounds returns a ref's bounding sphere as xyz centre and w radius - the same
@@ -252,7 +252,7 @@ func (e *residentModel) scene(ref ModelRef) (*loadedScene, ModelSelectorError) {
 	if ref.Scene != "" {
 		selected = -1
 		for i := range e.scenes {
-			if e.scenes[i].name == ref.Scene {
+			if e.scenes[i].Name == ref.Scene {
 				selected = i
 				break
 			}

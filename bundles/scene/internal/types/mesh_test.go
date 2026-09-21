@@ -5,6 +5,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -45,7 +46,7 @@ func TestVertexAuthorsInFloatsAndStoresInThirtyTwoBytes(t *testing.T) {
 }
 
 func TestUnitBoxIsACentredCubeWithPerFaceNormals(t *testing.T) {
-	vertices, indices := unitBoxGeometry()
+	vertices, indices := model.UnitBoxGeometry()
 	if len(vertices) != 24 {
 		t.Fatalf("the unit box has %d vertices, want 24 (four per face)", len(vertices))
 	}
@@ -76,7 +77,7 @@ func TestUnitBoxIsACentredCubeWithPerFaceNormals(t *testing.T) {
 // inside out, and it is the one thing about the box a test can settle without a
 // GPU: every triangle of a convex hull must face away from the centre.
 func TestUnitBoxTrianglesWindCounterClockwiseOutwards(t *testing.T) {
-	vertices, indices := unitBoxGeometry()
+	vertices, indices := model.UnitBoxGeometry()
 	for i := 0; i < len(indices); i += 3 {
 		a := vertices[indices[i]].Position
 		b := vertices[indices[i+1]].Position

@@ -1,19 +1,15 @@
 package types
 
 import (
-	"errors"
-	"fmt"
-
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
-	"github.com/qmuntal/gltf"
-	"github.com/qmuntal/gltf/modeler"
 )
 
 // gltfGeometry is one glTF primitive converted to scene's own vertices: one
 // interleaved buffer, one index list, one topology. Which of the two named
-// layouts that buffer is packed into is skinnedLayout below, and it is not
-// known until every placement of this geometry has been walked.
+// layouts that buffer is packed into is skinnedLayout below, which the
+// decoder's placement walk settled.
 //
 // Missing attributes are generated and repacked here rather than bound from a
 // second buffer, because gfx binds exactly one vertex buffer per mesh. Total
@@ -28,22 +24,21 @@ type gltfGeometry struct {
 	// file omitted them, which makes the whole model never-cull.
 	box    m.Box3
 	hasBox bool
-	// uv0 and uv1 are the ranges the two TEXCOORD accessors spanned, filled as
-	// the accessors are read rather than by a walk of their own: the read
-	// already visits every UV element, so the ranges cost this path no
-	// traversal. An attribute the file does not carry leaves an unseen range,
-	// which is the zero-width one at the origin - exactly what the unwritten
-	// UVs it left behind decode to.
+	// uv0 and uv1 are the ranges the two TEXCOORD arrays spanned, filled as
+	// the arrays are copied into the vertices rather than by a walk of their
+	// own. An attribute the file does not carry leaves an unseen range, which
+	// is the zero-width one at the origin - exactly what the unwritten UVs it
+	// left behind decode to.
 	//
 	// They outlive unwelding, which only duplicates and drops vertices: a range
 	// taken before it holds every UV that survives it, and a dropped vertex can
 	// only leave it wider than it strictly needed to be.
 	uv0, uv1 uvRange
 	// skinned reports whether the vertices carry a joint binding the shader
-	// should follow. It is decided after conversion, by the node's skin and by
-	// whether the primitive actually carried weights: glTF requires a skinned
-	// node's mesh to have JOINTS_0 and WEIGHTS_0, and one that does not draws
-	// unskinned at the skin's root rather than being lost.
+	// should follow. It is decided by the node's skin and by whether the
+	// primitive actually carried weights: glTF requires a skinned node's mesh
+	// to have JOINTS_0 and WEIGHTS_0, and one that does not draws unskinned at
+	// the skin's root rather than being lost.
 	//
 	// It is not the answer to "is this draw skinned" - the placement is. A
 	// plain-bound node names its joint on the instance and writes nothing
@@ -57,10 +52,10 @@ type gltfGeometry struct {
 	//
 	// The union is what makes a 32-byte layout under a skinning variant
 	// unrepresentable rather than merely unchecked. Both answers come from the
-	// one fact flattenMesh computes per placement, so a variant that declares
-	// locations 6 and 7 can only ever be paired with a buffer that supplies
-	// them. It is a union rather than a key so that one geometry stays one
-	// conversion however many nodes place it.
+	// one fact the decoder's walk computes per placement, so a variant that
+	// declares locations 6 and 7 can only ever be paired with a buffer that
+	// supplies them. It is a union rather than a key so that one geometry
+	// stays one conversion however many nodes place it.
 	//
 	// A geometry plain-bound under one node and static under another therefore
 	// stores joints and weights of zero for the static placements too. That is
@@ -75,275 +70,152 @@ type gltfGeometry struct {
 	morph gltfMorph
 }
 
-// errPointTopology reports a POINTS primitive, which gfx has no topology for -
-// it carries triangle lists, triangle strips and line lists and nothing else.
-// The primitive is skipped and the rest of the model loads, because a model
-// that is mostly triangles should not be lost to one debug point cloud.
-var errPointTopology = errors.New("POINTS has no gfx topology")
-
-// convertPrimitive turns one glTF primitive into scene geometry.
+// convertGeometry turns one decoded primitive into scene geometry: it copies
+// the decoder's attribute arrays into conversion vertices, generates what the
+// file left out, and remaps the skin's joints into the model's numbering.
 //
-// needTangents asks for generated tangents when the primitive's material has a
-// normal map and the file carried none; without one the tangent frame is never
-// read, so generating it would be per-vertex work for a value the shader
-// multiplies by nothing.
-func convertPrimitive(doc *gltf.Document, primitive *gltf.Primitive, needTangents bool) (gltfGeometry, error) {
-	position, ok := attributeAccessor(doc, primitive.Attributes, gltf.POSITION)
-	if !ok {
-		return gltfGeometry{}, errors.New("it has no POSITION attribute")
+// The copy is one plain loop per attribute over the glTF library's own slices,
+// with no call per element. Flat normals are generated for a triangle list
+// whose primitive named no NORMAL, and tangents for one whose material has a
+// normal map and whose primitive carried none; without a normal map the
+// tangent frame is never read, so generating it would be per-vertex work for a
+// value the shader multiplies by nothing.
+func convertGeometry(decoded *model.DecodedGeometry, skins []model.DecodedSkin) gltfGeometry {
+	geometry := gltfGeometry{
+		indices:  decoded.Indices,
+		topology: decoded.Topology,
+		box:      decoded.Box, hasBox: decoded.HasBox,
+		skinnedLayout: decoded.SkinnedLayout,
 	}
-	geometry := gltfGeometry{vertices: make([]skinnedVertex, position.Count)}
-	// White rather than the Go zero value, which is transparent black: the
-	// shader multiplies the vertex colour into base colour unconditionally, so
-	// a primitive with no COLOR_0 has to carry the identity for that multiply.
-	for i := range geometry.vertices {
-		geometry.vertices[i].Color = m.White
-	}
-	if err := readVertexAttributes(doc, primitive, &geometry); err != nil {
-		return gltfGeometry{}, err
-	}
-	geometry.box, geometry.hasBox = accessorBox(position)
-	// Targets are read before anything reorders the vertices, because a delta
-	// is addressed by its own vertex's index and unwelding renumbers them.
-	geometry.morph = readMorphTargets(doc, primitive, len(geometry.vertices))
+	geometry.vertices, geometry.uv0, geometry.uv1 = fillVertices(decoded)
+	// Targets are converted before anything reorders the vertices, because a
+	// delta is addressed by its own vertex's index and unwelding renumbers
+	// them.
+	geometry.morph = convertMorphTargets(decoded, len(geometry.vertices))
 	geometry.expandBoxByMorph()
-
-	indices, err := readIndices(doc, primitive)
-	if err != nil {
-		return gltfGeometry{}, err
+	if geometry.topology == gfx.TopologyTriangleList {
+		if !decoded.NormalNamed {
+			// glTF requires flat normals when NORMAL is absent, and a flat
+			// normal belongs to a face rather than to a vertex, so shared
+			// vertices have to come apart first. The specification also says
+			// the file's tangents are ignored in this case, which unwelding
+			// gives for free: the generator below rebuilds them against the
+			// normals scene just made.
+			var source []uint32
+			geometry.vertices, geometry.indices, source = unweld(geometry.vertices, geometry.indices)
+			geometry.morph.remap(source)
+			generateFlatNormals(geometry.vertices)
+		}
+		if !decoded.TangentNamed && decoded.NeedTangents {
+			generateTangents(geometry.vertices, geometry.indices)
+		}
 	}
-	geometry.topology, geometry.indices, err = convertTopology(primitive.Mode, indices, len(geometry.vertices))
-	if err != nil {
-		return gltfGeometry{}, err
+	// Normals and tangents are a triangle's properties. A line list has no
+	// faces to take them from, and the bundled shader lights it by whatever
+	// the file supplied - which for a line is nothing, so it renders by its
+	// emissive and base colour alone.
+	if decoded.Skin >= 0 && decoded.Skin < len(skins) {
+		geometry.bindJoints(skins[decoded.Skin].Joints)
 	}
-	if geometry.topology != gfx.TopologyTriangleList {
-		// Normals and tangents are a triangle's properties. A line list has no
-		// faces to take them from, and the bundled shader lights it by whatever
-		// the file supplied - which for a line is nothing, so it renders by its
-		// emissive and base colour alone.
-		return geometry, nil
-	}
-	if _, has := primitive.Attributes[gltf.NORMAL]; !has {
-		// glTF requires flat normals when NORMAL is absent, and a flat normal
-		// belongs to a face rather than to a vertex, so shared vertices have to
-		// come apart first. The specification also says the file's tangents are
-		// ignored in this case, which unwelding gives for free: the generator
-		// below rebuilds them against the normals scene just made.
-		var source []uint32
-		geometry.vertices, geometry.indices, source = unweld(geometry.vertices, geometry.indices)
-		geometry.morph.remap(source)
-		generateFlatNormals(geometry.vertices)
-	}
-	if _, has := primitive.Attributes[gltf.TANGENT]; !has && needTangents {
-		generateTangents(geometry.vertices, geometry.indices)
-	}
-	return geometry, nil
+	return geometry
 }
 
-// readVertexAttributes fills one primitive's vertices from the accessors it
-// names, and accumulates the two UV ranges as it goes. Every attribute but
-// POSITION is optional, and an attribute the file does not carry leaves scene's
-// default in place.
-//
-// The UV ranges ride the reads rather than taking a walk of their own: the
-// TEXCOORD callbacks below already visit every element, so the per-mesh record
-// costs this path one compare pair per coordinate and no second traversal.
-func readVertexAttributes(doc *gltf.Document, primitive *gltf.Primitive, geometry *gltfGeometry) error {
-	vertices := geometry.vertices
-	position, _ := attributeAccessor(doc, primitive.Attributes, gltf.POSITION)
-	if err := readAttribute(doc, position, func(i int, v attrValue) {
-		vertices[i].Position = m.Vec3{X: v[0], Y: v[1], Z: v[2]}
-	}); err != nil {
-		return fmt.Errorf("POSITION: %w", err)
+// fillVertices copies one decoded primitive's attribute arrays into its
+// conversion vertices. Every attribute but POSITION is optional, and an
+// attribute the file does not carry leaves scene's default in place.
+func fillVertices(decoded *model.DecodedGeometry) (vertices []skinnedVertex, uv0, uv1 uvRange) {
+	vertices = make([]skinnedVertex, len(decoded.Positions))
+	for i, position := range decoded.Positions {
+		vertices[i].Position = m.Vec3{X: position[0], Y: position[1], Z: position[2]}
+		// White rather than the Go zero value, which is transparent black:
+		// the shader multiplies the vertex colour into base colour
+		// unconditionally, so a primitive with no COLOR_0 has to carry the
+		// identity for that multiply.
+		vertices[i].Color = m.White
 	}
-	if accessor, ok := attributeAccessor(doc, primitive.Attributes, gltf.NORMAL); ok {
-		if err := readAttribute(doc, accessor, func(i int, v attrValue) {
-			vertices[i].Normal = m.Vec3{X: v[0], Y: v[1], Z: v[2]}.Normalize()
-		}); err != nil {
-			return fmt.Errorf("NORMAL: %w", err)
-		}
+	for i, normal := range decoded.Normals[:min(len(decoded.Normals), len(vertices))] {
+		vertices[i].Normal = m.Vec3{X: normal[0], Y: normal[1], Z: normal[2]}.Normalize()
 	}
-	if accessor, ok := attributeAccessor(doc, primitive.Attributes, gltf.TANGENT); ok {
-		if err := readAttribute(doc, accessor, func(i int, v attrValue) {
-			vertices[i].Tangent = m.Vec4{X: v[0], Y: v[1], Z: v[2], W: v[3]}
-		}); err != nil {
-			return fmt.Errorf("TANGENT: %w", err)
-		}
+	for i, tangent := range decoded.Tangents[:min(len(decoded.Tangents), len(vertices))] {
+		vertices[i].Tangent = m.Vec4{X: tangent[0], Y: tangent[1], Z: tangent[2], W: tangent[3]}
 	}
-	if accessor, ok := attributeAccessor(doc, primitive.Attributes, gltf.TEXCOORD_0); ok {
-		if err := readAttribute(doc, accessor, func(i int, v attrValue) {
-			vertices[i].UV0 = m.Vec2{X: v[0], Y: v[1]}
-			geometry.uv0.add(vertices[i].UV0)
-		}); err != nil {
-			return fmt.Errorf("TEXCOORD_0: %w", err)
-		}
+	for i, uv := range decoded.UV0[:min(len(decoded.UV0), len(vertices))] {
+		vertices[i].UV0 = m.Vec2{X: uv[0], Y: uv[1]}
+		uv0.add(vertices[i].UV0)
 	}
-	if accessor, ok := attributeAccessor(doc, primitive.Attributes, gltf.TEXCOORD_1); ok {
-		if err := readAttribute(doc, accessor, func(i int, v attrValue) {
-			vertices[i].UV1 = m.Vec2{X: v[0], Y: v[1]}
-			geometry.uv1.add(vertices[i].UV1)
-		}); err != nil {
-			return fmt.Errorf("TEXCOORD_1: %w", err)
-		}
+	for i, uv := range decoded.UV1[:min(len(decoded.UV1), len(vertices))] {
+		vertices[i].UV1 = m.Vec2{X: uv[0], Y: uv[1]}
+		uv1.add(vertices[i].UV1)
 	}
-	if accessor, ok := attributeAccessor(doc, primitive.Attributes, gltf.COLOR_0); ok {
-		colors, err := modeler.ReadColor(doc, accessor, nil)
-		if err != nil {
-			return fmt.Errorf("COLOR_0: %w", err)
-		}
-		// glTF's COLOR_0 is linear whatever component type it was written in,
-		// and modeler has already widened the file's form to eight-bit RGBA.
-		// The bake quantises straight back to those same eight bits, so this
-		// round trip through the float form is exact.
-		const scale = 1.0 / unorm8CodeMax
-		for i := range colors {
-			vertices[i].Color = m.NewColorLinear(
-				float32(colors[i][0])*scale, float32(colors[i][1])*scale,
-				float32(colors[i][2])*scale, float32(colors[i][3])*scale)
-		}
+	// glTF's COLOR_0 is linear whatever component type it was written in, and
+	// the decoder has already widened the file's form to eight-bit RGBA. The
+	// bake quantises straight back to those same eight bits, so this round
+	// trip through the float form is exact.
+	const scale = 1.0 / unorm8CodeMax
+	for i, colour := range decoded.Colors[:min(len(decoded.Colors), len(vertices))] {
+		vertices[i].Color = m.NewColorLinear(
+			float32(colour[0])*scale, float32(colour[1])*scale,
+			float32(colour[2])*scale, float32(colour[3])*scale)
 	}
-	// JOINTS_0 and WEIGHTS_0 are read into the conversion vertex here so that
-	// the one pass fills it whichever layout the geometry ends up storing in.
-	// Which one that is cannot be known yet: it is the union over every
-	// placement the flattening walk makes, and a primitive read here may be
-	// placed under a skinned node and a static one both. What is read is the
-	// skin's own numbering and the file's own weights; bindGeometryJoints
-	// remaps the indices into the model's single joint space and normalises
-	// the weights once the skin behind the primitive is known, and a pack into
+	// JOINTS_0 and WEIGHTS_0 are copied into the conversion vertex whichever
+	// layout the geometry ends up storing in. They are the skin's own numbering
+	// and the file's own weights; bindJoints remaps the indices into the
+	// model's single joint space and normalises the weights, and a pack into
 	// the skinned layout then narrows each to a byte - where a pack into the
 	// standard layout drops them entirely.
-	if accessor, ok := attributeAccessor(doc, primitive.Attributes, gltf.JOINTS_0); ok {
-		joints, err := modeler.ReadJoints(doc, accessor, nil)
-		if err != nil {
-			return fmt.Errorf("JOINTS_0: %w", err)
-		}
-		for i := range joints {
-			vertices[i].Joints = joints[i]
-		}
+	for i, joints := range decoded.Joints[:min(len(decoded.Joints), len(vertices))] {
+		vertices[i].Joints = joints
 	}
-	if accessor, ok := attributeAccessor(doc, primitive.Attributes, gltf.WEIGHTS_0); ok {
-		weights, err := modeler.ReadWeights(doc, accessor, nil)
-		if err != nil {
-			return fmt.Errorf("WEIGHTS_0: %w", err)
+	for i, weights := range decoded.Weights[:min(len(decoded.Weights), len(vertices))] {
+		vertices[i].Weights = m.Vec4{X: weights[0], Y: weights[1], Z: weights[2], W: weights[3]}
+	}
+	return vertices, uv0, uv1
+}
+
+// bindJoints rewrites one converted primitive's joint indices into the model's
+// single numbering, and decides whether it is skinned at all. slots is the
+// primitive's skin's joints array resolved into that numbering.
+//
+// A skin's JOINTS_0 indexes that skin's own joints array, which is local to
+// the skin; the model's numbering is what makes rows addressable by
+// clipBase + frame*jointCount + joint with no per-skin offset anywhere.
+//
+// Only a real skin reaches here. A node joint rides the instance record and
+// touches no vertex at all.
+//
+// Weights are normalised here as well as in the shader, and the two are not
+// redundant. This pass is what puts a weight inside [0, 1] so that it has a
+// unorm8 code to land on at all - a file writing 3 and 1 would otherwise clamp
+// both to full influence - and the shader's divide is what covers the sum the
+// rounding then misses, which no bake-time scheme can prevent and which a
+// mesh authored through the public API would never have had a bake to fix.
+func (g *gltfGeometry) bindJoints(slots []int) {
+	bound := false
+	for i := range g.vertices {
+		vertex := &g.vertices[i]
+		total := vertex.Weights.X + vertex.Weights.Y + vertex.Weights.Z + vertex.Weights.W
+		if total <= 0 {
+			vertex.Joints, vertex.Weights = [4]uint16{}, m.Vec4{}
+			continue
 		}
-		for i := range weights {
-			vertices[i].Weights = m.Vec4{
-				X: weights[i][0], Y: weights[i][1], Z: weights[i][2], W: weights[i][3],
+		bound = true
+		vertex.Weights = m.Vec4{
+			X: vertex.Weights.X / total, Y: vertex.Weights.Y / total,
+			Z: vertex.Weights.Z / total, W: vertex.Weights.W / total,
+		}
+		for influence, slot := range vertex.Joints {
+			// A slot past the skin's joints array is a malformed file. It
+			// resolves to joint 0, whose weight the file has already decided;
+			// the alternative is dropping a whole primitive over one bad
+			// index.
+			if int(slot) < len(slots) {
+				vertex.Joints[influence] = uint16(slots[slot])
+				continue
 			}
+			vertex.Joints[influence] = 0
 		}
 	}
-	return nil
-}
-
-// readIndices reads a primitive's index accessor, or reports that it has none.
-// modeler widens whatever width the file used to uint32, which is the whole of
-// the u8-index gap: WebGPU has no uint8 index format, and two of the vendored
-// assets carry one.
-func readIndices(doc *gltf.Document, primitive *gltf.Primitive) ([]uint32, error) {
-	accessor, ok := accessorAt(doc, primitive.Indices)
-	if !ok {
-		return nil, nil
-	}
-	indices, err := modeler.ReadIndices(doc, accessor, nil)
-	if err != nil {
-		return nil, fmt.Errorf("indices: %w", err)
-	}
-	return indices, nil
-}
-
-// convertTopology maps a glTF primitive mode onto the three topologies gfx
-// carries, expanding the two strips, the fan and the loop into lists.
-//
-// Expanding is what keeps every model mesh one topology, so batching, the index
-// buffer and the skinning path never branch on it. It is also the only way to
-// draw them at all: gfx has a triangle strip, but a strip's restart rule and a
-// fan's shared first vertex are not expressible as one draw call each anyway.
-//
-// A non-indexed strip, loop or fan gains an index buffer here rather than
-// duplicating its vertices, which is the cheaper half of the same conversion.
-func convertTopology(
-	mode gltf.PrimitiveMode, indices []uint32, vertexCount int,
-) (gfx.PrimitiveTopology, []uint32, error) {
-	switch mode {
-	case gltf.PrimitiveTriangles:
-		return gfx.TopologyTriangleList, indices, nil
-	case gltf.PrimitiveLines:
-		return gfx.TopologyLineList, indices, nil
-	case gltf.PrimitivePoints:
-		return 0, nil, errPointTopology
-	case gltf.PrimitiveLineStrip:
-		return gfx.TopologyLineList, expandLineStrip(sequence(indices, vertexCount), false), nil
-	case gltf.PrimitiveLineLoop:
-		return gfx.TopologyLineList, expandLineStrip(sequence(indices, vertexCount), true), nil
-	case gltf.PrimitiveTriangleStrip:
-		return gfx.TopologyTriangleList, expandTriangleStrip(sequence(indices, vertexCount)), nil
-	case gltf.PrimitiveTriangleFan:
-		return gfx.TopologyTriangleList, expandTriangleFan(sequence(indices, vertexCount)), nil
-	}
-	return 0, nil, fmt.Errorf("primitive mode %v is not a glTF mode", mode)
-}
-
-// sequence returns the indices a primitive assembles from, synthesising the
-// identity sequence for non-indexed geometry so the expansions have one input
-// shape rather than two.
-func sequence(indices []uint32, vertexCount int) []uint32 {
-	if len(indices) > 0 {
-		return indices
-	}
-	indices = make([]uint32, vertexCount)
-	for i := range indices {
-		indices[i] = uint32(i)
-	}
-	return indices
-}
-
-// expandLineStrip turns a strip into a line list, closing it when it is a loop.
-func expandLineStrip(strip []uint32, loop bool) []uint32 {
-	if len(strip) < 2 {
-		return nil
-	}
-	segments := len(strip) - 1
-	if loop {
-		segments++
-	}
-	list := make([]uint32, 0, segments*2)
-	for i := 0; i < len(strip)-1; i++ {
-		list = append(list, strip[i], strip[i+1])
-	}
-	if loop {
-		list = append(list, strip[len(strip)-1], strip[0])
-	}
-	return list
-}
-
-// expandTriangleStrip turns a strip into a triangle list, flipping every odd
-// triangle so the whole list keeps one winding - which is the point, since the
-// pipeline's face culling is per material and cannot alternate per triangle.
-func expandTriangleStrip(strip []uint32) []uint32 {
-	if len(strip) < 3 {
-		return nil
-	}
-	list := make([]uint32, 0, (len(strip)-2)*3)
-	for i := 0; i+2 < len(strip); i++ {
-		if i%2 == 0 {
-			list = append(list, strip[i], strip[i+1], strip[i+2])
-		} else {
-			list = append(list, strip[i+1], strip[i], strip[i+2])
-		}
-	}
-	return list
-}
-
-// expandTriangleFan turns a fan into a triangle list around its first vertex.
-func expandTriangleFan(fan []uint32) []uint32 {
-	if len(fan) < 3 {
-		return nil
-	}
-	list := make([]uint32, 0, (len(fan)-2)*3)
-	for i := 1; i+1 < len(fan); i++ {
-		list = append(list, fan[0], fan[i], fan[i+1])
-	}
-	return list
+	g.skinned = bound
 }
 
 // unweld gives every index its own vertex, so a value that belongs to a face
@@ -361,6 +233,20 @@ func unweld(vertices []skinnedVertex, indices []uint32) ([]skinnedVertex, []uint
 		unwelded[i] = uint32(i)
 	}
 	return expanded, unwelded, source
+}
+
+// sequence returns the indices a primitive assembles from, synthesising the
+// identity sequence for non-indexed geometry so the walks over it have one
+// input shape rather than two.
+func sequence(indices []uint32, vertexCount int) []uint32 {
+	if len(indices) > 0 {
+		return indices
+	}
+	indices = make([]uint32, vertexCount)
+	for i := range indices {
+		indices[i] = uint32(i)
+	}
+	return indices
 }
 
 // expandBoxByMorph grows the primitive's declared bounds by the reach its morph
@@ -463,22 +349,4 @@ func orthogonal(v m.Vec3) m.Vec3 {
 		return m.Vec3{Z: 1}
 	}
 	return perpendicular.Normalize()
-}
-
-// accessorBox reads a POSITION accessor's declared bounds. glTF requires them,
-// so a file without them is malformed - and scene answers by never culling the
-// model rather than by guessing, because a wrong box is a model that vanishes
-// at some camera angle and nowhere else.
-func accessorBox(accessor *gltf.Accessor) (m.Box3, bool) {
-	if len(accessor.Min) < 3 || len(accessor.Max) < 3 {
-		return m.Box3{}, false
-	}
-	return m.Box3{
-		Min: m.Vec3{
-			X: float32(accessor.Min[0]), Y: float32(accessor.Min[1]), Z: float32(accessor.Min[2]),
-		},
-		Max: m.Vec3{
-			X: float32(accessor.Max[0]), Y: float32(accessor.Max[1]), Z: float32(accessor.Max[2]),
-		},
-	}, true
 }

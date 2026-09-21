@@ -1,4 +1,4 @@
-package types
+package gltf
 
 import (
 	"fmt"
@@ -7,18 +7,17 @@ import (
 	"github.com/qmuntal/gltf/modeler"
 )
 
-// attrValue is one element of a vertex attribute, widened to four floats
-// whatever the file stored. Scene's vertex is float everywhere, so every
-// attribute path ends here and the component type stops mattering one function
-// earlier than it otherwise would.
+// attrValue is one element of an accessor, widened to four floats whatever the
+// file stored. The animation samplers are read through it, where the element
+// count is small and the shape varies by channel.
 type attrValue [4]float32
 
 // readAttribute reads one accessor and hands each element to set, dequantised
-// and denormalised. It is the single place scene decodes a component type,
-// which is what makes KHR_mesh_quantization a scale factor rather than a second
-// code path: a quantised position is an ordinary short accessor, and the
-// extension's only effect on reading is that shorts turn up where the core
-// specification allows only floats.
+// and denormalised. It is the single place the decoder decodes a component type
+// element by element, which is what makes KHR_mesh_quantization a scale factor
+// rather than a second code path: a quantised position is an ordinary short
+// accessor, and the extension's only effect on reading is that shorts turn up
+// where the core specification allows only floats.
 //
 // Elements the accessor does not carry are left at zero rather than defaulted,
 // because what a missing w means is the caller's business - 1 for a tangent
@@ -28,6 +27,12 @@ func readAttribute(doc *gltf.Document, accessor *gltf.Accessor, set func(int, at
 	if err != nil {
 		return err
 	}
+	return fillAttribute(data, accessor, set)
+}
+
+// fillAttribute hands each element of an accessor's decoded data to set,
+// dequantised and denormalised.
+func fillAttribute(data any, accessor *gltf.Accessor, set func(int, attrValue)) error {
 	scale, clamp := componentScale(accessor)
 	switch values := data.(type) {
 	case []int8:
@@ -83,6 +88,70 @@ func readAttribute(doc *gltf.Document, accessor *gltf.Accessor, set func(int, at
 			accessor.Type, accessor.ComponentType)
 	}
 	return nil
+}
+
+// The typed reads hand a vertex attribute over as the glTF library's own slice
+// whenever the file already stored it as floats, which is every unquantised
+// file: the accessor is decoded once, by modeler, and passed through
+// untouched. Only a quantised or normalised accessor is widened into a slice of
+// its own, through the one element-wise path above.
+//
+// This is what the seam measured 14% faster than filling a vertex struct
+// element by element through a callback: the common case makes no call per
+// element at all, and the pack reads the slices in a plain loop.
+
+// readVec2 reads one accessor as two floats an element.
+func readVec2(doc *gltf.Document, accessor *gltf.Accessor) ([][2]float32, error) {
+	data, err := modeler.ReadAccessor(doc, accessor, nil)
+	if err != nil {
+		return nil, err
+	}
+	if values, ok := data.([][2]float32); ok {
+		return values, nil
+	}
+	values := make([][2]float32, accessor.Count)
+	err = fillAttribute(data, accessor, func(i int, v attrValue) {
+		if i < len(values) {
+			values[i] = [2]float32{v[0], v[1]}
+		}
+	})
+	return values, err
+}
+
+// readVec3 reads one accessor as three floats an element.
+func readVec3(doc *gltf.Document, accessor *gltf.Accessor) ([][3]float32, error) {
+	data, err := modeler.ReadAccessor(doc, accessor, nil)
+	if err != nil {
+		return nil, err
+	}
+	if values, ok := data.([][3]float32); ok {
+		return values, nil
+	}
+	values := make([][3]float32, accessor.Count)
+	err = fillAttribute(data, accessor, func(i int, v attrValue) {
+		if i < len(values) {
+			values[i] = [3]float32{v[0], v[1], v[2]}
+		}
+	})
+	return values, err
+}
+
+// readVec4 reads one accessor as four floats an element.
+func readVec4(doc *gltf.Document, accessor *gltf.Accessor) ([][4]float32, error) {
+	data, err := modeler.ReadAccessor(doc, accessor, nil)
+	if err != nil {
+		return nil, err
+	}
+	if values, ok := data.([][4]float32); ok {
+		return values, nil
+	}
+	values := make([][4]float32, accessor.Count)
+	err = fillAttribute(data, accessor, func(i int, v attrValue) {
+		if i < len(values) {
+			values[i] = v
+		}
+	})
+	return values, err
 }
 
 // attrComponent is every component type a glTF accessor can hold. Signed 32-bit
@@ -165,9 +234,9 @@ func fillVec4[T attrComponent](values [][4]T, scale float32, clamp bool, set fun
 
 // accessorAt resolves an index into the accessor it names, and reports whether
 // the document actually has one there. A file naming an accessor past the end
-// of the array is malformed; scene treats the reference as absent rather than
-// failing the model, because the alternative is losing a whole mesh to one bad
-// index in an attribute it could have generated.
+// of the array is malformed; the decoder treats the reference as absent rather
+// than failing the model, because the alternative is losing a whole mesh to one
+// bad index in an attribute it could have generated.
 func accessorAt(doc *gltf.Document, index *int) (*gltf.Accessor, bool) {
 	if index == nil || *index < 0 || *index >= len(doc.Accessors) || doc.Accessors[*index] == nil {
 		return nil, false

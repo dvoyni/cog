@@ -8,6 +8,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
@@ -508,8 +509,8 @@ func TestBakeAnimationHoldsAScaleThatReachesZero(t *testing.T) {
 func TestAnimCurveHonoursStepInterpolation(t *testing.T) {
 	curve := &animCurve{
 		times:  []float32{0, 1},
-		values: []attrValue{{0, 0, 0, 1}, {0, 0, 1, 0}},
-		mode:   gltf.InterpolationStep,
+		values: [][4]float32{{0, 0, 0, 1}, {0, 0, 1, 0}},
+		mode:   model.DecodedInterpolationStep,
 	}
 	if got := curve.sample(0.9); got != (m.Vec4{W: 1}) {
 		t.Errorf("STEP at 0.9 = %v, want the first key held", got)
@@ -528,11 +529,11 @@ func TestAnimCurveEvaluatesCubicSplineSegments(t *testing.T) {
 		// Per key: in tangent, value, out tangent. Key 0 leaves at a slope of
 		// one and key 1 arrives flat, which is what makes the midpoint differ
 		// from the linear answer at all.
-		values: []attrValue{
+		values: [][4]float32{
 			{0, 0, 0, 0}, {0, 0, 0, 0}, {1, 0, 0, 0},
 			{0, 0, 0, 0}, {1, 0, 0, 0}, {0, 0, 0, 0},
 		},
-		mode: gltf.InterpolationCubicSpline,
+		mode: model.DecodedInterpolationCubicSpline,
 	}
 	// At the endpoints a Hermite segment is its keyframe values exactly, which
 	// is the property a wrong tangent scale still preserves - so the midpoint

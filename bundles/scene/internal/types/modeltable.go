@@ -1,16 +1,14 @@
 package types
 
 import (
-	"bytes"
 	"errors"
 	"io/fs"
-	"path"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
-	"github.com/qmuntal/gltf"
 )
 
 // ModelDescrParams is empty, and that is the whole statement: a model's path is
@@ -268,35 +266,22 @@ func (modelLoader) Free(value *residentModel, userData modelUserData) {
 }
 
 // parseModel decodes and converts one file's bytes. Everything it returns is
-// scene's own types: the gltf.Document is dropped here, so it never appears in
-// scene's API and never outlives the load that read it.
+// scene's own types: model's decoder drops the glTF document before it
+// returns, so the document never appears in scene's API and never outlives the
+// load that read it.
+//
+// The decoder resolves a .gltf file's external buffers against the model's own
+// directory, which is what glTF's relative URIs are relative to. Images are not
+// the decoder's business, so the texture loader resolves those itself, against
+// the whole filesystem and the full storage path.
 func parseModel(
 	data assets.Blob, modelPath string, fsys fs.FS, sampleRate int,
 ) (*LoadedModel, error) {
-	// The decoder resolves a .gltf file's external buffers against the model's
-	// own directory, which is what glTF's relative URIs are relative to. Images
-	// are not the decoder's business, so the texture loader resolves those
-	// itself, against the whole filesystem and the full storage path.
-	decoder := gltf.NewDecoderFS(bytes.NewReader(data.Data()), directoryFS(fsys, path.Dir(modelPath)))
-	document := new(gltf.Document)
-	if err := decoder.Decode(document); err != nil {
+	decoded, err := model.DecodeModel(data.Data(), modelPath, fsys)
+	if err != nil {
 		return nil, err
 	}
-	return convertDocument(document, modelPath, sampleRate)
-}
-
-// directoryFS presents one directory of the filesystem as its own root, which
-// is the shape the glTF decoder wants for relative URIs. A directory that
-// cannot be subsetted - "." at the root - is the filesystem itself.
-func directoryFS(fsys fs.FS, dir string) fs.FS {
-	if dir == "" || dir == "." {
-		return fsys
-	}
-	sub, err := fs.Sub(fsys, dir)
-	if err != nil {
-		return fsys
-	}
-	return sub
+	return convertDecoded(decoded, modelPath, sampleRate)
 }
 
 // installModel uploads one parsed model and builds the value the cache keeps.
@@ -585,8 +570,8 @@ func (l *Lookup) residentAnimation(
 // whether the model keeps a CPU copy of its pose rows at all.
 func needsAnimatedReroot(loaded *LoadedModel) bool {
 	for i := range loaded.scenes {
-		for _, node := range loaded.scenes[i].nodes {
-			if len(node.animated) > 0 {
+		for _, node := range loaded.scenes[i].Nodes {
+			if len(node.Animated) > 0 {
 				return true
 			}
 		}

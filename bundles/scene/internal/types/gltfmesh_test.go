@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
@@ -21,6 +22,35 @@ func testDoc() *gltf.Document {
 // primitive attributes naming them.
 func triangleAttributes(doc *gltf.Document, positions [][3]float32) gltf.PrimitiveAttributes {
 	return gltf.PrimitiveAttributes{gltf.POSITION: modeler.WritePosition(doc, positions)}
+}
+
+// convertPrimitive decodes and converts one primitive, placed by one node of
+// one scene, before the model packs its morph blocks. needTangents gives it a material whose normal map names an
+// external image, which the decoder names without reading - the one thing that
+// makes a conversion generate tangents the file did not carry.
+func convertPrimitive(doc *gltf.Document, primitive *gltf.Primitive, needTangents bool) (gltfGeometry, error) {
+	if needTangents {
+		doc.Images = append(doc.Images, &gltf.Image{URI: "normal.png"})
+		doc.Textures = append(doc.Textures, &gltf.Texture{Source: gltf.Index(len(doc.Images) - 1)})
+		doc.Materials = append(doc.Materials, &gltf.Material{
+			NormalTexture: &gltf.NormalTexture{Index: gltf.Index(len(doc.Textures) - 1)},
+		})
+		primitive.Material = gltf.Index(len(doc.Materials) - 1)
+	}
+	doc.Meshes = append(doc.Meshes, &gltf.Mesh{Primitives: []*gltf.Primitive{primitive}})
+	doc.Nodes = append(doc.Nodes, &gltf.Node{Mesh: gltf.Index(len(doc.Meshes) - 1)})
+	doc.Scenes = append(doc.Scenes, &gltf.Scene{Nodes: []int{len(doc.Nodes) - 1}})
+	decoded, err := model.DecodeDocument(doc, "m.glb")
+	if err != nil {
+		return gltfGeometry{}, err
+	}
+	for _, report := range decoded.Reports {
+		var skipped ErrModelPrimitiveSkipped
+		if errors.As(report, &skipped) {
+			return gltfGeometry{}, skipped.Err
+		}
+	}
+	return convertGeometry(&decoded.Geometries[0], decoded.Skins), nil
 }
 
 func TestConvertPrimitiveReadsPositionsAndDeclaredBounds(t *testing.T) {
@@ -107,78 +137,6 @@ func TestConvertPrimitiveDequantisesNormalisedShorts(t *testing.T) {
 	// visible shading error, so the read clamps.
 	if got := geometry.vertices[2].Position.X; got != -1 {
 		t.Errorf("-32768 dequantised to %v, want exactly -1", got)
-	}
-}
-
-func TestConvertTopologyExpandsStripsLoopsAndFans(t *testing.T) {
-	for _, test := range []struct {
-		name     string
-		mode     gltf.PrimitiveMode
-		indices  []uint32
-		topology gfx.PrimitiveTopology
-		want     []uint32
-	}{
-		{
-			name: "triangle strip flips odd triangles", mode: gltf.PrimitiveTriangleStrip,
-			indices: []uint32{0, 1, 2, 3}, topology: gfx.TopologyTriangleList,
-			want: []uint32{0, 1, 2, 2, 1, 3},
-		},
-		{
-			name: "triangle fan shares the first vertex", mode: gltf.PrimitiveTriangleFan,
-			indices: []uint32{0, 1, 2, 3}, topology: gfx.TopologyTriangleList,
-			want: []uint32{0, 1, 2, 0, 2, 3},
-		},
-		{
-			name: "line strip", mode: gltf.PrimitiveLineStrip,
-			indices: []uint32{0, 1, 2}, topology: gfx.TopologyLineList,
-			want: []uint32{0, 1, 1, 2},
-		},
-		{
-			name: "line loop closes", mode: gltf.PrimitiveLineLoop,
-			indices: []uint32{0, 1, 2}, topology: gfx.TopologyLineList,
-			want: []uint32{0, 1, 1, 2, 2, 0},
-		},
-		{
-			name: "triangles pass through", mode: gltf.PrimitiveTriangles,
-			indices: []uint32{0, 1, 2}, topology: gfx.TopologyTriangleList,
-			want: []uint32{0, 1, 2},
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			topology, indices, err := convertTopology(test.mode, test.indices, 4)
-			if err != nil {
-				t.Fatalf("convert: %v", err)
-			}
-			if topology != test.topology {
-				t.Errorf("topology = %v, want %v", topology, test.topology)
-			}
-			if len(indices) != len(test.want) {
-				t.Fatalf("indices = %v, want %v", indices, test.want)
-			}
-			for i := range indices {
-				if indices[i] != test.want[i] {
-					t.Fatalf("indices = %v, want %v", indices, test.want)
-				}
-			}
-		})
-	}
-}
-
-// A non-indexed strip gains an index buffer rather than duplicated vertices,
-// which is the cheaper half of the same conversion.
-func TestConvertTopologyIndexesANonIndexedStrip(t *testing.T) {
-	_, indices, err := convertTopology(gltf.PrimitiveTriangleStrip, nil, 4)
-	if err != nil {
-		t.Fatalf("convert: %v", err)
-	}
-	if len(indices) != 6 {
-		t.Fatalf("indices = %v, want six", indices)
-	}
-}
-
-func TestConvertTopologyRejectsPoints(t *testing.T) {
-	if _, _, err := convertTopology(gltf.PrimitivePoints, nil, 3); !errors.Is(err, errPointTopology) {
-		t.Fatalf("err = %v, want errPointTopology", err)
 	}
 }
 
@@ -287,20 +245,6 @@ func TestConvertPrimitiveSkipsTangentsWithoutANormalMap(t *testing.T) {
 	}
 	if geometry.vertices[0].Tangent != (m.Vec4{}) {
 		t.Errorf("tangent = %v, want none generated", geometry.vertices[0].Tangent)
-	}
-}
-
-// u8 indices are the WebGPU gap the loader papers over, and two of the vendored
-// assets carry one.
-func TestReadIndicesWidensEightBitIndices(t *testing.T) {
-	doc := testDoc()
-	index := modeler.WriteAccessor(doc, gltf.TargetElementArrayBuffer, []uint8{0, 1, 2})
-	indices, err := readIndices(doc, &gltf.Primitive{Indices: gltf.Index(index)})
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if len(indices) != 3 || indices[2] != 2 {
-		t.Fatalf("indices = %v, want [0 1 2] as uint32", indices)
 	}
 }
 

@@ -97,7 +97,7 @@ root.
 - Requires: no Adapter
 - Contributes: one `storage.ReadMount`, as the `scene.StorageReadMount` Adapter
   for `storage.ReadMountPort`
-- Go package dependencies: `app`, `gfx`, `kernel`, `m`, `storage`,
+- Go package dependencies: `app`, `gfx`, `kernel`, `m`, `model`, `storage`,
   `github.com/qmuntal/gltf`
 - Configuration: `scene.Config`, optional
 - Events declared or published: none

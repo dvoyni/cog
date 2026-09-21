@@ -3,9 +3,10 @@
 // the recording methods of OpQueue and the queries and mutations of
 // LookupAccess and LookupDeviceAccess; the consume side of the queue; Config,
 // which the Lookup holds; the model cache with its loader and unloads, and the
-// glTF decode behind them; the
-// mesh table; the bundled PBR material; the vertex, morph and animation packing;
-// and the camera maths the flush and the coordinate helpers both build on.
+// conversion of model's decoded glTF into vertices, baked poses, morph blocks
+// and PBR records behind them; the mesh table; the bundled PBR material; the
+// vertex, morph and animation packing; and the camera maths the flush and the
+// coordinate helpers both build on.
 //
 // A type whose unexported state the plugin reads (OpQueue, Lookup,
 // LookupAccess, LookupDeviceAccess, MeshRef, Pass, MaterialTag, LayerMask) is declared here with its

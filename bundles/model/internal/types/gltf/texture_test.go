@@ -1,4 +1,4 @@
-package types
+package gltf
 
 import (
 	"testing"
@@ -27,7 +27,7 @@ func TestModelSamplerMapsWrapAndFilter(t *testing.T) {
 	}
 	// A texture that names no sampler takes glTF's own default, which is repeat
 	// filtered linearly - not SamplerDesc's zero value, which clamps.
-	if defaultModelSampler.AddressU != gfx.AddressRepeat {
+	if DefaultSampler.AddressU != gfx.AddressRepeat {
 		t.Error("glTF's default wrap is repeat")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -162,8 +163,8 @@ func readVec3(at []byte) m.Vec3 {
 // The vertices are the ones with no two fields alike, so a pack that swapped
 // two attributes or wrote one at the wrong offset cannot pass by accident.
 func TestEveryStoredAttributeReadsBackAsWhatWasAuthored(t *testing.T) {
-	box, _ := unitBoxGeometry()
-	sphere, _ := unitSphereGeometry()
+	box, _ := model.UnitBoxGeometry()
+	sphere, _ := model.UnitSphereGeometry()
 	for _, c := range []struct {
 		what     string
 		vertices []Vertex
@@ -354,7 +355,7 @@ func TestPackingTheVerticesAlsoBoundsThem(t *testing.T) {
 // would break silently: a vertex overwritten before it is read comes back as
 // whatever the previous vertex left there.
 func TestPackingOverTheAuthoredVerticesWritesTheSameBytes(t *testing.T) {
-	sphere, _ := unitSphereGeometry()
+	sphere, _ := model.UnitSphereGeometry()
 	vertices := append(everyAttribute(), sphere...)
 	var arena []byte
 	at, _, record := PackVertices(&arena, vertices)
