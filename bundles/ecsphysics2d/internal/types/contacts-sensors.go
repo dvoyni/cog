@@ -72,7 +72,9 @@ func (c *Contacts) sweepSensors(bodies *BodyIndex, statics *StaticIndex) {
 		// to its own Probe too, and nothing here skips a Sensor: Overlap has to
 		// be able to find one, which is where the port departs from cp's point
 		// and segment queries.
-		c.probes = bodies.ProbeAll(c.probes[:0], from, to, radius, bits, collidesWith, sensor.entity)
+		c.probeSlots = c.probeSlots[:0]
+		c.probes = moving.probeAllSlots(c.probes[:0], &c.probeSlots,
+			from, to, radius, bits, collidesWith, sensor.entity)
 		split := len(c.probes)
 		c.probes = statics.ProbeAll(c.probes, from, to, radius, bits, collidesWith, sensor.entity)
 
@@ -86,11 +88,11 @@ func (c *Contacts) sweepSensors(bodies *BodyIndex, statics *StaticIndex) {
 			var otherWorld []m.Vec2d
 			if still >= len(c.probes) || (at < split && c.probes[at].T <= c.probes[still].T) {
 				hit, at = c.probes[at], at+1
-				found, foundSlot, ok := moving.lookup(hit.Entity)
-				if !ok {
-					continue
-				}
-				other, otherSlot, otherWorld = found, foundSlot, moving.world(found)
+				// The Body index keeps no Entity to slot table, so its Probe
+				// hands each Hit's slot back beside it.
+				otherSlot = c.probeSlots[at-1]
+				other = &moving.entries[otherSlot]
+				otherWorld = moving.world(other)
 			} else {
 				hit, still = c.probes[still], still+1
 				found, _, ok := statics.lookup(hit.Entity)

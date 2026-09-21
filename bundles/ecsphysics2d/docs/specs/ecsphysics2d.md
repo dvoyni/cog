@@ -158,11 +158,12 @@ Numbers fall into four classes and the difference matters:
   the port is compared against, and **they are recorded, never asserted.**
 - **cog's, measured** — the index costs, **re-taken in float64** on the hardware
   above: a short Probe at **103 ns**, `BodyIndex` upkeep at **70 µs** per 1 024
-  Bodies, one static Entity replaced at **97–102 ns**. The float32 prototype
-  [issue 345](https://github.com/dvoyni/cog/issues/345) had the same three at
-  30–50 ns, 9 µs and 17–24 ns, and **those numbers are superseded, not adjusted**:
-  its Components were half the size and nothing measured over them can be quoted
-  for this package.
+  Bodies — **67 µs** since [#441](https://github.com/dvoyni/cog/issues/441) took
+  the Entity-to-slot map out of it — one static Entity replaced at **97–102 ns**.
+  The float32 prototype [issue 345](https://github.com/dvoyni/cog/issues/345) had
+  the same three at 30–50 ns, 9 µs and 17–24 ns, and **those numbers are
+  superseded, not adjusted**: its Components were half the size and nothing
+  measured over them can be quoted for this package.
 - **cog's, derived** — the ECS walk at **≈ 9 ns an Entity over these Components**,
   **re-taken in float64** against `ecs.md`'s ≈ 3.4 ns; scheduling at ≈ 5.7 µs a
   System, confirmed here at 5.3–6.3 µs for a frame with one System and no Bodies
@@ -200,6 +201,21 @@ listing; and the remainder in the world-cache write and the entry bookkeeping.
 The map alone is larger than the whole figure the design was argued from. Nothing
 is re-decided on the strength of it here: the number is recorded, the design it
 was argued for is unchanged, and what to do about it is a later ticket's.
+
+**[#441](https://github.com/dvoyni/cog/issues/441) took the map out, and it was
+worth less in place than on its own.** The Body index is Cleared and refilled every
+tick, so a Shape's slot is now the walk's own position and the index keeps no
+Entity-to-slot table; the static index, kept current incrementally, keeps its map.
+Measured interleaved A/B, both binaries built and alternated round by round, on the
+hardware above: the rebuild of 1 024 Bodies went from a median **70.5 µs to
+67.4 µs** (18 runs each), and the whole step from **369.8 µs to 362.2 µs** at
+N = 1 024 and **101.8 µs to 100.8 µs** at N = 256 (12 runs each). A short Probe
+and `ProbeAll` are unchanged. **The 13 µs the map cost measured on its own did not
+all come back**: removing it saves 3–4 µs of the rebuild benchmark and about
+8 µs of the step, which is a decomposition priced part by part not adding up in
+place, and is recorded rather than explained. The rotations, 17 µs, are now the
+largest single part, and reusing a Body's transform when its `Angle` did not
+change is [physics: follow-up 2](https://github.com/dvoyni/cog/issues/523)'s.
 
 **The porting index's own measurements are not reproducible.** They were taken
 *"in throwaway modules outside cog's tree"* with no branch, directory or
@@ -1030,10 +1046,13 @@ the walk as too slow.
 The two buffers keep their largest size and answer **a plugin shrink command
 modelled on `ecs.ShrinkCmd`**, with an opt-out per area. Cached entries hold
 memory for the persistence window, are invisible to the app, and join the shrink
-command's areas. The two index grids grow and shrink the same way. **So does the
-solver's scratch**, the fifth area: the gather Solve refills from nothing every
+command's areas. The two index grids grow and shrink the same way. What the
+command reports for the indices is **exact for the Body index**, which holds
+nothing but slices, and **a floor for the static index**, whose Entity-to-slot
+table is a Go map: Go publishes a map's length and never what its buckets cost.
+**The solver's scratch shrinks too**, the fifth area: the gather Solve refills from nothing every
 tick — the solved list, the slot table, the Body and Joint rows — and the swept
-Sensor Probe buffer. None of it is read across a tick, so the command releases it
+Sensor Probe buffer with the Body slot beside each Hit. None of it is read across a tick, so the command releases it
 whole and changes no answer; the slot table is sized to the largest Body slot
 detection ever saw, which after a 100 000 Body spike is 400 KB, and up to twice
 that with the slack it grows by, that nothing else would ever give back. The command is the one physics handler that is not a
@@ -1409,6 +1428,14 @@ max 75, against about 13 balanced — with no `Optimize`, no rotations, and a
   2 m hash), long `ProbeAll` in a dense crowd, and Bodies spread very unevenly
   over a huge world. Against that it costs 128–750 µs to rebuild, and a refit-only
   tree queries 2–5.5× slower after 16 m of drift.
+- **The Body index finds a slot by the walk's own position.** It is Cleared and
+  refilled every tick, so the Nth Shape Index inserts is in slot N and nothing
+  there looks an Entity up; an Entity inserted twice between two Clears is held
+  twice, which the rebuild never does. The static index is kept current
+  incrementally and has to find an existing entry by its Entity, so it keeps an
+  Entity-to-slot table. **The two are deliberately not one mechanism.** The swept
+  Sensor, which has a Hit's Entity and needs its entry, is handed the slot beside
+  each Hit by its own Probe of the Body index.
 - **A large Shape is listed in every cell its box covers**, but a cell holds a slot
   id, not a copy, and a rectangle scan tests each Shape once however many cells it
   spans. A 20 m platform rotated 45° covers about 196 cells at 2 m: 784 bytes of

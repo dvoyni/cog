@@ -27,17 +27,35 @@ const defaultBuckets = 256
 //
 // Its queries are reads and hold no per-query state, so any number of them run
 // together.
-type StaticIndex struct{ index }
+type StaticIndex struct {
+	index
+	// slots is the Entity to slot table. The static index is kept current
+	// incrementally — a Shape added is inserted and a Shape removed is taken
+	// out — so it genuinely has to find an existing entry by its Entity, which
+	// is the one job a table keyed by Entity does and a position cannot.
+	slots map[ecs.Entity]int32
+}
 
 // BodyIndex holds every other Entity with a Shape, Kinematic and Dynamic alike,
 // and is rebuilt from the Bodies' positions each tick. Shapeless Bodies are in
 // neither index.
-type BodyIndex struct{ index }
+//
+// It keeps no Entity to slot table. It is Cleared and refilled from scratch
+// every tick, so the slot a Shape takes is the walk's own position — the Nth
+// Shape inserted is in slot N — and nothing on the rebuild ever has to find an
+// entry by its Entity. The Go map it once kept for that cost more than the
+// whole rebuild had been argued at.
+type BodyIndex struct {
+	index
+	// held is how many live Shapes the entries run holds, which is its length
+	// less whatever Remove has taken out since the last Clear.
+	held int
+}
 
 // NewStaticIndex is an empty static index with that cell size in metres. A cell
 // size of 0 or less takes the documented default of 2 m.
 func NewStaticIndex(cellSize float64) *StaticIndex {
-	idx := &StaticIndex{}
+	idx := &StaticIndex{slots: make(map[ecs.Entity]int32)}
 	idx.init(cellSize)
 	return idx
 }
@@ -106,6 +124,11 @@ type probing struct {
 	// band is set while the walk is scanning cells beside the ray rather than
 	// the ray's own, which only a Probe with a radius does.
 	band bool
+	// slots, when it is not nil, is the caller's run of entry slots kept
+	// beside dst, one a Hit in the same order, which is how a sweep over the
+	// Body index learns the slot behind each Hit without a table to ask. It is
+	// a pointer so that every other Probe pays one word for it and no more.
+	slots *[]int32
 }
 
 // index is the hashed uniform grid behind both Resources. The structure is not
@@ -123,7 +146,6 @@ type index struct {
 
 	entries     []entry
 	freeEntries []int32
-	slots       map[ecs.Entity]int32
 
 	buckets   []int32
 	links     []link
@@ -141,7 +163,6 @@ func (idx *index) init(cellSize float64) {
 	}
 	idx.cellSize = cellSize
 	idx.inverseCell = 1 / cellSize
-	idx.slots = make(map[ecs.Entity]int32)
 	idx.buckets = make([]int32, defaultBuckets)
 	idx.clearBuckets()
 }
@@ -150,22 +171,62 @@ func (idx *index) init(cellSize float64) {
 func (idx *index) CellSize() float64 { return idx.cellSize }
 
 // Len is how many Shapes the index holds.
-func (idx *index) Len() int { return len(idx.slots) }
+func (idx *StaticIndex) Len() int { return len(idx.slots) }
+
+// Len is how many Shapes the index holds.
+func (idx *BodyIndex) Len() int { return idx.held }
 
 // Insert puts an Entity's Shape into the index, placed at a position and an
 // angle, replacing whatever the index held for that Entity. The world cache is
 // built here and never again, which is what "a static is cached once, at
-// insert" means; a Body index is Cleared and refilled each tick instead.
+// insert" means.
 //
 // verts is the Polygon Component's vertices and is nil for every kind but Poly.
-func (idx *index) Insert(entity ecs.Entity, shape Shape, at m.Vec2d, angle float64, verts []m.Vec2d) {
+func (idx *StaticIndex) Insert(entity ecs.Entity, shape Shape, at m.Vec2d, angle float64, verts []m.Vec2d) {
+	idx.insert(entity, shape, at, angle, verts)
+}
+
+// insert is Insert, answering the slot it filled, or −1 for NoEntity.
+func (idx *StaticIndex) insert(entity ecs.Entity, shape Shape, at m.Vec2d, angle float64, verts []m.Vec2d) int32 {
 	if entity == ecs.NoEntity {
-		return
+		return -1
 	}
 	idx.Remove(entity)
-
-	needed := int32(worldLenFor(shape, verts))
 	slot := idx.allocEntry()
+	idx.place(slot, entity, shape, at, angle, verts)
+	idx.slots[entity] = slot
+	return slot
+}
+
+// Insert puts an Entity's Shape into the index, placed at a position and an
+// angle, in the next slot: the Nth Shape inserted since the last Clear is in
+// slot N. The index is Cleared and refilled each tick, which is how it is kept
+// current, so it never asks whether it already holds the Entity — an Entity
+// inserted twice between two Clears is held twice, and the rebuild inserts
+// each once.
+//
+// verts is the Polygon Component's vertices and is nil for every kind but Poly.
+func (idx *BodyIndex) Insert(entity ecs.Entity, shape Shape, at m.Vec2d, angle float64, verts []m.Vec2d) {
+	idx.insert(entity, shape, at, angle, verts)
+}
+
+// insert is Insert, answering the slot it filled, or −1 for NoEntity.
+func (idx *BodyIndex) insert(entity ecs.Entity, shape Shape, at m.Vec2d, angle float64, verts []m.Vec2d) int32 {
+	if entity == ecs.NoEntity {
+		return -1
+	}
+	slot := int32(len(idx.entries))
+	idx.entries = append(idx.entries, entry{})
+	idx.place(slot, entity, shape, at, angle, verts)
+	idx.held++
+	return slot
+}
+
+// place fills one entry slot with an Entity's Shape, builds its world cache and
+// lists it in every cell its box covers. Which slot it is, and how the index
+// finds it again, is each index's own.
+func (idx *index) place(slot int32, entity ecs.Entity, shape Shape, at m.Vec2d, angle float64, verts []m.Vec2d) {
+	needed := int32(worldLenFor(shape, verts))
 	if needed > idx.entries[slot].worldCap {
 		// The abandoned run is reclaimed by the next Clear, which resets the
 		// slab without giving its capacity back.
@@ -189,34 +250,69 @@ func (idx *index) Insert(entity ecs.Entity, shape Shape, at m.Vec2d, angle float
 	e.worldLen = int32(used)
 	e.box = box
 
-	idx.slots[entity] = slot
 	idx.list(slot)
 }
 
 // Remove takes an Entity's Shape out of the index and does nothing when the
 // index does not hold it.
-func (idx *index) Remove(entity ecs.Entity) {
+func (idx *StaticIndex) Remove(entity ecs.Entity) {
 	slot, ok := idx.slots[entity]
 	if !ok {
 		return
 	}
-	idx.unlist(slot)
-	idx.entries[slot].live = false
-	idx.entries[slot].entity = ecs.NoEntity
+	idx.drop(slot)
 	delete(idx.slots, entity)
 	idx.freeEntries = append(idx.freeEntries, slot)
 }
 
+// Remove takes an Entity's Shape out of the index and does nothing when the
+// index does not hold it.
+//
+// Having no Entity to slot table, it walks the entries to find the Entity,
+// which costs in proportion to the index's size; the plugin never calls it,
+// keeping the index current by the Clear and refill instead. The slot it
+// empties stays empty until the next Clear, so every other Shape keeps the slot
+// the walk gave it.
+func (idx *BodyIndex) Remove(entity ecs.Entity) {
+	if entity == ecs.NoEntity {
+		return
+	}
+	for slot := range idx.entries {
+		if idx.entries[slot].live && idx.entries[slot].entity == entity {
+			idx.drop(int32(slot))
+			idx.held--
+		}
+	}
+}
+
+// drop takes one slot's entry out of every cell and marks it dead.
+func (idx *index) drop(slot int32) {
+	idx.unlist(slot)
+	idx.entries[slot].live = false
+	idx.entries[slot].entity = ecs.NoEntity
+}
+
 // Clear empties the index, keeping every buffer it has grown so that refilling
-// it allocates nothing. It is how the Body index is rebuilt each tick.
-func (idx *index) Clear() {
+// it allocates nothing.
+func (idx *StaticIndex) Clear() {
+	idx.index.clear()
+	clear(idx.slots)
+}
+
+// Clear empties the index, keeping every buffer it has grown so that refilling
+// it allocates nothing. It is how the index is rebuilt each tick.
+func (idx *BodyIndex) Clear() {
+	idx.index.clear()
+	idx.held = 0
+}
+
+func (idx *index) clear() {
 	idx.entries = idx.entries[:0]
 	idx.freeEntries = idx.freeEntries[:0]
 	idx.links = idx.links[:0]
 	idx.freeLinks = idx.freeLinks[:0]
 	idx.slab = idx.slab[:0]
 	idx.listings = 0
-	clear(idx.slots)
 	idx.clearBuckets()
 }
 
@@ -231,7 +327,7 @@ func (idx *index) Probe(
 	from, to m.Vec2d, radius float64,
 	bits, collidesWith uint32, exclude ecs.Entity,
 ) (Hit, bool) {
-	_, hit, ok := idx.probeWalk(nil, true, from, to, radius, bits, collidesWith, exclude)
+	_, hit, ok := idx.probeWalk(nil, nil, true, from, to, radius, bits, collidesWith, exclude)
 	return hit, ok
 }
 
@@ -246,7 +342,7 @@ func (idx *index) ProbeAll(
 	dst []Hit, from, to m.Vec2d, radius float64,
 	bits, collidesWith uint32, exclude ecs.Entity,
 ) []Hit {
-	dst, _, _ = idx.probeWalk(dst, false, from, to, radius, bits, collidesWith, exclude)
+	dst, _, _ = idx.probeWalk(dst, nil, false, from, to, radius, bits, collidesWith, exclude)
 	return dst
 }
 
@@ -296,6 +392,20 @@ func (idx *index) Overlap(
 	return dst
 }
 
+// probeAllSlots is ProbeAll with each Hit's entry slot appended to *slots in
+// the same order, (*slots)[i] naming the entry behind dst[len(dst)+i] as it
+// stood on the way in; the caller empties *slots first. It is the swept
+// Sensor's Probe of the Body index, which keeps no Entity to slot table to ask
+// afterwards. slots is the caller's own long-lived buffer, so that pointing at
+// it costs no allocation.
+func (idx *index) probeAllSlots(
+	dst []Hit, slots *[]int32, from, to m.Vec2d, radius float64,
+	bits, collidesWith uint32, exclude ecs.Entity,
+) []Hit {
+	dst, _, _ = idx.probeWalk(dst, slots, false, from, to, radius, bits, collidesWith, exclude)
+	return dst
+}
+
 // world is an entry's run of the index's world-cache slab.
 func (idx *index) world(e *entry) []m.Vec2d { return idx.slab[e.world : e.world+e.worldLen] }
 
@@ -308,12 +418,15 @@ func (idx *index) world(e *entry) []m.Vec2d { return idx.slab[e.world : e.world+
 // which is also what keeps a Shape spanning several cells from being reported
 // twice. The nearest Probe needs no such guard, a repeated test giving the same
 // answer.
+//
+// slots is nil but for probeAllSlots, whose run it keeps beside dst.
 func (idx *index) probeWalk(
-	dst []Hit, first bool, from, to m.Vec2d, radius float64,
+	dst []Hit, slots *[]int32, first bool, from, to m.Vec2d, radius float64,
 	bits, collidesWith uint32, exclude ecs.Entity,
 ) ([]Hit, Hit, bool) {
 	walk := probing{
 		dst:          dst,
+		slots:        slots,
 		first:        first,
 		start:        len(dst),
 		from:         from,
@@ -464,6 +577,10 @@ func (idx *index) probeCell(walk *probing, i, j int32) {
 				walk.best, walk.found = hit, true
 				walk.exit = hit.T
 			}
+			continue
+		}
+		if walk.slots != nil {
+			walk.dst, *walk.slots = insertHitSlot(walk.dst, *walk.slots, walk.start, hit, idx.links[cursor].entry)
 			continue
 		}
 		walk.dst = insertHit(walk.dst, walk.start, hit)
@@ -620,6 +737,23 @@ func insertHit(dst []Hit, start int, hit Hit) []Hit {
 		dst[i-1], dst[i] = dst[i], dst[i-1]
 	}
 	return dst
+}
+
+// insertHitSlot is insertHit keeping a run of slots in step with the Hits:
+// slots[i] belongs to dst[start+i], and moves when its Hit does.
+func insertHitSlot(dst []Hit, slots []int32, start int, hit Hit, slot int32) ([]Hit, []int32) {
+	for i := start; i < len(dst); i++ {
+		if dst[i].Entity == hit.Entity {
+			return dst, slots
+		}
+	}
+	dst = append(dst, hit)
+	slots = append(slots, slot)
+	for i := len(dst) - 1; i > start && dst[i-1].T > dst[i].T; i-- {
+		dst[i-1], dst[i] = dst[i], dst[i-1]
+		slots[i-1-start], slots[i-start] = slots[i-start], slots[i-1-start]
+	}
+	return dst, slots
 }
 
 // firstScannedCell reports whether this is the one cell of a rectangle scan at

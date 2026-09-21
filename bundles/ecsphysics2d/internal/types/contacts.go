@@ -74,6 +74,10 @@ type Contacts struct {
 	// refilled once a Sensor and kept across ticks, so a steady scene allocates
 	// nothing for the Probe half of detection either.
 	probes []Hit
+	// probeSlots is the Body index slot behind each Hit in the first run of
+	// probes, in the same order: the Body index keeps no Entity to slot table
+	// to ask afterwards, so its Probe hands the slots back itself.
+	probeSlots []int32
 
 	// maxSlot is one past the largest BodyIndex slot detection saw, which sizes
 	// the solver's slot table without Solve reading an index of its own.

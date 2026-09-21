@@ -11,7 +11,27 @@ import (
 // packed down to what is live and then cut to what is used. The request, and
 // the response both areas report into, are in shrink.go.
 
-// shrink cuts one grid's two areas and reports the bytes each let go.
+// shrink cuts the static index's two areas and reports the bytes each let go.
+//
+// Its Entity to slot table is rebuilt over the entries the grid pass kept,
+// which renumbers them. The table is rebuilt into a new map rather than
+// cleared, because a Go map keeps the buckets a spike gave it and clear is not
+// a release; so a second shrink allocates one map where it allocates nothing
+// else, there being no way to ask a map what it costs and so nothing cheaper to
+// test first.
+func (idx *StaticIndex) shrink(request ShrinkRequest) ShrinkResponse {
+	released := idx.index.shrink(request)
+	if !request.KeepIndices {
+		idx.slots = make(map[ecs.Entity]int32, len(idx.entries))
+		for slot := range idx.entries {
+			idx.slots[idx.entries[slot].entity] = int32(slot)
+		}
+	}
+	return released
+}
+
+// shrink cuts one grid's two areas and reports the bytes each let go. It is the
+// whole of the Body index's shrink, that index keeping nothing beside its grid.
 //
 // The slab goes first: packing it is what makes the entries' runs exact, and
 // the grid pass that follows moves those entries about.
@@ -86,20 +106,16 @@ func (idx *index) liveWorldLen() int {
 	return total
 }
 
-// packGrid drops the dead entry slots, rebuilds the Entity to slot table over
-// what survives, and lists it all again into a bucket table sized for what it
-// now holds.
+// packGrid drops the dead entry slots and lists what survives again into a
+// bucket table sized for what it now holds. Compacting renumbers the entries,
+// so the static index rebuilds its Entity to slot table after it; the Body
+// index has none, and a slot there is only the walk's position until the next
+// Clear.
 //
 // The cell lists cannot be clipped where they lie, because a listing names an
 // entry by slot and compacting the entries renumbers them. Relisting is what
 // growBuckets already does when the table doubles, and this is that pass with
 // the table allowed to shrink.
-//
-// The Entity to slot table is rebuilt into a new map rather than cleared,
-// because a Go map keeps the buckets a spike gave it and clear is not a
-// release. It is rebuilt every time this runs, so a second shrink allocates one
-// map where it allocates nothing else; there is no way to ask a map what it
-// costs, so there is nothing cheaper to test first.
 func (idx *index) packGrid() {
 	kept := 0
 	for slot := range idx.entries {
@@ -112,11 +128,9 @@ func (idx *index) packGrid() {
 	idx.entries = clip(idx.entries[:kept])
 	idx.freeEntries = nil
 
-	idx.slots = make(map[ecs.Entity]int32, kept)
 	wanted := 0
 	for slot := range idx.entries {
 		e := &idx.entries[slot]
-		idx.slots[e.entity] = int32(slot)
 		if e.right >= e.left && e.top >= e.bottom {
 			wanted += (int(e.right-e.left) + 1) * (int(e.top-e.bottom) + 1)
 		}
@@ -149,13 +163,14 @@ func (idx *index) slabBytes() uintptr {
 }
 
 // gridBytes is what the entries, the cell lists and the bucket table hold, by
-// capacity.
+// capacity. For the Body index that is everything its grid holds, so what its
+// shrink reports is exact.
 //
-// The Entity to slot map is not in it, and cannot be: Go publishes a map's
-// length and never what its buckets cost, so a map rebuilt at the right size
-// releases memory this report has no way to see. What the response says is
-// therefore a floor on what the area gave back, and the map is the part that is
-// missing from it.
+// The static index's Entity to slot map is not in it, and cannot be: Go
+// publishes a map's length and never what its buckets cost, so a map rebuilt at
+// the right size releases memory this report has no way to see. The static
+// index's share of the response is therefore a floor on what it gave back, and
+// the map is the part that is missing from it.
 func (idx *index) gridBytes() uintptr {
 	return uintptr(cap(idx.entries))*unsafe.Sizeof(entry{}) +
 		uintptr(cap(idx.freeEntries)+cap(idx.freeLinks)+cap(idx.buckets))*unsafe.Sizeof(int32(0)) +

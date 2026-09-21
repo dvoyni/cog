@@ -210,6 +210,7 @@ func scratchedContacts(slots int) *Contacts {
 		contacts.solver.solved = append(contacts.solver.solved, int32(i))
 		contacts.solver.joints.bodies.put(testEntity(i), int32(i+1))
 		contacts.probes = append(contacts.probes, Hit{Entity: testEntity(i)})
+		contacts.probeSlots = append(contacts.probeSlots, int32(i))
 	}
 	contacts.solver.joints.rows = append(contacts.solver.joints.rows, jointRow{})
 	contacts.solver.step = 1.0 / 60

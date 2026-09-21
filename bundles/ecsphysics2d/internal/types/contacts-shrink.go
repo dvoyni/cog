@@ -93,18 +93,19 @@ func (c *Contacts) bytes() uintptr {
 // scales the cached Impulses by it, and dropping it would change the next
 // tick's solution.
 func (c *Contacts) releaseScratch() {
-	c.probes = nil
+	c.probes, c.probeSlots = nil, nil
 	s := &c.solver
 	s.solved, s.slotDense, s.rows = nil, nil, nil
 	s.joints.rows = nil
 	s.joints.bodies = entityTable{}
 }
 
-// scratchBytes is what the solver's gather and the Probe buffer hold, by
+// scratchBytes is what the solver's gather and the Probe buffers hold, by
 // capacity.
 func (c *Contacts) scratchBytes() uintptr {
 	s := &c.solver
 	return uintptr(cap(c.probes))*unsafe.Sizeof(Hit{}) +
+		uintptr(cap(c.probeSlots))*unsafe.Sizeof(int32(0)) +
 		uintptr(cap(s.solved)+cap(s.slotDense))*unsafe.Sizeof(int32(0)) +
 		uintptr(cap(s.rows))*unsafe.Sizeof(solverBody{}) +
 		uintptr(cap(s.joints.rows))*unsafe.Sizeof(jointRow{}) +

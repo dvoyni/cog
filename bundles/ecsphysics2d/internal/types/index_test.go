@@ -2,6 +2,7 @@ package types
 
 import (
 	"math"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -333,6 +334,83 @@ func TestClearKeepsTheBuffersSoARebuildAllocatesNothing(t *testing.T) {
 	if allocations := testing.AllocsPerRun(20, fill); allocations != 0 {
 		t.Errorf("rebuilding the Body index allocated %v times a tick, want 0", allocations)
 	}
+}
+
+// TestTheBodyIndexFindsASlotByTheWalksOwnPosition is the rebuild's slot rule:
+// the Body index is Cleared and refilled every tick, so the Nth Shape the walk
+// inserts is in slot N, and no Entity-to-slot table stands behind it. The
+// Entities go in out of order so that a slot equal to an Entity's own index
+// cannot pass for the walk's position.
+func TestTheBodyIndexFindsASlotByTheWalksOwnPosition(t *testing.T) {
+	idx := NewBodyIndex(2)
+	walk := make([]ecs.Entity, 64)
+	for i := range walk {
+		walk[i] = testEntity((i * 37) % 64)
+	}
+	for range 2 {
+		idx.Clear()
+		for i, entity := range walk {
+			idx.Insert(entity, NewCircleShape(0.4, m.Vec2d{}),
+				m.Vec2d{X: float64(i%8) * 1.7, Y: float64(i/8) * 1.7}, 0, nil)
+		}
+		if got := idx.Len(); got != len(walk) {
+			t.Fatalf("Len = %d after a rebuild, want %d", got, len(walk))
+		}
+		for slot, entity := range walk {
+			if got := idx.entries[slot].entity; got != entity {
+				t.Fatalf("slot %d holds %v, want %v, the walk's %dth Shape", slot, got, entity, slot)
+			}
+		}
+	}
+
+	if path, ok := mapInside(reflect.TypeFor[BodyIndex](), "BodyIndex"); ok {
+		t.Errorf("the Body index still keeps a Go map, at %s", path)
+	}
+}
+
+// TestTheSweepsProbeHandsEachHitsSlotBackBesideIt is how the swept Sensor finds
+// the Shape behind a Body Hit with no table to ask: the Probe keeps the slots in
+// step with the Hits as it orders them by T. The Bodies are inserted farthest
+// first, so every Hit is moved on its way into order, and a Shape spanning
+// several cells is met more than once.
+func TestTheSweepsProbeHandsEachHitsSlotBackBesideIt(t *testing.T) {
+	idx := NewBodyIndex(1)
+	for i := range 8 {
+		idx.Insert(testEntity(i), NewCircleShape(0.6, m.Vec2d{}), m.Vec2d{X: float64(16 - 2*i)}, 0, nil)
+	}
+
+	var slots []int32
+	hits := idx.probeAllSlots(nil, &slots, m.Vec2d{X: -2}, m.Vec2d{X: 20}, 0.2,
+		CollisionBitsAll, CollisionBitsAll, ecs.NoEntity)
+	if len(hits) != 8 || len(slots) != len(hits) {
+		t.Fatalf("the Probe met %d Bodies with %d slots, want 8 and 8", len(hits), len(slots))
+	}
+	for i, hit := range hits {
+		if i > 0 && hits[i-1].T > hit.T {
+			t.Fatalf("Hit %d at T %v comes after one at %v", i, hit.T, hits[i-1].T)
+		}
+		if got := idx.entries[slots[i]].entity; got != hit.Entity {
+			t.Fatalf("Hit %d names %v and its slot holds %v", i, hit.Entity, got)
+		}
+	}
+}
+
+// mapInside is the first Go map a type holds, looked for through its struct
+// fields, arrays and slices, with the path to it.
+func mapInside(typ reflect.Type, path string) (string, bool) {
+	switch typ.Kind() {
+	case reflect.Map:
+		return path, true
+	case reflect.Array, reflect.Slice:
+		return mapInside(typ.Elem(), path+"[]")
+	case reflect.Struct:
+		for field := range typ.Fields() {
+			if found, ok := mapInside(field.Type, path+"."+field.Name); ok {
+				return found, true
+			}
+		}
+	}
+	return "", false
 }
 
 func TestTheQueriesAllocateNothing(t *testing.T) {

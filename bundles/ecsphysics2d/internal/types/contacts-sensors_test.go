@@ -314,9 +314,14 @@ func TestASolidPairIsFilteredByTheGroupsBeforeAnyShapeTest(t *testing.T) {
 	person.CollisionBits, person.CollidesWith = crowd, crowd
 
 	bodies := NewBodyIndex(0)
-	// Deeply overlapping, so only the groups can be what keeps them apart.
-	bodies.Insert(ecs.Entity(1), crate, m.Vec2d{}, 0, nil)
-	bodies.Insert(ecs.Entity(2), person, m.Vec2d{X: 0.1}, 0, nil)
+	// Deeply overlapping, so only the groups can be what keeps them apart. The
+	// Body index is kept current by a Clear and a refill, as Index keeps it.
+	rebuild := func() {
+		bodies.Clear()
+		bodies.Insert(ecs.Entity(1), crate, m.Vec2d{}, 0, nil)
+		bodies.Insert(ecs.Entity(2), person, m.Vec2d{X: 0.1}, 0, nil)
+	}
+	rebuild()
 
 	contacts := NewContacts(7)
 	Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3)
@@ -326,13 +331,13 @@ func TestASolidPairIsFilteredByTheGroupsBeforeAnyShapeTest(t *testing.T) {
 
 	// The same two Shapes, one of them widened to look for the other, touch.
 	person.CollidesWith = crowd | crates
-	bodies.Insert(ecs.Entity(2), person, m.Vec2d{X: 0.1}, 0, nil)
+	rebuild()
 	Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3)
 	if contacts.Len() != 0 {
 		t.Fatalf("one side alone looking for the other made %d Contacts, want none", contacts.Len())
 	}
 	crate.CollidesWith = crates | crowd
-	bodies.Insert(ecs.Entity(1), crate, m.Vec2d{}, 0, nil)
+	rebuild()
 	Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3)
 	if contacts.Len() != 1 {
 		t.Fatalf("two sides that each look for the other made %d Contacts, want 1", contacts.Len())
