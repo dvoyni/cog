@@ -1,7 +1,6 @@
 package ecsscene
 
 import (
-	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -50,7 +49,7 @@ type Animation struct {
 // params, which merge by name over the file's materials — so
 // gfx.ColorParam("baseColorFactor", c) tints a glTF model.
 type Params struct {
-	Values ecs.List[gfx.ParameterDescr]
+	Values m.List[gfx.ParameterDescr]
 }
 
 // Material replaces what a draw is shaded with, one entry per pass tag. It is
@@ -61,7 +60,7 @@ type Params struct {
 // Tags are empty is handed to scene as an empty non-nil scene.Material, which
 // scene documents as a material serving no pass.
 type Material struct {
-	Tags ecs.List[MaterialTag]
+	Tags m.List[MaterialTag]
 }
 
 // Light is a punctual light. Its position is its Entity's m.Transform's, and a
@@ -104,7 +103,7 @@ type Camera struct {
 	AmbientGround    m.Color
 	AmbientIntensity float32
 
-	Passes ecs.List[scene.Pass]
+	Passes m.List[scene.Pass]
 }
 
 // MaxPlays is how many clips one Animation blends. It is scene's own cap:
@@ -124,5 +123,5 @@ type MaterialTag struct {
 	Tag    scene.PassTag
 	Shader gfx.ShaderDescr
 	State  gfx.MaterialState
-	Params ecs.List[gfx.ParameterDescr]
+	Params m.List[gfx.ParameterDescr]
 }

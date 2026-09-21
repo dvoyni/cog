@@ -50,7 +50,7 @@ costs*](../README.md#what-a-hook-costs).
 **Two things here are younger than the rest, and each is marked where it
 appears.** The first: the Component rule was relaxed after the package shipped.
 A Component holds no *mutable* indirection rather than no pointers at all, which
-admits `string` and [`ecs.List[T]`](#the-list). The sections that changed say what
+admits `string` and [`m.List[T]`](#the-list). The sections that changed say what
 they used to say and why the old reason did not survive, because the old rule
 was argued for in this document at some length and a reader who remembers that
 argument is owed the correction rather than a silent overwrite.
@@ -212,7 +212,7 @@ and it is what makes [the Store's flat index](#the-store) affordable.
 pointer it holds, it holds to memory nothing can write. That is
 **mechanically checkable**: a `reflect.Type` walk at registration, where cost is
 irrelevant. It permits numerics, bools, fixed-size arrays, `Entity`, structs of
-those, **`string`**, **`assets.Blob`** and **`ecs.List[T]`**. It refuses pointers,
+those, **`string`**, **`assets.Blob`** and **`m.List[T]`**. It refuses pointers,
 bare slices, maps, channels, funcs, interfaces and `sync` types.
 
 The check reports the offending field **by path**, because the field that fails
@@ -243,7 +243,7 @@ company, and the split is sharp rather than a matter of degree:
 | a **`string`** | **no** — the header is a copy and the bytes are immutable |
 | an **`assets.Blob`** | **no, by contract** — the bytes are never written after construction, and nothing checks that |
 | a `[]T` | **yes** — the header is a copy and the array is shared |
-| an **`ecs.List[T]`** | only through `Set`, which validation mode checks |
+| an **`m.List[T]`** | only through `Set`, which validation mode checks |
 
 A System holding nothing but `read{C}` writing the Store through a shared
 backing array is a data race **no lock anywhere names**, and it would make the
@@ -342,6 +342,15 @@ against the old rule and says so in a comment. They are correctness, not tuning.
 
 ### The List
 
+> **Amended by [#524](https://github.com/dvoyni/cog/issues/524).** The List is
+> `m.List`, declared in `libs/m` beside `m.Maybe`, with `m.NewList` and
+> `m.ListOf`; the root no longer declares a List or its constructors, and no
+> alias is kept. What is ECS knowledge stays in `bundles/ecs/internal/types`: the
+> registration walk recognises a List by the type of its first field, m's
+> unexported marker; the generation `Set` bumps is still the header word a
+> Changed Hook's byte compare sees; and under `-tags ecs_validate` `m` calls a
+> check the ECS installs, so the release build still carries none of it.
+
 **A `[]T` in a Component is refused and always will be.** A List is what a
 Component holds instead: a fixed-length run of `T` whose backing array is
 unexported, whose constructors copy into a fresh one, and whose only element
@@ -349,7 +358,7 @@ write is `Set`.
 
 ```go
 type Inventory struct {
-    Slots ecs.List[ItemID]
+    Slots m.List[ItemID]
 }
 
 func use(q *ecs.Query[InvQ]) {
@@ -600,7 +609,7 @@ is the one that allocates.
    collector **−0.015 ms** against an empty heap at 100k and **+0.051 ms** at
    1M, against **+0.805 ms** for the same field as a `string`. The costs are
    truncation and width, not the collector.
-3. **An `ecs.List[T]` in the Component**, where the bound is not real but the
+3. **An `m.List[T]` in the Component**, where the bound is not real but the
    contents are set at spawn and rarely rewritten. It costs one allocation per
    construction, takes its Store out of the noscan span, and routes every Query
    naming it to the per-field loop. See [The List](#the-list).
@@ -682,7 +691,7 @@ recording vocabulary:
 
 The rejections that remain are slices, which are mutable indirection and the
 line the rule draws: a binding spells those descriptors out as Component fields
-holding `ecs.List`s and rebuilds them per draw. The rows that moved were refused
+holding `m.List`s and rebuilds them per draw. The rows that moved were refused
 for holding a name, a matrix pointer or byte slices, and scene changed each of
 those. **`ecsscene` was built on the removed
 vocabulary** — `ModelHash`, `ClipHash`, `ecs.Names`, `ecs.NoHash` — and has

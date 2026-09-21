@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -92,11 +93,11 @@ func TestAMarkRecordsOneChangedPerEntityPerWriterRun(t *testing.T) {
 }
 
 // nestedRow is one element of nestedLists: a List inside a List's element.
-type nestedRow struct{ Inner List[int32] }
+type nestedRow struct{ Inner m.List[int32] }
 
 // nestedLists is a Component whose List's elements hold Lists, so a Set on an
 // inner List goes through At's copy of its element.
-type nestedLists struct{ Rows List[nestedRow] }
+type nestedLists struct{ Rows m.List[nestedRow] }
 
 // nestedListsPlugin owns nestedLists.
 type nestedListsPlugin struct{ store *Store[nestedLists] }
@@ -141,7 +142,7 @@ func TestAMarkRecordsANestedListSet(t *testing.T) {
 	}, []kernel.PluginName{Name, "components", "nestedlists"}, owner)
 	written, untouched := entities.alloc(), entities.alloc()
 	for _, e := range []Entity{written, untouched} {
-		owner.store.Set(e, nestedLists{Rows: NewList(nestedRow{Inner: NewList[int32](1, 2)})})
+		owner.store.Set(e, nestedLists{Rows: m.NewList(nestedRow{Inner: m.NewList[int32](1, 2)})})
 	}
 	run := func(what string, mark bool, at int, value int32) {
 		t.Helper()

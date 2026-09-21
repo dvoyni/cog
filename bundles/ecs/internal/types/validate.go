@@ -13,7 +13,7 @@ type listMode uint8
 
 const (
 	// modeStored is stamped when a value enters a Store. It is what closes the
-	// alias a constructor leaves behind: ListOf copies, so the List a caller
+	// alias a constructor leaves behind: m.ListOf copies, so the List a caller
 	// builds is its own, but Set copies the header into the Store and the two
 	// then share one array. Stamping on the way in makes the caller's retained
 	// copy read-only from that moment, which is the rule the world needs and

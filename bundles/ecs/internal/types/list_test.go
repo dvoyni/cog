@@ -10,6 +10,7 @@ import (
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/assets"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -18,7 +19,7 @@ type labelled struct {
 }
 
 type inventory struct {
-	Slots List[uint32]
+	Slots m.List[uint32]
 }
 
 func TestStorableAdmitsImmutableIndirectionAndNothingElse(t *testing.T) {
@@ -26,7 +27,7 @@ func TestStorableAdmitsImmutableIndirectionAndNothingElse(t *testing.T) {
 		Label   string
 		Nested  struct{ Also string }
 		Labels  [3]string
-		Numbers List[float32]
+		Numbers m.List[float32]
 		Count   int32
 	}
 	legal := []struct {
@@ -77,7 +78,7 @@ func TestABareSliceIsRefusedForTheLockUnitAndSaysSo(t *testing.T) {
 	if err == nil {
 		t.Fatal("a Component holding a []T was accepted")
 	}
-	if !strings.Contains(err.Error(), "ecs.List") {
+	if !strings.Contains(err.Error(), "m.List") {
 		t.Fatalf("the refusal does not name the answer: %v", err)
 	}
 	if !strings.Contains(err.Error(), "hasSlice.Items") {
@@ -96,11 +97,11 @@ type pixels struct {
 // row and grid are a List whose element type holds a List, which validation
 // reaches by walking the outer List's elements.
 type row struct {
-	Cells List[uint32]
+	Cells m.List[uint32]
 }
 
 type grid struct {
-	Rows List[row]
+	Rows m.List[row]
 }
 
 // TestPointerFreeStillMeansWhatItMeant is what keeps the relaxation from
@@ -116,41 +117,6 @@ func TestPointerFreeStillMeansWhatItMeant(t *testing.T) {
 		if err := PointerFree(tp); err == nil {
 			t.Fatalf("%s is reported pointer-free, so it would take the barrier-free fill", tp)
 		}
-	}
-}
-
-func TestAListCopiesRatherThanAdoptingWhatItWasBuiltFrom(t *testing.T) {
-	source := []uint32{1, 2, 3}
-	list := ListOf(source)
-	source[0] = 99
-	if got := list.At(0); got != 1 {
-		t.Fatalf("the List saw the caller's write: element 0 is %d, want 1", got)
-	}
-	if list.Len() != 3 {
-		t.Fatalf("Len is %d, want 3", list.Len())
-	}
-	if empty := ListOf[uint32](nil); empty.Len() != 0 {
-		t.Fatalf("the zero List has length %d, want 0", empty.Len())
-	}
-	seen := 0
-	for i, value := range NewList[uint32](7, 8).All() {
-		if value != uint32(7+i) {
-			t.Fatalf("element %d is %d", i, value)
-		}
-		seen++
-	}
-	if seen != 2 {
-		t.Fatalf("All yielded %d elements, want 2", seen)
-	}
-}
-
-// TestAListHeaderIsThirtyTwoBytes pins the width every List user pays: the
-// slice header and the generation Set adds one to. A wider header is a wider
-// row in every Store holding a List, so it changes only with its measurements
-// in ecs.md § The List.
-func TestAListHeaderIsThirtyTwoBytes(t *testing.T) {
-	if size := unsafe.Sizeof(List[uint32]{}); size != 32 {
-		t.Fatalf("a List header is %d bytes, want 32", size)
 	}
 }
 
@@ -186,7 +152,7 @@ func TestASetShowsInTheBytesOfTheComponentHoldingTheList(t *testing.T) {
 		}, []kernel.PluginName{Name, "components", "rich"}, rich)
 
 	e = entities.alloc()
-	rich.inventories.Set(e, inventory{Slots: ListOf([]uint32{1, 2, 3})})
+	rich.inventories.Set(e, inventory{Slots: m.ListOf([]uint32{1, 2, 3})})
 	engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
 	for _, failure := range []string{unchanged, repeated} {
 		if failure != "" {
@@ -220,8 +186,11 @@ func TestARemovedRowDoesNotKeepItsValueAlive(t *testing.T) {
 	collected := make(chan struct{}, 1)
 	func() {
 		e := entities.alloc()
-		slots := ListOf([]uint32{1, 2, 3})
-		runtime.SetFinalizer(&slots.data[0], func(*uint32) { collected <- struct{}{} })
+		slots := m.ListOf([]uint32{1, 2, 3})
+		// The backing array is m's own, reached here as validation mode reaches it:
+		// the slice header sits at the List's own offset.
+		first := &(*(*[]uint32)(unsafe.Pointer(&slots)))[0]
+		runtime.SetFinalizer(first, func(*uint32) { collected <- struct{}{} })
 		store.Set(e, inventory{Slots: slots})
 		store.Remove(e)
 	}()

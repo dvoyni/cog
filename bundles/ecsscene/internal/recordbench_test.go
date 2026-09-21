@@ -6,7 +6,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
@@ -49,14 +48,14 @@ var (
 		{Clip: "Walk", Weight: 1, Loop: true}, {Clip: "Run", Weight: 0.25, Loop: true},
 	}}
 	// benchParams is one tint, which is the per-Entity variation case.
-	benchParams = ecsscene.Params{Values: ecs.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}))}
+	benchParams = ecsscene.Params{Values: m.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}))}
 	// benchMaterial is two pass tags with one parameter each, so the per-tag
 	// scratch rule is exercised on every draw.
-	benchMaterial = ecsscene.Material{Tags: ecs.NewList(
+	benchMaterial = ecsscene.Material{Tags: m.NewList(
 		ecsscene.MaterialTag{Shader: gfx.ShaderWithText("forward"), State: gfx.StateOpaque3D(),
-			Params: ecs.NewList(gfx.FloatParam("fade", 1))},
+			Params: m.NewList(gfx.FloatParam("fade", 1))},
 		ecsscene.MaterialTag{Tag: "shadow", Shader: gfx.ShaderWithText("shadow"), State: gfx.StateOpaque3D(),
-			Params: ecs.NewList(gfx.FloatParam("bias", 0.01))},
+			Params: m.NewList(gfx.FloatParam("bias", 0.01))},
 	)}
 )
 

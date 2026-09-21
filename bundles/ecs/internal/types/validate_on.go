@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"unsafe"
+
+	"github.com/dvoyni/cog/libs/m"
 )
 
 // This file is the whole of validation mode, and it exists because a List
@@ -188,6 +190,10 @@ type sliceHeader struct {
 	data     unsafe.Pointer
 	len, cap int
 }
+
+// init installs checkListWritable as the check m.List.Set makes. The List is
+// m's, and m cannot import the ECS, so the ECS reaches it from this side.
+func init() { m.ListSetCheck = checkListWritable }
 
 // checkListWritable is the check List.Set makes. A backing array the table does
 // not know is a List the world has never seen, and writing it is the caller's
@@ -383,6 +389,6 @@ func checkHolders(data unsafe.Pointer) {
 	first, second := holders[0], holders[1]
 	holdings.Unlock()
 	panic(fmt.Sprintf(
-		"ecs: List.Set on a List two Components hold, %s of %v and %s of %v: a write under one's write lock changes memory the other's readers read under theirs, and no lock names it. A List that is Set belongs to exactly one Component; give the second its own copy, built with ecs.ListOf from the elements",
+		"ecs: List.Set on a List two Components hold, %s of %v and %s of %v: a write under one's write lock changes memory the other's readers read under theirs, and no lock names it. A List that is Set belongs to exactly one Component; give the second its own copy, built with m.ListOf from the elements",
 		first.store.owner, first.e, second.store.owner, second.e))
 }

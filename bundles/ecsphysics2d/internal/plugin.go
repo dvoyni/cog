@@ -34,7 +34,7 @@ type plugin struct {
 	// polygon is the run Index copies a Polygon Component's vertices into
 	// before handing them to an Insert, refilled once per ShapePoly Entity and
 	// never read outside that System. It lives here because a local would be
-	// nil at the top of every tick and would allocate on the hot path; ecs.List
+	// nil at the top of every tick and would allocate on the hot path; m.List
 	// hands out no slice, so there is nothing to point at instead.
 	polygon []m.Vec2d
 }
@@ -160,7 +160,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 //
 // A ShapePoly's vertices come out of the Polygon Component beside the Shape,
 // probed with ecs.Get and copied into the plugin's own scratch run once per
-// Entity: ecs.List yields copies and hands out no slice, deliberately, so there
+// Entity: m.List yields copies and hands out no slice, deliberately, so there
 // is nothing to point at. Every other kind carries its geometry in the Shape
 // value itself and reads nil. The scratch lives on the plugin rather than in
 // this frame so that the run it has grown survives the tick — a local would be

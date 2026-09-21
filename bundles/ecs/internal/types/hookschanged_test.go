@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -382,7 +383,7 @@ type paddedWide struct {
 // packed is a Component holding a List beside a plain field, with its tail
 // padding spelled out, as a Component watched for Changed must.
 type packed struct {
-	Items List[int32]
+	Items m.List[int32]
 	X     float32
 	_     [4]byte
 }
@@ -450,7 +451,7 @@ func TestAListSetThroughTheStoredListRecordsChanged(t *testing.T) {
 	}, nil)
 	byRef, byField, untouched := entities.alloc(), entities.alloc(), entities.alloc()
 	for _, e := range []Entity{byRef, byField, untouched} {
-		owner.packed.Set(e, packed{Items: NewList[int32](1, 2)})
+		owner.packed.Set(e, packed{Items: m.NewList[int32](1, 2)})
 	}
 
 	write = func(q *Query[packedQuery], set *Set[packed]) {

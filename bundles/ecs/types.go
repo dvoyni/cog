@@ -142,17 +142,6 @@ type Feeder[E any] = types.Feeder[E]
 //	}
 type Resp[T any] = types.Resp[T]
 
-// List is variable-length data a Component may hold: a fixed-length run of T
-// that yields copies and can only be written through a method. A bare []T
-// cannot be a Component, because a copy of one shares its backing array and a
-// read-locked System could write the Store through it; a List's backing array
-// is unexported, its constructors copy, At returns a copy and Set is checked
-// under -tags ecs_validate. Its length is fixed at construction.
-//
-// A List's backing array is a heap allocation the collector scans; prefer [N]T
-// wherever the bound is small and real.
-type List[T any] = types.List[T]
-
 // Hooks is what happened to one Component T since the System's last run, one
 // record per act, in the order the acts happened, filtered by the kind set K:
 //

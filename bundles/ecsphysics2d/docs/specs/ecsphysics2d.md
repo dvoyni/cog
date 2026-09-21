@@ -246,7 +246,7 @@ From [The Component vocabulary](https://github.com/dvoyni/cog/issues/287),
 | `Force` | `Force m.Vec2d`; `Torque float64` | gameplay adds; Solve clears | Solve |
 | `Dynamic` | unexported `invMass, invInertia, damping, angularDamping` | constructors and setters | Solve |
 | `Shape` | see [The Shape](#the-shape) | the app | Index, Detect, queries |
-| `Polygon` | `Verts ecs.List[m.Vec2d]` | the app | Index |
+| `Polygon` | `Verts m.List[m.Vec2d]` | the app | Index |
 | `Joint` | see [Joints](#joints) | the app; Solve writes the Impulse and ratchet's `Angle` | Index, Solve |
 | `Static` | Tag | spawn | Index |
 
@@ -449,9 +449,9 @@ paid by every circle in the world.
 
 ### A Polygon over four vertices is a second Component
 
-`Polygon{Verts ecs.List[m.Vec2d]}`, probed with `ecs.Get[Polygon]` by Index and
+`Polygon{Verts m.List[m.Vec2d]}`, probed with `ecs.Get[Polygon]` by Index and
 copied into the world cache once a tick. The hot path never touches it.
-`ecs.List[T]` is the ECS's own answer to a variable-length run in a Component: a
+`m.List[T]` is the storable answer to a variable-length run in a Component: a
 32-byte header, length fixed at construction, `At` yielding copies, deliberately
 no `Slice`.
 
@@ -2154,7 +2154,7 @@ within a group; groups after the first assume the value types exist.
 - [ ] The `Shape` value, its five kinds, and the per-kind constructors, including
       the hulling Polygon constructor with its three failure sentinels and the
       segment-neighbour constructor.
-- [ ] `Polygon` as a second Component over `ecs.List[m.Vec2d]`.
+- [ ] `Polygon` as a second Component over `m.List[m.Vec2d]`.
 - [ ] `ConvexHull`, ported.
 - [ ] The pair tests: the nine-arm switch, the closed forms, GJK, EPA with its two
       stack buffers, and `ContactPoints`, **with the guards restored**.
