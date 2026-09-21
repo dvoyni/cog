@@ -76,14 +76,15 @@ const CollisionBitsNone uint32 = 0
 // not a Body's Damping and not a Spring's Absorption; the three are different
 // things.
 type Shape struct {
-	verts                       [4]m.Vec2d
+	verts                       [shapeSlots]m.Vec2d
 	Radius                      float64
 	Friction                    float64
 	Restitution                 float64
 	CollisionBits, CollidesWith uint32
 	Kind                        ShapeKind
 	Sensor                      bool
-	_                           [6]byte
+	inlineN                     uint8
+	_                           [5]byte
 }
 
 // NewCircleShape is a circle of that radius about an offset from the Body's

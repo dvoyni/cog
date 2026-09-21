@@ -144,6 +144,12 @@ func newHulledShape(hull []m.Vec2d, radius float64) (Shape, Polygon, error) {
 		shape.Kind = ShapeQuad
 	default:
 		shape.Kind = ShapePoly
+		// PROTOTYPE #409: arm inline8 carries up to eight vertices inline.
+		if shapeSlots > maxInlineVerts && len(hull) <= shapeSlots {
+			shape.inlineN = uint8(len(hull))
+			copy(shape.verts[:], hull)
+			return shape, Polygon{}, nil
+		}
 		return shape, Polygon{Verts: ecs.ListOf(hull)}, nil
 	}
 	copy(shape.verts[:], hull)
@@ -167,6 +173,9 @@ func PolygonVerts(dst []m.Vec2d, shape Shape, polygon Polygon) []m.Vec2d {
 	case ShapeQuad:
 		return append(dst, shape.verts[:maxInlineVerts]...)
 	case ShapePoly:
+		if shapeSlots > maxInlineVerts && shape.inlineN > 0 {
+			return append(dst, shape.verts[:shape.inlineN]...)
+		}
 		for i := range polygon.Verts.Len() {
 			dst = append(dst, polygon.Verts.At(i))
 		}
@@ -184,6 +193,9 @@ func polyCount(shape Shape, verts []m.Vec2d) int {
 	case ShapeQuad:
 		return maxInlineVerts
 	case ShapePoly:
+		if shapeSlots > maxInlineVerts && shape.inlineN > 0 {
+			return int(shape.inlineN)
+		}
 		return len(verts)
 	}
 	return 0
@@ -192,7 +204,7 @@ func polyCount(shape Shape, verts []m.Vec2d) int {
 // polyVert is a polygon kind's i-th local vertex, from the Shape's own slots or
 // from the run the Polygon Component was copied into.
 func polyVert(shape *Shape, verts []m.Vec2d, i int) m.Vec2d {
-	if shape.Kind == ShapePoly {
+	if shape.Kind == ShapePoly && (shapeSlots == maxInlineVerts || shape.inlineN == 0) {
 		return verts[i]
 	}
 	return shape.verts[i]
@@ -321,3 +333,7 @@ func qHullPartition(verts []m.Vec2d, a, b m.Vec2d) int {
 	}
 	return head
 }
+
+// PolyInline reports a ShapePoly carrying its vertices in its own slots,
+// which only arm inline8 of the #409 prototype does. PROTOTYPE.
+func PolyInline(shape Shape) bool { return shapeSlots > maxInlineVerts && shape.inlineN > 0 }

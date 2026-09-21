@@ -241,7 +241,7 @@ func (p *plugin) index(
 func (p *plugin) polygonVerts(
 	polygons *ecs.Get[ecsphysics2d.Polygon], entity ecs.Entity, shape ecsphysics2d.Shape,
 ) []m.Vec2d {
-	if shape.Kind != ecsphysics2d.ShapePoly {
+	if shape.Kind != ecsphysics2d.ShapePoly || types.PolyInline(shape) {
 		return nil
 	}
 	polygon, ok := polygons.Of(entity)
