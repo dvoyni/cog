@@ -55,7 +55,8 @@ type Force = types.Force
 //
 // Its fields are unexported because they carry an invariant: what is stored is
 // the inverse mass and the inverse Moment, so the solver never divides.
-// NewDynamic builds one; SetMass, SetMoment, SetDamping and SetAngularDamping
+// NewDynamicForShape builds one from a Shape and a density, recentring the
+// Shape, and NewDynamic from a mass and a Moment the app has; SetMass, SetMoment, SetDamping and SetAngularDamping
 // change one; Mass, Moment, Damping and AngularDamping read one back.
 //
 // The zero Dynamic is harmless — infinite mass and an infinite Moment, so

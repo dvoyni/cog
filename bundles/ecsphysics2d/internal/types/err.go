@@ -59,3 +59,13 @@ func (e ErrBadDamping) Error() string {
 	return fmt.Sprintf("ecsphysics2d: %s rate %v; a damping rate is per second, finite, and not negative",
 		which, e.Rate)
 }
+
+// ErrBadDensity reports a density, in kg/m², that is zero, negative, NaN or
+// infinite, which NewDynamicForShape refuses before it computes a mass: a
+// density that is not positive gives a mass that is not either, and an
+// infinite one gives an infinite mass.
+type ErrBadDensity struct{ Density float64 }
+
+func (e ErrBadDensity) Error() string {
+	return fmt.Sprintf("ecsphysics2d: density %v; a density is positive and finite", e.Density)
+}
