@@ -62,19 +62,24 @@ func (c *Contacts) dropCached() {
 // released whole rather than clipped; the same goes for the pair table beside
 // it. The frame after a shrink regrows them, and that frame allocates, which is
 // what the command's documentation says it does.
+//
+// The sleeping Islands' two slabs, their members and their quiet Contacts, are
+// Contact-list buffers too and are packed here: what woke is dropped, and what
+// still sleeps is moved down and kept.
 func (c *Contacts) clipBuffers() {
 	c.entries = clip(c.entries)
 	c.aux = clip(c.aux)
 	c.previous, c.prevAux = nil, nil
 	c.prevLookup = pairTable{}
 	c.lookup.shrink()
+	c.islands.pack()
 }
 
 // bytes is what the Contact list's buffers and tables hold, by capacity.
 func (c *Contacts) bytes() uintptr {
 	return uintptr(cap(c.entries)+cap(c.previous))*unsafe.Sizeof(Contact{}) +
 		uintptr(cap(c.aux)+cap(c.prevAux))*unsafe.Sizeof(contactAux{}) +
-		c.lookup.bytes() + c.prevLookup.bytes()
+		c.lookup.bytes() + c.prevLookup.bytes() + c.islands.bytes()
 }
 
 // releaseScratch lets go of the solver's gather and the swept Sensor Probe
@@ -98,6 +103,7 @@ func (c *Contacts) releaseScratch() {
 	s.solved, s.slotDense, s.rows = nil, nil, nil
 	s.joints.rows = nil
 	s.joints.bodies = entityTable{}
+	c.islands.releaseScratch()
 }
 
 // scratchBytes is what the solver's gather and the Probe buffers hold, by
@@ -109,5 +115,6 @@ func (c *Contacts) scratchBytes() uintptr {
 		uintptr(cap(s.solved)+cap(s.slotDense))*unsafe.Sizeof(int32(0)) +
 		uintptr(cap(s.rows))*unsafe.Sizeof(solverBody{}) +
 		uintptr(cap(s.joints.rows))*unsafe.Sizeof(jointRow{}) +
-		uintptr(cap(s.joints.bodies.cells))*unsafe.Sizeof(entityCell{})
+		uintptr(cap(s.joints.bodies.cells))*unsafe.Sizeof(entityCell{}) +
+		c.islands.scratchBytes()
 }

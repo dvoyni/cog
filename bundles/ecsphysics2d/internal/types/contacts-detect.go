@@ -27,8 +27,13 @@ func Collide(
 ) {
 	contacts.beginTick()
 
-	moving, still := &bodies.index, &statics.index
-	contacts.maxSlot = int32(len(moving.entries))
+	moving, still, sleeping := &bodies.index, &statics.index, &bodies.sleepers
+	// The solver numbers the sleepers' grid after the awake one, so a Body a
+	// waking Island brings into this tick's solution has a slot of its own.
+	awake := bodies.awakeSlots()
+	contacts.awakeSlots = awake
+	contacts.maxSlot = awake + int32(len(sleeping.entries))
+	contacts.islands.markGoneSupports(statics)
 
 	// The swept Sensors first, so that one Sensor's entries sit together and in
 	// order of T at the front of the list, ahead of every solid pair — which is
@@ -73,6 +78,31 @@ func Collide(
 						second, moving.world(second), other,
 						jointed,
 					)
+				}
+			}
+		}
+
+		// Body against Sleeping body, over the sleepers' own grid. A sleeper is
+		// never tested against another sleeper or against a Static — its
+		// Island's Contacts are quiet — so this is the only walk that reaches
+		// one, and a touch found here is what wakes its Island.
+		if bodies.sleeping > 0 {
+			sLeft, sBottom := sleeping.cell(first.box.L), sleeping.cell(first.box.B)
+			sRight, sTop := sleeping.cell(first.box.R), sleeping.cell(first.box.T)
+			for i := sLeft; i <= sRight; i++ {
+				for j := sBottom; j <= sTop; j++ {
+					for at := sleeping.buckets[sleeping.bucket(i, j)]; at >= 0; at = sleeping.links[at].next {
+						other := sleeping.links[at].entry
+						second := &sleeping.entries[other]
+						if !firstScannedCell(second, i, j, sLeft, sBottom) {
+							continue
+						}
+						contacts.pair(
+							first, worldFirst, int32(slot),
+							second, sleeping.world(second), awake+other,
+							jointed,
+						)
+					}
 				}
 			}
 		}

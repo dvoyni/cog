@@ -69,3 +69,28 @@ type ShrinkRequest = types.ShrinkRequest
 // what its buckets cost, so what that map gives back is real and is not counted
 // here. The Body index keeps no such table, so its share of Indices is exact.
 type ShrinkResponse = types.ShrinkResponse
+
+// WakeCmd wakes the Island of the Entity it names, for whatever disturbs a
+// Sleeping body that is not a touch, a Position, Velocity or Force written, a
+// changed gravity or a support removed — each of which wakes one on its own.
+// A Shape or a Dynamic changed while a Body sleeps is the usual reason: a
+// sleeper is not re-indexed and not re-read until it wakes.
+//
+//	executioner.ExecuteCommand[ecsphysics2d.WakeCmd](
+//	    ecsphysics2d.WakeRequest{Entity: crate})
+//
+// The Island wakes on the sleep System's next run, which is before Solve on the
+// tick it is executed in when it runs Before[IntegrateOnUpdate]. An Entity that
+// is not asleep is left as it is.
+//
+// The physics plugin registers it, holding write on its own queue and nothing
+// besides, so a System dispatching it serialises with the sleep System and with
+// nothing else. It declares itself exclusive, as ShrinkCmd does.
+type WakeCmd kernel.Command[WakeRequest, WakeResponse]
+
+// WakeRequest names the Entity whose Island a WakeCmd wakes.
+type WakeRequest = types.WakeRequest
+
+// WakeResponse is what a WakeCmd answers, which is nothing: whether a Body
+// sleeps is read off the Sleeping Tag.
+type WakeResponse = types.WakeResponse

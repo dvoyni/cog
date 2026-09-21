@@ -13,9 +13,13 @@ import (
 // included, exactly as cp integrates positions for everything that is not
 // Static. Position is written and Velocity is read, which is the whole of this
 // System's lock set beside read{*Entities}.
+//
+// A Sleeping body is left out, as cp leaves it out of the Bodies it integrates:
+// its Position stays bit for bit what it was when it fell asleep.
 type positionQuery struct {
 	Place    *ecsphysics2d.Position
 	Velocity ecsphysics2d.Velocity
+	_        ecs.Without[ecsphysics2d.Sleeping]
 }
 
 // bodyIndexQuery drives the Body index rebuild: every Entity with a Shape that
@@ -26,10 +30,15 @@ type positionQuery struct {
 // Shapeless Bodies are in neither index, and naming Shape as a present field
 // rather than a filter is what says so: a Body without one never enters the
 // walk.
+//
+// A Sleeping body is left out too: it is kept in the Body index's grid for
+// sleepers, which Index moves it into when its Island falls asleep and out of
+// when it wakes, and which is not rebuilt every tick.
 type bodyIndexQuery struct {
 	Shape ecsphysics2d.Shape
 	Place ecsphysics2d.Position
 	_     ecs.Without[ecsphysics2d.Static]
+	_     ecs.Without[ecsphysics2d.Sleeping]
 }
 
 // jointIndexQuery drives the JointedPairs rebuild: every Joint, read. cp walks

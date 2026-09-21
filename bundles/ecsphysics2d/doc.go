@@ -50,10 +50,12 @@
 // maths.
 //
 // And a Body that moves: Position, Velocity, Force, Dynamic and the Static Tag,
-// with the four Systems the step is chained on app.UpdateEvent in cp's own
-// order — IntegrateOnUpdate, IndexOnUpdate, DetectOnUpdate, SolveOnUpdate.
-// Integrate moves every Body with a Velocity, Index keeps the two indices
-// current, Detect writes the tick's Contacts, and Solve drives them apart.
+// with the five Systems the step is chained on app.UpdateEvent in cp's own
+// order — IntegrateOnUpdate, IndexOnUpdate, DetectOnUpdate, SleepOnUpdate,
+// SolveOnUpdate. Integrate moves every Body with a Velocity, Index keeps the two
+// indices current, Detect writes the tick's Contacts, the sleep System puts
+// idle Islands to sleep and wakes disturbed ones, and Solve drives the Contacts
+// apart.
 //
 // # The step closes for circles
 //
@@ -199,6 +201,36 @@
 // whenever it changes; that System runs in series with Solve, which is the
 // price the app chose. Constants are not Config, which is fixed when physics
 // starts.
+//
+// # Sleeping
+//
+// Bodies that have been idle long enough stop being integrated, indexed,
+// detected and solved, and wake when something disturbs them. It is cp's
+// ProcessComponents and it is off by default: the Sleep Resource the plugin
+// registers has a Time of 0, and a world whose app never writes it steps
+// exactly as it would without sleeping at all.
+//
+// An app turns it on by writing Sleep from a System of its own, once from
+// app.InitEvent as a rule:
+//
+//	sleep.Get().Time = 0.5 // seconds every Body of an Island must be idle
+//
+// A Dynamic body is idle when v·v·m + w²·i is at most m·IdleSpeed², cp's
+// kinetic energy with no ½; an IdleSpeed of 0 falls back to one tick of the
+// Constants' Gravity, so a world with no gravity and no IdleSpeed never sleeps.
+// The Bodies joined by touching or by Joints are an Island, which falls asleep
+// and wakes as one; a Static or Kinematic body joins none, and a Kinematic one
+// keeps what it touches awake.
+//
+// A sleeping Body carries the Sleeping Tag, which only the plugin writes.
+// Everything that wakes one is on Sleeping: a touch, a Position, Velocity or
+// Force written, a changed gravity, a support removed, sleeping turned off, and
+// WakeCmd for the rest. It is still found by every query on the Body index, and
+// its Contacts go quiet while it sleeps and come back Continuing when it wakes.
+//
+// An app filter that wants cp's order — PreSolve before the Islands are built,
+// so a Contact it drops neither joins nor wakes one — orders itself
+// Before[SleepOnUpdate] as well as Before[SolveOnUpdate].
 //
 // # A Body's kind is said by its Components
 //

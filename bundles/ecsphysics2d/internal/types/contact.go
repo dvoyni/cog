@@ -44,6 +44,14 @@ const (
 	// pair keeps touching its entry arrives already marked, and it ends when the
 	// pair misses one tick.
 	flagIgnored
+	// flagStaticA and flagStaticB are carried only by a quiet entry, and say
+	// which of its parties was a Static when it went quiet: a Static has no
+	// Rest to say so and no solver slot to say it by once it is quiet.
+	flagStaticA
+	flagStaticB
+	// flagGone is set by Detect on a quiet entry whose Static party has left
+	// the static index, so the entry comes back Ended when its Island wakes.
+	flagGone
 )
 
 // ContactPoint is one point of a Contact, 120 bytes: cp's Contact struct with
@@ -208,8 +216,10 @@ func (c *Contact) TotalImpulse() m.Vec2d {
 // removed over the tick, which is what a collision sound or a damage number is
 // scaled by.
 //
-// It has no counterpart in jakecoffman/cp, whose only kinetic-energy
-// computation is inline in DebugInfo, so this is ported from the C.
+// It has no counterpart in jakecoffman/cp, so this is ported from the C. cp
+// computes kinetic energy in three places, none of them per arbiter:
+// Body.KineticEnergy (body.go :443), its caller in cp's own sleeping logic
+// (space.go :549), and an inline sum in DebugInfo (everything.go :329).
 //
 // One guard is added: a point PreStep never reached has nMass and tMass of
 // zero, and C never meets one because its Count() reports 0 for a cached

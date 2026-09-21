@@ -10,14 +10,14 @@ import (
 // declares a dependency on. It is also the key its Config arrives under.
 const Name kernel.PluginName = "ecsphysics2d"
 
-// The four Systems the step is, in cp's own order —
-// Integrate → Index → Detect → Solve — each chained After the one before it by
-// the plugin itself, so an app never has to know the order to stay out of it.
-// Positions integrate first, which is cp's order and not Box2D's, and is why a
-// Force written this tick moves the Body next tick.
+// The five Systems the step is, in cp's own order —
+// Integrate → Index → Detect → Sleep → Solve — each chained After the one
+// before it by the plugin itself, so an app never has to know the order to stay
+// out of it. Positions integrate first, which is cp's order and not Box2D's,
+// and is why a Force written this tick moves the Body next tick.
 //
 // They are exported so an app orders its own Systems against them. There is no
-// physics group and no phase of its own: the four sit in the ordinary phase,
+// physics group and no phase of its own: the five sit in the ordinary phase,
 // already after input's First.
 type (
 	// IntegrateOnUpdate moves every Body with a Velocity, Kinematic ones
@@ -35,6 +35,20 @@ type (
 	// filter Systems — cp's Begin and PreSolve — run
 	// After[DetectOnUpdate]().Before[SolveOnUpdate]().
 	DetectOnUpdate kernel.Subscription[app.UpdateEvent]
+
+	// SleepOnUpdate is cp's ProcessComponents, between Detect and Solve: it
+	// keeps each Dynamic body's idle time, wakes the Islands something
+	// disturbed, and puts to sleep the Islands that stayed idle for Sleep.Time.
+	// It does nothing but wake what still sleeps while sleeping is off.
+	//
+	// A filter System ordered only After[DetectOnUpdate]().Before[SolveOnUpdate]()
+	// may run either side of it. One that wants cp's order — PreSolve before the
+	// Islands are built, so a Contact it drops neither joins nor wakes one —
+	// adds Before[SleepOnUpdate](); one that must also see the Contacts a waking
+	// Island hands back runs After[SleepOnUpdate]() instead. Ordering it either
+	// way also spares the kernel's dispatch the map it builds, on the ticks the
+	// two race, for whichever of them is kept waiting.
+	SleepOnUpdate kernel.Subscription[app.UpdateEvent]
 
 	// SolveOnUpdate is the indivisible half of the step: it integrates
 	// velocities and, once there is one, runs the impulse solver around that.

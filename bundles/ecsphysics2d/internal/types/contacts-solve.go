@@ -40,6 +40,7 @@ func Solve(
 	dynamics *ecs.Get[Dynamic],
 	velocities *ecs.Set[Velocity],
 	places *ecs.Set[Position],
+	sleeping *ecs.Get[Sleeping],
 	gravity m.Vec2d,
 	h float64, iterations int, slop, bias float64,
 ) {
@@ -47,7 +48,7 @@ func Solve(
 	// Step 2 and its half of step 3: a jointed Body may touch nothing at all,
 	// so the gather set is the Bodies in solved Contacts together with the
 	// Bodies in Joints, and both are given rows before either is gathered.
-	contacts.gatherJoints(joints, places, velocities)
+	contacts.gatherJoints(joints, places, velocities, sleeping)
 
 	// The gather reads the velocity as it stands before integration, which is
 	// the only thing PreStep's bounce can be taken from.

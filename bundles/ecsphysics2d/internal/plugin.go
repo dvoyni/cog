@@ -22,7 +22,7 @@ const (
 	jointReserve = 512
 )
 
-// plugin registers the Components a Body is made of and chains the four Systems
+// plugin registers the Components a Body is made of and chains the five Systems
 // the step is. It holds the resolved settings and nothing else: a Component is
 // the source of truth and nothing is mirrored, so there is no world object for
 // a plugin to be.
@@ -37,10 +37,15 @@ type plugin struct {
 	// nil at the top of every tick and would allocate on the hot path; m.List
 	// hands out no slice, so there is nothing to point at instead.
 	polygon []m.Vec2d
+
+	// woken is the run of Bodies whose Sleeping Tag went since the last Index,
+	// which Index takes out of the sleepers' grid in one pass. It lives here
+	// for the reason polygon does.
+	woken []ecs.Entity
 }
 
 // New makes the physics plugin. Register ecs beside it, and app above it: the
-// four Systems are subscriptions on app.UpdateEvent, fed the fixed step.
+// five Systems are subscriptions on app.UpdateEvent, fed the fixed step.
 //
 //	kernel.New(config).WithPlugins(
 //	    appplugin.New(), platformplugin.New(),
@@ -60,18 +65,19 @@ func (p *plugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{ecs.Name, app.Name}
 }
 
-// Register resolves the settings, declares the seven Components a Body is made
-// of and the Joint that holds two of them, publishes the two indices, the two
-// solver Resources and the Constants, registers ShrinkCmd, and chains the four
-// Systems in
-// cp's order.
+// Register resolves the settings, declares the Components a Body is made of —
+// the Sleeping Tag and the Rest the sleep System keeps among them — and the
+// Joint that holds two of them, publishes the two indices, the two solver
+// Resources, the Constants and the Sleep settings, registers ShrinkCmd and
+// WakeCmd, and chains the five Systems in cp's order.
 //
 // The chain is explicit rather than left to the locks. Integrate and Solve
 // would serialise on Velocity anyway, Index reads the Position Integrate
-// writes, and Detect writes the Contact list Solve reads — but the order is
-// contract rather than a consequence: an app writes Before[IntegrateOnUpdate]
-// and After[DetectOnUpdate]().Before[SolveOnUpdate]() against it, and those
-// orderings must keep meaning what they mean whatever the lock sets become.
+// writes, and Detect writes the Contact list the sleep System and Solve write
+// after it — but the order is contract rather than a consequence: an app writes
+// Before[IntegrateOnUpdate] and After[DetectOnUpdate]().Before[SolveOnUpdate]()
+// against it, and those orderings must keep meaning what they mean whatever the
+// lock sets become.
 //
 // Every System is fed the step the same way, with ecs.Feed projecting
 // UpdateEvent.Dt, so none of them names where its step came from. Physics runs
@@ -89,6 +95,12 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	ecs.RegisterComponent[ecsphysics2d.Force](registrar, bodyReserve)
 	ecs.RegisterComponent[ecsphysics2d.Dynamic](registrar, bodyReserve)
 	ecs.RegisterComponent[ecsphysics2d.Static](registrar, staticReserve)
+	// Sleeping is a Tag only the sleep System adds and removes, and Rest is
+	// what that System keeps for each Dynamic body, which no app can name.
+	// Both are the moving Bodies' population, and neither is a Component until
+	// sleeping is turned on.
+	ecs.RegisterComponent[ecsphysics2d.Sleeping](registrar, bodyReserve)
+	ecs.RegisterComponent[types.Rest](registrar, bodyReserve)
 	// Shape takes the larger of the two reserves, because it is the one
 	// Component both kinds of Body carry: its population is the statics plus
 	// the shaped movers, and static geometry is the bigger half of that in
@@ -118,6 +130,14 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	// through ecs.Write[*Constants], and Solve reads them every tick.
 	registrar.InitResource(&ecsphysics2d.Constants{})
 
+	// Sleeping, off: an app turns it on by writing Sleep, and until then the
+	// sleep System builds nothing.
+	registrar.InitResource(&ecsphysics2d.Sleep{})
+
+	// The WakeCmd's queue, a Resource of its own so that the command's lock is
+	// a write on it and on nothing the step reads.
+	registrar.InitResource(types.NewWakes())
+
 	// The pairs a Joint holds apart, rebuilt by Index and read by Detect. It is
 	// a Resource of its own so that the Joint walk's write does not have to be
 	// held through detection.
@@ -129,6 +149,10 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	// lock is the only thing that does.
 	registrar.HandleCommand[ecsphysics2d.ShrinkCmd](types.ShrinkCommand)
 
+	// Waking an Island from outside a touch or a write, queued for the sleep
+	// System, which is the one that wakes it.
+	registrar.HandleCommand[ecsphysics2d.WakeCmd](types.WakeCommand)
+
 	registrar.Subscribe[ecsphysics2d.IntegrateOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, integrate, step()))
 	registrar.Subscribe[ecsphysics2d.IndexOnUpdate](
@@ -137,9 +161,12 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	registrar.Subscribe[ecsphysics2d.DetectOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, p.detect, step())).
 		After[ecsphysics2d.IndexOnUpdate]()
+	registrar.Subscribe[ecsphysics2d.SleepOnUpdate](
+		ecs.ToHandler[app.UpdateEvent](registrar, p.sleep, step())).
+		After[ecsphysics2d.DetectOnUpdate]()
 	registrar.Subscribe[ecsphysics2d.SolveOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, p.solve, step())).
-		After[ecsphysics2d.DetectOnUpdate]()
+		After[ecsphysics2d.SleepOnUpdate]()
 	return nil
 }
 
@@ -167,6 +194,9 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 // nil again at every call and would allocate every tick.
 func (p *plugin) index(
 	shapes *ecs.Hooks[ecsphysics2d.Shape, ecs.HookAddedRemoved],
+	sleepers *ecs.Hooks[ecsphysics2d.Sleeping, ecs.HookAddedRemoved],
+	shaped *ecs.Get[ecsphysics2d.Shape],
+	asleep *ecs.Get[ecsphysics2d.Sleeping],
 	places *ecs.Get[ecsphysics2d.Position],
 	statics *ecs.Get[ecsphysics2d.Static],
 	polygons *ecs.Get[ecsphysics2d.Polygon],
@@ -186,6 +216,12 @@ func (p *plugin) index(
 		// the unconditional call free for every Body's Shape.
 		if hook.IsRemoved() {
 			static.Remove(entity)
+			// A Sleeping body that lost its Shape leaves the sleepers' grid
+			// too. One that was despawned is taken out by its Sleeping hook
+			// below, which is why this asks whether the Tag is still there.
+			if _, sleeping := asleep.Of(entity); sleeping {
+				p.woken = append(p.woken, entity)
+			}
 		}
 		if hook.IsAdded() {
 			// A Hook narrows by nothing but its Component and its kind set, so
@@ -212,6 +248,36 @@ func (p *plugin) index(
 	}
 
 	body := bodyIndex.Get()
+
+	// The sleepers' grid is kept current rather than rebuilt: a Body whose
+	// Island fell asleep since the last Index goes in, where it sleeps, and one
+	// whose Island woke, or that was despawned asleep, comes out. The removals
+	// are gathered first and made in one pass over the grid, which keeps no
+	// Entity to slot table; an addition is checked against the Tag and the
+	// Components still being there, so a Body that fell asleep and was
+	// despawned before this ran is never put in.
+	for entity, hook := range sleepers.All() {
+		if hook.IsRemoved() {
+			p.woken = append(p.woken, entity)
+		}
+	}
+	types.RemoveSleepers(body, p.woken)
+	p.woken = p.woken[:0]
+	for entity, hook := range sleepers.All() {
+		if !hook.IsAdded() {
+			continue
+		}
+		if _, sleeping := asleep.Of(entity); !sleeping {
+			continue
+		}
+		shape, okShape := shaped.Of(entity)
+		place, okPlace := places.Of(entity)
+		if okShape && okPlace {
+			types.InsertSleeper(body, entity, shape, place.Current, place.Angle,
+				p.polygonVerts(polygons, entity, shape))
+		}
+	}
+
 	body.Clear()
 	for entity, it := range bodies.All() {
 		// InsertMoving rather than Insert, so that a moving circle Sensor
@@ -310,12 +376,55 @@ func (p *plugin) solve(
 	places *ecs.Set[ecsphysics2d.Position],
 	contacts *ecs.Write[*ecsphysics2d.Contacts],
 	constants *ecs.Read[*ecsphysics2d.Constants],
+	sleeping *ecs.Get[ecsphysics2d.Sleeping],
 	step *ecs.In[float64],
 ) {
 	types.Solve(
-		contacts.Get(), bodies, joints, dynamics, velocities, places,
+		contacts.Get(), bodies, joints, dynamics, velocities, places, sleeping,
 		constants.Get().Gravity,
 		step.Get(), p.settings.iterations, p.settings.slop, p.settings.bias,
+	)
+}
+
+// sleep is cp's ProcessComponents, between Detect and Solve: every awake
+// Dynamic body's idle time kept, every sleeping Island something disturbed
+// woken, and the tick's Islands built from the Contacts and the Joints so that
+// the ones idle for Sleep.Time fall asleep.
+//
+// Its lock set is its own and nothing else's changes for it: read on Sleep,
+// Constants, Dynamic, Velocity, Position, Joint and both indices; write on
+// Force, which it clears on a sleeper as Solve clears it on an awake Body, on
+// the Sleeping and Rest Stores, which only it writes, on the Contact list,
+// whose quiet Contacts it moves, and on the WakeCmd's queue. Every System that
+// filters on Sleeping gains a read of a Store only this one writes, and this
+// one sits in the chain between Detect and Solve, both of which already
+// serialise with everything it writes. Constants is read as Solve reads it:
+// the only System that waits on it is an app's own that took the write.
+//
+// It never writes the Body index. Moving a Body into the sleepers' grid and out
+// again is Index's, on the next tick, off the Sleeping Tag's own hook; a query
+// asks both grids, so nothing it answers changes in between.
+func (p *plugin) sleep(
+	settings *ecs.Read[*ecsphysics2d.Sleep],
+	constants *ecs.Read[*ecsphysics2d.Constants],
+	awake *ecs.Query[types.AwakeQuery],
+	asleep *ecs.Query[types.AsleepQuery],
+	joints *ecs.Query[types.IslandJointQuery],
+	rests *ecs.Set[types.Rest],
+	forces *ecs.Set[ecsphysics2d.Force],
+	velocities *ecs.Get[ecsphysics2d.Velocity],
+	places *ecs.Get[ecsphysics2d.Position],
+	tag *ecs.Set[ecsphysics2d.Sleeping],
+	untag *ecs.Remove[ecsphysics2d.Sleeping],
+	contacts *ecs.Write[*ecsphysics2d.Contacts],
+	wakes *ecs.Write[*types.Wakes],
+	step *ecs.In[float64],
+) {
+	sleep := settings.Get()
+	types.ProcessIslands(
+		contacts.Get(), awake, asleep, joints, rests, forces, velocities, places, tag, untag,
+		wakes.Get(),
+		sleep.IdleSpeed, sleep.Time, constants.Get().Gravity, step.Get(),
 	)
 }
 

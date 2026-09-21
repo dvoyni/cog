@@ -67,6 +67,39 @@ type Dynamic = types.Dynamic
 // Velocity, and moving one means replacing the Entity.
 type Static = types.Static
 
+// Sleeping is the Tag of a Dynamic body physics has stopped moving, because it
+// and everything in its Island stayed idle for Sleep.Time. The plugin adds it
+// and removes it and nothing else may: Integrate, the Body index rebuild and
+// the velocity integration skip a Body carrying it, and an app's own Queries
+// may skip one the same way, with ecs.Without[Sleeping].
+//
+// A Sleeping body's Position is bit for bit what it was when it fell asleep. It
+// gathers no gravity while it sleeps, so the tick it wakes it receives exactly
+// one tick's worth. Its Contacts go quiet — carried unreported, neither
+// Continuing nor Ended — and come back Continuing, with their Impulses, when it
+// wakes. It is still found by every query on the Body index, and never by one
+// on the static index.
+//
+// Its Island wakes, all of it at once, when:
+//
+//   - an awake Body touches it, or is jointed to it — a Sensor overlapping it
+//     neither wakes it nor stops reporting the overlap;
+//   - the app writes its Position or Velocity: a kick, an impulse, a teleport;
+//   - its Force differs from the one it carried when it fell asleep. The plugin
+//     clears a sleeper's Force every tick, so gravity an app adds into Force
+//     every tick, the same value each time, disturbs nothing;
+//   - Constants.Gravity changes, which wakes every Island, as cp's SetGravity
+//     does;
+//   - a member is despawned, or a Static a quiet Contact names leaves the
+//     static index — what rested on it falls;
+//   - sleeping is turned off, which wakes every Island;
+//   - a WakeCmd names it, which is the way for everything else, a Shape or a
+//     Dynamic changed while it sleeps among them.
+//
+// A Kinematic body touching an Island keeps it awake, and a Static or a
+// Kinematic body never belongs to an Island nor joins two.
+type Sleeping = types.Sleeping
+
 // Shape is the one convex region a Body occupies: a circle, a segment or a
 // convex Polygon, any of them rounded by its Radius. It is a Component the app
 // writes, and its Kind names how many of its vertices mean anything.

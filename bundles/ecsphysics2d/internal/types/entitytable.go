@@ -1,6 +1,10 @@
 package types
 
-import "github.com/dvoyni/cog/bundles/ecs"
+import (
+	"unsafe"
+
+	"github.com/dvoyni/cog/bundles/ecs"
+)
 
 // The open-addressed map from one Entity to its dense solver row. It is
 // pairtable.go's sibling and not the same table: a Joint's party is looked up
@@ -33,6 +37,11 @@ func (t *entityTable) reset() {
 		t.cells[i] = entityCell{}
 	}
 	t.used = 0
+}
+
+// bytes is what the table holds, by capacity.
+func (t *entityTable) bytes() uintptr {
+	return uintptr(cap(t.cells)) * unsafe.Sizeof(entityCell{})
 }
 
 func (t *entityTable) lookup(e ecs.Entity) (int32, bool) {
