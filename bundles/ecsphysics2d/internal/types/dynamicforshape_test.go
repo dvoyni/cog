@@ -49,14 +49,15 @@ func localPoints(shape Shape, polygon Polygon) []m.Vec2d {
 
 // For every kind, the constructor's mass, Moment of inertia and centre of
 // gravity are cp's, as AccumulateMassFromShapes computes them for a body of
-// that one Shape at that density. The centre of gravity is read off how far the
-// constructor moved each of the Shape's own points, which has to be the same
-// vector for every one of them.
+// that one Shape at that density. The returned centroid is cp's
+// CenterOfGravity, and it is also exactly what the constructor moved each of
+// the Shape's own points by — the same vector for every one of them — so the
+// app's one line puts the geometry back where it was drawn.
 func TestNewDynamicForShapeAgreesWithAccumulateMassFromShapes(t *testing.T) {
 	for _, row := range cpMassCases {
 		shape, polygon := massShape(t, row)
 
-		body, recentred, recentredPolygon, err := NewDynamicForShape(shape, polygon, row.density, 0, 0)
+		body, recentred, recentredPolygon, centroid, err := NewDynamicForShape(shape, polygon, row.density, 0, 0)
 		if err != nil {
 			t.Fatalf("%s: refused: %v", row.name, err)
 		}
@@ -72,10 +73,15 @@ func TestNewDynamicForShapeAgreesWithAccumulateMassFromShapes(t *testing.T) {
 			t.Fatalf("%s: %d points became %d", row.name, len(before), len(after))
 		}
 		cog := m.Vec2d{X: row.cog[0], Y: row.cog[1]}
+		if math.Abs(centroid.X-cog.X) > cpTolerance || math.Abs(centroid.Y-cog.Y) > cpTolerance {
+			t.Errorf("%s: returned centroid %v, cp's CenterOfGravity is %v", row.name, centroid, cog)
+		}
 		for i := range before {
-			moved := before[i].Sub(after[i])
-			if math.Abs(moved.X-cog.X) > cpTolerance || math.Abs(moved.Y-cog.Y) > cpTolerance {
-				t.Errorf("%s: point %d moved by %v, cp's centre of gravity is %v", row.name, i, moved, cog)
+			if moved := before[i].Sub(after[i]); !vecNear(moved, centroid) {
+				t.Errorf("%s: point %d moved by %v, the returned centroid is %v", row.name, i, moved, centroid)
+			}
+			if back := after[i].Add(centroid); !vecNear(back, before[i]) {
+				t.Errorf("%s: point %d put back by the centroid is %v, was drawn at %v", row.name, i, back, before[i])
 			}
 		}
 	}
@@ -86,7 +92,7 @@ func TestNewDynamicForShapeAgreesWithAccumulateMassFromShapes(t *testing.T) {
 func TestNewDynamicForShapePutsTheCentroidAtTheOrigin(t *testing.T) {
 	for _, row := range cpMassCases {
 		shape, polygon := massShape(t, row)
-		_, recentred, recentredPolygon, err := NewDynamicForShape(shape, polygon, row.density, 0, 0)
+		_, recentred, recentredPolygon, _, err := NewDynamicForShape(shape, polygon, row.density, 0, 0)
 		if err != nil {
 			t.Fatalf("%s: refused: %v", row.name, err)
 		}
@@ -129,7 +135,7 @@ func TestNewDynamicForShapeCarriesEverythingButTheGeometry(t *testing.T) {
 	shape.CollidesWith = 0b1001
 	shape.Sensor = true
 
-	_, got, _, err := NewDynamicForShape(shape, Polygon{}, 2, 0, 0)
+	_, got, _, _, err := NewDynamicForShape(shape, Polygon{}, 2, 0, 0)
 	if err != nil {
 		t.Fatalf("refused: %v", err)
 	}
@@ -154,7 +160,7 @@ func TestNewDynamicForShapeNeverWritesTheCallersPolygon(t *testing.T) {
 	}
 	given := PolygonVerts(nil, shape, polygon)
 
-	_, _, recentred, err := NewDynamicForShape(shape, polygon, 1, 0, 0)
+	_, _, recentred, _, err := NewDynamicForShape(shape, polygon, 1, 0, 0)
 	if err != nil {
 		t.Fatalf("refused: %v", err)
 	}
@@ -179,7 +185,7 @@ func TestNewDynamicForShapeReturnsTheZeroPolygonForAnInlineKind(t *testing.T) {
 		"segment": NewSegmentShape(m.Vec2d{}, m.Vec2d{X: 1}, 0.2),
 		"box":     NewBoxShapeFor(NewBB(0, 0, 2, 1), 0),
 	} {
-		_, _, polygon, err := NewDynamicForShape(shape, stray, 1, 0, 0)
+		_, _, polygon, _, err := NewDynamicForShape(shape, stray, 1, 0, 0)
 		if err != nil {
 			t.Fatalf("%s: refused: %v", name, err)
 		}
@@ -190,8 +196,9 @@ func TestNewDynamicForShapeReturnsTheZeroPolygonForAnInlineKind(t *testing.T) {
 }
 
 // Each refusal names its reason and hands back the zero Dynamic, with the Shape
-// and the Polygon exactly as they were given, so a caller that ignores the
-// error spawns a Body that visibly does nothing where it asked for it.
+// and the Polygon exactly as they were given and the zero centroid, so a caller
+// that ignores the error spawns a Body that visibly does nothing where it asked
+// for it.
 func TestNewDynamicForShapeRefusesWhatHasNoMass(t *testing.T) {
 	hexagon := []m.Vec2d{{X: 3, Y: 1}, {X: 2.5, Y: 1.866}, {X: 1.5, Y: 1.866}, {X: 1, Y: 1}, {X: 1.5, Y: 0.134}, {X: 2.5, Y: 0.134}}
 	poly, polygon, err := NewPolygonShape(hexagon, 0)
@@ -218,7 +225,7 @@ func TestNewDynamicForShapeRefusesWhatHasNoMass(t *testing.T) {
 		{"a mass that overflows", poly, polygon, math.MaxFloat64, 0, 0, ErrBadMass{Mass: math.Inf(1)}},
 		{"a negative damping", poly, polygon, 1, -1, 0, ErrBadDamping{Rate: -1}},
 	} {
-		body, shape, gotPolygon, err := NewDynamicForShape(c.shape, c.polygon, c.density, c.damping, c.angularDamping)
+		body, shape, gotPolygon, centroid, err := NewDynamicForShape(c.shape, c.polygon, c.density, c.damping, c.angularDamping)
 
 		switch want := c.want.(type) {
 		case ErrBadDensity:
@@ -232,6 +239,9 @@ func TestNewDynamicForShapeRefusesWhatHasNoMass(t *testing.T) {
 			if !errors.Is(err, c.want) {
 				t.Errorf("%s: err = %v, want %v", c.name, err, c.want)
 			}
+		}
+		if centroid != (m.Vec2d{}) {
+			t.Errorf("%s: came back with a centroid of %v, want the zero vector", c.name, centroid)
 		}
 		if body != (Dynamic{}) {
 			t.Errorf("%s: came back with %+v, want the zero Dynamic", c.name, body)
@@ -256,7 +266,7 @@ func TestNewDynamicForShapeAllocatesOnlyAPolysNewVertices(t *testing.T) {
 	} {
 		allocations := testing.AllocsPerRun(100, func() {
 			var err error
-			_, shapeSink, _, err = NewDynamicForShape(shape, Polygon{}, 1, 0, 0)
+			_, shapeSink, _, _, err = NewDynamicForShape(shape, Polygon{}, 1, 0, 0)
 			if err != nil {
 				t.Fatal(err)
 			}

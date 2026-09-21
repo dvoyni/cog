@@ -167,7 +167,7 @@
 // A new Dynamic body starts at NewDynamicForShape, which gives it the mass and
 // the Moment of inertia its Shape has at a density and moves the Shape so its
 // centroid is at Position, which is the centre of gravity; the app then places
-// the Body at the old origin plus the centroid. NewDynamic is for the Body
+// the Body at the old origin plus the centroid it returns. NewDynamic is for the Body
 // whose mass and Moment the app already has, and it leaves the Shape where it
 // is: an off-centre Shape then turns about Position, which is right only for a
 // Body meant to.

@@ -284,7 +284,7 @@ Ported here as free functions: `MomentForCircle`, `MomentForSegment`,
 #### Mass from shape and density
 
 **`NewDynamicForShape(shape, polygon, density, damping, angularDamping)
-(Dynamic, Shape, Polygon, error)`** is how a new Dynamic body gets its mass and
+(Dynamic, Shape, Polygon, m.Vec2d, error)`** is how a new Dynamic body gets its mass and
 moment, and `NewDynamic` is for the Body whose numbers the app already has. It
 is cp's `AccumulateMassFromShapes` in its one-shape case, one Shape per Body
 being the rule:
@@ -300,9 +300,14 @@ being the rule:
   `cog` offset the constructor moves the Shape instead: a circle's offset
   becomes zero, a segment's endpoints and a polygon's vertices are shifted by
   the centroid, and a segment's neighbour tangents, being relative, stay. The
-  material, the collision fields and `Sensor` are carried over. The app places
-  the Body at the old origin plus the centroid to leave the geometry where it
-  was. Recentring is the part an app gets wrong, and gets wrong silently — an
+  material, the collision fields and `Sensor` are carried over.
+- **It returns the centroid**, the vector the Shape was shifted by, in the
+  Shape's original frame. The app places the Body at the old origin plus it to
+  leave the geometry where it was:
+  `Position{Current: origin.Add(centroid), Previous: origin.Add(centroid)}`, or
+  `origin.Add(centroid.Rotate(m.ForAngle(angle)))` for a Body spawned turned.
+  Handing it back is what makes that one line for every kind: a Poly's
+  recentred Shape carries no vertex to compare against. Recentring is the part an app gets wrong, and gets wrong silently — an
   off-centre polygon spins about the wrong point and nothing fails — which is
   why a bare `MassForShape` returning numbers was not taken.
 - **The pair goes in and comes back as `NewPolygonShape` returns it.** An
@@ -312,7 +317,7 @@ being the rule:
 - **A Shape with no area** — a circle or a segment of radius 0 — is refused with
   `ErrNoArea`, and a density that is not positive and finite with
   `ErrBadDensity`. Like `NewDynamic`'s refusals, each returns the zero `Dynamic`,
-  with the Shape and Polygon as given.
+  with the Shape and Polygon as given and the zero centroid.
 - It adds **no bytes to `Shape`**. Its answers agree with cp's at 1e-9 on every
   kind, frozen in `cpmasscases_test.go`.
 

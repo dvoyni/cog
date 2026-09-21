@@ -38,7 +38,7 @@ func TestAnOffCentrePolygonTurnsAboutItsCentroidOnlyWhenBuiltThroughTheConstruct
 	mass := density * ecsphysics2d.AreaForPoly(hexagon, 0)
 	handBuilt := dynamic(t, mass, ecsphysics2d.MomentForPoly(mass, hexagon, centroid.Negate(), 0), 0, 0)
 
-	built, shape, polygon, err := ecsphysics2d.NewDynamicForShape(drawn, drawnPolygon, density, 0, 0)
+	built, shape, polygon, returned, err := ecsphysics2d.NewDynamicForShape(drawn, drawnPolygon, density, 0, 0)
 	if err != nil {
 		t.Fatalf("NewDynamicForShape: %v", err)
 	}
@@ -47,9 +47,15 @@ func TestAnOffCentrePolygonTurnsAboutItsCentroidOnlyWhenBuiltThroughTheConstruct
 			built.Mass(), handBuilt.Mass(), built.Moment(), handBuilt.Moment())
 	}
 
-	// Two origins far enough apart that the hexagons never touch.
+	if returned.Distance(centroid) > 1e-9 {
+		t.Fatalf("the constructor returned the centroid %v, the outline's is %v", returned, centroid)
+	}
+
+	// Two origins far enough apart that the hexagons never touch. The
+	// constructor's Body is placed at its origin plus the returned centroid,
+	// which is the one line its doc shows.
 	handOrigin, builtOrigin := m.Vec2d{}, m.Vec2d{X: 50}
-	builtAt := builtOrigin.Add(centroid)
+	builtAt := builtOrigin.Add(returned)
 
 	h := newHarness(t)
 	hand := h.spawn(t, spawnRequest{

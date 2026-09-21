@@ -322,21 +322,23 @@ func NewDynamic(mass, moment, damping, angularDamping float64) (Dynamic, error) 
 // Polygon is never written: a Poly comes back with a new vertex List, which
 // allocates, this being a constructor and not the hot path.
 //
-// Recentring moves the geometry in the Body's frame, so to leave it where it
-// was the app places the Body at the old origin plus the centroid. For a Body
-// spawned at origin with an Angle of 0, that is the one line
+// The centroid it returns is what the Shape was shifted by, in the Shape's
+// original frame. Recentring moves the geometry in the Body's frame, so to
+// leave it where it was the app places the Body at the old origin plus the
+// centroid. For a Body spawned at origin with an Angle of 0, that is the one
+// line
 //
-//	place := Position{Current: origin.Add(centroid), Previous: origin.Add(centroid)}
+//	Position{Current: origin.Add(centroid), Previous: origin.Add(centroid)}
 //
-// where centroid is the circle's offset, the midpoint of the segment's two
-// endpoints, or CentroidForPoly of the outline the polygon was built from. A
-// Body spawned turned adds centroid.Rotate(m.ForAngle(angle)) instead. A Body
-// left at the old origin turns about it, and nothing reports that.
+// and a Body spawned turned by angle adds centroid.Rotate(m.ForAngle(angle))
+// instead. A Body left at the old origin turns about it, and nothing reports
+// that.
 //
 // A Shape with no area — a circle or a segment of radius 0 — is refused with
 // ErrNoArea, a density that is not positive and finite with ErrBadDensity, and
 // a mass or a Damping rate NewDynamic refuses with its own error. Every refusal
-// returns the zero Dynamic and the Shape and the Polygon exactly as given.
-func NewDynamicForShape(shape Shape, polygon Polygon, density, damping, angularDamping float64) (Dynamic, Shape, Polygon, error) {
+// returns the zero Dynamic, the Shape and the Polygon exactly as given, and the
+// zero centroid.
+func NewDynamicForShape(shape Shape, polygon Polygon, density, damping, angularDamping float64) (Dynamic, Shape, Polygon, m.Vec2d, error) {
 	return types.NewDynamicForShape(shape, polygon, density, damping, angularDamping)
 }

@@ -148,23 +148,25 @@ var ErrNoArea = errors.New("ecsphysics2d: the Shape has no area, so no density g
 // List, which allocates; this is a constructor, called at spawn and never on
 // the hot path. The inline kinds allocate nothing.
 //
-// Recentring moves the geometry in the Body's frame, so to leave it where it
-// was the app places the Body at the old origin plus the centroid. For a Body
-// spawned at origin with an Angle of 0, that is the one line
+// The centroid it returns is what the Shape was shifted by, in the Shape's
+// original frame. Recentring moves the geometry in the Body's frame, so to
+// leave it where it was the app places the Body at the old origin plus the
+// centroid. For a Body spawned at origin with an Angle of 0, that is the one
+// line
 //
-//	place := Position{Current: origin.Add(centroid), Previous: origin.Add(centroid)}
+//	Position{Current: origin.Add(centroid), Previous: origin.Add(centroid)}
 //
-// where centroid is the circle's offset, the midpoint of the segment's two
-// endpoints, or CentroidForPoly of the outline the polygon was built from. A
-// Body spawned turned adds centroid.Rotate(m.ForAngle(angle)) instead.
+// and a Body spawned turned by angle adds centroid.Rotate(m.ForAngle(angle))
+// instead.
 //
 // A Shape with no area is refused with ErrNoArea, a density that is not
 // positive and finite with ErrBadDensity, and a mass or a Damping rate
 // NewDynamic refuses with that error. Every refusal returns the zero Dynamic —
-// which moves under nothing — and the Shape and the Polygon exactly as given.
-func NewDynamicForShape(shape Shape, polygon Polygon, density, damping, angularDamping float64) (Dynamic, Shape, Polygon, error) {
+// which moves under nothing — the Shape and the Polygon exactly as given, and
+// the zero centroid.
+func NewDynamicForShape(shape Shape, polygon Polygon, density, damping, angularDamping float64) (Dynamic, Shape, Polygon, m.Vec2d, error) {
 	if !(density > 0) || math.IsInf(density, 1) {
-		return Dynamic{}, shape, polygon, ErrBadDensity{Density: density}
+		return Dynamic{}, shape, polygon, m.Vec2d{}, ErrBadDensity{Density: density}
 	}
 
 	var (
@@ -190,20 +192,20 @@ func NewDynamicForShape(shape Shape, polygon Polygon, density, damping, angularD
 		}
 		var ok bool
 		if centroid, ok = CentroidForPoly(verts); !ok {
-			return Dynamic{}, shape, polygon, ErrNoArea
+			return Dynamic{}, shape, polygon, m.Vec2d{}, ErrNoArea
 		}
 		area = AreaForPoly(verts, shape.Radius)
 		unitMoment = MomentForPoly(1, verts, centroid.Negate(), shape.Radius)
 	}
 	// NaN fails the first test, so a NaN radius is refused here too.
 	if !(area > 0) || math.IsInf(area, 1) {
-		return Dynamic{}, shape, polygon, ErrNoArea
+		return Dynamic{}, shape, polygon, m.Vec2d{}, ErrNoArea
 	}
 
 	mass := density * area
 	body, err := NewDynamic(mass, mass*unitMoment, damping, angularDamping)
 	if err != nil {
-		return Dynamic{}, shape, polygon, err
+		return Dynamic{}, shape, polygon, m.Vec2d{}, err
 	}
 
 	recentred := shape
@@ -223,7 +225,7 @@ func NewDynamicForShape(shape Shape, polygon Polygon, density, damping, angularD
 		for i := range verts {
 			verts[i] = verts[i].Sub(centroid)
 		}
-		return body, recentred, Polygon{Verts: ecs.ListOf(verts)}, nil
+		return body, recentred, Polygon{Verts: ecs.ListOf(verts)}, centroid, nil
 	}
-	return body, recentred, Polygon{}, nil
+	return body, recentred, Polygon{}, centroid, nil
 }
