@@ -486,12 +486,67 @@ takes part in several pair tests a tick, and a wall segment in a crowd in many.
 - **At most two Contact points a pair**, cp's `MAX_CONTACTS_PER_ARBITER`,
   whatever the vertex count.
 
-Ported line for line: `CircleToCircle`, `CircleToSegment`, `ClosestPoints`,
-`GJKRecurse`, `EPARecurse`, `ContactPoints`, `SupportEdgeForPoly`,
-`SupportEdgeForSegment`, and the mass helpers. Changed: the dispatch and support
-layers above; `CircleToPoly`'s sign; the guards; and cp's `log.Println` on high
-EPA iterations, which the port does not do — the **C**'s three GJK warnings
-having been dropped by the Go port already.
+Ported line for line: `CircleToCircle`, `CircleToSegment`, `EPARecurse`,
+`ContactPoints`, `SupportEdgeForPoly`, `SupportEdgeForSegment`, and the mass
+helpers. Changed: the dispatch and support layers above; `CircleToPoly`'s sign;
+the guards; cp's `log.Println` on high EPA iterations, which the port does not do
+— the **C**'s three GJK warnings having been dropped by the Go port already; and
+`ClosestPoints` and `GJKRecurse`, for the three departures below.
+
+**GJK does not report disjoint Shapes on one line as touching.** From
+[ecsphysics2d: GJK reports disjoint Shapes as touching when the origin lands on
+a Minkowski edge's supporting line](https://github.com/dvoyni/cog/issues/439).
+All three are departures for **a defect in cp**, and the **C** has each of them:
+[research: does Chipmunk's C GJK report disjoint Shapes as
+touching?](https://github.com/dvoyni/cog/issues/506) reproduced the first in C
+7.0.2 and `master`, 436 of 3,848 box-disjoint fuzz pairs, the port's count
+exactly, and the other two were traced in both builds for #439. They are reached
+through Detect and not only through the bare `Penetration`: two capsules 1 m
+long, radius 0.25, laid end to end on one line 0.05–0.2 m apart over 3,600
+angles have intersecting boxes at 3,660 placements, and 1,410 of those were
+Contacts, 548 of them deeper than 0.25 m. After the three, none is.
+
+- **GJK's answers take the vertex arm when `t` is clamped or the simplex has
+  collapsed.** cp's `ClosestPoints` takes its overlapping arm on
+  `if(d <= 0.0f || (-1.0f < t && t < 1.0f))` (`cpCollision.c:246`, the same at
+  7.0.2 and `master`), and `d` is the distance to the edge's *supporting line*,
+  not to the edge. With `t` clamped the origin is beyond the edge's end, and on
+  that line `d` is 0 — or at a general angle a rounding below it — so the pair is
+  reported at its summed radii. The test is on the clamp and not on `d == 0`,
+  because the rounded form is the one the engine reaches. A simplex collapsed to
+  one Minkowski point has no edge, a zero normal and a `d` of 0, and takes the
+  same arm. Either way `p` being the zero vector is a vertex contact, which keeps
+  the edge's normal so it still has a direction.
+- **EPA keeps cp's `ClosestPoints`.** There the origin is inside the hull, and a
+  hull edge ending at a point in the middle of a face clamps `t` by a rounding of
+  1e-16 with the origin a real 0.01–0.6 m inside. The guard would read that
+  overlap as a separation of `|p|`, and a stack of boxes falls through itself.
+- **A collapsed simplex searches along −p.** Two Shapes on one line tie every
+  support query along the cold-start axis, which is perpendicular to that line,
+  so both ends of the simplex are one point. `master`'s `ClosestT`, which the port
+  carries, then gives `t = 0`, the search direction is the perpendicular of the
+  zero vector, and GJK stops where it started with no normal. **C 7.0.2**'s
+  `ClosestT` divides zero by zero and its clamp turns the NaN into `t = 1`, so it
+  searches along −p by accident and lands on the clamped edge instead: the
+  research's draw 4094 is two contacts with a zero normal in `master` and a false
+  0.25 m in 7.0.2. The port searches along −p on purpose. **The coincident-centres
+  rule is untouched:** a cold-start axis still zero after the seed is answered by
+  `GJK` itself with cp's `ClosestPoints`, so the pure `Penetration` still reports
+  no direction there.
+- **EPA is entered only if the new support point reached the origin**:
+  `p·n >= 0` is tested before cp's two `cpCheckPointGreater` calls
+  (`cpCollision.c:372`). `p` is the difference's extreme point along `n`, so
+  `p·n < 0` puts the origin outside whatever the orientation tests say, and they
+  say otherwise only by rounding: capsules end to end give a `v0`, `p` and `v1`
+  on one line through the origin, a triangle with no area that C and cp read as
+  holding it, and EPA then reports the summed radii. It needs no tolerance and
+  changes an answer only where the two tests contradict each other.
+
+The zero-depth disagreement between argument orders, where end-cap rejection
+rejects an exactly tangent pair one way round only, is not fixed here: the
+finiteness fuzz logs 1 such pair before the three and 1 after, and still fails on
+any disagreement with a real overlap behind it. `Penetration` needs no box check
+from its caller.
 
 ---
 
