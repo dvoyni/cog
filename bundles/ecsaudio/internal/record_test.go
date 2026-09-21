@@ -132,6 +132,61 @@ func TestAStolenVoiceNeverRestarts(t *testing.T) {
 	h.noErrors()
 }
 
+// An Emitter's Params.Priority is the band sound's stealing ranks on, and it
+// reaches the Voice unchanged - which is the whole of "keep my music playing":
+// music one band up is never stolen by effects at the default 0, however many
+// of them arrive.
+//
+// The cap is two. The music takes one slot; then a crowd of effects fills the
+// other and overflows it, on two ticks, so the effects steal one another and
+// the plays that find only the music left lose outright. Were the binding ever
+// to drop the field or override it, the music would sit in the effects' band as
+// the oldest Voice there, and the second effect of the first crowd would steal
+// it.
+func TestAnEmittersPriorityKeepsItsVoiceFromEffectsABandBelow(t *testing.T) {
+	h := newHarnessCapped(t, 2)
+
+	music := h.emit(sound.ClipWithResource(clip), sound.Params{Loop: m.Some(true), Priority: m.Some(1)})
+	h.tick()
+	voice := h.voiceOf(music)
+	if got, found := h.info(voice); !found {
+		t.Fatal("the music did not start")
+	} else if got.Params.Priority.Or(0) != 1 {
+		t.Fatalf("the music's Voice plays at priority %d, want the Emitter's 1", got.Params.Priority.Or(0))
+	}
+
+	const crowd = 4
+	for wave := range 2 {
+		for range crowd {
+			h.emit(sound.ClipWithResource(clip), sound.Params{})
+		}
+		h.tick()
+		// The first wave finds a free slot and loses the other three plays;
+		// the second steals the one effect holding it and loses the rest.
+		lost := crowd - 1
+		if wave == 1 {
+			lost = crowd
+		}
+		for range lost {
+			if ended := h.waitEnded(); ended.Voice == voice {
+				t.Fatalf("the music ended as %v under effects a band below it", ended.Reason)
+			} else if ended.Reason != sound.ReasonStolen {
+				t.Fatalf("an effect ended as %v, want stolen", ended.Reason)
+			}
+		}
+		h.noEnding()
+	}
+
+	got := h.probe(music)
+	if !got.Found {
+		t.Fatal("the music is not in the live view after the effects overflowed the cap")
+	}
+	if got.Live != 2 {
+		t.Fatalf("%d live Voices, want the cap of two", got.Live)
+	}
+	h.noErrors()
+}
+
 // A changed Clip is a Stop and a fresh Play, because there is no field of Params
 // that says which Clip. It is detected by ClipRef.Equal rather than ==, since a
 // ClipRef may hold a Blob and so is not comparable.

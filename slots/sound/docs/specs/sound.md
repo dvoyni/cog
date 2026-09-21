@@ -435,6 +435,13 @@ rank without a special rule.
 higher-priority one whatever the gains say. Music at priority 1 is not stolen by
 a crowd of footsteps at 0, however loud the crowd.
 
+**That is the recipe, and a game can rely on it: a Voice one band up is never
+stolen by any number of plays below it.** *Keep my music playing* is answered by
+putting the music at priority 1, and *the gun I just fired must be heard* by
+putting the player's own weapon there too. A sound that matters is protected by
+saying so up front, never by anything `sound` infers
+([Priority on emitters](https://github.com/dvoyni/cog/issues/502) §1–2).
+
 **The tie-break is not an implementation detail.** Two Voices tie on *both*
 terms exactly whenever the same Clip is played twice at the same position in one
 tick — a double footstep, two shell casings, a burst weapon. Left unstated, the
@@ -442,6 +449,11 @@ tie would fall to whatever order the table happened to iterate in, which makes
 every stealing test flaky on a schedule nobody controls, rarely enough to be
 blamed on something else for a long time
 ([#467](https://github.com/dvoyni/cog/issues/467) §6).
+
+**An incoming play ranks as the newest, so within a band a strictly quieter play
+loses and one that ties exactly steals the oldest.** It is younger than anything
+on the table, so *oldest first* never picks it on a tie
+([#502](https://github.com/dvoyni/cog/issues/502) §3).
 
 Two consequences stated rather than left implied:
 
@@ -460,6 +472,32 @@ alternative — a play always steals something — means the hundredth footstep 
 bug silences the music, which is the failure the cap exists to prevent. The
 game's code path is identical either way, because there is nowhere to put a
 *your play was refused* case.
+
+**A steal is final: nothing resumes a stolen Voice**
+([Should a stolen Voice resume when a slot frees?](https://github.com/dvoyni/cog/issues/503)).
+A sound that matters is kept by putting it a band up beforehand. A sound that
+must come back in step is the game's call, and the game already holds
+everything it needs:
+
+> **The retry recipe.** Keep a per-tick copy of each Voice from the live view —
+> its Clip, playhead and `Params`. On `ReasonStolen`, for the sounds the game
+> wants back, call `Play(clip, playhead + elapsed, params)`, where *elapsed* is
+> the time since the copy was taken.
+
+The copy has to be the game's, because `VoiceEndedEvent` carries only
+`{Voice, Reason}` and an ended handle addresses nothing. It is taken before the
+flush that steals the Voice, which is the last moment the Voice is in the view,
+so a retry recorded on the tick the ending arrives has *elapsed* of one tick and
+lands exactly where the stolen Voice would have been. `Play` already takes an
+offset, so no verb is added; and the game decides which sounds deserve it,
+because only the game knows. `Example_playAStolenVoiceAgain`, in `sound`'s
+`internal/` tests, runs the recipe against a composed engine and checks that the
+new Voice lands in step, so the recipe cannot quietly stop compiling.
+
+The retry is an ordinary play and ranks like one. One that ranks below
+everything live loses and ends as `ReasonStolen` in the same flush, never having
+reached the view. Whether to try once more on a later tick is again the game's
+call, and it keeps its copy of the sound to make it.
 
 **Settled here:** three things this spec asserts cannot all hold at a full
 table — the handle is minted when the play is **recorded**, the handle **is the
@@ -1743,6 +1781,18 @@ that needs one today hand-writes a fixture.
 - **Oldest-first stealing on its own**, which steals the music for a footstep;
   and **priority as the only key**, which makes a game enumerate every sound it
   owns before it can play two.
+- **Newest always wins** within a band. A crowd of distant sounds would cut off
+  the loud one next to you, and *quietest* and *furthest away* would stop being
+  one policy; the sound that must be heard goes a band up
+  ([#502](https://github.com/dvoyni/cog/issues/502) §2).
+- **Resuming a stolen Voice when a slot frees**, either shape
+  ([#503](https://github.com/dvoyni/cog/issues/503) §3). Anything short is over
+  before a slot frees, so it does nothing for the sounds stolen most.
+  **Suspending the Voice** keeps its table entry alive, breaks the closure
+  property, and holds the space the cap exists to reclaim. **Replaying it as a
+  new Voice** needs a new *a slot freed* moment in compute and a per-Voice flag
+  saying the sound may come back — which is the game's retry moved into the
+  engine as a heuristic.
 - **A `sound`-level `ErrBackendNotReady`.** On web, not-ready is normal.
 - **Failing the composition when no Device opens.** Audio is the one subsystem
   whose total absence costs a game nothing.

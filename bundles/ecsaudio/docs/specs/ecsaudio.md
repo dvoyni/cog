@@ -127,6 +127,28 @@ neither is guessable:
 - **Removing a `Transform` does not make a positional Voice non-positional
   either.** It simply stops moving.
 
+### An Emitter's `Priority`
+
+`Emitter.Params` is `sound.Params` whole, so an Emitter already carries
+**`Priority`: the band [sound.md §Stealing](../../../../slots/sound/docs/specs/sound.md#stealing)
+defines, and it reaches the Voice unchanged.** The binding neither drops it nor
+supplies one of its own; an absent `Priority` is the default 0, exactly as it is
+to a `Play` on the queue.
+
+It is how an Entity's sound is kept playing under the cap. **Music one band up
+is never stolen by effects at the default 0**, however many of them arrive:
+
+```go
+world.Spawn(ecsaudio.Emitter{
+	Clip:   sound.ClipWithResource("music/level1.ogg"),
+	Params: sound.Params{Loop: m.Some(true), Priority: m.Some(1)},
+})
+```
+
+Nothing is added here to say it — no field, no flag — and a binding test holds
+it ([Priority on emitters](https://github.com/dvoyni/cog/issues/502),
+[#504](https://github.com/dvoyni/cog/issues/504)).
+
 ---
 
 ## The Listener
@@ -190,7 +212,12 @@ naming a tagged Ogg loops the way that file says to with nothing added here.
 `sound` can end a Voice under the cap with nothing having despawned, so a table
 entry's handle can go stale on its own. The binding treats that **exactly as it
 treats a finished one-shot**: the entry stays, the handle is dead, nothing
-restarts. A game that wanted a stolen ambience back re-adds the Component.
+restarts. A game that wanted a stolen ambience back re-adds the Component, which
+restarts it from the head; one that wants it back in step records a `Play` on
+the queue by the retry recipe in
+[sound.md §Stealing](../../../../slots/sound/docs/specs/sound.md#stealing). A
+steal is final, and an `Emitter` gains no start offset for it
+([#503](https://github.com/dvoyni/cog/issues/503) §4).
 
 This is why the binding cannot assume its handle is live, and why a stale handle
 addressing nothing is load-bearing rather than merely tidy: every operation on
@@ -304,6 +331,10 @@ correspondence, which is this package's whole job:
 - a despawn ends the Voice with `ReasonStopped`;
 - a **stolen** Voice does not restart, which is the same rule reached by a
   different route;
+- an `Emitter` one `Priority` band up keeps its Voice while effects a band
+  below fill and overflow the cap — it stays in the live view and no
+  `VoiceEndedEvent` names it, so a binding that dropped or overrode the field
+  fails;
 - two `Listener` Tags report once and take the lowest Entity, on every tick and
   not just the first;
 - no `Listener` leaves the Listener where it was.
