@@ -281,6 +281,41 @@ Ported here as free functions: `MomentForCircle`, `MomentForSegment`,
 `MomentForBox`, `MomentForPoly`, `AreaForCircle`, `AreaForSegment`,
 `AreaForPoly`, `CentroidForPoly`.
 
+#### Mass from shape and density
+
+**`NewDynamicForShape(shape, polygon, density, damping, angularDamping)
+(Dynamic, Shape, Polygon, error)`** is how a new Dynamic body gets its mass and
+moment, and `NewDynamic` is for the Body whose numbers the app already has. It
+is cp's `AccumulateMassFromShapes` in its one-shape case, one Shape per Body
+being the rule:
+
+- **Mass is `density · area`** and the moment is about the centroid, from the
+  helpers cp's own shapes use — `AreaForCircle` and `MomentForCircle`;
+  `AreaForSegment` and `MomentForBox` over the capsule's length and width, which
+  is cp's `NewSegmentMassInfo` and `MomentForSegment`'s formula; `AreaForPoly`,
+  `MomentForPoly` and `CentroidForPoly` for the three polygon kinds. Every
+  area takes the Shape's radius; `MomentForPoly` does not, in cp or in C. The
+  Body is built through `NewDynamic`, so its checks apply.
+- **It recentres.** `Position` is the centre of gravity, so where cp stores a
+  `cog` offset the constructor moves the Shape instead: a circle's offset
+  becomes zero, a segment's endpoints and a polygon's vertices are shifted by
+  the centroid, and a segment's neighbour tangents, being relative, stay. The
+  material, the collision fields and `Sensor` are carried over. The app places
+  the Body at the old origin plus the centroid to leave the geometry where it
+  was. Recentring is the part an app gets wrong, and gets wrong silently — an
+  off-centre polygon spins about the wrong point and nothing fails — which is
+  why a bare `MassForShape` returning numbers was not taken.
+- **The pair goes in and comes back as `NewPolygonShape` returns it.** An
+  inline kind returns the zero Polygon. **The caller's Polygon is never
+  written**: a Poly gets a new vertex List, an allocation the constructor
+  documents, being off the hot path. The inline kinds allocate nothing.
+- **A Shape with no area** — a circle or a segment of radius 0 — is refused with
+  `ErrNoArea`, and a density that is not positive and finite with
+  `ErrBadDensity`. Like `NewDynamic`'s refusals, each returns the zero `Dynamic`,
+  with the Shape and Polygon as given.
+- It adds **no bytes to `Shape`**. Its answers agree with cp's at 1e-9 on every
+  kind, frozen in `cpmasscases_test.go`.
+
 ### Position is the centre of gravity
 
 **The Body has no separate origin and no `cog` field.** Shape geometry is local
@@ -292,7 +327,7 @@ all relative to `Position`.
 
 A Polygon whose vertices are not centred is legal and turns about `Position` —
 correct physics for mass concentrated there, such as a hammer written that way on
-purpose. A door drawn around its hinge is recentred with `CentroidForPoly` at
+purpose. A door drawn around its hinge is recentred by `NewDynamicForShape` at
 spawn; if the art's pivot is not the centre of gravity, the app's render copy
 adds a constant offset.
 
@@ -1825,7 +1860,7 @@ shrink.
 - **Contacts as Entities**, once structural change can be deferred.
 - **Sub-steps within a tick.** The nested sub-step event was **verified working** by
   a throwaway test at about 52 µs a tick, and parked with its three rules.
-- **Mass and inertia from density** (addition 3), **gravity** (addition 4),
+- **Gravity** (addition 4),
   **post-step callbacks** (addition 8), **debug drawing** (addition 9),
   **geometry from images** (addition 10).
 
@@ -1884,7 +1919,12 @@ the arbiter append :454, guarded by :444-453 (Sensor at :450, both-infinite-mass
 (defect 5)** :1036-1037 and :1045-1046 · PostSolve's `UserData` argument :767.
 
 **body.go** — `BodyUpdateVelocity` :608 · `BodyUpdatePosition` :621 · defaults
-wired :85-86 · `SetTransform` :359, with `p − R·cog` at :363-366.
+wired :85-86 · `SetTransform` :359, with `p − R·cog` at :363-366 ·
+`AccumulateMassFromShapes` :232-260, ported in its one-shape case as
+`NewDynamicForShape`, which cp's `Shape.SetDensity` (`shape.go` :97) drives. Its
+three per-kind mass infos are `CircleShapeMassInfo` (`circle.go` :20),
+`NewSegmentMassInfo` (`segment.go` :174) and `PolyShapeMassInfo` (`poly.go`
+:238).
 
 **arbiter.go** — `PreStep` :168, its `dist` :182 · `ApplyCachedImpulse` :113 ·
 `ApplyImpulse` :125 · `Update` :191 · `TotalImpulse` :409 · `e = ea·eb` :230 ·
@@ -1973,7 +2013,7 @@ within a group; groups after the first assume the value types exist.
       `ReversePerp`, `Project`, `Unrotate`, `ForAngle`, and `Vec2d.Vec2()` /
       `Vec2.Vec2d()`.
 - [ ] `Transform` and `BB` in `ecsphysics2d`, ported.
-- [ ] The mass helpers as free functions.
+- [ ] The mass helpers as free functions, and `NewDynamicForShape` over them.
 
 **Shapes and geometry**
 

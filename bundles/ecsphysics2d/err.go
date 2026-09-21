@@ -22,6 +22,16 @@ type ErrBadMoment = types.ErrBadMoment
 // negative one would amplify velocity every tick until it was an infinity.
 type ErrBadDamping = types.ErrBadDamping
 
+// ErrBadDensity reports a density, in kg/m², that is zero, negative, NaN or
+// infinite, which NewDynamicForShape refuses before it computes a mass.
+type ErrBadDensity = types.ErrBadDensity
+
+// ErrNoArea reports a Shape NewDynamicForShape cannot give a mass because it
+// encloses nothing: a circle or a segment of radius 0, a Poly whose Polygon is
+// empty, or a Polygon written by hand that is degenerate or wound the wrong
+// way. It is a sentinel a caller compares with errors.Is.
+var ErrNoArea = types.ErrNoArea
+
 // The three ways NewPolygonShape refuses an outline, each a sentinel a caller
 // compares with errors.Is so that the failure path allocates nothing. A refused
 // outline comes back as a point, which collides with almost nothing and cannot

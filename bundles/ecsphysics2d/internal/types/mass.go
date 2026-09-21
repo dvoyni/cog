@@ -1,8 +1,10 @@
 package types
 
 import (
+	"errors"
 	"math"
 
+	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -112,4 +114,116 @@ func CentroidForPoly(verts []m.Vec2d) (m.Vec2d, bool) {
 		return m.Vec2d{}, false
 	}
 	return vsum.MulS(1.0 / (3.0 * sum)), true
+}
+
+// ErrNoArea reports a Shape that encloses nothing, so that no density gives it
+// a mass: a circle or a segment of radius 0, a Poly whose Polygon is empty, or
+// a Polygon written by hand that is degenerate or wound against Chipmunk's
+// winding. It is a sentinel a caller compares with errors.Is.
+var ErrNoArea = errors.New("ecsphysics2d: the Shape has no area, so no density gives it a mass")
+
+// NewDynamicForShape is the Dynamic body a Shape of that density makes, in
+// kg/m², with the two Damping rates in 1/s, and the Shape moved so that its
+// centre of gravity is its local origin — which is what Position is.
+//
+// It is cp's AccumulateMassFromShapes in its one-shape case, one Shape per Body
+// being the port's rule. The mass is density times the area, and the Moment of
+// inertia is about the centroid, from the same helpers cp's shapes use:
+// AreaForCircle and MomentForCircle; AreaForSegment and MomentForBox over the
+// capsule's length and width, which is cp's segment and is MomentForSegment's
+// formula; AreaForPoly, MomentForPoly and CentroidForPoly for the three polygon
+// kinds. Every kind's area takes its radius. MomentForPoly does not, in cp or
+// in C, so a rounded polygon's Moment is its sharp outline's scaled up to the
+// rounded mass. The Body is built through NewDynamic and its checks apply.
+//
+// The Shape and the Polygon go in and come back as NewPolygonShape returns them
+// and PolygonVerts takes them. What comes back is recentred: a circle's offset
+// becomes zero, and a segment's endpoints and a polygon's vertices are shifted
+// by the centroid. A segment's neighbour tangents are relative to its endpoints
+// and stay as they are, and the material, the two collision fields and Sensor
+// are carried over. An inline kind ignores the Polygon and returns the zero
+// Polygon.
+//
+// The caller's Polygon is never written. A Poly comes back with a new vertex
+// List, which allocates; this is a constructor, called at spawn and never on
+// the hot path. The inline kinds allocate nothing.
+//
+// Recentring moves the geometry in the Body's frame, so to leave it where it
+// was the app places the Body at the old origin plus the centroid. For a Body
+// spawned at origin with an Angle of 0, that is the one line
+//
+//	place := Position{Current: origin.Add(centroid), Previous: origin.Add(centroid)}
+//
+// where centroid is the circle's offset, the midpoint of the segment's two
+// endpoints, or CentroidForPoly of the outline the polygon was built from. A
+// Body spawned turned adds centroid.Rotate(m.ForAngle(angle)) instead.
+//
+// A Shape with no area is refused with ErrNoArea, a density that is not
+// positive and finite with ErrBadDensity, and a mass or a Damping rate
+// NewDynamic refuses with that error. Every refusal returns the zero Dynamic —
+// which moves under nothing — and the Shape and the Polygon exactly as given.
+func NewDynamicForShape(shape Shape, polygon Polygon, density, damping, angularDamping float64) (Dynamic, Shape, Polygon, error) {
+	if !(density > 0) || math.IsInf(density, 1) {
+		return Dynamic{}, shape, polygon, ErrBadDensity{Density: density}
+	}
+
+	var (
+		area, unitMoment float64
+		centroid         m.Vec2d
+		verts            []m.Vec2d
+	)
+	switch shape.Kind {
+	case ShapeCircle:
+		centroid = shape.verts[0]
+		area = AreaForCircle(0, shape.Radius)
+		unitMoment = MomentForCircle(1, 0, shape.Radius, m.Vec2d{})
+	case ShapeSegment:
+		a, b := shape.verts[0], shape.verts[1]
+		centroid = a.Lerp(b, 0.5)
+		area = AreaForSegment(a, b, shape.Radius)
+		unitMoment = MomentForBox(1, a.Distance(b)+2*shape.Radius, 2*shape.Radius)
+	case ShapeTri, ShapeQuad, ShapePoly:
+		if shape.Kind == ShapePoly {
+			verts = PolygonVerts(make([]m.Vec2d, 0, polygon.Verts.Len()), shape, polygon)
+		} else {
+			verts = shape.verts[:polyCount(shape, nil)]
+		}
+		var ok bool
+		if centroid, ok = CentroidForPoly(verts); !ok {
+			return Dynamic{}, shape, polygon, ErrNoArea
+		}
+		area = AreaForPoly(verts, shape.Radius)
+		unitMoment = MomentForPoly(1, verts, centroid.Negate(), shape.Radius)
+	}
+	// NaN fails the first test, so a NaN radius is refused here too.
+	if !(area > 0) || math.IsInf(area, 1) {
+		return Dynamic{}, shape, polygon, ErrNoArea
+	}
+
+	mass := density * area
+	body, err := NewDynamic(mass, mass*unitMoment, damping, angularDamping)
+	if err != nil {
+		return Dynamic{}, shape, polygon, err
+	}
+
+	recentred := shape
+	switch shape.Kind {
+	case ShapeCircle:
+		recentred.verts[0] = m.Vec2d{}
+	case ShapeSegment:
+		recentred.verts[0] = shape.verts[0].Sub(centroid)
+		recentred.verts[1] = shape.verts[1].Sub(centroid)
+	case ShapeTri, ShapeQuad:
+		for i := range polyCount(shape, nil) {
+			recentred.verts[i] = shape.verts[i].Sub(centroid)
+		}
+	case ShapePoly:
+		// verts is this call's own copy, so shifting it writes nothing the
+		// caller holds, and ListOf copies it once more into the new List.
+		for i := range verts {
+			verts[i] = verts[i].Sub(centroid)
+		}
+		return body, recentred, Polygon{Verts: ecs.ListOf(verts)}, nil
+	}
+	return body, recentred, Polygon{}, nil
 }

@@ -305,3 +305,38 @@ func CentroidForPoly(verts []m.Vec2d) (m.Vec2d, bool) { return types.CentroidFor
 func NewDynamic(mass, moment, damping, angularDamping float64) (Dynamic, error) {
 	return types.NewDynamic(mass, moment, damping, angularDamping)
 }
+
+// NewDynamicForShape is the Dynamic body a Shape of that density makes, in
+// kg/m², with the two Damping rates in 1/s — and the Shape moved so that its
+// centroid is its local origin, which is what Position is. It is how a new
+// Dynamic body gets its mass and Moment of inertia; NewDynamic is for the Body
+// whose numbers the app already has.
+//
+// The mass is density times the area, radius included, and the Moment is about
+// the centroid, as Chipmunk's AccumulateMassFromShapes computes them for one
+// Shape. The Shape and the Polygon go in and come back as NewPolygonShape
+// returns them: a circle's offset becomes zero, a segment's endpoints and a
+// polygon's vertices are shifted by the centroid, a segment's neighbour
+// tangents stay as they are, and the material, the collision fields and Sensor
+// are carried over. An inline kind returns the zero Polygon. The caller's
+// Polygon is never written: a Poly comes back with a new vertex List, which
+// allocates, this being a constructor and not the hot path.
+//
+// Recentring moves the geometry in the Body's frame, so to leave it where it
+// was the app places the Body at the old origin plus the centroid. For a Body
+// spawned at origin with an Angle of 0, that is the one line
+//
+//	place := Position{Current: origin.Add(centroid), Previous: origin.Add(centroid)}
+//
+// where centroid is the circle's offset, the midpoint of the segment's two
+// endpoints, or CentroidForPoly of the outline the polygon was built from. A
+// Body spawned turned adds centroid.Rotate(m.ForAngle(angle)) instead. A Body
+// left at the old origin turns about it, and nothing reports that.
+//
+// A Shape with no area — a circle or a segment of radius 0 — is refused with
+// ErrNoArea, a density that is not positive and finite with ErrBadDensity, and
+// a mass or a Damping rate NewDynamic refuses with its own error. Every refusal
+// returns the zero Dynamic and the Shape and the Polygon exactly as given.
+func NewDynamicForShape(shape Shape, polygon Polygon, density, damping, angularDamping float64) (Dynamic, Shape, Polygon, error) {
+	return types.NewDynamicForShape(shape, polygon, density, damping, angularDamping)
+}
