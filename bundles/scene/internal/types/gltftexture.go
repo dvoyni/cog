@@ -171,8 +171,14 @@ func readBufferViewBytes(doc *gltf.Document, view *gltf.BufferView) ([]byte, err
 	return data[view.ByteOffset : view.ByteOffset+view.ByteLength], nil
 }
 
-// defaultModelSampler is glTF's own default for a texture that names no
-// sampler: repeat on both axes, filtered linearly at every step.
+// defaultModelSampler is what a texture that names no sampler reads with:
+// repeat on both axes, which glTF specifies, and linear filtering at every
+// step, which it does not. glTF asks for "auto filtering" there and leaves the
+// choice to the runtime; linear is cog's. The same choice fills any filter a
+// declared sampler omits, since FilterLinear is the zero value.
+//
+// It is deliberately not a report: the file is valid glTF, and whether linear
+// is wrong for it - a pixel-art atlas - is the consumer's judgement, not scene's.
 var defaultModelSampler = gfx.SamplerDesc{AddressU: gfx.AddressRepeat, AddressV: gfx.AddressRepeat}
 
 // modelSampler maps one glTF sampler onto gfx's. glTF specifies magnification,
