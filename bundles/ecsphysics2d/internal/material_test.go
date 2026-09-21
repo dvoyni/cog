@@ -310,23 +310,28 @@ func TestAFilterWritesTheMaterialForExactlyOneTick(t *testing.T) {
 }
 
 func TestAFilterWritesASurfaceVelocityAndTheContactCarriesTheBodyAlongIt(t *testing.T) {
-	// SurfaceVelocity stays zero out of the box — the Shape field that would feed
-	// it is addition 2 and is not built — but the entry field is laid out and the
-	// solver line is written identically whether the value is live or always
-	// zero. A filter reaching the field is what shows that, and it is what a
-	// conveyor is when addition 2 is taken: one Shape field and two lines in
-	// Detect away.
+	// The package's Conveyors recipe, and its proof. Surface velocity is not a
+	// Shape field: a belt is a Component of the app's own on the belt's Entity,
+	// and a filter between Detect and Solve writes each touching entry's
+	// SurfaceVelocity from it. The filter below is that recipe, for a belt that
+	// is the wall.
 	//
-	// The sign is cp's, not the specification's prose. cp's Update computes
-	// b.surfaceV − a.surfaceV, and this port's A plays the part cp's b plays —
-	// the Normal is B's surface facing A — so the entry's value is A's less B's,
-	// which is the note already on the field. The observable consequence is here:
-	// the solver drives the relative tangential velocity to zero, so a Body on a
-	// still wall ends up moving at minus what the entry carries.
-	const mass, radius, belt = 2, 0.5, 1.0
+	// The sign is cp's surface_vr in the port's A/B convention. cp's Update
+	// computes b.surfaceV − a.surfaceV, and this port's A plays the part cp's b
+	// plays — the Normal is B's surface facing A — so the entry's value is A's
+	// surface velocity less B's. The observable consequence is here: the solver
+	// drives the relative tangential velocity plus the entry to zero, so a Body
+	// resting on a belt ends up moving with the belt.
+	//
+	// The belt also runs a little into the wall, which the recipe removes along
+	// with the rest of the normal component: Solve adds the entry to the
+	// relative velocity before splitting it, so a normal component left in
+	// would drive the pair apart or together instead of carrying anything.
+	const mass, radius = 2, 0.5
+	beltVelocity := m.Vec2d{X: 1, Y: -0.5}
 
 	h := newHarnessWith(t, nil, 64)
-	h.spawn(t, spawnRequest{
+	belt := h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
 		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
 		Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{X: -50}, m.Vec2d{X: 50}, 0),
@@ -339,25 +344,36 @@ func TestAFilterWritesASurfaceVelocityAndTheContactCarriesTheBodyAlongIt(t *test
 	})
 	h.game.push = m.Vec2d{Y: -gravity * mass}
 
-	// The belt runs one way and the Body it carries goes the other, which is the
-	// whole of the sign. The Friction has to come from the filter too, because
-	// the drag stays bounded by the Coulomb clamp and a belt with no Friction
-	// carries nothing.
+	// surfaceOf is the app's belt Component, looked up per party.
+	surfaceOf := func(e ecs.Entity) m.Vec2d {
+		if e == belt {
+			return beltVelocity
+		}
+		return m.Vec2d{}
+	}
+	conveyor := func(entry *ecsphysics2d.Contact) {
+		if entry.A != belt && entry.B != belt {
+			return
+		}
+		surface := surfaceOf(entry.A).Sub(surfaceOf(entry.B))
+		entry.SurfaceVelocity = surface.Sub(entry.Normal.MulS(surface.Dot(entry.Normal)))
+	}
+
+	// Both Shapes ship at Friction 0, so the entry's product is 0 and the filter
+	// has to write one: the drag stays bounded by the Coulomb clamp.
 	h.game.filter = func(entry *ecsphysics2d.Contact) {
+		conveyor(entry)
 		entry.Friction = 1
-		entry.SurfaceVelocity = m.Vec2d{X: -belt}
 	}
 	h.frames(t, 180)
 
-	if got := h.read(t, placed).Velocity.Linear; math.Abs(got.X-belt) > 1e-12 || math.Abs(got.Y) > 1e-12 {
-		t.Errorf("a belt at %v carried the Body to %v, want (%v, 0)", -belt, got, belt)
+	if got := h.read(t, placed).Velocity.Linear; math.Abs(got.X-beltVelocity.X) > 1e-12 || math.Abs(got.Y) > 1e-12 {
+		t.Errorf("a belt at %v carried the Body to %v, want (%v, 0)", beltVelocity, got, beltVelocity.X)
 	}
 
 	// A belt with no Friction carries nothing: the drag is the same Coulomb
 	// clamp, and at u = 0 the clamp is ±0.
-	h.game.filter = func(entry *ecsphysics2d.Contact) {
-		entry.SurfaceVelocity = m.Vec2d{X: -belt}
-	}
+	h.game.filter = conveyor
 	before := h.read(t, placed).Velocity.Linear.X
 	h.frames(t, 60)
 	if got := h.read(t, placed).Velocity.Linear.X; math.Abs(got-before) > 1e-12 {

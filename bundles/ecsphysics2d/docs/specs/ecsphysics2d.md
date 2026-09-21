@@ -894,8 +894,12 @@ edits land: a filter can make one pair slippery for one tick without writing a
 `Shape`, which is permanent and shared.
 
 cp's combination rules port as written — `e = ea·eb`, `u = ua·ub`, both plain
-products, and `surface_vr = (B.surfaceV − A.surfaceV)` with its normal component
-removed. **Friction and Restitution ship on `Shape`**, defaults 0 and 0 matching
+products, and `surface_vr` is **A's surface velocity less B's** with its normal
+component removed. cp writes it `b.surfaceV − a.surfaceV`, which is the same thing:
+cp's normal points from its first Body to its second and this port's faces A, so
+the port's A plays cp's b. `TestAFilterWritesASurfaceVelocityAndTheContactCarriesTheBodyAlongIt`
+pins it that way round: a belt moving one way carries what rests on it the same
+way. **Friction and Restitution ship on `Shape`**, defaults 0 and 0 matching
 cp, as plain fields with documented ranges rather than constructors — the range is
 cp's and cp does not validate either.
 
@@ -904,17 +908,40 @@ forever, which is not *"cp's feature set, out of the box"*, and cp's own
 `jtMax := friction * con.jnAcc` is dead code at 0 — the solver cannot be tested
 without it.
 
-**Surface velocity stays zero, and addition 2 stays open.** Only the tangential
-relative velocity sees it, so it changes exactly one thing: the friction solver
-drives the relative tangential velocity to `−surface_vr` instead of to zero, and
-the Contact behaves as though the surface were sliding under whatever rests on it
-— a conveyor, a travelator, a wheel modelled as a circle that grips without
-spinning. It is properly physical: the drag stays bounded by the Coulomb clamp, so
-a belt with no Friction carries nothing. It waits because it does nothing without
-Friction, the entry field is already locked so the solver line is written
-identically either way, and taking it now costs one `m.Vec2d` on every wall
-segment in the world. **Taking it later is one `Shape` field, two lines in Detect,
-and nothing else.**
+**Addition 2 closes as a filter recipe, with no `Shape` field.** Surface velocity
+changes exactly one thing: the friction solver drives the relative tangential
+velocity to `−surface_vr` instead of to zero, and the Contact behaves as though
+the surface were sliding under whatever rests on it — a conveyor, a travelator, a
+wheel modelled as a circle that grips without spinning. It is properly physical:
+the drag stays bounded by the Coulomb clamp, so a belt with no Friction carries
+nothing.
+
+Detect fills the entry's `SurfaceVelocity` with zero, and the package doc's
+*Conveyors* passage is the recipe. The app puts a Component of its own on the
+belt's Entity holding the belt's surface velocity, and a filter System ordered
+`After[DetectOnUpdate]().Before[SolveOnUpdate]()` walks `Contacts` and, for each
+Contact with a belt on either side, writes `SurfaceVelocity`: A's surface velocity
+less B's, a party with no belt counting as zero, with its normal component
+removed. The normal component must go because Solve adds the entry to the pair's
+relative velocity *before* splitting it into normal and tangent, so what is left
+along the Normal would push the pair apart or pull it together. The entry's
+Friction is the product of the two Shapes', so the belt's Shape needs a Friction,
+and so does whatever rides on it, or the filter writes the entry's Friction itself.
+The filter's locks are the `*ecs.Write[*Contacts]` every filter takes and a read
+of the app's own Component, so no physics System's lock set changes.
+`TestAFilterWritesASurfaceVelocityAndTheContactCarriesTheBodyAlongIt` is the
+recipe's proof: its filter is the recipe, over a belt that also runs into the
+wall, and the Body leaves at the belt's tangential speed and no normal speed.
+
+Why not the field. cp keeps a `surfaceV` on every Shape and combines it per pair
+in `Arbiter.Update`; the port would pay **16 bytes on every `Shape` and on every
+index entry's copy of it** — about 2 µs on the Index walk and 2.7 µs on a resting
+step per 5,248 Shapes, scaled from
+[#409](https://github.com/dvoyni/cog/issues/409) — and every circle and wall would
+pay it for a conveyor that is rare. As a recipe, a scene with belts pays for them
+in its own System and a scene without pays nothing. `Shape` stays at 104 bytes.
+Decided by [#507](https://github.com/dvoyni/cog/issues/507), built by
+[#326](https://github.com/dvoyni/cog/issues/326).
 
 ### What a reacting System reads
 
@@ -1812,7 +1839,11 @@ shrink.
   edits land. Rubber-on-ice for one pair is an entry write.
 - **A parallel solver.** The dense gather arrays are what one would partition.
 - **A BVH**, or any other index structure: it is internal and no signature changes.
-- **Surface velocity** (addition 2): one `Shape` field and two lines in Detect.
+- **A per-`Shape` surface velocity**, over the filter recipe that closes addition
+  2: one `Shape` field and two lines in Detect, at 16 bytes on every `Shape` and
+  every index entry — about 2 µs on the Index walk and 2.7 µs on a resting step
+  per 5,248 Shapes, scaled from [#409](https://github.com/dvoyni/cog/issues/409).
+  It stays possible later.
 - **Raising the inline vertex cap**: a constant, with
   [#409](https://github.com/dvoyni/cog/issues/409) holding the measurement.
 - **A per-Entity Contact index** (`Of(e)`): purely additive.
