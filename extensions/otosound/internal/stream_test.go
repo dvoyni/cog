@@ -14,6 +14,7 @@ import (
 	"github.com/dvoyni/cog/extensions/otosound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/slots/sound"
+	"github.com/jfreymuth/vorbis"
 )
 
 // The streamed tier's tests, like every other test in this package, render to a
@@ -111,7 +112,7 @@ type generator struct {
 	opened   []*generatedSource
 }
 
-func (g *generator) open(assets.Blob) (source, error) {
+func (g *generator) open(assets.Blob, *vorbis.Setup) (source, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	opened := &generatedSource{frames: g.frames, channels: g.channels, guard: g.guard}

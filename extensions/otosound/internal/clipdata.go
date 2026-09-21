@@ -16,6 +16,7 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/sound"
 	"github.com/jfreymuth/oggvorbis"
+	"github.com/jfreymuth/vorbis"
 )
 
 const (
@@ -108,6 +109,13 @@ type clipData struct {
 	// Blob is a pointer and a length, so it references the same run the asset
 	// cache holds rather than copying it.
 	encoded assets.Blob
+	// setup is what the Clip's three headers say, parsed once in Prepare and
+	// shared by every decoder a Voice on this Clip opens. It is immutable, so
+	// sixty-four read-aheads decoding at once read it without a lock, and it is
+	// the bulk of what a decoder used to cost to open: the codebooks, the
+	// floors and the residues, which are the same for every Voice on the Clip.
+	// A resident Clip has none, for the same reason it has no encoded bytes.
+	setup *vorbis.Setup
 	// filter is the resampler this Clip's frames are converted with, shared by
 	// every read-ahead on it and nil when the file is already at the device's
 	// rate. A resident Clip does not keep one: it was converted once, in
@@ -398,6 +406,14 @@ func retain(encoded assets.Blob, deviceRate, sourceRate, channels int, length in
 	}
 	length, region, ignored := clipBounds(encoded, sourceRate, length, length)
 
+	// The setup header is parsed here, once per Clip, and never again: every
+	// Voice's decoder is built from this Setup. It runs on Prepare's goroutine,
+	// like everything else in this function.
+	setup, err := oggvorbis.ReadSetup(bytes.NewReader(encoded.Data()))
+	if err != nil {
+		return nil, otosound.ErrNotOggVorbis{Err: err}
+	}
+
 	clip := &clipData{
 		channels:     channels,
 		frames:       int(length),
@@ -408,6 +424,7 @@ func retain(encoded assets.Blob, deviceRate, sourceRate, channels int, length in
 		region:       region,
 		ignored:      ignored,
 		encoded:      encoded,
+		setup:        setup,
 		open:         openOgg,
 	}
 	if sourceRate != deviceRate {

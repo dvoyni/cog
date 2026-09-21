@@ -10,6 +10,7 @@ import (
 
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/jfreymuth/oggvorbis"
+	"github.com/jfreymuth/vorbis"
 )
 
 // This is the streamed tier: a decoder and a goroutine per Voice, filling a
@@ -58,18 +59,25 @@ type source interface {
 	seek(frame int64) error
 }
 
-// opener opens a decoder over a Clip's retained bytes. A Clip holds its own,
-// which is what lets a test build a streamed Clip over samples it generated
-// with no Ogg anywhere in it.
-type opener func(encoded assets.Blob) (source, error)
+// opener opens a decoder over a Clip's retained bytes and the Setup Prepare
+// read from them. A Clip holds its own, which is what lets a test build a
+// streamed Clip over samples it generated with no Ogg anywhere in it; such a
+// test's opener ignores the Setup, which is nil.
+type opener func(encoded assets.Blob, setup *vorbis.Setup) (source, error)
 
 // oggSource is the real decoder: jfreymuth/oggvorbis over a bytes.Reader on the
 // bytes the Clip retained. The Blob is a pointer and a length, so the decoder
 // reads the same run the asset cache already holds and nothing is copied.
 type oggSource struct{ reader *oggvorbis.Reader }
 
-func openOgg(encoded assets.Blob) (source, error) {
-	reader, err := oggvorbis.NewReader(bytes.NewReader(encoded.Data()))
+// openOgg opens a Voice's decoder from the Clip's Setup rather than from its
+// headers, so what a Voice pays is the decoder's own buffers and the scan for
+// the stream's length; the setup header was parsed once, in Prepare, for the
+// Clip. The stream's headers are still checked against the Setup, which is
+// how a Clip whose bytes and Setup disagree is a refused open rather than
+// garbage.
+func openOgg(encoded assets.Blob, setup *vorbis.Setup) (source, error) {
+	reader, err := oggvorbis.NewReaderWithSetup(bytes.NewReader(encoded.Data()), setup)
 	if err != nil {
 		return nil, err
 	}
@@ -105,11 +113,10 @@ type stream struct {
 //
 // offset is where in the Clip the Voice begins, which is also what a Seek and
 // what a recovery after a Device loss both arrive as: a start carrying a
-// position. The decoder open and the seek that follow it - 460 microseconds
-// together - happen on the goroutine this spawns, so neither the tick nor the
-// device thread ever pays for them, and sixty-four Voices restarting at once
-// after a reattach is sixty-four goroutines' work rather than 29 ms on the
-// thread that must not stall.
+// position. The decoder open and the seek that follow it happen on the
+// goroutine this spawns, so neither the tick nor the device thread ever pays
+// for them, and sixty-four Voices restarting at once after a reattach is
+// sixty-four goroutines' work rather than a stall on the thread that must not.
 func newStream(clip *clipData, offset time.Duration, loop bool) *stream {
 	s := &stream{
 		ring: newPCMRing(int(readAhead.Seconds()*float64(clip.rate)), clip.channels),
@@ -150,7 +157,7 @@ func (s *stream) halted() bool {
 func (s *stream) fill(clip *clipData, offset time.Duration, loop bool) {
 	defer close(s.done)
 
-	decoder, err := clip.open(clip.encoded)
+	decoder, err := clip.open(clip.encoded, clip.setup)
 	if err != nil {
 		s.ring.finish()
 		return
