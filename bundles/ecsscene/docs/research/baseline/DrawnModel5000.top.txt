@@ -1,0 +1,89 @@
+File: ecsscene2.test.exe
+Build ID: C:\Users\s\AppData\Local\Temp\claude\C--Repos-cog-games-cog\e83e42bf-c91d-46d3-9dee-1c190b4b92d1\scratchpad\base\ecsscene2.test.exe2026-09-21 07:23:59.1457783 +0200 CEST
+Type: cpu
+Time: 2026-09-21 07:25:15 CEST
+Duration: 8.36s, Total samples = 8.33s (99.60%)
+Showing nodes accounting for 7.46s, 89.56% of 8.33s total
+Dropped 137 nodes (cum <= 0.04s)
+Showing top 80 nodes out of 91
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%      8.17s 98.08%  github.com/dvoyni/cog/kernel.(*Engine).runTask
+         0     0%     0%      8.17s 98.08%  github.com/dvoyni/cog/kernel.(*scheduler).execute
+         0     0%     0%      8.16s 97.96%  github.com/dvoyni/cog/kernel.(*Engine).runPublication.func1.1
+         0     0%     0%      8.16s 97.96%  github.com/dvoyni/cog/kernel.(*Ordering[go.shape.struct { Dt float64; Last bool; Tick int64 }]).run
+         0     0%     0%      7.72s 92.68%  github.com/dvoyni/cog/bundles/scene/internal.(*plugin).flush.func2
+         0     0%     0%      7.72s 92.68%  github.com/dvoyni/cog/bundles/scene/internal.(*plugin).flushFrame
+     0.25s  3.00%  3.00%      3.53s 42.38%  github.com/dvoyni/cog/bundles/scene/internal.(*frameBuild).emit
+     0.02s  0.24%  3.24%      3.05s 36.61%  github.com/dvoyni/cog/slots/gfx/internal/types.(*OpQueue).DrawInstancedFrom
+     0.12s  1.44%  4.68%      3.03s 36.37%  github.com/dvoyni/cog/slots/gfx/internal/types.(*OpQueue).draw
+     1.29s 15.49% 20.17%      2.79s 33.49%  github.com/dvoyni/cog/slots/gfx/internal/types.(*OpQueue).bakeParametersIfNeeded
+     0.16s  1.92% 22.09%      2.04s 24.49%  github.com/dvoyni/cog/bundles/scene/internal.(*plugin).prepareDraws
+     0.01s  0.12% 22.21%      1.81s 21.73%  github.com/dvoyni/cog/slots/gfx/internal/types.(*OpQueue).bakeMaterialIfNeeded (inline)
+         0     0% 22.21%      1.63s 19.57%  github.com/dvoyni/cog/bundles/scene/internal.(*materialTable).intern
+     0.03s  0.36% 22.57%      1.63s 19.57%  github.com/dvoyni/cog/bundles/scene/internal/types.MaterialKeyOf
+         0     0% 22.57%      1.52s 18.25%  github.com/dvoyni/cog/slots/gfx/internal/types.MaterialDescr.Fingerprint
+     0.03s  0.36% 22.93%      1.42s 17.05%  github.com/dvoyni/cog/slots/gfx/internal/types.(*ParameterDescr).fingerprint
+     0.95s 11.40% 34.33%      1.19s 14.29%  github.com/dvoyni/cog/slots/gfx/internal/types.(*OpQueue).bakeParameterIfNeeded
+     0.30s  3.60% 37.94%      1.18s 14.17%  github.com/dvoyni/cog/bundles/scene/internal.(*plugin).expandModels
+     0.15s  1.80% 39.74%      1.13s 13.57%  github.com/dvoyni/cog/slots/gfx/internal/types.writeUint (inline)
+     1.12s 13.45% 53.18%      1.12s 13.45%  runtime.memmove
+     0.22s  2.64% 55.82%      0.97s 11.64%  hash/maphash.(*Hash).Write
+         0     0% 55.82%      0.86s 10.32%  github.com/dvoyni/cog/bundles/scene/internal.(*plugin).flushCamera
+     0.13s  1.56% 57.38%      0.86s 10.32%  github.com/dvoyni/cog/bundles/scene/internal.(*plugin).flushPass
+     0.15s  1.80% 59.18%      0.45s  5.40%  github.com/dvoyni/cog/bundles/scene/internal.(*frameBuild).addDraw
+         0     0% 59.18%      0.39s  4.68%  reflect.Value.Call
+         0     0% 59.18%      0.39s  4.68%  reflect.Value.call
+         0     0% 59.18%      0.38s  4.56%  github.com/dvoyni/cog/bundles/ecs/internal/types.(*systemCall[go.shape.struct { Dt float64; Last bool; Tick int64 }]).call
+         0     0% 59.18%      0.38s  4.56%  github.com/dvoyni/cog/bundles/ecs/internal/types.ToHandler[go.shape.struct { Dt float64; Last bool; Tick int64 }].func1.2
+         0     0% 59.18%      0.37s  4.44%  github.com/dvoyni/cog/bundles/ecs/internal/types.(*Query[go.shape.struct { Place github.com/dvoyni/cog/bundles/ecsscene.Transform; Model github.com/dvoyni/cog/bundles/ecsscene.Model }]).All.func1 (inline)
+         0     0% 59.18%      0.37s  4.44%  github.com/dvoyni/cog/bundles/ecs/internal/types.(*Query[go.shape.struct { Place github.com/dvoyni/cog/bundles/ecsscene.Transform; Model github.com/dvoyni/cog/bundles/ecsscene.Model }]).iterate
+     0.02s  0.24% 59.42%      0.37s  4.44%  github.com/dvoyni/cog/bundles/ecs/internal/types.(*Query[go.shape.struct { Place github.com/dvoyni/cog/bundles/ecsscene.Transform; Model github.com/dvoyni/cog/bundles/ecsscene.Model }]).iterateWide
+         0     0% 59.42%      0.37s  4.44%  github.com/dvoyni/cog/bundles/ecsscene/internal.record
+         0     0% 59.42%      0.35s  4.20%  internal/runtime/maps.MemHash
+     0.35s  4.20% 63.63%      0.35s  4.20%  internal/runtime/maps.memHashAES
+     0.02s  0.24% 63.87%      0.35s  4.20%  runtime.memhash (partial-inline)
+     0.03s  0.36% 64.23%      0.32s  3.84%  github.com/dvoyni/cog/bundles/ecsscene/internal.record-range1
+         0     0% 64.23%      0.26s  3.12%  runtime.typedslicecopy
+     0.25s  3.00% 67.23%      0.25s  3.00%  github.com/dvoyni/cog/slots/gfx/internal/types.(*OpQueue).bakeBufferIfNeeded
+     0.05s   0.6% 67.83%      0.23s  2.76%  github.com/dvoyni/cog/bundles/scene/internal.(*plugin).resolveMesh
+     0.03s  0.36% 68.19%      0.23s  2.76%  hash/maphash.WriteComparable[go.shape.struct { github.com/dvoyni/cog/libs/assets.ptr *uint8; github.com/dvoyni/cog/libs/assets.len int }]
+         0     0% 68.19%      0.22s  2.64%  github.com/dvoyni/cog/bundles/scene/internal/types.(*Lookup).model
+         0     0% 68.19%      0.22s  2.64%  github.com/dvoyni/cog/bundles/scene/internal/types.LookupModel (inline)
+     0.20s  2.40% 70.59%      0.21s  2.52%  github.com/dvoyni/cog/bundles/scene/internal/types.(*OpQueue).Model
+     0.03s  0.36% 70.95%      0.20s  2.40%  github.com/dvoyni/cog/bundles/scene/internal/types.MeshRecord.Descr (inline)
+     0.01s  0.12% 71.07%      0.19s  2.28%  hash/maphash.rthash (inline)
+     0.19s  2.28% 73.35%      0.19s  2.28%  runtime.memclrNoHeapPointers
+     0.12s  1.44% 74.79%      0.18s  2.16%  github.com/dvoyni/cog/bundles/scene/internal/types.LookupMesh (inline)
+     0.01s  0.12% 74.91%      0.18s  2.16%  hash/maphash.comparableHash[go.shape.struct { github.com/dvoyni/cog/libs/assets.ptr *uint8; github.com/dvoyni/cog/libs/assets.len int }]
+         0     0% 74.91%      0.18s  2.16%  hash/maphash.writeComparable[go.shape.struct { github.com/dvoyni/cog/libs/assets.ptr *uint8; github.com/dvoyni/cog/libs/assets.len int }] (inline)
+     0.17s  2.04% 76.95%      0.17s  2.04%  github.com/dvoyni/cog/bundles/scene/internal/types.(*residentModel).View
+     0.02s  0.24% 77.19%      0.17s  2.04%  github.com/dvoyni/cog/slots/gfx.MeshIndexed (inline)
+     0.02s  0.24% 77.43%      0.17s  2.04%  runtime.memhash128
+         0     0% 77.43%      0.16s  1.92%  runtime.memclrHasPointers
+     0.15s  1.80% 79.23%      0.15s  1.80%  github.com/dvoyni/cog/libs/m.Mat4.Mul (inline)
+     0.15s  1.80% 81.03%      0.15s  1.80%  github.com/dvoyni/cog/slots/gfx/internal/types.MeshIndexed
+     0.08s  0.96% 81.99%      0.14s  1.68%  github.com/dvoyni/cog/bundles/scene/internal.prepareDraw
+     0.02s  0.24% 82.23%      0.14s  1.68%  github.com/dvoyni/cog/libs/m.Transform.Mat4
+         0     0% 82.23%      0.14s  1.68%  github.com/dvoyni/cog/slots/gfx.BufferRangeParam (inline)
+     0.14s  1.68% 83.91%      0.14s  1.68%  github.com/dvoyni/cog/slots/gfx/internal/types.BufferRangeParam (inline)
+         0     0% 83.91%      0.13s  1.56%  hash/maphash.(*Hash).Sum64
+         0     0% 83.91%      0.13s  1.56%  runtime.systemstack
+         0     0% 83.91%      0.11s  1.32%  github.com/dvoyni/cog/bundles/scene/internal/types.(*OpQueue).beginFlush
+         0     0% 83.91%      0.11s  1.32%  github.com/dvoyni/cog/bundles/scene/internal/types.ModelKey (inline)
+     0.08s  0.96% 84.87%      0.11s  1.32%  github.com/dvoyni/cog/bundles/scene/internal/types.OpQueueAppendDraw (inline)
+         0     0% 84.87%      0.11s  1.32%  github.com/dvoyni/cog/bundles/scene/internal/types.OpQueueBeginFlush (inline)
+     0.02s  0.24% 85.11%      0.11s  1.32%  github.com/dvoyni/cog/bundles/scene/internal/types.validateResourcePath
+     0.09s  1.08% 86.19%      0.10s  1.20%  github.com/dvoyni/cog/libs/assets.(*Cache[go.shape.struct {},go.shape.struct { github.com/dvoyni/cog/bundles/scene/internal/types.lookup *github.com/dvoyni/cog/bundles/scene/internal/types.Lookup; github.com/dvoyni/cog/bundles/scene/internal/types.resources *github.com/dvoyni/cog/slots/gfx/internal/types.ResourceQueue; github.com/dvoyni/cog/bundles/scene/internal/types.path string },go.shape.*uint8]).Get
+     0.06s  0.72% 86.91%      0.10s  1.20%  github.com/dvoyni/cog/libs/m.TRS4
+         0     0% 86.91%      0.10s  1.20%  runtime.gcBgMarkWorker.func2
+         0     0% 86.91%      0.10s  1.20%  runtime.gcDrain
+     0.01s  0.12% 87.03%      0.09s  1.08%  hash/maphash.(*Hash).flush
+         0     0% 87.03%      0.08s  0.96%  runtime.growslice
+     0.05s   0.6% 87.64%      0.07s  0.84%  github.com/dvoyni/cog/bundles/scene/internal.(*plugin).resolveModelAnimation
+     0.05s   0.6% 88.24%      0.07s  0.84%  github.com/dvoyni/cog/bundles/scene/internal/types.DrawRecord.PbrRecord
+     0.04s  0.48% 88.72%      0.07s  0.84%  path.Clean
+         0     0% 88.72%      0.07s  0.84%  runtime.gcBgMarkWorker
+         0     0% 88.72%      0.07s  0.84%  runtime.gcDrainMarkWorkerDedicated (inline)
+     0.01s  0.12% 88.84%      0.06s  0.72%  github.com/dvoyni/cog/bundles/ecs/internal/types.(*Get[go.shape.struct { Plays [4]github.com/dvoyni/cog/bundles/scene/internal/types.ClipPlay }]).Of
+     0.06s  0.72% 89.56%      0.06s  0.72%  github.com/dvoyni/cog/bundles/scene/internal/types.(*Lookup).mesh (inline)
+         0     0% 89.56%      0.06s  0.72%  github.com/dvoyni/cog/slots/gfx/internal.(*plugin).presentOnUpdate.func2

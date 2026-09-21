@@ -1,0 +1,60 @@
+BenchmarkFrameEmpty-32    	   70453	     17168 ns/op	     813 B/op	      12 allocs/op
+BenchmarkFrame5000-32    	    2871	    415605 ns/op	     818 B/op	      12 allocs/op
+BenchmarkFrameAnimated5000-32    	    2553	    477682 ns/op	     813 B/op	      12 allocs/op
+BenchmarkFrameParams5000-32    	    2078	    563312 ns/op	     814 B/op	      12 allocs/op
+BenchmarkFrameMaterial5000-32    	     858	   1354356 ns/op	     828 B/op	      12 allocs/op
+BenchmarkDrawnModel5000-32    	     151	   8454138 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     851 B/op	      13 allocs/op
+BenchmarkDrawnModelParams5000-32    	     142	   9443785 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     843 B/op	      13 allocs/op
+BenchmarkDrawnModelMaterial5000-32    	     201	   6286662 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     846 B/op	      13 allocs/op
+BenchmarkDrawnMesh5000-32    	     222	   5428276 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     815 B/op	      12 allocs/op
+BenchmarkDirectModel5000-32    	     145	   8610575 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     843 B/op	      13 allocs/op
+BenchmarkFrameEmpty-32    	   63808	     17121 ns/op	     812 B/op	      12 allocs/op
+BenchmarkFrame5000-32    	    2811	    435062 ns/op	     816 B/op	      12 allocs/op
+BenchmarkFrameAnimated5000-32    	    2460	    466302 ns/op	     813 B/op	      12 allocs/op
+BenchmarkFrameParams5000-32    	    2028	    557136 ns/op	     814 B/op	      12 allocs/op
+BenchmarkFrameMaterial5000-32    	     847	   1387562 ns/op	     812 B/op	      12 allocs/op
+BenchmarkDrawnModel5000-32    	     151	   8199949 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     847 B/op	      13 allocs/op
+BenchmarkDrawnModelParams5000-32    	     142	   8791167 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     841 B/op	      13 allocs/op
+BenchmarkDrawnModelMaterial5000-32    	     205	   6153409 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     842 B/op	      13 allocs/op
+BenchmarkDrawnMesh5000-32    	     226	   5316329 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     815 B/op	      12 allocs/op
+BenchmarkDirectModel5000-32    	     153	   8273851 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     846 B/op	      13 allocs/op
+BenchmarkFrameEmpty-32    	   64868	     18328 ns/op	     813 B/op	      12 allocs/op
+BenchmarkFrame5000-32    	    2668	    426351 ns/op	     813 B/op	      12 allocs/op
+BenchmarkFrameAnimated5000-32    	    2556	    460323 ns/op	     813 B/op	      12 allocs/op
+BenchmarkFrameParams5000-32    	    2084	    571990 ns/op	     816 B/op	      12 allocs/op
+BenchmarkFrameMaterial5000-32    	     846	   1368955 ns/op	     817 B/op	      12 allocs/op
+BenchmarkDrawnModel5000-32    	     151	   8131362 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     864 B/op	      13 allocs/op
+BenchmarkDrawnModelParams5000-32    	     142	   8663928 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     847 B/op	      13 allocs/op
+BenchmarkDrawnModelMaterial5000-32    	     206	   6189219 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     843 B/op	      13 allocs/op
+BenchmarkDrawnMesh5000-32    	     226	   5388601 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     832 B/op	      12 allocs/op
+BenchmarkDirectModel5000-32    	     153	   8105437 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     854 B/op	      13 allocs/op
+BenchmarkFrameEmpty-32    	   71689	     16713 ns/op	     812 B/op	      12 allocs/op
+BenchmarkFrame5000-32    	    2832	    418598 ns/op	     817 B/op	      12 allocs/op
+BenchmarkFrameAnimated5000-32    	    2547	    473137 ns/op	     816 B/op	      12 allocs/op
+BenchmarkFrameParams5000-32    	    2127	    555460 ns/op	     810 B/op	      12 allocs/op
+BenchmarkFrameMaterial5000-32    	     849	   1361406 ns/op	     820 B/op	      12 allocs/op
+BenchmarkDrawnModel5000-32    	     151	   8356666 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     843 B/op	      13 allocs/op
+BenchmarkDrawnModelParams5000-32    	     140	  10025061 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     853 B/op	      13 allocs/op
+BenchmarkDrawnModelMaterial5000-32    	     204	   5922862 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     847 B/op	      13 allocs/op
+BenchmarkDrawnMesh5000-32    	     225	   5511393 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     816 B/op	      12 allocs/op
+BenchmarkDirectModel5000-32    	     151	   8263352 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     845 B/op	      13 allocs/op
+BenchmarkFrameEmpty-32    	   71702	     17133 ns/op	     812 B/op	      12 allocs/op
+BenchmarkFrame5000-32    	    2758	    429985 ns/op	     814 B/op	      12 allocs/op
+BenchmarkFrameAnimated5000-32    	    2505	    479337 ns/op	     813 B/op	      12 allocs/op
+BenchmarkFrameParams5000-32    	    2026	    575079 ns/op	     813 B/op	      12 allocs/op
+BenchmarkFrameMaterial5000-32    	     841	   1356727 ns/op	     818 B/op	      12 allocs/op
+BenchmarkDrawnModel5000-32    	     150	   8525211 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     858 B/op	      13 allocs/op
+BenchmarkDrawnModelParams5000-32    	     140	   8648623 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     857 B/op	      13 allocs/op
+BenchmarkDrawnModelMaterial5000-32    	     204	   6024239 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     847 B/op	      13 allocs/op
+BenchmarkDrawnMesh5000-32    	     226	   5464617 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     815 B/op	      12 allocs/op
+BenchmarkDirectModel5000-32    	     153	   8057696 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     848 B/op	      13 allocs/op
+BenchmarkFrameEmpty-32    	   72579	     16443 ns/op	     812 B/op	      12 allocs/op
+BenchmarkFrame5000-32    	    2745	    424203 ns/op	     816 B/op	      12 allocs/op
+BenchmarkFrameAnimated5000-32    	    2575	    457725 ns/op	     812 B/op	      12 allocs/op
+BenchmarkFrameParams5000-32    	    2108	    557396 ns/op	     814 B/op	      12 allocs/op
+BenchmarkFrameMaterial5000-32    	     879	   1360937 ns/op	     815 B/op	      12 allocs/op
+BenchmarkDrawnModel5000-32    	     148	   8148506 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     853 B/op	      13 allocs/op
+BenchmarkDrawnModelParams5000-32    	     141	   8567460 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     852 B/op	      13 allocs/op
+BenchmarkDrawnModelMaterial5000-32    	     206	   6084772 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     846 B/op	      13 allocs/op
+BenchmarkDrawnMesh5000-32    	     222	   5425628 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     819 B/op	      12 allocs/op
+BenchmarkDirectModel5000-32    	     154	   7926819 ns/op	      5000 batches/frame	      5000 instances/frame	         1.000 passes/frame	     843 B/op	      13 allocs/op
