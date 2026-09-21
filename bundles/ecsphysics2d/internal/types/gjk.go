@@ -98,7 +98,51 @@ func newMinkowskiPoint(a, b supportPoint) minkowskiPoint {
 
 // closestTo is cp's MinkowskiPoint.ClosestPoints: the closest points on the two
 // Shapes given the closest edge of their Minkowski difference to the origin.
+//
+// This is cp's line exactly, and EPA is what calls it: there the origin is
+// inside the hull, and a d at or below zero is a real overlap. GJK calls
+// closestOutside instead, which carries the guard below.
 func (v0 minkowskiPoint) closestTo(v1 minkowskiPoint) closestPoints {
+	return v0.closest(v1, false)
+}
+
+// closestOutside is closestTo for GJK, where the origin is known to be outside
+// the Minkowski difference: a departure from cp, for a defect in cp.
+//
+// C's line 246 in cpCollision.c, identical at 7.0.2 and master, reads
+//
+//	if(d <= 0.0f || (-1.0f < t && t < 1.0f)){
+//
+// and d is the origin's distance to the edge's supporting line, not to the
+// edge. When t is clamped the nearest point of the edge is its end, the origin
+// is beyond the edge, and if the origin lies on that line d is 0 — or, at a
+// general angle, a rounding below it — so two disjoint Shapes come back touching
+// at their summed radii. The research that reproduced it in C is
+// docs/research/chipmunk-c-gjk.md on the research/chipmunk-c-gjk branch
+// (dvoyni/cog#506).
+//
+// So the test is on the clamp and not on d == 0: an exact zero is only the
+// lattice's form of it, and the rounded one is what the engine reaches. A
+// clamped t takes the vertex arm, where the distance is |p|. So does a simplex
+// collapsed to one Minkowski point, which has no edge and so no line at all:
+// its n is the zero vector and its d an exact 0, and gjkRecurse only returns
+// one once the search along −p found nothing nearer, which makes |p| the
+// distance. Either way p itself being the zero vector is two Shapes meeting at
+// a vertex, which have no p/|p| and keep the edge's normal so that the contact
+// still has a direction.
+//
+// EPA is left on cp's line on purpose. There the origin is inside the hull, and
+// a hull edge ending at a point in the middle of a face can clamp t by a
+// rounding of 1e-16 with the origin a real 0.01 m to 0.6 m inside: the guard
+// would read that overlap as a separation of |p|, and a stack of boxes falls
+// through itself (TestBoxesStackAndSettle).
+func (v0 minkowskiPoint) closestOutside(v1 minkowskiPoint) closestPoints {
+	return v0.closest(v1, true)
+}
+
+// closest is the body closestTo and closestOutside share; outside says whether
+// the guard is on.
+func (v0 minkowskiPoint) closest(v1 minkowskiPoint, outside bool) closestPoints {
 	// Where along the edge the difference comes closest to the origin. The
 	// ClosestT the port uses carries C's CPFLOAT_MIN, which jakecoffman/cp
 	// drops, so a degenerate simplex answers with a number and not a NaN.
@@ -115,7 +159,11 @@ func (v0 minkowskiPoint) closestTo(v1 minkowskiPoint) closestPoints {
 	n := delta.ReversePerp().Normalize()
 	d := n.Dot(p)
 
-	if d <= 0 || (-1 < t && t < 1) {
+	edge := d <= 0 || (-1 < t && t < 1)
+	if outside {
+		edge = (-1 < t && t < 1 && delta != (m.Vec2d{})) || p == (m.Vec2d{})
+	}
+	if edge {
 		// Overlapping, or an ordinary vertex-against-edge collision.
 		return closestPoints{a: pa, b: pb, n: n, d: d, id: id}
 	}
@@ -184,6 +232,14 @@ func gjk(ctx support, centreA, centreB, coincident m.Vec2d, cached uint32) close
 		}
 		v0 = ctx.at(axis)
 		v1 = ctx.at(axis.Negate())
+		if axis == (m.Vec2d{}) {
+			// Still no axis: the answer is cp's, on cp's line. gjkRecurse would
+			// now search along −p from this collapsed simplex and find a
+			// direction the pure Penetration must not invent, so the
+			// coincident-centres rule is answered here, exactly as the recursion
+			// answered it before that search existed.
+			return v0.closestTo(v1)
+		}
 	}
 
 	return gjkRecurse(ctx, v0, v1, 1)
@@ -192,9 +248,13 @@ func gjk(ctx support, centreA, centreB, coincident m.Vec2d, cached uint32) close
 // gjkRecurse is cp's GJKRecurse, the GJK loop. The recursion is kept as
 // written: 30 frames is nothing, and flattening it would be a departure with no
 // reason behind it.
+//
+// Its two answers go through closestOutside rather than cp's closestTo: GJK
+// only answers with the origin outside the difference, and that is where the
+// supporting-line guard holds.
 func gjkRecurse(ctx support, v0, v1 minkowskiPoint, iteration int) closestPoints {
 	if iteration > maxGJKIterations {
-		return v0.closestTo(v1)
+		return v0.closestOutside(v1)
 	}
 
 	if pointGreater(v1.ab, v0.ab, m.Vec2d{}) {
@@ -202,23 +262,47 @@ func gjkRecurse(ctx support, v0, v1 minkowskiPoint, iteration int) closestPoints
 		return gjkRecurse(ctx, v1, v0, iteration)
 	}
 
+	// A simplex collapsed to one Minkowski point searches along −p, as a
+	// clamped one does. That is a departure from cp, for a defect in cp: two
+	// Shapes on one line — capsules end to end, draw 4094 of the finiteness
+	// fuzz — tie every support query along the cold-start axis, which is
+	// perpendicular to that line, so both ends of the simplex are the same
+	// point. The ClosestT the port uses, like C master's since e7ea51e, then
+	// gives t = 0, the search direction is the perpendicular of the zero vector,
+	// and GJK stops where it started with no normal and a d of 0: two disjoint
+	// Shapes touching. C 7.0.2, whose ClosestT divides zero by zero, clamps the
+	// NaN to t = 1 and searches along −p by accident; the port does it on
+	// purpose. The zero axis of two coincident centres never gets here: gjk
+	// answers it itself, because a direction found there is not the pure
+	// Penetration's to report.
 	t := v0.ab.ClosestT(v1.ab)
 	var n m.Vec2d
-	if -1 < t && t < 1 {
+	if -1 < t && t < 1 && v0.ab != v1.ab {
 		n = v1.ab.Sub(v0.ab).Perp()
 	} else {
 		n = lerpT(v0.ab, v1.ab, t).Negate()
 	}
 	p := ctx.at(n)
 
-	if pointGreater(p.ab, v0.ab, m.Vec2d{}) && pointGreater(v1.ab, p.ab, m.Vec2d{}) {
+	// The first test is a departure from cp, for a defect in cp. p is the
+	// difference's extreme point along n, so p·n < 0 puts the whole difference
+	// on the far side of a line through the origin, and the origin outside it
+	// whatever the two orientation tests say. They can say otherwise only by
+	// rounding: two capsules end to end on one line give a v0, p and v1 all on a
+	// line through the origin and 0.55 m or more from it, a triangle with no
+	// area, and C's cpCheckPointGreater pair (cpCollision.c line 372, 7.0.2 and
+	// master alike) reads it as containing the origin. EPA then ends on a clamped
+	// edge with d a rounding below 0 and reports the summed radii, 0.5 m. The
+	// test needs no tolerance: it changes an answer only where the orientation
+	// tests contradict the support point.
+	if p.ab.Dot(n) >= 0 && pointGreater(p.ab, v0.ab, m.Vec2d{}) && pointGreater(v1.ab, p.ab, m.Vec2d{}) {
 		// The origin is inside the simplex: the two overlap, and the answer is
 		// on the surface of the Minkowski difference rather than outside it.
 		return epa(ctx, v0, p, v1)
 	}
 
 	if checkAxis(v0.ab, v1.ab, p.ab, n) {
-		return v0.closestTo(v1)
+		return v0.closestOutside(v1)
 	}
 
 	if closestDist(v0.ab, p.ab) < closestDist(p.ab, v1.ab) {

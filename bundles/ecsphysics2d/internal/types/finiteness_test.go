@@ -198,12 +198,20 @@ func TestTheFinitenessInvariantHoldsOverASweepOfDegenerateInputs(t *testing.T) {
 		// axis to have found.
 		coincident, collinear int
 		// ungated counts the pairs whose bounding boxes do not intersect at all,
-		// and ungatedTouching how many of those the narrowphase nonetheless
-		// reports as touching. Neither is asserted on, because no engine path can
-		// reach them: Detect and Overlap both test box intersection before the
-		// narrowphase, and only the bare Penetration has no such gate. The count
-		// is logged because it is the one measurement of that answer there is.
-		ungated, ungatedTouching int
+		// and ungatedTouching lists those the narrowphase nonetheless reports as
+		// touching. Two Shapes whose boxes are apart are apart, so every entry is
+		// a failure. It used to be a record of 436 (437 counting either argument
+		// order) and not an assertion, on the belief that no engine path could
+		// reach them; the same GJK answers reach Detect at general angles, where
+		// the boxes do intersect, and GJK's guards took the count to 0.
+		ungated         int
+		ungatedTouching []string
+		// oneWay counts the pairs the broadphase admits that touch at exactly
+		// zero depth one way round and not the other. That disagreement is the
+		// end-cap rejection reading one Shape's neighbour tangents against the
+		// other's negated normal, and it is recorded, not fixed: 1 before the
+		// guards and 1 after, both zero-depth.
+		oneWay int
 		// depthKept is the failure: a GJK arm that lost the direction but reported
 		// a depth anyway, which would push two Bodies along a normal of nothing.
 		depthKept []string
@@ -278,15 +286,15 @@ func TestTheFinitenessInvariantHoldsOverASweepOfDegenerateInputs(t *testing.T) {
 
 		pairs++
 
-		// The broadphase gate is what separates an answer the engine can act on
-		// from one only a direct Penetration call ever sees. Detect and Overlap
-		// both refuse a pair whose boxes do not intersect before any narrowphase
-		// arm runs, so everything below the gate is recorded and nothing below it
-		// is asserted.
+		// Below the broadphase gate nothing can touch: two Shapes whose boxes
+		// are apart are apart, either way round.
 		if !boxA.Intersects(boxB) {
 			ungated++
-			if ok {
-				ungatedTouching++
+			if ok || backOK {
+				ungatedTouching = append(ungatedTouching, fmt.Sprintf(
+					"%s at %v angle %v against %s at %v angle %v: %v at depth %v one way, "+
+						"%v at depth %v the other",
+					a.name, atA, angleA, b.name, atB, angleB, ok, depth, backOK, backDepth))
 			}
 			continue
 		}
@@ -306,6 +314,8 @@ func TestTheFinitenessInvariantHoldsOverASweepOfDegenerateInputs(t *testing.T) {
 				asymmetric = append(asymmetric, fmt.Sprintf(
 					"%s at %v angle %v against %s at %v angle %v: %v one way, %v the other, depth %v",
 					a.name, atA, angleA, b.name, atB, angleB, ok, backOK, deeper))
+			} else {
+				oneWay++
 			}
 			continue
 		}
@@ -443,7 +453,8 @@ func TestTheFinitenessInvariantHoldsOverASweepOfDegenerateInputs(t *testing.T) {
 	}
 
 	t.Logf("seed %#x: %d pairs, of which %d had boxes the broadphase gate refuses (%d of those "+
-		"reported touching anyway, which no engine path can see); %d touching through the gate, "+
+		"reported touching, which must be none); %d touching through the gate, and %d touching "+
+		"one way round only at exactly zero depth; "+
 		"%d of them with no direction at all through the pure Penetration — %d from a closed form "+
 		"given no seed, which keeps its depth, and %d from a GJK arm, which does not (%d on "+
 		"exactly coincident bounding box centres, %d on a Minkowski difference with no area). "+
@@ -451,11 +462,15 @@ func TestTheFinitenessInvariantHoldsOverASweepOfDegenerateInputs(t *testing.T) {
 		"a unit normal, %d come apart outright, and %d still have no direction — every one of "+
 		"those a pair whose Minkowski difference is a single point. %d Probes (%d Hits, %d aimed "+
 		"exactly along a face plane); %d point queries (%d exactly on an edge coordinate)",
-		uint64(finitenessSeed), pairs, ungated, ungatedTouching,
-		touching, seeded+unseeded, seeded, unseeded, coincident, collinear,
+		uint64(finitenessSeed), pairs, ungated, len(ungatedTouching),
+		touching, oneWay, seeded+unseeded, seeded, unseeded, coincident, collinear,
 		coincident, seededRecovered, seededParted, seededFlat,
 		probes, hits, exactlyParallel, points, exactlyOnAnEdge)
 
+	if len(ungatedTouching) > 0 {
+		t.Errorf("%d pairs whose bounding boxes do not intersect are reported touching; the "+
+			"first is %s", len(ungatedTouching), ungatedTouching[0])
+	}
 	if len(depthKept) > 0 {
 		t.Errorf("%d pairs report a depth with no normal at all, which a solver would spend "+
 			"along a direction of nothing; the first is %s", len(depthKept), depthKept[0])
