@@ -73,7 +73,7 @@ func (c *Contacts) sweepSensors(bodies *BodyIndex, statics *StaticIndex) {
 		// be able to find one, which is where the port departs from cp's point
 		// and segment queries.
 		c.probeSlots = c.probeSlots[:0]
-		c.probes = moving.probeAllSlots(c.probes[:0], &c.probeSlots,
+		c.probes = bodies.probeAllSlots(c.probes[:0], &c.probeSlots,
 			from, to, radius, bits, collidesWith, sensor.entity)
 		split := len(c.probes)
 		c.probes = statics.ProbeAll(c.probes, from, to, radius, bits, collidesWith, sensor.entity)
@@ -89,10 +89,13 @@ func (c *Contacts) sweepSensors(bodies *BodyIndex, statics *StaticIndex) {
 			if still >= len(c.probes) || (at < split && c.probes[at].T <= c.probes[still].T) {
 				hit, at = c.probes[at], at+1
 				// The Body index keeps no Entity to slot table, so its Probe
-				// hands each Hit's slot back beside it.
+				// hands each Hit's slot back beside it — a Sleeping body's
+				// numbered after the awake grid's, in the grid of its own it
+				// is kept in. A sleeper met by a Sensor stays asleep: a Sensor
+				// entry neither joins an Island nor wakes one.
 				otherSlot = c.probeSlots[at-1]
-				other = &moving.entries[otherSlot]
-				otherWorld = moving.world(other)
+				grid, found := bodies.entryAt(otherSlot)
+				other, otherWorld = found, grid.world(found)
 			} else {
 				hit, still = c.probes[still], still+1
 				found, _, ok := statics.lookup(hit.Entity)

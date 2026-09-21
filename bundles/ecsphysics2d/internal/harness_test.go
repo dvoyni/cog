@@ -401,7 +401,12 @@ func jointedCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Exe
 }
 
 // filterOnUpdate is the app's filter System — cp's Begin and PreSolve — ordered
-// into the one gap the specification puts it in.
+// into the one gap the specification puts it in, and before the sleep System,
+// which is cp's own order: PreSolve runs before ProcessComponents. Left
+// unordered against it, the two write the Contact list in whichever order the
+// scheduler meets them, and a tick on which the sleep System is the one kept
+// waiting costs the kernel's dispatch a map for its wide lock set — an
+// allocation the allocation-line tests would see as noise.
 type filterOnUpdate kernel.Subscription[app.UpdateEvent]
 
 // pushQuery is the gameplay write that Force exists for: a System of the app's,
@@ -415,8 +420,10 @@ type pushQuery struct {
 type pushOnUpdate kernel.Subscription[app.UpdateEvent]
 
 // The probe Systems the chain is read off. Each is sandwiched between two of
-// the plugin's four identities, so the order they run in is the order the four
-// run in: Integrate < first < Index < second < Detect < third < Solve < fourth.
+// the plugin's identities, so the order they run in is the order the four they
+// sit between run in: Integrate < first < Index < second < Detect < third <
+// Solve < fourth. The sleep System runs inside the third gap, between Detect
+// and Solve, and the recorder there is unordered against it.
 type (
 	afterIntegrateOnUpdate kernel.Subscription[app.UpdateEvent]
 	afterIndexOnUpdate     kernel.Subscription[app.UpdateEvent]
@@ -425,7 +432,7 @@ type (
 )
 
 // game stands in for the app: it spawns Bodies, writes Force, reads Components
-// back, and records the order the plugin's four Systems ran in.
+// back, and records the order the plugin's Systems ran in.
 //
 // push is written only between ticks, and kernel.PublishEvent(…).Wait() is the
 // happens-before edge that makes that safe: no test writes it while a tick that
@@ -476,7 +483,7 @@ func (g *game) Register(registrar *kernel.Registrar, _ any) error {
 		for i := range list {
 			g.filter(&list[i])
 		}
-	})).After[ecsphysics2d.DetectOnUpdate]().Before[ecsphysics2d.SolveOnUpdate]()
+	})).After[ecsphysics2d.DetectOnUpdate]().Before[ecsphysics2d.SleepOnUpdate]()
 
 	g.probe(registrar)
 	return nil

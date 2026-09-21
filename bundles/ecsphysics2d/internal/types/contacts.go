@@ -79,6 +79,11 @@ type Contacts struct {
 	// to ask afterwards, so its Probe hands the slots back itself.
 	probeSlots []int32
 
+	// awakeSlots is where the Body index's sleepers' grid starts in the
+	// solver's slot numbering, as Detect saw it: a party at or past it is a
+	// Sleeping body. It is kept here so the sleep System reads no index.
+	awakeSlots int32
+
 	// maxSlot is one past the largest BodyIndex slot detection saw, which sizes
 	// the solver's slot table without Solve reading an index of its own.
 	maxSlot int32
@@ -105,6 +110,12 @@ type Contacts struct {
 	// solver is the gather the impulse solver runs over. It lives here because
 	// Solve write-locks this Resource already and nothing else may see it.
 	solver solver
+
+	// islands is the sleep System's state: the sleeping Islands, the Contacts
+	// that went quiet with them, and the tick's scratch. It lives here because
+	// a quiet Contact is a Contact entry, carried past the public view with no
+	// expiry, and the sleep System write-locks this Resource already.
+	islands islands
 }
 
 // NewContacts is an empty Contact list, its coincidence nudge seeded from the

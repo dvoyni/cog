@@ -57,6 +57,19 @@ type Force struct {
 // the static index hold entries that never need re-indexing in place.
 type Static struct{}
 
+// Sleeping is the Tag of a Dynamic body physics has stopped moving, because it
+// and everything in its Island stayed idle long enough. The sleep System adds
+// it and removes it and nothing else does; Integrate, the Body index rebuild
+// and the velocity integration skip a Body that carries it with
+// Without[Sleeping], and an app's own Queries may do the same.
+//
+// It is a Tag rather than a field because a Body's kind is said by its
+// Components, and because adding or removing one takes the write on its own
+// Store and nothing wider: only the sleep System writes that Store, so every
+// System that filters on it gains a read of a Store nothing beside it in the
+// frame writes.
+type Sleeping struct{}
+
 // IntegrateVelocity is cp's BodyUpdateVelocity for one Dynamic body over a step
 // of h seconds, and is the velocity half of Solve. It damps first and then adds
 // the step's gravity and Force together, exactly as cp does, and clears the

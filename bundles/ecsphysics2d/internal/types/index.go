@@ -34,6 +34,11 @@ type StaticIndex struct {
 	// out — so it genuinely has to find an existing entry by its Entity, which
 	// is the one job a table keyed by Entity does and a position cannot.
 	slots map[ecs.Entity]int32
+	// removals counts the Shapes that have left the index, by Remove, by an
+	// Insert replacing one, or by Clear. The sleep System compares it against
+	// the count it last saw, so a tick on which no Static left pays one
+	// comparison for the rule that removing a support wakes what rests on it.
+	removals uint64
 }
 
 // BodyIndex holds every other Entity with a Shape, Kinematic and Dynamic alike,
@@ -45,11 +50,31 @@ type StaticIndex struct {
 // Shape inserted is in slot N — and nothing on the rebuild ever has to find an
 // entry by its Entity. The Go map it once kept for that cost more than the
 // whole rebuild had been argued at.
+//
+// Sleeping bodies are kept in a second grid of its own, which is not rebuilt
+// every tick: Index moves a Body into it when its Island falls asleep and out
+// of it when the Island wakes. Detect tests awake Bodies against it and never
+// tests it against itself or against the static index, and every query here
+// asks both grids, so what a query answers does not depend on what sleeps. The
+// static index never holds a sleeper. cp moves a sleeping Body's Shapes into
+// its static tree instead; the port's two indices are public and the caller
+// chooses which to ask, so a Probe on the Body index would then miss a
+// sleeping crate and one on the static index would find it.
 type BodyIndex struct {
 	index
 	// held is how many live Shapes the entries run holds, which is its length
 	// less whatever Remove has taken out since the last Clear.
 	held int
+	// sleepers is the Sleeping bodies' grid. Its slots are stable while a Body
+	// sleeps and recycled when one wakes; the solver numbers them after the
+	// awake grid's, so a slot here is len(entries) plus its own.
+	sleepers index
+	// sleeping is how many live Shapes the sleepers' grid holds.
+	sleeping int
+	// woken is the set of Entities the drain is taking out of the sleepers'
+	// grid this tick, so that one pass over that grid takes out any number of
+	// them. It is scratch, written only under the index's own write.
+	woken entityTable
 }
 
 // NewStaticIndex is an empty static index with that cell size in metres. A cell
@@ -65,6 +90,7 @@ func NewStaticIndex(cellSize float64) *StaticIndex {
 func NewBodyIndex(cellSize float64) *BodyIndex {
 	idx := &BodyIndex{}
 	idx.init(cellSize)
+	idx.sleepers.init(cellSize)
 	return idx
 }
 
@@ -74,9 +100,9 @@ func NewBodyIndex(cellSize float64) *BodyIndex {
 // geometry the closed forms read.
 //
 // The cache is here rather than in a Component because adding or removing a
-// Component is a structural change taking the frame-wide write on the Entities,
-// and because mirroring derived data doubles the memory. Being internal it is
-// free of the Shape's inline vertex cap.
+// Component is a structural change — write on its own Store, every tick a Body
+// comes or goes — and because mirroring derived data doubles the memory. Being
+// internal it is free of the Shape's inline vertex cap.
 type entry struct {
 	entity                    ecs.Entity
 	shape                     Shape
@@ -129,6 +155,10 @@ type probing struct {
 	// Body index learns the slot behind each Hit without a table to ask. It is
 	// a pointer so that every other Probe pays one word for it and no more.
 	slots *[]int32
+	// slotBase is added to every slot kept in slots: 0 for the Body index's
+	// own grid, and the length of that grid for its sleepers', whose slots the
+	// solver numbers after the awake ones.
+	slotBase int32
 }
 
 // index is the hashed uniform grid behind both Resources. The structure is not
@@ -173,8 +203,8 @@ func (idx *index) CellSize() float64 { return idx.cellSize }
 // Len is how many Shapes the index holds.
 func (idx *StaticIndex) Len() int { return len(idx.slots) }
 
-// Len is how many Shapes the index holds.
-func (idx *BodyIndex) Len() int { return idx.held }
+// Len is how many Shapes the index holds, sleeping ones included.
+func (idx *BodyIndex) Len() int { return idx.held + idx.sleeping }
 
 // Insert puts an Entity's Shape into the index, placed at a position and an
 // angle, replacing whatever the index held for that Entity. The world cache is
@@ -263,6 +293,7 @@ func (idx *StaticIndex) Remove(entity ecs.Entity) {
 	idx.drop(slot)
 	delete(idx.slots, entity)
 	idx.freeEntries = append(idx.freeEntries, slot)
+	idx.removals++
 }
 
 // Remove takes an Entity's Shape out of the index and does nothing when the
@@ -283,6 +314,11 @@ func (idx *BodyIndex) Remove(entity ecs.Entity) {
 			idx.held--
 		}
 	}
+	for slot := range idx.sleepers.entries {
+		if idx.sleepers.entries[slot].live && idx.sleepers.entries[slot].entity == entity {
+			idx.dropSleeper(int32(slot))
+		}
+	}
 }
 
 // drop takes one slot's entry out of every cell and marks it dead.
@@ -295,12 +331,19 @@ func (idx *index) drop(slot int32) {
 // Clear empties the index, keeping every buffer it has grown so that refilling
 // it allocates nothing.
 func (idx *StaticIndex) Clear() {
+	if len(idx.slots) > 0 {
+		idx.removals++
+	}
 	idx.index.clear()
 	clear(idx.slots)
 }
 
 // Clear empties the index, keeping every buffer it has grown so that refilling
 // it allocates nothing. It is how the index is rebuilt each tick.
+//
+// It empties the grid the rebuild refills and leaves the Sleeping bodies' grid
+// alone, which is kept current as Islands fall asleep and wake rather than
+// rebuilt.
 func (idx *BodyIndex) Clear() {
 	idx.index.clear()
 	idx.held = 0
@@ -327,7 +370,7 @@ func (idx *index) Probe(
 	from, to m.Vec2d, radius float64,
 	bits, collidesWith uint32, exclude ecs.Entity,
 ) (Hit, bool) {
-	_, hit, ok := idx.probeWalk(nil, nil, true, from, to, radius, bits, collidesWith, exclude)
+	_, hit, ok := idx.probeWalk(nil, 0, nil, 0, true, from, to, radius, bits, collidesWith, exclude)
 	return hit, ok
 }
 
@@ -342,7 +385,7 @@ func (idx *index) ProbeAll(
 	dst []Hit, from, to m.Vec2d, radius float64,
 	bits, collidesWith uint32, exclude ecs.Entity,
 ) []Hit {
-	dst, _, _ = idx.probeWalk(dst, nil, false, from, to, radius, bits, collidesWith, exclude)
+	dst, _, _ = idx.probeWalk(dst, len(dst), nil, 0, false, from, to, radius, bits, collidesWith, exclude)
 	return dst
 }
 
@@ -402,7 +445,7 @@ func (idx *index) probeAllSlots(
 	dst []Hit, slots *[]int32, from, to m.Vec2d, radius float64,
 	bits, collidesWith uint32, exclude ecs.Entity,
 ) []Hit {
-	dst, _, _ = idx.probeWalk(dst, slots, false, from, to, radius, bits, collidesWith, exclude)
+	dst, _, _ = idx.probeWalk(dst, len(dst), slots, 0, false, from, to, radius, bits, collidesWith, exclude)
 	return dst
 }
 
@@ -419,16 +462,21 @@ func (idx *index) world(e *entry) []m.Vec2d { return idx.slab[e.world : e.world+
 // twice. The nearest Probe needs no such guard, a repeated test giving the same
 // answer.
 //
-// slots is nil but for probeAllSlots, whose run it keeps beside dst.
+// start is where the ordered run begins in dst, which is len(dst) for every
+// Probe but the Body index's second walk over its sleepers: that walk inserts
+// into the run the first one began, so the two grids answer as one ordered run.
+// slots is nil but for a sweep's Probe, whose run it keeps beside dst, each
+// slot offset by slotBase.
 func (idx *index) probeWalk(
-	dst []Hit, slots *[]int32, first bool, from, to m.Vec2d, radius float64,
+	dst []Hit, start int, slots *[]int32, slotBase int32, first bool, from, to m.Vec2d, radius float64,
 	bits, collidesWith uint32, exclude ecs.Entity,
 ) ([]Hit, Hit, bool) {
 	walk := probing{
 		dst:          dst,
 		slots:        slots,
+		slotBase:     slotBase,
 		first:        first,
-		start:        len(dst),
+		start:        start,
 		from:         from,
 		to:           to,
 		radius:       radius,
@@ -580,7 +628,8 @@ func (idx *index) probeCell(walk *probing, i, j int32) {
 			continue
 		}
 		if walk.slots != nil {
-			walk.dst, *walk.slots = insertHitSlot(walk.dst, *walk.slots, walk.start, hit, idx.links[cursor].entry)
+			walk.dst, *walk.slots = insertHitSlot(walk.dst, *walk.slots, walk.start, hit,
+				walk.slotBase+idx.links[cursor].entry)
 			continue
 		}
 		walk.dst = insertHit(walk.dst, walk.start, hit)

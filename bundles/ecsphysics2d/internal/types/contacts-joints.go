@@ -33,6 +33,7 @@ func (c *Contacts) gatherJoints(
 	walk *ecs.Query[JointQuery],
 	places *ecs.Set[Position],
 	velocities *ecs.Set[Velocity],
+	sleeping *ecs.Get[Sleeping],
 ) {
 	s := &c.solver
 	j := &s.joints
@@ -42,6 +43,15 @@ func (c *Contacts) gatherJoints(
 	seeded := false
 	for _, it := range walk.All() {
 		joint := it.Joint
+
+		// A Joint of a Sleeping body is not solved while it sleeps, as cp
+		// takes a sleeping Body's constraints out of its list, and it keeps
+		// its Impulse for the warm start the tick it wakes. The sleep System
+		// wakes a Joint's sleeper whenever its other party moves, so a Joint
+		// skipped here holds two sleepers, or a sleeper and a Static.
+		if sleepingParty(sleeping, joint.A) || sleepingParty(sleeping, joint.B) {
+			continue
+		}
 
 		placeA, okA := places.Of(joint.A)
 		placeB, okB := places.Of(joint.B)
@@ -245,4 +255,10 @@ func (c *Contacts) scatterJoints() {
 		}
 		row.joint = nil
 	}
+}
+
+// sleepingParty reports that a Joint's party carries the Sleeping Tag.
+func sleepingParty(sleeping *ecs.Get[Sleeping], e ecs.Entity) bool {
+	_, asleep := sleeping.Of(e)
+	return asleep
 }

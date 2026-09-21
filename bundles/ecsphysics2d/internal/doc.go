@@ -1,5 +1,5 @@
 // Package internal is the physics plugin itself: the Components it registers,
-// the four Systems the step is, and the settings resolved at registration.
+// the five Systems the step is, and the settings resolved at registration.
 //
 // Everything with an algorithm in it is a port of Chipmunk, taken from
 // github.com/jakecoffman/cp/v2 v2.4.0 (MIT, Copyright (c) 2017 Jake Coffman) and

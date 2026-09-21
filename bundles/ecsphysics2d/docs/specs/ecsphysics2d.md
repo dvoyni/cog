@@ -79,7 +79,8 @@ from them.
 
 - [Vocabulary](#vocabulary) · [What the numbers are, and what they are not](#what-the-numbers-are-and-what-they-are-not)
 - [The Components](#the-components) · [The Shape](#the-shape)
-- [The four Systems](#the-four-systems) · [The contact list](#the-contact-list) · [Joints](#joints)
+- [The five Systems](#the-five-systems) · [The contact list](#the-contact-list) · [Joints](#joints)
+- [Sleeping and Islands](#sleeping-and-islands)
 - [The queries and the indices](#the-queries-and-the-indices) · [Settings](#settings)
 - [Fidelity to cp](#fidelity-to-cp) · [The zero-allocation claim](#the-zero-allocation-claim)
 - [What is not foreclosed](#what-is-not-foreclosed) · [Shapes that were rejected](#shapes-that-were-rejected)
@@ -123,6 +124,12 @@ record; this list is a reading aid, not a second definition.
   for one Body, gravity among them. Physics starts them at its own defaults and
   reads them every tick; a game that wants others changes them itself. Not
   **Config**, which is fixed when physics starts.
+- **Sleeping body** — a Dynamic body physics has stopped moving because it and
+  everything in its Island stayed idle long enough, until something disturbs it.
+  Off unless the game turns it on.
+- **Island** — the Dynamic bodies joined by touching or by Joints, which fall
+  asleep together and wake together. A Static or Kinematic body never belongs to
+  one and never joins two.
 - **Joint** — a rule holding two Bodies to each other. Its own Entity.
 - **Spring** — a Joint that pushes towards a rest distance or Angle.
 - **Absorption** — how strongly a Spring resists its ends moving, force per unit
@@ -249,6 +256,12 @@ From [The Component vocabulary](https://github.com/dvoyni/cog/issues/287),
 | `Polygon` | `Verts ecs.List[m.Vec2d]` | the app | Index |
 | `Joint` | see [Joints](#joints) | the app; Solve writes the Impulse and ratchet's `Angle` | Index, Solve |
 | `Static` | Tag | spawn | Index |
+| `Sleeping` | Tag | the sleep System, and nothing else | Integrate, Index, Solve, the app's own Queries |
+
+Beside these the plugin keeps one Component of its own, `Rest`, which no app can
+name: what the sleep System remembers per Dynamic body, added the first tick
+sleeping is on. [Sleeping and Islands](#sleeping-and-islands) says why it is a
+Component.
 
 **The split follows writers, because the lock unit is the Store.** Fields with
 identical writer and reader sets travel together; `Force`, the busiest gameplay
@@ -520,9 +533,13 @@ plugin-owned slab. Being internal, it is free of the Component's fixed-array cap
   inserts them, and never again.
 - **Bodies are cached in Index**, which already walks `Position` and `Shape`.
 
-Not a Component: adding or removing one is a structural change taking the
-frame-wide `write{*Entities}` lock, and it would double the memory to mirror
-something derived. Not recomputed per pair, which is Box2D v3's way: a Shape
+Not a Component: adding or removing one is a structural change — it takes
+`write{*Store[T]}` and nothing wider (`ecs.md`'s *Structural change*, and
+`Set.UpdateFor` in `set.go`), but it would be one every tick a Body came or went —
+and it would double the memory to mirror something derived. *This paragraph once
+said the structural change took the frame-wide `write{*Entities}` lock; only
+Spawn and Despawn do, and the line is corrected by
+[sleeping](https://github.com/dvoyni/cog/issues/316), whose Tag rests on it.* Not recomputed per pair, which is Box2D v3's way: a Shape
 takes part in several pair tests a tick, and a wall segment in a crowd in many.
 
 ### Collision: a switch, values, and a stack
@@ -610,33 +627,43 @@ from its caller.
 
 ---
 
-## The four Systems
+## The five Systems
 
 From [The System decomposition](https://github.com/dvoyni/cog/issues/398),
 [The contact solver](https://github.com/dvoyni/cog/issues/405) and
 [Joints](https://github.com/dvoyni/cog/issues/318).
 
 **There are no sub-steps.** Physics updates once per `app.UpdateEvent` tick, in
-four Systems that always run in series, and alongside the rest of the frame
+five Systems that always run in series, and alongside the rest of the frame
 wherever locks allow. The step is `UpdateEvent.Dt`, fed with `ecs.Feed`. Physics
 runs on **every** published tick, catch-up ticks included; it never skips,
 because a skipped step changes the simulation.
 
-**`Integrate → Index → Detect → Solve`, in cp's own order** — positions first,
-then detection, then everything else inside Solve.
+**`Integrate → Index → Detect → Sleep → Solve`, in cp's own order** — positions
+first, then detection, then cp's `ProcessComponents`, then everything else inside
+Solve.
 
 | System | reads | writes |
 | --- | --- | --- |
-| **Integrate** | `Velocity` | `Position` |
-| **Index** | `Shape`, `Position`, `Polygon`, `Static`, `Joint`, `Hooks[Shape, HookAddedRemoved]` | `StaticIndex`, `BodyIndex`, `JointedPairs` |
+| **Integrate** | `Velocity`, `Sleeping` | `Position` |
+| **Index** | `Shape`, `Position`, `Polygon`, `Static`, `Joint`, `Sleeping`, `Hooks[Shape, HookAddedRemoved]`, `Hooks[Sleeping, HookAddedRemoved]` | `StaticIndex`, `BodyIndex`, `JointedPairs` |
 | **Detect** | `Shape`, `Position`, `StaticIndex`, `BodyIndex`, `JointedPairs` | `Contacts` |
 | *(the app's filter Systems — cp's Begin and PreSolve)* | `Contacts` + the app's own | `Contacts` |
-| **Solve** | `Dynamic`, `Constants` | `Velocity`, `Force`, `Position`, `Contacts`, `Joint` |
+| **Sleep** | `Sleep`, `Constants`, `Dynamic`, `Velocity`, `Position`, `Joint` | `Force`, `Contacts`, `Sleeping`, `Rest`, the `WakeCmd` queue |
+| **Solve** | `Dynamic`, `Constants`, `Sleeping` | `Velocity`, `Force`, `Position`, `Contacts`, `Joint` |
 | *(the app's reaction Systems — cp's PostSolve)* | `Contacts`, `Joint` | the app's own |
 
 Every System also takes `read{*Entities}`. **The only new locks are on Resources
 physics owns**, and the chain serialises nothing that could have run in parallel.
 Making Systems that run in parallel today take turns is rejected outright.
+
+Sleeping added the Sleep System and one read to three of the others:
+Integrate, Index and Solve each read the `Sleeping` Store, which only the sleep
+System writes, and every other lock the sleep System takes is one Solve, the next
+link of the chain, already holds as strongly. The argument is in
+[Sleeping and Islands](#sleeping-and-islands), and
+`TestSleepingCostsNoSystemParallelism` holds it against the engine's own
+description.
 
 Solve's read of `Constants` is the one lock in the table nothing of physics'
 writes. A read is shared, so it serialises Solve against no System that ran
@@ -653,9 +680,11 @@ Solve on every tick it is subscribed to, which is the price the app chose.
   index write through detection and no query could overlap it. The re-taken
   number makes the split matter more rather than less, and it also says plainly
   what a gameplay query on `BodyIndex` waits behind at that population.
-- **Scheduling costs about 4 × 5.7 µs ≈ 23 µs a tick.** For physics this
+- **Scheduling costs about 5 × 5.7 µs ≈ 29 µs a tick.** For physics this
   supersedes the map's finding that one System per bound plugin is the shape the
-  arithmetic supports: detection and response must be separate Systems.
+  arithmetic supports: detection and response must be separate Systems. The
+  fifth, Sleep, is paid whether or not sleeping is on, and is what sleeping costs
+  a world that leaves it off.
 
 ### Integration, per second, for one step `h`
 
@@ -704,8 +733,10 @@ the step with it, so an app that keeps writing `m·g` into `Force` under a
 gravity of zero gets the same fall, agreeing at 1e-9. It has no angular term,
 and neither a Kinematic nor a Static body receives it: the Query names
 `Dynamic`, which is cp's early return for a Kinematic body said by the ECS
-layout. cp's `SetGravity` also wakes every sleeping Body; the port has no
-sleeping yet, and the gravity-changes-wake rule arrives with it.
+layout. cp's `SetGravity` also wakes every sleeping Body, and so does a changed
+`Constants.Gravity` here: the sleep System compares the gravity it last saw
+([Sleeping and Islands](#sleeping-and-islands)). A sleeper is not
+velocity-integrated, so it gathers no gravity while it sleeps.
 
 **One property the tests must name the rate for.** cp damps exactly but applies
 Force as a plain Euler step, so terminal speed is not `F/(mλ)`:
@@ -825,13 +856,15 @@ assert on this path at all — its `"Unsolvable constraint"` assert is in
 
 ### The app orders everything else
 
-The plugin chains its own four Systems and exports their identity types; it names
+The plugin chains its own five Systems and exports their identity types; it names
 neither `input` nor `ecsscene` and adds no ordering against them, sitting in the
 ordinary group, already after input's `First`.
 
 - Gameplay that adds `Force` or moves Bodies: `Before[Integrate]`.
 - The app's filter Systems: `After[Detect]().Before[Solve]()`, taking
-  `*ecs.Write[*Contacts]`. Two filters serialise with each other; accepted.
+  `*ecs.Write[*Contacts]`. Two filters serialise with each other; accepted. A
+  filter that wants cp's order — PreSolve before the Islands are built — adds
+  `Before[Sleep]()`; unordered against it, it runs on either side.
 - Reaction Systems: after the filters. They may run alongside Solve and each
   other, except those reading this tick's Impulses, which must be after Solve.
 - The render copy from `Position` into the app's own Transform: after physics and
@@ -851,6 +884,10 @@ rendering" is written the way scene's flush already writes itself.
   half-seen.
 - **`StaticIndex`**: a Static Entity added or removed before Index in tick *t* is
   seen by Detect in tick *t*; one changed after Index is seen from *t+1*.
+- **A Sleeping body stays in `BodyIndex`**, in a grid of its own that Index
+  moves it into the tick after its Island falls asleep and out of the tick after
+  it wakes. A query asks both grids, so between the two it finds the Body in one
+  or the other and never in neither.
 - **Any future pause must keep Index running.** Index runs on every
   `UpdateEvent`, the event static writers use, so `hooks.md`'s *"a reader runs as
   often as its writers"* holds. A pause that stops Index silently stops draining
@@ -1110,7 +1147,10 @@ tick — the solved list, the slot table, the Body and Joint rows — and the sw
 Sensor Probe buffer with the Body slot beside each Hit. None of it is read across a tick, so the command releases it
 whole and changes no answer; the slot table is sized to the largest Body slot
 detection ever saw, which after a 100 000 Body spike is 400 KB, and up to twice
-that with the slack it grows by, that nothing else would ever give back. The command is the one physics handler that is not a
+that with the slack it grows by, that nothing else would ever give back. The
+sleeping Islands' records, members and quiet Contacts are Contact-list buffers and
+are packed with them; the Island build's scratch is solver scratch and is released
+with it. The command is the one physics handler that is not a
 System, so it declares itself exclusive on its own: its three write locks already
 serialise it, and the declaration is against those locks ever narrowing.
 
@@ -1350,6 +1390,222 @@ body pointers, and each gets a pure helper beside it:
 
 The app has those arguments in hand at spawn time, and *geometry stays pure as
 code: free functions over value types* is already the rule.
+
+---
+
+## Sleeping and Islands
+
+From [physics: bodies that stop moving go to sleep](https://github.com/dvoyni/cog/issues/316),
+decided on [physics: follow-up](https://github.com/dvoyni/cog/issues/315), and
+[physics: gravity](https://github.com/dvoyni/cog/issues/320), which it waited on.
+
+**Bodies that have been idle long enough stop being integrated, indexed, detected
+and solved, and wake when something disturbs them.** It is cp's
+`ProcessComponents`, **off by default** as cp's is: an app that never turns it on
+gets exactly the step it had before, with no Island built.
+
+**Why it earns its place.** The port runs cp's impulse solver, so under gravity
+every resting Contact of a pile is detected and solved every tick. A sleeping
+Island is out of the Integrate walk, out of the Body index rebuild, out of
+detection against itself and the statics, and out of Solve; what is left of it a
+tick is a walk over its Bodies comparing what they carry.
+
+### Settings
+
+```go
+type Sleep struct {
+    IdleSpeed float64 // m/s
+    Time      float64 // s
+}
+```
+
+- **A Resource the plugin registers at its zero value, which is off.** `Time` 0
+  is off, the zero-value spelling of cp's `SleepTimeThreshold` of `INFINITY`,
+  cp's default; an infinite `Time` is off as well. An app writes it through
+  `ecs.Write[*Sleep]`, once from `app.InitEvent` as a rule. Turning it off again
+  wakes every Island, rather than leaving them asleep with nothing left to wake
+  them, which is what cp's own loop would do.
+- **Idleness is cp's.** A Dynamic body is idle on a tick when `v·v·m + w²·i` —
+  cp's `KineticEnergy`, which has no ½, with its guard against `0·∞` for a Body
+  that does not turn — is at most `m·IdleSpeed²`, and then its idle time grows by
+  `h`; otherwise it is 0. An Island falls asleep when **every** member's idle time
+  has reached `Time` (cp's `ComponentActive`).
+- **`IdleSpeed` 0 falls back to cp's estimate from gravity**, `|g|²·h²` with `g`
+  read from `Constants` each tick. A world with zero gravity and `IdleSpeed` 0
+  therefore never idles: a game that writes its gravity into `Force` names an
+  `IdleSpeed` itself.
+
+### Marking: a Tag, and what the plugin keeps beside it
+
+**A sleeping Body carries the `Sleeping` Tag**, which the plugin adds and removes
+and nothing else may. Integrate, the Body index rebuild and the velocity
+integration skip it with `Without[Sleeping]`, and an app's Queries can do the
+same. A Tag was once suspect because adding one was thought to take the
+frame-wide `write{*Entities}`; it takes `write{*Store[Sleeping]}` and nothing
+else (`ecs.md`'s *Structural change*), and
+only the sleep System writes that Store.
+
+What sleeping has to remember per Body — cp's `sleepingIdleTime`, the `Force` it
+compares against, and for a sleeper the `Position` and `Velocity` it left in it
+and the Island it sleeps in — is a plugin-private Component, `Rest`, added the
+first tick sleeping is on. It is a Component and not a table in a Resource
+because the sleep System reaches it from the Entity a Contact or a Joint names,
+which is one load of a sparse array where a table keyed by Entity is a hash, and
+because a despawn empties it with every other Store. **Nothing is mirrored**:
+what a sleeper's `Position` and `Velocity` were is what they are compared
+against, and they stay the source of truth.
+
+### The sleep System
+
+**A fifth System, between Detect and Solve, where cp's `ProcessComponents`
+runs.** It keeps each awake Dynamic body's idle time, wakes every Island
+something disturbed, builds the tick's Islands, and puts to sleep those that
+have been idle for `Time`.
+
+**Islands are a union-find over the tick's awake Dynamic bodies**, joined along
+the Contact list and the Joints — cp flood-fills each Body's intrusive lists,
+which the port does not have. The buffers are kept across ticks, so the build
+allocates nothing. As cp: a Static or Kinematic body never joins an Island nor
+bridges two; a Contact or a Joint with a Kinematic body keeps its Island awake;
+a Sensor Contact neither joins nor wakes, and neither does one a filter dropped
+or ignored.
+
+**Its locks are Solve's, and the Stores and Resources sleeping adds.** It reads
+`Sleep`, `Constants`, `Dynamic`, `Velocity`, `Position` and `Joint`, and writes
+`Force`, `Contacts`, the `Sleeping` and `Rest` Stores and the `WakeCmd`'s queue.
+Every lock but the new ones is one Solve — the next link of the chain — already
+holds as strongly, so anything that could run beside the chain before still can.
+Integrate, Index and Solve each gain `read{*Store[Sleeping]}`, a Store only the
+sleep System writes; Detect gains nothing. `TestSleepingCostsNoSystemParallelism`
+reads the sets off the engine's description and holds all of it.
+
+**It reads no index**, which is what keeps it inside Solve's locks. The two
+things it needs from them Detect writes into the Contact list, holding both
+indices for read and the list for write already: where the sleepers' slots start,
+and which quiet Contacts name a Static that has left the static index.
+
+**App filters and the sleep System both write `Contacts`.** cp runs PreSolve
+before `ProcessComponents`, so a Contact it rejects neither joins nor wakes an
+Island; a filter that wants that adds `Before[SleepOnUpdate]()`. One ordered only
+`After[DetectOnUpdate]().Before[SolveOnUpdate]()` runs on either side of it, and
+the difference is one tick: which of this tick's drops the Islands see, and
+whether the filter sees the Contacts a waking Island hands back. **Left unordered
+it also costs an allocation on the ticks the sleep System is the one kept
+waiting**: the kernel's dispatch builds a map of the blocked request's resources,
+which spills to the heap past eight, and the sleep System has twelve. That is the
+kernel's dispatch line rather than the step's, and it moves with contention, not
+with the Body count; the test harness orders its filter before the sleep System,
+which is cp's order and takes the race away.
+
+### Waking
+
+The port has no setters to hook — cp's `SetPosition`, `SetVelocity`, `SetForce`
+and a dozen more each call `Activate` — so waking compares values. **An Island
+wakes, all of it, on the sleep System's next run, when:**
+
+- **an awake Body touches a sleeper** (cp's arbiter loop), or is jointed to one.
+  A sleeper is only ever detected against an awake Body, so any solid Contact
+  naming one wakes it;
+- **a sleeper's `Velocity` or `Position` differs from what the sleep System left
+  in them**: a kick, an impulse, a teleport;
+- **its `Force` differs from the one it last spent before falling asleep.** The
+  sleep System clears a sleeper's `Force` every tick — Solve does not reach it —
+  so gameplay that adds `m·g` every tick shows the same value every tick and
+  disturbs nothing, where cp's every force write wakes (`body.go` :331, :342,
+  :497). On an awake Body a `Force` differing from the previous tick's resets
+  its idle time, so a Body leaning on a wall under changing input never stutters
+  between asleep and awake;
+- **`Constants.Gravity` changes**, which wakes every Island, as cp's `SetGravity`
+  does: the sleep System keeps the gravity it last saw and compares;
+- **a support is removed**: a member despawned wakes the rest of its Island, and
+  a Static leaving the static index wakes every Island whose quiet Contacts name
+  it (cp's `RemoveShape`, `ActivateStatic`);
+- **a `WakeCmd` names it** — the way for everything else, a `Shape` or a
+  `Dynamic` changed while it sleeps among them. It follows `ShrinkCmd`: a
+  Command the plugin registers, self-exclusive, whose lock is a write on its own
+  queue and nothing wider.
+
+**A sleeper gathers no gravity.** It is not velocity-integrated while it sleeps,
+as in cp, so the tick it wakes it receives exactly one `g·h`, not one per tick
+slept. Its `Velocity` is left as it fell asleep, which cp does too; nothing zeroes
+it.
+
+### Contacts
+
+**A sleeping Island's Contacts go quiet, as cp's do**: they leave the current run
+on the tick it falls asleep, and are carried past the public view with no expiry,
+neither Continuing nor Ended. They are carried in a run of the Island's own
+rather than in the per-tick cached run, which would copy every quiet Contact
+every tick for as long as the pile sleeps. **On waking they come back Continuing,
+with their warm-start Impulses kept**, into the current run, and Solve warm-starts
+them that tick — their parties have not moved, so the geometry they carry is still
+true. Two do not come back that way, and come back **Ended** instead: one whose
+party has gone, despawned or out of the static index, and one whose party the app
+moved while it slept, whose geometry names a place it has left. cp re-detects its
+woken arbiters before it solves them again, which is the same answer.
+
+Which Contacts go quiet is exactly the ones nothing will test while the Island
+sleeps: every solid Contact whose parties are all asleep or Static. A Sensor
+Contact never goes quiet, and one between a sleeper and an awake Sensor is still
+found and reported every tick; one between two sleepers, or a sleeper and a
+Static, is not tested and ends, as cp's does.
+
+### The Body index keeps sleepers in a grid of their own
+
+**The Body index holds sleepers in a second grid, updated when an Island falls
+asleep or wakes and not rebuilt every tick.** Index moves a Body in and out on
+the next tick, off the `Sleeping` Tag's own Hook; the rebuild skips it with
+`Without[Sleeping]`. Detect tests every awake Body against it and never tests it
+against itself or the static index. **A query on the Body index asks both grids,
+so its answers do not change**, and **the static index never holds a sleeper.**
+
+cp moves a sleeping Body's Shapes into its static tree. The port's two indices
+are public and the caller chooses which to ask, so doing the same would make an
+explosion's `Overlap` on the Body index miss sleeping crates and a line-of-sight
+Probe on the static index hit them.
+
+The Body index has no Entity-to-slot table ([#441](https://github.com/dvoyni/cog/issues/441)),
+so taking sleepers out is one pass over the sleepers' grid however many leave,
+and the solver numbers the sleepers' slots after the awake grid's. A Body woken
+this tick is still in the sleepers' grid, and the Contacts it hands back are
+solved at a slot the sleep System numbers past every one Detect did.
+
+### What it costs, and where it pays
+
+Measured interleaved: every round ran each variant once, alternating, eight
+rounds, the median quoted; `go1.27.1 windows/amd64`, AMD Ryzen 9 7950X3D,
+GOMAXPROCS=32, with other builds sharing the machine, so the absolute numbers sit
+above the ones quoted elsewhere here and only the comparisons are claimed. The
+piles are `BenchmarkTheSettledPile`: stacks of four half-metre crates under the
+plugin's gravity, each stack an Island.
+
+| | sleeping off | sleeping on | |
+| --- | ---: | ---: | --- |
+| a settled pile, N = 256 | 450.8 µs | **72.7 µs** | 6.2× |
+| a settled pile, N = 1 024 | 1 570.2 µs | **116.6 µs** | 13.5× |
+| the reference scene, nothing ever sleeping, N = 256 | 126.9 µs | 127.8 µs | +0.9 µs, +0.7% |
+| the reference scene, nothing ever sleeping, N = 1 024 | 420.1 µs | 432.1 µs | +12.0 µs, +2.9% |
+
+The last two rows are `BenchmarkTheIslandBuild`: the reference scene of
+`BenchmarkTheStep`, Bodies under a Force and Contacts that never settle, with
+sleeping on at a `Time` nothing reaches, which is the Island build's whole cost
+on a tick where nothing sleeps.
+
+**The break-even is about thirteen Bodies**, for a settled pile. It is taken from
+the two sizes rather than measured at it: off costs about 1.46 µs a crate over a
+fixed 76 µs, on about 0.06 µs a crate over 58 µs, and the two lines cross near
+N = 13. Past that, a settled pile is cheaper asleep; a scene where nothing
+settles pays the Island build, a few per cent.
+
+**Sleeping off is not free.** Against `main` before sleeping, both binaries
+built and alternated the same way, `BenchmarkTheStep` went from 110.9 µs to
+123.5 µs at N = 256 and from 382.6 µs to 410.3 µs at N = 1 024, and
+`BenchmarkThePolygonStep` from 405.9 µs to 417.4 µs at N = 256 and 1 570.0 µs to
+1 553.8 µs at N = 1 024 — within its noise. What sleeping off costs is the fifth
+System's scheduling, the `Without[Sleeping]` probe in three Queries, and the
+harness's filter now ordered before the sleep System, one more link in its
+chain. It is recorded as a finding, not argued away: 7–11% of the reference step
+at these sizes, against an order of magnitude on a pile that sleeps.
 
 ---
 
@@ -1662,8 +1918,10 @@ type Constants struct {
   one of its fields is a property of the solver or of an index.
 
 cp's `Space.SetGravity` wakes every sleeping Body, and cp's idle-speed threshold
-falls back to one derived from gravity; both belong to sleeping, which is not
-built, and arrive with it.
+falls back to one derived from gravity; both arrived with sleeping. The sleep
+System reads `Constants` as Solve does: a changed `Gravity` wakes every Island,
+and an `IdleSpeed` of 0 falls back to `|g|·h` from it
+([Sleeping and Islands](#sleeping-and-islands)).
 
 ---
 
@@ -1998,8 +2256,19 @@ specification names:
 | the jointed scene, N=1 024 over 608 Contacts and 256 Joints | 19.010 |
 | the Polygon scene under `Constants` gravity, no Bodies | 18.026 |
 | the Polygon scene under `Constants` gravity, N=256 over 256 Contacts | 18.048 |
+| piles under `Constants` gravity with sleeping on, no Bodies | 19.045 |
+| the same, N=256 all asleep | 19.030 |
+| the same, N=1 024 all asleep | 19.017 |
+| the same churning — a stack kicked awake every tick — no Bodies | 20.026 |
+| the same churning, N=256, 4 000 kicks | 20.009 |
+| the same churning, N=1 024, 4 000 kicks | 20.035 |
 
-The two gravity rows were taken later, when the kernel's own line had dropped to
+The six sleeping rows were taken with sleeping, whose fifth System is one
+more subscription on every line — the kernel's own is about 18 objects a tick
+since — and their scenes compose the app's `Constants` writer, and the churning
+ones the kicking System as well; each sits flat on its own empty line, and a
+sleeping-off run of the four scenes above sits flat on 18.0. The gravity rows
+before them were taken later than the rest, when the kernel's own line had dropped to
 about 17 objects a tick, and their scene composes one more subscription — the
 app's System writing `Constants` every tick — so they sit a whole object above
 their own era's line; what they claim is their own flat slope, and repeated runs
@@ -2039,11 +2308,6 @@ shrink.
   [#409](https://github.com/dvoyni/cog/issues/409) holding the measurement.
 - **A per-Entity Contact index** (`Of(e)`): purely additive.
 - **An any-hit query**: rejected on numbers, not on principle.
-- **Sleeping and islands** (addition 7) — but **it got dearer**, and this is where
-  the bill shows. cp finds islands by flood-filling the Body's intrusive constraint
-  list and arbiter threads. With neither list, islands must be built from the
-  Contact list and a Joint walk each tick. Not blocked; the addition now owns a
-  graph build it would not have owned.
 - **Contacts as Entities**, once structural change can be deferred.
 - **Sub-steps within a tick.** The nested sub-step event was **verified working** by
   a throwaway test at about 52 µs a tick, and parked with its three rules.
@@ -2105,10 +2369,18 @@ the arbiter append :454, guarded by :444-453 (Sensor at :450, both-infinite-mass
 (defect 5)** :1036-1037 and :1045-1046 · PostSolve's `UserData` argument :767 ·
 `SetGravity` :119-126, waking every sleeping component :123-125 · gravity read
 once a step and handed to every Body :726-730 · the idle-speed fallback from
-gravity :530-536.
+gravity :530-536 · `IdleSpeedThreshold` and `SleepTimeThreshold` :21-22, the
+latter defaulting to `INFINITY` :82 · `Space.Activate` :150-205 and `Deactivate`
+:207-239 · `ProcessComponents` :525-615, its kinetic-energy test :549, its
+arbiter loop waking a sleeper or a Body touching a Kinematic one :558-573, its
+constraint loop :577-584 · `ComponentActive` :617 · `FloodFillComponent`
+:626-656.
 
 **body.go** — `BodyUpdateVelocity` :608 · `BodyUpdatePosition` :621 · defaults
-wired :85-86 · `SetTransform` :359, with `p − R·cog` at :363-366 ·
+wired :85-86 · `SetTransform` :359, with `p − R·cog` at :363-366 · `Activate`
+:370-411 · `ActivateStatic` :414 · `IsSleeping` :429 · `KineticEnergy` :443 · the
+setters that wake, `SetPosition` :286, `SetVelocity` :300, `SetForce` :332,
+`SetTorque` :343, `ApplyForceAtWorldPoint` :498 among them ·
 `AccumulateMassFromShapes` :232-260, ported in its one-shape case as
 `NewDynamicForShape`, which cp's `Shape.SetDensity` (`shape.go` :97) drives. Its
 three per-kind mass infos are `CircleShapeMassInfo` (`circle.go` :20),
@@ -2175,9 +2447,13 @@ on insert :196 · `Reindex` :318, **its `panic("implement me")`** :319.
 
 - **`Segment.SetNeighbors`** — nothing writes `a_tangent`/`b_tangent` after
   construction anywhere in the module. **Defect 4 confirmed at the source.**
-- **`Arbiter.TotalKE`** — no match in the module. The only kinetic-energy
-  computation is inline in `DebugInfo`. **So shipping `TotalKE` is porting from the
-  C**, as stated above.
+- **`Arbiter.TotalKE`** — no match in the module, and no per-arbiter kinetic
+  energy anywhere in it. cp computes kinetic energy in **three** places, all per
+  Body: `(*Body).KineticEnergy` at `body.go` :443, its caller in cp's own sleeping
+  logic at `space.go` :549, and the inline sum in `DebugInfo` at `everything.go`
+  :329. **So shipping `TotalKE` is porting from the C**, as stated above. *An
+  earlier revision said the `DebugInfo` sum was the only one; corrected by
+  [sleeping](https://github.com/dvoyni/cog/issues/316), which ports the second.*
 - **`(*Body).UpdatePosition`** — there is no such method; the default integrators
   are the package-level `BodyUpdateVelocity` and `BodyUpdatePosition`, wired as
   function pointers. The citations above are corrected to the package-level names.
@@ -2231,6 +2507,10 @@ within a group; groups after the first assume the value types exist.
 - [ ] Solve: the nine-step order, the gather through the slot table, `PreStep`,
       warm start, the iterations, and the bias applied as a position delta.
 - [ ] `TotalImpulse` and `TotalKE` as methods on the entry.
+- [x] Sleeping: the `Sleep` Resource, the `Sleeping` Tag and the plugin's `Rest`,
+      the sleep System and its Islands, the quiet Contacts, the sleepers' grid in
+      the Body index, and `WakeCmd`
+      ([#316](https://github.com/dvoyni/cog/issues/316)).
 
 **Joints**
 
