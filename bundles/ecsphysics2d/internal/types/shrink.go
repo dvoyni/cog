@@ -25,11 +25,16 @@ type ShrinkRequest struct {
 	// KeepWorldCache keeps the world-cache slab behind both grids — the
 	// world-space geometry the closed forms read.
 	KeepWorldCache bool
+	// KeepScratch keeps the solver's gather — the solved list, the slot table,
+	// the Body rows and the Joint rows with their Body table — and the swept
+	// Sensor Probe buffer. All of it is refilled from nothing every tick, so
+	// shrinking it releases it whole and changes nothing any tick computes.
+	KeepScratch bool
 }
 
 // ShrinkResponse is the bytes each area released, summed over both indices
 // where an area names two.
-type ShrinkResponse struct{ Contacts, Cached, Indices, WorldCache uintptr }
+type ShrinkResponse struct{ Contacts, Cached, Indices, WorldCache, Scratch uintptr }
 
 // add sums another area report into this one, which is how the two indices
 // report as one area each.
@@ -38,6 +43,7 @@ func (r *ShrinkResponse) add(other ShrinkResponse) {
 	r.Cached += other.Cached
 	r.Indices += other.Indices
 	r.WorldCache += other.WorldCache
+	r.Scratch += other.Scratch
 }
 
 // ShrinkCommand is the ShrinkCmd factory the physics plugin registers.
@@ -46,11 +52,21 @@ func (r *ShrinkResponse) add(other ShrinkResponse) {
 // besides — no Component Store and not the id authority — so it excludes Index,
 // Detect and Solve, which is exactly what it must, and costs a tick that does
 // not execute it nothing at all.
+//
+// It is the one physics handler that is not an ecs System, so it does not get
+// Exclusive from the System wrapper, and it needs it for the same reason a
+// System does: the three handles live in this closure, assigned by the lock
+// phase and read by the execute phase, and an invocation entering between
+// another's two would hand it the wrong ones. The three write locks already
+// serialise it, so the declaration costs nothing today. It is there against the
+// locks changing — if one were ever narrowed to a read, the protection would go
+// with it and nothing would fail.
 func ShrinkCommand() (kernel.Lock, kernel.Execute[ShrinkRequest, ShrinkResponse]) {
 	var contacts kernel.Write[*Contacts]
 	var statics kernel.Write[*StaticIndex]
 	var bodies kernel.Write[*BodyIndex]
 	return func(access kernel.ResourceAccess) {
+			access.Exclusive()
 			contacts = access.GetWrite[*Contacts]()
 			statics = access.GetWrite[*StaticIndex]()
 			bodies = access.GetWrite[*BodyIndex]()

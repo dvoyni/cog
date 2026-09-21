@@ -166,8 +166,8 @@
 //
 // # Memory is given back when the app asks and never before
 //
-// The Contact buffers, the two grids and the world-cache slab keep their
-// high-water capacity, so a steady scene allocates nothing. ShrinkCmd is what
+// The Contact buffers, the two grids, the world-cache slab and the solver's
+// scratch keep their high-water capacity, so a steady scene allocates nothing. ShrinkCmd is what
 // gives that capacity back, with a Keep option per area, and it is the only
 // thing in the package that allocates on purpose. Shrinking on a heuristic was
 // rejected — it would put an allocation into the tick after every lull — and so
