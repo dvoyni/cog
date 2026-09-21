@@ -14,90 +14,33 @@ import (
 	"github.com/qmuntal/gltf/modeler"
 )
 
-// stubBackend is a gfx.Backend that mints ids and does nothing else. Everything
-// this file asserts — residency, expansion, culling, packing — scene decides
-// before a backend is reached, which is what makes the whole path assertable
-// with no GPU. It declares no shader layout, so gfx drops every parameter the
-// frame binds, which is also fine: what a draw binds is scene's business and is
-// tested there.
-type stubBackend struct {
-	nextTexture gfx.TextureID
-	nextBuffer  gfx.BufferID
-	nextID      uint32
+// The files the drawing tests load. Each is built rather than read, because
+// this package has no testdata and the point is that the path a Model
+// Component holds is a file scene really loads.
+const (
+	propsModel    = "models/props.glb"
+	animatedModel = "models/animated.glb"
+)
+
+// triangle is the crate's one triangle, and quad the barrel's two: the vertex
+// count a draw reaches the backend with is what tells the two meshes apart.
+var (
+	triangle = [][3]float32{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}}
+	quad     = [][3]float32{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}}
+)
+
+// meshOf adds one mesh of unindexed positions to doc and returns its index.
+func meshOf(doc *gltf.Document, name string, positions [][3]float32) int {
+	doc.Meshes = append(doc.Meshes, &gltf.Mesh{
+		Name:       name,
+		Primitives: []*gltf.Primitive{{Attributes: gltf.PrimitiveAttributes{gltf.POSITION: modeler.WritePosition(doc, positions)}}},
+	})
+	return len(doc.Meshes) - 1
 }
 
-func (b *stubBackend) Ready() bool { return true }
-
-func (b *stubBackend) NewTexture() gfx.TextureID {
-	b.nextTexture++
-	return b.nextTexture
-}
-
-func (b *stubBackend) NewBuffer() gfx.BufferID {
-	b.nextBuffer++
-	return b.nextBuffer
-}
-
-func (b *stubBackend) next() uint32 {
-	b.nextID++
-	return b.nextID
-}
-
-func (b *stubBackend) NewSampler(gfx.SamplerDesc) (gfx.SamplerID, error) {
-	return gfx.SamplerID(b.next()), nil
-}
-
-func (b *stubBackend) FreeSampler(gfx.SamplerID) {}
-
-func (b *stubBackend) NewShader(gfx.ShaderDesc) (gfx.ShaderID, error) {
-	return gfx.ShaderID(b.next()), nil
-}
-
-func (b *stubBackend) FreeShader(gfx.ShaderID) {}
-
-func (b *stubBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout { return gfx.ShaderLayout{} }
-
-func (b *stubBackend) NewPipeline(gfx.PipelineDesc) (gfx.PipelineID, error) {
-	return gfx.PipelineID(b.next()), nil
-}
-
-func (b *stubBackend) FreePipeline(gfx.PipelineID) {}
-
-func (b *stubBackend) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
-	return gfx.TextureViewID(1), 1600, 1200
-}
-
-// TextureFormat answers for no texture: this double keeps no descriptors, and
-// gfx falls back to the frame buffer's format for a target it cannot place -
-// which is what every pipeline in this fixture was keyed to anyway.
-func (b *stubBackend) TextureFormat(gfx.TextureID) (gfx.TextureFormat, bool) {
-	return 0, false
-}
-
-func (b *stubBackend) TextureView(gfx.TextureID, int, int) gfx.TextureViewID {
-	return gfx.TextureViewID(b.next())
-}
-
-func (b *stubBackend) Limits() gfx.Limits { return gfx.DefaultLimits() }
-
-func (b *stubBackend) Execute(*gfx.Queue) {}
-
-func (b *stubBackend) TakeCapture() (gfx.Capture, bool) { return gfx.Capture{}, false }
-
-// crateGLB is the smallest drawable file: one triangle, one node, one scene. It
-// is built rather than read, because this package has no testdata and the point
-// is that the path a Model Component holds is a file scene really loads.
-func crateGLB(t testing.TB) []byte {
+// encodeGLB writes doc as a binary glTF file.
+func encodeGLB(t testing.TB, doc *gltf.Document) []byte {
 	t.Helper()
-	doc := &gltf.Document{Asset: gltf.Asset{Version: "2.0"}}
-	positions := modeler.WritePosition(doc, [][3]float32{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}})
-	doc.Meshes = []*gltf.Mesh{{
-		Name:       "crate",
-		Primitives: []*gltf.Primitive{{Attributes: gltf.PrimitiveAttributes{gltf.POSITION: positions}}},
-	}}
-	doc.Nodes = []*gltf.Node{{Name: "crate", Mesh: gltf.Index(0)}}
-	doc.Scenes = []*gltf.Scene{{Name: "scene", Nodes: []int{0}}}
-	doc.Scene = gltf.Index(0)
 	var buffer bytes.Buffer
 	if err := gltf.NewEncoder(&buffer).Encode(doc); err != nil {
 		t.Fatalf("encoding the model: %v", err)
@@ -105,29 +48,104 @@ func crateGLB(t testing.TB) []byte {
 	return buffer.Bytes()
 }
 
+// crateGLB is the smallest drawable file: one triangle, one node, one scene.
+func crateGLB(t testing.TB) []byte {
+	t.Helper()
+	doc := &gltf.Document{Asset: gltf.Asset{Version: "2.0"}}
+	meshOf(doc, "crate", triangle)
+	doc.Nodes = []*gltf.Node{{Name: "crate", Mesh: gltf.Index(0)}}
+	doc.Scenes = []*gltf.Scene{{Name: "scene", Nodes: []int{0}}}
+	doc.Scene = gltf.Index(0)
+	return encodeGLB(t, doc)
+}
+
+// propsGLB is a file a Scene and a Node selector each change the answer for:
+// its default scene holds the barrel alone, and the scene named "props" holds
+// the crate and the barrel. Only {props, crate} draws the triangle and nothing
+// else.
+func propsGLB(t testing.TB) []byte {
+	t.Helper()
+	doc := &gltf.Document{Asset: gltf.Asset{Version: "2.0"}}
+	meshOf(doc, "crate", triangle)
+	meshOf(doc, "barrel", quad)
+	doc.Nodes = []*gltf.Node{
+		{Name: "crate", Mesh: gltf.Index(0)},
+		{Name: "barrel", Mesh: gltf.Index(1)},
+	}
+	doc.Scenes = []*gltf.Scene{
+		{Name: "scene", Nodes: []int{1}},
+		{Name: "props", Nodes: []int{0, 1}},
+	}
+	doc.Scene = gltf.Index(0)
+	return encodeGLB(t, doc)
+}
+
+// animatedGLB is the crate on a node two clips spin, which is a single-joint
+// skin: a draw of it that plays anything packs a sceneAnim block, one play
+// record per clip it resolved.
+func animatedGLB(t testing.TB) []byte {
+	t.Helper()
+	doc := &gltf.Document{Asset: gltf.Asset{Version: "2.0"}}
+	meshOf(doc, "crate", triangle)
+	doc.Nodes = []*gltf.Node{{Name: "crate", Mesh: gltf.Index(0)}}
+	doc.Scenes = []*gltf.Scene{{Name: "scene", Nodes: []int{0}}}
+	doc.Scene = gltf.Index(0)
+	for _, clip := range []struct {
+		name string
+		end  [4]float32
+	}{{"Walk", [4]float32{0, 0, 1, 0}}, {"Idle", [4]float32{1, 0, 0, 0}}} {
+		sampler := &gltf.AnimationSampler{
+			Input:  modeler.WriteAccessor(doc, gltf.TargetNone, []float32{0, 1}),
+			Output: modeler.WriteAccessor(doc, gltf.TargetNone, [][4]float32{{0, 0, 0, 1}, clip.end}),
+		}
+		doc.Animations = append(doc.Animations, &gltf.Animation{
+			Name:     clip.name,
+			Samplers: []*gltf.AnimationSampler{sampler},
+			Channels: []*gltf.AnimationChannel{{
+				Sampler: 0,
+				Target:  gltf.AnimationChannelTarget{Node: gltf.Index(0), Path: gltf.TRSRotation},
+			}},
+		})
+	}
+	return encodeGLB(t, doc)
+}
+
 // crateModelComponent is a Model naming the crate file's whole default scene.
 func crateModelComponent() *ecsscene.Model {
 	return &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}}
 }
 
-// newDrawingHarness is the harness with a backend, a viewport and the crate on
-// disk: the whole engine, able to decide a frame.
+// defaultEye is where the harness camera stands, looking at the origin.
+var defaultEye = m.LookAt(m.Vec3{Z: 30}, m.Vec3{}, m.Vec3{Y: 1})
+
+// newDrawingHarness is the harness with a recording backend, a viewport, every
+// model file on disk and one camera looking at the origin: the whole engine,
+// able to decide and render a frame.
 func newDrawingHarness(t testing.TB, ids uint32) *harness {
 	t.Helper()
-	files := fstest.MapFS{crateModel: &fstest.MapFile{Data: crateGLB(t)}}
-	h := newHarnessWith(t, files, ids, &stubBackend{})
+	h := newCameralessHarness(t, ids)
+	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{FovY: 1.0472, Near: 0.1, Far: 200}})
+	return h
+}
+
+// newCameralessHarness is newDrawingHarness for a test that places its own
+// cameras.
+func newCameralessHarness(t testing.TB, ids uint32) *harness {
+	t.Helper()
+	files := fstest.MapFS{
+		crateModel:    &fstest.MapFile{Data: crateGLB(t)},
+		propsModel:    &fstest.MapFile{Data: propsGLB(t)},
+		animatedModel: &fstest.MapFile{Data: animatedGLB(t)},
+	}
+	h := newHarnessWith(t, files, ids, &testBackend{})
 	h.kernel.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
 		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
-	})
-	h.spawn(t, spawnRequest{
-		Place:  m.LookAt(m.Vec3{Z: 30}, m.Vec3{}, m.Vec3{Y: 1}),
-		Camera: &ecsscene.Camera{FovY: 1.0472, Near: 0.1, Far: 200},
 	})
 	return h
 }
 
-// frameUntil runs frames until ready. A model load is two commands on their own
-// goroutines, so residency lands some frames after the draw that asked for it.
+// frameUntil runs frames until ready. What takes frames is the very first
+// ones, before the viewport and the backend are up, and a model's residency.
 func (h *harness) frameUntil(t testing.TB, what string, ready func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -143,9 +161,59 @@ func (h *harness) frameUntil(t testing.TB, what string, ready func() bool) {
 	}
 }
 
+// drawn is every instance the last frame drew.
+func (h *harness) drawn() []drawnInstance { return h.backend.instances() }
+
+// where narrows instances to those one predicate admits.
+func where(instances []drawnInstance, admit func(drawnInstance) bool) []drawnInstance {
+	var out []drawnInstance
+	for _, instance := range instances {
+		if admit(instance) {
+			out = append(out, instance)
+		}
+	}
+	return out
+}
+
+// at admits the instances standing at one place, which is how a test finds
+// the Entity it placed there.
+func at(position m.Vec3) func(drawnInstance) bool {
+	return func(d drawnInstance) bool { return nearVec3(d.position(), position) }
+}
+
+// ofTriangle admits the draws of a three-vertex mesh, and ofQuad the draws of
+// the barrel's six.
+func ofTriangle(d drawnInstance) bool { return d.count == 3 }
+func ofQuad(d drawnInstance) bool     { return d.count == 6 }
+
+// inPass admits the instances drawn into the pass one camera emitted for one
+// tag, which scene labels the pass with.
+func inPass(label string) func(drawnInstance) bool {
+	return func(d drawnInstance) bool { return d.pass.Label == label }
+}
+
+// positions lists where instances stand, for a failure message.
+func positions(instances []drawnInstance) []m.Vec3 {
+	out := []m.Vec3{}
+	for _, instance := range instances {
+		out = append(out, instance.position())
+	}
+	return out
+}
+
+// noErrors fails the test on anything the engine reported: a draw gfx dropped
+// is a report, and a test that asserts what was drawn must see every drop.
+func (h *harness) noErrors(t testing.TB) {
+	t.Helper()
+	for _, err := range h.errs.snapshot() {
+		t.Errorf("the frame reported %v", err)
+	}
+}
+
 // TestDrawableEntitiesBecomeInstancesInAPass is the end-to-end: Components on a
 // real world, through the binding's one System, into the real scene plugin,
-// which loads the file a Model names and packs the Entities into a pass.
+// which loads the file a Model names and packs the Entities into a pass that
+// reaches the backend.
 //
 // Nothing between the Component and the instance was written for this test.
 func TestDrawableEntitiesBecomeInstancesInAPass(t *testing.T) {
@@ -153,23 +221,16 @@ func TestDrawableEntitiesBecomeInstancesInAPass(t *testing.T) {
 	h.spawn(t, spawnRequest{Count: 3, Step: 2, Model: crateModelComponent()})
 
 	h.frameUntil(t, "the crate to become resident", func() bool {
-		passes := h.passes(t)
-		return len(passes) == 1 && passes[0].Instances == 3
+		return len(where(h.drawn(), ofTriangle)) == 3
 	})
 
-	passes := h.passes(t)
-	if passes[0].Recorded != 3 || passes[0].Culled != 0 {
-		t.Fatalf("the pass recorded %d draws and culled %d, want 3 and 0",
-			passes[0].Recorded, passes[0].Culled)
+	crates := where(h.drawn(), ofTriangle)
+	for _, x := range []float32{0, 2, 4} {
+		if got := where(crates, at(m.Vec3{X: x})); len(got) != 1 {
+			t.Errorf("the crate at x=%v drew %d instances, want 1; the crates stand at %v", x, len(got), positions(crates))
+		}
 	}
-	// Three separate Model calls are three batches: the binding records one
-	// call per Entity and batches nothing, and scene does not merge calls.
-	if len(passes[0].Batches) != 3 {
-		t.Fatalf("the pass emitted %d batches for three separate calls", len(passes[0].Batches))
-	}
-	for _, err := range h.errs.snapshot() {
-		t.Errorf("the frame reported %v", err)
-	}
+	h.noErrors(t)
 }
 
 // TestADespawnedDrawableStopsDrawing is the other end of the lifecycle, and it
@@ -180,36 +241,44 @@ func TestADespawnedDrawableStopsDrawing(t *testing.T) {
 	first := h.spawn(t, spawnRequest{Count: 2, Step: 2, Model: crateModelComponent()})
 
 	h.frameUntil(t, "the crate to become resident", func() bool {
-		passes := h.passes(t)
-		return len(passes) == 1 && passes[0].Instances == 2
+		return len(where(h.drawn(), ofTriangle)) == 2
 	})
 
 	h.despawn(t, first)
 	h.frame(t)
 
-	if passes := h.passes(t); len(passes) != 1 || passes[0].Instances != 1 {
-		t.Fatalf("after the despawn the pass packed %v, want one instance", passes)
+	crates := where(h.drawn(), ofTriangle)
+	if len(crates) != 1 || !at(m.Vec3{X: 2})(crates[0]) {
+		t.Fatalf("after the despawn the crate drew at %v, want only the survivor at x=2", positions(crates))
 	}
 }
 
 // TestAPresentMaterialWithNoTagsDrawsNothing is presence meaning what scene's
-// empty material means: a material serving no pass. Every Entity here reaches
-// the pass, and only the two with no Material are packed — the bundled PBR for
-// the mesh and the file's own material for the model.
+// empty material means: a material serving no pass. Only the two Entities with
+// no Material draw - the bundled PBR for the mesh and the file's own material
+// for the model - and the two with an empty one draw nowhere.
 func TestAPresentMaterialWithNoTagsDrawsNothing(t *testing.T) {
 	h := newDrawingHarness(t, 256)
 	ref := h.bake(t)
-	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}})
-	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}, Material: &ecsscene.Material{}})
-	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{X: 2}}, Model: crateModelComponent()})
-	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{X: 4}}, Model: crateModelComponent(), Material: &ecsscene.Material{}})
+	h.spawn(t, spawnRequest{Place: m.At(-2, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}})
+	h.spawn(t, spawnRequest{Place: m.At(-4, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}, Material: &ecsscene.Material{}})
+	h.spawn(t, spawnRequest{Place: m.At(2, 0, 0), Model: crateModelComponent()})
+	h.spawn(t, spawnRequest{Place: m.At(4, 0, 0), Model: crateModelComponent(), Material: &ecsscene.Material{}})
 
-	h.frameUntil(t, "every draw to reach the pass", func() bool {
-		passes := h.passes(t)
-		return len(passes) == 1 && passes[0].Recorded == 4
+	h.frameUntil(t, "the crate to become resident", func() bool {
+		return len(where(h.drawn(), at(m.Vec3{X: 2}))) > 0
 	})
 
-	if pass := h.passes(t)[0]; pass.Instances != 2 {
-		t.Fatalf("the pass packed %d instances of 4 recorded draws, want the 2 without a Material", pass.Instances)
+	drawn := h.drawn()
+	for _, x := range []float32{-2, 2} {
+		if got := where(drawn, at(m.Vec3{X: x})); len(got) != 1 {
+			t.Errorf("the Entity with no Material at x=%v drew %d instances, want 1", x, len(got))
+		}
 	}
+	for _, x := range []float32{-4, 4} {
+		if got := where(drawn, at(m.Vec3{X: x})); len(got) != 0 {
+			t.Errorf("the Entity with an empty Material at x=%v drew %d instances, want none", x, len(got))
+		}
+	}
+	h.noErrors(t)
 }
