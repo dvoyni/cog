@@ -6,8 +6,9 @@ import (
 )
 
 // ShrinkCmd gives physics' memory back after a spike, and it is the only thing
-// in the package that does. The Contact buffers, the pair tables, the two grids
-// and the world-cache slab all keep their high-water capacity, so a steady
+// in the package that does. The Contact buffers, the pair tables, the two grids,
+// the world-cache slab and the solver's scratch all keep their high-water
+// capacity, so a steady
 // scene never allocates; after a level load, a boss's debris or a screen of
 // projectiles that capacity stays until the app executes this:
 //
@@ -30,7 +31,9 @@ import (
 // The physics plugin registers it, holding write on Contacts, StaticIndex and
 // BodyIndex and nothing besides — no Component Store and not the id authority.
 // That excludes Index, Detect and Solve while it runs, which is exactly what it
-// must, and costs a tick that does not execute it nothing at all.
+// must, and costs a tick that does not execute it nothing at all. It also
+// declares itself exclusive, so two invocations never overlap whatever its
+// locks become.
 type ShrinkCmd kernel.Command[ShrinkRequest, ShrinkResponse]
 
 // ShrinkRequest names the areas a ShrinkCmd leaves alone. The zero value
@@ -50,7 +53,12 @@ type ShrinkCmd kernel.Command[ShrinkRequest, ShrinkResponse]
 //     otherwise is packed — and packing it is the one area that collects
 //     something a steady state leaks rather than merely slack, because a Static
 //     replaced by a Shape needing a longer run abandons its old one where it
-//     lies and only a Clear the static index never gets would reclaim it.
+//     lies and only a Clear the static index never gets would reclaim it;
+//   - KeepScratch keeps the solver's gather — the solved list, the Body slot
+//     table and rows, the Joint rows — and the swept Sensor Probe buffer, which
+//     otherwise are released whole. Nothing in them is read across a tick, so
+//     shrinking them changes no answer; the slot table is sized to the largest
+//     Body slot detection ever saw, so it is what a large spike leaves behind.
 type ShrinkRequest = types.ShrinkRequest
 
 // ShrinkResponse is the bytes a ShrinkCmd released, per area, summed over both

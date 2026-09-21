@@ -971,7 +971,15 @@ the walk as too slow.
 The two buffers keep their largest size and answer **a plugin shrink command
 modelled on `ecs.ShrinkCmd`**, with an opt-out per area. Cached entries hold
 memory for the persistence window, are invisible to the app, and join the shrink
-command's areas. The two index grids grow and shrink the same way.
+command's areas. The two index grids grow and shrink the same way. **So does the
+solver's scratch**, the fifth area: the gather Solve refills from nothing every
+tick — the solved list, the slot table, the Body and Joint rows — and the swept
+Sensor Probe buffer. None of it is read across a tick, so the command releases it
+whole and changes no answer; the slot table is sized to the largest Body slot
+detection ever saw, which after a 100 000 Body spike is 400 KB, and up to twice
+that with the slack it grows by, that nothing else would ever give back. The command is the one physics handler that is not a
+System, so it declares itself exclusive on its own: its three write locks already
+serialise it, and the declaration is against those locks ever narrowing.
 
 ### Which pairs are reported
 

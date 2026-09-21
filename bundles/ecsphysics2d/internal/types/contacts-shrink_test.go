@@ -118,3 +118,100 @@ func spikedContacts(t testing.TB, spike, quiet int) (*Contacts, int) {
 	}
 	return contacts, held
 }
+
+// TestTheZeroRequestGivesTheSolverScratchBack is the fifth area: the gather
+// Solve refills from nothing every tick, and the swept Sensor Probe buffer
+// detection refills once a Sensor. None of it is read across a tick, so the
+// zero request releases all of it, and the slot table a 100 000 Body spike
+// sized is the bulk of that.
+func TestTheZeroRequestGivesTheSolverScratchBack(t *testing.T) {
+	const spike = 100_000
+	contacts := scratchedContacts(spike)
+	held := contacts.scratchBytes()
+	step := contacts.solver.step
+
+	released := contacts.shrink(ShrinkRequest{})
+	t.Logf("a %d slot spike released %d bytes of solver and Probe scratch", spike, released.Scratch)
+	if released.Scratch < spike*4 {
+		t.Errorf("the zero request released %d scratch bytes after a %d slot spike, want at least the %d its slot table needed",
+			released.Scratch, spike, spike*4)
+	}
+	if released.Scratch != held {
+		t.Errorf("the zero request released %d scratch bytes of the %d held", released.Scratch, held)
+	}
+	if left := contacts.scratchBytes(); left != 0 {
+		t.Errorf("the shrunk scratch still holds %d bytes", left)
+	}
+	if contacts.solver.step != step {
+		t.Errorf("the shrink changed the warm start's previous step from %v to %v", step, contacts.solver.step)
+	}
+
+	// The tick after regrows it, which is what the command says it does.
+	contacts.maxSlot = 4
+	contacts.beginSolve()
+	if len(contacts.solver.slotDense) != 4 || len(contacts.solver.rows) != 1 {
+		t.Errorf("the tick after a shrink gathered %d slots into %d rows, want 4 and the one immovable row",
+			len(contacts.solver.slotDense), len(contacts.solver.rows))
+	}
+}
+
+// TestKeepScratchOptsTheSolverScratchOut pins the fifth opt-out, and that it
+// is an area of its own: keeping it leaves every buffer where it was, and
+// keeping the other four still shrinks it.
+func TestKeepScratchOptsTheSolverScratchOut(t *testing.T) {
+	kept := scratchedContacts(4096)
+	held := kept.scratchBytes()
+	released := kept.shrink(ShrinkRequest{KeepScratch: true})
+	if released.Scratch != 0 {
+		t.Errorf("a kept scratch area released %d bytes", released.Scratch)
+	}
+	if got := kept.scratchBytes(); got != held {
+		t.Errorf("a kept scratch area holds %d bytes, want the %d it held", got, held)
+	}
+
+	alone := scratchedContacts(4096)
+	released = alone.shrink(ShrinkRequest{KeepContacts: true, KeepCached: true})
+	if released.Scratch != held || released.Contacts != 0 || released.Cached != 0 {
+		t.Errorf("shrinking the scratch alone released %+v, want %d scratch bytes and nothing else", released, held)
+	}
+}
+
+// TestASecondContactShrinkReleasesNothingAndAllocatesNothing is the idempotence
+// over every area the Contact list owns, the scratch included: the first
+// request takes the slack, the second finds none and costs no allocation.
+func TestASecondContactShrinkReleasesNothingAndAllocatesNothing(t *testing.T) {
+	contacts, _ := spikedContacts(t, 512, 4)
+	grown := scratchedContacts(4096)
+	contacts.solver, contacts.probes, contacts.maxSlot = grown.solver, grown.probes, grown.maxSlot
+	if contacts.scratchBytes() == 0 || len(contacts.entries) == 0 {
+		t.Fatal("the Contact list holds neither entries nor scratch, so a second shrink proves nothing")
+	}
+
+	contacts.shrink(ShrinkRequest{})
+	again := contacts.shrink(ShrinkRequest{})
+	if again != (ShrinkResponse{}) {
+		t.Errorf("a second shrink released %+v, want nothing", again)
+	}
+	if allocs := testing.AllocsPerRun(100, func() { contacts.shrink(ShrinkRequest{}) }); allocs != 0 {
+		t.Errorf("a second shrink allocates %.0f objects, want none", allocs)
+	}
+}
+
+// scratchedContacts is a Contact list whose scratch a tick of slots Bodies
+// grew: the slot table and the gather through beginSolve, a Joint's row and
+// Body table through the two buffers the Joint walk fills, and the Probe buffer
+// through a Sensor's Hits.
+func scratchedContacts(slots int) *Contacts {
+	contacts := NewContacts(1)
+	contacts.maxSlot = int32(slots)
+	contacts.beginSolve()
+	for i := range 64 {
+		contacts.solver.assign(int32(i), testEntity(i))
+		contacts.solver.solved = append(contacts.solver.solved, int32(i))
+		contacts.solver.joints.bodies.put(testEntity(i), int32(i+1))
+		contacts.probes = append(contacts.probes, Hit{Entity: testEntity(i)})
+	}
+	contacts.solver.joints.rows = append(contacts.solver.joints.rows, jointRow{})
+	contacts.solver.step = 1.0 / 60
+	return contacts
+}

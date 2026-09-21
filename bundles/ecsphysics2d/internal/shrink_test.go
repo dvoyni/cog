@@ -47,6 +47,9 @@ func TestThePluginRegistersShrinkOverItsOwnResourcesAlone(t *testing.T) {
 			t.Fatalf("ShrinkCmd reads %v and uses %v, want nothing besides its three writes",
 				command.Reads, command.Uses)
 		}
+		if !command.SelfExclusive {
+			t.Fatal("ShrinkCmd is not self-exclusive, so the closure its handles live in is shared by overlapping invocations as soon as a lock narrows")
+		}
 		return
 	}
 	t.Fatal("the architecture has no ecsphysics2d.ShrinkCmd")
@@ -76,13 +79,13 @@ func TestAShrunkPhysicsWorldReturnsToItsSteadyState(t *testing.T) {
 		if shrink {
 			released := world.kernel.ExecuteCommand[ecsphysics2d.ShrinkCmd](ecsphysics2d.ShrinkRequest{})
 			t.Logf("the zero request after a %d Body spike released %+v", spikeBodies, released)
-			if released.Contacts == 0 || released.Indices == 0 || released.WorldCache == 0 {
-				t.Fatalf("the zero request after a spike released %+v, want Contacts, Indices and WorldCache above 0",
+			if released.Contacts == 0 || released.Indices == 0 || released.WorldCache == 0 || released.Scratch == 0 {
+				t.Fatalf("the zero request after a spike released %+v, want Contacts, Indices, WorldCache and Scratch above 0",
 					released)
 			}
 		}
 		// The regrowth ticks, excluded: the Contact buffers, the pair tables,
-		// the cell lists and the slab all grow back to what the steady scene
+		// the cell lists, the slab and the solver scratch all grow back to what the steady scene
 		// needs.
 		world.run(t, 100)
 
@@ -105,6 +108,111 @@ func TestAShrunkPhysicsWorldReturnsToItsSteadyState(t *testing.T) {
 	if shrunk > control+0.05 {
 		t.Errorf("after the zero request the step costs %.3f objects a tick against its control's %.3f",
 			shrunk, control)
+	}
+}
+
+// TestAShrunkPhysicsWorldGivesTheSolverScratchBack is the fifth area in the
+// same shape: spike, cut, shrink the scratch alone, exclude the regrowth ticks,
+// and measure against a control that had the same spike and no shrink.
+//
+// What it measures is what each world still holds. The scratch is released
+// whole rather than clipped, because nothing in it is read across a tick, so a
+// scratch-only shrink run as a probe at the end reports exactly what the world
+// was holding: the control still holds its spike's slot table and gather, and
+// the shrunk world holds what the steady scene regrew. The step after it must
+// be back on its control's allocation line, and — because the scratch carries
+// nothing a later tick reads — it must move every Body exactly where the
+// control moved it.
+func TestAShrunkPhysicsWorldGivesTheSolverScratchBack(t *testing.T) {
+	const ticks = 2_000
+	scratchOnly := ecsphysics2d.ShrinkRequest{
+		KeepContacts: true, KeepCached: true, KeepIndices: true, KeepWorldCache: true,
+	}
+
+	type outcome struct {
+		held     uintptr
+		objects  float64
+		touching int
+		regrown  []m.Vec2d
+		places   []m.Vec2d
+	}
+	measure := func(shrink bool) outcome {
+		world := newShrinkWorld(t)
+		world.grow(t, steadyBodies)
+		world.run(t, 100)
+		world.grow(t, spikeBodies)
+		world.run(t, 2)
+		world.cut(t, steadyBodies)
+		world.run(t, 2)
+
+		if shrink {
+			released := world.kernel.ExecuteCommand[ecsphysics2d.ShrinkCmd](scratchOnly)
+			t.Logf("the scratch alone after a %d Body spike released %+v", spikeBodies, released)
+			if released.Scratch == 0 {
+				t.Fatalf("the scratch alone after a spike released %+v, want Scratch above 0", released)
+			}
+			if released.Contacts != 0 || released.Cached != 0 || released.Indices != 0 || released.WorldCache != 0 {
+				t.Fatalf("the scratch alone released %+v, want every kept area at 0", released)
+			}
+		}
+		// The regrowth ticks, excluded: the slot table, the gather and the
+		// Probe buffer grow back to what the steady scene needs. The first of
+		// them is the one that regrows it all at once, so where it leaves the
+		// Bodies is kept.
+		var result outcome
+		world.run(t, 1)
+		result.regrown = world.places(t)
+		world.run(t, 99)
+
+		result.touching = world.touching(t)
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		world.run(t, ticks)
+		runtime.ReadMemStats(&after)
+		result.objects = float64(after.Mallocs-before.Mallocs) / ticks
+		result.places = world.places(t)
+		result.held = world.kernel.ExecuteCommand[ecsphysics2d.ShrinkCmd](scratchOnly).Scratch
+		return result
+	}
+
+	control := measure(false)
+	shrunk := measure(true)
+	t.Logf("scratch held after a spike: control %d bytes, after the shrink %d; objects a tick %.3f against %.3f over %d and %d Contacts",
+		control.held, shrunk.held, control.objects, shrunk.objects, control.touching, shrunk.touching)
+	if control.touching == 0 || shrunk.touching == 0 {
+		t.Fatal("the measured scene has no Contacts at all, so it gathers nothing for the solver")
+	}
+	if shrunk.held >= control.held {
+		t.Errorf("after the shrink the world holds %d scratch bytes against its control's %d, want fewer",
+			shrunk.held, control.held)
+	}
+	// The spike's slot table alone is four bytes a Body slot, and the control
+	// still holds it.
+	if gave := control.held - shrunk.held; gave < 4*spikeBodies {
+		t.Errorf("the shrink gave back %d scratch bytes, want at least the %d a %d Body slot table holds",
+			gave, 4*spikeBodies, spikeBodies)
+	}
+	if shrunk.objects > control.objects+0.05 {
+		t.Errorf("after the shrink the step costs %.3f objects a tick against its control's %.3f",
+			shrunk.objects, control.objects)
+	}
+	samePlaces(t, "the tick after the shrink", control.regrown, shrunk.regrown)
+	samePlaces(t, "the end of the measurement", control.places, shrunk.places)
+}
+
+// samePlaces fails unless two worlds left every Body at exactly the same place.
+func samePlaces(t *testing.T, when string, control, shrunk []m.Vec2d) {
+	t.Helper()
+	if len(shrunk) != len(control) || len(control) == 0 {
+		t.Fatalf("at %s the two worlds hold %d and %d Bodies, want the same steady scene",
+			when, len(control), len(shrunk))
+	}
+	for i := range control {
+		if shrunk[i] != control[i] {
+			t.Fatalf("at %s Body %d is at %v after the shrink and at %v in its control: shrinking the scratch changed the simulation",
+				when, i, shrunk[i], control[i])
+		}
 	}
 }
 
@@ -177,10 +285,16 @@ func (w *shrinkWorld) touching(t testing.TB) int {
 	return w.kernel.ExecuteCommand[shrinkCountCmd](struct{}{})
 }
 
+func (w *shrinkWorld) places(t testing.TB) []m.Vec2d {
+	t.Helper()
+	return w.kernel.ExecuteCommand[shrinkPlacesCmd](struct{}{})
+}
+
 type (
-	shrinkGrowCmd  kernel.Command[int, struct{}]
-	shrinkCutCmd   kernel.Command[int, struct{}]
-	shrinkCountCmd kernel.Command[struct{}, int]
+	shrinkGrowCmd   kernel.Command[int, struct{}]
+	shrinkCutCmd    kernel.Command[int, struct{}]
+	shrinkCountCmd  kernel.Command[struct{}, int]
+	shrinkPlacesCmd kernel.Command[struct{}, []m.Vec2d]
 )
 
 // shrinkPushOnUpdate is the game's own Force write, ordered ahead of the step
@@ -236,6 +350,18 @@ func (g *shrinkGame) Register(registrar *kernel.Registrar, _ any) error {
 		answer *ecs.Resp[int],
 	) {
 		answer.Set(contacts.Get().Len())
+	}))
+	registrar.HandleCommand[shrinkPlacesCmd](ecs.ToExecute[struct{}, []m.Vec2d](registrar, func(
+		_ struct{},
+		places *ecs.Get[ecsphysics2d.Position],
+		answer *ecs.Resp[[]m.Vec2d],
+	) {
+		out := make([]m.Vec2d, 0, len(g.held))
+		for _, e := range g.held {
+			place, _ := places.Of(e)
+			out = append(out, place.Current)
+		}
+		answer.Set(out)
 	}))
 	registrar.Subscribe[shrinkPushOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, func(
 		q *ecs.Query[pushQuery],
