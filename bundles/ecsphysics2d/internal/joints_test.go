@@ -344,8 +344,8 @@ func TestAJointAnchorsToTheWorldThroughAStaticBody(t *testing.T) {
 // layer-C scene for the Joint solver, against a closed form rather than against
 // cp: a mass hung from a pin Joint at a small Angle swings at 2*pi*sqrt(L/g).
 //
-// Gravity is addition 4 and the port ships none, so the scene writes m*g into
-// Force from an ordinary System — which incidentally checks that addition 4
+// The scene writes m*g into Force from an ordinary System and leaves
+// Constants.Gravity at zero, which is the same fall and checks that gravity
 // really is optional rather than assumed. A Force written this tick moves the
 // Body next tick, so the measured period carries one tick of offset and the
 // tolerance below has it in.

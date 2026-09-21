@@ -59,22 +59,27 @@ type Static struct{}
 
 // IntegrateVelocity is cp's BodyUpdateVelocity for one Dynamic body over a step
 // of h seconds, and is the velocity half of Solve. It damps first and then adds
-// the step's Force, exactly as cp does, and clears the Force and the Torque:
+// the step's gravity and Force together, exactly as cp does, and clears the
+// Force and the Torque:
 //
-//	v ← v·exp(−damping·h)        + Force·invMass·h
+//	v ← v·exp(−damping·h)        + (gravity + Force·invMass)·h
 //	w ← w·exp(−angularDamping·h) + Torque·invInertia·h
 //
-// Three departures from cp, each with its reason:
+// gravity is the Constants' Gravity, read once a tick by Solve and handed to
+// every Body; it has no angular term. Because it is added beside Force·invMass
+// and scaled by the step with it, an app that writes m·g into Force under a
+// gravity of zero gets the same fall.
+//
+// Two departures from cp, each with its reason:
 //
 //   - cp multiplies by one damping scalar the Space precomputed as
 //     pow(space.damping, dt). The port computes exp(−rate·h) per Body, because
 //     Damping is per Body and stated as a rate per second. The two are the same
 //     function: cp's damping is e^−rate.
-//   - cp's gravity term is absent, because the port ships no gravity. Until it
-//     does, an app writes m·g into Force.
 //   - cp early-returns for a Kinematic body. The port never reaches one here,
 //     because the Query that drives this names Dynamic and a Kinematic body has
-//     none — the ECS layout doing what cp's type test did.
+//     none — the ECS layout doing what cp's type test did. So neither a
+//     Kinematic nor a Static body receives gravity, as in cp.
 //
 // Because cp damps exactly but applies Force as a plain Euler step, the
 // terminal speed under a constant Force is not F/(mλ) but
@@ -84,10 +89,12 @@ type Static struct{}
 // which is +13.0% at λ = 15 /s and 60 Hz. cog's step is fixed, so that is a
 // constant offset that disappears into tuning. The exact form
 // v ← v·e^−λh + (F/m)(1−e^−λh)/λ was weighed and not taken: it costs a divide
-// and a λ = 0 branch per Body per tick to buy nothing at a fixed step.
-func IntegrateVelocity(body *Dynamic, velocity *Velocity, force *Force, h float64) {
+// and a λ = 0 branch per Body per tick to buy nothing at a fixed step. Gravity
+// is an acceleration applied the same way, so a falling Body's terminal speed
+// carries the same factor.
+func IntegrateVelocity(body *Dynamic, velocity *Velocity, force *Force, gravity m.Vec2d, h float64) {
 	velocity.Linear = velocity.Linear.MulS(math.Exp(-body.damping * h)).
-		Add(force.Force.MulS(body.invMass * h))
+		Add(gravity.Add(force.Force.MulS(body.invMass)).MulS(h))
 	velocity.Angular = velocity.Angular*math.Exp(-body.angularDamping*h) +
 		force.Torque*body.invInertia*h
 	*force = Force{}

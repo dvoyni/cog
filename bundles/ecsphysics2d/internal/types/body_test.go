@@ -21,7 +21,7 @@ func TestIntegratingAVelocitySpendsTheForceAndClearsIt(t *testing.T) {
 	velocity := Velocity{}
 	force := Force{Force: m.Vec2d{X: 10, Y: -4}, Torque: 16}
 
-	IntegrateVelocity(&body, &velocity, &force, step)
+	IntegrateVelocity(&body, &velocity, &force, m.Vec2d{}, step)
 
 	// v = F·h/m and w = T·h/I, undamped: 10·(1/60)/2 and 16·(1/60)/8.
 	if want := (m.Vec2d{X: 10 * step / 2, Y: -4 * step / 2}); !vecNear(velocity.Linear, want) {
@@ -32,6 +32,29 @@ func TestIntegratingAVelocitySpendsTheForceAndClearsIt(t *testing.T) {
 	}
 	if force != (Force{}) {
 		t.Errorf("the Force was left at %+v, want it cleared", force)
+	}
+}
+
+// Gravity is cp's term: added beside Force·invMass after damping and scaled by
+// the step with it, with no angular part and no dependence on the mass.
+func TestGravityIsAddedBesideTheForceAndScaledByTheStep(t *testing.T) {
+	body, err := NewDynamic(2, 8, 15, 30)
+	if err != nil {
+		t.Fatalf("NewDynamic: %v", err)
+	}
+	velocity := Velocity{Linear: m.Vec2d{X: 4, Y: 1}, Angular: 2}
+	force := Force{Force: m.Vec2d{X: 10, Y: -4}}
+	gravity := m.Vec2d{X: 0.4, Y: -9.81}
+
+	IntegrateVelocity(&body, &velocity, &force, gravity, step)
+
+	linear, angular := math.Exp(-15*step), math.Exp(-30*step)
+	want := m.Vec2d{X: 4*linear + (0.4+10.0/2)*step, Y: 1*linear + (-9.81-4.0/2)*step}
+	if !vecNear(velocity.Linear, want) {
+		t.Errorf("Linear = %v, want %v", velocity.Linear, want)
+	}
+	if want := 2 * angular; !nearF(velocity.Angular, want) {
+		t.Errorf("Angular = %v, want %v: gravity has no angular term", velocity.Angular, want)
 	}
 }
 
@@ -85,7 +108,7 @@ func TestDampingIsExponentialInTheRatePerSecond(t *testing.T) {
 	velocity := Velocity{Linear: m.Vec2d{X: 4}, Angular: 2}
 	force := Force{}
 
-	IntegrateVelocity(&body, &velocity, &force, step)
+	IntegrateVelocity(&body, &velocity, &force, m.Vec2d{}, step)
 
 	if want := 4 * math.Exp(-15*step); !nearF(velocity.Linear.X, want) {
 		t.Errorf("Linear.X = %v, want %v", velocity.Linear.X, want)
@@ -132,7 +155,7 @@ func TestABodyUnderAConstantForceRampsToItsTerminalSpeed(t *testing.T) {
 	velocity, reached := Velocity{}, math.Inf(1)
 	for tick := 1; tick <= 600; tick++ {
 		force := Force{Force: m.Vec2d{X: push}}
-		IntegrateVelocity(&body, &velocity, &force, step)
+		IntegrateVelocity(&body, &velocity, &force, m.Vec2d{}, step)
 		if velocity.Linear.X >= 0.95*asked && math.IsInf(reached, 1) {
 			reached = float64(tick) * step
 		}
@@ -168,7 +191,7 @@ func TestACrateStopsByDampingWithAHalfLifeOfLnTwoOverTheRate(t *testing.T) {
 	half := math.Inf(1)
 	for tick := 1; tick <= 600; tick++ {
 		force := Force{}
-		IntegrateVelocity(&body, &velocity, &force, step)
+		IntegrateVelocity(&body, &velocity, &force, m.Vec2d{}, step)
 		if velocity.Linear.X <= 2 && math.IsInf(half, 1) {
 			half = float64(tick) * step
 		}
@@ -194,7 +217,7 @@ func TestTheIntegratorsAllocateNothing(t *testing.T) {
 
 	if got := testing.AllocsPerRun(1000, func() {
 		force := Force{Force: m.Vec2d{X: 10}, Torque: 4}
-		IntegrateVelocity(&body, &velocity, &force, step)
+		IntegrateVelocity(&body, &velocity, &force, m.Vec2d{X: 0.4, Y: -9.81}, step)
 		IntegratePosition(&position, &velocity, step)
 	}); got != 0 {
 		t.Errorf("one integrated Body allocates %v objects, want 0", got)

@@ -11,7 +11,9 @@ package ecsphysics2d
 // every one of these is a property of the solver or of an index rather than of
 // a scene. There is deliberately no settings Resource and no settings command.
 // A Resource an app System declared write on would conflict with Solve for the
-// whole frame, on every tick, including the ones it wrote nothing on.
+// whole frame, on every tick, including the ones it wrote nothing on. The
+// values that are a property of the scene rather than of the solver, gravity
+// among them, are Constants instead, and an app that changes them pays that.
 //
 // Every distance is in metres and every rate is per second. The defaults are
 // documented against a metre-scaled world, which is the same assumption the two

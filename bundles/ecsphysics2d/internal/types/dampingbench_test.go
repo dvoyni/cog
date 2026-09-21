@@ -70,7 +70,7 @@ func BenchmarkVelocityIntegration(b *testing.B) {
 	for i := range b.N {
 		at := i & (dampedBodies - 1)
 		forces[at] = steadyForce
-		IntegrateVelocity(&bodies[at], &velocities[at], &forces[at], 1.0/60)
+		IntegrateVelocity(&bodies[at], &velocities[at], &forces[at], m.Vec2d{}, 1.0/60)
 	}
 }
 
@@ -87,7 +87,7 @@ func BenchmarkVelocityIntegrationWithBox2DsDampingInstead(b *testing.B) {
 	for i := range b.N {
 		at := i & (dampedBodies - 1)
 		forces[at] = steadyForce
-		integrateVelocityBox2D(&bodies[at], &velocities[at], &forces[at], 1.0/60)
+		integrateVelocityBox2D(&bodies[at], &velocities[at], &forces[at], m.Vec2d{}, 1.0/60)
 	}
 }
 
@@ -102,23 +102,23 @@ func BenchmarkVelocityIntegrationWithNoDampingAtAll(b *testing.B) {
 	for i := range b.N {
 		at := i & (dampedBodies - 1)
 		forces[at] = steadyForce
-		integrateVelocityUndamped(&bodies[at], &velocities[at], &forces[at], 1.0/60)
+		integrateVelocityUndamped(&bodies[at], &velocities[at], &forces[at], m.Vec2d{}, 1.0/60)
 	}
 }
 
 // integrateVelocityBox2D is IntegrateVelocity with Box2D's damping in place of
 // cp's. It exists in this file alone and nothing in the package calls it.
-func integrateVelocityBox2D(body *Dynamic, velocity *Velocity, force *Force, h float64) {
-	velocity.Linear = velocity.Linear.MulS(1/(1+body.damping*h)).
-		Add(force.Force.MulS(body.invMass * h))
+func integrateVelocityBox2D(body *Dynamic, velocity *Velocity, force *Force, gravity m.Vec2d, h float64) {
+	velocity.Linear = velocity.Linear.MulS(1 / (1 + body.damping*h)).
+		Add(gravity.Add(force.Force.MulS(body.invMass)).MulS(h))
 	velocity.Angular = velocity.Angular/(1+body.angularDamping*h) +
 		force.Torque*body.invInertia*h
 	*force = Force{}
 }
 
 // integrateVelocityUndamped is IntegrateVelocity with no damping factor at all.
-func integrateVelocityUndamped(body *Dynamic, velocity *Velocity, force *Force, h float64) {
-	velocity.Linear = velocity.Linear.Add(force.Force.MulS(body.invMass * h))
+func integrateVelocityUndamped(body *Dynamic, velocity *Velocity, force *Force, gravity m.Vec2d, h float64) {
+	velocity.Linear = velocity.Linear.Add(gravity.Add(force.Force.MulS(body.invMass)).MulS(h))
 	velocity.Angular += force.Torque * body.invInertia * h
 	*force = Force{}
 }

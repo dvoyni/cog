@@ -1,6 +1,9 @@
 package ecsphysics2d
 
-import "github.com/dvoyni/cog/bundles/ecsphysics2d/internal/types"
+import (
+	"github.com/dvoyni/cog/bundles/ecsphysics2d/internal/types"
+	"github.com/dvoyni/cog/libs/m"
+)
 
 // StaticIndex is the index over the Entities carrying the Static Tag: geometry
 // that never changes in place, world-cached once when it is inserted. A System
@@ -49,3 +52,30 @@ type Contacts = types.Contacts
 // Joint pays one branch. An app reads it through ecs.Read[*JointedPairs]; Len,
 // Has, Add and Clear are the whole of it.
 type JointedPairs = types.JointedPairs
+
+// Constants are the physics values that hold for the whole world rather than
+// for one Body, which physics reads every tick and a game may change. Gravity
+// is the one there is.
+//
+// The plugin registers them itself, at its own defaults, beside Contacts: an
+// app that never writes them has a world with no gravity, which is a top-down
+// plane, and pays nothing. Solve reads them through ecs.Read[*Constants], once
+// a tick, so a change applies from the next Solve.
+//
+// Writing them takes ecs.Write[*Constants] in a System of the app's own, and
+// that System then runs in series with the Systems that read them — Solve
+// among them — on every tick it is subscribed to, whether or not it writes
+// anything. That is the price the app chose, so a value set once belongs in a
+// System on app.InitEvent rather than in one that runs every tick.
+//
+// They are not Config, which is fixed when physics starts and is a property of
+// the solver or of an index; these are properties of the scene.
+type Constants struct {
+	// Gravity is the acceleration every Dynamic body receives, in m/s², which
+	// is cp's Space gravity term in its velocity integrator. Kinematic and
+	// Static bodies never receive it. The default is zero.
+	//
+	// It is added before the Body's own Force·invMass and scaled by the step
+	// with it, so writing m·g into Force instead is the same fall.
+	Gravity m.Vec2d
+}

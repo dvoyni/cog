@@ -525,6 +525,14 @@ func newHarness(t testing.TB) *harness { return newHarnessWith(t, nil, 1024) }
 // because it is what is being tested, and the game standing in for the app.
 func newHarnessWith(t testing.TB, config any, ids uint32) *harness {
 	t.Helper()
+	return newHarnessWithPlugins(t, config, ids)
+}
+
+// newHarnessWithPlugins is newHarnessWith with more of the app's plugins
+// composed beside the game, for the tests that need a System of their own in
+// the frame and must not put it in every other test's.
+func newHarnessWithPlugins(t testing.TB, config any, ids uint32, extra ...kernel.Plugin) *harness {
+	t.Helper()
 	configs := map[kernel.PluginName]any{ecs.Name: ecs.Config{PrewarmEntities: ids}}
 	if config != nil {
 		configs[ecsphysics2d.Name] = config
@@ -533,7 +541,7 @@ func newHarnessWith(t testing.TB, config any, ids uint32) *harness {
 	var failure error
 	engine := kernel.New(configs).
 		Handler(func(err error) error { failure = err; return nil }).
-		WithPlugins(appplugin.New(), mainLoopAdapter{}, ecsplugin.New(), physics, world)
+		WithPlugins(append([]kernel.Plugin{appplugin.New(), mainLoopAdapter{}, ecsplugin.New(), physics, world}, extra...)...)
 	stopped := make(chan struct{})
 	t.Cleanup(func() {
 		engine.Quit()

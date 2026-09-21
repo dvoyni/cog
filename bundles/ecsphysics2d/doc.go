@@ -186,6 +186,20 @@
 // the same tick, and that velocity is spent by the next tick's Integrate. Only
 // Force pays this: a Velocity written directly is immediate.
 //
+// # Gravity is a Constant
+//
+// Constants is the Resource of the physics values that hold for the whole
+// world rather than for one Body, and Gravity, in m/s², is the one there is.
+// The plugin registers it next to Contacts at its own defaults, gravity 0, so a
+// top-down world is the default and an app that never writes it pays nothing.
+// Solve reads it once a tick and adds it in cp's velocity integrator beside
+// Force·invMass, to Dynamic bodies only, so writing m·g into Force instead is
+// the same fall. An app that wants gravity writes Constants.Gravity from a
+// System of its own through ecs.Write[*Constants], once from app.InitEvent or
+// whenever it changes; that System runs in series with Solve, which is the
+// price the app chose. Constants are not Config, which is fixed when physics
+// starts.
+//
 // # A Body's kind is said by its Components
 //
 // Dynamic present is a Dynamic body; a Velocity with no Dynamic is Kinematic;
@@ -205,7 +219,8 @@
 // # Units
 //
 // SI throughout, and per second rather than per tick: metres, kilograms,
-// seconds, radians; Force in newtons and Torque in newton-metres; Damping and
+// seconds, radians; Force in newtons and Torque in newton-metres; Gravity in
+// metres per second squared; Damping and
 // the solver's bias as rates in 1/s. Integration is exponential in the Damping
 // rates, which is exact and stable at any step.
 package ecsphysics2d

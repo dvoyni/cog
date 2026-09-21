@@ -40,6 +40,7 @@ func Solve(
 	dynamics *ecs.Get[Dynamic],
 	velocities *ecs.Set[Velocity],
 	places *ecs.Set[Position],
+	gravity m.Vec2d,
 	h float64, iterations int, slop, bias float64,
 ) {
 	contacts.beginSolve()
@@ -64,7 +65,7 @@ func Solve(
 	contacts.preStepJoints(h, velocities)
 
 	for _, it := range bodies.All() {
-		IntegrateVelocity(&it.Body, it.Velocity, it.Force, h)
+		IntegrateVelocity(&it.Body, it.Velocity, it.Force, gravity, h)
 	}
 	for i := 1; i < len(contacts.solver.rows); i++ {
 		row := &contacts.solver.rows[i]
