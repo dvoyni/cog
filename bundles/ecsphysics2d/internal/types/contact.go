@@ -111,15 +111,15 @@ type Contact struct {
 	// neither is the sign wart in TotalImpulse that it caused.
 	Normal m.Vec2d
 	// SurfaceVelocity is cp's surface_vr, the relative velocity of the two
-	// surfaces with its normal component removed. It is zero until Shapes carry
-	// a surface velocity of their own.
+	// surfaces with its normal component removed. Detect fills it with zero,
+	// because a Shape carries no surface velocity; a filter System writes it
+	// for one tick, which is how a conveyor is built (the package's Conveyors
+	// recipe).
 	//
-	// When they do, it is A's less B's, and the sign is worth stating because it
-	// is easy to land backwards. cp computes b.surfaceV − a.surfaceV, and this
-	// port's A plays the part cp's b plays — the Normal faces A where cp's faces
-	// its second Body — so cp's expression is A's less B's here. The
-	// specification's prose spells it the other way round, quoting cp's own a
-	// and b; it changes no number today, because nothing writes this field.
+	// It is A's surface velocity less B's, and the sign is worth stating
+	// because it is easy to land backwards. cp computes b.surfaceV − a.surfaceV,
+	// and this port's A plays the part cp's b plays — the Normal faces A where
+	// cp's faces its second Body — so cp's expression is A's less B's here.
 	SurfaceVelocity m.Vec2d
 	// Points are the Contact's points, of which Count are meaningful.
 	Points [2]ContactPoint

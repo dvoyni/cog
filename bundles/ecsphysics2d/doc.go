@@ -75,8 +75,37 @@
 // a filter for one tick. Both default to zero, as cp's do, which is why sliding
 // along a wall at the defaults is exactly v ← v − (v·n)·n and is the solver's
 // own behaviour rather than a rule of its own. Surface velocity is on the entry
-// and stays zero; the Shape field that would feed it is not built yet. Joints
-// arrive with theirs.
+// too, zero from Detect and written by a filter, as the next section shows.
+// Joints arrive with theirs.
+//
+// # Conveyors
+//
+// A Shape has no surface velocity. A belt is a Component of the app's own on
+// the belt's Entity, holding the velocity its surface moves at, and a filter
+// System ordered After[DetectOnUpdate]().Before[SolveOnUpdate]() walks
+// Contacts and, for each Contact with a belt on either side, writes
+// SurfaceVelocity: A's surface velocity less B's, a party with no belt counting
+// as zero, with its normal component removed.
+//
+//	surface := beltOf(entry.A).Sub(beltOf(entry.B))
+//	entry.SurfaceVelocity = surface.Sub(entry.Normal.MulS(surface.Dot(entry.Normal)))
+//
+// That is cp's surface_vr in this port's A/B convention: cp's b − a, the port's
+// A playing cp's b. The normal component must go because Solve adds the entry
+// to the pair's relative velocity before splitting it into normal and tangent,
+// so what is left along the Normal would push the pair apart or pull it
+// together; only the tangent carries.
+//
+// The carrying is friction, bounded by the same Coulomb clamp, so a belt with
+// no Friction carries nothing. The entry's Friction is the product of the two
+// Shapes', so the belt's Shape needs a Friction, and so does whatever rides on
+// it, or the filter writes the entry's Friction itself.
+//
+// A scene with belts pays for them in its own System and a scene without pays
+// nothing; the filter reads the app's Component through ecs.Get and takes the
+// Contacts write every filter takes. The recipe's proof, in
+// internal/material_test.go, is
+// TestAFilterWritesASurfaceVelocityAndTheContactCarriesTheBodyAlongIt.
 //
 // # Which pairs collide, and what keeps a point from tunnelling
 //
