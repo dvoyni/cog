@@ -239,11 +239,11 @@ func (b *backend) Emit(batch *sound.Batch) {
 // knows there was a choice.
 //
 // It runs on the tick, and what it does there is a goroutine and one ring's
-// worth of allocation. The 460 us of decoder open and the seek that follows are
+// worth of allocation. The 96 us of decoder open and the seek that follows are
 // the goroutine's, which is what keeps a recovery affordable: sixty-four
 // streamed Voices restated as starts on the tick the Device came back is
 // sixty-four goroutines opening decoders in parallel, with the Mixer playing
-// silence for each slot until its ring primes, rather than 29 ms of decoder
+// silence for each slot until its ring primes, rather than 6 ms of decoder
 // opens on a thread that has 10 ms to fill a buffer.
 //
 // The stream it replaces is halted first. A slot is restarted either because

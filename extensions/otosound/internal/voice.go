@@ -179,7 +179,7 @@ func (v *voice) advance() {
 //
 // A streamed voice always starts at zero, because its playhead counts frames of
 // its own stream and the stream was opened at the offset: the seek happened on
-// the read-ahead goroutine, where 460 us of decoder open costs nothing that can
+// the read-ahead goroutine, where 96 us of decoder open costs nothing that can
 // be heard.
 func startFrame(o *op) float64 {
 	if o.ring != nil {

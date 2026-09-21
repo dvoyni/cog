@@ -17,7 +17,7 @@ import (
 //
 // It exists because neither tier alone is defensible. A five-minute stereo
 // track resident is 101 MiB of float32 against 4.8 MB encoded - 21x - so music
-// cannot be resident; and a decoder is 460 microseconds and 137 KB to open, so
+// cannot be resident; and a decoder is 96 microseconds and 75 KB to open, so
 // a footstep cannot pay for one to play something whose entire decoded form is
 // smaller than the decoder streaming it. The limit between them is
 // Config.DecodedClipLimit, and which side a Clip fell on is invisible above the
@@ -105,11 +105,12 @@ type stream struct {
 //
 // offset is where in the Clip the Voice begins, which is also what a Seek and
 // what a recovery after a Device loss both arrive as: a start carrying a
-// position. The decoder open and the seek that follow it - 460 microseconds
-// together - happen on the goroutine this spawns, so neither the tick nor the
-// device thread ever pays for them, and sixty-four Voices restarting at once
-// after a reattach is sixty-four goroutines' work rather than 29 ms on the
-// thread that must not stall.
+// position. The decoder open and the seek that follow it - 96 microseconds
+// together, 470 for the first Voice in the process on a Clip whose setup
+// header no stream has parsed yet - happen on the goroutine this spawns, so
+// neither the tick nor the device thread ever pays for them, and sixty-four
+// Voices restarting at once after a reattach is sixty-four goroutines' work
+// rather than 6 ms on the thread that must not stall.
 func newStream(clip *clipData, offset time.Duration, loop bool) *stream {
 	s := &stream{
 		ring: newPCMRing(int(readAhead.Seconds()*float64(clip.rate)), clip.channels),

@@ -476,6 +476,15 @@ the 137 KB memory break-even: between the two, memory is knowingly spent to make
 > [otosound: the vorbis setup header costs 460 µs and 137 KB per decoder](https://github.com/dvoyni/cog/issues/466).
 > It is not blocking: the tiers are the right shape whatever the library costs.
 >
+> **Closed 2026-09-21** by
+> [The setup cache lands in vorbis and every streamed voice opens on a parsed setup the process already holds](https://github.com/dvoyni/cog/issues/518):
+> decoders of the same encoding share one parsed setup inside the forked
+> library, with no API change, so a streamed Voice opens and seeks in **96 µs
+> and 75 KB** rather than 470 µs and 475 KB
+> (`BenchmarkAStreamedVoiceOpensItsDecoder`, the fixture clip). Only the first
+> Voice on an encoding still pays the parse. The table above is what the tiers
+> were chosen on and stays as measured.
+>
 > **No pure-Go alternative exists.** Ebitengine wraps the same library, and every
 > other option is cgo, which requirement 4 of the audio effort rules out.
 

@@ -609,7 +609,7 @@ func TestAStreamedLoopWrapsInTheReadAheadAndNeverEnds(t *testing.T) {
 
 // A Voice started at an offset - which is what a Seek is, and what a recovery
 // after a Device loss restates every live Voice as - opens its decoder at that
-// offset. The seek and the 460 us decoder open behind it happen on the
+// offset. The seek and the 96 us decoder open behind it happen on the
 // read-ahead goroutine, so a burst of them costs the device thread nothing but
 // the silence of a ring that has not primed yet.
 func TestAStreamedVoiceStartedAtAnOffsetSeeksInItsReadAhead(t *testing.T) {

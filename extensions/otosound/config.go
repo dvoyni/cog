@@ -41,8 +41,9 @@ type Config struct {
 	// Neither tier alone is defensible, which is why this is a limit and not a
 	// mode. A five-minute stereo track resident is 101 MiB of float32 against
 	// 4.8 MB encoded, 21x, so music cannot be resident; and opening a decoder
-	// is 460 us and 137 KB, so a footstep cannot pay for one to play a Clip
-	// whose whole decoded form is smaller than the decoder streaming it.
+	// is 96 us and 75 KB even once the Clip's setup has been parsed, so a
+	// footstep cannot pay for one to play a Clip whose whole decoded form is
+	// smaller than the decoder streaming it.
 	//
 	// A Clip whose length reads 0 - a truncated file - streams whatever this
 	// says, because there is no decoded size to compare it against.

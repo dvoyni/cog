@@ -2,10 +2,10 @@ github.com/dvoyni/gogpu v0.54.1-0.20260910171621-041de1a5716f h1:nnkmU9FoUs3Kj0K
 github.com/dvoyni/gogpu v0.54.1-0.20260910171621-041de1a5716f/go.mod h1:V6+0B+iXxgiQkdlRJvUyjiYrGRDoooxYNgw9qTCZN8w=
 github.com/dvoyni/naga v0.19.1-0.20260910142728-7fd5ed312699 h1:NE1BCcI/Bvzo30EitBrN5YIcsUTE0n6/+PCgxbZQarQ=
 github.com/dvoyni/naga v0.19.1-0.20260910142728-7fd5ed312699/go.mod h1:15sQaHKkbqXcwTN+hHYGLsA0WBBnkmYzne/eF5p5WEg=
-github.com/dvoyni/oggvorbis v1.0.6-0.20260921122117-b3049fee30b6 h1:xu1DTlqKq/Cp5SkH4zrvhPr0wc+Y5AyesYxN7+ltPC8=
-github.com/dvoyni/oggvorbis v1.0.6-0.20260921122117-b3049fee30b6/go.mod h1:8/i3QcTPoLMjMzvnn7RNTGW8mtl27ZlbAyvuCxNv6v8=
-github.com/dvoyni/vorbis v1.0.3-0.20260921121822-291b14d32ed5 h1:TwitXYvEwrYMDhK4DoNUYRFF7PyRAs4801mx1Oa/jgs=
-github.com/dvoyni/vorbis v1.0.3-0.20260921121822-291b14d32ed5/go.mod h1:DoftRo4AznKnShRl1GxiTFCseHr4zR9BN3TWXyuzrqQ=
+github.com/dvoyni/oggvorbis v1.0.6-0.20260921150857-546236badfd4 h1:RTOwvoccqx04hPNmpmHxeYcYZ4URluwekaKF0x7H7xc=
+github.com/dvoyni/oggvorbis v1.0.6-0.20260921150857-546236badfd4/go.mod h1:MEig/1Sbh2CUGcPHBehQY/m5VNjtkUe/y+u6mmf6mmM=
+github.com/dvoyni/vorbis v1.0.3-0.20260921150454-ab3e6ce988a8 h1:fqJbeqdCXYaQphvLTkxI4CTQUKjt+b30KLE00xzQuaA=
+github.com/dvoyni/vorbis v1.0.3-0.20260921150454-ab3e6ce988a8/go.mod h1:DoftRo4AznKnShRl1GxiTFCseHr4zR9BN3TWXyuzrqQ=
 github.com/ebitengine/oto/v3 v3.5.0 h1:8ZDhKP3Hhslyb9NL3g4HWvhRQqwI+hKOHAXAqD6GPXs=
 github.com/ebitengine/oto/v3 v3.5.0/go.mod h1:Elkm7yzTRns3w2efvibzVOoQ65YOwmec9a76dCiK10o=
 github.com/ebitengine/purego v0.11.0 h1:jhp/D+Nyv7UUW8HAcmcjt2N2rYrYi9m3SL21k0Ua/NI=

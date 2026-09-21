@@ -27,10 +27,10 @@ const (
 	// 512 KiB that is 2.97 s mono 44.1 kHz, 1.49 s stereo 44.1 kHz, 1.37 s
 	// stereo 48 kHz.
 	//
-	// It sits deliberately above the 137 KB a decoder costs, which is where
+	// It sits deliberately above the 75 KB a decoder costs, which is where
 	// streaming starts to save memory at all. Between the two, memory is
 	// knowingly spent to make Play free: a Clip under the limit is already
-	// samples, so starting a Voice on it is an index rather than 460 us of
+	// samples, so starting a Voice on it is an index rather than 96 us of
 	// decoder.
 	defaultDecodedClipLimit = 512 << 10
 	// neverStream and alwaysStream are the two sentinels DecodedClipLimit takes

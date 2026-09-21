@@ -20,7 +20,7 @@
 // keeps its encoded bytes and streams, a decoder and a read-ahead ring per
 // Voice, filled by a goroutine that decodes and resamples ahead of the Mixer.
 // Neither tier alone is defensible - a five-minute stereo track resident is
-// 21x its encoded size, and a decoder is 460us and 137KB to open, which is more
+// 21x its encoded size, and a decoder is 96us and 75KB to open, which is more
 // than a footstep's whole decoded form - and both report the same duration,
 // channels, rate and loop region, so sound never learns which it got and
 // neither can a game.
