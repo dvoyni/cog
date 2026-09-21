@@ -11,7 +11,7 @@ research branch only). Machine: Windows 11, Go 1.27.1, amd64, 32 threads.
 
 ## What the parse does today
 
-The facts the question rests on differ from the brief in three places:
+The facts the question rests on differ from the brief in four places:
 
 - **Vertices are not packed during the parse.** `readVertexAttributes` reads
   each accessor through `modeler.ReadAccessor` (which already allocates a typed
@@ -139,7 +139,8 @@ measured.
 - **Order dependence.** CompareBaseColor's parse is 1.6 ms alone in a process
   and 3.7 to 4.2 ms when other models' benchmarks ran first in the same
   process. It allocates 7.3 MB per op, so the GC state it inherits matters.
-  Every number above comes from one model per process.
+  The parse, profile and vertex-arm numbers come from one model per process;
+  the scale table does not.
 - **The vertex arms are measured in isolation, not inside a full parse.** The
   "% of parse" column divides an isolated delta by a separate parse median. The
   GC cost of twopass's extra 0.9 MB would land partly on the background mark
