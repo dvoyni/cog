@@ -38,6 +38,6 @@ replace github.com/gogpu/naga => github.com/dvoyni/naga v0.19.1-0.20260910142728
 
 replace github.com/gogpu/gogpu => github.com/dvoyni/gogpu v0.54.1-0.20260910171621-041de1a5716f
 
-replace github.com/jfreymuth/vorbis => github.com/dvoyni/vorbis v1.0.3-0.20260921093404-e5240f9f0acd
+replace github.com/jfreymuth/vorbis => github.com/dvoyni/vorbis v1.0.3-0.20260921104633-0f8153bec9aa
 
 replace github.com/jfreymuth/oggvorbis => github.com/dvoyni/oggvorbis v1.0.6-0.20260921093351-7f88199d130d
