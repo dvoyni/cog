@@ -14,15 +14,21 @@ import (
 )
 
 // The numbers here are measured on a real engine driven by a real
-// app.UpdateEvent with the real scene plugin composed beside the binding —
-// publish, acquire every declared lock, run every System and every flush, wait.
+// app.UpdateEvent and app.RenderEvent with the real scene plugin composed
+// beside the binding — publish, acquire every declared lock, run every System
+// and every flush, wait.
 //
-// The frame has no camera and no resident model, which is deliberate: what the
-// binding costs is the walk, the probes, the copy-out into scratch and the
-// record into scene's queue, and what scene does with a draw once it has a
-// camera to decide for is scene's number. Scene records a Model call — plays,
-// overrides and material copied into its arenas — before it knows whether the
-// path is resident.
+// The allocation test's frame has no camera and no resident model, which is
+// deliberate: what the binding costs is the walk, the probes, the copy-out into
+// scratch and the record into scene's queue, and what scene does with a draw
+// once it has a camera to decide for is scene's number. Scene records a Model
+// call — plays, overrides and material copied into its arenas — before it knows
+// whether the path is resident.
+//
+// The benches' frame draws: a camera, the model resident, and scene's cull,
+// sort, pack and emit into gfx, which replays into a backend that discards. It
+// is the whole frame a game pays for, so a redesign of the binding has a
+// before and an after measured by the same code.
 
 // population is one arm of the cost table: n Model Entities, each carrying the
 // optional Components the arm names.
@@ -43,9 +49,10 @@ var (
 		{n: 5_000, material: true, nameInLog: "5 000 with Material"},
 	}
 
-	// benchAnimation blends two clips, which is the common walk-into-run case.
+	// benchAnimation blends two clips, which is the common walk-into-idle
+	// case. They are the animated model's two, so the drawn arm samples both.
 	benchAnimation = ecsscene.Animation{Plays: [ecsscene.MaxPlays]scene.ClipPlay{
-		{Clip: "Walk", Weight: 1, Loop: true}, {Clip: "Run", Weight: 0.25, Loop: true},
+		{Clip: "Walk", Weight: 1, Loop: true}, {Clip: "Idle", Weight: 0.25, Loop: true},
 	}}
 	// benchParams is one tint, which is the per-Entity variation case.
 	benchParams = ecsscene.Params{Values: m.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}))}
@@ -176,11 +183,84 @@ func tickSubscribers(tb testing.TB) int {
 	return count
 }
 
+// The bench frame is a camera at Z=80 over a grid of 100 columns and 50 rows
+// half a unit apart, which it sees whole: scene's own BenchmarkFrame grid.
+const (
+	benchColumns = 100
+	benchStep    = 0.5
+)
+
+var benchEye = m.LookAt(m.Vec3{Z: 80}, m.Vec3{}, m.Vec3{Y: 1})
+
+// benchPlace is where the arm's row-th row of Entities starts.
+func benchPlace(row, rows int) m.Transform {
+	return m.At(-benchColumns*benchStep/2, float32(row)*benchStep-float32(rows)*benchStep/2, 0)
+}
+
+// newFrameHarness is the whole frame an arm benches: the recording the
+// allocation test measures, and after it scene's flush with a camera to decide
+// for - cull, sort, pack - and gfx's recording of the passes into a backend that
+// is Ready and discards what it is handed. The model is resident and every
+// Entity is packed before it returns, and the arenas the first frames grow are
+// grown.
+//
+// The empty arm has a model made resident too, by an Entity that draws it and
+// is despawned, so all five arms differ only in the population.
+func newFrameHarness(b *testing.B, arm population) *harness {
+	b.Helper()
+	path := crateModel
+	if arm.animated {
+		path = animatedModel
+	}
+	files := fstest.MapFS{
+		crateModel:    &fstest.MapFile{Data: crateGLB(b)},
+		animatedModel: &fstest.MapFile{Data: animatedGLB(b)},
+	}
+	backend := &discardBackend{}
+	h := newHarnessWith(b, files, uint32(arm.n)+8, backend)
+	h.kernel.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
+		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
+	})
+	h.spawn(b, spawnRequest{Place: benchEye, Camera: &ecsscene.Camera{FovY: 1.0472, Near: 0.1, Far: 200}})
+	model := &ecsscene.Model{Ref: scene.ModelRef{Path: path}}
+	want := int64(arm.n)
+	if arm.n == 0 {
+		resident := h.spawn(b, spawnRequest{Model: model})
+		h.frameUntil(b, "the model to become resident", func() bool { return backend.drew.Load() == 1 })
+		h.despawn(b, resident)
+	}
+	rows := (arm.n + benchColumns - 1) / benchColumns
+	for row := range rows {
+		request := spawnRequest{
+			Count: min(benchColumns, arm.n-row*benchColumns), Step: benchStep,
+			Place: benchPlace(row, rows), Model: model,
+		}
+		if arm.animated {
+			request.Animation = &benchAnimation
+		}
+		if arm.params {
+			request.Params = &benchParams
+		}
+		if arm.material {
+			request.Material = &benchMaterial
+		}
+		h.spawn(b, request)
+	}
+	h.frameUntil(b, "every Entity to be drawn", func() bool { return backend.drew.Load() == want })
+	for range 100 {
+		h.frame(b)
+	}
+	return h
+}
+
 // benchmarkFrame is the classic b.N form deliberately: testing.B.Loop keeps its
 // loop-assigned values alive, which is exactly what an allocation figure must
 // not have helping it.
+//
+// It asserts nothing about the frame. It reports time and allocations, and
+// TestRecordingAllocatesNothingPerEntity holds the allocation claim.
 func benchmarkFrame(b *testing.B, arm population) {
-	h := newRecordingHarness(b, arm)
+	h := newFrameHarness(b, arm)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
