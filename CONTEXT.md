@@ -472,7 +472,7 @@ One playing instance of a Clip, begun by a play and addressed afterwards by what
 _Avoid_: Sound, source, channel, instance
 
 **Stealing**:
-What ends a Voice to make room when every slot is taken. The Voice that loses is the least audible one — its own volume through its Bus, its Falloff and its Cone — unless a Priority puts it out of reach, and the play that arrives is as stealable as anything already playing. A game hears about it through the same ending that tells it about a Stop.
+What ends a Voice to make room when every slot is taken. The Voice that loses is the least audible one — its own volume through its Bus, its Falloff and its Cone — unless a Priority puts it out of reach, and the play that arrives is as stealable as anything already playing. A game hears about it through the same ending that tells it about a Stop. A steal is final: nothing resumes a stolen Voice, and a game that wants the sound back plays it again as a new Voice.
 _Avoid_: Voice limit, culling, eviction. Also ducking, which is a game lowering a Bus on purpose.
 
 **Bus**:
