@@ -330,6 +330,10 @@ _Avoid_: Queue, light mode
 The set of graphics materials one recorded thing offers, one per Pass tag. A Pass whose tag it has no entry for does not draw that thing. A recording call copies it — its entries and each entry's parameters, but not their Blobs, and once per frame per distinct content — so the caller may change it the moment the call returns; two equal ones batch together however each was built, because a Scene material is keyed by content.
 _Avoid_: Shader
 
+**Model material**:
+What one material in a model file becomes once loaded: for each shader variant, the graphics material that draws it in a forward pass, together with the numbers the bundled PBR reads, and a content key fixed at load. It names no Pass tag. A renderer wraps it in its own material under whatever tag it chooses, so the same loaded file serves both renderers unchanged, and nothing re-keys it per draw.
+_Avoid_: Scene material (that is a renderer's, and carries tags)
+
 **Transform**:
 Where one recorded thing stands: a position, a rotation and a per-axis scale, and nothing else. Its zero value is the identity, and so is an all-zero scale; a scale with only some axes zero is taken literally, which is what makes a flattened scale expressible. A non-uniform scale sends that thing's normals through the inverse-transpose and costs nothing to anything else.
 _Avoid_: Matrix, model matrix. A Transform has no matrix to override it; a model's flattened node world is Scene's own business.
