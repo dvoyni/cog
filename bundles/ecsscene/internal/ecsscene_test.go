@@ -21,10 +21,10 @@ import (
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
-// Everything here runs against a real kernel.Engine with the real ecs and the
-// real scene plugin composed beside the binding, and reads back what scene's
-// own flush published. The binding is judged by what reaches scene, not by
-// what its System looks like.
+// Everything here runs against a real kernel.Engine with the real ecs, the real
+// scene plugin and the real gfx composed beside the binding, and reads back what
+// gfx handed a recording backend. The binding is judged by what reaches the
+// GPU, not by what its System looks like or by anything scene publishes.
 
 const crateModel = "models/crate.glb"
 
@@ -143,26 +143,6 @@ func despawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Exe
 	})
 }
 
-// inspectCmd runs a callback under scene's queue lock, which is the only way to
-// read what a frame published from outside scene.
-type inspectCmd kernel.Command[inspectRequest, inspectResponse]
-
-type inspectRequest struct {
-	Run func(*scene.OpQueue)
-}
-
-type inspectResponse struct{}
-
-func inspectCmdImpl() (kernel.Lock, kernel.Execute[inspectRequest, inspectResponse]) {
-	var queue kernel.Read[*scene.OpQueue]
-	return func(access kernel.ResourceAccess) {
-			queue = access.GetRead[*scene.OpQueue]()
-		}, func(_ kernel.Kernel, request inspectRequest) inspectResponse {
-			request.Run(queue.Get())
-			return inspectResponse{}
-		}
-}
-
 // bakeCmd bakes a mesh through scene's own lookup, which is where a MeshRef a
 // game stores in a Mesh Component comes from.
 type bakeCmd kernel.Command[bakeRequest, bakeResponse]
@@ -208,7 +188,6 @@ func (p *gamePlugin) Register(registrar *kernel.Registrar, _ any) error {
 	ecs.RegisterComponent[unmarked](registrar, 8)
 	registrar.HandleCommand[spawnCmd](spawnCmdImpl(registrar))
 	registrar.HandleCommand[despawnCmd](despawnCmdImpl(registrar))
-	registrar.HandleCommand[inspectCmd](inspectCmdImpl)
 	registrar.HandleCommand[bakeCmd](bakeCmdImpl)
 	return nil
 }
@@ -217,6 +196,9 @@ type harness struct {
 	kernel kernel.Executioner
 	engine *kernel.Engine
 	errs   *errorSink
+	// backend is the recording backend a drawing harness renders through, and
+	// nil for one whose device never arrives.
+	backend *testBackend
 }
 
 type errorSink struct {
@@ -275,14 +257,17 @@ func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gfx.Ba
 	<-engine.Ready()
 	k := engine.Executioner()
 	k.PublishEvent(app.InitEvent{}).Wait()
-	return &harness{kernel: k, engine: engine, errs: sink}
+	recording, _ := backend.(*testBackend)
+	return &harness{kernel: k, engine: engine, errs: sink, backend: recording}
 }
 
-// frame publishes one real app.UpdateEvent and waits for it: publish, acquire
-// every declared lock, run every System and every flush, wait.
+// frame publishes one real app.UpdateEvent and then one app.RenderEvent, and
+// waits for each: publish, acquire every declared lock, run every System and
+// every flush, wait - and then hand the frame gfx recorded to the backend.
 func (h *harness) frame(t testing.TB) {
 	t.Helper()
 	h.kernel.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
+	h.kernel.PublishEvent(app.RenderEvent{}).Wait()
 }
 
 func (h *harness) spawn(t testing.TB, request spawnRequest) ecs.Entity {
@@ -306,34 +291,4 @@ func (h *harness) bake(t testing.TB) scene.MeshRef {
 		t.Fatalf("baking a mesh: ref %v", response.Ref)
 	}
 	return response.Ref
-}
-
-// ops reads back what the last flush published, narrowed to one kind. The
-// slices inside alias scene's frame arenas, which stay put until the next
-// flush; every test reads them before publishing another frame.
-func (h *harness) ops(t testing.TB, kinds ...scene.OpKind) []scene.Op {
-	t.Helper()
-	var all []scene.Op
-	h.kernel.ExecuteCommand[inspectCmd](inspectRequest{Run: func(q *scene.OpQueue) {
-		all = q.Ops(nil)
-	}})
-	var out []scene.Op
-	for _, op := range all {
-		for _, kind := range kinds {
-			if op.Kind == kind {
-				out = append(out, op)
-			}
-		}
-	}
-	return out
-}
-
-// passes reads back what the last flush decided.
-func (h *harness) passes(t testing.TB) []scene.PassView {
-	t.Helper()
-	var out []scene.PassView
-	h.kernel.ExecuteCommand[inspectCmd](inspectRequest{Run: func(q *scene.OpQueue) {
-		out = q.Passes(nil)
-	}})
-	return out
 }

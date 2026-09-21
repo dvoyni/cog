@@ -1,7 +1,10 @@
 package internal
 
 import (
+	"encoding/binary"
+	"math"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
@@ -12,11 +15,21 @@ import (
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
+// Every test here asserts on what the recording backend received: the records
+// scene packed for an instance, the pass it landed in, and the pipeline and
+// parameters it drew with. Which Entity a draw belongs to is read off where
+// its instance stands, so no test depends on how scene batched the frame.
+
 // TestAModelEntityRecordsWhereItStandsOnItsLayers is the tracer bullet: an
 // Entity with a Transform and a Model naming a glTF path is drawn, with nothing
-// registered in advance — no manifest, no hash.
+// registered in advance — no manifest, no hash. Its instance stands where its
+// Transform says, and its layers are the ones the camera's cull mask reads: a
+// crate on a layer the camera does not draw is not drawn.
 func TestAModelEntityRecordsWhereItStandsOnItsLayers(t *testing.T) {
-	h := newHarness(t)
+	h := newCameralessHarness(t, 256)
+	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{
+		FovY: 1.0472, Near: 0.1, Far: 200, CullMask: scene.Layer(3),
+	}})
 	place := m.Transform{
 		Position: m.Vec3{X: 1, Y: 2, Z: 3},
 		Rotation: m.Quat{Y: 1},
@@ -25,191 +38,277 @@ func TestAModelEntityRecordsWhereItStandsOnItsLayers(t *testing.T) {
 	h.spawn(t, spawnRequest{Place: place, Model: &ecsscene.Model{
 		Ref: scene.ModelRef{Path: crateModel}, Layers: scene.Layer(3),
 	}})
+	h.spawn(t, spawnRequest{Place: m.At(-5, 0, 0), Model: &ecsscene.Model{
+		Ref: scene.ModelRef{Path: crateModel}, Layers: scene.Layer(5),
+	}})
 
-	h.frame(t)
+	h.frameUntil(t, "the crate to become resident", func() bool {
+		return len(where(h.drawn(), ofTriangle)) > 0
+	})
 
-	models := h.ops(t, scene.OpModel)
-	if len(models) != 1 {
-		t.Fatalf("the frame recorded %d model draws, want 1", len(models))
+	crates := where(h.drawn(), at(place.Position))
+	if len(crates) != 1 {
+		t.Fatalf("the crate at %v drew %d instances, want 1; the frame drew at %v",
+			place.Position, len(crates), positions(h.drawn()))
 	}
-	op := models[0]
-	if op.Path != crateModel {
-		t.Errorf("the draw named %q, want %q", op.Path, crateModel)
+	if want := place.Mat4(); !nearMat4(crates[0].world, want) {
+		t.Errorf("the instance stands at\n%v\nwant\n%v", crates[0].world, want)
 	}
-	if op.Layers != scene.Layer(3) {
-		t.Errorf("the draw is on layers %v, want %v", op.Layers, scene.Layer(3))
+	if hidden := where(h.drawn(), at(m.Vec3{X: -5})); len(hidden) != 0 {
+		t.Errorf("the crate on a layer the camera does not draw drew %d instances", len(hidden))
 	}
-	want := m.Transform{
-		Position: m.Vec3{X: 1, Y: 2, Z: 3},
-		Rotation: m.Quat{Y: 1},
-		Scale:    m.Vec3{X: 2, Y: 1, Z: 0.5},
-	}
-	if op.Model.Transform != want {
-		t.Errorf("the draw stands at %+v, want %+v", op.Model.Transform, want)
-	}
+	h.noErrors(t)
 }
 
 // TestAModelsSceneAndNodeSelectorsReachTheDraw is the rest of scene.ModelRef:
 // the Component holds scene's own reference, so a draw of one node inside a
-// file is the same Component with two more strings set.
+// file is the same Component with two more strings set. The file's default
+// scene is the barrel alone and its "props" scene the crate and the barrel, so
+// only both selectors together draw the crate's triangle and nothing else.
 func TestAModelsSceneAndNodeSelectorsReachTheDraw(t *testing.T) {
-	h := newHarness(t)
-	h.spawn(t, spawnRequest{Model: &ecsscene.Model{
-		Ref: scene.ModelRef{Path: "models/props.glb", Scene: "props", Node: "crate"},
+	h := newDrawingHarness(t, 256)
+	selected, whole := m.At(3, 0, 0), m.At(-5, 0, 0)
+	h.spawn(t, spawnRequest{Place: selected, Model: &ecsscene.Model{
+		Ref: scene.ModelRef{Path: propsModel, Scene: "props", Node: "crate"},
 	}})
+	h.spawn(t, spawnRequest{Place: whole, Model: &ecsscene.Model{Ref: scene.ModelRef{Path: propsModel}}})
 
-	h.frame(t)
+	h.frameUntil(t, "the props to become resident", func() bool {
+		return len(where(h.drawn(), at(selected.Position))) > 0
+	})
 
-	models := h.ops(t, scene.OpModel)
-	if len(models) != 1 {
-		t.Fatalf("the frame recorded %d model draws, want 1", len(models))
+	drawn := where(h.drawn(), at(selected.Position))
+	if got := len(where(drawn, ofTriangle)); got != 1 {
+		t.Errorf("the selected node drew %d instances of the crate's triangle, want 1", got)
 	}
-	got := scene.ModelRef{Path: models[0].Path, Scene: models[0].Model.Scene, Node: models[0].Model.Node}
-	want := scene.ModelRef{Path: "models/props.glb", Scene: "props", Node: "crate"}
-	if got != want {
-		t.Fatalf("the draw selects %+v, want %+v", got, want)
+	if got := len(where(drawn, ofQuad)); got != 0 {
+		t.Errorf("the selected node drew %d instances of the barrel, which is outside the selection", got)
 	}
+	// The unselected draw of the same file is the control: the barrel is
+	// what its default scene holds, which is what shows ofQuad finds it.
+	control := where(h.drawn(), at(whole.Position))
+	if len(where(control, ofQuad)) != 1 || len(where(control, ofTriangle)) != 0 {
+		t.Errorf("the file's default scene drew %d barrels and %d crates, want the barrel alone",
+			len(where(control, ofQuad)), len(where(control, ofTriangle)))
+	}
+	h.noErrors(t)
+}
+
+// playRecord is one play of a sceneAnim block: the two pose rows the play
+// blends between and their folded weights.
+type playRecord struct {
+	row0, row1 uint32
+	w0, w1     float32
+}
+
+// playsOf decodes the play records of an instance's sceneAnim block.
+func playsOf(t *testing.T, instance drawnInstance) []playRecord {
+	t.Helper()
+	if instance.animOffset == sceneNoAnim || len(instance.anim) < animHeaderSize {
+		t.Fatalf("the instance at %v carries no sceneAnim block", instance.position())
+	}
+	count := int(binary.LittleEndian.Uint32(instance.anim))
+	if len(instance.anim) < animHeaderSize+count*playRecordSize {
+		t.Fatalf("the sceneAnim block claims %d plays and holds %d bytes", count, len(instance.anim))
+	}
+	plays := make([]playRecord, count)
+	for i := range plays {
+		at := animHeaderSize + i*playRecordSize
+		plays[i] = playRecord{
+			row0: binary.LittleEndian.Uint32(instance.anim[at:]),
+			row1: binary.LittleEndian.Uint32(instance.anim[at+4:]),
+			w0:   floatAt(instance.anim, at+8),
+			w1:   floatAt(instance.anim, at+12),
+		}
+	}
+	return plays
 }
 
 // TestAnimationSkipsEmptySlots is the fixed array meeting scene's slice: an
 // empty clip name is an unused slot wherever it sits, and the plays that
-// remain reach the draw in slot order with the time the game wrote.
+// remain reach the GPU in slot order with the time, loop and weight the game
+// wrote.
+//
+// The sceneAnim block is what carries them. A play is two pose rows of one clip
+// and two weights, so the time shows as how far a play's row sits past the
+// same clip played at time zero - scene samples at 60 frames a second - and
+// the weight as the play's share of the normalised total.
 func TestAnimationSkipsEmptySlots(t *testing.T) {
-	h := newHarness(t)
-	h.spawn(t, spawnRequest{
-		Model: &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}},
-		Animation: &ecsscene.Animation{Plays: [ecsscene.MaxPlays]scene.ClipPlay{
-			{Clip: "Walk", Time: 0.25, Loop: true, Weight: 1},
-			{},
-			{Clip: "Idle", Time: 2, Weight: 0.5},
-		}},
-	})
-	h.spawn(t, spawnRequest{Step: 1, Model: &ecsscene.Model{Ref: scene.ModelRef{Path: "models/still.glb"}}})
-
-	h.frame(t)
-
-	plays := map[string][]scene.ClipPlay{}
-	for _, op := range h.ops(t, scene.OpModel) {
-		plays[op.Path] = append([]scene.ClipPlay(nil), op.Model.Plays...)
-	}
-	want := []scene.ClipPlay{
-		{Clip: "Walk", Time: 0.25, Loop: true, Weight: 1},
+	h := newDrawingHarness(t, 256)
+	animated := &ecsscene.Model{Ref: scene.ModelRef{Path: animatedModel}}
+	// Walk loops, so 1.25 seconds into a one-second clip is a quarter in;
+	// Idle does not, so two seconds in holds its last frame.
+	gapped := [ecsscene.MaxPlays]scene.ClipPlay{
+		{Clip: "Walk", Time: 1.25, Loop: true, Weight: 1},
+		{},
 		{Clip: "Idle", Time: 2, Weight: 0.5},
 	}
-	if !reflect.DeepEqual(plays[crateModel], want) {
-		t.Errorf("the animated draw plays %+v, want %+v", plays[crateModel], want)
+	dense := [ecsscene.MaxPlays]scene.ClipPlay{gapped[0], gapped[2]}
+	atZero := [ecsscene.MaxPlays]scene.ClipPlay{{Clip: "Walk", Weight: 1}, {Clip: "Idle", Weight: 1}}
+	h.spawn(t, spawnRequest{Place: m.At(0, 0, 0), Model: animated, Animation: &ecsscene.Animation{Plays: gapped}})
+	h.spawn(t, spawnRequest{Place: m.At(3, 0, 0), Model: animated, Animation: &ecsscene.Animation{Plays: dense}})
+	h.spawn(t, spawnRequest{Place: m.At(6, 0, 0), Model: animated, Animation: &ecsscene.Animation{Plays: atZero}})
+	h.spawn(t, spawnRequest{Place: m.At(9, 0, 0), Model: animated})
+
+	h.frameUntil(t, "the animated model to become resident", func() bool {
+		return len(where(h.drawn(), ofTriangle)) == 4
+	})
+
+	one := func(x float32) drawnInstance {
+		found := where(h.drawn(), at(m.Vec3{X: x}))
+		if len(found) != 1 {
+			t.Fatalf("the Entity at x=%v drew %d instances, want 1", x, len(found))
+		}
+		return found[0]
 	}
-	if got, ok := plays["models/still.glb"]; !ok || len(got) != 0 {
-		t.Errorf("the Entity with no Animation plays %+v (recorded: %v), want its rest pose", got, ok)
+	plays, reference := playsOf(t, one(0)), playsOf(t, one(6))
+	if len(plays) != 2 || len(reference) != 2 {
+		t.Fatalf("the gapped Entity packed %d plays and the reference %d, want 2 and 2", len(plays), len(reference))
 	}
+	if got := plays[0].row0 - reference[0].row0; got != 15 {
+		t.Errorf("the first play sits %d rows into Walk, want 15: a quarter second of a looped clip", got)
+	}
+	if got := plays[1].row0 - reference[1].row0; got != 60 {
+		t.Errorf("the second play sits %d rows into Idle, want 60: the clamped end of a one-second clip", got)
+	}
+	if got := plays[0].w0 + plays[0].w1; math.Abs(float64(got)-2.0/3) > 1e-5 {
+		t.Errorf("Walk weighs %v of the blend, want 2/3", got)
+	}
+	if got := plays[1].w0 + plays[1].w1; math.Abs(float64(got)-1.0/3) > 1e-5 {
+		t.Errorf("Idle weighs %v of the blend, want 1/3", got)
+	}
+	if !reflect.DeepEqual(plays, playsOf(t, one(3))) {
+		t.Errorf("the gapped slots packed %+v, and the same plays in adjacent slots %+v", plays, playsOf(t, one(3)))
+	}
+	if still := one(9); still.animOffset != sceneNoAnim {
+		t.Errorf("the Entity with no Animation carries sceneAnim block %d, want the rest pose", still.animOffset)
+	}
+	h.noErrors(t)
 }
 
 // TestParamsReachAMeshsParamsAndAModelsOverrides is one Component meaning the
 // one thing scene means by a per-draw parameter on each kind of draw: a mesh
-// binds it beside its material, and a model merges it by name over the file's.
+// binds it beside its material, which is where gfx packs it into the draw's
+// uniform block, and a model merges it by name over the file's own material
+// record.
 func TestParamsReachAMeshsParamsAndAModelsOverrides(t *testing.T) {
-	h := newHarness(t)
+	h := newDrawingHarness(t, 256)
 	ref := h.bake(t)
 	tint := gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1})
 	fade := gfx.FloatParam("fade", 0.5)
 	h.spawn(t, spawnRequest{
+		Place:  m.At(-3, 0, 0),
 		Mesh:   &ecsscene.Mesh{Ref: ref},
 		Params: &ecsscene.Params{Values: m.NewList(tint, fade)},
 	})
 	h.spawn(t, spawnRequest{
+		Place:  m.At(3, 0, 0),
 		Model:  &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}},
 		Params: &ecsscene.Params{Values: m.NewList(tint)},
 	})
 
-	h.frame(t)
+	h.frameUntil(t, "the crate to become resident", func() bool {
+		return len(where(h.drawn(), at(m.Vec3{X: 3}))) > 0
+	})
 
-	meshes := h.ops(t, scene.OpMesh)
+	meshes := where(h.drawn(), at(m.Vec3{X: -3}))
 	if len(meshes) != 1 {
-		t.Fatalf("the frame recorded %d mesh draws, want 1", len(meshes))
+		t.Fatalf("the mesh drew %d instances, want 1", len(meshes))
 	}
-	if got := paramNames(meshes[0].Draw.Params); !reflect.DeepEqual(got, []string{"baseColorFactor", "fade"}) {
-		t.Errorf("the mesh draw binds %v", got)
+	if got := meshes[0].param("baseColorFactor"); got != (m.Vec4{X: 1, W: 1}) {
+		t.Errorf("the mesh draw bound baseColorFactor %v, want the tint", got)
 	}
-	if value, _ := meshes[0].Draw.Params[1].FloatValue(); value != 0.5 {
-		t.Errorf("the mesh's fade is %v, want 0.5", value)
+	if got := meshes[0].param("fade"); got.X != 0.5 {
+		t.Errorf("the mesh draw bound fade %v, want 0.5", got.X)
 	}
-	models := h.ops(t, scene.OpModel)
+	models := where(h.drawn(), at(m.Vec3{X: 3}))
 	if len(models) != 1 {
-		t.Fatalf("the frame recorded %d model draws, want 1", len(models))
+		t.Fatalf("the model drew %d instances, want 1", len(models))
 	}
-	overrides := models[0].Model.OverrideParams
-	if got := paramNames(overrides); !reflect.DeepEqual(got, []string{"baseColorFactor"}) {
-		t.Fatalf("the model draw overrides %v", got)
+	if len(models[0].material) < 16 {
+		t.Fatalf("the model draw bound a %d-byte material record", len(models[0].material))
 	}
-	if color, _ := overrides[0].ColorValue(); color != (m.Color{R: 1, A: 1}) {
-		t.Errorf("the model's tint is %v", color)
+	if got := vec4At(models[0].material, 0); got != (m.Vec4{X: 1, W: 1}) {
+		t.Errorf("the model's material record has baseColorFactor %v, want the tint over the file's white", got)
 	}
+	if got := models[0].param("fade"); got != (m.Vec4{}) {
+		t.Errorf("the model draw bound fade %v, which only the mesh's Params named", got)
+	}
+	h.noErrors(t)
 }
 
-func paramNames(params []gfx.ParameterDescr) []string {
-	names := []string{}
-	for _, param := range params {
-		names = append(names, param.Name())
+// passView is what one draw drew with in one pass: the shader, the state and
+// the parameters its tag named.
+type passView struct {
+	Shader string
+	State  gfx.MaterialState
+	A, B   float32
+	C, D   float32
+}
+
+func viewOf(instance drawnInstance) passView {
+	return passView{
+		Shader: strings.TrimSpace(instance.shader), State: instance.state,
+		A: instance.param("a").X, B: instance.param("b").X,
+		C: instance.param("c").X, D: instance.param("d").X,
 	}
-	return names
 }
 
 // TestAMaterialsTagsEachKeepTheirOwnParams is the scratch rule that has a
 // reason: gfx keeps the params slice a descriptor is built around, so a tag
 // rebuilt over params another tag of the same draw still points at would bind
 // that other tag's values. Every tag here carries a different count, and a
-// second Entity with another material follows in the same frame.
+// second Entity with another material follows in the same frame. The camera
+// has a pass for each tag, so each tag's pipeline and parameters are what
+// that pass drew the Entity with.
 func TestAMaterialsTagsEachKeepTheirOwnParams(t *testing.T) {
-	h := newHarness(t)
+	h := newCameralessHarness(t, 256)
+	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{
+		FovY: 1.0472, Near: 0.1, Far: 200, Passes: m.NewList(
+			scene.Pass{ClearDepth: m.Some[float32](1)},
+			scene.Pass{Tag: "shadow", Order: 1},
+			scene.Pass{Tag: "outline", Order: 2},
+		),
+	}})
 	ref := h.bake(t)
 	forward := gfx.ShaderWithText("forward")
 	shadow := gfx.ShaderWithText("shadow")
-	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref}, Material: &ecsscene.Material{Tags: m.NewList(
+	h.spawn(t, spawnRequest{Place: m.At(-3, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref}, Material: &ecsscene.Material{Tags: m.NewList(
 		ecsscene.MaterialTag{Shader: forward, State: gfx.StateOpaque3D(), Params: m.NewList(
 			gfx.FloatParam("a", 1), gfx.FloatParam("b", 2))},
 		ecsscene.MaterialTag{Tag: "shadow", Shader: shadow, State: gfx.StateTransparent3D(), Params: m.NewList(
 			gfx.FloatParam("c", 3))},
 		ecsscene.MaterialTag{Tag: "outline", Shader: forward},
 	)}})
-	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(1)}, Material: &ecsscene.Material{Tags: m.NewList(
+	h.spawn(t, spawnRequest{Place: m.At(3, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(1)}, Material: &ecsscene.Material{Tags: m.NewList(
 		ecsscene.MaterialTag{Shader: shadow, Params: m.NewList(gfx.FloatParam("d", 4))},
 	)}})
 
-	h.frame(t)
+	h.frameUntil(t, "the frame to draw", func() bool { return len(h.drawn()) > 0 })
 
-	byLayers := map[scene.LayerMask]scene.Material{}
-	for _, op := range h.ops(t, scene.OpMesh) {
-		byLayers[op.Layers] = op.Draw.Material
-	}
-	type tagView struct {
-		Tag    scene.PassTag
-		Shader gfx.ShaderDescr
-		State  gfx.MaterialState
-		Params map[string]float32
-	}
-	view := func(material scene.Material) []tagView {
-		out := []tagView{}
-		for _, entry := range material {
-			params := map[string]float32{}
-			for _, param := range entry.Descr.Params() {
-				params[param.Name()], _ = param.FloatValue()
-			}
-			out = append(out, tagView{entry.Tag, entry.Descr.Shader(), entry.Descr.State(), params})
+	views := func(x float32) map[string]passView {
+		out := map[string]passView{}
+		for _, instance := range where(h.drawn(), at(m.Vec3{X: x})) {
+			out[instance.pass.Label] = viewOf(instance)
 		}
 		return out
 	}
-	want := []tagView{
-		{"", forward, gfx.StateOpaque3D(), map[string]float32{"a": 1, "b": 2}},
-		{"shadow", shadow, gfx.StateTransparent3D(), map[string]float32{"c": 3}},
-		{"outline", forward, gfx.MaterialState{}, map[string]float32{}},
+	// The tag with no state names none, which reaches gfx as the zero state:
+	// what the pipeline was built with is what the second Entity's only tag
+	// reads back as too.
+	want := map[string]passView{
+		"scene.camera0.forward": {Shader: "forward", State: gfx.StateOpaque3D(), A: 1, B: 2},
+		"scene.camera0.shadow":  {Shader: "shadow", State: gfx.StateTransparent3D(), C: 3},
+		"scene.camera0.outline": {Shader: "forward", State: gfx.MaterialState{}},
 	}
-	if got := view(byLayers[0]); !reflect.DeepEqual(got, want) {
-		t.Errorf("the three-tag material reached scene as\n%+v\nwant\n%+v", got, want)
+	if got := views(-3); !reflect.DeepEqual(got, want) {
+		t.Errorf("the three-tag material drew as\n%+v\nwant\n%+v", got, want)
 	}
-	wantOther := []tagView{{"", shadow, gfx.MaterialState{}, map[string]float32{"d": 4}}}
-	if got := view(byLayers[scene.Layer(1)]); !reflect.DeepEqual(got, wantOther) {
-		t.Errorf("the second Entity's material reached scene as %+v, want %+v", got, wantOther)
+	wantOther := map[string]passView{"scene.camera0.forward": {Shader: "shadow", State: gfx.MaterialState{}, D: 4}}
+	if got := views(3); !reflect.DeepEqual(got, wantOther) {
+		t.Errorf("the second Entity's material drew as %+v, want %+v", got, wantOther)
 	}
+	h.noErrors(t)
 }
 
 // TestAnAbsentMaterialIsNoMaterial is scene's nil on both kinds of draw: the
@@ -217,39 +316,83 @@ func TestAMaterialsTagsEachKeepTheirOwnParams(t *testing.T) {
 // with a Material beside it in the same frame shows the scratch does not leak
 // one draw's material into the next.
 func TestAnAbsentMaterialIsNoMaterial(t *testing.T) {
-	h := newHarness(t)
+	h := newDrawingHarness(t, 256)
 	ref := h.bake(t)
 	material := &ecsscene.Material{Tags: m.NewList(ecsscene.MaterialTag{Shader: gfx.ShaderWithText("flat")})}
-	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(1)}, Material: material})
-	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref}})
-	h.spawn(t, spawnRequest{Model: &ecsscene.Model{Ref: scene.ModelRef{Path: "models/shaded.glb"}}, Material: material})
-	h.spawn(t, spawnRequest{Model: &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}}})
+	h.spawn(t, spawnRequest{Place: m.At(-3, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(1)}, Material: material})
+	h.spawn(t, spawnRequest{Place: m.At(-1, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref}})
+	h.spawn(t, spawnRequest{Place: m.At(1, 0, 0), Model: crateModelComponent(), Material: material})
+	h.spawn(t, spawnRequest{Place: m.At(3, 0, 0), Model: crateModelComponent()})
 
-	h.frame(t)
+	h.frameUntil(t, "the crate to become resident", func() bool {
+		return len(where(h.drawn(), at(m.Vec3{X: 3}))) > 0
+	})
 
-	meshes, models := h.ops(t, scene.OpMesh), h.ops(t, scene.OpModel)
-	if len(meshes) != 2 || len(models) != 2 {
-		t.Fatalf("the frame recorded %d meshes and %d models, want 2 and 2", len(meshes), len(models))
-	}
-	for _, op := range meshes {
-		if absent := op.Layers == 0; absent != (op.Draw.Material == nil) {
-			t.Errorf("the mesh on layers %v draws with material %v", op.Layers, op.Draw.Material)
+	for x, flat := range map[float32]bool{-3: true, -1: false, 1: true, 3: false} {
+		drawn := where(h.drawn(), at(m.Vec3{X: x}))
+		if len(drawn) != 1 {
+			t.Errorf("the Entity at x=%v drew %d instances, want 1", x, len(drawn))
+			continue
+		}
+		shader := strings.TrimSpace(drawn[0].shader)
+		if got := shader == "flat"; got != flat {
+			t.Errorf("the Entity at x=%v drew with shader %.40q; with a Material: %v", x, shader, flat)
+		}
+		if !flat && !strings.Contains(shader, "sceneInstances") {
+			t.Errorf("the Entity at x=%v has no Material and drew with %.40q, not the bundled shader", x, shader)
 		}
 	}
-	for _, op := range models {
-		if absent := op.Path == crateModel; absent != (op.Model.Material == nil) {
-			t.Errorf("the model %q draws with material %v", op.Path, op.Model.Material)
+	h.noErrors(t)
+}
+
+// light is one packed light of a sceneFrame block.
+type light struct {
+	position, direction, color m.Vec3
+	invRange4                  float32
+	spotScale, spotOffset      float32
+}
+
+// lightsOf decodes the lights a pass's sceneFrame block carries.
+func lightsOf(t *testing.T, frame []byte) []light {
+	t.Helper()
+	if len(frame) < frameLightsAt {
+		t.Fatalf("the sceneFrame block is %d bytes", len(frame))
+	}
+	count := int(binary.LittleEndian.Uint32(frame[frameLightCountAt:]))
+	lights := make([]light, count)
+	for i := range lights {
+		at := frameLightsAt + i*lightRecordSize
+		vec3 := func(offset int) m.Vec3 {
+			v := vec4At(frame, at+offset)
+			return m.Vec3{X: v.X, Y: v.Y, Z: v.Z}
+		}
+		lights[i] = light{
+			position: vec3(0), invRange4: floatAt(frame, at+12),
+			direction: vec3(16), spotScale: floatAt(frame, at+28),
+			color: vec3(32), spotOffset: floatAt(frame, at+44),
 		}
 	}
+	return lights
 }
 
 // TestALightIsPlacedAndAimedByItsTransform is the one place the binding
 // computes anything: a spot's direction is its Transform's rotation applied to
 // -Z, which is the way m.LookAt faces, so a light placed with LookAt shines
 // at what it looks at. An unrotated spot shines down -Z, and a point light
-// takes its position alone.
+// takes its position alone. A light is among a pass.s lights only when its
+// layers are ones the camera draws.
 func TestALightIsPlacedAndAimedByItsTransform(t *testing.T) {
-	h := newHarness(t)
+	h := newCameralessHarness(t, 256)
+	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{
+		FovY: 1.0472, Near: 0.1, Far: 200, CullMask: scene.Layer(2),
+	}})
+	// A second camera draws layer 3 alone, which is what tells a light the
+	// binding left on layer 2 from one it dropped to zero, which is every layer.
+	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{
+		ID: 1, FovY: 1.0472, Near: 0.1, Far: 200, CullMask: scene.Layer(3),
+	}})
+	ref := h.bake(t)
+	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}})
 	eye, target := m.Vec3{Y: 5}, m.Vec3{X: 3, Y: 5, Z: 4}
 	h.spawn(t, spawnRequest{
 		Place: m.LookAt(eye, target, m.Vec3{Y: 1}),
@@ -260,93 +403,191 @@ func TestALightIsPlacedAndAimedByItsTransform(t *testing.T) {
 	})
 	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{Z: 7}}, Light: &ecsscene.Light{Kind: scene.LightSpot}})
 	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{X: -2}}, Light: &ecsscene.Light{Range: 3}})
+	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{X: 2}}, Light: &ecsscene.Light{Layers: scene.Layer(3)}})
 
-	h.frame(t)
+	h.frameUntil(t, "the frame to draw", func() bool { return len(h.drawn()) > 0 })
 
-	spots, points := h.ops(t, scene.OpSpotLight), h.ops(t, scene.OpPointLight)
-	if len(spots) != 2 || len(points) != 1 {
-		t.Fatalf("the frame recorded %d spot and %d point lights, want 2 and 1", len(spots), len(points))
+	other := where(h.drawn(), inPass("scene.camera1.forward"))
+	if len(other) == 0 {
+		t.Fatal("the layer-3 camera drew nothing")
 	}
-	for _, op := range spots {
-		switch op.Light.Position {
-		case eye:
-			if !near(op.Light.Direction, m.Vec3{X: 0.6, Z: 0.8}) {
-				t.Errorf("the aimed spot shines along %v, want (0.6, 0, 0.8)", op.Light.Direction)
-			}
-			want := scene.LightDescr{
-				Position: eye, Direction: op.Light.Direction, Color: m.Color{R: 1, G: 0.5, A: 1},
-				Intensity: 2, Range: 10, InnerCone: 0.1, OuterCone: 0.4, Kind: scene.LightSpot,
-			}
-			if op.Light != want || op.Layers != scene.Layer(2) {
-				t.Errorf("the aimed spot reached scene as %+v on %v, want %+v on %v",
-					op.Light, op.Layers, want, scene.Layer(2))
-			}
-		case m.Vec3{Z: 7}:
-			if !near(op.Light.Direction, m.Vec3{Z: -1}) {
-				t.Errorf("the unrotated spot shines along %v, want -Z", op.Light.Direction)
-			}
-		default:
-			t.Errorf("a spot light stands at %v", op.Light.Position)
+	for _, got := range lightsOf(t, other[0].frame) {
+		if got.position == eye {
+			t.Errorf("the layer-3 camera carries the spot on layer 2: %+v", got)
 		}
 	}
-	if points[0].Light.Position != (m.Vec3{X: -2}) || points[0].Light.Range != 3 {
-		t.Errorf("the point light reached scene as %+v", points[0].Light)
+	layer2 := where(h.drawn(), inPass("scene.camera0.forward"))
+	if len(layer2) == 0 {
+		t.Fatal("the layer-2 camera drew nothing")
 	}
+	lights := lightsOf(t, layer2[0].frame)
+	if len(lights) != 3 {
+		t.Fatalf("the pass carries %d lights, want the 3 on layers the camera draws: %+v", len(lights), lights)
+	}
+	cone := func(inner, outer float64) (scale, offset float32) {
+		scale = float32(1 / (math.Cos(inner) - math.Cos(outer)))
+		return scale, -float32(math.Cos(outer)) * scale
+	}
+	for _, got := range lights {
+		switch got.position {
+		case eye:
+			if !nearVec3(got.direction, m.Vec3{X: 0.6, Z: 0.8}) {
+				t.Errorf("the aimed spot shines along %v, want (0.6, 0, 0.8)", got.direction)
+			}
+			scale, offset := cone(0.1, 0.4)
+			if got.color != (m.Vec3{X: 2, Y: 1}) || !nearFloat(got.invRange4, 1e-4) ||
+				!nearFloat(got.spotScale, scale) || !nearFloat(got.spotOffset, offset) {
+				t.Errorf("the aimed spot reached the GPU as %+v, want colour (2, 1, 0), 1/range^4 1e-4 and cone %v, %v",
+					got, scale, offset)
+			}
+		case m.Vec3{Z: 7}:
+			if !nearVec3(got.direction, m.Vec3{Z: -1}) {
+				t.Errorf("the unrotated spot shines along %v, want -Z", got.direction)
+			}
+			if got.spotScale == 0 {
+				t.Errorf("the unrotated spot reached the GPU with no cone: %+v", got)
+			}
+		case m.Vec3{X: -2}:
+			if got.direction != (m.Vec3{}) || got.spotScale != 0 || got.spotOffset != 1 || !nearFloat(got.invRange4, 1.0/81) {
+				t.Errorf("the point light reached the GPU as %+v, want no cone and 1/range^4 of range 3", got)
+			}
+		default:
+			t.Errorf("a light stands at %v", got.position)
+		}
+	}
+	h.noErrors(t)
 }
 
-func near(a, b m.Vec3) bool {
+func nearVec3(a, b m.Vec3) bool {
 	const epsilon = 1e-5
 	d := a.Sub(b)
 	return d.X*d.X+d.Y*d.Y+d.Z*d.Z < epsilon*epsilon
 }
 
+func nearFloat(a, b float32) bool {
+	return math.Abs(float64(a-b)) <= 1e-5*math.Max(1, math.Abs(float64(b)))
+}
+
+func nearMat4(a, b m.Mat4) bool {
+	for i := range a {
+		if !nearFloat(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// The sceneFrame block's layout, past the three matrices: the eye, the view
+// direction, the sun and the two ambients, one vec4 each.
+const (
+	frameViewAt          = 0
+	frameProjectionAt    = 64
+	frameCameraAt        = 192
+	frameSunDirectionAt  = 224
+	frameSunColorAt      = 240
+	frameAmbientSkyAt    = 256
+	frameAmbientGroundAt = 272
+)
+
 // TestACameraRecordsItsPassesWithTheirClears is the List of scene.Pass: each
 // pass's clears are m.Maybe values, so "clear to this colour" and "preserve"
 // are both a value a Component can hold. The camera is placed by its
-// Transform, and a Camera whose Passes are empty leaves scene its default pass.
+// Transform, its lens and lighting reach its passes' sceneFrame blocks, its
+// cull mask decides what they draw, and a Camera whose Passes are empty gets
+// scene's default pass.
 func TestACameraRecordsItsPassesWithTheirClears(t *testing.T) {
-	h := newHarness(t)
+	h := newCameralessHarness(t, 256)
 	place := m.LookAt(m.Vec3{Y: 3, Z: 10}, m.Vec3{}, m.Vec3{Y: 1})
-	passes := []scene.Pass{
-		{ClearColor: m.Some(m.Color{B: 0.25, A: 1}), ClearDepth: m.Some[float32](1)},
-		{Tag: "overlay", Order: 1},
-	}
 	h.spawn(t, spawnRequest{Place: place, Camera: &ecsscene.Camera{
 		ID: -2, Projection: scene.Perspective, FovY: 1, Near: 0.1, Far: 100,
 		CullMask: scene.Layer(4), SunDirection: m.Vec3{Y: -1}, SunColor: m.White, SunIntensity: 3,
 		AmbientSky: m.Color{B: 1, A: 1}, AmbientGround: m.Color{G: 1, A: 1}, AmbientIntensity: 0.5,
-		Passes: m.ListOf(passes),
+		Passes: m.NewList(
+			scene.Pass{ClearColor: m.Some(m.Color{B: 0.25, A: 1}), ClearDepth: m.Some[float32](1)},
+			scene.Pass{Tag: "overlay", Order: 1},
+		),
 	}})
-	h.spawn(t, spawnRequest{Camera: &ecsscene.Camera{
+	obliquePlace := m.At(0, 0, 20)
+	h.spawn(t, spawnRequest{Place: obliquePlace, Camera: &ecsscene.Camera{
 		ID: 5, Projection: scene.Oblique, Height: 20, Shear: 0.5, Near: -50, Far: 50,
 	}})
+	// Two meshes every pass has a tag for, one on the layer the first camera
+	// draws and one off it.
+	ref := h.bake(t)
+	material := &ecsscene.Material{Tags: m.NewList(
+		ecsscene.MaterialTag{Shader: gfx.ShaderWithText("flat")},
+		ecsscene.MaterialTag{Tag: "overlay", Shader: gfx.ShaderWithText("flat")},
+	)}
+	h.spawn(t, spawnRequest{Place: m.At(-1, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(4), NeverCull: true}, Material: material})
+	h.spawn(t, spawnRequest{Place: m.At(1, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(1), NeverCull: true}, Material: material})
 
-	h.frame(t)
+	h.frameUntil(t, "the frame to draw", func() bool { return len(h.drawn()) > 0 })
 
-	cameras := map[scene.CameraID]scene.CameraDescr{}
-	for _, op := range h.ops(t, scene.OpCamera) {
-		op.Descr.Passes = append([]scene.Pass(nil), op.Descr.Passes...)
-		cameras[op.Camera] = op.Descr
+	const forward, overlay, oblique = "scene.camera-2.forward", "scene.camera-2.overlay", "scene.camera5.forward"
+	passes := map[string]int{}
+	for i, pass := range h.backend.passes() {
+		passes[pass.desc.Label] = i
 	}
-	want := scene.CameraDescr{
-		Transform: place, Projection: scene.Perspective, FovY: 1, Near: 0.1, Far: 100,
-		CullMask: scene.Layer(4), SunDirection: m.Vec3{Y: -1}, SunColor: m.White, SunIntensity: 3,
-		AmbientSky: m.Color{B: 1, A: 1}, AmbientGround: m.Color{G: 1, A: 1}, AmbientIntensity: 0.5,
-		Passes: passes,
+	first, second, third := passes[forward], passes[overlay], passes[oblique]
+	if len(passes) != 3 || !(first < second && second < third) {
+		t.Fatalf("the frame's passes are %v, want %q, %q and %q in that order", passes, forward, overlay, oblique)
 	}
-	if got, ok := cameras[-2]; !ok || !reflect.DeepEqual(got, want) {
-		t.Fatalf("the camera reached scene as\n%+v (recorded: %v)\nwant\n%+v", got, ok, want)
+	descs := h.backend.passes()
+	if d := descs[first].desc; d.Load != gfx.LoadClear || d.Clear != (m.Color{B: 0.25, A: 1}) ||
+		d.DepthLoad != gfx.LoadClear || d.DepthClear != 1 {
+		t.Errorf("the first pass reached the GPU as %+v, want colour cleared to the Component's and depth to 1", d)
 	}
-	if clear, ok := cameras[-2].Passes[0].ClearColor.Get(); !ok || clear != (m.Color{B: 0.25, A: 1}) {
-		t.Errorf("the first pass clears colour to %v (%v), want the Component's", clear, ok)
+	if d := descs[second].desc; d.Load == gfx.LoadClear || d.DepthLoad == gfx.LoadClear {
+		t.Errorf("the second pass clears, and its Component said preserve: %+v", d)
 	}
-	if _, ok := cameras[-2].Passes[1].ClearColor.Get(); ok {
-		t.Error("the second pass clears colour, and its Component said preserve")
+	if d := descs[third].desc; d.Load == gfx.LoadClear || d.DepthLoad != gfx.LoadClear || d.DepthClear != 1 {
+		t.Errorf("the pass-less camera's default pass reached the GPU as %+v, want colour kept and depth cleared", d)
 	}
-	other, ok := cameras[5]
-	if !ok || other.Projection != scene.Oblique || other.Height != 20 || other.Shear != 0.5 ||
-		other.Near != -50 || len(other.Passes) != 0 {
-		t.Errorf("the pass-less camera reached scene as %+v (recorded: %v)", other, ok)
+
+	for label, want := range map[string][]float32{forward: {-1}, overlay: {-1}, oblique: {-1, 1}} {
+		drawn := where(h.drawn(), inPass(label))
+		for _, x := range want {
+			if len(where(drawn, at(m.Vec3{X: x}))) != 1 {
+				t.Errorf("%s drew at %v, want the mesh at x=%v", label, positions(drawn), x)
+			}
+		}
+		if len(drawn) != len(want) {
+			t.Errorf("%s drew at %v, want only x=%v", label, positions(drawn), want)
+		}
+	}
+
+	aspect := float32(1600) / 1200
+	view, _ := place.Mat4().Inverse()
+	frame := where(h.drawn(), inPass(forward))[0].frame
+	expectMat4(t, "view", mat4At(frame, frameViewAt), view)
+	expectMat4(t, "projection", mat4At(frame, frameProjectionAt), m.Perspective4(1, aspect, 0.1, 100))
+	for what, want := range map[string]struct {
+		at   int
+		want m.Vec4
+	}{
+		"eye":           {frameCameraAt, m.Vec4{Y: 3, Z: 10, W: 1}},
+		"sun direction": {frameSunDirectionAt, m.Vec4{Y: -1}},
+		"sun colour":    {frameSunColorAt, m.Vec4{X: 3, Y: 3, Z: 3}},
+		"sky":           {frameAmbientSkyAt, m.Vec4{Z: 0.5}},
+		"ground":        {frameAmbientGroundAt, m.Vec4{Y: 0.5}},
+	} {
+		if got := vec4At(frame, want.at); got != want.want {
+			t.Errorf("the %s reached the GPU as %v, want %v", what, got, want.want)
+		}
+	}
+	obliqueFrame := where(h.drawn(), inPass(oblique))[0].frame
+	expectMat4(t, "oblique projection", mat4At(obliqueFrame, frameProjectionAt),
+		m.Oblique4(-10*aspect, 10*aspect, -10, 10, -50, 50, 0.5))
+	if got := vec4At(obliqueFrame, frameCameraAt); got != (m.Vec4{Z: 20, W: 1}) {
+		t.Errorf("the oblique eye reached the GPU as %v, want (0, 0, 20)", got)
+	}
+	h.noErrors(t)
+}
+
+func expectMat4(t *testing.T, what string, got, want m.Mat4) {
+	t.Helper()
+	if !nearMat4(got, want) {
+		t.Errorf("the %s reached the GPU as\n%v\nwant\n%v", what, got, want)
 	}
 }
 
@@ -354,36 +595,49 @@ func TestACameraRecordsItsPassesWithTheirClears(t *testing.T) {
 // is required, so a Model, Mesh, Light or Camera on an Entity with nowhere to
 // stand is not a draw at the origin but no draw at all.
 func TestAnEntityWithNoTransformIsNotRecorded(t *testing.T) {
-	h := newHarness(t)
+	h := newDrawingHarness(t, 256)
 	ref := h.bake(t)
 	h.spawn(t, spawnRequest{Unplaced: true,
-		Model: &ecsscene.Model{Ref: scene.ModelRef{Path: "models/nowhere.glb"}},
-		Mesh:  &ecsscene.Mesh{Ref: ref}, Light: &ecsscene.Light{}, Camera: &ecsscene.Camera{ID: 1, FovY: 1, Near: 1, Far: 2},
+		Model: crateModelComponent(), Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true},
+		Light: &ecsscene.Light{}, Camera: &ecsscene.Camera{ID: 1, FovY: 1, Near: 1, Far: 2},
 	})
-	h.spawn(t, spawnRequest{Model: &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}}})
+	h.spawn(t, spawnRequest{Place: m.At(5, 0, 0), Model: crateModelComponent()})
 
-	h.frame(t)
+	h.frameUntil(t, "the crate to become resident", func() bool {
+		return len(where(h.drawn(), at(m.Vec3{X: 5}))) > 0
+	})
 
-	if models := h.ops(t, scene.OpModel); len(models) != 1 || models[0].Path != crateModel {
-		t.Errorf("the frame recorded model draws %v, want only the placed one", models)
+	if drawn := h.drawn(); len(drawn) != 1 {
+		t.Errorf("the frame drew at %v, want only the placed crate", positions(drawn))
 	}
-	if rest := h.ops(t, scene.OpMesh, scene.OpPointLight, scene.OpSpotLight, scene.OpCamera); len(rest) != 0 {
-		t.Errorf("the frame recorded %d unplaced meshes, lights or cameras: %v", len(rest), rest)
+	for _, pass := range h.backend.passes() {
+		if strings.HasPrefix(pass.desc.Label, "scene.camera1.") {
+			t.Errorf("the unplaced camera emitted pass %q", pass.desc.Label)
+		}
 	}
+	if lights := lightsOf(t, h.drawn()[0].frame); len(lights) != 0 {
+		t.Errorf("the pass carries the unplaced light: %+v", lights)
+	}
+	h.noErrors(t)
 }
 
 // TestADrawIsInTheFlushOfTheTickThatRecordedItWithNoOrderingDeclared is the
 // ordering claim. scene subscribes its flush Last, so a recording System that
-// declares nothing is in the ordinary phase and already runs before it. Every
-// test above is the behavioural half — one frame, and the draw is in what that
-// frame's flush published — and this one asserts the edge the engine derived
-// without either side declaring it.
+// declares nothing is in the ordinary phase and already runs before it. The
+// behavioural half is one frame: an Entity spawned into a world that already
+// draws is drawn by the very next frame, which is only true if its tick's
+// flush saw it. The rest asserts the edge the engine derived without either
+// side declaring it.
 func TestADrawIsInTheFlushOfTheTickThatRecordedItWithNoOrderingDeclared(t *testing.T) {
-	h := newHarness(t)
-	h.spawn(t, spawnRequest{Model: &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}}})
+	h := newDrawingHarness(t, 256)
+	h.spawn(t, spawnRequest{Model: crateModelComponent()})
+	h.frameUntil(t, "the crate to become resident", func() bool {
+		return len(where(h.drawn(), ofTriangle)) > 0
+	})
+	h.spawn(t, spawnRequest{Place: m.At(4, 0, 0), Model: crateModelComponent()})
 	h.frame(t)
-	if models := h.ops(t, scene.OpModel); len(models) != 1 {
-		t.Fatalf("the first tick's flush published %d model draws, want the one recorded in it", len(models))
+	if drawn := where(h.drawn(), at(m.Vec3{X: 4})); len(drawn) != 1 {
+		t.Fatalf("the frame after the spawn drew the new crate %d times, want the one recorded in its tick", len(drawn))
 	}
 
 	description := h.engine.Describe()
