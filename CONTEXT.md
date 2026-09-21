@@ -528,6 +528,10 @@ _Avoid_: Frozen, inactive, disabled, deactivated
 The Dynamic bodies joined by touching or by Joints, which fall asleep together and wake together. A Static or Kinematic body never belongs to one and never joins two.
 _Avoid_: Component, group (Component is the ECS’s word)
 
+**Constants**:
+The physics values that hold for the whole world rather than for one Body, such as gravity. Physics starts them at its own defaults and reads them every tick; a game that wants others changes them itself, and a change applies from the next tick.
+_Avoid_: Config, settings (those are fixed when physics starts), World
+
 **Angle**:
 How far a Body has turned on the plane, in radians, counted on from every earlier turn rather than wrapped into one revolution.
 _Avoid_: Rotation, heading, facing, orientation
