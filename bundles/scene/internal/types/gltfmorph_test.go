@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
@@ -53,6 +54,25 @@ func deltaTarget(doc *gltf.Document, position, normal, tangent [][3]float32) glt
 		target[gltf.TANGENT] = modeler.WriteAccessor(doc, gltf.TargetNone, tangent)
 	}
 	return target
+}
+
+// readMorphTargets decodes the one primitive of the mesh that holds primitive
+// and converts its morph targets, before anything could reorder its vertices.
+// The document gains the node and scene the decoder needs to reach it.
+func readMorphTargets(doc *gltf.Document, primitive *gltf.Primitive, vertexCount int) gltfMorph {
+	for mesh := range doc.Meshes {
+		for _, candidate := range doc.Meshes[mesh].Primitives {
+			if candidate == primitive {
+				doc.Nodes = append(doc.Nodes, &gltf.Node{Mesh: gltf.Index(mesh)})
+			}
+		}
+	}
+	doc.Scenes = append(doc.Scenes, &gltf.Scene{Nodes: []int{len(doc.Nodes) - 1}})
+	decoded, err := model.DecodeDocument(doc, "m.glb")
+	if err != nil || len(decoded.Geometries) == 0 {
+		return gltfMorph{}
+	}
+	return convertMorphTargets(&decoded.Geometries[0], vertexCount)
 }
 
 // The mask is the union across the primitive's targets, intersected with what

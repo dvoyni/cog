@@ -9,7 +9,7 @@ import (
 // The sphere is a 16 x 12 UV sphere of 352 triangles, every vertex on the unit
 // sphere with its normal pointing out through it, wound outwards.
 func TestUnitSphereIsTheDocumentedTessellation(t *testing.T) {
-	vertices, indices := unitSphereGeometry()
+	vertices, indices := UnitSphereGeometry()
 	if len(vertices) != 17*13 {
 		t.Fatalf("the unit sphere has %d vertices, want 17 x 13 with the seam duplicated", len(vertices))
 	}
@@ -34,7 +34,7 @@ func TestUnitSphereIsTheDocumentedTessellation(t *testing.T) {
 // The plane is two 1x1 faces at y = 0, one facing up and one facing down, so
 // that a back-face-culled plane renders from either side.
 func TestUnitPlaneIsTwoSided(t *testing.T) {
-	vertices, indices := unitPlaneGeometry()
+	vertices, indices := UnitPlaneGeometry()
 	if len(vertices) != 8 || len(indices) != 12 {
 		t.Fatalf("the unit plane has %d vertices and %d indices, want 8 and 12", len(vertices), len(indices))
 	}

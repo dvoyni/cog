@@ -77,7 +77,7 @@ correct without them.
 - Name: `scene.Name` (`"scene"`)
 - Constructor: `sceneplugin.New() kernel.Plugin` (amended by #361; #339 made it `sceneimpl.New()`, and before that it was `scene.New() *scene.Plugin`)
 - Plugin dependencies: `gfx`, `storage`
-- Go package dependencies: `app`, `gfx`, `kernel`, `m`, `storage`,
+- Go package dependencies: `app`, `gfx`, `kernel`, `m`, `model`, `storage`,
   `github.com/qmuntal/gltf`
 - Events declared or published: none
 
@@ -863,6 +863,17 @@ Parse with [`github.com/qmuntal/gltf`](https://github.com/qmuntal/gltf)
 clean `GOOS=js GOARCH=wasm` build. Scene converts the `gltf.Document` into its
 own mesh, material and baked-pose types **in one pass at load and drops it**; the
 document never appears in scene's API. Decode allocates about 2× file size once.
+
+> **Amended by [#529](https://github.com/dvoyni/cog/issues/529).** The decode is
+> `bundles/model`'s. Its decoder, `bundles/model/internal/types/gltf`, parses the
+> file and hands over plain data: attribute arrays as the glTF library's own typed
+> slices, index lists, unbaked curves and skins, morph target floats, material
+> values, image references, lights and the flattened scene walk. scene converts
+> that into its vertices, baked poses, morph blocks and PBR records, still in one
+> load and still dropping the document, through `model.DecodeModel`. The unit
+> geometry (`model.UnitBoxGeometry` and its two siblings) and `Vertex` with the
+> storage layout it reports are `model`'s too, and scene names them through
+> aliases. See [model.md](../../../model/docs/specs/model.md#the-decoder-seam).
 
 **Supported:** GLB and `.gltf` with external buffers and images, interleaved and
 sparse accessors, 8/16/32-bit indices, per-primitive materials, generated flat

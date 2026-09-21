@@ -1,45 +1,23 @@
 package types
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
-	"math"
 
+	"github.com/dvoyni/cog/bundles/model"
+	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
-	"github.com/qmuntal/gltf/ext/lightspunctual"
-	"github.com/qmuntal/gltf/ext/texturetransform"
 )
-
-// The extension names scene reads. The list is short on purpose: an extension
-// that changes shading needs a shader change, and the bundled shader is one
-// module with no variants.
-const (
-	extEmissiveStrength = "KHR_materials_emissive_strength"
-	extMeshQuantization = "KHR_mesh_quantization"
-)
-
-// supportedRequired is the set an extensionsRequired entry may name. Anything
-// else fails the model wholesale, because a required extension is the file
-// saying it cannot be drawn correctly without it - and a wrongly drawn model is
-// exactly the failure a report cannot make visible.
-//
-// The four that matter in practice are Draco, meshopt, basisu and webp: each
-// replaces geometry or texture encoding with something scene has no decoder
-// for, so there is no geometry to fall back to. Rejecting the whole set rather
-// than those four by name is glTF's own rule and costs nothing.
-var supportedRequired = map[string]bool{
-	texturetransform.ExtensionName: true,
-	extEmissiveStrength:            true,
-	extMeshQuantization:            true,
-	lightspunctual.ExtensionName:   true,
-}
 
 // LoadedModel is one file converted to scene's own types, CPU-side, with no
 // GPU handle anywhere in it. It is what crosses from the parse half of a load
 // to the upload half.
+//
+// model's decoder produces the plain data and this conversion lays it out for
+// the GPU: it fills the conversion vertices the pack reads, generates flat
+// normals and tangents, remaps joints, packs the morph blocks, bakes the clips
+// onto the pose grid and fills the PBR records. None of that is the decoder's.
 type LoadedModel struct {
 	// geometries are the converted primitives, one per distinct glTF primitive
 	// rather than one per node that references it. Two wheel nodes sharing a
@@ -121,79 +99,10 @@ type loadedPrimitive struct {
 	morph MorphBinding
 }
 
-// loadedScene is one entry of the file's scenes array, flattened: the range of
-// primitives its walk produced and the nodes within it a Node selector can
-// address.
-type loadedScene struct {
-	name       string
-	start, end int
-	// nodes is keyed by name, holding the first depth-first match of each. An
-	// unnamed node is absent: a selector is a name, so a node without one is
-	// not addressable and there is nothing to record.
-	nodes map[string]loadedNode
-	// order is the same names again, in the order the walk claimed them, which
-	// is depth-first. The map answers a selector and this answers Nodes: a map
-	// has no order at all, and sorting one alphabetically would report a
-	// hierarchy as an alphabet.
-	order []string
-}
-
-// loadedNode is one addressable node: the contiguous slice of the flattened
-// list its subtree occupies, and what re-rooting that slice needs.
-type loadedNode struct {
-	start, end int
-	// first and last bracket the node's own entry and its named descendants'
-	// in the scene's order slice, which depth-first claiming makes contiguous
-	// the same way it makes the primitive range contiguous. It is a range over
-	// names rather than over primitives because a node carrying no geometry has
-	// an empty primitive range that a sibling's would be indistinguishable
-	// from, and Nodes has to list such a node.
-	first, last int
-	// reroot is the inverse of the node's authored world transform, which a
-	// Node draw applies to discard it. rerootable is false when that transform
-	// collapsed an axis and has no inverse - the draw reports and skips rather
-	// than drawing through a matrix that is quietly wrong.
-	reroot     m.Mat4
-	rerootable bool
-	// animated is the node's chain of animated ancestors, root-first, and is
-	// empty for almost every node in almost every file. A non-empty chain means
-	// the node's true world transform is time-varying, so the inverse above is
-	// the rest pose's and the real one has to be resolved against the frame's
-	// baked pose rows.
-	//
-	// rerootJoint is the joint carrying the chain's deepest link - its last
-	// entry - and rest is that link's own authored world matrix. Everything
-	// between that link and this node is rigid, by construction: the link is
-	// the deepest ancestor a clip steers. So the frame's true re-root is
-	//
-	//	reroot * rest * inverse(pose(rerootJoint))
-	//
-	// which is two products at pack time and collapses to reroot exactly when
-	// the pose is the rest pose. Both fields are meaningless when animated is
-	// empty, and nothing reads them there.
-	animated    []int
-	rerootJoint int
-	rest        m.Mat4
-}
-
-// geometryKey interns one converted primitive. Tangent generation is part of
-// the key because it depends on the material a node drew the mesh with: the
-// same mesh under a normal-mapped material and a plain one is two conversions,
-// which is rare and correct.
-type geometryKey struct {
-	mesh, primitive int
-	tangents        bool
-	// skin is part of the key because remapping JOINTS_0 into the model's one
-	// numbering rewrites the vertex buffer. The same mesh under two skins is
-	// two conversions, which is rare and correct.
-	//
-	// The node joint is not, and that is the whole of this field's history: it
-	// was keyed here because it shared a name with the skin, and it overwrites
-	// every vertex with a value the geometry has no opinion about. It rides
-	// the instance record instead, so a mesh under nine animated nodes is one
-	// conversion and nine placements.
-	skin int
-}
+// loadedScene is one entry of the file's scenes array, flattened by the
+// decoder: the range of primitives its walk produced and the nodes within it a
+// Node selector can address. It holds no GPU handle, so it is taken whole.
+type loadedScene = model.DecodedScene
 
 // loadedMaterial is one glTF material converted to the bundled PBR: the record
 // scene binds per batch, the pipeline state it draws under, and the texture and
@@ -208,553 +117,17 @@ type loadedMaterial struct {
 	samplers [pbrSlotCount]gfx.SamplerDesc
 }
 
-// materialVariant keys the material table of one load. A flattened matrix with
-// a negative determinant reverses winding, and pipeline state is per material
-// with no per-draw override, so such a primitive needs its own FrontCW copy of
-// the material it shares.
-type materialVariant struct {
-	material int
-	frontCW  bool
-}
-
-// defaultMaterial is the material index of a primitive that names none, which
-// glTF defines as the fully-metallic white default.
-const defaultMaterial = -1
-
-// modelConverter turns one gltf.Document into a LoadedModel in a single pass
-// and then drops the document. Nothing in gltf's types reaches scene's API: the
-// document is about 2x the file in memory, and holding it for the life of a
-// resident model would double what a model costs for the ability to re-read
-// fields scene already copied.
-type modelConverter struct {
-	doc      *gltf.Document
-	path     string
-	textures *textureRequests
-	model    LoadedModel
-	// geometries interns the converted primitives, keyed by where they came
-	// from rather than by their bytes: hashing a megabyte of vertices to find a
-	// duplicate the file already told us about would be work for nothing.
-	geometries map[geometryKey]int
-	// variants interns the (material, winding) pairs the flattening asked for,
-	// so a model whose every node has a positive determinant - which is most of
-	// them - builds exactly one record per glTF material.
-	variants map[materialVariant]int
-	// visited guards against a cyclic node graph, which is malformed but is a
-	// stack overflow rather than a report if nothing checks. It is cleared
-	// between scenes rather than kept for the file: a node two scenes both root
-	// belongs to both, and a file-wide guard would leave the second empty.
-	visited map[int]bool
-	// scene is the entry the walk is filling, and points into model.scenes.
-	scene *loadedScene
-	// animated is the set of nodes some animation steers, and chain the
-	// animated ancestors of the node the walk is inside, root-first.
-	// chainWorlds holds those ancestors' authored world matrices, so a node
-	// claiming its name can record the deepest one without a second walk.
-	animated    map[int]bool
-	chain       []int
-	chainWorlds []m.Mat4
-	// sampleRate is Config.PoseSampleRate, the global grid every clip bakes
-	// onto. It reaches the parse through the load request rather than through
-	// a Lookup, because the parse holds no resource at all.
-	sampleRate int
-	// joints is the model's one joint numbering, and skinJoints each skin's
-	// slots resolved into it, so remapping a primitive's JOINTS_0 is an index
-	// rather than a search.
-	joints     jointSpace
-	skinJoints [][]int
-	// curves interns the animation samplers the clips decode, so a clip whose
-	// twenty bones share one input accessor reads it once. morphCurves is the
-	// same interning for the weights channels, which decode to a different
-	// shape: targetCount scalars per keyframe rather than one widened value.
-	curves      map[samplerKey]*animCurve
-	morphCurves map[samplerKey]*morphCurve
-	// morphNodes is each node's run of the model's flattened weight slots,
-	// claimed in the flattening walk's depth-first order, and morphDefaults
-	// and morphNames the slot-indexed arrays that grow with it. The defaults
-	// are node.weights over mesh.weights over zero, resolved once at load.
-	morphNodes    map[int]morphSlotRun
-	morphDefaults []float32
-	morphNames    []string
-	// nodeRoots are the nodes nothing parents, and walked, locals and worlds
-	// the pose walk's scratch. All four keep their backing across the whole
-	// bake: the walk runs once per sampled frame and must allocate nothing.
-	nodeRoots []int
-	walked    []bool
-	locals    []m.Mat4
-	worlds    []m.Mat4
-	// poseReported keeps the unrepresentable-pose report to one per model
-	// however many joints and frames carry shear.
-	poseReported bool
-	// duplicated keeps a repeated node name to one report however many scenes
-	// and however many nodes carry it.
-	duplicated map[string]bool
-	// boundsReported keeps the missing-bounds report to one per model however
-	// many primitives declared no min/max.
-	boundsReported bool
-}
-
-// convertDocument converts one parsed document. It opens nothing: an external
-// image is named here and read by the Library when the texture cache misses it,
-// which is why this half of the load needs no filesystem at all.
-func convertDocument(doc *gltf.Document, path string, sampleRate int) (*LoadedModel, error) {
-	if err := checkRequiredExtensions(doc); err != nil {
-		return nil, err
-	}
-	if len(doc.Scenes) == 0 {
-		return nil, errors.New("it has no scenes")
-	}
-	converter := &modelConverter{
-		doc:         doc,
-		path:        path,
-		textures:    newTextureRequests(doc, path),
-		geometries:  map[geometryKey]int{},
-		variants:    map[materialVariant]int{},
-		visited:     map[int]bool{},
-		animated:    animatedNodes(doc),
-		duplicated:  map[string]bool{},
-		sampleRate:  sampleRate,
-		curves:      map[samplerKey]*animCurve{},
-		morphCurves: map[samplerKey]*morphCurve{},
-		morphNodes:  map[int]morphSlotRun{},
-	}
-	// The joint numbering and the node forest are both settled before the walk
-	// starts: a primitive's JOINTS_0 remaps as it is read, and the pose walk
-	// needs roots the flattening never computes because a joint may sit
-	// outside every scene's node list.
-	if err := converter.buildJointSpace(); err != nil {
-		return nil, err
-	}
-	converter.buildNodeForest()
-	converter.model.defaultScene = defaultSceneIndex(doc)
-	converter.model.scenes = make([]loadedScene, 0, len(doc.Scenes))
-	for _, scene := range doc.Scenes {
-		converter.flattenScene(scene)
-	}
-	// Both run last because the walk is what claims a degenerate node's joint
-	// and a morphed node's weight slots, so neither numbering is complete
-	// until every scene is flattened.
-	converter.packMorphDeltas()
-	converter.bakeAnimation()
-	converter.model.textures = converter.textures.descrs
-	converter.model.reports = append(converter.model.reports, converter.textures.reports...)
-	return &converter.model, nil
-}
-
-// checkRequiredExtensions fails a model whose file says it cannot be drawn
-// without something scene does not implement.
-func checkRequiredExtensions(doc *gltf.Document) error {
-	for _, required := range doc.ExtensionsRequired {
-		if !supportedRequired[required] {
-			return fmt.Errorf("it requires the %s extension, which scene does not implement", required)
-		}
-	}
-	return nil
-}
-
-// defaultSceneIndex picks the scene a draw with no Scene selector renders: the
-// file's declared default, or the first one.
-func defaultSceneIndex(doc *gltf.Document) int {
-	if doc.Scene != nil && *doc.Scene >= 0 && *doc.Scene < len(doc.Scenes) {
-		return *doc.Scene
-	}
-	return 0
-}
-
-// animatedNodes is the set of nodes some animation steers with a TRS channel.
-// Such a node has no fixed authored world transform, and neither has any
-// descendant of it - which is the whole reason a re-root inverse cannot always
-// be a matrix computed here.
+// missingTexture is the slot value for a texture the file itself could not
+// name - no texture at that index, no image source, an image the container
+// holds no bytes for. The model still becomes resident and the slot binds its
+// own per-slot default, because a model missing one texture is a model you can
+// see and fix; a model that failed wholesale over a missing picture is a level
+// with a hole in it.
 //
-// A weights channel is not in it: morph weights reshape a mesh and leave the
-// node where it was.
-func animatedNodes(doc *gltf.Document) map[int]bool {
-	animated := map[int]bool{}
-	for _, animation := range doc.Animations {
-		if animation == nil {
-			continue
-		}
-		for _, channel := range animation.Channels {
-			if channel == nil || channel.Target.Node == nil {
-				continue
-			}
-			switch channel.Target.Path {
-			case gltf.TRSTranslation, gltf.TRSRotation, gltf.TRSScale:
-				animated[*channel.Target.Node] = true
-			}
-		}
-	}
-	return animated
-}
-
-// flattenScene walks one scene into its own contiguous range of the flattened
-// list. Every scene in the file gets one, because a draw that names a scene
-// resolves against the load the path already paid for.
-func (c *modelConverter) flattenScene(scene *gltf.Scene) {
-	if scene == nil {
-		c.model.scenes = append(c.model.scenes, loadedScene{})
-		return
-	}
-	start := len(c.model.primitives)
-	c.model.scenes = append(c.model.scenes, loadedScene{
-		name: scene.Name, start: start, nodes: map[string]loadedNode{},
-	})
-	c.scene = &c.model.scenes[len(c.model.scenes)-1]
-	clear(c.visited)
-	c.chain = c.chain[:0]
-	for _, root := range scene.Nodes {
-		c.walkNode(root, m.NewMat4())
-	}
-	c.scene.end = len(c.model.primitives)
-	c.scene = nil
-}
-
-// walkNode flattens one node and its subtree depth-first, accumulating the
-// matrix that places it relative to the scene root.
-//
-// Depth-first is what makes a subtree a contiguous slice of the result rather
-// than a filter over it, which is the whole mechanism the Node selector will
-// use: a node's primitives and all its descendants' are emitted before anything
-// outside the subtree.
-func (c *modelConverter) walkNode(index int, parent m.Mat4) {
-	if index < 0 || index >= len(c.doc.Nodes) || c.doc.Nodes[index] == nil || c.visited[index] {
-		return
-	}
-	c.visited[index] = true
-	node := c.doc.Nodes[index]
-	world := parent.Mul(nodeMatrix(node))
-	// A skinned node's own transform is ignored per the glTF specification: its
-	// joints resolve against the scene root, so applying the node's matrix as
-	// well would apply it twice. Descendants still inherit it, because the
-	// hierarchy is a hierarchy whether or not this node is skinned.
-	//
-	// A node whose world transform is time-varying and that carries a mesh of
-	// its own takes the same treatment through a degenerate single-joint skin:
-	// its transform lives in the pose buffer instead, so its placement here is
-	// the identity too. "Time-varying" is inherited, not local - a static prop
-	// bolted to a spinning turret moves with the turret - so the test is the
-	// node's own channels or a non-empty ancestor chain.
-	//
-	// rest is where those primitives sit in the model's rest pose, which is the
-	// answer Bounds and AABB owe a caller. For a plain joint that is the node's
-	// own world transform, which row 0 of the pose buffer resolves to; for a
-	// glTF skin it is the identity, because the skin's joints already resolve
-	// against the scene root and its vertices are authored there.
-	placement, rest := world, world
-	binding := nodeBinding{skin: -1, joint: -1}
-	switch {
-	case node.Skin != nil:
-		placement, rest = m.NewMat4(), m.NewMat4()
-		binding.skin = *node.Skin
-	case node.Mesh != nil && (c.animated[index] || len(c.chain) > 0):
-		placement = m.NewMat4()
-		binding.joint = c.joints.claimPlain(index)
-	}
-	// The name is claimed before the subtree is walked and closed after, so a
-	// name a node shares with one of its own descendants resolves to the node -
-	// which is what "first depth-first match" says, and what recording the
-	// subtree on the way back out would get backwards.
-	named := c.claimNode(node.Name, world)
-	if node.Mesh != nil {
-		c.flattenMesh(*node.Mesh, placement, rest, binding, c.claimMorphSlots(index))
-	}
-	c.collectLight(node, world)
-	animated := c.animated[index]
-	if animated {
-		c.chain = append(c.chain, index)
-		c.chainWorlds = append(c.chainWorlds, world)
-	}
-	for _, child := range node.Children {
-		c.walkNode(child, world)
-	}
-	if animated {
-		c.chain = c.chain[:len(c.chain)-1]
-		c.chainWorlds = c.chainWorlds[:len(c.chainWorlds)-1]
-	}
-	if named {
-		c.closeNode(node.Name)
-	}
-}
-
-// claimNode records one named node's slice, opened at the walk's position, and
-// reports whether this node is the one that owns the name. A duplicate keeps
-// the first match and says so once.
-func (c *modelConverter) claimNode(name string, world m.Mat4) bool {
-	if name == "" || c.scene == nil {
-		return false
-	}
-	if _, taken := c.scene.nodes[name]; taken {
-		if !c.duplicated[name] {
-			c.duplicated[name] = true
-			c.model.reports = append(c.model.reports,
-				ErrModelNodeDuplicated{Model: c.path, Node: name})
-		}
-		return false
-	}
-	reroot, rerootable := world.InverseAffine()
-	node := loadedNode{
-		start: len(c.model.primitives), reroot: reroot, rerootable: rerootable,
-		rerootJoint: -1, first: len(c.scene.order),
-	}
-	c.scene.order = append(c.scene.order, name)
-	if len(c.chain) > 0 {
-		node.animated = append([]int(nil), c.chain...)
-		node.rest = c.chainWorlds[len(c.chainWorlds)-1]
-	}
-	c.scene.nodes[name] = node
-	return true
-}
-
-// closeNode ends a claimed node's slice at the walk's position, which
-// depth-first order has just made the end of its whole subtree.
-func (c *modelConverter) closeNode(name string) {
-	node := c.scene.nodes[name]
-	node.end = len(c.model.primitives)
-	node.last = len(c.scene.order)
-	c.scene.nodes[name] = node
-}
-
-// nodeBinding is how one node binds its mesh to the model's joints, and it is
-// two answers rather than one because the two live in different places.
-//
-// They were one type once, named for the skin, and the node joint was keyed
-// into the geometry along with it. That is what made the same mesh under nine
-// animated nodes nine conversions.
-type nodeBinding struct {
-	// skin is the glTF skin whose JOINTS_0 the conversion remaps into the
-	// model's one numbering, or -1. Remapping rewrites the vertex buffer, so
-	// this belongs to the geometry and is part of its key.
-	skin int
-	// joint is the model joint the node's own transform lives in, or -1. It
-	// overwrites nothing: the placement names the bone and every vertex under
-	// it rides at full weight, so this belongs to the instance record and is
-	// not part of any key.
-	joint int
-}
-
-// flattenMesh emits one node's primitives at their flattened placement.
-func (c *modelConverter) flattenMesh(
-	index int, placement, rest m.Mat4, binding nodeBinding, slots morphSlotRun,
-) {
-	if index < 0 || index >= len(c.doc.Meshes) || c.doc.Meshes[index] == nil {
-		return
-	}
-	// A negative determinant mirrors the geometry, which reverses triangle
-	// winding. Pipeline state is per material and the draw gets no say, so the
-	// winding has to be answered with a material variant rather than a flag on
-	// the instance.
-	frontCW := placement.Determinant() < 0
-	for at, primitive := range c.doc.Meshes[index].Primitives {
-		material := c.material(primitive.Material, frontCW)
-		tangents := c.model.materials[material].slots[NormalSlot] != missingTexture
-		geometry, ok := c.geometry(index, at, primitive, tangents, binding.skin)
-		if !ok {
-			continue
-		}
-		converted := &c.model.geometries[geometry]
-		morph := converted.morph.binding()
-		if morph.Morphed() {
-			// A primitive carrying more targets than its node claimed slots for
-			// is a malformed mesh - glTF requires every primitive of a mesh to
-			// declare the same targets - so the extra targets simply have no
-			// weight to read.
-			morph.SlotBase, morph.Targets = slots.base, min(morph.Targets, slots.count)
-		}
-		// Skinned is the placement's answer, not the geometry's: the same
-		// converted cube is plain-bound under one node and static under
-		// another, so the geometry cannot be asked.
-		placed := loadedPrimitive{
-			geometry: geometry, local: placement, rest: rest, material: material,
-			skinned: converted.skinned, morph: morph,
-		}
-		if binding.joint >= 0 {
-			placed.joint, placed.plain, placed.skinned = uint32(binding.joint), true, true
-		}
-		// The layout is the union of that same answer over every placement, and
-		// it is taken here so that the two can never be derived from different
-		// facts: a placement that draws under SCENE_SKIN is a placement whose
-		// geometry supplies the joints and the weights that variant declares.
-		// A plain-bound placement widens a geometry no skin ever touched, which
-		// is the tax this union charges and the reason it is a union at all.
-		converted.skinnedLayout = converted.skinnedLayout || placed.skinned
-		c.model.primitives = append(c.model.primitives, placed)
-	}
-}
-
-// geometry converts one primitive, or returns the conversion an earlier node
-// referencing the same mesh already paid for.
-func (c *modelConverter) geometry(
-	mesh, at int, primitive *gltf.Primitive, tangents bool, skin int,
-) (int, bool) {
-	key := geometryKey{mesh: mesh, primitive: at, tangents: tangents, skin: skin}
-	if index, ok := c.geometries[key]; ok {
-		return index, index >= 0
-	}
-	geometry, err := convertPrimitive(c.doc, primitive, tangents)
-	if err == nil {
-		c.bindGeometryJoints(&geometry, skin)
-	}
-	if err != nil {
-		// The failure is interned too, so a mesh referenced by ten nodes
-		// reports its one bad primitive once rather than ten times.
-		c.geometries[key] = -1
-		c.model.reports = append(c.model.reports, ErrModelPrimitiveSkipped{
-			Model: c.path, Mesh: c.doc.Meshes[mesh].Name, Err: err,
-		})
-		return -1, false
-	}
-	if !geometry.hasBox && !c.boundsReported {
-		c.boundsReported, c.model.neverCull = true, true
-		c.model.reports = append(c.model.reports, ErrModelBoundsMissing{Model: c.path})
-	}
-	c.geometries[key] = len(c.model.geometries)
-	c.model.geometries = append(c.model.geometries, geometry)
-	return len(c.model.geometries) - 1, true
-}
-
-// collectLight records a node's KHR_lights_punctual light in the model's own
-// space. Nothing converts it: a light is data an app declares, at whatever
-// world transform it drew the model at.
-func (c *modelConverter) collectLight(node *gltf.Node, world m.Mat4) {
-	index, ok := node.Extensions[lightspunctual.ExtensionName].(lightspunctual.LightIndex)
-	if !ok {
-		return
-	}
-	lights, ok := c.doc.Extensions[lightspunctual.ExtensionName].(lightspunctual.Lights)
-	if !ok || int(index) < 0 || int(index) >= len(lights) || lights[index] == nil {
-		return
-	}
-	light := lights[index]
-	colour := light.ColorOrDefault()
-	// glTF punctual lights point down their node's local -Z, which is also the
-	// convention scene's spot direction takes: the direction light travels.
-	direction := world.TransformDirection(m.Vec3{Z: -1}).Normalize()
-	descr := LightDescr{
-		Position:  world.Translation(),
-		Direction: direction,
-		Color:     m.NewColorLinear(float32(colour[0]), float32(colour[1]), float32(colour[2]), 1),
-		Intensity: float32(light.IntensityOrDefault()),
-	}
-	if light.Range != nil {
-		descr.Range = float32(*light.Range)
-	}
-	entry := ModelLight{Name: light.Name, Descr: descr}
-	switch light.Type {
-	case lightspunctual.TypeDirectional:
-		entry.Directional = true
-	case lightspunctual.TypeSpot:
-		descr.Kind = LightSpot
-		if light.Spot != nil {
-			descr.InnerCone = float32(light.Spot.InnerConeAngle)
-			descr.OuterCone = float32(light.Spot.OuterConeAngleOrDefault())
-		}
-		entry.Descr = descr
-	}
-	c.model.lights = append(c.model.lights, entry)
-}
-
-// material returns the index of the converted material one primitive draws
-// with, converting it the first time this load asks for that winding.
-func (c *modelConverter) material(index *int, frontCW bool) int {
-	source := defaultMaterial
-	if index != nil {
-		source = *index
-	}
-	key := materialVariant{material: source, frontCW: frontCW}
-	if existing, ok := c.variants[key]; ok {
-		return existing
-	}
-	converted := c.convertMaterial(source, frontCW)
-	c.variants[key] = len(c.model.materials)
-	c.model.materials = append(c.model.materials, converted)
-	return len(c.model.materials) - 1
-}
-
-// convertMaterial turns one glTF material into a bundled-PBR record plus its
-// texture bindings.
-//
-// The record's numbers are glTF's by verbatim name, which is what makes the
-// glTF specification the parameter documentation and what lets OverrideParams
-// merge by name with no translation table to drift out of date.
-func (c *modelConverter) convertMaterial(index int, frontCW bool) loadedMaterial {
-	converted := loadedMaterial{record: defaultPbrRecord(), state: PbrState(AlphaOpaque, false)}
-	for slot := range converted.slots {
-		converted.slots[slot] = missingTexture
-		converted.samplers[slot] = defaultModelSampler
-	}
-	if frontCW {
-		converted.state.FrontFace = gfx.FrontCW
-	}
-	if index < 0 || index >= len(c.doc.Materials) || c.doc.Materials[index] == nil {
-		return converted
-	}
-	material := c.doc.Materials[index]
-	converted.state = PbrState(alphaModeOf(material.AlphaMode), material.DoubleSided)
-	if frontCW {
-		converted.state.FrontFace = gfx.FrontCW
-	}
-	if material.AlphaMode == gltf.AlphaMask {
-		converted.record.AlphaCutoff = float32(material.AlphaCutoffOrDefault())
-	}
-	if pbr := material.PBRMetallicRoughness; pbr != nil {
-		factor := pbr.BaseColorFactorOrDefault()
-		converted.record.BaseColorFactor = m.Vec4{
-			X: float32(factor[0]), Y: float32(factor[1]),
-			Z: float32(factor[2]), W: float32(factor[3]),
-		}
-		converted.record.MetallicFactor = float32(pbr.MetallicFactorOrDefault())
-		converted.record.RoughnessFactor = float32(pbr.RoughnessFactorOrDefault())
-		c.bindSlot(&converted, baseColorSlot, pbr.BaseColorTexture, true)
-		c.bindSlot(&converted, metallicRoughnessSlot, pbr.MetallicRoughnessTexture, false)
-	}
-	if material.NormalTexture != nil && material.NormalTexture.Index != nil {
-		converted.record.NormalScale = float32(material.NormalTexture.ScaleOrDefault())
-		c.bindSlot(&converted, NormalSlot, &gltf.TextureInfo{
-			Index:      *material.NormalTexture.Index,
-			TexCoord:   material.NormalTexture.TexCoord,
-			Extensions: material.NormalTexture.Extensions,
-		}, false)
-	}
-	if material.OcclusionTexture != nil && material.OcclusionTexture.Index != nil {
-		converted.record.OcclusionStrength = float32(material.OcclusionTexture.StrengthOrDefault())
-		c.bindSlot(&converted, occlusionSlot, &gltf.TextureInfo{
-			Index:      *material.OcclusionTexture.Index,
-			TexCoord:   material.OcclusionTexture.TexCoord,
-			Extensions: material.OcclusionTexture.Extensions,
-		}, false)
-	}
-	c.bindSlot(&converted, emissiveSlot, material.EmissiveTexture, true)
-	converted.record.EmissiveFactor = emissiveFactor(material)
-	return converted
-}
-
-// bindSlot fills one texture slot: the image, its sampler, its UV set and its
-// KHR_texture_transform. An absent slot keeps the 1x1 default and the identity
-// transform, so the shader's unconditional five samples cost the same either
-// way.
-func (c *modelConverter) bindSlot(
-	converted *loadedMaterial, slot int, info *gltf.TextureInfo, srgb bool,
-) {
-	if info == nil {
-		return
-	}
-	texture, sampler := c.textures.texture(info.Index, srgb)
-	converted.slots[slot], converted.samplers[slot] = texture, sampler
-	texCoord := info.TexCoord
-	if transform, ok := info.Extensions[texturetransform.ExtensionName].(*texturetransform.TextureTranform); ok {
-		scale := transform.ScaleOrDefault()
-		converted.record.Transforms[slot] = m.Vec4{
-			X: float32(transform.Offset[0]), Y: float32(transform.Offset[1]),
-			Z: float32(scale[0]), W: float32(scale[1]),
-		}
-		converted.record.Rotations[slot] = float32(transform.Rotation)
-		if transform.TexCoord != nil {
-			texCoord = *transform.TexCoord
-		}
-	}
-	converted.record.selectUVSet(func(err error) {
-		c.model.reports = append(c.model.reports, err)
-	}, slot, texCoord)
-}
+// A picture that was named and did not arrive is a different thing and does not
+// come through here: it has a cache entry, and what it binds is that entry's
+// placeholder.
+const missingTexture = -1
 
 // The five slot indices, in the record order PbrSlots fixes. NormalSlot is
 // already named there, because it is the one slot whose 1x1 default is the flat
@@ -766,86 +139,223 @@ const (
 	emissiveSlot          = 4
 )
 
-// emissiveFactor folds KHR_materials_emissive_strength into emissiveFactor and
-// clamps the product at 1.
+// pbrSlotOf maps each of the decoder's material slots onto the record's.
+var pbrSlotOf = [model.DecodedSlotCount]int{
+	model.DecodedSlotBaseColor:         baseColorSlot,
+	model.DecodedSlotMetallicRoughness: metallicRoughnessSlot,
+	model.DecodedSlotNormal:            NormalSlot,
+	model.DecodedSlotOcclusion:         occlusionSlot,
+	model.DecodedSlotEmissive:          emissiveSlot,
+}
+
+// modelConverter lays one decoded model out for the GPU. The decoded model is
+// dropped with it: nothing of it but the scene walk is held past the load.
+type modelConverter struct {
+	decoded *model.DecodedModel
+	path    string
+	model   LoadedModel
+	// sampleRate is Config.PoseSampleRate, the global grid every clip bakes
+	// onto. It reaches the conversion through the load request rather than
+	// through a Lookup, because the conversion holds no resource at all.
+	sampleRate int
+	// walked, locals and worlds are the pose walk's scratch. All three keep
+	// their backing across the whole bake: the walk runs once per sampled
+	// frame and must allocate nothing.
+	walked []bool
+	locals []m.Mat4
+	worlds []m.Mat4
+	// poseReported keeps the unrepresentable-pose report to one per model
+	// however many joints and frames carry shear.
+	poseReported bool
+}
+
+// convertDocument decodes and converts one parsed document. It opens nothing:
+// an external image is named here and read by the Library when the texture
+// cache misses it, which is why this half of the load needs no filesystem at
+// all.
+func convertDocument(doc *gltf.Document, path string, sampleRate int) (*LoadedModel, error) {
+	decoded, err := model.DecodeDocument(doc, path)
+	if err != nil {
+		return nil, err
+	}
+	return convertDecoded(decoded, path, sampleRate)
+}
+
+// convertDecoded converts one decoded model.
+func convertDecoded(decoded *model.DecodedModel, path string, sampleRate int) (*LoadedModel, error) {
+	if err := checkJointCap(decoded.Skins); err != nil {
+		return nil, err
+	}
+	c := &modelConverter{decoded: decoded, path: path, sampleRate: sampleRate}
+	c.model.reports = decoded.Reports
+	c.model.geometries = make([]gltfGeometry, len(decoded.Geometries))
+	for i := range decoded.Geometries {
+		c.model.geometries[i] = convertGeometry(&decoded.Geometries[i], decoded.Skins)
+		// The decoded arrays are dropped as each geometry is converted, so a
+		// large model holds both forms of one primitive at a time rather than
+		// of all of them.
+		decoded.Geometries[i] = model.DecodedGeometry{}
+	}
+	c.model.primitives = make([]loadedPrimitive, len(decoded.Primitives))
+	for i := range decoded.Primitives {
+		c.model.primitives[i] = c.convertPrimitive(&decoded.Primitives[i])
+	}
+	c.model.materials = make([]loadedMaterial, len(decoded.Materials))
+	for i := range decoded.Materials {
+		c.model.materials[i] = c.convertMaterial(&decoded.Materials[i])
+	}
+	c.model.textures = make([]textureDescr, len(decoded.Images))
+	for i := range decoded.Images {
+		c.model.textures[i] = textureDescrOf(&decoded.Images[i])
+	}
+	for i := range decoded.Lights {
+		c.model.lights = append(c.model.lights, modelLightOf(&decoded.Lights[i]))
+	}
+	c.model.scenes = decoded.Scenes
+	c.model.defaultScene = decoded.DefaultScene
+	c.model.neverCull = decoded.NeverCull
+	c.packMorphDeltas()
+	c.bakeAnimation()
+	return &c.model, nil
+}
+
+// checkJointCap fails a model whose skins could make a vertex name a joint past
+// the byte the storage vertex holds it in.
 //
-// Folding at load is what keeps the record's numbers glTF's own: a separate
-// strength member would be a sixth factor the shader multiplies and
-// OverrideParams would have to know about. The clamp is the honest limit of an
-// 8-bit sRGB target with no tonemapping and no exposure control - a strength of
-// 8 has nowhere to go but white, and clipping it here at least keeps the hue.
-func emissiveFactor(material *gltf.Material) m.Vec4 {
-	strength := float32(1)
-	if raw, ok := material.Extensions[extEmissiveStrength]; ok {
-		strength = emissiveStrength(raw, strength)
+// The decoder claims every skin's joints first, in one contiguous block at the
+// bottom of the model's numbering, so the joints a vertex can name are exactly
+// the ones this counts. A plain joint rides the instance record in a full u32
+// and is bounded by node count rather than by anything, so however many a file
+// has, none of them can push a vertex's index over.
+//
+// Failing the whole model is the point. A joint index that did not fit would
+// truncate to a different bone, and a prop welded to the wrong limb with
+// nothing reported is exactly the failure a cap exists to prevent - so the
+// report is the loudest one a load has, which fails the model and names it.
+func checkJointCap(skins []model.DecodedSkin) error {
+	claimed := 0
+	for _, skin := range skins {
+		if len(skin.Joints) > sceneMaxSkinJoints {
+			return fmt.Errorf(
+				"its skin %q has %d joints, and a vertex names one in a byte, so %d is the most a skin may have",
+				skin.Name, len(skin.Joints), sceneMaxSkinJoints)
+		}
+		for _, joint := range skin.Joints {
+			claimed = max(claimed, joint+1)
+		}
+		// Skins share a numbering, because one numbering per model is what
+		// lets a pose row be addressed with no per-skin offset. So two skins
+		// inside the cap can still put a remapped index past it between them,
+		// and the check that actually guards the byte is this one - the
+		// per-skin test above is what names the skin when one skin alone is
+		// the reason.
+		if claimed > sceneMaxSkinJoints {
+			return fmt.Errorf(
+				"its skins claim %d joints between them, and a vertex names one in a byte, so %d is the most a model may bind",
+				claimed, sceneMaxSkinJoints)
+		}
 	}
-	factor := m.Vec4{
-		X: float32(material.EmissiveFactor[0]) * strength,
-		Y: float32(material.EmissiveFactor[1]) * strength,
-		Z: float32(material.EmissiveFactor[2]) * strength,
-	}
-	return m.Vec4{
-		X: min(factor.X, 1), Y: min(factor.Y, 1), Z: min(factor.Z, 1),
-	}
+	return nil
 }
 
-// emissiveStrength reads the extension's one member. There is no ext package
-// for it, so the payload arrives as raw JSON and is parsed here; a payload that
-// does not parse leaves the strength at 1, which is the extension's own
-// default and renders the material as though it were absent.
-func emissiveStrength(raw any, fallback float32) float32 {
-	var data []byte
-	switch payload := raw.(type) {
-	case json.RawMessage:
-		data = payload
-	case []byte:
-		data = payload
-	default:
-		return fallback
+// convertPrimitive places one decoded primitive, binding its morph targets to
+// the record stride its geometry packs at.
+func (c *modelConverter) convertPrimitive(decoded *model.DecodedPrimitive) loadedPrimitive {
+	placed := loadedPrimitive{
+		geometry: decoded.Geometry, local: decoded.Local, rest: decoded.Rest,
+		material: decoded.Material, skinned: decoded.Skinned,
+		joint: decoded.Joint, plain: decoded.Plain,
 	}
-	var payload struct {
-		EmissiveStrength *float64 `json:"emissiveStrength"`
+	if morph := c.model.geometries[decoded.Geometry].morph.binding(); morph.Morphed() {
+		morph.SlotBase, morph.Targets = decoded.MorphSlotBase, decoded.MorphTargets
+		placed.morph = morph
 	}
-	if err := json.Unmarshal(data, &payload); err != nil || payload.EmissiveStrength == nil {
-		return fallback
-	}
-	if math.IsNaN(*payload.EmissiveStrength) || *payload.EmissiveStrength < 0 {
-		return fallback
-	}
-	return float32(*payload.EmissiveStrength)
+	return placed
 }
 
-// alphaModeOf maps glTF's alphaMode onto scene's.
-func alphaModeOf(mode gltf.AlphaMode) AlphaMode {
+// convertMaterial fills one decoded material's bundled-PBR record and pipeline
+// state.
+//
+// The record's numbers are glTF's by verbatim name, which is what makes the
+// glTF specification the parameter documentation and what lets OverrideParams
+// merge by name with no translation table to drift out of date.
+func (c *modelConverter) convertMaterial(decoded *model.DecodedMaterial) loadedMaterial {
+	converted := loadedMaterial{
+		record: defaultPbrRecord(),
+		state:  PbrState(alphaModeOf(decoded.AlphaMode), decoded.DoubleSided),
+	}
+	if decoded.FrontCW {
+		converted.state.FrontFace = gfx.FrontCW
+	}
+	record := &converted.record
+	record.AlphaCutoff = decoded.AlphaCutoff
+	record.BaseColorFactor = decoded.BaseColorFactor
+	record.MetallicFactor = decoded.MetallicFactor
+	record.RoughnessFactor = decoded.RoughnessFactor
+	record.NormalScale = decoded.NormalScale
+	record.OcclusionStrength = decoded.OcclusionStrength
+	record.EmissiveFactor = decoded.EmissiveFactor
+	for from, slot := range pbrSlotOf {
+		bound := &decoded.Slots[from]
+		converted.slots[slot], converted.samplers[slot] = missingTexture, bound.Sampler
+		if bound.Image != model.DecodedNoImage {
+			converted.slots[slot] = bound.Image
+		}
+		record.Transforms[slot], record.Rotations[slot] = bound.Transform, bound.Rotation
+		// An absent slot keeps the 1x1 default and the identity transform, so
+		// the shader's unconditional five samples cost the same either way. A
+		// bound one selects its UV set, which reports a set past the two scene
+		// carries.
+		if bound.Bound {
+			record.selectUVSet(func(err error) {
+				c.model.reports = append(c.model.reports, err)
+			}, slot, bound.TexCoord)
+		}
+	}
+	return converted
+}
+
+// alphaModeOf maps the decoder's alphaMode onto scene's.
+func alphaModeOf(mode model.DecodedAlphaMode) AlphaMode {
 	switch mode {
-	case gltf.AlphaMask:
+	case model.DecodedAlphaMask:
 		return AlphaMask
-	case gltf.AlphaBlend:
+	case model.DecodedAlphaBlend:
 		return AlphaBlend
 	}
 	return AlphaOpaque
 }
 
-// nodeMatrix resolves one node's local transform. glTF stores its matrix
-// column-major, which is m.Mat4's own layout, so the matrix case is a widening
-// copy and nothing else.
-func nodeMatrix(node *gltf.Node) m.Mat4 {
-	if node.Matrix != [16]float64{} && node.Matrix != gltf.DefaultMatrix {
-		var matrix m.Mat4
-		for i, value := range node.Matrix {
-			matrix[i] = float32(value)
+// textureDescrOf keys one decoded image in the texture cache: an external
+// image by its storage path alone, an embedded one by the model's path and its
+// index, with its bytes supplied beside the name so the Library never opens the
+// container to look for them.
+func textureDescrOf(image *model.DecodedImage) textureDescr {
+	if !image.Embedded {
+		return textureDescr{
+			Name: image.Path, Params: textureDescrParams{image: externalImage, srgb: image.SRGB},
 		}
-		return matrix
 	}
-	translation := node.TranslationOrDefault()
-	rotation := node.RotationOrDefault()
-	scale := node.ScaleOrDefault()
-	return m.TRS4(
-		m.Vec3{X: float32(translation[0]), Y: float32(translation[1]), Z: float32(translation[2])},
-		m.Quat{
-			X: float32(rotation[0]), Y: float32(rotation[1]),
-			Z: float32(rotation[2]), W: float32(rotation[3]),
-		},
-		m.Vec3{X: float32(scale[0]), Y: float32(scale[1]), Z: float32(scale[2])},
-	)
+	return textureDescr{
+		Name:   image.Path,
+		Params: textureDescrParams{image: image.Index, srgb: image.SRGB},
+		Blob:   assets.NewBlob(image.Bytes),
+	}
+}
+
+// modelLightOf turns one decoded punctual light into the descriptor scene's
+// own recording calls take.
+func modelLightOf(light *model.DecodedLight) ModelLight {
+	descr := LightDescr{
+		Position:  light.Position,
+		Direction: light.Direction,
+		Color:     light.Color,
+		Intensity: light.Intensity,
+		Range:     light.Range,
+	}
+	if light.Spot {
+		descr.Kind = LightSpot
+		descr.InnerCone, descr.OuterCone = light.InnerCone, light.OuterCone
+	}
+	return ModelLight{Name: light.Name, Directional: light.Directional, Descr: descr}
 }

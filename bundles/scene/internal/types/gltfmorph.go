@@ -1,11 +1,10 @@
 package types
 
 import (
-	"encoding/json"
 	"math"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/qmuntal/gltf"
 )
 
 // gltfMorph is one primitive's morph targets converted: the mask every target
@@ -46,53 +45,37 @@ func (g gltfMorph) vertexCount() int {
 	return len(g.deltas) / g.targets / g.slots
 }
 
-// readMorphTargets converts one primitive's morph targets.
+// convertMorphTargets converts one decoded primitive's morph targets.
 //
-// The mask is the union across the primitive's targets, intersected with the
-// base primitive's authored attributes and then widened to a prefix. The
-// intersection matters because scene generates flat normals for a primitive
-// that has none and tangents for one whose material needs them: those are
-// scene's own reconstruction, not the asset's, so a NORMAL delta on a primitive
-// with no authored NORMAL is dropped here rather than added to a normal the
-// file never wrote.
-func readMorphTargets(
-	doc *gltf.Document, primitive *gltf.Primitive, vertexCount int,
-) gltfMorph {
-	if len(primitive.Targets) == 0 || vertexCount == 0 {
+// The mask is the union across the primitive's targets of the attributes they
+// name, widened to a prefix. The decoder has already dropped what the base
+// primitive did not author: scene generates flat normals for a primitive that
+// has none and tangents for one whose material needs them, and those are
+// scene's own reconstruction, not the asset's.
+func convertMorphTargets(decoded *model.DecodedGeometry, vertexCount int) gltfMorph {
+	if len(decoded.Targets) == 0 || vertexCount == 0 {
 		return gltfMorph{}
 	}
-	// glTF ignores a primitive's TANGENT when it carries no NORMAL - scene
-	// unwelds and regenerates both in that case - so an authored tangent needs
-	// an authored normal behind it.
-	_, hasNormal := primitive.Attributes[gltf.NORMAL]
-	_, hasTangent := primitive.Attributes[gltf.TANGENT]
-	authored := morphPosition
-	if hasNormal {
-		authored |= morphNormal
-		if hasTangent {
-			authored |= morphTangent
-		}
-	}
 	var mask morphMask
-	for _, target := range primitive.Targets {
+	for i := range decoded.Targets {
 		for _, slot := range morphSlots {
-			if _, named := target[slot.attribute]; named {
+			if _, named := slot.deltas(&decoded.Targets[i]); named {
 				mask |= slot.bit
 			}
 		}
 	}
-	mask = (mask & authored).prefix()
+	mask = mask.prefix()
 	if mask == 0 {
 		return gltfMorph{}
 	}
 	morph := gltfMorph{
-		targets: len(primitive.Targets),
+		targets: len(decoded.Targets),
 		mask:    mask,
 		slots:   mask.slots(),
 	}
 	morph.deltas = make([]m.Vec4, morph.targets*vertexCount*morph.slots)
 	targetStride := vertexCount * morph.slots
-	for target, attributes := range primitive.Targets {
+	for target := range decoded.Targets {
 		at := 0
 		for _, slot := range morphSlots {
 			if mask&slot.bit == 0 {
@@ -100,19 +83,13 @@ func readMorphTargets(
 			}
 			offset := target*targetStride + at
 			at++
-			accessor, ok := attributeAccessor(doc, attributes, slot.attribute)
-			if !ok {
-				continue
-			}
+			deltas, _ := slot.deltas(&decoded.Targets[target])
 			// A target accessor whose count disagrees with the primitive's is
 			// a malformed file. The vertices it does cover still morph, which
 			// beats losing the shape entirely.
-			_ = readAttribute(doc, accessor, func(i int, value attrValue) {
-				if i >= vertexCount {
-					return
-				}
-				morph.deltas[offset+i*morph.slots] = m.Vec4{X: value[0], Y: value[1], Z: value[2]}
-			})
+			for i, delta := range deltas[:min(len(deltas), vertexCount)] {
+				morph.deltas[offset+i*morph.slots] = m.Vec4{X: delta[0], Y: delta[1], Z: delta[2]}
+			}
 		}
 		if mask&morphPosition != 0 {
 			morph.reach += maxLength(morph.deltas[target*targetStride:(target+1)*targetStride], morph.slots)
@@ -121,9 +98,9 @@ func readMorphTargets(
 	return morph
 }
 
-// morphSlots is the fixed slot order a record holds its deltas in, the glTF
-// attribute each reads from, and the words and encoder each spends. It is fixed
-// rather than derived so that the mask, the stride and the shader's slot
+// morphSlots is the fixed slot order a record holds its deltas in, the decoded
+// target array each reads from, and the words and encoder each spends. It is
+// fixed rather than derived so that the mask, the stride and the shader's slot
 // offsets all agree without anything having to be transmitted.
 //
 // The widths are 2 / 1 / 1 words, so the prefix sums are 2 / 3 / 4 - distinct,
@@ -131,14 +108,26 @@ func readMorphTargets(
 // stride alone" true of a per-slot width. Each slot's offset inside a record
 // stays a compile-time constant.
 var morphSlots = [...]struct {
-	bit       morphMask
-	attribute string
-	words     int
-	pack      func(words []uint32, delta m.Vec4, scale m.Vec3) []uint32
+	bit    morphMask
+	deltas func(target *model.DecodedMorphTarget) ([][3]float32, bool)
+	words  int
+	pack   func(words []uint32, delta m.Vec4, scale m.Vec3) []uint32
 }{
-	{bit: morphPosition, attribute: gltf.POSITION, words: 2, pack: packMorphPosition},
-	{bit: morphNormal, attribute: gltf.NORMAL, words: 1, pack: packMorphDirection},
-	{bit: morphTangent, attribute: gltf.TANGENT, words: 1, pack: packMorphDirection},
+	{bit: morphPosition, deltas: positionDeltas, words: 2, pack: packMorphPosition},
+	{bit: morphNormal, deltas: normalDeltas, words: 1, pack: packMorphDirection},
+	{bit: morphTangent, deltas: tangentDeltas, words: 1, pack: packMorphDirection},
+}
+
+func positionDeltas(target *model.DecodedMorphTarget) ([][3]float32, bool) {
+	return target.Position, target.PositionNamed
+}
+
+func normalDeltas(target *model.DecodedMorphTarget) ([][3]float32, bool) {
+	return target.Normal, target.NormalNamed
+}
+
+func tangentDeltas(target *model.DecodedMorphTarget) ([][3]float32, bool) {
+	return target.Tangent, target.TangentNamed
 }
 
 // maxLength reports the largest magnitude among one target's position deltas,
@@ -227,175 +216,26 @@ func (c *modelConverter) packMorphDeltas() {
 	}
 }
 
-// claimMorphSlots gives one node the run of weight slots its mesh's targets
-// need, allocating it the first time the flattening walk reaches that node.
-//
-// Slots are claimed per node rather than per mesh because node.weights
-// overrides mesh.weights: two nodes referencing one head have independent
-// weights and appear as two runs of the same names, while the deltas behind
-// them stay shared and byte-identical.
-//
-// Depth-first, first-encounter order is what makes the flattened list the one
-// MorphWeights indexes and MorphTargets reports.
-func (c *modelConverter) claimMorphSlots(node int) morphSlotRun {
-	if run, ok := c.morphNodes[node]; ok {
-		return run
-	}
-	run := morphSlotRun{}
-	mesh := c.doc.Nodes[node].Mesh
-	if mesh == nil || *mesh < 0 || *mesh >= len(c.doc.Meshes) || c.doc.Meshes[*mesh] == nil {
-		c.morphNodes[node] = run
-		return run
-	}
-	targets := 0
-	for _, primitive := range c.doc.Meshes[*mesh].Primitives {
-		if primitive != nil {
-			targets = max(targets, len(primitive.Targets))
-		}
-	}
-	if targets == 0 {
-		c.morphNodes[node] = run
-		return run
-	}
-	run = morphSlotRun{base: len(c.morphDefaults), count: targets}
-	// node.weights overrides mesh.weights, and a file that declares neither
-	// starts every shape at zero, which is the identity for an additive blend.
-	weights := c.doc.Nodes[node].Weights
-	if len(weights) == 0 {
-		weights = c.doc.Meshes[*mesh].Weights
-	}
-	names := morphTargetNames(c.doc.Meshes[*mesh], targets)
-	for target := range targets {
-		weight := float32(0)
-		if target < len(weights) {
-			weight = float32(weights[target])
-		}
-		c.morphDefaults = append(c.morphDefaults, weight)
-		c.morphNames = append(c.morphNames, names[target])
-	}
-	c.morphNodes[node] = run
-	return run
-}
-
-// morphSlotRun is one node's run of the model's flattened weight slots.
-type morphSlotRun struct {
-	base, count int
-}
-
-// morphTargetNames reads a mesh's target names, which glTF carries as the
-// extras convention rather than as a member of its own: there is no other place
-// in the format for them, and every exporter that names shapes writes them
-// here.
-//
-// A mesh that names none, or names fewer than it has, leaves the rest empty
-// rather than being skipped: the list is indexed by slot, not searched.
-func morphTargetNames(mesh *gltf.Mesh, targets int) []string {
-	names := make([]string, targets)
-	var payload struct {
-		TargetNames []string `json:"targetNames"`
-	}
-	switch extras := mesh.Extras.(type) {
-	case map[string]any:
-		raw, ok := extras["targetNames"].([]any)
-		if !ok {
-			return names
-		}
-		for i, entry := range raw {
-			if i >= targets {
-				break
-			}
-			if name, ok := entry.(string); ok {
-				names[i] = name
-			}
-		}
-		return names
-	case json.RawMessage:
-		if json.Unmarshal(extras, &payload) != nil {
-			return names
-		}
-	case []byte:
-		if json.Unmarshal(extras, &payload) != nil {
-			return names
-		}
-	default:
-		return names
-	}
-	copy(names, payload.TargetNames)
-	return names
-}
-
-// morphCurve is one weights sampler decoded once. It is not an animCurve
-// because a weights channel stores targetCount scalars per keyframe rather than
-// one value widened to four, so the keyframe stride is the mesh's rather than
-// the format's.
+// morphCurve is one decoded weights sampler as the bake samples it. It is not
+// an animCurve because a weights channel stores count scalars per keyframe
+// rather than one value widened to four, so the keyframe stride is the mesh's
+// rather than the format's.
 type morphCurve struct {
 	times  []float32
 	values []float32
 	// count is the scalars one keyframe holds, which is the targeted node's
 	// target count.
 	count int
-	mode  gltf.Interpolation
+	mode  model.DecodedInterpolation
 }
 
-// end reports the curve's last keyframe time, which is what a clip's duration
-// is the maximum of.
-func (c *morphCurve) end() float32 {
-	if len(c.times) == 0 {
-		return 0
+// morphCurveOf wraps one decoded weights curve. It copies no keyframe.
+func morphCurveOf(curve *model.DecodedWeightCurve) *morphCurve {
+	return &morphCurve{
+		times: curve.Times, values: curve.Values, count: curve.Count, mode: curve.Interpolation,
 	}
-	return c.times[len(c.times)-1]
 }
 
-// morphCurve decodes one weights sampler, or returns nil for one that cannot be
-// read. Samplers are interned per document the way the TRS curves are.
-func (c *modelConverter) morphCurve(animation *gltf.Animation, index int) *morphCurve {
-	if index < 0 || index >= len(animation.Samplers) || animation.Samplers[index] == nil {
-		return nil
-	}
-	key := samplerKey{animation: animation, sampler: index}
-	if curve, ok := c.morphCurves[key]; ok {
-		return curve
-	}
-	c.morphCurves[key] = nil
-	sampler := animation.Samplers[index]
-	input, ok := accessorAt(c.doc, &sampler.Input)
-	if !ok {
-		return nil
-	}
-	output, ok := accessorAt(c.doc, &sampler.Output)
-	if !ok {
-		return nil
-	}
-	curve := &morphCurve{mode: sampler.Interpolation}
-	if err := readAttribute(c.doc, input, func(_ int, value attrValue) {
-		curve.times = append(curve.times, value[0])
-	}); err != nil {
-		return nil
-	}
-	if err := readAttribute(c.doc, output, func(_ int, value attrValue) {
-		curve.values = append(curve.values, value[0])
-	}); err != nil {
-		return nil
-	}
-	// The output is targetCount scalars per keyframe, and CUBICSPLINE stores
-	// each keyframe as in-tangent, value, out-tangent - so the count the file
-	// meant is what divides out here rather than something read from the mesh.
-	keys := len(curve.times)
-	if curve.mode == gltf.InterpolationCubicSpline {
-		keys *= 3
-	}
-	if keys == 0 || len(curve.values) < keys {
-		return nil
-	}
-	curve.count = len(curve.values) / keys
-	if curve.count == 0 {
-		return nil
-	}
-	c.morphCurves[key] = curve
-	return curve
-}
-
-// sample evaluates the curve at a time into dst, one scalar per target,
 // honouring the sampler's own interpolation.
 //
 // The bake is what STEP and CUBICSPLINE cost: they are evaluated here, at the
@@ -428,13 +268,13 @@ func (c *morphCurve) sample(time float32, dst []float32) {
 		return
 	}
 	amount := (time - c.times[low]) / span
-	if c.mode == gltf.InterpolationStep {
+	if c.mode == model.DecodedInterpolationStep {
 		c.copyKey(low, dst)
 		return
 	}
 	for target := range min(len(dst), c.count) {
 		start, end := c.valueAt(low, target), c.valueAt(low+1, target)
-		if c.mode == gltf.InterpolationCubicSpline {
+		if c.mode == model.DecodedInterpolationCubicSpline {
 			dst[target] = hermite(
 				start, end,
 				c.valueAt3(low*3+2, target), c.valueAt3((low+1)*3, target),
@@ -459,7 +299,7 @@ func (c *morphCurve) copyKey(key int, dst []float32) {
 // tangents.
 func (c *morphCurve) valueAt(key, target int) float32 {
 	index := key
-	if c.mode == gltf.InterpolationCubicSpline {
+	if c.mode == model.DecodedInterpolationCubicSpline {
 		index = key*3 + 1
 	}
 	return c.valueAt3(index, target)
@@ -487,23 +327,6 @@ func hermite(start, end, outgoing, incoming, amount, span float32) float32 {
 		incoming*(cube-square)*span
 }
 
-// animatedWeights resolves one weights channel against the model's flattened
-// slot list. A channel targeting a node no scene reaches has no slots to write
-// and is dropped: there is nothing addressable behind it.
-func (c *modelConverter) animatedWeights(
-	animation *gltf.Animation, channel *gltf.AnimationChannel, node int,
-) (animatedWeights, bool) {
-	run, ok := c.morphNodes[node]
-	if !ok || run.count == 0 {
-		return animatedWeights{}, false
-	}
-	curve := c.morphCurve(animation, channel.Sampler)
-	if curve == nil {
-		return animatedWeights{}, false
-	}
-	return animatedWeights{run: run, curve: curve}, true
-}
-
 // bakeMorphWeights samples every clip's weights channels onto the same 60 Hz
 // grid the poses use, as a plain []float32 that never reaches the GPU.
 //
@@ -520,7 +343,7 @@ func (c *modelConverter) bakeMorphWeights(
 	}
 	animation.weights = make([]float32, rows*slots)
 	for row := 0; row < len(animation.weights); row += slots {
-		copy(animation.weights[row:row+slots], c.morphDefaults)
+		copy(animation.weights[row:row+slots], c.decoded.MorphDefaults)
 	}
 	rate := float32(c.sampleRate)
 	for i := range tracks {
@@ -529,8 +352,8 @@ func (c *modelConverter) bakeMorphWeights(
 			row := track.clip.WeightBase + frame*slots
 			time := float32(frame) / rate
 			for _, steered := range track.weights {
-				at := row + steered.run.base
-				steered.curve.sample(time, animation.weights[at:at+steered.run.count])
+				at := row + steered.base
+				steered.curve.sample(time, animation.weights[at:at+steered.count])
 			}
 		}
 	}

@@ -5,91 +5,15 @@ import (
 	"math"
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
-)
-
-// The storage vertex: where each attribute sits in the buffer scene uploads,
-// and the two strides one vertex occupies there - 32 bytes for the standard
-// layout's six attributes, 40 for the skinned layout's eight.
-//
-// These are written down rather than taken from a Go struct's field offsets,
-// and that is the whole point of them. The authoring struct is 72 bytes of
-// float and the storage vertex is 32; the normal, the tangent and both UV sets
-// have all moved, so an offset derived from the Go struct would silently be the
-// wrong one - the authoring offset, used to address the storage buffer.
-//
-// Every offset is a multiple of four and so is either stride, which WebGPU
-// requires of arrayStride unconditionally. A narrower attribute that broke that
-// would not save a byte: it pads straight back.
-const (
-	storagePosition = 0
-	storageNormal   = 12
-	storageTangent  = 16
-	storageUV0      = 20
-	storageUV1      = 24
-	storageColor    = 28
-	StorageStride   = 32
-
-	storageJoints        = 32
-	storageWeights       = 36
-	StorageSkinnedStride = 40
 )
 
 // unorm8CodeMax is the largest code an 8-bit unorm holds, and the divisor the
 // fetch unit has already applied by the time a shader sees one. Both stored
 // unorm bytes - the colour and a skin weight - scale by exactly it.
 const unorm8CodeMax = 0xFF
-
-// skinnedVertexLayout is the storage layout of a mesh some placement skins, in
-// @location order, and standardVertexLayout is its first six rows - which is
-// the whole relationship between the two named layouts, spelled as a reslice so
-// that no row can be written down twice and drift.
-//
-// They describe the bytes the packers below write, not the Go struct a caller
-// fills in. The cut between them is the one SceneVertexIn has had since the
-// module was split: locations 6 and 7 are declared only under SCENE_SKIN, and
-// the Go side honours it here rather than supplying joints and weights to a
-// variant that never reads them.
-//
-// Four of the six shared rows are narrowed, and what reads them is
-// builtin/scene/vertexdecode.wgsl: a two-component 16-bit unorm holding oct32,
-// one 32-bit word holding oct 15/15 plus handedness plus a reserved bit, and
-// two more 16-bit unorm pairs holding UVs against the range in the mesh's own
-// record. gfx requires a shader's declared (kind, count) at a location to equal
-// what the layout supplies, so the pair here and the pair in vertex.wgsl cannot
-// drift apart without a pipeline being refused.
-//
-// The joints and the weights need no decode source at all: a Uint8x4 arrives as
-// the same vec4<u32> a Uint16x4 did and a Unorm8x4 as the same vec4<f32> a
-// Float32x4 did, so the fetch unit does the whole of it. What the narrowing
-// does need is the divide in deform.wgsl, because eight bits cannot hold four
-// weights that sum to exactly one - see bundles/scene/internal/types/vertexskin.go.
-//
-// The UVs and the weights are the narrowings the interface check cannot catch,
-// because a Float32x2 and a Unorm16x2 both arrive as a vec2<f32> and a
-// Float32x4 and a Unorm8x4 both as a vec4<f32>: the fetch unit's divide is the
-// only difference the shader sees, and the declaration is the same either way.
-// What holds the UV rows together is the mesh record, and what holds the weight
-// row together is that divide.
-var (
-	skinnedVertexLayout = [...]gfx.VertexAttr{
-		gfx.Attr(storagePosition, gfx.Float32x3), // POSITION
-		gfx.Attr(storageNormal, gfx.Unorm16x2),   // NORMAL     - oct32
-		gfx.Attr(storageTangent, gfx.Uint32),     // TANGENT    - oct 15/15 + handedness
-		gfx.Attr(storageUV0, gfx.Unorm16x2),      // TEXCOORD_0 - against the mesh record
-		gfx.Attr(storageUV1, gfx.Unorm16x2),      // TEXCOORD_1 - against the mesh record
-		gfx.Attr(storageColor, gfx.Unorm8x4),     // COLOR_0
-		gfx.Attr(storageJoints, gfx.Uint8x4),     // JOINTS_0   - one byte a joint, capped at 256
-		gfx.Attr(storageWeights, gfx.Unorm8x4),   // WEIGHTS_0  - renormalised in the shader
-	}
-	standardVertexLayout = skinnedVertexLayout[:StandardVertexAttrs]
-)
-
-// StandardVertexAttrs is how many of the eight rows the standard layout keeps.
-// It is the seam itself: the six every variant reads, against the two only
-// SCENE_SKIN declares.
-const StandardVertexAttrs = 6
 
 // skinnedVertex is the glTF loader's conversion vertex: the authoring vertex
 // plus the two attributes only a skinned draw reads.
@@ -115,7 +39,7 @@ type skinnedVertex struct {
 // table resolves a model's geometry through the same layout cache every other
 // mesh takes - one dense id per Go type - rather than through a second path
 // that would have to intern layouts of its own.
-func (skinnedVertex) VertexLayout() []gfx.VertexAttr { return skinnedVertexLayout[:] }
+func (skinnedVertex) VertexLayout() []gfx.VertexAttr { return model.SkinnedVertexLayout() }
 
 // PackVertices writes the storage bytes of standard-layout vertices into the
 // arena and reports the span they landed in, together with the bounding sphere
@@ -206,7 +130,7 @@ func boundVertices(vertices []Vertex) (m.Sphere, SceneMesh) {
 // wearing a skinnedVertex's type, and nothing may read them as vertices again.
 //
 // The record is handed in rather than derived here, because the glTF path
-// accumulated it while it was reading the accessors: readVertexAttributes
+// accumulated it while it was copying the decoded attributes: fillVertices
 // already visits every UV element, so the ranges cost that path no traversal at
 // all.
 func packOverAuthored(vertices []skinnedVertex, mesh SceneMesh, skinned bool) []byte {

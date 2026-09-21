@@ -165,7 +165,7 @@ func TestConvertDocumentAcceptsASupportedRequiredExtension(t *testing.T) {
 	triangleMesh(doc, nil)
 	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(0)}}
 	sceneOf(doc, 0)
-	doc.ExtensionsRequired = []string{extMeshQuantization}
+	doc.ExtensionsRequired = []string{"KHR_mesh_quantization"}
 	if _, err := convertDocument(doc, "m.glb", testSampleRate); err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestConvertDocumentFoldsAndClampsEmissiveStrength(t *testing.T) {
 	payload, _ := json.Marshal(map[string]float64{"emissiveStrength": 4})
 	doc.Materials = []*gltf.Material{{
 		EmissiveFactor: [3]float64{0.1, 0.5, 1},
-		Extensions:     gltf.Extensions{extEmissiveStrength: json.RawMessage(payload)},
+		Extensions:     gltf.Extensions{"KHR_materials_emissive_strength": json.RawMessage(payload)},
 	}}
 	triangleMesh(doc, gltf.Index(0))
 	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(0)}}
@@ -518,48 +518,6 @@ func TestConvertDocumentExposesPunctualLightsAsData(t *testing.T) {
 	}
 }
 
-func TestNodeMatrixPrefersAnExplicitMatrix(t *testing.T) {
-	node := &gltf.Node{
-		Matrix:      [16]float64{2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 5, 6, 7, 1},
-		Translation: [3]float64{99, 99, 99},
-	}
-	if got := nodeMatrix(node).Translation(); got != (m.Vec3{X: 5, Y: 6, Z: 7}) {
-		t.Errorf("translation = %v, want the matrix's own", got)
-	}
-}
-
-func TestNodeMatrixFallsBackToTRS(t *testing.T) {
-	node := &gltf.Node{
-		Translation: [3]float64{1, 2, 3},
-		Rotation:    [4]float64{0, 0, 0, 1},
-		Scale:       [3]float64{2, 2, 2},
-	}
-	matrix := nodeMatrix(node)
-	if got := matrix.Translation(); got != (m.Vec3{X: 1, Y: 2, Z: 3}) {
-		t.Errorf("translation = %v", got)
-	}
-	if matrix[0] != 2 {
-		t.Errorf("scale = %v, want 2", matrix[0])
-	}
-}
-
-// A payload that does not parse leaves the strength at the extension's own
-// default, which renders the material as though the extension were absent.
-func TestEmissiveStrengthFallsBackOnRubbish(t *testing.T) {
-	if got := emissiveStrength(json.RawMessage(`{"emissiveStrength":"loud"}`), 1); got != 1 {
-		t.Errorf("strength = %v, want the default", got)
-	}
-	if got := emissiveStrength(json.RawMessage(`{"emissiveStrength":-3}`), 1); got != 1 {
-		t.Errorf("a negative strength = %v, want the default", got)
-	}
-	if got := emissiveStrength(json.RawMessage(`{"emissiveStrength":2}`), 1); got != 2 {
-		t.Errorf("strength = %v, want 2", got)
-	}
-	if got := emissiveStrength("not a payload at all", 1); got != 1 {
-		t.Errorf("a payload of the wrong type = %v, want the default", got)
-	}
-}
-
 // namedSceneOf appends one named scene, so a Scene selector has something to
 // match. sceneOf is the single-scene shorthand every other test uses.
 func namedSceneOf(doc *gltf.Document, name string, roots ...int) {
@@ -603,11 +561,11 @@ func TestConvertDocumentFlattensEveryScene(t *testing.T) {
 	}
 	// A scene is a contiguous range for the same reason a subtree is: the
 	// flatten walks one scene to completion before it starts the next.
-	if got := model.scenes[0]; got.name != "first" || got.start != 0 || got.end != 1 {
-		t.Errorf("scene 0 spans [%d,%d) as %q, want first over [0,1)", got.start, got.end, got.name)
+	if got := model.scenes[0]; got.Name != "first" || got.Start != 0 || got.End != 1 {
+		t.Errorf("scene 0 spans [%d,%d) as %q, want first over [0,1)", got.Start, got.End, got.Name)
 	}
-	if got := model.scenes[1]; got.name != "second" || got.start != 1 || got.end != 3 {
-		t.Errorf("scene 1 spans [%d,%d) as %q, want second over [1,3)", got.start, got.end, got.name)
+	if got := model.scenes[1]; got.Name != "second" || got.Start != 1 || got.End != 3 {
+		t.Errorf("scene 1 spans [%d,%d) as %q, want second over [1,3)", got.Start, got.End, got.Name)
 	}
 }
 
@@ -627,7 +585,7 @@ func TestConvertDocumentFlattensASharedNodeInEverySceneThatRootsIt(t *testing.T)
 		t.Fatalf("primitives = %d, want one per scene", len(model.primitives))
 	}
 	for i, scene := range model.scenes {
-		if _, ok := scene.nodes["shared"]; !ok {
+		if _, ok := scene.Nodes["shared"]; !ok {
 			t.Errorf("scene %d does not address the shared node", i)
 		}
 	}
@@ -650,7 +608,7 @@ func TestConvertDocumentRecordsANamedNodesSubtreeAsASlice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
-	nodes := model.scenes[0].nodes
+	nodes := model.scenes[0].Nodes
 	for name, want := range map[string][2]int{
 		"root": {0, 3}, "child": {0, 2}, "grandchild": {1, 2}, "sibling": {2, 3},
 	} {
@@ -658,9 +616,9 @@ func TestConvertDocumentRecordsANamedNodesSubtreeAsASlice(t *testing.T) {
 		if !ok {
 			t.Fatalf("node %q is not addressable", name)
 		}
-		if node.start != want[0] || node.end != want[1] {
+		if node.Start != want[0] || node.End != want[1] {
 			t.Errorf("node %q covers [%d,%d), want [%d,%d)",
-				name, node.start, node.end, want[0], want[1])
+				name, node.Start, node.End, want[0], want[1])
 		}
 	}
 }
@@ -683,11 +641,11 @@ func TestConvertDocumentRecordsTheInverseOfANodesAuthoredWorld(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
-	node, ok := model.scenes[0].nodes["crate"]
-	if !ok || !node.rerootable {
+	node, ok := model.scenes[0].Nodes["crate"]
+	if !ok || !node.Rerootable {
 		t.Fatalf("crate = %+v, want a rerootable node", node)
 	}
-	if rerooted := node.reroot.Mul(model.primitives[node.start].local); !nearlyIdentity(rerooted) {
+	if rerooted := node.Reroot.Mul(model.primitives[node.Start].local); !nearlyIdentity(rerooted) {
 		t.Errorf("re-rooting the crate leaves %v, want the identity", rerooted)
 	}
 }
@@ -705,9 +663,9 @@ func TestConvertDocumentMarksACollapsedNodeUnrerootable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
-	if node := model.scenes[0].nodes["flat"]; node.rerootable {
+	if node := model.scenes[0].Nodes["flat"]; node.Rerootable {
 		t.Errorf("flat covers [%d,%d) and claims to reroot; want it marked unrerootable",
-			node.start, node.end)
+			node.Start, node.End)
 	}
 }
 
@@ -725,8 +683,8 @@ func TestConvertDocumentKeepsTheFirstOfADuplicateNodeNameAndReports(t *testing.T
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
-	if node := model.scenes[0].nodes["crate"]; node.start != 0 {
-		t.Errorf("crate covers [%d,%d), want the first match's [0,1)", node.start, node.end)
+	if node := model.scenes[0].Nodes["crate"]; node.Start != 0 {
+		t.Errorf("crate covers [%d,%d), want the first match's [0,1)", node.Start, node.End)
 	}
 	duplicates := 0
 	for _, err := range model.reports {
@@ -763,14 +721,14 @@ func TestConvertDocumentRecordsAnimatedAncestorsAndNotTheNodeItself(t *testing.T
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
-	nodes := model.scenes[0].nodes
-	if got := nodes["crate"].animated; len(got) != 1 || got[0] != 0 {
+	nodes := model.scenes[0].Nodes
+	if got := nodes["crate"].Animated; len(got) != 1 || got[0] != 0 {
 		t.Errorf("the crate's animated ancestors = %v, want the turntable alone", got)
 	}
-	if got := nodes["still"].animated; len(got) != 0 {
+	if got := nodes["still"].Animated; len(got) != 0 {
 		t.Errorf("an unanimated hierarchy recorded %v, want nothing", got)
 	}
-	if got := nodes["turntable"].animated; len(got) != 0 {
+	if got := nodes["turntable"].Animated; len(got) != 0 {
 		t.Errorf("the turntable is recorded as its own ancestor: %v", got)
 	}
 }

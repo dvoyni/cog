@@ -1,12 +1,10 @@
 package types
 
 import (
-	"fmt"
 	"math"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/qmuntal/gltf"
-	"github.com/qmuntal/gltf/modeler"
 )
 
 // bakedAnimation is one model's whole animation, resolved at load and never
@@ -89,256 +87,23 @@ func (c BakedClip) weightRow(frame, slotCount int) int {
 // draw-with-no-plays legal and defines the zero-total-weight case.
 const restRow = 0
 
-// jointSpace is one model's single joint numbering, shared by every skin and
-// every degenerate node joint in the file.
-//
-// One numbering rather than one per skin is what lets the instance record
-// carry a clip base alone: rows lay out per model, so the shader's address
-// needs no per-skin offset and a model with three skins is still one pose
-// buffer and one bind group.
-type jointSpace struct {
-	nodes       []int
-	inverseBind []m.Mat4
-	// skinned maps a node to the joint carrying its skin's inverse bind, and
-	// plain to the joint carrying an identity one. They are separate because a
-	// node can be both a skin joint and the degenerate joint of its own mesh,
-	// and those two bindings need different inverse binds against the same
-	// world transform.
-	//
-	// A node claimed by two skins with different inverse binds keeps the
-	// first: glTF permits it, no real asset does it, and the alternative is a
-	// joint index space keyed by (node, skin) that duplicates a pose row per
-	// frame for every shared bone.
-	skinned map[int]int
-	plain   map[int]int
-}
-
-func newJointSpace() jointSpace {
-	return jointSpace{skinned: map[int]int{}, plain: map[int]int{}}
-}
-
-func (s *jointSpace) count() int { return len(s.nodes) }
-
-// claimSkinned returns the joint one skin's slot resolves to, allocating it on
-// first use.
-func (s *jointSpace) claimSkinned(node int, inverseBind m.Mat4) int {
-	if joint, ok := s.skinned[node]; ok {
-		return joint
-	}
-	joint := s.append(node, inverseBind)
-	s.skinned[node] = joint
-	return joint
-}
-
-// claimPlain returns the joint a degenerate single-joint binding on a node
-// resolves to: the same world transform under an identity inverse bind.
-//
-// It reuses the node's skin joint when that joint's inverse bind is already
-// the identity, which is the common case - a wheel that is a skin joint of
-// nothing - and keeps a model from carrying two rows per frame for one bone.
-func (s *jointSpace) claimPlain(node int) int {
-	if joint, ok := s.plain[node]; ok {
-		return joint
-	}
-	if joint, ok := s.skinned[node]; ok && s.inverseBind[joint] == m.NewMat4() {
-		s.plain[node] = joint
-		return joint
-	}
-	joint := s.append(node, m.NewMat4())
-	s.plain[node] = joint
-	return joint
-}
-
-// pose returns the joint that carries a node's world transform under whatever
-// inverse bind, and whether the node has one at all. It is the read the
-// re-root chain makes: it wants the bone's world matrix and no binding.
-func (s *jointSpace) pose(node int) (int, bool) {
-	if joint, ok := s.skinned[node]; ok {
-		return joint, true
-	}
-	joint, ok := s.plain[node]
-	return joint, ok
-}
-
-func (s *jointSpace) append(node int, inverseBind m.Mat4) int {
-	s.nodes = append(s.nodes, node)
-	s.inverseBind = append(s.inverseBind, inverseBind)
-	return len(s.nodes) - 1
-}
-
-// buildJointSpace claims a joint for every slot of every skin, before the walk
-// starts, so a primitive's JOINTS_0 remaps to the model's numbering the moment
-// it is read.
-//
-// Only skins are claimed here. A degenerate node joint is claimed by the walk
-// that finds the mesh needing it, because a node targeted by a clip but
-// carrying no mesh has nothing to bind and would cost a row per frame for
-// nothing - except where the re-root chain wants its world transform, which
-// claims it after the walk.
-//
-// That order is what makes the joint cap mean what it says. The storage vertex
-// names a joint in one byte, so everything a vertex can name has to fit in
-// sceneMaxSkinJoints - and everything a vertex can name is claimed here, in one
-// contiguous block at the bottom of the numbering, before a plain joint or a
-// re-root joint can take an index. A plain joint rides the instance record in a
-// full u32 and is bounded by node count rather than by anything, so however
-// many a file has, none of them can push a vertex's index over.
-//
-// Failing the whole model is the point. A joint index that did not fit would
-// truncate to a different bone, and a prop welded to the wrong limb with
-// nothing reported is exactly the failure a cap exists to prevent - so the
-// report is the loudest one a load has, which fails the model and names it.
-func (c *modelConverter) buildJointSpace() error {
-	c.joints = newJointSpace()
-	c.skinJoints = make([][]int, len(c.doc.Skins))
-	for index, skin := range c.doc.Skins {
-		if skin == nil {
-			continue
-		}
-		if len(skin.Joints) > sceneMaxSkinJoints {
-			return fmt.Errorf(
-				"its skin %q has %d joints, and a vertex names one in a byte, so %d is the most a skin may have",
-				skin.Name, len(skin.Joints), sceneMaxSkinJoints)
-		}
-		inverseBind := c.inverseBindMatrices(skin)
-		slots := make([]int, len(skin.Joints))
-		for slot, node := range skin.Joints {
-			bind := m.NewMat4()
-			if slot < len(inverseBind) {
-				bind = inverseBind[slot]
-			}
-			slots[slot] = c.joints.claimSkinned(node, bind)
-		}
-		c.skinJoints[index] = slots
-		// Skins share a numbering, because one numbering per model is what
-		// lets a pose row be addressed with no per-skin offset. So two skins
-		// inside the cap can still put a remapped index past it between them,
-		// and the check that actually guards the byte is this one - the
-		// per-skin test above is what names the skin when one skin alone is
-		// the reason.
-		if c.joints.count() > sceneMaxSkinJoints {
-			return fmt.Errorf(
-				"its skins claim %d joints between them, and a vertex names one in a byte, so %d is the most a model may bind",
-				c.joints.count(), sceneMaxSkinJoints)
-		}
-	}
-	return nil
-}
-
-// inverseBindMatrices reads one skin's inverse bind accessor. A skin that
-// declares none is defined by glTF to mean identity for every joint, which is
-// what an empty result yields.
-func (c *modelConverter) inverseBindMatrices(skin *gltf.Skin) []m.Mat4 {
-	accessor, ok := accessorAt(c.doc, skin.InverseBindMatrices)
-	if !ok {
-		return nil
-	}
-	// The accessor is MAT4, which is not a vertex attribute and so has no path
-	// through readAttribute's widening. glTF requires float components here -
-	// the normalised integer matrix forms it permits elsewhere are excluded
-	// for inverse binds - so one type assertion is the whole decode.
-	data, err := modeler.ReadAccessor(c.doc, accessor, nil)
-	if err == nil {
-		if _, ok := data.([][4][4]float32); !ok {
-			err = fmt.Errorf("inverse bind matrices are %v of %v, which glTF does not permit",
-				accessor.Type, accessor.ComponentType)
-		}
-	}
-	if err != nil {
-		c.model.reports = append(c.model.reports,
-			ErrModelSkinUnbound{Model: c.path, Skin: skin.Name, Err: err})
-		return nil
-	}
-	// glTF stores a matrix column-major in the buffer, but the decoder groups
-	// those floats into a [4][4]float32 indexed [row][column] - so value[0] is
-	// the matrix's first row, not its first column. m.Mat4 is column-major, so
-	// the copy transposes.
-	//
-	// This is worth spelling out because getting it wrong is invisible to a
-	// test that writes its fixtures through the same package: the transpose
-	// cancels, the round trip agrees with itself, and only a real file - whose
-	// inverse bind is a rotation, whose transpose is its inverse - shows the
-	// skeleton inside out.
-	values := data.([][4][4]float32)
-	matrices := make([]m.Mat4, len(values))
-	for i, value := range values {
-		for row := range value {
-			for column := range value[row] {
-				matrices[i][column*4+row] = value[row][column]
-			}
-		}
-	}
-	return matrices
-}
-
-// bindGeometryJoints rewrites one converted primitive's joint indices into the
-// model's single numbering, and decides whether it is skinned at all.
-//
-// A skin's JOINTS_0 indexes that skin's own joints array, which is local to
-// the skin; the model's numbering is what makes rows addressable by
-// clipBase + frame*jointCount + joint with no per-skin offset anywhere.
-//
-// Only a real skin reaches here. A node joint overwrote every vertex with a
-// constant instead of remapping anything, which is what keyed it into the
-// geometry and made the same mesh under nine animated nodes nine conversions;
-// it rides the instance record now and touches no vertex at all.
-//
-// Weights are normalised here as well as in the shader, and the two are not
-// redundant. This pass is what puts a weight inside [0, 1] so that it has a
-// unorm8 code to land on at all - a file writing 3 and 1 would otherwise clamp
-// both to full influence - and the shader's divide is what covers the sum the
-// rounding then misses, which no bake-time scheme can prevent and which a
-// mesh authored through the public API would never have had a bake to fix.
-func (c *modelConverter) bindGeometryJoints(geometry *gltfGeometry, skin int) {
-	if skin < 0 || skin >= len(c.skinJoints) {
-		return
-	}
-	slots := c.skinJoints[skin]
-	bound := false
-	for i := range geometry.vertices {
-		vertex := &geometry.vertices[i]
-		total := vertex.Weights.X + vertex.Weights.Y + vertex.Weights.Z + vertex.Weights.W
-		if total <= 0 {
-			vertex.Joints, vertex.Weights = [4]uint16{}, m.Vec4{}
-			continue
-		}
-		bound = true
-		vertex.Weights = m.Vec4{
-			X: vertex.Weights.X / total, Y: vertex.Weights.Y / total,
-			Z: vertex.Weights.Z / total, W: vertex.Weights.W / total,
-		}
-		for influence, slot := range vertex.Joints {
-			// A slot past the skin's joints array is a malformed file. It
-			// resolves to joint 0, whose weight the file has already decided;
-			// the alternative is dropping a whole primitive over one bad
-			// index.
-			if int(slot) < len(slots) {
-				vertex.Joints[influence] = uint16(slots[slot])
-				continue
-			}
-			vertex.Joints[influence] = 0
-		}
-	}
-	geometry.skinned = bound
-}
-
 // bakeAnimation samples every clip onto the global grid and fills the pose and
-// joint buffers. It runs after every scene is flattened, because the walk is
-// what claims the degenerate joints.
+// joint buffers, from the joint numbering, node forest and unbaked clips the
+// decoder handed over.
 func (c *modelConverter) bakeAnimation() {
-	c.claimRerootJoints()
-	joints := c.joints.count()
+	decoded := c.decoded
+	joints := len(decoded.Joints)
 	animation := bakedAnimation{jointCount: joints}
 	animation.joints = make([]sceneSkinJoint, joints)
 	animation.jointNames = make([]string, joints)
-	for joint, node := range c.joints.nodes {
-		animation.joints[joint] = skinJointRecord(c.joints.inverseBind[joint])
-		if node >= 0 && node < len(c.doc.Nodes) && c.doc.Nodes[node] != nil {
-			animation.jointNames[joint] = c.doc.Nodes[node].Name
+	for joint, entry := range decoded.Joints {
+		animation.joints[joint] = skinJointRecord(entry.InverseBind)
+		if node := entry.Node; node >= 0 && node < len(decoded.Nodes) && decoded.Nodes[node].Present {
+			animation.jointNames[joint] = decoded.Nodes[node].Name
 		}
 	}
-	animation.slotCount = len(c.morphDefaults)
-	animation.targetNames = c.morphNames
+	animation.slotCount = len(decoded.MorphDefaults)
+	animation.targetNames = decoded.MorphNames
 	tracks := c.clipTracks()
 	rows := 1
 	for i := range tracks {
@@ -349,6 +114,7 @@ func (c *modelConverter) bakeAnimation() {
 	}
 	animation.poses = make([]scenePose, rows*joints)
 	if joints > 0 {
+		c.walked = make([]bool, len(decoded.Nodes))
 		c.bakeRestFrame(&animation)
 		for i := range tracks {
 			c.bakeClip(&animation, &tracks[i])
@@ -356,35 +122,6 @@ func (c *modelConverter) bakeAnimation() {
 	}
 	c.bakeMorphWeights(&animation, rows, tracks)
 	c.model.animation = animation
-}
-
-// claimRerootJoints gives a joint to the deepest animated ancestor of every
-// named node that has one, so a Node draw of a subtree hanging under a moving
-// bone can resolve its re-root inverse against the frame's poses rather than
-// against the rest pose.
-//
-// Almost every node in almost every file has an empty chain, and this loop
-// claims nothing for those - which is the whole of "the empty case stays free".
-func (c *modelConverter) claimRerootJoints() {
-	for i := range c.model.scenes {
-		for name, node := range c.model.scenes[i].nodes {
-			if len(node.animated) == 0 {
-				continue
-			}
-			ancestor := node.animated[len(node.animated)-1]
-			// Any joint on that node will do. Pose records hold globalJoint
-			// alone, unpremultiplied, so every joint following one node holds
-			// the same world transform whatever inverse bind it carries - and
-			// claiming a second one would duplicate a pose row per frame for
-			// every named bone of a rig, which on a real fox is most of them.
-			joint, ok := c.joints.pose(ancestor)
-			if !ok {
-				joint = c.joints.claimPlain(ancestor)
-			}
-			node.rerootJoint = joint
-			c.model.scenes[i].nodes[name] = node
-		}
-	}
 }
 
 // clipTrack is one animation with its channels resolved to curves and its
@@ -403,10 +140,10 @@ type clipTrack struct {
 }
 
 // animatedWeights is one weights channel resolved against the model's flattened
-// slot list.
+// slot list: the run of slots it writes, and the curve that writes them.
 type animatedWeights struct {
-	run   morphSlotRun
-	curve *morphCurve
+	base, count int
+	curve       *morphCurve
 }
 
 // animatedNode is one node one clip steers.
@@ -418,60 +155,28 @@ type animatedNode struct {
 	scaleCurve                      *animCurve
 }
 
-// clipTracks resolves every animation in the document into a track, in the
-// document's own order, skipping any that steers nothing scene can bake.
+// clipTracks places every decoded clip on the grid, in the file's own order.
 //
-// A weights-only animation is a real clip with no pose in it: it produces no
-// joint, so a morph-only model loads with an empty pose buffer and still plays
-// its clips by name.
+// A weights-only clip is a real clip with no pose in it: it produces no joint,
+// so a morph-only model loads with an empty pose buffer and still plays its
+// clips by name.
 func (c *modelConverter) clipTracks() []clipTrack {
 	rate := float32(c.sampleRate)
-	tracks := make([]clipTrack, 0, len(c.doc.Animations))
-	for _, animation := range c.doc.Animations {
-		if animation == nil {
-			continue
+	tracks := make([]clipTrack, 0, len(c.decoded.Clips))
+	for i := range c.decoded.Clips {
+		clip := &c.decoded.Clips[i]
+		track := clipTrack{clip: BakedClip{Name: clip.Name, Duration: clip.Duration}}
+		for _, steered := range clip.Nodes {
+			node := c.restingNode(steered.Node)
+			node.translationCurve = animCurveOf(steered.Translation)
+			node.rotationCurve = animCurveOf(steered.Rotation)
+			node.scaleCurve = animCurveOf(steered.Scale)
+			track.nodes = append(track.nodes, node)
 		}
-		track := clipTrack{clip: BakedClip{Name: animation.Name}}
-		byNode := map[int]int{}
-		for _, channel := range animation.Channels {
-			if channel == nil || channel.Target.Node == nil {
-				continue
-			}
-			node := *channel.Target.Node
-			if node < 0 || node >= len(c.doc.Nodes) || c.doc.Nodes[node] == nil {
-				continue
-			}
-			if channel.Target.Path == gltf.TRSWeights {
-				if weights, ok := c.animatedWeights(animation, channel, node); ok {
-					track.weights = append(track.weights, weights)
-					track.clip.Duration = max(track.clip.Duration, weights.curve.end())
-				}
-				continue
-			}
-			curve := c.animCurve(animation, channel.Sampler)
-			if curve == nil {
-				continue
-			}
-			slot, ok := byNode[node]
-			if !ok {
-				slot = len(track.nodes)
-				byNode[node] = slot
-				track.nodes = append(track.nodes, c.restingNode(node))
-			}
-			switch channel.Target.Path {
-			case gltf.TRSTranslation:
-				track.nodes[slot].translationCurve = curve
-			case gltf.TRSRotation:
-				track.nodes[slot].rotationCurve = curve
-			case gltf.TRSScale:
-				track.nodes[slot].scaleCurve = curve
-			default:
-				continue
-			}
-			track.clip.Duration = max(track.clip.Duration, curve.end())
-		}
-		if len(track.nodes) == 0 && len(track.weights) == 0 {
-			continue
+		for _, steered := range clip.Weights {
+			track.weights = append(track.weights, animatedWeights{
+				base: steered.SlotBase, count: steered.SlotCount, curve: morphCurveOf(steered.Curve),
+			})
 		}
 		// A single-keyframe clip and a zero-duration clip each bake to one
 		// frame, and neither is an error: a pose that never changes is still a
@@ -493,7 +198,7 @@ func (c *modelConverter) clipTracks() []clipTrack {
 // matrix - which glTF forbids for an animated node, and files do anyway - gets
 // the transform it asked for instead of an identity.
 func (c *modelConverter) restingNode(node int) animatedNode {
-	translation, rotation, scale, ok := nodeMatrix(c.doc.Nodes[node]).Decompose()
+	translation, rotation, scale, ok := c.decoded.Nodes[node].Local.Decompose()
 	if !ok {
 		translation, rotation, scale = m.Vec3{}, m.NewQuat(), m.Vec3{X: 1, Y: 1, Z: 1}
 	}
@@ -559,8 +264,8 @@ func (c *modelConverter) bakeClip(animation *bakedAnimation, track *clipTrack) {
 // storeRow decomposes the walk's world matrices into one pose row, reporting
 // once if a joint's matrix carries something TRS cannot represent.
 func (c *modelConverter) storeRow(animation *bakedAnimation, row int) {
-	for joint, node := range c.joints.nodes {
-		pose, ok := poseFromMatrix(c.worlds[node])
+	for joint, entry := range c.decoded.Joints {
+		pose, ok := poseFromMatrix(c.worlds[entry.Node])
 		if !ok && !c.poseReported {
 			c.poseReported = true
 			c.model.reports = append(c.model.reports,
@@ -579,20 +284,17 @@ func (c *modelConverter) storeRow(animation *bakedAnimation, row int) {
 // and a node belongs to at most one parent, so the same walk answers every
 // scene at once.
 func (c *modelConverter) resolveWorlds(nodes []animatedNode, time float32) {
-	c.worlds = grow(c.worlds, len(c.doc.Nodes))
-	c.locals = grow(c.locals, len(c.doc.Nodes))
-	for index, node := range c.doc.Nodes {
-		if node == nil {
-			c.locals[index] = m.NewMat4()
-			continue
-		}
-		c.locals[index] = nodeMatrix(node)
+	forest := c.decoded.Nodes
+	c.worlds = grow(c.worlds, len(forest))
+	c.locals = grow(c.locals, len(forest))
+	for index := range forest {
+		c.locals[index] = forest[index].Local
 	}
 	for i := range nodes {
 		c.locals[nodes[i].node] = nodes[i].local(time)
 	}
 	clear(c.walked)
-	for _, root := range c.nodeRoots {
+	for _, root := range c.decoded.Roots {
 		c.composeNode(root, m.NewMat4())
 	}
 }
@@ -607,98 +309,27 @@ func (c *modelConverter) composeNode(index int, parent m.Mat4) {
 	c.walked[index] = true
 	world := parent.Mul(c.locals[index])
 	c.worlds[index] = world
-	for _, child := range c.doc.Nodes[index].Children {
-		if child >= 0 && child < len(c.doc.Nodes) && c.doc.Nodes[child] != nil {
-			c.composeNode(child, world)
-		}
+	for _, child := range c.decoded.Nodes[index].Children {
+		c.composeNode(child, world)
 	}
 }
 
-// buildNodeForest finds the nodes nothing parents, which are the roots the
-// pose walk starts from. It is the document's forest rather than a scene's
-// root list because a joint may sit outside every scene's node list and still
-// be referenced by a skin, and its world transform is defined regardless.
-func (c *modelConverter) buildNodeForest() {
-	parented := make([]bool, len(c.doc.Nodes))
-	for _, node := range c.doc.Nodes {
-		if node == nil {
-			continue
-		}
-		for _, child := range node.Children {
-			if child >= 0 && child < len(parented) {
-				parented[child] = true
-			}
-		}
-	}
-	for index, node := range c.doc.Nodes {
-		if node != nil && !parented[index] {
-			c.nodeRoots = append(c.nodeRoots, index)
-		}
-	}
-	c.walked = make([]bool, len(c.doc.Nodes))
-}
-
-// animCurve is one animation sampler decoded once: its keyframe times, its
-// values widened to four floats, and the interpolation between them.
+// animCurve is one decoded animation sampler as the bake samples it: its
+// keyframe times, its values widened to four floats, and the interpolation
+// between them.
 type animCurve struct {
 	times  []float32
-	values []attrValue
-	mode   gltf.Interpolation
+	values [][4]float32
+	mode   model.DecodedInterpolation
 }
 
-// end reports the curve's last keyframe time, which is what a clip's duration
-// is the maximum of.
-func (c *animCurve) end() float32 {
-	if len(c.times) == 0 {
-		return 0
-	}
-	return c.times[len(c.times)-1]
-}
-
-// animCurve decodes one sampler, or returns nil for one that cannot be read.
-// Samplers are interned per document, because a clip that steers twenty bones
-// with one shared input accessor should decode it once.
-func (c *modelConverter) animCurve(animation *gltf.Animation, index int) *animCurve {
-	if index < 0 || index >= len(animation.Samplers) || animation.Samplers[index] == nil {
+// animCurveOf wraps one decoded curve, or is nil for a component the clip does
+// not steer. It copies no keyframe.
+func animCurveOf(curve *model.DecodedCurve) *animCurve {
+	if curve == nil {
 		return nil
 	}
-	key := samplerKey{animation: animation, sampler: index}
-	if curve, ok := c.curves[key]; ok {
-		return curve
-	}
-	c.curves[key] = nil
-	sampler := animation.Samplers[index]
-	input, ok := accessorAt(c.doc, &sampler.Input)
-	if !ok {
-		return nil
-	}
-	output, ok := accessorAt(c.doc, &sampler.Output)
-	if !ok {
-		return nil
-	}
-	curve := &animCurve{mode: sampler.Interpolation}
-	if err := readAttribute(c.doc, input, func(_ int, value attrValue) {
-		curve.times = append(curve.times, value[0])
-	}); err != nil {
-		return nil
-	}
-	if err := readAttribute(c.doc, output, func(_ int, value attrValue) {
-		curve.values = append(curve.values, value)
-	}); err != nil {
-		return nil
-	}
-	if len(curve.times) == 0 || len(curve.values) == 0 {
-		return nil
-	}
-	c.curves[key] = curve
-	return curve
-}
-
-// samplerKey interns one animation's samplers. The animation is part of the
-// key because sampler indices are local to it.
-type samplerKey struct {
-	animation *gltf.Animation
-	sampler   int
+	return &animCurve{times: curve.Times, values: curve.Values, mode: curve.Interpolation}
 }
 
 // sample evaluates the curve at a time, honouring the sampler's own
@@ -731,9 +362,9 @@ func (c *animCurve) sample(time float32) m.Vec4 {
 	}
 	amount := (time - c.times[low]) / span
 	switch c.mode {
-	case gltf.InterpolationStep:
+	case model.DecodedInterpolationStep:
 		return c.valueAt(low)
-	case gltf.InterpolationCubicSpline:
+	case model.DecodedInterpolationCubicSpline:
 		return c.hermite(low, amount, span)
 	}
 	return lerpVec4(c.valueAt(low), c.valueAt(low+1), amount)
@@ -743,7 +374,7 @@ func (c *animCurve) sample(time float32) m.Vec4 {
 // layout into account: the value sits between its in and out tangents.
 func (c *animCurve) valueAt(key int) m.Vec4 {
 	index := key
-	if c.mode == gltf.InterpolationCubicSpline {
+	if c.mode == model.DecodedInterpolationCubicSpline {
 		index = key*3 + 1
 	}
 	if index >= len(c.values) {

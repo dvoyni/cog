@@ -67,7 +67,7 @@ func (e *residentModel) View(path, scene, node string) (ModelView, ModelSelector
 	if scene != "" {
 		selected = -1
 		for i := range e.scenes {
-			if e.scenes[i].name == scene {
+			if e.scenes[i].Name == scene {
 				selected = i
 				break
 			}
@@ -82,20 +82,20 @@ func (e *residentModel) View(path, scene, node string) (ModelView, ModelSelector
 		RerootJoint: -1, Animation: &e.animation,
 	}
 	if node == "" {
-		view.Primitives, view.start = e.primitives[within.start:within.end], within.start
+		view.Primitives, view.start = e.primitives[within.Start:within.End], within.Start
 		return view, nil
 	}
-	named, ok := within.nodes[node]
+	named, ok := within.Nodes[node]
 	if !ok {
 		return ModelView{}, ErrModelNodeMissing{Model: path, Scene: scene, Node: node}
 	}
-	if !named.rerootable {
+	if !named.Rerootable {
 		return ModelView{}, ErrModelNodeDegenerate{Model: path, Node: node}
 	}
-	view.Primitives, view.start = e.primitives[named.start:named.end], named.start
-	view.Reroot, view.Rerooted = named.reroot, true
-	if len(named.animated) > 0 {
-		view.RerootJoint, view.RerootRest = named.rerootJoint, named.rest
+	view.Primitives, view.start = e.primitives[named.Start:named.End], named.Start
+	view.Reroot, view.Rerooted = named.Reroot, true
+	if len(named.Animated) > 0 {
+		view.RerootJoint, view.RerootRest = named.RerootJoint, named.Rest
 	}
 	return view, nil
 }

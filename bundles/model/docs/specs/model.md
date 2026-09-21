@@ -45,10 +45,14 @@ something unverified it would be marked **Gap**; none is left. Where putting
 decisions side by side settled something that no ticket did, it is marked
 **Settled here**.
 
-**Nothing of this is implemented.** `bundles/model` holds only this document.
-Each stage of [Required work](#required-work) turns the sections it builds from a
-plan into a description of the code. `mesh.md` moves here in the cache step,
-and `scene.md` is cut down to the renderer in the sweep.
+**The first carve step is implemented** ([#529](https://github.com/dvoyni/cog/issues/529)).
+`bundles/model` is a Bundle with a declaration root and no plugin yet. It holds
+the glTF decoder, the unit geometry, and `Vertex` with the storage layout it
+reports, and scene imports all three from its root. [The decoder
+seam](#the-decoder-seam) describes the code; every other section is still the
+plan. Each stage of [Required work](#required-work) turns the sections it builds
+from a plan into a description of the code. `mesh.md` moves here in the cache
+step, and `scene.md` is cut down to the renderer in the sweep.
 
 ---
 
@@ -177,9 +181,11 @@ the reason `transform.go` gives (sound is placed by a transform too). Each
 renderer keeps its re-export.
 
 **`model` is one plugin, and the decoder is a package inside it**, at
-`bundles/model/internal/types/gltf/`. Geometry generation (`unitBoxGeometry`,
-`unitPlaneGeometry`, `unitSphereGeometry`, `appendQuad`, 187 lines) lives in
-`model` too.
+`bundles/model/internal/types/gltf/`. Geometry generation (`UnitBoxGeometry`,
+`UnitPlaneGeometry`, `UnitSphereGeometry`, `appendQuad`, 187 lines) lives in
+`model` too, in `internal/types/geometry.go`, forwarded from the root. Both
+landed in [#529](https://github.com/dvoyni/cog/issues/529); see [The decoder
+seam](#the-decoder-seam).
 
 **`model` is a plugin that composition roots register, before any renderer.** It
 registers the `*model.Lookup` resource, which scene registers today, and it takes
@@ -196,45 +202,88 @@ landing.
 
 ## The decoder seam
 
-From [the decoder seam](https://github.com/dvoyni/cog/issues/496).
+From [the decoder seam](https://github.com/dvoyni/cog/issues/496). Built by
+[#529](https://github.com/dvoyni/cog/issues/529).
 
-**The seam is thin.** The decoder does no GPU-layout work. It hands `model`:
+**The seam is thin.** The decoder, `bundles/model/internal/types/gltf`, does no
+GPU-layout work. `gltf.Decode` parses one file and returns a `gltf.Model`, which
+`model`'s root names `DecodedModel`. It holds:
 
-- vertex attribute arrays and index arrays;
-- unbaked animation curves and skins;
-- morph target floats;
-- material parameters as plain values;
-- image references;
-- lights;
-- the flattened scene walk.
+- vertex attribute arrays and index arrays (`Geometries`);
+- unbaked animation curves and skins (`Clips`, `Skins`, `Joints`, and the node
+  forest the pose walk needs, `Nodes` and `Roots`);
+- morph target floats (each geometry's `Targets`, with the flattened weight
+  slots' defaults and names in `MorphDefaults` and `MorphNames`);
+- material parameters as plain values (`Materials`), glTF's own numbers under
+  glTF's own names, with KHR_texture_transform and the emissive strength read;
+- image references (`Images`);
+- lights (`Lights`);
+- the flattened scene walk (`Primitives`, `Scenes`, `DefaultScene`,
+  `NeverCull`).
 
-`model` runs `bakeClip`, `packMorphBlock` and the `ScenePbrRecord` fill. Each is
-already its own pass today, so moving it adds no pass.
+The glTF document is dropped before `Decode` returns. `model.DecodeModel` and
+`model.DecodeDocument` forward to it.
+
+**The walk stays in the decoder.** Flattening every scene, interning geometries
+and material windings, claiming joints and morph weight slots, and recording the
+re-root data are facts about the file, so the decoder computes them. Placement
+answers that decide a storage layout arrive as plain booleans: a geometry's
+`Skinned` and `SkinnedLayout`, and a primitive's `Skinned`, `Plain` and `Joint`.
+
+**The GPU layout is applied after the decoder returns.** Filling the conversion
+vertices, generating flat normals and tangents, remapping JOINTS_0 into the
+model's numbering, `packMorphBlock`, `bakeClip` and the `ScenePbrRecord` fill each
+run as their own pass over the decoded data. None of them is in the decoder
+package. **Until the cache step they run in scene**, in
+`bundles/scene/internal/types` (`gltfload.go`, `gltfmesh.go`, `gltfmorph.go`,
+`gltfanim.go`), beside the model cache that installs their result and the
+record types they fill. They move into `bundles/model/internal/types` with that
+cache in stage 3.2, which is when `ScenePbrRecord`, `scenePose`,
+`skinJointRecord`, the morph block layout and the pack helpers become `model`'s.
+The joint cap, 256 joints because a storage vertex names a joint in one byte, is
+checked there too: it is the storage layout's limit, not the file's.
 
 **Vertex data crosses as structure of arrays.** Positions, normals, UVs,
 tangents, colours, joints and weights cross as the glTF library's own typed
-slices (`[][3]float32` and so on), passed through untouched. `model` packs from
-them at install, where it packs from `[]skinnedVertex` today. `Vertex` is
+slices (`[][3]float32`, `[][4]uint8`, `[][4]uint16` and so on). A float accessor
+is handed over as the slice modeler decoded, untouched; only a quantised or
+normalised one is widened into a slice of the same shape. The conversion copies
+them into its vertices in one plain loop per attribute, with no call per element,
+which is the arm [the seam research](https://github.com/dvoyni/cog/blob/research/decoder-seam/bundles/scene/docs/research/decoder-seam-cost.md)
+measured 14% faster than the element-by-element read it replaced. `Vertex` is
 `model`'s and never crosses the seam.
 
-**GPU record layouts never live in the decoder package.** `ScenePbrRecord`,
-`scenePose`, `skinJointRecord`, the morph block layout and the pack helpers are in
-`bundles/model/internal/types`.
+**GPU record layouts never live in the decoder package.** It names no record,
+no storage offset and no shader slot. Its material slots are glTF's five, in its
+own order, and the conversion maps them onto the record's.
 
 **The decoder names images, and `model` keys them.** The decoder resolves each
 image reference and deduplicates by image and colour space. It hands over one
-plain reference per distinct pair: an external image's resolved storage path, or
-an embedded image's model path, image index and bytes, with the sRGB flag in both
-cases. Materials point at these by index. `model` builds
+`gltf.Image` per distinct pair: an external image's resolved storage path, or an
+embedded image's model path, image index and bytes, with the sRGB flag in both
+cases. Material slots point at these by index. The conversion builds
 `assets.Descr[textureDescrParams]` from them, and the rules for keying an image
 stay beside the texture loader. **The decoder does not import `libs/assets`.**
 
 **Imports and errors.** `model/internal/types` imports `internal/types/gltf`,
 never the other way round. The decoder imports only `libs/m`, `qmuntal/gltf` and
-`slots/gfx` (for sampler and topology enums). It declares its own report types,
-such as an unavailable texture, an unsupported required extension or an
-unsupported topology. `model` re-exports them under their current public names,
-so no error is wrapped twice and no settled name moves.
+`slots/gfx` (for sampler and topology enums). It declares its own report types:
+`ErrModelTextureUnavailable`, `ErrModelPrimitiveSkipped` (an unsupported topology
+or a primitive with no POSITION), `ErrModelBoundsMissing`,
+`ErrModelNodeDuplicated` and `ErrModelSkinUnbound`. An unsupported required
+extension fails the decode with a plain error, which the model cache wraps in
+`ErrModelUnavailable` as before. `model` re-exports the five under their current
+public names, and scene's root and `internal/types` alias `model`'s, so no error
+is wrapped twice and no settled name moves.
+
+**The unit geometry and `Vertex` are `model`'s.** `model.UnitBoxGeometry`,
+`UnitPlaneGeometry` and `UnitSphereGeometry` (and the unexported `appendQuad`)
+live in `bundles/model/internal/types/geometry.go`. They build `[]Vertex`, and a
+`Vertex` reports its storage layout through its `VertexLayout` method, so
+`Vertex`, the `VertexLayout` interface and the storage layout's offsets, strides
+and two attribute tables moved with them, ahead of the rest of mesh residency.
+scene's packers still write that layout, and name it through aliases in
+`vertexlayout.go`.
 
 ---
 
@@ -767,7 +816,10 @@ what it does.
    `bundles/model`, and scene imports it. Each step repoints scene's root aliases
    at `model`'s root. ecsscene keeps proxying into `scene.OpQueue` throughout.
    `friends.go`'s test accessors move with the code they reach. In this order:
-   1. the decoder and geometry. **This spec's first flip lands here**;
+   1. the decoder and geometry. **This spec's first flip lands here**. Landed in
+      [#529](https://github.com/dvoyni/cog/issues/529), with `Vertex` and its
+      storage layout moved early and the conversion to GPU layouts left in
+      scene until step 2;
    2. the caches and `Lookup`, with the two facades, `ModelHandle` and the model
       plugin, which registers the resource and takes `Config`. `mesh.md` moves
       here;
