@@ -301,7 +301,7 @@ func TestRemovingAnEmitterStopsItsVoiceAndReAddingOneStartsAgain(t *testing.T) {
 func TestATransformMakesTheVoicePositionalAndKeepsMovingIt(t *testing.T) {
 	h := newHarness(t)
 
-	place := ecsaudio.Transform{Position: m.Vec3{X: 3}}
+	place := m.Transform{Position: m.Vec3{X: 3}}
 	e := h.spawn(spawnRequest{
 		Emitter: &ecsaudio.Emitter{Clip: sound.ClipWithResource(clip)},
 		Place:   &place,
@@ -319,7 +319,7 @@ func TestATransformMakesTheVoicePositionalAndKeepsMovingIt(t *testing.T) {
 		t.Fatal("the entry does not record that its Play carried a Position")
 	}
 
-	h.change(changeRequest{Entity: e, Place: &ecsaudio.Transform{Position: m.Vec3{X: 9, Y: 4}}})
+	h.change(changeRequest{Entity: e, Place: &m.Transform{Position: m.Vec3{X: 9, Y: 4}}})
 	h.tick()
 
 	moved := h.probe(e)
@@ -363,11 +363,11 @@ func TestATransformAddedLaterDoesNotSpatializeAPlayingVoiceAndOneRemovedDoesNotU
 	unplaced := h.emit(sound.ClipWithResource(clip), sound.Params{})
 	placed := h.spawn(spawnRequest{
 		Emitter: &ecsaudio.Emitter{Clip: sound.ClipWithResource(clip)},
-		Place:   &ecsaudio.Transform{Position: m.Vec3{X: 5}},
+		Place:   &m.Transform{Position: m.Vec3{X: 5}},
 	})
 	h.tick()
 
-	h.change(changeRequest{Entity: unplaced, Place: &ecsaudio.Transform{Position: m.Vec3{X: 7}}})
+	h.change(changeRequest{Entity: unplaced, Place: &m.Transform{Position: m.Vec3{X: 7}}})
 	h.change(changeRequest{Entity: placed, RemovePlace: true})
 	h.tick()
 
@@ -391,7 +391,7 @@ func TestATransformAddedLaterDoesNotSpatializeAPlayingVoiceAndOneRemovedDoesNotU
 func TestTheTransformsRotationIsSentOnlyForAnEmitterWithACone(t *testing.T) {
 	h := newHarness(t)
 
-	turned := ecsaudio.Transform{Position: m.Vec3{X: 2}, Rotation: m.QuatRotationZ(1)}
+	turned := m.Transform{Position: m.Vec3{X: 2}, Rotation: m.QuatRotationZ(1)}
 	plain := h.spawn(spawnRequest{
 		Emitter: &ecsaudio.Emitter{Clip: sound.ClipWithResource(clip)},
 		Place:   &turned,
@@ -426,7 +426,7 @@ func TestTheListenerIsTheTransformOfTheEntityCarryingTheTag(t *testing.T) {
 	rotation := m.QuatRotationX(-1.5707963)
 	h.spawn(spawnRequest{
 		Listener: true,
-		Place:    &ecsaudio.Transform{Position: m.Vec3{X: 1, Y: 2, Z: 3}, Rotation: rotation},
+		Place:    &m.Transform{Position: m.Vec3{X: 1, Y: 2, Z: 3}, Rotation: rotation},
 	})
 	h.tick()
 
@@ -449,7 +449,7 @@ func TestNoListenerLeavesTheListenerWhereItWas(t *testing.T) {
 	h := newHarness(t)
 
 	standing := m.Vec3{X: 40, Y: 8}
-	e := h.spawn(spawnRequest{Listener: true, Place: &ecsaudio.Transform{Position: standing}})
+	e := h.spawn(spawnRequest{Listener: true, Place: &m.Transform{Position: standing}})
 	h.tick()
 
 	h.despawn(e)
@@ -467,7 +467,7 @@ func TestAListenerWithNoTransformIsIgnoredAndCountsAsNone(t *testing.T) {
 	h := newHarness(t)
 
 	placed := m.Vec3{X: 12}
-	h.spawn(spawnRequest{Listener: true, Place: &ecsaudio.Transform{Position: placed}})
+	h.spawn(spawnRequest{Listener: true, Place: &m.Transform{Position: placed}})
 	h.spawn(spawnRequest{Listener: true})
 	h.ticks(2)
 
@@ -485,8 +485,8 @@ func TestTwoListenersReportOnceAndTakeTheLowestEntityEveryTick(t *testing.T) {
 	h := newHarness(t)
 
 	lowest := m.Vec3{X: 1}
-	first := h.spawn(spawnRequest{Listener: true, Place: &ecsaudio.Transform{Position: lowest}})
-	second := h.spawn(spawnRequest{Listener: true, Place: &ecsaudio.Transform{Position: m.Vec3{X: 100}}})
+	first := h.spawn(spawnRequest{Listener: true, Place: &m.Transform{Position: lowest}})
+	second := h.spawn(spawnRequest{Listener: true, Place: &m.Transform{Position: m.Vec3{X: 100}}})
 	if second < first {
 		t.Fatalf("the fixture assumes the second spawn is the higher handle: %v then %v", first, second)
 	}

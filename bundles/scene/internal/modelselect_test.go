@@ -62,7 +62,7 @@ func TestANodeDrawTakesTheWholeSubtree(t *testing.T) {
 // Transform replaces it, so a prop drawn by name lands where the draw put it
 // however the artist laid the file out.
 func TestANodeDrawReRootsToTheDrawTransform(t *testing.T) {
-	h := residentDraw(t, propsFile(t), scene.ModelDraw{Node: "crate", Transform: scene.At(10, 0, 0)}, 1)
+	h := residentDraw(t, propsFile(t), scene.ModelDraw{Node: "crate", Transform: m.At(10, 0, 0)}, 1)
 	// The triangle's declared box is (0,0,0)..(1,1,0), so its sphere sits at
 	// (0.5, 0.5, 0) in the crate's own space. The file's 4 on X and 3 on Y are
 	// what re-rooting throws away.
@@ -86,7 +86,7 @@ func TestANodeDrawReRootsThroughARotatedChain(t *testing.T) {
 	}
 	sceneOf(doc, 0)
 	doc.Scene = gltf.Index(0)
-	h := residentDraw(t, doc, scene.ModelDraw{Node: "Wheels", Transform: scene.At(10, 0, 0)}, 1)
+	h := residentDraw(t, doc, scene.ModelDraw{Node: "Wheels", Transform: m.At(10, 0, 0)}, 1)
 	// The wheel's mesh hangs off the named node itself, so re-rooting leaves
 	// the draw's own transform and nothing else: the triangle's sphere sits
 	// where it does in its own space, moved by the call.
@@ -99,7 +99,7 @@ func TestANodeDrawReRootsThroughARotatedChain(t *testing.T) {
 // An empty Node keeps the scene's root transforms, because a scene is authored
 // as one unit: the same draw of the same file lands where the artist put it.
 func TestAWholeSceneDrawKeepsTheAuthoredTransforms(t *testing.T) {
-	h := residentDraw(t, propsFile(t), scene.ModelDraw{Transform: scene.At(10, 0, 0)}, 2)
+	h := residentDraw(t, propsFile(t), scene.ModelDraw{Transform: m.At(10, 0, 0)}, 2)
 	if got := drawnSphere(t, h).Center; abs32(got.X-14.5) > 1e-4 || abs32(got.Y-3.5) > 1e-4 {
 		t.Errorf("the whole scene's crate sits at %v, want the authored {14.5 3.5 0}", got)
 	}
@@ -276,7 +276,7 @@ func TestAModelCallCarriesItsSelectorsToInspection(t *testing.T) {
 func TestANodeDrawInstances(t *testing.T) {
 	h := residentDraw(t, propsFile(t), scene.ModelDraw{
 		Node:       "layout",
-		Transforms: []scene.Transform{scene.At(0, 0, 0), scene.At(2, 0, 0), scene.At(4, 0, 0)},
+		Transforms: []m.Transform{m.At(0, 0, 0), m.At(2, 0, 0), m.At(4, 0, 0)},
 	}, 6)
 	batches := h.passes()[0].Batches
 	if len(batches) != 2 {

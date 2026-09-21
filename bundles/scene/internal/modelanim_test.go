@@ -83,7 +83,7 @@ func firstInstance(t *testing.T, h *harness) sceneInstance {
 func TestAnUnskinnedDrawBindsNoGroupTwo(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(cameraMain, testCameraDescr())
-		q.Box(0, scene.At(0, 0, 0), testBoxColor)
+		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
 	h.frame()
 	for _, name := range []string{"scenePoses", "sceneSkinJoints", "sceneMorphDeltas"} {
@@ -116,7 +116,7 @@ func TestEveryUnskinnedDrawTakesTheSameVariant(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(cameraMain, testCameraDescr())
 		for i := range 4 {
-			q.Box(0, scene.At(float32(i), 0, 0), testBoxColor)
+			q.Box(0, m.At(float32(i), 0, 0), testBoxColor)
 		}
 	})
 	h.frame()
@@ -259,7 +259,7 @@ func TestOnlyThePlainBoundPlacementOfASharedMeshIsExempt(t *testing.T) {
 		// A camera pointed the other way: whatever survives survives because it
 		// is exempt, not because it is in frustum.
 		q.Camera(cameraMain, scene.CameraDescr{
-			Transform: scene.LookAt(m.Vec3{Z: 500}, m.Vec3{Z: 1000}, m.Vec3{Y: 1}),
+			Transform: m.LookAt(m.Vec3{Z: 500}, m.Vec3{Z: 1000}, m.Vec3{Y: 1}),
 			FovY:      1.0472, Near: 0.1, Far: 200,
 		})
 		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{})
@@ -304,7 +304,7 @@ func TestASkinnedDrawIsNeverCulled(t *testing.T) {
 		// A camera pointed the other way: the draw survives only because it is
 		// exempt, not because it is in frustum.
 		q.Camera(cameraMain, scene.CameraDescr{
-			Transform: scene.LookAt(m.Vec3{Z: 500}, m.Vec3{Z: 1000}, m.Vec3{Y: 1}),
+			Transform: m.LookAt(m.Vec3{Z: 500}, m.Vec3{Z: 1000}, m.Vec3{Y: 1}),
 			FovY:      1.0472, Near: 0.1, Far: 200,
 		})
 		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{})

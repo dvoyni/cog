@@ -43,9 +43,10 @@ const (
 // A Component is registered by the plugin that defines its Go type, which is
 // what keeps cog's coupling check working on Component data: the types are
 // declared in ecsscene's root, and this plugin, shipped in the same
-// Bundle, registers them under ecsscene.Name.
+// Bundle, registers them under ecsscene.Name. The m.Transform an Entity is
+// drawn at is not among them: it is the ecs plugin's, and every binding reads
+// the same Store.
 func (plugin) Register(registrar *kernel.Registrar, _ any) error {
-	ecs.RegisterComponent[ecsscene.Transform](registrar, drawableReserve)
 	ecs.RegisterComponent[ecsscene.Model](registrar, drawableReserve)
 	ecs.RegisterComponent[ecsscene.Mesh](registrar, drawableReserve)
 	ecs.RegisterComponent[ecsscene.Animation](registrar, drawableReserve)

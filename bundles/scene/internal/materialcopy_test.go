@@ -6,6 +6,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
@@ -166,10 +167,10 @@ func materialOver(params []gfx.ParameterDescr) scene.Material {
 
 // instances is n transforms, for a draw whose batch is told apart by its
 // instance count.
-func instances(n int) []scene.Transform {
-	transforms := make([]scene.Transform, n)
+func instances(n int) []m.Transform {
+	transforms := make([]m.Transform, n)
 	for i := range transforms {
-		transforms[i] = scene.At(float32(i), 0, 0)
+		transforms[i] = m.At(float32(i), 0, 0)
 	}
 	return transforms
 }

@@ -17,7 +17,7 @@ import (
 // registered in advance — no manifest, no hash.
 func TestAModelEntityRecordsWhereItStandsOnItsLayers(t *testing.T) {
 	h := newHarness(t)
-	place := ecsscene.Transform{
+	place := m.Transform{
 		Position: m.Vec3{X: 1, Y: 2, Z: 3},
 		Rotation: m.Quat{Y: 1},
 		Scale:    m.Vec3{X: 2, Y: 1, Z: 0.5},
@@ -39,7 +39,7 @@ func TestAModelEntityRecordsWhereItStandsOnItsLayers(t *testing.T) {
 	if op.Layers != scene.Layer(3) {
 		t.Errorf("the draw is on layers %v, want %v", op.Layers, scene.Layer(3))
 	}
-	want := scene.Transform{
+	want := m.Transform{
 		Position: m.Vec3{X: 1, Y: 2, Z: 3},
 		Rotation: m.Quat{Y: 1},
 		Scale:    m.Vec3{X: 2, Y: 1, Z: 0.5},
@@ -245,21 +245,21 @@ func TestAnAbsentMaterialIsNoMaterial(t *testing.T) {
 
 // TestALightIsPlacedAndAimedByItsTransform is the one place the binding
 // computes anything: a spot's direction is its Transform's rotation applied to
-// -Z, which is the way scene.LookAt faces, so a light placed with LookAt shines
+// -Z, which is the way m.LookAt faces, so a light placed with LookAt shines
 // at what it looks at. An unrotated spot shines down -Z, and a point light
 // takes its position alone.
 func TestALightIsPlacedAndAimedByItsTransform(t *testing.T) {
 	h := newHarness(t)
 	eye, target := m.Vec3{Y: 5}, m.Vec3{X: 3, Y: 5, Z: 4}
 	h.spawn(t, spawnRequest{
-		Place: ecsscene.Transform(scene.LookAt(eye, target, m.Vec3{Y: 1})),
+		Place: m.LookAt(eye, target, m.Vec3{Y: 1}),
 		Light: &ecsscene.Light{
 			Kind: scene.LightSpot, Color: m.Color{R: 1, G: 0.5, A: 1}, Intensity: 2, Range: 10,
 			InnerCone: 0.1, OuterCone: 0.4, Layers: scene.Layer(2),
 		},
 	})
-	h.spawn(t, spawnRequest{Place: ecsscene.Transform{Position: m.Vec3{Z: 7}}, Light: &ecsscene.Light{Kind: scene.LightSpot}})
-	h.spawn(t, spawnRequest{Place: ecsscene.Transform{Position: m.Vec3{X: -2}}, Light: &ecsscene.Light{Range: 3}})
+	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{Z: 7}}, Light: &ecsscene.Light{Kind: scene.LightSpot}})
+	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{X: -2}}, Light: &ecsscene.Light{Range: 3}})
 
 	h.frame(t)
 
@@ -306,7 +306,7 @@ func near(a, b m.Vec3) bool {
 // Transform, and a Camera whose Passes are empty leaves scene its default pass.
 func TestACameraRecordsItsPassesWithTheirClears(t *testing.T) {
 	h := newHarness(t)
-	place := ecsscene.Transform(scene.LookAt(m.Vec3{Y: 3, Z: 10}, m.Vec3{}, m.Vec3{Y: 1}))
+	place := m.LookAt(m.Vec3{Y: 3, Z: 10}, m.Vec3{}, m.Vec3{Y: 1})
 	passes := []scene.Pass{
 		{ClearColor: m.Some(m.Color{B: 0.25, A: 1}), ClearDepth: m.Some[float32](1)},
 		{Tag: "overlay", Order: 1},
@@ -329,7 +329,7 @@ func TestACameraRecordsItsPassesWithTheirClears(t *testing.T) {
 		cameras[op.Camera] = op.Descr
 	}
 	want := scene.CameraDescr{
-		Transform: scene.Transform(place), Projection: scene.Perspective, FovY: 1, Near: 0.1, Far: 100,
+		Transform: place, Projection: scene.Perspective, FovY: 1, Near: 0.1, Far: 100,
 		CullMask: scene.Layer(4), SunDirection: m.Vec3{Y: -1}, SunColor: m.White, SunIntensity: 3,
 		AmbientSky: m.Color{B: 1, A: 1}, AmbientGround: m.Color{G: 1, A: 1}, AmbientIntensity: 0.5,
 		Passes: passes,
@@ -425,7 +425,7 @@ func TestTheRecordingSystemsLockSetIsItsSignature(t *testing.T) {
 		}
 		for _, want := range []reflect.Type{
 			reflect.TypeFor[*ecs.Entities](),
-			reflect.TypeFor[*ecs.Store[ecsscene.Transform]](),
+			reflect.TypeFor[*ecs.Store[m.Transform]](),
 			reflect.TypeFor[*ecs.Store[ecsscene.Model]](),
 			reflect.TypeFor[*ecs.Store[ecsscene.Mesh]](),
 			reflect.TypeFor[*ecs.Store[ecsscene.Light]](),
@@ -472,7 +472,6 @@ func TestEveryComponentRegistersAndMeshAndLightArePointerFree(t *testing.T) {
 		owned[resource.Type] = resource.Owner
 	}
 	for component, store := range map[reflect.Type]reflect.Type{
-		reflect.TypeFor[ecsscene.Transform](): reflect.TypeFor[*ecs.Store[ecsscene.Transform]](),
 		reflect.TypeFor[ecsscene.Model]():     reflect.TypeFor[*ecs.Store[ecsscene.Model]](),
 		reflect.TypeFor[ecsscene.Mesh]():      reflect.TypeFor[*ecs.Store[ecsscene.Mesh]](),
 		reflect.TypeFor[ecsscene.Animation](): reflect.TypeFor[*ecs.Store[ecsscene.Animation]](),

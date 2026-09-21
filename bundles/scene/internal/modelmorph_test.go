@@ -7,6 +7,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/qmuntal/gltf"
 )
 
@@ -101,7 +102,7 @@ func TestAMorphedModelBindsItsOwnDeltasAndABoxBindsNone(t *testing.T) {
 	}
 	box := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(cameraMain, testCameraDescr())
-		q.Box(0, scene.At(0, 0, 0), testBoxColor)
+		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
 	box.frame()
 	if bound := box.backend.buffersBoundTo("sceneMorphDeltas"); len(bound) != 0 {

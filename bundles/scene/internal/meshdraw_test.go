@@ -149,8 +149,8 @@ func TestABakedStandardMeshCullsByItsOwnSphere(t *testing.T) {
 	var near, far scene.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
-		q.Mesh(0, near, scene.MeshDraw{Transform: scene.At(0, 0, -5)})
-		q.Mesh(0, far, scene.MeshDraw{Transform: scene.At(0, 0, 5)})
+		q.Mesh(0, near, scene.MeshDraw{Transform: m.At(0, 0, -5)})
+		q.Mesh(0, far, scene.MeshDraw{Transform: m.At(0, 0, 5)})
 	})
 	near = h.bake(triangle(), nil, gfx.TopologyTriangleList)
 	far = h.bake(triangle(), nil, gfx.TopologyTriangleList)
@@ -169,7 +169,7 @@ func TestATemporaryMeshIsNeverCulledUnlessItSaysSo(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		behind := q.TemporaryMesh(triangle(), nil, gfx.TopologyTriangleList)
-		q.Mesh(0, behind, scene.MeshDraw{Transform: scene.At(0, 0, 5)})
+		q.Mesh(0, behind, scene.MeshDraw{Transform: m.At(0, 0, 5)})
 	})
 	h.frame()
 	if pass := h.passes()[0]; pass.Culled != 0 || pass.Instances != 1 {
@@ -179,7 +179,7 @@ func TestATemporaryMeshIsNeverCulledUnlessItSaysSo(t *testing.T) {
 	bounded := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		behind := q.TemporaryMesh(triangle(), nil, gfx.TopologyTriangleList)
-		q.Mesh(0, behind, scene.MeshDraw{Transform: scene.At(0, 0, 5), Bounds: m.Vec4{W: 1}})
+		q.Mesh(0, behind, scene.MeshDraw{Transform: m.At(0, 0, 5), Bounds: m.Vec4{W: 1}})
 	})
 	bounded.frame()
 	if pass := bounded.passes()[0]; pass.Culled != 1 || pass.Instances != 0 {
@@ -288,7 +288,7 @@ func TestUpdateMeshRebakesAtAnySizeAndRecomputesTheSphere(t *testing.T) {
 	var ref scene.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
-		q.Mesh(0, ref, scene.MeshDraw{Transform: scene.At(0, 0, -110)})
+		q.Mesh(0, ref, scene.MeshDraw{Transform: m.At(0, 0, -110)})
 	})
 	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
 	h.frame()
@@ -458,8 +458,8 @@ func TestTransformsPlaceOneInstanceEachAndCullIndependently(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Mesh(0, ref, scene.MeshDraw{
-			Transform:  scene.At(0, 0, 500),
-			Transforms: []scene.Transform{scene.At(0, 0, -5), scene.At(2, 0, -5), scene.At(0, 0, 5)},
+			Transform:  m.At(0, 0, 500),
+			Transforms: []m.Transform{m.At(0, 0, -5), m.At(2, 0, -5), m.At(0, 0, 5)},
 		})
 	})
 	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
@@ -507,8 +507,8 @@ func TestAnInstancedOpaqueDrawIsOneBatchOfItsSurvivors(t *testing.T) {
 	var ref scene.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
-		q.Mesh(0, ref, scene.MeshDraw{Transforms: []scene.Transform{
-			scene.At(0, 0, -5), scene.At(0, 0, 5), scene.At(2, 0, -5), scene.At(-2, 0, -5),
+		q.Mesh(0, ref, scene.MeshDraw{Transforms: []m.Transform{
+			m.At(0, 0, -5), m.At(0, 0, 5), m.At(2, 0, -5), m.At(-2, 0, -5),
 		}})
 	})
 	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
@@ -547,7 +547,7 @@ func TestAnInstancedBlendDrawStaysOneBatchPerInstance(t *testing.T) {
 		q.Camera(testCamera, forwardCamera())
 		q.Mesh(0, ref, scene.MeshDraw{
 			Material:   blendMaterial(1),
-			Transforms: []scene.Transform{scene.At(0, 0, -2), scene.At(0, 0, -20), scene.At(0, 0, -8)},
+			Transforms: []m.Transform{m.At(0, 0, -2), m.At(0, 0, -20), m.At(0, 0, -8)},
 		})
 	})
 	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
@@ -575,8 +575,8 @@ func TestTwoInstancedCallsStayTwoBatches(t *testing.T) {
 	var ref scene.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
-		q.Mesh(0, ref, scene.MeshDraw{Transforms: []scene.Transform{scene.At(0, 0, -5), scene.At(1, 0, -5)}})
-		q.Mesh(0, ref, scene.MeshDraw{Transforms: []scene.Transform{scene.At(2, 0, -5), scene.At(3, 0, -5)}})
+		q.Mesh(0, ref, scene.MeshDraw{Transforms: []m.Transform{m.At(0, 0, -5), m.At(1, 0, -5)}})
+		q.Mesh(0, ref, scene.MeshDraw{Transforms: []m.Transform{m.At(2, 0, -5), m.At(3, 0, -5)}})
 	})
 	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
 	h.frame()
@@ -599,7 +599,7 @@ func TestAnInstancedDrawIsPackedOncePerPass(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Camera(testCamera+1, forwardCamera())
-		q.Mesh(0, ref, scene.MeshDraw{Transforms: []scene.Transform{scene.At(0, 0, -5), scene.At(1, 0, -5)}})
+		q.Mesh(0, ref, scene.MeshDraw{Transforms: []m.Transform{m.At(0, 0, -5), m.At(1, 0, -5)}})
 	})
 	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
 	h.frame()

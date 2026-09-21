@@ -39,14 +39,13 @@ const (
 	listenerReserve = 4
 )
 
-// Register declares the three Components, the plugin-owned correspondence and
-// the one System. A Component is registered by the plugin that defines its Go
+// Register declares the two Components, the plugin-owned correspondence and
+// the one System. The m.Transform they are placed by is the ecs plugin's. A Component is registered by the plugin that defines its Go
 // type, which is what keeps cog's coupling check working on Component data: the
 // types are declared in ecsaudio's root, and this plugin, shipped in the same
 // Bundle, registers them under ecsaudio.Name.
 func (plugin) Register(registrar *kernel.Registrar, _ any) error {
 	ecs.RegisterComponent[ecsaudio.Emitter](registrar, emitterReserve)
-	ecs.RegisterComponent[ecsaudio.Transform](registrar, emitterReserve)
 	ecs.RegisterComponent[ecsaudio.Listener](registrar, listenerReserve)
 	registrar.InitResource(newTable())
 	registrar.Subscribe[ecsaudio.RecordOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, record))

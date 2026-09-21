@@ -8,7 +8,7 @@ import "github.com/dvoyni/cog/bundles/ecsphysics2d/internal/types"
 //	| B D TY |
 //
 // A Body's is rigid: a rotation about its Position and a translation, never a
-// scale. It is physics-only and not ecsscene.Transform, which is 3D and would
+// scale. It is physics-only and not m.Transform, which is 3D and would
 // put a third axis into this package's contract.
 //
 // Its methods are Inverse, Mul, Point, Vec and BB; NewTransform and its

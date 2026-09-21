@@ -18,7 +18,7 @@ import "github.com/dvoyni/cog/libs/m"
 // of no size, and that is what was drawn.
 
 // Box records a unit cube at transform, lit by the camera's sun and ambient.
-func (q *OpQueue) Box(layers LayerMask, transform Transform, color m.Color) {
+func (q *OpQueue) Box(layers LayerMask, transform m.Transform, color m.Color) {
 	q.calls = append(q.calls, Op{Kind: OpBox, Layers: layers, Transform: transform, Color: color})
 	q.draw(DrawRecord{Shape: ShapeBox, Layers: layers, Transform: transform, Color: color})
 }
@@ -33,7 +33,7 @@ func (q *OpQueue) Sphere(layers LayerMask, center m.Vec3, radius float32, color 
 	}
 	q.draw(DrawRecord{
 		Shape: shapeSphere, Layers: layers, Color: color,
-		Transform: Transform{Position: center}.WithScale(radius),
+		Transform: m.Transform{Position: center}.WithScale(radius),
 	})
 }
 
@@ -47,7 +47,7 @@ func (q *OpQueue) Plane(layers LayerMask, center m.Vec3, size m.Vec2, color m.Co
 	}
 	q.draw(DrawRecord{
 		Shape: shapePlane, Layers: layers, Color: color,
-		Transform: Transform{Position: center},
+		Transform: m.Transform{Position: center},
 		Stretch:   m.Vec3{X: size.X, Y: 1, Z: size.Y},
 	})
 }
@@ -92,7 +92,7 @@ func (q *OpQueue) WireBox(layers LayerMask, center, size m.Vec3, thickness float
 	edge := func(position, stretch m.Vec3) {
 		q.draw(DrawRecord{
 			Shape: ShapeBox, Layers: layers, Color: color, SelfLit: true,
-			Transform: Transform{Position: center.Add(position)},
+			Transform: m.Transform{Position: center.Add(position)},
 			Stretch:   stretch,
 		})
 	}
@@ -117,11 +117,11 @@ func (q *OpQueue) WireBox(layers LayerMask, center, size m.Vec3, thickness float
 // end: the midpoint, and the rotation that carries +X onto the line's
 // direction. It also returns the line's length, which is the X stretch the
 // box needs. A zero-length line has no direction and reports !ok.
-func lineTransform(start, end m.Vec3) (Transform, float32, bool) {
+func lineTransform(start, end m.Vec3) (m.Transform, float32, bool) {
 	direction := end.Sub(start)
 	length := direction.Length()
 	if length == 0 {
-		return Transform{}, 0, false
+		return m.Transform{}, 0, false
 	}
 	x := direction.DivS(length)
 	// Any unit vector perpendicular to x serves as the box's local Y; the
@@ -133,7 +133,7 @@ func lineTransform(start, end m.Vec3) (Transform, float32, bool) {
 	y := helper.Cross(x).Normalize()
 	z := x.Cross(y)
 	basis := m.Mat3{x.X, x.Y, x.Z, y.X, y.Y, y.Z, z.X, z.Y, z.Z}
-	return Transform{
+	return m.Transform{
 		Position: start.Add(end).MulS(0.5),
 		Rotation: m.QuatFromMat3(basis),
 	}, length, true

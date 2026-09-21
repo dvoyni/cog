@@ -52,7 +52,7 @@ func modelFiles(data []byte) fstest.MapFS {
 // what the packer did rather than where the shared test camera happens to point.
 func modelCamera() scene.CameraDescr {
 	return scene.CameraDescr{
-		Transform: scene.LookAt(m.Vec3{Z: 30}, m.Vec3{}, m.Vec3{Y: 1}),
+		Transform: m.LookAt(m.Vec3{Z: 30}, m.Vec3{}, m.Vec3{Y: 1}),
 		FovY:      1.0472,
 		Near:      0.1, Far: 200,
 	}
@@ -107,7 +107,7 @@ func TestAModelCallIsOneOp(t *testing.T) {
 	sceneOf(doc, 0, 1)
 	doc.Scene = gltf.Index(0)
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)),
-		drawModel(modelPath, scene.ModelDraw{Transform: scene.At(1, 2, 3)}))
+		drawModel(modelPath, scene.ModelDraw{Transform: m.At(1, 2, 3)}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		passes := h.passes()
 		return len(passes) == 1 && passes[0].Instances == 2
@@ -170,7 +170,7 @@ func TestModelInstancingPacksEachPrimitiveAsOneBatch(t *testing.T) {
 	sceneOf(doc, 0, 1)
 	doc.Scene = gltf.Index(0)
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, scene.ModelDraw{
-		Transforms: []scene.Transform{scene.At(0, 0, 0), scene.At(2, 0, 0), scene.At(4, 0, 0)},
+		Transforms: []m.Transform{m.At(0, 0, 0), m.At(2, 0, 0), m.At(4, 0, 0)},
 	}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 6
@@ -195,7 +195,7 @@ func TestAModelDrawFoldsTheDrawTransformOverTheFlattenedMatrix(t *testing.T) {
 	sceneOf(doc, 0)
 	doc.Scene = gltf.Index(0)
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)),
-		drawModel(modelPath, scene.ModelDraw{Transform: scene.At(10, 0, 0)}))
+		drawModel(modelPath, scene.ModelDraw{Transform: m.At(10, 0, 0)}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
@@ -384,7 +384,7 @@ func TestAnUnboundedModelIsNeverCulled(t *testing.T) {
 	doc.Scene = gltf.Index(0)
 	// Far behind the camera, where a bounded model would certainly be culled.
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)),
-		drawModel(modelPath, scene.ModelDraw{Transform: scene.At(0, 0, 400)}))
+		drawModel(modelPath, scene.ModelDraw{Transform: m.At(0, 0, 400)}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})

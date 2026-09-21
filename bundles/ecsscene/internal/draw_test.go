@@ -120,7 +120,7 @@ func newDrawingHarness(t testing.TB, ids uint32) *harness {
 		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
 	})
 	h.spawn(t, spawnRequest{
-		Place:  ecsscene.Transform(scene.LookAt(m.Vec3{Z: 30}, m.Vec3{}, m.Vec3{Y: 1})),
+		Place:  m.LookAt(m.Vec3{Z: 30}, m.Vec3{}, m.Vec3{Y: 1}),
 		Camera: &ecsscene.Camera{FovY: 1.0472, Near: 0.1, Far: 200},
 	})
 	return h
@@ -201,8 +201,8 @@ func TestAPresentMaterialWithNoTagsDrawsNothing(t *testing.T) {
 	ref := h.bake(t)
 	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}})
 	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}, Material: &ecsscene.Material{}})
-	h.spawn(t, spawnRequest{Place: ecsscene.Transform{Position: m.Vec3{X: 2}}, Model: crateModelComponent()})
-	h.spawn(t, spawnRequest{Place: ecsscene.Transform{Position: m.Vec3{X: 4}}, Model: crateModelComponent(), Material: &ecsscene.Material{}})
+	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{X: 2}}, Model: crateModelComponent()})
+	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{X: 4}}, Model: crateModelComponent(), Material: &ecsscene.Material{}})
 
 	h.frameUntil(t, "every draw to reach the pass", func() bool {
 		passes := h.passes(t)

@@ -94,6 +94,14 @@ type componentClass struct {
 // it, which the Go import graph already forces. Ownership by ecs would not make
 // the check lenient, it would make it vacuous.
 //
+// m.Transform is the one exception, and it is vacuous on purpose. Where an
+// Entity stands is read by every binding, so it is declared in libs/m and its
+// Store is registered by the ecs plugin itself: one Store, so two Components
+// can never describe one position without the scheduler relating them. The
+// cost is that every plugin with Systems already depends on ecs, so a System
+// writing m.Transform without declaring anything else is never caught at
+// composition. Order its writers deliberately.
+//
 // Registration is explicit rather than derived, and half of that is forced: a
 // Lock must bind every handle it will use and a declared resource with no
 // initial value fails finalisation, so a Store that does not exist at

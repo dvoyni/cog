@@ -82,7 +82,7 @@ type Pass struct {
 // carrying them on both, with the camera's ignored once Passes is non-empty, is
 // a silent-override rule that produces bug reports.
 type CameraDescr struct {
-	Transform  Transform // the camera as a positioned object; scene inverts it
+	Transform  m.Transform // the camera as a positioned object; scene inverts it
 	Projection ProjectionKind
 	FovY       float32 // Perspective: the literal vertical field of view, radians
 	Height     float32 // Orthographic and Oblique: world units across the target's height

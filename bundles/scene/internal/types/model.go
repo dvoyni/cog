@@ -1,6 +1,7 @@
 package types
 
 import (
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
@@ -16,8 +17,8 @@ type ModelDraw struct {
 	// transforms is six batches of a hundred, not six hundred draw calls. The
 	// instances share the draw's animation, so a hundred crates is one call and
 	// a hundred independently-animated characters is a hundred.
-	Transform  Transform
-	Transforms []Transform
+	Transform  m.Transform
+	Transforms []m.Transform
 
 	// Scene names an entry in the file's scenes array; empty is the file's
 	// declared default. glTF scene names are optional, so a file whose scenes
@@ -146,10 +147,10 @@ type ModelDrawRecord struct {
 	// model at expansion rather than at record: the file is not read until the
 	// flush, and a selector means nothing until it is.
 	Scene, Node string
-	transform   Transform
+	transform   m.Transform
 	// transforms aliases the recording's transform arena, never the caller's
 	// array, and is empty for a single-instance draw.
-	transforms []Transform
+	transforms []m.Transform
 	// Plays aliases the recording's play arena for the same reason, and
 	// morphWeights the recording's weight arena. A nil morphWeights is the
 	// draw taking the animated result; an empty non-nil one is the caller
@@ -225,7 +226,7 @@ func (q *OpQueue) flushModels() []ModelDrawRecord { return q.publishedModels }
 
 // Instances resolves one model draw's placements, reading a single-instance
 // draw as the one-element case so the expansion has one shape.
-func (r ModelDrawRecord) Instances(single *[1]Transform) []Transform {
+func (r ModelDrawRecord) Instances(single *[1]m.Transform) []m.Transform {
 	if len(r.transforms) > 0 {
 		return r.transforms
 	}

@@ -34,7 +34,7 @@ type Op struct {
 	Layers LayerMask
 	Color  m.Color
 	// Transform describes an OpBox.
-	Transform Transform
+	Transform m.Transform
 	// Center describes an OpSphere, OpPlane or OpWireBox; Radius is the
 	// sphere's, and Size the plane's (X and Z) or the wire box's.
 	Center m.Vec3

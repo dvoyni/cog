@@ -25,7 +25,7 @@ type (
 	}
 	listenerQuery struct {
 		Listener ecsaudio.Listener
-		Place    ecsaudio.Transform
+		Place    m.Transform
 	}
 )
 
@@ -50,7 +50,7 @@ type manyListenersKey struct{}
 func record(
 	emitters *ecs.Query[emitterQuery],
 	listeners *ecs.Query[listenerQuery],
-	places *ecs.Get[ecsaudio.Transform],
+	places *ecs.Get[m.Transform],
 	correspondence *ecs.Write[*table],
 	out *ecs.Write[*sound.Queue],
 	k kernel.Kernel,
@@ -87,7 +87,7 @@ func record(
 // because that is what decides whether a Transform may move this Voice later.
 func play(
 	queue *sound.Queue, voices *table,
-	e ecs.Entity, emitter ecsaudio.Emitter, place ecsaudio.Transform, placed bool,
+	e ecs.Entity, emitter ecsaudio.Emitter, place m.Transform, placed bool,
 ) {
 	started := params(emitter, place, placed)
 	// The offset is zero because a Seek is not the binding's: an Emitter says
@@ -108,7 +108,7 @@ func play(
 // spatializing a Voice that was played without one: sound's positional rule is
 // one-way, so a Position arriving by SetVoice would make that Voice positional
 // for the rest of its life.
-func params(emitter ecsaudio.Emitter, place ecsaudio.Transform, fold bool) sound.Params {
+func params(emitter ecsaudio.Emitter, place m.Transform, fold bool) sound.Params {
 	out := emitter.Params
 	if !fold {
 		return out
@@ -130,7 +130,7 @@ func params(emitter ecsaudio.Emitter, place ecsaudio.Transform, fold bool) sound
 // least afford it. With two or more the lowest Entity is heard from, chosen the
 // same way on every tick, and the condition is reported once.
 func setListener(queue *sound.Queue, listeners *ecs.Query[listenerQuery], k kernel.Kernel) {
-	lowest, place, count := ecs.NoEntity, ecsaudio.Transform{}, 0
+	lowest, place, count := ecs.NoEntity, m.Transform{}, 0
 	for e, it := range listeners.All() {
 		count++
 		if lowest == ecs.NoEntity || e < lowest {

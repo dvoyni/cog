@@ -97,15 +97,6 @@ func ScreenToRay(camera CameraDescr, viewport m.Vec2, screen m.Vec2) (m.Ray, boo
 // wraps rather than silently becoming zero, which would read as every layer.
 func Layer(i uint) LayerMask { return types.Layer(i) }
 
-// At is the transform of a thing standing at a point, unrotated and unscaled.
-func At(x, y, z float32) Transform { return types.At(x, y, z) }
-
-// LookAt returns the transform of a camera standing at eye and facing target.
-// It is a position and a rotation rather than a view matrix, because a camera
-// that is not a Transform is the one thing in the API that will not compose
-// with a follow rig — and scene would decompose the matrix for culling anyway.
-func LookAt(eye, target, up m.Vec3) Transform { return types.LookAt(eye, target, up) }
-
 // NewLookup builds an empty Lookup at scene's default configuration. The plugin
 // creates its own from its configuration; this constructor lets tests and
 // embedders build one to drive a LookupAccess directly.

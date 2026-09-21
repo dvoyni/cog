@@ -13,7 +13,7 @@ var target = m.Vec2{X: 800, Y: 600}
 
 func frontCamera() CameraDescr {
 	return CameraDescr{
-		Transform: LookAt(m.Vec3{Z: 10}, m.Vec3{}, m.Vec3{Y: 1}),
+		Transform: m.LookAt(m.Vec3{Z: 10}, m.Vec3{}, m.Vec3{Y: 1}),
 		FovY:      1.0472,
 		Near:      0.1, Far: 100,
 	}
@@ -21,7 +21,7 @@ func frontCamera() CameraDescr {
 
 func orthoCamera() CameraDescr {
 	return CameraDescr{
-		Transform:  LookAt(m.Vec3{Z: 10}, m.Vec3{}, m.Vec3{Y: 1}),
+		Transform:  m.LookAt(m.Vec3{Z: 10}, m.Vec3{}, m.Vec3{Y: 1}),
 		Projection: Orthographic,
 		Height:     8,
 		Near:       0.1, Far: 100,
@@ -259,7 +259,7 @@ func TestViewProjectionIsWhatWorldToScreenProjectsThrough(t *testing.T) {
 
 func simpleCamera() CameraDescr {
 	return CameraDescr{
-		Transform: LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
+		Transform: m.LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
 		FovY:      1.0472,
 		Near:      0.1, Far: 100,
 	}

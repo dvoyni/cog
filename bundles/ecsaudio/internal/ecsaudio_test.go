@@ -59,7 +59,7 @@ type spawnCmd kernel.Command[spawnRequest, spawnResponse]
 
 type spawnRequest struct {
 	Emitter  *ecsaudio.Emitter
-	Place    *ecsaudio.Transform
+	Place    *m.Transform
 	Listener bool
 }
 
@@ -70,7 +70,7 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 		request spawnRequest,
 		spawn *ecs.Spawn[marked],
 		emitters *ecs.Set[ecsaudio.Emitter],
-		places *ecs.Set[ecsaudio.Transform],
+		places *ecs.Set[m.Transform],
 		listeners *ecs.Set[ecsaudio.Listener],
 		answer *ecs.Resp[spawnResponse],
 	) {
@@ -97,7 +97,7 @@ type changeRequest struct {
 
 	Emitter       *ecsaudio.Emitter
 	RemoveEmitter bool
-	Place         *ecsaudio.Transform
+	Place         *m.Transform
 	RemovePlace   bool
 }
 
@@ -108,8 +108,8 @@ func changeCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Exec
 		request changeRequest,
 		emitters *ecs.Set[ecsaudio.Emitter],
 		dropEmitters *ecs.Remove[ecsaudio.Emitter],
-		places *ecs.Set[ecsaudio.Transform],
-		dropPlaces *ecs.Remove[ecsaudio.Transform],
+		places *ecs.Set[m.Transform],
+		dropPlaces *ecs.Remove[m.Transform],
 	) {
 		if request.Emitter != nil {
 			emitters.UpdateFor(request.Entity, *request.Emitter)

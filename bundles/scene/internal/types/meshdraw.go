@@ -22,8 +22,8 @@ type MeshDraw struct {
 	// wrong. Per-instance animation is out of scope either way: the instances
 	// share the draw's animation, so a hundred trees sway in lockstep and a
 	// hundred independently-animated characters need a hundred calls.
-	Transform  Transform
-	Transforms []Transform
+	Transform  m.Transform
+	Transforms []m.Transform
 	// Material is the scene material to draw with; nil is the bundled PBR. A
 	// mesh built from a custom vertex layout must name one, because the bundled
 	// PBR's vertex stage reads scene.Vertex's eight attributes and nothing else.
@@ -175,7 +175,7 @@ type temporaryMesh struct {
 type MeshRecording struct {
 	Temporaries []temporaryMesh
 	Arena       []byte
-	transforms  []Transform
+	transforms  []m.Transform
 	params      []gfx.ParameterDescr
 	// materials holds the tag entries of every Material a draw named; each
 	// entry's parameters are copied into params beside the draw's own.

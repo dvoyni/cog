@@ -15,7 +15,9 @@ package m
 //
 // It lives here rather than in scene because more than one consumer places
 // things: scene draws at a Transform and sound is heard from one, and neither
-// may depend on the other.
+// may depend on the other. For the same reason it is, unwrapped, the ECS
+// Component that says where an Entity stands: the ecs plugin registers its one
+// Store, and every binding reads that Store rather than a copy of its own.
 type Transform struct {
 	Position Vec3
 	Rotation Quat

@@ -6,6 +6,7 @@ import (
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/storage"
 )
@@ -50,7 +51,7 @@ func (p *plugin) expandModels(
 	// selectors resolve in that same pass and the views are kept, so a draw
 	// whose Node matched nothing is skipped and reported exactly once rather
 	// than resolved twice.
-	var single [1]scene.Transform
+	var single [1]m.Transform
 	p.modelViews = grow(p.modelViews, len(models))
 	worlds := 0
 	for i := range models {

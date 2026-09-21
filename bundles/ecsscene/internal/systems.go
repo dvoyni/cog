@@ -18,19 +18,19 @@ import (
 // accessors instead, at one probe each.
 type (
 	modelQuery struct {
-		Place ecsscene.Transform
+		Place m.Transform
 		Model ecsscene.Model
 	}
 	meshQuery struct {
-		Place ecsscene.Transform
+		Place m.Transform
 		Mesh  ecsscene.Mesh
 	}
 	lightQuery struct {
-		Place ecsscene.Transform
+		Place m.Transform
 		Light ecsscene.Light
 	}
 	cameraQuery struct {
-		Place  ecsscene.Transform
+		Place  m.Transform
 		Camera ecsscene.Camera
 	}
 )
@@ -88,7 +88,7 @@ func record(
 	s, queue := work.Get(), out.Get()
 	for e, it := range models.All() {
 		draw := scene.ModelDraw{
-			Transform: scene.Transform(it.Place),
+			Transform: it.Place,
 			Scene:     it.Model.Ref.Scene,
 			Node:      it.Model.Ref.Node,
 		}
@@ -105,7 +105,7 @@ func record(
 	}
 	for e, it := range meshes.All() {
 		draw := scene.MeshDraw{
-			Transform: scene.Transform(it.Place),
+			Transform: it.Place,
 			Bounds:    it.Mesh.Bounds,
 			NeverCull: it.Mesh.NeverCull,
 		}
@@ -137,7 +137,7 @@ func record(
 	}
 	for _, it := range cameras.All() {
 		queue.Camera(it.Camera.ID, scene.CameraDescr{
-			Transform:        scene.Transform(it.Place),
+			Transform:        it.Place,
 			Projection:       it.Camera.Projection,
 			FovY:             it.Camera.FovY,
 			Height:           it.Camera.Height,
@@ -158,7 +158,7 @@ func record(
 }
 
 // facing is the direction an unrotated Transform faces, which is the way
-// scene.LookAt aims.
+// m.LookAt aims.
 var facing = m.Vec3{Z: -1}
 
 // clipPlays flattens an Animation's used slots into scratch.

@@ -7,20 +7,6 @@ import (
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
-// Transform is where an Entity stands: scene.Transform itself, as a type of
-// this package's own. Every recorded Entity needs one, and an Entity without
-// one is not recorded whatever else it carries.
-//
-// It is defined from scene.Transform rather than aliased to it so that the
-// Store's Go type belongs to this package: a System elsewhere that names it
-// imports ecsscene, and the import graph keeps forcing the plugin dependency
-// the coupling check expects. Convert with scene.Transform(t) and Transform(t).
-//
-// Its zero value is the identity, exactly as scene.Transform's is. A light is
-// placed by its Position and aimed by its Rotation; a camera is placed and
-// aimed the same way, and its Scale is ignored, as scene ignores it.
-type Transform scene.Transform
-
 // Model draws a glTF file, or one scene or node inside it.
 //
 // Ref.Path is the storage path scene loads, held as the string it is. Loading
@@ -78,9 +64,9 @@ type Material struct {
 	Tags ecs.List[MaterialTag]
 }
 
-// Light is a punctual light. Its position is the Transform's, and a spot's
-// direction is the Transform's rotation applied to -Z, which is the way
-// scene.LookAt faces. It is pointer-free.
+// Light is a punctual light. Its position is its Entity's m.Transform's, and a
+// spot's direction is that Transform's rotation applied to -Z, which is the way
+// m.LookAt faces. It is pointer-free.
 //
 // Every zero is scene's default: Intensity zero is 1, Range zero is infinite,
 // OuterCone zero is pi/4, and InnerCone zero is a real value.
@@ -94,8 +80,8 @@ type Light struct {
 	Layers    scene.LayerMask
 }
 
-// Camera is a camera. Its placement is the Transform's position and rotation;
-// its Scale is ignored, as scene ignores it.
+// Camera is a camera. Its placement is its Entity's m.Transform's position and
+// rotation; its Scale is ignored, as scene ignores it.
 //
 // The fields are scene.CameraDescr's, with its Passes held as a List. An empty
 // Passes is scene's one default pass. Two Cameras with one ID are left to

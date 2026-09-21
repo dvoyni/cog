@@ -8,6 +8,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
 	"github.com/dvoyni/cog/bundles/ecsscene"
+	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/sceneplugin"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -21,24 +22,41 @@ import (
 // driftQuery moves a Transform, as a game System does before the binding
 // records it.
 type driftQuery struct {
-	Place *ecsscene.Transform
+	Place *m.Transform
+}
+
+// retuneQuery writes one of the binding's own Components.
+type retuneQuery struct {
+	Model *ecsscene.Model
 }
 
 type driftSystem kernel.Subscription[app.UpdateEvent]
 
-// moverPlugin is a game that names the binding's Components through the
-// root alone and orders itself against the binding's identity.
-type moverPlugin struct{ deps []kernel.PluginName }
+// moverPlugin is a game that orders itself against the binding's identity. It
+// writes one of the binding's Components, or, when it only places, the
+// m.Transform the ecs plugin owns.
+type moverPlugin struct {
+	deps   []kernel.PluginName
+	places bool
+}
 
 func (*moverPlugin) Name() kernel.PluginName             { return "mover" }
 func (p *moverPlugin) Dependencies() []kernel.PluginName { return p.deps }
 
-func (*moverPlugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.Subscribe[driftSystem](ecs.ToHandler[app.UpdateEvent](registrar, func(q *ecs.Query[driftQuery]) {
+func (p *moverPlugin) Register(registrar *kernel.Registrar, _ any) error {
+	system := ecs.ToHandler[app.UpdateEvent](registrar, func(q *ecs.Query[retuneQuery]) {
 		for _, it := range q.All() {
-			it.Place.Position = it.Place.Position.Add(m.Vec3{X: 1})
+			it.Model.Layers = it.Model.Layers | scene.Layer(1)
 		}
-	})).Before[ecsscene.RecordOnUpdate]()
+	})
+	if p.places {
+		system = ecs.ToHandler[app.UpdateEvent](registrar, func(q *ecs.Query[driftQuery]) {
+			for _, it := range q.All() {
+				it.Place.Position = it.Place.Position.Add(m.Vec3{X: 1})
+			}
+		})
+	}
+	registrar.Subscribe[driftSystem](system).Before[ecsscene.RecordOnUpdate]()
 	return nil
 }
 
@@ -65,12 +83,22 @@ func TestTheCouplingCheckStillHoldsOnTheBindingsComponents(t *testing.T) {
 		t.Fatalf("a System locking the binding's Stores without declaring ecsscene composed with %v", err)
 	}
 	if undeclared.Plugin != "mover" || undeclared.Owner != ecsscene.Name ||
-		undeclared.Resource != reflect.TypeFor[*ecs.Store[ecsscene.Transform]]() {
-		t.Errorf("the refusal is %+v, want mover locking *ecs.Store[ecsscene.Transform] owned by %q",
+		undeclared.Resource != reflect.TypeFor[*ecs.Store[ecsscene.Model]]() {
+		t.Errorf("the refusal is %+v, want mover locking *ecs.Store[ecsscene.Model] owned by %q",
 			undeclared, ecsscene.Name)
 	}
 
 	if err := compose(&moverPlugin{deps: []kernel.PluginName{ecs.Name, ecsscene.Name}}); err != nil {
 		t.Fatalf("a System declaring ecsscene did not compose: %v", err)
+	}
+}
+
+// TestASystemPlacingEntitiesNeedsOnlyEcs is the documented cost of the ecs
+// plugin owning the m.Transform Store: every plugin with Systems already
+// depends on ecs, so a System writing where an Entity stands composes without
+// declaring this binding, and the coupling check never sees it.
+func TestASystemPlacingEntitiesNeedsOnlyEcs(t *testing.T) {
+	if err := compose(&moverPlugin{deps: []kernel.PluginName{ecs.Name}, places: true}); err != nil {
+		t.Fatalf("a System writing m.Transform with only an ecs dependency did not compose: %v", err)
 	}
 }

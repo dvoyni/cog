@@ -30,7 +30,7 @@ func TestInstanceRecordIsSixtyFourFullyAllocatedBytes(t *testing.T) {
 }
 
 func TestPackInstanceWritesTheWorldMatrixAsThreeRows(t *testing.T) {
-	transform := scene.Transform{Position: m.Vec3{X: 1, Y: 2, Z: 3}}
+	transform := m.Transform{Position: m.Vec3{X: 1, Y: 2, Z: 3}}
 	instance := packInstance(transform.Mat4(), types.AnimBinding{Offset: types.SceneNoAnim}, 0)
 	want := [3]m.Vec4{
 		{X: 1, W: 1},

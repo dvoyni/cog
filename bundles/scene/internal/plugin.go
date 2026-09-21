@@ -469,7 +469,7 @@ func groupRun(entries []sortEntry, survivors []survivor, draws []types.DrawRecor
 // cameraPosition reads the eye out of a camera's transform. Scale is ignored
 // the way the view matrix ignores it: a scaled camera scales the world instead,
 // and its position is unaffected either way.
-func cameraPosition(transform scene.Transform) m.Vec4 {
+func cameraPosition(transform m.Transform) m.Vec4 {
 	eye := transform.Mat4().Translation()
 	return m.Vec4{X: eye.X, Y: eye.Y, Z: eye.Z, W: 1}
 }

@@ -22,8 +22,8 @@ func forwardCamera() scene.CameraDescr {
 func TestADrawBehindTheCameraIsCulledByThePublishedFrustum(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
-		q.Box(0, scene.At(0, 0, -5), testBoxColor)
-		q.Box(0, scene.At(0, 0, 5), testBoxColor)
+		q.Box(0, m.At(0, 0, -5), testBoxColor)
+		q.Box(0, m.At(0, 0, 5), testBoxColor)
 	})
 	h.frame()
 
@@ -52,7 +52,7 @@ func TestADrawBehindTheCameraIsCulledByThePublishedFrustum(t *testing.T) {
 func TestADrawPastFarIsCulled(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
-		q.Box(0, scene.At(0, 0, -200), testBoxColor)
+		q.Box(0, m.At(0, 0, -200), testBoxColor)
 	})
 	h.frame()
 
@@ -66,8 +66,8 @@ func TestADrawPastFarIsCulled(t *testing.T) {
 func TestCullingUsesTheScaledWorldSphere(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
-		q.Box(0, scene.At(0, 0, 5), testBoxColor)
-		q.Box(0, scene.At(0, 0, 5).WithScale(20), testBoxColor)
+		q.Box(0, m.At(0, 0, 5), testBoxColor)
+		q.Box(0, m.At(0, 0, 5).WithScale(20), testBoxColor)
 	})
 	h.frame()
 
@@ -83,12 +83,12 @@ func TestNeverCullAndExplicitBoundsOverrideTheBakedSphere(t *testing.T) {
 	h := newHarnessWithErrors(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		// Behind the camera, but exempt.
-		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: scene.At(0, 0, 5), Color: testBoxColor, NeverCull: true})
+		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(0, 0, 5), Color: testBoxColor, NeverCull: true})
 		// Behind the camera by its mesh, but its explicit sphere reaches the
 		// camera.
-		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: scene.At(0, 0, 5), Color: testBoxColor, Bounds: m.Sphere{Radius: 10}})
+		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(0, 0, 5), Color: testBoxColor, Bounds: m.Sphere{Radius: 10}})
 		// Behind the camera by its mesh, and its explicit sphere says so too.
-		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: scene.At(0, 0, 5), Color: testBoxColor, Bounds: m.Sphere{Radius: 1}})
+		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(0, 0, 5), Color: testBoxColor, Bounds: m.Sphere{Radius: 1}})
 	}, &reported)
 	h.frame()
 
@@ -137,7 +137,7 @@ func TestOpaqueDrawsGroupByMaterialNotRecordingOrder(t *testing.T) {
 		q.Camera(testCamera, forwardCamera())
 		a, b := opaqueMaterial(1), opaqueMaterial(2)
 		for i, material := range []scene.Material{b, a, b, a, b} {
-			types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: scene.At(float32(i), 0, -5), Color: testBoxColor, Material: material})
+			types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(float32(i), 0, -5), Color: testBoxColor, Material: material})
 		}
 	})
 	h.frame()
@@ -170,9 +170,9 @@ func TestBlendDrawsFollowOpaqueAndSortBackToFront(t *testing.T) {
 		q.Camera(testCamera, forwardCamera())
 		// Recorded near first, and with the lower material id, so a sort by
 		// either recording order or material would put it first.
-		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: scene.At(0, 0, -2), Color: testBoxColor, Material: blendMaterial(1)})
-		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: scene.At(0, 0, -20), Color: testBoxColor, Material: blendMaterial(2)})
-		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: scene.At(0, 0, -50), Color: testBoxColor, Material: opaqueMaterial(3)})
+		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(0, 0, -2), Color: testBoxColor, Material: blendMaterial(1)})
+		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(0, 0, -20), Color: testBoxColor, Material: blendMaterial(2)})
+		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(0, 0, -50), Color: testBoxColor, Material: opaqueMaterial(3)})
 	})
 	h.frame()
 
@@ -200,8 +200,8 @@ func TestEachPassFiltersTheSharedSurvivorsByTag(t *testing.T) {
 			{Tag: scene.TagForward},
 		}
 		q.Camera(testCamera, descr)
-		q.Box(0, scene.At(0, 0, -5), testBoxColor)
-		q.Box(0, scene.At(0, 0, 5), testBoxColor)
+		q.Box(0, m.At(0, 0, -5), testBoxColor)
+		q.Box(0, m.At(0, 0, 5), testBoxColor)
 	})
 	h.frame()
 
@@ -229,7 +229,7 @@ func TestEachPassFiltersTheSharedSurvivorsByTag(t *testing.T) {
 func TestLightsAreCulledPerPassAtFlush(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
-		q.Box(0, scene.At(0, 0, -5), testBoxColor)
+		q.Box(0, m.At(0, 0, -5), testBoxColor)
 		q.PointLight(0, scene.LightDescr{Position: m.Vec3{Z: -5}, Range: 2})
 		q.PointLight(0, scene.LightDescr{Position: m.Vec3{Z: 5}, Range: 2})
 		q.SpotLight(0, scene.LightDescr{Position: m.Vec3{Z: 5}, Direction: m.Vec3{Z: -1}})
@@ -251,7 +251,7 @@ func TestALightLayerMaskIsFilteredAgainstTheCameraCullMaskOnly(t *testing.T) {
 		q.Camera(testCamera, descr)
 		descr.CullMask = scene.Layer(2)
 		q.Camera(testCamera+1, descr)
-		q.Box(scene.Layer(1), scene.At(0, 0, -5), testBoxColor)
+		q.Box(scene.Layer(1), m.At(0, 0, -5), testBoxColor)
 		q.PointLight(scene.Layer(1), scene.LightDescr{Position: m.Vec3{Z: -5}})
 	})
 	h.frame()
@@ -324,8 +324,8 @@ func TestAMultiTagMaterialDrawsInEveryPassItServes(t *testing.T) {
 			{Tag: scene.TagForward},
 		}
 		q.Camera(testCamera, descr)
-		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: scene.At(0, 0, -5), Color: testBoxColor, Material: both})
-		q.Box(0, scene.At(1, 0, -5), testBoxColor)
+		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(0, 0, -5), Color: testBoxColor, Material: both})
+		q.Box(0, m.At(1, 0, -5), testBoxColor)
 	})
 	h.frame()
 

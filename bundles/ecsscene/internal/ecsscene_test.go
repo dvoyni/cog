@@ -39,7 +39,7 @@ type spawnRequest struct {
 	Count int
 	// Place is every Entity's Transform, and Step how far apart along X they
 	// stand, so a test can tell one recorded draw from another.
-	Place ecsscene.Transform
+	Place m.Transform
 	Step  float32
 	// Unplaced spawns the Entities with no Transform at all.
 	Unplaced bool
@@ -61,7 +61,7 @@ type spawnResponse struct {
 // other Component is added after, through its accessor, so one command covers
 // every combination a test names.
 type placed struct {
-	Place ecsscene.Transform
+	Place m.Transform
 }
 
 // unmarked is a Tag the game owns, so an Entity can be spawned with nothing of

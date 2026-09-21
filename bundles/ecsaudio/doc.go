@@ -3,8 +3,9 @@
 // updates and stops on sound's queue, and a Voice attached to an Entity dies
 // with it.
 //
-// It is a binding and nothing else: three Components and one recording System,
-// which is what the ecs prefix means in this repo - ecsscene, ecsphysics2d. No
+// It is a binding and nothing else: two Components of its own and one recording
+// System, which is what the ecs prefix means in this repo - ecsscene,
+// ecsphysics2d. No
 // commands, no state a game addresses, and no arithmetic. Every equation is
 // sound's, and this package computes nothing.
 //
@@ -16,9 +17,14 @@
 // # The three declarations
 //
 // Emitter is what an Entity sounds like: a sound.ClipRef and the sound.Params it
-// plays with. Transform is where it is heard from, m.Transform as a type of this
-// package's own, with Scale ignored because scale means nothing to audio.
-// Listener is the Tag marking the one Entity the world is heard from.
+// plays with. m.Transform is where it is heard from, with Scale ignored because
+// scale means nothing to audio. It is not this package's: the ecs plugin
+// registers its one Store, the same one ecsscene draws from, so a game keeps one
+// placement per Entity and never copies it between a renderer's and a mixer's.
+// It is m.Transform and never reached through scene, because that would make
+// every game with sound depend on the renderer. The axes need no conversion:
+// sound faces -Z with +Y up, as the ECS spotlight does. Listener is the Tag
+// marking the one Entity the world is heard from.
 //
 // Emitter and Transform are two Components rather than one for the reason
 // ecsphysics2d keeps Force apart from Position: a System copying transforms
@@ -80,10 +86,10 @@
 //
 //	world.Spawn(
 //		ecsaudio.Listener{},
-//		ecsaudio.Transform(m.Transform{
+//		m.Transform{
 //			Position: playerPos,
 //			Rotation: m.QuatRotationX(-math.Pi / 2),
-//		}),
+//		},
 //	)
 //
 // Nothing 2D-specific is added here: no mode, no field, no flag.

@@ -285,7 +285,7 @@ func TestObliqueViewDirectionIsTheProjectionRayNotTheCameraAxis(t *testing.T) {
 	// +Z is world +Y and its screen-up is world -Z. At shear 1 the implied
 	// elevation is atan(1/1), so the viewer sits 45 degrees up on the +Z side.
 	descr := scene.CameraDescr{
-		Transform:  scene.Transform{Rotation: m.QuatAxisAngle(m.Vec3{X: 1}, -math.Pi/2)},
+		Transform:  m.Transform{Rotation: m.QuatAxisAngle(m.Vec3{X: 1}, -math.Pi/2)},
 		Projection: scene.Oblique, Height: 10, Shear: 1, Near: -50, Far: 50,
 	}
 	direction := types.ViewDirection(descr)
@@ -308,7 +308,7 @@ func TestViewDirectionIsUnitLengthUnderAScaledCamera(t *testing.T) {
 	// The view matrix ignores a TRS camera's scale, so the view direction must
 	// too, and a non-uniform one must still come back unit.
 	scaled := scene.CameraDescr{
-		Transform:  scene.Transform{Rotation: m.QuatAxisAngle(m.Vec3{Y: 1}, 0.4), Scale: m.NewVec3(8)},
+		Transform:  m.Transform{Rotation: m.QuatAxisAngle(m.Vec3{Y: 1}, 0.4), Scale: m.NewVec3(8)},
 		Projection: scene.Oblique, Height: 10, Shear: 0.5, Near: -50, Far: 50,
 	}
 	if got := scaled.Transform.Mat4(); got[0] == 0 {
@@ -337,7 +337,7 @@ func shaderViewDirection(block sceneFrameBlock, position m.Vec3) m.Vec3 {
 
 func TestTheViewDirectionSelectorPicksRadialOrConstant(t *testing.T) {
 	eye := m.Vec3{X: 2, Y: 6, Z: 4}
-	transform := scene.Transform{Position: eye, Rotation: m.QuatAxisAngle(m.Vec3{X: 1}, -math.Pi/2)}
+	transform := m.Transform{Position: eye, Rotation: m.QuatAxisAngle(m.Vec3{X: 1}, -math.Pi/2)}
 	surfaces := []m.Vec3{{X: -8, Z: -8}, {X: 9, Y: 1, Z: 7}, {X: 0, Y: 3, Z: -2}}
 
 	// A perspective camera has a real eye, so every surface sees a different

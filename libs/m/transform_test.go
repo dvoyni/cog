@@ -74,3 +74,13 @@ func TestScaledMat4AppliesItsExtraOnTopOfTheTransformsOwnScale(t *testing.T) {
 		t.Errorf("ScaledMat4 scaled X by %v, want (6,0,0)", got)
 	}
 }
+
+func TestAPerAxisScaleScalesEachAxisAndLeavesTheTranslationAlone(t *testing.T) {
+	tr := Transform{Position: Vec3{X: 1}, Scale: Vec3{X: 2, Y: 3, Z: 4}}
+	if got := tr.Mat4().TransformPoint(Vec3{X: 1, Y: 1, Z: 1}); !vec3Near(got, Vec3{X: 3, Y: 3, Z: 4}) {
+		t.Errorf("per-axis scale gave %v, want (3,3,4)", got)
+	}
+	if got := At(1, 0, 0).WithScale(2).Mat4().TransformPoint(Vec3{X: 2}); !vec3Near(got, Vec3{X: 5}) {
+		t.Errorf("uniformly scaled translate gave %v, want (5,0,0)", got)
+	}
+}

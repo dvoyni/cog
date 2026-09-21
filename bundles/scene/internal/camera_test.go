@@ -15,7 +15,7 @@ const cameraMain scene.CameraID = 0
 
 func simpleCamera() scene.CameraDescr {
 	return scene.CameraDescr{
-		Transform: scene.LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
+		Transform: m.LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
 		FovY:      1.0472,
 		Near:      0.1, Far: 100,
 	}

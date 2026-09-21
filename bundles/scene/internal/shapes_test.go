@@ -20,7 +20,7 @@ func TestEveryDebugCallIsOneOpReportingItsArguments(t *testing.T) {
 		q.Plane(0, m.Vec3{Y: -1}, m.Vec2{X: 4, Y: 6}, testBoxColor)
 		q.Line3D(0, m.Vec3{}, m.Vec3{X: 2}, 0.1, testLineColor)
 		q.WireBox(0, m.Vec3{Z: 1}, m.Vec3{X: 1, Y: 2, Z: 3}, 0.05, testLineColor)
-		q.Box(0, scene.At(7, 0, 0), testBoxColor)
+		q.Box(0, m.At(7, 0, 0), testBoxColor)
 	})
 	h.frame()
 
@@ -96,7 +96,7 @@ func TestTheUnitSphereAndPlaneBakeLazilyAndOnce(t *testing.T) {
 	shapes := 0
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		q.Box(0, scene.At(0, 0, 0), testBoxColor)
+		q.Box(0, m.At(0, 0, 0), testBoxColor)
 		for range shapes {
 			q.Sphere(0, m.Vec3{}, 1, testBoxColor)
 			q.Plane(0, m.Vec3{}, m.Vec2{X: 1, Y: 1}, testBoxColor)
@@ -181,7 +181,7 @@ func TestALineIsAStretchedBoxFromStartToEnd(t *testing.T) {
 // glows the given colour, so they show in a frame with no lights.
 func TestLinesAreSelfLitAndSolidsAreLit(t *testing.T) {
 	var q scene.OpQueue
-	q.Box(0, scene.At(0, 0, 0), testBoxColor)
+	q.Box(0, m.At(0, 0, 0), testBoxColor)
 	q.Sphere(0, m.Vec3{}, 1, testBoxColor)
 	q.Plane(0, m.Vec3{}, m.Vec2{X: 1, Y: 1}, testBoxColor)
 	q.Line3D(0, m.Vec3{}, m.Vec3{X: 1}, 0.1, testLineColor)

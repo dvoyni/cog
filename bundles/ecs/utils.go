@@ -13,7 +13,8 @@ import (
 // to the kernel as a resource of type *Store[C] owned by the calling plugin.
 //
 // Register a Component in the plugin that defines its Go type, which declares a
-// dependency on Name: the authority is read through Registrar.Dependency. ids is
+// dependency on Name: the authority is read through Registrar.Dependency. The
+// one exception is m.Transform, whose Store the ecs plugin registers itself. ids is
 // the peak population hint the Store reserves for; it is not a cap. It panics
 // if C names mutable indirection, naming the offending field by path.
 func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C] {

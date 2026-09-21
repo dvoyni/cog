@@ -17,7 +17,7 @@ var testBoxColor = m.NewColorSrgb(0.42, 0.71, 0.94, 1)
 // testCameraDescr is the floor of the API: a camera looking at the origin.
 func testCameraDescr() scene.CameraDescr {
 	return scene.CameraDescr{
-		Transform: scene.LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
+		Transform: m.LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
 		FovY:      1.0472,
 		Near:      0.1,
 		Far:       100,
@@ -27,7 +27,7 @@ func testCameraDescr() scene.CameraDescr {
 func TestBoxRecordsOneOp(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		q.Box(0, scene.At(1, 2, 3), testBoxColor)
+		q.Box(0, m.At(1, 2, 3), testBoxColor)
 	})
 	h.frame()
 
@@ -50,7 +50,7 @@ func TestBoxRecordsOneOp(t *testing.T) {
 func TestABoxIsOneInstancedDrawInItsCamerasPass(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		q.Box(0, scene.At(0, 0, 0), testBoxColor)
+		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
 	h.frame()
 
@@ -81,8 +81,8 @@ func TestACameraDrawsOnlyTheLayersItsMaskSelects(t *testing.T) {
 			descr.CullMask = scene.Layer(1)
 			return descr
 		}())
-		q.Box(scene.Layer(1), scene.At(0, 0, 0), testBoxColor)
-		q.Box(scene.Layer(2), scene.At(2, 0, 0), testBoxColor)
+		q.Box(scene.Layer(1), m.At(0, 0, 0), testBoxColor)
+		q.Box(scene.Layer(2), m.At(2, 0, 0), testBoxColor)
 	})
 	h.frame()
 
@@ -104,8 +104,8 @@ func TestEveryPassBindsItsOwnInstanceSliceAndCountsFromZero(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Camera(second, testCameraDescr())
-		q.Box(0, scene.At(0, 0, 0), testBoxColor)
-		q.Box(0, scene.At(2, 0, 0), testBoxColor)
+		q.Box(0, m.At(0, 0, 0), testBoxColor)
+		q.Box(0, m.At(2, 0, 0), testBoxColor)
 	})
 	h.frame()
 
@@ -145,8 +145,8 @@ func TestEveryPassBindsItsOwnInstanceSliceAndCountsFromZero(t *testing.T) {
 func TestEveryDrawBindsTheFrameAndItsMaterialRecord(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		q.Box(0, scene.At(0, 0, 0), testBoxColor)
-		q.Box(0, scene.At(2, 0, 0), m.NewColorSrgb(1, 0, 0, 1))
+		q.Box(0, m.At(0, 0, 0), testBoxColor)
+		q.Box(0, m.At(2, 0, 0), m.NewColorSrgb(1, 0, 0, 1))
 	})
 	h.frame()
 
@@ -181,7 +181,7 @@ func TestTheFrameUploadsOneBufferPerArena(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		for i := range 8 {
-			q.Box(0, scene.At(float32(i), 0, 0), testBoxColor)
+			q.Box(0, m.At(float32(i), 0, 0), testBoxColor)
 		}
 	})
 	h.frame()
@@ -234,7 +234,7 @@ func TestTheBundledShaderIsMountedForTheFirstFrame(t *testing.T) {
 func TestEveryDrawBindsAllFivePbrSlots(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		q.Box(0, scene.At(0, 0, 0), testBoxColor)
+		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
 	h.frame()
 
@@ -274,7 +274,7 @@ func TestEveryDrawBindsAllFivePbrSlots(t *testing.T) {
 func TestTheDefaultTexturesAreBakedOnce(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		q.Box(0, scene.At(0, 0, 0), testBoxColor)
+		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
 	h.frame()
 	first := h.backend.texturesBoundTo("baseColorTexture")
@@ -294,7 +294,7 @@ func TestTheDefaultTexturesAreBakedOnce(t *testing.T) {
 func TestTheMaterialRecordIsBoundAsItsOwnRange(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		q.Box(0, scene.At(0, 0, 0), testBoxColor)
+		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
 	h.frame()
 
@@ -317,7 +317,7 @@ func TestACamerasSunAndAmbientReachItsFrameBlock(t *testing.T) {
 	descr.AmbientSky = m.NewColorLinear(0.2, 0.3, 0.4, 1)
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, descr)
-		q.Box(0, scene.At(0, 0, 0), testBoxColor)
+		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
 	h.frame()
 

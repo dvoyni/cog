@@ -4,24 +4,6 @@ import (
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 )
 
-// Transform places one recorded thing in the world. Its zero value is the
-// identity, so a caller who cares about none of it writes none of it.
-//
-// Scale is per axis. Only an all-zero Scale reads as the identity, which is
-// what keeps the zero Transform the identity; a partly zero Scale is taken
-// literally, so m.Vec3{X: 2} collapses the draw onto the X axis rather than
-// silently becoming (2,1,1), and a flattened scale - m.Vec3{X: 1, Y: 1} - is
-// expressible. WithScale is the uniform spelling.
-//
-// A non-uniform scale costs its draw the inverse-transpose normal path in the
-// shader, and only its draw: the packer flags the instances whose basis does
-// not scale uniformly, and every other instance keeps the plain one.
-//
-// There is no matrix override. A Transform is plain values, which is what lets
-// an ECS Component hold one; anything a matrix said that position, rotation and
-// per-axis scale cannot - a shear - is not something scene draws.
-type Transform = types.Transform
-
 // CameraID orders a camera among every other pass in the frame, and is the
 // default gfx.Order for the passes it emits. It is a defined type over
 // gfx.Order rather than an alias because it carries meaning the order does not:

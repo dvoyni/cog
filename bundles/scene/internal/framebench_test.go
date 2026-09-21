@@ -39,15 +39,15 @@ func BenchmarkFrame(b *testing.B) {
 	var override []gfx.ParameterDescr
 	cases := []struct {
 		name string
-		draw func(transform scene.Transform) scene.MeshDraw
+		draw func(transform m.Transform) scene.MeshDraw
 	}{
-		{"none", func(transform scene.Transform) scene.MeshDraw {
+		{"none", func(transform m.Transform) scene.MeshDraw {
 			return scene.MeshDraw{Transform: transform}
 		}},
-		{"shared", func(transform scene.Transform) scene.MeshDraw {
+		{"shared", func(transform m.Transform) scene.MeshDraw {
 			return scene.MeshDraw{Transform: transform, Material: shared}
 		}},
-		{"override", func(transform scene.Transform) scene.MeshDraw {
+		{"override", func(transform m.Transform) scene.MeshDraw {
 			return scene.MeshDraw{Transform: transform, Material: shared, Params: override}
 		}},
 	}
@@ -57,15 +57,15 @@ func BenchmarkFrame(b *testing.B) {
 			recordMaterials := false
 			h := newHarness(b, func(q *scene.OpQueue) {
 				q.Camera(testCamera, scene.CameraDescr{
-					Transform: scene.LookAt(m.Vec3{Z: 80}, m.Vec3{}, m.Vec3{Y: 1}),
+					Transform: m.LookAt(m.Vec3{Z: 80}, m.Vec3{}, m.Vec3{Y: 1}),
 					FovY:      1.0472, Near: 0.1, Far: 200,
 				})
 				for i := range frameBenchDraws {
 					x := float32(i%100)*0.5 - 25
 					y := float32(i/100)*0.5 - 12.5
-					draw := scene.MeshDraw{Transform: scene.At(x, y, 0)}
+					draw := scene.MeshDraw{Transform: m.At(x, y, 0)}
 					if recordMaterials {
-						draw = c.draw(scene.At(x, y, 0))
+						draw = c.draw(m.At(x, y, 0))
 					}
 					q.Mesh(0, ref, draw)
 				}

@@ -5,6 +5,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
@@ -160,7 +161,7 @@ func TestAModelPrimitiveNarrowsItsIndices(t *testing.T) {
 func TestAUnitMeshNarrowsItsIndices(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		q.Box(0, scene.At(0, 0, 0), testBoxColor)
+		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
 	h.frame()
 

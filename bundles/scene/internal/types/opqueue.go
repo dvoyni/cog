@@ -208,7 +208,7 @@ func (q *OpQueue) endFlush() {
 // and the material is the bundled one.
 type DrawRecord struct {
 	Layers    LayerMask
-	Transform Transform
+	Transform m.Transform
 	// Stretch is the non-uniform scale scene applied itself, on top of the
 	// transform's own Scale, to turn a unit mesh into a line, an edge or a
 	// plane of the requested size. Zero means none.

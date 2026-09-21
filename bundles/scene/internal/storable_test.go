@@ -14,7 +14,7 @@ import (
 // types rather than a mirror of them: a clear is an m.Maybe rather than a
 // pointer, and a transform has no matrix pointer to override it.
 func TestPassAndTransformAreStorable(t *testing.T) {
-	for _, tp := range []reflect.Type{reflect.TypeFor[scene.Pass](), reflect.TypeFor[scene.Transform]()} {
+	for _, tp := range []reflect.Type{reflect.TypeFor[scene.Pass](), reflect.TypeFor[m.Transform]()} {
 		if err := ecs.Storable(tp); err != nil {
 			t.Errorf("ecs.Storable(%s) = %v, want nil", tp, err)
 		}
@@ -29,7 +29,7 @@ func TestAZeroPassPreservesColourAndDepth(t *testing.T) {
 		descr.Passes = []scene.Pass{{}}
 		q.Camera(cameraMain, descr)
 		// Something to draw: gfx drops a pass that neither clears nor draws.
-		q.Box(0, scene.At(0, 0, 0), testBoxColor)
+		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
 	h.frame()
 
@@ -69,7 +69,7 @@ func TestANonUniformlyScaledDrawTakesTheInverseTransposeNormalPath(t *testing.T)
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, ref, scene.MeshDraw{
-			Transform: scene.Transform{Position: m.Vec3{X: 1, Y: 2, Z: 3}, Scale: m.Vec3{X: 2, Y: 1, Z: 1}},
+			Transform: m.Transform{Position: m.Vec3{X: 1, Y: 2, Z: 3}, Scale: m.Vec3{X: 2, Y: 1, Z: 1}},
 			NeverCull: true,
 		})
 	})
@@ -90,7 +90,7 @@ func TestAUniformlyScaledDrawKeepsThePlainNormalPath(t *testing.T) {
 	var ref scene.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		q.Mesh(0, ref, scene.MeshDraw{Transform: scene.At(0, 0, 0).WithScale(3), NeverCull: true})
+		q.Mesh(0, ref, scene.MeshDraw{Transform: m.At(0, 0, 0).WithScale(3), NeverCull: true})
 	})
 	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 	h.frame()

@@ -1,7 +1,6 @@
 package ecsaudio
 
 import (
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/sound"
 )
 
@@ -16,8 +15,23 @@ import (
 // does carry is W3C's defaults rather than the literal zeros. Both rules are
 // sound's and neither is restated here; see sound.Falloff and sound.Cone.
 //
-// Position and Orientation are the two fields the Transform fills in, and what
-// an Emitter says about them is described there.
+// Position and Orientation are the two fields an m.Transform on the same Entity
+// fills in. It supplies the Position, always; and the Orientation, only when
+// the Emitter's Params carry a Cone. Orientation is withheld otherwise because
+// absent is not the identity: sound reads a Positional Voice with no
+// Orientation as equally loud in every direction, and a binding that sent the
+// Rotation of every Transform would make every source in the game directional
+// along an axis nobody chose. Both replace what Params said, because a
+// Transform is the Entity's placement and Params are everything else about the
+// sound. Its Scale means nothing to audio and is ignored.
+//
+// Two consequences of sound's one-way positional rule, worth stating because
+// neither is guessable:
+//
+//   - Adding a Transform to an Entity whose Voice is already playing does not
+//     make that Voice positional. It takes effect on the next Play.
+//   - Removing a Transform does not make a positional Voice non-positional
+//     either. It simply stops moving.
 //
 // An Emitter and a live Voice are not the same thing, and the difference is the
 // one rule of this package worth learning: an entry in the binding's table
@@ -37,43 +51,9 @@ type Emitter struct {
 	Params sound.Params
 }
 
-// Transform is where an Entity is heard from: m.Transform as a type of this
-// package's own, exactly as ecsscene.Transform is. Scale means nothing to audio
-// and is ignored.
-//
-// It is defined from m.Transform rather than aliased to it so that the Store's
-// Go type belongs to this package: a System elsewhere that names it imports
-// ecsaudio, and the import graph keeps forcing the plugin dependency the
-// coupling check expects. Convert with m.Transform(t) and Transform(t).
-//
-// It is m.Transform and never scene.Transform, because reaching the transform
-// through scene would make every game with sound depend on the renderer. The
-// axes need no conversion: sound faces -Z with +Y up, as the ECS spotlight does,
-// so a Transform a game already keeps for rendering is read straight across.
-//
-// On a Listener Entity it is copied whole - Position and Rotation both - into
-// sound.ListenerParams.
-//
-// On an Emitter Entity it supplies the Position, always; and the Orientation,
-// only when that Emitter's Params carry a Cone. Orientation is withheld
-// otherwise because absent is not the identity: sound reads a Positional Voice
-// with no Orientation as equally loud in every direction, and a binding that
-// sent the Rotation of every Transform would make every source in the game
-// directional along an axis nobody chose. Both replace what Params said, because
-// a Transform is the Entity's placement and Params are everything else about the
-// sound.
-//
-// Two consequences of sound's one-way positional rule, worth stating because
-// neither is guessable:
-//
-//   - Adding a Transform to an Entity whose Voice is already playing does not
-//     make that Voice positional. It takes effect on the next Play.
-//   - Removing a Transform does not make a positional Voice non-positional
-//     either. It simply stops moving.
-type Transform m.Transform
-
 // Listener marks the one Entity the world is heard from. The binding copies its
-// Transform into sound's Listener every tick.
+// m.Transform whole - Position and Rotation both - into sound's Listener every
+// tick.
 //
 // An Entity carrying it with no Transform is ignored, and counts as none; no
 // Entity carrying it at all leaves the Listener where it was; two or more report
