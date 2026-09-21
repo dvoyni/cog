@@ -520,6 +520,14 @@ _Avoid_: Immobile, as a kind of its own
 **Dynamic body**:
 A Body with a mass, a Moment of inertia and a Damping, moved and turned by the forces and Torques on it and pushed by what it touches.
 
+**Sleeping body**:
+A Dynamic body that physics has stopped moving because it and everything in its Island stayed idle long enough, until something disturbs it. Sleeping is off unless the game turns it on.
+_Avoid_: Frozen, inactive, disabled, deactivated
+
+**Island**:
+The Dynamic bodies joined by touching or by Joints, which fall asleep together and wake together. A Static or Kinematic body never belongs to one and never joins two.
+_Avoid_: Component, group (Component is the ECS’s word)
+
 **Angle**:
 How far a Body has turned on the plane, in radians, counted on from every earlier turn rather than wrapped into one revolution.
 _Avoid_: Rotation, heading, facing, orientation
