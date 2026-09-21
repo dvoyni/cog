@@ -56,7 +56,7 @@ func TestAnInfiniteMomentIsLegalAndEveryOtherBadMomentIsNot(t *testing.T) {
 	}
 
 	velocity, force := Velocity{}, Force{Torque: 1000}
-	IntegrateVelocity(&body, &velocity, &force, step)
+	IntegrateVelocity(&body, &velocity, &force, m.Vec2d{}, step)
 	if velocity.Angular != 0 {
 		t.Errorf("a Body with an infinite moment turned at %v under a torque of 1000", velocity.Angular)
 	}
@@ -149,7 +149,7 @@ func TestTheZeroDynamicIsHarmless(t *testing.T) {
 
 	velocity := Velocity{}
 	force := Force{Force: m.Vec2d{X: 1e9, Y: -1e9}, Torque: 1e9}
-	IntegrateVelocity(&body, &velocity, &force, step)
+	IntegrateVelocity(&body, &velocity, &force, m.Vec2d{}, step)
 	if velocity != (Velocity{}) {
 		t.Errorf("the zero Dynamic moved to %+v under a force of 1e9", velocity)
 	}

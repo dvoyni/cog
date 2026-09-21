@@ -119,6 +119,10 @@ record; this list is a reading aid, not a second definition.
   the product.
 - **Damping** — how fast a Dynamic body's velocity decays on its own, as a rate
   per second. A Body's, wherever it is.
+- **Constants** — the physics values that hold for the whole world rather than
+  for one Body, gravity among them. Physics starts them at its own defaults and
+  reads them every tick; a game that wants others changes them itself. Not
+  **Config**, which is fixed when physics starts.
 - **Joint** — a rule holding two Bodies to each other. Its own Entity.
 - **Spring** — a Joint that pushes towards a rest distance or Angle.
 - **Absorption** — how strongly a Spring resists its ends moving, force per unit
@@ -516,12 +520,18 @@ then detection, then everything else inside Solve.
 | **Index** | `Shape`, `Position`, `Polygon`, `Static`, `Joint`, `Hooks[Shape, HookAddedRemoved]` | `StaticIndex`, `BodyIndex`, `JointedPairs` |
 | **Detect** | `Shape`, `Position`, `StaticIndex`, `BodyIndex`, `JointedPairs` | `Contacts` |
 | *(the app's filter Systems — cp's Begin and PreSolve)* | `Contacts` + the app's own | `Contacts` |
-| **Solve** | `Dynamic` | `Velocity`, `Force`, `Position`, `Contacts`, `Joint` |
+| **Solve** | `Dynamic`, `Constants` | `Velocity`, `Force`, `Position`, `Contacts`, `Joint` |
 | *(the app's reaction Systems — cp's PostSolve)* | `Contacts`, `Joint` | the app's own |
 
 Every System also takes `read{*Entities}`. **The only new locks are on Resources
 physics owns**, and the chain serialises nothing that could have run in parallel.
 Making Systems that run in parallel today take turns is rejected outright.
+
+Solve's read of `Constants` is the one lock in the table nothing of physics'
+writes. A read is shared, so it serialises Solve against no System that ran
+beside it before `Constants` existed; the only System that waits on it is an
+app's own that took `write{*Constants}`, and that System runs in series with
+Solve on every tick it is subscribed to, which is the price the app chose.
 
 - **Integrate is one System, not two.** Both its Queries use `Velocity`, one
   writing and one reading, so a split serialises anyway and costs about 6 µs.
@@ -541,10 +551,12 @@ Making Systems that run in parallel today take turns is rejected outright.
 **Velocity**, Dynamic bodies only (cp skips Kinematic ones), inside Solve:
 
 ```
-v ← v·exp(−damping·h)        + Force·invMass·h
+v ← v·exp(−damping·h)        + (gravity + Force·invMass)·h
 w ← w·exp(−angularDamping·h) + Torque·invInertia·h
 Force, Torque ← 0
 ```
+
+`gravity` is `Constants.Gravity`, read once a tick and not once a Body.
 
 **Position**, every Body with a `Velocity`, Kinematic ones included, in Integrate:
 
@@ -574,8 +586,15 @@ of cp's single global damping, which is reproduced by giving every Body the same
 rates. A spinning wheel and a sliding crate need different rates, and the second
 rate costs 8 B.
 
-**There is no gravity term.** Gravity is addition 4 and the port ships none;
-until then the app writes `m·g` into `Force`.
+**The gravity term is cp's own**, `BodyUpdateVelocity`'s
+`v·damping + (g + f·m_inv)·dt`, with `g` read from `Constants`
+(see [Constants](#constants)). It is added beside `Force·invMass` and scaled by
+the step with it, so an app that keeps writing `m·g` into `Force` under a
+gravity of zero gets the same fall, agreeing at 1e-9. It has no angular term,
+and neither a Kinematic nor a Static body receives it: the Query names
+`Dynamic`, which is cp's early return for a Kinematic body said by the ECS
+layout. cp's `SetGravity` also wakes every sleeping Body; the port has no
+sleeping yet, and the gravity-changes-wake rule arrives with it.
 
 **One property the tests must name the rate for.** cp damps exactly but applies
 Force as a plain Euler step, so terminal speed is not `F/(mλ)`:
@@ -1456,6 +1475,39 @@ It lives in Detect. cp's other two fallbacks are geometry, not coin flips, and
 port as written: circle-against-segment falls back to the segment's own normal,
 and a circle point query to `(0, 1)`.
 
+### Constants
+
+From [physics: which small additions earn their place](https://github.com/dvoyni/cog/issues/507)
+and [physics: gravity](https://github.com/dvoyni/cog/issues/320).
+
+**`Constants` is a Resource of the values that are a property of the scene, not
+of the solver**, and gravity is the one there is. It is the Resource the
+`SolverSettings` rejection above did not rule out, because what that rejection
+weighed is a value nothing changes mid-run; a scene's gravity is one an app may
+want to change, and an app that never does pays nothing.
+
+```go
+type Constants struct {
+    Gravity m.Vec2d // m/s², default 0
+}
+```
+
+- **The plugin registers it**, next to `Contacts`, **at its own defaults**:
+  gravity 0, which is a top-down plane.
+- **Solve takes `read{*Constants}`** and reads `Gravity` once a tick. A change
+  applies from the next Solve; nothing is cached across ticks.
+- **An app that wants another value takes `write{*Constants}`** in a System of
+  its own — once from `app.InitEvent` for a constant gravity, or every tick for
+  one that changes. That System runs in series with Solve, and with anything
+  else that reads `Constants`, on every tick it is subscribed to: **the price
+  the app chose**, and the reason a value set once belongs in an init System.
+- **It is not a `Config` field.** `Config` is fixed when physics starts and every
+  one of its fields is a property of the solver or of an index.
+
+cp's `Space.SetGravity` wakes every sleeping Body, and cp's idle-speed threshold
+falls back to one derived from gravity; both belong to sleeping, which is not
+built, and arrive with it.
+
 ---
 
 ## Fidelity to cp
@@ -1571,10 +1623,11 @@ Each names the cp code path it exercises. **Only the first needs cp at all.**
 Scenes 2–6 are **stronger than a cp comparison**, because a closed form is *right*
 where cp is merely the reference — and they cost no dependency at all.
 
-**Four of these scenes write their own gravity.** Gravity is addition 4 and the
-port ships none, so the ramp, the ladder and the pendulum add `m·g` into `Force`
-from an ordinary System — **which incidentally checks that addition 4 really is
-optional rather than assumed.**
+**Four of these scenes write their own gravity as a Force.** The ramp, the ladder
+and the pendulum leave `Constants.Gravity` at zero and add `m·g` into `Force`
+from an ordinary System — the same fall as the gravity term, which is asserted at
+1e-9 against cp beside them, **and a check that gravity really is optional
+rather than assumed.**
 
 **A `Force` written this tick moves the Body next tick**, so every scene that
 writes gravity is off by one tick against the analytic form. The scenes settle or
@@ -1786,6 +1839,14 @@ specification names:
 | the jointed scene, nothing in it | 19.039 |
 | the jointed scene, N=256 over 104 Contacts and 64 Joints | 19.017 |
 | the jointed scene, N=1 024 over 608 Contacts and 256 Joints | 19.010 |
+| the Polygon scene under `Constants` gravity, no Bodies | 18.026 |
+| the Polygon scene under `Constants` gravity, N=256 over 256 Contacts | 18.048 |
+
+The two gravity rows were taken later, when the kernel's own line had dropped to
+about 17 objects a tick, and their scene composes one more subscription — the
+app's System writing `Constants` every tick — so they sit a whole object above
+their own era's line; what they claim is their own flat slope, and repeated runs
+put it at −0.03 to +0.02.
 
 **The slope is flat and slightly negative**, which is the claim: what a tick
 allocates is the kernel's own dispatch over the subscriptions the engine
@@ -1825,7 +1886,7 @@ shrink.
 - **Contacts as Entities**, once structural change can be deferred.
 - **Sub-steps within a tick.** The nested sub-step event was **verified working** by
   a throwaway test at about 52 µs a tick, and parked with its three rules.
-- **Mass and inertia from density** (addition 3), **gravity** (addition 4),
+- **Mass and inertia from density** (addition 3),
   **post-step callbacks** (addition 8), **debug drawing** (addition 9),
   **geometry from images** (addition 10).
 
@@ -1881,7 +1942,10 @@ the arbiter append :454, guarded by :444-453 (Sensor at :450, both-infinite-mass
 :453) · `QueryRejectConstraints` :514 · `LookupHandler` :840, its key literal :841
 · `SegmentQuery` :1032 · `SegmentQueryFirst` :1042 · `ShapeQuery` :1084 ·
 `BBQuery` :980 · `PointQueryNearest` :940 · **the un-inflated broadphase ray
-(defect 5)** :1036-1037 and :1045-1046 · PostSolve's `UserData` argument :767.
+(defect 5)** :1036-1037 and :1045-1046 · PostSolve's `UserData` argument :767 ·
+`SetGravity` :119-126, waking every sleeping component :123-125 · gravity read
+once a step and handed to every Body :726-730 · the idle-speed fallback from
+gravity :530-536.
 
 **body.go** — `BodyUpdateVelocity` :608 · `BodyUpdatePosition` :621 · defaults
 wired :85-86 · `SetTransform` :359, with `p − R·cog` at :363-366.
@@ -2053,9 +2117,9 @@ within a group; groups after the first assume the value types exist.
 - **Continuous collision for the whole world**, and **Probing a box**. Only
   circles Probe. A solid, non-Sensor Body that moves farther than its own extent in
   one tick tunnels; a thrown boulder is discrete.
-- **Gravity as a world property, verticality, and any third axis.** The `2d` in
-  the package name is the commitment. Gravity as a constant acceleration *in the
-  plane* is addition 4.
+- **Verticality and any third axis.** The `2d` in the package name is the
+  commitment. Gravity as a constant acceleration *in the plane* is not out of
+  scope: it is [Constants](#constants).
 - **Bit-identical replay.** Determinism is neither required nor pursued. Two cheap
   things are taken anyway: the coincidence nudge draws from a seeded source, and
   the price of full replay is recorded rather than paid — **the whole

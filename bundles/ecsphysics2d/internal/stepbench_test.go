@@ -122,6 +122,39 @@ func TestThePolygonStepSitsOnTheEnginesAllocationLineToo(t *testing.T) {
 	}
 }
 
+// TestTheStepUnderGravitySitsOnTheEnginesAllocationLine is the Polygon scene
+// with its gravity read from Constants rather than written into Force, and an
+// app System writing Constants every tick, so that the Resource read in Solve
+// and the app's write are both inside the measurement. The empty engine carries
+// the same writer, so the line it sets includes that subscription's dispatch.
+func TestTheStepUnderGravitySitsOnTheEnginesAllocationLine(t *testing.T) {
+	const ticks = 4_000
+
+	measure := func(n int) (float64, int) {
+		h, _ := newGravityHarness(t, nil, m.Vec2d{Y: -9.8})
+		populatePolygons(t, h, n)
+		h.frames(t, 100)
+		touching := len(h.contacts(t))
+		mallocs := allocationsDuring(func() {
+			for range ticks {
+				h.kernel.PublishEvent(app.UpdateEvent{Dt: tick}).Wait()
+			}
+		})
+		return float64(mallocs) / ticks, touching
+	}
+
+	empty, _ := measure(0)
+	full, touching := measure(256)
+	t.Logf("objects a step under gravity: %.3f with no Bodies, %.3f at N=256 over %d Contacts",
+		empty, full, touching)
+	if touching == 0 {
+		t.Fatal("the measured scene has no Contacts at all, so it measures neither Detect nor Solve")
+	}
+	if full-empty > 0.05 {
+		t.Errorf("the step's own cost under gravity is %.3f objects a tick, want none", full-empty)
+	}
+}
+
 // populatePolygons spawns n Polygon Bodies over a grid of static boxes: a
 // quarter of them boxes carrying their four vertices inline, a quarter
 // triangles, and half hexagons carrying a Polygon Component, so that all three

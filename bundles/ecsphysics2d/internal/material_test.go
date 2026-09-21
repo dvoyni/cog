@@ -17,9 +17,9 @@ import (
 // the oracle for either — it is only the oracle for the one layer-B trajectory
 // at the end of this file.
 //
-// Every scene writes its own gravity into Force from an ordinary System, the
-// port shipping none, which is also what checks that gravity really is optional
-// rather than assumed.
+// Every scene writes its own gravity into Force from an ordinary System and
+// leaves Constants.Gravity at zero, which is the same fall and is also what
+// checks that gravity really is optional rather than assumed.
 
 // gravity is the acceleration the scenes here write, and rampAngle the slope
 // they write it down.

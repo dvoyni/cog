@@ -144,10 +144,10 @@ func TestTwoPressedCirclesSolveExactlyAsChipmunkDoes(t *testing.T) {
 }
 
 func TestACircleHeldAgainstAWallByAForceSolvesExactlyAsChipmunkDoes(t *testing.T) {
-	// Four of the specification's seven scenes write their own gravity, the
-	// port shipping none: an ordinary System adds m·g into Force. This is that,
-	// and it is also the one place a Force written this tick shows up as a
-	// velocity next tick.
+	// Four of the specification's seven scenes write their own gravity as m·g
+	// into Force from an ordinary System, leaving Constants.Gravity at zero,
+	// which is the same fall. This is that, and it is also the one place a
+	// Force written this tick shows up as a velocity next tick.
 	h := layerB(t)
 	h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,

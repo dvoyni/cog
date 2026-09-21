@@ -61,8 +61,9 @@ func (p *plugin) Dependencies() []kernel.PluginName {
 }
 
 // Register resolves the settings, declares the seven Components a Body is made
-// of and the Joint that holds two of them, publishes the two indices and the
-// two solver Resources, registers ShrinkCmd, and chains the four Systems in
+// of and the Joint that holds two of them, publishes the two indices, the two
+// solver Resources and the Constants, registers ShrinkCmd, and chains the four
+// Systems in
 // cp's order.
 //
 // The chain is explicit rather than left to the locks. Integrate and Solve
@@ -111,6 +112,11 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	// The Contact list, seeded with the one source of randomness in the
 	// package: the direction two exactly coincident Shapes are parted along.
 	registrar.InitResource(types.NewContacts(resolved.seed))
+
+	// The Constants, at the plugin's defaults: no gravity, which is a top-down
+	// plane. An app that wants others writes them from a System of its own,
+	// through ecs.Write[*Constants], and Solve reads them every tick.
+	registrar.InitResource(&ecsphysics2d.Constants{})
 
 	// The pairs a Joint holds apart, rebuilt by Index and read by Detect. It is
 	// a Resource of its own so that the Joint walk's write does not have to be
@@ -290,6 +296,12 @@ func (p *plugin) detect(
 // Position is written here as well as by Integrate, which costs no parallelism:
 // the two are links of the same chain, so nothing that could have run beside
 // one could have run beside the other.
+//
+// Gravity is read out of Constants once a tick, here, and handed to every
+// Body's velocity integration, rather than read per Body. The read is shared,
+// so it costs no parallelism either: nothing the plugin registers writes
+// Constants, and the only System that waits on this read is an app's own that
+// took ecs.Write[*Constants], which is the price that app chose.
 func (p *plugin) solve(
 	bodies *ecs.Query[types.VelocityQuery],
 	joints *ecs.Query[types.JointQuery],
@@ -297,10 +309,12 @@ func (p *plugin) solve(
 	velocities *ecs.Set[ecsphysics2d.Velocity],
 	places *ecs.Set[ecsphysics2d.Position],
 	contacts *ecs.Write[*ecsphysics2d.Contacts],
+	constants *ecs.Read[*ecsphysics2d.Constants],
 	step *ecs.In[float64],
 ) {
 	types.Solve(
 		contacts.Get(), bodies, joints, dynamics, velocities, places,
+		constants.Get().Gravity,
 		step.Get(), p.settings.iterations, p.settings.slop, p.settings.bias,
 	)
 }
