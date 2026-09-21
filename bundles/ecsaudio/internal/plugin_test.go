@@ -47,11 +47,9 @@ func (*moverPlugin) Register(registrar *kernel.Registrar, _ any) error {
 // every error composition reported.
 func compose(mover *moverPlugin) error {
 	var failure error
-	kernel.New(map[kernel.PluginName]any{
-		storage.Name: storage.Config{}.WithReadFS("test", 10, fstest.MapFS{}),
-	}).Handler(func(err error) error { failure = errors.Join(failure, err); return nil }).
+	kernel.New(nil).Handler(func(err error) error { failure = errors.Join(failure, err); return nil }).
 		WithPlugins(
-			storageplugin.New(), permanentAdapter{},
+			storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: fstest.MapFS{}}},
 			soundplugin.New(), nosoundplugin.New(),
 			ecsplugin.New(), New(), mover,
 		)
@@ -90,11 +88,9 @@ func TestTheCouplingCheckStillHoldsOnTheBindingsComponents(t *testing.T) {
 // because the signature is what a reader would check and the description is
 // what the scheduler acts on.
 func TestTheRecordingSystemTakesNoStructuralLockAndReadsNoVoiceView(t *testing.T) {
-	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storage.Config{}.WithReadFS("test", 10, fstest.MapFS{}),
-	}).Handler(func(err error) error { t.Errorf("composing: %v", err); return nil }).
+	engine := kernel.New(nil).Handler(func(err error) error { t.Errorf("composing: %v", err); return nil }).
 		WithPlugins(
-			storageplugin.New(), permanentAdapter{},
+			storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: fstest.MapFS{}}},
 			soundplugin.New(), nosoundplugin.New(),
 			ecsplugin.New(), New(),
 		)

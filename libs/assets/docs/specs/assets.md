@@ -1163,9 +1163,10 @@ that is sound — because no file an asset is loaded from changes while the engi
 runs.**
 
 The map was charted believing a real developer loop was being given up, and the
-fact that dissolves it is not about caching at all. `storage.Config.ReadMounts` is
+fact that dissolves it is not about caching at all. storage's read mounts are
 fixed at composition — an embedded FS, a preloaded bundle, or `os.DirFS` on a
-desktop, chosen by the composition root and never added to afterwards — and
+desktop, contributed by a plugin through `storage.ReadMountPort` and never added
+to afterwards — and
 `storage.FileSystem` exposes exactly one method, `Open`: no `Stat`, no mtime, no
 subscription surface. The only mutable mount is `PermanentMount`, and the only
 thing the engine writes through it is the values file; every other writer in the
@@ -1547,7 +1548,7 @@ it graduates; redrawing any of it is a fresh effort.
   `ShaderID`-derived structs, with no path, no source and no load. They are freed
   by the shader loader's cascade, which is a different thing from being cached.
 - **A filesystem watch, hot-reload, or anything else that evicts a cache by
-  itself.** `storage.Config.ReadMounts` is fixed at composition and
+  itself.** storage's read mounts are fixed at composition and
   `storage.FileSystem` exposes only `Open`: the asset filesystem is static by
   construction, so there is no change to notify about. Redrawing this needs a
   filesystem that changes, which is a storage effort rather than a caching one.

@@ -71,20 +71,6 @@ func unboundAdapter[I any]() string {
 	return fmt.Sprintf("kernel: adapter handle for %s read before composition bound it", TypeName(reflect.TypeFor[I]()))
 }
 
-// portInterface returns I's type, and the fault when I is not an interface: a
-// Port is a contract its Adapters implement, never a concrete type. named is the
-// Port or Adapter type the declaration was given, for the message.
-//
-// It reports rather than panicking because it has no value it owes anyone: the
-// declaration simply does not happen, and composition answers with the reason.
-func portInterface[I any](declaration string, named reflect.Type) (reflect.Type, error) {
-	iface := reflect.TypeFor[I]()
-	if iface.Kind() != reflect.Interface {
-		return nil, ErrPortNotAnInterface{Declaration: declaration, Port: named, Interface: iface}
-	}
-	return iface, nil
-}
-
 func describeAdapters(contributions []adapterContribution) []AdapterDescription {
 	adapters := make([]AdapterDescription, 0, len(contributions))
 	for _, contribution := range contributions {

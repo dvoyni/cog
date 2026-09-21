@@ -32,7 +32,7 @@ type ResourceDescription struct {
 }
 
 // PortDescription reports one plugin's declaration of a Port: the Port type and
-// the interface it is built on, the plugin that declared it, whether it collects
+// the type it is built on (an interface, or a value type), the plugin that declared it, whether it collects
 // any number of Adapters or requires exactly one, and the Adapters bound to it,
 // in plugin order. An Adapter for a Port nobody requires or collects binds to
 // nothing and has no entry.

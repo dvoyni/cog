@@ -492,10 +492,7 @@ func newTestKernelWithErrors(t *testing.T, p *plugin, report func(error)) kernel
 
 func newTestKernelWith(t *testing.T, p *plugin, filesystem fs.FS, handler kernel.ErrorHandler) kernel.Executioner {
 	t.Helper()
-	config := map[kernel.PluginName]any{
-		storage.Name: storage.Config{}.WithReadFS("test", 10, filesystem),
-	}
-	engine := kernel.New(config).Handler(handler).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, p, testPlugin{})
+	engine := kernel.New(nil).Handler(handler).WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: filesystem}}, appplugin.New(), mainLoopAdapter{}, p, testPlugin{})
 	go engine.Run()
 	t.Cleanup(engine.Quit)
 	<-engine.Ready()
@@ -1599,13 +1596,10 @@ func TestFailedShaderIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	filesystem := &countingFS{FS: files}
 	p := newPlugin()
 	errorsReported := 0
-	config := map[kernel.PluginName]any{
-		storage.Name: storage.Config{}.WithReadFS("test", 10, filesystem),
-	}
-	engine := kernel.New(config).Handler(func(err error) error {
+	engine := kernel.New(nil).Handler(func(err error) error {
 		errorsReported++
 		return nil
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, p, testPlugin{})
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: filesystem}}, appplugin.New(), mainLoopAdapter{}, p, testPlugin{})
 	go engine.Run()
 	t.Cleanup(engine.Quit)
 	<-engine.Ready()

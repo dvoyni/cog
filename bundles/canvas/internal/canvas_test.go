@@ -234,6 +234,7 @@ func (b *testBackend) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
 	return 1, 100, 100
 }
 func (b *testBackend) Limits() gfx.Limits { return gfx.DefaultLimits() }
+
 // TextureFormat answers for no texture: this double keeps no descriptors, and
 // gfx falls back to the frame buffer's format for a target it cannot place -
 // which is what every pipeline in this fixture was keyed to anyway.
@@ -473,10 +474,9 @@ func testKernelRecorder(t testing.TB, filesystem fs.FS, config canvas.Config, re
 	canvasPlugin := &plugin{}
 	backend := &testBackend{capture: true}
 	configs := map[kernel.PluginName]any{
-		storage.Name: storage.Config{}.WithReadFS("test", 10, filesystem),
-		canvas.Name:  config,
+		canvas.Name: config,
 	}
-	engine := kernel.New(configs).Handler(onError).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, canvasPlugin, recorder)
+	engine := kernel.New(configs).Handler(onError).WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: filesystem}}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, canvasPlugin, recorder)
 	go engine.Run()
 	<-engine.Ready()
 	k := engine.Executioner()

@@ -3,6 +3,8 @@ package storage
 import (
 	"fmt"
 
+	"github.com/dvoyni/cog/kernel"
+
 	"github.com/dvoyni/cog/slots/storage/internal/types"
 )
 
@@ -27,6 +29,19 @@ type ErrReservedMount struct{ Id MountId }
 
 func (e ErrReservedMount) Error() string {
 	return fmt.Sprintf("storage: read mount %q is reserved to the permanent filesystem", e.Id)
+}
+
+// ErrDuplicateMount reports a mount id contributed through ReadMountPort more
+// than once. Plugins lists every contributor of Id, in plugin order, the same
+// plugin repeated when it contributed the id twice. Plugin order is not a
+// choice anyone makes, so storage refuses to let it pick a winner.
+type ErrDuplicateMount struct {
+	Id      MountId
+	Plugins []kernel.PluginName
+}
+
+func (e ErrDuplicateMount) Error() string {
+	return fmt.Sprintf("storage: read mount %q is contributed more than once, by %v", e.Id, e.Plugins)
 }
 
 // ErrInvalidValuesPath reports a values file path that is not an fs.ValidPath.

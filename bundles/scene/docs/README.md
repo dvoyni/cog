@@ -76,7 +76,7 @@ scene has the declaration-root shape of
   `scene.Config`, the flush that expands model draws, selects lights, culls,
   sorts, interns materials and packs instances into gfx passes and draws, the
   frame-build state all of that keeps across frames, the handlers of the two-hop
-  model load, and the `Start` mount of the embedded shaders under
+  model load, and the read mount of the embedded shaders under
   `internal/builtin/scene/`.
 - **`bundles/scene/sceneplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
@@ -95,10 +95,10 @@ root.
 - Constructor: `sceneplugin.New() kernel.Plugin`
 - Plugin dependencies: `gfx`, `storage`
 - Requires: no Adapter
-- Contributes: none
+- Contributes: one `storage.ReadMount`, as the `scene.StorageReadMount` Adapter
+  for `storage.ReadMountPort`
 - Go package dependencies: `app`, `gfx`, `kernel`, `m`, `storage`,
   `github.com/qmuntal/gltf`
-- Implements: `kernel.PluginStarter`
 - Configuration: `scene.Config`, optional
 - Events declared or published: none
 
@@ -110,8 +110,9 @@ kernel.New(map[kernel.PluginName]any{
 
 `PoseSampleRate` — the global animation bake rate in Hz — is the only number in
 `Config`. A zero value takes its default, 60, and giving no configuration at all
-takes it too; a negative rate is refused. `Start` mounts scene's embedded shader
-filesystem through `storage.SetMountCmd`.
+takes it too; a negative rate is refused. `Register` contributes scene's
+embedded shader filesystem to storage as a read mount, which storage installs at
+its own `Start`.
 
 **Register `storage` before `scene`.** The order the demos use is `storage`,
 `input`, `gfx`, `canvas`, `scene`, then the driver (`gogpu`), with the app's own

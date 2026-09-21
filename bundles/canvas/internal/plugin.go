@@ -135,6 +135,13 @@ func (p *plugin) Register(registrar *kernel.Registrar, value any) error {
 	registrar.Subscribe[canvas.FlushOnUpdate](p.flush).
 		Last().Before[gfx.PresentOnUpdate]()
 	registrar.ProvideAdapter[canvas.McpProvider](mcp.Provider(provider{}))
+	// The built-in shaders and default font sit above every other mount, so a
+	// game's own files never shadow them. storage installs the mount at its
+	// Start, ahead of every plugin that depends on it, so both are in place for
+	// the first frame.
+	registrar.ProvideAdapter[canvas.StorageReadMount](storage.ReadMount{
+		Id: builtinMountID, Priority: math.MaxInt, FS: builtinFS,
+	})
 	return nil
 }
 
@@ -182,16 +189,6 @@ func (p *plugin) snapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent
 		}, func(_ kernel.Kernel, event app.UpdateEvent) {
 			p.snapshots.record(queue.Get(), event.Tick)
 		}
-}
-
-// Start mounts the built-in filesystem: the shaders and the default font.
-// Startup runs after every plugin has registered and before the host loop, so
-// both are in place for the first frame without depending on app
-// publishing an event.
-func (p *plugin) Start(k kernel.Executioner) error {
-	return k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{Mount: storage.ReadMount{
-		Id: builtinMountID, Priority: math.MaxInt, FS: builtinFS,
-	}}).Err
 }
 
 func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {

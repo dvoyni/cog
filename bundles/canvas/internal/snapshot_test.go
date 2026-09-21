@@ -159,29 +159,28 @@ type drawsRig struct {
 func newDrawsRig(t *testing.T) *drawsRig {
 	t.Helper()
 	fixture := &snapshotFixture{}
+	// The sprites and the font these tests record all exist, because an asset
+	// that does not is reported now rather than skipped in silence, and this
+	// rig treats every reported error as fatal. The font joined them when the
+	// font store became two caches: a missing font used to fail nowhere on the
+	// draw path.
+	//
+	// hero.png is 32x32 rather than 4x4 for the same reason: the wire fixture
+	// windows it with a Frame of {2,4,18,20}, which never fitted a 4x4 sheet.
+	// That drew nothing and said nothing, so a pin of the recorded JSON never
+	// noticed; a frame that does not fit is reported now, and the fixture has to
+	// mean what it records.
+	mount := storage.ReadMount{Id: "test", Priority: 10, FS: fstest.MapFS{
+		"images/hero.png":  &fstest.MapFile{Data: pngBytes(t, 32, 32)},
+		"images/other.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)},
+		"fonts/body.ttf":   &fstest.MapFile{Data: goregular.TTF},
+	}}
 	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storage.Config{}.
-			// The sprites and the font these tests record all exist, because an
-			// asset that does not is reported now rather than skipped in
-			// silence, and this rig treats every reported error as fatal. The
-			// font joined them when the font store became two caches: a missing
-			// font used to fail nowhere on the draw path.
-			//
-			// hero.png is 32x32 rather than 4x4 for the same reason: the wire
-			// fixture windows it with a Frame of {2,4,18,20}, which never fitted
-			// a 4x4 sheet. That drew nothing and said nothing, so a pin of the
-			// recorded JSON never noticed; a frame that does not fit is reported
-			// now, and the fixture has to mean what it records.
-			WithReadFS("test", 10, fstest.MapFS{
-				"images/hero.png":  &fstest.MapFile{Data: pngBytes(t, 32, 32)},
-				"images/other.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)},
-				"fonts/body.ttf":   &fstest.MapFile{Data: goregular.TTF},
-			}),
 		canvas.Name: canvas.Config{},
 	}).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
 		return err
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appStandIn{fixture}, gfxplugin.New(), backendAdapter{&testBackend{}}, New(), fixture)
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{mount}, appStandIn{fixture}, gfxplugin.New(), backendAdapter{&testBackend{}}, New(), fixture)
 	stopped := make(chan struct{})
 	go func() { engine.Run(); close(stopped) }()
 	<-engine.Ready()

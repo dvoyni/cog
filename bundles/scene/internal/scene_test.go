@@ -234,6 +234,7 @@ func (b *testBackend) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
 	return 1, 1600, 1200
 }
 func (b *testBackend) Limits() gfx.Limits { return gfx.DefaultLimits() }
+
 // TextureFormat answers for no texture: this double keeps no descriptors, and
 // gfx falls back to the frame buffer's format for a target it cannot place -
 // which is what every pipeline in this fixture was keyed to anyway.
@@ -492,12 +493,11 @@ func newHarnessOver(
 	backend := &testBackend{}
 	sink := &errorSink{}
 	configs := map[kernel.PluginName]any{
-		storage.Name: storage.Config{}.WithReadFS("test", 10, files),
-		scene.Name:   scene.Config{},
+		scene.Name: scene.Config{},
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) error { sink.add(err); *reported = append(*reported, err); return nil }).
-		WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, New(), recordPlugin{record: record})
+		WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: files}}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, New(), recordPlugin{record: record})
 	go engine.Run()
 	<-engine.Ready()
 	k := engine.Executioner()

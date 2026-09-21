@@ -25,6 +25,20 @@ func (permanentAdapter) Register(registrar *kernel.Registrar, _ any) error {
 // filesystem Port as.
 type testPermanentFS kernel.Adapter[storage.PermanentFSPort]
 
+// readMountAdapter contributes one read mount through storage's Port, standing
+// in for the game plugin that would contribute its assets.
+type readMountAdapter struct{ mount storage.ReadMount }
+
+func (readMountAdapter) Name() kernel.PluginName           { return "test-read-mount" }
+func (readMountAdapter) Dependencies() []kernel.PluginName { return nil }
+func (a readMountAdapter) Register(registrar *kernel.Registrar, _ any) error {
+	registrar.ProvideAdapter[testReadMount](a.mount)
+	return nil
+}
+
+// testReadMount is the Adapter readMountAdapter contributes its mount as.
+type testReadMount kernel.Adapter[storage.ReadMountPort]
+
 type emptyPermanentFS struct{ fstest.MapFS }
 
 func (emptyPermanentFS) WriteFile(string, []byte, fs.FileMode) error { return errors.ErrUnsupported }

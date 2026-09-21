@@ -1,8 +1,9 @@
 # Ports and Adapters — specification
 
-A **Port** is a declared identity type naming an interface some plugin needs
-filled. An **Adapter** is a declared identity type naming one way of filling a
-Port, and the plain value a plugin provides under it during registration, bound
+A **Port** is a declared identity type naming what some plugin needs filled:
+an interface its Adapters implement, or a value type its Adapters are. An
+**Adapter** is a declared identity type naming one way of filling a Port, and
+the plain value a plugin provides under it during registration, bound
 by the engine during composition. The vocabulary is in
 [`CONTEXT.md`](../../../CONTEXT.md); the decision to have Ports at all is
 [ADR 0001](../../../docs/adr/0001-bundles-slots-ports-and-adapters.md).
@@ -10,7 +11,8 @@ by the engine during composition. The vocabulary is in
 This is how the platform varies beneath a piece of engine functionality without
 that functionality being replaced: gfx requires exactly one GPU backend, storage
 requires exactly one permanent filesystem, and the mcp broker collects every
-Provider.
+Provider. The same mechanism carries plain data: storage collects every read
+mount a plugin contributes.
 
 ## Declaring Ports and Adapters
 
@@ -23,7 +25,7 @@ type CollectedPort[I any] = func(collectedPort) I  // any number, zero included
 type Adapter[P any]       = func(adapterOf) P      // one Adapter for the Port P
 ```
 
-The shapes are never called. They carry the interface and the kind, so the
+The shapes are never called. They carry the type and the kind, so the
 compiler can read both back from the declared type. A plugin declares the Ports
 it offers, and the plugin filling a Port declares its Adapter:
 
@@ -36,6 +38,9 @@ type BackendPort kernel.RequiredPort[Backend]
 
 // mcp
 type ProviderPort kernel.CollectedPort[Provider]
+
+// storage: a Port built on a struct, whose Adapters are plain data
+type ReadMountPort kernel.CollectedPort[ReadMount]
 
 // gogpu
 type AppMainLoop kernel.Adapter[app.MainLoopPort]
@@ -65,23 +70,24 @@ registrar.ProvideAdapter[GfxBackend](gfx.Backend(p.gfxBackend))  // in gogpu
 
 - **`RequireAdapter[P]`** declares that the calling plugin needs exactly one
   Adapter for the required Port `P`. The handle's `Get()` returns it, typed as
-  `P`'s interface. A collected Port does not compile here.
+  the type `P` is built on. A collected Port does not compile here.
 - **`CollectAdapters[P]`** declares that the calling plugin takes any number of
   Adapters for the collected Port `P`, zero included. The handle's `Get()`
   returns every one as a `ContributedAdapter[I]`: the Adapter and the
   `PluginName` of the plugin that contributed it, in plugin order. A required
   Port does not compile here.
 - **`ProvideAdapter[A]`** contributes `adapter` as the Adapter `A`, to the Port
-  `A` is built on. `adapter` has that Port's interface type, so the compiler
-  checks the value implements it. A Port type, or any type not built from
+  `A` is built on. `adapter` has the type that Port is built on, so the
+  compiler checks the value implements the interface or is the value type. A Port type, or any type not built from
   `Adapter`, does not compile here.
 
-**A concrete value is converted to the interface.** Go infers a call's type
-parameters from its arguments before it reads their constraints, so an argument
-of a concrete type would be taken as the interface and then contradict the
-Port. Pass a value already typed as the interface, or convert it:
+**A concrete value for an interface Port is converted to the interface.** Go
+infers a call's type parameters from its arguments before it reads their
+constraints, so an argument of a concrete type would be taken as the interface
+and then contradict the Port. Pass a value already typed as the interface, or convert it:
 `ProvideAdapter[McpProvider](mcp.Provider(provider{}))`. A value that does not
-implement the interface fails that conversion at compile time.
+implement the interface fails that conversion at compile time. A value Port
+needs no conversion: `ProvideAdapter[StorageReadMount](storage.ReadMount{…})`.
 
 The plugin that requires or collects `P` **declares** it; a plugin that provides
 an Adapter for `P` is a **contributor**.
@@ -101,11 +107,11 @@ type ContributedAdapter[I any] struct {
 
 ## Rules
 
-1. **A Port is built on an interface type.** A Port built on any other type
-   panics at registration, from any of the three calls. The plugin boundary
-   reports that as `ErrPluginPanic` naming the plugin.
-2. **A binding is keyed by the Port type**, never by the interface. Two Ports on
-   the same interface are distinct, and an Adapter binds only to the Port its
+1. **A Port is built on any type.** An interface when its Adapters are
+   behaviour a plugin calls; a value type, such as a struct, when they are plain
+   data the declaring plugin reads.
+2. **A binding is keyed by the Port type**, never by the type it is built on.
+   Two Ports on the same type are distinct, and an Adapter binds only to the Port its
    type names.
 3. **Binding happens at finalization**: after every plugin's `Register`, before
    any `Start`. Adapters bind regardless of the order plugins register in, so a
@@ -118,7 +124,7 @@ type ContributedAdapter[I any] struct {
    finalization — from inside `Register`, say — and on a zero handle.
 6. **An Adapter is a plain value, not a Resource.** Reading it takes no lock and
    it appears in no lock set. Whether it may be called concurrently, and from
-   where, is the Port interface's business. `Get` itself only reads what
+   where, is the business of the type the Port is built on. `Get` itself only reads what
    composition wrote, so any goroutine may call it once `Run` begins.
 7. **A required Port with no Adapter** fails composition with
    `ErrMissingAdapter`.
@@ -182,7 +188,7 @@ and then by declaring plugin:
 ```go
 type PortDescription struct {
     Type      reflect.Type // the Port type
-    Interface reflect.Type // the interface it is built on
+    Interface reflect.Type // the type it is built on: an interface or a value type
     Owner     PluginName   // the plugin that declared it
     Collects  bool         // false: requires exactly one
     Adapters  []AdapterDescription // in plugin order
@@ -204,3 +210,15 @@ ports:
 ```
 
 An Adapter nobody consumes is not listed, because it binds to nothing.
+
+## Rejected shapes
+
+- **Interface-only Ports.** Ports were first restricted to interface types, on
+  the view that a Port is a contract its Adapters implement. Storage's read
+  mounts broke it: a mount is an id, a priority and a filesystem, plain data
+  with no behaviour. Under the restriction it needed a one-method interface
+  whose only implementation returned its receiver, a getter the declaration
+  root forbids, or a struct that impersonated `fs.FS` so storage could
+  type-assert it back. Neither carried anything the struct did not. The
+  restriction is lifted for both kinds: a Port is built on whatever type its
+  Adapters are, and `ErrPortNotAnInterface` is gone with it.

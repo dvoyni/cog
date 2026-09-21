@@ -90,8 +90,9 @@ kernel.New(map[kernel.PluginName]any{
 `scene.Config` is the configuration type, and a zero field takes its default
 (amended by #361; #339 moved it to `sceneimpl.Config`, and before that it was
 `scene.Config` with `scene.DefaultConfig()`). The plugin
-implements `Name`, `Dependencies`, and `Init` for the kernel lifecycle. During `Init` scene
-executes `storage.SetMountCmd` to mount its embedded shaders, as canvas does.
+implements `Name`, `Dependencies`, and `Register` for the kernel lifecycle. During `Register` scene
+contributes its embedded shaders to storage as a read mount through
+`storage.ReadMountPort`, as canvas does.
 Register `storage` before `scene`. A typical order is `storage`, `input`, `gfx`,
 `canvas`, `scene`, then the system driver.
 

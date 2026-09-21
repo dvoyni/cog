@@ -254,12 +254,11 @@ func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gfx.Ba
 	t.Helper()
 	sink := &errorSink{}
 	configs := map[kernel.PluginName]any{
-		storage.Name: storage.Config{}.WithReadFS("test", 10, fs.FS(files)),
-		ecs.Name:     ecs.Config{PrewarmEntities: ids},
+		ecs.Name: ecs.Config{PrewarmEntities: ids},
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) error { sink.add(err); return nil }).
-		WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, sceneplugin.New(),
+		WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: fs.FS(files)}}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, sceneplugin.New(),
 			ecsplugin.New(), New(), &gamePlugin{})
 	// The cleanup waits for Run to return rather than only cancelling it: a
 	// dying engine allocates while it winds down, and the allocation claims here

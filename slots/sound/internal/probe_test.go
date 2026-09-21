@@ -183,10 +183,9 @@ func newHarnessWithHandler(
 	t.Helper()
 	ended := make(chan sound.VoiceEndedEvent, 64)
 	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storage.Config{}.WithReadFS("test", 10, files),
-		sound.Name:   config,
+		sound.Name: config,
 	}).Handler(handler).WithPlugins(
-		storageplugin.New(), permanentAdapter{},
+		storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: files}},
 		New(), soundBackendAdapter{backend},
 		probePlugin{ended: ended},
 	)

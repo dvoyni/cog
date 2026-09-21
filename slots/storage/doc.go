@@ -9,6 +9,6 @@
 // storage is a Slot: its plugin, built by storageplugin.New, requires exactly
 // one PermanentFS Adapter through PermanentFSPort, which an Extension
 // (diskstorage, jsstorage) provides. storage itself carries no platform code:
-// no build tags, no os. Read mounts are plain fs.FS values the composition root
-// chooses.
+// no build tags, no os. Read mounts are plain fs.FS values that plugins, a
+// game's own included, contribute through ReadMountPort.
 package storage

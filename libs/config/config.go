@@ -62,7 +62,7 @@
 // An exported, top-level field whose type is parsable from text: string, bool,
 // the signed and unsigned integer kinds, the floats, and time.Duration. Not a
 // nested struct, a slice or a map, which is what keeps a field holding a live
-// value - storage.Config.ReadMounts carries fs.FS - out of reach.
+// value - an fs.FS, say - out of reach.
 //
 // A key with no value means true for a bool field and is an error for any
 // other type. An empty value sets the empty string. A key given twice keeps

@@ -358,8 +358,9 @@ rules.
 
 **A Port** is a defined type built from `kernel.RequiredPort[I]` (exactly one
 Adapter) or `kernel.CollectedPort[I]` (any number, zero included), where `I` is
-the interface its Adapters implement. The plugin declaring it puts it, beside
-that interface, in its root's `ports.go`. A required Port is what makes a plugin
+the interface its Adapters implement, or the value type they are when an
+Adapter is plain data. The plugin declaring it puts it, beside that type, in its
+root's `ports.go`. A required Port is what makes a plugin
 a Slot, so only a Slot declares one:
 
 ```go
@@ -367,6 +368,7 @@ type BackendPort kernel.RequiredPort[Backend]         // gfx/ports.go
 type MainLoopPort kernel.RequiredPort[MainLoop]       // app/ports.go
 type PermanentFSPort kernel.RequiredPort[PermanentFS] // storage/ports.go
 type ProviderPort kernel.CollectedPort[Provider]      // mcp/ports.go
+type ReadMountPort kernel.CollectedPort[ReadMount]    // storage/ports.go, a struct
 ```
 
 **An Adapter** is a defined type built from `kernel.Adapter[P]`, where `P` is the
@@ -393,9 +395,10 @@ p.providers = registrar.CollectAdapters[mcp.ProviderPort]()  // CollectedAdapter
 ```
 
 **Providing** is open to any plugin, a Bundle included, and always names the
-plugin's own Adapter type. The value has the Port's interface type, so the
+plugin's own Adapter type. The value has the type the Port is built on, so the
 compiler checks it; Go infers type arguments from the value before the
-constraints, so convert a concrete value to the interface:
+constraints, so convert a concrete value to an interface Port's interface (a
+value Port takes its value as is):
 
 ```go
 registrar.ProvideAdapter[diskstorage.StoragePermanentFS](permanent) // already a storage.PermanentFS

@@ -143,8 +143,6 @@ covering one focused mechanism takes that mechanism's name.
 
 ```go
 config := map[kernel.PluginName]any{
-    storage.Name: storage.Config{}.
-        WithReadFS("res", storage.DefaultReadPriority, os.DirFS("res")),
     diskstorage.Name: diskstorage.Config{AppId: "my-app"},
     gogpu.Name: gogpu.Config{}.WithTitle("My App"),
 }
@@ -156,6 +154,7 @@ plugins := []kernel.Plugin{
     appplugin.New(),
     gfxplugin.New(),
     gogpuplugin.New(), // provides app's MainLoop and gfx's Backend Adapters
+    mygame.New(os.DirFS("res")), // provides storage's read mount for res/
     ...
 }
 

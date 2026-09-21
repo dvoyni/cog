@@ -275,7 +275,8 @@ values derived from one. This is a contract, not a checked invariant.
 
 ## Ports and Adapters
 
-A **Port** is a declared identity type naming an interface a plugin needs filled;
+A **Port** is a declared identity type naming what a plugin needs filled: an
+interface its Adapters implement, or a value type its Adapters are;
 an **Adapter** is a declared identity type naming one way of filling it, under
 which a plugin provides a plain value that the engine binds during composition.
 The full rules are in [`specs/ports.md`](specs/ports.md).
@@ -286,6 +287,7 @@ Both are declared like commands, as defined types built from a kernel shape:
 type MainLoopPort kernel.RequiredPort[MainLoop]    // app: exactly one Adapter
 type BackendPort kernel.RequiredPort[Backend]      // gfx: exactly one Adapter
 type ProviderPort kernel.CollectedPort[Provider]   // mcp: any number, zero included
+type ReadMountPort kernel.CollectedPort[ReadMount] // storage: plain data, any number
 type AppMainLoop kernel.Adapter[app.MainLoopPort]  // gogpu: fills app.MainLoopPort
 type GfxBackend kernel.Adapter[gfx.BackendPort]    // gogpu: fills gfx.BackendPort
 ```
@@ -299,24 +301,24 @@ registrar.ProvideAdapter[GfxBackend](gfx.Backend(device))        // contribute o
 ```
 
 `RequireAdapter[P]` returns a `RequiredAdapter[I]` whose `Get()` yields the one
-bound Adapter, typed as the Port's interface `I`. `CollectAdapters[P]` returns a
+bound Adapter, typed as the type `I` the Port is built on. `CollectAdapters[P]` returns a
 `CollectedAdapters[I]` whose `Get()` yields a fresh `[]ContributedAdapter[I]`:
 each Adapter with the `PluginName` of the plugin that provided it, in plugin
-order. `ProvideAdapter[A]` takes a value of the Port's interface type, so the
-compiler checks it implements the interface. Go infers type parameters from
-arguments before constraints, so a concrete value is converted to the interface
-first. Requiring a collected Port, collecting a required one, or providing
+order. `ProvideAdapter[A]` takes a value of the type the Port is built on, so
+the compiler checks it implements the interface or is the value type. Go infers
+type parameters from arguments before constraints, so a concrete value for an
+interface Port is converted to the interface first. Requiring a collected Port, collecting a required one, or providing
 anything but an Adapter type does not compile.
 
-- A Port must be built on an interface type. Anything else, to any of the
-  three, panics at registration and arrives as `ErrPluginPanic`.
-- Bindings are keyed by the Port type: two Ports on one interface are distinct.
+- A Port may be built on any type: an interface when its Adapters are
+  behaviour, a value type such as a struct when they are plain data.
+- Bindings are keyed by the Port type: two Ports on one type are distinct.
 - Binding happens at finalization: after every `Register`, before any `Start`.
   It adds no plugin-dependency edge in either direction and does not depend on
   registration order.
 - `Get` panics before finalization and is valid from `Start` onwards. An Adapter
   is not a Resource: reading it takes no lock, and its thread rules are the Port
-  interface's business.
+  type's business.
 - A required Port with no Adapter fails composition with `ErrMissingAdapter`;
   with several, `ErrDuplicateAdapter`.
 - A nil Adapter is refused when it is provided: `ProvideAdapter[A]` given an
@@ -355,8 +357,6 @@ Exported error types:
 - `ErrSchedulerStopped`: work was submitted after the coordinator stopped. It is
   not reported: a dispatch arriving after shutdown is the engine ending, not a
   failure in the thing that dispatched.
-- `ErrPortNotAnInterface`: a Port or Adapter declaration names a type argument
-  that is not an interface.
 - `ErrConflictingPluginName`: two registered plugins use the same name.
 - `ErrMissingPluginDependency`: a plugin's declared dependency is absent.
 - `ErrPluginDependencyCycle`: plugin dependencies cannot be ordered.

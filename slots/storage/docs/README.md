@@ -17,7 +17,7 @@ storage has the declaration-root shape of
 
 - **`slots/storage`** is the root, and holds declarations only: the commands,
   `Config`, `FileSystem`, `Values`, `WriteFS`, `ReadMount`, `PermanentFS` and
-  `PermanentFSPort`, the errors and `Name`. Its functions, the value-request
+  `PermanentFSPort`, `ReadMountPort`, the errors and `Name`. Its functions, the value-request
   builders, `WriteAccess` and `NewFileSystem`, are forwarders in `utils.go`. It
   is what every other package imports.
 - **`slots/storage/internal/types`** declares `FileSystem`, `WriteFS`, `Values`,
@@ -39,7 +39,7 @@ The Adapters are Extensions in `extensions/`:
 
 storage carries no platform code: none of its packages has build tags or
 imports `os`. What persists is the Adapter's business, and read mounts are
-plain `fs.FS` values the composition root chooses.
+plain `fs.FS` values that plugins contribute.
 
 The reason is what a disk read mount does in a browser. This was established by
 a probe built for `GOOS=js GOARCH=wasm` and run under the browser
@@ -55,8 +55,8 @@ a probe built for `GOOS=js GOARCH=wasm` and run under the browser
 
 storage used to carry both: a `WithReadDiskFS` helper, an implicit read mount
 of the executable's directory, and an application id defaulted from
-`os.Executable`. They are gone. A desktop root that wants a directory mounts
-`os.DirFS` itself, a browser root mounts what it preloaded, and the application
+`os.Executable`. They are gone. A desktop game that wants a directory mounts
+`os.DirFS` itself, a browser game mounts what it preloaded, and the application
 id belongs to the Adapter that uses it.
 
 ## Plugin
@@ -65,6 +65,7 @@ id belongs to the Adapter that uses it.
 - Constructor: `storageplugin.New() kernel.Plugin`
 - Plugin dependencies: none
 - Requires: exactly one Adapter for `storage.PermanentFSPort`
+- Collects: any number of Adapters for `storage.ReadMountPort`, zero included
 - Go package dependencies: `kernel` and the standard library
 - Events published or subscribed: none
 
@@ -75,28 +76,61 @@ filesystem. The Adapter is bound after every `Register`, so the `FileSystem`
 resource resolves it when it is read or written, which is from `Start` onwards.
 
 Configuration is a `storage.Config` supplied under `storage.Name`. Its zero
-value is the default: no read mounts and `DefaultValuesPath`.
+value is the default: `DefaultValuesPath`. `storage.Config` exposes only
+`ValuesPath`, and `WithValuesPath` returns a modified copy.
 
 ```go
 config := map[kernel.PluginName]any{
-    storage.Name: storage.Config{}.
-        WithReadFS("res", storage.DefaultReadPriority, os.DirFS("res")).
-        WithReadFS("embedded", 100, embeddedFS),
     diskstorage.Name: diskstorage.Config{AppId: "my-app"},
 }
 
 plugins := []kernel.Plugin{
     storageplugin.New(),
     diskstorageplugin.New(), // or jsstorageplugin.New() in a browser, with jsstorage.Config under jsstorage.Name
+    mygame.New(os.DirFS("res")), // contributes its read mount
     …
 }
 ```
 
-`storage.Config` exposes `ReadMounts` and `ValuesPath`. Its `With*` methods
-return modified copies. `DefaultReadPriority` is zero.
+### Read mounts
 
-`PermanentMount` is reserved: the plugin derives it from the permanent
-filesystem, and a `Config` that mounts it is rejected with `ErrReservedMount`.
+Read mounts are not configured: plugins contribute them through
+`storage.ReadMountPort`, a collected Port built on `ReadMount` itself. A
+composition root has no `Register` to provide from, so the mounts a game needs
+come from the game's own plugin, which is handed the filesystem by `main`, the
+one place that knows the platform. A plugin declares an Adapter for the Port in
+its root's `adapters.go` and provides one `ReadMount` per mount during its
+`Register`:
+
+```go
+type StorageReadMount kernel.Adapter[storage.ReadMountPort]
+
+registrar.ProvideAdapter[StorageReadMount](storage.ReadMount{
+    Id: "res", Priority: storage.DefaultReadPriority, FS: res,
+})
+registrar.ProvideAdapter[StorageReadMount](storage.ReadMount{
+    Id: "embedded", Priority: 100, FS: embeddedFS,
+})
+```
+
+One plugin may contribute any number, and so may any number of plugins; canvas
+and scene contribute their built-in shaders and font the same way.
+`DefaultReadPriority` is zero.
+
+Adapters bind after every `Register`, so storage installs the mounts at its
+`Start`. storage has no dependencies, so it starts ahead of every plugin that
+depends on it, and those find the mounts in place. The `Start` fails, and with
+it the run, when:
+
+- one id is contributed more than once, by one plugin or several:
+  `ErrDuplicateMount{Id, Plugins}`. Nothing is mounted, since plugin order is
+  not a choice anyone makes and must not pick a winner;
+- a mount has an empty id or a nil `FS`: `ErrInvalidMount`;
+- a mount claims `PermanentMount`, which the plugin derives from the permanent
+  filesystem: `ErrReservedMount`.
+
+`SetMountCmd` and `RemoveMountCmd` still add, replace and remove mounts by id
+once the engine runs.
 
 ## Adapters
 
@@ -145,8 +179,8 @@ readable filesystem, including the permanent one, and it exposes no mutators.
 `ReadMount{Id, Priority, FS}` entries are searched by descending priority; equal
 priorities keep registration order. `PermanentMount` is searched ahead of every
 other mount whatever their priorities, so a file that was just written is the
-one read back — other mounts use `math.MaxInt` too (canvas mounts its shaders
-there), and a priority tie must not shadow saved data. Only `fs.ErrNotExist`
+one read back — other mounts use `math.MaxInt` too (canvas contributes its
+shaders there), and a priority tie must not shadow saved data. Only `fs.ErrNotExist`
 falls through to the next mount. `Open` requires `fs.ValidPath` names.
 
 There is one way to read: reading is never split by which filesystem holds the
@@ -231,6 +265,9 @@ splitting a single store into several entry points.
 - `ErrInvalidConfig{Got}`: plugin configuration is not a `storage.Config`.
 - `ErrInvalidMount{Id}`: a mount has an empty ID or nil filesystem.
 - `ErrReservedMount{Id}`: `PermanentMount` was mounted or unmounted by hand.
+- `ErrDuplicateMount{Id, Plugins}`: a mount id was contributed through
+  `ReadMountPort` more than once; `Plugins` lists every contributor in plugin
+  order.
 - `ErrNoWriteAccess{Op, Path}`: `WriteAccess` received a handle whose write lock
   was never declared.
 - `ErrInvalidValuesPath{Path}`: the values file path is not an `fs.ValidPath`.

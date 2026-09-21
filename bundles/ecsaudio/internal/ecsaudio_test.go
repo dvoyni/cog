@@ -271,11 +271,10 @@ func newHarnessCapped(t *testing.T, maxVoices int) *harness {
 	sink := &errorSink{}
 	ended := make(chan sound.VoiceEndedEvent, 64)
 	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storage.Config{}.WithReadFS("test", 10, files),
-		sound.Name:   sound.Config{MaxVoices: maxVoices},
+		sound.Name: sound.Config{MaxVoices: maxVoices},
 	}).Handler(func(err error) error { sink.add(err); return nil }).
 		WithPlugins(
-			storageplugin.New(), permanentAdapter{},
+			storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: files}},
 			soundplugin.New(), nosoundplugin.New(),
 			ecsplugin.New(), New(), &gamePlugin{ended: ended},
 		)

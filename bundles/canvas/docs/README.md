@@ -43,7 +43,7 @@ canvas has the declaration-root shape of
 - **`bundles/canvas/internal`** is the plugin: its `New`, the resolution of
   `canvas.Config`, the flush that turns a recording into gfx draws, the sprite
   and triangle batchers and their scratch, the draw-snapshot slot and its two
-  subscriptions, the `Start` mount of the embedded shaders and default font
+  subscriptions, the read mount of the embedded shaders and default font
   (under `internal/builtin/canvas/`), and the mcp Provider.
 - **`bundles/canvas/canvasplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
@@ -63,9 +63,10 @@ the root.
 - Plugin dependencies: `app` (whose `TimeCmd` `canvas_draws` dispatches), `gfx`, `storage`
 - Requires: no Adapter
 - Contributes: one `mcp.Provider`, as the `canvas.McpProvider` Adapter for
-  `mcp.ProviderPort`
+  `mcp.ProviderPort`; one `storage.ReadMount`, as the `canvas.StorageReadMount`
+  Adapter for `storage.ReadMountPort`
 - Go package dependencies: `app`, `gfx`, `kernel`, `mcp`, `storage`, `x/image`
-- Implements: `kernel.PluginStarter`, `kernel.PluginStopper`
+- Implements: `kernel.PluginStopper`
 - Configuration: `canvas.Config`, optional
 - Events declared or published: none
 
@@ -81,8 +82,9 @@ configuration at all, takes all three. `LayersPerArray` must be at least two.
 Atlas dimensions and the memory budget must be positive, and one array must fit
 within `MaxAtlasBytes`.
 
-During `Start`, canvas executes `storage.SetMountCmd` to mount its embedded
-shaders and default font. Register `storage` before `canvas`. A typical order is
+During `Register`, canvas contributes its embedded shaders and default font to
+storage as a read mount at `math.MaxInt` priority, which storage installs at its
+own `Start`. Register `storage` before `canvas`. A typical order is
 `storage`, `input`, `gfx`, `canvas`, then the system driver. Compose it with
 `canvasplugin.New()`.
 

@@ -4,12 +4,14 @@ import (
 	"errors"
 	"io/fs"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"testing/fstest"
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/storage"
+	"github.com/dvoyni/cog/slots/storage/internal/types"
 )
 
 // storage is a Slot: it requires exactly one PermanentFS Adapter, so a
@@ -31,11 +33,12 @@ func TestStorageWithoutAnAdapterFailsWithErrMissingAdapter(t *testing.T) {
 }
 
 func TestPermanentMountIsReserved(t *testing.T) {
-	config := storage.Config{}.WithReadFS(storage.PermanentMount, 10, fstest.MapFS{})
-
 	var reserved storage.ErrReservedMount
-	if _, _, err := resolveConfig(config, nil); !errors.As(err, &reserved) {
-		t.Fatalf("resolveConfig error = %v, want ErrReservedMount", err)
+	err := startErr(mountPlugin{name: "mounts", mounts: []storage.ReadMount{
+		{Id: storage.PermanentMount, Priority: 10, FS: fstest.MapFS{}},
+	}})
+	if !errors.As(err, &reserved) || reserved.Id != storage.PermanentMount {
+		t.Fatalf("Start error = %v, want ErrReservedMount", err)
 	}
 
 	k := testKernel(t, storage.Config{}, newMemoryFS())
@@ -49,32 +52,103 @@ func TestPermanentMountIsReserved(t *testing.T) {
 	}
 }
 
-// A read mount is a plain fs.FS the composition root chooses, and the
-// permanent filesystem the Adapter provides reads back ahead of it.
+// A read mount is a plain fs.FS a plugin contributes, and the permanent
+// filesystem the Adapter provides reads back ahead of it.
 func TestReadMountsAndTheAdapterShareOneOverlay(t *testing.T) {
 	permanent := newMemoryFS()
-	config := storage.Config{}.WithReadFS("assets", storage.DefaultReadPriority, fstest.MapFS{
-		"asset.txt": &fstest.MapFile{Data: []byte("asset")},
-		"save.txt":  &fstest.MapFile{Data: []byte("packaged")},
-	})
-	k := testKernel(t, config, permanent)
+	k := testKernel(t, storage.Config{}, permanent, mountPlugin{name: "assets", mounts: []storage.ReadMount{
+		{Id: "assets", Priority: storage.DefaultReadPriority, FS: fstest.MapFS{
+			"asset.txt": &fstest.MapFile{Data: []byte("asset")},
+			"save.txt":  &fstest.MapFile{Data: []byte("packaged")},
+		}},
+	}})
 	if err := permanent.WriteFile("save.txt", []byte("saved"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	assertRead := func(name, want string) {
-		t.Helper()
-		var data []byte
-		var err error
-		k.ExecuteCommand[readFileCmd](readFileRequest{read: func(filesystem storage.FileSystem) {
-			data, err = fs.ReadFile(filesystem, name)
+	assertRead(t, k, "asset.txt", "asset")
+	assertRead(t, k, "save.txt", "saved")
+}
+
+// Mounts from several plugins, and several from one plugin, overlay by
+// priority: the higher one answers a name both hold, and a name only the lower
+// one holds still reads through it.
+func TestContributedMountsOverlayByPriority(t *testing.T) {
+	k := testKernel(t, storage.Config{}, newMemoryFS(),
+		mountPlugin{name: "game", mounts: []storage.ReadMount{
+			{Id: "res", Priority: storage.DefaultReadPriority, FS: fstest.MapFS{
+				"shared.txt": &fstest.MapFile{Data: []byte("res")},
+				"res.txt":    &fstest.MapFile{Data: []byte("res only")},
+			}},
+			{Id: "patch", Priority: 20, FS: fstest.MapFS{
+				"patched.txt": &fstest.MapFile{Data: []byte("patch")},
+			}},
+		}},
+		mountPlugin{name: "mod", mounts: []storage.ReadMount{
+			{Id: "mod", Priority: 10, FS: fstest.MapFS{
+				"shared.txt":  &fstest.MapFile{Data: []byte("mod")},
+				"patched.txt": &fstest.MapFile{Data: []byte("mod")},
+			}},
 		}})
-		if err != nil || string(data) != want {
-			t.Fatalf("ReadFile(%q) = %q, %v; want %q", name, data, err, want)
+
+	assertRead(t, k, "shared.txt", "mod")
+	assertRead(t, k, "res.txt", "res only")
+	assertRead(t, k, "patched.txt", "patch")
+
+	var ids []storage.MountId
+	k.ExecuteCommand[readFileCmd](readFileRequest{read: func(filesystem storage.FileSystem) {
+		for _, mount := range types.FileSystemMounts(filesystem) {
+			ids = append(ids, mount.Id)
+		}
+	}})
+	if want := []storage.MountId{storage.PermanentMount, "patch", "mod", "res"}; !slices.Equal(ids, want) {
+		t.Fatalf("mounts = %v, want %v", ids, want)
+	}
+}
+
+// Two contributions that claim one id are a composition mistake, whichever
+// plugins they come from, so Start fails rather than letting plugin order pick
+// a winner.
+func TestADuplicateMountIdFailsStart(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		plugins []kernel.Plugin
+		want    []kernel.PluginName
+	}{
+		{name: "two plugins", plugins: []kernel.Plugin{
+			mountPlugin{name: "a", mounts: []storage.ReadMount{{Id: "res", FS: fstest.MapFS{}}}},
+			mountPlugin{name: "b", mounts: []storage.ReadMount{{Id: "res", FS: fstest.MapFS{}}}},
+		}, want: []kernel.PluginName{"a", "b"}},
+		{name: "one plugin", plugins: []kernel.Plugin{
+			mountPlugin{name: "a", mounts: []storage.ReadMount{{Id: "res", FS: fstest.MapFS{}}, {Id: "res", FS: fstest.MapFS{}}}},
+		}, want: []kernel.PluginName{"a", "a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := startErr(tc.plugins...)
+
+			var duplicate storage.ErrDuplicateMount
+			if !errors.As(err, &duplicate) {
+				t.Fatalf("Start error = %v, want ErrDuplicateMount", err)
+			}
+			if duplicate.Id != "res" || !slices.Equal(duplicate.Plugins, tc.want) {
+				t.Fatalf("duplicate = %+v, want res from %v", duplicate, tc.want)
+			}
+		})
+	}
+}
+
+func TestAnInvalidContributedMountFailsStart(t *testing.T) {
+	for _, mount := range []storage.ReadMount{
+		{Id: "", FS: fstest.MapFS{}},
+		{Id: "res", FS: nil},
+	} {
+		err := startErr(mountPlugin{name: "mounts", mounts: []storage.ReadMount{mount}})
+
+		var invalid storage.ErrInvalidMount
+		if !errors.As(err, &invalid) || invalid.Id != mount.Id {
+			t.Fatalf("Start error for %+v = %v, want ErrInvalidMount", mount, err)
 		}
 	}
-	assertRead("asset.txt", "asset")
-	assertRead("save.txt", "saved")
 }
 
 // TestValueRoundTripThroughOneWriteLock is the point of the merge: one
@@ -108,19 +182,62 @@ func TestAZeroValueRequestIsRejected(t *testing.T) {
 	}
 }
 
-func testKernel(t *testing.T, config storage.Config, permanent storage.PermanentFS) kernel.Executioner {
+func testKernel(t *testing.T, config storage.Config, permanent storage.PermanentFS, plugins ...kernel.Plugin) kernel.Executioner {
 	t.Helper()
 	engine := kernel.New(map[kernel.PluginName]any{storage.Name: config}).
 		Handler(func(err error) error {
 			t.Errorf("unexpected kernel error: %v", err)
 			return err
 		}).
-		WithPlugins(New(), adapterPlugin{permanent: permanent}, readerPlugin{})
+		WithPlugins(append([]kernel.Plugin{New(), adapterPlugin{permanent: permanent}, readerPlugin{}}, plugins...)...)
 	go engine.Run()
 	t.Cleanup(engine.Quit)
 	<-engine.Ready()
 	return engine.Executioner()
 }
+
+// startErr runs an engine over plugins and answers what Run returned, which is
+// the Start failure when one plugin's Start fails.
+func startErr(plugins ...kernel.Plugin) error {
+	engine := kernel.New(nil).
+		Handler(func(err error) error { return err }).
+		WithPlugins(append([]kernel.Plugin{New(), adapterPlugin{permanent: newMemoryFS()}}, plugins...)...)
+	done := make(chan error, 1)
+	go func() { done <- engine.Run() }()
+	<-engine.Ready()
+	engine.Quit()
+	return <-done
+}
+
+func assertRead(t *testing.T, k kernel.Executioner, name, want string) {
+	t.Helper()
+	var data []byte
+	var err error
+	k.ExecuteCommand[readFileCmd](readFileRequest{read: func(filesystem storage.FileSystem) {
+		data, err = fs.ReadFile(filesystem, name)
+	}})
+	if err != nil || string(data) != want {
+		t.Fatalf("ReadFile(%q) = %q, %v; want %q", name, data, err, want)
+	}
+}
+
+// mountPlugin contributes read mounts through storage's Port, in order.
+type mountPlugin struct {
+	name   kernel.PluginName
+	mounts []storage.ReadMount
+}
+
+func (m mountPlugin) Name() kernel.PluginName         { return m.name }
+func (mountPlugin) Dependencies() []kernel.PluginName { return nil }
+func (m mountPlugin) Register(registrar *kernel.Registrar, _ any) error {
+	for _, mount := range m.mounts {
+		registrar.ProvideAdapter[testReadMount](mount)
+	}
+	return nil
+}
+
+// testReadMount is the Adapter mountPlugin contributes its mounts as.
+type testReadMount kernel.Adapter[storage.ReadMountPort]
 
 // adapterPlugin provides the PermanentFS Adapter the tests compose.
 type adapterPlugin struct{ permanent storage.PermanentFS }

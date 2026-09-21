@@ -45,7 +45,7 @@ Every Plugin that is neither a Slot nor an Extension: it requires no Port, thoug
 _Avoid_: Module, which is a shader module or a Go module; package; feature
 
 **Port**:
-A declared point at which a plugin takes Adapters from other plugins, identified by its own type and typed by the interface its Adapters implement. A required Port takes exactly one, and declaring one is what makes a plugin a Slot; a collected Port takes any number, zero included.
+A declared point at which a plugin takes Adapters from other plugins, identified by its own type and typed by the interface its Adapters implement, or by the value type they are when an Adapter is plain data. A required Port takes exactly one, and declaring one is what makes a plugin a Slot; a collected Port takes any number, zero included.
 _Avoid_: Plugin, as the name of a kind; the interface alone, which is what a Port carries rather than what it is
 
 **Adapter**:

@@ -27,9 +27,7 @@ func flattenShader(t testing.TB, mount storage.MountId, filesystem fs.FS, shader
 		mu       sync.Mutex
 		refusals []error
 	)
-	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storage.Config{}.WithReadFS(mount, 0, filesystem),
-	}).Handler(func(err error) error {
+	engine := kernel.New(nil).Handler(func(err error) error {
 		var source gfx.ErrShaderSource
 		// A shader whose source is not there is the asset Library's read failure
 		// now rather than an error type of gfx's own, and it wraps what the open
@@ -40,7 +38,7 @@ func flattenShader(t testing.TB, mount storage.MountId, filesystem fs.FS, shader
 			mu.Unlock()
 		}
 		return err
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), flattenRecorder{backend: backend, shader: shader})
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: mount, Priority: 0, FS: filesystem}}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), flattenRecorder{backend: backend, shader: shader})
 	go engine.Run()
 	<-engine.Ready()
 	k := engine.Executioner()
@@ -128,6 +126,7 @@ func (b *flattenBackend) FreePipeline(gfx.PipelineID)                {}
 func (b *flattenBackend) Limits() gfx.Limits                         { return gfx.DefaultLimits() }
 func (b *flattenBackend) Execute(*gfx.Queue)                         {}
 func (b *flattenBackend) TakeCapture() (gfx.Capture, bool)           { return gfx.Capture{}, false }
+
 // TextureFormat answers for no texture: this double keeps no descriptors, and
 // gfx falls back to the frame buffer's format for a target it cannot place -
 // which is what every pipeline in this fixture was keyed to anyway.

@@ -364,38 +364,49 @@ func TestPorts_GetBeforeFinalizationPanics(t *testing.T) {
 	}
 }
 
-// A Port built on a type that is not an interface is refused by each of the
-// three declarations.
-// A Port built on a concrete type is a registration fault like any other: it
-// is collected and comes back from composition, not thrown.
-func TestPorts_NonInterfacePortFailsComposition(t *testing.T) {
-	type labelPort RequiredPort[testLabel]
-	type labelsPort CollectedPort[*testLabel]
-	type labelAdapter Adapter[labelPort]
-	for _, tc := range []struct {
-		name    string
-		declare func(r *Registrar)
-	}{
-		{name: "require", declare: func(r *Registrar) { r.RequireAdapter[labelPort]() }},
-		{name: "collect", declare: func(r *Registrar) { r.CollectAdapters[labelsPort]() }},
-		{name: "provide", declare: func(r *Registrar) { r.ProvideAdapter[labelAdapter](testLabel("concrete")) }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			p := testPlugin{name: "p", register: func(r *Registrar) error {
-				tc.declare(r)
-				return nil
-			}}
+// A Port may be built on a value type rather than an interface: the Adapter is
+// then plain data, bound and read back exactly as an interface Adapter is.
+func TestPorts_ValuePortsBind(t *testing.T) {
+	type mount struct {
+		Id       string
+		Priority int
+	}
+	type mountPort RequiredPort[mount]
+	type mountsPort CollectedPort[mount]
+	type mountAdapter Adapter[mountPort]
+	type mountsAdapter Adapter[mountsPort]
 
-			_, err := composeForTest(p)
+	var required mount
+	var collected []ContributedAdapter[mount]
+	port := &testPlugin{name: "port"}
+	port.register = func(r *Registrar) error {
+		one := r.RequireAdapter[mountPort]()
+		many := r.CollectAdapters[mountsPort]()
+		port.start = func(Executioner) error {
+			required = one.Get()
+			collected = many.Get()
+			return nil
+		}
+		return nil
+	}
+	adapter := testPlugin{name: "adapter", register: func(r *Registrar) error {
+		r.ProvideAdapter[mountAdapter](mount{Id: "res", Priority: 1})
+		r.ProvideAdapter[mountsAdapter](mount{Id: "a"})
+		r.ProvideAdapter[mountsAdapter](mount{Id: "b", Priority: 2})
+		return nil
+	}}
 
-			var notAnInterface ErrPortNotAnInterface
-			if !errors.As(err, &notAnInterface) {
-				t.Fatalf("composition error = %v, want ErrPortNotAnInterface", err)
-			}
-			if !strings.Contains(notAnInterface.Error(), "not an interface") {
-				t.Fatalf("error = %q, want it to say the type is not an interface", notAnInterface)
-			}
-		})
+	startEngine(t, port, adapter)
+
+	if want := (mount{Id: "res", Priority: 1}); required != want {
+		t.Fatalf("required = %+v, want %+v", required, want)
+	}
+	want := []ContributedAdapter[mount]{
+		{Plugin: "adapter", Adapter: mount{Id: "a"}},
+		{Plugin: "adapter", Adapter: mount{Id: "b", Priority: 2}},
+	}
+	if !slices.Equal(collected, want) {
+		t.Fatalf("collected = %+v, want %+v", collected, want)
 	}
 }
 

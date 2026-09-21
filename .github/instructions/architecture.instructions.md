@@ -68,7 +68,7 @@ stay where they are.
   in `resources.go`, a value type in `types.go`
   (`type OpQueue = types.OpQueue`).
 - **`Config`** is plain data whose zero value is the default. It may have
-  builder methods (`WithReadFS`), the only logic a root holds outside
+  builder methods (`WithValuesPath`), the only logic a root holds outside
   `utils.go` besides an inline anchor. There is no `DefaultConfig`.
 - **Functions** appear only in `utils.go`, and each one is a pure forwarder: a
   single call into the plugin's own `internal/types`, returned when the

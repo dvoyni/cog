@@ -32,10 +32,9 @@ func Example_playAStolenVoiceAgain() {
 	ended := make(chan sound.VoiceEndedEvent, 8)
 	game := &retryingGame{kept: map[sound.Voice]sound.VoiceInfo{}}
 	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storage.Config{}.WithReadFS("game", 10, clipBytes),
-		sound.Name:   sound.Config{}.WithMaxVoices(1),
+		sound.Name: sound.Config{}.WithMaxVoices(1),
 	}).WithPlugins(
-		storageplugin.New(), permanentAdapter{},
+		storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "game", Priority: 10, FS: clipBytes}},
 		New(), soundBackendAdapter{newFakeBackend(longClip())},
 		&retryingGamePlugin{game: game, ended: ended},
 	)

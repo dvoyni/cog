@@ -233,6 +233,20 @@ func (permanentAdapter) Register(registrar *kernel.Registrar, _ any) error {
 // filesystem Port as.
 type testPermanentFS kernel.Adapter[storage.PermanentFSPort]
 
+// readMountAdapter contributes one read mount through storage's Port, standing
+// in for the game plugin that would contribute its assets.
+type readMountAdapter struct{ mount storage.ReadMount }
+
+func (readMountAdapter) Name() kernel.PluginName           { return "test-read-mount" }
+func (readMountAdapter) Dependencies() []kernel.PluginName { return nil }
+func (a readMountAdapter) Register(registrar *kernel.Registrar, _ any) error {
+	registrar.ProvideAdapter[testReadMount](a.mount)
+	return nil
+}
+
+// testReadMount is the Adapter readMountAdapter contributes its mount as.
+type testReadMount kernel.Adapter[storage.ReadMountPort]
+
 type emptyPermanentFS struct{ fstest.MapFS }
 
 func (emptyPermanentFS) WriteFile(string, []byte, fs.FileMode) error { return errors.ErrUnsupported }
@@ -266,10 +280,8 @@ func newHarnessWith(t *testing.T, hardware *fakeAudio, handler kernel.ErrorHandl
 	}
 	files := fstest.MapFS{"music/pianoroll.ogg": {Data: clip}}
 	sink := &plugin{hardware: hardware}
-	engine := kernel.New(map[kernel.PluginName]any{
-		storage.Name: storage.Config{}.WithReadFS("test", 10, files),
-	}).Handler(handler).WithPlugins(
-		storageplugin.New(), permanentAdapter{},
+	engine := kernel.New(nil).Handler(handler).WithPlugins(
+		storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: files}},
 		soundplugin.New(), sink,
 		probePlugin{},
 	)

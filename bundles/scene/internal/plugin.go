@@ -108,16 +108,12 @@ func (p *plugin) Register(registrar *kernel.Registrar, value any) error {
 	registrar.InitResource(types.NewSizedLookup(config))
 	registrar.Subscribe[scene.FlushOnUpdate](p.flush).
 		Last().Before[gfx.PresentOnUpdate]()
-	return nil
-}
-
-// Start mounts the bundled shader filesystem. Startup runs after every plugin
-// has registered and before the host loop, so the shader is in place for the
-// first frame without depending on app publishing an event.
-func (p *plugin) Start(k kernel.Executioner) error {
-	return k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{Mount: storage.ReadMount{
+	// storage installs the bundled shader mount at its Start, ahead of every
+	// plugin that depends on it, so the shader is in place for the first frame.
+	registrar.ProvideAdapter[scene.StorageReadMount](storage.ReadMount{
 		Id: shaderMountID, Priority: math.MaxInt, FS: shaderFS,
-	}}).Err
+	})
+	return nil
 }
 
 // flush binds the resources the frame's decisions need. Everything scene

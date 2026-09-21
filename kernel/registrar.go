@@ -125,7 +125,7 @@ func (r *Registrar) Subscribe[
 // RequireAdapter declares that this plugin needs exactly one Adapter for the
 // required Port P. Composition binds it after every Register; none fails with
 // ErrMissingAdapter and several with ErrDuplicateAdapter. The binding adds no
-// plugin dependency. It panics if P is not built on an interface type.
+// plugin dependency.
 func (r *Registrar) RequireAdapter[P RequiredPortConstraint[I], I any]() RequiredAdapter[I] {
 	binding := &requiredBinding[I]{}
 	r.declarePort[P, I](false, func(contributions []adapterContribution) {
@@ -141,8 +141,7 @@ func (r *Registrar) RequireAdapter[P RequiredPortConstraint[I], I any]() Require
 // CollectAdapters declares that this plugin takes every Adapter provided for the
 // collected Port P, zero included. Composition binds them after every Register,
 // in plugin order, each with the name of the plugin that provided it. The
-// binding adds no plugin dependency. It panics if P is not built on an
-// interface type.
+// binding adds no plugin dependency.
 func (r *Registrar) CollectAdapters[P CollectedPortConstraint[I], I any]() CollectedAdapters[I] {
 	binding := &collectedBinding[I]{}
 	r.declarePort[P, I](true, func(contributions []adapterContribution) {
@@ -158,22 +157,19 @@ func (r *Registrar) CollectAdapters[P CollectedPortConstraint[I], I any]() Colle
 }
 
 // ProvideAdapter contributes adapter as the Adapter A, to the Port A is built
-// on. The parameter has that Port's interface type, so the compiler checks that
-// adapter implements it. An Adapter no plugin requires or collects is not an
-// error. A nil adapter is refused with ErrNilAdapter and contributes nothing; a
-// typed nil, such as a nil pointer, is not nil. It panics if the Port is not
-// built on an interface type.
+// on. The parameter has the type that Port is built on, so the compiler checks
+// that adapter is one: an implementation of the Port's interface, or a value of
+// its value type. An Adapter no plugin requires or collects is not an error. A
+// nil adapter is refused with ErrNilAdapter and contributes nothing; a typed
+// nil, such as a nil pointer, is not nil.
 //
 // Go infers type parameters from a call's arguments before it reads their
-// constraints, so a concrete adapter must already have the interface type:
-// convert it, as in ProvideAdapter[GfxBackend](gfx.Backend(device)), or pass a
-// value declared with that type.
+// constraints, so a concrete adapter for an interface Port must already have
+// the interface type: convert it, as in
+// ProvideAdapter[GfxBackend](gfx.Backend(device)), or pass a value declared
+// with that type.
 func (r *Registrar) ProvideAdapter[A AdapterConstraint[P], P portConstraint[K, I], K portKind, I any](adapter I) {
 	id := reflect.TypeFor[A]()
-	if _, err := portInterface[I]("ProvideAdapter", id); err != nil {
-		r.registry.fail(err)
-		return
-	}
 	if any(adapter) == nil {
 		r.registry.fail(ErrNilAdapter{Plugin: r.owner, Adapter: id})
 		return
@@ -184,16 +180,7 @@ func (r *Registrar) ProvideAdapter[A AdapterConstraint[P], P portConstraint[K, I
 }
 
 func (r *Registrar) declarePort[P any, I any](collects bool, bind func([]adapterContribution)) {
-	declaration := "RequireAdapter"
-	if collects {
-		declaration = "CollectAdapters"
-	}
 	port := reflect.TypeFor[P]()
-	iface, err := portInterface[I](declaration, port)
-	if err != nil {
-		r.registry.fail(err)
-		return
-	}
 	for _, existing := range r.registry.adapterDeclarations {
 		if existing.port == port && existing.owner == r.owner {
 			r.registry.fail(ErrDuplicateRegistration{
@@ -203,6 +190,6 @@ func (r *Registrar) declarePort[P any, I any](collects bool, bind func([]adapter
 		}
 	}
 	r.registry.adapterDeclarations = append(r.registry.adapterDeclarations, &adapterDeclaration{
-		port: port, iface: iface, owner: r.owner, collects: collects, bind: bind,
+		port: port, iface: reflect.TypeFor[I](), owner: r.owner, collects: collects, bind: bind,
 	})
 }

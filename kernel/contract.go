@@ -93,7 +93,8 @@ type Subscription[TEvent any] = func() (Lock, Observe[TEvent])
 
 // RequiredPort is the shape of a Port that needs exactly one Adapter. A plugin
 // names its Port by defining a type from it, with the interface its Adapter
-// implements as the type argument, and that defined type is the Port's identity:
+// implements as the type argument, or the value type its Adapter is when the
+// Adapter is plain data, and that defined type is the Port's identity:
 //
 //	type BackendPort kernel.RequiredPort[Backend]
 //

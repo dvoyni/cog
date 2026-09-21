@@ -192,18 +192,3 @@ type ErrExecutingUnknownCommand[TCommand any] struct {
 func (e ErrExecutingUnknownCommand[TCommand]) Error() string {
 	return fmt.Sprintf("trying to execute unknown command %s", TypeName(reflect.TypeFor[TCommand]()))
 }
-
-// ErrPortNotAnInterface is reported when a Port or Adapter declaration names a
-// type argument that is not an interface. A Port is a contract its Adapters
-// implement, so a concrete type cannot be one. Declaration is the registrar call
-// that was given it.
-type ErrPortNotAnInterface struct {
-	Declaration string
-	Port        reflect.Type
-	Interface   reflect.Type
-}
-
-func (e ErrPortNotAnInterface) Error() string {
-	return fmt.Sprintf("kernel: %s type argument %s is built on %s, which is not an interface type",
-		e.Declaration, TypeName(e.Port), TypeName(e.Interface))
-}
