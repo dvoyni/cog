@@ -18,8 +18,12 @@ import (
 // that the gap is reported as a decomposition rather than as one number.
 //
 // Nothing here changes the index. They are measurements of the pieces, priced
-// against BenchmarkBodyIndexRebuild's whole, and any optimisation they suggest
-// is a finding for a later ticket rather than this one's work.
+// against BenchmarkBodyIndexRebuild's whole.
+//
+// The slot table is no longer on the rebuild: the Body index finds a slot by
+// the walk's own position now (issue 441), and only the static index keeps a
+// map. BenchmarkTheRebuildsSlotTable stays as the price of what was taken out,
+// which is what the rebuild's before-and-after is read against.
 
 // rebuiltBodies is the population every number in this file and the rebuild
 // benchmark beside it is quoted per.
@@ -43,8 +47,9 @@ func BenchmarkTheRebuildsRotations(b *testing.B) {
 }
 
 // BenchmarkTheRebuildsSlotTable is the two Go map operations a Body the
-// Entity-to-slot table costs on the rebuild path: the miss Remove asks on an
-// index a Clear has just emptied, and the store Insert makes.
+// Entity-to-slot table cost on the rebuild path before the Body index gave it
+// up: the miss Remove asked on an index a Clear had just emptied, and the store
+// Insert made.
 //
 // It is measured a whole rebuild at a time — the clear and then 1 024 Bodies —
 // because a map's cost is what its occupancy makes it, and a benchmark that

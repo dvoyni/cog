@@ -19,8 +19,8 @@ type ShrinkRequest struct {
 	// persistence window closes. Shrinking it drops them, so a pair that
 	// flickers apart across the shrink starts again at Began with no warm start.
 	KeepCached bool
-	// KeepIndices keeps both grids: their entries, the Entity to slot table and
-	// the cell lists behind the buckets.
+	// KeepIndices keeps both grids: their entries, the static index's Entity
+	// to slot table and the cell lists behind the buckets.
 	KeepIndices bool
 	// KeepWorldCache keeps the world-cache slab behind both grids — the
 	// world-space geometry the closed forms read.

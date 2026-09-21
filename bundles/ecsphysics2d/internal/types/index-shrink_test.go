@@ -123,6 +123,44 @@ func TestASecondIndexShrinkReleasesNothing(t *testing.T) {
 	}
 }
 
+// TestTheBodyIndexShrinkIsExactAndASecondOneAllocatesNothing is what the Body
+// index's slot rule buys the shrink: it keeps no Go map, so everything its grid
+// holds is a slice whose capacity can be asked. The figure it reports is the
+// whole of what it let go, and a second shrink has nothing to rebuild.
+func TestTheBodyIndexShrinkIsExactAndASecondOneAllocatesNothing(t *testing.T) {
+	idx := NewBodyIndex(2)
+	fill := func(count int) {
+		idx.Clear()
+		for i := range count {
+			idx.Insert(testEntity(i), NewCircleShape(0.4, m.Vec2d{}),
+				m.Vec2d{X: float64(i%64) * 1.9, Y: float64(i/64) * 1.9}, 0, nil)
+		}
+	}
+	fill(4096)
+	fill(256)
+
+	before := idx.gridBytes()
+	released := idx.shrink(ShrinkRequest{})
+	if released.Indices == 0 || released.Indices != before-idx.gridBytes() {
+		t.Errorf("the shrink reported %d grid bytes, want the %d the grid went down by",
+			released.Indices, before-idx.gridBytes())
+	}
+	if idx.Len() != 256 || len(overlappedBodies(idx)) != 256 {
+		t.Fatalf("the shrunk Body index holds %d and answers %d, want 256 and 256",
+			idx.Len(), len(overlappedBodies(idx)))
+	}
+
+	if allocations := testing.AllocsPerRun(10, func() { idx.shrink(ShrinkRequest{}) }); allocations != 0 {
+		t.Errorf("a second shrink of the Body index allocated %v times, want 0", allocations)
+	}
+}
+
+// overlappedBodies is overlapped for a Body index.
+func overlappedBodies(idx *BodyIndex) []ecs.Entity {
+	return idx.Overlap(nil, NewCircleShape(200, m.Vec2d{}), m.Vec2d{X: 60, Y: 30}, 0, nil,
+		CollisionBitsAll, CollisionBitsAll, ecs.NoEntity)
+}
+
 // spikedIndex is a static index a spike filled and a cut emptied down to keep
 // Entities: the shape of an index after a level load, with slack in every
 // buffer, dead slots in the entry run, and abandoned world-cache runs the

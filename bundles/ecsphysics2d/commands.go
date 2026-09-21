@@ -43,9 +43,9 @@ type ShrinkCmd kernel.Command[ShrinkRequest, ShrinkResponse]
 //     reported Ended and are carried unreported as Impulse carriers until the
 //     persistence window closes. Shrinking it drops them, so a pair that
 //     flickers apart across the shrink comes back at Began with no warm start;
-//   - KeepIndices keeps both grids: their entries, the Entity to slot table and
-//     the cell lists behind the buckets, which otherwise are compacted and the
-//     bucket table re-sized to what the listings now need;
+//   - KeepIndices keeps both grids: their entries, the static index's Entity to
+//     slot table and the cell lists behind the buckets, which otherwise are
+//     compacted and the bucket table re-sized to what the listings now need;
 //   - KeepWorldCache keeps the world-cache slab behind both grids, which
 //     otherwise is packed — and packing it is the one area that collects
 //     something a steady state leaks rather than merely slack, because a Static
@@ -56,7 +56,8 @@ type ShrinkRequest = types.ShrinkRequest
 // ShrinkResponse is the bytes a ShrinkCmd released, per area, summed over both
 // indices where an area names two. An area kept reports 0.
 //
-// It is a floor rather than an exact figure in one place: the indices' Entity
-// to slot tables are Go maps, and a map publishes its length and never what its
-// buckets cost, so what such a map gives back is real and is not counted here.
+// It is a floor rather than an exact figure in one place: the static index's
+// Entity to slot table is a Go map, and a map publishes its length and never
+// what its buckets cost, so what that map gives back is real and is not counted
+// here. The Body index keeps no such table, so its share of Indices is exact.
 type ShrinkResponse = types.ShrinkResponse
