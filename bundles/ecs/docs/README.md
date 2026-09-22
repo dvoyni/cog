@@ -1076,17 +1076,22 @@ below.
 ## What it costs
 
 Measured on a real `kernel.Engine` driven by a real `app.UpdateEvent`, AMD Ryzen
-9 7950X3D, go1.27.1 windows/amd64, medians of five:
+9 7950X3D, go1.27.1 windows/amd64. The **ns/op** column is the median of ten
+interleaved rounds, from the same binary and session as
+[What a wider Query costs](#what-a-wider-query-costs) below
+([#280](https://github.com/dvoyni/cog/issues/280)); the allocation columns
+predate that session and are
+[#283](https://github.com/dvoyni/cog/issues/283)'s to refresh:
 
 | whole frame | ns/op | allocs/op | B/op |
 | --- | --- | --- | --- |
-| nothing subscribed | 81 | **2** | 160 |
-| hand-written subscription, 1 000 | 5 185 | **6** | 322 |
-| **a System with a two-Component Query, 1 000** | **7 949** | **6** | 322 |
-| …the same Query with a `Without`, a third tagged, 1 000 | 8 201 | **6** | 322 |
-| hand-written subscription, 10 000 | 20 142 | **6** | 322 |
-| **a System with a two-Component Query, 10 000** | **38 783** | **6** | 321 |
-| …the same Query with a `Without`, a third tagged, 10 000 | 36 506 | **6** | 322 |
+| nothing subscribed | 88 | **2** | 160 |
+| hand-written subscription, 1 000 | 7 759 | **6** | 322 |
+| **a System with a two-Component Query, 1 000** | **11 677** | **6** | 322 |
+| …the same Query with a `Without`, a third tagged, 1 000 | 13 493 | **6** | 322 |
+| hand-written subscription, 10 000 | 23 883 | **6** | 322 |
+| **a System with a two-Component Query, 10 000** | **35 437** | **6** | 321 |
+| …the same Query with a `Without`, a third tagged, 10 000 | 44 293 | **6** | 322 |
 
 **The engine charges 2 per publication plus 4 per subscriber, and the Query
 lands exactly on that line** — identical at 1 000 and at 10 000 Entities, which
@@ -1098,12 +1103,17 @@ none of it**: 6.003 at 1k and 6.001 at 10k with a `Without` in the Query.
 `-gcflags=-m` reports no `moved to heap` anywhere on the iteration path, so the
 zero is explained by the compiler rather than merely observed.
 
-From the 1k to 10k slope, so the per-frame floor drops out: **3.43 ns an Entity
-against the hand-written loop's 1.66**. The filtered Query's slope is **3.14**,
-lower than the unfiltered one's rather than higher, because a third of the
-population fails the `Without` probe and never reaches the fill or the loop
-body: **a filter is cheaper than the work it removes**, which is the whole
-reason to reach for one.
+From the 1k to 10k slope, so the per-frame floor drops out: **2.64 ns an Entity
+against the hand-written loop's 1.79**. The two-Component Query is shape 2, so
+it takes the walk `All()` carries inside its own literal and pays no per-Entity
+call. The filtered Query's slope is **3.42**, higher than the unfiltered one's:
+its `Without` makes it three fields, shape 3, and a shape-3 Query delegates
+through `iterate` and pays an indirect `yield` an Entity, which costs more than
+the third of the population the filter turns away saves. Before #422 inlined
+the two-field walk the order was the other way round, 3.43 against 3.14, when
+both Queries delegated. The filter's probe itself is not the difference: a
+`Without` that rejects nothing costs what a third Component field costs, see
+below.
 
 Three things the implementation does that those numbers depend on. Each is
 invisible in a microbenchmark and each cost an allocation a tick when it was not
@@ -1118,6 +1128,136 @@ done:
 - **The fill is unrolled by field count.** A per-field loop costs about 2.4x a
   hand-written walk and per-field binder closures about 5x, and those allocate.
   Queries wider than four Components fall back to the loop.
+
+### What a wider Query costs
+
+What each additional field in a Query costs an Entity, on the shipped fillers
+([#280](https://github.com/dvoyni/cog/issues/280)). The benchmark is
+`BenchmarkQueryWidth` in `internal/types/widthbench_test.go`, kept in the tree
+so every number here can be re-run.
+
+**The setup.** A dedicated plugin registers eight Components `w0`…`w7`, all the
+same pointer-free 8-byte shape, two Tags every Entity holds, and two Tags no
+Entity ever receives. Every Entity holds every width Component and both present
+Tags, set in the same order, so every Store's dense row is the Entity's index
+and every Store is the same length. That is the cache-friendliest layout there
+is, deliberately; other layouts were not measured. Equal lengths make the
+first-declared field the Driver, and `TestTheWidthSweepDrivesOffItsFirstField`
+pins that, the shape, the walk length and the yield count for every row. A
+width-*k* Query probes *k*−1 fields per Entity, because the Driver's field is
+never probed. The loop body is `it.W0.X += 1` everywhere, so an extra field
+costs its probe and its fill and never any loop-body work. The walk is timed
+alone, after one frame has bound the Query, never the whole frame. Every row
+reports 0 allocs/op.
+
+**The rows.**
+
+- `components-k`: a Query of `w0`…`w(k−1)`, `W0` the one write, ranged over
+  `All()`. This is what a System author pays. **Only width 2 takes the walk
+  `All()` carries inside its literal**; widths 1, 3 and 4 delegate through
+  `iterate` and pay an indirect `yield` an Entity, and widths 5 and up run
+  `iterateWide`.
+- `delegated-k`, k = 1…4: the same Queries walked by calling `q.iterate`
+  directly, so every width takes the same path with one indirect `yield` an
+  Entity. **These are the rows the go/no-go rule reads**, so that "the third
+  field" is not confused with "the third field left the inlined literal".
+- `tag-3`, `tag-4`: `W0`, `W1` and one or two present Tags as ordinary fields.
+- `without-3`, `without-4`: `W0`, `W1` and one or two `Without`s that reject
+  nothing. All four are shape 3 or 4, so through `All()` they already delegate.
+- `hand-k`: the same walk written by hand over the typed Stores — `owners`
+  backwards, `probe` each other Store, copy every probed value to a local and
+  fold it into `W0`. `hand-1` touches only the dense row and does not even load
+  `owners`, so it is a floor rather than a like-for-like baseline, and the
+  width-1 ratios read high.
+
+**How it was run.** One binary, `go test -c -o width.test
+./bundles/ecs/internal/types`, ten rounds, and in each round every case as its
+own invocation (`width.test -test.run '^$' -test.bench
+'^BenchmarkQueryWidth$/^components-3$/^n=10000$' -test.count 1`), the case
+order rotated by five each round, with the seven `BenchmarkFrame*` arms of the
+table above in the same rotation. The figures are medians. AMD Ryzen 9 7950X3D,
+go1.27.1 windows/amd64. The machine was shared with other builds during the
+session: individual runs swing up to 2× and the medians sit 20–30% above a
+quiet run's, but the per-case minima tell the same story, and the verdict below
+holds on both.
+
+**Footprint.** A Component Store holds 8 bytes of dense row and 8 of sparse slot
+an Entity (the sweep registers every Store with `ids` equal to the population,
+so a `Without` probe loads a real slot rather than taking the out-of-range
+return), plus the Driver's 8-byte `owners`. A Tag Store's rows are zero-width,
+so a probe touches only its sparse slots. A width-*k* walk therefore touches
+about 16·*k* + 8 bytes an Entity. This machine has 1 MB of L2 per core and 96 or
+32 MB of L3 per CCD.
+
+At 10 000 Entities, ns an Entity:
+
+| width | `All()` | delegated | hand-written | `All()` × hand | delegated × hand | touched |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 2.61 | 1.86 | 0.54 | 4.8 | 3.5 | 240 KB |
+| 2 | **2.52** (inlined literal) | 3.50 | 1.43 | 1.8 | 2.5 | 400 KB |
+| 3 | 5.17 | 4.41 | 2.37 | 2.2 | 1.9 | 560 KB |
+| 4 | 7.28 | 6.26 | 3.40 | 2.1 | 1.8 | 720 KB |
+| 5 | 14.74 | | | | | 880 KB |
+| 6 | 19.21 | | | | | 1 040 KB |
+| 7 | 28.45 | | | | | 1 200 KB |
+| 8 | 37.43 | | | | | 1 360 KB |
+| 2 + one present Tag | 4.32 | | | | | 480 KB |
+| 2 + two present Tags | 5.81 | | | | | 560 KB |
+| 2 + one `Without`, rejecting nothing | 4.35 | | | | | 480 KB |
+| 2 + two `Without`s, rejecting nothing | 7.00 | | | | | 560 KB |
+
+At 1 000 Entities:
+
+| width | `All()` | delegated | hand-written | `All()` × hand | delegated × hand | touched |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 2.72 | 1.87 | 0.62 | 4.4 | 3.0 | 24 KB |
+| 2 | **2.39** (inlined literal) | 3.52 | 1.70 | 1.4 | 2.1 | 40 KB |
+| 3 | 4.57 | 4.54 | 2.99 | 1.5 | 1.5 | 56 KB |
+| 4 | 6.83 | 6.36 | 3.25 | 2.1 | 2.0 | 72 KB |
+| 5 | 14.99 | | | | | 88 KB |
+| 6 | 19.66 | | | | | 104 KB |
+| 7 | 28.03 | | | | | 120 KB |
+| 8 | 37.43 | | | | | 136 KB |
+| 2 + one present Tag | 4.39 | | | | | 48 KB |
+| 2 + two present Tags | 5.77 | | | | | 56 KB |
+| 2 + one `Without`, rejecting nothing | 4.50 | | | | | 48 KB |
+| 2 + two `Without`s, rejecting nothing | 7.27 | | | | | 56 KB |
+
+**The third field is not a step.** On the delegated rows at 10 000, each field
+adds **Δ2 = 1.64, Δ3 = 0.90, Δ4 = 1.86 ns** an Entity (1.65, 1.02 and 1.81 at
+1 000; 1.33, 0.77 and 1.63 on the minima). The rule written before the run —
+the gap reproduces if Δ3 ≥ 3 ns **and** Δ3 ≥ 2 × max(Δ2, Δ4) — fails on both
+counts: the third field is the *cheapest* of the three. A present Tag as the
+third field adds 0.82 and a `Without` rejecting nothing 0.84, against the same
+`delegated-2`; the fourth adds 1.49 and 2.66 (the two fourth-field minima are
+identical, 5.03, so the gap between those medians is the machine). The
+prototype's 10.8 ns for a three-Component Query
+([ecs.md](specs/ecs.md#time-and-one-number-worth-another-look)) does **not
+reproduce** on the shipped Query. The hand-written walk climbs about 0.9–1.0 ns
+a field at 10 000, so inside the unrolled range a Query's field costs about what
+the data costs, plus the Query's fixed charge of a filler call and one indirect
+`yield` an Entity.
+
+**Through `All()`** the steps are Δ2 = −0.09, Δ3 = 2.65, Δ4 = 2.11 at 10 000
+(−0.33, 2.19, 2.26 at 1 000). Width 2 is cheaper than width 1 because only width
+2 takes the inlined literal; a Query that delegates through `All()` pays about
+0.75–1.0 ns an Entity over calling `iterate` directly, the range statement's
+state machine that survives around an indirect `yield`. Width 3's apparent
+2.65 ns step is that path change plus a field, not a dearer probe. Widening
+width 1, 3 and 4 into their own literals is
+[#546](https://github.com/dvoyni/cog/issues/546)'s, measured against these rows.
+
+**A present Tag costs what a Component field costs**, and **a `Without` that
+rejects nothing costs a full probe**: both compare one sparse slot, and the
+Tag's zero-width fill is free next to it.
+
+**The step at width 5 is the filler, not the cache.** Widths 1–4 run the
+unrolled fillers; width 5 and up run `iterateWide`, the per-field loop, and pay
+**7.5 ns** an Entity at the switch and 4.5–9 ns a field after it. It is the same
+at 1 000, where every width fits in L2, as at 10 000, where widths 6–8 do not —
+37.43 ns at width 8 on both — so nothing in this sweep is a cache effect.
+Explaining or shrinking the per-field loop is
+[#257](https://github.com/dvoyni/cog/issues/257)'s ground.
 
 ### What structural change costs
 
