@@ -7,28 +7,29 @@ import (
 	"testing/fstest"
 
 	"github.com/dvoyni/cog/bundles/ecsscene"
-	"github.com/dvoyni/cog/bundles/scene"
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // The numbers here are measured on a real engine driven by a real
-// app.UpdateEvent and app.RenderEvent with the real scene plugin composed
-// beside the binding — publish, acquire every declared lock, run every System
-// and every flush, wait.
+// app.UpdateEvent and app.RenderEvent with the real model and gfx plugins
+// composed beside the binding — publish, acquire every declared lock, run every
+// System, wait.
 //
-// The allocation test's frame has no camera and no resident model, which is
-// deliberate: what the binding costs is the walk, the probes, the copy-out into
-// scratch and the record into scene's queue, and what scene does with a draw
-// once it has a camera to decide for is scene's number. Scene records a Model
-// call — plays, overrides and material copied into its arenas — before it knows
-// whether the path is resident.
+// The allocation test's frame has no camera and no resident model, on a
+// backend that never comes up. Since the recording System draws into gfx
+// itself, such a frame keys nothing and records nothing: the load System waits
+// for the backend and the recording System skips a frame it could not draw, as
+// scene's flush skipped it. What the test still holds is that the frame's
+// fixed cost does not grow with the population. The benches report the drawn
+// frame's allocations.
 //
-// The benches' frame draws: a camera, the model resident, and scene's cull,
-// sort, pack and emit into gfx, which replays into a backend that discards. It
-// is the whole frame a game pays for, so a redesign of the binding has a
-// before and an after measured by the same code.
+// The benches' frame draws: a camera, the model resident, and the recording
+// System's bucketing, cull, sort, pack and emit into gfx, which replays into a
+// backend that discards. It is the whole frame a game pays for, so the
+// redesign has a before and an after measured by the same code.
 
 // population is one arm of the cost table: n Model Entities, each carrying the
 // optional Components the arm names.
@@ -51,7 +52,7 @@ var (
 
 	// benchAnimation blends two clips, which is the common walk-into-idle
 	// case. They are the animated model's two, so the drawn arm samples both.
-	benchAnimation = ecsscene.Animation{Plays: [ecsscene.MaxPlays]scene.ClipPlay{
+	benchAnimation = ecsscene.Animation{Plays: [model.MaxClipPlays]model.ClipPlay{
 		{Clip: "Walk", Weight: 1, Loop: true}, {Clip: "Idle", Weight: 0.25, Loop: true},
 	}}
 	// benchParams is one tint, which is the per-Entity variation case.
@@ -67,15 +68,15 @@ var (
 )
 
 // newRecordingHarness is the binding under measurement, warmed past every
-// arena the first frames grow: scene's queue keeps its backing across frames,
-// and so does the recording scratch.
+// arena the first frames grow: the scratches keep their backing across
+// frames.
 func newRecordingHarness(tb testing.TB, arm population) *harness {
 	tb.Helper()
 	h := newHarnessOver(tb, fstest.MapFS{}, uint32(arm.n)+8)
 	if arm.n > 0 {
 		request := spawnRequest{
 			Count: arm.n, Step: 0.5,
-			Model: &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}},
+			Model: &ecsscene.Model{Ref: model.ModelRef{Path: crateModel}},
 		}
 		if arm.animated {
 			request.Animation = &benchAnimation
@@ -113,7 +114,7 @@ func allocationsDuring(f func()) uint64 {
 //
 // It is a steady state over thousands of frames rather than allocs/op, which
 // rounds: a fraction of an object a frame is what a rare growth looks like. The
-// harness subscribes no second recorder, because one waiting on scene's queue
+// harness subscribes no second recorder, because one waiting on gfx's queue
 // behind the binding costs the kernel's scheduler an allocation per blocked
 // dispatch, and that would grow with frame length rather than with anything
 // the binding does.
@@ -197,10 +198,10 @@ func benchPlace(row, rows int) m.Transform {
 	return m.At(-benchColumns*benchStep/2, float32(row)*benchStep-float32(rows)*benchStep/2, 0)
 }
 
-// newFrameHarness is the whole frame an arm benches: the recording the
-// allocation test measures, and after it scene's flush with a camera to decide
-// for - cull, sort, pack - and gfx's recording of the passes into a backend that
-// is Ready and discards what it is handed. The model is resident and every
+// newFrameHarness is the whole frame an arm benches: the load System, the
+// recording System with a camera to decide for - bucket, cull, sort, pack - and
+// gfx's recording of the passes into a backend that is Ready and discards what
+// it is handed. The model is resident and every
 // Entity is packed before it returns, and the arenas the first frames grow are
 // grown.
 //
@@ -222,10 +223,10 @@ func newFrameHarness(b *testing.B, arm population) *harness {
 		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
 	})
 	h.spawn(b, spawnRequest{Place: benchEye, Camera: &ecsscene.Camera{FovY: 1.0472, Near: 0.1, Far: 200}})
-	model := &ecsscene.Model{Ref: scene.ModelRef{Path: path}}
+	crate := &ecsscene.Model{Ref: model.ModelRef{Path: path}}
 	want := int64(arm.n)
 	if arm.n == 0 {
-		resident := h.spawn(b, spawnRequest{Model: model})
+		resident := h.spawn(b, spawnRequest{Model: crate})
 		h.frameUntil(b, "the model to become resident", func() bool { return backend.drew.Load() == 1 })
 		h.despawn(b, resident)
 	}
@@ -233,7 +234,7 @@ func newFrameHarness(b *testing.B, arm population) *harness {
 	for row := range rows {
 		request := spawnRequest{
 			Count: min(benchColumns, arm.n-row*benchColumns), Step: benchStep,
-			Place: benchPlace(row, rows), Model: model,
+			Place: benchPlace(row, rows), Model: crate,
 		}
 		if arm.animated {
 			request.Animation = &benchAnimation
