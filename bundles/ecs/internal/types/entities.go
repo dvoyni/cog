@@ -2,6 +2,7 @@ package types
 
 import (
 	"reflect"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -82,6 +83,20 @@ type Entities struct {
 	// write{*Entities} while they do, so nothing else is running. It is the
 	// name-to-Component mapping; there is no other.
 	classes map[reflect.Type]*componentClass
+	// reserved is the reservation cursor: how many Reserved Entities deferring
+	// handles have taken since the last drain settled it. It is the one atomic
+	// in the whole deferral design, and it is one atomic add per deferred New —
+	// parallel deferring Systems contend on this one word, no System is
+	// serialised, and no lock set is widened.
+	//
+	// It is a cursor over the free list, read from the newest index down, and
+	// past len(gens) at the floor once the free list is exhausted. It can be
+	// taken without the write lock because nothing writes the free list or the
+	// generations while any System runs: every System touching a Store holds
+	// read{*Entities}, and a writer is excluded against all of them. settle cuts
+	// the free list back to where it left off and resets it. See
+	// bundles/ecs/docs/specs/deferred.md § Reservation holds only read{*Entities}.
+	reserved atomic.Uint32
 	// The fields below are ShrinkCmd's. They sit after everything a spawn or a
 	// despawn reads, and what only the Command reads is behind one pointer,
 	// because this object's size class is measurable on a despawn: three
@@ -240,15 +255,70 @@ func (en *Entities) drain() {
 }
 
 // settle returns the free list to an ordinary free list between the two passes:
-// it is where the reservation cursor is cut back and reset and the released
-// list is moved onto the free list.
+// the indices the reservation cursor handed out are cut off the free list, and
+// the cursor is reset to nothing.
 //
-// It is empty while nothing reserves. The cursor, the free generation bit and
-// the released list arrive with the deferring handles; the step is named here
-// because the order of a drain is the contract — the despawn pass must run
-// after the free list is ordinary again, not before — and a step that is
-// discovered later is a step that lands in the wrong place.
-func (en *Entities) settle() {}
+// It sits between the passes so that the despawn pass is literally today's
+// despawn, with no special case for an outstanding reservation: an index freed
+// there goes onto a free list nothing has already handed out, and is available
+// to the very next reservation.
+//
+// The cut is by count rather than by value, because the cursor hands indices
+// out from the newest end of the free list downward, which is the end alloc
+// takes from. A cursor that ran past the free list took the rest of its indices
+// from past len(gens), and there is nothing to cut for those: the spawn pass
+// grew the index space to reach them.
+//
+// Moving the released list onto the free list is the third step of the settle
+// and arrives with the released list itself.
+func (en *Entities) settle() {
+	taken := min(int(en.reserved.Swap(0)), len(en.free))
+	en.free = en.free[:len(en.free)-taken]
+}
+
+// reserve hands out one Reserved Entity: an index and a generation fixed here,
+// with no Components until the drain and Alive false until then. It is what a
+// deferred New returns, and it is the only thing in the ECS that changes state
+// without a write lock.
+//
+// The cursor is one atomic add. Below len(free) it names an index from the free
+// list, newest first, which is the index alloc would have taken; past it the
+// indices come from past len(gens) at the floor, the generation a fresh index
+// starts live at. Nothing is written here — not the generations, not the free
+// list — so nothing needs the write lock: the spawn pass does the writing, and
+// settle does the cutting.
+//
+// The generation it hands back is the generation the index will be alive at,
+// with the free bit off, so Alive stays exactly false until the spawn pass
+// stores it. A free index carries that same generation with the bit on, and an
+// index past the end is past len(gens); both miss in the one compare Alive is.
+func (en *Entities) reserve() Entity {
+	cursor := int(en.reserved.Add(1)) - 1
+	if cursor < len(en.free) {
+		index := en.free[len(en.free)-1-cursor]
+		return newEntity(index, en.gens[index]&^freeGeneration)
+	}
+	return newEntity(uint32(len(en.gens)+cursor-len(en.free)), en.floor)
+}
+
+// spawnReserved brings a Reserved Entity to life, which is the first half of
+// what the spawn pass does for one queued Spawn: it grows the index space where
+// the reservation went past the end, and clears the free bit by storing the
+// generation the handle has carried since it was reserved.
+//
+// The indices it grows past are reservations of their own — the cursor hands
+// out past-the-end indices consecutively, and every reservation is queued by
+// the same call that made it — so each is filled by its own queued Spawn, in
+// whatever order the handles enrolled. Until then the placeholder carries the
+// free bit, so an index this pass has not reached yet answers Alive false like
+// any other index that is not live.
+func (en *Entities) spawnReserved(e Entity) {
+	index := int(e.idx())
+	for len(en.gens) <= index {
+		en.gens = append(en.gens, en.floor|freeGeneration)
+	}
+	en.gens[index] = e.gen()
+}
 
 // alloc hands out an id, recycling a freed index where there is one so that the
 // flat sparse index of every Store stays bounded by peak concurrent entities

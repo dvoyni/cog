@@ -108,13 +108,29 @@ type Spawn[S any] struct {
 // Component and the Component set; the plugin boundary turns that into a
 // composition failure naming the plugin.
 func (s *Spawn[S]) prepare(en *Entities, access kernel.ResourceAccess) {
+	s.entities = access.GetWrite[*Entities]()
+	s.fields = planSet[S](en, access, func(class *componentClass) spawnField { return class.declareSet(access) })
+	s.hooks = spawnGate{fields: s.fields}
+}
+
+// planSet plans a Component set against the world and declares what each field
+// carries, through the declaration the caller chose: the write declareSet makes
+// for an immediate Spawn, or the read declareDeferredSet makes for a deferring
+// one. The plan itself — what the set must be, where each Component sits in it,
+// and what a field that names no Component is — is the same for both, and is
+// written once here so that the two handles can never diverge on it.
+//
+// It panics when the set is not a struct, when a field is a pointer, or when a
+// field names a Component no plugin registered, naming the Component and the
+// Component set; the plugin boundary turns that into a composition failure
+// naming the plugin.
+func planSet[S any](en *Entities, access kernel.ResourceAccess, declare func(*componentClass) spawnField) []spawnField {
 	setType := reflect.TypeFor[S]()
 	if setType.Kind() != reflect.Struct {
 		panic(fmt.Sprintf("ecs: Component set %s is a %s; a Component set is a struct whose field types are the Components",
 			kernel.TypeName(setType), setType.Kind()))
 	}
-	s.entities = access.GetWrite[*Entities]()
-	s.fields = make([]spawnField, 0, setType.NumField())
+	fields := make([]spawnField, 0, setType.NumField())
 	for i := range setType.NumField() {
 		field := setType.Field(i)
 		if field.Type.Kind() == reflect.Pointer {
@@ -126,11 +142,11 @@ func (s *Spawn[S]) prepare(en *Entities, access kernel.ResourceAccess) {
 		if class == nil {
 			panic(fmt.Sprintf("ecs: Component set %s names unregistered Component %s", kernel.TypeName(setType), kernel.TypeName(field.Type)))
 		}
-		planned := class.declareSet(access)
+		planned := declare(class)
 		planned.offset = field.Offset
-		s.fields = append(s.fields, planned)
+		fields = append(fields, planned)
 	}
-	s.hooks = spawnGate{fields: s.fields}
+	return fields
 }
 
 func (s *Spawn[S]) spawnGate() *spawnGate { return &s.hooks }

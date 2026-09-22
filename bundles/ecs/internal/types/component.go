@@ -83,6 +83,26 @@ type componentClass struct {
 	// in the Store's Hook log, and the gate that chooses between them when a run
 	// starts. The offset and the resolved Store are the Spawn's to fill.
 	declareSet func(access kernel.ResourceAccess) spawnField
+	// declareDeferredSet is declareSet for a handle that queues the Spawn
+	// instead of making it: the same setters and the same gate, and a read of
+	// the Store where declareSet takes the write.
+	//
+	// The read is the whole difference, and it is what makes the deferring
+	// handle's lock narrow. A write conflicts with every Query and every
+	// accessor of C; a read conflicts only with writers of C, which already
+	// serialise against each other. The ownership the write was kept for is
+	// untouched: the kernel's coupling check walks the read set and the write
+	// set through the same closure, so ErrUndeclaredDependency still fires,
+	// naming the Component and its owner.
+	//
+	// The Store is bound here rather than read back through the handle, because
+	// the pass that writes through it runs inside the drain System's
+	// write{*Entities} rather than inside the queuer's read — which is the same
+	// seam the enrolled drain closure binds the authority at. The handle is
+	// declared and dropped, as accessor.go, systemcall.go and hooks.go each drop
+	// one: what it buys is the declaration, not a value. See
+	// bundles/ecs/docs/specs/deferred.md § Ownership without the write.
+	declareDeferredSet func(access kernel.ResourceAccess) spawnField
 	// population, has, owners and encode are what the read Commands ask of a
 	// Store they reach by name rather than by type: its Len, its Has, its live
 	// owners slice and one Entity's value as JSON. They are baked here for the
@@ -175,6 +195,19 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 			handle := access.GetWrite[*Store[C]]()
 			return spawnField{
 				get: func() *storeHeader { return handle.Get().erase() },
+				set: func(store *storeHeader, e Entity, value unsafe.Pointer) {
+					(*Store[C])(unsafe.Pointer(store)).Set(e, *(*C)(value))
+				},
+				recorded: func(store *storeHeader, e Entity, value unsafe.Pointer) {
+					(*Store[C])(unsafe.Pointer(store)).setRecorded(e, *(*C)(value))
+				},
+				hooks: hookGate{watch: &store.watch, mask: recordsSpawn},
+			}
+		},
+		declareDeferredSet: func(access kernel.ResourceAccess) spawnField {
+			access.GetRead[*Store[C]]()
+			return spawnField{
+				get: func() *storeHeader { return store.erase() },
 				set: func(store *storeHeader, e Entity, value unsafe.Pointer) {
 					(*Store[C])(unsafe.Pointer(store)).Set(e, *(*C)(value))
 				},
