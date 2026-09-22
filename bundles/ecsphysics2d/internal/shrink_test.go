@@ -105,7 +105,7 @@ func TestAShrunkPhysicsWorldReturnsToItsSteadyState(t *testing.T) {
 	if controlTouching == 0 || shrunkTouching == 0 {
 		t.Fatal("the measured scene has no Contacts at all, so it measures neither Detect nor Solve")
 	}
-	if shrunk > control+0.05 {
+	if !raceEnabled && shrunk > control+0.05 {
 		t.Errorf("after the zero request the step costs %.3f objects a tick against its control's %.3f",
 			shrunk, control)
 	}
@@ -193,7 +193,7 @@ func TestAShrunkPhysicsWorldGivesTheSolverScratchBack(t *testing.T) {
 		t.Errorf("the shrink gave back %d scratch bytes, want at least the %d a %d Body slot table holds",
 			gave, 4*spikeBodies, spikeBodies)
 	}
-	if shrunk.objects > control.objects+0.05 {
+	if !raceEnabled && shrunk.objects > control.objects+0.05 {
 		t.Errorf("after the shrink the step costs %.3f objects a tick against its control's %.3f",
 			shrunk.objects, control.objects)
 	}

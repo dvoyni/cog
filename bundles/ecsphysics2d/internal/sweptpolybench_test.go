@@ -21,6 +21,9 @@ import (
 // are the point of it: a run with no Sensor Hits against a Polygon measures the
 // walk past an index rather than the arm.
 func TestTheSweptSensorAgainstPolygonsSitsOnTheEnginesAllocationLine(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const ticks = 4_000
 
 	measure := func(n int) (float64, int, int) {

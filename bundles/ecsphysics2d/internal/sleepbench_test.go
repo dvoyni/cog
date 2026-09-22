@@ -111,6 +111,9 @@ func sleepingCount(t testing.TB, h *harness, crates []ecs.Entity) int {
 // the measurement. The empty engine carries the same Systems, so its line
 // includes their dispatch.
 func TestTheSleepingStepSitsOnTheEnginesAllocationLine(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const ticks = 4_000
 
 	measure := func(n int, churn bool) (float64, int, int) {

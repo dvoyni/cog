@@ -284,6 +284,9 @@ func TestAManifoldNeverCarriesMoreThanTwoPointsHoweverManyVertices(t *testing.T)
 }
 
 func TestTheNarrowphaseAllocatesNothingOnEveryPairKind(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	// EPA's hull is two fixed stack buffers ping-ponged, where cp allocates a
 	// fresh slice on every one of up to thirty iterations. That is the
 	// narrowphase's whole share of cp's 656 objects a step.

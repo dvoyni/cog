@@ -180,6 +180,9 @@ func TestNothingShrinks(t *testing.T) {
 // column with: three allocations for the three arrays and nothing during the
 // fill, against append doubling's repeated regrowth.
 func TestTheReserveHintBuysAnAllocationFreeFill(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const n = 10000
 	entities := newEntities(n)
 	ids := make([]Entity, n)

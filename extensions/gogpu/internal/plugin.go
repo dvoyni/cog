@@ -155,7 +155,6 @@ func (p *plugin) Stop(kernel.Executioner) error {
 	return nil
 }
 
-
 // onUpdate runs on the gogpu (main) thread each frame. It flushes batched input,
 // then hands the Loop the real time of any newly rendered frames (measured in
 // onDraw), because gogpu's deltaTime is 0 on wasm and onUpdate's own time deltas

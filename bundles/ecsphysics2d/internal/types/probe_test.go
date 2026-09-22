@@ -213,6 +213,9 @@ func TestClosestPointIsOnTheSurfaceFromInsideAndOut(t *testing.T) {
 }
 
 func TestThePairPrimitivesAllocateNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	to := m.Vec2d{X: 10}
 	at := m.Vec2d{X: 5}
 

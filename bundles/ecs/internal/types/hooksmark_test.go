@@ -327,10 +327,10 @@ func TestMarkingAChangeAllocatesNothingAfterTheFirstWatchedRun(t *testing.T) {
 		delivered += len(reader.out)
 		reader.endRun()
 	}
-	if first := allocationsDuring(run); first == 0 {
+	if first := allocationsDuring(run); first == 0 && !raceEnabled {
 		t.Fatal("the first marking run on a watched Store allocated nothing, want its marks allocated")
 	}
-	if objects := testing.AllocsPerRun(100, run); objects != 0 {
+	if objects := testing.AllocsPerRun(100, run); objects != 0 && !raceEnabled {
 		t.Fatalf("MarkChanged on a watched Store allocated %v objects a run after the first, want 0", objects)
 	}
 	if runs := 1 + 101; delivered != runs*len(ids) {
@@ -344,7 +344,7 @@ func TestMarkingAChangeAllocatesNothingAfterTheFirstWatchedRun(t *testing.T) {
 		}
 		bodies.changes.compare()
 	}
-	if objects := testing.AllocsPerRun(100, unwatched); objects != 0 {
+	if objects := testing.AllocsPerRun(100, unwatched); objects != 0 && !raceEnabled {
 		t.Fatalf("MarkChanged on an unwatched Store allocated %v objects a run, want 0", objects)
 	}
 	if components.bodies.hooks != nil {

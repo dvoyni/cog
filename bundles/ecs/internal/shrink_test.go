@@ -188,7 +188,7 @@ func TestAShrunkWorldReturnsToItsSteadyState(t *testing.T) {
 		control := measure(hooks, false)
 		shrunk := measure(hooks, true)
 		t.Logf("objects a frame after a spike, Hook readers %v: control %.3f, after the zero request %.3f", hooks, control, shrunk)
-		if shrunk > control+0.05 {
+		if !raceEnabled && shrunk > control+0.05 {
 			t.Errorf("after the zero request, Hook readers %v, the frame costs %.3f objects against its control's %.3f", hooks, shrunk, control)
 		}
 	}

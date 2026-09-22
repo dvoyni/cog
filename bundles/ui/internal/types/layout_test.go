@@ -816,6 +816,9 @@ func TestIgnoreClipLetsPopupEscapeParent(t *testing.T) {
 }
 
 func TestProcessDoesNotAllocateAfterWarmup(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	roots := benchmarkTree(1000)
 	state := GlobalState{Screen: Rect{Width: 1000, Height: 1000}}
 	var context Processor

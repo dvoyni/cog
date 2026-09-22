@@ -90,6 +90,9 @@ func TestBBSegmentQueryReportsTheFractionAtWhichTheBoxIsEntered(t *testing.T) {
 }
 
 func TestBBAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	box := NewBB(0, 0, 2, 2)
 	other := NewBB(1, 1, 3, 3)
 	point := m.Vec2d{X: 1, Y: 1}

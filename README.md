@@ -200,3 +200,38 @@ All command and subscription handler errors flow through the engine's serialized
 `ErrorHandler`. Returning `true` terminates the engine; returning `false` allows
 recovery where possible. The default handler logs and terminates. Context
 cancellation and the host returning both shut down the runtime.
+
+## Checks
+
+cog has no CI. A change is checked by running `scripts/check.sh` from anywhere
+inside the repo. It stops at the first failing step, printing each step's name
+before it runs:
+
+1. `go build ./...`
+2. `go vet ./...`
+3. `gofmt -l` over every tracked `.go` file, failing on and naming any file it
+   lists
+4. `GOOS=js GOARCH=wasm go build ./...` and `GOOS=js GOARCH=wasm go vet ./...`
+5. `go test ./...`
+6. `go test -tags ecs_validate`, Validation mode, over every package but
+   `bundles/ecsphysics2d/...`, which is excluded until
+   [#548](https://github.com/dvoyni/cog/issues/548) is fixed
+7. `go test -race` over every package but `docs/research/ecs-go-mechanics-bench`,
+   a research harness that asserts nothing and whose allocation sweep would
+   multiply under the detector, and `kernel/archtest`, which checks package
+   structure, runs no concurrent code and is already slow; both still run in
+   step 5
+
+Steps 1–6 need only `sh`, `git` and Go, and run anywhere, Git Bash on Windows
+included. Step 7 needs cgo and a C toolchain, so it runs under WSL or on Linux
+(`apt install build-essential` on Debian or Ubuntu). On a machine that cannot
+build the race detector the step fails with an explanation; it never skips.
+
+- `scripts/check.sh --no-race` runs steps 1–6, for a machine without a C
+  toolchain.
+- `scripts/check.sh --race` runs step 7 only.
+
+Allocation-count assertions run only without `-race`: the detector changes
+allocation behaviour, so under it they skip. `extensions/jsstorage` and
+`extensions/jssound` are built and vetted for js/wasm but their tests are not
+run, since they need a js/wasm runtime the script does not drive.

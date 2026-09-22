@@ -361,6 +361,9 @@ func TestAppendAnimLaysTheMorphListOutInWholeVec4s(t *testing.T) {
 // A steady frame allocates nothing: the block is appended into the caller's
 // backing, which a renderer keeps across frames.
 func TestAppendAnimIntoASizedArenaAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	plays := []ScenePlayRecord{{BaseRow0: 1}, {BaseRow0: 2}}
 	morph := AnimMorph{Targets: []SceneMorphWeight{{Target: 1, Weight: 1}}}
 	arena := make([]byte, 0, 4096)

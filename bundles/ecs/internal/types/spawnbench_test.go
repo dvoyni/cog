@@ -201,6 +201,9 @@ func BenchmarkBarrierSpawning(b *testing.B) {
 // list recycles the ids and the Store reuses the dense row, so growth stops at
 // the high-water mark.
 func TestStructuralChangeStaysOnTheEnginesAllocationLine(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	// Both arms run the same number of frames, so the two numbers carry the
 	// same noise floor: a stray object somewhere in the engine is worth
 	// 1/frames either way, and only a per-spawn allocation could separate them.

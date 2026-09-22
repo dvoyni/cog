@@ -546,6 +546,9 @@ func TestTheReadAheadStopsWithItsVoice(t *testing.T) {
 // it, because AllocsPerRun counts the process and a decoder allocating on
 // another goroutine would be charged to a block it never touched.
 func TestTheDeviceThreadAllocatesNothingWithAStreamedVoice(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	gen := &generator{frames: 4 * testBlock}
 	clip := gen.clip()
 	mx, handoff := newTestMixer(8)

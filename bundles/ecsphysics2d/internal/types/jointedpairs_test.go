@@ -66,6 +66,9 @@ func TestJointedPairsGrowsWithoutLosingAPair(t *testing.T) {
 // TestTheJointedPairSetAllocatesNothingOnceItHasGrown is the zero-allocation
 // rule on the one structure Index rebuilds every tick.
 func TestTheJointedPairSetAllocatesNothingOnceItHasGrown(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	pairs := NewJointedPairs()
 	fill := func() {
 		pairs.Clear()

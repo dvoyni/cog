@@ -434,6 +434,9 @@ func (s *Spawn[S]) newEscaping(components S) Entity {
 // hits, made a test rather than a comment: the two spellings differ only in
 // where the Component set's value lives, and one of them allocates per spawn.
 func TestSpawnStagesItsComponentSetThroughAField(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	spawn, writeable, _ := handles[spawnSet](t, 64)
 	round := func(create func(spawnSet) Entity) float64 {
 		values := spawnSet{Body: body{X: 1}, Velocity: velocity{X: 2}}

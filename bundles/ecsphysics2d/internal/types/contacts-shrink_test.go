@@ -192,7 +192,7 @@ func TestASecondContactShrinkReleasesNothingAndAllocatesNothing(t *testing.T) {
 	if again != (ShrinkResponse{}) {
 		t.Errorf("a second shrink released %+v, want nothing", again)
 	}
-	if allocs := testing.AllocsPerRun(100, func() { contacts.shrink(ShrinkRequest{}) }); allocs != 0 {
+	if allocs := testing.AllocsPerRun(100, func() { contacts.shrink(ShrinkRequest{}) }); allocs != 0 && !raceEnabled {
 		t.Errorf("a second shrink allocates %.0f objects, want none", allocs)
 	}
 }

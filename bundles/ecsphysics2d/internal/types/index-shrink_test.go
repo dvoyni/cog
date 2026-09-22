@@ -150,7 +150,7 @@ func TestTheBodyIndexShrinkIsExactAndASecondOneAllocatesNothing(t *testing.T) {
 			idx.Len(), len(overlappedBodies(idx)))
 	}
 
-	if allocations := testing.AllocsPerRun(10, func() { idx.shrink(ShrinkRequest{}) }); allocations != 0 {
+	if allocations := testing.AllocsPerRun(10, func() { idx.shrink(ShrinkRequest{}) }); allocations != 0 && !raceEnabled {
 		t.Errorf("a second shrink of the Body index allocated %v times, want 0", allocations)
 	}
 }

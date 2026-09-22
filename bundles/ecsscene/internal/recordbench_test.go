@@ -127,6 +127,9 @@ func allocationsDuring(f func()) uint64 {
 // further round is taken only while some arm is still over the bar. Taking the
 // minimum can hide noise and cannot hide a real allocation.
 func TestRecordingAllocatesNothingPerEntity(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const frames, maxRounds, bar = 3_000, 4, 0.05
 	harnesses := make([]*harness, len(arms))
 	for i, arm := range arms {

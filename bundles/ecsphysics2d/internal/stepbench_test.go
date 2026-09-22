@@ -31,6 +31,9 @@ import (
 // outright below if it finds no Contacts at all — a measurement over an empty
 // Contact list would pass without measuring either Detect or Solve.
 func TestTheStepSitsOnTheEnginesAllocationLine(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const ticks = 10_000
 
 	measure := func(n int) (float64, int, int) {
@@ -95,6 +98,9 @@ func TestTheStepSitsOnTheEnginesAllocationLine(t *testing.T) {
 // per touching pair — and this is where the port's two ping-ponged stack
 // buffers are worth their comment.
 func TestThePolygonStepSitsOnTheEnginesAllocationLineToo(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const ticks = 4_000
 
 	measure := func(n int) (float64, int) {
@@ -128,6 +134,9 @@ func TestThePolygonStepSitsOnTheEnginesAllocationLineToo(t *testing.T) {
 // and the app's write are both inside the measurement. The empty engine carries
 // the same writer, so the line it sets includes that subscription's dispatch.
 func TestTheStepUnderGravitySitsOnTheEnginesAllocationLine(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const ticks = 4_000
 
 	measure := func(n int) (float64, int) {
@@ -352,6 +361,9 @@ func gridAt(i int) m.Vec2d {
 // delivered no Impulse, for the same reason: a measurement over an empty list
 // measures the walk and not the work.
 func TestTheJointedStepSitsOnTheEnginesAllocationLine(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const ticks = 10_000
 
 	measure := func(n int) (float64, int, int, float64) {

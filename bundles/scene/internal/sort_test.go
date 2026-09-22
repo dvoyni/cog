@@ -48,6 +48,9 @@ func TestSortEntriesOrdersByKeyThenRecordingOrdinal(t *testing.T) {
 // The sort runs on a reused slice of 12-byte entries and must allocate nothing,
 // because it runs once per pass per frame.
 func TestSortEntriesAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	entries := make([]sortEntry, 1000)
 	fill := func() {
 		for i := range entries {

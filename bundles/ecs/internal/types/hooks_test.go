@@ -780,7 +780,7 @@ func TestRecordingAnActAllocatesNothing(t *testing.T) {
 	frame(t, engine, 1)
 
 	log := components.colliders.hooks
-	if objects := testing.AllocsPerRun(1000, pair); objects != 0 {
+	if objects := testing.AllocsPerRun(1000, pair); objects != 0 && !raceEnabled {
 		t.Fatalf("an UpdateFor and a From on a watched Store allocated %v objects, want 0", objects)
 	}
 	if len(log.records) != 2*1001 || len(log.retained) != 1001 {
@@ -811,7 +811,7 @@ func TestRecordingASpawnAndADespawnAllocatesNothing(t *testing.T) {
 	}
 	frame(t, engine, 1)
 
-	if objects := testing.AllocsPerRun(1000, pair); objects != 0 {
+	if objects := testing.AllocsPerRun(1000, pair); objects != 0 && !raceEnabled {
 		t.Fatalf("a Spawn and a Despawn on watched Stores allocated %v objects, want 0", objects)
 	}
 	for _, log := range []struct {

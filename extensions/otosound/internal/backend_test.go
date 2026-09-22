@@ -228,6 +228,9 @@ func TestAReleasedClipIsFreedAtOnceWhileNoMixerHasEverPulled(t *testing.T) {
 // Every play is a table entry and a batch entry, both of which were made once,
 // so an Adapter allocates nothing per play.
 func TestAPlayAllocatesNothingInTheAdapter(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	b := newTestBackend(t, &fakeAudio{})
 	id, err := b.Install(constantClip(4*testBlock, 1, 1))
 	if err != nil {

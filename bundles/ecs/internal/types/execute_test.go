@@ -252,6 +252,9 @@ func TestASystemNamingTheResponseTwiceIsRejected(t *testing.T) {
 // appear if the response left the System by any route but the cell: the wrapper
 // is allocated once at registration and the value is copied out under the lock.
 func TestAnsweringThroughTheWrapperAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	measure := func(system any) float64 {
 		_, _, engine := newWorld(t, 8, func(registrar *kernel.Registrar) {
 			registrar.HandleCommand[nudgeCmd](ToExecute[nudgeRequest, nudgeResponse](registrar, system))

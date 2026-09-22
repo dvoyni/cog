@@ -208,6 +208,9 @@ func TestACrateStopsByDampingWithAHalfLifeOfLnTwoOverTheRate(t *testing.T) {
 // pointers into Component Stores and compute in registers, and m.Vec2d's
 // variadic MulS does not escape its slice.
 func TestTheIntegratorsAllocateNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	body, err := NewDynamic(2, 8, 15, 0.3)
 	if err != nil {
 		t.Fatalf("NewDynamic: %v", err)

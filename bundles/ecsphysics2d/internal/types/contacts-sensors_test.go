@@ -374,6 +374,9 @@ func TestASweptSensorPairBeginsThenContinuesThenEndsExactlyOnce(t *testing.T) {
 }
 
 func TestTheSweptSensorPathAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	statics := NewStaticIndex(0)
 	for i := range 32 {
 		statics.Insert(ecs.Entity(1000+i), NewCircleShape(0.2, m.Vec2d{}),
