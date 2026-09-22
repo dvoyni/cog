@@ -10,18 +10,24 @@ import (
 
 // spawnField is one Component of a Component set, as registration left it.
 type spawnField struct {
-	// set writes one Component from the staging buffer into its Store. It is the
-	// one cached closure per field: a generic cannot be instantiated from a
-	// reflect.Type, so the typed call is baked at registration where C is a
-	// compile-time type and reached here through an unsafe.Pointer into staging.
-	set func(e Entity, value unsafe.Pointer)
+	// get reads this Component's Store out of its locked cell, erased. It is
+	// the Query's own shape: Spawn.resolve calls it once an invocation and
+	// leaves the answer in store, so no write pays the cell's type assertion.
+	get func() *storeHeader
+	// store is get's answer for the current invocation. See resolver.
+	store *storeHeader
+	// set writes one Component from the staging buffer into store. A generic
+	// cannot be instantiated from a reflect.Type, so the typed call is baked at
+	// registration where C is a compile-time type, and reached here through an
+	// unsafe.Pointer into staging and the erased Store it converts back.
+	set func(store *storeHeader, e Entity, value unsafe.Pointer)
 	// offset is where this Component sits in the Component set's struct, which
 	// is where it sits in staging: they are the same type.
 	offset uintptr
 	// recorded is set that also records the Spawn in the Store's Hook log, and
 	// hooks whether this run takes it. Neither is read on a Spawn that records
 	// nowhere.
-	recorded func(e Entity, value unsafe.Pointer)
+	recorded func(store *storeHeader, e Entity, value unsafe.Pointer)
 	hooks    hookGate
 }
 
@@ -80,8 +86,11 @@ type Spawn[S any] struct {
 	// registration-time value because a handle is what the kernel guards: the
 	// cell it reads is the one the lock covers.
 	entities kernel.Write[*Entities]
+	// resolved is entities' value for the current invocation. See resolver.
+	resolved *Entities
 	// fields is the Component set's field table as registration left it: an
-	// offset into staging and the setter baked for that Component's Store.
+	// offset into staging, the Store's getter and this invocation's Store, and
+	// the setters baked for that Component's Store.
 	// Reflection runs exactly once, here, and never again — the mirror of the
 	// Query's fill.
 	fields []spawnField
@@ -126,6 +135,17 @@ func (s *Spawn[S]) prepare(en *Entities, access kernel.ResourceAccess) {
 
 func (s *Spawn[S]) spawnGate() *spawnGate { return &s.hooks }
 
+// resolve reads the authority and every field's Store out of their cells for
+// this invocation. spawnGate shares the field array, so the Stores it writes
+// through when a Hooks reader watches are the ones resolved here.
+func (s *Spawn[S]) resolve() {
+	s.resolved = s.entities.Get()
+	for i := range s.fields {
+		field := &s.fields[i]
+		field.store = field.get()
+	}
+}
+
 // New creates an Entity carrying every Component the Component set names and
 // returns its handle. The Components are written in field order, and the Entity
 // is complete when New returns: there is no command buffer and nothing is
@@ -140,7 +160,7 @@ func (s *Spawn[S]) New(components S) Entity {
 	// The Components land in the Spawn's own buffer before any closure sees an
 	// address, which is what keeps them off the heap. See staging.
 	s.staging = components
-	e := s.entities.Get().alloc()
+	e := s.resolved.alloc()
 	buffer := unsafe.Pointer(&s.staging)
 	if s.hooks.on {
 		s.hooks.spawn(e, buffer)
@@ -148,7 +168,7 @@ func (s *Spawn[S]) New(components S) Entity {
 	}
 	for i := range s.fields {
 		field := &s.fields[i]
-		field.set(e, unsafe.Add(buffer, field.offset))
+		field.set(field.store, e, unsafe.Add(buffer, field.offset))
 	}
 	return e
 }

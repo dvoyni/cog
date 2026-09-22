@@ -12,12 +12,17 @@ import "github.com/dvoyni/cog/kernel"
 // Component at all, because Entities reaches every Store itself.
 type WriteableEntities struct {
 	entities kernel.Write[*Entities]
+	// resolved is entities' value for the current invocation. See resolver.
+	resolved *Entities
 }
 
 // prepare declares the write. It runs once, at registration.
 func (w *WriteableEntities) prepare(_ *Entities, access kernel.ResourceAccess) {
 	w.entities = access.GetWrite[*Entities]()
 }
+
+// resolve reads the authority out of its cell for this invocation.
+func (w *WriteableEntities) resolve() { w.resolved = w.entities.Get() }
 
 // Despawn retires an Entity and reports whether it was alive to begin with. It
 // is total and eager: every Store is emptied of e at once and the index returns
@@ -28,5 +33,5 @@ func (w *WriteableEntities) prepare(_ *Entities, access kernel.ResourceAccess) {
 // backwards walk buys. Despawning any other Entity in the driver's Store is
 // undefined for that walk.
 func (w *WriteableEntities) Despawn(e Entity) bool {
-	return w.entities.Get().despawn(e)
+	return w.resolved.despawn(e)
 }

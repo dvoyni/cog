@@ -1361,7 +1361,8 @@ tick** — 0.09% of a 30 Hz frame at 200 Systems.
 
 ### A System is not re-entrant
 
-A System's arguments, its event or request cell and `ToExecute`'s single `Resp`
+A System's arguments, its event or request cell, `ToExecute`'s single `Resp`,
+and the handles each parameter resolves once an invocation into its own fields
 are allocated once, at registration, which is what makes a System cost nothing a
 tick. Two invocations of one System therefore must never overlap.
 

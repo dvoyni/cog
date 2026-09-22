@@ -224,9 +224,9 @@ func (g *spawnGate) spawn(e Entity, staging unsafe.Pointer) {
 	for i := range g.fields {
 		field := &g.fields[i]
 		if field.hooks.on {
-			field.recorded(e, unsafe.Add(staging, field.offset))
+			field.recorded(field.store, e, unsafe.Add(staging, field.offset))
 		} else {
-			field.set(e, unsafe.Add(staging, field.offset))
+			field.set(field.store, e, unsafe.Add(staging, field.offset))
 		}
 	}
 }

@@ -38,12 +38,22 @@ var storeCoreType = reflect.TypeFor[storeCore]()
 // Neither is a place to keep anything. The value is refreshed per tick and is
 // valid only for the body of the System, under the kernel's standing rule that
 // a value read from a handle lives only as long as the handler holds its lock.
-// That is why Get goes to the cell every call rather than to a copy taken at
-// registration: the cell the lock covers is the only sanctioned route.
+// So Get returns the value resolved from the cell the lock covers at the start
+// of the invocation, never one taken at registration: the cell is read once an
+// invocation, just before the System's func, and every Get in the body returns
+// that. See resolver.
+//
+// A Set on a Write updates that parameter's own resolved value, so a Get on the
+// same parameter reads it back. Another parameter naming the same resource in
+// the same signature — a second Write, or a Read beside a Write — does not see
+// that Set until the next invocation: it returns what it resolved at the start
+// of this one.
 //
 // The one thing they will not name is the ECS's own cells. See guardHandle.
 type Read[T any] struct {
 	handle kernel.Read[T]
+	// resolved is handle's value for the current invocation.
+	resolved T
 }
 
 // prepare declares the read and binds the handle. It runs once, at
@@ -53,14 +63,21 @@ func (r *Read[T]) prepare(_ *Entities, access kernel.ResourceAccess) {
 	r.handle = access.GetRead[T]()
 }
 
-// Get returns the resource for the body of this System call, and for no longer.
-func (r *Read[T]) Get() T { return r.handle.Get() }
+// resolve reads the resource out of its cell for this invocation.
+func (r *Read[T]) resolve() { r.resolved = r.handle.Get() }
+
+// Get returns the resource for the body of this System call, and for no longer:
+// the value resolved at the start of the invocation.
+func (r *Read[T]) Get() T { return r.resolved }
 
 // Write is Read's writing form, and the one a recording System takes: a draw is
 // appended to the queue, so recording is a write however read-only the gameplay
 // behind it was. A write lock also authorises reads, so Get is here too.
 type Write[T any] struct {
 	handle kernel.Write[T]
+	// resolved is handle's value for the current invocation, and what this
+	// parameter's last Set wrote.
+	resolved T
 }
 
 // prepare declares the write and binds the handle. It runs once, at
@@ -70,12 +87,21 @@ func (w *Write[T]) prepare(_ *Entities, access kernel.ResourceAccess) {
 	w.handle = access.GetWrite[T]()
 }
 
-// Get returns the resource for the body of this System call, and for no longer.
-func (w *Write[T]) Get() T { return w.handle.Get() }
+// resolve reads the resource out of its cell for this invocation.
+func (w *Write[T]) resolve() { w.resolved = w.handle.Get() }
+
+// Get returns the resource for the body of this System call, and for no longer:
+// the value resolved at the start of the invocation, or this parameter's own
+// last Set since.
+func (w *Write[T]) Get() T { return w.resolved }
 
 // Set replaces the resource value, for the few resources that are reassigned
-// wholesale rather than mutated in place.
-func (w *Write[T]) Set(value T) { w.handle.Set(value) }
+// wholesale rather than mutated in place. A Get on this parameter reads it
+// back; another parameter naming the same resource sees it next invocation.
+func (w *Write[T]) Set(value T) {
+	w.handle.Set(value)
+	w.resolved = value
+}
 
 // guardHandle refuses the ECS's own cells to a generic resource handle, and the
 // refusal is soundness rather than tidiness.
