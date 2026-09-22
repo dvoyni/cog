@@ -262,7 +262,7 @@ it. The key names no resource, so it never appears among `Writes`.
 from `Register`. It is for a value a plugin registers against rather than runs
 with, such as the ECS authority a Component's Store enrols in. `T` must be owned
 by the reader or a plugin in its transitive dependency closure, which has
-therefore registered first; otherwise it panics with `ErrUnavailableDependency`.
+therefore registered first; otherwise it returns `ErrUnavailableDependency`.
 It declares no lock and is not available to a `Lock`, whose only way to reach a
 resource is a handle it binds. It returns the value as registration left it, so
 keep what it returns only if it is a pointer its owner never replaces with

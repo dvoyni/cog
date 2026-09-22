@@ -340,13 +340,12 @@ func ToExecute[Req any, Res any](
 // allocation from arity 0 to 12 — and there are no numbered type families
 // anywhere in this design.
 //
-// The failure is a panic at registration, which the plugin boundary reports as
-// ErrPluginPanic naming the plugin. That is the third of the three answers the
-// specs record for this diagnostic, and it is taken because the alternative — a
-// sentence in the composition error list — needs a way for a plugin-side builder
-// to reach kernel's private error list, which is an addition nothing else in the
-// ECS needs. See the Gap in kernel/docs/specs/ecs-support.md, and
-// https://github.com/dvoyni/cog/issues/279, which is where that is settled.
+// The failure is a panic at registration, and that is the contract: the plugin
+// boundary reports it as kernel.ErrPluginPanic naming the plugin, and
+// composition fails. It is the route every ecs registration builder takes,
+// Dependency's re-panicked error included, because each returns a value — the
+// factory, or the *Store[C] — and so has no error to return. The ecs README's
+// §What a signature may contain records why a reported error was withdrawn.
 //
 // driven names the value E is in the diagnostics: "event" for a subscription,
 // "request" for a command. answer is the response cell a command reads back, and

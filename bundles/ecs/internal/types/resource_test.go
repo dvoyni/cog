@@ -159,9 +159,9 @@ func TestAResourceHandleRefusesTheECSsOwnCells(t *testing.T) {
 // composeAndFail composes an engine whose Systems are expected to be refused at
 // registration and returns the composition failure's sentence. A bad signature
 // is a panic in Register, which the plugin boundary reports as ErrPluginPanic
-// naming the plugin — the third of the three answers the specs record, taken
-// here because the alternative needs kernel to grow a way for a plugin-side
-// builder to reach its private error list.
+// naming the plugin: the contract for every ecs registration builder, since each
+// returns a value rather than an error. It returns only the sentence;
+// TestABadSignatureFailsCompositionAsAPluginPanic pins the error type.
 func composeAndFail(t *testing.T, subscribe func(*kernel.Registrar)) string {
 	t.Helper()
 	var failure error

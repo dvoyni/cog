@@ -1,6 +1,7 @@
 package types
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -350,6 +351,61 @@ func TestASystemTakingAnUnknownParameterIsRejected(t *testing.T) {
 		}
 	}()
 	ToHandler[app.UpdateEvent](nil, func(s *Store[body]) {})
+}
+
+// TestABadSignatureFailsCompositionAsAPluginPanic pins what a user actually sees
+// when a signature is outside the contract: composition fails with
+// kernel.ErrPluginPanic naming the plugin and the Register boundary, and its
+// sentence names the System's func type and the offending parameter with no
+// stack in it. The direct-call tests above pin each refusal's wording; this one
+// pins the route.
+func TestABadSignatureFailsCompositionAsAPluginPanic(t *testing.T) {
+	for _, probe := range []struct {
+		name   string
+		system any
+		wanted []string
+	}{
+		{"an unknown parameter", func(s *Store[body]) {},
+			[]string{"ecs: System func(", "*ecs.Store[", "not something a System may take"}},
+		{"a returned value", func(q *Query[moveQuery]) error { return nil },
+			[]string{"ecs: System func(", "returns"}},
+		{"an In no Feed supplies", func(dt *In[float64]) {},
+			[]string{"ecs: System func(", "*ecs.In[float64]", "which no Feed supplies"}},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			var failure error
+			kernel.New(nil).
+				Handler(func(err error) error { failure = err; return err }).
+				WithPlugins(
+					authority{ids: 8},
+					&componentsPlugin{ids: 8},
+					&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
+						registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](registrar, probe.system))
+					}},
+				)
+
+			if failure == nil {
+				t.Fatalf("composing a System with %s succeeded", probe.name)
+			}
+			var panicked kernel.ErrPluginPanic
+			if !errors.As(failure, &panicked) {
+				t.Fatalf("composition failure %T (%v) is not a kernel.ErrPluginPanic", failure, failure)
+			}
+			if panicked.Plugin != "systems" || panicked.Boundary != "Register" {
+				t.Fatalf("composition failure names plugin %q at %q, want \"systems\" at \"Register\"",
+					panicked.Plugin, panicked.Boundary)
+			}
+			message := failure.Error()
+			for _, want := range probe.wanted {
+				if !strings.Contains(message, want) {
+					t.Fatalf("composition failure %q does not name %q", message, want)
+				}
+			}
+			if strings.Contains(message, "goroutine ") {
+				t.Fatalf("composition failure %q renders a stack", message)
+			}
+		})
+	}
 }
 
 // TestASystemNamingTheEventTwiceIsRejected holds the "at most once" half of the

@@ -91,7 +91,10 @@ already registered. So
 **every plugin that registers a Component or a System declares `ecs.Name` in its
 `Dependencies`**. It already had to, for the `read{*Entities}` every System
 takes; a plugin that registers Components alone and forgets it fails
-composition with `ErrUnavailableDependency` naming it.
+composition. `Dependency` returns `ErrUnavailableDependency` naming it, and ecs
+re-panics it: a registration-time panic, which the plugin boundary reports as
+`kernel.ErrPluginPanic` naming the plugin, with `ErrUnavailableDependency` as the
+recovered value.
 
 ## Entity
 
@@ -660,6 +663,83 @@ holds it for read.
 | `kernel.Kernel` | nothing | the kernel value, for publishing an event |
 | the event or request value | nothing | legal, and not the default shape |
 
+**Anything else is a composition-time failure naming the System.** This is a
+mistake every new user makes once, so the diagnostic matters more than the
+mechanism. The failure is a registration-time panic with one sentence naming
+the System and the offending parameter, which the plugin boundary reports as
+`kernel.ErrPluginPanic` naming the plugin, with `Boundary` `"Register"`; and
+composition fails. **That is the contract**, not a placeholder. The builder runs
+before `Registrar.Subscribe` receives the Subscription's identity type, so the
+sentence names the System by its **func type**, and `ErrPluginPanic` names the
+plugin it is registered in. A parameter the ECS does not hand out, as a composed
+engine prints it:
+
+```
+plugin "systems" panicked in Register: ecs: System func(*ecs.Store[game.Body])
+takes *ecs.Store[game.Body], which is not something a System may take; …
+```
+
+A Query naming a Component no plugin registered takes the same route, and names
+the **Component** and the **Query** rather than the store type the user never
+wrote:
+
+```
+plugin "systems" panicked in Register: ecs: Query game.GuardedQ names
+unregistered Component game.Guarded
+```
+
+**Composition stops at the first bad signature**, so three of them are fixed one
+per run. That is the kernel's rule for every fault — registration stops at the
+first one it finds, whatever route the fault arrives by — and not a cost of this
+route.
+
+**A reported composition error is withdrawn.**
+[#238](https://github.com/dvoyni/cog/issues/238) asked for this failure to be a
+composition error collected with `ErrMissingResource` and the others, "rather
+than surfacing as `ErrPluginPanic` with a stack".
+[#279](https://github.com/dvoyni/cog/issues/279) withdrew that requirement, for
+three reasons, and a proposal to bring it back has to meet them:
+
+1. **The default output is one sentence with no stack.** `ErrPluginPanic`
+   carries the stack in its `Stack` field, but its `Error()` renders only the
+   plugin, the boundary and the recovered value, and the engine's default error
+   handler logs `%v`. The stack reaches only a custom handler that reads the
+   field. The stack in the user's face that #238 objected to does not happen.
+2. **An ecs registration builder returns a value, so a fault in one can only
+   panic.** `ToHandler` and `ToExecute` return the factory a subscription or
+   Command takes, and `RegisterComponent` returns the `*Store[C]`; none of them
+   has an error to return. Every ecs registration-time refusal takes this route:
+   the Storable refusal, an unregistered Component in a Query or a Component set,
+   the Component-set shape refusals, and `Dependency`'s own
+   `ErrUnavailableDependency`, which ecs re-panics. That is ecs's consistency with
+   itself, and it diverges from the kernel's on purpose: the kernel returns the
+   error from `Dependency` because `Dependency` owes its caller a value it can
+   pair with one. A builder returning `(factory, error)` would break the
+   one-expression `registrar.Subscribe[X](ecs.ToHandler(...))` that is the point
+   of the design.
+3. **A reported error would buy nothing and cost a great deal.** The kernel stops
+   composition at its first fault whatever route it takes, so a
+   `Registrar.ReportError(error)` could not collect several bad signatures in one
+   run either: one fix per run is what every route gives. What it would cost is
+   every refusal site keeping going after an error, including a parameter's own
+   preparation, which receives a `kernel.ResourceAccess` rather than the
+   `Registrar` and plans Query fields that later code assumes are well-formed.
+   The name would also clash with `Kernel.ReportError`, which has runtime rather
+   than composition semantics.
+
+The classification is a **closed set**, and structurally so: every parameter
+that reaches the world is a pointer to a type in this package implementing one
+unexported method, so no package outside can add one and the builder never has
+to ask what a type means. A new handle is a new type, not a new branch.
+
+`ecs.Read[T]` and `ecs.Write[T]` will **not** name the ECS's own cells —
+`*ecs.Entities` or a `*ecs.Store[T]` — and the refusal is soundness rather than
+tidiness. `Store.Remove` is exported, so `ecs.Read[*ecs.Store[Body]]` would hand
+a read-locked System a mutator: a data race the kernel cannot see, because the
+lock set says read and the code writes. The accessors take the right lock,
+declare `read{*Entities}` with it, and check the Component was registered at
+all.
+
 ### A System is not re-entrant
 
 Every System keeps its per-invocation state in one struct built at registration:
@@ -689,38 +769,6 @@ func count(request CountRequest, q *ecs.Query[CountQ], answer *ecs.Resp[CountRes
 Exposed as an agent tool, that is exactly the shape two parallel calls reach at
 once. Without the declaration each caller could receive the other's answer, and
 nothing would fail to say so.
-
-**Anything else is a composition-time failure naming the System's type.** This
-is a mistake every new user makes once, so the diagnostic matters more than the
-mechanism. The failure is a registration-time panic, which the plugin boundary
-reports as `ErrPluginPanic` naming the plugin — the same route a Query naming a
-Component no plugin registered takes:
-
-```
-plugin "systems" panicked in Register: ecs: Query game.GuardedQ names
-unregistered Component game.Guarded
-```
-
-That names the **Component** and the **Query**, rather than the store type the
-user never wrote. Which of the three answers the specs record for this
-diagnostic is right is still open
-([#279](https://github.com/dvoyni/cog/issues/279)); the panic is the one taken
-here, because the alternative — a sentence in the composition error list — needs
-a way for a plugin-side builder to reach `kernel`'s private error list, and
-nothing else in the ECS needs that.
-
-The classification is a **closed set**, and structurally so: every parameter
-that reaches the world is a pointer to a type in this package implementing one
-unexported method, so no package outside can add one and the builder never has
-to ask what a type means. A new handle is a new type, not a new branch.
-
-`ecs.Read[T]` and `ecs.Write[T]` will **not** name the ECS's own cells —
-`*ecs.Entities` or a `*ecs.Store[T]` — and the refusal is soundness rather than
-tidiness. `Store.Remove` is exported, so `ecs.Read[*ecs.Store[Body]]` would hand
-a read-locked System a mutator: a data race the kernel cannot see, because the
-lock set says read and the code writes. The accessors take the right lock,
-declare `read{*Entities}` with it, and check the Component was registered at
-all.
 
 ### The event does not belong in the signature
 

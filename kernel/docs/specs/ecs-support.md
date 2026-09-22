@@ -319,13 +319,14 @@ engine's own state was being built before the engine, in `main`.
 The addition is one method:
 
 ```go
-func (r *Registrar) Dependency[T any]() T
+func (r *Registrar) Dependency[T any]() (T, error)
 ```
 
 It returns resource `T`'s value, provided it is initialized and its owner is
-the reader or in the reader's transitive dependency closure. Otherwise it panics
-with `ErrUnavailableDependency`, which the plugin boundary reports as
-`ErrPluginPanic` naming the reader.
+the reader or in the reader's transitive dependency closure. Otherwise it
+returns `ErrUnavailableDependency`, which `Register` propagates as the failure
+`Run` returns. The ecs builders re-panic it, so from ecs it reaches the user as
+`ErrPluginPanic` naming the plugin (see "A bad System signature panics" below).
 
 **It is on `Registrar` and deliberately not on `ResourceAccess`.** A `Lock`
 reaches a resource only by declaring a lock on it; a lock-free getter on the
@@ -351,10 +352,8 @@ set it declares is still a function of the System's signature.
 no argument and creates the authority from its config, the authority's
 constructor is out of every other plugin's reach, and every plugin registering a
 Component or System declares `ecs` — which each System's `read{*Entities}`
-already required. (Since [#340](https://github.com/dvoyni/cog/issues/340) the
-plugin is `ecsimpl.New()` with `ecsimpl.Config`, and the constructor is in
-`bundles/ecs/internal`. Since [#358](https://github.com/dvoyni/cog/issues/358)
-it is `ecsplugin.New()` with `ecs.Config`, and the constructor is in
+already required. (Since [#358](https://github.com/dvoyni/cog/issues/358)
+the plugin is `ecsplugin.New()` with `ecs.Config`, and the constructor is in
 `bundles/ecs/internal/types`.)
 
 ---
@@ -390,38 +389,25 @@ it is recorded so the next proposal starts from the measurement.
 
 ---
 
-## Gap: what a bad System signature should be
+## A bad System signature panics
 
-`ecs.ToHandler` must reject a parameter it does not recognise, and the two
-tickets that touched this do not agree on how.
+`ecs.ToHandler` and `ecs.ToExecute` reject a parameter they do not recognise by
+panicking at registration with one sentence naming the System and the
+parameter. The plugin boundary reports it as `ErrPluginPanic` naming the plugin,
+and composition fails. It is the route ecs already gives `ErrUnavailableDependency`
+by re-panicking it (item 7), and it needs no kernel API.
 
+It diverges from the kernel's own error return on purpose. `Dependency` returns
+its error because it owes its caller a value it can pair with one; an ecs
+builder returns a value too — the factory a subscription takes, or the
+`*Store[C]` — and so has no error to return.
 [How a System declares what it touches](https://github.com/dvoyni/cog/issues/238)
-required a **reported** composition error naming the System's type, joining
-`ErrMissingResource` and friends, explicitly *"rather than surfacing as
-`ErrPluginPanic` with a stack"*, on the grounds that this is a mistake every new
-user makes once. [What kernel gains](https://github.com/dvoyni/cog/issues/244)
-concluded kernel gains no new error type and no other API. The prototype does
-the third thing: it panics, and `callPluginBoundary` converts that into
-`ErrPluginPanic`.
-
-Those cannot all hold. `registry.errs` is private to `kernel` and is appended to
-only from `Registrar` methods, so a plugin-side builder cannot join that list
-without kernel growing a way to report — which is an addition item 1 through 4
-otherwise avoid. And `ErrPluginPanic` differs from what #238 asked for in two
-ways that matter: it carries a **stack**, and `WithPlugins` **fails composition
-at the first one**, so a project with three bad signatures fixes them one per
-run.
-
-The reading this document does **not** take is that the prototype's behaviour
-settles it, because the prototype was never asked this question.
-
-**What would settle it:** decide whether `Registrar` gains a narrow
-`ReportError(error)` — additive, no hot-path cost, and it would let `ecs` emit a
-sentence rather than a stack and let composition collect every bad signature in
-one run — or whether `ErrPluginPanic` is accepted as the answer and #238's
-requirement is formally withdrawn. It is a small decision with a real
-ergonomic difference, and it is a **new ticket**, not something to settle while
-assembling a spec.
+asked for a reported composition error instead; that requirement is withdrawn
+([#279](https://github.com/dvoyni/cog/issues/279)), and the ecs README's
+§What a signature may contain records why. `Registrar.ReportError(error)` was not
+added because it would buy nothing: the kernel stops composition at its first
+fault whatever route the fault takes, so it could not collect several bad
+signatures in one run either.
 
 ---
 
@@ -439,8 +425,9 @@ does not add them speculatively:
   trivially rather than strained. The alternative that *would* have needed a
   kernel affordance — a handler enumerating 85 registered Stores in its `Lock` —
   is exactly what this replaced.
-- **No new error type** beyond item 7's `ErrUnavailableDependency`, subject to
-  the Gap above.
+- **No new error type** beyond item 7's `ErrUnavailableDependency`.
+- **No `Registrar.ReportError`.** A bad System signature panics and is reported
+  as `ErrPluginPanic`; see "A bad System signature panics" above.
 - **No ownership escape hatch.**
 - **No `Describe` change for Component stores** beyond item 6's report;
   `*ecs.Store[C]` is self-describing.
