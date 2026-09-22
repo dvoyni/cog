@@ -20,6 +20,9 @@ type Model struct {
 	Ref model.ModelRef
 	// Layers is the Entity's layer mask, whose zero reads as every layer.
 	Layers LayerMask
+	// The tail padding is spelled out, because the load System watches Model
+	// for Changed, and a change is a difference in bytes.
+	_ [4]byte
 }
 
 // Mesh draws a mesh model already holds, named by the ref its bake returned.
@@ -32,6 +35,9 @@ type Mesh struct {
 	// Layers is the Entity's layer mask, whose zero reads as every layer.
 	Layers    LayerMask
 	NeverCull bool
+	// The tail padding is spelled out, because the load System watches Mesh
+	// for Changed, and a change is a difference in bytes.
+	_ [3]byte
 }
 
 // Animation is the clips a Model Entity blends this frame. It is optional and

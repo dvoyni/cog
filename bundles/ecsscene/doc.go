@@ -22,8 +22,10 @@
 // Adapter and contributes none. This package declares what it offers: the
 // Components a game spawns (Model, Mesh, Animation, Params, Material, Light,
 // Camera), MaterialTag, the camera, layer and pass vocabulary, Name, and the
-// ordering identity RecordOnUpdate. The Component registrations, the recording scratch
-// and the one System are in ecsscene's internal/. The Components are still
+// ordering identities LoadOnUpdate and RecordOnUpdate. The Component
+// registrations, the two scratches and the two Systems are in ecsscene's
+// internal/: the load System, which keys changed Entities into Batches and is
+// the only one that loads, and the recording System. The Components are still
 // registered by the plugin that defines their Go type, because that plugin
 // ships in this same Bundle under this package's Name. The Components are plain
 // data with no methods; internal/types declares only the vocabulary the root

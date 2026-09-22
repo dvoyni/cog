@@ -190,6 +190,8 @@ func (p *gamePlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[spawnCmd](spawnCmdImpl(registrar))
 	registrar.HandleCommand[despawnCmd](despawnCmdImpl(registrar))
 	registrar.HandleCommand[bakeCmd](bakeCmdImpl)
+	registrar.HandleCommand[keysCmd](keysCmdImpl)
+	registrar.HandleCommand[setParamsCmd](setParamsCmdImpl(registrar))
 	return nil
 }
 

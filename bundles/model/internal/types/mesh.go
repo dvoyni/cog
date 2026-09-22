@@ -32,8 +32,13 @@ const rendererMeshID uint32 = 1 << 31
 // MeshRef names one mesh a renderer can draw. It is an opaque value: a source,
 // a dense id that doubles as the sort key's meshID, and a generation that
 // makes a recycled id detectable. Its zero value is no mesh.
+//
+// The padding after source is spelled out, because a MeshRef held in an ECS
+// Component that a Hooks reader watches for Changed is compared by its bytes,
+// and Go leaves implicit padding holding whatever was there.
 type MeshRef struct {
 	source     MeshSource
+	_          [3]byte
 	id         uint32
 	generation uint32
 }

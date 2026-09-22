@@ -17,3 +17,11 @@ const Name kernel.PluginName = "ecsscene"
 // It declares no ordering of its own: scene.FlushOnUpdate is subscribed Last,
 // so anything that does not ask to be last already runs before it.
 type RecordOnUpdate kernel.Subscription[app.UpdateEvent]
+
+// LoadOnUpdate is the subscription type of the binding's load System on
+// app.UpdateEvent. It runs on the Model, Mesh, Material and Params Components
+// that changed since its last run, resolves each changed Entity's model and
+// keys its draws, and drives model's bake and release queues. It is ordered
+// Before RecordOnUpdate. A game System that spawns drawables or writes those
+// Components orders itself Before it, so the change is keyed in the same tick.
+type LoadOnUpdate kernel.Subscription[app.UpdateEvent]

@@ -7,6 +7,8 @@ import (
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/gfx"
+	"github.com/dvoyni/cog/slots/storage"
 )
 
 // plugin is cog's ecs↔scene binding. Register ecs, model and scene beside it.
@@ -26,11 +28,13 @@ func New() kernel.Plugin { return plugin{} }
 // Name reports the plugin name.
 func (plugin) Name() kernel.PluginName { return ecsscene.Name }
 
-// Dependencies reports both halves of the binding - the System reads the ECS's
-// Stores and writes scene's queue - and model, whose Lookup every model and
-// mesh the binding names resolves against.
+// Dependencies reports both halves of the binding - the Systems read the ECS's
+// Stores and the recording System writes scene's queue - and model, whose
+// Lookup every model and mesh the binding names resolves against. The load
+// System loads, so it also reads storage's filesystem and writes gfx's
+// resource queue, as scene's flush does.
 func (plugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, model.Name, scene.Name}
+	return []kernel.PluginName{ecs.Name, model.Name, scene.Name, gfx.Name, storage.Name}
 }
 
 // The populations the Stores reserve for. They are hints, not caps: a Store
@@ -41,7 +45,8 @@ const (
 	cameraReserve   = 8
 )
 
-// Register declares every Component, the recording scratch and the one System.
+// Register declares every Component, the two scratches and the two Systems: the
+// load System, ordered before the recording System, and the recording System.
 // A Component is registered by the plugin that defines its Go type, which is
 // what keeps cog's coupling check working on Component data: the types are
 // declared in ecsscene's root, and this plugin, shipped in the same
@@ -57,6 +62,9 @@ func (plugin) Register(registrar *kernel.Registrar, _ any) error {
 	ecs.RegisterComponent[ecsscene.Light](registrar, lightReserve)
 	ecs.RegisterComponent[ecsscene.Camera](registrar, cameraReserve)
 	registrar.InitResource(newScratch())
+	registrar.InitResource(newKeyScratch())
+	registrar.Subscribe[ecsscene.LoadOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, load)).
+		Before[ecsscene.RecordOnUpdate]()
 	registrar.Subscribe[ecsscene.RecordOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, record))
 	return nil
 }

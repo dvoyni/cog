@@ -574,6 +574,14 @@ anyway.
    It also drives `model`'s bake and release queues. In a steady frame it walks
    no Entity. Apps may still preload through the load facade to choose when an
    upload happens.
+
+   Landed in [#536](https://github.com/dvoyni/cog/issues/536), behind
+   `ecsscene.LoadOnUpdate`. It reads `Hooks[T, HookAll]` of `Model`, `Mesh`,
+   `Material` and `Params`, so it keys a `Mesh` too. It names a model
+   primitive in the key by the `MeshRef` it draws, since a primitive's place
+   in a selector's view is not its place in the model. `Model`, `Mesh` and
+   `model.MeshRef` spell out their padding, because the ECS compares Changed
+   by bytes.
 2. **The recording System** takes `kernel.Read[*model.Lookup]` and writes
    `*gfx.OpQueue`. It:
    1. reads each Entity's key from scratch;

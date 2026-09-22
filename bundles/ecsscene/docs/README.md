@@ -34,11 +34,13 @@ there.
 - **`bundles/ecsscene`** is the root, and holds declarations only: the eight
   Components a game spawns (`Transform`, `Model`, `Mesh`, `Animation`,
   `Params`, `Material`, `Light`, `Camera`), `MaterialTag`, the camera, layer
-  and pass vocabulary, `Name` and the ordering identity `RecordOnUpdate`. It
+  and pass vocabulary, `Name` and the ordering identities `LoadOnUpdate` and
+  `RecordOnUpdate`. It
   declares no plugin, and it is what a game's Systems import.
 - **`bundles/ecsscene/internal`** is the plugin: its `New`, the registration of
-  every Component, the recording scratch and the one recording System behind
-  `RecordOnUpdate`.
+  every Component, the load System behind `LoadOnUpdate` with the key scratch
+  it writes, and the recording System behind `RecordOnUpdate` with its
+  scratch.
 - **`bundles/ecsscene/ecssceneplugin`** exports only `New() kernel.Plugin`.
   ecsscene has no configuration, so there is no `Config`. Only composition
   roots and tests import it.
@@ -51,17 +53,17 @@ as a dependency, and the ECS's coupling check keeps holding on Component data.
 
 ## Files
 
-In the root, `doc.go` holds the package documentation, `id.go` `Name` and
-`RecordOnUpdate`, `types.go` every Component with `MaterialTag` and the
+In the root, `doc.go` holds the package documentation, `id.go` `Name`,
+`LoadOnUpdate` and `RecordOnUpdate`, `types.go` every Component with `MaterialTag` and the
 vocabulary's aliases, and `utils.go` `Layer`. `internal/types/camera.go`
 declares the vocabulary. In `internal`, `plugin.go` holds the plugin and its
-registration, and `systems.go` the recording System, its Queries and its
-scratch.
+registration, `load.go` the load System, the Batch key and the key scratch,
+and `systems.go` the recording System, its Queries and its scratch.
 
 ## Dependencies
 
-- Go packages: `app`, `ecs`, `gfx`, `kernel`, `m`, `model`, `scene`
-- Plugin dependencies: `ecs`, `model`, `scene`
+- Go packages: `app`, `ecs`, `gfx`, `kernel`, `m`, `model`, `scene`, `storage`
+- Plugin dependencies: `ecs`, `model`, `scene`, `gfx`, `storage`
 - Configuration: none — every Store reserves an internal default population,
   which is a hint and not a cap
 - Events declared or published: none
@@ -173,6 +175,54 @@ func spawnCrates(sp *ecs.Spawn[Crate]) {
     })
 }
 ```
+
+## The load System
+
+It runs on what changed, and is ordered before the recording System:
+
+```go
+func load(
+    k kernel.Kernel,
+    modelHooks    *ecs.Hooks[ecsscene.Model, ecs.HookAll],
+    meshHooks     *ecs.Hooks[ecsscene.Mesh, ecs.HookAll],
+    materialHooks *ecs.Hooks[ecsscene.Material, ecs.HookAll],
+    paramsHooks   *ecs.Hooks[ecsscene.Params, ecs.HookAll],
+    models    *ecs.Get[ecsscene.Model],
+    meshes    *ecs.Get[ecsscene.Mesh],
+    materials *ecs.Get[ecsscene.Material],
+    params    *ecs.Get[ecsscene.Params],
+    lookup     *ecs.Write[*model.Lookup],
+    filesystem *ecs.Read[storage.FileSystem],
+    resources  *ecs.Write[*gfx.ResourceQueue],
+    work       *ecs.Write[*keyScratch],
+)
+```
+
+- **For each Entity a Hook names**, once however many name it, it resolves the
+  `ModelRef` to a `ModelHandle`, loading the model if needed, and computes the
+  Batch keys: (`ModelHandle`, primitive, material key, `Params` hash) for each
+  primitive of a `Model`, and (`MeshRef`, material key, `Params` hash) for a
+  `Mesh`. A primitive is named by the mesh it draws. The material key is the
+  model material's load-time key, or the key of the `Material` override, and
+  zero is the bundled PBR a `Mesh` with no `Material` draws with. `Params` are
+  hashed with `gfx.FingerprintParams`, and no parameters hash as zero.
+- **It stores both in its key scratch, keyed by Entity**, never in a
+  Component: writing a Component would make it that Component's writer. An
+  Entity that loses its `Model` and `Mesh`, or is despawned, leaves the scratch.
+- **It drives model's bake and release queues**, as scene's flush does.
+- **In a steady frame it walks no Entity and hashes nothing.** No Hook names
+  anything, so what is left is draining two empty queues.
+- **It is the only ecsscene System holding `Write[*model.Lookup]`**, and it
+  reads every Store it keys from. Loading is exclusive; nothing else is.
+- **A model that does not load stays unkeyed** until its Component changes
+  again, because every load failure but a missing backend is cached. Entities
+  touched before the backend is up wait for the first frame that has one.
+- **`Model` and `Mesh` spell their tail padding out**, and model's `MeshRef`
+  its padding after the source, because a Changed record is a difference in
+  bytes.
+
+A game System that spawns drawables or writes these Components orders itself
+`Before[ecsscene.LoadOnUpdate]()`, so the change is keyed in the same tick.
 
 ## The recording System
 
