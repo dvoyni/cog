@@ -188,3 +188,46 @@ type ErrSpotDirectionMissing struct{}
 func (ErrSpotDirectionMissing) Error() string {
 	return "scene: spot light has no direction"
 }
+
+// ErrClipMachineEmpty reports a ClipMachine built with no states. A machine
+// starts in its first state, so with none there is nothing to start in.
+type ErrClipMachineEmpty struct{}
+
+func (ErrClipMachineEmpty) Error() string {
+	return "model: a clip machine needs at least one state to start in"
+}
+
+// ErrClipStateClipMissing reports a ClipState naming a clip the model does not
+// declare. It is refused at construction, once, rather than dropped play by
+// play every frame the state is live.
+type ErrClipStateClipMissing struct {
+	State string
+	Clip  string
+}
+
+func (e ErrClipStateClipMissing) Error() string {
+	return fmt.Sprintf("model: clip state %q plays clip %q, which the model does not declare", e.State, e.Clip)
+}
+
+// ErrClipTransitionStateMissing reports a ClipTransition whose From or To names
+// no state. State is the name that was not found.
+type ErrClipTransitionStateMissing struct {
+	From, To string
+	State    string
+}
+
+func (e ErrClipTransitionStateMissing) Error() string {
+	return fmt.Sprintf("model: clip transition %q -> %q names state %q, which the machine does not have",
+		e.From, e.To, e.State)
+}
+
+// ErrClipTransitionTriggerInvalid reports a ClipTransition with both On and
+// OnFinish set, or neither. Both would leave which one fires it ambiguous, and
+// neither would leave it unreachable.
+type ErrClipTransitionTriggerInvalid struct {
+	From, To string
+}
+
+func (e ErrClipTransitionTriggerInvalid) Error() string {
+	return fmt.Sprintf("model: clip transition %q -> %q must set exactly one of On and OnFinish", e.From, e.To)
+}

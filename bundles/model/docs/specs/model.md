@@ -112,6 +112,18 @@ The glossary is [`CONTEXT.md`](../../../../CONTEXT.md). The terms this document 
 - **Carve.** Moving code out of scene into `model` without changing what it does.
 - **Sweep.** The one landing that rewrites callers from `scene.X` to `model.X`
   and deletes scene's temporary aliases.
+- **Clip machine.** `model.ClipMachine`: a clip state machine the caller keeps
+  and steps, which hands back a frame's `ClipPlay`s and the events of the step.
+  It is one value, definition and runtime state together. "Animation graph" and
+  "animator" are the words to avoid: there is no graph, and nothing animates on
+  its own.
+- **Clip state.** One state of a clip machine: a named clip, whether it loops,
+  and a `Rate` on the caller's dt. Not a **Clip**, which is a sound.
+- **Trigger.** The string `Fire` takes a transition on. `OnFinish` is the other
+  way a transition is taken, and is not a trigger.
+- **Freeze.** What a `Fire` during a crossfade does to the mix: its plays keep
+  their relative weights and fade out as one group, while their clocks keep
+  running.
 
 ---
 
@@ -1530,6 +1542,112 @@ to assume the other made the sum one, which is also what makes a malformed file
 skinned correctly rather than silently shrunk.
 
 **Skinning is model-only.** `MeshDraw` has no `Plays` field and no joint concept.
+
+### Clip state machines
+
+([Animation state machines](https://github.com/dvoyni/cog/issues/26))
+
+```go
+machine, err := model.NewClipMachine(clips, []model.ClipState{
+    {Name: "Walk", Clip: "Walk", Loop: true},
+    {Name: "Run", Clip: "Run", Loop: true, Rate: 1.5},
+}, []model.ClipTransition{
+    {From: "Walk", To: "Run", On: "run", Crossfade: 0.4, Ease: model.EaseCubicInOut},
+    {From: "Run", To: "Walk", On: "walk", Crossfade: 0.6},
+})
+
+machine.Fire("run")                        // gameplay decides
+events = machine.Step(dt, events[:0])      // gameplay owns time
+draw.Plays = machine.Plays(plays[:0])      // scene
+machine.PlaysInto(&animation.Plays)        // ecsscene
+```
+
+**A clip machine is a plain value the caller keeps.** A scene game holds one in
+a field or a map, and an ecsscene game holds one as a Component. It is not a
+resource, not a System, and nothing about it lives in `anim`. Animation stays
+stateless as far as either renderer is concerned: the machine is gameplay's own
+bookkeeping, and what reaches a draw is the same `[]ClipPlay` a hand-written
+crossfade would build. Before it, every consumer did build that by hand, the
+animated demo's fox and both fountains' foxes each scheduling weights of its
+own.
+
+**One type is both the definition and the runtime state, and it is storable.**
+`ClipMachine` passes `ecs.Storable`, so it can be a Component without a second
+"instance" type beside it. That decides its shape: its tables are `m.List`s,
+the storable spelling of a slice, and its easing is the `EaseKind` enum
+(`EaseLinear`, the zero value, `EaseCubicIn`, `EaseCubicOut`, `EaseCubicInOut`)
+rather than a func. The curves are `anim`'s functions of those names,
+re-implemented, because `model` does not import `anim`. Copying a machine to
+many Entities shares the Lists' backing arrays read-only, so a copy costs
+headers rather than tables, and each copy then steps on its own.
+
+**Names resolve once, at construction.** `NewClipMachine` takes the
+`[]ClipInfo` that `LookupDeviceAccess.Clips` returns, resolves every state's
+clip to an index and a duration and every transition's states to indices, and
+starts in `states[0]` at time 0. `Step` never touches the lookup, which is what
+lets a System step machines without holding one. A name that does not resolve
+is an error there, once, rather than a dropped play every frame:
+
+| Error | When |
+| --- | --- |
+| `ErrClipMachineEmpty` | no states, so nothing to start in |
+| `ErrClipStateClipMissing` | a state names a clip the model does not declare |
+| `ErrClipTransitionStateMissing` | a transition's `From` or `To` names no state |
+| `ErrClipTransitionTriggerInvalid` | a transition sets both `On` and `OnFinish`, or neither |
+
+States and clips are addressed by name, first match, as clips always are.
+
+**`Rate` scales the dt the caller passes**, per state, and zero reads as 1. A
+game whose gaits must match their strides to ground speed passes a distance
+rather than a time and sets each state's `Rate` to one over its gait's pace,
+which is what the fountains do: their machines run on world units of ground
+covered, and each clip advances exactly as far as its stride covers. The
+crossfade runs on the same unscaled dt, so there it is measured in ground
+covered too.
+
+**`Loop` false clamps and holds the last frame**, as `ClipPlay.Loop` does, and
+is what lets a state finish. `OnFinish` takes a transition on the Step a
+non-looping `From` state's time first reaches its clip's duration. The new state
+starts from time 0; the overshoot is not carried.
+
+**Events.** `Step(dt, events)` appends `ClipEvent{Kind, State}`s, with
+`StateName(i)` naming a state index. The order is fixed:
+
+1. what every `Fire` since the last Step started, each as `ClipExited` for the
+   state it left then `ClipEntered` for the one it started;
+2. `ClipFinished`, once per entry into a non-looping state, on the Step its time
+   first reaches its duration;
+3. the `ClipExited` and `ClipEntered` of the `OnFinish` transition that same
+   Step takes, if the state has one.
+
+`Fire` returns only whether it found a transition, so what it starts is held
+for the next Step, up to four Fires' worth; a caller firing more than that
+between two Steps loses the oldest. The caller routes events itself, into
+`anim` cues or its own code, because `model` does not import `anim`.
+
+**The interrupt rule: a `Fire` during a crossfade freezes the mix.** The
+incoming play and every outgoing play keep their relative weights and become
+one outgoing group, which fades out as a whole over the new transition's
+`Crossfade` and `Ease` while the new state fades in from time 0. The frozen
+plays' clocks keep advancing, each at its own state's `Rate`, so the pose keeps
+moving while it fades. Live plays never exceed `MaxClipPlays`: when the group
+would push them past it, the lightest outgoing play is dropped and the rest keep
+their proportions.
+
+The failing sequence the rule exists for is a walk-to-run fade interrupted by a
+jump halfway. Restarting the jump's fade from whichever of Walk or Run is
+"current" snaps the other half of the pose away on the frame the jump is
+fired; fading each outgoing play on a curve of its own grows the play count by
+one per interrupt and has no answer at the cap. Freezing the mix keeps the pose
+the player is looking at on the frame of the Fire, and costs one group.
+
+**Weights need not sum to one**, because they are normalised at pack time
+([Clip plays](#clip-plays)). The machine's do, which only makes the HUD's
+numbers readable.
+
+**What it does not preclude.** Blend layers by bone mask are a second
+machine's plays on a subset of joints, which needs a mask on the play, not a
+change here.
 
 ### Morph targets
 
