@@ -394,8 +394,10 @@ replaced scene's friend accessors: `ModelView` resolves one draw's selectors,
 loading the model if needed; `Mesh` resolves a durable ref; `EnsureUnit` bakes a
 `model.UnitMesh`, which scene maps its shape enum onto; `EnsureBundled` returns
 the bundled PBR's forward descrs; and `DrainMeshes` applies the staged bakes and
-releases. The two facades and `ModelHandle` below are still the plan
-([#531](https://github.com/dvoyni/cog/issues/531)).
+releases. The two facades and `ModelHandle` below landed in
+[#531](https://github.com/dvoyni/cog/issues/531): the read facade is
+`LookupReadAccess`, and the load facade is `LookupAccess`, `LookupDeviceAccess`
+and the Lookup's own methods, `Resolve` among them.
 
 **The read set is immutable from install to unload:**
 
@@ -850,7 +852,7 @@ what it does.
       [#530](https://github.com/dvoyni/cog/issues/530), bringing the conversion
       to GPU layouts, the per-frame animation resolution and the model
       material's forward-descr shape with it. The two facades and `ModelHandle`
-      follow in [#531](https://github.com/dvoyni/cog/issues/531);
+      landed in [#531](https://github.com/dvoyni/cog/issues/531);
    3. the model material and the shader;
    4. the shader's records and packers, the light-array filler, `FrameLighting`,
       `AppendAnim`, and the size and binding-name constants. Projection maths goes

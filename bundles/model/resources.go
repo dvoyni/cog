@@ -8,7 +8,9 @@ import "github.com/dvoyni/cog/bundles/model/internal/types"
 // buffer-built meshes and the unit meshes - plus the deferred bakes and buffer
 // releases a renderer's flush applies at the frame boundary.
 //
-// It never retains a filesystem or GPU handle of its own. Query and mutate it
-// only through a scoped LookupAccess or LookupDeviceAccess, or, from the
-// renderer that holds it for writing, through its own methods.
+// It never retains a filesystem or GPU handle of its own. It has two facades.
+// Under a read lock, LookupReadAccess answers only for resident models and
+// never loads. Under the write lock, the load facade is LookupAccess,
+// LookupDeviceAccess and, for the renderer that holds it, the Lookup's own
+// methods: they load, preload, unload and drive the bake and release queues.
 type Lookup = types.Lookup

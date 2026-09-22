@@ -167,6 +167,21 @@ type ClipPlay = types.ClipPlay
 // piece of clip state gameplay cannot compute for itself.
 type ClipInfo = types.ClipInfo
 
+// ModelHandle is a plain slot index into the Lookup's dense model table. A
+// ModelRef resolves to one once, through the load facade's Resolve, and a read
+// by handle is then one index, with no path clean and no string hash. There is
+// no generation: a handle goes stale only when its model is unloaded, and
+// drawing an unloaded model is undefined behaviour. The zero value is no model.
+type ModelHandle = types.ModelHandle
+
+// LookupReadAccess is the read facade: everything a draw reads from a resident
+// model, by ModelHandle and by MeshRef. It never loads, and a model that is
+// not resident is absent. Acquire a *Lookup read dependency in a handler,
+// build one with NewLookupReadAccess, and never store the result. Readers run
+// side by side, because everything it reads is immutable from install to
+// unload.
+type LookupReadAccess = types.LookupReadAccess
+
 // LookupAccess is the scoped facade for everything about a Lookup that neither
 // loads a model nor frees a GPU texture: the mesh verbs, UnloadModel and the
 // two memory totals. Acquire a *Lookup write dependency in a handler, build one

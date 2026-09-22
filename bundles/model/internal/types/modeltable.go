@@ -88,6 +88,11 @@ type residentModel struct {
 	// animation is the model's baked animation: the clip table the packer reads
 	// and the two group 2 buffers its draws bind.
 	animation ResidentAnimation
+	// key is the cache key the model was loaded under, and handle its slot in
+	// the dense model table. A failed load has neither: it is cached, but it is
+	// not resident, so nothing can hold a handle to it.
+	key    string
+	handle ModelHandle
 }
 
 // modelPrimitive is one flattened primitive as the flush draws it.
@@ -282,6 +287,7 @@ func (modelLoader) Free(value *residentModel, userData modelUserData) {
 	}
 	l.poseBytes -= animation.poseBytes
 	l.morphBytes -= animation.morphBytes
+	l.evict(value)
 }
 
 // parseModel decodes and converts one file's bytes. Everything it returns is
@@ -372,6 +378,7 @@ func (l *Lookup) installModel(
 	l.poseBytes += model.animation.poseBytes
 	l.morphBytes += model.animation.morphBytes
 	l.reportLoad(k, modelPath, loaded.reports)
+	l.admit(modelPath, model)
 	return model
 }
 
