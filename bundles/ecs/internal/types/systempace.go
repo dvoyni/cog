@@ -21,6 +21,13 @@ type pacedLog struct {
 // to: each run that grew a log bumps that log's counter once, however many
 // records it appended.
 //
+// That is also what makes one Drain() one writer run per Store however many
+// passes it makes, which deferred.md § One drain is one writer run per Store
+// requires. The count is per run of the drain System, and both of the drain's
+// passes append inside that one run, so a two-pass drain is counted once and
+// the check measures how often the world was drained rather than the shape of
+// the drainer. Counting per append, or per pass, would break that rule.
+//
 // A System appends only to the logs of Stores it holds a write lock on, so it
 // reads each one only while nothing else appends to it or compacts it.
 type systemPace struct {
