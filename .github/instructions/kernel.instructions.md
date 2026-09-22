@@ -79,6 +79,32 @@ A test fixture that registers a different body per test case is the one place an
 inline factory is right — there is no single implementation to name. A fixture
 command with one body follows the rule like any other.
 
+### Naming An ECS System
+
+A function handed to `ecs.ToHandler` is a System, and its name ends in `System`:
+what it does, then the suffix.
+
+```go
+func locomotionSystem(q *ecs.Query[locomotionQuery], dt *ecs.In[float64]) { … }
+
+registrar.Subscribe[LocomotionOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, locomotionSystem))
+```
+
+A System's signature is a plain func of Queries and handles, which reads the same
+as a helper's. The suffix is what marks it as scheduled, locked and run by the
+kernel, both where it is declared and where it is registered. The subscription
+identity keeps its own verb-plus-event name (`LocomotionOnUpdate`); the suffix
+names the function, not the identity.
+
+A System registered as a command through `ecs.ToExecute` is a command handler, and
+follows § Naming A Command: `xCmdImpl`.
+
+**A file about one System is named for it**, lowercased as
+[`gostyle.instructions.md`](gostyle.instructions.md) names a type's file:
+`locomotionSystem` and the Query and helpers only it uses live in
+`locomotionsystem.go`. A System that is a method of a class-like type lives in
+that type's file, like any other method.
+
 ### The Factory Closure Is Shared
 
 Because the factory runs once, **every variable it declares is shared by all

@@ -63,8 +63,8 @@ func (plugin) Register(registrar *kernel.Registrar, _ any) error {
 	ecs.RegisterComponent[ecsscene.Camera](registrar, cameraReserve)
 	registrar.InitResource(newScratch())
 	registrar.InitResource(newKeyScratch())
-	registrar.Subscribe[ecsscene.LoadOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, load)).
+	registrar.Subscribe[ecsscene.LoadOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, loadSystem)).
 		Before[ecsscene.RecordOnUpdate]()
-	registrar.Subscribe[ecsscene.RecordOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, record))
+	registrar.Subscribe[ecsscene.RecordOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, recordSystem))
 	return nil
 }

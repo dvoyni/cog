@@ -142,12 +142,12 @@ func newScratch() *scratch {
 
 func (s *scratch) reportOnce(key string, err error) { s.k.ReportErrorOnce(key, err) }
 
-// record is the recording System: every Entity with a Transform and a Model,
-// Mesh, Light or Camera, drawn into gfx once a tick. It repeats scene's path
-// over Entities: it buckets the frame's instances into Batches by the keys the
-// load System wrote, and for each camera and pass culls, applies the layer
-// mask and filters each Batch's instances, then sorts, and packs one
-// properties record and one instanced draw per Batch through model's packers.
+// recordSystem is the recording System: every Entity with a Transform and a
+// Model, Mesh, Light or Camera, drawn into gfx once a tick. It repeats scene's
+// path over Entities: it buckets the frame's instances into Batches by the keys
+// the load System wrote, and for each camera and pass culls, applies the layer
+// mask and filters each Batch's instances, then sorts, and packs one properties
+// record and one instanced draw per Batch through model's packers.
 //
 // Its signature is its whole lock set. It reads the Stores, the load System's
 // keys, the Lookup through the read facade and the viewport; it writes only
@@ -155,7 +155,7 @@ func (s *scratch) reportOnce(key string, err error) { s.k.ReportErrorOnce(key, e
 // System's Before: gfx presents Last, so an ordinary-phase System already runs
 // before it, and a game System that moves Transforms orders itself
 // Before[ecsscene.RecordOnUpdate].
-func record(
+func recordSystem(
 	k kernel.Kernel,
 	models *ecs.Query[modelQuery],
 	meshes *ecs.Query[meshQuery],

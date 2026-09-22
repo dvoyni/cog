@@ -34,8 +34,8 @@ type (
 // nothing.
 type manyListenersKey struct{}
 
-// record is the binding: every Emitter reconciled against the Voice it already
-// has, and the Listener copied across, into sound's queue once a tick.
+// recordSystem is the binding: every Emitter reconciled against the Voice it
+// already has, and the Listener copied across, into sound's queue once a tick.
 //
 // Its signature is its whole lock set - the Stores it reads, the table it owns
 // and sound's queue it writes. It writes no Component and names no
@@ -47,7 +47,7 @@ type manyListenersKey struct{}
 // It declares no ordering: sound's flush is subscribed Last, so an
 // ordinary-phase System already runs before it, and a game System that moves
 // Transforms orders itself Before[ecsaudio.RecordOnUpdate].
-func record(
+func recordSystem(
 	emitters *ecs.Query[emitterQuery],
 	listeners *ecs.Query[listenerQuery],
 	places *ecs.Get[m.Transform],

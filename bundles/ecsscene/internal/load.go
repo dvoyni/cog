@@ -109,10 +109,10 @@ func (s *keyScratch) touch(e ecs.Entity) {
 	s.pending = append(s.pending, e)
 }
 
-// load is the load System. It is the only ecsscene System holding the Lookup
-// for writing, so it is the one that loads, and it drives model's bake and
-// release queues: nothing else in an ecsscene app drains them, because an app
-// runs ecsscene or scene and never both.
+// loadSystem is the load System. It is the only ecsscene System holding the
+// Lookup for writing, so it is the one that loads, and it drives model's bake
+// and release queues: nothing else in an ecsscene app drains them, because an
+// app runs ecsscene or scene and never both.
 //
 // It runs on what changed: every addition, change and removal of a Model,
 // Mesh, Material or Params since its last run, each Entity once. For each it
@@ -124,7 +124,7 @@ func (s *keyScratch) touch(e ecs.Entity) {
 // Everything it reads from the Stores is a read, so it keeps no System off
 // them. What it writes is exclusive by nature: the Lookup, and the resource
 // queue a load uploads through.
-func load(
+func loadSystem(
 	k kernel.Kernel,
 	modelHooks *ecs.Hooks[ecsscene.Model, ecs.HookAll],
 	meshHooks *ecs.Hooks[ecsscene.Mesh, ecs.HookAll],

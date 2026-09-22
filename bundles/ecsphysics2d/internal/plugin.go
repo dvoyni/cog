@@ -154,25 +154,25 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	registrar.HandleCommand[ecsphysics2d.WakeCmd](types.WakeCommand)
 
 	registrar.Subscribe[ecsphysics2d.IntegrateOnUpdate](
-		ecs.ToHandler[app.UpdateEvent](registrar, integrate, step()))
+		ecs.ToHandler[app.UpdateEvent](registrar, integrateSystem, step()))
 	registrar.Subscribe[ecsphysics2d.IndexOnUpdate](
-		ecs.ToHandler[app.UpdateEvent](registrar, p.index)).
+		ecs.ToHandler[app.UpdateEvent](registrar, p.indexSystem)).
 		After[ecsphysics2d.IntegrateOnUpdate]()
 	registrar.Subscribe[ecsphysics2d.DetectOnUpdate](
-		ecs.ToHandler[app.UpdateEvent](registrar, p.detect, step())).
+		ecs.ToHandler[app.UpdateEvent](registrar, p.detectSystem, step())).
 		After[ecsphysics2d.IndexOnUpdate]()
 	registrar.Subscribe[ecsphysics2d.SleepOnUpdate](
-		ecs.ToHandler[app.UpdateEvent](registrar, p.sleep, step())).
+		ecs.ToHandler[app.UpdateEvent](registrar, p.sleepSystem, step())).
 		After[ecsphysics2d.DetectOnUpdate]()
 	registrar.Subscribe[ecsphysics2d.SolveOnUpdate](
-		ecs.ToHandler[app.UpdateEvent](registrar, p.solve, step())).
+		ecs.ToHandler[app.UpdateEvent](registrar, p.solveSystem, step())).
 		After[ecsphysics2d.SleepOnUpdate]()
 	return nil
 }
 
-// index rebuilds the two spatial indices from the positions Integrate has just
-// written, drains the Shape hooks that say which Static Entities came and went,
-// and rebuilds the set of pairs a Joint holds apart.
+// indexSystem rebuilds the two spatial indices from the positions Integrate has
+// just written, drains the Shape hooks that say which Static Entities came and
+// went, and rebuilds the set of pairs a Joint holds apart.
 //
 // The two halves are not symmetric, and that is the whole design. Statics are
 // maintained incrementally, world-cached once at Insert and never again, which
@@ -192,7 +192,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 // value itself and reads nil. The scratch lives on the plugin rather than in
 // this frame so that the run it has grown survives the tick — a local would be
 // nil again at every call and would allocate every tick.
-func (p *plugin) index(
+func (p *plugin) indexSystem(
 	shapes *ecs.Hooks[ecsphysics2d.Shape, ecs.HookAddedRemoved],
 	sleepers *ecs.Hooks[ecsphysics2d.Sleeping, ecs.HookAddedRemoved],
 	shaped *ecs.Get[ecsphysics2d.Shape],
@@ -324,8 +324,8 @@ func (p *plugin) polygonVerts(
 	return p.polygon
 }
 
-// detect finds the tick's Contacts by walking the two indices, and is where the
-// seeded coincidence nudge lives.
+// detectSystem finds the tick's Contacts by walking the two indices, and is
+// where the seeded coincidence nudge lives.
 //
 // It names no Component Store. cp's narrowphase reaches the Shape and the Body
 // through pointers; the port's index entries carry the Shape, its world cache
@@ -336,7 +336,7 @@ func (p *plugin) polygonVerts(
 // An app's filter Systems — cp's Begin and PreSolve — order themselves
 // After[DetectOnUpdate]().Before[SolveOnUpdate]() and take
 // *ecs.Write[*Contacts].
-func (p *plugin) detect(
+func (p *plugin) detectSystem(
 	staticIndex *ecs.Read[*ecsphysics2d.StaticIndex],
 	bodyIndex *ecs.Read[*ecsphysics2d.BodyIndex],
 	jointed *ecs.Read[*ecsphysics2d.JointedPairs],
@@ -349,9 +349,10 @@ func (p *plugin) detect(
 	)
 }
 
-// solve is the indivisible half of the step: the dense solved-Contact list, the
-// gather through the BodyIndex slot table, PreStep, the velocity integration,
-// the warm start, the iterations, and the bias applied as a position delta.
+// solveSystem is the indivisible half of the step: the dense solved-Contact
+// list, the gather through the BodyIndex slot table, PreStep, the velocity
+// integration, the warm start, the iterations, and the bias applied as a
+// position delta.
 //
 // Velocity integration cannot be a System of its own, which is what makes Solve
 // indivisible, and both sides force it: PreStep computes bounce from the
@@ -368,7 +369,7 @@ func (p *plugin) detect(
 // so it costs no parallelism either: nothing the plugin registers writes
 // Constants, and the only System that waits on this read is an app's own that
 // took ecs.Write[*Constants], which is the price that app chose.
-func (p *plugin) solve(
+func (p *plugin) solveSystem(
 	bodies *ecs.Query[types.VelocityQuery],
 	joints *ecs.Query[types.JointQuery],
 	dynamics *ecs.Get[ecsphysics2d.Dynamic],
@@ -386,7 +387,7 @@ func (p *plugin) solve(
 	)
 }
 
-// sleep is cp's ProcessComponents, between Detect and Solve: every awake
+// sleepSystem is cp's ProcessComponents, between Detect and Solve: every awake
 // Dynamic body's idle time kept, every sleeping Island something disturbed
 // woken, and the tick's Islands built from the Contacts and the Joints so that
 // the ones idle for Sleep.Time fall asleep.
@@ -404,7 +405,7 @@ func (p *plugin) solve(
 // It never writes the Body index. Moving a Body into the sleepers' grid and out
 // again is Index's, on the next tick, off the Sleeping Tag's own hook; a query
 // asks both grids, so nothing it answers changes in between.
-func (p *plugin) sleep(
+func (p *plugin) sleepSystem(
 	settings *ecs.Read[*ecsphysics2d.Sleep],
 	constants *ecs.Read[*ecsphysics2d.Constants],
 	awake *ecs.Query[types.AwakeQuery],
@@ -428,8 +429,8 @@ func (p *plugin) sleep(
 	)
 }
 
-// integrate moves every Body with a Velocity by that Velocity over one step,
-// and records where it was when the tick began.
+// integrateSystem moves every Body with a Velocity by that Velocity over one
+// step, and records where it was when the tick began.
 //
 // It runs first, which is cp's order and not Box2D's, and is the whole reason a
 // Force written this tick moves the Body next tick: the Force this tick's
@@ -440,7 +441,7 @@ func (p *plugin) sleep(
 // It is one System and not two. Both of the halves anyone would split it into
 // use Velocity, one writing and one reading, so a split serialises anyway and
 // costs about 6 µs of scheduling to buy nothing.
-func integrate(bodies *ecs.Query[positionQuery], step *ecs.In[float64]) {
+func integrateSystem(bodies *ecs.Query[positionQuery], step *ecs.In[float64]) {
 	// Read once, outside the loop: In is a cell the adapter writes, so a Get
 	// inside the loop is a load the compiler cannot hoist.
 	h := step.Get()

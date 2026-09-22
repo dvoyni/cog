@@ -48,6 +48,6 @@ func (plugin) Register(registrar *kernel.Registrar, _ any) error {
 	ecs.RegisterComponent[ecsaudio.Emitter](registrar, emitterReserve)
 	ecs.RegisterComponent[ecsaudio.Listener](registrar, listenerReserve)
 	registrar.InitResource(newTable())
-	registrar.Subscribe[ecsaudio.RecordOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, record))
+	registrar.Subscribe[ecsaudio.RecordOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, recordSystem))
 	return nil
 }
