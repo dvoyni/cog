@@ -1851,6 +1851,137 @@
             "array"
           ]
         },
+        "contention": {
+          "additionalProperties": false,
+          "properties": {
+            "contended": {
+              "type": "boolean"
+            },
+            "handlerPairs": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  },
+                  "b": {
+                    "type": "string"
+                  },
+                  "resources": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "a",
+                  "b"
+                ],
+                "type": "object"
+              },
+              "type": [
+                "null",
+                "array"
+              ]
+            },
+            "handlerPairsOmitted": {
+              "type": "integer"
+            },
+            "phases": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicts": {
+                    "type": "integer"
+                  },
+                  "event": {
+                    "type": "string"
+                  },
+                  "members": {
+                    "type": "integer"
+                  },
+                  "phase": {
+                    "type": "string"
+                  },
+                  "singleThreaded": {
+                    "type": "boolean"
+                  },
+                  "widestLocks": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "event",
+                  "phase",
+                  "members",
+                  "conflicts",
+                  "singleThreaded"
+                ],
+                "type": "object"
+              },
+              "type": [
+                "null",
+                "array"
+              ]
+            },
+            "resources": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicts": {
+                    "type": "integer"
+                  },
+                  "owner": {
+                    "type": "string"
+                  },
+                  "readers": {
+                    "type": "integer"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "writers": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "type",
+                  "owner",
+                  "conflicts",
+                  "readers"
+                ],
+                "type": "object"
+              },
+              "type": [
+                "null",
+                "array"
+              ]
+            }
+          },
+          "required": [
+            "contended"
+          ],
+          "type": [
+            "null",
+            "object"
+          ]
+        },
         "path": {
           "type": "string"
         },

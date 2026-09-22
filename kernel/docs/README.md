@@ -437,7 +437,11 @@ It has three views, each **ranked rather than enumerated**:
 - `Contention.Handlers` — every handler pair that can never overlap and the
   resources that is true of, the pair sharing the most first. This set is
   quadratic, so `Dump` prints the worst of it and counts the rest; the
-  description carries all of it.
+  description carries all of it. A pair's shared keys may include an `Exclusive`
+  key absorbed through `Uses`: a handler that uses an `Exclusive` command takes
+  on its self-exclusion and can never overlap it, and the pair names that key by
+  the command's identity type. It names no resource, so it appears in
+  `Contention.Handlers` and never in `Contention.Resources`.
 
 Commands and subscriptions are treated alike in `Resources` and `Handlers`: any
 two handlers may be in flight at once, so any two may serialise. Only `Phases` is

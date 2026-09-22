@@ -320,10 +320,20 @@ holding once the commands it declares are folded in, plus the `uses` edges that
 explain it — the one thing an agent cannot compute by reading source, because a
 handler deliberately never names the resources behind a command it uses. It
 returns flat JSON in five arrays — plugins, resources, ports, commands and
-subscriptions — addressed by type string, and writes a file instead when given
-an absolute `.json` path. A port entry names the interface, the Port type,
-whether it collects or requires Adapters, and the Adapter types bound to it in
-plugin order.
+subscriptions — addressed by type string, plus a `contention` object, and writes
+a file instead when given an absolute `.json` path. A port entry names the
+interface, the Port type, whether it collects or requires Adapters, and the
+Adapter types bound to it in plugin order.
+
+`contention` is the kernel's conflict report (`kernel/docs/README.md`, *The
+conflict report*), ranked as the kernel ranks it. `contended` is always present,
+and `false` when nothing contends. `resources` lists each contended resource with
+its conflicting pairs, the handlers writing it and a count of those reading it;
+`phases` lists each phase in which some member pair serialises, with
+`singleThreaded` and `widestLocks`, so a phase absent there runs in parallel; and
+`handlerPairs` lists the ten pairs sharing the most, with `handlerPairsOmitted`
+counting the rest, the cap `Dump` uses. A handler's exclusion against itself is
+no pair: it is the `selfExclusive` flag on its command or subscription entry.
 
 ## Attaching
 

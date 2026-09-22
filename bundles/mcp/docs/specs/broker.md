@@ -505,8 +505,9 @@ see
   [mcp §The capability-body rule](mcp.md#the-capability-body-rule).
   Making it an `mcp.Command` would mean the broker registering a command it
   dispatches to itself — ceremony that takes the scheduler for nothing.
-- **Flat JSON, five arrays**, mirroring `ArchitectureDescription`: plugins,
-  resources, ports, commands and subscriptions. The ports array was added by
+- **Flat JSON, five arrays and the contention report**, mirroring
+  `ArchitectureDescription`: plugins, resources, ports, commands and
+  subscriptions. The ports array was added by
   [#335](https://github.com/dvoyni/cog/issues/335) with the kernel's
   `ArchitectureDescription.Ports`: each entry names the interface in `interface`,
   the Port type in `port`, whether it collects or requires Adapters, and the
@@ -515,7 +516,18 @@ see
   [#353](https://github.com/dvoyni/cog/issues/353), which made Ports and
   Adapters declared types; before it `port` named the declaring plugin and
   `contributors` the providing plugins.) `Dump` stays
-  the human spelling.
+  the human spelling. Amended by
+  [#290](https://github.com/dvoyni/cog/issues/290): beside the five arrays sits
+  one `contention` object, the kernel's `ArchitectureDescription.Contention` in a
+  wire shape, ranked as the kernel ranks it and capped as `Dump` caps it.
+  `contended` is always present, `false` when nothing contends; `resources`
+  carries each contended resource's type, owner, conflicting pairs, writer names
+  and a reader count; `phases` carries event, phase, members, conflicting pairs,
+  `singleThreaded` and `widestLocks`; `handlerPairs` is the kernel's first ten
+  pairs with their shared keys unfiltered, and `handlerPairsOmitted` counts the
+  rest. Every handler renders by its identity type through `kernel.TypeName`,
+  so it joins to `commands` and `subscriptions`. The path-only reply carries no
+  `contention`, and the written file carries the same capped document.
 - **No index, because the type string is the address.** `Uses`, `DependsOn`,
   `Reads` and `Writes` are all joins on it. This is
   [#208](https://github.com/dvoyni/cog/issues/208) §6's addressability rule
@@ -574,14 +586,30 @@ which `Dump`'s output already exceeds for cog's current plugin set.
 Reproduced in full, per the house style, so it is reviewed as prompt text:
 
 > What this engine is actually composed of: the plugins in start order, who owns
-> which command, event and resource, which plugins contributed the Adapters each
-> Port is bound to, the subscription dependency graph, and —
-> the part you cannot get by reading source — the full set of resources each
-> handler ends up locking once the commands it declares are folded in. Use it
-> when you need to know what a dispatch really touches, or why one handler waits
-> for another. Commands are listed so you can see who owns behaviour; you cannot
-> call them from here, and there is no tool that takes a command name. Pass
-> `path` to write the JSON to a file instead of returning it inline.
+> which command, event and resource, which Adapters are bound to each Port, the
+> subscription dependency graph, and — the part you cannot get by reading source
+> — the full set of resources each handler ends up locking once the commands it
+> declares are folded in. Use it when you need to know what a dispatch really
+> touches, or why one handler waits for another. Commands are listed so you can
+> see who owns behaviour; you cannot call them from here, and there is no tool
+> that takes a command name. `contention` answers why a frame is not parallel:
+> it lists the handlers that can never run at the same time because one writes a
+> resource the other holds. That is how shared state works and is not a defect;
+> read it to find what serialises, not to report a bug. `contended` is false
+> when nothing does. `resources` are ranked by how many handler pairs each
+> serialises, with the handlers that write it and a count of those that read it.
+> A phase appears in `phases` only if some pair of its members conflicts, so a
+> phase missing there runs its members in parallel; `singleThreaded` means its
+> members run one at a time, and `widestLocks` names the members that conflict
+> with every other, which are what makes it serialise. Only the ten
+> `handlerPairs` sharing the most resources are listed, and
+> `handlerPairsOmitted` counts the rest. A handler that uses a command is
+> reported as conflicting with that command, because it absorbs the command's
+> locks; if the command declares `Exclusive`, the handler absorbs that too, and
+> the pair's resources may then name the command itself. A handler marked
+> `selfExclusive` never overlaps itself, so two simultaneous calls to it queue;
+> that raises no contention pair, so read it on the command or subscription
+> entry. Pass `path` to write the JSON to a file instead of returning it inline.
 
 ### The broker does not describe itself
 
@@ -589,9 +617,9 @@ Reproduced in full, per the house style, so it is reviewed as prompt text:
 already receives it from `tools/list`, and `<plugin>_<capability>` namespacing
 means the provider list is recoverable from the tool names the agent already
 holds. An `mcpserver_providers` capability would be a second, worse spelling of
-`tools/list`. The ports array names the plugins contributing `mcp.Provider`,
-because it lists every Port, and that is a fact about composition rather than a
-description of the broker.
+`tools/list`. The ports array names the Adapter types bound to
+`mcp.ProviderPort`, because it lists every Port, and that is a fact about
+composition rather than a description of the broker.
 
 ---
 
@@ -704,7 +732,8 @@ paths of [#359](https://github.com/dvoyni/cog/issues/359).
 
 **`bundles/mcp/internal/architecture.go`**
 
-- The one capability, its request (`{path?}`), its five-array response, and
+- The one capability, its request (`{path?}`), its response of five arrays and a
+  `contention` object ([#290](https://github.com/dvoyni/cog/issues/290)), and
   `reflect.Type` rendering via `kernel.TypeName`.
 
 **Tests**
