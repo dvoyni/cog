@@ -191,3 +191,88 @@ func TestRender_AMaybeRendersAsThePointerItReplaced(t *testing.T) {
 		t.Fatalf("maybe schema = %s\nwant the pointer's %s", got, want)
 	}
 }
+
+func renderOutput(t *testing.T, capability mcp.Capability) *jsonschema.Schema {
+	t.Helper()
+	tools, err := render([]offered{{provider: "probe", capability: capability}})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	schema, ok := tools[0].OutputSchema.(*jsonschema.Schema)
+	if !ok {
+		t.Fatalf("output schema is %T, want *jsonschema.Schema", tools[0].OutputSchema)
+	}
+	return schema
+}
+
+// sliceLists and listLists are one response spelled with slices and with
+// m.List: a List crosses the wire as the array its MarshalJSON writes, so the
+// schema an agent reads must describe that array and never the struct of
+// unexported fields it is in Go.
+type sliceLists struct {
+	Rects  []testRect   `json:"rects"`
+	Nested [][]testRect `json:"nested"`
+	Keys   []testAction `json:"keys"`
+	Maybes []*int       `json:"maybes"`
+}
+
+type listLists struct {
+	Rects  m.List[testRect]         `json:"rects"`
+	Nested m.List[m.List[testRect]] `json:"nested"`
+	Keys   m.List[testAction]       `json:"keys"`
+	Maybes m.List[m.Maybe[int]]     `json:"maybes"`
+}
+
+// A List renders as the array of its element's schema, nested Lists as arrays
+// of arrays, and never as an object. The array is not nullable: an empty List
+// marshals as [], never null.
+func TestRender_AListRendersAsTheArrayItCrossesAs(t *testing.T) {
+	schema := renderOutput(t, mcp.Func("list", "", func(kernel.Executioner, echoResponse) (listLists, error) {
+		return listLists{}, nil
+	}))
+
+	rects := schema.Properties["rects"]
+	if rects.Type != "array" || len(rects.Types) != 0 {
+		t.Fatalf("rects schema type = %q %v, want a non-nullable array", rects.Type, rects.Types)
+	}
+	if rects.Items == nil || rects.Items.Type != "object" || rects.Items.Properties["width"] == nil {
+		t.Fatalf("rects items = %+v, want testRect's object schema", rects.Items)
+	}
+
+	nested := schema.Properties["nested"]
+	if nested.Type != "array" || len(nested.Types) != 0 || nested.Items == nil {
+		t.Fatalf("nested schema = %+v, want a non-nullable array", nested)
+	}
+	inner := nested.Items
+	if inner.Type != "array" || len(inner.Types) != 0 || inner.Items == nil || inner.Items.Properties["x"] == nil {
+		t.Fatalf("nested items = %+v, want a non-nullable array of testRect", inner)
+	}
+}
+
+// The element is walked before the List renders, so a TextValued type inside
+// it renders as its string enum and a Maybe inside it as its nullable value.
+func TestRender_AListsElementKeepsItsOwnOverrides(t *testing.T) {
+	list := renderOutput(t, mcp.Func("list", "", func(kernel.Executioner, echoResponse) (listLists, error) {
+		return listLists{}, nil
+	}))
+	slice := renderOutput(t, mcp.Func("slice", "", func(kernel.Executioner, echoResponse) (sliceLists, error) {
+		return sliceLists{}, nil
+	}))
+
+	key := list.Properties["keys"].Items.Properties["key"]
+	if len(key.AnyOf) != 2 || key.AnyOf[0].Type != "string" || len(key.AnyOf[0].Enum) != 2 {
+		t.Fatalf("key inside a List = %+v, want the TextValued enum and pattern", key)
+	}
+
+	want, err := json.Marshal(slice.Properties["maybes"].Items)
+	if err != nil {
+		t.Fatalf("marshal slice item: %v", err)
+	}
+	got, err := json.Marshal(list.Properties["maybes"].Items)
+	if err != nil {
+		t.Fatalf("marshal list item: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("Maybe inside a List = %s\nwant the pointer's %s", got, want)
+	}
+}
