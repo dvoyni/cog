@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/qmuntal/gltf"
 )
 
@@ -25,7 +24,7 @@ func TestAModelPrimitiveStoresTheStrideItsLayoutNames(t *testing.T) {
 		h := residentModel(t, c.doc)
 		var attrs, bytes, vertices int
 		found := 0
-		h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
+		h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *model.Lookup) {
 			for _, mesh := range durableMeshes(lookup) {
 				if mesh.VertexCount == 0 {
 					continue

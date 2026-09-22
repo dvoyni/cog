@@ -27,7 +27,7 @@ type MeshDraw struct {
 	Transforms []m.Transform
 	// Material is the scene material to draw with; nil is the bundled PBR. A
 	// mesh built from a custom vertex layout must name one, because the bundled
-	// PBR's vertex stage reads scene.Vertex's eight attributes and nothing else.
+	// PBR's vertex stage reads model.Vertex's eight attributes and nothing else.
 	//
 	// It is copied into the frame's own arenas at record - its tag entries and
 	// each entry's parameters - so a caller may reuse or change it the moment
@@ -65,7 +65,7 @@ func (d MeshDraw) sphere() m.Sphere {
 // A ref that names no mesh - a mint that was rejected, a released mesh, a
 // temporary from an earlier frame - records nothing here and is reported and
 // skipped by the flush, once per ref rather than once per draw.
-func (q *OpQueue) Mesh(layers LayerMask, ref MeshRef, draw MeshDraw) {
+func (q *OpQueue) Mesh(layers LayerMask, ref model.MeshRef, draw MeshDraw) {
 	transforms := draw.Transforms
 	if len(transforms) > 0 {
 		start := len(q.meshes.transforms)
@@ -110,7 +110,7 @@ func (q *OpQueue) Mesh(layers LayerMask, ref MeshRef, draw MeshDraw) {
 // in: used in a later frame it is reported and skipped, rather than silently
 // drawing whatever geometry now occupies its slot.
 //
-// A temporary mesh built on scene.Vertex pays an O(n) pack every frame, where a
+// A temporary mesh built on model.Vertex pays an O(n) pack every frame, where a
 // custom layout pays an O(n) memcpy: scene packs the standard vertex and cannot
 // hand a caller's slice to gfx. That cost is stated rather than designed
 // around - carving the standard vertex out would mean a second stored layout
@@ -128,14 +128,14 @@ func (q *OpQueue) Mesh(layers LayerMask, ref MeshRef, draw MeshDraw) {
 // draw an explicit MeshDraw.Bounds when it should cull. Its indices stay uint32
 // for the same reason: narrowing them would turn a zero-copy reinterpret into
 // an allocating pass paid every frame rather than once.
-func (q *OpQueue) TemporaryMesh[TVertex VertexLayout](
+func (q *OpQueue) TemporaryMesh[TVertex model.VertexLayout](
 	vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology,
-) MeshRef {
+) model.MeshRef {
 	input, err := model.MintMesh[TVertex](
 		&q.meshes.layouts, &q.meshes.Arena, vertices, indices, topology, false)
 	if err != nil {
 		q.meshes.Reports = append(q.meshes.Reports, err)
-		return MeshRef{}
+		return model.MeshRef{}
 	}
 	q.meshes.Temporaries = append(q.meshes.Temporaries, input)
 	return model.NewMeshRef(MeshTemporary, uint32(len(q.meshes.Temporaries)), q.frame)

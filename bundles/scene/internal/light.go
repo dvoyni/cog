@@ -9,7 +9,7 @@ import (
 
 // lightBounds is the sphere a light is culled by: its position and range. An
 // infinite range has no sphere and is never culled.
-func lightBounds(descr scene.LightDescr) (m.Sphere, bool) {
+func lightBounds(descr model.LightDescr) (m.Sphere, bool) {
 	if descr.Range <= 0 {
 		return m.Sphere{}, false
 	}

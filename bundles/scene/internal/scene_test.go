@@ -335,24 +335,24 @@ type inspectResponse struct{}
 // lookupProbeCmd runs a callback with a valid scoped facade, either half.
 type lookupProbeCmd kernel.Command[lookupProbeRequest, lookupProbeResponse]
 type lookupProbeRequest struct {
-	run func(scene.LookupAccess)
+	run func(model.LookupAccess)
 	// device is the loading half. Preload, State and every query moved onto it
 	// when the load moved inside the call that asks for it, so a test that
 	// drives one asks for this facade rather than the other.
-	device func(scene.LookupDeviceAccess)
+	device func(model.LookupDeviceAccess)
 	// files is the separate probe readFile needs. Neither facade hands its
 	// filesystem back, so a test that wants to read a mounted file asks for one
 	// here.
 	files func(storage.FileSystem)
 	// lookup hands over the resource itself, which is how a test asserts on
 	// state no facade exposes.
-	lookup func(*scene.Lookup)
+	lookup func(*model.Lookup)
 	// model hands over the resource together with what it takes to reach one
 	// loaded model, which is how a test asserts that a draw record points at
 	// the cache's own value rather than at a copy of it. Nothing outside this
 	// package can ask that question, and it is the whole of "binds the file's
 	// records directly".
-	model func(*scene.Lookup, kernel.Kernel, fs.FS, *gfx.ResourceQueue)
+	model func(*model.Lookup, kernel.Kernel, fs.FS, *gfx.ResourceQueue)
 }
 type lookupProbeResponse struct{}
 
@@ -388,11 +388,11 @@ func inspectCmdImpl() (kernel.Lock, kernel.Execute[inspectRequest, inspectRespon
 }
 
 func lookupProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupProbeRequest, lookupProbeResponse]) {
-	var lookup kernel.Write[*scene.Lookup]
+	var lookup kernel.Write[*model.Lookup]
 	var filesystem kernel.Read[storage.FileSystem]
 	var resources kernel.Write[*gfx.ResourceQueue]
 	return func(access kernel.ResourceAccess) {
-			lookup = access.GetWrite[*scene.Lookup]()
+			lookup = access.GetWrite[*model.Lookup]()
 			filesystem = access.GetRead[storage.FileSystem]()
 			resources = access.GetWrite[*gfx.ResourceQueue]()
 		}, func(k kernel.Kernel, req lookupProbeRequest) lookupProbeResponse {
@@ -400,10 +400,10 @@ func lookupProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupProbeRequest, looku
 				req.files(filesystem.Get())
 			}
 			if req.run != nil {
-				req.run(scene.NewLookupAccess(k, lookup.Get()))
+				req.run(model.NewLookupAccess(k, lookup.Get()))
 			}
 			if req.device != nil {
-				req.device(scene.NewLookupDeviceAccess(
+				req.device(model.NewLookupDeviceAccess(
 					k, lookup.Get(), fs.FS(filesystem.Get()), resources.Get()))
 			}
 			if req.lookup != nil {
@@ -581,7 +581,7 @@ func bundledMaterials(defaults model.PbrDefaults) [model.VariantCount]scene.Mate
 // lookupDefaults reads the two default textures the first frame baked, off the
 // bundled PBR they are bound into. It is called after a frame, so the bake it
 // hands EnsureBundled is never reached.
-func lookupDefaults(lookup *scene.Lookup) model.PbrDefaults {
+func lookupDefaults(lookup *model.Lookup) model.PbrDefaults {
 	bundled := lookup.EnsureBundled(func(int, int, gfx.TextureFormat, []byte) gfx.TextureDescr {
 		panic("the defaults were not baked by the first frame")
 	})
@@ -602,7 +602,7 @@ func lookupDefaults(lookup *scene.Lookup) model.PbrDefaults {
 // durableMeshes lists the Lookup's resident meshes in table order. A test that
 // releases nothing leaves every slot at its first generation, so the walk asks
 // for each id at generation 1 and stops at the first that does not resolve.
-func durableMeshes(lookup *scene.Lookup) []model.MeshRecord {
+func durableMeshes(lookup *model.Lookup) []model.MeshRecord {
 	var meshes []model.MeshRecord
 	for id := uint32(1); ; id++ {
 		mesh, ok := lookup.Mesh(model.NewMeshRef(model.MeshDurable, id, 1))

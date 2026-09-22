@@ -33,7 +33,7 @@ import (
 // finds a Mesh call's. Instance-major would interleave two primitives' records
 // and break the contiguity the whole batching path assumes.
 func (p *plugin) expandModels(
-	k kernel.Kernel, lookup *scene.Lookup, write *scene.OpQueue,
+	k kernel.Kernel, lookup *model.Lookup, write *scene.OpQueue,
 	filesystem storage.FileSystem, resources *gfx.ResourceQueue,
 ) {
 	models := types.OpQueueFlushModels(write)

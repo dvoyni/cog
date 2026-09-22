@@ -15,7 +15,7 @@ import (
 // on the material after recording changes nothing drawn: the forward pass still
 // finds its entry and draws the mesh.
 func TestMutatingAMeshMaterialTagAfterRecordingChangesNothingDrawn(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		material := opaqueMaterial(1)
@@ -36,7 +36,7 @@ func TestMutatingAMeshMaterialTagAfterRecordingChangesNothingDrawn(t *testing.T)
 // one material by content; read at flush, the first would carry the rewritten
 // value and a material id of its own.
 func TestMutatingAMeshMaterialParameterAfterRecordingChangesNothingDrawn(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		params := pbrTestParams(1)
@@ -75,7 +75,7 @@ func TestMutatingAMeshMaterialParameterAfterRecordingChangesNothingDrawn(t *test
 // hand the second draw the first draw's copy, and all three would be one
 // material.
 func TestMutatingASharedMeshMaterialBetweenDrawsChangesOnlyTheLaterDraw(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		params := pbrTestParams(1)
@@ -130,7 +130,7 @@ func TestMutatingASharedModelMaterialBetweenDrawsChangesOnlyTheLaterDraw(t *test
 // frame sits in an arena since rewritten, and a draw handed it would bind
 // whatever that frame put there instead.
 func TestASharedMeshMaterialIsCopiedAfreshEachFrame(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	shared := opaqueMaterial(1)
 	frame := 0
 	h := newHarness(t, func(q *scene.OpQueue) {
@@ -214,7 +214,7 @@ func TestMutatingAModelMaterialAfterRecordingChangesNothingDrawn(t *testing.T) {
 // that slices the arena would hand back nil - and nil is the bundled PBR, which
 // serves the forward pass and draws the mesh.
 func TestAnEmptyMaterialStillServesNoPassAfterTheCopy(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, ref, scene.MeshDraw{Material: scene.Material{}, NeverCull: true})

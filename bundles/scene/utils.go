@@ -1,12 +1,8 @@
 package scene
 
 import (
-	"io/fs"
-
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
-	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // The coordinate helpers are pure package-level functions, callable on any
@@ -96,32 +92,3 @@ func ScreenToRay(camera CameraDescr, viewport m.Vec2, screen m.Vec2) (m.Ray, boo
 // Layer is the mask of one layer. There are 32 of them; an index past the end
 // wraps rather than silently becoming zero, which would read as every layer.
 func Layer(i uint) LayerMask { return types.Layer(i) }
-
-// NewLookup builds an empty Lookup at scene's default configuration. The plugin
-// creates its own from its configuration; this constructor lets tests and
-// embedders build one to drive a LookupAccess directly.
-func NewLookup() *Lookup { return types.NewLookup() }
-
-// NewLookupAccess builds the scoped facade for everything that neither loads a
-// model nor frees a GPU texture. Call it inside a handler that holds the
-// *Lookup write lock.
-//
-// Two dependencies, and that is what the facade split buys: a consumer that
-// only bakes meshes, unloads a model or reads the memory totals declares one
-// resource, where the loading half declares three.
-func NewLookupAccess(k kernel.Kernel, lookup *Lookup) LookupAccess {
-	return types.NewLookupAccess(k, lookup)
-}
-
-// NewLookupDeviceAccess builds the scoped facade for Preload, State, the model
-// queries and the two unload verbs that free a GPU texture. Call it inside a
-// handler that holds the *Lookup write lock, the storage.FileSystem read lock
-// and the *gfx.ResourceQueue write lock.
-//
-// fsys is the storage filesystem, which satisfies fs.FS. Convert it once per
-// handler rather than per call: handing it out as an interface allocates.
-func NewLookupDeviceAccess(
-	k kernel.Kernel, lookup *Lookup, fsys fs.FS, resources *gfx.ResourceQueue,
-) LookupDeviceAccess {
-	return types.NewLookupDeviceAccess(k, lookup, fsys, resources)
-}

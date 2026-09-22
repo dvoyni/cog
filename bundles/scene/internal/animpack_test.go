@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 )
 
 // testAnim is a two-joint model with two clips a second long, which at the
@@ -36,7 +35,7 @@ func collectReports() (model.ReportOnce, *[]string) {
 // would preserve only the ability to express a bug.
 func TestResolvePlaysNormalisesWeights(t *testing.T) {
 	report, _ := collectReports()
-	plays, _ := model.ResolvePlays(testAnim(), "m.glb", []scene.ClipPlay{
+	plays, _ := model.ResolvePlays(testAnim(), "m.glb", []model.ClipPlay{
 		{Clip: "walk", Weight: 3},
 		{Clip: "run", Weight: 1},
 	}, nil, nil, report)
@@ -60,7 +59,7 @@ func TestResolvePlaysNormalisesWeights(t *testing.T) {
 // it, which is one of the three things row 0 answers.
 func TestResolvePlaysFallsBackToTheRestFrameOnZeroWeight(t *testing.T) {
 	report, _ := collectReports()
-	plays, _ := model.ResolvePlays(testAnim(), "m.glb", []scene.ClipPlay{
+	plays, _ := model.ResolvePlays(testAnim(), "m.glb", []model.ClipPlay{
 		{Clip: "walk", Weight: 0},
 		{Clip: "run", Weight: 0},
 	}, nil, nil, report)
@@ -73,7 +72,7 @@ func TestResolvePlaysFallsBackToTheRestFrameOnZeroWeight(t *testing.T) {
 // under a key carrying the name, so two typos in one file are two reports.
 func TestResolvePlaysDropsAnUnknownClipAndReportsIt(t *testing.T) {
 	report, keys := collectReports()
-	plays, _ := model.ResolvePlays(testAnim(), "m.glb", []scene.ClipPlay{
+	plays, _ := model.ResolvePlays(testAnim(), "m.glb", []model.ClipPlay{
 		{Clip: "sprint", Weight: 1},
 		{Clip: "walk", Weight: 1},
 	}, nil, nil, report)
@@ -93,7 +92,7 @@ func TestResolvePlaysDropsAnUnknownClipAndReportsIt(t *testing.T) {
 // A model with no joints has nothing to play, however many plays a draw names.
 func TestResolvePlaysIsEmptyForAModelWithNoJoints(t *testing.T) {
 	report, keys := collectReports()
-	plays, _ := model.ResolvePlays(&model.ResidentAnimation{}, "m.glb", []scene.ClipPlay{
+	plays, _ := model.ResolvePlays(&model.ResidentAnimation{}, "m.glb", []model.ClipPlay{
 		{Clip: "walk", Weight: 1},
 	}, nil, nil, report)
 	if len(plays) != 0 {

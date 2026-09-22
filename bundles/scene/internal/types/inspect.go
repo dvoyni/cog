@@ -1,6 +1,7 @@
 package types
 
 import (
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -47,11 +48,11 @@ type Op struct {
 	// Mesh and Draw describe an OpMesh, and carry everything that call said,
 	// including its own Transform. Draw's Transforms and Params alias the
 	// queue's frame arenas, like every other borrowed slice scene hands back.
-	Mesh MeshRef
+	Mesh model.MeshRef
 	Draw MeshDraw
 	// Light describes an OpPointLight or OpSpotLight, with Kind set by the
 	// call that recorded it. Layers is its layer mask.
-	Light LightDescr
+	Light model.LightDescr
 	// Path and Model describe an OpModel, and carry everything that call
 	// said, including its own Transform. Model's Transforms aliases the
 	// queue's frame arena, like every other borrowed slice scene hands back.

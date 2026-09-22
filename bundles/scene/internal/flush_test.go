@@ -231,9 +231,9 @@ func TestLightsAreCulledPerPassAtFlush(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Box(0, m.At(0, 0, -5), testBoxColor)
-		q.PointLight(0, scene.LightDescr{Position: m.Vec3{Z: -5}, Range: 2})
-		q.PointLight(0, scene.LightDescr{Position: m.Vec3{Z: 5}, Range: 2})
-		q.SpotLight(0, scene.LightDescr{Position: m.Vec3{Z: 5}, Direction: m.Vec3{Z: -1}})
+		q.PointLight(0, model.LightDescr{Position: m.Vec3{Z: -5}, Range: 2})
+		q.PointLight(0, model.LightDescr{Position: m.Vec3{Z: 5}, Range: 2})
+		q.SpotLight(0, model.LightDescr{Position: m.Vec3{Z: 5}, Direction: m.Vec3{Z: -1}})
 	})
 	h.frame()
 
@@ -253,7 +253,7 @@ func TestALightLayerMaskIsFilteredAgainstTheCameraCullMaskOnly(t *testing.T) {
 		descr.CullMask = scene.Layer(2)
 		q.Camera(testCamera+1, descr)
 		q.Box(scene.Layer(1), m.At(0, 0, -5), testBoxColor)
-		q.PointLight(scene.Layer(1), scene.LightDescr{Position: m.Vec3{Z: -5}})
+		q.PointLight(scene.Layer(1), model.LightDescr{Position: m.Vec3{Z: -5}})
 	})
 	h.frame()
 
@@ -273,7 +273,7 @@ func TestASeventeenthLightIsDroppedWithoutAReport(t *testing.T) {
 	h := newHarnessWithErrors(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		for i := 0; i < 20; i++ {
-			q.PointLight(0, scene.LightDescr{Position: m.Vec3{X: float32(i), Z: -5}})
+			q.PointLight(0, model.LightDescr{Position: m.Vec3{X: float32(i), Z: -5}})
 		}
 	}, &reported)
 	h.frame()
@@ -294,15 +294,15 @@ func TestADegenerateSpotLightIsReportedOncePerFrame(t *testing.T) {
 		descr := forwardCamera()
 		descr.Passes = []scene.Pass{{Tag: scene.TagForward}, {Tag: "shadow", Order: -1000, Target: gfx.NoTarget(), Depth: gfx.DepthTarget(sizedTexture(800, 600))}}
 		q.Camera(testCamera, descr)
-		q.SpotLight(0, scene.LightDescr{Position: m.Vec3{Z: -5}, Direction: m.Vec3{Z: -1}, InnerCone: 1, OuterCone: 0.5})
-		q.PointLight(0, scene.LightDescr{Position: m.Vec3{Z: -5}})
+		q.SpotLight(0, model.LightDescr{Position: m.Vec3{Z: -5}, Direction: m.Vec3{Z: -1}, InnerCone: 1, OuterCone: 0.5})
+		q.PointLight(0, model.LightDescr{Position: m.Vec3{Z: -5}})
 	}, &reported)
 	h.frame()
 
 	if len(reported) != 1 {
 		t.Fatalf("reported %v, want exactly one report for the inverted cone across two passes", reported)
 	}
-	if _, ok := reported[0].(scene.ErrSpotConeInverted); !ok {
+	if _, ok := reported[0].(model.ErrSpotConeInverted); !ok {
 		t.Errorf("reported %v, want ErrSpotConeInverted", reported[0])
 	}
 	for _, pass := range h.passes() {

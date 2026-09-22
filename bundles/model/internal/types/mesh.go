@@ -93,7 +93,7 @@ type MeshRecord struct {
 	// than by walking two attribute slices.
 	layoutID int
 	// Standard reports whether the mesh carries one of the two layouts the
-	// bundled PBR knows - the standard one every scene.Vertex mesh takes, or
+	// bundled PBR knows - the standard one every model.Vertex mesh takes, or
 	// the skinned one a model's geometry takes where some placement skins it.
 	// It is recognised by type at mint time rather than by comparing
 	// attributes, which is what lets the bundled PBR reject a custom layout and
@@ -133,7 +133,7 @@ type LayoutCache struct {
 }
 
 // resolve returns the layout's dense id, the interned attributes, and whether
-// the vertex is scene.Vertex itself - which is what decides that the mint packs
+// the vertex is model.Vertex itself - which is what decides that the mint packs
 // rather than reinterprets, and is narrower than the MeshRecord flag it feeds:
 // a model's geometry is a layout the bundled PBR knows without ever passing
 // through here, and bakeModelGeometry says so directly.

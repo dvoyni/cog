@@ -880,7 +880,7 @@ outright in this repo, not traded off.**
   `PoseBytes` and `MorphBytes`.
 
 The five production callers are all in cog-examples; four already hold
-`Write[*scene.Lookup]` beside `Write[*canvas.OpQueue]`, so the added queue write
+`Write[*model.Lookup]` beside `Write[*canvas.OpQueue]`, so the added queue write
 costs them no new serialisation, and the cost becomes visible where it should be —
 in each demo's `Lock` closure.
 
@@ -986,8 +986,8 @@ stay on the facade ui builds.
 canvas.NewLookupAccess(k, lookup, fsys)             // SpriteSize, FontMetrics, Measure*
 canvas.NewLookupDeviceAccess(k, lookup, resources)  // UnloadSprite, UnloadFont, UnloadAll
 
-scene.NewLookupAccess(k, lookup)                              // bake, unload, no loading
-scene.NewLookupDeviceAccess(k, lookup, fsys, resources)       // Preload, State, queries
+model.NewLookupAccess(k, lookup)                              // bake, unload, no loading
+model.NewLookupDeviceAccess(k, lookup, fsys, resources)       // Preload, State, queries
 ```
 
 **Settled here as a convention rather than twice as a local choice.** The two

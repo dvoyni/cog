@@ -5,13 +5,16 @@ buffer-built meshes, punctual lights and a debug shape vocabulary — and
 translates it into `gfx` passes and draws at the end of each simulation update.
 
 It is canvas's sibling: the same frame-local `OpQueue` that gameplay writes and
-the plugin resets every tick, and the same single persistent `Lookup` behind a
-handler-scoped access facade. What differs is that scene *decides* things —
+the plugin resets every tick, and a single persistent `Lookup` behind a
+handler-scoped access facade - model's `*model.Lookup`, which scene loads through
+and draws from. What differs is that scene *decides* things —
 which draws a camera sees, in what order, packed into which batches — and
 publishes those decisions back as `Passes`.
 
 This README is the API. `bundles/scene/docs/specs/scene.md` is the design record — what each rule is
-for and what was rejected to get there — and
+for and what was rejected to get there — for the renderer, and
+[`model.md`](../../model/docs/specs/model.md) is the design record for everything a model
+file can contain, which scene draws from; and
 [`.github/instructions/scene.instructions.md`](../../../.github/instructions/scene.instructions.md)
 is the traps a caller hits that neither the compiler nor a plausible-looking zero
 value warns about.
@@ -52,18 +55,22 @@ vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
 scene has the declaration-root shape of
 [`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
 
-- **`bundles/scene`** is the root, and holds declarations only: the `*OpQueue`
-  and `*Lookup` resources with `LookupAccess` and `LookupDeviceAccess`, the recording vocabulary
-  (`Transform`, `CameraID`, `CameraDescr`, `ProjectionKind`, `Pass`, `PassTag`,
-  `LayerMask`, `Material`, `MaterialTag`, `Vertex`, `VertexLayout`, `MeshRef`,
-  `MeshDraw`, `ModelDraw`, `ClipPlay`, `LightDescr`, …), the model query types
-  (`ModelRef`, `ModelLight`, `ClipInfo`), the inspection views
-  (`Op`, `PassView`, `BatchView`), `VertexDecodePath`, `Config`, the `Err*`
-  types, `Name` and the ordering identity `FlushOnUpdate`. Its functions —
-  `At`, `LookAt`, `Layer`, `NewLookup`, `NewLookupAccess`, `NewLookupDeviceAccess` and the coordinate
-  helpers (`ViewProjection`, `WorldToScreen`, `ScreenToWorld`, `ScreenToRay`) —
-  are forwarders in `utils.go`. It declares no plugin, and it is what every
-  other package imports.
+- **`bundles/scene`** is the root, and holds the renderer's declarations only:
+  the `*OpQueue` resource, the recording vocabulary (`CameraID`, `CameraDescr`,
+  `ProjectionKind`, `Pass`, `PassTag`, `LayerMask`, `Material`, `MaterialTag`,
+  `MeshDraw`, `ModelDraw`, …), the inspection views (`Op`, `PassView`,
+  `BatchView`), the renderer's `Err*` types, `Name` and the ordering identity
+  `FlushOnUpdate`. Its functions — `Layer` and the coordinate helpers
+  (`ViewProjection`, `WorldToScreen`, `ScreenToWorld`, `ScreenToRay`) — are
+  forwarders in `utils.go`. It declares no plugin, and it is what every other
+  package imports.
+- **`bundles/model`** is not scene's, but a recorder imports it beside scene.
+  Everything a model file can contain is named from there and aliased nowhere:
+  `*model.Lookup` with `model.NewLookupAccess` and `model.NewLookupDeviceAccess`,
+  `model.Vertex`, `model.VertexLayout`, `model.MeshRef`, `model.ClipPlay`,
+  `model.LightDescr`, the query types (`model.ModelRef`, `model.ModelLight`,
+  `model.ClipInfo`), `model.VertexDecodePath`, `model.Config`, and the
+  `ErrModel…`, `ErrMesh…` and spot-light reports.
 - **`bundles/scene/internal/types`** declares `OpQueue` with its recording
   methods and the consume side the flush reads, the recording vocabulary, the
   frame-local temporary mesh, and the camera maths the flush and the coordinate
@@ -71,7 +78,7 @@ scene has the declaration-root shape of
   unloads, the mesh table and its deferred bakes, the glTF conversion and the
   animation and morph bakes behind them, the vertex packing, `Config` and the
   bundled PBR material are model's, in `bundles/model`, and are named here
-  through aliases. The parse command the Lookup enqueues, `LoadModelCmd`, is
+  from model's root. The parse command the Lookup enqueues, `LoadModelCmd`, is
   declared here too; the plugin handles it. The root aliases what it exposes.
 - **`bundles/scene/internal`** is the plugin: its `New`, the flush that expands model draws, selects lights, culls,
   sorts, interns materials and packs instances into gfx passes and draws, the
@@ -84,7 +91,7 @@ scene has the declaration-root shape of
 The aliased types stay concrete types (`type OpQueue = types.OpQueue`):
 recording a draw is a direct method call, with no interface anywhere on the
 per-instance path, and their exported methods (`OpQueue.Model`,
-`LookupAccess.Bounds`, …) are public API through the alias. What the plugin
+`OpQueue.Passes`, …) are public API through the alias. What the plugin
 needs beyond that goes through plain functions `internal/types` exports, which
 nothing outside `bundles/scene` can call. `internal/types` never imports the
 root.
@@ -97,9 +104,8 @@ root.
 - Requires: no Adapter
 - Contributes: no Adapter. The bundled shader is mounted by `model`, as the
   `model.StorageReadMount` Adapter for `storage.ReadMountPort`
-- Go package dependencies: `app`, `gfx`, `kernel`, `m`, `model`, `storage`,
-  `github.com/qmuntal/gltf`
-- Configuration: none. `scene.Config` aliases `model.Config`, which the model
+- Go package dependencies: `app`, `gfx`, `kernel`, `m`, `model`, `storage`
+- Configuration: none. The pose sample rate is `model.Config`, which the model
   plugin takes under `model.Name`
 - Events declared or published: none
 
@@ -119,7 +125,7 @@ mounts nothing.
 **Register `storage` and `model` before `scene`.** The order the demos use is
 `storage`, `input`, `gfx`, `canvas`, `model`, `scene`, then the driver
 (`gogpu`), with the app's own recording plugin last, because it records into the
-queues those plugins declare. A plugin that locks `*scene.Lookup` itself names
+queues those plugins declare. A plugin that locks `*model.Lookup` itself names
 `model.Name` among its dependencies, since the Lookup is model's resource.
 
 **Scene needs a WebGPU core adapter.** It reads storage buffers from the vertex
@@ -151,17 +157,17 @@ zero `LayerMask` means every layer; a nil `Material` means the bundled PBR.
 
 - `*OpQueue` — frame-local recording surface. Scene consumes and republishes it
   on `app.UpdateEvent`.
-- `*Lookup` — model's persistent resource, which the model plugin registers
-  and scene aliases: loaded models, baked pose and morph buffers, the texture
+- `*model.Lookup` — model's persistent resource, which the model plugin
+  registers and scene draws from: loaded models, baked pose and morph buffers, the texture
   cache, buffer-built meshes and the unit meshes, plus the deferred bakes and
   buffer releases scene's flush applies at the frame boundary. Query and mutate
   it only through a scoped `LookupAccess` or `LookupDeviceAccess`.
 
 Gameplay normally writes only `*OpQueue`. Mesh baking and `UnloadModel` go
-through `*Lookup` via a `LookupAccess`; loading, the model queries and the
-texture unloads go through a `LookupDeviceAccess`, which needs the filesystem
-and the resource queue beside it. Scene's own flush writes `*Lookup` to load the
-models the frame named and to drain its bakes.
+through `*model.Lookup` via a `model.LookupAccess`; loading, the model queries
+and the texture unloads go through a `model.LookupDeviceAccess`, which needs the
+filesystem and the resource queue beside it. Scene's own flush writes
+`*model.Lookup` to load the models the frame named and to drain its bakes.
 
 ## Recording API
 
@@ -456,7 +462,7 @@ uploads in that frame. `UpdateMesh` replaces a durable mesh's geometry wholesale
 at any size, keeping the ref and its id, and refuses a change of vertex layout or
 topology. `ReleaseMesh` stales the ref at once and frees at the frame boundary.
 
-Scene blesses **two named layouts and no others**. `scene.Vertex` is the
+Scene blesses **two named layouts and no others**. `model.Vertex` is the
 **standard** layout: six attributes at locations 0..5, 72 bytes authored and 32
 stored, interleaved. The **skinned** layout is the same six plus `JOINTS_0` and
 `WEIGHTS_0` at locations 6..7, 40 bytes, and it belongs to the glTF loader — a
@@ -473,7 +479,7 @@ input no attribute supplies). Any other `VertexLayout` is a custom layout, and
 **a custom layout requires a custom `Material`**; the reverse — a named layout
 with a custom material — is fine.
 
-`scene.Vertex` is what an app *writes*, not what scene *stores*: scene packs it
+`model.Vertex` is what an app *writes*, not what scene *stores*: scene packs it
 into the storage layout its `VertexLayout()` reports, and the two differ. The
 `Normal` and `Tangent` an app writes as `m.Vec3` and `m.Vec4` store octahedrally
 encoded in four bytes each — so they are **directions**, their length is divided
@@ -499,7 +505,7 @@ flag anywhere. A UV set collapsed to one point stores scale 0 and bias equal to
 that point, which the same multiply-add decodes exactly.
 
 A **custom material drawing a standard-layout mesh must decode them**: include
-`scene.VertexDecodePath` (`builtin/scene/vertexdecode.wgsl`) and declare
+`model.VertexDecodePath` (`builtin/scene/vertexdecode.wgsl`) and declare
 `@location(1) normal: vec2<f32>` and `@location(2) tangent: u32`, then call
 `sceneDecodeNormal` and `sceneDecodeTangent` at the top of the vertex stage,
 before any morph or skin. Declaring the old `vec3<f32>`/`vec4<f32>` is refused at
@@ -551,7 +557,7 @@ to the draw, which is what makes scrubbing, reversing and pausing the caller's
 business.
 
 ```go
-draw.Plays = []scene.ClipPlay{{Clip: "Walk", Time: t, Loop: true, Weight: 1}}
+draw.Plays = []model.ClipPlay{{Clip: "Walk", Time: t, Loop: true, Weight: 1}}
 draw.MorphWeights = []float32{0.4, 0, 0.9}
 ```
 
@@ -571,8 +577,8 @@ draw.
 ## Lights
 
 ```go
-q.PointLight(layers, scene.LightDescr{Position: p, Color: c, Range: 12})
-q.SpotLight(layers, scene.LightDescr{Position: p, Direction: d, Color: c,
+q.PointLight(layers, model.LightDescr{Position: p, Color: c, Range: 12})
+q.SpotLight(layers, model.LightDescr{Position: p, Direction: d, Color: c,
 	InnerCone: 0.2, OuterCone: 0.5})
 ```
 
@@ -650,13 +656,13 @@ assertions be a plain `go test` beside its `main.go`.
 
 ## Lookup API
 
-Residency, bounds, naming and mesh lifecycle go through `*scene.Lookup`. A
+Residency, bounds, naming and mesh lifecycle go through `*model.Lookup`. A
 resource must not retain filesystem or GPU handles past its lock scope, so
 callers acquire a handler-scoped facade:
 
 ```go
-la := scene.NewLookupAccess(kernel, lookup)                          // one resource
-dev := scene.NewLookupDeviceAccess(kernel, lookup, fsys, resources)  // three
+la := model.NewLookupAccess(kernel, lookup)                          // one resource
+dev := model.NewLookupDeviceAccess(kernel, lookup, fsys, resources)  // three
 ```
 
 **Two facades, because loading needs the device.** A load now runs inside the
@@ -779,7 +785,7 @@ for a draw, the caller's own handler for a query or a `Preload`.
 ## Event Subscribed
 
 `scene.FlushOnUpdate` subscribes to `app.UpdateEvent`. It writes the scene
-`*OpQueue` and `*Lookup`, reads `gfx.Viewport` and `storage.FileSystem` — the
+`*OpQueue` and `*model.Lookup`, reads `gfx.Viewport` and `storage.FileSystem` — the
 latter because a model draw loads the file it names — and writes `gfx.OpQueue`
 and `gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
 `gfx.PresentOnUpdate`, exactly as canvas is: gameplay records first, canvas

@@ -15,8 +15,8 @@ import (
 // else in it shares, so a pack that swapped two attributes, wrote one at the
 // wrong offset or dropped one entirely cannot come out byte-identical by
 // accident.
-func everyAttribute() []scene.Vertex {
-	return []scene.Vertex{
+func everyAttribute() []model.Vertex {
+	return []model.Vertex{
 		{
 			Position: m.Vec3{X: 1.5, Y: -2.25, Z: 3.125},
 			Normal:   m.Vec3{X: 0.5, Y: -0.5, Z: 0.7071},
@@ -51,7 +51,7 @@ func TestBakeMeshStagesThePackedVertices(t *testing.T) {
 	}
 
 	var staged []byte
-	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
+	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *model.Lookup) {
 		lookup.DrainMeshes(model.MeshBaker{
 			Bake: func(data []byte) gfx.BufferDescr {
 				if staged == nil {

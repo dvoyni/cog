@@ -1,9 +1,11 @@
 package types
 
+import "github.com/dvoyni/cog/bundles/model"
+
 // LightRecord is one recorded light: what the flush consumes.
 type LightRecord struct {
 	Layers LayerMask
-	Descr  LightDescr
+	Descr  model.LightDescr
 }
 
 // PointLight records a point light for this frame. Kind is set here, over the
@@ -15,8 +17,8 @@ type LightRecord struct {
 // within a pass, every light in the buffer lights every draw. That would need a
 // per-draw light list, which contradicts the frame block being bound once for
 // the whole pass.
-func (q *OpQueue) PointLight(layers LayerMask, light LightDescr) {
-	light.Kind = LightPoint
+func (q *OpQueue) PointLight(layers LayerMask, light model.LightDescr) {
+	light.Kind = model.LightPoint
 	q.calls = append(q.calls, Op{Kind: OpPointLight, Layers: layers, Light: light})
 	q.lights = append(q.lights, LightRecord{Layers: layers, Descr: light})
 }
@@ -25,8 +27,8 @@ func (q *OpQueue) PointLight(layers LayerMask, light LightDescr) {
 // about Direction, fully on inside InnerCone and off beyond OuterCone, with
 // KHR_lights_punctual's smoothing between them, linear in cosine. Layers work
 // as for PointLight.
-func (q *OpQueue) SpotLight(layers LayerMask, light LightDescr) {
-	light.Kind = LightSpot
+func (q *OpQueue) SpotLight(layers LayerMask, light model.LightDescr) {
+	light.Kind = model.LightSpot
 	q.calls = append(q.calls, Op{Kind: OpSpotLight, Layers: layers, Light: light})
 	q.lights = append(q.lights, LightRecord{Layers: layers, Descr: light})
 }

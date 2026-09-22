@@ -60,6 +60,20 @@ correct without them.
 > **Amended by [#532](https://github.com/dvoyni/cog/issues/532).** The built-in
 > WGSL moved to `bundles/model/internal/builtin/scene/`, and the model plugin
 > mounts it; its storage paths are unchanged.
+>
+> **Amended by [#539](https://github.com/dvoyni/cog/issues/539).** This document
+> now specifies the renderer only: the queue, cameras and passes, scene's
+> materials and pass tags, the draw calls, light culling, sorting, culling and
+> batching, and the coordinate helpers. Everything a model file can contain is
+> `bundles/model`'s, and so is its specification: the glTF loader and
+> residency, mesh baking, animation, the lights' packing and cap, the bundled
+> PBR material, the Lookup facade and the shader-side contract moved to
+> [`model.md`](../../../model/docs/specs/model.md#the-model-contract-moved-from-scenemd),
+> and the vertex and mesh layouts are in
+> [`mesh.md`](../../../model/docs/specs/mesh.md). Each of those sections keeps a
+> stub here saying what scene still does in that area. The names are spelled
+> as they now are: `model.MeshRef`, `model.ClipPlay`, `model.LightDescr`,
+> `*model.Lookup` and the rest have no alias in scene's root.
 
 ---
 
@@ -81,8 +95,8 @@ correct without them.
 - Name: `scene.Name` (`"scene"`)
 - Constructor: `sceneplugin.New() kernel.Plugin` (amended by #361; #339 made it `sceneimpl.New()`, and before that it was `scene.New() *scene.Plugin`)
 - Plugin dependencies: `gfx`, `storage`, `model` (amended by #530)
-- Go package dependencies: `app`, `gfx`, `kernel`, `m`, `model`, `storage`,
-  `github.com/qmuntal/gltf`
+- Go package dependencies: `app`, `gfx`, `kernel`, `m`, `model`, `storage`
+  (amended by #539: the glTF library is `model`'s alone)
 - Events declared or published: none
 
 ```go
@@ -93,7 +107,8 @@ kernel.New(map[kernel.PluginName]any{
 
 `model.Config` is the configuration type, and a zero field takes its default
 (amended by #530, which moved the Lookup and its configuration to the model
-plugin; `scene.Config` aliases it and scene takes none of its own. #361 had it
+plugin, and scene takes none of its own; #539 deleted the `scene.Config` alias.
+#361 had it
 as `scene.Config`, #339 moved it to `sceneimpl.Config`, and before that it was
 `scene.Config` with `scene.DefaultConfig()`). The plugin
 implements `Name`, `Dependencies`, and `Register` for the kernel lifecycle. The
@@ -137,19 +152,21 @@ instead. There is no build gate on that check ([wgpu backend capabilities invent
 
 - `*OpQueue` — frame-local recording surface. Scene consumes and resets it on
   `app.UpdateEvent`.
-- `*Lookup` — the single persistent resource holding resident models, baked pose
-  and morph buffers, the texture cache, buffer-built meshes, and the
-  built-in unit meshes. It also owns deferred unloads and deferred bakes. Query
-  and mutate it only through a scoped `LookupAccess`.
+- `*model.Lookup` is not scene's (amended by #530 and #539). It is the single
+  persistent resource holding resident models, baked pose and morph buffers,
+  the texture cache, buffer-built meshes, and the built-in unit meshes, and the
+  model plugin registers it. See
+  [model.md §Lookup facade](../../../model/docs/specs/model.md#lookup-facade).
 
 Gameplay normally writes only `*OpQueue`. Sizing, naming, residency, mesh baking
-and unloading go through `*Lookup` via a `LookupAccess`; the flush handler also
-writes `*Lookup` to apply deferred bakes and unloads.
+and unloading go through `*model.Lookup` via `model`'s facades; scene's flush
+also writes `*model.Lookup` to load what a frame draws and to apply deferred
+bakes and unloads.
 
 ### Event subscribed
 
 `scene.FlushOnUpdate` (amended by #339; was `UpdateEventHandler`) subscribes to `app.UpdateEvent`. It writes the scene
-`*OpQueue` and `*Lookup`, reads `gfx.Viewport`, and writes `gfx.OpQueue` and
+`*OpQueue` and `*model.Lookup`, reads `gfx.Viewport`, and writes `gfx.OpQueue` and
 `gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
 `gfx.PresentOnUpdate`, exactly as canvas is: gameplay records first, canvas
 and scene emit graphics draws second, gfx presents last.
@@ -180,9 +197,9 @@ and call ([Scene recording API sketch](https://github.com/dvoyni/cog/issues/12))
 ```go
 func (q *OpQueue) Camera(id CameraID, descr CameraDescr)
 func (q *OpQueue) Model(layers LayerMask, path string, draw ModelDraw)
-func (q *OpQueue) Mesh(layers LayerMask, mesh MeshRef, draw MeshDraw)
-func (q *OpQueue) PointLight(layers LayerMask, light LightDescr)
-func (q *OpQueue) SpotLight(layers LayerMask, light LightDescr)
+func (q *OpQueue) Mesh(layers LayerMask, mesh model.MeshRef, draw MeshDraw)
+func (q *OpQueue) PointLight(layers LayerMask, light model.LightDescr)
+func (q *OpQueue) SpotLight(layers LayerMask, light model.LightDescr)
 
 func (q *OpQueue) Box(layers LayerMask, transform Transform, color m.Color)
 func (q *OpQueue) Sphere(layers LayerMask, center m.Vec3, radius float32, color m.Color)
@@ -190,7 +207,7 @@ func (q *OpQueue) Plane(layers LayerMask, center m.Vec3, size m.Vec2, color m.Co
 func (q *OpQueue) Line3D(layers LayerMask, start, end m.Vec3, thickness float32, color m.Color)
 func (q *OpQueue) WireBox(layers LayerMask, center, size m.Vec3, thickness float32, color m.Color)
 
-func (q *OpQueue) TemporaryMesh[TVertex VertexLayout](vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology) MeshRef
+func (q *OpQueue) TemporaryMesh[TVertex model.VertexLayout](vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology) model.MeshRef
 
 func (q *OpQueue) Reset()
 func (q *OpQueue) OpCount() int
@@ -855,326 +872,20 @@ type ModelDraw struct {
     Transforms     []Transform // non-empty overrides Transform, one instance per entry
     Scene          string      // entry in the file's scenes array; empty is the default scene
     Node           string      // subtree within that scene; empty is the whole scene
-    Plays          []ClipPlay
+    Plays          []model.ClipPlay
     MorphWeights   []float32
     Material       Material    // nil is the bundled PBR
     OverrideParams []gfx.ParameterDescr
 }
 ```
 
-### Loader
-
-Parse with [`github.com/qmuntal/gltf`](https://github.com/qmuntal/gltf)
-(v0.29.0, BSD-2-Clause) as a **parse layer only**: zero runtime dependencies, a
-`Decoder` taking an `fs.FS` that maps straight onto `storage.FileSystem`, and a
-clean `GOOS=js GOARCH=wasm` build. Scene converts the `gltf.Document` into its
-own mesh, material and baked-pose types **in one pass at load and drops it**; the
-document never appears in scene's API. Decode allocates about 2× file size once.
-
-> **Amended by [#529](https://github.com/dvoyni/cog/issues/529).** The decode is
-> `bundles/model`'s. Its decoder, `bundles/model/internal/types/gltf`, parses the
-> file and hands over plain data: attribute arrays as the glTF library's own typed
-> slices, index lists, unbaked curves and skins, morph target floats, material
-> values, image references, lights and the flattened scene walk. scene converts
-> that into its vertices, baked poses, morph blocks and PBR records, still in one
-> load and still dropping the document, through `model.DecodeModel`. The unit
-> geometry (`model.UnitBoxGeometry` and its two siblings) and `Vertex` with the
-> storage layout it reports are `model`'s too, and scene names them through
-> aliases. See [model.md](../../../model/docs/specs/model.md#the-decoder-seam).
-
-**Supported:** GLB and `.gltf` with external buffers and images, interleaved and
-sparse accessors, 8/16/32-bit indices, per-primitive materials, generated flat
-normals and tangents when missing, node tree with default scene, skins with
-`inverseBindMatrices`, morph POSITION/NORMAL/TANGENT deltas with default weights,
-animations on TRS and `weights` channels with STEP/LINEAR/CUBICSPLINE (all
-resolved at load, since clips are baked), the full metallic-roughness material
-set with two UV sets, alpha modes, double-sided, and samplers.
-
-**Extensions in v1:** `KHR_texture_transform`, `KHR_materials_emissive_strength`,
-`KHR_mesh_quantization` (dequantised at load, including morph deltas),
-`KHR_lights_punctual` parsed and exposed **as data** for the app to declare —
-nothing in scene converts a glTF light automatically, and plain directional
-lights beyond the camera's sun are dropped. Rejected in `extensionsRequired`,
-failing the model wholesale: Draco, meshopt, basisu, webp. Other `extensionsUsed`
-are ignored.
-
-**WebGPU gaps the loader papers over:** no `uint8` indices (widen to 16),
-no 3-component 8/16-bit vertex formats (dequantise), no fan or loop topology and
-no strips (converted to lists at load, so a model mesh is always a list and
-batching, index buffers and the skinning path never branch on strip or fan
-assembly), and no mipmap generation API (CPU box filter).
-
-**Two topologies survive the conversion, not one.** A triangle strip or fan
-becomes a triangle list; a line strip or loop becomes a **line list**, because
-that is what gfx carries and there is nothing to turn a line into that is still
-a line. Normals and tangents are triangle properties, so a line primitive gets
-whatever the file supplied and is shaded by its base colour and emissive alone.
-The invariant the batching and skinning paths actually rely on is that a model
-mesh never assembles as a strip or a fan, which holds.
-
-**A `POINTS` primitive is skipped and reported, and the rest of the model
-loads.** gfx has three topologies — triangle list, triangle strip, line list —
-and no point list, so there is nothing to convert a point cloud into. Adding a
-fourth is engine work behind [#29](https://github.com/dvoyni/cog/issues/29), not
-a loader decision, and the alternative here is losing a mesh that is mostly
-triangles to one debug primitive. `MeshPrimitiveModes` is the only asset in the
-repository this reaches, and it is where the report is asserted.
-
-### Addressing
-
-`path` names the file and is the **only cache key**. `Scene` names an entry in
-the file's `scenes` array (empty is the default scene). `Node` names a node
-within that scene (empty is the whole scene) — a **plain name, first depth-first
-match**, not a slash path; a duplicate name reports once and keeps the first.
-
-Both selectors are **names, and glTF names are optional**. A file whose scenes
-carry no name has no addressable scene but its declared default, which is what
-an empty `Scene` selects; the same is true of a node. This is not hypothetical:
-`MultipleScenes` is the only file in the whole Khronos repository with more than
-one `scenes` entry, and **both of its scenes are unnamed, as are both of its
-nodes** — so the one asset that exists to exercise the `Scene` selector can only
-be drawn through its default. The alternative, reading the selector as a decimal
-index when no name matches, was rejected: it makes the selector a parsed string,
-which is the same objection that keeps selectors out of the path.
-
-A name is resolved **pre-order**, so a node sharing a name with one of its own
-descendants resolves to the node — which is what "first depth-first match" says,
-and what recording a subtree on the way back out would get backwards.
-
-**Nodes only.** glTF `mesh` names are optional, non-unique and carry no place in
-space, so a mesh is not addressable by name. Selectors are not encoded in the
-path (`"props.glb#crate"`), because that makes the cache key a parsed string.
-
-**A `Node` draw re-roots.** The node's authored world transform inside the file
-is discarded and the draw's `Transform` replaces it, descendants keeping their
-relative transforms. So `props.glb` + `Node: "crate"` behaves as an independent
-asset however the artist laid the file out. `Node: ""` keeps the scene's root
-transforms, because a scene *is* authored as one unit.
-
-**A draw with an unmatched `Node` skips**, and never falls back to the whole
-scene. One typo'd node name rendering an entire building at the origin is the
-worse failure ([Model lookup facade](https://github.com/dvoyni/cog/issues/21)).
-
-**A node whose authored world transform collapses an axis skips too**, under its
-own report. Re-rooting *is* that transform's inverse, so a node scaled to zero
-on some axis has nothing to draw the subtree through. A whole-scene draw of the
-same file is unaffected and still draws it flat where the file put it, which is
-why this is the draw's report rather than the load's.
-
-**The report keys carry the selector, not just the path.** An unmatched node
-reports under `"model:" + path + "#" + node` and an unmatched scene under
-`"model:" + path + "#scene:" + scene`, so two typo'd names in one file are two
-reports, a bad scene and a bad node are two more, and a bad draw repeated every
-frame is still one. They are separate from the load's own `"model:" + path` key
-and are not cleared by a successful load: the file is fine, the selector is not.
-
-### Flattening
-
-Load walks every scene in the file depth-first into a flat, **subtree-contiguous**
-list of `{primitive, localMatrix, material, joint}`, each `localMatrix`
-accumulated relative to the scene root. Depth-first order is exactly what makes
-a subtree a slice rather than a filter, so a `Node` draw takes that node's
-contiguous slice.
-
-Three consequences:
-
-- **A skinned node's own transform is ignored** per the glTF spec, so skinned
-  primitives get an identity `localMatrix`.
-- **A baked `localMatrix` with negative determinant reverses winding**, so load
-  creates a `FrontFace: FrontCW` material variant for those primitives. Pipeline
-  state is per material and the draw gets no say.
-- **A node animated by TRS channels becomes a degenerate single-joint skin** —
-  see [Animation](#animation).
-
-**Every scene in the file is flattened, not only the default one.** `path` is a
-model's only cache key, so a draw naming a scene has no second load to trigger
-and every scene a selector can reach has to be there already. Geometry is
-interned per glTF primitive across the whole file, so two scenes sharing a mesh
-share the upload and the mesh id; what a second scene costs is its own placement
-records.
-
-The cycle guard is therefore **per scene, not per file**: a node two scenes both
-root belongs to both, and a file-wide guard would leave the second empty.
-
-**The re-root inverse is resolved per instance per frame, not precomputed at
-load.** If an ancestor of the named node is animated, the node's true world
-transform is time-varying and a load-time inverse is the wrong matrix — the crate
-would inherit its ancestor's motion, contradicting the point of re-rooting. At
-load scene records each named node's chain of *animated* ancestors, usually
-empty; at instance-pack time, if the chain is non-empty, it walks the chain
-against the same baked pose rows, inverts, and folds the result into the
-instance world matrix. The packer already knows the clip and time, the chain is
-a handful of joints, and the empty case costs nothing
-([Baked pose buffer and skinning contract](https://github.com/dvoyni/cog/issues/15)).
-
-**The chain is of *ancestors*, and a node animated in its own right keeps that
-animation.** Re-rooting replaces where a node sits, not what it does: a wheel
-node with a spin channel drawn by name spins about the draw's transform rather
-than being frozen. So the node itself is never in its own chain, and a `weights`
-channel is in nobody's — morph weights reshape a mesh and leave the node where
-it was.
-
-**Until a clip can play, the load-time inverse is the whole answer.** The chain
-is recorded now; the pack-time walk lands with the baked pose rows, because the
-baked pose of a model with no clip playing *is* the rest pose, and the inverse of
-the rest pose is what a load computes. Nothing is silently approximate in the
-meantime: there is as yet no clip to make the two differ.
-
-### Materials and overrides
-
-Each glTF material converts at load into one bundled-PBR record plus its texture
-bindings, owned by the model entry and shared by every draw of it. The two
-override knobs do not overlap:
-
-| knob | behaviour | case |
-| --- | --- | --- |
-| `Material != nil` | **replaces wholesale**; the file's PBR records are not bound and their parameters do not survive | dissolve, silhouette, depth-only |
-| `OverrideParams` | **merges by name** over each primitive's own record into a per-draw copy in the frame arena, keeping the file's textures | team colour, hit flash, fade |
-
-A nil `Material` with no overrides binds the file's records directly, with no
-copy. `OverrideParams` **broadcasts** to every material the draw binds — all six
-of a multi-material model's — which is what the common per-draw override wants.
-It is matched against the *resolved tag entry*, and a name that entry's shader
-does not declare is **ignored rather than reported**: that is what keeps the
-broadcast safe across tags.
-
-**An override has two destinations, and scene resolves only one of them.** The
-gfx parameters the entry declares — the five textures and five samplers — need no
-code at all: an override rides on the draw's own parameter list, and gfx already
-resolves a draw parameter over a material one of the same name against the
-reflected layout of that entry's shader, dropping what the shader does not
-declare. That *is* the matching rule, enforced by the same reflection every
-other binding goes through. What gfx cannot serve is the record: `scenePbrMaterial`
-is a bound range of an arena scene packs itself, so its members
-— `baseColorFactor`, `metallicFactor`, the five transforms and rotations — are
-not reflected uniforms and no name of theirs ever reaches gfx. Scene merges
-those into the draw's own copy of the record.
-
-So "a per-draw copy in the frame arena" is the record and nothing else: the
-`Material` is never copied, overrides or not, and the record was already copied
-into the frame's material arena on every path. The no-copy guarantee holds for a
-stronger reason than it was written for.
-
-**`uvSets` and `pad` are deliberately not addressable.** `pad` is not a member
-anyone means, and `uvSets` is a packed five-bit selector no parameter kind
-expresses — which TEXCOORD set a slot samples is the file's statement about its
-own mesh, not a per-draw knob. Every other member the shader declares is
-reachable, and a test reads the WGSL struct and fails on one that is not.
-
-**A parameter whose kind does not fit the member it names is ignored**, on the
-same footing as a name the record does not carry. The merge runs per batch per
-pass with no reporter on the path, and the broadcast means one parameter list is
-matched against several materials, so "does not fit here" is not on its own
-evidence of a caller bug. A vec4 member takes either `ColorParam` or `VecParam`.
-
-**The two knobs compose rather than conflict.** A draw naming both takes glTF's
-own defaults for the replacement material's record — the file's numbers are gone
-with its bindings — and the overrides then merge over those.
-
-**`MeshDraw.Params` stay out of the record.** They are for what a custom
-material declares and scene knows nothing about; the bundled PBR record is the
-model's own, and a mesh that wants a colour names a `Material`.
-
-### Loading
-
-**Loading is synchronous, and a model that could not be loaded is skipped,
-never substituted.** A draw of a path the cache does not hold reads, parses,
-decodes and uploads it inside the flush that recorded the draw, so the model is
-drawn in that same frame. A path that could not be loaded draws nothing — no
-placeholder.
-
-**The hitch is a property of this design, not an accident.** The JSON parse, the
-image decodes, tangent generation and the vertex pack all run inside scene's
-flush, holding `Write[*gfx.ResourceQueue]` and `Write[*gfx.OpQueue]`, so a large
-file costs the frame that first named it several hundred milliseconds and
-canvas's flush waits behind it. **`Preload(path)` is the lever**: it is the same
-load, fired without a draw, so an app moves the cost into a loading screen it
-controls. A game that skips `Preload` takes the hitch on first draw, which is
-what gfx and canvas already do.
-
-This replaces a two-command asynchronous load and the four-valued state machine
-that described it. What was bought back is everything that existed only to
-describe a load in flight: the `Missing → Loading → Resident → Failed` states,
-the per-entry generation counter, the ghost rule that needed it, and the release
-queue. There is no load in flight, so none of them has anything left to say.
-
-**The load runs where the caller stands.** Scene's flush holds
-`Read[storage.FileSystem]`, converted to an `fs.FS` once per frame rather than
-once per model draw — handing a `storage.FileSystem` out as an interface
-allocates — and a frame with no model draws pays nothing for it. It is the one
-lock this design added, and it serialises against nothing a frame does:
-`storage.FileSystem` is write-locked only by storage's own three mount commands.
-
-**Residency is atomic and per path.** A model is drawable only when geometry,
-baked poses, material records **and every one of its textures** are uploaded,
-all of which happen before the call that asked for it returns — there is no
-half-drawn model. **A failure never retries**: a typo'd path must not re-read the
-file every frame forever, so whatever the load produced is cached, a failure
-included, and it clears only on unload.
-
-**Failure has two halves and they report differently.** The read is the asset
-library's, so a file that cannot be opened is the library's failure to report —
-once, keyed by the descriptor, wrapping the underlying error so
-`errors.Is(err, fs.ErrNotExist)` still answers — and what the cache keeps is the
-loader's `nil` default. Everything the loader itself finds wrong is scene's:
-a file that does not parse, declares no scenes or requires an extension scene has
-no decoder for is cached as an `ErrModelUnavailable` and reported under
-`"model:" + path`. `State(path)` returns whichever of the two applies, and `nil`
-when the model loaded.
-
-**Partial failure binds a placeholder.** A model that parses but is missing a
-texture still loads, and reports once. **What it binds depends on what the slot
-asked for**: a *picture* slot — base colour, emissive — binds **magenta**,
-because a missing base colour rendering white looks deliberate; a *data* slot —
-normal, metallic-roughness, occlusion — keeps its own 1×1 default, because
-magenta as a normal map is a surface lit from nowhere and as
-metallic-roughness it is `metallic=1, roughness=0`, a mirror. A **rejected
-required extension** is different — there is no geometry to fall back to, so the
-model fails wholesale.
-
-**Textures** live in a scene-owned cache, never canvas's atlas (wrap modes, mips
-and per-texture samplers rule the atlas out). It is an `assets.Cache` of its own,
-with its own params type: two caches sharing one params type would share one
-report-once namespace. **No refcount**: nothing unloads automatically, so there
-is nothing for a count to drive.
-
-**A texture is named `{path, image index, colour space}`.** An external image is
-named by its **resolved storage path** and shared across every model that binds
-it; a GLB-embedded one has no path of its own, so it is named by its model's
-path and its index — and its bytes ride in the descriptor's payload, which the
-cache takes in place of a read. That is the whole reason the asset library lets a
-`Blob` sit beside a `Name`: the alternative is reading the whole container once
-per embedded image and re-parsing it to reach image N.
-
-**The cache is consulted before the read**, which is what makes two models
-sharing an external image one read and one decode. It used to be consulted after
-the decode, at install time, so the second model decoded a picture it then threw
-away.
-
-**The colour space is part of the key**, because it is the *slot's* property and
-not the image's: base colour and emissive are gamma-encoded pictures, and
-metallic-roughness, normal and occlusion are data. One image bound to both kinds
-of slot is therefore two GPU textures, and it has to be — sampling a normal map
-through an sRGB view is a wrong picture with nothing in the frame to explain it.
-**The material slot itself is not in the key**: one ORM image — occlusion,
-roughness and metalness packed into one picture, which is glTF's standard
-packing — stays one GPU texture, and picking the per-slot fallback stays the
-material binding's business.
-
-**Unload frees at the call, and the entry leaves the cache there.** A free
-followed by a get is a **reload, not an error**, which is what a same-tick
-unload becomes: the frame's own draws load the path again at the flush. What
-still lands at the frame boundary is only the GPU buffers, through the same
-pending-release list `ReleaseMesh` uses, so nothing the frame already recorded
-draws from a dead buffer. `UnloadModel` frees geometry, baked poses and material
-records **only — it does not cascade to textures**, because with no refcount it
-cannot know whether another loaded model shares them by path. Unloading an
-absent path is a no-op.
-
-**Bounds** come from the POSITION accessor `min`/`max`, which glTF requires,
-computed per primitive in the flattened local space and expanded by the summed
-maximum morph position delta. A primitive whose accessor carries no `min`/`max`
-makes the **whole model never-cull, reported once**.
+> **Amended by [#539](https://github.com/dvoyni/cog/issues/539).** A model
+> draw is scene's; everything a model file is, is `model`'s. The loader,
+> addressing by `Scene` and `Node`, flattening, the file's materials and the
+> two override knobs, and loading, residency, textures and unloading moved to
+> [model.md §glTF models](../../../model/docs/specs/model.md#gltf-models). scene records the draw,
+> resolves its selectors through the Lookup's `ModelView` on the load facade,
+> and expands the view into one draw record a primitive.
 
 ---
 
@@ -1188,13 +899,7 @@ vertices are deformed by weights or bones".** A caller wanting deforming
 procedural geometry owns its vertices and uses `UpdateMesh`, blending on the CPU.
 
 ```go
-type MeshRef struct{ /* source, id, generation — all unexported */ }
-func (r MeshRef) ID() uint32 // 0 when none
-
-func (q *OpQueue) TemporaryMesh[TVertex VertexLayout](vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology) MeshRef
-func (la LookupAccess) BakeMesh[TVertex VertexLayout](vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology) MeshRef
-func (la LookupAccess) UpdateMesh[TVertex VertexLayout](ref MeshRef, vertices []TVertex, indices []uint32) bool
-func (la LookupAccess) ReleaseMesh(ref MeshRef)
+func (q *OpQueue) TemporaryMesh[TVertex model.VertexLayout](vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology) model.MeshRef
 
 type MeshDraw struct {
     Transform  Transform
@@ -1206,7 +911,7 @@ type MeshDraw struct {
 }
 ```
 
-`MeshRef` is an opaque value struct with unexported fields and a **discriminated
+`model.MeshRef` is an opaque value struct with unexported fields and a **discriminated
 source** (durable or frame-local), a dense scene id, and a generation counter —
 mirroring `gfx.BufferDescr`, the only place in cog that already serves both a
 frame-local and a durable path from one type. The zero value means none. `source`
@@ -1220,394 +925,32 @@ would batch as though they were the same geometry. The generation of a temporary
 ref is the **frame** it was minted in, which is what the later-frame check reads;
 a durable ref's is its slot's reissue count.
 
-Both mint functions feed the single `q.Mesh(layers, ref, draw)` recording call.
+Both mint functions - scene's `TemporaryMesh` and `model`'s durable `BakeMesh`
+on `model.LookupAccess` - feed the single `q.Mesh(layers, ref, draw)` recording call.
 An anonymous inline call, canvas's `DrawTriangles` shape, was rejected because
 sorting requires a dense `meshID` on every draw and an anonymous call has none.
 The inline path costs one extra statement and buys one `MeshDraw`, one sort key
 and one culling rule instead of two of each — affordable because scene's
 *throwaway geometry* floor is the debug vocabulary, not this API.
 
-### Vertices
-
-The generic mechanism is canvas's verbatim: a plain-data struct implementing
-`VertexLayout() []gfx.VertexAttr`, memcpy'd through `unsafe.Slice` into an
-arena, its layout id cached by `reflect.Type`. Go 1.27 permits type parameters
-on **methods**, so both mint functions carry `[TVertex]` directly.
-
-Typed over raw `[]byte` + `[]gfx.VertexAttr` because the type system ties data
-to layout, and because it lets scene recognise the standard layout **by type**
-rather than by comparing attribute slices — which the custom-material check and
-the bounds computation both need.
-
-`scene.Vertex` carries the **six** attributes of the standard layout, 72 B
-authored and 32 B stored. It has no `Joints` and no `Weights`: no public path
-ever wrote them — a skin binding is set only from a loaded model's animation —
-so a buffer-built mesh never skins and the eight stored bytes would be dead in
-every mesh an app can build. The **skinned layout**, the same six plus `JOINTS_0`
-and `WEIGHTS_0` at 40 B, belongs to the glTF loader and is unreachable from the
-public API. See [`mesh.md`](../../../model/docs/specs/mesh.md) for both layouts row by row.
-
-**A custom vertex layout requires a custom material.** The bundled PBR knows the
-two named layouts and nothing else, and every variant of it reads a prefix of
-one of them. The reverse is fine. A violation is
-**reported once and the draw skipped** — the layout is recognised by Go type at
-mint time, and the material is only known at draw time, so the check runs as the
-frame prepares its draws and the report is keyed by the ref's id: once per ref,
-however many draws named it. The stale-ref report is keyed the same way.
-
-**A mesh draw taking the bundled PBR is white paint, `metallicFactor` 0.**
-`MeshDraw` carries no colour: colour is a material's property, and a mesh that
-wants one names a `Material`. glTF's own default is fully metallic, and a metal
-has no diffuse at all — with no image-based lighting in v1 there is nothing to
-reflect, so a mesh with nothing said about it would render **black**, which is the
-one thing a draw with no material of its own must not be. This is the same
-"paint, not metal" ruling the debug vocabulary already takes, minus the colour.
-
-### Topology and indices
-
-One `topology` argument, zero value `TriangleList`, every gfx topology passed
-straight through. Indices are authored as `[]uint32` only, following the finding
-that WebGPU has no `uint8` indices. What scene *stores* is narrower: a durable
-mesh of 65535 vertices or fewer is uploaded as `uint16`, derived from the vertex
-count rather than chosen, and a temporary mesh keeps `uint32` because narrowing
-it would cost an allocating pass every frame rather than once. See **Index
-width** in [`mesh.md`](../../../model/docs/specs/mesh.md). The bundled PBR is documented as meaningful for
-triangles only; a custom shader doing point sprites or a wireframe overlay is
-legitimate and costs scene nothing to allow.
-
-### Baking is deferred, and holds no gfx lock
-
-`BakeMesh` mints the scene id and returns the ref **immediately**, queueing the
-upload onto the `Lookup` for scene's own flush to drain — the flush already
-write-locks `*gfx.ResourceQueue`, so a mesh baked and drawn in the same update
-handler uploads in that same frame.
-
-This keeps `LookupAccess` **GPU-free**, canvas's deliberate design. The house
-style of write-locking `*gfx.ResourceQueue` in the app handler and threading it
-down was rejected because `BakeBuffer` dereferences its backend with **no nil
-guard**, so every caller would have to gate on `Ready()` and a mesh baked at
-startup before the backend is installed would either panic or silently not exist.
-Deferring gates it in one place.
-
-`BakeMesh` **copies** the caller's bytes into a scene staging arena at call time
-and hands `BakeBuffer` `copyData: false` at flush — one copy total. Consequently
-the ref is a **scene** id and the `gfx.BufferDescr` lives inside the `Lookup`.
-
-`UpdateMesh` is a **wholesale re-bake at any size**, deferred the same way,
-recomputing the baked sphere in the pass that copies. There is **no capacity
-concept in the API**: `ReBakeBuffer` already re-bakes at any length while
-preserving the id, so growth is free at the gfx level. Sizing to a maximum vertex
-count is a *performance* note about `CreateBuffer` plus bind-group invalidation,
-not a constraint the API encodes. `UpdateMesh` rejects, reported once, a change
-of vertex **layout** or **topology** — the pipeline key and the `meshID` both
-assume they are fixed for the ref's life — and calling it on a temporary ref.
-
-`ReleaseMesh` is explicit, frame-boundary and generation-counted. Drawing a
-**released or stale** ref skips the draw and **reports once**, keyed by the ref's
-id: a mesh that quietly stops appearing is the same failure class the load rules
-guard against, and the generation counter is what makes a recycled id detectable
-rather than drawing whatever now occupies that slot.
-
-Invalid input — zero vertices, an index out of range, or an index count that is
-not a multiple of 3 under `TriangleList` — is **reported once and yields a zero
-`MeshRef`**, which then skips at draw time under the stale-ref rule. This departs
-from `canvas.DrawTriangles`, which silently returns on bad input, because that is
-a per-frame recording call where a report would spam every frame whereas a bake
-happens once.
-
-### Buffer lifetimes
-
-There is no static/dynamic split at the API level: in WebGPU memory type is
-chosen only by `MAP_*` flags, and every GPU-readable buffer is updated by a copy.
-`queue.writeBuffer` is the recommended default on both paths — gogpu's native
-path runs a 256 KiB-chunk staging belt flushed ahead of the user command buffer
-in the same submit, and the browser path is `CopyBytesToJS` + `writeBuffer`. The
-split that matters is **lifetime**, which gfx already encodes:
-
-| lifetime | surface |
-| --- | --- |
-| durable geometry, baked poses, morph deltas | `ResourceQueue.BakeBuffer`, `ReleaseBuffer` on unload |
-| per-frame instances, animation, lights, per-pass camera blocks | `BufferWithBytes` in the `OpQueue` temporary arena |
-| caller-owned dynamic meshes | `BakeBuffer` + `ReBakeBuffer` (or the arena if regenerated every frame anyway) |
-
-gfx needs nothing new for v1 and must not grow a mapped staging ring.
-`gfx.BufferDesc.Dynamic` is dead code — never read, and a pure function of
-`Kind` — and is deleted.
+> **Amended by [#539](https://github.com/dvoyni/cog/issues/539).** `MeshRef`,
+> `BakeMesh`, `UpdateMesh` and `ReleaseMesh` are `model`'s: it owns all mesh
+> residency, and scene keeps only the frame-local source `TemporaryMesh` mints
+> and the `MeshDraw` recording. Vertices, topology and indices, deferred
+> baking and buffer lifetimes moved to
+> [model.md §Buffer-built meshes](../../../model/docs/specs/model.md#buffer-built-meshes), and the
+> layouts row by row are in [`mesh.md`](../../../model/docs/specs/mesh.md).
 
 ---
 
 ## Animation
 
-Animation is **stateless**: each draw passes clip plays `{clip, time, weight}`,
-and gameplay or the `anim` plugin owns time. Everything is baked at load;
-runtime skinning and morphing are entirely vertex-shader work. **There are no
-compute shaders in this scope.**
-
-### Baked poses
-
-([Baked pose buffer and skinning contract](https://github.com/dvoyni/cog/issues/15),
-[GPU skinning and morph techniques survey](https://github.com/dvoyni/cog/issues/6))
-
-**A pose record is 48 B — `[rot.xyzw][trans.xyz, _][scale.xyz, _]`** — three
-aligned `vec4` loads, f32, holding **`globalJoint` alone**. Scale is a `vec3`.
-
-Two rejected alternatives, both worth recording because each looks cheaper:
-
-- **Premultiplying `globalJoint * inverseBind`** (the original research
-  recommendation) is overturned. Inverse bind matrices routinely carry
-  non-uniform scale from the bind pose, and premultiplying injects it into a
-  record that is then decomposed to TRS, which cannot represent shear at all;
-  degenerate single-joint skins have no inverse bind to premultiply; and the
-  unpremultiplied buffer literally contains bone world transforms, which is what
-  the fogged bone-socket work needs. `inverseBind` is instead a small per-skin
-  array — one entry per joint, not per joint-frame — applied *after* the
-  cross-play blend. Cost is one extra 48 B fetch and one 4×3 concat per
-  *influence*, from an array small enough to stay L1-resident.
-- **A 32 B record** with scalar scale packed into translation's `w` would cut
-  pose memory and per-vertex loads by a third — the single largest cost in this
-  design. It is rejected because **squash-and-stretch is animated non-uniform
-  scale**, a mainstream idiom, and unlike a draw's `Transform` a pose has no
-  call site where a per-axis scale could be written, so a stretched bone would
-  be silently averaged away with nothing to correct.
-
-**Normals and tangents use a precomputed normal matrix, never a shader inverse.**
-Because the inverse bind can be non-orthonormal, so can the composed skinning
-matrix. Load computes `transpose(inverse(inverseBind))` per joint. The shader
-transforms the normal by the blended TRS rotation (orthonormal, so direct), then
-by that matrix, then renormalises; the tangent takes the same path plus
-Gram-Schmidt against the skinned normal, and its `w` handedness flips from the
-inverse bind's determinant sign, also precomputed.
-
-**The inverse bind and the normal matrix share one buffer.** They are both per
-skin, both indexed by the same joint index, and both fetched on every influence,
-so they interleave into a single `sceneSkinJoints` record: 64 B for the inverse
-bind plus 48 B for the normal matrix, **112 B per joint**, exactly 7 × 16 with no
-tail padding. One address computation instead of two, and both halves land
-adjacent for all four influences.
-
-Declared as **explicit `vec4` columns, not `mat4x3` and `mat3x3`**. WGSL pads
-every matrix column to 16 bytes, so the record already carries 28 bytes that
-matrix syntax cannot address — and the precomputed handedness sign needs
-somewhere to live. Explicit columns make that padding addressable and give it a
-free home.
-
-Two buffers was the original shape; they were merged to recover a storage-buffer
-slot, which cost nothing because nothing about the *semantics* moved — poses stay
-unpremultiplied, the inverse bind still applies after the blend, the normal
-matrix is still precomputed rather than inverted in the shader
-([scene: the storage-buffer budget is eight of eight, not six](https://github.com/dvoyni/cog/issues/58)).
-
-**Sample rate is 60 Hz, global**, from `Config.PoseSampleRate`; linear
-interpolation, clip duration rounded up to whole frames. No per-clip override:
-glTF has no field to express one. 60 rather than the researched 30 because
-`STEP` channels and `CUBICSPLINE` curves are exactly what 30 Hz degrades visibly,
-and glTF has both. **Per-vertex cost is unaffected by the rate** — always two
-frames per play — so only storage doubles, and at demo scale that is noise
-(a 24-joint three-clip rig is ~350 KiB).
-
-**One joint index space per model.** Every skin's joints and every degenerate
-node joint share a single numbering, remapped from each primitive's `JOINTS_0`
-at load. Rows lay out per model path as `[rest frame][clip 0][clip 1]…`, so
-
-```
-row = clipBase + frame * jointCount + joint
-```
-
-is one MAD in the shader and the instance record needs only `clipBase`. The waste
-is `(joints this clip does not animate) × frames`; the pathological file — many
-independently-animated props sharing one file *and* per-prop clips — is precisely
-what `Node` re-rooting exists to split apart.
-
-**Row 0 of every model is an implicit rest frame**, the authored node hierarchy
-resolved once. Without it a draw with `Plays: nil` has nothing to place its
-geometry, because skinned nodes get an identity `localMatrix` and a degenerate
-node's transform lives in the pose buffer — the model would collapse to the
-origin. One extra frame per model (~1 KiB) makes `Preload` plus draw-with-no-plays
-legal, and defines the zero-total-weight case.
-
-**Any node whose world transform a clip can move becomes a degenerate
-single-joint skin** with a weight-1.0 binding; nodes no clip reaches bake flat
-into `localMatrix`. Rigid node animation — wheels, propellers, doors — is
-ordinary glTF, so the alternative was a second animation mechanism with the
-per-frame CPU hierarchy walk this design exists to eliminate. **The rule keys on
-TRS channels only**: a node whose clip touches only its `weights` channel
-creates **no joint** and keeps its authored `localMatrix`, so a morph-only model
-loads with zero joints and an empty pose buffer
-([Morph target contract](https://github.com/dvoyni/cog/issues/16)).
-
-**"A clip can move it" is inherited, not local.** A static prop bolted to a
-spinning turret moves with the turret, so the test is the node's own TRS
-channels *or* a non-empty chain of animated ancestors. Keying on the node's own
-channels alone would leave every mesh hanging under an animated bone frozen in
-its rest place while its parent turned — which is the same failure the rule
-exists to prevent, one level down.
-
-**Only nodes that bind something claim a joint.** A node a clip steers but which
-carries no mesh needs no joint of its own: its motion already reaches its
-descendants through the hierarchy walk that bakes them, and a joint for it would
-cost a 48 B row per frame for a binding nobody makes. The joints a model carries
-are therefore every skin's joints, every mesh node needing a degenerate binding,
-and the deepest animated ancestor of every *named* node — that last so a `Node`
-draw can re-root against the frame, and reusing an existing joint on the same
-node where there is one, because pose records are unpremultiplied and so hold
-the same world transform whatever inverse bind they are paired with. Claiming a
-fresh joint there instead very nearly doubles a rig: on Fox, whose every bone is
-both named and animated, 24 joints become 40.
-
-### Clip plays
-
-```go
-type ClipPlay struct {
-    Clip   string
-    Time   float32
-    Weight float32
-    Loop   bool
-}
-```
-
-**Clips are addressed by name**, first match; an unknown name is reported once
-and the play dropped.
-
-**`Loop` is on the play, not the caller's time.** Gameplay owns time and `Time`
-arrives already advanced, but whether a time past the end wraps or holds can only
-be answered by whoever knows the clip loops, and that is not derivable from a raw
-time value. `Loop` false clamps to `[0, duration]`; true takes `Time` modulo
-duration, which makes negative time legal and a reversed animation free.
-
-**There is no seam case in the frame pair.** The grid rounds *up* to whole
-frames, so a clip's last row sits at or just past its own end and the wrapped
-time always lands on a pair inside the clip's own rows. A pair straddling the
-clip's boundary — its last frame blended back into its first — never has to be
-built, and the clamped case simply takes the last row twice.
-
-**Caps: 4 influences, 4 plays, 256 joints a model.** Influences are `JOINTS_0`
-only. A 5th play is **dropped by lowest weight and reported once per model**.
-
-The joint ceiling is the storage vertex's, not the pose buffer's: poses live in
-a storage buffer indexed by row against a 128 MiB binding and would take any
-count, but a vertex names its joint in **one byte**
-([mesh.md](../../../model/docs/specs/mesh.md#per-attribute)). It binds what a vertex can name — the joints
-a model's *skins* claim, which are numbered first and contiguously — so the
-plain joints a node binding claims, which ride the instance record in a full
-`u32`, are outside it. **A model whose skins claim more fails wholesale at load,
-naming the model**, because an index that did not fit would truncate to a
-different bone with nothing reported. The cap is per model: every model has its
-own joint numbering, so a level full of rigged characters does not share it.
-
-**Play weights are normalised on the CPU** at pack time. The blend is a weighted
-*mean* of TRS, not an additive layer: weights summing to 0.5 do not half-apply
-the animation, they shrink every bone's translation toward the origin and mangle
-the character. There is no legitimate non-unit sum, so "as given" would preserve
-only the ability to express a bug. A total of ~0 falls back to the rest frame.
-
-Per play the CPU folds `weight * (1 - frac)` and `weight * frac` into one scalar
-each and emits `{baseRow0, baseRow1, w0, w1}` (16 B), so the shader does no
-clip-length, wrap or normalisation arithmetic. It accumulates weighted TRS per
-influence with quaternions sign-fixed against the running accumulator,
-normalises, builds a 4×3, applies the inverse bind, and runs standard linear
-blend skinning over 4 influences. Quaternion hemisphere continuity is fixed
-within a clip **at bake**, so the frame lerp needs no runtime check.
-
-**Unrepresentable data is best-effort plus one report.** Compose along the
-hierarchy, decompose, recompose, and if the residual exceeds an epsilon report
-once keyed `"model:"+path` and bake the decomposition anyway: a slightly wrong
-elbow beats a missing character, and shear is invisible on virtually every real
-rig. A single-keyframe clip and a zero-duration clip each bake to one frame;
-neither is an error.
-
-**Faithfulness is decided by recomposing, not by classifying the matrix.** A
-collapsed axis in particular is *not* unrepresentable — a TRS record holds a zero
-scale exactly — and treating it as such would pop an object animated down to
-nothing back to full size. Scale keyframes reaching zero are ordinary: three of
-the Khronos `InterpolationTest`'s nine cubes do it. The rotation such a matrix
-cannot carry is rebuilt from the axes that survived, which is arbitrary and
-unobservable, because a zero-scaled axis has no direction to get wrong.
-
-**Vertex weights are normalised at load *and* renormalised in the shader**, and
-the two are not redundant. glTF only says a producer *should* make `WEIGHTS_0`
-sum to one and real files drift; unnormalised linear blend skinning then scales
-the mesh as well as posing it. The load pass is what puts a weight inside
-`[0, 1]` so that it has a `Unorm8` code to land on at all, and the shader's
-divide by the accumulated total is what covers the sum that rounding four
-weights into four bytes then misses — 11.7% of `Fox`'s vertices, always by
-exactly one code ([mesh.md](../../../model/docs/specs/mesh.md#per-attribute)). Neither half is permitted
-to assume the other made the sum one, which is also what makes a malformed file
-skinned correctly rather than silently shrunk.
-
-**Skinning is model-only.** `MeshDraw` has no `Plays` field and no joint concept.
-
-### Morph targets
-
-([Morph target contract](https://github.com/dvoyni/cog/issues/16))
-
-**Morphing is linear in the weights**, so blending N plays' weight vectors on the
-CPU and applying the deltas once is *exactly* equal to morphing per play and
-blending the results. Unlike the pose case there is no approximation to trade
-away, so the entire morph blend is CPU-side and **the shader never sees a play**.
-
-glTF `weights` channels bake onto the same 60 Hz grid as a plain CPU-side
-`[]float32` per clip (`frames × targetCount`) that **never reaches the GPU**. At
-pack time the CPU does the two-frame lerp per play and the weighted mean across
-plays using the already-normalised play weights, and emits one final weight
-vector.
-
-**`MorphWeights` is positional** — the one index-addressed thing in the plugin.
-Name addressing would put ~52 map hits per face per frame on the recording path
-to re-derive a mapping the caller computed at startup; naming lives on the lookup
-facade as `MorphTargets(path)` instead, so the per-frame path is a memcpy.
-A non-nil `MorphWeights` **overrides the animated result wholesale**; nil falls
-back to animated weights, then `node.weights`, then `mesh.weights`, then zero. A
-**short slice leaves the remaining targets at 0**; a long slice ignores the tail
-and reports once per model. Neither is an error.
-
-**A slot belongs to a node, not a mesh.** glTF requires every primitive of a mesh
-to carry the same targets in the same order, so a 3-primitive 8-target mesh
-contributes **8** slots, not 24 — and `node.weights` overrides `mesh.weights`, so
-two nodes referencing the same mesh have independent weights. The flattened list
-is one entry per target of every morphed node in depth-first node order, so a
-duplicated head appears as two runs of the same names. The *deltas* stay shared
-per mesh, byte-identical between those two nodes: `morphBase` points at the
-mesh's block while the weights come from the node's slots.
-
-**One `sceneMorphDeltas` buffer per model.** One buffer per *primitive* is
-overturned: it would mean a bind group per primitive, collapsing group 2's whole
-reason for existing. Every morphed primitive's targets concatenate into the one
-buffer and are reached by a base offset.
-
-**The delta layout is specified in [mesh.md](../../../model/docs/specs/mesh.md#morph-delta-storage)**, and
-only there: the record's per-slot widths, the per-primitive ranges, the
-per-target span and the address the shader builds from them. It used to be
-described here as well, in a passage this document was the authority for — and
-two specs describing one layout is how they drift, so what was here is a pointer
-now. What stays in this document is the plumbing that layout change did not
-touch: one buffer per model, the per-node weight slots, the CPU-side blend, and
-the caps below.
-
-Addressing needs **no base-vertex correction**: `gfx.MeshDescr` owns its own
-buffers and always binds them at offset 0, so `@builtin(vertex_index)` is 0-based
-within a primitive and indexes `sceneMorphDeltas` directly.
-
-**Caps: 64 active targets**, culled first by `|w| < 1e-5` — absolute value,
-because glTF does not clamp weights to `[0,1]` and a negative weight is
-meaningful — then, if still over, dropped by lowest absolute weight and reported
-once per model. Stored targets are unlimited. With sparse packing the cap no
-longer constrains memory or layout at all and is purely a guard against runaway
-per-vertex ALU.
-
-**The morph half adds deltas and normalises nothing.** The naive reading of glTF
-renormalises the normal after morphing *and* after skinning; the first is dead
-work, because skinning is linear. Tangent deltas add to `xyz` and leave `w`
-untouched.
-
-**Bounds** expand at load by the maximum position-delta magnitude summed over the
-targets: conservative (it assumes every target at weight 1 at once), computed in
-one pass over delta data already being read, and it over-draws rather than
-under-draws.
-
-**Instancing morphed geometry saves draw calls, not vertex work.** 100 morphed
-heads is one draw and 100× the morph ALU.
-
-Buffer-built meshes have **no morph targets** in v1.
+> **Amended by [#539](https://github.com/dvoyni/cog/issues/539).** Baked poses,
+> clip plays and morph targets are `model`'s, and moved to
+> [model.md §Animation](../../../model/docs/specs/model.md#animation). scene hands a draw's `Plays`
+> and `MorphWeights` to `model.ResolvePlays`, `model.BlendMorphWeights` and
+> `model.SelectMorphTargets`, and appends the block with `model.AppendAnim`.
+> `MeshDraw` has no `Plays`: skinning is model-only.
 
 ---
 
@@ -1615,87 +958,12 @@ Buffer-built meshes have **no morph targets** in v1.
 
 ([Lighting model and limits](https://github.com/dvoyni/cog/issues/17))
 
-Naive forward: one light list per pass, **every shaded fragment loops all of
-it**. The honest consequence, stated rather than hidden: adding a light costs
-every shaded pixel in the pass, which is what makes the cap load-bearing rather
-than decorative.
-
-The sun and hemispheric ambient are per-camera fields
-(see [Cameras and passes](#cameras-and-passes)); the array holds point and spot
-lights only, which is what makes the record branchless and 48 bytes with **no
-`kind` field**.
-
-```go
-type LightDescr struct {
-    Position   m.Vec3
-    Direction  m.Vec3  // direction of travel; zero vector for a point light
-    Color      m.Color // linear
-    Intensity  float32 // zero means 1
-    Range      float32 // zero means infinite
-    InnerCone  float32 // radians; zero is a real value (falloff from the axis)
-    OuterCone  float32 // radians; zero means pi/4, glTF's default
-    Kind       LightKind
-}
-```
-
-`PointLight` and `SpotLight` set `Kind` themselves over the one struct, so call
-sites stay explicit, a hand-written point light leaves the cone fields zero, and
-the per-camera light buffer is homogeneous without scene converting between two
-structs.
-
-```wgsl
-struct SceneLight {
-    position:   vec3<f32>,  // world
-    invRange4:  f32,        // 1/range^4; 0 is infinite
-    direction:  vec3<f32>,  // direction of travel; zero vector for point
-    spotScale:  f32,        // 0 for point
-    color:      vec3<f32>,  // linear, Intensity premultiplied
-    spotOffset: f32,        // 1 for point
-}
-
-let toLight  = light.position - P;
-let d2       = dot(toLight, toLight);
-let L        = toLight * inverseSqrt(max(d2, 1e-12));
-let window   = saturate(1.0 - d2 * d2 * light.invRange4);
-let cone     = saturate(dot(-L, light.direction) * light.spotScale + light.spotOffset);
-let radiance = light.color * window * cone / max(d2, 1e-6);
-```
-
-**Attenuation keeps glTF's falloff geometry but not its photometry.**
-`Intensity` is **unitless**, documented as "radiance at one world unit".
-Photometric units were rejected on a hard constraint, not taste: targets are
-`RGBA8Srgb`, tonemapping is out of scope, so shading lands directly in 0..1 with
-**no exposure control anywhere** — a 60 W bulb is ~64 cd and every frame would be
-pure white. When HDR lands this becomes photometric by redefining the unit and
-changing nothing else. `max(d2, 1e-6)` is a robustness guard for a light sitting
-on a surface, not a falloff parameter.
-
-**`Range` zero means infinite**, glTF's own default. Storing `invRange4 =
-1/range^4` rather than `range` makes `saturate(1 - d^4 * invRange4)` evaluate to
-exactly 1 when it is 0 — no branch, no `select`, no special case. Bug visibility
-runs the right way too: a forgotten `Range` yields a light that reaches too far,
-which you see immediately, rather than a silently skipped light. The residual
-cost is that **an infinite-range light is unculled by construction and always
-survives to the cap.**
-
-**Spot cone** is `KHR_lights_punctual`'s smoothing, linear in cosine, with the
-CPU precomputing:
-
-```
-spotScale  = 1 / max(cos(InnerCone) - cos(OuterCone), 1e-4)
-spotOffset = -cos(OuterCone) * spotScale
-```
-
-so the shader is one `dot`, one MAD, one `saturate`. `InnerCone >= OuterCone` is
-reported and the light skipped. **Trap worth a line:** a point light's
-`direction` must be packed as an **actual zero vector**, not left uninitialised —
-the `spotScale = 0` trick relies on `x * 0 == 0`, which is false for `NaN`.
-
-**The sun stays out of the array.** Packing it as a directional entry would cost
-an explicit `kind` field (with infinite range taken, no free discriminator is
-left) and waste position, range and cone on that entry. The tiebreaker is that
-the unification is unachievable anyway: **hemispheric ambient is normal-dependent,
-not a direction**, so it can never join the loop.
+> **Amended by [#539](https://github.com/dvoyni/cog/issues/539).** `LightDescr`,
+> the packed light, attenuation, the cone, the sun and the cap of 16 by
+> contribution are `model`'s, and moved to
+> [model.md §Lights](../../../model/docs/specs/model.md#lights). What scene keeps is which lights a
+> pass offers: its layer test and its frustum test, before `model`'s
+> `LightSelection` applies the cap.
 
 **Culling: per pass, at flush, before the cap.** Sphere `(Position, Range)`
 against that pass's frustum. A camera's 1024×1024 shadow pass and its screen pass
@@ -1703,247 +971,21 @@ can see different light sets, which is correct rather than surprising. Culling i
 what makes the cap survivable: a level with 40 lights of which 6 are on screen
 works perfectly.
 
-**Cap: 16, silently, by contribution.** Past 16, scene keeps the 16 with the
-highest contribution at the camera position — each light's own falloff evaluated
-at the eye, times its colour's luminance — and drops the rest **with no error
-reported**. The silence departs from the "reported once" rule used for plays and
-morph targets, and the difference is principled: those caps are static and
-asset-shaped, so "once at load, per model" is a well-defined moment and the
-excess is an authoring mistake. A 17th light is **dynamic and camera-shaped** —
-it appears when you turn around — so there is no natural "once", a per-frame
-report is pure noise, and the degradation is continuous by construction, since
-the lights dropped are exactly the ones contributing least. Record order was
-rejected as the drop policy because it silently punishes recording order, which
-a caller has no reason to believe is significant.
-
-**Among equal contributions the offer order decides**, and for a scene watched
-from outside its lights that is most of them. The score is the light's own
-falloff window evaluated at the eye, so every light whose `Range` does not reach
-the camera scores exactly zero, as does every spot the camera is not standing in
-the beam of; the insertion replaces the weakest kept entry only if the newcomer
-*beats* it, so a tie leaves the earlier light in place and the first 16 recorded
-are the 16 kept. This is not a weakening of "the lights dropped are the ones
-contributing least" — a light contributing nothing at the eye is contributing
-least — but it does mean a caller who records more than 16 chooses which survive
-by the order they record them in, and that a light mattering greatly to geometry
-the camera is looking *at* can score nothing because it is far from where the
-camera is looking *from*. The `pbr` demo is built on this: it records the lights
-it means to keep first, and its five surplus lamps stand deep enough behind the
-still life to score zero until the camera orbits in among them.
-
-16 is a **fixed constant, not a `Config` knob**: a knob needs documented
-interaction rules, and the answer to "I need 40 lights" is clustered lighting,
-not a number that makes the naive loop slower. Being fixed is also what lets the
-member be declared `lights: array<SceneLight, 16>` — 768 bytes inside
-`sceneFrame` — rather than a runtime-sized array, which is a strictly smaller ask
-on gfx's reflection work. `lightCount` still bounds the loop. The over-16
-selection is a fixed `[16]` insertion by contribution — no sort, no allocation.
-
 **A light's `LayerMask` is filtered against the camera's `CullMask` only.** It
 decides which cameras' light buffers the light lands in; it does **not** decide
 which objects the light illuminates. This is the natural misreading and it must
 be stated bluntly, because the other reading requires a per-draw light list,
 which contradicts group 0 being invariant for a whole pass.
 
-`Intensity` is premultiplied into `color` at pack time for the punctual array,
-the sun and both ambient colours: it removes a per-fragment multiply and costs
-nothing. All colours are **linear**, so an sRGB-picked literal must go through
-`m.NewColorSrgb`.
-
-**Nothing is reserved for shadows** — no sun shadow matrix, no comparison sampler
-slot. An unused matrix and an unbound sampler are dead weight, and reflection
-would type the sampler wrongly anyway, so the reservation would not even be
-usable as reserved.
-
 ---
 
 ## Bundled PBR material
 
-([Bundled glTF PBR material contract](https://github.com/dvoyni/cog/issues/18))
-
-The bundled PBR is a `gfx.MaterialDescr` like any other, wrapped in a `Material`
-with **one `forward` entry and nothing else**. `MeshDraw.Material` /
-`ModelDraw.Material` nil selects it.
-
-### Parameters are glTF's names, verbatim
-
-`baseColorFactor`, `baseColorTexture`, `metallicFactor`, `roughnessFactor`,
-`metallicRoughnessTexture`, `normalTexture`, `normalScale`, `occlusionTexture`,
-`occlusionStrength`, `emissiveFactor`, `emissiveTexture`, `alphaCutoff`.
-
-These are **user-facing**: `OverrideParams` merges by name, so
-`gfx.ColorParam("baseColorFactor", c)` is what a caller writes to tint a model.
-Verbatim naming means the loader maps 1:1 with no translation table to drift, and
-**the glTF specification becomes the parameter documentation** — including the
-exact semantics of `occlusionStrength` and `normalScale`, which are easy to get
-subtly wrong from memory. The storage binding itself is `scenePbrMaterial`,
-reserved-prefixed, because no caller ever addresses the whole record.
-
-**Five samplers**, one per slot (`baseColorSampler`, `metallicRoughnessSampler`,
-`normalSampler`, `occlusionSampler`, `emissiveSampler`). glTF references a
-sampler per texture and two slots of one material can legitimately differ — a
-tiling ground beside a clamped decal — so a single shared sampler would silently
-mis-sample a legal file. `SamplerDesc` stays comparable precisely so
-`extensions/gfx/translate.go` dedupes identical descriptors to one object, making the GPU
-cost near zero. Groups 0 and 2 use no samplers at all.
-
-### Absent slots bind 1×1 defaults, and there are only two
-
-WGSL requires every declared binding bound and gfx has no preprocessing, so
-omitting a texture is not available without shader variants. Scene owns the
-defaults and always binds all five; the factor parameters multiply through
-unchanged.
-
-Only **two** textures are needed: **a single white texel serves baseColor,
-metallic-roughness, occlusion and emissive**, because 1.0 is a fixed point of the
-sRGB transfer curve, so the sRGB-format slots and the linear-format slots both
-read 1.0 from it. The second is the flat normal `(0.5, 0.5, 1)`. 1×1 rather than
-larger because uploads go through `queue.WriteTexture`, which carries no 256-byte
-row alignment, and for a constant texel every mip level is identical.
-
-**A slot the file *named* and could not fill is a different case** and does not
-come through here. An empty slot is the file saying nothing, and nothing is the
-right picture; a named picture that did not arrive is a fault, and the colour
-slots say so in magenta. The two meet in one place — the material binding takes
-the texture cache's entry when it has one and falls back to these defaults when
-the entry is the zero descriptor, which is exactly the placeholder a data slot
-gets.
-
-### Per-slot texture metadata is flattened, not arrayed
-
-Each slot carries a UV-set selector and a `KHR_texture_transform`, declared as
-**flat named members**:
-
-```wgsl
-baseColorTransform: vec4<f32>,   // offset.xy, scale.xy
-baseColorRotation:  f32,
-// ... x5 slots, plus a packed 5-bit uvSets selector
-```
-
-not `transforms: array<TexTransform, 5>`. gfx packs the record from name-matched
-parameters and array members are not name-addressable, so flattening keeps every
-member reachable through `OverrideParams` — and that buys a real capability
-rather than symmetry: **animating `baseColorTransform` per frame *is* UV
-scrolling** (water, lava, conveyor belts, scan lines), which the array form
-forecloses permanently. It costs nothing to carry, since the record is a
-256-byte-aligned bound range and the actual fields come to roughly 64 bytes, and
-it widens no reflection ask.
-
-**UV sets are capped at two** (TEXCOORD_0/1, glTF core's minimum), selected per
-slot by one `select`. A slot naming `texCoord >= 2` is reported once and falls
-back to set 0 — ignoring `texCoord: 1` would be a silent wrong-output failure on
-a core feature. The transform is applied unconditionally, about 30 ALU across
-five slots, less than one iteration of the 16-light loop. A single shared
-transform per material was rejected as the classic trap: right for the common
-atlas case, silently wrong the moment two slots differ.
-
-### The BRDF is the Khronos reference, exactly
-
-GGX/Trowbridge-Reitz distribution, Smith height-correlated visibility, Schlick
-Fresnel, Lambert diffuse, `F0 = 0.04` for dielectrics lerped to `baseColor` by
-`metallic`, `diffuseColor = baseColor * (1 - metallic)`.
-
-Every demo model is a Khronos sample authored and screenshot-verified against
-this exact BRDF, which makes it the only choice where "the model looks wrong" is
-a **bug** rather than an open question about which approximation was picked.
-
-**Ambient reaches metals through an analytic specular term.** The trap:
-`diffuseColor = baseColor * (1 - metallic)`, so a pure metal has zero diffuse and
-would render **black** everywhere the sun and punctual lights do not reach. So
-ambient splits two ways, both scaled by occlusion:
-
-- diffuse: `sceneAmbient(N) * occlusion * diffuseColor`
-- specular: `sceneAmbient(reflect(-V, N)) * occlusion * EnvBRDFApprox(F0, roughness, NdotV)`
-
-about six ALU and one extra `mix`. Lerping toward `baseColor` by metallic keeps
-metals visible but makes them behave like diffuse paint — roughness stops
-affecting them, which is precisely the property a metallic-roughness workflow
-exists to express. **Honest limitation:** this approximates an environment that
-does not exist, so a mirror-smooth metal reflects a smooth gradient rather than
-the scene. Image-based lighting substitutes into exactly these two terms.
-
-`KHR_materials_emissive_strength` **folds into `emissiveFactor` at load** and
-clamps above 1 until HDR lands. Keeping it separate would only buy animatability,
-and `emissiveFactor` is itself overridable.
-
-### Pipeline state mapping
-
-([Pipeline state growth for 3D](https://github.com/dvoyni/cog/issues/10))
-
-| glTF | state |
-| --- | --- |
-| `doubleSided: true` | `Cull: CullNone` |
-| `doubleSided: false` | `Cull: CullBack` |
-| `alphaMode: OPAQUE` | `gfx.StateOpaque3D()` |
-| `alphaMode: MASK` | `gfx.StateOpaque3D()` plus a shader `discard` against `alphaCutoff` |
-| `alphaMode: BLEND` | `gfx.StateTransparent3D()` |
-| node transform determinant < 0 | the same material with `FrontFace: FrontCW` |
-
-`MASK` is **fixed-function-identical to `OPAQUE`** — it writes depth and batches
-with the opaque geometry — and the cutoff is entirely a fragment-shader concern.
-It cannot be alpha-to-coverage, which needs MSAA.
-
-**The double-sided normal flip is unconditional**: `N = select(-N, N,
-frontFacing)`. glTF requires the shading normal be flipped on back faces of a
-double-sided material; making it conditional would cost a record flag and a
-branch to save nothing, since for single-sided materials the select is a proven
-no-op.
-
-### Two named layouts, 32 and 40 bytes
-
-The **standard layout** is six attributes at `@location(0..5)`, 32 bytes:
-`POSITION` Float32x3 · `NORMAL` Unorm16x2 (oct32) · `TANGENT` Uint32 (oct 15/15
-plus handedness) · `TEXCOORD_0` Unorm16x2 · `TEXCOORD_1` Unorm16x2 · `COLOR_0`
-Unorm8x4. The **skinned layout** is the same six plus `JOINTS_0` Uint8x4 and
-`WEIGHTS_0` Unorm8x4 at `@location(6..7)`, 40 bytes, and only the glTF loader
-produces one. Eight of gfx's 16 attribute slots at most, well inside its 2048
-stride cap. [`mesh.md`](../../../model/docs/specs/mesh.md) is the authority on both, attribute by
-attribute.
-
-**Presence is trimmed exactly once, along a seam WGSL already had.**
-`SceneVertexIn` declares locations 6 and 7 only under `SCENE_SKIN`, and a
-converted geometry takes the skinned layout iff some placement draws it under
-that define — one union per geometry, no new define, no new variant. Nothing
-else is optional: the PBR needs tangents and both UV sets, and **`COLOR_0` is
-included on failure mode**, not on evidence — it is glTF core, costs 4 bytes as
-`Unorm8x4`, and omitting it renders a vertex-coloured model **silently white**
-rather than erroring.
-
-**Variants were rejected for a mechanical reason.** `gfx.ShaderDescr` is
-source-or-path and the backend hardcodes `vs_main`/`fs_main`, so one module is
-exactly one vertex plus one fragment stage — a variant is a whole separate module
-carrying **its own copy of the entire BRDF**, the failure where a shading fix
-lands in some copies and not others.
-
-**Missing attributes are generated and repacked in place at load**, not bound
-from a second buffer. gfx binds exactly one vertex buffer, and multi-buffer was
-rejected on the finding that **total memory is identical either way** — repacking
-gives one buffer at full stride, multi-buffer the original plus exactly the
-remainder — so the only saving is a copy the one-pass conversion and
-dequantisation largely already spend.
-
-**The `arrayStride: 0` broadcast trick is unusable on cog's backends.** It is
-spec-legal and gogpu's browser path forwards it untouched, but the pure-Go native
-path validates it not at all and its backends diverge silently: the software
-rasteriser drops the whole draw, GLES reads 0 as "tightly packed", Metal sets
-`stepRate: 1`. A trick that works in a browser and silently corrupts the desktop
-HAL is exactly the divergence the map forbids
-([gogpu/wgpu: arrayStride 0 is unvalidated and backends diverge](https://github.com/dvoyni/cog/issues/47)).
-
-**Packing waited on a measured trigger and then got one.** v1 stored all eight
-attributes wide, at 84 bytes; the narrowing above — oct normals and tangents,
-per-mesh UV ranges, byte joints and weights — is a load-time encoding behind
-unchanged attribute names, charted in [`mesh.md`](../../../model/docs/specs/mesh.md) attribute by
-attribute.
-
-### Tangents
-
-Tangents are **UV-gradient generated per triangle** when the primitive's material
-has a normal map and `TANGENT` is absent, and an arbitrary orthonormal basis
-otherwise. This is explicitly **not MikkTSpace**: a normal map baked against
-MikkTSpace can show seams. No asset in the demo set exercises the generation path
-— WaterBottle ships real tangents — which weakens the trigger rather than
-strengthening it.
+> **Amended by [#539](https://github.com/dvoyni/cog/issues/539).** The bundled
+> PBR is `model`'s: its parameters, slots, defaults, BRDF, pipeline state and
+> layouts moved to [model.md §Bundled PBR material](../../../model/docs/specs/model.md#bundled-pbr-material).
+> scene wraps its forward descr in a `Material` with one `forward` entry, and
+> `MeshDraw.Material` / `ModelDraw.Material` nil selects it.
 
 ---
 
@@ -2139,204 +1181,12 @@ Sorting is per pass, so a crate visible to two cameras is packed twice regardles
 
 ## Lookup facade
 
-([Model lookup facade](https://github.com/dvoyni/cog/issues/21))
-
-```go
-la := scene.NewLookupAccess(kernel, lookup)                          // bakes, unloads a model, reads the totals
-dev := scene.NewLookupDeviceAccess(kernel, lookup, fsys, resources)  // everything that loads, and the texture unloads
-
-type ModelRef struct{ Path, Scene, Node string } // mirrors ModelDraw's selectors
-
-type ClipInfo struct {
-    Name     string
-    Duration float32 // seconds
-}
-```
-
-Bind `access.GetWrite[*scene.Lookup]()` in the handler's `Lock` for the first,
-and `storage.FileSystem` read plus `*gfx.ResourceQueue` write beside it for the
-second, then use:
-
-| Method | Facade | Result | Notes |
-| --- | --- | --- | --- |
-| `State(path) error` | device | nil, or why not | the only call that says *why* a model is not there; it loads like every other query, so by the time it answers the model is loaded or it failed |
-| `Preload(path)` | device | — | the same load, fired without a draw; no return |
-| `ModelLights(path, dst) ([]ModelLight, bool)` | device | the file's lamps | data; nothing converts one automatically |
-| `Nodes(ref, dst) ([]string, bool)` | device | node names | a non-empty `Node` lists that subtree, the node itself first; the order is the flatten's depth-first order, never sorted |
-| `Bounds(ref) (m.Vec4, bool)` | device | xyz centre, w radius | local space post-re-rooting; **rest pose for anything drawn through the pose buffer**, which is a skin *and* an animated node's own mesh |
-| `AABB(ref) (min, max m.Vec3, ok bool)` | device | axis-aligned box | same space and pose rules |
-| `Joints(path, dst) ([]string, bool)` | device | joint names | names only; count is `len` |
-| `Clips(path, dst) ([]ClipInfo, bool)` | device | clip names and durations | |
-| `MorphTargets(path, dst) ([]string, bool)` | device | target names | one flattened list per path, depth-first node order |
-| `PoseBytes(path) (int, bool)` | device | GPU pose memory | |
-| `MorphBytes(path) (int, bool)` | device | GPU delta memory | |
-| `TotalPoseBytes() int` | plain | — | a running counter, O(1); no bool, because a sum over what is loaded is always real |
-| `TotalMorphBytes() int` | plain | — | the same counter rule |
-| `BakeMesh` / `UpdateMesh` / `ReleaseMesh` | plain | see [Buffer-built meshes](#buffer-built-meshes) | |
-| `UnloadModel(path)` | plain | — | frees at the call; its buffers go at the frame boundary |
-| `UnloadTexture(path)` / `UnloadAll()` | device | — | free a GPU texture at the call, which is what puts them on the device half |
-
-### Every query returns `(value, ok)`, and every query loads
-
-This is the facade's real contract. A query on a path the cache does not hold
-runs the **same load a draw runs**, so a path is loaded exactly one way and
-`Preload` is a lever for *where the cost lands*, **not a step you can forget**.
-Inert queries would have a silent and *permanent* failure mode: a caller who
-forgot `Preload` would poll an empty list forever with nothing to observe.
-
-`ok` means **"this value is real"**, and nothing finer. It is false for an
-invalid path, a missing path just queued, a loading path, a failed path, and a
-resident path whose `Scene`/`Node` matched nothing. Inferring the same from a
-zero return does not work: `PoseBytes` returning 0 is indistinguishable between a
-still-loading model and a resident model with no skeleton, which is the whole
-point of a memory report. When `ok` is false the `dst`-append accessors return
-`dst` **untouched**, not a zeroed slice.
-
-`ok` says only *this value is real*, so it cannot say why it is not — which is
-what keeps **`State(path)` load-bearing**: failure is terminal, and a loading
-screen watching only `ok` can never print a reason. There is no `Pending()`
-aggregate and nothing to poll: a load has finished by the time the call that
-asked for it returns.
-
-**`State` returns an `error`, not a state word.** `nil` is loaded, and anything
-else is the failure the load itself produced — the library's read failure, or
-scene's own `ErrModelUnavailable`. A two-valued enum would have been a bool
-wearing a costume, and a bool would have thrown away the one thing a HUD wants
-to show.
-
-**`State` is a query, so it loads too.** That is the rule applied without an
-exception, and it is what makes a loading screen that calls only `State` work.
-
-### Selectors, and what is not here
-
-`Clips`, `MorphTargets`, `PoseBytes`, `MorphBytes`, `State`, `Preload` and the
-unloads are **per path**: `path` is the whole cache key, a model has one joint
-index space, and `MorphTargets` is one flattened list per path that `Node`
-re-rooting does not renumber. Only `Nodes`, `Bounds` and `AABB` are
-scene/node-scoped, and they take **`ModelRef{Path, Scene, Node}`** mirroring
-`ModelDraw`'s own fields — three bare strings were rejected on a transposition
-bug that compiles (`Bounds(p, "crate", "")` and `Bounds(p, "", "crate")` are both
-valid and mean different things).
-
-**Both answer about the rest pose, and "skinned" is the wrong word for which
-geometry that covers.** A glTF skin is the obvious case, but a node with an
-animation channel of its own *carrying a mesh* takes a degenerate single-joint
-binding for exactly the same reason, and its placement leaves the instance
-record for the pose buffer too. The flattened `local` matrix of both is the
-**identity**, so a bound placed through it is a bound at the origin for geometry
-the frame draws elsewhere — and under a `Node` selector it is worse than that,
-because the re-root then applies the inverse of a transform that was never
-applied. The load therefore keeps a second matrix per primitive, its **rest
-placement**: `local` for everything the instance record places, and the node's
-authored world transform for everything a pose row places. Row 0 of the pose
-buffer is the authored hierarchy resolved once, so the two agree.
-
-This is not a refinement, it is a correctness rule, and it was wrong until
-`loading` looked: `CesiumMilkTruck` animates its two wheel nodes, so
-`AABB(Node: "Wheels")` answered `inverse(world) · meshBox` — a box the wheel
-never occupies — and the whole scene's box counted both wheels at the origin.
-The demo's assertion is that the two wheel pairs, being one mesh under one local
-rotation beneath two differently offset parents, re-root to the **same** box.
-
-**Neither query reports where an animated model is *this* frame.** Replaying the
-blend on the CPU is the per-frame hierarchy walk the design exists to remove,
-which is also why such a draw is never culled. A caller who needs the live bound
-computes it.
-
-**Both bound geometries are published** because scene already has both: the tight
-sphere is baked per node anyway, and the AABB is the load-time by-product it is
-computed from. Publishing only the AABB would be a regression, since a sphere
-derived from one is the circumsphere, up to √3 loose. `Bounds` uses the same
-`m.Vec4` convention as `MeshDraw.Bounds`, so the name means one thing across the
-plugin.
-
-Over a **multi-primitive** subtree the √3 claim is narrower than it sounds, and
-the implementation records the real rule. `Bounds` is the union (`m.Sphere.Union`)
-of the primitives' own spheres, each transformed by the re-rooted placement;
-`AABB` is the union of those primitives' boxes, each *refit* around its
-transformed corners. Transforming a sphere is exact and refitting a box is not,
-so the sphere wins wherever the placements rotate — which is the case the √3
-remark is about. Where nothing rotates, the AABB's own circumsphere can be the
-tighter of the two. **Neither dominates in general**, and both are published
-precisely so a caller picks the one their test wants rather than deriving one
-from the other.
-
-A primitive whose POSITION accessor declared no min/max has no bound to
-contribute, and makes both queries `ok = false` for any ref that selects it.
-Returning a bound over the rest of the model would be a real-looking number the
-unbounded piece sticks out of, with nothing in the answer to show the hole. A
-ref that resolves to a real node carrying no geometry at all is also `false`,
-but reports nothing — the absence of a report is what tells it apart from a typo.
-
-**Mesh names are cut** — a draw addresses nodes only, so a mesh name is a string
-a caller cannot act on. **No texture queries** beyond `UnloadTexture`. `Joints`
-is names only, **no hierarchy** — parents and rest transforms are what bone
-sockets need and they are purely additive when that lands. `Clips` returns name
-and duration together because a caller needs the duration to know when a one-shot
-play has ended and to normalise `Time`.
-
-Every list accessor appends into a caller `dst`. Returning the internal slice
-read-only would be free but dangles past the handler's lock scope, which is the
-one thing `LookupAccess` forbids. These are cold paths — naming lives here
-precisely so a caller resolves names to indices **once at startup**.
-
-### Failure edges
-
-- **An invalid path never enters the cache at all.** The facade validates it
-  where the caller is standing (canvas's `validateResourcePath` rules), reports
-  it once and returns — no entry, no tombstone — so a typo is permanently a typo
-  and `UnloadModel` on the string the caller passed is what clears the report.
-- **An unmatched `Scene`/`Node` on a resident model** returns `ok = false` and
-  reports once, keyed `"model:" + path + "#" + node`. An unload clears every key
-  under that path's prefix, not just `"model:" + path`, so a file that failed on
-  a typo and was unloaded reports again if it fails again.
-- **`Nodes` answers for a degenerate node**, one whose authored world transform
-  collapsed an axis. Its names are a real answer; only *re-rooting* it is
-  impossible, so it is `Bounds` and `AABB` that reject it — through the same
-  `view()` a draw goes through — while `Nodes` resolves the scene and the
-  subtree without one.
-- **`UnloadTexture` frees every texture the path baked**, because colour space
-  and embedded-image index are part of a texture's cache key while `path` is the
-  whole of what a caller can name. For a `.glb` that means every image the
-  container carries. That is a predicate over entries rather than a key, so it is
-  one `FreeWhere` and each freed entry's report key goes with it. Nothing checks
-  whether a resident model still binds them: this is the lever for a texture
-  whose models are already gone, and the no-cascade wart is what makes the two
-  directions asymmetric.
-- **`UnloadAll` is models and textures, and nothing else.** Buffer-built meshes
-  are the caller's own handles — a lookup-wide sweep has no way to tell them
-  their `MeshRef`s went stale — and scene's own unit meshes, default textures
-  and null skin would be re-baked on the very next frame.
-- **An unloaded entry is deleted, not reset.** There is no load in flight for a
-  tombstone to defeat, so the slot simply goes and the next draw or query loads
-  the path afresh. (`MeshRef.generation` is a different mechanism, guarding a
-  caller's own handles, and is untouched.)
-- **Unload is the only retry lever.** A failure clears only on unload, so
-  `UnloadModel(p)` on a failed path lets the next draw or query load it again,
-  including recovery from an invalid path once the string is fixed. There is no
-  `Retry`/`Reload`: it is `UnloadModel` + `Preload`, and because freeing is
-  immediate the two may be called in that order in one handler.
-
-### The facade splits, so no System pays for loading
-
-Every verb that can load needs an `fs.FS` and the resource queue at the call,
-because the load runs there. Putting all of them on one facade would have made
-`NewLookupAccess` four dependencies — and one of its consumers is an **ECS
-System whose entire use of it is two `BakeMesh` calls**. That System would have
-had to declare `*ecs.Write[*gfx.ResourceQueue]` to bake a cube, serialising it
-against canvas's flush, scene's flush and gfx. **Widening an ECS System's lock
-set is rejected outright in this repo, not traded off.**
-
-So `NewLookupAccess(k, lookup)` keeps its two dependencies and carries the mesh
-verbs, `UnloadModel` and the two totals, and
-`NewLookupDeviceAccess(k, lookup, fsys, resources)` carries everything that
-loads plus the two unload verbs that free a GPU texture. The cost becomes
-visible where it belongs — in each consumer's own `Lock` closure.
-
-**`LookupDeviceAccess` is a convention, not a local choice.** Canvas splits the
-*opposite* halves under the same name: there the loading half is cheap and the
-unloading half is the device's. Both are named for what they carry, because the
-constraint is the device either way.
+> **Amended by [#539](https://github.com/dvoyni/cog/issues/539).** The Lookup
+> and its facades are `model`'s: `*model.Lookup`, `model.NewLookupAccess`,
+> `model.NewLookupDeviceAccess` and the read facade. The queries, their
+> `(value, ok)` contract and the failure edges moved to [model.md §Lookup facade](../../../model/docs/specs/model.md#lookup-facade).
+> scene's flush holds the Lookup for writing, loads a model on its first draw
+> and drains the bake and release queues.
 
 ---
 
@@ -2463,325 +1313,11 @@ the camera parameters instead, a private optimisation with no contract attached.
 
 ## Shader-side contract
 
-([Bind-group frequency convention](https://github.com/dvoyni/cog/issues/9))
-
-The frequency convention is a **WGSL group-numbering contract**, not new gfx
-machinery. gfx binds whatever reflection reports and never renumbers, so scene
-expresses its three frequencies purely in shader source. **This binds scene
-shaders only**; canvas keeps its own numbering untouched.
-
-| group | frequency | contents |
-| --- | --- | --- |
-| 0 | per pass | `sceneFrame`, `sceneInstances`, `sceneAnim` — bound once per pass |
-| 1 | per material | the material record as a bound range, plus material textures and samplers |
-| 2 | per model | baked poses, inverse binds, normal matrices, morph deltas |
-| 3 | — | unassigned, reserved |
-
-Ascending frequency, lowest group changing least. Web's floor is 4 bind groups,
-so three fit with one spare for shadows or post-processing to claim without
-renumbering.
-
-### Scene declares no uniform block
-
-All numeric data lives in **storage buffers** from the per-frame arena. gfx's
-uniform path gives every draw its own pooled 256-byte buffer and its own
-`WriteBuffer` — a thousand draws is a thousand buffers, a thousand uploads, and a
-256-byte cap. Scene abandons it entirely: there is no cap and one upload instead
-of a thousand. The honest cost is that a uniform read is scalar-uniform across a
-wave while a storage read indexed by `instance_index` is not — small, and not
-worth two shader paths. `uniformMax` stays at 256 for the uniform path canvas
-uses; scene never reaches it.
-
-### Material records are bound ranges, not indices
-
-```wgsl
-@group(1) @binding(0) var<storage, read> material: PbrMaterial;
-```
-
-read directly, with no subscript. A `u32` material index in the instance record
-**does not work**: gfx packs at translate time on the render thread, because
-offsets come from `Backend.ShaderLayout`, while scene writes instance records at
-record time on the update thread — scene would have to write an index for a
-record gfx has not laid out yet. Two writers, one field, opposite sides of the
-thread boundary. **The binding *is* the addressing**, so nothing has to agree
-across it, reflection needs only a one-level walk, and group 1 rebinds per
-material exactly as intended.
-
-The cost, named plainly: storage binding offsets must be 256-aligned, so each
-record pads to a 256 multiple. That is per **batch**, and it is a pad rather than
-a cap — a 400-byte PBR record pads to 512 instead of being truncated.
-
-**One record per batch, no dedupe.** Two meshes sharing a material produce two
-byte-identical records; collapsing them would cost a hash of every record every
-frame on the render thread to save an upload nobody has measured. While the
-automatic collapse is deferred this degenerates to one record per draw.
-
-**Scene bindings do not bypass name matching.** Scene injects
-`BufferParam("sceneFrame", …)` and friends as ordinary per-draw parameters and
-the existing matcher binds them exactly like a material texture. The plan cache
-is keyed by parameter *shape*, so injecting the same names on every draw keeps
-shapes identical and hits the cache every time. A separate "system bindings"
-channel would be a second path to keep in sync for no capability.
-
-The `scene`-prefixed name space is **reserved** for engine-supplied bindings,
-mirroring canvas's `canvasTexture`/`canvasSampler`. A material parameter named
-`scene*` is an app bug; gfx does not police it, the material simply loses.
-
-### Declared bindings
-
-| binding | group | contents |
-| --- | --- | --- |
-| `sceneFrame` | 0 | view, projection, viewProj, camera position, view direction, sun direction and colour, ambient sky/ground, `lightCount`, `lights: array<SceneLight, 16>` |
-| `sceneInstances` | 0 | `array<SceneInstance>`, bound by range per pass |
-| `sceneAnim` | 0 | `array<vec4<f32>>` arena, indexed by `sceneInstance.animOffset` |
-| `scenePbrMaterial` | 1 | the bundled PBR record, a bound range |
-| `scenePoses` | 2 | baked 48 B pose records |
-| `sceneSkinJoints` | 2 | per-skin, per-joint 112 B record: inverse bind and normal matrix interleaved |
-| `sceneMorphDeltas` | 2 | `array<u32>`, one block per morphed primitive: per-slot ranges, a base/first/count per target, then the records ([mesh.md](../../../model/docs/specs/mesh.md#morph-delta-storage)) |
-
-Plus the PBR's five textures and five samplers in group 1
-(see [Bundled PBR material](#bundled-pbr-material)).
-
-**The storage-buffer budget is eight of eight, and there is no spare left.**
-Every reflected binding is emitted with visibility `Vertex|Fragment`
-unconditionally, because reflection walks module globals without consulting entry
-points, so a buffer only the vertex stage reads still consumes a fragment-stage
-slot — which means the count above is seven in **each** stage, against the
-browser core-adapter floor of 8.
-
-It was eight, then seven, and it is eight again. Interleaving the two per-skin
-arrays into one `sceneSkinJoints` buffer recovered a slot at no gfx cost, because
-they share a joint index and are fetched together per influence
-([scene: the storage-buffer budget is eight of eight, not six](https://github.com/dvoyni/cog/issues/58),
-correcting the "six with two spare" figure the closed tickets record). That
-recovered slot was the one permitted growth, and
-[scene: UV0 and UV1 narrow against a per-mesh range](https://github.com/dvoyni/cog/issues/219)
-spent it on `sceneMeshes`, the per-mesh UV range every narrowed UV decodes
-against. The fully animated variant now sits exactly on the browser core floor.
-
-Three rules follow, and they are contract rather than guidance:
-
-- **No scene shader may declare a ninth storage buffer**, and there is no longer
-  a spare to spend: the one growth the spare existed for has been taken. Any
-  further per-draw datum must go into a buffer that already exists.
-- **A caller-supplied material may declare none of its own.** It may freely use
-  the bindings scene binds on every draw — those are scene's and already counted
-  — which is what the `procedural` demo does.
-- **The debug check compares against `gfx.DefaultLimits()`, never against the
-  device's reported limits**, and covers every shader gfx reflects, not just
-  scene's own. A desktop adapter reports hardware limits (200 storage buffers is
-  ordinary), so checking the real device passes a build that cannot run in a
-  browser. The device's limits belong in the *message*, not the comparison: name
-  the declared count, the device's limit and the web floor, so the diagnostic
-  says which platform breaks.
-
-Exceeding this is not a degraded frame. `CreateBindGroup` fails the entry-count
-rule, the error is swallowed, `encoder.Finish()`'s error is dropped, and **the
-whole frame's command buffer vanishes silently** — on the web only.
-
-Moving `sceneFrame` to a uniform block is the named next lever if an eighth is
-ever needed, and is filed rather than built
-([scene: move sceneFrame to a uniform block](https://github.com/dvoyni/cog/issues/100)):
-gfx's uniform path is per-draw only, capped at 256 bytes with silent truncation,
-with no range binding reachable for a uniform-typed binding.
-
-### The `sceneAnim` block
-
-Per-instance animation parameters are **indirect**. `sceneInstances` is bound
-once per pass and shared by every draw in it, so a fixed record would have to be
-sized for the worst case — 64 B of skinning plus 256 B of morph weights, a ~320 B
-tax on every debug line against ~48 B of content. Instead `sceneInstance` stays
-~64 B and `animOffset` indexes a second per-frame buffer that only animating
-draws write to.
-
-```
-vec4 0: { playCount: u32, targetCount: u32, morphBase: u32, morphStride: u32 }
-vec4 1: { _, _, _, _ }                               // 4 words reserved
-then  :  playCount   x { baseRow0: u32, baseRow1: u32, w0: f32, w1: f32 }  // 16 B
-then  :  targetCount x { targetIndex: u32, weight: f32 }                   // 8 B,
-                                                                           // padded to a vec4 boundary
-```
-
-**`vec4 1` is wholly reserved.** It carried `morphTargetStride` — the
-`vertexCount * morphStride` a dense delta address multiplied by — and a morph
-target now stores records only for the span of vertices it moves, so each one
-carries its own base in its block's header and no per-primitive stride exists to
-fold ([mesh.md](../../../model/docs/specs/mesh.md#morph-delta-storage)).
-
-Morph weights are a **count-prefixed sparse list**, not a dense 64-float block:
-the CPU knows which entries are non-zero before it writes anything, so a 52-shape
-face with 5 active shapes costs 40 B instead of 256 B and the shader loops 5
-times over real work instead of 64 times with a `continue`. **The zero-skip
-branch disappears entirely**, because zeros never reach the GPU.
-
-**Four animation states, two independent counts.** A draw is skinned only,
-morphed only, both, or neither; `playCount` and `targetCount` are each
-independently zero-checkable and `animOffset == SCENE_NO_ANIM` covers neither. No
-flags bitfield — two counts the shader reads anyway already carry the
-information.
-
-The three morph words are per-*primitive* constants duplicated per instance, 12 B
-of the 32 B header. Putting them in the per-batch material record would remove
-the duplication exactly, and was rejected: it would put scene geometry constants
-into a record gfx packs on the render thread while scene records on the update
-thread — the two-writers-across-a-boundary problem the bound-range design exists
-to avoid.
-
-### WGSL functions
-
-These are the signatures the bundled shaders implement. **They are not published
-in v1** — see the next section — but they are fixed here so that publishing them
-later changes nothing.
-
-```wgsl
-struct SceneVertex { position: vec3f, normal: vec3f, tangent: vec4f }
-
-// The 99% call: morph, then skin, per glTF order.
-// Handles animOffset == SCENE_NO_ANIM and the SCENE_NOSKIN flag.
-fn sceneDeformVertex(inst: u32, vertexIndex: u32,
-                     joints: vec4u, weights: vec4f,
-                     v: SceneVertex) -> SceneVertex
-
-// The escape hatch: fully blended joint transform, inverse bind applied.
-fn sceneJointMatrix(inst: u32, joint: u32) -> mat4x3f
-fn sceneSkinMatrix(inst: u32, joints: vec4u, weights: vec4f) -> mat4x3f
-
-struct SceneSurface {
-    position:  vec3<f32>,   // world
-    normal:    vec3<f32>,   // world, normalised
-    baseColor: vec3<f32>,   // linear
-    metallic:  f32,
-    roughness: f32,
-    occlusion: f32,
-}
-
-// Sun + every punctual light + hemispheric ambient scaled by s.occlusion.
-fn sceneShadeSurface(s: SceneSurface) -> vec3<f32>
-
-struct SceneLightSample { direction: vec3<f32>, radiance: vec3<f32> } // surface -> light
-
-fn sceneLightCount() -> u32
-fn sceneLightSample(i: u32, position: vec3<f32>) -> SceneLightSample
-fn sceneSun() -> SceneLightSample                 // radiance zero when SunDirection is zero
-fn sceneAmbient(normal: vec3<f32>) -> vec3<f32>   // mix(ground, sky, normal.y*0.5+0.5)
-fn sceneCameraPosition() -> vec3<f32>              // the transform's eye; a real viewer only under Perspective
-fn sceneViewDirection(position: vec3<f32>) -> vec3<f32> // unit, surface -> viewer, under every projection
-
-struct ScenePbrSurface {
-    surface:  SceneSurface,
-    emissive: vec3<f32>,
-    alpha:    f32,
-}
-
-fn scenePbrSurface(uv0: vec2<f32>, uv1: vec2<f32>, normal: vec3<f32>,
-                   tangent: vec4<f32>, color: vec4<f32>,
-                   worldPos: vec3<f32>, frontFacing: bool) -> ScenePbrSurface
-```
-
-Two levels for lighting because the common custom material wants a shaded
-surface, while the main reason to write one — a toon ramp — needs per-light
-`NdotL` *before* shading; without the low level such a shader must reimplement
-attenuation and the cone, reintroducing exactly the inconsistency the contract
-exists to prevent. `SceneSurface` carries **no view vector** (that is
-`sceneViewDirection(s.position)`, one less field to get wrong and one the frame
-answers correctly under every projection) and **no emissive** (emissive is the material's own output, not lighting, and debug lines
-are self-lit through `emissiveFactor`, so a lighting function owning it would
-read as a contradiction). A shader writes `sceneShadeSurface(s) + emissive`.
-
-**The view direction is the frame's, not the camera position's.**
-`sceneCameraPosition()` is the eye read straight out of the camera transform,
-and it is a real viewer only under `Perspective`. An orthographic camera has no
-eye point — its view direction is constant across the frame rather than radial
-from the transform's translation — and an oblique one looks one way while its
-viewer sees another, so every view-dependent term (specular, fresnel, rim,
-anything consuming `nDotV`) differenced against the eye lights vertical faces as
-if edge-on and floors as if head-on: the exact inverse of what is drawn. For
-`Orthographic` the error was already there and merely small, because ortho
-cameras tend to sit far away with narrow framing; `Oblique` turns it from a
-subtle bias into a visible artefact, and the one fix serves both.
-
-So `SceneFrame` carries `viewDirection: vec4<f32>` — **xyz the constant world
-direction from a surface towards the viewer, w a mix selector**: 1 when that
-constant is the answer, 0 when the shader must difference against
-`cameraPosition` per fragment. Only `Perspective` takes the 0, and
-`sceneViewDirection` is one `mix` rather than a branch or a discriminator
-member. The constant is the direction that leaves both screen coordinates
-unchanged — `(0, -Shear, 1)` in view space, which at `Shear: 0` is the camera's
-own +Z and so serves `Orthographic` by the same line. It is resolved through
-`cameraBasis`, the same unscaled world matrix `cameraView` inverts, so the two
-cannot disagree about which matrix the camera is.
-
-`sceneCameraPosition()` stays exported for the genuine distance work — a fog
-term, a detail fade — that means the transform.
-
-`scenePbrSurface` returns everything one set of texture fetches produces in one
-call, rather than separate emissive/alpha helpers that invite the same texture to
-be fetched two or three times — the compiler *may* common those up, but "may" is
-not a contract, and this is the hot path.
-
-The bundled fragment shader then reads as what it is:
-
-```wgsl
-let r = scenePbrSurface(uv0, uv1, normal, tangent, color, worldPos, frontFacing);
-// alphaMode MASK: if (r.alpha < alphaCutoff) { discard; }
-return vec4(sceneShadeSurface(r.surface) + r.emissive, r.alpha);
-```
-
-### Custom shaders are not supported in v1
-
-([Custom shader contract and prelude](https://github.com/dvoyni/cog/issues/19),
-closed out of scope)
-
-**gfx does no shader preprocessing of any kind** — `ShaderDescr` is inline text
-or a storage path handed straight to the backend, with no include, macro or
-injection point. So publishing the functions above means either **copy-paste**,
-with every consumer carrying its own copy of the BRDF — the exact failure that
-shader variants were rejected over — or new gfx surface. v1 ships the bundled PBR
-and publishes no contract; the function bodies live inside the two bundled
-shaders. Publication is purely additive, so nothing is foreclosed
-([scene: custom shader contract and prelude](https://github.com/dvoyni/cog/issues/48),
-blocked by
-[gfx: shader preprocessing and vertex variants](https://github.com/dvoyni/cog/issues/45)).
-
-A caller may still supply a whole `gfx.MaterialDescr` with its own WGSL, as the
-`procedural` demo does — it simply gets no scene helper functions and must
-declare only bindings scene binds on every draw that uses it.
-
-Those bindings are `sceneFrame`, `sceneInstances` and `scenePbrMaterial`, and a
-caller material may declare any subset of them: gfx binds what reflection
-reports and silently drops a parameter no shader declares, so declaring fewer is
-free while declaring one more is frame-fatal. `scenePbrMaterial` is bound but
-inert for a caller material - a `MeshDraw` has no colour to put in the record,
-so it always reads the bundled white paint until `OverrideParams` lands - which
-leaves the frame block and the instance array as the whole usable contract. The
-`procedural` demo declares exactly those two, carries no parameters at all, and
-puts its per-object colour in its own vertices, which is what makes the
-constraint livable rather than merely legal.
-
-**Two findings that bind the bundled shaders themselves:**
-
-- **A declared-but-unused binding is frame-fatal.** Reflection is naga, which
-  deliberately does not compact unused globals, so every declared
-  `@group/@binding` lands in the explicit `BindGroupLayout` and must be bound at
-  draw time. Miss one and `CreateBindGroup` fails the entry-count rule, the error
-  is swallowed, `encoder.Finish()`'s error is dropped, and **the whole frame's
-  command buffer vanishes silently**. This is why the null skin and the 1×1
-  default textures exist.
-- **Every reflected binding is emitted `Vertex|Fragment`**, so a vertex-only
-  buffer consumes a fragment-stage slot too — see the budget gap above.
-
-### Binding cost
-
-`resetAcc()` runs on every `SetPipeline` and after every `Draw`, so gfx re-emits
-every binding per draw. That is left exactly as it is: the bind-group cache
-already returns the *same object* for an unchanged group, so the only real cost
-is the redundant `SetBindGroup` call, killed in the backend by comparing against
-the last group bound — a pure optimisation with **zero API change**. Two
-correctness rules on that filter: reset it on **shader change**, since bind-group
-layout compatibility across shaders cannot be inferred from object identity, and
-reset it at every **`BeginPass`**, since bind-group state does not survive a
-render pass boundary. Draws are sorted by material, so runs are long and the
-filter earns its keep; group 0, invariant for a whole pass, is bound once.
+> **Amended by [#539](https://github.com/dvoyni/cog/issues/539).** The shader
+> and every record it reads are `model`'s. The group convention, the bindings,
+> the `sceneAnim` block and the WGSL functions moved to [model.md §Shader-side contract](../../../model/docs/specs/model.md#shader-side-contract).
+> scene fills the view fields of each pass's frame block and appends what
+> `model`'s packers return into its own arenas.
 
 ---
 

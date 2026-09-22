@@ -683,10 +683,10 @@ recording vocabulary:
 | **`scene.Transform`** | **legal** — plain values since its `Matrix` pointer was removed |
 | `scene.ModelDraw`, `scene.MeshDraw`, `scene.CameraDescr` | rejected — `Transforms`, `Plays`, `Params`, `Passes` are bare slices |
 | `scene.Material`, `gfx.MaterialDescr` | rejected — a slice, and a descriptor holding one |
-| `scene.ClipPlay` | **legal** — `.Clip` is a `string` |
-| `scene.ModelRef` | **legal** — `.Path` is a `string` |
+| `model.ClipPlay` | **legal** — `.Clip` is a `string` |
+| `model.ModelRef` | **legal** — `.Path` is a `string` |
 | `scene.Pass`, `gfx.ParameterDescr` | **legal** — clears are `m.Maybe`, bytes are `assets.Blob` |
-| **`scene.MeshRef`** | **legal Component** — already a dense id and a generation |
+| **`model.MeshRef`** | **legal Component** — already a dense id and a generation |
 | **`scene.LayerMask`, `scene.CameraID`** | **legal Component** |
 
 The rejections that remain are slices, which are mutable indirection and the

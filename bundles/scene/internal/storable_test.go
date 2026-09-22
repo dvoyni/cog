@@ -66,7 +66,7 @@ func TestAPresentClearClearsAtItsValue(t *testing.T) {
 // SCENE_NONUNIFORM, which is what sends its normals through the shader's
 // inverse-transpose; a uniformly scaled draw does not pay for it.
 func TestANonUniformlyScaledDrawTakesTheInverseTransposeNormalPath(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, ref, scene.MeshDraw{
@@ -88,7 +88,7 @@ func TestANonUniformlyScaledDrawTakesTheInverseTransposeNormalPath(t *testing.T)
 }
 
 func TestAUniformlyScaledDrawKeepsThePlainNormalPath(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, ref, scene.MeshDraw{Transform: m.At(0, 0, 0).WithScale(3), NeverCull: true})

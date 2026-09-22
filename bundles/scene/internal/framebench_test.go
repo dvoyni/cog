@@ -53,7 +53,7 @@ func BenchmarkFrame(b *testing.B) {
 	}
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
-			var ref scene.MeshRef
+			var ref model.MeshRef
 			recordMaterials := false
 			h := newHarness(b, func(q *scene.OpQueue) {
 				q.Camera(testCamera, scene.CameraDescr{
@@ -76,7 +76,7 @@ func BenchmarkFrame(b *testing.B) {
 			h.frame()
 			if shared == nil {
 				var defaults model.PbrDefaults
-				h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(l *scene.Lookup) {
+				h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(l *model.Lookup) {
 					defaults = lookupDefaults(l)
 				}})
 				shared, override = frameBenchMaterial(defaults)

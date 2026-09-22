@@ -18,7 +18,7 @@ type preparedDraw struct {
 	// blend sort still needs a point to measure depth to.
 	sphere   m.Sphere
 	cullable bool
-	mesh     scene.MeshRef
+	mesh     model.MeshRef
 	// interned is the draw's material's index in the frame's material table.
 	interned int32
 	// anim is the draw's animation binding, carried through so the packer

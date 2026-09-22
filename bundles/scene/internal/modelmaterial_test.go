@@ -65,7 +65,7 @@ func TestAPlainModelDrawBindsTheFilesRecordsWithNoCopy(t *testing.T) {
 	if len(records) != 2 {
 		t.Fatalf("expanded to %d draws, want one per primitive", len(records))
 	}
-	h.model(func(lookup *scene.Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue) {
+	h.model(func(lookup *model.Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue) {
 		entry, _, ok := lookup.ModelView(k, fsys, resources, modelPath, "", "")
 		if !ok || len(entry.Materials) != 2 {
 			t.Fatalf("entry = %v, want the two materials the file declares", entry)
@@ -105,7 +105,7 @@ func TestAFrameDrawingOneModelManyTimesFingerprintsNoFileMaterial(t *testing.T) 
 	if len(records) != 2*draws {
 		t.Fatalf("expanded to %d draws, want %d", len(records), 2*draws)
 	}
-	h.model(func(lookup *scene.Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue) {
+	h.model(func(lookup *model.Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue) {
 		entry, _, ok := lookup.ModelView(k, fsys, resources, modelPath, "", "")
 		if !ok || len(entry.Materials) != 2 {
 			t.Fatalf("entry = %v, want the two materials the file declares", entry)
@@ -184,7 +184,7 @@ func TestOverrideParamsKeepTheFilesTexturesAndReachTheDrawsParameters(t *testing
 			}
 		}
 	}
-	h.model(func(lookup *scene.Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue) {
+	h.model(func(lookup *model.Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue) {
 		entry, _, _ := lookup.ModelView(k, fsys, resources, modelPath, "", "")
 		for i := range records {
 			if !wrapsForward(records[i].Material, entry.Materials[i].Forward[model.VariantStatic]) {

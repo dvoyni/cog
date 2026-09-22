@@ -11,8 +11,7 @@
 // through the shader writes the same bytes. A renderer keeps its own arenas,
 // culling, sorting and emission, and appends what the packers return.
 //
-// The carve out of scene is in progress (bundles/model/docs/specs/model.md):
-// some of what the root exports - the Lookup's methods a renderer's flush
-// calls among them - is here because scene has to name it, and its final
-// shape lands with the stages that follow.
+// Callers name model's types from here: no renderer re-exports them. What the
+// root keeps, and why, is settled in bundles/model/docs/specs/model.md under
+// "model's root after the sweep".
 package model

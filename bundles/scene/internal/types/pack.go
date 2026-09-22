@@ -12,7 +12,7 @@ import "github.com/dvoyni/cog/bundles/model"
 // — a hundred crates is one call, and a hundred independently-animated
 // characters is a hundred calls.
 type AnimBinding struct {
-	Skin SkinBuffers
+	Skin model.SkinBuffers
 	// MorphAt indexes the frame's per-primitive morph offsets, or is -1 when
 	// the model has no shapes and the draw's one block serves every primitive.
 	// It is an index rather than a slice because the arena it points into is

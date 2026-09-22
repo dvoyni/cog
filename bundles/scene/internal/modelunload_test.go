@@ -3,6 +3,7 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 )
 
@@ -13,7 +14,7 @@ import (
 func residentSkinnedModel(t testing.TB) *harness {
 	t.Helper()
 	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(*scene.OpQueue) {})
-	h.device(func(la scene.LookupDeviceAccess) {
+	h.device(func(la model.LookupDeviceAccess) {
 		la.Preload(modelPath)
 		if err := la.State(modelPath); err != nil {
 			t.Fatalf("Preload left %q unloaded: %v", modelPath, err)
@@ -24,7 +25,7 @@ func residentSkinnedModel(t testing.TB) *harness {
 
 func (h *harness) totalPoseBytes() int {
 	var total int
-	h.lookup(func(la scene.LookupAccess) { total = la.TotalPoseBytes() })
+	h.lookup(func(la model.LookupAccess) { total = la.TotalPoseBytes() })
 	return total
 }
 
@@ -37,7 +38,7 @@ func TestUnloadModelFreesAtTheCall(t *testing.T) {
 	if h.totalPoseBytes() == 0 {
 		t.Fatal("the skinned fixture should have baked poses to free")
 	}
-	h.lookup(func(la scene.LookupAccess) { la.UnloadModel(modelPath) })
+	h.lookup(func(la model.LookupAccess) { la.UnloadModel(modelPath) })
 	if got := h.totalPoseBytes(); got != 0 {
 		t.Fatalf("pose bytes = %d after the call, want the model freed", got)
 	}
@@ -48,8 +49,8 @@ func TestUnloadModelFreesAtTheCall(t *testing.T) {
 // by a get is a reload, not an error.
 func TestAnUnloadedPathReloadsOnTheNextQuery(t *testing.T) {
 	h := residentSkinnedModel(t)
-	h.lookup(func(la scene.LookupAccess) { la.UnloadModel(modelPath) })
-	h.device(func(la scene.LookupDeviceAccess) {
+	h.lookup(func(la model.LookupAccess) { la.UnloadModel(modelPath) })
+	h.device(func(la model.LookupDeviceAccess) {
 		if err := la.State(modelPath); err != nil {
 			t.Fatalf("State after unload = %v, want the query to have loaded it afresh", err)
 		}
@@ -64,16 +65,16 @@ func TestAnUnloadedPathReloadsOnTheNextQuery(t *testing.T) {
 func TestUnloadClearsAFailedPathSoItLoadsAgain(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
 	const missing = "models/absent.glb"
-	h.device(func(la scene.LookupDeviceAccess) { la.Preload(missing) })
+	h.device(func(la model.LookupDeviceAccess) { la.Preload(missing) })
 	if len(h.errors()) != 1 {
 		t.Fatalf("reports = %v, want the failed read reported once", h.errors())
 	}
-	h.device(func(la scene.LookupDeviceAccess) { la.Preload(missing) })
+	h.device(func(la model.LookupDeviceAccess) { la.Preload(missing) })
 	if len(h.errors()) != 1 {
 		t.Fatalf("reports = %v, want the second preload to find the cached failure", h.errors())
 	}
-	h.lookup(func(la scene.LookupAccess) { la.UnloadModel(missing) })
-	h.device(func(la scene.LookupDeviceAccess) { la.Preload(missing) })
+	h.lookup(func(la model.LookupAccess) { la.UnloadModel(missing) })
+	h.device(func(la model.LookupDeviceAccess) { la.Preload(missing) })
 	if len(h.errors()) != 2 {
 		t.Fatalf("reports = %v, want the unload to have let the path load and fail again", h.errors())
 	}
@@ -86,11 +87,11 @@ func TestUnloadClearsAFailedPathSoItLoadsAgain(t *testing.T) {
 func TestUnloadClearsAnInvalidPath(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
 	const bad = "../escape.glb"
-	h.device(func(la scene.LookupDeviceAccess) { la.State(bad) })
-	h.lookup(func(la scene.LookupAccess) { la.UnloadModel(bad) })
+	h.device(func(la model.LookupDeviceAccess) { la.State(bad) })
+	h.lookup(func(la model.LookupAccess) { la.UnloadModel(bad) })
 	var err error
-	h.device(func(la scene.LookupDeviceAccess) { err = la.State(bad) })
-	if _, ok := err.(scene.ErrModelPathInvalid); !ok {
+	h.device(func(la model.LookupDeviceAccess) { err = la.State(bad) })
+	if _, ok := err.(model.ErrModelPathInvalid); !ok {
 		t.Fatalf("State = %v, want the path validated and refused afresh", err)
 	}
 	// Afresh means the report key cleared too, so the second failure is
@@ -104,7 +105,7 @@ func TestUnloadClearsAnInvalidPath(t *testing.T) {
 // not disturb anything else in the cache.
 func TestUnloadingAnAbsentPathIsANoOp(t *testing.T) {
 	h := residentSkinnedModel(t)
-	h.lookup(func(la scene.LookupAccess) { la.UnloadModel("models/never-asked.glb") })
+	h.lookup(func(la model.LookupAccess) { la.UnloadModel("models/never-asked.glb") })
 	if h.totalPoseBytes() == 0 {
 		t.Fatal("unloading an absent path freed something else")
 	}
@@ -118,7 +119,7 @@ func TestUnloadingAnAbsentPathIsANoOp(t *testing.T) {
 // the device because freeing a texture needs the queue at the call.
 func TestUnloadAllClearsEveryModel(t *testing.T) {
 	h := residentSkinnedModel(t)
-	h.device(func(la scene.LookupDeviceAccess) { la.UnloadAll() })
+	h.device(func(la model.LookupDeviceAccess) { la.UnloadAll() })
 	if got := h.totalPoseBytes(); got != 0 {
 		t.Fatalf("pose bytes = %d, want everything freed", got)
 	}
