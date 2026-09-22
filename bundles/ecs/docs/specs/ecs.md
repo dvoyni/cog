@@ -1990,7 +1990,11 @@ They are unexported (`censusCmd`, `entityCmd`, `queryCmd` in
 because no identifier in ecs may name a World), with their request and response types in
 `internal/types`, because nothing outside ecs dispatches them: the mcp provider
 that offers them to an Agent is ecs's own
-([#289](https://github.com/dvoyni/cog/issues/289)). The root gains nothing.
+([#289](https://github.com/dvoyni/cog/issues/289)). The root gains nothing for
+them.
+
+What an Agent sees of them, the tools `ecs_world`, `ecs_entity` and `ecs_query`
+and the prompt text each carries, is specified in [mcp.md](mcp.md).
 
 **The name is `kernel.TypeName`, and `classes` is the mapping.** Registration
 already keeps a `componentClass` per Component type in `Entities.classes`, and
@@ -2120,8 +2124,10 @@ value read from a handle lives only as long as the handler holds its lock.
 
 ### The binding is necessarily a third plugin
 
-`ecs` imports only `kernel`, `libs/m` and `libs/assets` (for `assets.Blob` in
-the storable walk); `model` and `gfx` import nothing of `ecs`.
+`ecs` imports only `kernel`, `libs/m`, `libs/assets` (for `assets.Blob` in
+the storable walk) and the `bundles/mcp` root (for the Provider's Adapter
+identity, [#289](https://github.com/dvoyni/cog/issues/289)); `model` and `gfx`
+import nothing of `ecs`.
 **Neither side can know about the other**, so a binding is necessarily a third
 plugin that imports both. That is what "there is no binding mechanism" means in
 practice, and it has a consequence worth stating: **a project not using the ECS

@@ -8,5 +8,7 @@
 // ecs's root. Composition roots and tests reach New through ecsplugin;
 // everything else reaches ecs through its root.
 //
-// The plugin requires no Adapter and contributes none.
+// The plugin requires no Adapter and contributes one mcp.Provider, as
+// ecs.McpProvider (mcpprovider.go), offering the three read Commands to an
+// Agent as the tools ecs_world, ecs_entity and ecs_query.
 package internal

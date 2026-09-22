@@ -950,6 +950,198 @@
       "type": "object"
     }
   },
+  "ecs_entity": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "entity": {
+          "description": "the Entity as 7v2 or Entity(7v2) or its decimal handle: any form a log or an earlier answer gave",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity"
+      ],
+      "type": "object"
+    },
+    "output": {
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "error": {
+                "description": "present when the value could not be encoded as JSON, saying why",
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "description": "the Component's exported fields as JSON; unexported fields are not shown, and it is null when error is set"
+              }
+            },
+            "required": [
+              "name",
+              "value"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "entity": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity",
+        "components"
+      ],
+      "type": "object"
+    }
+  },
+  "ecs_query": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "description": "Component names spelled as kernel.TypeName renders them and as ecs_world lists them; an Entity must carry every one",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "limit": {
+          "description": "how many matching Entities to return: omit or 0 for 50; at most 500",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "components"
+      ],
+      "type": "object"
+    },
+    "output": {
+      "additionalProperties": false,
+      "properties": {
+        "entities": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "components": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "description": "present when the value could not be encoded as JSON, saying why",
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "description": "the Component's exported fields as JSON; unexported fields are not shown, and it is null when error is set"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "entity": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "entity",
+              "components"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "total": {
+          "description": "how many Entities matched in all, including those not returned",
+          "type": "integer"
+        },
+        "truncated": {
+          "description": "true when fewer Entities were returned than matched: the list is not the whole answer",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "total",
+        "truncated",
+        "entities"
+      ],
+      "type": "object"
+    }
+  },
+  "ecs_world": {
+    "input": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "output": {
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "population": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name",
+              "population"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "entities": {
+          "type": "integer"
+        },
+        "freeIndices": {
+          "type": "integer"
+        },
+        "indexSpace": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "entities",
+        "freeIndices",
+        "indexSpace",
+        "components"
+      ],
+      "type": "object"
+    }
+  },
   "gfx_capture": {
     "input": {
       "additionalProperties": false,

@@ -3,6 +3,7 @@ package internal
 import (
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecs/internal/types"
+	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 )
@@ -58,6 +59,10 @@ func (plugin) Register(registrar *kernel.Registrar, value any) error {
 	registrar.HandleCommand[censusCmd](types.CensusCommand)
 	registrar.HandleCommand[entityCmd](types.EntityCommand)
 	registrar.HandleCommand[queryCmd](types.QueryCommand)
+	// The three read Commands offered to an Agent. The Provider holds nothing
+	// and subscribes nothing, and an app that composes no broker binds it to
+	// nothing, so a game nobody debugs pays nothing for it.
+	registrar.ProvideAdapter[ecs.McpProvider](mcp.Provider(provider{}))
 	// Where an Entity stands is one Store every binding reads - scene draws at
 	// it and sound is heard from it - so it belongs to neither. Two Components
 	// describing one position would be two lock units the scheduler cannot
