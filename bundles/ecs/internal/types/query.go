@@ -373,40 +373,96 @@ func (q *Query[Q]) rowCopies(each func(slot **rowCopy)) {
 // during the loop, so a System spawning one Entity per visited Entity would not
 // terminate. Changing whether some other Entity is in the driver Store is
 // undefined.
-// The two-field walk is written out here rather than called, and that is the
-// whole of why this function is shaped the way it is. A filler is far past what
-// the inliner will take from a method — iterate1 is 186 cost units and iterate2
-// is 331, against a budget of 80, with fill alone at 67 and appearing twice in
-// each — so a yield reached through one is an indirect call an Entity, and the
-// range statement's own state machine survives into the emitted closure with
-// it. Together that is about 1.1 ns an Entity, paid by every System in the
-// engine whether or not it knows it is on a hot path.
+//
+// The walks for shapes 1, 2 and 3 are written out here rather than called, and
+// that is the whole of why this function is shaped the way it is. A filler is
+// far past what the inliner will take from a method — on go1.27.1 iterate1 is
+// 196 cost units, iterate2 343, iterate3 483 and iterate4 624, against a budget
+// of 80, with fill alone at 67 and appearing once a field in each — so a yield
+// reached through one is an indirect call an Entity, and the range statement's
+// own state machine survives into the emitted closure with it. Together that is
+// about 1.1 ns an Entity, paid by every System in the engine whether or not it
+// knows it is on a hot path.
 //
 // A func literal created and called exactly once gets a budget of 800 instead.
-// With the body inside the literal the whole chain collapses into the call
-// site: the literal, the walk, and then the range statement's yield closure
-// inlined into the walk in turn, leaving no per-Entity call at all. Measured at
-// 0.888 ns an Entity on BenchmarkFrameQuery10k, which halves what a Query costs
-// over a hand-written loop, 1.860 to 0.952.
+// With a walk inside a literal the whole chain collapses into the call site:
+// the literal, the walk, and then the range statement's yield closure inlined
+// into the walk in turn, leaving no per-Entity call at all. Measured at 0.888 ns
+// an Entity on BenchmarkFrameQuery10k for width 2 (#422), and for widths 1 and
+// 3 at the savings ecs.md records beside it (#546).
 //
-// Do not tidy this back into a call to iterate2, and do not bring a second
-// filler in beside it. Two bodies measure 791 units for some shapes and 817 for
-// others, and past 800 the literal does not merely lose this win: it compiles
-// as a standalone body that also loses the row and fill inlining iterate2 keeps
-// today, which is +4.8 ns an Entity, worse than never having tried. Shape 3 is
-// worth its own 0.665 ns an Entity and fits at 553 on its own, so it belongs in
-// its own literal rather than as a second arm of this one.
+// Each shape is a literal of its own, and that is the budget again. The width-2
+// walk is written in the returned literal's own body; widths 1 and 3 are each a
+// literal called once from it, so each is priced against its own 800 and the
+// returned literal pays only a call for each: 576 units in all, against 413
+// with width 2 alone. Do not bring a second walk body in beside the width-2 one.
+// Two bodies measure 791 units for some shapes and 817 for others, and past 800
+// the literal does not merely lose the win: it compiles as a standalone body
+// that also loses the row and fill inlining the fillers keep, which is +4.8 ns
+// an Entity, worse than never having tried.
 //
-// queryinline_test.go is the net under all of it, because nothing else is: the
-// allocation-line tests pass unchanged on a busted build, since the regression
-// allocates nothing.
+// And keep the width-2 walk where it is, one literal shallower than the others.
+// With three walks the range body is called from three places, and the inliner
+// gives the 800 only to the call it resolves first, which is the width-2 walk's
+// for that reason alone. The others get twice a method's budget, 160, so a range
+// body past 160 still collapses at width 2 and is an indirect call an Entity at
+// widths 1 and 3, as it was before they had literals. Moved into a literal
+// beside the others, width 2 would lose its collapse for such a body too:
+// ecsscene's record-range3 is one.
+//
+// Width 4 fits too, at 624 on its own, and was measured beside these; it did
+// not pass #546's rule, and ecs.md records why before anyone adds it back.
+//
+// Do not tidy any of it back into a call to a filler. queryinline_test.go is
+// the net under all of it, because nothing else is: the allocation-line tests
+// pass unchanged on a busted build, since the regression allocates nothing.
 func (q *Query[Q]) All() iter.Seq2[Entity, *Q] {
 	return func(yield func(Entity, *Q) bool) {
 		// Validation mode takes the delegating path whatever the shape, so the
 		// run token and the row stamps stay in one place. It is not a build
-		// anybody ships.
-		if validate || q.shape != 2 {
+		// anybody ships. Shapes 4 and up keep the filler switch in every build.
+		switch {
+		case validate || q.shape > 3:
 			q.iterate(yield)
+			return
+		case q.shape == 1:
+			func() {
+				q.bind()
+				buffer := unsafe.Pointer(&q.rows)
+				driver := q.fields[0].cursor
+				walk := q.walk
+				for row := len(walk) - 1; row >= 0; row-- {
+					driver.fill(uintptr(row), buffer)
+					if !yield(walk[row], &q.rows) {
+						return
+					}
+				}
+			}()
+			return
+		case q.shape == 3:
+			func() {
+				q.bind()
+				buffer := unsafe.Pointer(&q.rows)
+				driver, second, third := q.fields[0].cursor, q.fields[1].cursor, q.fields[2].cursor
+				walk := q.walk
+				for row := len(walk) - 1; row >= 0; row-- {
+					e := walk[row]
+					secondRow, ok := second.row(e)
+					if !ok {
+						continue
+					}
+					thirdRow, ok := third.row(e)
+					if !ok {
+						continue
+					}
+					second.fill(secondRow, buffer)
+					third.fill(thirdRow, buffer)
+					driver.fill(uintptr(row), buffer)
+					if !yield(e, &q.rows) {
+						return
+					}
+				}
+			}()
 			return
 		}
 		q.bind()

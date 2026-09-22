@@ -589,8 +589,8 @@ Three limits are real and are named rather than claiming "unlimited":
    explicit type arguments. Cost is linear in width across the unrolled fillers,
    widths 1 to 4, at about 1–2 ns a field an Entity; it steps up at width 5,
    where the per-field loop takes over, by about 7.5 ns an Entity. Through
-   `All()` width 2 is cheaper than its neighbours for as long as it alone takes
-   the inlined literal. See
+   `All()` widths 1 to 3 take a walk written out inside its literal and run
+   0.6–0.9 ns an Entity under the delegated path width 4 still takes. See
    [Time, and one number worth another look](#time-and-one-number-worth-another-look).
 2. **Sparse-index memory per Component type.** 8 bytes × peak concurrent index
    space, per type — 32 KB per type at nox's low thousands, **2.8 MB across 85
@@ -1155,9 +1155,9 @@ Recorded so the arrangement is not tidied back into a call:
 - **Two filler bodies in one literal.** 791 cost units for some shapes and 817
   for others, and past 800 the literal does not merely lose the win: it compiles
   as a standalone body that also loses the `row` and `fill` inlining `iterate2`
-  keeps, **+4.8 ns an Entity** — worse than never having tried. Shape 3 fits at
-  553 on its own and is worth 0.665 ns an Entity, so it belongs in a literal of
-  its own, never as a second arm of this one.
+  keeps, **+4.8 ns an Entity** — worse than never having tried. That is why
+  widths 1 and 3 landed as literals of their own (below), never as second arms
+  of this one.
 - **The filler held as a `func` field** rather than reached through the shape
   switch. A regression: an indirect call is opaque to escape analysis, so the
   yield closure escapes and the frame pays **two allocations a tick**. This is
@@ -1174,6 +1174,88 @@ allocates nothing — they pass unchanged at 200 B/op and 4 allocs/op on a buste
 build. `queryinline_test.go` is the net instead: it reads the `-gcflags=-m=2`
 verdicts and fails both when the literal stops inlining and when a range body
 stops collapsing into the walk.
+
+**Widths 1 and 3 have walks of their own as well**
+([#546](https://github.com/dvoyni/cog/issues/546)). Each is a literal of its
+own, called once from the one `All()` returns, so each is priced against its
+own 800 — width 1 at 196 units, width 3 at 483 — and the returned literal pays
+only a call for each: **576** in all, against 413 with width 2 alone. `All()`
+itself stays at 17 (22 in the dictionary wrapper) and inlines at every range
+site, so the range statement still calls a literal it can see and every walk
+comes along with it. Width 2's walk stays in the returned literal's own body,
+and where it sits is load-bearing: with three walks the range body is called
+from three places, and the inliner gives the 800 only to the call it resolves
+first. That is width 2's because it is one literal shallower than the others;
+the others get 160, twice a method's budget. So a range body past 160 still
+collapses at width 2, and at widths 1 and 3 the walk inlines but the body is an
+indirect call an Entity, as it was through the filler.
+
+Judged per width against a rule fixed before the run, on `BenchmarkQueryWidth`
+at 10 000 Entities: the saving *S* (old `components-k` less new) had to beat an
+A/A band with 8 of 10 rounds agreeing in sign and reach 0.3 ns an Entity, and be
+no less than *Y*, the indirect-`yield` cost at that width inside the new binary
+(`delegated-k − components-k`), less the band; width 2, `BenchmarkFrameQuery*`
+and the hand-written control had to stay put. Ten rounds, three binaries (old,
+a copy of old for the band, new) interleaved with the order rotated, medians,
+ns an Entity, AMD Ryzen 9 7950X3D, go1.27.1, on a machine shared with other
+builds. All three candidates were measured together first, so `All()`'s cost
+and width 2's numbers were taken with the whole set present:
+
+| width | *S* | band | sign | *Y* | *S* on minima | verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | **1.19** | 0.071 | 10/10 | 0.53 | 1.17 | lands |
+| 3 | **0.91** | 0.018 | 9/10 | 0.85 | 0.67 | lands |
+| 4 | 0.72 | 0.011 | **7/10** | −0.10 | 0.69 | not landed |
+
+Width 2 did not move: `components-2` +0.027 against a 0.029 band, and neither
+`BenchmarkFrameQuery` size nor `BenchmarkFrameHandWritten10k` agreed in sign in
+more than 5 rounds of 10. The reduced set, widths 1 and 3, was then measured
+again in a session of its own before landing: *S* = **1.21** and **1.08**, both
+10/10, width 2 and the control unchanged, and `BenchmarkFrameFiltered10k` — a
+shape-3 Query — **0.61 ns an Entity cheaper** (0.51 at 1 000). Across a package
+boundary, in ecsphysics2d's test binary, a width-1 walk saved 0.46, a width-3
+one 0.80 and `BenchmarkIntegrateOverBodyComponents` 0.94 ns an Entity.
+
+The production range sites that now take a literal: width 3, `integrate`
+(`positionQuery`), whose body collapses; width 1, the Joint walks —
+`index`'s `jointIndexQuery`, whose body collapses, and `gatherJoints`,
+`findWakes` and `build` over `JointQuery` and `IslandJointQuery`, whose bodies
+are past 160 and stay an indirect call. `emitterQuery` is width 1 but reads a
+`ClipRef`, which holds a string, so it is shape 5 and keeps the per-field loop.
+The price is code size: every range site carries every walk, whichever it runs,
+and `integrate` grew from 736 to 1 984 bytes of text.
+
+Recorded so nobody re-attempts these without new information:
+
+- **Width 4 in a literal of its own.** It fits — 624 alone, and the returned
+  literal 656 with all three — and saved 0.72 ns an Entity on the median
+  against a band of 0.011, 0.69 on the minima. But only 7 of 10 rounds agreed in
+  sign: in two of them every arm ran 40–80% slow and the new binary drew the
+  worse moment, and one was slower without a visible cause. That fails the
+  rule's first condition, so it was not landed. *Y* could not be read either:
+  `delegated-4`, unchanged code, ran 0.54 faster in the new binary than in the
+  old, a layout effect, which put *Y* below zero. What a re-attempt needs is a
+  quieter machine, not a different literal. It would carry `Solve`'s velocity
+  walk, the Body index rebuild and the awake-island walk.
+- **Width 2 in a literal of its own beside the others.** Every walk fits —
+  width 2 at 343, the returned literal at 372 — and `All()` still inlines, but
+  width 2's call to the range body is then resolved in the same batch as the
+  others', is no longer the only one, and gets 160. A width-2 body past 160 stops
+  collapsing: ecsscene's `record-range3`, at 177, is one.
+  `TestAWidthTwoBodyPastTheCallBudgetStillCollapses` pins it.
+- **`All()` returning a different literal by shape.** `All()` still inlines, at
+  39 units, but a func value with two producers is one the range site cannot
+  resolve, so neither literal inlines there and the range body and its state
+  escape: two allocations a run, width 2 included — the escaping shape the
+  method-value note above predicted.
+
+**Across a package boundary `row` and `fill` do not inline into any walk,** the
+width-2 one included, and did not before #546 either: in ecsphysics2d's
+`integrate` every walk calls them an Entity. Inside this package they inline
+everywhere, which is what `queryinline_test.go` and the width sweep see. The
+walks still save what the cross-package rows above show, but a System in
+another package does not get a call-free loop. Why the compiler does not carry
+those two bodies across is not established.
 
 ### Filters
 
@@ -2310,10 +2392,14 @@ is the cheapest, not a step. The sweep's rule, set before it ran — the gap
 reproduces if the third field's step is at least 3 ns and at least twice either
 neighbour's — fails on both counts, at 1 000 Entities as at 10 000, and for a
 present Tag or a `Without` that rejects nothing in the third slot too (0.82 and
-0.84 ns). The 10.8 ns figure was the prototype's. Through `All()`, width 2 is
-cheaper than width 1 and width 3 looks like a 2.65 ns step, because only width 2
-takes the walk `All()` carries inside its literal and the others delegate and
-pay an indirect `yield` an Entity; that is a path, not a probe. Width 5 and up
+0.84 ns). The 10.8 ns figure was the prototype's. Through `All()` in that
+session, width 2 was cheaper than width 1 and width 3 looked like a 2.65 ns step,
+because only width 2 took the walk `All()` carries inside its literal and the
+others delegated and paid an indirect `yield` an Entity; that is a path, not a
+probe. Since [#546](https://github.com/dvoyni/cog/issues/546) widths 1 and 3
+have walks of their own, and its re-run of the sweep reads 1.14, 2.25, 3.38 and
+6.14 through `All()` against 1.77, 3.19, 4.19 and 5.71 delegated, with the
+delegated steps at 1.41, 1.00 and 1.53 — the same verdict. Width 5 and up
 run the per-field loop and step up by about 7.5 ns an Entity, the same whether
 the Stores fit in L2 or not. The README's
 [What a wider Query costs](../README.md#what-a-wider-query-costs) has both

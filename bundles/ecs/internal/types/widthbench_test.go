@@ -46,7 +46,8 @@ type (
 
 // widthPlugin owns the sweep's Component types, apart from componentsPlugin so
 // the shared fixture keeps its six Stores. It keeps each typed Store for the
-// hand-written rows and the population.
+// hand-written rows and the population, and x0's so a test can make a Without
+// reject something.
 type widthPlugin struct {
 	ids uint32
 	s0  *Store[w0]
@@ -59,6 +60,7 @@ type widthPlugin struct {
 	s7  *Store[w7]
 	t0s *Store[t0]
 	t1s *Store[t1]
+	x0s *Store[x0]
 }
 
 func (p *widthPlugin) Name() kernel.PluginName { return "width" }
@@ -80,7 +82,7 @@ func (p *widthPlugin) Register(registrar *kernel.Registrar, _ any) error {
 	p.s7 = RegisterComponent[w7](registrar, p.ids)
 	p.t0s = RegisterComponent[t0](registrar, p.ids)
 	p.t1s = RegisterComponent[t1](registrar, p.ids)
-	RegisterComponent[x0](registrar, p.ids)
+	p.x0s = RegisterComponent[x0](registrar, p.ids)
 	RegisterComponent[x1](registrar, p.ids)
 	return nil
 }
@@ -220,10 +222,11 @@ type widthCase struct {
 }
 
 // widthCases lists every row. The components-k rows walk through All(), which
-// is what a System author pays; only components-2 takes All()'s inlined
-// literal. The delegated-k rows walk the same Queries through q.iterate, where
-// every width pays one indirect yield an Entity, and they are the rows the
-// go/no-go rule reads.
+// is what a System author pays; components-1 to components-3 take a walk
+// written out inside All()'s literal, and components-4 delegates. The
+// delegated-k rows walk the same Queries through q.iterate, where every width
+// pays one indirect yield an Entity, and they are the rows #280's rule and
+// #546's Y read.
 var widthCases = []widthCase{
 	{"components-1", func(b *testing.B, n int) {
 		_, q := widthWorld[width1](b, n)
