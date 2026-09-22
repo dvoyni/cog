@@ -118,8 +118,11 @@ func (s *Set[T]) MarkChanged(e Entity) {
 // Component takes: nothing else records which Entities have what.
 //
 // So UpdateFor is how a Component is added and Remove is how one is taken away,
-// and both are immediate. There is no command buffer, because a type-erased one
-// costs an allocation per queued command.
+// and both stay immediate: each holds only write{*Store[T]}, so there is no lock
+// duration for deferral to buy. There is no general command buffer either,
+// because a type-erased one costs an allocation per queued command; the typed
+// per-handle buffers DeferredSpawn and DeferredDespawn carry are for Spawn and
+// Despawn alone.
 //
 // It is safe on the Entity a Query is currently visiting, and for the driver of
 // that Query it is safe on any Entity: a new row is appended, and the backwards

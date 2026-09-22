@@ -164,9 +164,14 @@ func (s *Spawn[S]) resolve() {
 
 // New creates an Entity carrying every Component the Component set names and
 // returns its handle. The Components are written in field order, and the Entity
-// is complete when New returns: there is no command buffer and nothing is
-// deferred, because a type-erased one costs an allocation per queued command and
-// the handler already holds the barrier that would make deferral safe.
+// is complete when New returns: this handle defers nothing, because the handler
+// already holds the barrier that would make deferral safe.
+//
+// There is no general command buffer, and a type-erased one is why: it costs an
+// allocation per queued command. What does exist is a typed buffer per handle,
+// for Spawn and Despawn alone - DeferredSpawn and DeferredDespawn, whose changes
+// are made at a drain - and what it buys is lock duration. Set.UpdateFor and
+// Remove.From stay immediate.
 //
 // Calling it while iterating a Query is safe for the Query being iterated, since
 // All() walks its driver backwards and never reaches a row appended during the

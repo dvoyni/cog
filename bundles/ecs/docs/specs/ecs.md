@@ -48,7 +48,7 @@ work](#required-work) records them under *Since Hooks*, and the package's README
 carries their measured cost under [*What a Hook
 costs*](../README.md#what-a-hook-costs).
 
-**Two things here are younger than the rest, and each is marked where it
+**Three things here are younger than the rest, and each is marked where it
 appears.** The first: the Component rule was relaxed after the package shipped.
 A Component holds no *mutable* indirection rather than no pointers at all, which
 admits `string` and [`m.List[T]`](#the-list). The sections that changed say what
@@ -67,12 +67,25 @@ document argued for are now false, and the sections that made them say what
 they used to say: that nothing ever shrinks, that structural hooks were ruled
 out, and that change detection would arrive as Query fields.
 
+The third: **deferred Spawn and Despawn**, specified in
+[`deferred.md`](deferred.md) and assembled from [ecs: defer Spawn and Despawn
+through a typed buffer, to shorten the wide
+lock](https://github.com/dvoyni/cog/issues/260). Two handles queue a structural
+change instead of making it, and a drain applies what is queued under the wide
+lock. This document states what deferral changes for code naming neither
+handle: the generation's free bit, the two rows in the handle tables and in the
+signature contract, and what `ShrinkCmd` does while a reservation is
+outstanding. What a deferred change promises is `deferred.md`'s to state, and
+is pointed to here rather than copied. The sections it changed are marked
+*Since deferral*, and [Required work](#required-work) records them under *Since
+deferral*.
+
 ---
 
 ## Contents
 
 - [Vocabulary](#vocabulary) · [What the numbers are, and what they are not](#what-the-numbers-are-and-what-they-are-not)
-- [Entity](#entity) · [Component](#component) · [The List](#the-list) · [Validation mode](#validation-mode) · [Naming an engine-side thing](#naming-an-engine-side-thing)
+- [Entity](#entity) · [Component](#component) · [The List](#the-list) · [Validation mode](#validation-mode) · [Naming an engine-side thing](#naming-an-engine-side-thing-is-not-the-ecss-business)
 - [Registration and ownership](#registration-and-ownership)
 - [The Store](#the-store) · [Giving memory back](#giving-memory-back) · [The Query](#the-query) · [The Driver](#the-driver)
 - [The System](#the-system) · [The lock set](#the-lock-set)
@@ -84,6 +97,7 @@ out, and that change detection would arrive as Query fields.
 - [Shapes that were rejected](#shapes-that-were-rejected)
 - [Required work](#required-work) · [Out of scope](#out-of-scope)
 - Hooks, in their own document: [`hooks.md`](hooks.md)
+- Deferred Spawn and Despawn, in their own document: [`deferred.md`](deferred.md)
 
 ---
 
@@ -1053,6 +1067,14 @@ one generation floor, a `uint32`. An index allocated again after being dropped
 starts above any generation ever issued, so a stale handle can never match it.
 Staleness stays decided, never estimated.
 
+**While a reservation is outstanding, the index step drops nothing** and
+`ShrinkResponse.Entities` reports 0 bytes: a reserved index has been handed out
+and is not yet filled, so it is neither free nor live. Stores, scratch and Hook
+logs shrink as ever, and every reservation settles at the next drain, so the
+pause is at most one Update
+([`deferred.md`](deferred.md#immediate-handles-and-shrinkcmd-while-reservations-are-outstanding)).
+*Since deferral.*
+
 **Why there is no heuristic.** General containers never shrink on their own: Go
 slices and maps, Rust `Vec`, Bevy's message buffers, and flecs outside its
 manual `ecs_shrink`. Allocators shrink against a decaying peak. For a spike
@@ -1631,9 +1653,12 @@ This is contract, not convention. A System takes any number of:
 | --- | --- | --- |
 | `*ecs.Query[Q]` | `read{*Entities}` + per-field access | the Components it iterates |
 | `*ecs.Spawn[S]` | `write{*Entities}` + `write{*Store[F]}` per Component set field | creating Entities |
-| `*ecs.WriteableEntities` | `write{*Entities}` | despawning |
+| `*ecs.DeferredSpawn[S]` | `read{*Entities}` + `read{*Store[F]}` per Component set field | queuing an Entity's creation for the next drain — [`deferred.md`](deferred.md), *since deferral* |
+| `*ecs.WriteableEntities` | `write{*Entities}` | despawning, and `Drain()` |
+| `*ecs.DeferredDespawn` | `read{*Entities}` | queuing a despawn for the next drain — [`deferred.md`](deferred.md), *since deferral* |
 | `*ecs.Get[T]` | `read{*Store[T]}` | reading one Component of an Entity it did not iterate to |
 | `*ecs.Set[T]` | `write{*Store[T]}` | writing, or inserting, the same |
+| `*ecs.Remove[T]` | `write{*Store[T]}` | taking one Component away from an Entity |
 | `*ecs.Hooks[T, K]` | `read{*Entities}` + `read{*Store[T]}` | what happened to `T` since the System's last run — [`hooks.md`](hooks.md), *since Hooks* |
 | `*ecs.Read[T]`, `*ecs.Write[T]` | the kernel's own read/write on `T` | any other plugin's resource |
 | `*ecs.In[T]` | nothing | a value projected out of the event |
@@ -1838,9 +1863,11 @@ That is the line with teeth, and it becomes a usage rule:
 > last of them blocks the whole frame for the duration of the query. The cost is
 > never the spawn; it is everything around it.
 
-That hazard is also the motivation for [defer structural change through a typed
-command buffer](https://github.com/dvoyni/cog/issues/260): what a command buffer
-would buy is **lock duration**, not safety and not allocation.
+That hazard is the motivation for [`deferred.md`](deferred.md), which is built:
+a System naming a deferring handle holds `read{*Entities}` for its run and its
+change lands at a drain. What deferral buys is **lock duration**, not safety and
+not allocation, and splitting the System out stays the cheaper answer wherever
+it is available. *Since deferral.*
 
 ### Two Systems, one Component, disjoint Entities: accepted
 
@@ -1937,9 +1964,21 @@ scheduler has already excluded everyone.
 | `ecs.Get[T]` | `.Of(Entity) (T, bool)` | `read{*Store[T]}` |
 | `ecs.Set[T]` | `.Of(Entity) (T, bool)`, `.Ref(Entity) (*T, bool)`, `.UpdateFor(Entity, T)`, `.MarkChanged(Entity)` | `write{*Store[T]}` |
 | `ecs.Remove[T]` | `.From(Entity) bool` | `write{*Store[T]}` |
+| `ecs.DeferredSpawn[S]` | `.New(S) Entity` | `read{*Entities}`, plus `read{*Store[F]}` per Component set field |
+| `ecs.DeferredDespawn` | `.Despawn(Entity)` | `read{*Entities}` |
 
 Spawn and Despawn are **two handles rather than one**, because folding `Despawn`
 onto `Spawn[S]` would force a Component set type on Systems that never spawn.
+The deferring pair below is two handles for that same reason.
+
+**The last two queue the change instead of making it**, and the whole of the
+difference is that four `write`s became `read`s: a deferring System holds no
+barrier, and the change is made at the next drain, by the System that called
+`WriteableEntities.Drain()`. Migrating a System is one token in its signature
+and no call-site change, and the price of that is that `DeferredSpawn[S].New`
+hands back an Entity that is not alive until the drain. What a drain is, where
+it runs, what it applies in what order, and when a queued change becomes
+visible are [`deferred.md`](deferred.md)'s, in full. *Since deferral.*
 
 `Get[T]` has **no `Ref`**, and that is what stops a read handle being a write in
 disguise. `Set[T].UpdateFor` **inserts when absent** — legal because it already
@@ -2050,7 +2089,7 @@ budgets.
 
 **The storm case is recorded, not designed for**: 500 despawns in a tick costs
 109 µs, a third of a 33 ms budget. The answer if a game hits it is
-[#260](https://github.com/dvoyni/cog/issues/260)'s deferred buffer, not a second
+[`deferred.md`](deferred.md)'s typed buffer, which is built, not a second
 liveness model carried from the start.
 
 ### Spawn is a handle, not a Command, by a factor of 2270
@@ -2104,6 +2143,15 @@ allocs / 1600 B per tick, 4920 ns against 4147 for a typed queue. At 30 Hz that
 is 48 KB/s fed to the collector during frames, which requirement 1 forbids. So
 **no general command buffer is built and `Add`/`Remove` stay immediate.**
 
+**The typed arm of that measurement is what [`deferred.md`](deferred.md)
+builds**, and it does not change the answer above. A deferring handle carries a
+buffer of its own changes, typed and monomorphised, holding nothing type-erased
+and allocating nothing in steady state. It is not a general command buffer: only
+Spawn and Despawn defer, `Set[T].UpdateFor` and `Remove[T].From` stay immediate,
+and there is no cross-System queue. What the typed buffer buys is **lock
+duration**, the one thing this section says a command buffer would have been
+for. *Since deferral.*
+
 ### What a System sees
 
 Because every handler touching a Store holds `read{*Entities}` and Spawn and
@@ -2115,6 +2163,12 @@ Systems that ran before it and none from those that ran after; where two declare
 no ordering, which ran first is unspecified. What a System reads through Hooks,
 its own acts included, is [`hooks.md`](hooks.md#when-a-system-sees-a-record)'s
 to specify.
+
+**A deferred Spawn or Despawn is made by the drain, not at the call**, so the
+promise above covers it and is not restated here: the one amendment — that the
+System which made the change is the drain System — is
+[`deferred.md` §*Queuing is not a Structural
+change*](deferred.md#queuing-is-not-a-structural-change)'s. *Since deferral.*
 
 ### Hooks: what happened, read by a System
 
@@ -2847,12 +2901,14 @@ Entity, emptied by the Despawn that already exists, touching no Component, Query
 or System signature. →
 [#264](https://github.com/dvoyni/cog/issues/264).
 
-**Deferred structural change — additive, and it buys lock duration.** Not safety
-and not allocation, both of which are already had. A drained change reaches a
-Hook at the drain, as the same records an immediate change makes
+~~**Deferred structural change — additive, and it buys lock duration.** Not
+safety and not allocation, both of which are already had.~~ **Built**, and
+additive as promised: `*ecs.DeferredSpawn[S]` and `*ecs.DeferredDespawn` queue,
+`WriteableEntities.Drain()` applies, and a drained change reaches a Hook at the
+drain as the same records an immediate change makes
 ([Deferred structural change and Hooks: when a drained change is
-recorded](https://github.com/dvoyni/cog/issues/383)). →
-[#260](https://github.com/dvoyni/cog/issues/260).
+recorded](https://github.com/dvoyni/cog/issues/383)). No System that names
+neither handle declares anything new. → [`deferred.md`](deferred.md).
 
 **Relations — not additive, and the promise is weaker on purpose.** The only
 route to answering "who points at me" cheaply changes what a `Store` is, so the
@@ -2883,8 +2939,7 @@ because they are what a future proposal has to beat
    are on" is built on — measured, running shards *sequentially* so no race is
    involved: whole array 1000/1000 visited, split into 2, 4 or 8 ranges
    **500/1000**, silently. So the obligation would have cost either that
-   affordance or [#260](https://github.com/dvoyni/cog/issues/260) pulled into
-   v1.
+   affordance or [deferred structural change](deferred.md) pulled into v1.
 
    **Correction, measured.** This entry said deferred structural change was a
    hard prerequisite. It is not, and the mistake was to treat the affordance and
@@ -2894,9 +2949,9 @@ because they are what a future proposal has to beat
    is left holds `read{*Entities}`, which every route to a Store declares — so no
    other System can move a row under it either. The 500/1000 measurement stands
    and is what rules out splitting a loop that restructures; it says nothing
-   about one that cannot. [#260](https://github.com/dvoyni/cog/issues/260) is
-   needed only for a split loop that also wants structural change, which the rule
-   already refuses. Measured end to end on a real engine in
+   about one that cannot. [Deferral](deferred.md) is needed only for a split
+   loop that also wants structural change, which the rule already refuses.
+   Measured end to end on a real engine in
    [#278](https://github.com/dvoyni/cog/issues/278), which returned a go: at 5 000
    Entities and ~104 ns an Entity, 4.74x against serial, allocating what the
    serial frame allocates.
@@ -3002,9 +3057,10 @@ at `finalize` against the resulting set, not at the call — only the ability to
 grep for who locks what.
 
 **A general command buffer for structural change.** Type-erased, it costs one
-allocation per queued command. Deferred structural change returns post-v1 as
-[#260](https://github.com/dvoyni/cog/issues/260), typed, and motivated by lock
-duration.
+allocation per queued command. Deferred structural change returned post-v1 in
+[`deferred.md`](deferred.md), typed and motivated by lock duration, and it is
+still not a general command buffer: Spawn and Despawn alone defer, each through
+its own handle's typed buffer, and nothing queues across Systems.
 
 **A process-wide interner for names.** 5× the per-entity cost, it allocates, it
 cannot be read at package initialisation, it gives different ids in different
@@ -3175,6 +3231,29 @@ and in the implementation tickets under
 - ~~The `*ecs.Hooks[T, K]` row in the signature contract
   ([#380](https://github.com/dvoyni/cog/issues/380)).~~ **Built**
   ([#390](https://github.com/dvoyni/cog/issues/390)).
+
+**Since deferral — built**
+
+The items that change what this document specifies for code naming neither
+deferring handle. Everything else deferral needs is in
+[`deferred.md` § Required work](deferred.md#required-work) and in the
+implementation tickets under
+[the map](https://github.com/dvoyni/cog/issues/260).
+
+- The generation's free bit, and `Alive` as one compare against it, at the cost
+  of half the generation space
+  ([#559](https://github.com/dvoyni/cog/issues/559)).
+- `WriteableEntities.Drain()`, and `ecs.DrainOnUpdate` subscribed by the ECS on
+  `app.UpdateEvent`, `Last`, always — the ECS's first System of its own
+  ([#560](https://github.com/dvoyni/cog/issues/560)).
+- `*ecs.DeferredDespawn` ([#561](https://github.com/dvoyni/cog/issues/561)) and
+  `*ecs.DeferredSpawn[S]` with the Reserved Entity
+  ([#562](https://github.com/dvoyni/cog/issues/562)), in the handle tables and
+  the signature contract.
+- The released list, and `ShrinkCmd` dropping no index while a reservation is
+  outstanding ([#563](https://github.com/dvoyni/cog/issues/563)).
+- Hooks at the drain, with one `Drain()` counted as one writer run per Store
+  ([#564](https://github.com/dvoyni/cog/issues/564)).
 
 ---
 

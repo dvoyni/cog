@@ -38,6 +38,10 @@ package is the defect unless this document says otherwise.
 binds code that names no Hooks is stated there in full: a `List`'s `Set`, the
 Validation checks every `List` user meets, and [`ecs.ShrinkCmd`](ecs.md#giving-memory-back).
 
+[`deferred.md`](deferred.md) landed after this document and is built too. It
+specifies the two deferring handles and the drain; what a drained change costs a
+Hook stays here, in [§*A drained change*](#a-drained-change).
+
 ---
 
 ## Contents
@@ -519,35 +523,53 @@ before any act ([#382](https://github.com/dvoyni/cog/issues/382)).
 
 ### A drained change
 
-[ecs: defer structural change through a typed buffer](https://github.com/dvoyni/cog/issues/260)
-is parked and not designed here. Whenever it is built, it is bound by the
-constraint written onto it from
-[Deferred structural change and Hooks](https://github.com/dvoyni/cog/issues/383):
+A structural change may be **queued** rather than made, and applied later at a
+**drain**: [`deferred.md`](deferred.md) specifies the two deferring handles and
+`WriteableEntities.Drain()`. What it costs a Hook is the constraint written onto
+this document from
+[Deferred structural change and Hooks](https://github.com/dvoyni/cog/issues/383),
+and it is built as that constraint stated it:
 
 - **A drained change is recorded at the drain**, under the drainer's
   `write{*Entities}`, as the same act an immediate change is, with the same
   records. An index cannot tell the two apart. A deferring handle records
   nothing at the call and declares nothing for Hooks.
-- **Visibility.**
-  - A reader on the same event as the deferring System runs before the drain,
-    so it sees a change queued in publication *n* in its run for *n + 1*.
-  - A reader subscribed `Last()` on the same event has no order against the
-    drainer, so it sees the change in this publication or the next. **Which one
-    is unspecified**, and nothing is lost or duplicated either way.
+- **Visibility is the general rule above and nothing else:** a reader sees a
+  drained change if its run starts after the run of the drain System that
+  applied it. Because an app schedules its own drain Systems wherever it likes,
+  **a reader ordered after one sees the change within that same publication**.
+  This supersedes the constraint's earlier line, *"a reader on the same event
+  sees it in its next run"*, which was written when the only drain was the
+  ECS's own `Last()` one.
+  - Against [`ecs.DrainOnUpdate`](deferred.md#ecsdrainonupdate), which the ECS
+    subscribes on `app.UpdateEvent` in `Last` always, an ordinary Update reader
+    runs before the drain, so it sees a change queued in publication *n* in its
+    run for *n + 1*.
+  - A reader subscribed `Last()` has no order against that drainer unless it
+    takes one by name, so it sees the change in this publication or the next.
+    **Which one is unspecified**, and nothing is lost or duplicated either way.
   - A reader on another event sees it at its first run after the drain.
-  - The System that queued a change sees it in its next run.
+  - The System that queued a change sees it in its first run after the drain,
+    and sees nothing of its own queue within the run that queued it.
 - **Order.** A Store's log follows the order in which the drain applies changes
-  to it, and the drain order is deterministic: handles in the order they enrolled
-  at registration, each buffer in the order changes were queued, and nothing
-  iterating a map.
+  to it, and the drain order is deterministic: the spawn pass before the despawn
+  pass, handles in the order they enrolled at registration, each buffer in the
+  order changes were queued, and nothing iterating a map.
 - **A drained change that does nothing records nothing**, such as a despawn of an
   Entity already dead by the drain.
 - **A drained removal or despawn captures `T` at the drain**, including writes
   made between the call and the drain. The Changed records those writes
   produced are already earlier in the log.
-- **A drain that appends to a Store's log counts as one writer run** on that
-  Store, for [the Validation check](#validation-mode-checks-the-rule).
-- **If #260 ever defers `UpdateFor` or `From`**, against its own recommendation:
+- **One `Drain()` counts as one writer run** on each Store it appends to,
+  however many passes it makes, for
+  [the Validation check](#validation-mode-checks-the-rule).
+- **A deferring handle offers no spawn gate**, so a queuing System is not marked
+  as one that can append to every Store's log. The writing and the records
+  happen at the drain, which owns the gate and the pace count
+  ([`deferred.md` §*Hooks*](deferred.md#hooks)).
+- **If `UpdateFor` or `From` are ever deferred**, which
+  [`deferred.md`](deferred.md#what-is-not-foreclosed) leaves open and does not
+  build:
   - a deferred `From` records a removal at the drain;
   - a deferred inserting `UpdateFor` records an addition;
   - a deferred replacing `UpdateFor` records Changed at the drain by comparing
@@ -608,7 +630,7 @@ took.
 | a writer's run end (Changed) | `write{*Store[T]}` |
 | a Spawn | `write{*Entities}`, once per watched Store it carries |
 | a Despawn | `write{*Entities}`, once per watched Store holding the Entity |
-| a drain ([#260](https://github.com/dvoyni/cog/issues/260)) | `write{*Entities}` |
+| a drain ([`deferred.md`](deferred.md#the-drain)) | `write{*Entities}` |
 
 **No act reads a Store other than its own, and no lock set grows.** The log needs
 no sequence number, because the act's lock already orders it. It is not a global
@@ -1182,10 +1204,12 @@ The rules in this document are the list. At least:
   changes.
 - `-gcflags=-m` on the paths listed under escape analysis.
 
-**Held for [#260](https://github.com/dvoyni/cog/issues/260)'s build**, not this
-one: a reader on the deferring System's event sees a drained spawn and despawn in
-its next run and not before the drain; a drained despawn of a dead Entity records
-nothing; a drained despawn carries the value as it stood at the drain.
+~~**Held for [#260](https://github.com/dvoyni/cog/issues/260)'s build**, not this
+one:~~ **Built with [`deferred.md`](deferred.md)**: a reader on the deferring
+System's event sees a drained spawn and despawn in its next run and not before
+the drain; a drained despawn of a dead Entity records nothing; a drained despawn
+carries the value as it stood at the drain
+([`deferred.md` § Required work](deferred.md#required-work)).
 
 ---
 
@@ -1197,8 +1221,8 @@ reader of this document alone does not re-propose them.
 - **Per-entity side data**, [#264](https://github.com/dvoyni/cog/issues/264)'s
   other half. No consumer asks for it, and #237's answers cover every current
   case. It returns with a consumer.
-- **Designing the deferred structural-change buffer** of
-  [#260](https://github.com/dvoyni/cog/issues/260). This document fixes only how
+- **Designing the deferred structural-change buffer.** That is
+  [`deferred.md`](deferred.md)'s, and it is built. This document fixes only how
   a drained change reaches a Hook.
 - **Kernel changes**, including [#370](https://github.com/dvoyni/cog/issues/370)'s
   enforcement of non-re-entrancy. [#282](https://github.com/dvoyni/cog/issues/282)'s
