@@ -120,6 +120,7 @@ func NewBlobFromString(s string) Blob
 func (b Blob) Data() []byte
 func (b Blob) String() string
 func (b Blob) Len() int
+func (b Blob) MarshalJSON() ([]byte, error) // {"len":N}, never the bytes
 
 type Descr[P comparable] struct {
 	Name   string // a storage path; empty when the asset is named by its Blob
@@ -171,6 +172,12 @@ type Blob struct {
 	len int
 }
 ```
+
+**It encodes to JSON as `{"len":N}`**, through `MarshalJSON`, and never as its
+bytes: the ECS's read by Component name
+([#371](https://github.com/dvoyni/cog/issues/371)) encodes Components under
+`write{*ecs.Entities}`, where a texture-sized payload would stall every System,
+and `{}` would hide even the size. Nothing decodes a Blob from JSON.
 
 `m.Blob` is **deleted**, not moved and not changed in place: the type is
 `assets.Blob` and every one of its eleven referencing files outside its own

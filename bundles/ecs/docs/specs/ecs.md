@@ -75,7 +75,7 @@ out, and that change detection would arrive as Query fields.
 - [Registration and ownership](#registration-and-ownership)
 - [The Store](#the-store) · [Giving memory back](#giving-memory-back) · [The Query](#the-query) · [The Driver](#the-driver)
 - [The System](#the-system) · [The lock set](#the-lock-set)
-- [Structural change](#structural-change) · [Reaching another Entity](#reaching-another-entity)
+- [Structural change](#structural-change) · [Reaching another Entity](#reaching-another-entity) · [Reading the world by name](#reading-the-world-by-name)
 - [Binding: how another plugin attaches](#binding-how-another-plugin-attaches)
 - [More than one world](#more-than-one-world)
 - [The zero-allocation claim](#the-zero-allocation-claim)
@@ -1667,8 +1667,9 @@ removing one.
 **There is no exclusion mechanism to build, and no structural change is a
 Command.** That is the whole of [Structural change, and what excludes it from
 iteration](https://github.com/dvoyni/cog/issues/240), and it retired all four of
-that ticket's candidate answers at once. The ECS's only Command is
-[`ShrinkCmd`](#giving-memory-back), which is not a structural change. A `Uses` dispatch is not a scheduled
+that ticket's candidate answers at once. The ECS's Commands are
+[`ShrinkCmd`](#giving-memory-back) and the three [read
+Commands](#reading-the-world-by-name), and none is a structural change. A `Uses` dispatch is not a scheduled
 unit — it passes `noLocks, noLocks` and runs on the calling goroutine — and the
 fold is **static**, run once at finalisation, transitively, with cycle
 detection. So **a handler's lock set is complete before the frame starts**: a
@@ -1878,7 +1879,13 @@ only route to a Store is a generated handle, and the generated `Lock` always
 emits that read — but it is written into the spec as an invariant, not left
 implicit, because an implementation that added a second route would break it
 silently. [`ShrinkCmd`](#giving-memory-back) is the second thing that relies on
-it: it rewrites every Store's arrays holding `write{*Entities}` alone.
+it: it rewrites every Store's arrays holding `write{*Entities}` alone. The
+three read Commands are a further route beside it: they [read every Store by
+Component name](#reading-the-world-by-name) through closures registration baked
+into `Entities.classes`, not through a generated handle. They are sound for the
+same reason `ShrinkCmd` is: their only callers hold `write{*Entities}`, which
+supersedes the `read{*Entities}` the invariant requires, so no handler touching
+a Store runs while they do.
 
 It is also why the obvious optimisation stays forbidden. A per-Entity bitmask of
 "which Stores hold me" would let a Despawn skip the scan, but the mask lives in
@@ -1960,6 +1967,96 @@ once"; `gltfload.go:421` is the only glTF node walk and it runs at load), so the
 relation that usually forces an ECS to grow relations is answered on the far
 side of the binding. `Parent`, `Child` and `Hierarchy` are a game's words for
 its own Components; the engine has no opinion about them.
+
+---
+
+## Reading the world by name
+
+Every way into the ECS above names its Components as Go types, and the lock set
+is derived from those types at registration. Something outside Go cannot name a
+Component that way: an Agent, a debugging tool or a data file has only a string
+such as `"ecsscene.Model"`. So the ecs plugin registers three read-only
+Commands that take the string instead
+([#371](https://github.com/dvoyni/cog/issues/371)):
+
+| Command | answers |
+| --- | --- |
+| census | every registered Component name with its Store's population, the live Entity count, the free-list depth and the index space |
+| entity | one Entity, given as `"7v2"`, `"Entity(7v2)"` or its decimal handle, with every Component it carries and its value |
+| query | the Entities carrying every named Component, in ascending index order, with only those Components' values; `total`, `truncated`, a default limit of 50 and a maximum of 500 |
+
+They are unexported (`censusCmd`, `entityCmd`, `queryCmd` in
+`bundles/ecs/internal`; the census was the ticket's "world" read, renamed
+because no identifier in ecs may name a World), with their request and response types in
+`internal/types`, because nothing outside ecs dispatches them: the mcp provider
+that offers them to an Agent is ecs's own
+([#289](https://github.com/dvoyni/cog/issues/289)). The root gains nothing.
+
+**The name is `kernel.TypeName`, and `classes` is the mapping.** Registration
+already keeps a `componentClass` per Component type in `Entities.classes`, and
+each class already carried its name as `owner`. So there is no second registry:
+type to name is `class.owner`, and name to type is one unexported scan,
+`classNamed`. `RegisterComponent[C]` bakes four more closures into the class
+while `C` is still a compile-time type (the Store's population, its membership
+probe, its owners and a JSON encoder of one Entity's value), which is the reason
+`declareSet` is baked there. Nothing is added to `Store`, `Query` or any fill
+path, and `Entities` gains no field: its size class is measured on a despawn.
+Two types that render one name are refused together, listing both as
+`PkgPath.Name`, and that package-qualified form is accepted.
+
+**The lock is one entry, and it is already solved.** Each Command declares
+`write{*ecs.Entities}` and nothing else. [That is one entry, not
+N](#writeentities-is-one-entry-not-n): every handler touching a Store holds
+`read{*Entities}`, so the one write excludes every ECS System without naming a
+Store, which is why a Command registered before any Component exists can reach
+all of them. `ShrinkCmd` holds exactly the same lock for the same reason.
+
+**The price.** A call waits for every running ECS System to release
+`*ecs.Entities`, and under Conflict-aware FIFO every ECS System queued behind it
+waits until it returns. The stall is linear in the walk (for a query, the
+smallest named Store's population) plus up to the limit's encodings, which is
+what the limit bounds. A Command dispatched through the Executioner runs on the
+calling goroutine once its locks are granted, so the stall is charged to
+whichever frame is in flight, not to a frame of its own. Nothing here measures
+it; the write barrier alone measured
+[~6 µs a frame](#what-the-barrier-costs-and-where-the-cost-actually-is).
+
+**No frame pays for it, and no lock set widens.** They are Commands, not
+Systems: a frame nobody reads from runs exactly the handlers and lock sets it
+ran before, and the ecs plugin still subscribes nothing. What does change is
+visible where it should be: `Describe().Contention` lists the three Commands as
+writers of `*ecs.Entities` conflicting with every System.
+
+**Values are encoded under the lock and leave it detached.** A copied `m.List`
+shares its backing array, and a System holding a write lock may call `List.Set`
+the moment the reader lets go, so encoding after the handler returned would be
+a data race. Each value is encoded to JSON inside the handler and decoded back,
+with `UseNumber`, into plain maps, slices, strings, `json.Number` and bools that
+share no memory with any Store; `UseNumber` keeps a `uint64` Entity Reference
+exact. `m.List` encodes as the array of its elements and `assets.Blob` as
+`{"len":N}`, never its bytes, which could be texture-sized and would be encoded
+under the barrier. A value that cannot be encoded (a NaN) is reported on that
+Component alone.
+
+**Liveness on this path also checks the free list.** `Alive` is true of the
+handle a freed index will carry when it is next allocated, because a despawn
+steps the generation as it retires the index. No System ever holds that handle,
+but a string parser can make one, so a handle is alive for these reads only if
+`Alive` holds and its index is not on the free list. A dead Entity is refused
+naming the Entity that holds its index now, where one does; a free index names
+no holder. `Alive` itself is unchanged.
+
+**Refusals are answers.** An unknown name (refused listing every registered
+name), an ambiguous one, a malformed or dead Entity and a limit out of range
+are expected outcomes, so they travel in the response's `Refusal`, with every
+other field zero, rather than as a handler error. A handler body has no error to
+return, and `Executioner.ExecuteCommand` answers with the response alone.
+
+**Why Commands and not Systems.** A System may not name `*Entities`
+(`guardHandle` refuses it), `WriteableEntities` exposes only `Despawn` and no
+Store enumeration, and a `Query[Q]` cannot be built from strings. A Command
+holding the authority for write is the one shape that reaches every Store by
+name without widening anything a frame runs.
 
 ---
 

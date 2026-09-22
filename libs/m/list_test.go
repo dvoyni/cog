@@ -1,6 +1,7 @@
 package m
 
 import (
+	"encoding/json"
 	"testing"
 	"unsafe"
 )
@@ -53,5 +54,33 @@ func TestASetWritesTheElementAndMovesTheGeneration(t *testing.T) {
 	list.Set(1, 5)
 	if got := list.At(1); got != 5 {
 		t.Fatalf("element 1 is %d, want 5", got)
+	}
+}
+
+// A List crosses JSON as the array of its elements, so a Component holding one
+// reads as its data rather than as {}: empty is [], never null, and a List of
+// Lists nests through the same method.
+func TestAListEncodesAsTheArrayOfItsElements(t *testing.T) {
+	type point struct{ X, Y int }
+	cases := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"the zero List", List[int]{}, `[]`},
+		{"an empty List", ListOf([]int{}), `[]`},
+		{"a populated List", NewList(1, 2, 3), `[1,2,3]`},
+		{"a List of structs", NewList(point{1, 2}), `[{"X":1,"Y":2}]`},
+		{"nested Lists", NewList(NewList(1), List[int]{}, NewList(2, 3)), `[[1],[],[2,3]]`},
+		{"a List in a struct", struct{ Items List[string] }{NewList("a")}, `{"Items":["a"]}`},
+	}
+	for _, c := range cases {
+		encoded, err := json.Marshal(c.value)
+		if err != nil {
+			t.Fatalf("%s: marshal: %v", c.name, err)
+		}
+		if got := string(encoded); got != c.want {
+			t.Errorf("%s encoded as %s, want %s", c.name, got, c.want)
+		}
 	}
 }
