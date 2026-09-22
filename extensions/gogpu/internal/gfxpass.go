@@ -86,18 +86,13 @@ func (b *gfxBackend) BeginPass(desc gfx.PassDesc) gfx.RenderPass {
 		}
 		return nil
 	}
-	colour, width, height := b.passColour(desc)
+	var colour *wgpu.TextureView
+	var width, height int
+	if !desc.NoColor {
+		colour, width, height = b.passColour(desc)
+	}
 	depth := b.passDepth(desc, width, height)
-	if colour == nil {
-		// Either there is nothing to render at all, or the pass declares a
-		// colour target whose view does not exist yet - which every temporary
-		// target does on its first frame, since its allocation is a bake this
-		// same Execute replays after the descriptors were built. Both are
-		// skipped, and skipping is not optional for the second: a descriptor
-		// carrying only a depth attachment is the shape the HAL never begins
-		// and then faults ending, so opening one here is a segfault rather than
-		// a wasted pass. isDepthOnly above has already reported the case that
-		// asked for it deliberately.
+	if !passBegins(desc, colour != nil, depth != nil) {
 		return nil
 	}
 	pass := &wgpu.RenderPassDescriptor{Label: desc.Label}

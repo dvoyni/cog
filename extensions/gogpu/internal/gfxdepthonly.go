@@ -91,6 +91,28 @@ func isDepthOnly(desc gfx.PassDesc) bool {
 	return desc.NoColor && hasDepthAttachment(desc)
 }
 
+// passBegins reports whether a pass has the attachments to be opened, given
+// whether its colour and depth views resolved. It runs after the refusal, so a
+// depth-only pass that reaches it is one this backend can encode.
+//
+// A pass that declared colour and resolved none is skipped: either there is
+// nothing to render at all, or its target's view does not exist yet, as on
+// every temporary target's first frame, since its allocation is a bake the same
+// Execute replays after the descriptors were built.
+//
+// A depth-only pass needs only its depth view. This used to sit behind the same
+// colour check, which outlived the refusal it duplicated: with the refusal
+// lifted for Vulkan the pass was still dropped, silently, so its clear and its
+// depth writes never happened and a later pass loading that texture rendered
+// against whatever was in it. Pooled depth takes its size from the colour
+// target, so a depth-only pass on it resolves no view and is skipped here.
+func passBegins(desc gfx.PassDesc, colour, depth bool) bool {
+	if isDepthOnly(desc) {
+		return depth
+	}
+	return colour
+}
+
 // takeRefusal returns the pending refusal, if any, and clears it. It exists
 // because the backend runs on the render thread with no kernel handle: the
 // plugin takes it and reports it where a report can be made.
