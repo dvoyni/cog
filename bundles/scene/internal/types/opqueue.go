@@ -273,14 +273,14 @@ type DrawRecord struct {
 	// that never heard of animation binds nothing there and declares nothing.
 	Anim AnimBinding
 	// Group ties together the records one instanced call expanded into, so the
-	// flush can pack their survivors as a single batch. It is the recording
-	// ordinal of the group's first record plus one - unique within a frame with
-	// no counter to reset - and zero for a record that stands alone.
+	// flush can pack their survivors as a single batch without comparing them.
+	// It is the recording ordinal of the group's first record plus one - unique
+	// within a frame with no counter to reset - and zero for a record that
+	// stands alone.
 	//
-	// A debug shape leaves it zero even where a call makes several draws that
-	// would batch: a wire box's twelve edges share the unit box and the bundled
-	// material, and stay twelve batches, because collapsing draws that were
-	// recorded separately is the deferred automatic collapse, not this.
+	// A debug shape leaves it zero even where a call makes several draws: a
+	// wire box's twelve edges still pack as one batch, but because the flush
+	// merges equal draws recorded separately, not because they share a group.
 	Group uint32
 }
 

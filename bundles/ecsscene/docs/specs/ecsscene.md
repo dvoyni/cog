@@ -64,9 +64,11 @@ measured for 5 000 crates in view at `6a5254d` (the table is in
   frame. The key now belongs to the loaded model material, taken once at load.
 
 So ecsscene draws Batches, keyed on change, and reaches `gfx` without scene's
-queue in between. It could not batch through scene, because scene never merges
-separate calls ([#49](https://github.com/dvoyni/cog/issues/49)), and making it
-merge them is out of scope.
+queue in between. It could not batch through scene, because scene did not merge
+separate calls when this was decided, and making it merge them was out of scope
+here. scene has merged them since ([#49](https://github.com/dvoyni/cog/issues/49)),
+on the same criteria ecsscene keys a Batch on: key, per-draw parameters and
+animation.
 
 ---
 
@@ -418,7 +420,8 @@ ecsscene as much as scene, stay with the rest of `model`'s record in
 
 - **Per-instance properties** ([#520](https://github.com/dvoyni/cog/issues/520)),
   which would make a tinted crowd one draw in both renderers.
-- **scene merging separate calls** ([#49](https://github.com/dvoyni/cog/issues/49)).
+- **scene merging separate calls** ([#49](https://github.com/dvoyni/cog/issues/49)),
+  which landed afterwards in scene alone.
 - **Running scene and ecsscene together**, and detecting a stale `ModelHandle`.
   Both are undefined behaviour by the standing rules.
 - **Merging the four test backends** (scene's, ecsscene's, gfx's `fakeBackend`,

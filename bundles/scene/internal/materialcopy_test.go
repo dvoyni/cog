@@ -34,7 +34,7 @@ func TestMutatingAMeshMaterialTagAfterRecordingChangesNothingDrawn(t *testing.T)
 // parameter rewritten in place after recording; the second names a material
 // built from a copy of the original parameters. Copied at record, the two are
 // one material by content; read at flush, the first would carry the rewritten
-// value and a material id of its own.
+// value and a material id of its own, and the two draws would not merge.
 func TestMutatingAMeshMaterialParameterAfterRecordingChangesNothingDrawn(t *testing.T) {
 	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
@@ -56,12 +56,9 @@ func TestMutatingAMeshMaterialParameterAfterRecordingChangesNothingDrawn(t *test
 	h.frame()
 
 	batches := h.passes()[0].Batches
-	if len(batches) != 2 {
-		t.Fatalf("published %d batches, want 2", len(batches))
-	}
-	if batches[0].MaterialID != batches[1].MaterialID {
-		t.Fatalf("material ids %d and %d; the first draw saw the parameter written after it was recorded",
-			batches[0].MaterialID, batches[1].MaterialID)
+	if len(batches) != 1 || batches[0].InstanceCount != 2 {
+		t.Fatalf("published %v, want the two draws merged into one batch: "+
+			"a separate batch means the first draw saw the parameter written after it was recorded", batches)
 	}
 }
 
@@ -69,7 +66,8 @@ func TestMutatingAMeshMaterialParameterAfterRecordingChangesNothingDrawn(t *test
 // one frame, and only the later draw sees it. The first and third draws name
 // the original content - the third through a material rebuilt from a copy of
 // the original parameters - and the second names the rewritten one. Each draw
-// carries its own instance count so its batch is found after the sort.
+// carries its own instance count so its batch is found after the sort, and the
+// first and third, being equal, merge into one batch of four.
 //
 // A frame that reused one copy of a shared material by slice identity would
 // hand the second draw the first draw's copy, and all three would be one
@@ -89,11 +87,8 @@ func TestMutatingASharedMeshMaterialBetweenDrawsChangesOnlyTheLaterDraw(t *testi
 	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 	h.frame()
 
-	ids := materialIDsByInstanceCount(t, h.passes()[0].Batches, 3)
-	if ids[1] != ids[3] {
-		t.Fatalf("first and third draws have material ids %d and %d, want one: both name the original content", ids[1], ids[3])
-	}
-	if ids[2] == ids[1] {
+	ids := materialIDsByInstanceCount(t, h.passes()[0].Batches, 4, 2)
+	if ids[2] == ids[4] {
 		t.Fatalf("second draw has the first draw's material id %d, want its own: it names the rewritten material", ids[2])
 	}
 }
@@ -116,11 +111,8 @@ func TestMutatingASharedModelMaterialBetweenDrawsChangesOnlyTheLaterDraw(t *test
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 2*(1+2+3)
 	})
 
-	ids := materialIDsByInstanceCount(t, h.passes()[0].Batches, 3)
-	if ids[1] != ids[3] {
-		t.Fatalf("first and third draws have material ids %d and %d, want one: both name the original content", ids[1], ids[3])
-	}
-	if ids[2] == ids[1] {
+	ids := materialIDsByInstanceCount(t, h.passes()[0].Batches, 4, 2)
+	if ids[2] == ids[4] {
 		t.Fatalf("second draw has the first draw's material id %d, want its own: it names the rewritten material", ids[2])
 	}
 }
@@ -177,9 +169,9 @@ func instances(n int) []m.Transform {
 }
 
 // materialIDsByInstanceCount reads each batch's material id by its instance
-// count, requiring every count to agree on one id and every count from 1 to
-// draws to be present.
-func materialIDsByInstanceCount(t *testing.T, batches []scene.BatchView, draws int) map[int]uint32 {
+// count, requiring every count to agree on one id and every count named to be
+// present and no other.
+func materialIDsByInstanceCount(t *testing.T, batches []scene.BatchView, counts ...int) map[int]uint32 {
 	t.Helper()
 	ids := map[int]uint32{}
 	for _, batch := range batches {
@@ -188,10 +180,13 @@ func materialIDsByInstanceCount(t *testing.T, batches []scene.BatchView, draws i
 		}
 		ids[batch.InstanceCount] = batch.MaterialID
 	}
-	for n := 1; n <= draws; n++ {
+	for _, n := range counts {
 		if _, ok := ids[n]; !ok {
 			t.Fatalf("no batch of %d instances among %v", n, batches)
 		}
+	}
+	if len(ids) != len(counts) {
+		t.Fatalf("batches %v hold instance counts other than %v", batches, counts)
 	}
 	return ids
 }

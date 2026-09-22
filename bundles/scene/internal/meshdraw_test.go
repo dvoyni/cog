@@ -568,10 +568,10 @@ func TestAnInstancedBlendDrawStaysOneBatchPerInstance(t *testing.T) {
 	}
 }
 
-// Two instanced calls of one mesh with one material stay two batches. What the
-// flush collapses is the instances of one call; collapsing consecutive equal
-// draws that were recorded separately is deferred.
-func TestTwoInstancedCallsStayTwoBatches(t *testing.T) {
+// Two instanced calls of one mesh with one material and no per-draw data merge
+// into one batch, in recording order: the flush collapses equal draws whether
+// or not one call recorded them.
+func TestTwoEqualInstancedCallsPackAsOneBatch(t *testing.T) {
 	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
@@ -582,12 +582,8 @@ func TestTwoInstancedCallsStayTwoBatches(t *testing.T) {
 	h.frame()
 
 	batches := h.passes()[0].Batches
-	if len(batches) != 2 {
-		t.Fatalf("published %d batches, want one per call: %+v", len(batches), batches)
-	}
-	if batches[0].FirstInstance != 0 || batches[0].InstanceCount != 2 ||
-		batches[1].FirstInstance != 2 || batches[1].InstanceCount != 2 {
-		t.Fatalf("the batches span %+v, want [0, 2) and [2, 4)", batches)
+	if len(batches) != 1 || batches[0].FirstInstance != 0 || batches[0].InstanceCount != 4 {
+		t.Fatalf("published %+v, want both calls as one batch spanning [0, 4)", batches)
 	}
 }
 

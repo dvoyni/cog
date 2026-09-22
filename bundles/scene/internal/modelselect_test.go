@@ -18,11 +18,13 @@ import (
 func propsFile(t testing.TB) *gltf.Document {
 	t.Helper()
 	doc := testDoc()
-	mesh := triangleMesh(doc, nil)
+	// The two props are two meshes, as a crate and a barrel would be, so each
+	// is a batch of its own: one mesh under both would merge into one batch.
+	crate, barrel := triangleMesh(doc, nil), triangleMesh(doc, nil)
 	doc.Nodes = []*gltf.Node{
 		{Name: "layout", Children: []int{1, 2}, Translation: [3]float64{4, 0, 0}},
-		{Name: "crate", Mesh: gltf.Index(mesh), Translation: [3]float64{0, 3, 0}},
-		{Name: "barrel", Mesh: gltf.Index(mesh), Translation: [3]float64{0, -3, 0}},
+		{Name: "crate", Mesh: gltf.Index(crate), Translation: [3]float64{0, 3, 0}},
+		{Name: "barrel", Mesh: gltf.Index(barrel), Translation: [3]float64{0, -3, 0}},
 	}
 	sceneOf(doc, 0)
 	doc.Scene = gltf.Index(0)
@@ -110,11 +112,12 @@ func TestAWholeSceneDrawKeepsTheAuthoredTransforms(t *testing.T) {
 // default one.
 func TestASceneSelectorDrawsThatScene(t *testing.T) {
 	doc := testDoc()
-	mesh := triangleMesh(doc, nil)
+	// A mesh per node, so each node is a batch and the batch count says which
+	// nodes were drawn.
 	doc.Nodes = []*gltf.Node{
-		{Name: "a", Mesh: gltf.Index(mesh)},
-		{Name: "b", Mesh: gltf.Index(mesh), Translation: [3]float64{0, 1, 0}},
-		{Name: "c", Mesh: gltf.Index(mesh), Translation: [3]float64{0, 2, 0}},
+		{Name: "a", Mesh: gltf.Index(triangleMesh(doc, nil))},
+		{Name: "b", Mesh: gltf.Index(triangleMesh(doc, nil)), Translation: [3]float64{0, 1, 0}},
+		{Name: "c", Mesh: gltf.Index(triangleMesh(doc, nil)), Translation: [3]float64{0, 2, 0}},
 	}
 	namedSceneOf(doc, "solo", 0)
 	namedSceneOf(doc, "pair", 1, 2)

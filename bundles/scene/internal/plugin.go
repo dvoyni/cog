@@ -415,14 +415,14 @@ func (p *plugin) flushPass(
 	// removes any class bit from the key.
 	sortEntries(p.build.opaque)
 	sortEntries(p.build.blend)
-	// The opaque class packs an instanced call's survivors as one batch; the
-	// blend class packs one batch per entry, which is what keeps its back-to-
-	// front order intact.
+	// The opaque class packs each run of equal draws as one batch, an
+	// instanced call's survivors included; the blend class packs one batch per
+	// entry, which is what keeps its back-to-front order intact.
 	for _, class := range [2]sortClass{{p.build.opaque, true}, {p.build.blend, false}} {
 		for i := 0; i < len(class.entries); {
 			run := 1
 			if class.batched {
-				run = groupRun(class.entries[i:], survivors, draws)
+				run = groupRun(class.entries[i:], survivors, draws, p.prepared)
 			}
 			p.build.worlds = p.build.worlds[:0]
 			for _, entry := range class.entries[i : i+run] {
@@ -451,25 +451,97 @@ type sortClass struct {
 	batched bool
 }
 
-// groupRun counts the entries at the head of a sorted class that came from one
-// instanced call and so pack as a single batch. An ungrouped draw runs alone,
-// which is what leaves the deferred collapse of consecutive equal draws
-// deferred.
+// groupRun counts the entries at the head of a sorted class that pack as a
+// single batch: the survivors of one instanced call, and after them any draw
+// recorded separately that is equal to the head on everything a batch holds
+// once for all of its instances. The key is already equal for the whole run -
+// the sort put it there - so that leaves the draw's gfx parameters, its
+// bundled-PBR record and its animation binding. A draw that differs in any of
+// them ends the run, and costs a batch rather than drawing the wrong picture.
 //
-// A group's survivors reach here contiguous, and nothing else can land between
-// them: the instances of one call share a mesh and a material and therefore a
-// sort key, ties break on the recording ordinal, and every other draw was
-// recorded wholly before or wholly after the call.
-func groupRun(entries []sortEntry, survivors []survivor, draws []types.DrawRecord) int {
-	group := draws[survivors[entries[0].draw].draw].Group
-	if group == 0 {
-		return 1
-	}
+// Equal draws reach here contiguous because the key is material then mesh and
+// ties break on the recording ordinal, so a merged run is the batch a single
+// instanced call of the same draws would have made, instance for instance. A
+// group's survivors are contiguous for the same reason: the instances of one
+// call share a key, and every other draw was recorded wholly before or wholly
+// after the call.
+func groupRun(entries []sortEntry, survivors []survivor, draws []types.DrawRecord, prepared []preparedDraw) int {
+	index := survivors[entries[0].draw].draw
+	head := runHead{draw: &draws[index], anim: &prepared[index].anim}
 	run := 1
-	for run < len(entries) && draws[survivors[entries[run].draw].draw].Group == group {
-		run++
+	for ; run < len(entries); run++ {
+		next := survivors[entries[run].draw].draw
+		if head.draw.Group != 0 && draws[next].Group == head.draw.Group {
+			continue
+		}
+		if entries[run].key != entries[0].key || !head.matches(&draws[next], &prepared[next].anim) {
+			break
+		}
 	}
 	return run
+}
+
+// runHead is the first draw of a run, with what comparing against it costs
+// computed once for the run rather than once per draw: its parameters'
+// fingerprint and its bundled-PBR record.
+type runHead struct {
+	draw *types.DrawRecord
+	anim *types.AnimBinding
+
+	fingerprint      uint64
+	record           model.ScenePbrRecord
+	hashed, recorded bool
+}
+
+// matches reports whether a draw is equal to the head on everything a batch
+// holds once for all of its instances: its animation binding, its gfx
+// parameters and its bundled-PBR record. The cheap comparisons go first.
+//
+// Parameters held in the head's own backing - every instance of a call aliases
+// one arena range - are equal without a hash. Anything else compares gfx's own
+// fingerprint, the one ecsscene keys its batches on, which is the only
+// comparison that cannot silently forget a kind.
+func (h *runHead) matches(draw *types.DrawRecord, anim *types.AnimBinding) bool {
+	if draw.OverridesRecord != h.draw.OverridesRecord || !sameAnim(h.anim, anim) {
+		return false
+	}
+	a, b := h.draw.Params, draw.Params
+	if len(a) != len(b) {
+		return false
+	}
+	if len(a) > 0 && &a[0] != &b[0] {
+		if !h.hashed {
+			h.fingerprint, h.hashed = gfx.FingerprintParams(a), true
+		}
+		if gfx.FingerprintParams(b) != h.fingerprint {
+			return false
+		}
+	}
+	if !h.recorded {
+		h.record, h.recorded = h.draw.PbrRecord(), true
+	}
+	return draw.PbrRecord() == h.record
+}
+
+// sameAnim reports whether two draws say the same thing about animation. A
+// batch packs one binding for all of its instances, so separately animated
+// draws must stay separate batches: each animated call packs its own sceneAnim
+// block, and so carries its own offset.
+func sameAnim(a, b *types.AnimBinding) bool {
+	if a.InstanceAnim != b.InstanceAnim || a.Skin.Bound != b.Skin.Bound || a.Skin.Morphed != b.Skin.Morphed {
+		return false
+	}
+	if a.Skin.Bound && (!sameBuffer(a.Skin.Poses, b.Skin.Poses) || !sameBuffer(a.Skin.Joints, b.Skin.Joints)) {
+		return false
+	}
+	return !a.Skin.Morphed || sameBuffer(a.Skin.Morphs, b.Skin.Morphs)
+}
+
+// sameBuffer reports whether two descriptors name one baked buffer. A model's
+// group 2 buffers are always baked; an inline descriptor has no identity to
+// compare, and answers no rather than guess.
+func sameBuffer(a, b gfx.BufferDescr) bool {
+	return a.ID() != 0 && a.ID() == b.ID()
 }
 
 // cameraPosition reads the eye out of a camera's transform. Scale is ignored

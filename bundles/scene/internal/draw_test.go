@@ -104,8 +104,10 @@ func TestEveryPassBindsItsOwnInstanceSliceAndCountsFromZero(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Camera(second, testCameraDescr())
+		// Two colours, so the boxes are two batches: equal boxes would merge
+		// into one, and this test is about where a pass's second batch starts.
 		q.Box(0, m.At(0, 0, 0), testBoxColor)
-		q.Box(0, m.At(2, 0, 0), testBoxColor)
+		q.Box(0, m.At(2, 0, 0), testLineColor)
 	})
 	h.frame()
 

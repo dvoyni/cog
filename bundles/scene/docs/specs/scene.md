@@ -821,10 +821,10 @@ Four things are worth carrying out of it.
 - **Allocation is flat.** The copy lands in arenas that keep their backing
   across frames, so it adds no allocation in either case. (The bundled-PBR case's
   5 028 allocations a frame predate this work and are not the material path.)
-- **Every draw is its own batch** in all three cases, before and after: separately
-  recorded draws are not merged, which is the deferred automatic collapse
-  ([#49](https://github.com/dvoyni/cog/issues/49)), and the copy changes nothing
-  about batching.
+- **Every draw was its own batch** in all three cases, before and after: separately
+  recorded draws were not merged when this was measured. Merging them landed
+  later ([#49](https://github.com/dvoyni/cog/issues/49)), and the copy changes
+  nothing about batching.
 
 **Once per frame** ([#314](https://github.com/dvoyni/cog/issues/314)). Measured
 before and after the recording started reusing a frame's copy by content key and
@@ -1031,9 +1031,9 @@ the view depth as a monotonically-flipped `uint32`, reversed. **Recording ordina
 is the comparator's final tiebreak**, so an unstable sort is still frame-to-frame
 deterministic.
 
-There is deliberately **no `paramsHash` in the key**: with the automatic collapse
-deferred nothing reads it, and the collapse will check params over a run the way
-canvas's `keyMatches` does — order-preserving, so it changes nothing.
+There is deliberately **no `paramsHash` in the key**: the collapse checks per-draw
+data over a run instead (see Instancing), which is order-preserving, so it
+changes nothing.
 
 **Scene needs none of gfx's ids.** `ShaderID`, `PipelineID` and `TextureID` are
 assigned in `translate` on the render thread; scene never sees them.
@@ -1086,13 +1086,14 @@ Every scene draw is instanced, with `instances = 1` in the degenerate case, and
 `firstInstance`, so a batch reads its own slice of `sceneInstances` with no
 offset plumbing. That machinery is built in full.
 
-v1 does **not** collapse consecutive equal draws automatically. Instead
 `Transforms []m.Transform` on `MeshDraw` and `ModelDraw` makes an instanced draw
-**explicit** — a forest, a particle field, a tile floor — which is a feature
-rather than an optimisation and so earns its place independently, while driving
-the exact path the future collapser will drive. Because the sort ships in v1, the
-collapse will be **output-identical** when it lands
-([scene: collapse consecutive equal draws into instanced batches](https://github.com/dvoyni/cog/issues/49)).
+**explicit**: a forest, a particle field, a tile floor. It is a feature rather
+than an optimisation and so earns its place independently. Consecutive equal
+draws are also collapsed automatically, through the same packing path
+([scene: collapse consecutive equal draws into instanced batches](https://github.com/dvoyni/cog/issues/49)),
+and because the sort already puts equal draws side by side in recording order,
+the collapse is **output-identical**: the frame packs the same instance array it
+would have packed uncollapsed, in fewer batches.
 
 - **The instances share the draw's `Plays` and `MorphWeights`**, so a hundred
   trees sway in lockstep and a hundred independently-animated characters need a
@@ -1102,12 +1103,42 @@ collapse will be **output-identical** when it lands
 - **A blend-class instanced draw splits into N single-instance sort entries.**
   Sorting the set by its nearest instance would composite visibly wrong.
 
-The batch is **the call, not the key**. Each record an instanced call expands
-into carries the call's group, and the flush packs a run of one group's
-survivors as one batch — one draw call, one 256-byte material record, N
-contiguous instances. Two separate calls of the same mesh and material stay two
-batches, and so do a `WireBox`'s twelve edges; merging those is the deferred
-automatic collapse, and doing it early here would make that ticket unfalsifiable.
+A batch is **a run of equal draws**: one draw call, one 256-byte material
+record, N contiguous instances. Each record an instanced call expands into
+carries the call's group, and a group's survivors always pack together. After
+them, the run takes any draw recorded separately that is equal to the run's head
+on all of:
+
+- the opaque key, `materialID<<32 | meshID`;
+- the per-draw gfx `Params`, and whether they override the bundled-PBR record,
+  and so the record `PbrRecord()` builds. Params compare by gfx's own
+  `FingerprintParams`, the one ecsscene keys its batches on;
+- the animation binding. A batch packs one binding for all its instances, so
+  separately animated draws stay separate: each animated call packs its own
+  `sceneAnim` block and carries its own offset.
+
+A draw that differs in any of them ends the run. Two separate calls of the same
+mesh and material with no per-draw data are one batch, and so are a `WireBox`'s
+twelve edges and two calls of one static model. **The blend class never batches**,
+not even two adjacent equal draws: each blended entry is its own batch so each
+lands at its own depth, and ecsscene.md turns down blended batching with the
+glass-and-smoke case.
+
+**Measured** ([#49](https://github.com/dvoyni/cog/issues/49)), `BenchmarkFrame`:
+5 000 separately recorded equal Mesh calls, before and after, two test binaries
+run interleaved six times each, medians. The frame goes from 5 000 batches to 1:
+
+| Case | Before | After | Bytes a frame |
+|---|---|---|---|
+| none (bundled PBR) | 13.7 ms | 1.75 ms | 14 MB to 332 KB |
+| shared Material | 14.1 ms | 3.24 ms | 14 MB to 332 KB |
+| shared Material plus a Params override | 14.7 ms | 3.52 ms | 14 MB to 332 KB |
+
+The none case also drops from 5 024 allocations a frame to 24. What was not
+measured is a frame whose equal-keyed neighbours all differ in per-draw data,
+which pays the comparison and merges nothing: a run's head builds its record
+once, and a draw's parameters are fingerprinted only when they are not the
+head's own slice.
 
 A group's survivors arrive at the packer contiguous with nothing between them,
 which is what lets the run be found with a scan rather than a second grouping
@@ -2238,7 +2269,6 @@ under [Scene follow-ups](https://github.com/dvoyni/cog/issues/29).
 | Morph targets and skinning on buffer-built meshes | both need a group-2 binding a `MeshRef` has no equivalent of, and skinning additionally needs joint-data ownership — most of a model format invented at the call site | [43](https://github.com/dvoyni/cog/issues/43), [51](https://github.com/dvoyni/cog/issues/51) |
 | Shader preprocessing and vertex variants; multi-buffer vertex binding | the cheap first step is an entry-point field, not preprocessing: the fragment stage does not vary with vertex layout at all | [45](https://github.com/dvoyni/cog/issues/45), [46](https://github.com/dvoyni/cog/issues/46) |
 | gogpu's unvalidated `arrayStride` | upstream; filed so the trap is written down | [47](https://github.com/dvoyni/cog/issues/47) |
-| Automatic collapse of consecutive equal draws | shape fully known (canvas's `keyMatches` run-loop over the sorted array), and **output-identical** because the sort ships in v1 | [49](https://github.com/dvoyni/cog/issues/49) |
 | Golden-image acceptance and the first CI workflow | engine surface, not plugin spec; the assertion half needs none of it | [54](https://github.com/dvoyni/cog/issues/54) |
 | Text AA midpoint shift for linear blending | only if linear-blended text reads wrong | [36](https://github.com/dvoyni/cog/issues/36) |
 | Moving `sceneFrame` to a uniform block | the better long-term shape and the named next lever for an eighth storage-buffer slot, but gfx's uniform path is per-draw only, capped at 256 with silent truncation, with no range binding and a `BufferUniform` usage never produced anywhere — a gfx feature, not a budget fix | [100](https://github.com/dvoyni/cog/issues/100) |

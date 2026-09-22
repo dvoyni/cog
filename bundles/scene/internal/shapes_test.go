@@ -53,7 +53,7 @@ func TestEveryDebugCallIsOneOpReportingItsArguments(t *testing.T) {
 }
 
 // A wire box is one call and twelve draws: each edge is its own instance,
-// culled on its own.
+// culled on its own, and the twelve pack into one gfx draw.
 func TestAWireBoxFlushesToTwelveEdges(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
@@ -65,8 +65,8 @@ func TestAWireBoxFlushesToTwelveEdges(t *testing.T) {
 	if pass.Recorded != 12 || pass.Instances != 12 {
 		t.Fatalf("recorded %d, packed %d; want 12 edges", pass.Recorded, pass.Instances)
 	}
-	if len(h.backend.draws) != 12 {
-		t.Fatalf("the backend received %d draws, want 12 edges", len(h.backend.draws))
+	if len(h.backend.draws) != 1 || h.backend.draws[0].instances != 12 {
+		t.Fatalf("the backend received %d draws, want one of the 12 edges", len(h.backend.draws))
 	}
 }
 
@@ -308,11 +308,11 @@ func nearVec3(a, b m.Vec3) bool {
 	return math.Abs(float64(a.X-b.X)) < 1e-4 && math.Abs(float64(a.Y-b.Y)) < 1e-4 && math.Abs(float64(a.Z-b.Z)) < 1e-4
 }
 
-// A wire box's twelve edges share one mesh and one material, and stay twelve
-// single-instance batches. The batching the flush does is per instanced call;
-// collapsing consecutive equal draws recorded one at a time is deferred, and a
-// wire box is twelve separate draws by design.
-func TestAWireBoxStaysTwelveSingleInstanceBatches(t *testing.T) {
+// A wire box's twelve edges share one mesh, one material and one colour, and
+// pack as one batch of twelve instances. They are twelve separate draws by
+// design, recorded one at a time with no group between them, so this is the
+// flush merging equal draws rather than packing one instanced call.
+func TestAWireBoxPacksAsOneBatch(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.WireBox(0, m.Vec3{Z: -5}, m.Vec3{X: 1, Y: 1, Z: 1}, 0.05, testLineColor)
@@ -320,12 +320,10 @@ func TestAWireBoxStaysTwelveSingleInstanceBatches(t *testing.T) {
 	h.frame()
 
 	batches := h.passes()[0].Batches
-	if len(batches) != 12 {
-		t.Fatalf("published %d batches, want the twelve edges: %+v", len(batches), batches)
+	if len(batches) != 1 || batches[0].FirstInstance != 0 || batches[0].InstanceCount != 12 {
+		t.Fatalf("published %+v, want the twelve edges as one batch", batches)
 	}
-	for i, batch := range batches {
-		if batch.InstanceCount != 1 {
-			t.Fatalf("edge %d is a batch of %d instances, want 1", i, batch.InstanceCount)
-		}
+	if materials := h.backend.buffersBoundTo("scenePbrMaterial"); len(materials) != 1 {
+		t.Fatalf("scenePbrMaterial was bound %d times, want one record for the box", len(materials))
 	}
 }
