@@ -42,7 +42,8 @@
 //
 // A game whose drawables are shaped differently writes its own recording
 // System and does not register this plugin. docs/README.md is the API, and
-// its prohibitions are what a second binding has to keep true.
+// its prohibitions are what a second binding has to keep true;
+// docs/specs/ecsscene.md is the design record.
 //
 // The Components and the vocabulary's aliases are in types.go, the errors the
 // recording System reports in err.go, and Layer in utils.go.

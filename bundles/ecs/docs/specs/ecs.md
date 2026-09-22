@@ -694,9 +694,12 @@ line the rule draws: a binding spells those descriptors out as Component fields
 holding `m.List`s and rebuilds them per draw. The rows that moved were refused
 for holding a name, a matrix pointer or byte slices, and scene changed each of
 those. **`ecsscene` was built on the removed
-vocabulary** — `ModelHash`, `ClipHash`, `ecs.Names`, `ecs.NoHash` — and has
-since been rebuilt as a thin binding whose Components hold scene's own types,
-the path included.
+vocabulary** — `ModelHash`, `ClipHash`, `ecs.Names`, `ecs.NoHash` — and was
+rebuilt as a thin binding whose Components held scene's own types, the path
+included. Since [#538](https://github.com/dvoyni/cog/issues/538) its Components
+hold `model`'s — `model.ModelRef`, `model.MeshRef`, `model.ClipPlay`,
+`model.LightDescr` — beside its own copy of scene's camera, layer and pass
+types, and the verdicts above hold of those the same way.
 
 ---
 
@@ -1951,26 +1954,42 @@ System may take anything a cog handler may take — and **no new vocabulary at
 all** ([The binding shape](https://github.com/dvoyni/cog/issues/246)).
 
 This was settled against the real `scene` package rather than against physics
-and audio, which do not exist and therefore cannot answer it. Scene is also the
-case a game reaches for first.
+and audio, which did not exist then and therefore could not answer it. Scene is
+also the case a game reaches for first.
+
+> **Amended by [#538](https://github.com/dvoyni/cog/issues/538).** `ecsscene`
+> no longer binds into scene. Since the model split
+> ([model.md](../../../model/docs/specs/model.md)), it is the ECS's renderer over
+> `model`: it records to `gfx` itself and imports nothing of scene, and an app
+> composes it *instead of* scene, never beside it. The decision above did not
+> move — ecsscene is still an ordinary plugin reaching resources through its
+> Systems' signatures, with nothing of the ECS's own. What changed is which
+> resources, and three subsections below say what they used to say. ecsscene's
+> own design record is [`ecsscene.md`](../../../ecsscene/docs/specs/ecsscene.md).
+
+ecsscene's recording System, as it is now:
 
 ```go
 func record(
-    models *ecs.Query[modelQuery],             // the Components
-    plays  *ecs.Get[Animation],                // an optional Component, probed
-    work   *ecs.Write[*scratch],               // the binding's own resource
-    out    *ecs.Write[*scene.OpQueue],         // the bound plugin's resource
-) {
-    s, queue := work.Get(), out.Get()
-    for e, it := range models.All() {
-        draw := scene.ModelDraw{Transform: scene.Transform(it.Place)}
-        if animation, ok := plays.Of(e); ok {
-            draw.Plays = s.clipPlays(&animation)
-        }
-        queue.Model(it.Model.Layers, it.Model.Ref.Path, draw)
-    }
-}
+    k kernel.Kernel,
+    models  *ecs.Query[modelQuery],            // the Components
+    meshes  *ecs.Query[meshQuery],
+    lights  *ecs.Query[lightQuery],
+    cameras *ecs.Query[cameraQuery],
+    animations *ecs.Get[ecsscene.Animation],   // optional Components, probed
+    params     *ecs.Get[ecsscene.Params],
+    materials  *ecs.Get[ecsscene.Material],
+    keys     *ecs.Read[*keyScratch],           // the load System's keys
+    lookup   *ecs.Read[*model.Lookup],         // model's residency, read only
+    viewport *ecs.Read[*gfx.Viewport],
+    work *ecs.Write[*scratch],                 // the binding's own resource
+    out  *ecs.Write[*gfx.OpQueue],             // the resource it draws into
+)
 ```
+
+It used to take `*ecs.Write[*scene.OpQueue]` and make one `queue.Model` or
+`queue.Mesh` call per Entity. The shape of the signature is the same; only the
+resources are different.
 
 `ecs.Read[T]` and `ecs.Write[T]` are the only addition. They wrap the
 `kernel.Read[T]`/`kernel.Write[T]` a handler's `Lock` already declares, reached
@@ -1985,25 +2004,36 @@ value read from a handle lives only as long as the handler holds its lock.
 
 ### The binding is necessarily a third plugin
 
-`ecs` imports only `kernel` and `m`; `scene` imports nothing of `ecs`. **Neither can
-know about the other**, so a binding is necessarily a third plugin that imports
-both. That is what "there is no binding mechanism" means in practice, and it has
-a consequence worth stating: **a project not using the ECS schedules no ECS
-Systems** — it simply does not register that plugin.
+`ecs` imports only `kernel` and `m`; `model` and `gfx` import nothing of `ecs`.
+**Neither side can know about the other**, so a binding is necessarily a third
+plugin that imports both. That is what "there is no binding mechanism" means in
+practice, and it has a consequence worth stating: **a project not using the ECS
+schedules no ECS Systems** — it simply does not register that plugin.
 
-**cog ships the bindings for its own in-house plugins** — ecs↔scene, and physics
-and audio when they exist. They remain separate plugins, because the import
-graph allows nothing else, and a game that wants its own instead simply does not
-register cog's.
+When this was written the other side was `scene`, which imported nothing of
+`ecs` either; the argument is the same with `model` and `gfx` in its place.
 
-### Data flows one way, and for scene that is not a choice
+**cog ships the bindings for its own in-house plugins** — `ecsscene` for drawing
+over `model`, `ecsphysics2d` and `ecsaudio`. They remain separate plugins,
+because the import graph allows nothing else, and a game that wants its own
+instead simply does not register cog's.
 
-`scene.OpQueue` is frame-local and re-recorded from nothing every frame; scene
-retains residency and **no per-entity state whatsoever**. There is no scene-side
-object for a drawable Entity to be a copy of, so "two copies and a sync cost
-every frame" does not arise, and neither does the coupling worry on the other
-side: **the Components are the source of truth because there is no other
-candidate.**
+### Data flows one way, and for a renderer that is not a choice
+
+`gfx.OpQueue` is frame-local and re-recorded from nothing every frame. `model`
+retains residency — loaded models, meshes, textures — and **no per-entity state
+whatsoever**. There is no renderer-side object for a drawable Entity to be a copy
+of, so "two copies and a sync cost every frame" does not arise, and neither does
+the coupling worry on the other side: **the Components are the source of truth
+because there is no other candidate.** This was said of `scene.OpQueue` first,
+and it held unchanged when ecsscene moved from scene's queue to gfx's.
+
+ecsscene does keep one thing between frames: its load System's **key
+scratch**, the Batch key of each Entity, written when a `Model`, `Mesh`,
+`Material` or `Params` changes. It is derived data, rebuilt from the Components
+on change and dropped when the Entity is, never a second source of truth, and it
+is a resource named in both Systems' signatures rather than anything the ECS
+holds.
 
 This does **not** generalise to physics, which does retain bodies. The direction
 question is the bound plugin's to answer and stays
@@ -2012,17 +2042,27 @@ question is the bound plugin's to answer and stays
 
 ### The wide lock lands in the bound plugin, not in the ECS
 
-Not where it was expected. `*scene.OpQueue` is **one resource**, so every
-recording System serialises against every other recording System for write,
-whatever Components they read. **The ECS's per-Store granularity buys nothing on
-the recording side** — that is a property of the bound plugin's API. Scene
-publishes one queue, so scene recording is one lock wide.
+Not where it was expected. The queue a binding records into is **one
+resource**, so every recording System serialises against every other recording
+System for write, whatever Components they read. **The ECS's per-Store
+granularity buys nothing on the recording side** — that is a property of the
+bound plugin's API. It was `*scene.OpQueue`; it is `*gfx.OpQueue` now, which
+only Last-phase flushes and gfx's own handlers otherwise write, so no ordinary
+System lost parallelism in the move.
 
-Which is fine, because splitting it would lose anyway. Whole-frame, publish →
-locks → Systems → wait, measured on `ecsscene` itself with `storage`, `gfx`,
-`scene`, `ecs` and a game plugin composed beside it — five subscribers to the
-tick — and 5 000 `Model` Entities per row; the binary it replaced was built
-first and run alternately, ten rounds, medians:
+ecsscene holds **one more lock than it did**: its load System takes
+`Write[*model.Lookup]`, because loading is exclusive, and it is the only
+ecsscene System that does. The recording System reads the Lookup. A game System
+that *writes* the Lookup now serialises against recording, where before scene's
+Last-phase flush held that lock. Readers run side by side, so nothing that only
+reads model residency is serialised.
+
+Which is fine, because splitting the recording would lose anyway. Whole-frame,
+publish → locks → Systems → wait, measured on `ecsscene` when it still proxied
+into scene, with `storage`, `gfx`, `scene`, `ecs` and a game plugin composed
+beside it — five subscribers to the tick — and 5 000 `Model` Entities per row,
+with no frame drawn; the binary it replaced was built first and run alternately,
+ten rounds, medians:
 
 | whole frame | ns/op | allocs/op |
 | --- | --- | --- |
@@ -2045,12 +2085,22 @@ blocked behind another costs the kernel's scheduler an allocation per blocked
 dispatch, which shows up as a fraction of an object a frame growing with frame
 length. **One recording System per bound plugin is the shape.**
 
+Those rows predate the redesign and measured recording only. The benches that
+replaced them draw the frame into a backend as well, and are in
+[`ecsscene.md` §What it costs](../../../ecsscene/docs/specs/ecsscene.md#what-it-costs):
+5 000 Entities went from 14.2 ms through scene to 1.1 ms recorded to gfx as one
+Batch, with allocations flat at 18–20 a frame whatever the population.
+
 ### Ordering needs nothing new
 
-scene's plugin subscribes its flush, `scene.FlushOnUpdate`, `.Last().Before[gfx.PresentOnUpdate]()`,
-so a recording System that does not ask to be last already runs before it. No
-new ordering vocabulary, demonstrated in the prototype with a `.Last()` stand-in
-for the flush.
+gfx subscribes its present, `gfx.PresentOnUpdate`, `Last`, so a recording
+System that does not ask to be last already runs before it. ecsscene orders its
+load System `Before[ecsscene.RecordOnUpdate]()` with the ordering the kernel
+already has, and a game System that moves Transforms orders itself
+`Before[ecsscene.RecordOnUpdate]()`. No new ordering vocabulary. When ecsscene
+bound into scene the same held of scene's flush, `scene.FlushOnUpdate`,
+subscribed `.Last().Before[gfx.PresentOnUpdate]()`, demonstrated in the
+prototype with a `.Last()` stand-in for the flush.
 
 ### What a binding plugin may not do
 
@@ -2059,30 +2109,37 @@ been written with them in mind.
 
 - **A Component holds no mutable indirection, transitively** — enforced at
   registration, where the type is named and nothing has been stored yet.
-- **Never hand the bound plugin a view of a Store's memory.** Scene reads what a
-  draw names at its flush, which is a *different* System running after the
-  recording System's locks are gone. Copy a `List` out through `All()` into
-  scratch; there is no `Raw()` to get this wrong with.
+- **Never hand the bound plugin a view of a Store's memory.** gfx copies a
+  draw's descriptors at the call, but bytes it was handed without a copy are
+  read at its present, which is a *different* handler running after the
+  recording System's locks are gone — as scene's flush was when ecsscene bound
+  into scene. Copy a `List` out through `All()` into scratch; there is no
+  `Raw()` to get this wrong with.
 - **Draw data a bound plugin takes as a slice is rebuilt, not stored.** Play
   lists, params, material tags and passes are copied out of the Components into
-  scratch each frame; scene copies each into its own arena at record time, so
-  the next draw may reuse the backing the moment the call returns. Scratch comes
-  from backings allocated once, never from a stack array a recording call would
-  let escape.
+  scratch each frame, and reset per frame rather than per draw, so nothing is
+  overwritten before the frame is emitted. Scratch comes from backings allocated once, never from a stack
+  array a recording call would let escape.
 - **Anything a System keeps between calls is a resource.** Scratch captured in a
   closure has no lock anywhere naming it; as a resource in the signature it is in
   the lock set, and the kernel rather than a comment keeps two holders apart.
+  ecsscene's key scratch and recording scratch are both resources.
 - **Do not cache an Entity without checking liveness, and do not restructure the
   world from inside another Entity's iteration.**
 
-### One measured thing that is scene's problem, not the ECS's
+### One measured thing that was scene's problem, not the ECS's
 
 `scene` re-resolves a model path per recorded draw per frame at **46.9 ns**
 against **0.54 ns** for a dense index — ~235 µs a frame at 5 000 drawables,
 three quarters of it re-normalising a path that was validated at load. The ECS
-binding is correct and allocation-free without any change there, so it is
+binding was correct and allocation-free without any change there, so it was
 recorded as [scene: name a model by an interned handle, not by its path every
 frame](https://github.com/dvoyni/cog/issues/263) and is out of scope here.
+
+ecsscene no longer pays it: its load System resolves a `ModelRef` to a
+`model.ModelHandle`, a plain slot index, once, when the `Model` changes, and the
+recording System reads through the handle. scene still resolves by path, and
+#263 is still scene's.
 
 ---
 

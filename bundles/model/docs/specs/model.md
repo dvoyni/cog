@@ -45,17 +45,22 @@ something unverified it would be marked **Gap**; none is left. Where putting
 decisions side by side settled something that no ticket did, it is marked
 **Settled here**.
 
-**The first two carve steps are implemented** ([#529](https://github.com/dvoyni/cog/issues/529),
-[#530](https://github.com/dvoyni/cog/issues/530)). `bundles/model` is a Bundle
-with a plugin, `modelplugin.New`, that registers the `*model.Lookup` resource.
-It holds the glTF decoder, the unit geometry, `Vertex` with the storage layout
-it reports, the conversion to GPU layouts, the model and texture caches, the
-mesh table and the Lookup, and scene imports all of it from model's root. [The
-decoder seam](#the-decoder-seam) and the caches in [Residency](#residency-one-lookup-two-facades)
-describe the code; every other section is still the plan. Each stage of
-[Required work](#required-work) turns the sections it builds from a plan into a
-description of the code. [`mesh.md`](mesh.md) moved here with the cache, and
-`scene.md` is cut down to the renderer in the sweep.
+**Stages 1 to 4 of [Required work](#required-work) are implemented.**
+`bundles/model` is a Bundle with a plugin, `modelplugin.New`, that registers
+the `*model.Lookup` resource. It holds the glTF decoder, the unit geometry,
+`Vertex` with the storage layout it reports, the conversion to GPU layouts, the
+model and texture caches, the mesh table, the Lookup with its two facades, the
+model material, the bundled shader, and the records it reads with their
+packers, and scene imports all of it from model's root. ecsscene records to
+`gfx` itself over the same `model`, and imports nothing of scene; it landed on
+main in one merge ([#538](https://github.com/dvoyni/cog/issues/538)). **Its
+part of this design moved to its own spec**,
+[`ecsscene.md`](../../../ecsscene/docs/specs/ecsscene.md): its Components and
+vocabulary, its copy of the frame code, its two Systems, Batches and what it is
+tested against. [ecsscene after the split](#ecsscene-after-the-split) keeps the
+summary. What is left is the sweep, stage 5, which deletes scene's temporary
+aliases. [`mesh.md`](mesh.md) moved here with the cache, and `scene.md` is cut
+down to the renderer in the sweep.
 
 ---
 
@@ -71,8 +76,6 @@ description of the code. [`mesh.md`](mesh.md) moved here with the cache, and
 - [Storability, and `m.List`](#storability-and-mlist)
 - [scene after the split](#scene-after-the-split)
 - [ecsscene after the split](#ecsscene-after-the-split)
-- [Batches](#batches)
-- [What ecsscene is tested against](#what-ecsscene-is-tested-against)
 - [The fountains](#the-fountains)
 - [What is not foreclosed](#what-is-not-foreclosed)
 - [Shapes that were rejected](#shapes-that-were-rejected)
@@ -396,8 +399,9 @@ renderer drawing a mesh with no material needs the same record.
 
 **Settled, verified while handing over:** the shader reads `animOffset` from each
 instance's own record (`instance.wgsl`, read by `skin.wgsl` and `morph.wgsl`),
-never as a value fixed for the draw. That is the condition [Batches](#batches)
-rests on for skinned and morphed Entities.
+never as a value fixed for the draw. That is the condition ecsscene's
+[Batches](../../../ecsscene/docs/specs/ecsscene.md#batches) rest on for skinned
+and morphed Entities.
 
 ---
 
@@ -518,173 +522,33 @@ not about these re-exports. The sweep deletes them.
 ## ecsscene after the split
 
 From [#495](https://github.com/dvoyni/cog/issues/495), [#497](https://github.com/dvoyni/cog/issues/497),
-[#509](https://github.com/dvoyni/cog/issues/509) and [#521](https://github.com/dvoyni/cog/issues/521).
+[#501](https://github.com/dvoyni/cog/issues/501), [#509](https://github.com/dvoyni/cog/issues/509)
+and [#521](https://github.com/dvoyni/cog/issues/521). Landed in
+[#535](https://github.com/dvoyni/cog/issues/535), [#536](https://github.com/dvoyni/cog/issues/536)
+and [#537](https://github.com/dvoyni/cog/issues/537), and on main in one merge
+with [#538](https://github.com/dvoyni/cog/issues/538).
 
 **ecsscene repeats scene's path, recording to `gfx` itself, and imports nothing
-of scene.** It is not redesigned to do anything scene does not.
+of scene.** It is not redesigned to do anything scene does not, except draw
+Batches. Its design record is now its own:
+[`ecsscene.md`](../../../ecsscene/docs/specs/ecsscene.md). In summary:
 
-### Its Components
-
-**ecsscene wraps `model` values in Components of its own**, passed through
-unconverted. It does not register `model`'s types: registering `model.MeshRef`
-would claim the one Store that Go type can have.
-
-| Component | after the split |
-| --- | --- |
-| `Model` | `{Ref model.ModelRef; Layers LayerMask}` |
-| `Mesh` | `{Ref model.MeshRef; Bounds; Layers LayerMask; NeverCull}` |
-| `Animation` | `Plays [model.MaxClipPlays]model.ClipPlay`. ecsscene's `MaxPlays` goes |
-| `Params` | `Values m.List[gfx.ParameterDescr]` |
-| `Material` | `Tags m.List[MaterialTag]`, and `MaterialTag.Tag` is ecsscene's own `PassTag` |
-| `Light` | `{Descr model.LightDescr; Layers LayerMask}`. The recording System writes `Descr.Position` and `Descr.Direction` from the Entity's Transform, and the Component documents both as ignored |
-| `Camera` | stays flat, with scene's field names. `Passes` becomes `m.List[Pass]` |
-
-### Its own copy of the vocabulary
-
-**ecsscene declares its own copies of scene's camera, layer and pass types**, each
-keeping scene's name, shape and zero-value meaning:
-
-- `LayerMask`, with `LayersAll` and `Layer`;
-- `PassTag`, with `TagForward`;
-- `Pass`, with its six fields;
-- `CameraID`, over `gfx.Order`;
-- `ProjectionKind`, with `Perspective`, `Orthographic` and `Oblique`.
-
-`LightKind` is `model`'s. Projection maths is `libs/m`'s.
-
-### Its own copy of the frame code
-
-**ecsscene copies the code that does not depend on the shader** into its own
-`internal/`, adapted to Entities: the arena and `recordBytes`, culling (`culler`,
-`prepareDraw`, `resolveBounds`), the sort keys and `sortEntries`, and
-`frameBuild`'s emission loop, which takes its binding names from `model`. Once
-ecsscene uses Batches and scene does not, the two copies differ in their details
-anyway.
-
-### Its Systems
-
-1. **The load System** runs on changed `Model`, `Material` and `Params`
-   Components. It takes `kernel.Write[*model.Lookup]` and is ordered before
-   recording. For each changed Entity it:
-   - resolves the `ModelRef` to a `ModelHandle`, loading the model if needed;
-   - computes the Batch key;
-   - stores both in ecsscene's scratch, keyed by Entity, and never in a
-     Component, since writing the Component would make this System its writer.
-
-   It also drives `model`'s bake and release queues. In a steady frame it walks
-   no Entity. Apps may still preload through the load facade to choose when an
-   upload happens.
-
-   Landed in [#536](https://github.com/dvoyni/cog/issues/536), behind
-   `ecsscene.LoadOnUpdate`. It reads `Hooks[T, HookAll]` of `Model`, `Mesh`,
-   `Material` and `Params`, so it keys a `Mesh` too. It names a model
-   primitive in the key by the `MeshRef` it draws, since a primitive's place
-   in a selector's view is not its place in the model. `Model`, `Mesh` and
-   `model.MeshRef` spell out their padding, because the ECS compares Changed
-   by bytes.
-2. **The recording System** takes `kernel.Read[*model.Lookup]` and writes
-   `*gfx.OpQueue`. It:
-   1. reads each Entity's key from scratch;
-   2. buckets Entities into Batches;
-   3. for each camera and pass, culls, applies the layer mask, and filters each
-      Batch's instances;
-   4. sorts, and packs one properties record and one instanced draw per Batch
-      through `model`'s packers.
-
-   Landed in [#537](https://github.com/dvoyni/cog/issues/537), behind
-   `ecsscene.RecordOnUpdate`. It also reads the load System's key scratch and
-   `*gfx.Viewport`. The load System ensures the bundled PBR and records
-   whether the backend is ready, because the recording System holds the
-   Lookup only for reading. Buckets split by shader variant as well as by key,
-   which changes nothing for a file's own material. Passes keep scene's
-   labels, `scene.camera<ID>.<tag>`, and scene's errors are declared again
-   under ecsscene's names.
-
-The lock-set test that names `*scene.OpQueue` changes to `*gfx.OpQueue` with the
-recording.
-
----
-
-## Batches
-
-From [how ecsscene groups Entities into instanced draws](https://github.com/dvoyni/cog/issues/509).
-
-**ecsscene builds its Batches every frame, in its recording System, from keys
-written on change.** Sorting measured under 0.4% of a frame, so rebuilding them
-is cheap, and a steady frame never hashes a material.
-
-**The Batch key:**
-
-- a Model Entity: (`ModelHandle`, primitive, material key, `Params` hash);
-- a Mesh Entity: (`MeshRef`, material key, `Params` hash).
-
-The material key is the model material's load-time key, or the key of the
-Entity's `Material` override.
-
-**Not in the key:** `LayerMask`, culling and the camera. They filter instances
-inside a Batch for each pass, the way scene packs only a Batch's survivors.
-
-**What splits a Batch** is anything that changes the key: a different mesh or
-primitive, a different `Material` (so a different pipeline), or different `Params`
-values. **Equal `Params` batch.** 5 000 crates all tinted red are one Batch, and
-5 000 crates tinted differently are 5 000 Batches, as in scene.
-
-**Skinned and morphed Entities that share a mesh and material share a Batch.**
-Each instance points at its own animation block through the instance record's
-`AnimOffset`, which the shader reads per instance (verified; see [the shader's
-records](#the-shaders-records-and-their-packers)). The fallback #509 kept in
-reserve, a hash of `Plays` joining the key, is not needed.
-
-**Blended materials stay one Batch per entry**, sorted back to front, as in scene.
-An alpha-tested cutout is `BlendOpaque`, so it batches.
-
-**Batching is always on, with no Component to opt out.** It costs a game nothing
-it would opt into, and the only thing it changes that a game could observe is
-the order of opaque draws, which is already unspecified. It is not a heuristic,
-because equal keys batch deterministically.
-
----
-
-## What ecsscene is tested against
-
-From [what ecsscene asserts against once there is no Op to read back](https://github.com/dvoyni/cog/issues/501).
-
-**The oracle is a recording `gfx.Backend`.** The harness publishes `RenderEvent`
-as well as `UpdateEvent`. Tests assert on what gfx received:
-
-- the vertex and index buffers bound;
-- draw and instance counts;
-- pass descriptors and clears;
-- the baked bytes of the instance, camera and light buffers, decoded against
-  `model`'s record layouts;
-- the `SetParams` bytes.
-
-Tests in the same package may also read ecsscene's scratch as a white-box extra,
-never as the only assertion on a behaviour.
-
-**ecsscene keeps its own `testBackend`, in `_test.go`**, modelled on scene's
-(`bundles/scene/internal/scene_test.go`). It also records `SetParams` bytes, which
-scene's drops, and supplies a `ShaderLayout` for each variant so gfx keeps the
-parameters.
-
-**ecsscene publishes no inspection API.** Counts a game or a HUD needs come from
-gfx's `ArmFrameCmd`.
-
-**Tests assert properties, not Batch shape.** A test checks which mesh drew how
-many instances with which records. Only the Batch tests assert exact Batch counts.
-
-**Layer and pass routing get their first tests in the redesign.** scene does that
-routing today and ecsscene has never tested it. That gap exists already; the
-redesign does not open it.
-
-**The five benches keep their names** (`BenchmarkFrameEmpty`, `Frame5000`,
-`FrameAnimated5000`, `FrameParams5000`, `FrameMaterial5000`) and gain a bottom
-half that draws: a camera, a model made resident from an in-memory file system,
-`UpdateEvent` plus `RenderEvent`, and a backend that reports `Ready()` and whose
-sinks replay and discard. They assert nothing; they report time and allocations.
-`TestRecordingAllocatesNothingPerEntity` keeps the allocation claim. They are
-built against today's ecsscene first, so the redesign has a "before" figure from
-the same code.
+- **Its Components wrap `model`'s values**, `model.ModelRef`, `model.MeshRef`,
+  `model.ClipPlay` and `model.LightDescr`, and it does not register `model`'s
+  types.
+- **It declares its own copy of scene's camera, layer and pass vocabulary**,
+  with scene's names, shapes and zero values, and its own copy of the frame
+  code that does not depend on the shader. What does depend on the shader is
+  `model`'s.
+- **Its load System** is the only ecsscene System holding
+  `kernel.Write[*model.Lookup]`. It keys each changed Entity into a Batch, and
+  drives `model`'s bake and release queues.
+- **Its recording System** holds the Lookup only for reading, through the read
+  facade, buckets Entities into [Batches](../../../ecsscene/docs/specs/ecsscene.md#batches)
+  by those keys, and draws one instanced draw per opaque Batch into
+  `*gfx.OpQueue`, through `model`'s packers and binding names.
+- **Its oracle is a recording `gfx.Backend`**, and it publishes no inspection
+  API ([What it is tested against](../../../ecsscene/docs/specs/ecsscene.md#what-it-is-tested-against)).
 
 ---
 
@@ -694,8 +558,11 @@ From [which examples the redesigned ecsscene ships with](https://github.com/dvoy
 These live in cog-examples.
 
 - **`cmd/ecs/fountain` is rewritten in place**, with the same frame and the same
-  Components doing the same jobs, on `model`'s refs. Its `reference.png` is
-  recaptured once, after the redesign.
+  Components doing the same jobs, on `model`'s refs and ecsscene's own types.
+  It composes ecsscene and not scene, and cog-examples' headless harness starts
+  it with `headless.NewECS`, which composes ecs and ecsscene in scene's place.
+  Its `reference.png` was recaptured once, on the GPU, after the redesign
+  ([#538](https://github.com/dvoyni/cog/issues/538)).
 - **`cmd/scene/fountain` is new: the same frame through `scene.OpQueue`**, with
   the same seed and `referenceStep`. Its motes are a plain slice, one scene call
   each with its own tint.
@@ -717,13 +584,24 @@ be new API.
   `ArmFrameCmd` snapshot: two passes labelled `ground` and `forward`, each with
   its clear; the fox and the nozzle drawn in `forward`; the basin drawn in both.
 - `TestTheHUDReadsAsInReferencePNG` stays whole, batches figure included.
-- **Against `internal/fountain`'s expected figures:** the passes, their labels and
-  the instances in each pass must be equal. Draws may differ, and ecsscene's may
-  be lower than scene's, never higher: two motes spawned on one step fade to the
-  same tint, and ecsscene batches them while scene never merges calls.
+- **Against `internal/fountain`'s expected figures:** the passes, their whole
+  labels and the instances in each pass must be equal. Draws may differ, and
+  ecsscene's may be lower than scene's, never higher: two motes spawned on one
+  step fade to the same tint, and ecsscene batches them while scene never
+  merges calls.
 
-`headless.Engine.Passes`, `Ops` and `Lookup` stay for scene's examples. The
-fountains stop calling them.
+**Both comparisons assert, since [#538](https://github.com/dvoyni/cog/issues/538).**
+`internal/fountain` holds `ReferencePasses`, each pass's whole label
+(`scene.camera-100.ground`, `scene.camera-100.forward`) and its instances, and
+`ReferenceSceneDraws`, the scene fountain's draws in each pass. The scene
+fountain must equal both. The ecs fountain must equal `ReferencePasses` and stay
+at or under `ReferenceSceneDraws` pass by pass. At step 600 the forward pass is
+117 instances in both, drawn in 117 draws by scene and 116 by ecsscene. The
+labels can be compared whole because ecsscene keeps scene's spelling.
+
+`headless.Engine.Passes` and `Ops` stay for scene's examples, and fail a test
+on an engine from `NewECS`. The fountains do not call them. `Lookup` and
+`LookupDevice` answer through `model`'s facades under either renderer.
 
 ---
 
@@ -778,7 +656,9 @@ Each was ruled out by the ticket named, and most with the sequence that breaks i
 - **`model` importing `bundles/ecs`** to name `ecs.List`. An asset plugin would
   depend on an ECS that a non-ECS game never composes.
 - **ecsscene registering `model`'s types directly.** It claims the one Store each
-  Go type can have, so a second ECS plugin gets `ErrDuplicateRegistration`.
+  Go type can have, so a second ECS plugin gets `ErrDuplicateRegistration`. It
+  is recorded in [`ecsscene.md`](../../../ecsscene/docs/specs/ecsscene.md#shapes-that-were-rejected)
+  as well.
 
 **Residency** ([#497](https://github.com/dvoyni/cog/issues/497)):
 
@@ -792,19 +672,6 @@ Each was ruled out by the ticket named, and most with the sequence that breaks i
   it copies every resident model every frame.
 - **The app preloads everything, and a miss draws nothing.** An Entity naming a
   model that was never preloaded draws nothing, and nothing reports why.
-
-**Batches** ([#509](https://github.com/dvoyni/cog/issues/509)):
-
-- **scene merges calls.** ecsscene no longer passes through `scene.OpQueue`, so
-  the merge is not on its path and 5 000 crates stay 5 000 draws.
-- **The ECS keeps Batches standing.** A model loaded at runtime needs a runtime
-  key to group storage by. A Tag is fixed at compile time, Relations do not
-  exist, and grouping storage by value is rejected in `ecs.md`.
-- **Any Entity with `Params` draws alone.** `FrameParams5000` would make 5 000
-  Batches where one does.
-- **Batching blended entries.** Glass panes A (near) and B (far) share a mesh and
-  material, with smoke C between them. Merging A and B draws both before C or both
-  after it, so one composites in the wrong order.
 
 **The shader's records** ([#521](https://github.com/dvoyni/cog/issues/521)):
 
@@ -824,15 +691,10 @@ Each was ruled out by the ticket named, and most with the sequence that breaks i
 - **Reshaping ecsscene's copied vocabulary**, such as nesting sun and ambient or
   renaming a type. That is improving, not splitting.
 
-**The test oracle** ([#501](https://github.com/dvoyni/cog/issues/501)):
-
-- **An inspection surface of ecsscene's own.** The System fills scratch correctly
-  but forgets to bind the instance buffer. The surface reports the right Batches,
-  every test passes, and the frame draws everything at the origin.
-- **Golden frames.** Every fake returns false from `TakeCapture` and CI has no
-  GPU, so the test is skipped and a regression merges.
-- **`ArmFrameCmd` counts as the oracle.** Binding the wrong model's mesh with the
-  right instance count passes.
+**Batches and the test oracle** ([#509](https://github.com/dvoyni/cog/issues/509),
+[#501](https://github.com/dvoyni/cog/issues/501)) moved with ecsscene's design
+to [`ecsscene.md` §Shapes that were
+rejected](../../../ecsscene/docs/specs/ecsscene.md#shapes-that-were-rejected).
 
 **The examples** ([#510](https://github.com/dvoyni/cog/issues/510)):
 
@@ -908,7 +770,14 @@ what it does.
    to gfx, with its own copies of the arena, culling, sorting and vocabulary, the
    load System, and Batches. ecsscene stops importing scene. The fountain
    comparison starts asserting. ecsscene's section of this spec moves into its own
-   docs, and `ecs.md` §Binding is brought up to date.
+   docs, and `ecs.md` §Binding is brought up to date. Built on the integration
+   branch `model/ecsscene-redesign` as [#535](https://github.com/dvoyni/cog/issues/535)
+   (the Components and the vocabulary), [#536](https://github.com/dvoyni/cog/issues/536)
+   (the load System) and [#537](https://github.com/dvoyni/cog/issues/537) (the
+   recording System), and landed on main in one merge with
+   [#538](https://github.com/dvoyni/cog/issues/538), which moved the fountain
+   onto ecsscene alone and made its comparison assert. ecsscene's design is
+   now [`ecsscene.md`](../../../ecsscene/docs/specs/ecsscene.md).
 5. **The sweep.** Every caller in cog and cog-examples names `model.X`, scene's
    temporary aliases are deleted, and `scene.md` is cut down to the renderer.
 

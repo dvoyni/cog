@@ -19,9 +19,12 @@ emission, through `model`'s packers and binding names. What each field means is
 what it means to scene: [`../../scene/docs/README.md`](../../scene/docs/README.md).
 **An app runs ecsscene or scene, never both.**
 
-[`../../ecs/docs/specs/ecs.md`](../../ecs/docs/specs/ecs.md) §Binding is the design
-record. **[What a binding may not do](#what-a-binding-may-not-do) is the part to
-read before writing a second one.**
+[`specs/ecsscene.md`](specs/ecsscene.md) is the design record: why each part is
+shaped the way it is, what it is tested against, and the shapes that were
+rejected. [`../../ecs/docs/specs/ecs.md`](../../ecs/docs/specs/ecs.md) §Binding
+is the shape every binding of the ECS takes. **[What a binding may not
+do](#what-a-binding-may-not-do) is the part to read before writing a second
+one.**
 
 ecsscene is a **Bundle**: it requires no Adapter and contributes none. The
 vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in

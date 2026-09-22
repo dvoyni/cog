@@ -1038,7 +1038,7 @@ func record(
 ```
 
 **There is no binding mechanism, and that is the decision.** A plugin that is
-not the ECS — physics, audio, scene — attaches to the world by being an ordinary
+not the ECS — physics, audio, drawing — attaches to the world by being an ordinary
 plugin: it registers Components if it has any, subscribes Systems like anything
 else, and reaches its own frame-local resource from inside them. `ecs.Read[T]`
 and `ecs.Write[T]` are the only addition, and they wrap the
@@ -1049,12 +1049,12 @@ signature as a Component is**. No binding type, no adapter, no registration call
 of the ECS's own.
 
 **The binding is necessarily a third plugin.** `ecs` imports only `kernel` and `m`, and
-a plugin like `scene` imports nothing of `ecs`, so neither can know about the
+a plugin like `model` or `gfx` imports nothing of `ecs`, so neither can know about the
 other. That is what "no binding mechanism" means in practice — and a project not
 using the ECS simply does not register that plugin and schedules no Systems.
-cog ships the ecs↔scene one as [`ecsscene`](../../ecsscene/docs/README.md), which is the
-whole shape in one System and carries the prohibitions a second binding has to
-keep true.
+cog ships the drawing one as [`ecsscene`](../../ecsscene/docs/README.md), the ECS's
+renderer over `model`, which records to `gfx` itself and carries the prohibitions
+a second binding has to keep true.
 
 **Neither handle is a place to keep anything.** `Get` goes to the cell the lock
 covers on every call, so the value is refreshed per tick and valid only for the
@@ -1062,7 +1062,7 @@ body of the System, under the kernel's standing rule that a value read from a
 handle lives only as long as the handler holds its lock. `Set` is for the few
 resources reassigned wholesale rather than mutated in place.
 
-**The wide lock lands in the bound plugin, not in the ECS.** A `*scene.OpQueue`
+**The wide lock lands in the bound plugin, not in the ECS.** A `*gfx.OpQueue`
 is one resource, so every recording System serialises against every other
 recording System for write, whatever Components they read — a property of the
 bound plugin's API, not of the ECS. One recording System per bound plugin is the
