@@ -43,6 +43,12 @@ func DecodeDocument(doc *gltf.Document, modelPath string) (*DecodedModel, error)
 // and tools that drive one without the plugin.
 func NewLookup() *Lookup { return types.NewLookup() }
 
+// NewLookupReadAccess builds the read facade over lookup. Call it inside a
+// handler that holds the *Lookup read lock, and never store the result.
+func NewLookupReadAccess(lookup *Lookup) LookupReadAccess {
+	return types.NewLookupReadAccess(lookup)
+}
+
 // NewLookupAccess builds the scoped facade over lookup. Call it inside a
 // handler that holds the *Lookup write lock, and never store the result.
 func NewLookupAccess(k kernel.Kernel, lookup *Lookup) LookupAccess {

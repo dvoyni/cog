@@ -14,8 +14,10 @@ import (
 // the deferred bakes and buffer releases a renderer's flush applies at the
 // frame boundary.
 //
-// It never retains a filesystem or GPU handle of its own. Query and mutate it
-// only through a scoped LookupAccess or LookupDeviceAccess.
+// It never retains a filesystem or GPU handle of its own. Read it through a
+// LookupReadAccess, which never loads, and load, unload and mutate it through
+// a scoped LookupAccess or LookupDeviceAccess or, from the renderer that holds
+// it for writing, its own methods.
 type Lookup struct {
 	config Config
 	// meshes is the dense mesh table every MeshRef indexes, and a ref's id is
@@ -47,6 +49,13 @@ type Lookup struct {
 	// count to drive.
 	models   *assets.Cache[ModelDescrParams, modelUserData, *residentModel]
 	textures *assets.Cache[textureDescrParams, textureUserData, gfx.TextureDescr]
+	// table is the dense model table a ModelHandle indexes, and handles the
+	// same residency by cache key, which is how a ModelRef finds its handle.
+	// Slot 0 stays empty so the zero handle is no model; freeHandles are the
+	// slots a free gave back. See modelhandle.go.
+	table       []*residentModel
+	handles     map[string]ModelHandle
+	freeHandles []ModelHandle
 	// poseBytes and morphBytes are the GPU memory every loaded model's baked
 	// poses and morph deltas occupy, added by a load and subtracted by a free.
 	// They are counters rather than a walk because the two queries reporting
@@ -78,6 +87,8 @@ func NewSizedLookup(config Config) *Lookup {
 		config:   config,
 		models:   assets.New(modelLoader{}),
 		textures: assets.New(textureLoader{}),
+		table:    make([]*residentModel, 1),
+		handles:  map[string]ModelHandle{},
 	}
 }
 
