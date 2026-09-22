@@ -680,7 +680,7 @@ recording vocabulary:
 
 | type | verdict |
 | --- | --- |
-| **`scene.Transform`** | **legal** — plain values since its `Matrix` pointer was removed |
+| **`m.Transform`** | **legal** — plain values, and the one placement type since [#468](https://github.com/dvoyni/cog/issues/468) |
 | `scene.ModelDraw`, `scene.MeshDraw`, `scene.CameraDescr` | rejected — `Transforms`, `Plays`, `Params`, `Passes` are bare slices |
 | `scene.Material`, `gfx.MaterialDescr` | rejected — a slice, and a descriptor holding one |
 | `model.ClipPlay` | **legal** — `.Clip` is a `string` |
@@ -770,6 +770,16 @@ cannot name `B.Health` in a Query struct without importing `B`. So the rule is:
 
 Registering someone else's type stays legal as the escape hatch for the inverted
 case, and `ErrDuplicateRegistration` catches the collision naming both plugins.
+
+**`m.Transform` is the one exception, and it is vacuous on purpose.** Where an
+Entity stands is read by every binding, so the type is declared in `libs/m` and
+its Store is registered by the ecs plugin itself, not by a plugin that defines
+it: one Store, so two Components can never describe one position without the
+scheduler relating them. The cost is the vacuity above, confined to that one
+Store: every plugin with Systems already depends on `ecs`, so a System writing
+`m.Transform` without declaring anything else is never caught at composition.
+Order its writers deliberately. It is not licence to register a binding's own
+Components in `ecs`; every other Component follows the rule.
 
 One wart, recorded before it is discovered in a log: an instantiated generic
 renders its type argument with the full import path, so the error a developer
@@ -1987,7 +1997,7 @@ func record(
 )
 ```
 
-It used to take `*ecs.Write[*scene.OpQueue]` and make one `queue.Model` or
+It used to take a write on scene's `OpQueue` and make one `queue.Model` or
 `queue.Mesh` call per Entity. The shape of the signature is the same; only the
 resources are different.
 
@@ -2004,7 +2014,8 @@ value read from a handle lives only as long as the handler holds its lock.
 
 ### The binding is necessarily a third plugin
 
-`ecs` imports only `kernel` and `m`; `model` and `gfx` import nothing of `ecs`.
+`ecs` imports only `kernel`, `libs/m` and `libs/assets` (for `assets.Blob` in
+the storable walk); `model` and `gfx` import nothing of `ecs`.
 **Neither side can know about the other**, so a binding is necessarily a third
 plugin that imports both. That is what "there is no binding mechanism" means in
 practice, and it has a consequence worth stating: **a project not using the ECS
@@ -2025,7 +2036,7 @@ retains residency — loaded models, meshes, textures — and **no per-entity st
 whatsoever**. There is no renderer-side object for a drawable Entity to be a copy
 of, so "two copies and a sync cost every frame" does not arise, and neither does
 the coupling worry on the other side: **the Components are the source of truth
-because there is no other candidate.** This was said of `scene.OpQueue` first,
+because there is no other candidate.** This was said of scene's `OpQueue` first,
 and it held unchanged when ecsscene moved from scene's queue to gfx's.
 
 ecsscene does keep one thing between frames: its load System's **key
@@ -2046,7 +2057,7 @@ Not where it was expected. The queue a binding records into is **one
 resource**, so every recording System serialises against every other recording
 System for write, whatever Components they read. **The ECS's per-Store
 granularity buys nothing on the recording side** — that is a property of the
-bound plugin's API. It was `*scene.OpQueue`; it is `*gfx.OpQueue` now, which
+bound plugin's API. It was scene's `OpQueue`; it is `*gfx.OpQueue` now, which
 only Last-phase flushes and gfx's own handlers otherwise write, so no ordinary
 System lost parallelism in the move.
 

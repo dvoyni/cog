@@ -42,7 +42,8 @@ ecs has the declaration-root shape of
   share. The root aliases every type and forwards every function to it.
 - **`bundles/ecs/internal`** is the plugin: its `New`, the resolution of
   `ecs.Config`, and a `Register` that publishes the authority, registers
-  `ShrinkCmd`, and does nothing else.
+  `ShrinkCmd`, and registers the Store of `m.Transform`, where an Entity
+  stands: the one Component the ECS registers itself.
 - **`bundles/ecs/ecsplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
 
@@ -76,8 +77,10 @@ kernel.New(config).WithPlugins(ecsplugin.New(), physics.New(), game.New())
 **No plugin constructor takes the world.** `ecsplugin.New` creates the authority
 from its config and publishes it as the `*Entities` resource every System holds
 for read and every structural change holds for write. Besides that it registers
-only [`ShrinkCmd`](#giving-memory-back), because Components are registered by the
-plugins that define them and Systems are ordinary subscriptions.
+[`ShrinkCmd`](#giving-memory-back) and the Store of `m.Transform`, the one
+Component the ECS registers itself (see [Component
+registration](#component-registration)). Every other Component is registered by
+the plugin that defines it, and Systems are ordinary subscriptions.
 
 Component registration and the handler builder still need the authority at
 registration, before any handler runs. They read it with
@@ -446,6 +449,15 @@ and the Go import graph already forces the same edge, since a System cannot name
 make the check lenient, it would make it **vacuous**. Registering someone else's
 type stays legal as the escape hatch, and the kernel's duplicate-registration
 error names both plugins.
+
+**`m.Transform` is the one exception, and it is vacuous on purpose.** Where an
+Entity stands is read by every binding, so the type is declared in `libs/m` and
+its Store is registered by the ecs plugin itself: one Store, so two Components
+can never describe one position without the scheduler relating them. The cost:
+every plugin with Systems already depends on `ecs`, so a System writing
+`m.Transform` without declaring anything else is never caught at composition.
+Order its writers deliberately. The exception is not licence to register your
+own Components in `ecs`.
 
 Half of "explicit" is forced rather than chosen: a `Lock` must bind every handle
 it will use, and a declared resource with no initial value fails finalisation —
@@ -1019,22 +1031,24 @@ reverse index refused above: **any global index is a global lock.**
 
 ## Binding: how another plugin attaches
 
+ecsscene's recording System:
+
 ```go
 func record(
-    models *ecs.Query[modelQuery],             // the Components
-    plays  *ecs.Get[Animation],                // an optional Component, probed
-    work   *ecs.Write[*scratch],               // the binding's own resource
-    out    *ecs.Write[*scene.OpQueue],         // the bound plugin's resource
-) {
-    s, queue := work.Get(), out.Get()
-    for e, it := range models.All() {
-        draw := scene.ModelDraw{Transform: scene.Transform(it.Place)}
-        if animation, ok := plays.Of(e); ok {
-            draw.Plays = s.clipPlays(&animation)
-        }
-        queue.Model(it.Model.Layers, it.Model.Ref.Path, draw)
-    }
-}
+    k kernel.Kernel,
+    models  *ecs.Query[modelQuery],            // the Components
+    meshes  *ecs.Query[meshQuery],
+    lights  *ecs.Query[lightQuery],
+    cameras *ecs.Query[cameraQuery],
+    animations *ecs.Get[ecsscene.Animation],   // optional Components, probed
+    params     *ecs.Get[ecsscene.Params],
+    materials  *ecs.Get[ecsscene.Material],
+    keys     *ecs.Read[*keyScratch],           // the load System's keys
+    lookup   *ecs.Read[*model.Lookup],         // model's residency, read only
+    viewport *ecs.Read[*gfx.Viewport],
+    work *ecs.Write[*scratch],                 // the binding's own resource
+    out  *ecs.Write[*gfx.OpQueue],             // the resource it draws into
+)
 ```
 
 **There is no binding mechanism, and that is the decision.** A plugin that is
@@ -1048,13 +1062,19 @@ System's lock set beside the Query's Stores, at registration, **as visible in th
 signature as a Component is**. No binding type, no adapter, no registration call
 of the ECS's own.
 
-**The binding is necessarily a third plugin.** `ecs` imports only `kernel` and `m`, and
+**The binding is necessarily a third plugin.** `ecs` imports only `kernel`, `libs/m` and `libs/assets`, and
 a plugin like `model` or `gfx` imports nothing of `ecs`, so neither can know about the
 other. That is what "no binding mechanism" means in practice — and a project not
 using the ECS simply does not register that plugin and schedules no Systems.
 cog ships the drawing one as [`ecsscene`](../../ecsscene/docs/README.md), the ECS's
 renderer over `model`, which records to `gfx` itself and carries the prohibitions
 a second binding has to keep true.
+
+**Where an Entity stands is `m.Transform`, and nothing else.** Two Components
+describing one position are unrelated to the scheduler, so two Systems writing
+them run concurrently and nothing reports that they disagree; copy one way, in
+one System. See ecsscene's [What a binding may not
+do](../../ecsscene/docs/README.md#what-a-binding-may-not-do).
 
 **Neither handle is a place to keep anything.** `Get` goes to the cell the lock
 covers on every call, so the value is refreshed per tick and valid only for the

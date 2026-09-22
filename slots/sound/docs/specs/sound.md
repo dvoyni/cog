@@ -614,7 +614,7 @@ always an `m.Quat`, and a 2D sound is a 3D sound lying on the `Z=0` plane.
 ### The axes, stated outright
 
 **Right-handed, forward −Z, up +Y, right +X**, for the Listener and for every
-Voice. This is what `scene.LookAt` and the ECS spotlight already do, and it is
+Voice. This is what `m.LookAt` and the ECS spotlight already do, and it is
 the W3C Listener's default forward `(0,0,−1)` and up `(0,1,0)` — so an unrotated
 Listener *is* the W3C default Listener, and a speaker and a spotlight on one
 `Transform` point the same way. `scene` follows this only by habit, so **this
@@ -1855,8 +1855,8 @@ each with `doc.go`, `id.go`, `config.go`, `adapters.go`, `err.go`, an
   Adapters, and `sound` must satisfy `ruleSlotPort`, `ruleRootFiles` and the
   Adapter-declaration rules like every other Slot.
 - **`m.Transform` is done** — `libs/m/transform.go` exists, with
-  `Forward()`/`Right()`/`Up()` on both `Mat4` and `Transform`, and
-  `scene.Transform` is an alias for it. Nothing here is waiting on it.
+  `Forward()`/`Right()`/`Up()` on both `Mat4` and `Transform`, and it is the
+  one placement type. Nothing here is waiting on it.
 
 **Already true and worth not re-deriving:** `libs/assets` is built and is what
 holds the encoded bytes; `m.Maybe` is `libs/m/maybe.go`; `m.QuatRotationX` is

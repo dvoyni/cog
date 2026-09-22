@@ -374,6 +374,12 @@ compiler behind it.
 - **Do not cache an Entity without checking liveness, and do not restructure the
   world from a recording System.** Recording holds `*Entities` for read, which is
   not the authority to retire anything.
+- **Do not declare a placement Component beside `m.Transform`.** Two Components
+  describing one position are unrelated to the scheduler, whose lock unit is the
+  Component type: two Systems writing them run concurrently, and nothing reports
+  that they disagree. A binding that keeps a position of its own, as physics
+  keeps `Position` on its plane, copies it into `m.Transform` one way, in one
+  System, and never back.
 
 ## What it costs
 

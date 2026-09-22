@@ -7,7 +7,8 @@ updates and stops on `sound`'s queue, and a Voice attached to an Entity dies wit
 it.
 
 **It is a binding and nothing else.** No commands, no state a game addresses, no
-arithmetic. Three Components and one recording System, which is exactly what the
+arithmetic. Two Components and one recording System, reading the Entity's
+`m.Transform`, which is exactly what the
 `ecs` prefix means in this repo — `ecsscene`, `ecsphysics2d`.
 
 The design is bound by three requirements, in this order:
@@ -79,16 +80,14 @@ type Emitter struct {
 	Params sound.Params
 }
 
-// Transform is where an Entity is heard from: m.Transform as a type of this
-// package's own, exactly as ecsscene.Transform is. Scale means nothing to
-// audio and is ignored.
-type Transform m.Transform
-
 // Listener marks the one Entity the world is heard from.
 type Listener struct{}
 ```
 
-### Why `Emitter` and `Transform` are separate Components
+Where an Entity is heard from is its `m.Transform`, whose Store is the ecs
+plugin's. ecsaudio declares no Transform of its own, and `Scale` is ignored.
+
+### Why `Emitter` and `m.Transform` are separate Components
 
 Not tidiness. `bundles/ecsphysics2d/types.go:44-49` gives the reason in its own
 words — `Force` is its own Component *"so that a System adding Force does not
@@ -96,19 +95,20 @@ block the render copy reading Position"*. Here it is a System copying transforms
 every tick against a System that changes a Clip once an hour. One Component would
 serialise them.
 
-### Why `Transform` is defined and not aliased
+### Where an Entity is heard from is `m.Transform`
 
-`ecsscene`'s stated reason, unchanged
-(`bundles/ecsscene/types.go`): the Store's Go type belongs to this package, so a
-System naming it imports `ecsaudio`, and the import graph keeps forcing the
-plugin dependency the coupling check expects. Convert with `m.Transform(t)` and
-`Transform(t)`.
+ecsaudio registers no Transform. It reads the ecs plugin's `Store[m.Transform]`,
+the same Store ecsscene draws from, so there is one placement in the engine
+rather than one per consumer
+([#468](https://github.com/dvoyni/cog/issues/468)). The cost of that shared
+Store is the one stated in the ecs README's
+[Component registration](../../../ecs/docs/README.md#component-registration):
+the coupling check never catches an undeclared writer of it, so its writers are
+ordered deliberately.
 
-**It is `m.Transform`, never `scene.Transform`.** Reaching the transform through
-`scene` would make every game with sound depend on the renderer. `libs/m` gained
-`Transform` — with `Forward()`, `Right()` and `Up()` — for exactly this, and
-`scene.Transform` is now an alias for it, so there is one transform in the engine
-rather than one per consumer.
+It is never reached through `scene`, which would make every game with sound
+depend on the renderer. `libs/m` holds `Transform`, with `Forward()`, `Right()`
+and `Up()`, for exactly this.
 
 **The axes need no conversion.** `sound` faces −Z with +Y up, as the ECS
 spotlight does, so a Transform the game already keeps for rendering is read
@@ -293,10 +293,10 @@ whose `Position` follows the player and whose `Rotation` is the fixed
 ```go
 world.Spawn(
 	ecsaudio.Listener{},
-	ecsaudio.Transform(m.Transform{
+	m.Transform{
 		Position: playerPos,
 		Rotation: m.QuatRotationX(-math.Pi / 2),
-	}),
+	},
 )
 ```
 
@@ -396,7 +396,7 @@ full-sentence test names, and **no race detector in this environment** — use
 Nothing below exists.
 
 1. **`bundles/ecsaudio`** root: `doc.go`, `id.go`, `types.go` (`Emitter`,
-   `Transform`, `Listener`, and the `RecordOnUpdate` ordering identity),
+   `Listener`, and the `RecordOnUpdate` ordering identity),
    `err.go` (`ErrManyListeners`). No `commands.go`, no `resources.go`, no
    `ports.go`, no `adapters.go` — a binding declares none of those.
 2. **`bundles/ecsaudio/internal`** — the Component registrations, the
@@ -417,9 +417,9 @@ Nothing below exists.
   pointers, comparable when its fields are.
 
 **Already done, and not waiting on anything:** `libs/m/transform.go` exists with
-`Transform`, `Forward()`, `Right()` and `Up()`, and `scene.Transform` is an alias
-for it. `ecsscene.Transform` is still defined from `scene.Transform` and is
-untouched by this package.
+`Transform`, `Forward()`, `Right()` and `Up()`. `m.Transform` is the one
+placement type, registered by the ecs plugin
+([#468](https://github.com/dvoyni/cog/issues/468)).
 
 ---
 

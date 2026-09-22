@@ -86,7 +86,7 @@ default the hard way.
 | `LightDescr.Range` | infinite | glTF's own default. A forgotten `Range` is a light that reaches too far — visible immediately — rather than a light silently dropped. |
 | `LightDescr.OuterCone` | π/4 | `InnerCone` zero is a **real value**, not a default: falloff straight from the axis. |
 | `CameraDescr.Shear` | `0`, i.e. plain `Orthographic` | Only `Oblique` reads it. Setting it on a `Perspective` or `Orthographic` camera does nothing, the way `FovY` does nothing under `Orthographic`. |
-| `Transform.Scale` | 1 on every axis | Only an **all-zero** scale reads as the identity. A partly zero scale is taken literally: `m.Vec3{X: 2}` collapses the draw onto the X axis. `WithScale` is the uniform spelling. |
+| `m.Transform.Scale` | 1 on every axis | Only an **all-zero** scale reads as the identity. A partly zero scale is taken literally: `m.Vec3{X: 2}` collapses the draw onto the X axis. `WithScale` is the uniform spelling. |
 | `Material` (nil) | the bundled PBR | Every draw literal that omits the field gets lit PBR and needs no shader. |
 | `ModelDraw.Scene` / `.Node` | the default scene / the whole scene | A **non-empty** selector that matches nothing skips the draw and never falls back. |
 
@@ -111,7 +111,7 @@ which is legal and means what it says:
 
 ```go
 q.Camera(cameraMain, scene.CameraDescr{
-	Transform:  scene.LookAt(m.Vec3{}, m.Vec3{Y: -1}, m.Vec3{Z: -1}), // in the ground plane
+	Transform:  m.LookAt(m.Vec3{}, m.Vec3{Y: -1}, m.Vec3{Z: -1}), // in the ground plane
 	Projection: scene.Oblique,
 	Height:     30,
 	Shear:      0.5,

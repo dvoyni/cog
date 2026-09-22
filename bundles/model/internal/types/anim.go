@@ -65,8 +65,7 @@ const MaxClipPlays = 4
 // Scale is a vec3 rather than a scalar packed into Translation.W. That would
 // cut pose memory and per-vertex loads by a third - the single largest cost in
 // this design - but squash-and-stretch is animated non-uniform scale, a
-// mainstream idiom, and unlike Transform there is no Matrix escape hatch to
-// correct it at.
+// mainstream idiom, and a pose has no other place to express it.
 //
 // Field order and size must match ScenePose in builtin/scene/scene.wgsl.
 type scenePose struct {

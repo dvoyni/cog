@@ -37,7 +37,8 @@ correct without them.
 > wrapped in the root, concrete as before, so no per-instance call goes through
 > an interface. The flush's subscription identity, `UpdateEventHandler` below, is
 > now `scene.FlushOnUpdate`. The file paths and line numbers cited below are as
-> they were when this was written.
+> they were when this was written. `Transform` is no longer scene's: it is
+> `m.Transform` since [#468](https://github.com/dvoyni/cog/issues/468).
 >
 > **Amended by [#361](https://github.com/dvoyni/cog/issues/361).** scene moved
 > to the declaration-root shape of
@@ -46,7 +47,9 @@ correct without them.
 > vocabulary, `LookupAccess` and the inspection views are aliases in the root's
 > `types.go`, `OpQueue` and `Lookup` in its `resources.go`, `Config` in its
 > `config.go`, and `At`, `LookAt`, `Layer`, `NewLookup`, `NewLookupAccess` and
-> the four coordinate helpers are forwarders in its `utils.go`. The `Err*` types
+> the four coordinate helpers are forwarders in its `utils.go`. `At` and
+> `LookAt` are `m`'s since [#468](https://github.com/dvoyni/cog/issues/468):
+> `m.At` and `m.LookAt`, with no forwarder in scene. The `Err*` types
 > stay in its `err.go`. What `bundles/scene/internal` held — `OpQueue` with its
 > recording and consume sides, the `Lookup` with its model table, the glTF
 > loader, the packing, the bundled PBR — moved to `bundles/scene/internal/types`,
@@ -201,7 +204,7 @@ func (q *OpQueue) Mesh(layers LayerMask, mesh model.MeshRef, draw MeshDraw)
 func (q *OpQueue) PointLight(layers LayerMask, light model.LightDescr)
 func (q *OpQueue) SpotLight(layers LayerMask, light model.LightDescr)
 
-func (q *OpQueue) Box(layers LayerMask, transform Transform, color m.Color)
+func (q *OpQueue) Box(layers LayerMask, transform m.Transform, color m.Color)
 func (q *OpQueue) Sphere(layers LayerMask, center m.Vec3, radius float32, color m.Color)
 func (q *OpQueue) Plane(layers LayerMask, center m.Vec3, size m.Vec2, color m.Color)
 func (q *OpQueue) Line3D(layers LayerMask, start, end m.Vec3, thickness float32, color m.Color)
@@ -229,13 +232,13 @@ The floor of the API is two statements:
 
 ```go
 q.Camera(cameraMain, scene.CameraDescr{
-    Transform: scene.LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
+    Transform: m.LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
     FovY:      1.0472,
     Near:      0.1, Far: 100,
     SunDirection: m.Vec3{X: -0.3, Y: -1, Z: -0.2},
     SunColor:     m.NewColorSrgb(1, 1, 1, 1),
 })
-q.Box(0, scene.At(0, 0, 0), m.NewColorSrgb(0.42, 0.71, 0.94, 1))
+q.Box(0, m.At(0, 0, 0), m.NewColorSrgb(0.42, 0.71, 0.94, 1))
 ```
 
 **Every slice field on every descriptor is borrowed for the duration of the
@@ -247,18 +250,10 @@ record](#materials-are-copied-at-record).
 
 ### Transform
 
-```go
-type Transform struct {
-    Position m.Vec3
-    Rotation m.Quat
-    Scale    m.Vec3 // all zero means (1,1,1); otherwise literal
-}
-
-func At(x, y, z float32) Transform
-func (t Transform) WithScale(s float32) Transform
-func (t Transform) WithRotation(q m.Quat) Transform
-func LookAt(eye, target, up m.Vec3) Transform
-```
+scene places everything with `m.Transform` — a position, a rotation and a
+per-axis scale — built with `m.At` and `m.LookAt` and adjusted with `WithScale`
+and `WithRotation`, all in `libs/m/transform.go`. scene declares no placement
+type of its own and imports nothing of `ecs` to take it.
 
 The zero value is the identity. `Scale` is **per axis**, and only an all-zero
 `Scale` reads as the identity; **a partly zero scale is taken literally**. So
@@ -274,7 +269,7 @@ packed matrix itself (see [The instance record](#the-instance-record)), so only
 an instance whose basis does not scale uniformly pays for the cofactors, however
 its scale was spelled.
 
-**There is no `Matrix`.** A pointer field made `Transform` mutable indirection,
+**There is no `Matrix`.** A pointer field made `m.Transform` mutable indirection,
 which an ECS Component cannot hold, and everything it spelled that a position, a
 rotation and a per-axis scale cannot — a shear — is not something scene draws. A
 model primitive's flattened node world is a whole matrix, and scene carries that
@@ -383,7 +378,7 @@ type Pass struct {
 }
 
 type CameraDescr struct {
-    Transform  Transform       // the camera as a positioned object; scene inverts it
+    Transform  m.Transform     // the camera as a positioned object; scene inverts it
     Projection ProjectionKind
     FovY       float32         // Perspective: vertical field of view, radians
     Height     float32         // Orthographic and Oblique: world units across the target's height
@@ -404,8 +399,8 @@ type CameraDescr struct {
 }
 ```
 
-**A camera is a positioned object, not a view matrix.** `LookAt(eye, target, up)`
-returns a `Transform`; scene inverts it with the allocation-free `m.InverseAffine`.
+**A camera is a positioned object, not a view matrix.** `m.LookAt(eye, target, up)`
+returns an `m.Transform`; scene inverts it with the allocation-free `m.InverseAffine`.
 A `View m.Mat4` field would have made the camera the one thing in the API that
 is not a `Transform`, would not compose with a follow rig, and scene would
 decompose it for culling anyway. **A camera's `Transform.Scale` is ignored** —
@@ -868,8 +863,8 @@ material binds baked textures for that reason.
 
 ```go
 type ModelDraw struct {
-    Transform      Transform
-    Transforms     []Transform // non-empty overrides Transform, one instance per entry
+    Transform      m.Transform
+    Transforms     []m.Transform // non-empty overrides Transform, one instance per entry
     Scene          string      // entry in the file's scenes array; empty is the default scene
     Node           string      // subtree within that scene; empty is the whole scene
     Plays          []model.ClipPlay
@@ -902,8 +897,8 @@ procedural geometry owns its vertices and uses `UpdateMesh`, blending on the CPU
 func (q *OpQueue) TemporaryMesh[TVertex model.VertexLayout](vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology) model.MeshRef
 
 type MeshDraw struct {
-    Transform  Transform
-    Transforms []Transform // non-empty overrides Transform
+    Transform  m.Transform
+    Transforms []m.Transform // non-empty overrides Transform
     Material   Material    // nil is the bundled PBR
     Params     []gfx.ParameterDescr
     Bounds     m.Vec4      // xyz centre, w radius, local space
@@ -1092,7 +1087,7 @@ Every scene draw is instanced, with `instances = 1` in the degenerate case, and
 offset plumbing. That machinery is built in full.
 
 v1 does **not** collapse consecutive equal draws automatically. Instead
-`Transforms []Transform` on `MeshDraw` and `ModelDraw` makes an instanced draw
+`Transforms []m.Transform` on `MeshDraw` and `ModelDraw` makes an instanced draw
 **explicit** — a forest, a particle field, a tile floor — which is a feature
 rather than an optimisation and so earns its place independently, while driving
 the exact path the future collapser will drive. Because the sort ships in v1, the
@@ -1810,13 +1805,13 @@ a decision in this spec reversed**
 
 **A shadow camera is a camera.** It is not a second pass on the lit camera: a
 shadow map is rendered from the light, so the sun's shadow map is a second
-`Camera` whose `Transform` is `LookAt` along `SunDirection`, whose `Projection`
+`Camera` whose `Transform` is `m.LookAt` along `SunDirection`, whose `Projection`
 is `Orthographic` sized to cover the region that must cast, and whose one pass is
 depth-only.
 
 ```go
 q.Camera(shadowCameraID, scene.CameraDescr{
-    Transform:  scene.LookAt(sunEye, sceneCentre, up),
+    Transform:  m.LookAt(sunEye, sceneCentre, up),
     Projection: scene.Orthographic,
     Height:     40, Near: 1, Far: 200,
     CullMask:   layerCasters,

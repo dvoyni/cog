@@ -92,7 +92,9 @@ it would get `ErrDuplicateRegistration`.
 
 **Where an Entity stands is not one of them.** It is an `m.Transform`, whose one
 Store the ecs plugin registers, so a game's Systems and other bindings read the
-same placement ecsscene draws from.
+same placement ecsscene draws from. Because that Store is shared and owned by
+`ecs`, the coupling check will not catch an undeclared writer of it, so writers
+of `m.Transform` are ordered deliberately.
 
 **`Model` and `Mesh` spell out their tail padding, and `model.MeshRef` its
 padding after the source.** The ECS compares a Changed record by its bytes, and
