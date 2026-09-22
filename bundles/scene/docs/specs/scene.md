@@ -603,18 +603,20 @@ through untouched. Scene wraps it in no name registry shared with canvas. A pass
 with `NoTarget()` and no explicit depth, or with `NoTarget()` and a present
 `ClearColor`, is a reported error.
 
-**A `NoTarget()` pass does not reach the GPU on the desktop backend, and that is
-not scene's doing.** gogpu's Vulkan HAL returns a render-pass encoder *without
-beginning a render pass* when the descriptor names no colour attachments, and
-`End` then calls `vkCmdEndRenderPass` on a pass that was never begun — an access
+**A `NoTarget()` pass reaches the GPU on Vulkan and in a browser, and nowhere
+else.** gogpu's Vulkan HAL used to return a render-pass encoder *without
+beginning a render pass* when the descriptor named no colour attachments, and
+`End` then called `vkCmdEndRenderPass` on a pass that was never begun: an access
 violation inside the driver, several frames of stack from anything that names a
-pass. It is in the pinned version and in the newest published one. `cog/extensions/gogpu`
-therefore declines such a pass and reports `ErrDepthOnlyPassUnsupported` once
-per run, which turns the segfault into a line a caller can read; a browser's own
-WebGPU encodes the pass correctly, so the same build run through `cmd/web` does
-execute it. The `cameras` demo is the first frame in the tree that emits one, and
-it is deliberately arranged so the skip costs nothing: its prepass writes into a
-depth texture **nothing else reads**.
+pass. `gogpu/wgpu#353` fixed that in v0.34.5, the version cog pins, and
+`cog/extensions/gogpu` now opens the pass on Vulkan with only its depth view
+(`passBegins`, `extensions/gogpu/internal/gfxdepthonly.go:109-114`). A browser's
+own WebGPU always encoded it. On every other backend `depthOnlyPassesWork`
+(`gfxdepthonly.go:56-69`) refuses the pass and reports
+`ErrDepthOnlyPassUnsupported` once per run. That covers GLES, the software HAL
+and any HAL nobody has tried. The `cameras` demo is the first frame in the tree
+that emits one, and it is deliberately arranged so a refusal costs nothing: its
+prepass writes into a depth texture **nothing else reads**.
 
 That arrangement is the rule to carry, not an accident of one demo. **A pass
 whose depth another pass loads with no `ClearDepth` renders against undefined
@@ -1745,7 +1747,8 @@ Colour ([Canvas colour-space migration](https://github.com/dvoyni/cog/issues/33)
   generated white pixel are one texture and cannot take different colour spaces.
   **Glyph texels are unaffected mechanically**: they are stored `RGB=255,
   A=coverage`, sRGB touches RGB only, and 1.0 is a fixed point. The *edges* still
-  shift ([canvas: text AA midpoint shift for linear blending](https://github.com/dvoyni/cog/issues/36)).
+  shift. [canvas: text AA midpoint shift for linear blending](https://github.com/dvoyni/cog/issues/36)
+  is closed: feuds-26 text was judged fine after the migration.
 - Decoded images are sRGB **by construction** — the atlas array,
   `resolveStandalone`, and the separate resource path all go `RGBA8Srgb`
   unconditionally, because a decoded PNG is sRGB by definition and letting a
@@ -1881,9 +1884,11 @@ What a later effort adds, all additive:
 2. `sceneFrame` grows the light-space matrix and bias parameters, for free: the
    prelude is published by inclusion (`model.FramePath`), so an includer picks
    the grown struct up with the source and no external copy constrains it.
-3. Group 0 grows `texture_depth_2d` and `sampler_comparison` bindings. Because a
-   declared binding must be bound on every draw or the frame silently vanishes,
-   scene owns a **1×1 default shadow map** and binds it when there is no shadow —
+3. Group 0 grows `texture_depth_2d` and `sampler_comparison` bindings. A
+   declared binding nothing fills costs that draw: since
+   [#133](https://github.com/dvoyni/cog/issues/133) gfx drops it and reports
+   `gfx.ErrStorageBufferUnsupplied`, and the rest of the frame renders. So scene
+   still owns a **1×1 default shadow map** and binds it when there is no shadow,
    the same pattern as the PBR's white texel and the null skin. It is produced by
    a `NoTarget()` pass with `ClearDepth: 1.0` and no draws, since depth formats
    are not writable through a texture upload.
@@ -1897,9 +1902,10 @@ What a later effort adds, all additive:
 
 **gfx needs nothing new.** Depth-only passes, sampleable `Depth32F`, comparison
 samplers and `Depth`/`Comparison` reflection all ship in v1 as capability. Depth
-bias is [gfx: depth bias for shadow maps](https://github.com/dvoyni/cog/issues/32);
-until it lands, bias is a shader constant, which is where a normal-offset bias
-would live anyway.
+bias is part of [scene: sun shadow maps](https://github.com/dvoyni/cog/issues/52),
+which absorbed the old depth-bias ticket and adds the three `gfx.MaterialState`
+bias fields together; until it lands, bias is a shader constant, which is where
+a normal-offset bias would live anyway.
 
 **Cascades** work today as N depth textures and N shadow cameras. The
 atlas-packed form is exactly the trigger `PassDescr.Viewport` was fogged with; a
@@ -1930,28 +1936,37 @@ The barrier each step of the chain needs is placed by gfx, in both directions, s
 a ping-pong costs the author nothing to get right
 ([#112](https://github.com/dvoyni/cog/issues/112)).
 
-What a later effort adds is the **fullscreen draw**, not the passes: either a
-bundled blit material — a full-screen textured pass with an exposed source
-texture — or the general custom-shader contract. The bundled blit is much the
-cheaper first step, and it does not inherit the reason shader variants were
-rejected: that argument was about every variant carrying its own copy of the
-BRDF, and a blit shares no code with the PBR at all.
+**The fullscreen draw is canvas's.** Nothing new is needed in scene or gfx; a
+chain is built from pieces that already ship:
+
+- a camera pass into a `q.TemporaryTarget`;
+- a canvas layer given a target with `SetLayerTarget`
+  (`bundles/canvas/internal/types/opqueue.go:190`), rendering into the next
+  temporary target or the screen;
+- `DrawTexture` or `SpriteTexture` (`opqueue.go:306,413`) drawing the source
+  texture with the caller's `*gfx.MaterialDescr` as the effect, or with
+  `canvas.TextureMaterial()` (`bundles/canvas/utils.go:69`) as the plain blit,
+  which samples without the key-colour ramp.
+
+cog-examples `cmd/scene/cameras/composite.go` composites camera targets through
+canvas with a material of its own, and `cmd/canvas/rendertexture` puts a canvas
+layer on a target. A bundled scene blit material was the alternative, and
+[scene: post-processing chains and a bundled blit material](https://github.com/dvoyni/cog/issues/53)
+closed on this route instead.
 
 Two honest limits:
 
 - **A post-process pass can only read a target it was given.** gfx's frame buffer
   is not nameable by a recorder, so a chain can grade a camera's own output but
   not the composited frame including canvas. Whole-frame post-processing needs
-  new gfx surface, and is in **direct tension** with
-  [gfx: delete the present blit via upstream viewFormats](https://github.com/dvoyni/cog/issues/35),
-  which removes the frame buffer that would be read. Neither forecloses the
-  other; they just cannot both pay off.
-- **Effects wanting range beyond 0..1** — bloom, exposure, filmic tonemapping —
-  want [gfx: HDR camera targets and tonemapping](https://github.com/dvoyni/cog/issues/34)
-  first.
-
-Tracked as
-[scene: post-processing chains and a bundled blit material](https://github.com/dvoyni/cog/issues/53).
+  new gfx surface. The frame buffer and its present pass stay, because they are
+  that hook and the tonemapping hook:
+  [gfx: delete the present blit via upstream viewFormats](https://github.com/dvoyni/cog/issues/35)
+  is closed as won't-do for that reason.
+- **Effects wanting range beyond 0..1**, such as bloom, exposure and filmic
+  tonemapping, want
+  [gfx: HDR camera targets and tonemapping](https://github.com/dvoyni/cog/issues/34)
+  first, and that ticket is parked.
 
 ### Image-based lighting
 
@@ -1994,7 +2009,8 @@ shipping pre-baked cubemaps, which wants texture compression. This is **"not
 built", not "must be undone"**.
 
 Tracked as
-[scene: image-based lighting and environment cubemaps](https://github.com/dvoyni/cog/issues/44).
+[scene: image-based lighting and environment cubemaps](https://github.com/dvoyni/cog/issues/44),
+which is parked.
 
 ---
 
@@ -2101,13 +2117,13 @@ assertion written by the author of the flip will happily confirm:
 
 Every criterion must be satisfiable by a human running
 `go run ./cmd/scene/<demo>` today. The repo has **no CI at all**, **no
-`testdata/`**, no golden or snapshot tests, no headless cog run, and **no frame
-readback**. Golden-image acceptance is therefore a follow-up rather than fog —
-its shape is fully known, since `gogpu` one layer down already ships
-`golden_test.go`, `testdata/golden/*.png`, `-update-golden`, a headless renderer
-and `Surface.ReadPixels` — and what is missing is cog-side plumbing, which is
-engine surface this spec does not cover
-([scene: golden-image acceptance harness and the first CI workflow](https://github.com/dvoyni/cog/issues/54)).
+`testdata/`**, no golden or snapshot tests and no headless cog run. gfx has since
+gained frame readback ([capture.md](../../../../slots/gfx/docs/specs/capture.md)),
+and the MCP `app_time` tool can pause and step to a documented frame, so every
+`cmd/scene/*/reference.png` is reproducible and checked by eye.
+[scene: golden-image acceptance harness and the first CI workflow](https://github.com/dvoyni/cog/issues/54)
+is closed as won't-do on that basis: reference frames checked by eye through MCP
+are enough.
 
 Two pieces of work are **handed to the implementation effort** rather than
 decided here: porting the web build recipe (`build.sh`, `index.html`, the tar
@@ -2249,30 +2265,31 @@ under [Scene follow-ups](https://github.com/dvoyni/cog/issues/29).
 | Item | Why | Tracked |
 | --- | --- | --- |
 | Implementing this spec — README, `scene.instructions.md`, plugin code | belongs to the implementation effort that follows | — |
-| Shadow maps, post-processing, IBL **implementation** | documented as extension points only; the multi-tag material shape they need **does** ship | [52](https://github.com/dvoyni/cog/issues/52), [53](https://github.com/dvoyni/cog/issues/53), [44](https://github.com/dvoyni/cog/issues/44) |
+| Shadow maps and IBL **implementation** | documented as extension points only; the multi-tag material shape they need **does** ship. Shadows are blocked by [#100](https://github.com/dvoyni/cog/issues/100); IBL is parked | [52](https://github.com/dvoyni/cog/issues/52), [44](https://github.com/dvoyni/cog/issues/44) |
+| Post-processing chains and a bundled blit material | **closed**: canvas's route covers it (§Post-processing) | [53](https://github.com/dvoyni/cog/issues/53) |
 | Custom shader contract and prelude | no longer out of scope: the preprocessor shipped and model publishes `FramePath` and `PbrPath` beside `VertexDecodePath` ([model.md](../../../model/docs/specs/model.md#custom-shaders)) | [48](https://github.com/dvoyni/cog/issues/48) |
 | Compute shaders and any no-compute fallback | not required by this scope | — |
 | Offline asset baking / an engine-native model format | glTF at runtime through `storage` is the whole story | — |
 | Object picking / id passes | scene retains no draw list to raycast; the caller's own entity loop is ten lines | — |
-| Draw hierarchy and **bone sockets** | the socket is the narrow half of "do draws form a hierarchy at all"; answering it first would fix a recording surface the general question must then live inside. The cost is **draw identity**: ops are frame-local and anonymous and the sort destroys recording order, so naming a parent means a new id space and a resolution order surviving that sort — scene's recording model, not a feature on top of it. The enabling work stays: poses hold `globalJoint` unpremultiplied and the flush already walks baked rows CPU-side at instance-pack time | [57](https://github.com/dvoyni/cog/issues/57) |
-| HDR camera targets and tonemapping | HDR without a tonemap is half a feature, and post-processing is documented-only | [34](https://github.com/dvoyni/cog/issues/34) |
-| Deleting the present blit via upstream `viewFormats` | the faster design, but it needs a merge in a module we do not fork, and a spec must not ship blocked on someone else's repo | [35](https://github.com/dvoyni/cog/issues/35) |
-| Colour write mask, MSAA + alpha-to-coverage, depth bias | each has a known shape and a known trigger; none is triggered here | [30](https://github.com/dvoyni/cog/issues/30), [31](https://github.com/dvoyni/cog/issues/31), [32](https://github.com/dvoyni/cog/issues/32) |
-| Canvas on pooled storage records | a *performance* refactor scene merely benefits from, with its own regression surface — unlike the colour migration, which scene correctness requires | [28](https://github.com/dvoyni/cog/issues/28) |
-| Canvas per-layer render targets | scene needs canvas to render nothing to a texture; the traffic runs the other way | [55](https://github.com/dvoyni/cog/issues/55) |
-| Canvas async loading and the `(value, ok)` contract | canvas loads synchronously, so its `ok` would be a different predicate wearing the same shape; adopting it honestly means canvas going async and `ui`'s measure path tolerating an unmeasurable element | [50](https://github.com/dvoyni/cog/issues/50) |
-| The canvas key-colour **mechanism** | it classifies a texel purely by value, so it cannot tell a sprite's genuine dark neutrals from an authored key region — but scene is correct with the heuristic exactly as it stands, once the constants are re-derived | [56](https://github.com/dvoyni/cog/issues/56) |
-| A `ui` viewport element hosting a camera's output texture | scene's side is closed: `Pass.Target` takes the gfx handle and scene hands back no handle of its own | [37](https://github.com/dvoyni/cog/issues/37) |
-| Refcounting textures so `UnloadModel` is the only lever | the no-cascade wart | [39](https://github.com/dvoyni/cog/issues/39) |
-| Residency budget and automatic eviction | v1 unloading is entirely explicit with nothing evicting on its own, so a budget is the alternative to that design, not a refinement of it | [40](https://github.com/dvoyni/cog/issues/40) |
-| Baking poses at 30 Hz with higher-order shader interpolation | the knob exists; what needs designing is the interpolant that makes 30 Hz not a regression, and what to do about `STEP` discontinuities no interpolant reconstructs | [42](https://github.com/dvoyni/cog/issues/42) |
-| Morph targets and skinning on buffer-built meshes | both need a group-2 binding a `MeshRef` has no equivalent of, and skinning additionally needs joint-data ownership — most of a model format invented at the call site | [43](https://github.com/dvoyni/cog/issues/43), [51](https://github.com/dvoyni/cog/issues/51) |
-| Shader preprocessing and vertex variants; multi-buffer vertex binding | the cheap first step is an entry-point field, not preprocessing: the fragment stage does not vary with vertex layout at all | [45](https://github.com/dvoyni/cog/issues/45), [46](https://github.com/dvoyni/cog/issues/46) |
-| gogpu's unvalidated `arrayStride` | upstream; filed so the trap is written down | [47](https://github.com/dvoyni/cog/issues/47) |
-| Golden-image acceptance and the first CI workflow | engine surface, not plugin spec; the assertion half needs none of it | [54](https://github.com/dvoyni/cog/issues/54) |
-| Text AA midpoint shift for linear blending | only if linear-blended text reads wrong | [36](https://github.com/dvoyni/cog/issues/36) |
-| Moving `sceneFrame` to a uniform block | the better long-term shape and the named next lever for an eighth storage-buffer slot, but gfx's uniform path is per-draw only, capped at 256 with silent truncation, with no range binding and a `BufferUniform` usage never produced anywhere — a gfx feature, not a budget fix | [100](https://github.com/dvoyni/cog/issues/100) |
-| A uniform block over 256 bytes silently truncating | scene declares no uniform block at all, so it is immune; reachable only through canvas's uniform path | [101](https://github.com/dvoyni/cog/issues/101) |
+| Draw hierarchy and **bone sockets** | the socket is the narrow half of "do draws form a hierarchy at all"; answering it first would fix a recording surface the general question must then live inside. The cost is **draw identity**: ops are frame-local and anonymous and the sort destroys recording order, so naming a parent means a new id space and a resolution order surviving that sort — scene's recording model, not a feature on top of it. The enabling work stays: poses hold `globalJoint` unpremultiplied and the flush already walks baked rows CPU-side at instance-pack time. Parked; its first cut is a socket query, not a hierarchy | [57](https://github.com/dvoyni/cog/issues/57) |
+| HDR camera targets and tonemapping | HDR without a tonemap is half a feature; parked | [34](https://github.com/dvoyni/cog/issues/34) |
+| Deleting the present blit via upstream `viewFormats` | **closed** as won't-do: the frame buffer and its present pass are the tonemapping and whole-frame post-processing hook, and no profile has shown the pass as a cost. Forks are not the obstacle: cog carries them through `replace` in `go.mod` (gogpu is `dvoyni/gogpu`, and [#47](https://github.com/dvoyni/cog/issues/47) adds `dvoyni/wgpu`), but a fork takes only upstream-bound fixes that add no API, and `ViewFormats` on `SurfaceConfiguration` is new API. Reopen if a profile on a real target shows the present pass or the frame buffer's memory costing something, and nothing else uses the pass | [35](https://github.com/dvoyni/cog/issues/35) |
+| Colour write mask, MSAA + alpha-to-coverage, depth bias | MSAA is parked. The write mask is **closed**, superseded by the `NoTarget()` + `DepthTarget` prepass. Depth bias is **closed** into sun shadow maps ([#52](https://github.com/dvoyni/cog/issues/52)) | [30](https://github.com/dvoyni/cog/issues/30), [31](https://github.com/dvoyni/cog/issues/31), [32](https://github.com/dvoyni/cog/issues/32) |
+| Canvas on pooled storage records | **closed**, answered no: the canvas uniform block is per batch and is how a custom material declares its parameters ([#155](https://github.com/dvoyni/cog/issues/155)) | [28](https://github.com/dvoyni/cog/issues/28) |
+| Canvas per-layer render targets | **closed**, built: `OpQueue.SetLayerTarget` (`bundles/canvas/internal/types/opqueue.go:190`) | [55](https://github.com/dvoyni/cog/issues/55) |
+| Canvas async loading and the `(value, ok)` contract | **closed** as stale: loading is synchronous everywhere | [50](https://github.com/dvoyni/cog/issues/50) |
+| The canvas key-colour **mechanism** | it classifies a texel purely by value, so it cannot tell a sprite's genuine dark neutrals from an authored key region — but scene is correct with the heuristic exactly as it stands, once the constants are re-derived. Parked | [56](https://github.com/dvoyni/cog/issues/56) |
+| A `ui` viewport element hosting a camera's output texture | **closed** as won't-do: a game composes it from `ui.ParamVisual[T]`, `SpriteTexture` or `DrawTexture`, and `canvas.TextureMaterial()` | [37](https://github.com/dvoyni/cog/issues/37) |
+| Refcounting textures so `UnloadModel` is the only lever | **closed** as won't-do: `UnloadAll` is the lever, because renderers unload between scenes | [39](https://github.com/dvoyni/cog/issues/39) |
+| Residency budget and automatic eviction | **closed** as won't-do: eviction is a command the app calls, never an engine heuristic | [40](https://github.com/dvoyni/cog/issues/40) |
+| Baking poses at 30 Hz with higher-order shader interpolation | **closed** as won't-do: not worth the complexity, and `PoseSampleRate` already halves the memory for a game that wants it | [42](https://github.com/dvoyni/cog/issues/42) |
+| Morph targets and skinning on buffer-built meshes | both need a group-2 binding a `MeshRef` has no equivalent of, and skinning additionally needs joint-data ownership — most of a model format invented at the call site. Parked | [43](https://github.com/dvoyni/cog/issues/43), [51](https://github.com/dvoyni/cog/issues/51) |
+| Shader preprocessing and vertex variants; multi-buffer vertex binding | #45 shipped as the WGSL preprocessor ([preprocessor.md](../../../../slots/gfx/docs/specs/preprocessor.md)); #46 is **closed**, because load-time packing removed its premise | [45](https://github.com/dvoyni/cog/issues/45), [46](https://github.com/dvoyni/cog/issues/46) |
+| gogpu's unvalidated `arrayStride` | ready: validation on the fork `dvoyni/wgpu`, pinned by `replace` and sent upstream | [47](https://github.com/dvoyni/cog/issues/47) |
+| Golden-image acceptance and the first CI workflow | **closed** as won't-do: gfx has frame readback ([capture.md](../../../../slots/gfx/docs/specs/capture.md)), and reference frames checked by eye are enough | [54](https://github.com/dvoyni/cog/issues/54) |
+| Text AA midpoint shift for linear blending | **closed**: feuds-26 text was judged fine after the linear migration | [36](https://github.com/dvoyni/cog/issues/36) |
+| Moving `sceneFrame` to a uniform block | the better long-term shape and the only way to a free storage slot, since the budget is 8 of 8. gfx's uniform path is per draw only, a 256-strided slot in one arena buffer, reflection holds one uniform block, and nothing produces a `BufferUniform`. The open question is the per-pass uniform binding. Parked; it blocks shadows | [100](https://github.com/dvoyni/cog/issues/100) |
+| A uniform block over 256 bytes silently truncating | **closed**, fixed: gfx refuses such a shader at reflection as `gfx.ErrUniformBlockTooLarge`, fatal to the shader | [101](https://github.com/dvoyni/cog/issues/101) |
 
 ### Known-unspecified, with triggers
 

@@ -2034,6 +2034,9 @@ rasteriser drops the whole draw, GLES reads 0 as "tightly packed", Metal sets
 `stepRate: 1`. A trick that works in a browser and silently corrupts the desktop
 HAL is exactly the divergence the map forbids
 ([gogpu/wgpu: arrayStride 0 is unvalidated and backends diverge](https://github.com/dvoyni/cog/issues/47)).
+That ticket is ready: it adds the missing validation on the fork `dvoyni/wgpu`,
+which cog will pin by `replace`, and sends the same patch upstream. Stride 0 is
+rejected there, not emulated, so the trick stays unusable after it lands.
 
 **Packing waited on a measured trigger and then got one.** v1 stored all eight
 attributes wide, at 84 bytes; the narrowing above — oct normals and tangents,
@@ -2278,13 +2281,16 @@ renumbering.
 ### Scene declares no uniform block
 
 All numeric data lives in **storage buffers** from the per-frame arena. gfx's
-uniform path gives every draw its own pooled 256-byte buffer and its own
-`WriteBuffer` — a thousand draws is a thousand buffers, a thousand uploads, and a
-256-byte cap. Scene abandons it entirely: there is no cap and one upload instead
-of a thousand. The honest cost is that a uniform read is scalar-uniform across a
-wave while a storage read indexed by `instance_index` is not — small, and not
-worth two shader paths. `uniformMax` stays at 256 for the uniform path canvas
-uses; scene never reaches it.
+uniform path is per draw only: every draw that declares a block gets its own
+256-strided slot in one arena buffer (`extensions/gogpu/internal/gfxuniformarena.go`),
+and `uniformMax` (`slots/gfx/internal/translator.go:29`) caps the block at 256
+bytes. A shader declaring more is refused when it is reflected, as
+`gfx.ErrUniformBlockTooLarge`, and every draw through it is dropped
+([#101](https://github.com/dvoyni/cog/issues/101)). Scene abandons the path
+entirely: there is no cap and no per-draw slot. The honest cost is that a
+uniform read is scalar-uniform across a wave while a storage read indexed by
+`instance_index` is not. That cost is small, and not worth two shader paths.
+Canvas uses the uniform path; scene never reaches it.
 
 ### Material records are bound ranges, not indices
 
@@ -2370,15 +2376,24 @@ Three rules follow, and they are contract rather than guidance:
   the declared count, the device's limit and the web floor, so the diagnostic
   says which platform breaks.
 
-Exceeding this is not a degraded frame. `CreateBindGroup` fails the entry-count
-rule, the error is swallowed, `encoder.Finish()`'s error is dropped, and **the
-whole frame's command buffer vanishes silently** — on the web only.
+Exceeding this in a browser is no longer found first as a lost frame. The check
+is `checkWebLimits` (`slots/gfx/internal/limits.go:26`), and it runs when a
+shader is created, on every platform. A shader past the floor is reported once
+as `gfx.ErrShaderExceedsWebLimits`, naming the limit, the declared count, the
+web floor and the device's limit. It is a portability report, not a refusal: the
+shader is kept and renders on a device whose own limits allow it, so a desktop
+run names the shader that a browser cannot run.
 
-Moving `sceneFrame` to a uniform block is the named next lever if an eighth is
-ever needed, and is filed rather than built
-([scene: move sceneFrame to a uniform block](https://github.com/dvoyni/cog/issues/100)):
-gfx's uniform path is per-draw only, capped at 256 bytes with silent truncation,
-with no range binding reachable for a uniform-typed binding.
+Moving `sceneFrame` to a uniform block is the named next lever when another
+storage buffer is needed, and is filed rather than built
+([scene: move sceneFrame to a uniform block](https://github.com/dvoyni/cog/issues/100),
+parked, and blocking [sun shadow maps](https://github.com/dvoyni/cog/issues/52)).
+gfx's uniform path is per draw only, one 256-strided arena slot each; reflection
+holds a single uniform block; and nothing produces a `gfx.BufferUniform`, so no
+range binding reaches a uniform-typed binding. What that ticket leaves open is
+the gfx surface for a per-pass uniform binding. The silent truncation it once
+listed is gone: a block over 256 bytes is refused
+([#101](https://github.com/dvoyni/cog/issues/101)).
 
 ### The `sceneAnim` block
 
