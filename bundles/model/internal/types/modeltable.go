@@ -124,16 +124,22 @@ type modelPrimitive struct {
 }
 
 // modelMaterial is one converted glTF material: the forward gfx material a draw
-// binds, once per shader variant, and the per-batch record that carries its
-// numbers. It names no pass: a renderer wraps the forward material under its
-// own tag.
+// binds, once per shader variant, the content key of each, and the per-batch
+// record that carries its numbers. It names no pass: a renderer wraps the
+// forward material under its own tag.
 //
 // One glTF material serves whatever primitives reference it, and what a
 // primitive deforms is not the material's business - so the variant is picked
 // per primitive, from the same bindings that primitive's draw supplies, and the
 // material carries all four rather than deciding.
+//
+// Key is each forward descr's gfx fingerprint, taken once here at load. The
+// descr never changes after it, so the key never goes stale, and a renderer
+// derives its own material key from it rather than fingerprinting the descr
+// on every draw of every frame.
 type modelMaterial struct {
 	Forward [VariantCount]gfx.MaterialDescr
+	Key     [VariantCount]uint64
 	Record  ScenePbrRecord
 }
 
@@ -431,6 +437,7 @@ func bindModelMaterial(
 		// One params slice serves all four: only the shader differs.
 		built.Forward[variant] = gfx.MaterialWithState(
 			ShaderVariant(variant).shader(), loaded.state, params...)
+		built.Key[variant] = built.Forward[variant].Fingerprint()
 	}
 	return built
 }

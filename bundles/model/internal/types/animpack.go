@@ -97,7 +97,7 @@ func ResolvePlays(
 	if len(anim.Clips) == 0 || len(plays) == 0 {
 		return dst, weights
 	}
-	var kept [maxClipPlays]resolvedPlay
+	var kept [MaxClipPlays]resolvedPlay
 	count := 0
 	for _, play := range plays {
 		clip, ok := anim.clip(play.Clip)
@@ -106,7 +106,7 @@ func ResolvePlays(
 			continue
 		}
 		resolved := resolvedPlay{clip: clip, time: play.Time, loop: play.Loop, weight: play.Weight}
-		if count < maxClipPlays {
+		if count < MaxClipPlays {
 			kept[count] = resolved
 			count++
 			continue
@@ -123,7 +123,7 @@ func ResolvePlays(
 			kept[lightest] = resolved
 		}
 		report(playsReportKey(path), ErrModelPlaysOverLimit{
-			Model: path, Plays: len(plays), Limit: maxClipPlays,
+			Model: path, Plays: len(plays), Limit: MaxClipPlays,
 		})
 	}
 	var total float32

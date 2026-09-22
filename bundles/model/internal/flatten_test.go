@@ -6,36 +6,21 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/model/modelplugin"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/app/appplugin"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/gfx/gfxplugin"
+	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
-// flattenedSceneShader is the bundled module as the backend sees it, with every
-// feature on, served from the mount model contributes. Tests that read the
-// shader's text read this rather than any one source, because a declaration
-// lives in whichever of the sources owns it.
-func flattenedSceneShader(t testing.TB) string {
-	t.Helper()
-	text, err := flattenShader(t, model.SceneShader(
-		gfx.ShaderDefine("SCENE_SKIN"), gfx.ShaderDefine("SCENE_MORPH")))
-	if err != nil {
-		t.Fatalf("flatten the bundled scene shader: %v", err)
-	}
-	return text
-}
-
-// flattenShader resolves one shader through gfx's preprocessor, with model's
-// bundled shader mount as storage's only read mount - the mount scene draws
-// from. The preprocessor is internal to gfx, so the module is read where it
-// leaves gfx: one draw with the shader, and the source the backend is handed
-// for it. A shader the preprocessor refuses is the error gfx reports for it.
-func flattenShader(t testing.TB, shader gfx.ShaderDescr) (string, error) {
+// flattenShader resolves one shader through gfx's preprocessor, with
+// filesystem as storage's only read mount under mount. The preprocessor is
+// internal to gfx, so the module is read where it leaves gfx: one draw with the
+// shader, and the source the backend is handed for it. A shader the
+// preprocessor refuses is the error gfx reports for it.
+func flattenShader(t testing.TB, mount storage.MountId, filesystem fs.FS, shader gfx.ShaderDescr) (string, error) {
 	t.Helper()
 	backend := &flattenBackend{}
 	var (
@@ -53,7 +38,7 @@ func flattenShader(t testing.TB, shader gfx.ShaderDescr) (string, error) {
 			mu.Unlock()
 		}
 		return err
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, modelplugin.New(), appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), flattenRecorder{backend: backend, shader: shader})
+	}).WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: mount, Priority: 0, FS: filesystem}}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), flattenRecorder{backend: backend, shader: shader})
 	go engine.Run()
 	<-engine.Ready()
 	k := engine.Executioner()

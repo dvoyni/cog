@@ -117,8 +117,8 @@ func TestResolvePlaysDropsTheLightestOverTheCap(t *testing.T) {
 		{Clip: "jump", Weight: 2},
 		{Clip: "fall", Weight: 1},
 	}, nil, nil, report)
-	if len(plays) != maxClipPlays {
-		t.Fatalf("plays = %d, want the cap of %d", len(plays), maxClipPlays)
+	if len(plays) != MaxClipPlays {
+		t.Fatalf("plays = %d, want the cap of %d", len(plays), MaxClipPlays)
 	}
 	if len(*keys) != 1 || (*keys)[0] != "model:m.glb#plays" {
 		t.Errorf("reported %v, want one report per model", *keys)

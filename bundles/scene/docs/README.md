@@ -75,9 +75,9 @@ scene has the declaration-root shape of
   declared here too; the plugin handles it. The root aliases what it exposes.
 - **`bundles/scene/internal`** is the plugin: its `New`, the flush that expands model draws, selects lights, culls,
   sorts, interns materials and packs instances into gfx passes and draws, the
-  frame-build state all of that keeps across frames, the handlers of the two-hop
-  model load, and the read mount of the embedded shaders under
-  `internal/builtin/scene/`.
+  frame-build state all of that keeps across frames, and the handlers of the
+  two-hop model load. The bundled shader's sources are model's, embedded under
+  `bundles/model/internal/builtin/scene/` and mounted by the model plugin.
 - **`bundles/scene/sceneplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
 
@@ -95,8 +95,8 @@ root.
 - Constructor: `sceneplugin.New() kernel.Plugin`
 - Plugin dependencies: `gfx`, `storage`, `model`
 - Requires: no Adapter
-- Contributes: one `storage.ReadMount`, as the `scene.StorageReadMount` Adapter
-  for `storage.ReadMountPort`
+- Contributes: no Adapter. The bundled shader is mounted by `model`, as the
+  `model.StorageReadMount` Adapter for `storage.ReadMountPort`
 - Go package dependencies: `app`, `gfx`, `kernel`, `m`, `model`, `storage`,
   `github.com/qmuntal/gltf`
 - Configuration: none. `scene.Config` aliases `model.Config`, which the model
@@ -112,8 +112,9 @@ kernel.New(map[kernel.PluginName]any{
 `PoseSampleRate` — the global animation bake rate in Hz — is model's, because
 the Lookup that bakes every clip is model's. A zero value takes its default, 60,
 and giving no configuration at all takes it too; a negative rate is refused.
-`Register` contributes scene's embedded shader filesystem to storage as a read
-mount, which storage installs at its own `Start`.
+The model plugin's `Register` contributes the bundled shader's embedded sources
+to storage as a read mount, which storage installs at its own `Start`; scene
+mounts nothing.
 
 **Register `storage` and `model` before `scene`.** The order the demos use is
 `storage`, `input`, `gfx`, `canvas`, `model`, `scene`, then the driver

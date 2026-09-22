@@ -5,43 +5,47 @@ import (
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
-// overrideRecord merges a draw's OverrideParams into its own copy of the
-// bundled PBR record, by name.
+// Override merges a draw's OverrideParams into its own copy of the bundled PBR
+// record, by name, one parameter at a time through OverrideParam.
 //
-// This is one of the two destinations an override has, and the only one scene
-// resolves itself. The record is a bound range of the frame's material arena
-// rather than a set of reflected uniforms - the binding is the addressing - so
-// gfx never sees its members and cannot match a parameter against them. The
-// other destination needs no code at all: an override reaches the draw's gfx
-// parameter list, and gfx already resolves a draw parameter over a material one
-// of the same name against the reflected layout of the entry's own shader.
+// This is one of the two destinations an override has, and the only one a
+// renderer resolves itself. The record is a bound range of the frame's material
+// arena rather than a set of reflected uniforms - the binding is the addressing
+// - so gfx never sees its members and cannot match a parameter against them.
+// The other destination needs no code at all: an override reaches the draw's
+// gfx parameter list, and gfx already resolves a draw parameter over a material
+// one of the same name against the reflected layout of the entry's own shader.
 //
 // A name neither destination declares is ignored rather than reported, and that
 // silence is load-bearing: OverrideParams broadcasts to every material the draw
 // binds, and an alphaMode MASK shadow shader declares baseColorTexture and
 // alphaCutoff where an OPAQUE one declares neither. A report would fire on the
 // materials that legitimately do not carry the name.
-func overrideRecord(record *ScenePbrRecord, params []gfx.ParameterDescr) {
+func (r *ScenePbrRecord) Override(params []gfx.ParameterDescr) {
 	for i := range params {
-		vec, scalar := record.Member(params[i].Name())
-		switch {
-		case vec != nil:
-			if color, ok := params[i].ColorValue(); ok {
-				*vec = m.Vec4{X: color.R, Y: color.G, Z: color.B, W: color.A}
-			} else if value, ok := params[i].VecValue(); ok {
-				*vec = value
-			}
-		case scalar != nil:
-			if value, ok := params[i].FloatValue(); ok {
-				*scalar = value
-			}
-		}
+		r.OverrideParam(params[i])
 	}
 }
 
-// Override merges params into the record by name, the way a draw's
-// OverrideParams reach the record gfx cannot see; see overrideRecord.
-func (r *ScenePbrRecord) Override(params []gfx.ParameterDescr) { overrideRecord(r, params) }
+// OverrideParam merges one parameter into the record by name: a color or a
+// vector into a vec4 member, a float into a scalar one. A name the record has
+// no member for, or a value of a kind its member cannot hold, leaves the record
+// as it was; see Override.
+func (r *ScenePbrRecord) OverrideParam(param gfx.ParameterDescr) {
+	vec, scalar := r.Member(param.Name())
+	switch {
+	case vec != nil:
+		if color, ok := param.ColorValue(); ok {
+			*vec = m.Vec4{X: color.R, Y: color.G, Z: color.B, W: color.A}
+		} else if value, ok := param.VecValue(); ok {
+			*vec = value
+		}
+	case scalar != nil:
+		if value, ok := param.FloatValue(); ok {
+			*scalar = value
+		}
+	}
+}
 
 // Member locates the record member one parameter name addresses, as either a
 // vec4 or a scalar destination. Both are nil for a name the record has no

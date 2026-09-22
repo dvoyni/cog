@@ -60,13 +60,38 @@ var materialSeed = maphash.MakeSeed()
 func MaterialKeyOf(material Material) MaterialKey {
 	var h maphash.Hash
 	h.SetSeed(materialSeed)
-	var buf [8]byte
 	for i := range material {
-		h.WriteString(string(material[i].tag()))
-		binary.LittleEndian.PutUint64(buf[:], material[i].Descr.Fingerprint())
-		h.Write(buf[:])
+		writeMaterialEntry(&h, material[i].tag(), material[i].Descr.Fingerprint())
 	}
-	if key := MaterialKey(h.Sum64()); key != 0 {
+	return materialKeyOfSum(h.Sum64())
+}
+
+// ForwardMaterialKey is MaterialKeyOf of the one-entry forward material
+// Material{{Tag: TagForward, Descr: descr}}, given descr's gfx fingerprint
+// rather than descr. A model material carries that fingerprint from its load,
+// so a draw of a file's own material is keyed without fingerprinting anything:
+// what is left is hashing the tag and eight bytes. The key is the one
+// MaterialKeyOf would give, so the file's material batches exactly as it did
+// when the flush keyed it.
+func ForwardMaterialKey(fingerprint uint64) MaterialKey {
+	var h maphash.Hash
+	h.SetSeed(materialSeed)
+	writeMaterialEntry(&h, TagForward, fingerprint)
+	return materialKeyOfSum(h.Sum64())
+}
+
+// writeMaterialEntry hashes one entry of a material: its tag, then its gfx
+// fingerprint.
+func writeMaterialEntry(h *maphash.Hash, tag PassTag, fingerprint uint64) {
+	h.WriteString(string(tag))
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], fingerprint)
+	h.Write(buf[:])
+}
+
+// materialKeyOfSum reads a sum that lands on zero as one: zero is never a key.
+func materialKeyOfSum(sum uint64) MaterialKey {
+	if key := MaterialKey(sum); key != 0 {
 		return key
 	}
 	return 1

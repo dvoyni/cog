@@ -105,9 +105,11 @@ func (p *plugin) expandModels(
 			material, record, key := call.Material, (*model.ScenePbrRecord)(nil), call.MaterialKey
 			if material == nil {
 				// The file's own material names no pass, so it is wrapped as
-				// the forward one here, and keyed by the flush like any other.
-				material = p.forwardMaterial(owned.Forward[model.VariantFor(anim.Skin.Bound, anim.Skin.Morphed)])
-				record, key = &owned.Record, 0
+				// the forward one here. Its key derives from the one the load
+				// took, so the flush never fingerprints a file material.
+				variant := model.VariantFor(anim.Skin.Bound, anim.Skin.Morphed)
+				material = p.forwardMaterial(owned.Forward[variant])
+				record, key = &owned.Record, types.ForwardMaterialKey(owned.Key[variant])
 			}
 			// A morphed model packs a block per primitive rather than per
 			// call, because the four morph words and the sparse weight list

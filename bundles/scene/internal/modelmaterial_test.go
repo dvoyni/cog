@@ -82,6 +82,49 @@ func TestAPlainModelDrawBindsTheFilesRecordsWithNoCopy(t *testing.T) {
 	})
 }
 
+// A file's material is keyed once, at load, and never per draw. Every draw
+// record a frame expands a model into carries a key already, so intern - whose
+// fallback for a record with no key is the one place the flush fingerprints a
+// material - takes none of them there. The key is the content key the flush
+// would have taken, so the draws still batch exactly as before.
+func TestAFrameDrawingOneModelManyTimesFingerprintsNoFileMaterial(t *testing.T) {
+	const draws = 32
+	h := newHarnessWithFiles(t, modelFiles(glb(t, twoMaterialModel(t))), func(q *scene.OpQueue) {
+		q.Camera(cameraMain, modelCamera())
+		for i := range draws {
+			q.Model(scene.LayersAll, modelPath, scene.ModelDraw{
+				Transform: m.At(float32(i), 0, 0),
+			})
+		}
+	})
+	h.frameUntil(t, "the model to become resident", func() bool {
+		return len(h.passes()) == 1 && h.passes()[0].Instances > 0
+	})
+	var records []types.DrawRecord
+	h.inspect(func(q *scene.OpQueue) { records = append(records, types.OpQueueFlushDraws(q)...) })
+	if len(records) != 2*draws {
+		t.Fatalf("expanded to %d draws, want %d", len(records), 2*draws)
+	}
+	h.model(func(lookup *scene.Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue) {
+		entry, _, ok := lookup.ModelView(k, fsys, resources, modelPath, "", "")
+		if !ok || len(entry.Materials) != 2 {
+			t.Fatalf("entry = %v, want the two materials the file declares", entry)
+		}
+		for i := range records {
+			owned := &entry.Materials[i%2]
+			if records[i].MaterialKey == 0 {
+				t.Fatalf("draw %d carries no key, so the flush fingerprints its material", i)
+			}
+			if want := types.ForwardMaterialKey(owned.Key[model.VariantStatic]); records[i].MaterialKey != want {
+				t.Errorf("draw %d key = %x, want the one derived from the load's %x", i, records[i].MaterialKey, want)
+			}
+			if want := types.MaterialKeyOf(records[i].Material); records[i].MaterialKey != want {
+				t.Errorf("draw %d key = %x, want its material's content key %x", i, records[i].MaterialKey, want)
+			}
+		}
+	})
+}
+
 // OverrideParams merges by name over each primitive's own record, and it
 // broadcasts: one call's parameter list reaches every material the draw binds,
 // which is what the common per-draw override - team colour, hit flash, fade -

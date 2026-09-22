@@ -103,6 +103,10 @@ const (
 // MaxLights is the per-pass light cap: the length of the shader's Lights array.
 const MaxLights = types.MaxLights
 
+// MaxClipPlays is how many clips one draw may blend. A fifth play is dropped
+// by lowest weight and reported once per model rather than failing the draw.
+const MaxClipPlays = types.MaxClipPlays
+
 // LightKind is which of the two punctual lights a LightDescr describes.
 // PointLight and SpotLight set it themselves; it is exposed so an Op can be
 // read back.
