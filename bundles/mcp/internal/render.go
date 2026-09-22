@@ -126,10 +126,13 @@ var textValuedType = reflect.TypeFor[mcp.TextValued]()
 // generic name every other instantiation shares.
 var maybeType = reflect.TypeFor[m.Maybe[struct{}]]()
 
-// typeSchemas walks every request and response type once and renders the two
+// listType is one instantiation of m.List, read the same way as maybeType.
+var listType = reflect.TypeFor[m.List[struct{}]]()
+
+// typeSchemas walks every request and response type once and renders the three
 // kinds of type whose wire form is not their Go shape: each mcp.TextValued type
-// as the string it actually crosses the wire as, and each m.Maybe as the
-// nullable value it crosses as. This is the only place the broker inspects a
+// as the string it actually crosses the wire as, each m.Maybe as the nullable
+// value it crosses as, and each m.List as the array it crosses as. This is the only place the broker inspects a
 // provider's types for anything beyond their shape, and what it learns is a
 // string set or an element type, never a meaning.
 func typeSchemas(all []offered) (map[reflect.Type]*jsonschema.Schema, error) {
@@ -188,6 +191,24 @@ func walkOverrides(
 		return nil
 	}
 
+	if element, ok := listElement(payload); ok {
+		// A List's elements sit in an unexported slice the walk below would not
+		// reach, so its element is walked first and the List then renders as
+		// the slice it marshals as. MarshalJSON writes [] for an empty List and
+		// never null, so the array is not nullable.
+		if err := walkOverrides(element, seen, overrides); err != nil {
+			return err
+		}
+		schema, err := jsonschema.ForType(reflect.SliceOf(element), &jsonschema.ForOptions{TypeSchemas: overrides})
+		if err != nil {
+			return err
+		}
+		schema.Type, schema.Types = "array", nil
+		overrides[payload] = schema
+		overrides[reflect.PointerTo(payload)] = schema
+		return nil
+	}
+
 	switch payload.Kind() {
 	case reflect.Pointer, reflect.Slice, reflect.Array:
 		return walkOverrides(payload.Elem(), seen, overrides)
@@ -224,6 +245,24 @@ func maybeElement(payload reflect.Type) (reflect.Type, bool) {
 		return nil, false
 	}
 	return get.Type.Out(0), true
+}
+
+// listElement reports whether payload is an instantiation of m.List, and the
+// type it holds, recognised as maybeElement recognises a Maybe. The element is
+// the result of At.
+func listElement(payload reflect.Type) (reflect.Type, bool) {
+	if payload.Kind() != reflect.Struct || payload.PkgPath() != listType.PkgPath() {
+		return nil, false
+	}
+	generic := listType.Name()[:strings.IndexByte(listType.Name(), '[')+1]
+	if !strings.HasPrefix(payload.Name(), generic) {
+		return nil, false
+	}
+	at, ok := payload.MethodByName("At")
+	if !ok {
+		return nil, false
+	}
+	return at.Type.Out(0), true
 }
 
 // textSchema renders one mcp.TextValued type: the strings it accepts, plus a

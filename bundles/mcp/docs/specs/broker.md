@@ -379,6 +379,19 @@ unexported fields as an empty object. An instantiation is recognised by `m`'s
 package and the generic name, since `reflect` has no generic origin to compare,
 and `T` is `Get`'s first result.
 
+The walk renders each `m.List[T]` it reaches as `jsonschema.ForType` would
+render `[]T`: an array whose `items` is `T`'s schema, with `T`'s own overrides
+applied because `T` is walked first
+([#547](https://github.com/dvoyni/cog/issues/547)). A List crosses JSON as the
+array its `MarshalJSON` writes
+([#371](https://github.com/dvoyni/cog/issues/371)), and inference left alone
+would read its unexported fields as an empty object. The array is not nullable,
+because an empty List marshals as `[]` and never `null`, so the `null` the
+library admits for a slice is narrowed away. Nested Lists render through the
+same branch. An instantiation is recognised as a Maybe's is, and `T` is `At`'s
+result. `m.List` has no `UnmarshalJSON`, so a List in a request type would be
+advertised correctly but not decode.
+
 **Annotations** map as
 [mcp §Annotations](mcp.md#annotations) states:
 `ReadOnlyHint = readOnly`, `DestructiveHint` always false, `OpenWorldHint`
@@ -720,8 +733,9 @@ paths of [#359](https://github.com/dvoyni/cog/issues/359).
 
 **`bundles/mcp/internal/render.go`**
 
-- Capability → tool: name, schemas via `jsonschema.ForType`, the `TextValued`
-  and `m.Maybe` walk building `ForOptions.TypeSchemas`, annotation mapping.
+- Capability → tool: name, schemas via `jsonschema.ForType`, the `TextValued`,
+  `m.Maybe` and `m.List` walk building `ForOptions.TypeSchemas`, annotation
+  mapping.
 - Validation: deferred `err`, duplicate name within a plugin, non-`object`
   schema root. All to `kernel.ReportError`.
 
@@ -751,6 +765,9 @@ paths of [#359](https://github.com/dvoyni/cog/issues/359).
 - The `TextValued` walk finds a type nested inside a slice of structs.
 - An `m.Maybe` renders as the pointer it replaced, a Maybe of a struct and a
   slice of Maybes included.
+- An `m.List` renders as a non-nullable array of its element's schema, nested
+  Lists included, and a `TextValued` type or an `m.Maybe` inside its element
+  keeps its own override ([#547](https://github.com/dvoyni/cog/issues/547)).
 - The whole tool list of a full cog composition, read over a client, matches
   `kernel/archtest/testdata/toolschemas.json`.
 
