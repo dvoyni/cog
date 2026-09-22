@@ -173,8 +173,8 @@ func TestRecordingAllocatesNothingPerEntity(t *testing.T) {
 }
 
 // tickSubscribers counts what the engine runs per tick, because the allocation
-// floor above is the engine's own per-publication and per-subscriber charge and
-// means nothing without the number of subscribers it was measured over.
+// floor above is the engine's own charge for this composition and means nothing
+// without the number of subscribers it was measured over.
 func tickSubscribers(tb testing.TB) int {
 	tb.Helper()
 	h := newHarnessOver(tb, fstest.MapFS{}, 8)
