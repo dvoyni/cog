@@ -371,10 +371,11 @@ func ToExecute[Req any, Res any](
 // prepareSystem is the classification, and the classification is contract.
 //
 // A System takes any number of *Query[Q], *Spawn[S], *WriteableEntities,
-// *Get[T], *Set[T], *Remove[T], *Hooks[T, K], *Read[T], *Write[T] and *In[T]; the
-// kernel.Kernel value; at most once the event or request value itself; and, for
-// a command only, at most once the *Resp[Res] it answers through. Anything else
-// is a composition-time failure naming the System's type.
+// *DeferredDespawn, *Get[T], *Set[T], *Remove[T], *Hooks[T, K], *Read[T],
+// *Write[T] and *In[T]; the kernel.Kernel value; at most once the event or
+// request value itself; and, for a command only, at most once the *Resp[Res] it
+// answers through. Anything else is a composition-time failure naming the
+// System's type.
 //
 // A System returns nothing, which is a hard rule rather than a style
 // preference: reflect.Value.Call allocates for a callee that returns a value,
@@ -539,7 +540,7 @@ func refusal(systemType, paramType, drivenType reflect.Type, driven string) stri
 		}
 	}
 	return fmt.Sprintf(
-		"ecs: System %s takes %s, which is not something a System may take; a System takes *ecs.Query, *ecs.Spawn, *ecs.WriteableEntities, *ecs.Get, *ecs.Set, *ecs.Remove, *ecs.Hooks, *ecs.Read, *ecs.Write, *ecs.In, the kernel.Kernel value, at most once the %s value %s, and for a command at most once the *ecs.Resp it answers through",
+		"ecs: System %s takes %s, which is not something a System may take; a System takes *ecs.Query, *ecs.Spawn, *ecs.WriteableEntities, *ecs.DeferredDespawn, *ecs.Get, *ecs.Set, *ecs.Remove, *ecs.Hooks, *ecs.Read, *ecs.Write, *ecs.In, the kernel.Kernel value, at most once the %s value %s, and for a command at most once the *ecs.Resp it answers through",
 		kernel.TypeName(systemType), kernel.TypeName(paramType), driven, kernel.TypeName(drivenType))
 }
 
