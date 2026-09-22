@@ -62,7 +62,7 @@ error handling.
     Adapters, a directory under the user's data directory on desktop and
     localStorage in a browser.
 - [`m`](libs/m): immutable vectors, rectangles, colors, matrices, quaternions,
-    scalar helpers, and splines. Angles use radians.
+    scalar helpers, splines, and piecewise-linear ramps. Angles use radians.
 - [`assets`](libs/assets/docs/README.md): one cache for loaded assets, keyed by a
     comparable descriptor — a static run of bytes, a descriptor, a stateless
     loader, and the four verbs a plugin caches an asset family with.
