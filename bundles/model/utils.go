@@ -51,6 +51,15 @@ func MintMesh[TVertex VertexLayout](
 	return types.MintMesh[TVertex](cache, arena, vertices, indices, topology, durable)
 }
 
+// NewClipMachine builds a clip state machine over the clips a model declares,
+// as LookupDeviceAccess.Clips reports them. Every clip and state name is
+// resolved here, once; Step never touches the lookup. The machine starts in
+// states[0] at time 0. An unknown clip or state, a transition with both
+// triggers or neither, and an empty state list are each an error.
+func NewClipMachine(clips []ClipInfo, states []ClipState, transitions []ClipTransition) (ClipMachine, error) {
+	return types.NewClipMachine(clips, states, transitions)
+}
+
 // VariantFor picks the shader variant a draw needs from what it deforms.
 func VariantFor(skinned, morphed bool) ShaderVariant { return types.VariantFor(skinned, morphed) }
 

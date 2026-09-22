@@ -87,6 +87,23 @@ type ErrModelClipMissing = types.ErrModelClipMissing
 // is what the character mostly looks like anyway.
 type ErrModelPlaysOverLimit = types.ErrModelPlaysOverLimit
 
+// ErrClipMachineEmpty reports a ClipMachine built with no states, which leaves
+// it nothing to start in.
+type ErrClipMachineEmpty = types.ErrClipMachineEmpty
+
+// ErrClipStateClipMissing reports a ClipState naming a clip the model does not
+// declare. NewClipMachine refuses it once, rather than a play being dropped
+// every frame the state is live.
+type ErrClipStateClipMissing = types.ErrClipStateClipMissing
+
+// ErrClipTransitionStateMissing reports a ClipTransition whose From or To names
+// no state. State is the name that was not found.
+type ErrClipTransitionStateMissing = types.ErrClipTransitionStateMissing
+
+// ErrClipTransitionTriggerInvalid reports a ClipTransition with both On and
+// OnFinish set, or neither.
+type ErrClipTransitionTriggerInvalid = types.ErrClipTransitionTriggerInvalid
+
 // ErrModelMorphWeightsOverLength reports a draw whose MorphWeights is longer
 // than the model's flattened target list. The tail is ignored and the draw
 // renders: MorphWeights is positional, so a caller whose array outlives an edit

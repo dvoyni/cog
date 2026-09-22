@@ -101,6 +101,46 @@ type ClipPlay = types.ClipPlay
 // piece of clip state gameplay cannot compute for itself.
 type ClipInfo = types.ClipInfo
 
+// ClipMachine is a clip state machine: the caller keeps it, fires triggers into
+// it and steps it each tick, and it hands back the frame's clip plays and what
+// happened on the way. It is a plain storable value, so a scene game keeps one
+// in a field and an ecsscene game keeps one as a Component. Its tables are
+// m.Lists, so a copy shares them read-only and then steps on its own.
+type ClipMachine = types.ClipMachine
+
+// ClipState is one state of a ClipMachine: a named clip, whether it loops, and
+// the Rate that scales the dt Step is given. Rate zero reads as 1.
+type ClipState = types.ClipState
+
+// ClipTransition is one way out of a state, taken by Fire on its On trigger or
+// by Step when a non-looping From finishes. Exactly one of the two is set.
+type ClipTransition = types.ClipTransition
+
+// EaseKind names the curve a crossfade's incoming weight follows: anim's
+// easings of the same names, as an enum so that a ClipMachine stays storable.
+type EaseKind = types.EaseKind
+
+const (
+	EaseLinear     = types.EaseLinear
+	EaseCubicIn    = types.EaseCubicIn
+	EaseCubicOut   = types.EaseCubicOut
+	EaseCubicInOut = types.EaseCubicInOut
+)
+
+// ClipEvent is one thing a ClipMachine reports from a Step: a state, by index,
+// entered, exited or finished. StateName names the index.
+type ClipEvent = types.ClipEvent
+
+// ClipEventKind is what happened to a ClipEvent's state. Its zero value is no
+// event.
+type ClipEventKind = types.ClipEventKind
+
+const (
+	ClipEntered  = types.ClipEntered
+	ClipExited   = types.ClipExited
+	ClipFinished = types.ClipFinished
+)
+
 // ModelHandle is a plain slot index into the Lookup's dense model table. A
 // ModelRef resolves to one once, through the load facade's Resolve, and a read
 // by handle is then one index, with no path clean and no string hash. There is
