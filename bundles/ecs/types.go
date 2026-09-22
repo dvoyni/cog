@@ -72,6 +72,25 @@ type With[T any] = types.With[T]
 // every Store, so one entry in the lock set excludes every System in the frame.
 type Spawn[S any] = types.Spawn[S]
 
+// DeferredSpawn queues a Spawn instead of making one, so a System that creates
+// Entities holds read{*Entities} and read{*Store[F]} per Component set field
+// rather than the wide write: it runs beside every Query and is excluded only
+// against writers of what it spawns.
+//
+//	func cast(spawn *ecs.DeferredSpawn[Projectile], q *ecs.Query[Casters]) {
+//	    for _, it := range q.All() {
+//	        spawn.New(Projectile{Body: it.Body.At, Velocity: it.Caster.Aim})
+//	    }
+//	}
+//
+// New is its one method, and the Entity it returns is not alive: its id and
+// generation are fixed at the call so it can be stored as a Reference in the
+// same run — a missile's target, a projectile's owner — but it has no
+// Components, Alive is false for it, and an immediate Despawn, Set or Remove on
+// it misses. It comes to life at the next WriteableEntities.Drain, carrying
+// exactly the Component set it was queued with.
+type DeferredSpawn[S any] = types.DeferredSpawn[S]
+
 // WriteableEntities is the write-locked promotion of the id authority, and the
 // only thing that can retire an Entity: Despawn empties every Store of it. It
 // declares write{*Entities} and nothing besides.
