@@ -19,6 +19,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ecsscene/ecssceneplugin"
 	"github.com/dvoyni/cog/bundles/input/inputplugin"
 	"github.com/dvoyni/cog/bundles/mcp/mcpplugin"
+	"github.com/dvoyni/cog/bundles/model/modelplugin"
 	"github.com/dvoyni/cog/bundles/scene/sceneplugin"
 	"github.com/dvoyni/cog/bundles/ui/uiplugin"
 	"github.com/dvoyni/cog/extensions/nosound/nosoundplugin"
@@ -40,7 +41,7 @@ func TestTypeName_NamesEveryTypeInAFullCogCompositionUniquely(t *testing.T) {
 		WithPlugins(
 			storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
 			soundplugin.New(), nosoundplugin.New(),
-			inputplugin.New(), animplugin.New(), canvasplugin.New(), sceneplugin.New(), uiplugin.New(),
+			inputplugin.New(), animplugin.New(), canvasplugin.New(), modelplugin.New(), sceneplugin.New(), uiplugin.New(),
 			ecsplugin.New(), ecssceneplugin.New(), ecsaudioplugin.New(), mcpplugin.New(),
 		)
 	if failure != nil {

@@ -5,7 +5,6 @@ import (
 	"math"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -82,15 +81,15 @@ func readStoredVertex(t *testing.T, packed []byte, index, stride int, mesh Scene
 	mesh = mesh.packRecord()
 	at := packed[index*stride:]
 	return storedVertex{
-		position: readVec3(at[storagePosition:]),
+		position: readVec3(at[StoragePosition:]),
 		normal: decodeStoredNormal(
-			binary.NativeEndian.Uint16(at[storageNormal:]),
-			binary.NativeEndian.Uint16(at[storageNormal+2:]),
+			binary.NativeEndian.Uint16(at[StorageNormal:]),
+			binary.NativeEndian.Uint16(at[StorageNormal+2:]),
 		),
-		tangent: decodeStoredTangent(binary.NativeEndian.Uint32(at[storageTangent:])),
-		uv0:     readStoredUV(at[storageUV0:], mesh.UV0Scale, mesh.UV0Bias),
-		uv1:     readStoredUV(at[storageUV1:], mesh.UV1Scale, mesh.UV1Bias),
-		color:   readStoredColor(at[storageColor:]),
+		tangent: decodeStoredTangent(binary.NativeEndian.Uint32(at[StorageTangent:])),
+		uv0:     readStoredUV(at[StorageUV0:], mesh.UV0Scale, mesh.UV0Bias),
+		uv1:     readStoredUV(at[StorageUV1:], mesh.UV1Scale, mesh.UV1Bias),
+		color:   readStoredColor(at[StorageColor:]),
 	}
 }
 
@@ -108,7 +107,7 @@ func readStoredJoints(packed []byte, index int) [4]uint16 {
 	at := packed[index*StorageSkinnedStride:]
 	var joints [4]uint16
 	for i := range joints {
-		joints[i] = uint16(at[storageJoints+i])
+		joints[i] = uint16(at[StorageJoints+i])
 	}
 	return joints
 }
@@ -119,7 +118,7 @@ func readStoredJoints(packed []byte, index int) [4]uint16 {
 // position by their total, because these four do not sum to one and nothing at
 // bake can make them.
 func readStoredWeights(packed []byte, index int) m.Vec4 {
-	at := packed[index*StorageSkinnedStride+storageWeights:]
+	at := packed[index*StorageSkinnedStride+StorageWeights:]
 	return m.Vec4{
 		X: float32(at[0]) / unorm8CodeMax, Y: float32(at[1]) / unorm8CodeMax,
 		Z: float32(at[2]) / unorm8CodeMax, W: float32(at[3]) / unorm8CodeMax,
@@ -163,8 +162,8 @@ func readVec3(at []byte) m.Vec3 {
 // The vertices are the ones with no two fields alike, so a pack that swapped
 // two attributes or wrote one at the wrong offset cannot pass by accident.
 func TestEveryStoredAttributeReadsBackAsWhatWasAuthored(t *testing.T) {
-	box, _ := model.UnitBoxGeometry()
-	sphere, _ := model.UnitSphereGeometry()
+	box, _ := UnitBoxGeometry()
+	sphere, _ := UnitSphereGeometry()
 	for _, c := range []struct {
 		what     string
 		vertices []Vertex
@@ -255,14 +254,14 @@ func TestBothNamedLayoutsAreFourAlignedAndUnpadded(t *testing.T) {
 		name          string
 		offset, bytes int
 	}{
-		{"position", storagePosition, 12},
-		{"normal", storageNormal, 4},
-		{"tangent", storageTangent, 4},
-		{"uv0", storageUV0, 4},
-		{"uv1", storageUV1, 4},
-		{"color", storageColor, 4},
-		{"joints", storageJoints, 4},
-		{"weights", storageWeights, 4},
+		{"position", StoragePosition, 12},
+		{"normal", StorageNormal, 4},
+		{"tangent", StorageTangent, 4},
+		{"uv0", StorageUV0, 4},
+		{"uv1", StorageUV1, 4},
+		{"color", StorageColor, 4},
+		{"joints", StorageJoints, 4},
+		{"weights", StorageWeights, 4},
 	} {
 		if attr.offset%4 != 0 {
 			t.Errorf("%s starts at %d, which is not 4-aligned", attr.name, attr.offset)
@@ -301,8 +300,8 @@ func TestTheTwoNamedLayoutsAreTheSixAndTheSameSixPlusTwo(t *testing.T) {
 	}
 	// The two rows the standard layout declines to supply are the two
 	// SceneVertexIn declares only under SCENE_SKIN.
-	if skinned[6] != gfx.Attr(storageJoints, gfx.Uint8x4) ||
-		skinned[7] != gfx.Attr(storageWeights, gfx.Unorm8x4) {
+	if skinned[6] != gfx.Attr(StorageJoints, gfx.Uint8x4) ||
+		skinned[7] != gfx.Attr(StorageWeights, gfx.Unorm8x4) {
 		t.Errorf("the skinned layout's last two rows are %+v and %+v, want the joints and the weights",
 			skinned[6], skinned[7])
 	}
@@ -326,7 +325,7 @@ func TestPackedVerticesLandAfterWhateverTheArenaAlreadyHeld(t *testing.T) {
 
 // The traversal that packs is the traversal that bounds: one pass over the
 // vertices does both, rather than the pack being a second walk beside the one
-// mintMesh already made. The sphere is the circumsphere of the positions' box,
+// MintMesh already made. The sphere is the circumsphere of the positions' box,
 // the same shape glTF's POSITION min/max gives a loaded primitive.
 func TestPackingTheVerticesAlsoBoundsThem(t *testing.T) {
 	vertices := []Vertex{
@@ -355,7 +354,7 @@ func TestPackingTheVerticesAlsoBoundsThem(t *testing.T) {
 // would break silently: a vertex overwritten before it is read comes back as
 // whatever the previous vertex left there.
 func TestPackingOverTheAuthoredVerticesWritesTheSameBytes(t *testing.T) {
-	sphere, _ := model.UnitSphereGeometry()
+	sphere, _ := UnitSphereGeometry()
 	vertices := append(everyAttribute(), sphere...)
 	var arena []byte
 	at, _, record := PackVertices(&arena, vertices)

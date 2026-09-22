@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -104,13 +105,13 @@ func TestNeverCullAndExplicitBoundsOverrideTheBakedSphere(t *testing.T) {
 // its one parameter, so two of them are two material ids.
 func opaqueMaterial(key float32) scene.Material {
 	return scene.Material{{Descr: gfx.MaterialWithState(
-		gfx.ShaderWithResource(types.SceneShaderPath), gfx.StateOpaque3D(), pbrTestParams(key)...,
+		gfx.ShaderWithResource(model.SceneShaderPath), gfx.StateOpaque3D(), pbrTestParams(key)...,
 	)}}
 }
 
 func blendMaterial(key float32) scene.Material {
 	return scene.Material{{Descr: gfx.MaterialWithState(
-		gfx.ShaderWithResource(types.SceneShaderPath), gfx.StateTransparent3D(), pbrTestParams(key)...,
+		gfx.ShaderWithResource(model.SceneShaderPath), gfx.StateTransparent3D(), pbrTestParams(key)...,
 	)}}
 }
 
@@ -119,10 +120,10 @@ func blendMaterial(key float32) scene.Material {
 // backend without an unbound binding.
 func pbrTestParams(key float32) []gfx.ParameterDescr {
 	params := []gfx.ParameterDescr{gfx.FloatParam("key", key)}
-	for _, slot := range types.PbrSlots {
+	for _, slot := range model.PbrSlots {
 		params = append(params,
 			gfx.TextureParam(slot.Texture, gfx.TextureWithBytes(1, 1, gfx.FormatRGBA8, []byte{255, 255, 255, 255}, true, false)),
-			gfx.SamplerParam(slot.Sampler, types.PbrSampler),
+			gfx.SamplerParam(slot.Sampler, model.PbrSampler),
 		)
 	}
 	return params
@@ -277,8 +278,8 @@ func TestASeventeenthLightIsDroppedWithoutAReport(t *testing.T) {
 	}, &reported)
 	h.frame()
 
-	if pass := h.passes()[0]; pass.Lights != types.MaxLights {
-		t.Errorf("the pass packed %d lights, want the cap of %d", pass.Lights, types.MaxLights)
+	if pass := h.passes()[0]; pass.Lights != model.MaxLights {
+		t.Errorf("the pass packed %d lights, want the cap of %d", pass.Lights, model.MaxLights)
 	}
 	if len(reported) != 0 {
 		t.Errorf("the 17th light reported %v; the drop is silent by design", reported)

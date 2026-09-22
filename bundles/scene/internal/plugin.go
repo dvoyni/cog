@@ -4,6 +4,7 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/kernel"
@@ -18,7 +19,6 @@ import (
 // same frame-local OpQueue shape, the same persistent Lookup behind a scoped
 // access facade.
 type plugin struct {
-	config scene.Config
 	// defaultPasses is the reused one-element slice a camera that declared no
 	// passes of its own is flushed through.
 	defaultPasses [1]scene.Pass
@@ -30,6 +30,11 @@ type plugin struct {
 	// outlive a frame because the tag set belongs to the passes an app
 	// declares; the materials in it do not.
 	materials materialTable
+	// forward is the frame's arena of forward tag entries, one per model
+	// material a draw names: model's materials name no pass, so the flush
+	// wraps each as a scene material here. It keeps its backing across frames,
+	// so a steady frame wraps without allocating.
+	forward []scene.MaterialTag
 	// prepared is the frame's per-draw resolution, parallel to the flushed
 	// draws, and culler the per-camera cull. Both keep their backing across
 	// frames.
@@ -43,7 +48,7 @@ type plugin struct {
 	// temporaries is the frame's temporary meshes as mesh records, built once
 	// so that a temporary ref resolves exactly the way a durable one does and
 	// everything downstream is blind to which kind it has.
-	temporaries []types.MeshRecord
+	temporaries []model.MeshRecord
 	// modelWorlds is the frame's expanded model instance matrices. A draw
 	// record points into it, so it is sized once before any record is written
 	// and never appended to while records already point at it.
@@ -54,18 +59,18 @@ type plugin struct {
 	// the animation each draw resolved to, and modelPlays the scratch one
 	// draw's play records are folded in. All three keep their backing across
 	// frames.
-	modelViews []types.ModelView
+	modelViews []model.ModelView
 	modelAnims []types.AnimBinding
-	modelPlays []types.ScenePlayRecord
+	modelPlays []model.ScenePlayRecord
 	// The morph half of the same resolution. modelWeightFrames is parallel to
 	// modelPlays, modelWeights the draw's blended vector over the model's
 	// flattened slot list, and modelTargets the scratch one primitive's sparse
 	// list is culled into. modelMorphOffsets is the frame's per-primitive
 	// sceneAnim offsets, which a draw record reaches by index rather than by a
 	// slice: it is still being appended to while the records are written.
-	modelWeightFrames []types.WeightFrames
+	modelWeightFrames []model.WeightFrames
 	modelWeights      []float32
-	modelTargets      []types.SceneMorphWeight
+	modelTargets      []model.SceneMorphWeight
 	modelMorphOffsets []uint32
 	// meshReported is the set of mesh ids already reported this frame, so a
 	// released mesh named by a hundred draws is one report rather than a
@@ -81,11 +86,11 @@ type passLabel struct {
 	tag    scene.PassTag
 }
 
-// New returns the scene plugin. It declares scene.OpQueue and scene.Lookup, and
-// requires gfx and storage.
+// New returns the scene plugin. It declares scene.OpQueue, and requires gfx,
+// storage and model, whose *model.Lookup it draws from.
 //
-// Register storage before scene. A typical order is storage, input, gfx,
-// canvas, scene, then the system driver.
+// Register storage and model before scene. A typical order is storage, input,
+// gfx, canvas, model, scene, then the system driver.
 func New() kernel.Plugin {
 	return &plugin{labels: map[passLabel]string{}, meshReported: map[uint32]struct{}{}}
 }
@@ -93,19 +98,17 @@ func New() kernel.Plugin {
 func (p *plugin) Name() kernel.PluginName { return scene.Name }
 
 // Dependencies reports the plugins scene requires: gfx, which it emits passes
-// and draws into, and storage, which hosts its shader filesystem mount.
+// and draws into, storage, which hosts its shader filesystem mount, and model,
+// which registers the *model.Lookup every draw resolves against.
 func (p *plugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{gfx.Name, storage.Name}
+	return []kernel.PluginName{gfx.Name, storage.Name, model.Name}
 }
 
-func (p *plugin) Register(registrar *kernel.Registrar, value any) error {
-	config, err := resolveConfig(value)
-	if err != nil {
-		return err
-	}
-	p.config = config
+// scene takes no configuration. The Lookup it draws from is model's, and so
+// is the pose sample rate that sizes it, so a value handed to scene under its
+// own name is ignored.
+func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.InitResource(&scene.OpQueue{})
-	registrar.InitResource(types.NewSizedLookup(config))
 	registrar.Subscribe[scene.FlushOnUpdate](p.flush).
 		Last().Before[gfx.PresentOnUpdate]()
 	// storage installs the bundled shader mount at its Start, ahead of every
@@ -181,7 +184,7 @@ func (p *plugin) flushFrame(
 	// The staged bytes go to gfx without a second copy: BakeMesh already copied
 	// them out of its caller, and the arena they live in is handed over rather
 	// than reused. That is the one copy the whole durable path costs.
-	types.LookupDrainMeshes(lookup, types.MeshBaker{
+	lookup.DrainMeshes(model.MeshBaker{
 		Bake: func(data []byte) gfx.BufferDescr { return gfxResources.BakeBuffer(data, false) },
 		Rebake: func(buffer gfx.BufferDescr, data []byte) gfx.BufferDescr {
 			return gfxResources.ReBakeBuffer(buffer, data, false)
@@ -189,7 +192,17 @@ func (p *plugin) flushFrame(
 		Release: gfxResources.ReleaseBuffer,
 	})
 	p.buildTemporaries(report, write)
-	p.materials.reset(types.LookupEnsureBundled(lookup, bakeTexture))
+	// model's materials name no pass, so each one a frame draws is wrapped as a
+	// forward scene material in the frame's own arena, starting with the
+	// bundled PBR's four variants.
+	clear(p.forward)
+	p.forward = p.forward[:0]
+	bundled := lookup.EnsureBundled(bakeTexture)
+	var wrapped [model.VariantCount]scene.Material
+	for variant := range bundled {
+		wrapped[variant] = p.forwardMaterial(bundled[variant])
+	}
+	p.materials.reset(wrapped)
 	// Model draws expand into ordinary draw records before anything looks at
 	// one, so culling, sorting and packing are blind to where a draw came from.
 	// Anything a draw names and the cache does not hold is read, parsed and
@@ -209,7 +222,7 @@ func (p *plugin) flushFrame(
 // per-camera cost is then one sphere test, and its per-pass cost one array read.
 func (p *plugin) prepareDraws(
 	report func(error), lookup *scene.Lookup, write *scene.OpQueue,
-	bake types.BakeFunc, draws []types.DrawRecord,
+	bake model.BakeFunc, draws []types.DrawRecord,
 ) {
 	p.prepared = grow(p.prepared, len(draws))
 	clear(p.meshReported)
@@ -217,7 +230,7 @@ func (p *plugin) prepareDraws(
 		record := &draws[i]
 		ref := record.Mesh
 		if record.Shape != types.ShapeNone {
-			ref = types.LookupEnsureUnit(lookup, record.Shape, bake)
+			ref = lookup.EnsureUnit(record.Shape.UnitMesh(), bake)
 		}
 		mesh, ok := p.resolveMesh(lookup, write, ref)
 		switch {
@@ -226,13 +239,13 @@ func (p *plugin) prepareDraws(
 			// or temporary and from an earlier frame - is reported, once per
 			// ref. A ref that never named one was already reported at the mint
 			// that rejected it, so it skips in silence.
-			if types.MeshRefSource(ref) != types.MeshNone {
+			if ref.Source() != model.MeshNone {
 				p.reportMeshOnce(report, ref, scene.ErrMeshUnavailable{Mesh: ref.ID()})
 			}
 			ref = scene.MeshRef{}
 		case !mesh.Standard && record.Material == nil:
 			p.reportMeshOnce(report, ref, scene.ErrMeshCustomLayoutNeedsMaterial{Mesh: ref.ID()})
-			ref, mesh = scene.MeshRef{}, types.MeshRecord{}
+			ref, mesh = scene.MeshRef{}, model.MeshRecord{}
 		}
 		p.prepared[i] = prepareDraw(*record, mesh)
 		p.prepared[i].mesh = ref
@@ -250,7 +263,7 @@ func (p *plugin) prepareDraws(
 		// than an absent one.
 		skin := &p.prepared[i].anim.Skin
 		p.prepared[i].interned = p.materials.intern(report, record.Material, record.MaterialKey,
-			types.VariantFor(skin.Bound, skin.Morphed))
+			model.VariantFor(skin.Bound, skin.Morphed))
 		if !skin.Bound && !skin.Morphed {
 			p.prepared[i].anim.Offset = types.SceneNoAnim
 		}
@@ -262,15 +275,15 @@ func (p *plugin) prepareDraws(
 // across a frame boundary from drawing whatever now holds its slot.
 func (p *plugin) resolveMesh(
 	lookup *scene.Lookup, write *scene.OpQueue, ref scene.MeshRef,
-) (types.MeshRecord, bool) {
-	if types.MeshRefSource(ref) == types.MeshTemporary {
-		id := types.MeshRefIndex(ref)
-		if types.MeshRefGeneration(ref) != types.OpQueuePublishedFrame(write) || id == 0 || int(id) > len(p.temporaries) {
-			return types.MeshRecord{}, false
+) (model.MeshRecord, bool) {
+	if ref.Source() == types.MeshTemporary {
+		id := ref.Index()
+		if ref.Generation() != types.OpQueuePublishedFrame(write) || id == 0 || int(id) > len(p.temporaries) {
+			return model.MeshRecord{}, false
 		}
 		return p.temporaries[id-1], true
 	}
-	return types.LookupMesh(lookup, ref)
+	return lookup.Mesh(ref)
 }
 
 // buildTemporaries materialises the frame's temporary meshes and reports the
@@ -283,7 +296,7 @@ func (p *plugin) buildTemporaries(report func(error), write *scene.OpQueue) {
 	}
 	p.temporaries = grow(p.temporaries, len(recording.Temporaries))
 	for i := range recording.Temporaries {
-		p.temporaries[i] = recording.Temporaries[i].Record(recording.Arena)
+		p.temporaries[i] = recording.Temporaries[i].InlineRecord(recording.Arena)
 	}
 }
 
@@ -508,4 +521,13 @@ func (p *plugin) label(id scene.CameraID, tag scene.PassTag) string {
 		p.labels[key] = label
 	}
 	return label
+}
+
+// forwardMaterial wraps one of model's forward gfx materials as a scene
+// material serving only the forward pass, in the frame's own arena. The result
+// is a one-entry window of the arena, so a later append can never grow into it.
+func (p *plugin) forwardMaterial(descr gfx.MaterialDescr) scene.Material {
+	start := len(p.forward)
+	p.forward = append(p.forward, scene.MaterialTag{Tag: scene.TagForward, Descr: descr})
+	return p.forward[start : start+1 : start+1]
 }

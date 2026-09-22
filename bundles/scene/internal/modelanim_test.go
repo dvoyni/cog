@@ -4,6 +4,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -150,11 +151,11 @@ func TestASkinnedModelBindsItsOwnPosesAndSkins(t *testing.T) {
 	})
 	// One joint over 61 frames plus the rest frame. The size is what separates
 	// "bound the model" from "bound a single row and animates nothing".
-	if got, want := len(boundBytes(t, h, "scenePoses")), 62*types.PoseSize; got != want {
+	if got, want := len(boundBytes(t, h, "scenePoses")), 62*model.PoseSize; got != want {
 		t.Errorf("the bound pose buffer is %d bytes, want the model's %d", got, want)
 	}
-	if got := len(boundBytes(t, h, "sceneSkinJoints")); got != types.SkinJointSize {
-		t.Errorf("the joint buffer is %d bytes, want the model's one joint at %d", got, types.SkinJointSize)
+	if got := len(boundBytes(t, h, "sceneSkinJoints")); got != model.SkinJointSize {
+		t.Errorf("the joint buffer is %d bytes, want the model's one joint at %d", got, model.SkinJointSize)
 	}
 	instance := firstInstance(t, h)
 	if instance.Flags&sceneNoSkin != 0 {
@@ -343,7 +344,7 @@ func TestTheLookupReportsClipsJointsAndPoseBytes(t *testing.T) {
 	if len(joints) != 1 || joints[0] != "wheel" {
 		t.Errorf("joints = %v, want the one degenerate joint", joints)
 	}
-	if want := 62 * types.PoseSize; bytes != want {
+	if want := 62 * model.PoseSize; bytes != want {
 		t.Errorf("PoseBytes = %d, want %d", bytes, want)
 	}
 	h.lookup(func(access scene.LookupAccess) {

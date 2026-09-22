@@ -3,17 +3,17 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
 )
 
 // morphAnim is a resident animation with a weight grid a test can address
 // directly: the rest row, then one clip of two frames.
-func morphAnim() *types.ResidentAnimation {
-	return &types.ResidentAnimation{
+func morphAnim() *model.ResidentAnimation {
+	return &model.ResidentAnimation{
 		SampleRate: testSampleRate,
 		SlotCount:  3,
-		Clips: []types.BakedClip{{
+		Clips: []model.BakedClip{{
 			Name: "smile", Duration: 1.0 / testSampleRate, Frames: 2, WeightBase: 3,
 		}},
 		Weights: []float32{
@@ -28,7 +28,7 @@ func morphAnim() *types.ResidentAnimation {
 // mesh.weights over zero, resolved once at load.
 func TestBlendMorphWeightsFallsBackToTheRestRow(t *testing.T) {
 	report, keys := collectReports()
-	got := types.BlendMorphWeights(morphAnim(), "m.glb", nil, nil, nil, false, nil, report)
+	got := model.BlendMorphWeights(morphAnim(), "m.glb", nil, nil, nil, false, nil, report)
 	want := []float32{0.1, 0.2, 0.3}
 	for slot, expected := range want {
 		if got[slot] != expected {
@@ -47,10 +47,10 @@ func TestBlendMorphWeightsFallsBackToTheRestRow(t *testing.T) {
 func TestBlendMorphWeightsOverridesWholesale(t *testing.T) {
 	report, keys := collectReports()
 	anim := morphAnim()
-	plays, frames := types.ResolvePlays(anim, "m.glb", []scene.ClipPlay{
+	plays, frames := model.ResolvePlays(anim, "m.glb", []scene.ClipPlay{
 		{Clip: "smile", Weight: 1},
 	}, nil, nil, report)
-	got := types.BlendMorphWeights(anim, "m.glb", plays, frames, []float32{0.75}, true, nil, report)
+	got := model.BlendMorphWeights(anim, "m.glb", plays, frames, []float32{0.75}, true, nil, report)
 	for slot, want := range []float32{0.75, 0, 0} {
 		if got[slot] != want {
 			t.Errorf("slot %d = %v, want %v", slot, got[slot], want)
@@ -68,14 +68,14 @@ func TestSelectMorphTargetsCullsByMagnitude(t *testing.T) {
 	report, keys := collectReports()
 	// A negative weight is meaningful - glTF does not clamp weights to [0, 1] -
 	// so the cull is by absolute value and keeps it.
-	got := types.SelectMorphTargets([]float32{0, 0.5, 1e-6, -0.25}, nil, "m.glb", report)
+	got := model.SelectMorphTargets([]float32{0, 0.5, 1e-6, -0.25}, nil, "m.glb", report)
 	if len(got) != 2 {
 		t.Fatalf("kept %v, want the two targets above the tolerance", got)
 	}
-	if got[0] != (types.SceneMorphWeight{Target: 1, Weight: 0.5}) {
+	if got[0] != (model.SceneMorphWeight{Target: 1, Weight: 0.5}) {
 		t.Errorf("entry 0 = %+v, want target 1 at 0.5", got[0])
 	}
-	if got[1] != (types.SceneMorphWeight{Target: 3, Weight: -0.25}) {
+	if got[1] != (model.SceneMorphWeight{Target: 3, Weight: -0.25}) {
 		t.Errorf("entry 1 = %+v, want target 3 at -0.25: a negative weight is a shape", got[1])
 	}
 	if len(*keys) != 0 {
@@ -90,8 +90,8 @@ func TestSelectMorphTargetsCullsByMagnitude(t *testing.T) {
 func TestPackAnimLaysTheMorphListOutInWholeVec4s(t *testing.T) {
 	var build frameBuild
 	block := morphBlock{
-		binding: types.MorphBinding{Base: 7, Stride: 2, Targets: 3},
-		targets: []types.SceneMorphWeight{{Target: 0, Weight: 1}, {Target: 2, Weight: 0.5}},
+		binding: model.MorphBinding{Base: 7, Stride: 2, Targets: 3},
+		targets: []model.SceneMorphWeight{{Target: 0, Weight: 1}, {Target: 2, Weight: 0.5}},
 	}
 	// A morphed draw with no plays still packs a block: playCount and
 	// targetCount are independently zero-checkable, with no flags bitfield.
@@ -101,20 +101,20 @@ func TestPackAnimLaysTheMorphListOutInWholeVec4s(t *testing.T) {
 	}
 	// Two entries fill one vec4 exactly, so the second block follows the
 	// header plus one.
-	if want := uint32(types.AnimHeaderVec4s + 1); build.packAnim(nil, block) != want {
+	if want := uint32(model.AnimHeaderVec4s + 1); build.packAnim(nil, block) != want {
 		t.Errorf("the second block is not at %d", want)
 	}
 	// An odd count pads: three entries are two vec4s, the last half empty.
 	odd := morphBlock{
 		binding: block.binding,
-		targets: append(block.targets, types.SceneMorphWeight{Target: 1, Weight: 0.25}),
+		targets: append(block.targets, model.SceneMorphWeight{Target: 1, Weight: 0.25}),
 	}
 	third := build.packAnim(nil, odd)
-	if want := uint32(2 * (types.AnimHeaderVec4s + 1)); third != want {
+	if want := uint32(2 * (model.AnimHeaderVec4s + 1)); third != want {
 		t.Errorf("the third block is at %d, want %d", third, want)
 	}
 	// Two blocks of header plus one vec4, then one of header plus two.
-	if got, want := len(build.anims.bytes()), (2*(types.AnimHeaderVec4s+1)+types.AnimHeaderVec4s+2)*16; got != want {
+	if got, want := len(build.anims.bytes()), (2*(model.AnimHeaderVec4s+1)+model.AnimHeaderVec4s+2)*16; got != want {
 		t.Errorf("the arena is %d bytes, want %d", got, want)
 	}
 }

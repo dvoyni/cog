@@ -11,7 +11,7 @@ import (
 // glTF says an empty material renders: white, fully rough, fully metallic, with
 // every texture slot multiplying through unchanged.
 func TestThePbrRecordDefaultsToGltfsOwnDefaults(t *testing.T) {
-	record := defaultPbrRecord()
+	record := DefaultPbrRecord()
 	if record.BaseColorFactor != (m.Vec4{X: 1, Y: 1, Z: 1, W: 1}) {
 		t.Errorf("baseColorFactor is %v, want white", record.BaseColorFactor)
 	}
@@ -42,7 +42,7 @@ func TestThePbrRecordDefaultsToGltfsOwnDefaults(t *testing.T) {
 
 // UV sets are capped at two, and the selector is one bit per slot.
 func TestUVSetSelectionIsOneBitPerSlotAndCapsAtTwo(t *testing.T) {
-	record := defaultPbrRecord()
+	record := DefaultPbrRecord()
 	var reported []error
 	report := func(err error) { reported = append(reported, err) }
 

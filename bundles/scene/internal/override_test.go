@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+	"github.com/dvoyni/cog/bundles/model"
 )
 
 // Every member the shader declares is reachable by name, and the two that are
@@ -23,7 +23,7 @@ func TestEveryPbrRecordMemberTheShaderDeclaresIsAddressable(t *testing.T) {
 	// selector no parameter kind expresses - which TEXCOORD set a slot samples
 	// is the file's statement about its own mesh.
 	unaddressable := map[string]bool{"uvSets": true, "pad": true}
-	var record types.ScenePbrRecord
+	var record model.ScenePbrRecord
 	members := wgslStructMembers(t, source, "ScenePbrMaterial")
 	if len(members) != 19 {
 		t.Fatalf("parsed %d members of ScenePbrMaterial: %v", len(members), members)

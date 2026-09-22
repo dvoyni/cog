@@ -6,6 +6,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -25,7 +26,7 @@ func TestLightRecordIsFortyEightBytesAndTheFrameBlockHoldsSixteen(t *testing.T) 
 	if offset := unsafe.Offsetof(block.Lights); offset != 304 {
 		t.Errorf("lights is at offset %d, want 304", offset)
 	}
-	if len(block.Lights) != types.MaxLights || types.MaxLights != 16 {
+	if len(block.Lights) != model.MaxLights || model.MaxLights != 16 {
 		t.Errorf("the block holds %d lights, want the fixed 16", len(block.Lights))
 	}
 	if size := unsafe.Sizeof(block); size != 304+16*48 {
@@ -217,8 +218,8 @@ func TestTheCapKeepsTheBrightestSixteenNotTheFirstSixteen(t *testing.T) {
 	for _, order := range [][]preparedLight{nearestFirst, farthestFirst} {
 		var selection lightSelection
 		selection.selectLights(forwardFrustum(), m.Vec3{}, 0, order)
-		if selection.count != types.MaxLights {
-			t.Fatalf("kept %d lights, want the cap of %d", selection.count, types.MaxLights)
+		if selection.count != model.MaxLights {
+			t.Fatalf("kept %d lights, want the cap of %d", selection.count, model.MaxLights)
 		}
 		for i := 0; i < selection.count; i++ {
 			if z := selection.lights[i].Position.Z; z < -16 {

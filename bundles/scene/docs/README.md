@@ -16,7 +16,7 @@ for and what was rejected to get there — and
 is the traps a caller hits that neither the compiler nor a plausible-looking zero
 value warns about.
 
-[`specs/mesh.md`](specs/mesh.md) specifies **what a mesh stores** — the
+[`mesh.md`](../../model/docs/specs/mesh.md), which moved to model with mesh residency, specifies **what a mesh stores** — the
 vertex layout and the precision of each attribute, which attributes a mesh may
 omit, how wide its indices are, how morph deltas are packed, and what the bundled
 PBR requires of a mesh handed to it. Its **Index width** section is implemented:
@@ -65,15 +65,15 @@ scene has the declaration-root shape of
   are forwarders in `utils.go`. It declares no plugin, and it is what every
   other package imports.
 - **`bundles/scene/internal/types`** declares `OpQueue` with its recording
-  methods and the consume side the flush reads, `Lookup` with its two scoped
-  facades, the model cache and the unloads, the mesh table and its deferred bakes,
-  the glTF loader and the animation and morph bakes behind them, the vertex
-  packing, the recording vocabulary, `Config` (which the Lookup holds), the
-  bundled PBR material, and the camera maths the flush and the coordinate
-  helpers share. The parse command the Lookup enqueues, `LoadModelCmd`, is
+  methods and the consume side the flush reads, the recording vocabulary, the
+  frame-local temporary mesh, and the camera maths the flush and the coordinate
+  helpers share. The Lookup with its two scoped facades, the model cache and the
+  unloads, the mesh table and its deferred bakes, the glTF conversion and the
+  animation and morph bakes behind them, the vertex packing, `Config` and the
+  bundled PBR material are model's, in `bundles/model`, and are named here
+  through aliases. The parse command the Lookup enqueues, `LoadModelCmd`, is
   declared here too; the plugin handles it. The root aliases what it exposes.
-- **`bundles/scene/internal`** is the plugin: its `New`, the resolution of
-  `scene.Config`, the flush that expands model draws, selects lights, culls,
+- **`bundles/scene/internal`** is the plugin: its `New`, the flush that expands model draws, selects lights, culls,
   sorts, interns materials and packs instances into gfx passes and draws, the
   frame-build state all of that keeps across frames, the handlers of the two-hop
   model load, and the read mount of the embedded shaders under
@@ -93,30 +93,33 @@ root.
 
 - Name: `scene.Name` (`"scene"`)
 - Constructor: `sceneplugin.New() kernel.Plugin`
-- Plugin dependencies: `gfx`, `storage`
+- Plugin dependencies: `gfx`, `storage`, `model`
 - Requires: no Adapter
 - Contributes: one `storage.ReadMount`, as the `scene.StorageReadMount` Adapter
   for `storage.ReadMountPort`
 - Go package dependencies: `app`, `gfx`, `kernel`, `m`, `model`, `storage`,
   `github.com/qmuntal/gltf`
-- Configuration: `scene.Config`, optional
+- Configuration: none. `scene.Config` aliases `model.Config`, which the model
+  plugin takes under `model.Name`
 - Events declared or published: none
 
 ```go
 kernel.New(map[kernel.PluginName]any{
-	scene.Name: scene.Config{PoseSampleRate: 30},
+	model.Name: model.Config{PoseSampleRate: 30},
 })
 ```
 
-`PoseSampleRate` — the global animation bake rate in Hz — is the only number in
-`Config`. A zero value takes its default, 60, and giving no configuration at all
-takes it too; a negative rate is refused. `Register` contributes scene's
-embedded shader filesystem to storage as a read mount, which storage installs at
-its own `Start`.
+`PoseSampleRate` — the global animation bake rate in Hz — is model's, because
+the Lookup that bakes every clip is model's. A zero value takes its default, 60,
+and giving no configuration at all takes it too; a negative rate is refused.
+`Register` contributes scene's embedded shader filesystem to storage as a read
+mount, which storage installs at its own `Start`.
 
-**Register `storage` before `scene`.** The order the demos use is `storage`,
-`input`, `gfx`, `canvas`, `scene`, then the driver (`gogpu`), with the app's own
-recording plugin last, because it records into the queues those plugins declare.
+**Register `storage` and `model` before `scene`.** The order the demos use is
+`storage`, `input`, `gfx`, `canvas`, `model`, `scene`, then the driver
+(`gogpu`), with the app's own recording plugin last, because it records into the
+queues those plugins declare. A plugin that locks `*scene.Lookup` itself names
+`model.Name` among its dependencies, since the Lookup is model's resource.
 
 **Scene needs a WebGPU core adapter.** It reads storage buffers from the vertex
 stage, which compatibility mode does not guarantee — `maxStorageBuffersInVertexStage`
@@ -147,11 +150,11 @@ zero `LayerMask` means every layer; a nil `Material` means the bundled PBR.
 
 - `*OpQueue` — frame-local recording surface. Scene consumes and republishes it
   on `app.UpdateEvent`.
-- `*Lookup` — the single persistent resource: loaded models, baked pose and
-  morph buffers, the texture cache, buffer-built meshes and scene's
-  own unit meshes, plus the deferred bakes and buffer releases the flush applies
-  at the frame boundary. Query and mutate it only through a scoped
-  `LookupAccess` or `LookupDeviceAccess`.
+- `*Lookup` — model's persistent resource, which the model plugin registers
+  and scene aliases: loaded models, baked pose and morph buffers, the texture
+  cache, buffer-built meshes and the unit meshes, plus the deferred bakes and
+  buffer releases scene's flush applies at the frame boundary. Query and mutate
+  it only through a scoped `LookupAccess` or `LookupDeviceAccess`.
 
 Gameplay normally writes only `*OpQueue`. Mesh baking and `UnloadModel` go
 through `*Lookup` via a `LookupAccess`; loading, the model queries and the

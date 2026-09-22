@@ -4,7 +4,6 @@ import (
 	"math"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
@@ -68,7 +67,7 @@ func readMorphTargets(doc *gltf.Document, primitive *gltf.Primitive, vertexCount
 		}
 	}
 	doc.Scenes = append(doc.Scenes, &gltf.Scene{Nodes: []int{len(doc.Nodes) - 1}})
-	decoded, err := model.DecodeDocument(doc, "m.glb")
+	decoded, err := DecodeDocument(doc, "m.glb")
 	if err != nil || len(decoded.Geometries) == 0 {
 		return gltfMorph{}
 	}

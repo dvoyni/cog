@@ -45,14 +45,17 @@ something unverified it would be marked **Gap**; none is left. Where putting
 decisions side by side settled something that no ticket did, it is marked
 **Settled here**.
 
-**The first carve step is implemented** ([#529](https://github.com/dvoyni/cog/issues/529)).
-`bundles/model` is a Bundle with a declaration root and no plugin yet. It holds
-the glTF decoder, the unit geometry, and `Vertex` with the storage layout it
-reports, and scene imports all three from its root. [The decoder
-seam](#the-decoder-seam) describes the code; every other section is still the
-plan. Each stage of [Required work](#required-work) turns the sections it builds
-from a plan into a description of the code. `mesh.md` moves here in the cache
-step, and `scene.md` is cut down to the renderer in the sweep.
+**The first two carve steps are implemented** ([#529](https://github.com/dvoyni/cog/issues/529),
+[#530](https://github.com/dvoyni/cog/issues/530)). `bundles/model` is a Bundle
+with a plugin, `modelplugin.New`, that registers the `*model.Lookup` resource.
+It holds the glTF decoder, the unit geometry, `Vertex` with the storage layout
+it reports, the conversion to GPU layouts, the model and texture caches, the
+mesh table and the Lookup, and scene imports all of it from model's root. [The
+decoder seam](#the-decoder-seam) and the caches in [Residency](#residency-one-lookup-two-facades)
+describe the code; every other section is still the plan. Each stage of
+[Required work](#required-work) turns the sections it builds from a plan into a
+description of the code. [`mesh.md`](mesh.md) moved here with the cache, and
+`scene.md` is cut down to the renderer in the sweep.
 
 ---
 
@@ -188,15 +191,17 @@ landed in [#529](https://github.com/dvoyni/cog/issues/529); see [The decoder
 seam](#the-decoder-seam).
 
 **`model` is a plugin that composition roots register, before any renderer.** It
-registers the `*model.Lookup` resource, which scene registers today, and it takes
+registers the `*model.Lookup` resource, and nothing else does, and it takes
 `model.Config` under `model.Name`. scene and ecsscene each declare a dependency
-on it. **Settled here:** the Lookup is a kernel resource and it is `model`'s, so
-the plugin that registers it is `model`'s. The `PoseSampleRate` key therefore
-moves from `scene.Name` to `model.Name` in the landing that moves the Lookup.
-A setting left under `scene.Name` would be ignored silently, but no composition
-root in cog-examples or feuds-26 sets `scene.Config` (counted 2026-09-21). Every
-composition root that registers scene does gain a `model` plugin in that
-landing.
+on it, and so does any plugin that locks the Lookup itself, because the kernel
+requires a dependency on a resource's owner. **Settled here:** the Lookup is a
+kernel resource and it is `model`'s, so the plugin that registers it is
+`model`'s. The `PoseSampleRate` key moved from `scene.Name` to `model.Name` with
+the Lookup ([#530](https://github.com/dvoyni/cog/issues/530)). scene takes no
+configuration now, and a setting left under `scene.Name` is ignored silently,
+but no composition root in cog-examples or feuds-26 set `scene.Config` (counted
+2026-09-21). Every composition root that registers scene registers
+`modelplugin.New()` before it.
 
 ---
 
@@ -234,13 +239,13 @@ answers that decide a storage layout arrive as plain booleans: a geometry's
 vertices, generating flat normals and tangents, remapping JOINTS_0 into the
 model's numbering, `packMorphBlock`, `bakeClip` and the `ScenePbrRecord` fill each
 run as their own pass over the decoded data. None of them is in the decoder
-package. **Until the cache step they run in scene**, in
-`bundles/scene/internal/types` (`gltfload.go`, `gltfmesh.go`, `gltfmorph.go`,
-`gltfanim.go`), beside the model cache that installs their result and the
-record types they fill. They move into `bundles/model/internal/types` with that
-cache in stage 3.2, which is when `ScenePbrRecord`, `scenePose`,
-`skinJointRecord`, the morph block layout and the pack helpers become `model`'s.
-The joint cap, 256 joints because a storage vertex names a joint in one byte, is
+package. They run in `bundles/model/internal/types` (`gltfload.go`,
+`gltfmesh.go`, `gltfmorph.go`, `gltfanim.go`), beside the model cache that
+installs their result and the record types they fill: `ScenePbrRecord`,
+`scenePose`, `skinJointRecord`, the morph block layout and the pack helpers are
+`model`'s. They ran in scene until the cache moved with them in
+[#530](https://github.com/dvoyni/cog/issues/530). The joint cap, 256 joints
+because a storage vertex names a joint in one byte, is
 checked there too: it is the storage layout's limit, not the file's.
 
 **Vertex data crosses as structure of arrays.** Positions, normals, UVs,
@@ -292,10 +297,18 @@ scene's packers still write that layout, and name it through aliases in
 From [what model declares](https://github.com/dvoyni/cog/issues/494) and [how
 ecsscene groups Entities into instanced draws](https://github.com/dvoyni/cog/issues/509).
 
-**Today the model cache holds a renderer type.** `modelMaterial.Variants` is
-`[VariantCount]Material`, which is scene's pass-tagged `Material`. That is the
-one place the cache reaches into renderer vocabulary, and it is why a file
-material is re-keyed on every draw record, every frame.
+**The cache no longer holds a renderer type.** Until the cache moved, the model
+material was `[VariantCount]Material`, scene's pass-tagged `Material`: the one
+place the cache reached into renderer vocabulary, and the reason a file material
+is re-keyed on every draw record, every frame. [#530](https://github.com/dvoyni/cog/issues/530)
+brought the data shape forward so that `model` never named a `PassTag`: the
+cache holds `modelMaterial{Forward [VariantCount]gfx.MaterialDescr; Record
+ScenePbrRecord}`, and the bundled PBR comes back from `Lookup.EnsureBundled` as
+`[VariantCount]gfx.MaterialDescr`. scene wraps each forward descr it draws as
+`MaterialTag{TagForward, descr}` in an arena its flush keeps across frames, so a
+steady frame wraps without allocating. `MaterialKeyOf` still runs over a file
+material per draw; the load-time key below, and the rest of this section, are
+still the plan.
 
 **The model material holds, for each shader variant:**
 
@@ -367,10 +380,22 @@ rests on for skinned and morphed Entities.
 From [the cache read path](https://github.com/dvoyni/cog/issues/497).
 
 **`model` owns the caches.** `modeltable.go`, `texturetable.go` and
-`modelunload.go` move into it. There is one `*model.Lookup`, holding the model
-cache, the texture cache, the mesh table every `MeshRef` indexes, the staging
-arena, the unit meshes, and the deferred bake and release queues. Only scene's
-per-frame temporary mesh stays behind.
+`modelunload.go` moved into it in [#530](https://github.com/dvoyni/cog/issues/530).
+There is one `*model.Lookup`, holding the model cache, the texture cache, the
+mesh table every `MeshRef` indexes, the staging arena, the unit meshes, and the
+deferred bake and release queues. Only scene's per-frame temporary mesh stays
+behind: `MeshSource` is reduced to `MeshNone` and `MeshDurable`, scene declares
+`MeshTemporary` past them and `TemporaryMeshID` beside it, and mints its
+temporaries through `model.MintMesh` into a `model.LayoutCache` and an arena of
+its own, building their refs with `model.NewMeshRef`.
+
+**A renderer holding the Lookup for writing calls its own methods**, which
+replaced scene's friend accessors: `ModelView` resolves one draw's selectors,
+loading the model if needed; `Mesh` resolves a durable ref; `EnsureUnit` bakes a
+`model.UnitMesh`, which scene maps its shape enum onto; `EnsureBundled` returns
+the bundled PBR's forward descrs; and `DrainMeshes` applies the staged bakes and
+releases. The two facades and `ModelHandle` below are still the plan
+([#531](https://github.com/dvoyni/cog/issues/531)).
 
 **The read set is immutable from install to unload:**
 
@@ -820,9 +845,12 @@ what it does.
       [#529](https://github.com/dvoyni/cog/issues/529), with `Vertex` and its
       storage layout moved early and the conversion to GPU layouts left in
       scene until step 2;
-   2. the caches and `Lookup`, with the two facades, `ModelHandle` and the model
-      plugin, which registers the resource and takes `Config`. `mesh.md` moves
-      here;
+   2. the caches and `Lookup` and the model plugin, which registers the
+      resource and takes `Config`. `mesh.md` moves here. Landed in
+      [#530](https://github.com/dvoyni/cog/issues/530), bringing the conversion
+      to GPU layouts, the per-frame animation resolution and the model
+      material's forward-descr shape with it. The two facades and `ModelHandle`
+      follow in [#531](https://github.com/dvoyni/cog/issues/531);
    3. the model material and the shader;
    4. the shader's records and packers, the light-array filler, `FrameLighting`,
       `AppendAnim`, and the size and binding-name constants. Projection maths goes

@@ -19,6 +19,7 @@ import (
 	"github.com/dvoyni/cog/bundles/input/inputplugin"
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/bundles/mcp/mcpplugin"
+	"github.com/dvoyni/cog/bundles/model/modelplugin"
 	"github.com/dvoyni/cog/bundles/scene/sceneplugin"
 	"github.com/dvoyni/cog/bundles/ui/uiplugin"
 	"github.com/dvoyni/cog/kernel"
@@ -47,7 +48,7 @@ func TestToolSchemas_WhatAnAgentReadsIsPinned(t *testing.T) {
 		return err
 	}).WithPlugins(
 		storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
-		inputplugin.New(), animplugin.New(), canvasplugin.New(), sceneplugin.New(), uiplugin.New(),
+		inputplugin.New(), animplugin.New(), canvasplugin.New(), modelplugin.New(), sceneplugin.New(), uiplugin.New(),
 		ecsplugin.New(), ecssceneplugin.New(), mcpplugin.New(),
 	)
 	stopped := make(chan struct{})

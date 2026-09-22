@@ -3,8 +3,8 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -75,9 +75,9 @@ func BenchmarkFrame(b *testing.B) {
 			// material binds.
 			h.frame()
 			if shared == nil {
-				var defaults types.PbrDefaults
+				var defaults model.PbrDefaults
 				h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(l *scene.Lookup) {
-					defaults = types.LookupDefaults(l)
+					defaults = lookupDefaults(l)
 				}})
 				shared, override = frameBenchMaterial(defaults)
 			}
@@ -107,23 +107,23 @@ func BenchmarkFrame(b *testing.B) {
 
 // frameBenchMaterial builds the benchmark's shared material over scene's baked
 // defaults, and the one-float override that varies it.
-func frameBenchMaterial(defaults types.PbrDefaults) (scene.Material, []gfx.ParameterDescr) {
+func frameBenchMaterial(defaults model.PbrDefaults) (scene.Material, []gfx.ParameterDescr) {
 	if defaults.White.ID() == 0 || defaults.FlatNormal.ID() == 0 {
 		panic("scene's default textures were not baked by the first frame")
 	}
 	params := []gfx.ParameterDescr{gfx.FloatParam("key", 1)}
-	for i, slot := range types.PbrSlots {
+	for i, slot := range model.PbrSlots {
 		texture := defaults.White
-		if i == types.NormalSlot {
+		if i == model.NormalSlot {
 			texture = defaults.FlatNormal
 		}
 		params = append(params,
 			gfx.TextureParam(slot.Texture, texture),
-			gfx.SamplerParam(slot.Sampler, types.PbrSampler),
+			gfx.SamplerParam(slot.Sampler, model.PbrSampler),
 		)
 	}
 	material := scene.Material{{Descr: gfx.MaterialWithState(
-		gfx.ShaderWithResource(types.SceneShaderPath), gfx.StateOpaque3D(), params...,
+		gfx.ShaderWithResource(model.SceneShaderPath), gfx.StateOpaque3D(), params...,
 	)}}
 	return material, []gfx.ParameterDescr{gfx.FloatParam("key", 0.25)}
 }

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
@@ -20,7 +20,7 @@ func testMaterial(tags ...scene.PassTag) scene.Material {
 		}
 		material = append(material, scene.MaterialTag{
 			Tag:   tag,
-			Descr: gfx.MaterialWithState(gfx.ShaderWithResource(types.SceneShaderPath), state),
+			Descr: gfx.MaterialWithState(gfx.ShaderWithResource(model.SceneShaderPath), state),
 		})
 	}
 	return material
@@ -28,7 +28,7 @@ func testMaterial(tags ...scene.PassTag) scene.Material {
 
 func TestANilMaterialResolvesToTheBundledPbrOnTheForwardTag(t *testing.T) {
 	var table materialTable
-	table.reset(types.BundledPbr(types.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}))
 	forward := table.internTag(scene.TagForward)
 
 	entry, ok := resolve(&table, discardErrors, nil, forward)
@@ -45,7 +45,7 @@ func TestANilMaterialResolvesToTheBundledPbrOnTheForwardTag(t *testing.T) {
 // rather than a change to every existing draw.
 func TestTheBundledPbrServesTheForwardTagAndNothingElse(t *testing.T) {
 	var table materialTable
-	table.reset(types.BundledPbr(types.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}))
 	shadow := table.internTag("shadow")
 
 	if _, ok := resolve(&table, discardErrors, nil, shadow); ok {
@@ -55,7 +55,7 @@ func TestTheBundledPbrServesTheForwardTagAndNothingElse(t *testing.T) {
 
 func TestAMaterialWithoutAnEntryForAPassTagIsSkipped(t *testing.T) {
 	var table materialTable
-	table.reset(types.BundledPbr(types.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}))
 	material := testMaterial(scene.TagForward)
 	shadow := table.internTag("shadow")
 
@@ -72,8 +72,8 @@ func TestAMaterialWithoutAnEntryForAPassTagIsSkipped(t *testing.T) {
 // tag at all.
 func TestAnEmptyTagEntryServesTheForwardPass(t *testing.T) {
 	var table materialTable
-	table.reset(types.BundledPbr(types.PbrDefaults{}))
-	material := scene.Material{{Descr: gfx.Material(gfx.ShaderWithResource(types.SceneShaderPath))}}
+	table.reset(bundledMaterials(model.PbrDefaults{}))
+	material := scene.Material{{Descr: gfx.Material(gfx.ShaderWithResource(model.SceneShaderPath))}}
 
 	if _, ok := resolve(&table, discardErrors, material, table.internTag(scene.TagForward)); !ok {
 		t.Fatal("an entry with no tag did not serve the forward pass")
@@ -82,7 +82,7 @@ func TestAnEmptyTagEntryServesTheForwardPass(t *testing.T) {
 
 func TestADuplicateTagIsReportedOnceAndTheFirstEntryWins(t *testing.T) {
 	var table materialTable
-	table.reset(types.BundledPbr(types.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}))
 	material := testMaterial(scene.TagForward, scene.TagForward)
 	var reported []error
 	report := func(err error) { reported = append(reported, err) }
@@ -114,7 +114,7 @@ func TestADuplicateTagIsReportedOnceAndTheFirstEntryWins(t *testing.T) {
 // pipelines actually bound in a pass.
 func TestMaterialIdsAreOnePerMaterialAndTag(t *testing.T) {
 	var table materialTable
-	table.reset(types.BundledPbr(types.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}))
 	forward, shadow := table.internTag(scene.TagForward), table.internTag("shadow")
 	material := testMaterial(scene.TagForward, "shadow")
 	other := testMaterial(scene.TagForward)
@@ -139,7 +139,7 @@ func TestMaterialIdsAreOnePerMaterialAndTag(t *testing.T) {
 // table has seen the frame's materials before.
 func TestResolvingAnInternedMaterialAllocatesNothing(t *testing.T) {
 	var table materialTable
-	table.reset(types.BundledPbr(types.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}))
 	forward := table.internTag(scene.TagForward)
 	material := testMaterial(scene.TagForward)
 	resolve(&table, discardErrors, material, forward)
@@ -156,7 +156,7 @@ func TestResolvingAnInternedMaterialAllocatesNothing(t *testing.T) {
 // allocating after the first.
 func TestTheMaterialTableKeepsItsBackingAcrossFrames(t *testing.T) {
 	var table materialTable
-	bundled := types.BundledPbr(types.PbrDefaults{})
+	bundled := bundledMaterials(model.PbrDefaults{})
 	material := testMaterial(scene.TagForward)
 	table.reset(bundled)
 	forward := table.internTag(scene.TagForward)
@@ -175,7 +175,7 @@ func TestTheMaterialTableKeepsItsBackingAcrossFrames(t *testing.T) {
 
 func TestPassTagsInternToStableDenseIds(t *testing.T) {
 	var table materialTable
-	table.reset(types.BundledPbr(types.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}))
 	forward, shadow := table.internTag(scene.TagForward), table.internTag("shadow")
 
 	if forward == shadow {
@@ -198,7 +198,7 @@ func discardErrors(error) {}
 // own resolves to the bundled variant its mesh needs; these tests use the static
 // one, which is what a buffer-built mesh takes.
 func resolve(table *materialTable, report func(error), material scene.Material, tag tagID) (materialEntry, bool) {
-	return table.entry(table.intern(report, material, 0, types.VariantStatic), tag)
+	return table.entry(table.intern(report, material, 0, model.VariantStatic), tag)
 }
 
 // A caller-supplied gfx.MaterialDescr has no id of its own, so materials intern
@@ -206,11 +206,11 @@ func resolve(table *materialTable, report func(error), material scene.Material, 
 // shader, state and parameters take one id and sort together.
 func TestMaterialsInternByContentNotByBacking(t *testing.T) {
 	var table materialTable
-	table.reset(types.BundledPbr(types.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}))
 	forward := table.internTag(scene.TagForward)
 	build := func() scene.Material {
 		return scene.Material{{Descr: gfx.MaterialWithState(
-			gfx.ShaderWithResource(types.SceneShaderPath), gfx.StateOpaque3D(), gfx.FloatParam("k", 1),
+			gfx.ShaderWithResource(model.SceneShaderPath), gfx.StateOpaque3D(), gfx.FloatParam("k", 1),
 		)}}
 	}
 	first, _ := resolve(&table, discardErrors, build(), forward)
@@ -219,7 +219,7 @@ func TestMaterialsInternByContentNotByBacking(t *testing.T) {
 		t.Fatalf("two identical materials took ids %d and %d", first.materialID, second.materialID)
 	}
 	different := scene.Material{{Descr: gfx.MaterialWithState(
-		gfx.ShaderWithResource(types.SceneShaderPath), gfx.StateOpaque3D(), gfx.FloatParam("k", 2),
+		gfx.ShaderWithResource(model.SceneShaderPath), gfx.StateOpaque3D(), gfx.FloatParam("k", 2),
 	)}}
 	if other, _ := resolve(&table, discardErrors, different, forward); other.materialID == first.materialID {
 		t.Fatal("a material with a different parameter took the same id")
@@ -238,16 +238,16 @@ func TestMaterialsInternByContentNotByBacking(t *testing.T) {
 // through its state alone.
 func TestTheBlendClassFollowsTheEntrysBlendMode(t *testing.T) {
 	var table materialTable
-	table.reset(types.BundledPbr(types.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}))
 	forward := table.internTag(scene.TagForward)
-	shader := gfx.ShaderWithResource(types.SceneShaderPath)
+	shader := gfx.ShaderWithResource(model.SceneShaderPath)
 	cases := []struct {
 		name  string
 		descr gfx.MaterialDescr
 		blend bool
 	}{
 		{"opaque 3D", gfx.MaterialWithState(shader, gfx.StateOpaque3D()), false},
-		{"mask", gfx.MaterialWithState(shader, types.PbrState(types.AlphaMask, false)), false},
+		{"mask", gfx.MaterialWithState(shader, model.PbrState(model.AlphaMask, false)), false},
 		{"transparent 3D", gfx.MaterialWithState(shader, gfx.StateTransparent3D()), true},
 		{"default gfx.Material", gfx.Material(shader), true},
 		{"additive", gfx.MaterialWithState(shader, gfx.MaterialState{Blend: gfx.BlendAdditive}), true},

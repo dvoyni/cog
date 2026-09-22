@@ -3,7 +3,6 @@ package types
 import (
 	"fmt"
 
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -102,7 +101,7 @@ type loadedPrimitive struct {
 // loadedScene is one entry of the file's scenes array, flattened by the
 // decoder: the range of primitives its walk produced and the nodes within it a
 // Node selector can address. It holds no GPU handle, so it is taken whole.
-type loadedScene = model.DecodedScene
+type loadedScene = DecodedScene
 
 // loadedMaterial is one glTF material converted to the bundled PBR: the record
 // scene binds per batch, the pipeline state it draws under, and the texture and
@@ -140,18 +139,18 @@ const (
 )
 
 // pbrSlotOf maps each of the decoder's material slots onto the record's.
-var pbrSlotOf = [model.DecodedSlotCount]int{
-	model.DecodedSlotBaseColor:         baseColorSlot,
-	model.DecodedSlotMetallicRoughness: metallicRoughnessSlot,
-	model.DecodedSlotNormal:            NormalSlot,
-	model.DecodedSlotOcclusion:         occlusionSlot,
-	model.DecodedSlotEmissive:          emissiveSlot,
+var pbrSlotOf = [DecodedSlotCount]int{
+	DecodedSlotBaseColor:         baseColorSlot,
+	DecodedSlotMetallicRoughness: metallicRoughnessSlot,
+	DecodedSlotNormal:            NormalSlot,
+	DecodedSlotOcclusion:         occlusionSlot,
+	DecodedSlotEmissive:          emissiveSlot,
 }
 
 // modelConverter lays one decoded model out for the GPU. The decoded model is
 // dropped with it: nothing of it but the scene walk is held past the load.
 type modelConverter struct {
-	decoded *model.DecodedModel
+	decoded *DecodedModel
 	path    string
 	model   LoadedModel
 	// sampleRate is Config.PoseSampleRate, the global grid every clip bakes
@@ -174,7 +173,7 @@ type modelConverter struct {
 // cache misses it, which is why this half of the load needs no filesystem at
 // all.
 func convertDocument(doc *gltf.Document, path string, sampleRate int) (*LoadedModel, error) {
-	decoded, err := model.DecodeDocument(doc, path)
+	decoded, err := DecodeDocument(doc, path)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +181,7 @@ func convertDocument(doc *gltf.Document, path string, sampleRate int) (*LoadedMo
 }
 
 // convertDecoded converts one decoded model.
-func convertDecoded(decoded *model.DecodedModel, path string, sampleRate int) (*LoadedModel, error) {
+func convertDecoded(decoded *DecodedModel, path string, sampleRate int) (*LoadedModel, error) {
 	if err := checkJointCap(decoded.Skins); err != nil {
 		return nil, err
 	}
@@ -194,7 +193,7 @@ func convertDecoded(decoded *model.DecodedModel, path string, sampleRate int) (*
 		// The decoded arrays are dropped as each geometry is converted, so a
 		// large model holds both forms of one primitive at a time rather than
 		// of all of them.
-		decoded.Geometries[i] = model.DecodedGeometry{}
+		decoded.Geometries[i] = DecodedGeometry{}
 	}
 	c.model.primitives = make([]loadedPrimitive, len(decoded.Primitives))
 	for i := range decoded.Primitives {
@@ -232,7 +231,7 @@ func convertDecoded(decoded *model.DecodedModel, path string, sampleRate int) (*
 // truncate to a different bone, and a prop welded to the wrong limb with
 // nothing reported is exactly the failure a cap exists to prevent - so the
 // report is the loudest one a load has, which fails the model and names it.
-func checkJointCap(skins []model.DecodedSkin) error {
+func checkJointCap(skins []DecodedSkin) error {
 	claimed := 0
 	for _, skin := range skins {
 		if len(skin.Joints) > sceneMaxSkinJoints {
@@ -260,7 +259,7 @@ func checkJointCap(skins []model.DecodedSkin) error {
 
 // convertPrimitive places one decoded primitive, binding its morph targets to
 // the record stride its geometry packs at.
-func (c *modelConverter) convertPrimitive(decoded *model.DecodedPrimitive) loadedPrimitive {
+func (c *modelConverter) convertPrimitive(decoded *DecodedPrimitive) loadedPrimitive {
 	placed := loadedPrimitive{
 		geometry: decoded.Geometry, local: decoded.Local, rest: decoded.Rest,
 		material: decoded.Material, skinned: decoded.Skinned,
@@ -279,9 +278,9 @@ func (c *modelConverter) convertPrimitive(decoded *model.DecodedPrimitive) loade
 // The record's numbers are glTF's by verbatim name, which is what makes the
 // glTF specification the parameter documentation and what lets OverrideParams
 // merge by name with no translation table to drift out of date.
-func (c *modelConverter) convertMaterial(decoded *model.DecodedMaterial) loadedMaterial {
+func (c *modelConverter) convertMaterial(decoded *DecodedMaterial) loadedMaterial {
 	converted := loadedMaterial{
-		record: defaultPbrRecord(),
+		record: DefaultPbrRecord(),
 		state:  PbrState(alphaModeOf(decoded.AlphaMode), decoded.DoubleSided),
 	}
 	if decoded.FrontCW {
@@ -298,7 +297,7 @@ func (c *modelConverter) convertMaterial(decoded *model.DecodedMaterial) loadedM
 	for from, slot := range pbrSlotOf {
 		bound := &decoded.Slots[from]
 		converted.slots[slot], converted.samplers[slot] = missingTexture, bound.Sampler
-		if bound.Image != model.DecodedNoImage {
+		if bound.Image != DecodedNoImage {
 			converted.slots[slot] = bound.Image
 		}
 		record.Transforms[slot], record.Rotations[slot] = bound.Transform, bound.Rotation
@@ -316,11 +315,11 @@ func (c *modelConverter) convertMaterial(decoded *model.DecodedMaterial) loadedM
 }
 
 // alphaModeOf maps the decoder's alphaMode onto scene's.
-func alphaModeOf(mode model.DecodedAlphaMode) AlphaMode {
+func alphaModeOf(mode DecodedAlphaMode) AlphaMode {
 	switch mode {
-	case model.DecodedAlphaMask:
+	case DecodedAlphaMask:
 		return AlphaMask
-	case model.DecodedAlphaBlend:
+	case DecodedAlphaBlend:
 		return AlphaBlend
 	}
 	return AlphaOpaque
@@ -330,7 +329,7 @@ func alphaModeOf(mode model.DecodedAlphaMode) AlphaMode {
 // image by its storage path alone, an embedded one by the model's path and its
 // index, with its bytes supplied beside the name so the Library never opens the
 // container to look for them.
-func textureDescrOf(image *model.DecodedImage) textureDescr {
+func textureDescrOf(image *DecodedImage) textureDescr {
 	if !image.Embedded {
 		return textureDescr{
 			Name: image.Path, Params: textureDescrParams{image: externalImage, srgb: image.SRGB},
@@ -345,7 +344,7 @@ func textureDescrOf(image *model.DecodedImage) textureDescr {
 
 // modelLightOf turns one decoded punctual light into the descriptor scene's
 // own recording calls take.
-func modelLightOf(light *model.DecodedLight) ModelLight {
+func modelLightOf(light *DecodedLight) ModelLight {
 	descr := LightDescr{
 		Position:  light.Position,
 		Direction: light.Direction,

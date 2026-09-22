@@ -7,8 +7,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
@@ -112,7 +112,7 @@ func TestAMissingPictureBindsMagentaAndLeavesTheDataSlotsAlone(t *testing.T) {
 	}
 	// All ten bindings, always: WGSL requires every declared binding bound and
 	// gfx does no preprocessing, so a slot whose image is gone binds something.
-	for _, slot := range types.PbrSlots {
+	for _, slot := range model.PbrSlots {
 		if len(h.backend.texturesBoundTo(slot.Texture)) == 0 {
 			t.Errorf("%s was never bound", slot.Texture)
 		}

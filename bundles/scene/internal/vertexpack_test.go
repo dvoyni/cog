@@ -5,8 +5,8 @@ import (
 	"math"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -39,8 +39,9 @@ func everyAttribute() []scene.Vertex {
 func readFloat32(at []byte) float32 { return math.Float32frombits(binary.NativeEndian.Uint32(at)) }
 
 // The bake path stages packed bytes, not a copy of the caller's slice. The
-// staging arena is the only place that is observable: downstream of the drain
-// the vertices are a buffer id and a size.
+// drain is the only place that is observable: downstream of it the vertices are
+// a buffer id and a size, so the probe drains the Lookup itself and keeps the
+// first bytes it is handed, which are the vertices.
 func TestBakeMeshStagesThePackedVertices(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) { q.Camera(testCamera, testCameraDescr()) })
 	vertices := everyAttribute()
@@ -51,11 +52,18 @@ func TestBakeMeshStagesThePackedVertices(t *testing.T) {
 
 	var staged []byte
 	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
-		pending := types.LookupPendingMeshes(lookup)[len(types.LookupPendingMeshes(lookup))-1]
-		staged = append(staged, pending.Vertices.Of(types.LookupStaging(lookup))...)
+		lookup.DrainMeshes(model.MeshBaker{
+			Bake: func(data []byte) gfx.BufferDescr {
+				if staged == nil {
+					staged = append([]byte{}, data...)
+				}
+				return gfx.BufferDescr{}
+			},
+			Release: func(gfx.BufferDescr) {},
+		})
 	}})
 	var arena []byte
-	at, _, _ := types.PackVertices(&arena, vertices)
+	at, _, _ := model.PackVertices(&arena, vertices)
 	want := at.Of(arena)
 	if len(staged) != len(want) {
 		t.Fatalf("staged %d vertex bytes, want %d", len(staged), len(want))

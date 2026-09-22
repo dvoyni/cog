@@ -28,26 +28,31 @@ plain default: the file said nothing, and nothing is the right picture.
 ## Wiring
 
 Compose scene with what it depends on — storage and its `PermanentFS` Adapter,
-gfx and its `Backend` Adapter, and app, whose `MainLoop` Adapter gogpu provides with
-gfx's `Backend` — and the app's own recording plugin. The kernel orders them by their dependencies:
+gfx and its `Backend` Adapter, app, whose `MainLoop` Adapter gogpu provides with
+gfx's `Backend`, and model, which registers the `*model.Lookup` scene draws
+from — and the app's own recording plugin. The kernel orders them by their dependencies:
 
 ```go
 plugins := []kernel.Plugin{
 	storageplugin.New(), diskstorageplugin.New(), // diskstorage.Config{AppId: "demo"} under diskstorage.Name
-	inputplugin.New(), appplugin.New(), gfxplugin.New(), canvasplugin.New(), sceneplugin.New(), gogpuplugin.New(),
+	inputplugin.New(), appplugin.New(), gfxplugin.New(), canvasplugin.New(), modelplugin.New(), sceneplugin.New(), gogpuplugin.New(),
 	demo, // records into the queues the plugins above declare
 }
 ```
 
-Only the composition root imports `sceneplugin`. Recording code imports the
+Only the composition root imports `sceneplugin` and `modelplugin`. Recording code imports the
 root, `scene`, and nothing else: `*scene.OpQueue`, `*scene.Lookup`,
 `scene.NewLookupAccess`, `scene.NewLookupDeviceAccess` and every descriptor are
 there. A recorder that must run
 before scene's flush in the same tick orders itself
 `Before[scene.FlushOnUpdate]()`; one that asks for no order already runs before
-it, because the flush is registered `Last()`. Configuration, when a caller
-needs any, is `scene.Config` keyed by `scene.Name`, and a zero field takes
-its default.
+it, because the flush is registered `Last()`. scene takes no configuration:
+the pose sample rate is model's, `model.Config` keyed by `model.Name`, and a
+zero field takes its default. A `scene.Config` keyed by `scene.Name` is ignored.
+
+**A plugin that locks `*scene.Lookup` depends on `model.Name`.** The Lookup is
+model's resource, and `scene.Lookup` only aliases it, so the kernel refuses a
+lock on it from a plugin whose `Dependencies` name scene and not model.
 
 Scene reads storage buffers from the vertex stage, so it needs a **WebGPU core
 adapter**. Compatibility mode defaults that limit to zero and the binding cannot

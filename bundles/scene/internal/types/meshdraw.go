@@ -1,6 +1,7 @@
 package types
 
 import (
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -130,36 +131,14 @@ func (q *OpQueue) Mesh(layers LayerMask, ref MeshRef, draw MeshDraw) {
 func (q *OpQueue) TemporaryMesh[TVertex VertexLayout](
 	vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology,
 ) MeshRef {
-	input, err := mintMesh[TVertex](
+	input, err := model.MintMesh[TVertex](
 		&q.meshes.layouts, &q.meshes.Arena, vertices, indices, topology, false)
 	if err != nil {
 		q.meshes.Reports = append(q.meshes.Reports, err)
 		return MeshRef{}
 	}
-	q.meshes.Temporaries = append(q.meshes.Temporaries, temporaryMesh{
-		vertices: input.vertices, indices: input.indices,
-		vertexCount: input.vertexCount, indexCount: input.indexCount,
-		topology: input.topology, layout: input.layout, standard: input.standard,
-		uv: input.uv,
-	})
-	return MeshRef{
-		source: MeshTemporary, id: uint32(len(q.meshes.Temporaries)), generation: q.frame,
-	}
-}
-
-// temporaryMesh is one frame's worth of caller geometry, held as spans of the
-// recording's arena until the flush turns it into a mesh record.
-type temporaryMesh struct {
-	vertices    Span
-	indices     Span
-	vertexCount int
-	indexCount  int
-	topology    gfx.PrimitiveTopology
-	layout      []gfx.VertexAttr
-	standard    bool
-	// uv is the per-mesh record this frame's pack quantised the UVs against,
-	// carried through to the mesh record so the draw names the right slot.
-	uv SceneMesh
+	q.meshes.Temporaries = append(q.meshes.Temporaries, input)
+	return model.NewMeshRef(MeshTemporary, uint32(len(q.meshes.Temporaries)), q.frame)
 }
 
 // MeshRecording is everything the frame's mesh calls own: the temporary meshes
@@ -173,7 +152,9 @@ type temporaryMesh struct {
 // does not swap: interning is what makes the per-frame path cheap, and it is
 // keyed by Go type, which no frame boundary changes.
 type MeshRecording struct {
-	Temporaries []temporaryMesh
+	// Temporaries are the frame's temporary meshes, each held as spans of Arena
+	// until the flush turns it into a mesh record.
+	Temporaries []model.MeshInput
 	Arena       []byte
 	transforms  []m.Transform
 	params      []gfx.ParameterDescr
@@ -185,7 +166,7 @@ type MeshRecording struct {
 	// across frames.
 	copies  map[MaterialKey]Material
 	Reports []error
-	layouts layoutCache
+	layouts model.LayoutCache
 }
 
 func (r *MeshRecording) reset() {
@@ -246,23 +227,4 @@ func (r *MeshRecording) copyMaterial(material Material) (Material, MaterialKey) 
 	}
 	r.copies[key] = copied
 	return copied, key
-}
-
-// Record builds the mesh record one temporary draws from. Its buffers are
-// inline bytes rather than baked ones, which is what makes gfx re-bake them
-// into its own pooled per-frame buffers; the bytes are snapshotted there, so
-// the recording is free to reuse this arena on the next frame.
-//
-// It names no index width, and the zero value is the uint32 a temporary mesh
-// stages its indices at.
-func (t temporaryMesh) Record(arena []byte) MeshRecord {
-	record := MeshRecord{
-		Vertices:    gfx.BufferWithBytes(t.vertices.Of(arena), true),
-		VertexCount: t.vertexCount, indexCount: t.indexCount,
-		Topology: t.topology, Layout: t.layout, Standard: t.standard, UV: t.uv,
-	}
-	if t.indexCount > 0 {
-		record.Indices, record.Indexed = gfx.BufferWithBytes(t.indices.Of(arena), true), true
-	}
-	return record
 }

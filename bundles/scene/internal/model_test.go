@@ -11,6 +11,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -208,7 +209,7 @@ func TestAModelDrawFoldsTheDrawTransformOverTheFlattenedMatrix(t *testing.T) {
 		if len(draws) != 1 {
 			t.Fatalf("draws = %d, want the one expanded primitive", len(draws))
 		}
-		world = prepareDraw(draws[0], types.MeshRecord{}).sphere
+		world = prepareDraw(draws[0], model.MeshRecord{}).sphere
 	})
 	// The triangle's declared box is (0,0,0)..(1,1,0), so its sphere sits at
 	// (0.5, 0.5, 0) before the node's 3 on Y and the draw's 10 on X.

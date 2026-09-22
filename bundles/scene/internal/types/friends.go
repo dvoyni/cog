@@ -1,70 +1,17 @@
 package types
 
-import (
-	"io/fs"
-
-	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/gfx"
-)
-
 // The friend functions: what scene's internal/ reads from, or does to, a public
-// type's unexported state. Only packages under bundles/scene can import this
+// type's unexported state. What it reads of model's residency - the Lookup, a
+// MeshRef, a selector's report key - it reads through their own exported
+// methods, since model's internal/types is out of its reach. Only packages under bundles/scene can import this
 // package, so these are not public API. Each is a field read or a direct call, so the
 // flush pays nothing for going through one.
 
 // LayerMaskDrawnBy calls LayerMask.drawnBy for scene's internal/.
 func LayerMaskDrawnBy(v LayerMask, cull LayerMask) bool { return v.drawnBy(cull) }
 
-// LookupAccessLookup reads LookupAccess.lookup for scene's internal/'s tests.
-func LookupAccessLookup(v LookupAccess) *Lookup { return v.lookup }
-
-// LookupDefaults reads Lookup.defaults for scene's internal/'s tests.
-func LookupDefaults(v *Lookup) PbrDefaults { return v.defaults }
-
-// LookupDrainMeshes calls Lookup.drainMeshes for scene's internal/.
-func LookupDrainMeshes(v *Lookup, baker MeshBaker) { v.drainMeshes(baker) }
-
-// LookupEnsureBundled calls Lookup.ensureBundled for scene's internal/.
-func LookupEnsureBundled(v *Lookup, bake bakeTextureFunc) [4]Material { return v.ensureBundled(bake) }
-
-// LookupEnsureUnit calls Lookup.ensureUnit for scene's internal/.
-func LookupEnsureUnit(v *Lookup, shape unitShape, bake BakeFunc) MeshRef {
-	return v.ensureUnit(shape, bake)
-}
-
-// LookupMesh calls Lookup.mesh for scene's internal/.
-func LookupMesh(v *Lookup, ref MeshRef) (MeshRecord, bool) { return v.mesh(ref) }
-
-// LookupMeshes reads Lookup.meshes for scene's internal/'s tests.
-func LookupMeshes(v *Lookup) []MeshRecord { return v.meshes }
-
-// LookupModel calls Lookup.model for scene's internal/, which loads the path if
-// the cache holds no entry for it. The reason a model is absent is State's to
-// report, so this reduces it to the bool the expansion and the tests need.
-func LookupModel(
-	v *Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue, path string,
-) (*residentModel, bool) {
-	model, err := v.model(k, fsys, resources, path)
-	return model, err == nil
-}
-
-// LookupPendingMeshes reads Lookup.pendingMeshes for scene's internal/'s tests.
-func LookupPendingMeshes(v *Lookup) []pendingMesh { return v.pendingMeshes }
-
-// LookupStaging reads Lookup.staging for scene's internal/'s tests.
-func LookupStaging(v *Lookup) []byte { return v.staging }
-
 // MaterialTagOf calls MaterialTag.tag for scene's internal/.
 func MaterialTagOf(v MaterialTag) PassTag { return v.tag() }
-
-// MeshRefGeneration reads MeshRef.generation for scene's internal/.
-func MeshRefGeneration(v MeshRef) uint32 { return v.generation }
-
-// MeshRefIndex reads MeshRef.id for scene's internal/.
-func MeshRefIndex(v MeshRef) uint32 { return v.id }
-
-// MeshRefSource reads MeshRef.source for scene's internal/.
-func MeshRefSource(v MeshRef) MeshSource { return v.source }
 
 // OpQueueAppendDraw calls OpQueue.appendFlushDraw for scene's internal/.
 func OpQueueAppendDraw(v *OpQueue, record DrawRecord) { v.appendFlushDraw(record) }
@@ -113,6 +60,3 @@ func OpQueueRecordedMeshes(v *OpQueue) MeshRecording { return v.meshes }
 
 // PassTagOf calls Pass.tag for scene's internal/.
 func PassTagOf(v Pass) PassTag { return v.tag() }
-
-// SelectorReportKey calls ModelSelectorError.reportKey for scene's internal/.
-func SelectorReportKey(v ModelSelectorError) string { return v.reportKey() }

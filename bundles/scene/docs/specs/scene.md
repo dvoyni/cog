@@ -76,25 +76,27 @@ correct without them.
 
 - Name: `scene.Name` (`"scene"`)
 - Constructor: `sceneplugin.New() kernel.Plugin` (amended by #361; #339 made it `sceneimpl.New()`, and before that it was `scene.New() *scene.Plugin`)
-- Plugin dependencies: `gfx`, `storage`
+- Plugin dependencies: `gfx`, `storage`, `model` (amended by #530)
 - Go package dependencies: `app`, `gfx`, `kernel`, `m`, `model`, `storage`,
   `github.com/qmuntal/gltf`
 - Events declared or published: none
 
 ```go
 kernel.New(map[kernel.PluginName]any{
-	scene.Name: scene.Config{PoseSampleRate: 60},
+	model.Name: model.Config{PoseSampleRate: 60},
 })
 ```
 
-`scene.Config` is the configuration type, and a zero field takes its default
-(amended by #361; #339 moved it to `sceneimpl.Config`, and before that it was
+`model.Config` is the configuration type, and a zero field takes its default
+(amended by #530, which moved the Lookup and its configuration to the model
+plugin; `scene.Config` aliases it and scene takes none of its own. #361 had it
+as `scene.Config`, #339 moved it to `sceneimpl.Config`, and before that it was
 `scene.Config` with `scene.DefaultConfig()`). The plugin
 implements `Name`, `Dependencies`, and `Register` for the kernel lifecycle. During `Register` scene
 contributes its embedded shaders to storage as a read mount through
 `storage.ReadMountPort`, as canvas does.
-Register `storage` before `scene`. A typical order is `storage`, `input`, `gfx`,
-`canvas`, `scene`, then the system driver.
+Register `storage` and `model` before `scene`. A typical order is `storage`,
+`input`, `gfx`, `canvas`, `model`, `scene`, then the system driver.
 
 `PoseSampleRate` is the global animation bake rate in Hz, default 60. It is the
 only configurable number in the plugin; see
@@ -1238,7 +1240,7 @@ ever wrote them — a skin binding is set only from a loaded model's animation �
 so a buffer-built mesh never skins and the eight stored bytes would be dead in
 every mesh an app can build. The **skinned layout**, the same six plus `JOINTS_0`
 and `WEIGHTS_0` at 40 B, belongs to the glTF loader and is unreachable from the
-public API. See [`mesh.md`](mesh.md) for both layouts row by row.
+public API. See [`mesh.md`](../../../model/docs/specs/mesh.md) for both layouts row by row.
 
 **A custom vertex layout requires a custom material.** The bundled PBR knows the
 two named layouts and nothing else, and every variant of it reads a prefix of
@@ -1264,7 +1266,7 @@ that WebGPU has no `uint8` indices. What scene *stores* is narrower: a durable
 mesh of 65535 vertices or fewer is uploaded as `uint16`, derived from the vertex
 count rather than chosen, and a temporary mesh keeps `uint32` because narrowing
 it would cost an allocating pass every frame rather than once. See **Index
-width** in [`mesh.md`](mesh.md). The bundled PBR is documented as meaningful for
+width** in [`mesh.md`](../../../model/docs/specs/mesh.md). The bundled PBR is documented as meaningful for
 triangles only; a custom shader doing point sprites or a wireframe overlay is
 legitimate and costs scene nothing to allow.
 
@@ -1479,7 +1481,7 @@ only. A 5th play is **dropped by lowest weight and reported once per model**.
 The joint ceiling is the storage vertex's, not the pose buffer's: poses live in
 a storage buffer indexed by row against a 128 MiB binding and would take any
 count, but a vertex names its joint in **one byte**
-([mesh.md](mesh.md#per-attribute)). It binds what a vertex can name — the joints
+([mesh.md](../../../model/docs/specs/mesh.md#per-attribute)). It binds what a vertex can name — the joints
 a model's *skins* claim, which are numbered first and contiguously — so the
 plain joints a node binding claims, which ride the instance record in a full
 `u32`, are outside it. **A model whose skins claim more fails wholesale at load,
@@ -1523,7 +1525,7 @@ the mesh as well as posing it. The load pass is what puts a weight inside
 `[0, 1]` so that it has a `Unorm8` code to land on at all, and the shader's
 divide by the accumulated total is what covers the sum that rounding four
 weights into four bytes then misses — 11.7% of `Fox`'s vertices, always by
-exactly one code ([mesh.md](mesh.md#per-attribute)). Neither half is permitted
+exactly one code ([mesh.md](../../../model/docs/specs/mesh.md#per-attribute)). Neither half is permitted
 to assume the other made the sum one, which is also what makes a malformed file
 skinned correctly rather than silently shrunk.
 
@@ -1567,7 +1569,7 @@ overturned: it would mean a bind group per primitive, collapsing group 2's whole
 reason for existing. Every morphed primitive's targets concatenate into the one
 buffer and are reached by a base offset.
 
-**The delta layout is specified in [mesh.md](mesh.md#morph-delta-storage)**, and
+**The delta layout is specified in [mesh.md](../../../model/docs/specs/mesh.md#morph-delta-storage)**, and
 only there: the record's per-slot widths, the per-primitive ranges, the
 per-target span and the address the shader builds from them. It used to be
 described here as well, in a passage this document was the authority for — and
@@ -1890,7 +1892,7 @@ plus handedness) · `TEXCOORD_0` Unorm16x2 · `TEXCOORD_1` Unorm16x2 · `COLOR_0
 Unorm8x4. The **skinned layout** is the same six plus `JOINTS_0` Uint8x4 and
 `WEIGHTS_0` Unorm8x4 at `@location(6..7)`, 40 bytes, and only the glTF loader
 produces one. Eight of gfx's 16 attribute slots at most, well inside its 2048
-stride cap. [`mesh.md`](mesh.md) is the authority on both, attribute by
+stride cap. [`mesh.md`](../../../model/docs/specs/mesh.md) is the authority on both, attribute by
 attribute.
 
 **Presence is trimmed exactly once, along a seam WGSL already had.**
@@ -1926,7 +1928,7 @@ HAL is exactly the divergence the map forbids
 **Packing waited on a measured trigger and then got one.** v1 stored all eight
 attributes wide, at 84 bytes; the narrowing above — oct normals and tangents,
 per-mesh UV ranges, byte joints and weights — is a load-time encoding behind
-unchanged attribute names, charted in [`mesh.md`](mesh.md) attribute by
+unchanged attribute names, charted in [`mesh.md`](../../../model/docs/specs/mesh.md) attribute by
 attribute.
 
 ### Tangents
@@ -2530,7 +2532,7 @@ mirroring canvas's `canvasTexture`/`canvasSampler`. A material parameter named
 | `scenePbrMaterial` | 1 | the bundled PBR record, a bound range |
 | `scenePoses` | 2 | baked 48 B pose records |
 | `sceneSkinJoints` | 2 | per-skin, per-joint 112 B record: inverse bind and normal matrix interleaved |
-| `sceneMorphDeltas` | 2 | `array<u32>`, one block per morphed primitive: per-slot ranges, a base/first/count per target, then the records ([mesh.md](mesh.md#morph-delta-storage)) |
+| `sceneMorphDeltas` | 2 | `array<u32>`, one block per morphed primitive: per-slot ranges, a base/first/count per target, then the records ([mesh.md](../../../model/docs/specs/mesh.md#morph-delta-storage)) |
 
 Plus the PBR's five textures and five samplers in group 1
 (see [Bundled PBR material](#bundled-pbr-material)).
@@ -2599,7 +2601,7 @@ then  :  targetCount x { targetIndex: u32, weight: f32 }                   // 8 
 `vertexCount * morphStride` a dense delta address multiplied by — and a morph
 target now stores records only for the span of vertices it moves, so each one
 carries its own base in its block's header and no per-primitive stride exists to
-fold ([mesh.md](mesh.md#morph-delta-storage)).
+fold ([mesh.md](../../../model/docs/specs/mesh.md#morph-delta-storage)).
 
 Morph weights are a **count-prefixed sparse list**, not a dense 64-float block:
 the CPU knows which entries are non-zero before it writes anything, so a 52-shape

@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/kernel"
@@ -53,18 +54,19 @@ func residentModelDraw(t testing.TB, doc *gltf.Document, draw scene.ModelDraw) (
 	return h, records
 }
 
-// A plain draw binds the file's own records directly: the Material the load
-// built and the PBR record beside it, both owned by the resident entry and
-// shared by every draw of the path. There is no per-draw copy of either, which
-// is what makes the common path cost what the same geometry recorded by hand
-// would.
+// A plain draw binds the file's own records directly: the forward material the
+// load built and the PBR record beside it, both owned by the resident entry and
+// shared by every draw of the path. The draw's Material is only a forward tag
+// wrapped around that gfx material in the frame's arena, and its parameters are
+// the entry's own, so there is no per-draw copy of either, which is what makes
+// the common path cost what the same geometry recorded by hand would.
 func TestAPlainModelDrawBindsTheFilesRecordsWithNoCopy(t *testing.T) {
 	h, records := residentModelDraw(t, twoMaterialModel(t), scene.ModelDraw{})
 	if len(records) != 2 {
 		t.Fatalf("expanded to %d draws, want one per primitive", len(records))
 	}
 	h.model(func(lookup *scene.Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue) {
-		entry, ok := types.LookupModel(lookup, k, fsys, resources, modelPath)
+		entry, _, ok := lookup.ModelView(k, fsys, resources, modelPath, "", "")
 		if !ok || len(entry.Materials) != 2 {
 			t.Fatalf("entry = %v, want the two materials the file declares", entry)
 		}
@@ -73,8 +75,8 @@ func TestAPlainModelDrawBindsTheFilesRecordsWithNoCopy(t *testing.T) {
 			if records[i].Pbr != &owned.Record {
 				t.Errorf("draw %d binds a copied record, want the entry's own", i)
 			}
-			if &records[i].Material[0] != &owned.Variants[types.VariantStatic][0] {
-				t.Errorf("draw %d binds a copied Material, want the entry's own", i)
+			if !wrapsForward(records[i].Material, owned.Forward[model.VariantStatic]) {
+				t.Errorf("draw %d binds %v, want the entry's own forward material", i, records[i].Material)
 			}
 		}
 	})
@@ -140,9 +142,9 @@ func TestOverrideParamsKeepTheFilesTexturesAndReachTheDrawsParameters(t *testing
 		}
 	}
 	h.model(func(lookup *scene.Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue) {
-		entry, _ := types.LookupModel(lookup, k, fsys, resources, modelPath)
+		entry, _, _ := lookup.ModelView(k, fsys, resources, modelPath, "", "")
 		for i := range records {
-			if &records[i].Material[0] != &entry.Materials[i].Variants[types.VariantStatic][0] {
+			if !wrapsForward(records[i].Material, entry.Materials[i].Forward[model.VariantStatic]) {
 				t.Errorf("draw %d binds a copied Material, want the file's textures kept", i)
 			}
 		}
@@ -170,7 +172,7 @@ func TestOverrideParamsAreCopiedIntoTheFramesArena(t *testing.T) {
 // the frame to explain it.
 func TestAModelDrawWithAMaterialReplacesTheFilesWholesale(t *testing.T) {
 	replacement := scene.Material{{Descr: gfx.MaterialWithState(
-		gfx.ShaderWithResource(types.SceneShaderPath), types.PbrState(types.AlphaOpaque, false))}}
+		gfx.ShaderWithResource(model.SceneShaderPath), model.PbrState(model.AlphaOpaque, false))}}
 	h, records := residentModelDraw(t, twoMaterialModel(t),
 		scene.ModelDraw{Material: replacement})
 	defer h.frame()
@@ -204,7 +206,7 @@ func TestAModelDrawWithAMaterialReplacesTheFilesWholesale(t *testing.T) {
 // "replaces wholesale".
 func TestOverrideParamsMergeOverAReplacementMaterialsOwnDefaults(t *testing.T) {
 	replacement := scene.Material{{Descr: gfx.MaterialWithState(
-		gfx.ShaderWithResource(types.SceneShaderPath), types.PbrState(types.AlphaOpaque, false))}}
+		gfx.ShaderWithResource(model.SceneShaderPath), model.PbrState(model.AlphaOpaque, false))}}
 	h, records := residentModelDraw(t, twoMaterialModel(t), scene.ModelDraw{
 		Material:       replacement,
 		OverrideParams: []gfx.ParameterDescr{gfx.FloatParam("roughnessFactor", 0.5)},

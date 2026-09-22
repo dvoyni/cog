@@ -3,6 +3,7 @@ package internal
 import (
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -15,8 +16,8 @@ import (
 var (
 	instanceSize       = int(unsafe.Sizeof(sceneInstance{}))
 	frameBlockSize     = int(unsafe.Sizeof(sceneFrameBlock{}))
-	materialRecordSize = int(unsafe.Sizeof(types.ScenePbrRecord{}))
-	meshRecordSize     = int(unsafe.Sizeof(types.SceneMesh{}))
+	materialRecordSize = int(unsafe.Sizeof(model.ScenePbrRecord{}))
+	meshRecordSize     = int(unsafe.Sizeof(model.SceneMesh{}))
 )
 
 // pendingPass is one pass the flush has decided but not yet emitted, and
@@ -40,7 +41,7 @@ type pendingDraw struct {
 	// skin is the group 2 buffers the draw binds, and its two flags are also
 	// what picked the draw's shader variant: a half it does not have is a half
 	// the module does not declare, so there is nothing left unbound.
-	skin types.SkinBuffers
+	skin model.SkinBuffers
 	// material is the gfx material the draw's resolved tag entry named. It is
 	// carried per draw rather than looked up again at emit time because
 	// resolution is a pass-relative answer: the same scene material serves a
@@ -98,7 +99,7 @@ func (b *frameBuild) reset() {
 	// Slot 0 first, before any draw can claim an index: the identity record is
 	// what a custom-layout mesh and a UV-less standard mesh name, and it has to
 	// be there whether or not any mesh this frame carries a range of its own.
-	b.meshes.appendElement(&types.IdentityMesh)
+	b.meshes.appendElement(&model.IdentityMesh)
 	b.passes = b.passes[:0]
 	b.draws = b.draws[:0]
 	b.batches = b.batches[:0]
@@ -173,8 +174,8 @@ func (b *frameBuild) beginPass(descr gfx.PassDescr, block sceneFrameBlock) *pend
 // call's survivors, so while the automatic collapse of consecutive equal draws
 // is deferred the table degenerates to one record per draw for everything else.
 func (b *frameBuild) addDraw(
-	pass *pendingPass, mesh types.MeshRecord, id uint32, entry materialEntry,
-	worlds []m.Mat4, record types.ScenePbrRecord, params []gfx.ParameterDescr, anim types.AnimBinding,
+	pass *pendingPass, mesh model.MeshRecord, id uint32, entry materialEntry,
+	worlds []m.Mat4, record model.ScenePbrRecord, params []gfx.ParameterDescr, anim types.AnimBinding,
 ) {
 	first := (len(b.instances.bytes()) - pass.instanceOffset) / instanceSize
 	// One record per batch, the way the material record goes, and for the same
@@ -206,8 +207,8 @@ func (b *frameBuild) addDraw(
 // or a standard mesh whose every UV is zero - names slot 0, the reserved
 // identity, and appends nothing. That is the whole of the "no UVs" case: there
 // is no validity flag, no branch in the shader and no second path to test.
-func (b *frameBuild) meshIndex(record types.SceneMesh) uint32 {
-	if record == (types.SceneMesh{}) {
+func (b *frameBuild) meshIndex(record model.SceneMesh) uint32 {
+	if record == (model.SceneMesh{}) {
 		return 0
 	}
 	return uint32(b.meshes.appendElement(&record) / meshRecordSize)

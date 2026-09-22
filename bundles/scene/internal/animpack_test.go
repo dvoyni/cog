@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -11,13 +12,13 @@ import (
 
 // testAnim is a two-joint model with two clips a second long, which at the
 // default rate is 61 frames each.
-func testAnim() *types.ResidentAnimation {
+func testAnim() *model.ResidentAnimation {
 	joints := 2
-	return &types.ResidentAnimation{
+	return &model.ResidentAnimation{
 		JointCount: joints,
 		SampleRate: testSampleRate,
 		JointNames: []string{"root", "tip"},
-		Clips: []types.BakedClip{
+		Clips: []model.BakedClip{
 			{Name: "walk", Duration: 1, Frames: 61, Base: joints},
 			{Name: "run", Duration: 1, Frames: 61, Base: joints * 62},
 		},
@@ -26,7 +27,7 @@ func testAnim() *types.ResidentAnimation {
 
 // collectReports gathers what the pack path reported, keyed the way the Lookup
 // would key it, so a test can assert the key as well as the error.
-func collectReports() (types.ReportOnce, *[]string) {
+func collectReports() (model.ReportOnce, *[]string) {
 	var keys []string
 	return func(key string, _ error) { keys = append(keys, key) }, &keys
 }
@@ -37,7 +38,7 @@ func collectReports() (types.ReportOnce, *[]string) {
 // would preserve only the ability to express a bug.
 func TestResolvePlaysNormalisesWeights(t *testing.T) {
 	report, _ := collectReports()
-	plays, _ := types.ResolvePlays(testAnim(), "m.glb", []scene.ClipPlay{
+	plays, _ := model.ResolvePlays(testAnim(), "m.glb", []scene.ClipPlay{
 		{Clip: "walk", Weight: 3},
 		{Clip: "run", Weight: 1},
 	}, nil, nil, report)
@@ -61,7 +62,7 @@ func TestResolvePlaysNormalisesWeights(t *testing.T) {
 // it, which is one of the three things row 0 answers.
 func TestResolvePlaysFallsBackToTheRestFrameOnZeroWeight(t *testing.T) {
 	report, _ := collectReports()
-	plays, _ := types.ResolvePlays(testAnim(), "m.glb", []scene.ClipPlay{
+	plays, _ := model.ResolvePlays(testAnim(), "m.glb", []scene.ClipPlay{
 		{Clip: "walk", Weight: 0},
 		{Clip: "run", Weight: 0},
 	}, nil, nil, report)
@@ -74,7 +75,7 @@ func TestResolvePlaysFallsBackToTheRestFrameOnZeroWeight(t *testing.T) {
 // under a key carrying the name, so two typos in one file are two reports.
 func TestResolvePlaysDropsAnUnknownClipAndReportsIt(t *testing.T) {
 	report, keys := collectReports()
-	plays, _ := types.ResolvePlays(testAnim(), "m.glb", []scene.ClipPlay{
+	plays, _ := model.ResolvePlays(testAnim(), "m.glb", []scene.ClipPlay{
 		{Clip: "sprint", Weight: 1},
 		{Clip: "walk", Weight: 1},
 	}, nil, nil, report)
@@ -94,7 +95,7 @@ func TestResolvePlaysDropsAnUnknownClipAndReportsIt(t *testing.T) {
 // A model with no joints has nothing to play, however many plays a draw names.
 func TestResolvePlaysIsEmptyForAModelWithNoJoints(t *testing.T) {
 	report, keys := collectReports()
-	plays, _ := types.ResolvePlays(&types.ResidentAnimation{}, "m.glb", []scene.ClipPlay{
+	plays, _ := model.ResolvePlays(&model.ResidentAnimation{}, "m.glb", []scene.ClipPlay{
 		{Clip: "walk", Weight: 1},
 	}, nil, nil, report)
 	if len(plays) != 0 {
@@ -113,12 +114,12 @@ func TestPackAnimLaysTheBlockOutInVec4s(t *testing.T) {
 	if got := build.packAnim(nil, morphBlock{}); got != types.SceneNoAnim {
 		t.Errorf("an empty block is at %d, want sceneNoAnim", got)
 	}
-	first := build.packAnim([]types.ScenePlayRecord{{BaseRow0: 4, BaseRow1: 6, W0: 0.5, W1: 0.5}}, morphBlock{})
+	first := build.packAnim([]model.ScenePlayRecord{{BaseRow0: 4, BaseRow1: 6, W0: 0.5, W1: 0.5}}, morphBlock{})
 	if first != 0 {
 		t.Errorf("the first block is at %d, want the start of the arena", first)
 	}
-	second := build.packAnim([]types.ScenePlayRecord{{}, {}}, morphBlock{})
-	if want := uint32(types.AnimHeaderVec4s + types.PlayRecordVec4s); second != want {
+	second := build.packAnim([]model.ScenePlayRecord{{}, {}}, morphBlock{})
+	if want := uint32(model.AnimHeaderVec4s + model.PlayRecordVec4s); second != want {
 		t.Errorf("the second block is at %d, want %d", second, want)
 	}
 	if got, want := len(build.anims.bytes()), (2+1+2+2)*16; got != want {
@@ -149,7 +150,7 @@ func TestPackInstanceMarksAnUnskinnedDraw(t *testing.T) {
 // A model that keeps no CPU pose rows - which is almost every model - answers
 // no, and the caller keeps the load's rest-pose re-root.
 func TestBlendJointDeclinesWithoutCPUPoseRows(t *testing.T) {
-	if _, ok := types.BlendJoint(testAnim(), nil, 0); ok {
+	if _, ok := model.BlendJoint(testAnim(), nil, 0); ok {
 		t.Error("a model with no CPU rows has no frame-resolved pose to give")
 	}
 }

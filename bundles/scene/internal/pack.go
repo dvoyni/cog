@@ -3,6 +3,7 @@ package internal
 import (
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -123,7 +124,7 @@ type sceneFrameBlock struct {
 	// what allows; pad takes it to the array's 16-byte alignment.
 	LightCount uint32
 	pad        [3]uint32
-	Lights     [types.MaxLights]sceneLight
+	Lights     [model.MaxLights]sceneLight
 }
 
 // packFrameLighting writes one camera's sun and hemispheric ambient into its

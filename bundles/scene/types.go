@@ -1,6 +1,7 @@
 package scene
 
 import (
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 )
 
@@ -89,11 +90,11 @@ const LayersAll = types.LayersAll
 // LightKind is which of the two punctual lights a LightDescr describes.
 // PointLight and SpotLight set it themselves; it is exposed so an Op can be
 // read back.
-type LightKind = types.LightKind
+type LightKind = model.LightKind
 
 const (
-	LightPoint = types.LightPoint
-	LightSpot  = types.LightSpot
+	LightPoint = model.LightPoint
+	LightSpot  = model.LightSpot
 )
 
 // LightDescr is one punctual light, point or spot, over the one struct: call
@@ -106,7 +107,7 @@ const (
 // which you see immediately, rather than a silently skipped light. OuterCone
 // zero means pi/4, glTF's default; InnerCone zero is a real value, falloff
 // from the axis.
-type LightDescr = types.LightDescr
+type LightDescr = model.LightDescr
 
 // Material is a scene material: the gfx materials it serves, one per pass tag.
 // A pass whose tag has no entry skips every draw using this material, so tag
@@ -172,7 +173,7 @@ type MaterialTag = types.MaterialTag
 // component is in, where a byte cannot - glTF's COLOR_0 is linear, which is
 // m.NewColorLinear. Its zero value is transparent black, so anything scene
 // builds itself writes m.White.
-type Vertex = types.Vertex
+type Vertex = model.Vertex
 
 // VertexLayout is implemented by the plain-data vertex types scene accepts.
 // The returned attributes describe the *buffer* scene uploads: they map byte
@@ -196,12 +197,12 @@ type Vertex = types.Vertex
 // The one direction that fails is a shader input no attribute supplies. A
 // layout supplying an attribute the shader never declares is legal and common,
 // and gfx checks the pairing at pipeline time either way.
-type VertexLayout = types.VertexLayout
+type VertexLayout = model.VertexLayout
 
 // MeshRef names one mesh scene can draw. It is an opaque value: a source, a
 // dense scene id that doubles as the sort key's meshID, and a generation that
 // makes a recycled id detectable. Its zero value is no mesh.
-type MeshRef = types.MeshRef
+type MeshRef = model.MeshRef
 
 // MeshDraw is everything one Mesh call says beyond which mesh it draws.
 //
@@ -209,7 +210,7 @@ type MeshRef = types.MeshRef
 // the mesh's own baked sphere.
 type MeshDraw = types.MeshDraw
 
-const VertexDecodePath = types.VertexDecodePath
+const VertexDecodePath = model.VertexDecodePath
 
 // ModelDraw is everything one Model call says beyond which file it draws.
 //
@@ -226,7 +227,7 @@ type ModelDraw = types.ModelDraw
 // cap, and which of a level's lights matter is the app's judgement, not the
 // loader's. So an app reads these and declares the ones it wants through
 // PointLight and SpotLight, at whatever world transform it drew the model at.
-type ModelLight = types.ModelLight
+type ModelLight = model.ModelLight
 
 // ModelRef names what a scene- or node-scoped query is asking about, mirroring
 // ModelDraw's own selectors field for field.
@@ -238,7 +239,7 @@ type ModelLight = types.ModelLight
 // Only Nodes, Bounds and AABB take one. Everything else on the facade is per
 // path, because path is the whole cache key: a model has one joint index space,
 // and MorphTargets is one flattened list that Node re-rooting does not renumber.
-type ModelRef = types.ModelRef
+type ModelRef = model.ModelRef
 
 // ClipPlay is one animation clip playing on one model draw.
 //
@@ -250,14 +251,14 @@ type ModelRef = types.ModelRef
 // Clips are addressed by name, first match. An unknown name is reported once
 // per model and the play dropped, so a typo costs the one play rather than the
 // whole character.
-type ClipPlay = types.ClipPlay
+type ClipPlay = model.ClipPlay
 
 // ClipInfo is one clip a model file declares, as Clips reports it.
 //
 // Duration is here because a caller needs it to know when a one-shot play has
 // ended, which is a question only the clip's own length answers and the one
 // piece of clip state gameplay cannot compute for itself.
-type ClipInfo = types.ClipInfo
+type ClipInfo = model.ClipInfo
 
 // OpKind identifies which recording call produced an Op.
 type OpKind = types.OpKind
@@ -321,11 +322,11 @@ type BatchView = types.BatchView
 // with NewLookupAccess, and pass it to consumers for the duration of that
 // handler. Never store the result: the handles behind it are valid only while
 // the handler holds its lock.
-type LookupAccess = types.LookupAccess
+type LookupAccess = model.LookupAccess
 
 // LookupDeviceAccess is the scoped facade for everything about a Lookup that
 // needs the device: Preload, State and the model queries, all of which load,
 // and the two unload verbs that free a GPU texture at the call. Acquire
 // *Lookup write, storage.FileSystem read and *gfx.ResourceQueue write in a
 // handler, build one with NewLookupDeviceAccess, and never store the result.
-type LookupDeviceAccess = types.LookupDeviceAccess
+type LookupDeviceAccess = model.LookupDeviceAccess

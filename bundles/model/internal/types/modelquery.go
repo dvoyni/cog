@@ -125,7 +125,7 @@ func (la LookupDeviceAccess) Nodes(ref ModelRef, dst []string) ([]string, bool) 
 	}
 	scene, err := model.scene(ref)
 	if err != nil {
-		la.kernel.ReportErrorOnce(err.reportKey(), err)
+		la.kernel.ReportErrorOnce(err.ReportKey(), err)
 		return dst, false
 	}
 	if ref.Node == "" {
@@ -134,7 +134,7 @@ func (la LookupDeviceAccess) Nodes(ref ModelRef, dst []string) ([]string, bool) 
 	named, found := scene.Nodes[ref.Node]
 	if !found {
 		err := ErrModelNodeMissing{Model: ref.Path, Scene: ref.Scene, Node: ref.Node}
-		la.kernel.ReportErrorOnce(err.reportKey(), err)
+		la.kernel.ReportErrorOnce(err.ReportKey(), err)
 		return dst, false
 	}
 	return append(dst, scene.Order[named.First:named.Last]...), true
@@ -203,7 +203,7 @@ func (la LookupDeviceAccess) bounds(ref ModelRef) (m.Sphere, m.Box3, bool) {
 	}
 	view, err := model.View(ref.Path, ref.Scene, ref.Node)
 	if err != nil {
-		la.kernel.ReportErrorOnce(err.reportKey(), err)
+		la.kernel.ReportErrorOnce(err.ReportKey(), err)
 		return m.Sphere{}, m.Box3{}, false
 	}
 	// A selector that matched a real node carrying no geometry has no bound,

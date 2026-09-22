@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -13,9 +14,9 @@ var (
 	unitSphere = m.Sphere{Radius: 1}
 	// noSphere is a mesh that carries no baked bounds - a custom layout, or a
 	// temporary mesh.
-	noSphere = types.MeshRecord{}
+	noSphere = model.MeshRecord{}
 	// boxSphere is a mesh with a baked sphere, the unit box's.
-	boxSphere = types.MeshRecord{Bounds: m.Sphere{Radius: float32(math.Sqrt(3)) / 2}}
+	boxSphere = model.MeshRecord{Bounds: m.Sphere{Radius: float32(math.Sqrt(3)) / 2}}
 )
 
 // Bounds resolve in a fixed order: NeverCull wins, then an explicit non-zero

@@ -1,6 +1,36 @@
 package types
 
-import "github.com/dvoyni/cog/libs/m"
+import (
+	"github.com/dvoyni/cog/bundles/model"
+	"github.com/dvoyni/cog/libs/m"
+)
+
+// unitShape names one of the unit meshes a debug-vocabulary call draws. It is
+// how scene's queue records a shape; the meshes themselves are model's, and
+// UnitMesh maps a shape onto the one it draws. The zero value is ShapeNone, so a
+// draw record that says nothing about its shape draws the mesh it names
+// instead - and a draw that names no mesh either draws nothing, which is what a
+// rejected mint has to yield.
+type unitShape uint8
+
+const (
+	ShapeNone unitShape = iota
+	ShapeBox
+	shapeSphere
+	shapePlane
+)
+
+// UnitMesh is the model unit mesh a shape draws. ShapeNone draws none, and is
+// never asked.
+func (s unitShape) UnitMesh() model.UnitMesh {
+	switch s {
+	case shapeSphere:
+		return model.UnitSphere
+	case shapePlane:
+		return model.UnitPlane
+	}
+	return model.UnitBox
+}
 
 // The debug vocabulary: Box, Sphere, Plane, Line3D and WireBox, the scene twin
 // of canvas's FillRect, StrokeRect and Line. Each is sugar over one of scene's

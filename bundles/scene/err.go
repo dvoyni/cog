@@ -3,6 +3,7 @@ package scene
 import (
 	"fmt"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 )
 
@@ -87,7 +88,7 @@ func (e ErrMaterialTagAlreadyServed) Error() string {
 // the two scene carries. The slot falls back to set 0 rather than being
 // dropped, and says so: silently ignoring texCoord: 1 would be a wrong picture
 // on a core glTF feature with nothing anywhere to explain it.
-type ErrTextureUVSetUnsupported = types.ErrTextureUVSetUnsupported
+type ErrTextureUVSetUnsupported = model.ErrTextureUVSetUnsupported
 
 // ErrSpotConeInverted reports a spot light whose InnerCone is at or past its
 // OuterCone, which leaves no cone to smooth across. The light is skipped for
@@ -117,14 +118,14 @@ func (ErrSpotDirectionMissing) Error() string {
 // This departs from canvas.DrawTriangles, which silently returns on bad input,
 // because that is a per-frame recording call where a report would spam every
 // frame, whereas a bake happens once.
-type ErrMeshGeometryInvalid = types.ErrMeshGeometryInvalid
+type ErrMeshGeometryInvalid = model.ErrMeshGeometryInvalid
 
 // ErrMeshUnavailable reports a MeshRef that no longer names a mesh: released,
 // stale against a slot that has been reissued, or temporary and used in a later
 // frame. The draw is skipped, and the report fires once per ref per frame
 // however many draws named it - a mesh that quietly stops appearing is the same
 // failure class the generation counter exists to catch.
-type ErrMeshUnavailable = types.ErrMeshUnavailable
+type ErrMeshUnavailable = model.ErrMeshUnavailable
 
 // ErrMeshCustomLayoutNeedsMaterial reports a draw handing the bundled PBR a
 // layout it does not know. It knows exactly two - the standard layout every
@@ -149,7 +150,7 @@ func (e ErrMeshCustomLayoutNeedsMaterial) Error() string {
 
 // ErrMeshUpdateRejected reports an UpdateMesh that would change something fixed
 // for a ref's life. The mesh keeps the geometry it had.
-type ErrMeshUpdateRejected = types.ErrMeshUpdateRejected
+type ErrMeshUpdateRejected = model.ErrMeshUpdateRejected
 
 // ErrModelUnavailable reports a model the decode refused: it does not parse, it
 // declares no scenes, or it requires an extension scene has no decoder for. The
@@ -163,7 +164,7 @@ type ErrMeshUpdateRejected = types.ErrMeshUpdateRejected
 // The report fires from the handler whose call triggered the load - the flush
 // for a draw, the caller's own handler for a query - so it cannot outlive the
 // call that caused it.
-type ErrModelUnavailable = types.ErrModelUnavailable
+type ErrModelUnavailable = model.ErrModelUnavailable
 
 // ErrModelTextureUnavailable reports one texture of an otherwise sound model:
 // a texture index the file has nothing at, an image it holds no bytes for, or
@@ -178,32 +179,32 @@ type ErrModelUnavailable = types.ErrModelUnavailable
 //
 // It is reported once per picture rather than once per model, so two models
 // naming one broken image report it once between them.
-type ErrModelTextureUnavailable = types.ErrModelTextureUnavailable
+type ErrModelTextureUnavailable = model.ErrModelTextureUnavailable
 
 // ErrModelPrimitiveSkipped reports one primitive scene cannot draw - a POINTS
 // primitive, which gfx has no topology for, or geometry with no POSITION
 // attribute at all. The rest of the model loads: a mesh that is mostly
 // triangles should not be lost to one point cloud.
-type ErrModelPrimitiveSkipped = types.ErrModelPrimitiveSkipped
+type ErrModelPrimitiveSkipped = model.ErrModelPrimitiveSkipped
 
 // ErrModelBoundsMissing reports a primitive whose POSITION accessor carries no
 // min/max, which glTF requires. The whole model becomes never-cull rather than
 // taking a guessed box: drawing too much is a cost you can profile, where a
 // wrong box is a model that vanishes at one camera angle and nowhere else.
-type ErrModelBoundsMissing = types.ErrModelBoundsMissing
+type ErrModelBoundsMissing = model.ErrModelBoundsMissing
 
 // ErrModelPathInvalid is a path that is not a resource path at all - empty,
 // absolute, NUL-bearing or escaping the mount root. Such a path never reaches
 // the cache: it is refused where the caller is standing, leaving no entry and
 // no tombstone, so a typo is permanently a typo until UnloadModel clears the
 // report under the string that was passed.
-type ErrModelPathInvalid = types.ErrModelPathInvalid
+type ErrModelPathInvalid = model.ErrModelPathInvalid
 
 // ErrModelNodeDuplicated reports two nodes of one file sharing a name. A Node
 // selector is the first depth-first match, so the second is unaddressable and
 // the file has to be renamed for it to be drawn on its own. The model loads
 // either way: the duplicate costs nothing to anything but the selector.
-type ErrModelNodeDuplicated = types.ErrModelNodeDuplicated
+type ErrModelNodeDuplicated = model.ErrModelNodeDuplicated
 
 // ErrModelSceneMissing reports a draw naming a scene the file does not carry.
 // The draw is skipped and never falls back to the default scene, for the same
@@ -211,25 +212,25 @@ type ErrModelNodeDuplicated = types.ErrModelNodeDuplicated
 //
 // glTF scene names are optional, and a file whose scenes are unnamed has no
 // addressable scene but its default - which is what an empty Scene selects.
-type ErrModelSceneMissing = types.ErrModelSceneMissing
+type ErrModelSceneMissing = model.ErrModelSceneMissing
 
 // ErrModelNodeMissing reports a draw naming a node the selected scene does not
 // carry. The draw is skipped and never falls back to the whole scene: one
 // typo'd node name rendering an entire building at the origin is the worse
 // failure of the two.
-type ErrModelNodeMissing = types.ErrModelNodeMissing
+type ErrModelNodeMissing = model.ErrModelNodeMissing
 
 // ErrModelNodeDegenerate reports a Node draw of a node whose authored world
 // transform collapses an axis and so cannot be inverted. Re-rooting is exactly
 // that inverse, so there is nothing to draw the subtree through; a whole-scene
 // draw of the same file is unaffected and still draws it flat where the file
 // put it.
-type ErrModelNodeDegenerate = types.ErrModelNodeDegenerate
+type ErrModelNodeDegenerate = model.ErrModelNodeDegenerate
 
 // ErrModelSkinUnbound reports a skin whose inverse bind accessor could not be
 // read. Every joint of that skin falls back to an identity inverse bind, which
 // draws the mesh in its joints' own space rather than losing it.
-type ErrModelSkinUnbound = types.ErrModelSkinUnbound
+type ErrModelSkinUnbound = model.ErrModelSkinUnbound
 
 // ErrModelPoseApproximated reports a joint whose baked world matrix carries
 // something translation, rotation and scale cannot represent - shear, almost
@@ -239,17 +240,17 @@ type ErrModelSkinUnbound = types.ErrModelSkinUnbound
 // beats a missing character, shear is invisible on virtually every real rig,
 // and the report is what makes the approximation visible rather than silent.
 // It fires once per model however many joints and frames carry it.
-type ErrModelPoseApproximated = types.ErrModelPoseApproximated
+type ErrModelPoseApproximated = model.ErrModelPoseApproximated
 
 // ErrModelClipMissing reports a ClipPlay naming a clip the model does not
 // declare. The play is dropped and the rest of the draw's plays still blend:
 // one typo'd clip name should cost the one play, not the character.
-type ErrModelClipMissing = types.ErrModelClipMissing
+type ErrModelClipMissing = model.ErrModelClipMissing
 
 // ErrModelPlaysOverLimit reports a draw that asked for more clip plays than one
 // draw may blend. The heaviest are kept and the rest dropped by weight, which
 // is what the character mostly looks like anyway.
-type ErrModelPlaysOverLimit = types.ErrModelPlaysOverLimit
+type ErrModelPlaysOverLimit = model.ErrModelPlaysOverLimit
 
 // ErrModelMorphWeightsOverLength reports a draw whose MorphWeights is longer
 // than the model's flattened target list. The tail is ignored and the draw
@@ -259,7 +260,7 @@ type ErrModelPlaysOverLimit = types.ErrModelPlaysOverLimit
 // The short case is not an error at all and has no report. A caller animating
 // the first two shapes of a fifty-shape face should not have to carry the other
 // forty-eight zeros, so a short slice leaves the rest at 0.
-type ErrModelMorphWeightsOverLength = types.ErrModelMorphWeightsOverLength
+type ErrModelMorphWeightsOverLength = model.ErrModelMorphWeightsOverLength
 
 // ErrModelMorphTargetsOverLimit reports a draw whose active morph targets
 // exceed what one draw may blend. The heaviest are kept and the rest dropped by
@@ -267,4 +268,4 @@ type ErrModelMorphWeightsOverLength = types.ErrModelMorphWeightsOverLength
 //
 // Stored targets are unlimited: with sparse packing the cap constrains neither
 // memory nor layout, and is purely a guard against runaway per-vertex ALU.
-type ErrModelMorphTargetsOverLimit = types.ErrModelMorphTargetsOverLimit
+type ErrModelMorphTargetsOverLimit = model.ErrModelMorphTargetsOverLimit

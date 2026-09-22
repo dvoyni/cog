@@ -1,7 +1,6 @@
 package types
 
 import (
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -80,7 +79,7 @@ type gltfGeometry struct {
 // normal map and whose primitive carried none; without a normal map the
 // tangent frame is never read, so generating it would be per-vertex work for a
 // value the shader multiplies by nothing.
-func convertGeometry(decoded *model.DecodedGeometry, skins []model.DecodedSkin) gltfGeometry {
+func convertGeometry(decoded *DecodedGeometry, skins []DecodedSkin) gltfGeometry {
 	geometry := gltfGeometry{
 		indices:  decoded.Indices,
 		topology: decoded.Topology,
@@ -123,7 +122,7 @@ func convertGeometry(decoded *model.DecodedGeometry, skins []model.DecodedSkin) 
 // fillVertices copies one decoded primitive's attribute arrays into its
 // conversion vertices. Every attribute but POSITION is optional, and an
 // attribute the file does not carry leaves scene's default in place.
-func fillVertices(decoded *model.DecodedGeometry) (vertices []skinnedVertex, uv0, uv1 uvRange) {
+func fillVertices(decoded *DecodedGeometry) (vertices []skinnedVertex, uv0, uv1 uvRange) {
 	vertices = make([]skinnedVertex, len(decoded.Positions))
 	for i, position := range decoded.Positions {
 		vertices[i].Position = m.Vec3{X: position[0], Y: position[1], Z: position[2]}
@@ -349,4 +348,11 @@ func orthogonal(v m.Vec3) m.Vec3 {
 		return m.Vec3{Z: 1}
 	}
 	return perpendicular.Normalize()
+}
+
+func abs32(value float32) float32 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }

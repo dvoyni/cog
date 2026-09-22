@@ -3,7 +3,6 @@ package types
 import (
 	"math"
 
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -52,7 +51,7 @@ func (g gltfMorph) vertexCount() int {
 // primitive did not author: scene generates flat normals for a primitive that
 // has none and tangents for one whose material needs them, and those are
 // scene's own reconstruction, not the asset's.
-func convertMorphTargets(decoded *model.DecodedGeometry, vertexCount int) gltfMorph {
+func convertMorphTargets(decoded *DecodedGeometry, vertexCount int) gltfMorph {
 	if len(decoded.Targets) == 0 || vertexCount == 0 {
 		return gltfMorph{}
 	}
@@ -109,7 +108,7 @@ func convertMorphTargets(decoded *model.DecodedGeometry, vertexCount int) gltfMo
 // stays a compile-time constant.
 var morphSlots = [...]struct {
 	bit    morphMask
-	deltas func(target *model.DecodedMorphTarget) ([][3]float32, bool)
+	deltas func(target *DecodedMorphTarget) ([][3]float32, bool)
 	words  int
 	pack   func(words []uint32, delta m.Vec4, scale m.Vec3) []uint32
 }{
@@ -118,15 +117,15 @@ var morphSlots = [...]struct {
 	{bit: morphTangent, deltas: tangentDeltas, words: 1, pack: packMorphDirection},
 }
 
-func positionDeltas(target *model.DecodedMorphTarget) ([][3]float32, bool) {
+func positionDeltas(target *DecodedMorphTarget) ([][3]float32, bool) {
 	return target.Position, target.PositionNamed
 }
 
-func normalDeltas(target *model.DecodedMorphTarget) ([][3]float32, bool) {
+func normalDeltas(target *DecodedMorphTarget) ([][3]float32, bool) {
 	return target.Normal, target.NormalNamed
 }
 
-func tangentDeltas(target *model.DecodedMorphTarget) ([][3]float32, bool) {
+func tangentDeltas(target *DecodedMorphTarget) ([][3]float32, bool) {
 	return target.Tangent, target.TangentNamed
 }
 
@@ -226,11 +225,11 @@ type morphCurve struct {
 	// count is the scalars one keyframe holds, which is the targeted node's
 	// target count.
 	count int
-	mode  model.DecodedInterpolation
+	mode  DecodedInterpolation
 }
 
 // morphCurveOf wraps one decoded weights curve. It copies no keyframe.
-func morphCurveOf(curve *model.DecodedWeightCurve) *morphCurve {
+func morphCurveOf(curve *DecodedWeightCurve) *morphCurve {
 	return &morphCurve{
 		times: curve.Times, values: curve.Values, count: curve.Count, mode: curve.Interpolation,
 	}
@@ -268,13 +267,13 @@ func (c *morphCurve) sample(time float32, dst []float32) {
 		return
 	}
 	amount := (time - c.times[low]) / span
-	if c.mode == model.DecodedInterpolationStep {
+	if c.mode == DecodedInterpolationStep {
 		c.copyKey(low, dst)
 		return
 	}
 	for target := range min(len(dst), c.count) {
 		start, end := c.valueAt(low, target), c.valueAt(low+1, target)
-		if c.mode == model.DecodedInterpolationCubicSpline {
+		if c.mode == DecodedInterpolationCubicSpline {
 			dst[target] = hermite(
 				start, end,
 				c.valueAt3(low*3+2, target), c.valueAt3((low+1)*3, target),
@@ -299,7 +298,7 @@ func (c *morphCurve) copyKey(key int, dst []float32) {
 // tangents.
 func (c *morphCurve) valueAt(key, target int) float32 {
 	index := key
-	if c.mode == model.DecodedInterpolationCubicSpline {
+	if c.mode == DecodedInterpolationCubicSpline {
 		index = key*3 + 1
 	}
 	return c.valueAt3(index, target)

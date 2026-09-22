@@ -5,7 +5,6 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -46,7 +45,7 @@ func TestVertexAuthorsInFloatsAndStoresInThirtyTwoBytes(t *testing.T) {
 }
 
 func TestUnitBoxIsACentredCubeWithPerFaceNormals(t *testing.T) {
-	vertices, indices := model.UnitBoxGeometry()
+	vertices, indices := UnitBoxGeometry()
 	if len(vertices) != 24 {
 		t.Fatalf("the unit box has %d vertices, want 24 (four per face)", len(vertices))
 	}
@@ -77,7 +76,7 @@ func TestUnitBoxIsACentredCubeWithPerFaceNormals(t *testing.T) {
 // inside out, and it is the one thing about the box a test can settle without a
 // GPU: every triangle of a convex hull must face away from the centre.
 func TestUnitBoxTrianglesWindCounterClockwiseOutwards(t *testing.T) {
-	vertices, indices := model.UnitBoxGeometry()
+	vertices, indices := UnitBoxGeometry()
 	for i := 0; i < len(indices); i += 3 {
 		a := vertices[indices[i]].Position
 		b := vertices[indices[i+1]].Position
@@ -102,7 +101,7 @@ func TestMeshRefZeroValueIsNoMesh(t *testing.T) {
 
 func TestUnitBoxBakesOnceAndOnlyOnFirstUse(t *testing.T) {
 	lookup := NewSizedLookup(WithDefaults(Config{}))
-	if lookup.unit[ShapeBox].ID() != 0 {
+	if lookup.unit[UnitBox].ID() != 0 {
 		t.Fatal("the unit box was baked before anything asked for it")
 	}
 	var baked []gfx.BufferDescr
@@ -110,8 +109,8 @@ func TestUnitBoxBakesOnceAndOnlyOnFirstUse(t *testing.T) {
 		baked = append(baked, gfx.BufferWithBytes(data, false))
 		return baked[len(baked)-1]
 	}
-	first := lookup.ensureUnit(ShapeBox, bake)
-	second := lookup.ensureUnit(ShapeBox, bake)
+	first := lookup.EnsureUnit(UnitBox, bake)
+	second := lookup.EnsureUnit(UnitBox, bake)
 	if first.ID() == 0 {
 		t.Fatal("the unit box did not bake on first use")
 	}
@@ -125,20 +124,20 @@ func TestUnitBoxBakesOnceAndOnlyOnFirstUse(t *testing.T) {
 
 func TestMeshLookupResolvesABakedRef(t *testing.T) {
 	lookup := NewSizedLookup(WithDefaults(Config{}))
-	ref := lookup.ensureUnit(ShapeBox, func(data []byte) gfx.BufferDescr {
+	ref := lookup.EnsureUnit(UnitBox, func(data []byte) gfx.BufferDescr {
 		return gfx.BufferWithBytes(data, false)
 	})
-	mesh, ok := lookup.mesh(ref)
+	mesh, ok := lookup.Mesh(ref)
 	if !ok {
 		t.Fatal("the baked unit box does not resolve")
 	}
 	if mesh.indexCount != 36 {
 		t.Fatalf("the resolved mesh has %d indices, want 36", mesh.indexCount)
 	}
-	if _, ok := lookup.mesh(MeshRef{}); ok {
+	if _, ok := lookup.Mesh(MeshRef{}); ok {
 		t.Fatal("the zero MeshRef resolved to a mesh")
 	}
-	if _, ok := lookup.mesh(MeshRef{id: ref.id, generation: ref.generation + 1}); ok {
+	if _, ok := lookup.Mesh(MeshRef{id: ref.id, generation: ref.generation + 1}); ok {
 		t.Fatal("a stale generation resolved to a mesh")
 	}
 }
@@ -148,10 +147,10 @@ func TestMeshLookupResolvesABakedRef(t *testing.T) {
 // origin without anybody computing it per frame.
 func TestUnitBoxBakesItsBoundingSphere(t *testing.T) {
 	lookup := NewSizedLookup(WithDefaults(Config{}))
-	ref := lookup.ensureUnit(ShapeBox, func(data []byte) gfx.BufferDescr {
+	ref := lookup.EnsureUnit(UnitBox, func(data []byte) gfx.BufferDescr {
 		return gfx.BufferWithBytes(data, false)
 	})
-	mesh, _ := lookup.mesh(ref)
+	mesh, _ := lookup.Mesh(ref)
 	if mesh.Bounds.Center != (m.Vec3{}) {
 		t.Fatalf("the unit box's sphere is centred at %v, want the origin", mesh.Bounds.Center)
 	}

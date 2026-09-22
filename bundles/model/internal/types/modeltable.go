@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io/fs"
 
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
@@ -124,16 +123,18 @@ type modelPrimitive struct {
 	Morph MorphBinding
 }
 
-// modelMaterial is one converted glTF material: the scene material a draw binds,
-// once per shader variant, and the per-batch record that carries its numbers.
+// modelMaterial is one converted glTF material: the forward gfx material a draw
+// binds, once per shader variant, and the per-batch record that carries its
+// numbers. It names no pass: a renderer wraps the forward material under its
+// own tag.
 //
 // One glTF material serves whatever primitives reference it, and what a
 // primitive deforms is not the material's business - so the variant is picked
 // per primitive, from the same bindings that primitive's draw supplies, and the
 // material carries all four rather than deciding.
 type modelMaterial struct {
-	Variants [VariantCount]Material
-	Record   ScenePbrRecord
+	Forward [VariantCount]gfx.MaterialDescr
+	Record  ScenePbrRecord
 }
 
 // modelReportKey and textureReportKey are the keys the load's report-once calls
@@ -207,6 +208,24 @@ func (l *Lookup) model(
 	return loaded, nil
 }
 
+// ModelView resolves one draw of the model at path under its scene and node
+// selectors, loading the model if the cache holds no entry. ok is false when
+// no model is resident for the path, and why is State's to report; a selector
+// that matches nothing is err, which the caller reports under its ReportKey.
+//
+// It is the load facade's read for a renderer's flush, which holds the Lookup
+// for writing, the filesystem and the resource queue.
+func (l *Lookup) ModelView(
+	k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue, path, scene, node string,
+) (view ModelView, err ModelSelectorError, ok bool) {
+	model, loadErr := l.model(k, fsys, resources, path)
+	if loadErr != nil {
+		return ModelView{}, nil, false
+	}
+	view, err = model.View(path, scene, node)
+	return view, err, true
+}
+
 // Load parses one file and takes it into residency, or records the failure that
 // ended it. The Library has already read the bytes, so data is the file whole
 // and no second open happens here.
@@ -277,7 +296,7 @@ func (modelLoader) Free(value *residentModel, userData modelUserData) {
 func parseModel(
 	data assets.Blob, modelPath string, fsys fs.FS, sampleRate int,
 ) (*LoadedModel, error) {
-	decoded, err := model.DecodeModel(data.Data(), modelPath, fsys)
+	decoded, err := DecodeModel(data.Data(), modelPath, fsys)
 	if err != nil {
 		return nil, err
 	}
@@ -377,8 +396,8 @@ func (l *Lookup) reportLoad(k kernel.Kernel, path string, reports []error) {
 	k.ReportErrorOnce(modelReportKey(path), model...)
 }
 
-// bindModelMaterial builds the scene material one converted glTF material draws
-// with: the bundled shader, the pipeline state its alphaMode, doubleSided and
+// bindModelMaterial builds the forward materials one converted glTF material
+// draws with: the bundled shader, the pipeline state its alphaMode, doubleSided and
 // winding produced, and all ten of the shader's texture and sampler bindings.
 //
 // All ten, always: WGSL requires every declared binding bound and gfx does no
@@ -408,12 +427,10 @@ func bindModelMaterial(
 		)
 	}
 	built := modelMaterial{Record: loaded.record}
-	for variant := range built.Variants {
+	for variant := range built.Forward {
 		// One params slice serves all four: only the shader differs.
-		built.Variants[variant] = Material{{
-			Tag:   TagForward,
-			Descr: gfx.MaterialWithState(ShaderVariant(variant).shader(), loaded.state, params...),
-		}}
+		built.Forward[variant] = gfx.MaterialWithState(
+			ShaderVariant(variant).shader(), loaded.state, params...)
 	}
 	return built
 }
@@ -481,7 +498,7 @@ func (l *Lookup) bakeModelGeometry(
 }
 
 // ensureDefaults bakes the two 1x1 textures every empty slot binds, once. It is
-// the half of ensureBundled a model load needs: a model builds its own
+// the half of EnsureBundled a model load needs: a model builds its own
 // materials but shares those defaults.
 func (l *Lookup) ensureDefaults(resources *gfx.ResourceQueue) PbrDefaults {
 	if l.hasDefaults {

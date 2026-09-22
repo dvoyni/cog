@@ -3,7 +3,6 @@ package types
 import (
 	"math"
 
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -320,12 +319,12 @@ func (c *modelConverter) composeNode(index int, parent m.Mat4) {
 type animCurve struct {
 	times  []float32
 	values [][4]float32
-	mode   model.DecodedInterpolation
+	mode   DecodedInterpolation
 }
 
 // animCurveOf wraps one decoded curve, or is nil for a component the clip does
 // not steer. It copies no keyframe.
-func animCurveOf(curve *model.DecodedCurve) *animCurve {
+func animCurveOf(curve *DecodedCurve) *animCurve {
 	if curve == nil {
 		return nil
 	}
@@ -362,9 +361,9 @@ func (c *animCurve) sample(time float32) m.Vec4 {
 	}
 	amount := (time - c.times[low]) / span
 	switch c.mode {
-	case model.DecodedInterpolationStep:
+	case DecodedInterpolationStep:
 		return c.valueAt(low)
-	case model.DecodedInterpolationCubicSpline:
+	case DecodedInterpolationCubicSpline:
 		return c.hermite(low, amount, span)
 	}
 	return lerpVec4(c.valueAt(low), c.valueAt(low+1), amount)
@@ -374,7 +373,7 @@ func (c *animCurve) sample(time float32) m.Vec4 {
 // layout into account: the value sits between its in and out tangents.
 func (c *animCurve) valueAt(key int) m.Vec4 {
 	index := key
-	if c.mode == model.DecodedInterpolationCubicSpline {
+	if c.mode == DecodedInterpolationCubicSpline {
 		index = key*3 + 1
 	}
 	if index >= len(c.values) {

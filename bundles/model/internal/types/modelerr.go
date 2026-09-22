@@ -3,7 +3,6 @@ package types
 import (
 	"fmt"
 
-	"github.com/dvoyni/cog/bundles/model"
 )
 
 // ErrModelUnavailable reports a model the decode refused: it does not parse, it
@@ -170,13 +169,3 @@ func (e ErrModelMorphTargetsOverLimit) Error() string {
 		"scene: a draw of model %q has %d active morph targets against a limit of %d, so the lightest were dropped",
 		e.Model, e.Targets, e.Limit)
 }
-
-// The decoder's reports are declared beside it, in model, and named here under
-// the names scene has always given them.
-type (
-	ErrModelTextureUnavailable = model.ErrModelTextureUnavailable
-	ErrModelPrimitiveSkipped   = model.ErrModelPrimitiveSkipped
-	ErrModelBoundsMissing      = model.ErrModelBoundsMissing
-	ErrModelNodeDuplicated     = model.ErrModelNodeDuplicated
-	ErrModelSkinUnbound        = model.ErrModelSkinUnbound
-)
