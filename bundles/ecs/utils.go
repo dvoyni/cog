@@ -47,12 +47,13 @@ func PointerFree(t reflect.Type) error { return types.PointerFree(t) }
 //	    ecs.Feed(func(e app.UpdateEvent) float64 { return e.Dt }),
 //	)).After[GravitySystem]()
 //
-// A System takes any number of *Query, *Spawn, *WriteableEntities, *Get, *Set,
-// *Remove, *Read, *Write and *In; the kernel.Kernel value; and at most once the
-// event value. It returns nothing. Its lock set is the union of what its
-// parameters declare, computed once here. A signature outside that contract
-// panics at registration, naming the System, and is reported as
-// kernel.ErrPluginPanic naming the plugin.
+// A System takes any number of *Query, *Spawn, *WriteableEntities,
+// *DeferredDespawn, *Get, *Set, *Remove, *Hooks, *Read, *Write and *In; the
+// kernel.Kernel value; at most once the event value; and, for a System
+// registered with ToExecute, at most once the *Resp it answers through. It
+// returns nothing. Its lock set is the union of what its parameters declare,
+// computed once here. A signature outside that contract panics at registration,
+// naming the System, and is reported as kernel.ErrPluginPanic naming the plugin.
 func ToHandler[E any](
 	registrar *kernel.Registrar, system any, feeds ...Feeder[E],
 ) func() (kernel.Lock, kernel.Observe[E]) {

@@ -83,6 +83,23 @@ type Spawn[S any] = types.Spawn[S]
 // applied. The ECS subscribes one itself, as DrainOnUpdate.
 type WriteableEntities = types.WriteableEntities
 
+// DeferredDespawn queues a Despawn instead of making one, so a System that
+// retires Entities holds read{*Entities} rather than the wide write: it runs
+// beside every Query and is excluded only against writers.
+//
+//	func lifetime(despawn *ecs.DeferredDespawn, q *ecs.Query[Expiring]) {
+//	    for e, it := range q.All() {
+//	        if it.Expiring.At <= now { despawn.Despawn(e) }
+//	    }
+//	}
+//
+// Despawn is its one method and returns nothing: a queued Despawn cannot miss at
+// the call, because the drain decides. Queuing is not a Structural change — the
+// queued Entity stays alive, and the queuer's own Query still iterates it —
+// until a System calls WriteableEntities.Drain. A queued Despawn of an Entity
+// that is not alive at the drain does nothing.
+type DeferredDespawn = types.DeferredDespawn
+
 // Get reaches one Component of an Entity a System did not iterate to, such as
 // the target a Reference names. It is the read half: Of yields a copy, and
 // there is no Ref, so a read handle is never a write in disguise.
