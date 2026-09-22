@@ -32,11 +32,23 @@ something unverified it is marked **Gap** and says what would settle it, and
 where assembling the decisions side by side settled something no ticket did, it
 is marked **Settled here**.
 
-**This document is not built.** [Required work](#required-work) is the checklist
-the implementation is to be built from, and the rules in this document are also
-the list of behaviour tests. Until it is built, `ecs.md` §*There is no command
-buffer* describes the ECS as shipped, and the two sentences in `ecs.md` and
-`set.go` that say *nothing is deferred* are true of the package today.
+**This document is built.** `github.com/dvoyni/cog/bundles/ecs` implements it,
+and what structural change costs on the build is measured in the package
+README's [*What structural change
+costs*](../README.md#what-structural-change-costs). [What it
+costs](#what-it-costs) keeps the prototype figures the design was held to, and
+the README's supersede them. [Required work](#required-work) is the checklist
+the implementation was built from, and the rules in this document are also the
+list of behaviour tests. Where the package and this document disagree, the
+package is the defect unless this document says otherwise.
+
+`ecs.md` and `hooks.md` changed when this document landed, and those sections
+point here: `ecs.md` §*[The shape](ecs.md#the-shape)*, §*[What a signature may
+contain](ecs.md#what-a-signature-may-contain)*, §*[Giving memory
+back](ecs.md#giving-memory-back)*, §*[What a System
+sees](ecs.md#what-a-system-sees)* and §*[There is no command
+buffer](ecs.md#there-is-no-command-buffer-and-the-reason-is-allocation)*, and
+`hooks.md` §*[A drained change](hooks.md#a-drained-change)*.
 
 ---
 
@@ -724,7 +736,7 @@ Hooks.
   assuming a `Last()` drain only; with app drain Systems, a reader ordered after
   one sees the change in its current publication. The constraint's other lines
   stand, and [`hooks.md` §*A drained change*](hooks.md#a-drained-change) is
-  rewritten against this document when it lands.
+  written against this document.
 - **Order.** A Store's log follows the order in which the drain applies changes
   to it: handles in enrolment order, each buffer in queue order, spawn pass
   before despawn pass, nothing iterating a map.

@@ -949,9 +949,12 @@ against a change to a Component's value. **No structural change is a Command**
 (the ECS's Commands are [`ShrinkCmd`](#giving-memory-back) and the three [read
 Commands](#reading-the-world-by-name), and none changes membership), and that is the part most likely to be built wrong from habit: `Spawn[S].New` and
 `WriteableEntities.Despawn` are direct calls on handles the System already
-holds, not messages, not a queue and not a deferred buffer. There is no
+holds, not messages and not a queue. There is no
 exclusion mechanism to build either, because the lock set below already excludes
-everyone.
+everyone. The deferring pair `*ecs.DeferredSpawn[S]` and `*ecs.DeferredDespawn`
+queue instead, and their change is made at the next
+`WriteableEntities.Drain()`; what they buy is lock duration and they are
+specified in [`specs/deferred.md`](specs/deferred.md).
 
 **Two handles, not one.** Folding `Despawn` onto `Spawn[S]` would force a
 Component set type on Systems that never spawn, so a System that only retires Entities names
