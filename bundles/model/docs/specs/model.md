@@ -2028,15 +2028,17 @@ remainder — so the only saving is a copy the one-pass conversion and
 dequantisation largely already spend.
 
 **The `arrayStride: 0` broadcast trick is unusable on cog's backends.** It is
-spec-legal and gogpu's browser path forwards it untouched, but the pure-Go native
-path validates it not at all and its backends diverge silently: the software
-rasteriser drops the whole draw, GLES reads 0 as "tightly packed", Metal sets
-`stepRate: 1`. A trick that works in a browser and silently corrupts the desktop
-HAL is exactly the divergence the map forbids
+spec-legal and gogpu's browser path forwards it untouched. Upstream's pure-Go
+native path validated it not at all, and its backends diverged silently: the
+software rasteriser dropped the whole draw, GLES read 0 as "tightly packed", Metal
+set `stepRate: 1`. A trick that works in a browser and silently corrupts the
+desktop HAL is exactly the divergence the map forbids
 ([gogpu/wgpu: arrayStride 0 is unvalidated and backends diverge](https://github.com/dvoyni/cog/issues/47)).
-That ticket is ready: it adds the missing validation on the fork `dvoyni/wgpu`,
-which cog will pin by `replace`, and sends the same patch upstream. Stride 0 is
-rejected there, not emulated, so the trick stays unusable after it lands.
+cog now pins the fork `dvoyni/wgpu` by `replace`, and its pipeline validation
+rejects stride 0, a stride that is not a multiple of 4, a stride over
+`maxVertexBufferArrayStride` and an attribute that runs past its stride, on every
+native backend, before any HAL sees them. Stride 0 is rejected, not emulated, so
+the trick stays unusable; the same patch is bound for upstream.
 
 **Packing waited on a measured trigger and then got one.** v1 stored all eight
 attributes wide, at 84 bytes; the narrowing above — oct normals and tangents,
