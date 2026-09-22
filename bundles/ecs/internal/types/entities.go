@@ -57,10 +57,15 @@ type Entities struct {
 	captures []func(e Entity)
 	// classes is what component registration baked, keyed by the Component's Go
 	// type. It is written during registration and read during registration —
-	// once, while a Query is planned — and never touched while the engine runs.
-	// It is what lets a Query declare a lock on a Store whose type it holds only
-	// as a reflect.Type: a generic cannot be instantiated from one, so the
-	// generic call is made where C is a compile-time type and kept here.
+	// once, while a Query is planned. It is what lets a Query declare a lock on
+	// a Store whose type it holds only as a reflect.Type: a generic cannot be
+	// instantiated from one, so the generic call is made where C is a
+	// compile-time type and kept here.
+	//
+	// While the engine runs, the one thing that reads it is the read Commands,
+	// which scan it for a Component named by string (classNamed) and hold
+	// write{*Entities} while they do, so nothing else is running. It is the
+	// name-to-Component mapping; there is no other.
 	classes map[reflect.Type]*componentClass
 	// The fields below are ShrinkCmd's. They sit after everything a spawn or a
 	// despawn reads, and what only the Command reads is behind one pointer,
@@ -118,6 +123,29 @@ func (en *Entities) declare(componentType reflect.Type, class *componentClass) {
 // Component rather than a missing resource naming a store type nobody wrote.
 func (en *Entities) classOf(componentType reflect.Type) *componentClass {
 	return en.classes[componentType]
+}
+
+// classNamed resolves a Component named by string: the class whose owner,
+// kernel.TypeName of its type, is name when exactly one class has that owner,
+// or the class whose package-qualified form, PkgPath.Name, is name, which is
+// what resolves two types rendering one owner. It returns nil for an unknown or
+// an ambiguous name, and the caller's refusal path walks classes again to say
+// which.
+//
+// It is a scan, and it is called only by the read Commands, under
+// write{*Entities}: nothing on a frame's path ever names a Component by string.
+func (en *Entities) classNamed(name string) *componentClass {
+	var found *componentClass
+	for componentType, class := range en.classes {
+		if class.owner != name && qualifiedName(componentType) != name {
+			continue
+		}
+		if found != nil && found != class {
+			return nil
+		}
+		found = class
+	}
+	return found
 }
 
 // Alive reports whether e is the handle of an entity that exists now. A stale

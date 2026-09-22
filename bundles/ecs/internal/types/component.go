@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"unsafe"
@@ -44,9 +45,10 @@ type componentClass struct {
 	// is what validation mode stamps from, and it is nil for the overwhelming
 	// majority of Components.
 	lists []listSite
-	// owner is the Component type's name, kept because the only place it is
-	// wanted is a diagnostic and reaching back for a reflect.Type there would
-	// mean keeping one on the hot struct.
+	// owner is the Component type's name, kernel.TypeName of it. It is kept for
+	// a diagnostic, where reaching back for a reflect.Type would mean keeping
+	// one on the hot struct, and it is the name the read Commands resolve when
+	// a caller outside Go names a Component by string: see classNamed.
 	owner string
 	// copyValue is the typed copy a read field's fill takes when the Component
 	// is not trivial, and it exists for the garbage collector rather than for
@@ -79,6 +81,23 @@ type componentClass struct {
 	// in the Store's Hook log, and the gate that chooses between them when a run
 	// starts. The offset is the Spawn's to fill.
 	declareSet func(access kernel.ResourceAccess) spawnField
+	// population, has, owners and encode are what the read Commands ask of a
+	// Store they reach by name rather than by type: its Len, its Has, its live
+	// owners slice and one Entity's value as JSON. They are baked here for the
+	// reason declareSet is - the Commands hold the Component only as a name, and
+	// a generic cannot be instantiated from one - and they reach the Store
+	// directly rather than through a handle, because their only callers hold
+	// write{*Entities}, which excludes everything that touches any Store. See
+	// readbyname.go.
+	//
+	// owners hands back the Store's own slice: valid only while that lock is
+	// held, and never retained. encode reports the JSON of e's value, whether e
+	// has one, and any error encoding it; it runs under the lock, because a
+	// copied List shares its backing array with the Store.
+	population func() int
+	has        func(e Entity) bool
+	owners     func() []Entity
+	encode     func(e Entity) ([]byte, bool, error)
 }
 
 // RegisterComponent declares that C is a Component of this world, and is the
@@ -160,6 +179,17 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 				hooks: hookGate{watch: &store.watch, mask: recordsSpawn},
 			}
 		},
+	}
+	class.population = store.Len
+	class.has = store.Has
+	class.owners = func() []Entity { return store.owners }
+	class.encode = func(e Entity) ([]byte, bool, error) {
+		value, ok := store.Get(e)
+		if !ok {
+			return nil, false, nil
+		}
+		encoded, err := json.Marshal(value)
+		return encoded, true, err
 	}
 	if !trivial {
 		class.copyValue = func(dst, src unsafe.Pointer) { *(*C)(dst) = *(*C)(src) }

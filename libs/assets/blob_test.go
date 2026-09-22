@@ -1,6 +1,7 @@
 package assets_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -110,5 +111,28 @@ func TestAStringLiteralIsOneIdentityAndItsByteConversionIsNot(t *testing.T) {
 	}
 	if got := distinct(computed...); got != 5 {
 		t.Fatalf("five computed strings are %d identities, want 5", got)
+	}
+}
+
+// A Blob crosses JSON as its length and never its bytes: it may be
+// texture-sized, and whoever encodes it may be holding a lock every System
+// waits on.
+func TestABlobEncodesAsItsLengthAlone(t *testing.T) {
+	encoded, err := json.Marshal(assets.Blob{})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if got, want := string(encoded), `{"len":0}`; got != want {
+		t.Errorf("Blob{} encoded as %s, want %s", got, want)
+	}
+	encoded, err = json.Marshal(struct{ Pixels assets.Blob }{assets.NewBlobFromString("secretpixels")})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if got, want := string(encoded), `{"Pixels":{"len":12}}`; got != want {
+		t.Errorf("a populated Blob encoded as %s, want %s", got, want)
+	}
+	if strings.Contains(string(encoded), "secret") {
+		t.Errorf("the encoding %s carries the bytes", encoded)
 	}
 }

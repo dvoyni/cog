@@ -1,6 +1,9 @@
 package assets
 
-import "unsafe"
+import (
+	"strconv"
+	"unsafe"
+)
 
 // Blob is a run of bytes treated as static: once a value holding it is built,
 // nothing writes the bytes again. It is how an engine type carrying pixels, a
@@ -90,3 +93,12 @@ func (b Blob) String() string {
 // Len reports how many bytes the run holds, so a length test does not
 // materialise a slice.
 func (b Blob) Len() int { return b.len }
+
+// MarshalJSON writes the run as its length, {"len":N}, and never its bytes. A
+// Blob can be texture-sized, and whoever encodes one may be holding a lock
+// every other reader waits on - the ECS's read by Component name encodes under
+// write{*Entities} - so the size is what is shown and the payload is not.
+// Nothing decodes a Blob from JSON.
+func (b Blob) MarshalJSON() ([]byte, error) {
+	return append(strconv.AppendInt([]byte(`{"len":`), int64(b.len), 10), '}'), nil
+}

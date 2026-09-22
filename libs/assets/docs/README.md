@@ -36,6 +36,7 @@ func NewBlobFromString(s string) Blob
 func (b Blob) Data() []byte
 func (b Blob) String() string
 func (b Blob) Len() int
+func (b Blob) MarshalJSON() ([]byte, error) // {"len":N}, never the bytes
 
 type Descr[P comparable] struct {
 	Name   string // a storage path; empty when the asset is named by its Blob
@@ -89,6 +90,13 @@ once tells the truth.
 `[]byte{...}` at the call site is a fresh asset every time it runs, so the cache
 fills with entries nothing can ask for twice. A package `var`, a `const` or a
 string literal is the shape; bytes from an arena or a per-frame buffer are not.
+
+**A Blob encodes to JSON as its length, `{"len":N}`, and never its bytes.** A
+Blob can be texture-sized, and the ECS's [read by Component
+name](../../../bundles/ecs/docs/README.md#reading-the-world-by-name) encodes a
+Component while every System waits on it, so the size is shown and the payload
+is not. An exported Blob field, such as `Descr.Blob`, encodes that way rather
+than as the `{}` its unexported fields would give. Nothing decodes one.
 
 **Inline text goes through `NewBlobFromString`.** A string literal, `const` or
 package `var` resolves to the same address every evaluation, so the *built once

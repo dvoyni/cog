@@ -1,6 +1,7 @@
 package m
 
 import (
+	"encoding/json"
 	"iter"
 	"unsafe"
 )
@@ -99,6 +100,17 @@ func (l List[T]) All() iter.Seq2[int, T] {
 			}
 		}
 	}
+}
+
+// MarshalJSON writes the elements as a JSON array, [] when the List is empty
+// and never null, so a Component holding a List reads as its data rather than
+// as the {} its unexported fields would otherwise give. A List of Lists nests
+// through this same method. There is no UnmarshalJSON: nothing decodes a List.
+func (l List[T]) MarshalJSON() ([]byte, error) {
+	if len(l.data) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(l.data)
 }
 
 // Set writes element i and adds one to the List's generation, so the change

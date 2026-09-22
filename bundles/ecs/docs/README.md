@@ -35,14 +35,20 @@ ecs has the declaration-root shape of
   this package.
 - **`bundles/ecs/internal/types`** declares every one of those types and holds
   the machinery behind them: the authority's allocation, despawn, Store
-  enrolment and Component registry, the Store and its type-erased header,
+  enrolment and Component registry, which also answers a Component by the name
+  `kernel.TypeName` renders for it, the Store and its type-erased header,
   registration, the Query with its driver and fillers, the filters, structural
   change, the accessors, `List` and its write check, the resource and event
-  handles, and both handler builders with the parameter classification they
-  share. The root aliases every type and forwards every function to it.
+  handles, both handler builders with the parameter classification they
+  share, and the factories of the three [read
+  Commands](#reading-the-world-by-name) with their request and response types.
+  The root aliases every type and forwards every function to it, except those
+  read Commands' types, which nothing outside `bundles/ecs` names.
 - **`bundles/ecs/internal`** is the plugin: its `New`, the resolution of
   `ecs.Config`, and a `Register` that publishes the authority, registers
-  `ShrinkCmd`, and does nothing else.
+  `ShrinkCmd` and the three unexported [read
+  Commands](#reading-the-world-by-name), registers the `m.Transform` Store,
+  and does nothing else.
 - **`bundles/ecs/ecsplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
 
@@ -50,7 +56,7 @@ The aliased types stay concrete types (`type Entities = types.Entities`,
 `type Query[Q any] = types.Query[Q]`): no probe, fill or spawn goes through an
 interface, and a despawn pays the one indirect call per Store it always paid.
 Their exported methods (`Entities.Alive`, `Query.All`, `Store.Get`, …) are
-public API through the alias. What the plugin needs beyond that is the two
+public API through the alias. What the plugin needs beyond that is the five
 functions `internal/types` exports in `friends.go`, which nothing outside
 `bundles/ecs` can call. `internal/types` never imports the root. The types are
 declared there, but the kernel's architecture output and every ecs diagnostic
@@ -76,8 +82,10 @@ kernel.New(config).WithPlugins(ecsplugin.New(), physics.New(), game.New())
 **No plugin constructor takes the world.** `ecsplugin.New` creates the authority
 from its config and publishes it as the `*Entities` resource every System holds
 for read and every structural change holds for write. Besides that it registers
-only [`ShrinkCmd`](#giving-memory-back), because Components are registered by the
-plugins that define them and Systems are ordinary subscriptions.
+only [`ShrinkCmd`](#giving-memory-back), the three [read
+Commands](#reading-the-world-by-name) and the `m.Transform` Store, because
+Components are registered by the plugins that define them and Systems are
+ordinary subscriptions.
 
 Component registration and the handler builder still need the authority at
 registration, before any handler runs. They read it with
@@ -338,6 +346,7 @@ func (l List[T]) Len() int
 func (l List[T]) At(i int) T
 func (l List[T]) All() iter.Seq2[int, T]
 func (l *List[T]) Set(i int, value T)  // write lock only; checked under -tags ecs_validate
+func (l List[T]) MarshalJSON() ([]byte, error)
 ```
 
 **A `[]T` in a Component is refused; a `List[T]` is what it holds instead.** The
@@ -356,6 +365,11 @@ elements and stamps every nested backing array exactly as it stamps the outer
 one, so a nested `Set` through a read panics as a flat one does. The cost lands
 only in a validating build: a nested row fills the bounded stamp table faster, so
 its oldest-first eviction forgets sooner.
+
+**A List encodes as the JSON array of its elements**, `[]` when empty and never
+`null`, and a List of Lists nests. It has no unexported state `encoding/json`
+would otherwise show as `{}`, which is what the [read
+Commands](#reading-the-world-by-name) rely on. Nothing decodes one.
 
 **There is no `Raw()`.** Copy out through `All()` into scratch you reuse: four
 328 B elements cost about 60 ns and no allocation, because the iterator inlines.
@@ -825,8 +839,8 @@ func fire(sp *ecs.Spawn[Projectile], we *ecs.WriteableEntities) {
 
 A **structural change** is a change to which Entities have which Components, as
 against a change to a Component's value. **No structural change is a Command**
-(the ECS's one Command is [`ShrinkCmd`](#giving-memory-back), which changes no
-membership), and that is the part most likely to be built wrong from habit: `Spawn[S].New` and
+(the ECS's Commands are [`ShrinkCmd`](#giving-memory-back) and the three [read
+Commands](#reading-the-world-by-name), and none changes membership), and that is the part most likely to be built wrong from habit: `Spawn[S].New` and
 `WriteableEntities.Despawn` are direct calls on handles the System already
 holds, not messages, not a queue and not a deferred buffer. There is no
 exclusion mechanism to build either, because the lock set below already excludes
@@ -1016,6 +1030,44 @@ ordinary Query and user code, requiring nothing of the ECS.
 A stale slot in a `[4]Entity` is the game's to compact, and detecting one is free
 on the read that was already happening. Centralising either would need the
 reverse index refused above: **any global index is a global lock.**
+
+## Reading the world by name
+
+A caller outside Go (an Agent, a debugging tool) knows a Component only as the
+string `kernel.TypeName` renders for it, the one the architecture output and
+every ecs diagnostic already show: `ecs.Health`, `m.Transform`. The ecs plugin
+registers three unexported read-only Commands that take that string:
+
+| Command | request | answers |
+| --- | --- | --- |
+| `censusCmd` | nothing | `entities`, `freeIndices`, `indexSpace`, and `components`: every registered name with its Store's `population`, sorted by name |
+| `entityCmd` | `entity`: `"7v2"`, `"Entity(7v2)"` or the decimal handle | `entity`, and `components`: every Component it carries, sorted by name, each `{name, value, error}` |
+| `queryCmd` | `components` (at least one name), `limit` (0 is 50, at most 500) | `total`, `truncated`, and `entities` in ascending index order, each with only the named Components |
+
+Nothing outside ecs dispatches them, so the root declares none of them; the mcp
+provider that will offer them to an Agent is ecs's own
+([#289](https://github.com/dvoyni/cog/issues/289)). A name is resolved over the
+`classes` map registration already fills, and two types rendering one name are
+refused together and accepted by their package-qualified form,
+`PkgPath.Name`.
+
+**Each holds `write{*ecs.Entities}` and nothing else, and that is their price.**
+A call waits for every running ECS System to release the authority, and every
+System queued behind it waits until it returns; the query's limit bounds that
+stall. **No frame's lock set widens**, because they are Commands and not
+Systems, and a frame nobody reads from pays nothing. `Describe().Contention`
+lists them as writers of `*ecs.Entities` conflicting with every System.
+
+Values are encoded to JSON while the lock is held and decoded back with
+`UseNumber` before the handler returns, so an answer shares no memory with any
+Store and an Entity Reference stays exact. An `m.List` arrives as an array, an
+`assets.Blob` as `{"len":N}`, a Tag as `{}`, and a value that cannot be encoded
+reports `error` on that Component alone. An unknown name, a malformed or dead
+Entity and a limit out of range are answered as the response's `Refusal`, naming
+what would have worked; a dead Entity's refusal names the Entity holding its
+index now, where one does. A handle to a free index, including the one that
+index will carry next, is refused as not alive. The design record is the spec's
+[Reading the world by name](specs/ecs.md#reading-the-world-by-name).
 
 ## Binding: how another plugin attaches
 
@@ -1595,7 +1647,11 @@ two `HookAll` readers read it all (`BenchmarkHookShrink`).
 **The package's one `moved to heap` is registration-time**: `entities`, the cell
 the `ShrinkCmd` factory's two closures share (`shrink.go`, and `friends.go`
 where the factory inlines). It is one allocation when the plugin registers the
-Command, and it has been there since 144aa8a. Executing the Command allocates
+Command, and it has been there since 144aa8a. The three [read
+Commands](#reading-the-world-by-name)' factories each allocate one
+`readCommand` at registration instead, as an explicit value rather than a
+captured local, and their execution allocates the answer it builds; neither is
+on a frame's path. Executing the Command allocates
 only what the shrink itself makes: `shrinkIndices` builds a bitmap of the free
 indices on every shrink that has some, and its size is known only at run time.
 
