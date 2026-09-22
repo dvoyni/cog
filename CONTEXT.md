@@ -204,6 +204,10 @@ The Registration-phase declaration that one Component type exists, made once per
 The engine's holding of every value of one Component type. There is one per registered Component type, and it is the unit a lock is taken on. It knows how many Entities it holds, and that number is what a Query consults to choose its Driver.
 _Avoid_: Pool, column, table. Also Page and Chunk, both of which stay unspent: a Store's index is not divided into blocks, and nothing groups its rows. Chunk is held in reserve for a run of rows sharing one change version, which is the only thing a real block would buy.
 
+**Transform**:
+Where one thing stands — an Entity, or a draw recorded straight into a renderer: a position, a rotation and a per-axis scale, and nothing else. It is `m.Transform`, built with `m.At` and `m.LookAt`, and there is exactly one such type in the engine. Its zero value is the identity, and so is an all-zero scale; a scale with only some axes zero is taken literally, which is what makes a flattened scale expressible. A non-uniform scale sends that thing's normals through the inverse-transpose and costs nothing to anything else. Its one Store is the ecs plugin's, registered by the ecs plugin itself rather than by a plugin that defines the type, so a game's own Systems and every binding read the same placement. Two Components describing one position would be unrelated to the scheduler, whose lock unit is the Component type: two Systems writing them run concurrently, and nothing reports that they disagree. The remedy is direction: exactly one System writes each, and a copy from one into the other never runs back.
+_Avoid_: Matrix, model matrix. A Transform has no matrix to override it; a model's flattened node world is Scene's own business.
+
 **Query**:
 A struct type whose field types are the Component types one System touches. A field's pointer-ness is its access mode: a pointer field is written and yields the stored value itself, a value field is read and yields a copy. A Query matches every Entity having _at least_ those Component types, which is why it is not a Component set. It selects on presence and on nothing else: no Query narrows by what a Component _contains_, so finding every Entity whose Reference points somewhere in particular is a comparison the System makes itself, once per candidate.
 _Avoid_: View, archetype
@@ -333,10 +337,6 @@ _Avoid_: Shader
 **Model material**:
 What one material in a model file becomes once loaded: for each shader variant, the graphics material that draws it in a forward pass, together with the numbers the bundled PBR reads, and a content key fixed at load. It names no Pass tag. A renderer wraps it in its own material under whatever tag it chooses, so the same loaded file serves both renderers unchanged, and nothing re-keys it per draw.
 _Avoid_: Scene material (that is a renderer's, and carries tags)
-
-**Transform**:
-Where one recorded thing stands: a position, a rotation and a per-axis scale, and nothing else. Its zero value is the identity, and so is an all-zero scale; a scale with only some axes zero is taken literally, which is what makes a flattened scale expressible. A non-uniform scale sends that thing's normals through the inverse-transpose and costs nothing to anything else.
-_Avoid_: Matrix, model matrix. A Transform has no matrix to override it; a model's flattened node world is Scene's own business.
 
 **Layer mask**:
 A selection of which Cameras see a recorded item. Both a Camera and an item carry one, and an empty mask on either side means every layer.
@@ -510,7 +510,7 @@ _Avoid_: Ramp, crossfade, tween, as names for anything audio does
 ## Physics
 
 **Body**:
-An Entity that physics moves or collides with: it has a position and an Angle on the plane, and a Shape or a velocity. Every Body is exactly one of the three kinds below, and which one is said by the Components it has rather than by a flag. A Body stands on a 2D plane; placing it in 3D is a Transform's job, written by whoever draws it.
+An Entity that physics moves or collides with: it has a position and an Angle on the plane, and a Shape or a velocity. Every Body is exactly one of the three kinds below, and which one is said by the Components it has rather than by a flag. A Body stands on a 2D plane; placing it in 3D is a Transform's job, written by whoever draws it. The copy runs one way, from physics' `Position` into `m.Transform`, in one System, and never back.
 _Avoid_: Collider, rigid body, physics object, actor
 
 **Static body**:

@@ -121,6 +121,15 @@ could then only ever name `ecs` twice.
 So the rule the ECS spec carries, and which this delta exists to justify:
 **register a Component in the plugin that defines its Go type.**
 
+**`m.Transform` is the one exception, and the check is knowingly vacuous on
+it.** Where an Entity stands is read by every binding, so the type is declared
+in `libs/m` and its Store is registered by the ecs plugin itself: exactly the
+ownership-by-`ecs` Store the counterfactual above priced. The cost is the one
+priced there, confined to that Store: every plugin with a System already
+depends on `ecs`, so a System writing `m.Transform` without declaring anything
+else is never caught at composition, and its writers must be ordered
+deliberately. The kernel is unchanged by it.
+
 **Cost: none to kernel; a real cost to the app.** The coupling check now fires
 on Component access, which is new surface for a game that scatters Components
 across plugins. That is the check doing its job — the Go import graph already

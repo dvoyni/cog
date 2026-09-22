@@ -407,9 +407,9 @@ physics-only and stay here.
   Bundles do not embed, so a plugin-shipped Bundle could only spawn an Entity
   carrying nothing but this plugin's Components. The spec lists the Component set
   per kind; the constructors build the values.
-- **No shared `ecsscene.Transform`.** Transform is 3D with rotation and scale;
-  sharing it would put the third axis into the contract. The app writes Transform
-  from `Position` in its own one-way System. Two Components describing one
+- **No `m.Transform`.** Transform is 3D with rotation and scale; sharing it
+  would put the third axis into the contract. The app writes `m.Transform` from
+  `Position` in its own one-way System. Two Components describing one
   position are, to the scheduler, unrelated — the lock unit is the Component
   type, so two Systems writing "the" transform would run concurrently on separate
   copies and nothing would report the conflict.

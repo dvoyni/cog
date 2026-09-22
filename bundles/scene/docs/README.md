@@ -140,13 +140,13 @@ A camera and a box. Everything else is optional.
 
 ```go
 q.Camera(cameraMain, scene.CameraDescr{
-	Transform: scene.LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
+	Transform: m.LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
 	FovY:      1.0472,
 	Near:      0.1, Far: 100,
 	SunDirection: m.Vec3{X: -0.3, Y: -1, Z: -0.2},
 	SunColor:     m.NewColorSrgb(1, 1, 1, 1),
 })
-q.Box(0, scene.At(0, 0, 0), m.NewColorSrgb(0.42, 0.71, 0.94, 1))
+q.Box(0, m.At(0, 0, 0), m.NewColorSrgb(0.42, 0.71, 0.94, 1))
 ```
 
 `Near` and `Far` are the only required fields: a zero in either is reported and
@@ -181,7 +181,7 @@ func (q *OpQueue) Mesh(layers LayerMask, mesh MeshRef, draw MeshDraw)
 func (q *OpQueue) PointLight(layers LayerMask, light LightDescr)
 func (q *OpQueue) SpotLight(layers LayerMask, light LightDescr)
 
-func (q *OpQueue) Box(layers LayerMask, transform Transform, color m.Color)
+func (q *OpQueue) Box(layers LayerMask, transform m.Transform, color m.Color)
 func (q *OpQueue) Sphere(layers LayerMask, center m.Vec3, radius float32, color m.Color)
 func (q *OpQueue) Plane(layers LayerMask, center m.Vec3, size m.Vec2, color m.Color)
 func (q *OpQueue) Line3D(layers LayerMask, start, end m.Vec3, thickness float32, color m.Color)
@@ -207,26 +207,17 @@ draws still reaches the later one.
 
 ### Transform
 
-```go
-type Transform struct {
-	Position m.Vec3
-	Rotation m.Quat
-	Scale    m.Vec3 // all zero means (1,1,1); otherwise literal
-}
-
-func At(x, y, z float32) Transform
-func LookAt(eye, target, up m.Vec3) Transform
-func (t Transform) WithScale(s float32) Transform
-func (t Transform) WithRotation(q m.Quat) Transform
-func (t Transform) Mat4() m.Mat4
-```
+scene places everything with `m.Transform` — a position, a rotation and a
+per-axis scale — built with `m.At` and `m.LookAt` and adjusted with `WithScale`
+and `WithRotation`, all in `libs/m`. scene declares no placement type of its
+own.
 
 The zero value is the identity. `Scale` is **per axis**, and only an all-zero
 `Scale` reads as `(1,1,1)`: a partly zero one is taken literally, so
 `m.Vec3{X: 2}` collapses the draw onto X and a flattened scale is expressible.
 `WithScale(s)` is the uniform spelling. A non-uniform scale puts that instance,
 and only that instance, on the inverse-transpose normal path. There is no matrix
-override: a `Transform` is plain values, which is what lets an ECS Component
+override: an `m.Transform` is plain values, which is what lets an ECS Component
 hold one.
 
 ### Layers
@@ -261,7 +252,7 @@ first use.
 
 ```go
 type CameraDescr struct {
-	Transform  Transform // the camera as a positioned object; scene inverts it
+	Transform  m.Transform // the camera as a positioned object; scene inverts it
 	Projection ProjectionKind
 	FovY       float32 // Perspective: the literal vertical field of view, radians
 	Height     float32 // Orthographic and Oblique: world units across the target's height
@@ -311,7 +302,7 @@ you want held fixed and let `Near` go negative:
 ```go
 q.Camera(-1, scene.CameraDescr{
 	// Straight down from inside the ground plane, screen-up towards -Z.
-	Transform:  scene.LookAt(m.Vec3{}, m.Vec3{Y: -1}, m.Vec3{Z: -1}),
+	Transform:  m.LookAt(m.Vec3{}, m.Vec3{Y: -1}, m.Vec3{Z: -1}),
 	Projection: scene.Oblique,
 	Height:     30,
 	Shear:      0.5,
@@ -395,7 +386,7 @@ shadow casting with no call-site change.
 
 ```go
 q.Model(layers, "models/truck.glb", scene.ModelDraw{
-	Transform: scene.At(0, 0, 0),
+	Transform: m.At(0, 0, 0),
 	Scene:     "",      // empty is the file's declared default
 	Node:      "crate", // empty is the whole scene; a plain name, not a path
 })
@@ -426,7 +417,7 @@ Two ways to change what a model looks like, and they do not overlap:
 A draw may use both: the replacement takes glTF's own defaults and the overrides
 merge over those.
 
-`Transforms []Transform` instances the draw. Instancing is per primitive, so a
+`Transforms []m.Transform` instances the draw. Instancing is per primitive, so a
 six-primitive model at a hundred transforms is six batches of a hundred, not six
 hundred draw calls — and the instances share the draw's animation.
 
@@ -453,7 +444,7 @@ in one handler is a real retry.
 ```go
 ref := la.BakeMesh(vertices, indices, gfx.TopologyTriangleList) // durable
 ref := q.TemporaryMesh(vertices, indices, gfx.TopologyTriangleList) // this frame only
-q.Mesh(layers, ref, scene.MeshDraw{Transform: scene.At(0, 1, 0)})
+q.Mesh(layers, ref, scene.MeshDraw{Transform: m.At(0, 1, 0)})
 ```
 
 `BakeMesh` mints the ref immediately and queues the upload onto the `Lookup` for

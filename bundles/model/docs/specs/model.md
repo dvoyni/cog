@@ -174,7 +174,7 @@ on the renderer's. The rows that needed a decision:
 | `ShaderVariant`, `VariantStatic`, `variantSkin`, `variantMorph`, `variantSkinMorph`, `VariantCount`, `VariantFor` | `model` | chosen from skin and morph, which are model facts |
 | the bundled PBR shader (`SceneShaderPath`, `SceneShader`) | `model` | it reads `ScenePbrRecord`'s layout, so the shader and the record move together |
 | `Material`, `MaterialTag`, `MaterialKey`, `MaterialKeyOf`, `PassTag`, `TagForward` | each renderer, its own | a renderer wraps the model material's forward descr under its own tag |
-| `CameraDescr`, `CameraID`, `ProjectionKind` and its three values, `Pass`, `DefaultPass`, `DepthClearFar`, `LookAt` | each renderer, its own | `model` declares **no** camera, since none is decoded. A decoded glTF camera would arrive as a `ModelCamera` data record |
+| `CameraDescr`, `CameraID`, `ProjectionKind` and its three values, `Pass`, `DefaultPass`, `DepthClearFar` | each renderer, its own | `model` declares **no** camera, since none is decoded. A decoded glTF camera would arrive as a `ModelCamera` data record |
 | `Projection`, `ViewDirection`, `WorldToScreen`, `ScreenToWorld`, `ScreenToRay` and helpers | `libs/m`, over plain parameters | each renderer's camera calls them |
 | `LightKind`, `LightPoint`, `LightSpot`, `LightDescr`, `ModelLight` | `model` | the loader already fills them |
 | `LightRecord` | each renderer | the recorded light carries a layer mask |
@@ -192,9 +192,9 @@ on the renderer's. The rows that needed a decision:
 | `Lookup` and its access types | `model` | everything it holds is `model`'s. See [Residency](#residency-one-lookup-two-facades) |
 | `OpQueue`, `ModelDraw`, `MeshDraw`, `DrawRecord`, `ModelDrawRecord`, `LayerMask`, `RecordOnUpdate`, the Op inspection surface | `scene` | |
 
-**`Transform` stays `m.Transform`.** It already is one: scene's is an alias, for
-the reason `transform.go` gives (sound is placed by a transform too). Each
-renderer keeps its re-export.
+**Placement is `m.Transform`, named directly; no renderer re-exports it**
+([#468](https://github.com/dvoyni/cog/issues/468)). `m.LookAt` builds a camera's
+one, which is why no renderer declares a `LookAt`.
 
 **`model` is one plugin, and the decoder is a package inside it**, at
 `bundles/model/internal/types/gltf/`. Geometry generation (`UnitBoxGeometry`,

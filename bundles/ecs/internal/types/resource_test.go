@@ -9,7 +9,7 @@ import (
 	"github.com/dvoyni/cog/slots/app"
 )
 
-// drawLog stands in for scene's *scene.OpQueue: the frame-local resource a
+// drawLog stands in for gfx's *gfx.OpQueue: the frame-local resource a
 // bound plugin publishes and a recording System appends to. It is re-recorded
 // from nothing every frame and holds no per-entity state, which is why the
 // Components are the source of truth and there is nothing to mirror.
@@ -20,7 +20,7 @@ type drawLog struct{ Xs []float32 }
 type modelNames struct{ Scale float32 }
 
 // bindingPlugin is the third plugin a binding necessarily is. ecs imports only
-// kernel and the bound plugin imports nothing of ecs, so neither can know about
+// kernel, libs/m and libs/assets, and the bound plugin imports nothing of ecs, so neither can know about
 // the other; the binding imports both and registers ordinary Systems.
 type bindingPlugin struct {
 	log   *drawLog

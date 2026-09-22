@@ -10,8 +10,8 @@
 // a unit quaternion as xyzw; translation and scale use xyz and leave w spare.
 //
 // Scale is a vec3 rather than a scalar in translation.w. Squash-and-stretch is
-// animated non-uniform scale, a mainstream idiom, and unlike Transform there is
-// no Matrix escape hatch to correct it at.
+// animated non-uniform scale, a mainstream idiom, and a pose has no other place
+// to express it.
 struct ScenePose {
     rotation: vec4<f32>,
     translation: vec4<f32>,

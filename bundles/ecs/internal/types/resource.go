@@ -15,13 +15,13 @@ var storeCoreType = reflect.TypeFor[storeCore]()
 // together they are the whole of the binding mechanism: there is no binding
 // type, no adapter and no registration call of the ECS's own. A System that
 // draws, plays a sound or steps physics reaches that plugin through the
-// frame-local resource the plugin already publishes — scene's *scene.OpQueue,
-// gfx's *gfx.OpQueue — and the ECS contributes nothing else.
+// frame-local resource the plugin already publishes — gfx's *gfx.OpQueue, for
+// ecsscene — and the ECS contributes nothing else.
 //
 //	func record(
 //	    models *ecs.Query[modelQuery],             // the Components
 //	    work   *ecs.Write[*scratch],               // the binding's own resource
-//	    out    *ecs.Write[*scene.OpQueue],         // the bound plugin's resource
+//	    out    *ecs.Write[*gfx.OpQueue],           // the resource it draws into
 //	) {
 //	    s, queue := work.Get(), out.Get()
 //	    for e, it := range models.All() { … }
@@ -32,7 +32,7 @@ var storeCoreType = reflect.TypeFor[storeCore]()
 // and is as visible in the signature as a Component is. Two Systems both
 // writing one resource therefore serialise against each other whatever their
 // Queries touch — which is a property of the bound plugin's API rather than of
-// the ECS. Scene publishes one queue, so scene recording is one lock wide, and
+// the ECS. gfx publishes one queue, so recording into gfx is one lock wide, and
 // one recording System per bound plugin is the shape.
 //
 // Neither is a place to keep anything. The value is refreshed per tick and is
