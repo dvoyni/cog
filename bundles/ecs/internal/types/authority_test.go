@@ -10,9 +10,16 @@ const Name kernel.PluginName = "ecs"
 // authority stands in for the ecs plugin in this package's own tests. They
 // cannot compose ecsplugin.New(), because the plugin imports this package, and
 // they need this package's unexported state to make the claims they make. It
-// registers exactly what the ecs plugin registers - the authority, under Name,
-// and the shrink Command - so every composition here is the one an app builds;
-// the plugin's own tests in ecs's internal/ compose the real plugin.
+// registers what every composition here rests on - the authority, under Name,
+// and the shrink Command - so a test of a mechanism is a test of it in an
+// engine; the plugin's own tests in ecs's internal/ compose the real plugin.
+//
+// It deliberately subscribes no drainer. ecs.DrainOnUpdate is a Last() node
+// holding write{*Entities} that every real app carries, and putting one in
+// every composition here would add a barrier to every benchmark in this package
+// whose subject is something else. A test that wants one subscribes it itself,
+// which is what an app drain System is anyway; that the ecs plugin subscribes
+// one unconditionally is tested where the real plugin is composed.
 type authority struct {
 	// ids is how many Entities the authority reserves room for.
 	ids uint32

@@ -75,6 +75,12 @@ type Spawn[S any] = types.Spawn[S]
 // WriteableEntities is the write-locked promotion of the id authority, and the
 // only thing that can retire an Entity: Despawn empties every Store of it. It
 // declares write{*Entities} and nothing besides.
+//
+// Drain is its other method: it applies everything the deferring handles have
+// queued in this Engine, under the same wide lock. A drain System is an
+// ordinary System of one parameter — func(entities *ecs.WriteableEntities) {
+// entities.Drain() } — which an app subscribes wherever it wants its queue
+// applied. The ECS subscribes one itself, as DrainOnUpdate.
 type WriteableEntities = types.WriteableEntities
 
 // Get reaches one Component of an Entity a System did not iterate to, such as

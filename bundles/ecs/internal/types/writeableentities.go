@@ -35,3 +35,26 @@ func (w *WriteableEntities) resolve() { w.resolved = w.entities.Get() }
 func (w *WriteableEntities) Despawn(e Entity) bool {
 	return w.resolved.despawn(e)
 }
+
+// Drain applies everything the deferring handles have queued in this Engine —
+// whatever System and whatever event queued it — under the wide lock this
+// parameter already declares, and nothing else: it is the spawn pass, the free
+// list settling, and the despawn pass, in that order.
+//
+// It is a call the app makes rather than a point the engine picks. A drain
+// System is an ordinary System of one parameter, scheduled where it belongs:
+//
+//	func Drain(entities *ecs.WriteableEntities) { entities.Drain() }
+//
+// An app writes as many as it needs. The ECS subscribes one itself, on
+// app.UpdateEvent in the Last phase as ecs.DrainOnUpdate, always, so a queue is
+// never left undrained; an app drain System is how a change is made visible
+// earlier than that, within the publication that queued it.
+//
+// A drain over empty buffers is a length check per enrolled buffer: there is no
+// empty-drain skip. Nothing else drains — not ShrinkCmd and not the read
+// Commands, though both hold write{*Entities} too. See
+// bundles/ecs/docs/specs/deferred.md § The drain.
+func (w *WriteableEntities) Drain() {
+	w.resolved.drain()
+}
