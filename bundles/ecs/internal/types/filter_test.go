@@ -224,21 +224,86 @@ func TestAFilterIsPlannedWithNoWidth(t *testing.T) {
 	}
 }
 
-// filtersOnlyQuery names two filters and nothing else, so nothing can drive it.
-type filtersOnlyQuery struct {
+// withAndWithoutQuery names two filters and nothing else. The With can drive,
+// so it registers, and it yields the Entity and an empty struct.
+type withAndWithoutQuery struct {
 	_ Without[disabled]
 	_ With[body]
 }
 
-type filtersOnlySystem kernel.Subscription[app.UpdateEvent]
+type withAndWithoutSystem kernel.Subscription[app.UpdateEvent]
 
-// TestAQueryOfFiltersOnlyFailsAtRegistration is the Driver's precondition made
-// into a composition failure. A filter can never drive — Without[T]'s owners
+// TestAQueryOfAWithAndAWithoutYieldsExactlyTheDifference is "visit every Entity
+// that has X" with no field the System will never read. The With's Store holds
+// a superset of the match set, exactly as a Component field's does, so it can
+// drive: the walk is the body population, and the Without drops the tagged
+// Entities from it.
+//
+// It is shape 2, so a release build takes the walk All() carries inline, and
+// the validation build takes the delegating path; the driver's fill is the
+// width-0 no-op in both.
+func TestAQueryOfAWithAndAWithoutYieldsExactlyTheDifference(t *testing.T) {
+	var query *Query[withAndWithoutQuery]
+	entities, components, engine := newWorld(t, 128, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[withAndWithoutSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[withAndWithoutQuery]) { query = q }))
+	})
+
+	want := map[Entity]bool{}
+	bodied := 0
+	for i := range 30 {
+		e := entities.alloc()
+		// Every fifth entity has nothing the Query names, so the body Store is
+		// not simply every Entity there is.
+		if i%5 == 4 {
+			components.velocities.Set(e, velocity{})
+			continue
+		}
+		components.bodies.Set(e, body{})
+		bodied++
+		if i%3 == 0 {
+			components.disableds.Set(e, disabled{})
+			continue
+		}
+		want[e] = true
+	}
+
+	frame(t, engine, 1)
+	if query == nil {
+		t.Fatalf("no Query was planned")
+	}
+
+	query.bind()
+	if len(query.walk) != bodied {
+		t.Fatalf("the driver walks %d entities, want the %d the With's Store holds", len(query.walk), bodied)
+	}
+	matched := 0
+	for e, it := range query.All() {
+		if *it != (withAndWithoutQuery{}) {
+			t.Fatalf("the Query yielded %+v, want the empty struct", it)
+		}
+		if !want[e] {
+			t.Fatalf("%v was yielded but lacks body or carries disabled", e)
+		}
+		matched++
+	}
+	if matched != len(want) || len(want) == 0 || len(want) == bodied {
+		t.Fatalf("the Query yielded %d entities, want %d of %d bodied", matched, len(want), bodied)
+	}
+}
+
+// withoutsOnlyQuery names two Withouts and nothing else, so nothing can drive it.
+type withoutsOnlyQuery struct {
+	_ Without[disabled]
+	_ Without[solid]
+}
+
+type withoutsOnlySystem kernel.Subscription[app.UpdateEvent]
+
+// TestAQueryOfWithoutsAloneFailsAtRegistration is the Driver's precondition
+// made into a composition failure. A Without can never drive — its owners
 // array lists exactly the Entities to exclude, and nothing enumerates the
-// complement — so a Query of filters alone would have to drive off Entities,
-// which would put read{*Entities} into the lock set for that reason rather than
-// by design.
-func TestAQueryOfFiltersOnlyFailsAtRegistration(t *testing.T) {
+// complement — so a Query of Withouts alone has nothing to walk.
+func TestAQueryOfWithoutsAloneFailsAtRegistration(t *testing.T) {
 	var failure error
 	kernel.New(nil).
 		Handler(func(err error) error { failure = err; return err }).
@@ -246,17 +311,17 @@ func TestAQueryOfFiltersOnlyFailsAtRegistration(t *testing.T) {
 			authority{ids: 8},
 			&componentsPlugin{ids: 8},
 			&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
-				registrar.Subscribe[filtersOnlySystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[filtersOnlyQuery]) {}))
+				registrar.Subscribe[withoutsOnlySystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[withoutsOnlyQuery]) {}))
 			}},
 		)
 
 	if failure == nil {
-		t.Fatalf("composing a Query of filters alone succeeded")
+		t.Fatalf("composing a Query of Withouts alone succeeded")
 	}
 	message := failure.Error()
-	// The Query, the plugin, and why — a Query that names only filters is a
+	// The Query, the plugin, and why — a Query that names only Withouts is a
 	// mistake about the Driver, so the diagnostic has to say what a Driver is.
-	for _, want := range []string{"systems", "filtersOnlyQuery", "filter", "drive"} {
+	for _, want := range []string{"systems", "withoutsOnlyQuery", "filter", "drive"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("composition failure %q does not name %q", message, want)
 		}
@@ -289,11 +354,11 @@ func TestAQueryOfNoFieldsAtAllFailsTheSameWay(t *testing.T) {
 	}
 }
 
-// TestAFilterIsNeverTheDriver is the same rule one level down, and it is the
+// TestAWithoutIsNeverTheDriver is the same rule one level down, and it is the
 // one a heuristic could get wrong silently: a Without over a Store shorter than
 // every Component's would be the shortest Store in the scan, and picking it
 // would walk exactly the Entities the Query excludes.
-func TestAFilterIsNeverTheDriver(t *testing.T) {
+func TestAWithoutIsNeverTheDriver(t *testing.T) {
 	var query *Query[activeQuery]
 	entities, components, engine := newWorld(t, 128, func(registrar *kernel.Registrar) {
 		registrar.Subscribe[activeSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[activeQuery]) { query = q }))
@@ -324,6 +389,65 @@ func TestAFilterIsNeverTheDriver(t *testing.T) {
 	}
 	if value, _ := components.bodies.Get(tagged); value.X != 0 {
 		t.Fatalf("the tagged entity moved, so the filter drove the walk: %v", value)
+	}
+}
+
+// solidBodyQuery matches on solid's presence without reading it, in the one
+// spelling the README recommends for that.
+type solidBodyQuery struct {
+	Body     *body
+	Velocity velocity
+	_        With[solid]
+}
+
+type solidBodySystem kernel.Subscription[app.UpdateEvent]
+
+// TestAWithOverTheShortestStoreIsTheDriver pins the Driver choice itself, not
+// only the result: a Query driven off the long Stores returns the same Entities
+// and costs many times more, so asserting on the matches alone would pass a
+// regression to "a filter never drives". A With's Store holds a superset of the
+// match set, exactly as a Component field's does, so it is walked like one.
+func TestAWithOverTheShortestStoreIsTheDriver(t *testing.T) {
+	var query *Query[solidBodyQuery]
+	entities, components, engine := newWorld(t, 128, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[solidBodySystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[solidBodyQuery]) { query = q }))
+	})
+
+	want := map[Entity]bool{}
+	for i := range 40 {
+		e := entities.alloc()
+		components.bodies.Set(e, body{})
+		components.velocities.Set(e, velocity{X: 1})
+		if i%8 == 3 {
+			components.solids.Set(e, solid{})
+			want[e] = true
+		}
+	}
+
+	frame(t, engine, 1)
+	if query == nil {
+		t.Fatalf("no Query was planned")
+	}
+
+	query.bind()
+	if !query.fields[0].filter || query.fields[0].cursor.wanted == absentGeneration {
+		t.Fatalf("the driver is not the With, whose Store is the shortest one")
+	}
+	if len(query.walk) != len(want) {
+		t.Fatalf("the driver walks %d entities, want the %d the With's Store holds", len(query.walk), len(want))
+	}
+	matched := 0
+	for e, it := range query.All() {
+		if !want[e] {
+			t.Fatalf("%v was yielded without solid", e)
+		}
+		if it.Velocity.X != 1 {
+			t.Fatalf("%v yielded velocity %v, so the fill beside the With driver is wrong", e, it.Velocity)
+		}
+		matched++
+	}
+	if matched != len(want) {
+		t.Fatalf("the Query yielded %d entities, want the %d with solid", matched, len(want))
 	}
 }
 

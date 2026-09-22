@@ -18,10 +18,10 @@ import "reflect"
 // nothing lands in the struct — but it reads the same Store, and the lock set
 // is about Stores.
 //
-// A filter can never be the Driver, so a Query needs at least one present-typed
-// Component or Tag besides its filters; see the panic prepare raises. For
-// Without that is forced: its owners array lists exactly the Entities to
-// exclude, and nothing enumerates the complement.
+// A Without can never be the Driver: its owners array lists exactly the
+// Entities to exclude, and nothing enumerates the complement. So a Query of
+// Withouts alone has nothing to walk, and needs at least one Component, Tag or
+// With besides them; see the panic prepare raises.
 type Without[T any] struct{}
 
 // With narrows a Query to the Entities that do have T, without yielding T into
@@ -32,9 +32,11 @@ type Without[T any] struct{}
 // It contributes read{T} for the same reason Without does: the probe is a read
 // of that Store's sparse array.
 //
-// A Tag named as an ordinary field already yields nothing and already costs no
-// copy, and unlike a filter it can drive. Reach for With[T] where T is not a
-// Tag; where it is, name it.
+// It is the recommended spelling for presence a System matches on but does
+// not read, whether T is a Tag or not, and it can drive: its owners array
+// holds a superset of the match set, exactly as a Component field's does, so
+// the Query walks it when it is the shortest Store. The Driver's remedy is
+// spelled _ With[Solid].
 type With[T any] struct{}
 
 // queryFilter is what a Query field of filter type answers while the Query is

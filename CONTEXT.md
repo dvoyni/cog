@@ -217,7 +217,7 @@ A Query field that narrows which Entities match without yielding anything into t
 _Avoid_: Predicate, matcher
 
 **Driver**:
-The one Store a Query walks to find candidates, every other Component it names being checked against each candidate in turn. A Query costs what its Driver is long, not what it matches, so narrowing a Query with a Tag can be the difference between visiting a hundred Entities and five thousand. A Filter can never be the Driver: it names the Entities to exclude, and nothing lists the rest. app's platform loop is the MainLoop, not a Driver.
+The one Store a Query walks to find candidates, every other Component it names being checked against each candidate in turn. A Query costs what its Driver is long, not what it matches, so narrowing a Query with a Tag can be the difference between visiting a hundred Entities and five thousand. A `Without` can never be the Driver: it names the Entities to exclude, and nothing lists the rest. app's platform loop is the MainLoop, not a Driver.
 _Avoid_: lead, primary, base
 
 **System**:
