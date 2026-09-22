@@ -343,6 +343,8 @@ func (t *translator) packParams(dst []byte, drawParams, materialParams []gfx.Par
 	if size <= 0 {
 		return dst[:0]
 	}
+	// A guard only: checkUniformBlock refuses any shader whose block exceeds
+	// uniformMax when it is loaded, so no plan reaching here is larger than dst.
 	if size > len(dst) {
 		size = len(dst)
 	}

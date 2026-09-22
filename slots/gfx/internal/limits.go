@@ -4,6 +4,17 @@ import (
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
+// checkUniformBlock measures a reflected shader's uniform block against the
+// per-draw slot of the uniform arena. It is not a web-floor check: the floor is
+// 64 KiB, the slot is uniformMax, and a block past the slot renders truncated on
+// every device. The caller treats a failure as fatal to the shader.
+func checkUniformBlock(shader string, layout gfx.ShaderLayout) error {
+	if layout.UniformSize > uniformMax {
+		return gfx.ErrUniformBlockTooLarge{Shader: shader, Declared: layout.UniformSize, Max: uniformMax}
+	}
+	return nil
+}
+
 // checkWebLimits measures a reflected shader against the browser spec floor,
 // never against the device it happens to be running on: a desktop adapter
 // reports its hardware limits, where 200 storage buffers is ordinary, so a

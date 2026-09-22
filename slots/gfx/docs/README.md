@@ -803,6 +803,13 @@ silently wrong. The draw is dropped and the shape is reported once. It is the
 `O(1)` half: whether every index is below the vertex count is checked by
 whoever built the geometry, where a pass over the indices already runs.
 
+`ErrUniformBlockTooLarge{Shader, Declared, Max}` reports a shader whose uniform
+block is larger than the 256 bytes gfx binds for it on every draw. It is checked
+once, when the shader is reflected, and it is fatal to the shader: the module is
+freed and every draw through it is dropped, because the alternative is a block
+cut to 256 bytes with nothing saying so. The web-floor reports are the opposite
+case: they name a limit some other device has, and the draw still renders.
+
 
 The capture errors are typed for the same reason: a caller reads them, and a
 burst branches on them. Four are reported by a backend as well as by gfx:
