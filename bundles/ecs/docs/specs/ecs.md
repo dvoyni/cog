@@ -1342,6 +1342,88 @@ good Driver, named in the Query as `_ ecs.With[Solid]`. There is deliberately
 **no ECS mechanism** for it: that road is EnTT groups, shipyard packs
 and bevy's sparse-set markers, and exclusivity is what kills all three.
 
+### Presence bitsets, measured and declined
+
+**Rejected shape: narrowing the walk by intersecting per-Store presence
+bitsets** (#258). A bitset is not a global index: it would live in `Store[T]`,
+be written under `write{*Store[T]}` or `write{*Entities}`, and be read under the
+`read{*Store[T]}` every Query naming `T` already holds. So it costs no System
+parallelism. It failed on speed. **The app-maintained remedy stays the only
+answer to the bad case.**
+
+The prototype ANDs the bitsets of the fields matched on presence, AND NOT for a
+`Without`, into a scratch snapshot. It walks the set bits and finds each row
+through the sparse slots, and it has `All()`'s call shape at each width. Each
+point has 5 000 `Body` and 5 000 `Collider` over exactly 10 000 live Entities.
+The extra Components at widths 3 and 4 sit on every `Body`, so `Body` drives the
+probing arm. Medians of ten interleaved rounds, in ns/op, with 0 allocations in
+every arm and an A/A noise band of 3% at every point:
+
+| overlap | width | probing | bitset | R1 | R2 | remedy |
+| --- | --- | --- | --- | --- | --- | --- |
+| 100% | 2 | **11 925** | 14 055 | 14 267 | 11 832 | |
+| 100% | 3 | **23 008** | 24 857 | 24 968 | 23 332 | |
+| 100% | 4 | 29 580 | 29 533 | 30 486 | 29 849 | |
+| 100% | 3, `Without` | 15 060 | **11 976** | 11 665 | 11 450 | |
+| 50% | 2 | 7 429 | 7 048 | 7 084 | 7 119 | |
+| 50% | 3 | 14 023 | 13 534 | 12 866 | 12 910 | |
+| 50% | 4 | 23 778 | **15 525** | 15 362 | 15 654 | |
+| 50% | 3, `Without` | 9 905 | **6 094** | 6 146 | 6 135 | |
+| 10% | 2 | 4 168 | **1 691** | 1 725 | 1 722 | |
+| 10% | 3 | 6 255 | **3 010** | 3 025 | 3 083 | |
+| 10% | 4 | 7 230 | **3 522** | 3 542 | 3 604 | |
+| 10% | 3, `Without` | 5 802 | **1 510** | 1 490 | 1 532 | |
+| 2% | 2 | 3 791 | **449** | 455 | 476 | 509 |
+| 2% | 3 | 4 742 | **750** | 777 | 782 | |
+| 2% | 4 | 4 861 | **901** | 926 | 1 000 | |
+| 2% | 3, `Without` | 4 632 | **418** | 425 | 444 | |
+| 1% | 2 | 3 566 | 307 | 311 | 333 | **246** |
+| 1% | 3 | 4 295 | **440** | 459 | 488 | |
+| 1% | 4 | 4 083 | **573** | 582 | 603 | |
+| 1% | 3, `Without` | 4 070 | **311** | 323 | 338 | |
+
+The `Without` at 100% excludes half the intersection, so it matches 50%.
+
+**This is a selectivity trade.** An always-on bitset is 18% slower at full
+overlap and width 2, and 8× faster at 2%. It beats probing from 50% overlap down
+at every width. At 2% it even beats the remedy Tag (449 against 509), and the
+remedy wins back only at 1%.
+
+**The two Driver rules** each run once per run. Both take the bitset below a
+match fraction of 0.75.
+- **R1** predicts matches from Store lengths under independence,
+  `len(gens) × Π(len/len(gens))`. It chose the bitset at every point. At width 2
+  it predicts 2 500 at every overlap, because disjointness is correlation and
+  lengths cannot see it.
+- **R2** probes the Driver's last 16 rows without yielding them. It chose probing
+  at 100% for widths 2 to 4, and the bitset everywhere else, which is the faster
+  path at every point.
+
+**Go required every condition for one rule, and neither rule met them all:**
+
+| condition | R1 | R2 |
+| --- | --- | --- |
+| 1. at 100%, widths 2–4, not slower than probing by more than the band with 8/10 rounds agreeing | **fails**: +19.6% at width 2 (10/10), +8.5% at width 3 (8/10) | holds: −0.8%, +1.4%, +0.9% |
+| 2. at 2%, width 2, at least 3× faster than probing | holds: 8.3× | holds: 8.0× |
+| 3. within 10% of the faster arm at every point | **fails**: +19.6% at 100% width 2 | **fails on medians**: +11.1% at 2% width 4 and +10.8% at 1% width 3; the minima hold, worst +8.5% |
+| 4. zero allocations | holds | holds |
+| 5. `BenchmarkPresenceBitWrite` at most 1 ns | **fails**: 1.200 median, 1.161 minimum | **fails**: the same |
+
+- **Condition 5** is the one that fails for both rules on both medians and
+  minima. One set plus one clear on the bitset costs 1.2 ns, of which ~0.24 ns
+  is the benchmark loop's own overhead.
+- **R2's miss on condition 3** is the rule's own cost at the smallest walks:
+  16 sampled rows and a second `bind`. A production rule would reuse `bind`.
+- R2 samples the tail of the Driver, so it is only as good as the tail is
+  typical. The sweep shuffles the four kinds of Entity for that reason. With
+  `disjointStores`' layout, the whole intersection is allocated last, so R2
+  would read no rejects at any overlap.
+
+The machine was shared with concurrent builders (Ryzen 9 7950X3D, go1.27.1
+windows/amd64). The prototype is in 4e4468f
+(`bundles/ecs/internal/types/selectivitybench_test.go`), removed after it.
+Check it out there to re-run the sweep.
+
 ### The scale sweep nobody publishes
 
 No primary source publishes a 1k/10k/100k iteration sweep, so cog measured one.
