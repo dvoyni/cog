@@ -3,7 +3,6 @@ package types
 import (
 	"math/bits"
 	"slices"
-	"unsafe"
 )
 
 // morphMask is which of position, normal and tangent one primitive's morph
@@ -106,8 +105,6 @@ type SceneMorphWeight struct {
 	Target uint32
 	Weight float32
 }
-
-var morphWeightSize = int(unsafe.Sizeof(SceneMorphWeight{}))
 
 // maxMorphTargets is how many targets one draw may blend at once. Stored
 // targets are unlimited: with sparse packing the cap constrains neither memory

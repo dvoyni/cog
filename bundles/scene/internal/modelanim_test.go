@@ -6,7 +6,6 @@ import (
 
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/qmuntal/gltf"
 )
@@ -27,7 +26,7 @@ func skinnedModel(t testing.TB) *gltf.Document {
 
 // instancesOf decodes the instance records one binding covered, which is the
 // only place the flags and the animation offset a frame packed are readable.
-func instancesOf(t *testing.T, h *harness, binding bufferBinding) []sceneInstance {
+func instancesOf(t *testing.T, h *harness, binding bufferBinding) []model.Instance {
 	t.Helper()
 	data, ok := h.backend.baked[binding.buffer]
 	if !ok {
@@ -37,8 +36,8 @@ func instancesOf(t *testing.T, h *harness, binding bufferBinding) []sceneInstanc
 		t.Fatalf("the binding covers %d..%d of a %d-byte buffer",
 			binding.offset, binding.offset+binding.size, len(data))
 	}
-	size := int(unsafe.Sizeof(sceneInstance{}))
-	instances := make([]sceneInstance, binding.size/size)
+	size := int(unsafe.Sizeof(model.Instance{}))
+	instances := make([]model.Instance, binding.size/size)
 	for i := range instances {
 		at := binding.offset + i*size
 		copy(unsafe.Slice((*byte)(unsafe.Pointer(&instances[i])), size), data[at:at+size])
@@ -64,7 +63,7 @@ func boundBytes(t *testing.T, h *harness, name string) []byte {
 }
 
 // firstInstance decodes the first instance the frame packed.
-func firstInstance(t *testing.T, h *harness) sceneInstance {
+func firstInstance(t *testing.T, h *harness) model.Instance {
 	t.Helper()
 	bound := h.backend.buffersBoundTo("sceneInstances")
 	if len(bound) == 0 {
@@ -102,10 +101,10 @@ func TestAnUnskinnedDrawBindsNoGroupTwo(t *testing.T) {
 		t.Errorf("sceneAnim was bound %d times; the static variant declares none", len(bound))
 	}
 	instance := firstInstance(t, h)
-	if instance.Flags&sceneNoSkin == 0 {
+	if instance.Flags&model.SceneNoSkin == 0 {
 		t.Error("a debug box carries SCENE_NOSKIN")
 	}
-	if instance.AnimOffset != types.SceneNoAnim {
+	if instance.AnimOffset != model.SceneNoAnim {
 		t.Errorf("AnimOffset = %d, want sceneNoAnim", instance.AnimOffset)
 	}
 }
@@ -158,10 +157,10 @@ func TestASkinnedModelBindsItsOwnPosesAndSkins(t *testing.T) {
 		t.Errorf("the joint buffer is %d bytes, want the model's one joint at %d", got, model.SkinJointSize)
 	}
 	instance := firstInstance(t, h)
-	if instance.Flags&sceneNoSkin != 0 {
+	if instance.Flags&model.SceneNoSkin != 0 {
 		t.Error("a skinned model draw must not carry SCENE_NOSKIN")
 	}
-	if instance.AnimOffset == types.SceneNoAnim {
+	if instance.AnimOffset == model.SceneNoAnim {
 		t.Error("a draw with a play carries the offset of its sceneAnim block")
 	}
 }
@@ -203,16 +202,16 @@ func TestAPlainBoundPlacementCarriesItsJointOnTheInstance(t *testing.T) {
 	plain, static := 0, 0
 	for _, instance := range instances {
 		switch {
-		case instance.Flags&scenePlainJoint != 0:
+		case instance.Flags&model.ScenePlainJoint != 0:
 			plain++
-			if instance.Flags&sceneNoSkin != 0 {
+			if instance.Flags&model.SceneNoSkin != 0 {
 				t.Error("a plain-bound instance carries SCENE_NOSKIN as well as SCENE_PLAINJOINT")
 			}
 			if instance.Joint != 0 {
 				t.Errorf("the plain-bound instance rides joint %d, want the file's one joint",
 					instance.Joint)
 			}
-		case instance.Flags&sceneNoSkin != 0:
+		case instance.Flags&model.SceneNoSkin != 0:
 			static++
 			if instance.Joint != 0 {
 				t.Errorf("a static instance carries joint %d, want the field left alone",
@@ -286,12 +285,12 @@ func TestAModelDrawWithNoPlaysCarriesNoAnimBlock(t *testing.T) {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
 	instance := firstInstance(t, h)
-	if instance.AnimOffset != types.SceneNoAnim {
+	if instance.AnimOffset != model.SceneNoAnim {
 		t.Errorf("AnimOffset = %d, want sceneNoAnim: no plays is the rest frame", instance.AnimOffset)
 	}
 	// Still skinned. The node's transform is in the pose buffer, so the draw
 	// has to read row 0 rather than skip the path.
-	if instance.Flags&sceneNoSkin != 0 {
+	if instance.Flags&model.SceneNoSkin != 0 {
 		t.Error("a model whose node is a joint is skinned even with no plays")
 	}
 }
@@ -367,7 +366,7 @@ func TestAStaticModelBakesNoPosesAndBindsNone(t *testing.T) {
 			t.Errorf("PoseBytes = %d, want none for a file with no animation", got)
 		}
 	})
-	if instance := firstInstance(t, h); instance.Flags&sceneNoSkin == 0 {
+	if instance := firstInstance(t, h); instance.Flags&model.SceneNoSkin == 0 {
 		t.Error("a static model carries SCENE_NOSKIN")
 	}
 	if bound := h.backend.buffersBoundTo("scenePoses"); len(bound) != 0 {

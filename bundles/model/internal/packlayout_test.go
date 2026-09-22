@@ -10,12 +10,12 @@ import (
 	"github.com/gogpu/naga/wgsl"
 )
 
-// Every record scene uploads is declared twice - once as a Go struct in
-// pack.go, once as a WGSL struct in builtin/scene - and nothing but a comment
-// saying "must match" held the two together. A mismatch is silent in the worst
-// way: the shader reads one field out of the bytes another one landed in and
-// renders something plausible. Adding a member to the frame block is exactly
-// when that comment stops being enough.
+// Every record the shader reads is declared twice - once as a Go struct in
+// internal/types, once as a WGSL struct in builtin/scene - and nothing but a
+// comment saying "must match" held the two together. A mismatch is silent in
+// the worst way: the shader reads one field out of the bytes another one landed
+// in and renders something plausible. Adding a member to the frame block is
+// exactly when that comment stops being enough.
 //
 // So the shader is parsed and lowered, and every member's offset is compared
 // against the Go type's. The pairing is spelled out rather than derived by
@@ -33,9 +33,9 @@ type shaderMember struct {
 }
 
 func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
-	var frame sceneFrameBlock
-	var light sceneLight
-	var instance sceneInstance
+	var frame model.FrameBlock
+	var light model.Light
+	var instance model.Instance
 	var mesh model.SceneMesh
 	var pbr model.ScenePbrRecord
 	records := []shaderRecord{

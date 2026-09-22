@@ -43,7 +43,7 @@ type plugin struct {
 	// any camera, and lights the per-pass selection. Both keep their backing
 	// across frames.
 	preparedLights []preparedLight
-	lights         lightSelection
+	lights         model.LightSelection
 	// temporaries is the frame's temporary meshes as mesh records, built once
 	// so that a temporary ref resolves exactly the way a durable one does and
 	// everything downstream is blind to which kind it has.
@@ -260,7 +260,7 @@ func (p *plugin) prepareDraws(
 		p.prepared[i].interned = p.materials.intern(report, record.Material, record.MaterialKey,
 			model.VariantFor(skin.Bound, skin.Morphed))
 		if !skin.Bound && !skin.Morphed {
-			p.prepared[i].anim.Offset = types.SceneNoAnim
+			p.prepared[i].anim.Offset = model.SceneNoAnim
 		}
 	}
 }
@@ -372,16 +372,14 @@ func (p *plugin) flushPass(
 	// Lights are culled per pass, against this pass's frustum, and capped at
 	// the eye, before anything is packed. A camera's shadow pass and screen
 	// pass may end up with different light sets, which is correct.
-	p.lights.selectLights(cull.frustum, eye.Vec3(), camera.Descr.CullMask, p.preparedLights)
-	block := packFrameLighting(sceneFrameBlock{
+	selectLights(&p.lights, cull.frustum, eye.Vec3(), camera.Descr.CullMask, p.preparedLights)
+	block := model.PackFrameLighting(model.FrameBlock{
 		View:           viewMatrix,
 		Projection:     projectionMatrix,
 		ViewProjection: viewProjection,
 		CameraPosition: eye,
 		ViewDirection:  types.ViewDirection(camera.Descr),
-		LightCount:     uint32(p.lights.count),
-		Lights:         p.lights.lights,
-	}, camera.Descr)
+	}, frameLighting(camera.Descr), &p.lights)
 	pending := p.build.beginPass(p.passDescr(camera.ID, pass, order), block)
 	result := scene.PassView{
 		CameraID: camera.ID,
@@ -390,7 +388,7 @@ func (p *plugin) flushPass(
 		Frustum:  cull.frustum,
 		Recorded: cull.recorded,
 		Culled:   cull.culled,
-		Lights:   p.lights.count,
+		Lights:   p.lights.Count(),
 	}
 	// The tag interns once per pass, so no draw in it ever compares a string.
 	tag := p.materials.internTag(types.PassTagOf(pass))

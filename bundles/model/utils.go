@@ -141,3 +141,47 @@ func SceneShader(opts ...gfx.ShaderOption) gfx.ShaderDescr { return types.SceneS
 func PackVertices(arena *[]byte, vertices []Vertex) (Span, m.Sphere, SceneMesh) {
 	return types.PackVertices(arena, vertices)
 }
+
+// PackInstance builds the instance record for one world matrix under one
+// batch's animation, naming the per-mesh record slot its geometry decodes
+// against. It flags a non-uniformly scaled matrix, so the shader takes the
+// inverse-transpose for that instance's normals.
+func PackInstance(world m.Mat4, anim InstanceAnim, mesh uint32) Instance {
+	return types.PackInstance(world, anim, mesh)
+}
+
+// PackLight resolves one punctual light's defaults into its packed record. A
+// spot with no direction, or with its inner cone at or past its outer cone,
+// returns ErrSpotDirectionMissing or ErrSpotConeInverted, and the renderer
+// reports it and skips the light.
+func PackLight(descr LightDescr) (Light, error) { return types.PackLight(descr) }
+
+// ContributionAt is what one packed light is worth at a point: the shader's
+// own falloff there times the colour's luminance. Evaluated at the eye, it is
+// the score a renderer offers the light to a LightSelection at.
+func ContributionAt(light *Light, point m.Vec3) float32 {
+	return types.ContributionAt(light, point)
+}
+
+// PackFrameLighting writes the sun, the ambient, the selected lights and
+// LightCount into one pass's frame block, resolving the defaults: the sun
+// direction is normalised, a zero one is no sun, and a zero intensity means 1.
+// The view fields are left as they came in.
+func PackFrameLighting(block FrameBlock, lighting FrameLighting, selection *LightSelection) FrameBlock {
+	return types.PackFrameLighting(block, lighting, selection)
+}
+
+// AppendAnim appends one draw's sceneAnim block to dst - the header, the
+// plays, the morph list, padded to a whole vec4 - and returns the grown slice
+// with the AnimOffset an instance carries. A draw with no plays and no morph
+// targets appends nothing and returns SceneNoAnim.
+func AppendAnim(dst []byte, plays []ScenePlayRecord, morph AnimMorph) ([]byte, uint32) {
+	return types.AppendAnim(dst, plays, morph)
+}
+
+// PaintPbrRecord is the record of a surface with no material of its own:
+// glTF's defaults with metallic 0, and color as the base colour. A self-lit
+// surface is black paint that glows, with color in the emissive factor.
+func PaintPbrRecord(color m.Color, selfLit bool) ScenePbrRecord {
+	return types.PaintPbrRecord(color, selfLit)
+}

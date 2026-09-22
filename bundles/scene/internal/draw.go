@@ -1,23 +1,11 @@
 package internal
 
 import (
-	"unsafe"
-
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
-)
-
-// The sizes of the records scene binds ranges of. They are the Go structs'
-// sizes because the Go structs are what scene writes; the WGSL side of the same
-// contract is asserted where the shader is reflected.
-var (
-	instanceSize       = int(unsafe.Sizeof(sceneInstance{}))
-	frameBlockSize     = int(unsafe.Sizeof(sceneFrameBlock{}))
-	materialRecordSize = int(unsafe.Sizeof(model.ScenePbrRecord{}))
-	meshRecordSize     = int(unsafe.Sizeof(model.SceneMesh{}))
 )
 
 // pendingPass is one pass the flush has decided but not yet emitted, and
@@ -124,22 +112,22 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 		gfxWrite.Pass(pass.descr)
 		for _, draw := range b.draws[pass.firstDraw : pass.firstDraw+pass.drawCount] {
 			b.params = append(b.params[:0],
-				gfx.BufferRangeParam("sceneFrame", frames, pass.frameOffset, frameBlockSize),
-				gfx.BufferRangeParam("sceneInstances", instances, pass.instanceOffset, pass.instanceBytes),
-				gfx.BufferParam("sceneAnim", anims),
-				gfx.BufferParam("sceneMeshes", meshes),
-				gfx.BufferRangeParam("scenePbrMaterial", materials, draw.materialOffset, materialRecordSize),
+				gfx.BufferRangeParam(model.BindingSceneFrame, frames, pass.frameOffset, model.FrameBlockSize),
+				gfx.BufferRangeParam(model.BindingSceneInstances, instances, pass.instanceOffset, pass.instanceBytes),
+				gfx.BufferParam(model.BindingSceneAnim, anims),
+				gfx.BufferParam(model.BindingSceneMeshes, meshes),
+				gfx.BufferRangeParam(model.BindingScenePbrMaterial, materials, draw.materialOffset, model.ScenePbrRecordSize),
 			)
 			// Group 2 is bound only where the draw's variant declares it. The
 			// two halves go separately because the variants split them: a
 			// morph-only face declares binding 2 alone.
 			if draw.skin.Bound {
 				b.params = append(b.params,
-					gfx.BufferParam("scenePoses", draw.skin.Poses),
-					gfx.BufferParam("sceneSkinJoints", draw.skin.Joints))
+					gfx.BufferParam(model.BindingScenePoses, draw.skin.Poses),
+					gfx.BufferParam(model.BindingSceneSkinJoints, draw.skin.Joints))
 			}
 			if draw.skin.Morphed {
-				b.params = append(b.params, gfx.BufferParam("sceneMorphDeltas", draw.skin.Morphs))
+				b.params = append(b.params, gfx.BufferParam(model.BindingSceneMorphDeltas, draw.skin.Morphs))
 			}
 			b.params = append(b.params, draw.params...)
 			gfxWrite.DrawInstancedFrom(draw.mesh, *draw.material,
@@ -150,7 +138,7 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 
 // beginPass starts accumulating one pass, taking its sceneFrame block and the
 // start of its instance slice.
-func (b *frameBuild) beginPass(descr gfx.PassDescr, block sceneFrameBlock) *pendingPass {
+func (b *frameBuild) beginPass(descr gfx.PassDescr, block model.FrameBlock) *pendingPass {
 	b.passes = append(b.passes, pendingPass{
 		descr:          descr,
 		frameOffset:    b.frames.appendRecord(&block),
@@ -177,13 +165,13 @@ func (b *frameBuild) addDraw(
 	pass *pendingPass, mesh model.MeshRecord, id uint32, entry materialEntry,
 	worlds []m.Mat4, record model.ScenePbrRecord, params []gfx.ParameterDescr, anim types.AnimBinding,
 ) {
-	first := (len(b.instances.bytes()) - pass.instanceOffset) / instanceSize
+	first := (len(b.instances.bytes()) - pass.instanceOffset) / model.InstanceSize
 	// One record per batch, the way the material record goes, and for the same
 	// reason: two batches of one mesh write two identical records rather than
 	// paying a hash of every record every frame to find that out.
 	meshIndex := b.meshIndex(mesh.UV)
 	for _, world := range worlds {
-		instance := packInstance(world, anim, meshIndex)
+		instance := model.PackInstance(world, anim.InstanceAnim, meshIndex)
 		b.instances.appendElement(&instance)
 	}
 	b.draws = append(b.draws, pendingDraw{
@@ -211,13 +199,22 @@ func (b *frameBuild) meshIndex(record model.SceneMesh) uint32 {
 	if record == (model.SceneMesh{}) {
 		return 0
 	}
-	return uint32(b.meshes.appendElement(&record) / meshRecordSize)
+	return uint32(b.meshes.appendElement(&record) / model.SceneMeshSize)
 }
 
 // endPass closes the pass being accumulated.
 func (b *frameBuild) endPass(pass *pendingPass) {
 	pass.drawCount = len(b.draws) - pass.firstDraw
 	pass.instanceBytes = len(b.instances.bytes()) - pass.instanceOffset
+}
+
+// appendAnim appends one draw's sceneAnim block to the frame's arena through
+// model's packer and returns the animOffset an instance carries, or SceneNoAnim
+// when the draw animates nothing.
+func (b *frameBuild) appendAnim(plays []model.ScenePlayRecord, morph model.AnimMorph) uint32 {
+	var offset uint32
+	b.anims.data, offset = model.AppendAnim(b.anims.data, plays, morph)
+	return offset
 }
 
 // animBytes is the sceneAnim arena's upload. An empty arena still uploads one

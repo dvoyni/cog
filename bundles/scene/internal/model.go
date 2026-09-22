@@ -178,7 +178,7 @@ func (p *plugin) resolveModelAnimation(k kernel.Kernel, models []types.ModelDraw
 	p.modelMorphOffsets = p.modelMorphOffsets[:0]
 	once := func(key string, err error) { k.ReportErrorOnce(key, err) }
 	for i := range models {
-		p.modelAnims[i] = types.AnimBinding{Offset: types.SceneNoAnim, MorphAt: -1}
+		p.modelAnims[i] = types.AnimBinding{InstanceAnim: model.InstanceAnim{Offset: model.SceneNoAnim}, MorphAt: -1}
 		view := &p.modelViews[i]
 		if !view.Resolved {
 			continue
@@ -194,7 +194,7 @@ func (p *plugin) resolveModelAnimation(k kernel.Kernel, models []types.ModelDraw
 		// primitive instead, because the morph words and the sparse weight list
 		// are the primitive's rather than the draw's.
 		if anim.SlotCount == 0 {
-			p.modelAnims[i].Offset = p.build.packAnim(p.modelPlays, morphBlock{})
+			p.modelAnims[i].Offset = p.build.appendAnim(p.modelPlays, model.AnimMorph{})
 		} else {
 			p.packModelMorphs(&p.modelAnims[i], anim, view, &models[i], once)
 		}
@@ -234,13 +234,13 @@ func (p *plugin) packModelMorphs(
 	binding.MorphAt = len(p.modelMorphOffsets)
 	for j := range view.Primitives {
 		morph := view.Primitives[j].Morph
-		block := morphBlock{binding: morph}
+		block := model.AnimMorph{Binding: morph}
 		if morph.Morphed() {
 			slots := p.modelWeights[morph.SlotBase : morph.SlotBase+morph.Targets]
-			block.targets = model.SelectMorphTargets(slots, p.modelTargets[:0], call.Path, report)
-			p.modelTargets = block.targets
+			block.Targets = model.SelectMorphTargets(slots, p.modelTargets[:0], call.Path, report)
+			p.modelTargets = block.Targets
 		}
 		p.modelMorphOffsets = append(
-			p.modelMorphOffsets, p.build.packAnim(p.modelPlays, block))
+			p.modelMorphOffsets, p.build.appendAnim(p.modelPlays, block))
 	}
 }

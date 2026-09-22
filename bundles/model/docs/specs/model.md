@@ -330,29 +330,45 @@ shadow descr for each variant beside the forward one.
 ## The shader's records and their packers
 
 From [where scene's per-frame drawing code goes](https://github.com/dvoyni/cog/issues/521).
+Landed in [#533](https://github.com/dvoyni/cog/issues/533): the records and
+packers are in `internal/types/records.go`, `light.go` and `lightselection.go`,
+aliased in the root's `types.go` and forwarded from its `utils.go`.
 
 **`model` exports every record the shader reads, with its packer.** Both
 renderers write the same bytes through the same code, so a shader change cannot
 compile against one renderer and draw garbage in the other.
 
-- **The records:** the frame block, the instance record with its flags, the light
-  record, and the animation header, play and morph-weight records. They are
-  aliased in `model`'s root, and their packers are forwarders into
-  `model/internal/types`.
-- **The binding names are constants**: `sceneFrame`, `sceneInstances`,
-  `sceneAnim`, `sceneMeshes`, `scenePbrMaterial`, `scenePoses`,
-  `sceneSkinJoints` and `sceneMorphDeltas`.
-- **Each record has a `Size` constant**, replacing the `unsafe.Sizeof` block in
-  scene's `draw.go`, because binding ranges need them.
+- **The records:** `FrameBlock`, `Instance` with its flags (`SceneNonUniform`,
+  `SceneNoSkin`, `ScenePlainJoint`) and `SceneNoAnim`, `Light`, and
+  `SceneAnimHeader`, `ScenePlayRecord` and `SceneMorphWeight`, beside
+  `ScenePbrRecord`, `SceneMesh` and `IdentityMesh`. They are aliased in
+  `model`'s root, and their packers are forwarders into `model/internal/types`.
+  The flags keep the WGSL constants' names; the three records the renderer
+  used to declare take the names this section gave them.
+- **The binding names are constants**, `BindingScene` followed by the WGSL
+  name: `BindingSceneFrame` (`sceneFrame`), `BindingSceneInstances`,
+  `BindingSceneAnim`, `BindingSceneMeshes`, `BindingScenePbrMaterial`,
+  `BindingScenePoses`, `BindingSceneSkinJoints` and `BindingSceneMorphDeltas`.
+- **Each record has a `Size` constant**, `<Record>Size`, replacing the
+  `unsafe.Sizeof` block in scene's `draw.go`, because binding ranges need them.
+  `PoseSize`, `SkinJointSize`, `AnimHeaderVec4s` and `PlayRecordVec4s` became
+  constants too.
 
-**Fixed-size records are returned by value.** `PackInstance` returns an
-`Instance`. `PackLight` returns a `Light` and an error. Each renderer appends them
-with its own arena, which stays out of `model`.
+**Fixed-size records are returned by value.** `PackInstance(world, anim
+InstanceAnim, mesh)` returns an `Instance`. `InstanceAnim` is what the record
+says about animation: the block offset, `Skinned`, and the plain-bound `Joint`
+and `Plain`. scene's `AnimBinding` embeds it beside the group 2 buffers and
+`MorphAt`, which stay the renderer's. `PackLight` returns a `Light` and an
+error, `ErrSpotDirectionMissing` or `ErrSpotConeInverted`, both `model`'s now.
+Each renderer appends them with its own arena, which stays out of `model`.
 
 **The variable-length animation block is written by `model`:**
-`model.AppendAnim(dst []byte, plays, morph) ([]byte, offset)`. The header, the
-order of the parts and the vec4 padding are part of the layout. The renderer
-passes its arena's slice in and keeps the result.
+`model.AppendAnim(dst []byte, plays, morph AnimMorph) ([]byte, uint32)`.
+`AnimMorph` is the morph half: the primitive's `MorphBinding` and the sparse
+targets `SelectMorphTargets` kept. The header, the order of the parts and the
+vec4 padding are part of the layout. The renderer passes its arena's slice in
+and keeps the result. A draw with nothing to animate appends nothing and gets
+`SceneNoAnim`.
 
 **The frame block keeps today's two steps.**
 
@@ -368,9 +384,15 @@ so neither camera changes shape. The defaults (normalising the sun, an intensity
 of zero meaning 1) are resolved once, in `model`.
 
 **Light selection is split.** `model` exports the part that fills the shader's
-array: the contribution score (today `contributionAt`), the offer, and the array
-capped at `MaxLights`. Each renderer keeps `prepareLights`, the layer test and
-the frustum test, and hands `model` only the lights that pass.
+array: the contribution score, `ContributionAt`, and `LightSelection`, the array
+capped at `MaxLights`, with `Reset`, `Offer`, `Count` and `Lights`. Each renderer
+keeps `prepareLights`, the layer test and the frustum test, and offers `model`
+only the lights that pass.
+
+**Paint is `model`'s too.** A draw with no material of its own binds
+`PaintPbrRecord(color, selfLit)`: glTF's defaults with metallic 0. scene's debug
+shapes and bare meshes used to set the record's fields themselves; a second
+renderer drawing a mesh with no material needs the same record.
 
 **Settled, verified while handing over:** the shader reads `animOffset` from each
 instance's own record (`instance.wgsl`, read by `skin.wgsl` and `morph.wgsl`),
@@ -861,8 +883,10 @@ what it does.
       [#532](https://github.com/dvoyni/cog/issues/532): the load-time key,
       `MaxClipPlays`, the override merges, and the WGSL with its mount;
    4. the shader's records and packers, the light-array filler, `FrameLighting`,
-      `AppendAnim`, and the size and binding-name constants. Projection maths goes
-      to `libs/m`.
+      `AppendAnim`, and the size and binding-name constants. Landed in
+      [#533](https://github.com/dvoyni/cog/issues/533), with `PaintPbrRecord`.
+      Projection maths went to `libs/m` in
+      [#534](https://github.com/dvoyni/cog/issues/534).
 4. **The ecsscene redesign, in one landing.** It moves from proxying to recording
    to gfx, with its own copies of the arena, culling, sorting and vocabulary, the
    load System, and Batches. ecsscene stops importing scene. The fountain

@@ -276,10 +276,11 @@ func (b *testBackend) Draw(first, count, instances, firstInstance int, indexed b
 func (b *testBackend) ReleaseBuffer(gfx.BufferID)   {}
 func (b *testBackend) ReleaseTexture(gfx.TextureID) {}
 
-// The record layouts scene uploads. They mirror the Go structs scene writes -
-// sceneInstance, sceneFrameBlock, sceneLight, ScenePbrRecord and the sceneAnim
-// block - field for field, because the bytes are the contract a shader reads
-// and this package cannot name scene's own types.
+// The record layouts scene uploads. They mirror the records model packs -
+// model.Instance, model.FrameBlock, model.Light, model.ScenePbrRecord and the
+// sceneAnim block - field for field, and are spelled out here rather than read
+// from model because the bytes are the contract a shader reads: a decode
+// through the writer's own types would agree with itself whatever they are.
 const (
 	instanceRecordSize = 64
 	lightRecordSize    = 48

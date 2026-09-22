@@ -72,6 +72,28 @@ func DefaultPbrRecord() ScenePbrRecord {
 	return record
 }
 
+// PaintPbrRecord is the record of a surface with no material of its own:
+// paint, not metal. It takes glTF's defaults except for metallic, because glTF
+// defaults to a fully metallic surface and a metal has no diffuse at all - it
+// would render as a dark mirror of an environment that does not exist, and the
+// bundled shader has no image-based lighting to reflect.
+//
+// A self-lit surface is black paint that glows: the colour goes into
+// emissiveFactor, which the shader adds after shading, and the base colour is
+// black so the lights contribute nothing to it. Alpha stays on the base colour
+// either way.
+func PaintPbrRecord(color m.Color, selfLit bool) ScenePbrRecord {
+	record := DefaultPbrRecord()
+	record.MetallicFactor = 0
+	if selfLit {
+		record.BaseColorFactor = m.Vec4{W: color.A}
+		record.EmissiveFactor = m.Vec4{X: color.R, Y: color.G, Z: color.B}
+		return record
+	}
+	record.BaseColorFactor = m.Vec4{X: color.R, Y: color.G, Z: color.B, W: color.A}
+	return record
+}
+
 // selectUVSet points one slot at a TEXCOORD set. A slot naming a set past the
 // cap falls back to set 0 and is reported: ignoring texCoord: 1 would be a
 // silent wrong-output failure on a core glTF feature, so the fallback says so
