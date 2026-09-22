@@ -2,6 +2,7 @@ package types
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 	"unsafe"
 
@@ -120,6 +121,71 @@ func TestAllWalksItsDriverBackwards(t *testing.T) {
 		if want := order[n-1-i]; e != want {
 			t.Fatalf("visit %d was %v, want %v: the walk is not backwards", i, e, want)
 		}
+	}
+}
+
+// TestEveryInlinedWalkYieldsWhatItsFillerYields holds the walks written out in
+// All() to the fillers they were copied from: the same Entities, in the same
+// backwards order over the Driver, with the same buffer at every step. The
+// fillers are the reference because the validate build still runs them, so
+// this is what keeps the two copies of each walk from drifting apart.
+//
+// Every Query wider than one loses some Entities to a probe. w1 is removed from
+// every fifth Entity, which makes W1 the Driver wherever it is a field; w0 is
+// removed from every seventh, which the W0 probe then rejects; and x0 is set on
+// every third, which a Without[x0] rejects.
+func TestEveryInlinedWalkYieldsWhatItsFillerYields(t *testing.T) {
+	t.Run("width 1", func(t *testing.T) { yieldsWhatItsFillerYields[width1](t, false) })
+	t.Run("width 2", func(t *testing.T) { yieldsWhatItsFillerYields[width2](t, true) })
+	t.Run("width 3", func(t *testing.T) { yieldsWhatItsFillerYields[width3](t, true) })
+	t.Run("width 3 with a Without", func(t *testing.T) { yieldsWhatItsFillerYields[without3](t, true) })
+	t.Run("width 4", func(t *testing.T) { yieldsWhatItsFillerYields[width4](t, true) })
+	t.Run("width 4 with two Withouts", func(t *testing.T) { yieldsWhatItsFillerYields[without4](t, true) })
+}
+
+func yieldsWhatItsFillerYields[Q any](t *testing.T, rejects bool) {
+	t.Helper()
+	const n = 60
+	width, q := widthWorld[Q](t, n)
+	for i, e := range slices.Clone(width.s0.owners) {
+		if i%3 == 0 {
+			width.x0s.Set(e, x0{})
+		}
+		if i%5 == 0 {
+			width.s1.Remove(e)
+		}
+		if i%7 == 0 {
+			width.s0.Remove(e)
+		}
+	}
+	type step struct {
+		e   Entity
+		row Q
+	}
+	var viaAll, viaFiller []step
+	for e, row := range q.All() {
+		viaAll = append(viaAll, step{e, *row})
+	}
+	walked := slices.Clone(q.walk)
+	q.iterate(func(e Entity, row *Q) bool {
+		viaFiller = append(viaFiller, step{e, *row})
+		return true
+	})
+	if len(viaAll) == 0 || rejects && len(viaAll) >= len(walked) {
+		t.Fatalf("All() yielded %d of a %d-long walk, which tests nothing", len(viaAll), len(walked))
+	}
+	if !reflect.DeepEqual(viaAll, viaFiller) {
+		t.Fatalf("All() and the filler disagree:\nAll()  %v\nfiller %v", viaAll, viaFiller)
+	}
+	// Backwards over the Driver: each yielded Entity sits lower in the walk
+	// than the one before it.
+	next := len(walked)
+	for i, s := range viaAll {
+		at := slices.Index(walked[:next], s.e)
+		if at < 0 {
+			t.Fatalf("visit %d, %v, is not below visit %d in the Driver's owners: the walk is not backwards", i, s.e, i-1)
+		}
+		next = at
 	}
 }
 
