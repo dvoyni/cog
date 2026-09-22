@@ -21,13 +21,33 @@ const architectureName = "architecture"
 // bundles/mcp/docs/specs/broker.md so it is reviewed as prompt text rather than
 // buried as a string literal.
 const architectureDescription = "What this engine is actually composed of: the plugins in start " +
-	"order, who owns which command, event and resource, which plugins contributed the Adapters " +
-	"each Port is bound to, the subscription dependency graph, and — " +
+	"order, who owns which command, event and resource, which Adapters are bound to each Port, the " +
+	"subscription dependency graph, and — " +
 	"the part you cannot get by reading source — the full set of resources each handler ends up " +
 	"locking once the commands it declares are folded in. Use it when you need to know what a " +
 	"dispatch really touches, or why one handler waits for another. Commands are listed so you can " +
 	"see who owns behaviour; you cannot call them from here, and there is no tool that takes a " +
-	"command name. Pass `path` to write the JSON to a file instead of returning it inline."
+	"command name. `contention` answers why a frame is not parallel: it lists the handlers that can " +
+	"never run at the same time because one writes a resource the other holds. That is how shared " +
+	"state works and is not a defect; read it to find what serialises, not to report a bug. " +
+	"`contended` is false when nothing does. `resources` are ranked by how many handler pairs each " +
+	"serialises, with the handlers that write it and a count of those that read it. A phase " +
+	"appears in `phases` only if some pair of its members conflicts, so a phase missing there runs " +
+	"its members in parallel; `singleThreaded` means its members run one at a time, and " +
+	"`widestLocks` names the members that conflict with every other, which are what makes it " +
+	"serialise. Only the ten `handlerPairs` sharing the most resources are listed, and " +
+	"`handlerPairsOmitted` counts the rest. A handler that uses a command is reported as " +
+	"conflicting with that command, because it absorbs the command's locks; if the command " +
+	"declares `Exclusive`, the handler absorbs that too, and the pair's resources may then name the " +
+	"command itself. A handler marked `selfExclusive` never overlaps itself, so two simultaneous " +
+	"calls to it queue; that raises no contention pair, so read it on the command or subscription " +
+	"entry. Pass `path` to write the JSON to a file instead of returning it inline."
+
+// architectureHandlerPairs bounds how many handler pairs the answer lists. It
+// matches kernel.Dump's handler-pair cap, which is unexported, so the value is
+// duplicated here on purpose: the pairwise set is quadratic in the number of
+// handlers, and one resource every handler touches makes nearly all of it.
+const architectureHandlerPairs = 10
 
 // architectureRequest asks for the finalized architecture.
 type architectureRequest struct {
@@ -37,11 +57,12 @@ type architectureRequest struct {
 	Path string `json:"path,omitempty" jsonschema:"absolute path of a .json file to write the description to instead of returning it inline; parent directories are created and an existing file is overwritten"`
 }
 
-// architectureResponse is the finalized architecture as five flat arrays, or
-// just the path when one was given. There is no index: the type string is the
-// address, and uses, dependsOn, reads and writes are all joins on it.
+// architectureResponse is the finalized architecture as five flat arrays and
+// the contention report, or just the path when one was given. There is no
+// index: the type string is the address, and uses, dependsOn, reads, writes and
+// every handler the contention report names are all joins on it.
 type architectureResponse struct {
-	// Path is set, and the arrays empty, when the description was written to a
+	// Path is set, and the rest empty, when the description was written to a
 	// file instead.
 	Path          string                     `json:"path,omitempty"`
 	Plugins       []architecturePlugin       `json:"plugins,omitempty"`
@@ -49,6 +70,53 @@ type architectureResponse struct {
 	Ports         []architecturePort         `json:"ports,omitempty"`
 	Commands      []architectureCommand      `json:"commands,omitempty"`
 	Subscriptions []architectureSubscription `json:"subscriptions,omitempty"`
+	// Contention is always set by describe and nil on the path-only reply. A
+	// value would put a contended false on every path reply, which is a false
+	// statement about an engine that may well contend.
+	Contention *architectureContention `json:"contention,omitempty"`
+}
+
+// architectureContention is the kernel's conflict report in the order the
+// kernel ranks it, with the handler pairs capped as kernel.Dump caps them.
+type architectureContention struct {
+	// Contended is always present, so an engine without contention says so
+	// rather than leaving an Agent to infer it from missing arrays.
+	Contended           bool                             `json:"contended"`
+	Resources           []architectureResourceContention `json:"resources,omitempty"`
+	Phases              []architecturePhaseContention    `json:"phases,omitempty"`
+	HandlerPairs        []architectureHandlerPair        `json:"handlerPairs,omitempty"`
+	HandlerPairsOmitted int                              `json:"handlerPairsOmitted,omitempty"`
+}
+
+// architectureResourceContention is one resource handler pairs serialise on.
+// Readers is a count, because a resource every System reads would otherwise
+// list hundreds of names.
+type architectureResourceContention struct {
+	Type      string   `json:"type"`
+	Owner     string   `json:"owner"`
+	Conflicts int      `json:"conflicts"`
+	Writers   []string `json:"writers,omitempty"`
+	Readers   int      `json:"readers"`
+}
+
+// architecturePhaseContention is one event's phase in which some member pair
+// serialises. A phase absent here has none, and runs its members in parallel.
+type architecturePhaseContention struct {
+	Event          string   `json:"event"`
+	Phase          string   `json:"phase"`
+	Members        int      `json:"members"`
+	Conflicts      int      `json:"conflicts"`
+	SingleThreaded bool     `json:"singleThreaded"`
+	WidestLocks    []string `json:"widestLocks,omitempty"`
+}
+
+// architectureHandlerPair is two handlers that can never overlap and the keys
+// they serialise on, as the kernel computes them: an Exclusive key absorbed
+// through Uses is among them, named by the command's identity type.
+type architectureHandlerPair struct {
+	A         string   `json:"a"`
+	B         string   `json:"b"`
+	Resources []string `json:"resources,omitempty"`
 }
 
 // architecturePlugin is one plugin in start order.
@@ -206,7 +274,51 @@ func describe(description kernel.ArchitectureDescription) architectureResponse {
 			Uses: typeNames(subscription.Uses), SelfExclusive: subscription.SelfExclusive,
 		})
 	}
+	document.Contention = describeContention(description.Contention)
 	return document
+}
+
+// describeContention carries the kernel's report across as it ranks it: no
+// re-sort and no filter. Resources and phases go whole; handler pairs are cut
+// where kernel.Dump cuts them and the rest counted. A handler renders by its
+// identity type alone, which already joins to commands and subscriptions, where
+// its kind, owner and event are listed.
+func describeContention(contention kernel.ContentionDescription) *architectureContention {
+	report := &architectureContention{
+		// The test kernel.Dump uses to print "none".
+		Contended: len(contention.Resources) > 0 || len(contention.Phases) > 0,
+	}
+	for _, resource := range contention.Resources {
+		report.Resources = append(report.Resources, architectureResourceContention{
+			Type: kernel.TypeName(resource.Type), Owner: string(resource.Owner),
+			Conflicts: resource.Conflicts, Writers: handlerNames(resource.Writers),
+			Readers: len(resource.Readers),
+		})
+	}
+	for _, phase := range contention.Phases {
+		report.Phases = append(report.Phases, architecturePhaseContention{
+			Event: kernel.TypeName(phase.Event), Phase: phase.Phase,
+			Members: phase.Members, Conflicts: phase.Conflicts,
+			SingleThreaded: phase.SingleThreaded, WidestLocks: handlerNames(phase.WidestLocks),
+		})
+	}
+	listed := min(len(contention.Handlers), architectureHandlerPairs)
+	for _, pair := range contention.Handlers[:listed] {
+		report.HandlerPairs = append(report.HandlerPairs, architectureHandlerPair{
+			A: kernel.TypeName(pair.A.Type), B: kernel.TypeName(pair.B.Type),
+			Resources: typeNames(pair.Resources),
+		})
+	}
+	report.HandlerPairsOmitted = len(contention.Handlers) - listed
+	return report
+}
+
+func handlerNames(handlers []kernel.HandlerRef) []string {
+	names := make([]string, 0, len(handlers))
+	for _, handler := range handlers {
+		names = append(names, kernel.TypeName(handler.Type))
+	}
+	return names
 }
 
 func typeNames(types []reflect.Type) []string {
