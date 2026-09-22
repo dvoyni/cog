@@ -339,7 +339,7 @@ func TestTheEntityReadRefusesWhatIsNotAlive(t *testing.T) {
 
 	// Before the index is reused, nothing holds it: the despawned handle names
 	// no holder, and the handle the index will carry next is not alive either,
-	// although Alive alone would say it is.
+	// which since the free generation bit is what Alive says on its own.
 	answer := executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: gone.String()})
 	if answer.Refusal != gone.String()+" is not alive" {
 		t.Errorf("the despawned Entity answered %+v, want it refused as not alive and no holder named", answer)
@@ -350,6 +350,15 @@ func TestTheEntityReadRefusesWhatIsNotAlive(t *testing.T) {
 	answer = executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: next})
 	if answer.Refusal == "" || strings.Contains(answer.Refusal, "holds") {
 		t.Errorf("the fabricated next handle %s answered %+v, want it refused as not alive and no holder named", next, answer)
+	}
+
+	// A string is the one place a caller can name the word a free index stores,
+	// its next generation with the free bit on. No Entity carries it, and this
+	// path is where that is checked, so it is refused like any dead handle.
+	freeBit := index + "v" + strconv.FormatUint(uint64(nextGeneration+1)+1<<31, 10)
+	answer = executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: freeBit})
+	if answer.Refusal == "" || strings.Contains(answer.Refusal, "holds") {
+		t.Errorf("the handle %s, naming the free index's own stored generation, answered %+v, want it refused as not alive", freeBit, answer)
 	}
 
 	reused := spawn(executioner, plainSet{})[0]
