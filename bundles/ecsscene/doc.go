@@ -1,22 +1,25 @@
-// Package ecsscene records Entities into scene.
+// Package ecsscene draws Entities: it is the ECS's renderer over model, beside
+// scene rather than on top of it.
 //
 // It is a binding, and a binding is necessarily a third plugin: ecs imports
-// nothing of scene and scene imports nothing of ecs, so what attaches them is
+// nothing of model and model imports nothing of ecs, so what attaches them is
 // an ordinary cog plugin that imports both. A project not using the ECS does
-// not register it and schedules no ECS Systems.
+// not register it and schedules no ECS Systems. An app runs ecsscene or scene,
+// never both.
 //
 // Its Components wrap model's values — a model.ModelRef, a model.MeshRef,
 // model.ClipPlays, a model.LightDescr — and gfx.ParameterDescrs, beside
 // ecsscene's own copy of the camera, layer and pass vocabulary (CameraID,
 // ProjectionKind, PassTag, Pass, LayerMask), which keeps scene's names, shapes
 // and zero values without naming scene. There is no manifest, no hash and no
-// name table: a Component holds the glTF path itself. Until the recording
-// System draws into gfx itself, it copies each matching Entity into scene's op
-// queue once a tick, at the m.Transform the Entity carries.
+// name table: a Component holds the glTF path itself. ecsscene repeats scene's
+// path, recording to gfx itself: once a tick it buckets every drawable Entity
+// into a Batch by the key the load System wrote on change, and draws each
+// Batch's surviving instances as one instanced draw, at the m.Transform each
+// Entity carries. It imports nothing of scene.
 //
-// Data flows one way. Scene keeps no per-entity state, so there is no
-// scene-side object for an Entity to be a copy of, and the Components are the
-// source of truth because there is no other candidate.
+// Data flows one way. The frame is rebuilt from the Stores every tick, and the
+// Components are the source of truth because there is no other candidate.
 //
 // ecsscene is a Bundle. Its plugin, built by ecssceneplugin.New, requires no
 // Adapter and contributes none. This package declares what it offers: the
@@ -41,6 +44,6 @@
 // System and does not register this plugin. docs/README.md is the API, and
 // its prohibitions are what a second binding has to keep true.
 //
-// The Components and the vocabulary's aliases are in types.go, and Layer in
-// utils.go.
+// The Components and the vocabulary's aliases are in types.go, the errors the
+// recording System reports in err.go, and Layer in utils.go.
 package ecsscene

@@ -71,6 +71,13 @@ type keyScratch struct {
 	// walked is how many Entities the last run keyed. A steady frame keys
 	// none.
 	walked int
+	// ready is whether this tick's backend is up, and bundled the bundled
+	// PBR's four forward materials, which the load System ensures once the
+	// backend is: the recording System holds the Lookup only for reading, so
+	// it takes both from here rather than baking anything itself.
+	ready      bool
+	hasBundled bool
+	bundled    [model.VariantCount]gfx.MaterialDescr
 }
 
 func newKeyScratch() *keyScratch {
@@ -104,7 +111,8 @@ func (s *keyScratch) touch(e ecs.Entity) {
 
 // load is the load System. It is the only ecsscene System holding the Lookup
 // for writing, so it is the one that loads, and it drives model's bake and
-// release queues as scene's flush does.
+// release queues: nothing else in an ecsscene app drains them, because an app
+// runs ecsscene or scene and never both.
 //
 // It runs on what changed: every addition, change and removal of a Model,
 // Mesh, Material or Params since its last run, each Entity once. For each it
@@ -148,11 +156,20 @@ func load(
 	resources := resourceQueue.Get()
 	// A load before the backend is up is refused and not cached, so the
 	// Entities wait for the first frame that has one. Nothing is drained
-	// either, exactly as scene's flush skips such a frame.
-	if resources == nil || !resources.Ready() {
+	// either, and the recording System skips the frame too.
+	s.ready = resources != nil && resources.Ready()
+	if !s.ready {
 		return
 	}
 	lookup := lookupResource.Get()
+	// The bundled PBR bakes its two default textures the first time, and
+	// the Lookup returns the same four materials forever after.
+	if !s.hasBundled {
+		s.bundled = lookup.EnsureBundled(func(width, height int, format gfx.TextureFormat, pixels []byte) gfx.TextureDescr {
+			return resources.BakeTexture(width, height, format, pixels, true, false)
+		})
+		s.hasBundled = true
+	}
 	if len(s.pending) > 0 {
 		keyer := keyer{
 			k: k, lookup: lookup, resources: resources,

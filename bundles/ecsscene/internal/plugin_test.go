@@ -9,7 +9,6 @@ import (
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
 	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model/modelplugin"
-	"github.com/dvoyni/cog/bundles/scene/sceneplugin"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -67,7 +66,7 @@ func compose(mover *moverPlugin) error {
 	kernel.New(map[kernel.PluginName]any{storage.Name: storage.Config{}}).
 		Handler(func(err error) error { failure = errors.Join(failure, err); return nil }).
 		WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
-			modelplugin.New(), sceneplugin.New(), ecsplugin.New(), New(), mover)
+			modelplugin.New(), ecsplugin.New(), New(), mover)
 	return failure
 }
 

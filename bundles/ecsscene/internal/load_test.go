@@ -14,10 +14,9 @@ import (
 )
 
 // The load System's tests read its scratch, which is what it writes and what
-// nothing else in the frame shows yet: until the recording System draws
-// Batches, the keys have no reader but these tests. Each also checks that the
-// frame still draws what it drew, so the scratch is never the only thing a
-// test asserts.
+// the recording System buckets Batches by, as a white-box extra. Each also
+// checks that the frame still draws what it drew, so the scratch is never the
+// only thing a test asserts.
 
 // keysCmd snapshots the load System's scratch: every keyed Entity's handle and
 // keys, and how many Entities its last run keyed.

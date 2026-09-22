@@ -10,16 +10,15 @@ import (
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // Every test here asserts on what the recording backend received: the records
-// scene packed for an instance, the pass it landed in, and the pipeline and
+// packed for an instance, the pass it landed in, and the pipeline and
 // parameters it drew with. Which Entity a draw belongs to is read off where
-// its instance stands, so no test depends on how scene batched the frame.
+// its instance stands, so no test depends on how the frame was batched.
 
 // TestAModelEntityRecordsWhereItStandsOnItsLayers is the tracer bullet: an
 // Entity with a Transform and a Model naming a glTF path is drawn, with nothing
@@ -626,11 +625,11 @@ func TestAnEntityWithNoTransformIsNotRecorded(t *testing.T) {
 }
 
 // TestADrawIsInTheFlushOfTheTickThatRecordedItWithNoOrderingDeclared is the
-// ordering claim. scene subscribes its flush Last, so a recording System that
+// ordering claim. gfx subscribes its present Last, so a recording System that
 // declares nothing is in the ordinary phase and already runs before it. The
 // behavioural half is one frame: an Entity spawned into a world that already
 // draws is drawn by the very next frame, which is only true if its tick's
-// flush saw it. The rest asserts the edge the engine derived without either
+// present saw it. The rest asserts the edge the engine derived without either
 // side declaring it.
 func TestADrawIsInTheFlushOfTheTickThatRecordedItWithNoOrderingDeclared(t *testing.T) {
 	h := newDrawingHarness(t, 256)
@@ -645,36 +644,38 @@ func TestADrawIsInTheFlushOfTheTickThatRecordedItWithNoOrderingDeclared(t *testi
 	}
 
 	description := h.engine.Describe()
-	var recorder, flush *kernel.SubscriptionDescription
+	var recorder, present *kernel.SubscriptionDescription
 	for i := range description.Subscriptions {
 		switch description.Subscriptions[i].Type {
 		case reflect.TypeFor[ecsscene.RecordOnUpdate]():
 			recorder = &description.Subscriptions[i]
-		case reflect.TypeFor[scene.FlushOnUpdate]():
-			flush = &description.Subscriptions[i]
+		case reflect.TypeFor[gfx.PresentOnUpdate]():
+			present = &description.Subscriptions[i]
 		}
 	}
-	if recorder == nil || flush == nil {
+	if recorder == nil || present == nil {
 		t.Fatalf("the description lists %d subscriptions and not both halves", len(description.Subscriptions))
 	}
 	if recorder.Phase != "ordinary" {
 		t.Errorf("the recording System is in phase %q, want the ordinary one it never asked to leave", recorder.Phase)
 	}
-	if flush.Phase != "last" {
-		t.Errorf("scene's flush is in phase %q, want last: the ordering claim rests on it", flush.Phase)
+	if present.Phase != "last" {
+		t.Errorf("gfx's present is in phase %q, want last: the ordering claim rests on it", present.Phase)
 	}
-	if !containsType(flush.DependsOn, reflect.TypeFor[ecsscene.RecordOnUpdate]()) {
-		t.Errorf("scene's flush does not wait for the recording System; it depends on %v", flush.DependsOn)
+	if !containsType(present.DependsOn, reflect.TypeFor[ecsscene.RecordOnUpdate]()) {
+		t.Errorf("gfx's present does not wait for the recording System; it depends on %v", present.DependsOn)
 	}
-	if containsType(recorder.DependsOn, reflect.TypeFor[scene.FlushOnUpdate]()) {
-		t.Error("the recording System waits for scene's flush, which is the wrong way round")
+	if containsType(recorder.DependsOn, reflect.TypeFor[gfx.PresentOnUpdate]()) {
+		t.Error("the recording System waits for gfx's present, which is the wrong way round")
 	}
 }
 
 // TestTheRecordingSystemsLockSetIsItsSignature is the other thing the signature
-// is: a declaration. Every Store it reads, its scratch and scene's queue, none
-// of them named in a Lock func — and the scratch is in the lock set because it
-// is a resource rather than something a closure captured.
+// is: a declaration. Every Store it reads, the load System's keys, model's
+// Lookup and the viewport it reads, and its scratch and gfx's queue it writes,
+// none of them named in a Lock func — and the scratch is in the lock set
+// because it is a resource rather than something a closure captured. The
+// Lookup is a read: the load System is the one that loads.
 func TestTheRecordingSystemsLockSetIsItsSignature(t *testing.T) {
 	h := newHarness(t)
 	for _, sub := range h.engine.Describe().Subscriptions {
@@ -691,14 +692,22 @@ func TestTheRecordingSystemsLockSetIsItsSignature(t *testing.T) {
 			reflect.TypeFor[*ecs.Store[ecsscene.Animation]](),
 			reflect.TypeFor[*ecs.Store[ecsscene.Params]](),
 			reflect.TypeFor[*ecs.Store[ecsscene.Material]](),
+			reflect.TypeFor[*keyScratch](),
+			reflect.TypeFor[*model.Lookup](),
+			reflect.TypeFor[*gfx.Viewport](),
 		} {
 			if !containsType(sub.Reads, want) {
 				t.Errorf("the System's read set %v does not name %v", sub.Reads, want)
 			}
 		}
-		for _, want := range []reflect.Type{reflect.TypeFor[*scratch](), reflect.TypeFor[*scene.OpQueue]()} {
+		for _, want := range []reflect.Type{reflect.TypeFor[*scratch](), reflect.TypeFor[*gfx.OpQueue]()} {
 			if !containsType(sub.Writes, want) {
 				t.Errorf("the System's write set %v does not name %v", sub.Writes, want)
+			}
+		}
+		for _, read := range []reflect.Type{reflect.TypeFor[*model.Lookup](), reflect.TypeFor[*keyScratch]()} {
+			if containsType(sub.Writes, read) {
+				t.Errorf("the System writes %v, which it only reads", read)
 			}
 		}
 		if containsType(sub.Writes, reflect.TypeFor[*ecs.Entities]()) {

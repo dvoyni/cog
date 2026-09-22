@@ -591,6 +591,15 @@ anyway.
    4. sorts, and packs one properties record and one instanced draw per Batch
       through `model`'s packers.
 
+   Landed in [#537](https://github.com/dvoyni/cog/issues/537), behind
+   `ecsscene.RecordOnUpdate`. It also reads the load System's key scratch and
+   `*gfx.Viewport`. The load System ensures the bundled PBR and records
+   whether the backend is ready, because the recording System holds the
+   Lookup only for reading. Buckets split by shader variant as well as by key,
+   which changes nothing for a file's own material. Passes keep scene's
+   labels, `scene.camera<ID>.<tag>`, and scene's errors are declared again
+   under ecsscene's names.
+
 The lock-set test that names `*scene.OpQueue` changes to `*gfx.OpQueue` with the
 recording.
 

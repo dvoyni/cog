@@ -18,7 +18,7 @@ import (
 // It replays gfx.Queue through the public sinks and keeps, per pass, every
 // draw with the state bound when it was issued: the pipeline, the SetParams
 // bytes, the vertex and index buffers and every storage range. Uploaded bytes
-// are kept per buffer, so a test decodes the records scene packed rather than
+// are kept per buffer, so a test decodes the records ecsscene packed rather than
 // only their offsets.
 //
 // Unlike scene's, it keeps the SetParams bytes, and every shader it compiles
@@ -276,7 +276,7 @@ func (b *testBackend) Draw(first, count, instances, firstInstance int, indexed b
 func (b *testBackend) ReleaseBuffer(gfx.BufferID)   {}
 func (b *testBackend) ReleaseTexture(gfx.TextureID) {}
 
-// The record layouts scene uploads. They mirror the records model packs -
+// The record layouts the bundled shader reads. They mirror the records model packs -
 // model.Instance, model.FrameBlock, model.Light, model.ScenePbrRecord and the
 // sceneAnim block - field for field, and are spelled out here rather than read
 // from model because the bytes are the contract a shader reads: a decode
@@ -293,7 +293,7 @@ const (
 )
 
 // drawnInstance is one instance a frame drew: the pass it was in, the
-// pipeline and parameters it drew with, and the records scene packed for it.
+// pipeline and parameters it drew with, and the records packed for it.
 type drawnInstance struct {
 	pass     gfx.PassDesc
 	shader   string

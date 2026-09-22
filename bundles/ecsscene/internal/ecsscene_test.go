@@ -9,9 +9,8 @@ import (
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
 	"github.com/dvoyni/cog/bundles/ecsscene"
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/model/modelplugin"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/sceneplugin"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -23,9 +22,10 @@ import (
 )
 
 // Everything here runs against a real kernel.Engine with the real ecs, the real
-// scene plugin and the real gfx composed beside the binding, and reads back what
+// model plugin and the real gfx composed beside the binding, and reads back what
 // gfx handed a recording backend. The binding is judged by what reaches the
-// GPU, not by what its System looks like or by anything scene publishes.
+// GPU, not by what its Systems look like. scene is not composed: an app runs
+// ecsscene or scene, never both.
 
 const crateModel = "models/crate.glb"
 
@@ -52,6 +52,12 @@ type spawnRequest struct {
 	Material  *ecsscene.Material
 	Light     *ecsscene.Light
 	Camera    *ecsscene.Camera
+	// ParamsEach, when set, gives the i-th Entity its own Params in place of
+	// Params, which is how a test spawns thousands of distinct values in one
+	// command.
+	ParamsEach func(i int) ecsscene.Params
+	// AnimationEach is the same for Animation.
+	AnimationEach func(i int) ecsscene.Animation
 }
 
 type spawnResponse struct {
@@ -106,8 +112,14 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 			if request.Animation != nil {
 				animations.UpdateFor(e, *request.Animation)
 			}
+			if request.AnimationEach != nil {
+				animations.UpdateFor(e, request.AnimationEach(i))
+			}
 			if request.Params != nil {
 				params.UpdateFor(e, *request.Params)
+			}
+			if request.ParamsEach != nil {
+				params.UpdateFor(e, request.ParamsEach(i))
 			}
 			if request.Material != nil {
 				materials.UpdateFor(e, *request.Material)
@@ -127,7 +139,8 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 }
 
 // despawnCmd retires one Entity, which is the only way a drawable stops
-// drawing: scene keeps no per-entity state, so nothing has to be told.
+// drawing: the frame is rebuilt from the Stores each tick, so nothing else has
+// to be told.
 type despawnCmd kernel.Command[despawnRequest, despawnResponse]
 
 type despawnRequest struct {
@@ -144,37 +157,37 @@ func despawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Exe
 	})
 }
 
-// bakeCmd bakes a mesh through scene's own lookup, which is where a MeshRef a
-// game stores in a Mesh Component comes from.
+// bakeCmd bakes a mesh through model's Lookup, which is where a MeshRef a game
+// stores in a Mesh Component comes from.
 type bakeCmd kernel.Command[bakeRequest, bakeResponse]
 
 type bakeRequest struct{}
 
 type bakeResponse struct {
-	Ref scene.MeshRef
+	Ref model.MeshRef
 }
 
 func bakeCmdImpl() (kernel.Lock, kernel.Execute[bakeRequest, bakeResponse]) {
-	var lookup kernel.Write[*scene.Lookup]
+	var lookup kernel.Write[*model.Lookup]
 	return func(access kernel.ResourceAccess) {
-			lookup = access.GetWrite[*scene.Lookup]()
+			lookup = access.GetWrite[*model.Lookup]()
 		}, func(k kernel.Kernel, _ bakeRequest) bakeResponse {
-			vertices := []scene.Vertex{
+			vertices := []model.Vertex{
 				{Position: m.Vec3{X: -1, Y: -1}, Normal: m.Vec3{Z: 1}},
 				{Position: m.Vec3{X: 1, Y: -1}, Normal: m.Vec3{Z: 1}},
 				{Position: m.Vec3{Y: 1}, Normal: m.Vec3{Z: 1}},
 			}
-			la := scene.NewLookupAccess(k, lookup.Get())
+			la := model.NewLookupAccess(k, lookup.Get())
 			return bakeResponse{Ref: la.BakeMesh(vertices, []uint32{0, 1, 2}, gfx.TopologyTriangleList)}
 		}
 }
 
 // gamePlugin stands in for the game: it spawns the world's Entities and reads
 // back what the frame recorded. It declares the binding because it names the
-// binding's Components, and scene because it locks scene's resources.
+// binding's Components, and model because it locks model's Lookup.
 //
 // It subscribes nothing to the tick. A second recorder beside the binding's
-// would serialise against it on scene's queue, and the kernel's bookkeeping for
+// would serialise against it on gfx's queue, and the kernel's bookkeeping for
 // a blocked request would show up in the allocation figures as noise that
 // scales with frame length.
 type gamePlugin struct{}
@@ -182,7 +195,7 @@ type gamePlugin struct{}
 func (p *gamePlugin) Name() kernel.PluginName { return "game" }
 
 func (p *gamePlugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, scene.Name, ecsscene.Name}
+	return []kernel.PluginName{ecs.Name, model.Name, ecsscene.Name}
 }
 
 func (p *gamePlugin) Register(registrar *kernel.Registrar, _ any) error {
@@ -226,9 +239,10 @@ func newHarness(t testing.TB) *harness {
 	return newHarnessOver(t, fstest.MapFS{}, 256)
 }
 
-// newHarnessOver composes the whole engine: storage and gfx because scene needs
-// them, scene because it is what is being bound to, ecs because it is what is
-// being bound from, the binding, and a game plugin standing in for the app.
+// newHarnessOver composes the whole engine: storage and gfx because the binding
+// loads and draws through them, model because it holds what is drawn, ecs
+// because it is what is being bound from, the binding, and a game plugin
+// standing in for the app.
 func newHarnessOver(t testing.TB, files fstest.MapFS, ids uint32) *harness {
 	t.Helper()
 	return newHarnessWith(t, files, ids, &detachedBackend{})
@@ -243,7 +257,7 @@ func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gfx.Ba
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) error { sink.add(err); return nil }).
-		WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: fs.FS(files)}}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, modelplugin.New(), sceneplugin.New(),
+		WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: fs.FS(files)}}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, modelplugin.New(),
 			ecsplugin.New(), New(), &gamePlugin{})
 	// The cleanup waits for Run to return rather than only cancelling it: a
 	// dying engine allocates while it winds down, and the allocation claims here
@@ -287,7 +301,7 @@ func (h *harness) despawn(t testing.TB, e ecs.Entity) {
 	h.kernel.ExecuteCommand[despawnCmd](despawnRequest{Entity: e})
 }
 
-func (h *harness) bake(t testing.TB) scene.MeshRef {
+func (h *harness) bake(t testing.TB) model.MeshRef {
 	t.Helper()
 	response := h.kernel.ExecuteCommand[bakeCmd](bakeRequest{})
 	if response.Ref.ID() == 0 {

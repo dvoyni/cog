@@ -187,7 +187,7 @@ func ofTriangle(d drawnInstance) bool { return d.count == 3 }
 func ofQuad(d drawnInstance) bool     { return d.count == 6 }
 
 // inPass admits the instances drawn into the pass one camera emitted for one
-// tag, which scene labels the pass with.
+// tag, which the recording System labels the pass with, in scene's spelling.
 func inPass(label string) func(drawnInstance) bool {
 	return func(d drawnInstance) bool { return d.pass.Label == label }
 }
@@ -211,9 +211,9 @@ func (h *harness) noErrors(t testing.TB) {
 }
 
 // TestDrawableEntitiesBecomeInstancesInAPass is the end-to-end: Components on a
-// real world, through the binding's one System, into the real scene plugin,
-// which loads the file a Model names and packs the Entities into a pass that
-// reaches the backend.
+// real world, through the binding's load System, which loads the file a Model
+// names through model, and its recording System, which packs the Entities into
+// a pass that reaches the backend.
 //
 // Nothing between the Component and the instance was written for this test.
 func TestDrawableEntitiesBecomeInstancesInAPass(t *testing.T) {
