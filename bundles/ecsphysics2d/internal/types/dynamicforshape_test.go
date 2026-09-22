@@ -258,6 +258,9 @@ func TestNewDynamicForShapeRefusesWhatHasNoMass(t *testing.T) {
 // The inline kinds need nothing from the heap. A Poly allocates its new vertex
 // List, which is the documented cost of never writing the caller's.
 func TestNewDynamicForShapeAllocatesOnlyAPolysNewVertices(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	box := NewBoxShapeFor(NewBB(0, 0, 2, 1), 0.1)
 	for name, shape := range map[string]Shape{
 		"circle":  NewCircleShape(1, m.Vec2d{X: 1}),

@@ -132,6 +132,9 @@ func BenchmarkFrameNoSystem(b *testing.B) {
 // magnitude apart. An allocation in the iteration would scale with the entity
 // count, so identical counts at 1k and 10k are the claim.
 func TestTheFrameSitsOnTheEnginesAllocationLine(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const frames = 10_000
 	measure := func(n int, subscribe func(*kernel.Registrar),
 		fill func(*Entities, *componentsPlugin, int),

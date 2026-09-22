@@ -94,6 +94,9 @@ func TestAliveRejectsNoEntityAndHandlesItNeverIssued(t *testing.T) {
 // frame is on it. Once the free list has indices, allocation is a pop and a
 // despawn is a push.
 func TestAllocationAndDespawnAreAllocationFreeInSteadyState(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const n = 256
 	entities := newEntities(n)
 	live := make([]Entity, 0, n)

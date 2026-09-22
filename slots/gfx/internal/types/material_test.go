@@ -89,6 +89,9 @@ func TestFingerprintSeesTextureBufferAndMatrixParameters(t *testing.T) {
 }
 
 func TestFingerprintAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	material := MaterialWithState(ShaderWithResource("shader.wgsl"), StateOpaque3D(),
 		FloatParam("roughness", 0.5),
 		TextureParam("t", TextureWithResource("a.png")),

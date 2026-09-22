@@ -59,6 +59,9 @@ func TestResetEmptiesTheSelection(t *testing.T) {
 
 // The selection is a fixed insertion: a steady pass allocates nothing.
 func TestASteadySelectionAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	lights := pointLights(40)
 	var selection LightSelection
 	allocations := testing.AllocsPerRun(50, func() {

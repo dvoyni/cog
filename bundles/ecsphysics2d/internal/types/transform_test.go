@@ -96,6 +96,9 @@ func TestTransformBBIsTheBoxAroundTheTurnedBox(t *testing.T) {
 }
 
 func TestTransformAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	transform := NewTransformRigid(m.Vec2d{X: 1, Y: 2}, 0.5)
 	other := NewTransformScale(2, 3)
 	point := m.Vec2d{X: 3, Y: 4}

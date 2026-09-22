@@ -206,6 +206,9 @@ func BenchmarkStepLocal(b *testing.B) {
 // the handle is a window onto a cell, and a window is not a copy. And nothing
 // scales with the entity count, which is what a per-Entity allocation would.
 func TestTheBoundFrameSitsOnTheEnginesAllocationLine(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const frames = 10_000
 	measure := func(n int, bound bool, subscribe func(*kernel.Registrar)) float64 {
 		var entities *Entities
@@ -264,6 +267,9 @@ func TestTheBoundFrameSitsOnTheEnginesAllocationLine(t *testing.T) {
 // context; that is the kernel's price and not the ECS's, but a System is where
 // a game will pay it, so the number belongs here.
 func TestWhatPublishingFromASystemCosts(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const frames = 2_000
 	measure := func(subscribe func(*kernel.Registrar)) float64 {
 		entities, components, engine := newWorld(t, 1_000, subscribe)

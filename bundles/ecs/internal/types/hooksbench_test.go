@@ -218,6 +218,9 @@ func (arm hookFrame) world(tb testing.TB, n int) (*kernel.Engine, func() int) {
 // does, and the same at 10k Entities as at 1k, so nothing a reader or a
 // recording writer does allocates per record or per Entity.
 func TestAHookReaderStaysOnTheAllocationLine(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const frames = 5_000
 	measure := func(arm hookFrame, n int) float64 {
 		engine, delivered := arm.world(t, n)

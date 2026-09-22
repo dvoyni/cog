@@ -82,6 +82,9 @@ func TestALightLayerMaskSelectsCameras(t *testing.T) {
 
 // The selection is a fixed insertion: a steady frame allocates nothing.
 func TestASteadySelectionAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	lights := preparedPointLights(40)
 	var selection model.LightSelection
 	frustum := forwardFrustum()

@@ -86,6 +86,9 @@ func TestElementExposesEveryModifier(t *testing.T) {
 var modifierSink Element
 
 func TestElementModifiersDoNotAllocate(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	allocations := testing.AllocsPerRun(100, func() {
 		modifierSink = NewElement().
 			ID("element").

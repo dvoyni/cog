@@ -473,6 +473,9 @@ func bodiesAre(t *testing.T, components *componentsPlugin, n int, x, y float32) 
 // serial one costs, up to a residue the Go runtime and not the walk is
 // responsible for, and that nothing in it grows with the entity count.
 func TestTheSplitFrameSitsOnTheEnginesAllocationLine(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const frames = 1_000
 	measure := func(n int, subscribe func(*kernel.Registrar)) float64 {
 		entities, components, engine := newWorld(t, uint32(n), subscribe)

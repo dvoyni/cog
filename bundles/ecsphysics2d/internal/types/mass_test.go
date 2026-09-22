@@ -135,6 +135,9 @@ func TestCentroidForPolyTellsTheCallerAboutADegenerateOutline(t *testing.T) {
 }
 
 func TestTheMassHelpersAllocateNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	a, b := m.Vec2d{X: -1}, m.Vec2d{X: 1}
 	offset := m.Vec2d{X: 2, Y: 3}
 

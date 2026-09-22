@@ -123,6 +123,9 @@ func TestACullCountsOnlyTheLayersTheCameraSees(t *testing.T) {
 }
 
 func TestASteadyCullAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	draws := make([]types.DrawRecord, 64)
 	prepared := make([]preparedDraw, 64)
 	for i := range prepared {

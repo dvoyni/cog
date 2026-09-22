@@ -141,6 +141,9 @@ func TestARefusedOutlineIsAPointAndSaysWhichOfTheThreeItWas(t *testing.T) {
 }
 
 func TestARefusedOutlineAllocatesNothingOnTheFailurePath(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	// The errors are package-level sentinels rather than structs carrying the
 	// outline, which is what makes this true.
 	tooFew := []m.Vec2d{{}, {X: 1}}
@@ -208,7 +211,7 @@ func TestPolygonVertsReadsTheKindsOwnStoreAndAllocatesNothingWarm(t *testing.T) 
 
 	if got := testing.AllocsPerRun(100, func() {
 		dst = PolygonVerts(dst[:0], shape, polygon)
-	}); got != 0 {
+	}); got != 0 && !raceEnabled {
 		t.Errorf("refilling a warm run allocated %v times, want 0", got)
 	}
 }

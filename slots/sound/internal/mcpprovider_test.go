@@ -383,7 +383,7 @@ func TestTheRingAllocatesNothing(t *testing.T) {
 	allocations := testing.AllocsPerRun(1000, func() {
 		record.record(types.Ending{Reason: sound.ReasonFinished, Clip: ended}, 7)
 	})
-	if allocations != 0 {
+	if allocations != 0 && !raceEnabled {
 		t.Fatalf("recording an ending allocated %v times, want 0", allocations)
 	}
 	if record.held != endingsHeld {

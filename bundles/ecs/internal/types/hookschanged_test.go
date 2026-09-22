@@ -1055,11 +1055,11 @@ func TestRecordingAChangeAllocatesNothingAfterTheFirstWatchedRun(t *testing.T) {
 	} {
 		delivered = 0
 		first := allocationsDuring(run(arm.write))
-		if arm.name == "Ref" && (first == 0 || cap(copied.rows) == 0 || cap(copied.stamps) == 0) {
+		if arm.name == "Ref" && ((!raceEnabled && first == 0) || cap(copied.rows) == 0 || cap(copied.stamps) == 0) {
 			t.Fatalf("the first watched run allocated %d objects and left rows with capacity %d, want its row copies allocated",
 				first, cap(copied.rows))
 		}
-		if objects := testing.AllocsPerRun(100, run(arm.write)); objects != 0 {
+		if objects := testing.AllocsPerRun(100, run(arm.write)); objects != 0 && !raceEnabled {
 			t.Fatalf("%s on a watched Store allocated %v objects a run after the first, want 0", arm.name, objects)
 		}
 		if runs := 1 + 101; delivered != runs*len(ids) {

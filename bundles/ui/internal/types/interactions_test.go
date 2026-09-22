@@ -3,6 +3,9 @@ package types
 import "testing"
 
 func TestChildrenDoesNotCopyTheFirstSequence(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	children := []Element{NewElement(), NewElement(), NewElement()}
 	var sink Element
 	allocations := testing.AllocsPerRun(100, func() {
@@ -42,6 +45,9 @@ func TestChildrenBranchesDoNotShareBorrowedStorage(t *testing.T) {
 var interactionSum int
 
 func TestInteractionsIterationDoesNotAllocate(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	interactions := Interactions{values: []Interaction{
 		{ID: "first", Kind: InteractionHover, Button: -1},
 		{ID: "second", Kind: InteractionClick, Button: 0},

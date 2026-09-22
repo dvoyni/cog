@@ -167,6 +167,9 @@ func TestVec2dConvertsToAndFromVec2(t *testing.T) {
 }
 
 func TestVec2dAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	v := Vec2d{3, 4}
 	other := Vec2d{1, 2}
 

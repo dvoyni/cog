@@ -314,6 +314,9 @@ func TestAnIndexListsNothingItCannotPlaceOrCannotCache(t *testing.T) {
 }
 
 func TestClearKeepsTheBuffersSoARebuildAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	idx := NewBodyIndex(2)
 	fill := func() {
 		idx.Clear()
@@ -414,6 +417,9 @@ func mapInside(typ reflect.Type, path string) (string, bool) {
 }
 
 func TestTheQueriesAllocateNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	idx := NewStaticIndex(2)
 	for i := range 64 {
 		idx.Insert(testEntity(i), NewCircleShape(0.4, m.Vec2d{}),

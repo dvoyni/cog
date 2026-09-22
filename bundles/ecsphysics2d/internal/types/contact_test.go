@@ -510,6 +510,9 @@ func TestABodyWithAnUnplaceableBoxIsSkippedRatherThanSearchedFor(t *testing.T) {
 }
 
 func TestDetectionAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	contacts := NewContacts(7)
 	bodies, statics := NewBodyIndex(0), NewStaticIndex(0)
 	for i := range 64 {

@@ -222,6 +222,9 @@ func accessorPopulation(tb testing.TB, n int) (*accessorWorld, []Entity) {
 // It measures a steady state over ten thousand frames rather than an average
 // over b.N, because an average can hide amortised growth.
 func TestTheAccessorsStayOnTheEnginesAllocationLine(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	const frames = 10_000
 	measure := func(n int, subscribe func(*kernel.Registrar),
 		fill func(*Entities, *componentsPlugin, int),
@@ -276,6 +279,9 @@ func TestTheAccessorsStayOnTheEnginesAllocationLine(t *testing.T) {
 // small allocation per Entity behind the engine's own noise only if the
 // population were tiny, and this counts the calls directly.
 func TestAnAccessorCallAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	world, ids := accessorPopulation(t, 64)
 	for _, e := range ids {
 		world.colliderSet.UpdateFor(e, collider{Radius: 1})

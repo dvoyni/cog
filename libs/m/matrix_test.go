@@ -148,7 +148,7 @@ func TestInverseAffineInvertsAndAllocatesNothing(t *testing.T) {
 
 	if allocations := testing.AllocsPerRun(100, func() {
 		inverseAffineSink, _ = matrix.InverseAffine()
-	}); allocations != 0 {
+	}); allocations != 0 && !raceEnabled {
 		t.Fatalf("InverseAffine allocated %v times per run, want 0", allocations)
 	}
 }

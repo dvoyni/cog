@@ -124,6 +124,9 @@ func left(out []float32) []float32 {
 // this is measured against rather than included in: what the Adapter owes is
 // that its contribution is zero.
 func TestTheDeviceThreadAllocatesNothingOverAFullBlock(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	mx, handoff := newTestMixer(8)
 	clip := constantClip(4096, 2, 0.5)
 	start(handoff, 0, clip, mono(0.8), true)

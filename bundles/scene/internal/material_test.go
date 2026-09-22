@@ -138,6 +138,9 @@ func TestMaterialIdsAreOnePerMaterialAndTag(t *testing.T) {
 // Resolving is what a draw pays per pass, so it must not allocate once the
 // table has seen the frame's materials before.
 func TestResolvingAnInternedMaterialAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	var table materialTable
 	table.reset(bundledMaterials(model.PbrDefaults{}))
 	forward := table.internTag(scene.TagForward)
@@ -155,6 +158,9 @@ func TestResolvingAnInternedMaterialAllocatesNothing(t *testing.T) {
 // A frame reuses the table's backing, so a steady frame interns without
 // allocating after the first.
 func TestTheMaterialTableKeepsItsBackingAcrossFrames(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	var table materialTable
 	bundled := bundledMaterials(model.PbrDefaults{})
 	material := testMaterial(scene.TagForward)
