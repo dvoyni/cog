@@ -39,7 +39,28 @@ type Entities struct {
 	// Reclamation is eager and is therefore nothing at all: an index returns
 	// here the moment its entity is retired, and nothing reclaims on its own.
 	// Capacity goes back only when the app executes ShrinkCmd.
+	//
+	// While reservations are outstanding its newest end is the part the
+	// reservation cursor has already handed out: an index there is live or
+	// about to be, and settle cuts it off. Nothing appends to it in that state,
+	// which is what keeps a reservation's arithmetic — a position counted from
+	// the newest end — true for the whole of the frame it was made in. See
+	// reserve and released.
 	free []uint32
+	// released holds indices an immediate Despawn freed while reservations were
+	// outstanding, and settle moves them onto the free list once it has cut it
+	// back to the cursor. They wait here rather than going straight onto free
+	// because appending to free would either put the index inside the part the
+	// cursor has already handed out or renumber every reservation made after
+	// it: a reservation names its index by position from the newest end, and
+	// that end must not move.
+	//
+	// So an index freed immediately is recycled from the next drain rather than
+	// at once — at most one frame later, since the ECS drains every Update. It
+	// is nil in a world that defers nothing: despawn appends here only while
+	// the cursor is off zero. See bundles/ecs/docs/specs/deferred.md § Immediate
+	// handles, and ShrinkCmd, while reservations are outstanding.
+	released []uint32
 	// stores is every Store enrolled with this authority, as the one call a
 	// despawn makes of it: its remove. It is the reason holding Entities for
 	// write is the one lock that covers structural change: a despawn empties all
@@ -97,6 +118,23 @@ type Entities struct {
 	// the free list back to where it left off and resets it. See
 	// bundles/ecs/docs/specs/deferred.md § Reservation holds only read{*Entities}.
 	reserved atomic.Uint32
+	// edge is where the cursor's past-the-end hand-outs start: the length of the
+	// index space as the cursor found it. Every index at or above it that the
+	// cursor has reached is spoken for, whether by a reservation that is waiting
+	// for the spawn pass or by an immediate Spawn that grew the index space to
+	// go live at once.
+	//
+	// It is pinned rather than read as len(gens) because an immediate Spawn
+	// takes its index through the same cursor and grows the index space there
+	// and then: reading the length would move the start of the region under
+	// every reservation still outstanding, and hand the next one an index
+	// already alive. It is written only under the write lock, and only where
+	// the index space changes while no reservation is outstanding — alloc's
+	// growth, shrinkIndices' cut — plus settle, which pins it once the spawn
+	// pass has grown the space to cover every reservation. So it is len(gens)
+	// exactly whenever the cursor is at zero, and frozen for as long as it is
+	// not.
+	edge uint32
 	// The fields below are ShrinkCmd's. They sit after everything a spawn or a
 	// despawn reads, and what only the Command reads is behind one pointer,
 	// because this object's size class is measurable on a despawn: three
@@ -254,9 +292,14 @@ func (en *Entities) drain() {
 	}
 }
 
-// settle returns the free list to an ordinary free list between the two passes:
-// the indices the reservation cursor handed out are cut off the free list, and
-// the cursor is reset to nothing.
+// settle returns the free list to an ordinary free list between the two passes,
+// in three steps and in this order: the indices the reservation cursor handed
+// out are cut off the free list, the cursor is reset to nothing, and the
+// released list is moved onto the free list.
+//
+// The order is what makes the third step safe. Cutting first means the released
+// indices land on a free list nothing has handed out, so they are ordinary free
+// indices from here; moving first would put them inside the cut and lose them.
 //
 // It sits between the passes so that the despawn pass is literally today's
 // despawn, with no special case for an outstanding reservation: an index freed
@@ -266,14 +309,16 @@ func (en *Entities) drain() {
 // The cut is by count rather than by value, because the cursor hands indices
 // out from the newest end of the free list downward, which is the end alloc
 // takes from. A cursor that ran past the free list took the rest of its indices
-// from past len(gens), and there is nothing to cut for those: the spawn pass
-// grew the index space to reach them.
-//
-// Moving the released list onto the free list is the third step of the settle
-// and arrives with the released list itself.
+// from past the edge, and there is nothing to cut for those: the spawn pass
+// grew the index space to reach them, which is also why the edge is pinned here
+// rather than where the cursor first moves — nothing can pin it there, because
+// a reservation holds only read{*Entities}.
 func (en *Entities) settle() {
 	taken := min(int(en.reserved.Swap(0)), len(en.free))
 	en.free = en.free[:len(en.free)-taken]
+	en.free = append(en.free, en.released...)
+	en.released = en.released[:0]
+	en.edge = uint32(len(en.gens))
 }
 
 // reserve hands out one Reserved Entity: an index and a generation fixed here,
@@ -283,10 +328,14 @@ func (en *Entities) settle() {
 //
 // The cursor is one atomic add. Below len(free) it names an index from the free
 // list, newest first, which is the index alloc would have taken; past it the
-// indices come from past len(gens) at the floor, the generation a fresh index
+// indices come from past the edge at the floor, the generation a fresh index
 // starts live at. Nothing is written here — not the generations, not the free
 // list — so nothing needs the write lock: the spawn pass does the writing, and
 // settle does the cutting.
+//
+// An immediate Spawn takes its index through this same cursor, so the two can
+// never name one index: whichever handle moved the cursor, it moved past what
+// the other took.
 //
 // The generation it hands back is the generation the index will be alive at,
 // with the free bit off, so Alive stays exactly false until the spawn pass
@@ -298,7 +347,7 @@ func (en *Entities) reserve() Entity {
 		index := en.free[len(en.free)-1-cursor]
 		return newEntity(index, en.gens[index]&^freeGeneration)
 	}
-	return newEntity(uint32(len(en.gens)+cursor-len(en.free)), en.floor)
+	return newEntity(uint32(int(en.edge)+cursor-len(en.free)), en.floor)
 }
 
 // spawnReserved brings a Reserved Entity to life, which is the first half of
@@ -323,7 +372,17 @@ func (en *Entities) spawnReserved(e Entity) {
 // alloc hands out an id, recycling a freed index where there is one so that the
 // flat sparse index of every Store stays bounded by peak concurrent entities
 // rather than by entities ever created.
+//
+// While reservations are outstanding it takes its index through the reservation
+// cursor instead, which is what keeps an immediate Spawn and a deferred New in
+// one frame off one index. With the cursor at zero there is nothing to share it
+// with, and the pop below is that hand-out and its cut in one step: taking the
+// newest free index is exactly what the cursor at zero names, and removing it
+// is exactly what settle would have done.
 func (en *Entities) alloc() Entity {
+	if cursor := int(en.reserved.Load()); cursor != 0 {
+		return en.allocThroughCursor(cursor)
+	}
 	if n := len(en.free); n > 0 {
 		index := en.free[n-1]
 		en.free = en.free[:n-1]
@@ -336,7 +395,39 @@ func (en *Entities) alloc() Entity {
 	}
 	index := uint32(len(en.gens))
 	en.gens = append(en.gens, en.floor)
+	en.edge = uint32(len(en.gens))
 	return newEntity(index, en.floor)
+}
+
+// allocThroughCursor is alloc while reservations are outstanding: the index is
+// the one the cursor names next, and the entity is alive when this returns.
+//
+// The cursor needs no atomic here — the caller holds write{*Entities}, so no
+// reservation can be running — but it is moved all the same, because it is the
+// one thing keeping the two handles apart: the position it names is taken here,
+// and the next reservation reads the next one.
+//
+// The index is not removed from the free list, and that is the difference from
+// the pop alloc makes with the cursor at zero. A reservation already outstanding
+// named its own index by position from the newest end, so removing one below it
+// would renumber it; the whole handed-out run comes off at the settle instead.
+// Past the free list the index space grows here, exactly as the spawn pass grows
+// it for a reservation, and for the same reason: the indices below it are
+// hand-outs of their own, each of which fills its own slot.
+func (en *Entities) allocThroughCursor(cursor int) Entity {
+	en.reserved.Store(uint32(cursor) + 1)
+	if cursor < len(en.free) {
+		index := en.free[len(en.free)-1-cursor]
+		// Going live clears the free bit, as the pop's does; the index stays on
+		// the free list until the settle cuts it, carrying a live generation
+		// there, which is why nothing reads the run the cursor has handed out.
+		generation := en.gens[index] &^ freeGeneration
+		en.gens[index] = generation
+		return newEntity(index, generation)
+	}
+	e := newEntity(uint32(int(en.edge)+cursor-len(en.free)), en.floor)
+	en.spawnReserved(e)
+	return e
 }
 
 // despawn empties every Store of e and retires the handle, returning its index
@@ -368,6 +459,16 @@ func (en *Entities) despawn(e Entity) bool {
 	// free neither the handle just retired nor the handle the index will carry
 	// next is alive. The bit comes off at alloc.
 	en.gens[index] = nextGeneration(en.gens[index]) | freeGeneration
+	// While reservations are outstanding the index waits on the released list
+	// and settle moves it onto the free list, because the newest end of the free
+	// list is where the cursor is counting from and must not move. With the
+	// cursor at zero — every despawn of a world that defers nothing, and every
+	// despawn the drain's own pass makes, since settle has just reset it — this
+	// is the append it always was, and the index is free at once.
+	if en.reserved.Load() != 0 {
+		en.released = append(en.released, index)
+		return true
+	}
 	en.free = append(en.free, index)
 	return true
 }
@@ -424,9 +525,23 @@ func (en *Entities) shrink(request ShrinkRequest) ShrinkResponse {
 }
 
 // shrinkIndices drops the free indices at the top of the index space and cuts
-// the generations and the free list to capacity equal to length, reporting the
-// bytes let go.
+// the generations, the free list and the released list to capacity equal to
+// length, reporting the bytes let go.
+//
+// It drops nothing and reports 0 while any reservation is outstanding, which is
+// the whole of what ShrinkCmd does about deferral: the Command keeps its shape
+// and its response, and the other three areas shrink as they always did. An
+// index the cursor has handed out is alive or about to be, and the free list is
+// where it is still sitting — a shrink that read that list as free would drop
+// the index space out from under a Reserved Entity, and a shrink that cut the
+// list itself would renumber every reservation outstanding. A reservation lasts
+// only until the next drain, so the Command an app sends between frames — where
+// every ShrinkCmd belongs, because it gives capacity back — sees the cursor at
+// zero and this is the shrink it always was.
 func (en *Entities) shrinkIndices() uintptr {
+	if en.reserved.Load() != 0 {
+		return 0
+	}
 	before := en.bytes()
 	// A free index carries the free bit, so the unused run at the top is one
 	// walk down the generations — no pass over the free list, and none over the
@@ -449,12 +564,18 @@ func (en *Entities) shrinkIndices() uintptr {
 	}
 	en.free = clip(kept)
 	en.gens = clip(en.gens[:top])
+	// The released list is empty here — nothing appends to it with the cursor at
+	// zero, and the settle that reset the cursor emptied it — so this gives back
+	// whatever capacity a frame of immediate despawns left it holding.
+	en.released = clip(en.released)
+	en.edge = uint32(len(en.gens))
 	return before - en.bytes()
 }
 
-// bytes is what the generations and the free list hold, by capacity.
+// bytes is what the generations, the free list and the released list hold, by
+// capacity.
 func (en *Entities) bytes() uintptr {
-	return uintptr(cap(en.gens)+cap(en.free)) * unsafe.Sizeof(uint32(0))
+	return uintptr(cap(en.gens)+cap(en.free)+cap(en.released)) * unsafe.Sizeof(uint32(0))
 }
 
 // nextGeneration steps a live generation, wrapping back to 1 at the top of the
