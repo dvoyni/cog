@@ -69,6 +69,77 @@ func TestTheIndexSpaceIsBoundedByPeakConcurrentEntities(t *testing.T) {
 	}
 }
 
+// TestAFabricatedHandleAtAFreeIndexsNextGenerationIsNotAlive names the blind
+// spot the free bit closes. A despawn steps the generation as it retires the
+// index, so a free index already stores the generation it will carry when it is
+// allocated again; without the bit, a handle fabricated from that index and
+// that generation compared equal and answered Alive true. It is the handle a
+// deferred Spawn's Reserved Entity will be — deferred.md § Alive is false for a
+// reservation until the drain — and it must be dead until the drain hands it
+// out.
+func TestAFabricatedHandleAtAFreeIndexsNextGenerationIsNotAlive(t *testing.T) {
+	entities := newEntities(8)
+	first := entities.alloc()
+	entities.despawn(first)
+
+	next := newEntity(first.idx(), first.gen()+1)
+	if entities.Alive(next) {
+		t.Fatalf("%v, the handle free index %d will carry next, is Alive before anything allocates it", next, first.idx())
+	}
+	if entities.despawn(next) {
+		t.Fatalf("despawn(%v) = true for a handle nothing holds yet", next)
+	}
+
+	// The same word, once the index goes live, is the handle that index holds:
+	// the bit is what the free index carried, not a different generation.
+	if reused := entities.alloc(); reused != next {
+		t.Fatalf("the recycled index came back as %v, want %v: the free bit moved the generation", reused, next)
+	}
+	if !entities.Alive(next) {
+		t.Fatalf("%v is not Alive although it is the handle the recycled index was allocated at", next)
+	}
+}
+
+// The bit itself: set on the generation of a free index, clear on a live one.
+// Alive is that word compared against the handle's, and nothing else, so this
+// is the whole of what makes the case above work.
+func TestAFreeIndexCarriesTheFreeBitAndGoingLiveClearsIt(t *testing.T) {
+	entities := newEntities(8)
+	e := entities.alloc()
+	if generation := entities.gens[e.idx()]; generation&freeGeneration != 0 {
+		t.Fatalf("index %d carries generation %#x while it is live, want the free bit clear", e.idx(), generation)
+	}
+
+	entities.despawn(e)
+	if generation := entities.gens[e.idx()]; generation&freeGeneration == 0 {
+		t.Fatalf("index %d carries generation %#x while it is free, want the free bit set", e.idx(), generation)
+	}
+
+	reused := entities.alloc()
+	if generation := entities.gens[reused.idx()]; generation&freeGeneration != 0 {
+		t.Fatalf("index %d carries generation %#x once it is live again, want the free bit clear", reused.idx(), generation)
+	}
+	if reused.gen()&freeGeneration != 0 {
+		t.Fatalf("the handle %v carries the free bit: no issued handle ever may", reused)
+	}
+}
+
+// A generation steps inside the live half only. One that reached the free half
+// would make a live entity look free to Alive, and the all-ones generation a
+// Store writes into an empty sparse slot lives in that half too, which is why
+// nextGeneration no longer names it.
+func TestAGenerationNeverStepsIntoTheFreeHalf(t *testing.T) {
+	for _, g := range []uint32{1, 2, freeGeneration - 3, freeGeneration - 2, freeGeneration - 1} {
+		next := nextGeneration(g)
+		if next == 0 || next == absentGeneration || next&freeGeneration != 0 {
+			t.Fatalf("nextGeneration(%#x) = %#x, want a generation a live entity may carry", g, next)
+		}
+	}
+	if next := nextGeneration(freeGeneration - 1); next != 1 {
+		t.Fatalf("nextGeneration at the top of the live half = %d, want it to wrap to 1", next)
+	}
+}
+
 func TestAliveRejectsNoEntityAndHandlesItNeverIssued(t *testing.T) {
 	entities := newEntities(8)
 	entities.alloc()
@@ -79,6 +150,7 @@ func TestAliveRejectsNoEntityAndHandlesItNeverIssued(t *testing.T) {
 		{"NoEntity", NoEntity},
 		{"an index never allocated", newEntity(500, 1)},
 		{"a generation never issued", newEntity(0, 9)},
+		{"a live index at its generation with the free bit", newEntity(0, freeGeneration|1)},
 	}
 	for _, test := range cases {
 		if entities.Alive(test.e) {

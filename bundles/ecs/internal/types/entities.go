@@ -157,12 +157,18 @@ func (en *Entities) classNamed(name string) *componentClass {
 // always means "does my target still have Health", which an accessor answers
 // with the Store lock the System already holds; this one needs read{*Entities}.
 //
-// It is exact for every handle this authority ever issued. The one thing it
-// cannot distinguish is a fabricated handle naming a generation that has not
-// been handed out yet — the generation a freed index will carry when it is next
-// allocated — because the index's current generation is the only thing
-// consulted, and a separate record of which indices are free would be a second
-// liveness structure for a handle nobody can hold.
+// It is one compare against one word and consults nothing else — no free list,
+// no second liveness structure — and it is exact for every handle this
+// authority ever issued and for the one handle that used to fool it. A freed
+// index stores its next generation with freeGeneration set, so the handle
+// fabricated from that index and that generation does not match until alloc
+// clears the bit as the index goes live.
+//
+// The one handle it still says true of is one fabricated with freeGeneration
+// itself, which is not a generation any Entity carries and which no caller
+// inside Go can name: Entity's halves are unexported and every handle comes
+// from newEntity. The one path where a caller outside Go can make one is the
+// read by name, whose readable checks for it (readbyname.go).
 func (en *Entities) Alive(e Entity) bool {
 	index := e.idx()
 	return int(index) < len(en.gens) && en.gens[index] == e.gen()
@@ -184,7 +190,12 @@ func (en *Entities) alloc() Entity {
 	if n := len(en.free); n > 0 {
 		index := en.free[n-1]
 		en.free = en.free[:n-1]
-		return newEntity(index, en.gens[index])
+		// Going live clears the free bit despawn set. The generation itself is
+		// the one despawn stepped to: this hands out the handle the index was
+		// already recorded as owing, and it is alive from here.
+		generation := en.gens[index] &^ freeGeneration
+		en.gens[index] = generation
+		return newEntity(index, generation)
 	}
 	index := uint32(len(en.gens))
 	en.gens = append(en.gens, en.floor)
@@ -216,7 +227,10 @@ func (en *Entities) despawn(e Entity) bool {
 		remove(e)
 	}
 	index := e.idx()
-	en.gens[index] = nextGeneration(en.gens[index])
+	// The generation steps and takes the free bit with it, so while the index is
+	// free neither the handle just retired nor the handle the index will carry
+	// next is alive. The bit comes off at alloc.
+	en.gens[index] = nextGeneration(en.gens[index]) | freeGeneration
 	en.free = append(en.free, index)
 	return true
 }
@@ -277,22 +291,18 @@ func (en *Entities) shrink(request ShrinkRequest) ShrinkResponse {
 // bytes let go.
 func (en *Entities) shrinkIndices() uintptr {
 	before := en.bytes()
+	// A free index carries the free bit, so the unused run at the top is one
+	// walk down the generations — no pass over the free list, and none over the
+	// bitmap of it this used to build.
 	top := len(en.gens)
-	if len(en.free) > 0 {
-		// A bitmap of the free indices, so finding the unused run at the top
-		// costs one pass over the free list and none over a sorted copy of it.
-		free := make([]uint64, (top+63)/64)
-		for _, index := range en.free {
-			free[index/64] |= 1 << (index % 64)
-		}
-		for top > 0 && free[(top-1)/64]&(1<<((top-1)%64)) != 0 {
-			top--
-		}
+	for top > 0 && en.gens[top-1]&freeGeneration != 0 {
+		top--
 	}
 	// Dropping an index forgets its generation, so the floor takes the highest
-	// generation dropped before the index space is cut.
+	// generation dropped before the index space is cut. The free bit comes off
+	// first: the floor is the generation a fresh index starts live at.
 	for _, generation := range en.gens[top:] {
-		en.floor = max(en.floor, generation)
+		en.floor = max(en.floor, generation&^freeGeneration)
 	}
 	kept := en.free[:0]
 	for _, index := range en.free {
@@ -310,12 +320,18 @@ func (en *Entities) bytes() uintptr {
 	return uintptr(cap(en.gens)+cap(en.free)) * unsafe.Sizeof(uint32(0))
 }
 
-// nextGeneration steps a generation, skipping the two values a live entity may
-// never carry: 0, which would make the handle equal to NoEntity, and the
-// all-ones generation a Store writes into an empty sparse slot.
+// nextGeneration steps a live generation, wrapping back to 1 at the top of the
+// live half rather than stepping into the free half. That wrap is also what
+// keeps the two values a live entity may never carry out of reach: 0, which
+// would make the handle equal to NoEntity, is now past a wrap rather than one
+// step away, and absentGeneration, the all-ones generation a Store writes into
+// an empty sparse slot, is itself in the free half.
+//
+// Its argument is always a live generation: despawn is the only caller and the
+// value it steps is the one the entity is alive at.
 func nextGeneration(g uint32) uint32 {
 	g++
-	if g == 0 || g == absentGeneration {
+	if g&freeGeneration != 0 {
 		return 1
 	}
 	return g

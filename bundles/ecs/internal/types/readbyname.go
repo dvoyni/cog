@@ -332,27 +332,24 @@ func qualifiedName(t reflect.Type) string {
 	return t.PkgPath() + "." + t.Name()
 }
 
-// readable is liveness on the read path: Alive, and the index is not on the
-// free list. Alive alone is true of the handle a freed index will carry when it
-// is next allocated, because despawn steps the generation as it retires the
-// index; no System ever holds that handle, but a string parser can make one.
+// readable is liveness on the read path: Alive, over a generation the authority
+// could have issued. Alive is exact for every handle Go code can hold, because
+// newEntity is the only way to make one; a string parser is the one caller that
+// can name the free generation of a free index, which Alive matches because it
+// is the word that index stores. So this path drops it first, and everything
+// else — a despawned handle, the handle a free index will carry next, an index
+// past the index space — Alive answers on its own.
 func readable(en *Entities, e Entity) bool {
-	return en.Alive(e) && !freed(en, e.idx())
+	return e.gen()&freeGeneration == 0 && en.Alive(e)
 }
 
 // holder is the Entity that holds index now, if any does: an index beyond the
-// index space, or on the free list, has none.
+// index space, or free, has none. Free is the bit on its generation.
 func holder(en *Entities, index uint32) (Entity, bool) {
-	if int(index) >= len(en.gens) || freed(en, index) {
+	if int(index) >= len(en.gens) || en.gens[index]&freeGeneration != 0 {
 		return NoEntity, false
 	}
 	return newEntity(index, en.gens[index]), true
-}
-
-// freed reports whether index is on the free list. It is a linear scan, paid
-// only on the one-Entity read and its refusal.
-func freed(en *Entities, index uint32) bool {
-	return slices.Contains(en.free, index)
 }
 
 // parseEntity reads an Entity back from a string: "7v2", "Entity(7v2)" or the

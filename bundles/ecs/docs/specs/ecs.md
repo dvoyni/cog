@@ -203,9 +203,9 @@ is](https://github.com/dvoyni/cog/issues/237)).
 
 Generations **start at 1**, so `Entity(0)` unambiguously means "no Entity" while
 index 0 stays an ordinary usable slot. `NoEntity` is the named constant;
-comparison is `==`. It implements `fmt.Stringer`. Thirty-two bits of generation
-is ~4×10⁹ reuses of one slot before a stale handle could alias — at 30 Hz,
-never.
+comparison is `==`. It implements `fmt.Stringer`. The top generation bit is the
+**free bit**, so a live generation carries thirty-one: ~2×10⁹ reuses of one slot
+before a stale handle could alias — at 30 Hz, never.
 
 A game holds Entities across frames constantly: a creature's target, a spell's
 owner, a projectile's caster. **That is safe**, and it is safe by construction
@@ -215,6 +215,24 @@ Entity](#reaching-another-entity).
 Indices are **recycled** through a free list. That is what bounds the flat
 sparse index by *peak concurrent* Entities rather than by Entities ever created,
 and it is what makes [the Store's flat index](#the-store) affordable.
+
+**The free bit is what keeps `Alive` exact in one compare.** A despawn steps the
+index's generation and sets the free bit on it; allocating the index clears the
+bit and hands out the generation that was already stored. A free index therefore
+holds a word no issued handle ever equals, and `Alive` stays one compare against
+one word — no free list, no bitmap, no second liveness structure consulted.
+
+Without the bit, the handle a free index *will* carry answered `Alive` true
+before anything held it. Nothing in Go can make that handle, but [reading the
+world by name](#reading-the-world-by-name) parses one from a string, and the
+[Reserved Entity](deferred.md#alive-is-false-for-a-reservation-until-the-drain)
+a deferred Spawn hands back is exactly it and must be dead until its drain
+([#559](https://github.com/dvoyni/cog/issues/559)).
+
+The bit costs half the generation space and nothing else. `absentGeneration`,
+the all-ones generation a Store writes into an empty sparse slot, falls in the
+free half, so a live generation can no longer reach it at all and the generation
+step no longer names it.
 
 ---
 
@@ -2304,13 +2322,15 @@ exact. `m.List` encodes as the array of its elements and `assets.Blob` as
 under the barrier. A value that cannot be encoded (a NaN) is reported on that
 Component alone.
 
-**Liveness on this path also checks the free list.** `Alive` is true of the
-handle a freed index will carry when it is next allocated, because a despawn
-steps the generation as it retires the index. No System ever holds that handle,
-but a string parser can make one, so a handle is alive for these reads only if
-`Alive` holds and its index is not on the free list. A dead Entity is refused
-naming the Entity that holds its index now, where one does; a free index names
-no holder. `Alive` itself is unchanged.
+**Liveness on this path is `Alive`, over a generation an `Entity` may carry.**
+[The free bit](#entity) answers the handle a freed index will carry next, so
+this path no longer scans the free list for it. What it drops first is the one
+handle only a parser can name: the word a free index stores, that next
+generation with the free bit set, which `Alive` matches because it *is* that
+index's word. No `Entity` carries it and no Go caller can make one. A dead
+Entity is refused naming the Entity that holds its index now, where one does; a
+free index names no holder, which is the same bit again. `Alive` itself is
+unchanged by this path.
 
 **Refusals are answers.** An unknown name (refused listing every registered
 name), an ambiguous one, a malformed or dead Entity and a limit out of range
@@ -3043,8 +3063,8 @@ Hooks* block after it is built too.
 **`ecs` package — the core**
 
 - `Entity`, `NoEntity`, `fmt.Stringer`, private index/generation accessors.
-- `Entities`: id allocation with a free list, generation tracking, `Alive`, the
-  reference to every Store, eager total `Despawn`, created by the plugin from `Config.PrewarmEntities`.
+- `Entities`: id allocation with a free list, generation tracking with the free bit, `Alive` in one compare against it,
+  the reference to every Store, eager total `Despawn`, created by the plugin from `Config.PrewarmEntities`.
   Declared in `internal` and aliased in the root since #340.
 - `Store[T]`: the three arrays, the one-load probe, swap-remove, `append`
   doubling, a reserve hint, and the type-erased `storeCore` carrying exactly one
