@@ -40,9 +40,10 @@ these decisions next to each other settled something no ticket did, it is marked
 package it describes, and where the two disagree the code is the defect unless
 this document says otherwise. [Required work](#required-work) is the checklist
 it was built from and now records what is still open. The zero-allocation
-prototype that produced the numbers below lived on the throwaway branch
-`proto/ecs-zero-alloc` and is gone; the benchmarks that replaced it are in the
-package. The sections Hooks changed are built as well: [Required
+prototype that produced the numbers below lives on the branch
+`proto/ecs-zero-alloc`, which is still on `origin` (2e21edd, 2026-09-22) and
+was never merged; the benchmarks that replaced it are in the package, and the
+corrected figures below cite them. The sections Hooks changed are built as well: [Required
 work](#required-work) records them under *Since Hooks*, and the package's README
 carries their measured cost under [*What a Hook
 costs*](../README.md#what-a-hook-costs).
@@ -140,20 +141,31 @@ are retired outright.
 ## What the numbers are, and what they are not
 
 Every measurement in this document was taken on **AMD Ryzen 9 7950X3D, Go
-1.27.1, windows/amd64, `NumCPU=32`**, medians of five runs unless stated. There
-are four benchmark suites and they are not equally strong evidence:
+1.27.1, windows/amd64, `NumCPU=32`**, medians of five runs unless stated. The
+design was measured on four research suites and the implementation on its own
+benchmarks, and they are not equally strong evidence. Only one research suite is
+on `main`; the other three live only on the branches named, all still on
+`origin` at 2026-09-22:
 
-| suite | branch | what it is |
+| suite | where it is | what it is |
 | --- | --- | --- |
-| `docs/research/ecs-go-mechanics-bench/` | `research/ecs-go-mechanics` | Go language mechanics in isolation |
-| `docs/research/ecs-query-shape-bench/` | `worktree-ecs-vocabulary` | query-fill shapes against a hand-written loop |
-| `docs/research/ecs-sparse-probe-bench/` | `worktree-ecs-vocabulary` | a model of the Store: probe, driver, spawn, dispatch, scheduler |
-| `docs/research/ecs-zero-alloc-proto/` | `proto/ecs-zero-alloc` | **the decided design on a real `kernel.Engine`** |
+| `docs/research/ecs-go-mechanics-bench/` | **on `main`** | Go language mechanics in isolation |
+| `docs/research/ecs-query-shape-bench/` | branch `worktree-ecs-vocabulary` only | query-fill shapes against a hand-written loop |
+| `docs/research/ecs-sparse-probe-bench/` | branch `worktree-ecs-vocabulary` only | a model of the Store: probe, driver, spawn, dispatch, scheduler |
+| `docs/research/ecs-zero-alloc-proto/` | branch `proto/ecs-zero-alloc` only | the decided design on a real `kernel.Engine`, as a prototype |
+| `bundles/ecs/internal/types/*bench_test.go` — accessor, binding, driver, frame, hooks, hooksmark, listheader, spawn, split, width | **on `main`** | **the implementation on a real `kernel.Engine`** |
+| `bundles/ecsscene/internal/recordbench_test.go` | **on `main`** | the ecsscene binding's frame, drawn into a backend through gfx since [#537](https://github.com/dvoyni/cog/issues/537) |
 
-Only the last runs on a real engine, driven by a real `app.UpdateEvent`, and
-that distinction matters more than once below: three allocation constraints
+The last three rows run on a real engine, driven by a real `app.UpdateEvent`,
+and that distinction matters more than once below: three allocation constraints
 appeared **only** in situ and are invisible in every microbenchmark
-([The zero-allocation proof](https://github.com/dvoyni/cog/issues/243)).
+([The zero-allocation proof](https://github.com/dvoyni/cog/issues/243)). The
+implementation's benchmarks are the strongest evidence in this document, and
+every figure corrected against the implementation cites the ticket that
+measured it with them. The allocation tests beside them in the same package
+(`TestTheFrameSitsOnTheEnginesAllocationLine` and its siblings) log every
+steady-state count this document quotes, and a count read from them names the
+commit it was read at.
 
 Four honest limits on all of it.
 
@@ -1189,9 +1201,13 @@ and the lock set is about Stores. This corrects
 [#238](https://github.com/dvoyni/cog/issues/238), which had filters contributing
 no access; it is a data race, not a refinement.
 
-`ecs.With[T]` and `ecs.Or[…]` can arrive later as further field types without
-the derivation changing shape — the query-vocabulary growth axis requirement 3
-named. The rejected alternative was a second type parameter
+`ecs.With[T]` has shipped as a second filter type, and it may drive a Query
+where a `Without` may not ([The Driver](#the-driver),
+[#291](https://github.com/dvoyni/cog/issues/291)). `ecs.Or[…]` can still arrive
+later as a further field type without the derivation changing shape — the
+query-vocabulary growth axis requirement 3 named. An earlier revision listed
+`With[T]` beside `Or[…]` as future; it arrived without changing the derivation,
+which is the claim. The rejected alternative was a second type parameter
 (`ecs.Query[MoveQuery, ecs.Without[Disabled]]`), which separates access from
 matching more visibly but reintroduces a numbered family the moment you want two
 filters.
@@ -1268,27 +1284,63 @@ smallest *intersection*, unknowable without computing it; smallest-Store bounds
 candidates by the rarest Component's population, which flecs, bevy and Ark each
 arrived at independently.
 
-**A Query must name at least one present-typed Component or Tag**, checked at
-registration with a named error. A filter can never drive: `Without[T]`'s
-`owners` lists exactly the Entities to *exclude*, and nothing enumerates the
-complement. A `Without`-only Query would have to drive off `Entities`, which
-would put `read{*Entities}` into a Query's lock set for that reason rather than
-by design.
+**A Query must name at least one field it matches on presence — a Component, a
+Tag or a `With`** — checked at registration, where a Query of `Without`s alone,
+or of no fields, fails naming the Query
+([#291](https://github.com/dvoyni/cog/issues/291)). The Driver is the shortest
+Store among those fields, so a `With` is a Driver candidate like a Component
+field: its `owners` is a superset of the match set, exactly as a Component
+field's is. **A `Without` can never drive**: `Without[T]`'s `owners` lists
+exactly the Entities to *exclude*, and nothing enumerates the complement. An
+earlier revision said no filter could drive, and gave as a second reason that a
+`Without`-only Query would have to drive off `Entities` and so put
+`read{*Entities}` into its lock set for that reason rather than by design. That
+half is withdrawn: every System declares `read{*Entities}` unconditionally
+([The lock set](#the-lock-set), rule 1), so it could never have widened a lock
+set. The complement argument alone decides it.
 
 ### The known bad case, stated with its remedy
 
-Two large, mostly disjoint Stores — 5000 with `Body`, 5000 with `Collider`, 100
-with both:
+Two large, mostly disjoint Stores — 5 000 with `Body`, 5 000 with `Collider`,
+100 with both — on the implementation
+([#271](https://github.com/dvoyni/cog/issues/271); AMD Ryzen 9 7950X3D,
+go1.27.1, windows/amd64, 2026-09-12, `-count=5` medians):
 
-| | ns/op |
+| | ns/op | allocs |
+| --- | --- | --- |
+| drive off a 5 000-entity Store | 3 354 — yields 5 000 candidates, 100 survive | 0 |
+| drive off a 100-entity Tag on the intersection | **422 — 7.9× faster** | 0 |
+
+An earlier revision quoted 2 596 against 137 ns, 19×, from the Store model in
+`ecs-sparse-probe-bench`; the implementation measured 7.9×, and 19× is
+withdrawn. **The smaller ratio is not a smaller hazard.** The discard side
+matches the model: **0.60 ns per discarded candidate** against its 0.52 — real,
+linear, cheap. The whole difference is in the remedy arm, which on the
+implementation is a three-field Query doing real work per match — the Tag
+drives, two probes, two fills and the body's read-modify-write — at about
+**4.2 ns per matched Entity**, where the model's 137 ns implied about 1.4. It is
+per-match cost and not fixed cost: an overlap sweep of 10 / 100 / 1 000 Entities
+gives 65 / 435 / 4 113 ns, about 4.1 ns an Entity over ~26 ns fixed (#271).
+
+Spelled with `_ ecs.With[Solid]` instead of a `Solid Solid` field, the remedy
+costs the same, and it is the spelling the README recommends for presence a
+System matches on but does not read
+([#291](https://github.com/dvoyni/cog/issues/291); same machine, 2026-09-22,
+interleaved over ten rounds from two test binaries, medians, 0 allocs):
+
+| Query | ns/op |
 | --- | --- |
-| drive off a 5000-entity Store | 2596 — yields 5000 candidates, 100 survive |
-| drive off a 100-entity Tag on the intersection | **137 — 19× faster** |
+| `{Body *Body; Collider Collider}` — drives off 5 000 | 3 645 |
+| `{Body *Body; Collider Collider; Solid Solid}` | 477.65 |
+| **`{Body *Body; Collider Collider; _ ecs.With[Solid]}`** | **481.35** |
 
-0.52 ns per discarded candidate: real, linear, cheap. **The remedy is an
-app-maintained Tag**, which is just another Store and a very good Driver. There
-is deliberately **no ECS mechanism** for it: that road is EnTT groups, shipyard
-packs and bevy's sparse-set markers, and exclusivity is what kills all three.
+Both remedy spellings are 7.6× faster than the bad case in that session, within
+0.8% of each other.
+
+**The remedy is an app-maintained Tag**, which is just another Store and a very
+good Driver, named in the Query as `_ ecs.With[Solid]`. There is deliberately
+**no ECS mechanism** for it: that road is EnTT groups, shipyard packs
+and bevy's sparse-set markers, and exclusivity is what kills all three.
 
 ### The scale sweep nobody publishes
 
@@ -1458,9 +1510,10 @@ the built package confirms it, the unhoisted body re-issuing the load on every
 Entity.
 
 **No allocation cost at all**, which the implementation holds: a ten-thousand
-frame steady state is **6.004 objects a frame at 1k and 6.001 at 10k** for `In`
-+ `Feed`, against **6.004 and 6.003** for naming the event — the engine's own
-line, identical either way.
+frame steady state is **4.002 objects a frame at 1k and 4.002 at 10k** for `In`
++ `Feed`, against **4.003 and 4.002** for naming the event — the engine's own
+line, identical either way (`TestTheBoundFrameSitsOnTheEnginesAllocationLine`,
+read at da4a6ae; 6.004 / 6.001 and 6.004 / 6.003 before 98f84c8).
 
 **The time cost, however, did not survive implementation, and the number this
 spec first carried should not be quoted.** The prototype measured it whole-frame
@@ -1560,24 +1613,40 @@ hole than the redundancy is a cost.
 
 ### What the barrier costs, and where the cost actually is
 
-Three Systems over 2 000 Entities, the third iterating the same Entities in
-every mode and differing **only in what it declares**:
+Three Systems over 2 000 Entities: the two workers write different Components,
+and the third iterates **its own** Component, disjoint from the workers', in
+every arm, differing **only in what it declares**. These are the
+`BenchmarkBarrier*` benchmarks in `internal/types/spawnbench_test.go`
+(`barrierEntities = 2_000`). Time from
+[#272](https://github.com/dvoyni/cog/issues/272) (AMD Ryzen 9 7950X3D, go1.27.1,
+windows/amd64, 2026-09-12, medians of five); allocations read from the tree at
+da4a6ae (`-benchmem`):
 
 | third System declares | ns/frame | allocs |
 | --- | --- | --- |
-| *(absent — two workers only)* | 18 633 | 10 |
-| `read{*Entities}`, a Query | **30 230** | 11 |
-| `write{*Entities}` — a `Spawn` parameter it never uses | **36 016** | 11 |
-| the same, spawning and despawning one Entity a tick | **36 226** | 11 |
+| *(absent — two workers only)* | 13 695 | 8 |
+| `read{*Entities}`, a Query | **14 907** | 9 |
+| `write{*Entities}` — a `Spawn` parameter it never uses | **23 086** | 9 |
+| the same, spawning and despawning one Entity a tick | **23 335** | 9 |
 
-**The barrier costs ~6 µs a frame** — one scheduling round, exactly what the
-~2.2 µs task floor predicts for a writer draining readers and then releasing
-them. At 30 Hz that is **0.018% of a frame**, and it costs no allocation.
+**The barrier costs ~8.2 µs a frame** — one scheduling round, a writer draining
+every reader and then releasing them. At 30 Hz that is **0.025% of a frame**,
+and it costs no allocation: the declared arm allocates what the reading arm
+does. An earlier revision quoted 18 633 / 30 230 / 36 016 / 36 226 ns, ~6 µs and
+0.018%, from the prototype, with 10 / 11 / 11 / 11 allocations; the
+implementation measured ~8.2 µs, and every whole-frame count has been lower
+since 98f84c8 took the context out of the kernel. That revision also called ~6 µs
+"exactly what the ~2.2 µs task floor predicts"; that claim is withdrawn, since
+the figure moves with the composition. **The figure depends on the
+composition**: #272 found that when the third System's Component overlaps the
+workers', the barrier collapses to about **0.4 µs**. No benchmark in the tree
+reproduces the overlapping composition; the disjoint one above is the case
+where `*Entities` is the only difference between the arms.
 
 **The spawning itself is free.** Declaring a `Spawn` and never using it costs
-36 016 ns; actually spawning and despawning every tick costs 36 226 ns, inside
-the noise. **The entire cost is the declaration, and it is paid at
-registration.**
+23 086 ns; actually spawning and despawning every tick costs 23 335 ns, 249 ns
+more, which is the spawn and the despawn themselves. **The entire cost is the
+declaration, and it is paid at registration.**
 
 That is the line with teeth, and it becomes a usage rule:
 
@@ -1708,13 +1777,17 @@ element. It needs nothing beyond the `write{*Store[T]}` `Set[T]` holds, and does
 nothing where no reader watches `T` for Changed
 ([`hooks.md` § Changed is a difference in bytes](hooks.md#changed-is-a-difference-in-bytes)).
 
-**Gap.** The prototype builds `Query`, `Spawn`, `WriteableEntities`, `Read`,
+~~**Gap.** The prototype builds `Query`, `Spawn`, `WriteableEntities`, `Read`,
 `Write` and `In`, and it was the accessors' *cost* that was measured — on the
 Store model in `ecs-sparse-probe-bench`, not on a real engine.
 `Get`/`Set`/`Remove` as kernel-bound handles were never composed, so their
-allocation behaviour in situ is inferred from the others rather than observed.
-What would settle it: build the three, add them to the whole-frame allocation
-benchmark, and confirm they land on the same 6-per-tick line.
+allocation behaviour in situ is inferred from the others rather than observed.~~
+**Closed** by `TestTheAccessorsStayOnTheEnginesAllocationLine`
+([#273](https://github.com/dvoyni/cog/issues/273)): the three are composed as
+kernel-bound handles and sit on the engine's own line, flat in Entity count —
+at da4a6ae, 4.001 / 4.002 objects a frame at 1k / 10k following a Reference and
+4.002 / 4.002 adding and removing a Component per Entity, against a
+hand-written subscription's 4.006. The inference held.
 
 ### `All()` walks its Driver backwards, and that is a guarantee
 
@@ -1909,8 +1982,31 @@ Accessor.
 | a scattered target's `Body` **through the Reference** | **4360** |
 | both — the real homing shape | 8213 |
 
-Random access is the same probe the Driver already pays, **not a second-class
-path**. Three guarantees, written as tests, two of them free consequences of
+That table is the Store model's (`ecs-sparse-probe-bench`), not the
+implementation's. **Random access is the same probe the Driver already pays**,
+and that half held on the implementation: the bare probe costs **0.75 ns** with
+the resource cell hoisted. An earlier revision went on to call it **"not a
+second-class path"**, which was true of the probe and not of the handle as
+first built: `Get` paid a type assertion out of the resource cell on every call,
+where a Query pays it once a run — `Get.Of` **2.65 ns** a call, and a homing
+frame's slope **5.63 against a hand-written 1.98 ns an Entity**
+([#273](https://github.com/dvoyni/cog/issues/273), same machine, 2026-09-12).
+That is what the handle cost before #282. Since
+[#282](https://github.com/dvoyni/cog/issues/282) every accessor resolves its
+handles once an invocation, and what is left is stated rather than argued (AMD
+Ryzen 9 7950X3D, go1.27.1, windows/amd64, 2026-09-22, two test binaries
+interleaved over ten rounds, medians): `Get.Of` is **2.01 ns** a call against
+the hoisted probe's 0.75, the difference being the load of the cached field and
+the call, not the assertion; and the homing frame's slope is **4.46 against the
+hand-written 2.11 ns an Entity, 2.1×**. For comparison, a plain two-Component
+Query runs at 2.64 against its hand-written loop's 1.79, 1.5×
+([#280](https://github.com/dvoyni/cog/issues/280), which measured it with
+`All()`'s inlined two-field walk). **Following a Reference now costs about
+1.3 ns a call over the bare probe, and nothing in allocation.** The README's
+[What reaching another Entity costs](../README.md#what-reaching-another-entity-costs)
+carries both builds side by side.
+
+Three guarantees, written as tests, two of them free consequences of
 eager Despawn:
 
 - **a Reference to a despawned Entity simply misses** — no liveness check of its
@@ -2020,7 +2116,8 @@ what the limit bounds. A Command dispatched through the Executioner runs on the
 calling goroutine once its locks are granted, so the stall is charged to
 whichever frame is in flight, not to a frame of its own. Nothing here measures
 it; the write barrier alone measured
-[~6 µs a frame](#what-the-barrier-costs-and-where-the-cost-actually-is).
+[~8.2 µs a frame](#what-the-barrier-costs-and-where-the-cost-actually-is)
+([#272](https://github.com/dvoyni/cog/issues/272)).
 
 **No frame pays for it, and no lock set widens.** They are Commands, not
 Systems: a frame nobody reads from runs exactly the handlers and lock sets it
@@ -2338,29 +2435,74 @@ What was measured is not a microbenchmark: the decided design on a **real
 exactly where an allocation hides and none of them exists standalone.
 
 `allocs/op` per **whole frame** — publish, acquire every declared lock, run every
-System, wait:
+System, wait. The counts are the implementation's, read from the tree at
+da4a6ae: the allocation tests' steady-state logs, rounded, and a `-benchmem` run
+for the row only a benchmark measures. The B/op column is the prototype's,
+measured before 98f84c8, and was not re-measured:
 
-| shape | allocs/op | B/op | ECS share |
+| shape | allocs/op | B/op, prototype | ECS share |
 | --- | --- | --- | --- |
-| nothing subscribed | 2 | 160 | — |
-| **1 hand-written subscription, no ECS** | **6** | **320** | baseline |
-| 1 System, reflected, 1k **and** 10k | **6** | 320 | **0** |
-| 1 System, baked, 1k and 10k | **6** | 320 | **0** |
-| 3 Components / `Without` filter | **6** | 320 | **0** |
-| 2 Systems, disjoint writes | **10** | 608 | **0** |
-| move + spawn + despawn every tick | **10** | 611 | **0** |
+| nothing subscribed (`BenchmarkFrameNoSystem`) | 2 | 160 | — |
+| **1 hand-written subscription, no ECS** | **4** | **320** | baseline |
+| 1 System, reflected, 1k **and** 10k | **4** | 320 | **0** |
+| 1 System, baked, 1k and 10k | *not in the tree*; 6 on the prototype | 320 | 0 |
+| 2 Components and a `Without` filter | **4** | 320 | **0** |
+| 2 Systems, disjoint writes | *not reproduced in the tree*; 10 on the prototype | 608 | 0 |
+| move + spawn + despawn every tick | *not reproduced in the tree*; 10 on the prototype | 611 | 0 |
 
-**The engine charges 2 per publication plus 4 per subscriber, and every ECS
-shape lands exactly on that line — so the ECS contributes nothing**, including
-`Spawn` and `Despawn` running every tick in the last row.
+An earlier revision explained the column with a formula over publications and
+subscribers. It is withdrawn: it predicted
+26 objects for the six-subscriber ecsscene frame
+[#276](https://github.com/dvoyni/cog/issues/276) measured at a flat 15, and
+since 98f84c8 it does not fit one subscriber either, which costs 4. No formula
+replaces it.
+**What shows the ECS contributes nothing is a comparison, not a formula: the
+per-frame count is flat, independent of Entity count, and identical to a
+hand-written subscription in the same composition.** Per named composition, at
+da4a6ae:
+
+- **2** with nothing subscribed (`BenchmarkFrameNoSystem`);
+- **4** for one subscriber, hand-written or a System, at 1k and 10k, with or
+  without a `Without` filter (`TestTheFrameSitsOnTheEnginesAllocationLine`:
+  4.005 hand-written, 4.002 / 4.002, filtered 4.001 / 4.001);
+- **4** following a Reference, and adding and removing a Component per Entity
+  (`TestTheAccessorsStayOnTheEnginesAllocationLine`: 4.006 hand-written, 4.001 /
+  4.002 and 4.002 / 4.002);
+- **4** naming the event, with `In` + `Feed`, or with a resource in the
+  signature (`TestTheBoundFrameSitsOnTheEnginesAllocationLine`: 4.001–4.003);
+- **4** for one subscriber spawning and despawning every tick
+  (`TestStructuralChangeStaysOnTheEnginesAllocationLine`: 4.028, and 4.020 at
+  ten thousand a tick);
+- **8** for a System publishing one event (`TestWhatPublishingFromASystemCosts`:
+  8.051 against a silent System's 4.007, 4.044 for the publication);
+- **8 / 9 / 9 / 9** for the four barrier arms, two workers with disjoint writes
+  and a third System absent, reading, declaring a `Spawn`, and spawning
+  (`BenchmarkBarrier*`, [What the barrier
+  costs](#what-the-barrier-costs-and-where-the-cost-actually-is)).
+
+The prototype's two-System rows have no exact counterpart in the tree. The
+nearest in-tree composition is `BenchmarkBarrierAbsent` — two workers with
+disjoint writes over 2 000 Entities, at 8. The README's
+[What a Hook costs](../README.md#what-a-hook-costs) carries the Hook-reader
+frames.
+
+**The ecsscene frame is not one of these compositions.** Since #537 its benches
+draw the frame into a backend through gfx, replay included, and cost 18–20
+allocs/op, flat from 0 to 5 000 Entities. A drawn frame is not comparable to a
+hand-written subscription line, so its figures are ecsscene's to carry:
+[`ecsscene` README §What it costs](../../../ecsscene/docs/README.md#what-it-costs)
+and [`ecsscene.md` §What it costs](../../../ecsscene/docs/specs/ecsscene.md#what-it-costs).
 
 Identical at 1k and 10k, which is the real test: an allocation in the iteration
 would scale with entity count, and none does. **Steady state over 10 000
-frames**, because an average over `b.N` can hide amortised growth: **6.005
-objects a frame at 1 000 Entities, 6.003 at 10 000**; with structural change
-10.048, flat. Ten thousand spawns and ten thousand despawns add nothing — the
-free list recycles ids and the Store reuses the dense row, so growth stops at
-the high-water mark.
+frames**, because an average over `b.N` can hide amortised growth: **4.002
+objects a frame at 1 000 Entities and 4.002 at 10 000**, against the
+hand-written 4.005, at da4a6ae. On the prototype, before 98f84c8, it was 6.005
+and 6.003, and 10.048 with structural change in its two-System frame, which no
+test in the tree reproduces. With structural change on one subscriber the tree
+gives 4.028 at one spawn and despawn a tick and 4.020 at ten thousand. Ten
+thousand spawns and ten thousand despawns add nothing — the free list recycles
+ids and the Store reuses the dense row, so growth stops at the high-water mark.
 
 **Escape analysis reports no `moved to heap` anywhere on the iteration path**, so
 the zero is *explained by the compiler* rather than merely observed.
@@ -2376,8 +2518,12 @@ implementation.
    query struct, and the compiler names it (`moved to heap: buf`). In a
    microbenchmark the iterator inlines at the range site and the buffer stays on
    the stack; across a package boundary with a real callee — how every real
-   System will be written — it does not. Nothing changes semantically, since the
-   same buffer was already reused for every Entity.
+   System will be written — it does not. Nothing changes semantically within
+   one invocation, since the same buffer was already reused for every Entity.
+   Across invocations it holds because two invocations of one System never
+   overlap: every System's `Lock` declares `Exclusive`, so the buffer is never
+   shared by two runs at once ([A System is not
+   re-entrant](#a-system-is-not-re-entrant)).
 2. **`Spawn` stages its Component set through a field**, same hazard: taking the
    address of the parameter and handing it to cached closures
    heap-allocates it per spawn.
@@ -2420,9 +2566,12 @@ footprints.
 
 ### Concurrency
 
-Two Systems with disjoint write sets:
+Two Systems with disjoint write sets, on the prototype before 98f84c8; no test
+or benchmark in the tree reproduces this composition, so the allocation column
+is the prototype's (the nearest in-tree frame, `BenchmarkBarrierAbsent`, gives 8
+at da4a6ae):
 
-| | GOMAXPROCS=1 | GOMAXPROCS=32 | speedup | allocs |
+| | GOMAXPROCS=1 | GOMAXPROCS=32 | speedup | allocs, prototype |
 | --- | --- | --- | --- | --- |
 | 1 000 Entities | 12.3 µs | 13.3 µs | **0.92×** | 10 both |
 | 10 000 Entities | 64.6 µs | 44.0 µs | **1.47×** | 10 both |
@@ -2452,8 +2601,8 @@ stack (155 ns). The cause is unexplained; the consequence is not. 2.1 µs is the
 whole ~2.2 µs scheduling floor, so **a reflected call roughly doubles the cost
 of dispatching a cheap System.**
 
-The design does not depend on the resolution: both builders measure 6 allocs a
-frame, so **the reflective builder is correct and the baked one is an
+The design does not depend on the resolution: both builders measured 6 allocs a
+frame on the prototype before 98f84c8, the same line as each other, so **the reflective builder is correct and the baked one is an
 optimisation**. Fixed-arity generic constructors (`ToHandler1`, `ToHandler2`, …)
 are a **preference**, not a forced fallback — worth having because 2.1 µs a
 System a tick is real, not worth blocking v1 on, and orthogonal to
@@ -2745,9 +2894,12 @@ Hooks* block after it is built too.
   selection by scanning Store lengths, `All()` walking the Driver backwards over
   a half-open index range, the fill buffer **as a field of the Query**, and the
   unrolled fillers chosen by field count.
-- `Without[T]`, and `With[T]` if it is wanted in v1; the fill skips blank
+- `Without[T]`, and `With[T]`, which shipped and may drive
+  ([#291](https://github.com/dvoyni/cog/issues/291)); the fill skips blank
   fields.
-- The registration-time error for a Query naming no present-typed Component.
+- The registration-time error for a Query naming nothing it matches on
+  presence — `Without`s alone, or no fields — since a Query needs at least one
+  Component, Tag or `With` to drive it.
 - `ToHandler[E]` and `ToExecute[Req, Res]`; the parameter classification table
   above is the contract; a System returning anything is rejected.
 - `In[T]` and `Feed`.
@@ -2779,8 +2931,11 @@ Hooks* block after it is built too.
 
 - The whole-frame allocation benchmark on a real engine at 1k and 10k, with and
   without a structural change per tick, and a 10 000-frame steady state. The bar
-  is **6 allocations a frame with one subscriber, 10 with two** — the engine's
-  own line — and *identical* at both entity counts.
+  is the engine's own line — what a hand-written subscription in the same
+  composition costs — and *identical* at both entity counts. It read **6
+  allocations a frame with one subscriber, 10 with two** when it was written;
+  since 98f84c8 one subscriber costs 4, and the counts per composition are in
+  [The zero-allocation claim](#the-zero-allocation-claim).
 - `-gcflags=-m` on the iteration path showing no `moved to heap`, so the zero is
   explained rather than observed.
 - Timings in the classic `b.N` form, **never `testing.B.Loop`**, beside a

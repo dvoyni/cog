@@ -215,9 +215,9 @@ func accessorPopulation(tb testing.TB, n int) (*accessorWorld, []Entity) {
 
 // TestTheAccessorsStayOnTheEnginesAllocationLine is the Gap the spec recorded,
 // closed with a measurement instead of an inference. The bar is the engine's
-// own: 2 allocations per publication plus 4 per subscriber, identical at 1 000
-// and at 10 000 Entities — because an allocation inside an accessor would scale
-// with how many times it is called, which is once per Entity here.
+// own: what a hand-written subscription costs a frame, flat and identical at
+// 1 000 and at 10 000 Entities — because an allocation inside an accessor would
+// scale with how many times it is called, which is once per Entity here.
 //
 // It measures a steady state over ten thousand frames rather than an average
 // over b.N, because an average can hide amortised growth.
@@ -275,7 +275,7 @@ func TestTheAccessorsStayOnTheEnginesAllocationLine(t *testing.T) {
 }
 
 // TestAnAccessorCallAllocatesNothing prices the call itself rather than the
-// frame, which is the finer instrument: a frame's six objects would hide one
+// frame, which is the finer instrument: a frame's four objects would hide one
 // small allocation per Entity behind the engine's own noise only if the
 // population were tiny, and this counts the calls directly.
 func TestAnAccessorCallAllocatesNothing(t *testing.T) {

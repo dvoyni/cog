@@ -1243,27 +1243,33 @@ Measured on a real `kernel.Engine` driven by a real `app.UpdateEvent`, AMD Ryzen
 9 7950X3D, go1.27.1 windows/amd64. The **ns/op** column is the median of ten
 interleaved rounds, from the same binary and session as
 [What a wider Query costs](#what-a-wider-query-costs) below
-([#280](https://github.com/dvoyni/cog/issues/280)); the allocation columns
-predate that session and are
-[#283](https://github.com/dvoyni/cog/issues/283)'s to refresh:
+([#280](https://github.com/dvoyni/cog/issues/280)). The allocs/op column is
+read from the tree at da4a6ae
+([#283](https://github.com/dvoyni/cog/issues/283)); the B/op column was
+measured before 98f84c8 took the context out of the kernel, and was not
+re-measured:
 
-| whole frame | ns/op | allocs/op | B/op |
+| whole frame | ns/op | allocs/op | B/op, before 98f84c8 |
 | --- | --- | --- | --- |
 | nothing subscribed | 88 | **2** | 160 |
-| hand-written subscription, 1 000 | 7 759 | **6** | 322 |
-| **a System with a two-Component Query, 1 000** | **11 677** | **6** | 322 |
-| …the same Query with a `Without`, a third tagged, 1 000 | 13 493 | **6** | 322 |
-| hand-written subscription, 10 000 | 23 883 | **6** | 322 |
-| **a System with a two-Component Query, 10 000** | **35 437** | **6** | 321 |
-| …the same Query with a `Without`, a third tagged, 10 000 | 44 293 | **6** | 322 |
+| hand-written subscription, 1 000 | 7 759 | **4** | 322 |
+| **a System with a two-Component Query, 1 000** | **11 677** | **4** | 322 |
+| …the same Query with a `Without`, a third tagged, 1 000 | 13 493 | **4** | 322 |
+| hand-written subscription, 10 000 | 23 883 | **4** | 322 |
+| **a System with a two-Component Query, 10 000** | **35 437** | **4** | 321 |
+| …the same Query with a `Without`, a third tagged, 10 000 | 44 293 | **4** | 322 |
 
-**The engine charges 2 per publication plus 4 per subscriber, and the Query
-lands exactly on that line** — identical at 1 000 and at 10 000 Entities, which
-is the real test, because an allocation in the iteration would scale with the
-Entity count. Over a 10 000-frame steady state, which an average over `b.N`
-could hide amortised growth behind, it is **6.003 objects a frame at 1k and
-6.003 at 10k**, against the hand-written **6.015** — and **a filter changes
-none of it**: 6.003 at 1k and 6.001 at 10k with a `Without` in the Query.
+**The Query costs exactly what the hand-written subscription costs** —
+identical at 1 000 and at 10 000 Entities, which is the real test, because an
+allocation in the iteration would scale with the Entity count. That comparison,
+not a formula, is what shows the ECS adds nothing; an earlier revision explained
+the count with a formula over publications and subscribers, which over-counted
+and is withdrawn. Over a 10 000-frame steady state, which an
+average over `b.N` could hide amortised growth behind, it is **4.002 objects a
+frame at 1k and 4.002 at 10k**, against the hand-written **4.005** — and **a
+filter changes none of it**: 4.001 at 1k and 4.001 at 10k with a `Without` in
+the Query (`TestTheFrameSitsOnTheEnginesAllocationLine`, at da4a6ae; 6.003 /
+6.003 against 6.015 before 98f84c8).
 `-gcflags=-m` reports no `moved to heap` anywhere on the iteration path, so the
 zero is explained by the compiler rather than merely observed.
 
@@ -1454,16 +1460,23 @@ The barrier, on a real frame: three Systems over 2 000 Entities, the two workers
 writing different Components and the third iterating **its own** Component in
 every arm, differing **only in what it declares**.
 
+Time from [#272](https://github.com/dvoyni/cog/issues/272) (Ryzen 9 7950X3D,
+go1.27.1, 2026-09-12, medians of five); allocations read from the tree at
+da4a6ae (`BenchmarkBarrier*`, `-benchmem`; 10 / 11 / 11 / 11 before 98f84c8):
+
 | the third System declares | ns/frame | allocs/op |
 | --- | --- | --- |
-| *(absent — two workers only)* | 13 695 | 10 |
-| `read{*Entities}`, an ordinary Query | **14 907** | 11 |
-| `write{*Entities}` — a `Spawn` parameter it never uses | **23 086** | 11 |
-| the same, spawning and despawning one Entity a tick | **23 335** | 11 |
+| *(absent — two workers only)* | 13 695 | 8 |
+| `read{*Entities}`, an ordinary Query | **14 907** | 9 |
+| `write{*Entities}` — a `Spawn` parameter it never uses | **23 086** | 9 |
+| the same, spawning and despawning one Entity a tick | **23 335** | 9 |
 
 **The barrier costs ~8.2 µs a frame** — one scheduling round, which is what a
 writer draining every reader and then releasing them costs. At 30 Hz that is
-0.025% of a frame, and **it costs no allocation**.
+0.025% of a frame, and **it costs no allocation**. The figure is this
+composition's: with the third System's Component overlapping the workers',
+#272 saw the barrier collapse to about 0.4 µs, and no benchmark in the tree
+reproduces that composition.
 
 **The spawning itself is free, and the entire cost is the declaration.**
 Declaring a `Spawn` and never using it costs 23 086 ns; actually spawning and
@@ -1474,11 +1487,12 @@ registration, for the System's whole run, so the remedy is a smaller System and
 never a cheaper spawn.
 
 A frame containing a structural change stays on the engine's line, over a
-1 000-frame steady state with one subscriber: **6.03 objects a frame spawning
-and despawning one Entity a tick, and 6.01 spawning and despawning ten
-thousand**. Ten thousand structural changes a tick add nothing, because the free
-list recycles the ids and the Store reuses the dense row, so growth stops at the
-high-water mark. `-gcflags=-m` reports no `moved to heap` on the spawn path
+1 000-frame steady state with one subscriber: **4.028 objects a frame spawning
+and despawning one Entity a tick, and 4.020 spawning and despawning ten
+thousand** (`TestStructuralChangeStaysOnTheEnginesAllocationLine`, at da4a6ae;
+6.03 and 6.01 before 98f84c8). Ten thousand structural changes a tick add
+nothing, because the free list recycles the ids and the Store reuses the dense
+row, so growth stops at the high-water mark. `-gcflags=-m` reports no `moved to heap` on the spawn path
 either.
 
 The exclusion is measured with a control, because an observed occupancy of 1
@@ -1579,24 +1593,29 @@ declaration](#a-system-is-not-re-entrant) as the System's arguments.
 
 Same engine, same event, same medians. Two claims, and both are "nothing".
 
+The allocs/op column is read from the tree at da4a6ae
+([#283](https://github.com/dvoyni/cog/issues/283)); every row read 6, and the
+publishing row 12, before 98f84c8.
+
 | whole frame | ns/op | allocs/op |
 | --- | --- | --- |
-| a System naming `app.UpdateEvent`, 1 000 | 8 536 | **6** |
-| **a System with `In` + `Feed`, 1 000** | **8 629** | **6** |
-| …the same, `Get()` left inside the loop, 1 000 | 8 374 | **6** |
-| a recording System — Query + `Read` + `Write`, 1 000 | 8 513 | **6** |
-| a System naming `app.UpdateEvent`, 10 000 | 40 242 | **6** |
-| **a System with `In` + `Feed`, 10 000** | **39 650** | **6** |
-| …the same, `Get()` left inside the loop, 10 000 | 39 320 | **6** |
-| a recording System — Query + `Read` + `Write`, 10 000 | 38 011 | **6** |
-| a System publishing one event, 1 000 | 12 606 | **12** |
+| a System naming `app.UpdateEvent`, 1 000 | 8 536 | **4** |
+| **a System with `In` + `Feed`, 1 000** | **8 629** | **4** |
+| …the same, `Get()` left inside the loop, 1 000 | 8 374 | **4** |
+| a recording System — Query + `Read` + `Write`, 1 000 | 8 513 | **4** |
+| a System naming `app.UpdateEvent`, 10 000 | 40 242 | **4** |
+| **a System with `In` + `Feed`, 10 000** | **39 650** | **4** |
+| …the same, `Get()` left inside the loop, 10 000 | 39 320 | **4** |
+| a recording System — Query + `Read` + `Write`, 10 000 | 38 011 | **4** |
+| a System publishing one event, 1 000 | 12 606 | **8** |
 
 **`In` plus `Feed` costs no allocation over naming the event, and neither does a
-resource in the signature** — six objects a frame, the engine's own
-2-per-publication-plus-4-per-subscriber line, identical at 1 000 and at 10 000
-Entities. Over a ten-thousand-frame steady state: **6.004 at 1k and 6.001 at
-10k** for `In` + `Feed` against **6.004 and 6.003** for naming the event, and
-**6.002 at both** for the recording System. `-gcflags=-m` still reports no
+resource in the signature** — four objects a frame, what a hand-written
+subscription costs, identical at 1 000 and at 10 000 Entities. Over a
+ten-thousand-frame steady state (`TestTheBoundFrameSitsOnTheEnginesAllocationLine`,
+at da4a6ae): **4.002 at 1k and 4.002 at 10k** for `In` + `Feed` against **4.003
+and 4.002** for naming the event, and **4.002 and 4.001** for the recording
+System. `-gcflags=-m` still reports no
 `moved to heap` on any path a frame or a Command runs, and `queryCursor.row` and
 `queryCursor.fill` still inline. The package's one `moved to heap` is at
 registration: `entities`, the cell the `ShrinkCmd` factory's two closures share
@@ -1629,9 +1648,10 @@ changed — but the 10% is not reproduced here and should not be quoted.
 **Publishing from a System is the one thing that allocates**, and it is the
 kernel's charge rather than the ECS's: a publication is a goroutine, a
 completion handle and an event context. Measured over a two-thousand-frame
-steady state, a System that publishes one event costs **12.046 objects a frame
-against a silent System's 6.005** — **6.04 for the publication**, which is one
-more publication's worth of exactly the line every other row here sits on. A
+steady state, a System that publishes one event costs **8.051 objects a frame
+against a silent System's 4.007** — **4.044 for the publication**
+(`TestWhatPublishingFromASystemCosts`, at da4a6ae; 12.046 against 6.005 before
+98f84c8). A
 System that publishes per Entity would pay it per Entity; publish once a frame,
 or not at all.
 
@@ -1851,16 +1871,18 @@ reader's trade.
 #### Memory
 
 **Allocations.** Every arm stays on the engine's line. Over a 5 000-frame steady
-state (`TestAHookReaderStaysOnTheAllocationLine`), in objects a frame:
+state (`TestAHookReaderStaysOnTheAllocationLine`), in objects a frame, read from
+the tree at da4a6ae ([#283](https://github.com/dvoyni/cog/issues/283)); each
+row sat two higher before 98f84c8:
 
 | frame | control, 1k / 10k | with the readers, 1k / 10k |
 | --- | --- | --- |
-| `churn` + `HookAddedRemoved` | 13.075 / 13.028 | 13.046 / 13.036 |
-| `churn` + `HookAll` | 13.075 / 13.028 | 13.032 / 13.011 |
-| `churn` + `move` + `HookAddedRemoved` | 14.035 / 14.025 | 14.005 / 14.011 |
-| spawn and despawn + `HookSpawnedDespawned` | 10.024 / 10.002 | 10.019 / 10.011 |
-| `move` + `HookAddedChanged` | 10.007 / 10.006 | 10.009 / 10.031 |
-| `move` + 4 × `HookAll` | 14.055 / 14.045 | 14.045 / 14.025 |
+| `churn` + `HookAddedRemoved` | 11.061 / 11.058 | 11.043 / 11.014 |
+| `churn` + `HookAll` | 11.061 / 11.058 | 11.015 / 11.009 |
+| `churn` + `move` + `HookAddedRemoved` | 12.003 / 12.027 | 12.016 / 12.009 |
+| spawn and despawn + `HookSpawnedDespawned` | 8.002 / 8.002 | 8.005 / 8.006 |
+| `move` + `HookAddedChanged` | 8.008 / 8.013 | 8.016 / 8.009 |
+| `move` + 4 × `HookAll` | 12.029 / 12.032 | 12.033 / 12.033 |
 
 `testing.AllocsPerRun` reports 0 for `UpdateFor`, `From`, `Ref`, `MarkChanged`,
 a `*T` field, Spawn and Despawn on a watched Store after its first watched run.

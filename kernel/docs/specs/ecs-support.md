@@ -32,7 +32,10 @@ generic registration in the owning plugin**:
 
 ```go
 func RegisterComponent[C any](r *kernel.Registrar, ids uint32) *Store[C] {
-	en := r.Dependency[*Entities]()   // item 7
+	en, err := r.Dependency[*Entities]()   // item 7
+	if err != nil {
+		panic(err)   // the plugin boundary reports it as ErrPluginPanic
+	}
 	s := NewStore[C](en, ids)
 	r.InitResource[*Store[C]](s)   // an ordinary resource, with an ordinary owner
 	// … enrol with Entities, bake the per-type closures …
