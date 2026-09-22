@@ -5,7 +5,6 @@ import (
 	"math"
 	"unsafe"
 
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -39,7 +38,7 @@ type skinnedVertex struct {
 // table resolves a model's geometry through the same layout cache every other
 // mesh takes - one dense id per Go type - rather than through a second path
 // that would have to intern layouts of its own.
-func (skinnedVertex) VertexLayout() []gfx.VertexAttr { return model.SkinnedVertexLayout() }
+func (skinnedVertex) VertexLayout() []gfx.VertexAttr { return SkinnedVertexLayout() }
 
 // PackVertices writes the storage bytes of standard-layout vertices into the
 // arena and reports the span they landed in, together with the bounding sphere
@@ -69,7 +68,7 @@ func (skinnedVertex) VertexLayout() []gfx.VertexAttr { return model.SkinnedVerte
 // one function that writes a standard vertex's storage bytes, and which the
 // glTF path shares - into two halves only this path uses.
 //
-// See bundles/scene/docs/specs/mesh.md, "The per-mesh record", and
+// See bundles/model/docs/specs/mesh.md, "The per-mesh record", and
 // github.com/dvoyni/cog/issues/261.
 //
 // It writes native-endian words for the same reason indexBytes does: a
@@ -198,18 +197,18 @@ func packInto(dst []byte, vertices []Vertex, mesh SceneMesh) {
 // the identity where the mesh has no range of its own, so there is no branch
 // here for the mesh that names slot 0.
 func packVertex(dst []byte, vertex Vertex, mesh SceneMesh) {
-	putVec3(dst[storagePosition:], vertex.Position)
+	putVec3(dst[StoragePosition:], vertex.Position)
 	normalX, normalY := packNormal(vertex.Normal)
-	binary.NativeEndian.PutUint16(dst[storageNormal:], normalX)
-	binary.NativeEndian.PutUint16(dst[storageNormal+2:], normalY)
-	binary.NativeEndian.PutUint32(dst[storageTangent:], packTangent(vertex.Tangent))
-	putUV(dst[storageUV0:], vertex.UV0, mesh.UV0Scale, mesh.UV0Bias)
-	putUV(dst[storageUV1:], vertex.UV1, mesh.UV1Scale, mesh.UV1Bias)
+	binary.NativeEndian.PutUint16(dst[StorageNormal:], normalX)
+	binary.NativeEndian.PutUint16(dst[StorageNormal+2:], normalY)
+	binary.NativeEndian.PutUint32(dst[StorageTangent:], packTangent(vertex.Tangent))
+	putUV(dst[StorageUV0:], vertex.UV0, mesh.UV0Scale, mesh.UV0Bias)
+	putUV(dst[StorageUV1:], vertex.UV1, mesh.UV1Scale, mesh.UV1Bias)
 	colour := vertex.Color
-	dst[storageColor+0] = packUnorm8(colour.R)
-	dst[storageColor+1] = packUnorm8(colour.G)
-	dst[storageColor+2] = packUnorm8(colour.B)
-	dst[storageColor+3] = packUnorm8(colour.A)
+	dst[StorageColor+0] = packUnorm8(colour.R)
+	dst[StorageColor+1] = packUnorm8(colour.G)
+	dst[StorageColor+2] = packUnorm8(colour.B)
+	dst[StorageColor+3] = packUnorm8(colour.A)
 }
 
 // packSkin writes the skinned layout's last eight bytes over a vertex whose
@@ -226,10 +225,10 @@ func packVertex(dst []byte, vertex Vertex, mesh SceneMesh) {
 // writes past the standard layout's stride.
 func packSkin(dst []byte, joints [4]uint16, weights m.Vec4) {
 	for i, joint := range joints {
-		dst[storageJoints+i] = packJoint(joint)
+		dst[StorageJoints+i] = packJoint(joint)
 	}
 	for i, weight := range [4]float32{weights.X, weights.Y, weights.Z, weights.W} {
-		dst[storageWeights+i] = packWeight(weight)
+		dst[StorageWeights+i] = packWeight(weight)
 	}
 }
 

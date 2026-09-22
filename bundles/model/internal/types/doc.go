@@ -2,7 +2,18 @@
 // machinery behind them: the authoring vertex and the storage layout it packs
 // into, the unit geometry generators, and the glTF decoder's output and
 // reports, which the decoder in internal/types/gltf declares and this package
-// names.
+// names; the Lookup with its two scoped facades, Config, which the Lookup
+// holds, the model and texture caches with their loaders and unloads, and the
+// conversion of the decoded glTF into vertices, baked poses, morph blocks and
+// PBR records behind them; the mesh table with its minting, staging and
+// deferred bakes, and the unit meshes; the bundled PBR material, which names
+// no pass; and the per-frame animation and morph resolution a renderer packs
+// from.
+//
+// A renderer reaches the Lookup's residency through the Lookup's own exported
+// methods - ModelView, Mesh, EnsureUnit, EnsureBundled and DrainMeshes - and a
+// MeshRef's through Source, Index and Generation, because nothing outside
+// bundles/model can import this package.
 //
 // Go allows nothing outside bundles/model to import this package. Nothing
 // declared here imports the root, which is what keeps the arrangement acyclic.

@@ -115,27 +115,6 @@ type ModelDraw struct {
 	OverrideParams []gfx.ParameterDescr
 }
 
-// ModelLight is one KHR_lights_punctual light a model file declares, in the
-// model's own space, with its node's flattened transform already applied.
-//
-// Lights are exposed as data and nothing converts one automatically. A file's
-// lights are authored for the file, not for the scene it is dropped into: a
-// lamp prop placed forty times would silently blow the sixteen-light per-pass
-// cap, and which of a level's lights matter is the app's judgement, not the
-// loader's. So an app reads these and declares the ones it wants through
-// PointLight and SpotLight, at whatever world transform it drew the model at.
-type ModelLight struct {
-	Name string
-	// Directional marks a glTF directional light, which scene has no recording
-	// call for at all - the one directional light scene shades with is the
-	// camera's own sun. Descr.Direction is the only placement such a light has.
-	Directional bool
-	// Descr is the light as scene's own recording calls take it, so declaring
-	// one is PointLight(layers, light.Descr) with the position and direction
-	// carried into world space.
-	Descr LightDescr
-}
-
 // ModelDrawRecord is one recorded Model call. It is kept apart from DrawRecord
 // because a model draw expands into one draw per primitive at flush time, and
 // the expansion needs the path to be resolved against residency first - a

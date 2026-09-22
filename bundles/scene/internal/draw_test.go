@@ -4,8 +4,8 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -216,11 +216,11 @@ func TestAFrameWithNoBoxesStillEmitsItsPass(t *testing.T) {
 
 func TestTheBundledShaderIsMountedForTheFirstFrame(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {})
-	embedded, err := shaderFS.ReadFile(types.SceneShaderPath)
+	embedded, err := shaderFS.ReadFile(model.SceneShaderPath)
 	if err != nil {
 		t.Fatalf("read the embedded shader: %v", err)
 	}
-	mounted := h.readFile(t, types.SceneShaderPath)
+	mounted := h.readFile(t, model.SceneShaderPath)
 	if string(mounted) != string(embedded) {
 		t.Fatal("the mounted shader differs from the embedded source")
 	}
@@ -302,9 +302,9 @@ func TestTheMaterialRecordIsBoundAsItsOwnRange(t *testing.T) {
 	if len(materials) != 1 {
 		t.Fatalf("scenePbrMaterial was bound %d times, want once per draw", len(materials))
 	}
-	if materials[0].size != int(unsafe.Sizeof(types.ScenePbrRecord{})) {
+	if materials[0].size != int(unsafe.Sizeof(model.ScenePbrRecord{})) {
 		t.Fatalf("the material range is %d bytes, want the %d-byte record",
-			materials[0].size, unsafe.Sizeof(types.ScenePbrRecord{}))
+			materials[0].size, unsafe.Sizeof(model.ScenePbrRecord{}))
 	}
 }
 

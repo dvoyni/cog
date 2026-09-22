@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
@@ -17,7 +17,7 @@ import (
 func flattenedSceneShader(t testing.TB, opts ...gfx.ShaderOption) string {
 	t.Helper()
 	text, err := flattenShader(t, shaderMountID, shaderFS,
-		types.SceneShader(append([]gfx.ShaderOption{
+		model.SceneShader(append([]gfx.ShaderOption{
 			gfx.ShaderDefine("SCENE_SKIN"), gfx.ShaderDefine("SCENE_MORPH"),
 		}, opts...)...))
 	if err != nil {
@@ -50,7 +50,7 @@ func TestTheSplitFlattensToExactlyItsSourcesLineCount(t *testing.T) {
 	}
 
 	text, err := flattenShader(t, shaderMountID, shaderFS,
-		types.SceneShader(gfx.ShaderDefine("SCENE_SKIN"), gfx.ShaderDefine("SCENE_MORPH")))
+		model.SceneShader(gfx.ShaderDefine("SCENE_SKIN"), gfx.ShaderDefine("SCENE_MORPH")))
 	if err != nil {
 		t.Fatalf("flatten: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestEveryVariantFlattensToTheSameLineCount(t *testing.T) {
 		for _, name := range defines {
 			opts = append(opts, gfx.ShaderDefine(name))
 		}
-		text, err := flattenShader(t, shaderMountID, shaderFS, types.SceneShader(opts...))
+		text, err := flattenShader(t, shaderMountID, shaderFS, model.SceneShader(opts...))
 		if err != nil {
 			t.Fatalf("%v: flatten: %v", defines, err)
 		}
@@ -175,7 +175,7 @@ func TestTheSplitUsesTwoDefinesAndOneConst(t *testing.T) {
 // own default and scene supplies MaxLights over it, so the two are one value.
 func TestSceneSuppliesItsOwnLightCap(t *testing.T) {
 	if !strings.Contains(flattenedSceneShader(t), "const SCENE_MAX_LIGHTS = 16;") {
-		t.Fatalf("the flattened module does not carry scene's cap of %d", types.MaxLights)
+		t.Fatalf("the flattened module does not carry scene's cap of %d", model.MaxLights)
 	}
 }
 

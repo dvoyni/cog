@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -300,7 +301,7 @@ func drawnSphere(t *testing.T, h *harness) m.Sphere {
 		if len(draws) == 0 {
 			t.Fatal("no draws were expanded")
 		}
-		sphere = prepareDraw(draws[0], types.MeshRecord{}).sphere
+		sphere = prepareDraw(draws[0], model.MeshRecord{}).sphere
 	})
 	return sphere
 }

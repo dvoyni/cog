@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -53,7 +54,7 @@ type materialTable struct {
 // reset starts a frame, interning the bundled PBR's four variants first and in
 // variant order, so that a draw naming no material of its own resolves to its
 // variant with no map probe at all.
-func (t *materialTable) reset(bundled [types.VariantCount]scene.Material) {
+func (t *materialTable) reset(bundled [model.VariantCount]scene.Material) {
 	if t.keys == nil {
 		t.keys = map[types.MaterialKey]int32{}
 		t.tags = map[scene.PassTag]tagID{}
@@ -115,7 +116,7 @@ func (t *materialTable) entry(interned int32, tag tagID) (materialEntry, bool) {
 // zero when nothing did - a model's own materials - in which case it is taken
 // here. A draw naming a material pays the fingerprint once either way.
 func (t *materialTable) intern(
-	report func(error), material scene.Material, key types.MaterialKey, variant types.ShaderVariant,
+	report func(error), material scene.Material, key types.MaterialKey, variant model.ShaderVariant,
 ) int32 {
 	if material == nil {
 		return int32(variant)

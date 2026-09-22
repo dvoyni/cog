@@ -1,6 +1,9 @@
 package scene
 
-import "github.com/dvoyni/cog/bundles/scene/internal/types"
+import (
+	"github.com/dvoyni/cog/bundles/model"
+	"github.com/dvoyni/cog/bundles/scene/internal/types"
+)
 
 // OpQueue is the frame-local writable resource gameplay records cameras, models,
 // meshes, lights and debug shapes into. The scene plugin consumes and
@@ -15,12 +18,7 @@ import "github.com/dvoyni/cog/bundles/scene/internal/types"
 // nothing between the caller and the queue; consuming it is the plugin's alone.
 type OpQueue = types.OpQueue
 
-// Lookup is the single scene-owned persistent resource. It holds everything
-// that outlives a frame — loaded models, baked pose and morph buffers, the
-// path-keyed texture cache, buffer-built meshes and scene's own unit meshes —
-// plus the deferred bakes and buffer releases the flush applies at the frame
-// boundary.
-//
-// It never retains a filesystem or GPU handle of its own. Query and mutate it
-// only through a scoped LookupAccess or LookupDeviceAccess.
-type Lookup = types.Lookup
+// Lookup is model's persistent resource, which the model plugin registers and
+// scene's flush reads and drives. It is aliased here until the sweep rewrites
+// scene's callers to name model.Lookup.
+type Lookup = model.Lookup

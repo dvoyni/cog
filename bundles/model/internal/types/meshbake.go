@@ -62,7 +62,7 @@ func (la LookupAccess) BakeMesh[TVertex VertexLayout](
 	if !la.Valid() {
 		return MeshRef{}
 	}
-	input, err := mintMesh[TVertex](
+	input, err := MintMesh[TVertex](
 		&la.lookup.layouts, &la.lookup.staging, vertices, indices, topology, true)
 	if err != nil {
 		la.kernel.ReportError(err)
@@ -99,18 +99,18 @@ func (la LookupAccess) UpdateMesh[TVertex VertexLayout](
 	if !la.Valid() {
 		return false
 	}
-	if ref.source == MeshTemporary {
+	if ref.source > MeshDurable {
 		la.kernel.ReportError(ErrMeshUpdateRejected{
 			Mesh: ref.ID(), Reason: "it is a temporary mesh, which is rebuilt by recording it again",
 		})
 		return false
 	}
-	record, ok := la.lookup.mesh(ref)
+	record, ok := la.lookup.Mesh(ref)
 	if !ok {
 		la.kernel.ReportError(ErrMeshUnavailable{Mesh: ref.ID()})
 		return false
 	}
-	input, err := mintMesh[TVertex](
+	input, err := MintMesh[TVertex](
 		&la.lookup.layouts, &la.lookup.staging, vertices, indices, record.Topology, true)
 	if err != nil {
 		la.kernel.ReportError(err)
@@ -155,7 +155,7 @@ func (la LookupAccess) ReleaseMesh(ref MeshRef) {
 // resident model's geometry through exactly this path - the alternative being a
 // second retirement rule that could drift from this one.
 func (l *Lookup) releaseMesh(ref MeshRef) bool {
-	record, ok := l.mesh(ref)
+	record, ok := l.Mesh(ref)
 	if !ok {
 		return false
 	}
@@ -174,21 +174,21 @@ func (l *Lookup) releaseMesh(ref MeshRef) bool {
 
 // stage queues the upload of one mint, whose bytes the mint already wrote into
 // the staging arena.
-func (l *Lookup) stage(ref MeshRef, input meshInput, rebake bool) {
+func (l *Lookup) stage(ref MeshRef, input MeshInput, rebake bool) {
 	l.pendingMeshes = append(l.pendingMeshes, pendingMesh{
 		id: ref.id, generation: ref.generation, rebake: rebake,
 		Vertices: input.vertices, indices: input.indices,
 	})
 }
 
-// drainMeshes applies everything the frame's callers queued: the uploads first,
+// DrainMeshes applies everything the frame's callers queued: the uploads first,
 // then the releases, so a mesh baked and released in one frame never reaches
 // the GPU at all.
 //
 // An upload whose slot has moved on is dropped. The staging arena is handed to
 // gfx rather than reused, because the bake takes the bytes without copying
 // them; the next frame grows a fresh one.
-func (l *Lookup) drainMeshes(baker MeshBaker) {
+func (l *Lookup) DrainMeshes(baker MeshBaker) {
 	for _, pending := range l.pendingMeshes {
 		record := &l.meshes[pending.id-1]
 		if record.generation != pending.generation {

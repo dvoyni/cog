@@ -20,7 +20,7 @@ func indexWidthOf(t testing.TB, h *harness, ref scene.MeshRef) (gfx.IndexWidth, 
 	var size int
 	found := false
 	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
-		record, ok := types.LookupMesh(lookup, ref)
+		record, ok := lookup.Mesh(ref)
 		found = ok
 		width, size = record.IndexWidth, record.Indices.Size()
 	}})
@@ -60,7 +60,7 @@ func TestATemporaryMeshKeepsUint32Indices(t *testing.T) {
 		ref := q.TemporaryMesh(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 		q.Mesh(0, ref, scene.MeshDraw{NeverCull: true})
 		mesh := types.OpQueueRecordedMeshes(q).Temporaries[len(types.OpQueueRecordedMeshes(q).Temporaries)-1]
-		record := mesh.Record(types.OpQueueRecordedMeshes(q).Arena)
+		record := mesh.InlineRecord(types.OpQueueRecordedMeshes(q).Arena)
 		width, size = record.IndexWidth, record.Indices.Size()
 	})
 	h.frame()
@@ -140,10 +140,10 @@ func TestAModelPrimitiveNarrowsItsIndices(t *testing.T) {
 	var widths []gfx.IndexWidth
 	var sizes []int
 	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
-		for i := range types.LookupMeshes(lookup) {
-			if types.LookupMeshes(lookup)[i].Indexed {
-				widths = append(widths, types.LookupMeshes(lookup)[i].IndexWidth)
-				sizes = append(sizes, types.LookupMeshes(lookup)[i].Indices.Size())
+		for _, mesh := range durableMeshes(lookup) {
+			if mesh.Indexed {
+				widths = append(widths, mesh.IndexWidth)
+				sizes = append(sizes, mesh.Indices.Size())
 			}
 		}
 	}})
@@ -169,9 +169,9 @@ func TestAUnitMeshNarrowsItsIndices(t *testing.T) {
 	var size int
 	found := 0
 	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
-		for i := range types.LookupMeshes(lookup) {
-			if types.LookupMeshes(lookup)[i].Indexed {
-				width, size = types.LookupMeshes(lookup)[i].IndexWidth, types.LookupMeshes(lookup)[i].Indices.Size()
+		for _, mesh := range durableMeshes(lookup) {
+			if mesh.Indexed {
+				width, size = mesh.IndexWidth, mesh.Indices.Size()
 				found++
 			}
 		}

@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -44,7 +45,7 @@ func TestMutatingAMeshMaterialParameterAfterRecordingChangesNothingDrawn(t *test
 		original := slices.Clone(params)
 		material := func(params []gfx.ParameterDescr) scene.Material {
 			return scene.Material{{Descr: gfx.MaterialWithState(
-				gfx.ShaderWithResource(types.SceneShaderPath), gfx.StateOpaque3D(), params...,
+				gfx.ShaderWithResource(model.SceneShaderPath), gfx.StateOpaque3D(), params...,
 			)}}
 		}
 		q.Mesh(0, ref, scene.MeshDraw{Material: material(params), NeverCull: true})
@@ -161,7 +162,7 @@ func TestASharedMeshMaterialIsCopiedAfreshEachFrame(t *testing.T) {
 // a caller that rewrites params rewrites the material.
 func materialOver(params []gfx.ParameterDescr) scene.Material {
 	return scene.Material{{Descr: gfx.MaterialWithState(
-		gfx.ShaderWithResource(types.SceneShaderPath), gfx.StateOpaque3D(), params...,
+		gfx.ShaderWithResource(model.SceneShaderPath), gfx.StateOpaque3D(), params...,
 	)}}
 }
 

@@ -48,12 +48,12 @@ type ModelView struct {
 // in one file are two reports and one typo drawn every frame is still one.
 type ModelSelectorError interface {
 	error
-	reportKey() string
+	ReportKey() string
 }
 
-func (e ErrModelSceneMissing) reportKey() string   { return "model:" + e.Model + "#scene:" + e.Scene }
-func (e ErrModelNodeMissing) reportKey() string    { return "model:" + e.Model + "#" + e.Node }
-func (e ErrModelNodeDegenerate) reportKey() string { return "model:" + e.Model + "#" + e.Node }
+func (e ErrModelSceneMissing) ReportKey() string   { return "model:" + e.Model + "#scene:" + e.Scene }
+func (e ErrModelNodeMissing) ReportKey() string    { return "model:" + e.Model + "#" + e.Node }
+func (e ErrModelNodeDegenerate) ReportKey() string { return "model:" + e.Model + "#" + e.Node }
 
 // View resolves one draw's selectors against a resident model, or says why the
 // draw is skipped.

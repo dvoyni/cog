@@ -8,11 +8,11 @@ import (
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
-// Lookup is the single scene-owned persistent resource. It holds everything
-// that outlives a frame — loaded models, baked pose and morph buffers, the
-// texture cache, buffer-built meshes and scene's own unit meshes —
-// plus the deferred bakes and buffer releases the flush applies at the frame
-// boundary.
+// Lookup is model's persistent resource, the one every renderer reads. It holds
+// everything that outlives a frame — loaded models, baked pose and morph
+// buffers, the texture cache, buffer-built meshes and the unit meshes — plus
+// the deferred bakes and buffer releases a renderer's flush applies at the
+// frame boundary.
 //
 // It never retains a filesystem or GPU handle of its own. Query and mutate it
 // only through a scoped LookupAccess or LookupDeviceAccess.
@@ -24,7 +24,7 @@ type Lookup struct {
 	meshes     []MeshRecord
 	freeMeshes []uint32
 	// layouts interns the vertex layouts durable meshes were baked from.
-	layouts layoutCache
+	layouts LayoutCache
 	// staging holds the bytes BakeMesh and UpdateMesh copied out of their
 	// callers, and pendingMeshes the uploads waiting on them. The arena is
 	// handed to gfx wholesale at the flush and a fresh one grown after, rather
@@ -36,9 +36,9 @@ type Lookup struct {
 	// released at the frame boundary so nothing the frame already recorded
 	// draws from a dead buffer.
 	pendingReleases []gfx.BufferDescr
-	// unit holds scene's own meshes - the box, sphere and plane the debug
+	// unit holds the unit meshes - the box, sphere and plane a renderer's debug
 	// vocabulary draws - each baked on first use.
-	unit [shapeCount]MeshRef
+	unit [unitMeshCount]MeshRef
 	// models is the model cache, keyed by the path that is a model's only cache
 	// key, and textures the scene-owned texture cache every loaded model's
 	// materials bind out of. They are two caches rather than two tiers of one,
@@ -63,12 +63,12 @@ type Lookup struct {
 	// first use around the two default textures. It is not a package-level value because those textures
 	// are baked resources: the backend may not be Ready() at startup, and a
 	// texture baked then would either panic or silently not exist.
-	bundled    [VariantCount]Material
+	bundled    [VariantCount]gfx.MaterialDescr
 	hasBundled bool
 }
 
-// NewLookup builds an empty Lookup at scene's default configuration; see
-// scene.NewLookup.
+// NewLookup builds an empty Lookup at model's default configuration; see
+// model.NewLookup.
 func NewLookup() *Lookup { return NewSizedLookup(WithDefaults(Config{})) }
 
 // NewSizedLookup builds an empty Lookup for config, which is already complete.
@@ -153,16 +153,17 @@ func (la LookupDeviceAccess) resolve(path string) (*residentModel, bool) {
 	return model, err == nil
 }
 
-// ensureBundled builds the bundled PBR's four variants the first time something
-// draws, baking the two 1x1 default textures they bind into every absent slot,
-// and returns the same materials forever after.
+// EnsureBundled builds the bundled PBR's four forward materials the first time
+// something draws, baking the two 1x1 default textures they bind into every
+// absent slot, and returns the same materials forever after. A renderer wraps
+// them under its own pass tag.
 //
 // 1x1 rather than larger because uploads carry no row-alignment rule and for a
 // constant texel every mip level is identical, so there is nothing to generate.
 // Both are linear-format: 1.0 is a fixed point of the sRGB transfer curve, so
 // the white texel reads 1.0 through an sRGB slot and a linear one alike, and
 // the flat normal is not a picture at all.
-func (l *Lookup) ensureBundled(bake bakeTextureFunc) [VariantCount]Material {
+func (l *Lookup) EnsureBundled(bake BakeTextureFunc) [VariantCount]gfx.MaterialDescr {
 	if l.hasBundled {
 		return l.bundled
 	}

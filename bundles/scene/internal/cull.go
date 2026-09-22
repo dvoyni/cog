@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -35,7 +36,7 @@ type preparedDraw struct {
 // Drawing too much is a performance problem you can see and profile. Never-cull
 // is never reported for the same reason: it is the documented default, not an
 // error.
-func resolveBounds(neverCull bool, explicit m.Sphere, mesh types.MeshRecord) (m.Sphere, bool) {
+func resolveBounds(neverCull bool, explicit m.Sphere, mesh model.MeshRecord) (m.Sphere, bool) {
 	switch {
 	case neverCull:
 		return m.Sphere{}, false
@@ -52,7 +53,7 @@ func resolveBounds(neverCull bool, explicit m.Sphere, mesh types.MeshRecord) (m.
 // exact under a uniform scale, conservative under a non-uniform one - a per-axis
 // Scale, a shape's stretch, or a model primitive's flattened node world - since
 // a sphere under non-uniform scale is not a sphere.
-func prepareDraw(record types.DrawRecord, mesh types.MeshRecord) preparedDraw {
+func prepareDraw(record types.DrawRecord, mesh model.MeshRecord) preparedDraw {
 	world := record.World()
 	prepared := preparedDraw{world: world, anim: record.Anim}
 	if local, cull := resolveBounds(record.NeverCull, record.Bounds, mesh); cull {

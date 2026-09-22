@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"slices"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -315,7 +316,7 @@ func (r DrawRecord) World() m.Mat4 {
 func (r DrawRecord) PbrRecord() ScenePbrRecord {
 	record := r.basePbrRecord()
 	if r.OverridesRecord {
-		overrideRecord(&record, r.Params)
+		record.Override(r.Params)
 	}
 	return record
 }
@@ -327,7 +328,7 @@ func (r DrawRecord) basePbrRecord() ScenePbrRecord {
 	if r.Pbr != nil {
 		return *r.Pbr
 	}
-	record := defaultPbrRecord()
+	record := model.DefaultPbrRecord()
 	record.MetallicFactor = 0
 	if r.Shape == ShapeNone {
 		return record

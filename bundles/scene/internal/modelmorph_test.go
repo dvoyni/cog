@@ -5,6 +5,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -32,7 +33,7 @@ func morphModel(t testing.TB) *gltf.Document {
 // twelve-byte header for each of the two targets, and one two-word record each,
 // because each shape moves one of the three vertices. The dense float layout
 // stored six sixteen-byte records for the same file.
-const morphModelWords = types.MorphRangeWords + 2*types.MorphTargetHeaderWords + 2*2
+const morphModelWords = model.MorphRangeWords + 2*model.MorphTargetHeaderWords + 2*2
 
 // animBlock is one instance's sceneAnim block decoded out of the frame's arena:
 // the header words the shader reads before it loops, and the sparse morph list
@@ -49,7 +50,7 @@ type animBlock struct {
 	// nothing writes it now, and a block that still does is a block whose
 	// header the shader and the packer disagree about.
 	reserved uint32
-	targets  []types.SceneMorphWeight
+	targets  []model.SceneMorphWeight
 }
 
 func decodeAnimBlock(t *testing.T, arena []byte, offset uint32) animBlock {
@@ -68,10 +69,10 @@ func decodeAnimBlock(t *testing.T, arena []byte, offset uint32) animBlock {
 		morphStride: word(base + 12),
 		reserved:    word(base + 16),
 	}
-	list := base + types.AnimHeaderVec4s*16 + int(block.playCount)*16
+	list := base + model.AnimHeaderVec4s*16 + int(block.playCount)*16
 	for i := range int(block.targetCount) {
 		at := list + i*8
-		block.targets = append(block.targets, types.SceneMorphWeight{
+		block.targets = append(block.targets, model.SceneMorphWeight{
 			Target: word(at),
 			Weight: math.Float32frombits(word(at + 4)),
 		})
@@ -97,7 +98,7 @@ func TestAMorphedModelBindsItsOwnDeltasAndABoxBindsNone(t *testing.T) {
 	h := residentMorphModel(t, morphModel(t), scene.ModelDraw{})
 	// One position range, two target headers and one record each: the two
 	// shapes move one vertex apiece out of three.
-	if got, want := len(boundBytes(t, h, "sceneMorphDeltas")), morphModelWords*types.MorphWordSize; got != want {
+	if got, want := len(boundBytes(t, h, "sceneMorphDeltas")), morphModelWords*model.MorphWordSize; got != want {
 		t.Errorf("the bound delta buffer is %d bytes, want the model's %d", got, want)
 	}
 	box := newHarness(t, func(q *scene.OpQueue) {
@@ -211,7 +212,7 @@ func TestTheLookupReportsMorphTargetsAndBytes(t *testing.T) {
 	if len(names) != 2 || names[0] != "smile" || names[1] != "blink" {
 		t.Errorf("MorphTargets = %v, want the mesh's two named shapes", names)
 	}
-	if want := morphModelWords * types.MorphWordSize; bytes != want {
+	if want := morphModelWords * model.MorphWordSize; bytes != want {
 		t.Errorf("MorphBytes = %d, want %d", bytes, want)
 	}
 	h.lookup(func(access scene.LookupAccess) {
@@ -244,13 +245,13 @@ func TestASkinnedAndMorphedModelBindsBothOfItsOwnBuffers(t *testing.T) {
 		t.Error("a skinned draw must not carry SCENE_NOSKIN, morphed or not")
 	}
 	// One joint over 61 frames plus the rest frame, not a single row.
-	if got, want := len(boundBytes(t, h, "scenePoses")), 62*types.PoseSize; got != want {
+	if got, want := len(boundBytes(t, h, "scenePoses")), 62*model.PoseSize; got != want {
 		t.Errorf("the bound pose buffer is %d bytes, want the model's %d", got, want)
 	}
 	// One position range, one target header, one record: the shape moves one
 	// of the three vertices.
 	if got, want := len(boundBytes(t, h, "sceneMorphDeltas")),
-		(types.MorphRangeWords+types.MorphTargetHeaderWords+2)*types.MorphWordSize; got != want {
+		(model.MorphRangeWords+model.MorphTargetHeaderWords+2)*model.MorphWordSize; got != want {
 		t.Errorf("the bound delta buffer is %d bytes, want the model's %d", got, want)
 	}
 	block := decodeAnimBlock(t, boundBytes(t, h, "sceneAnim"), instance.AnimOffset)

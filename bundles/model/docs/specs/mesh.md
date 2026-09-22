@@ -66,6 +66,19 @@ ran from, and is kept as the record of what changed rather than as an open list.
 > `bundles/scene/internal/types`; the flush moved from `sceneimpl` to
 > `bundles/scene/internal`; and the WGSL sources are under
 > `bundles/scene/internal/builtin/scene/`.
+>
+> **Amended by [#530](https://github.com/dvoyni/cog/issues/530).** Mesh
+> residency moved to `bundles/model`, with the model cache and the `Lookup`,
+> and this document moved with it from `bundles/scene/docs/specs/` (see
+> [the model spec](model.md#residency-one-lookup-two-facades)). Nothing a mesh
+> stores changed. The mesh table, `MeshRef`, `MeshRecord`, the minting and
+> staging, the vertex, index and morph-delta packing, the glTF conversion and
+> the bundled PBR are in `bundles/model/internal/types`, and `Vertex`,
+> `VertexLayout`, `MeshRef`, `LookupAccess` and `VertexDecodePath` are spelled
+> `model.X`, which scene's root still aliases. A frame-local mesh is scene's:
+> `OpQueue.TemporaryMesh`, `MeshTemporary` and `TemporaryMeshID` stay in
+> `bundles/scene/internal/types`, and mint through `model.MintMesh`. The WGSL
+> sources are still under `bundles/scene/internal/builtin/scene/`.
 
 **What remains open is the by-eye confirmation**
 ([#223](https://github.com/dvoyni/cog/issues/223)). The size figures in

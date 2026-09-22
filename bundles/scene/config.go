@@ -1,15 +1,11 @@
 package scene
 
-import "github.com/dvoyni/cog/bundles/scene/internal/types"
+import "github.com/dvoyni/cog/bundles/model"
 
-// Config is scene's configuration. PoseSampleRate, the global animation bake
-// rate in Hz, is the only configurable number in the plugin: everything else
-// scene decides follows from what a frame records. It arrives through
-// kernel.New's config map under Name, and a zero field takes its default -
-// 60 Hz - so a caller names only what it changes:
+// Config is model's configuration, aliased here until the sweep rewrites its
+// callers. scene takes no configuration of its own: the pose sample rate is a
+// fact of the models the Lookup bakes, so it arrives under model.Name, and a
+// Config handed to scene under scene.Name is ignored.
 //
-//	kernel.New(map[kernel.PluginName]any{scene.Name: scene.Config{PoseSampleRate: 30}})
-//
-// It is declared in internal/types, because the Lookup resource holds it, and
-// aliased here.
-type Config = types.Config
+//	kernel.New(map[kernel.PluginName]any{model.Name: model.Config{PoseSampleRate: 30}})
+type Config = model.Config

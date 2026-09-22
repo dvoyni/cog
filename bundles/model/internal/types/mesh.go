@@ -10,24 +10,27 @@ import (
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
-// MeshSource discriminates where a MeshRef came from. It is what makes a
-// frame-local ref used in a later frame detectable rather than silently wrong.
+// MeshSource discriminates where a MeshRef came from. model knows only its own
+// durable meshes; a renderer that mints frame-local meshes of its own declares
+// its sources past MeshDurable and builds their refs with NewMeshRef. It is
+// what makes a frame-local ref used in a later frame detectable rather than
+// silently wrong.
 type MeshSource uint8
 
 const (
 	MeshNone MeshSource = iota
 	MeshDurable
-	MeshTemporary
 )
 
-// TemporaryMeshID is the bit a temporary mesh's public id carries. The two
-// sources allocate independent dense ranges, and the sort key is one uint32 of
-// meshID, so without a bit to tell them apart a temporary mesh and a durable
-// one would collide in it and batch as though they were the same geometry.
-const TemporaryMeshID uint32 = 1 << 31
+// rendererMeshID is the bit the public id of a mesh from any source past
+// MeshDurable carries. The sources allocate independent dense ranges, and a
+// sort key is one uint32 of meshID, so without a bit to tell them apart a
+// renderer's own mesh and a durable one would collide in it and batch as though
+// they were the same geometry. scene names it TemporaryMeshID.
+const rendererMeshID uint32 = 1 << 31
 
-// MeshRef names one mesh scene can draw. It is an opaque value: a source, a
-// dense scene id that doubles as the sort key's meshID, and a generation that
+// MeshRef names one mesh a renderer can draw. It is an opaque value: a source,
+// a dense id that doubles as the sort key's meshID, and a generation that
 // makes a recycled id detectable. Its zero value is no mesh.
 type MeshRef struct {
 	source     MeshSource
@@ -35,18 +38,35 @@ type MeshRef struct {
 	generation uint32
 }
 
-// ID reports the mesh's dense scene id, or 0 when the ref names no mesh. A
-// temporary mesh's id carries TemporaryMeshID, so the two sources never collide
+// NewMeshRef builds the ref of a mesh a renderer minted itself, under a source
+// it declared past MeshDurable. Nothing in model resolves such a ref: the
+// renderer that minted it does.
+func NewMeshRef(source MeshSource, id, generation uint32) MeshRef {
+	return MeshRef{source: source, id: id, generation: generation}
+}
+
+// ID reports the mesh's dense id, or 0 when the ref names no mesh. A mesh from
+// a renderer's own source carries rendererMeshID, so the sources never collide
 // in a sort key or a BatchView.
 func (r MeshRef) ID() uint32 {
 	switch r.source {
+	case MeshNone:
+		return 0
 	case MeshDurable:
 		return r.id
-	case MeshTemporary:
-		return TemporaryMeshID | r.id
 	}
-	return 0
+	return rendererMeshID | r.id
 }
+
+// Source reports where the ref came from.
+func (r MeshRef) Source() MeshSource { return r.source }
+
+// Index reports the ref's dense id within its own source, without the bit ID
+// adds for a renderer's source.
+func (r MeshRef) Index() uint32 { return r.id }
+
+// Generation reports the generation the ref was minted at.
+func (r MeshRef) Generation() uint32 { return r.generation }
 
 // MeshRecord is one resident mesh: the buffers it draws from and the geometry
 // gfx needs to describe it.
@@ -98,11 +118,11 @@ func (r MeshRecord) Descr() gfx.MeshDescr {
 	return gfx.MeshIndexed(r.Vertices, r.Indices, r.IndexWidth, r.Topology, r.Layout...)
 }
 
-// layoutCache interns vertex layouts by their Go type, so a per-frame mint pays
+// LayoutCache interns vertex layouts by their Go type, so a per-frame mint pays
 // one map probe rather than a method call and a slice copy. Both minting
 // surfaces keep one: the ids are only ever compared within the cache that
 // issued them.
-type layoutCache struct {
+type LayoutCache struct {
 	ids     map[reflect.Type]int
 	layouts [][]gfx.VertexAttr
 }
@@ -112,7 +132,7 @@ type layoutCache struct {
 // rather than reinterprets, and is narrower than the MeshRecord flag it feeds:
 // a model's geometry is a layout the bundled PBR knows without ever passing
 // through here, and bakeModelGeometry says so directly.
-func (c *layoutCache) resolve[TVertex VertexLayout]() (int, []gfx.VertexAttr, bool) {
+func (c *LayoutCache) resolve[TVertex VertexLayout]() (int, []gfx.VertexAttr, bool) {
 	vertexType := reflect.TypeFor[TVertex]()
 	standard := vertexType == reflect.TypeFor[Vertex]()
 	if id, ok := c.ids[vertexType]; ok {
@@ -128,13 +148,13 @@ func (c *layoutCache) resolve[TVertex VertexLayout]() (int, []gfx.VertexAttr, bo
 	return id, c.layouts[id], standard
 }
 
-// meshInput is one mint's geometry once it has been validated, described and
+// MeshInput is one mint's geometry once it has been validated, described and
 // written into an arena: vertices and indices are spans of that arena and no
 // longer touch the caller's slices at all. Which arena is the minting surface's
 // business - the Lookup's staging arena outlives the call, the recording's
 // frame-local one does not - and is why the mint is handed one rather than
 // owning it.
-type meshInput struct {
+type MeshInput struct {
 	vertices    Span
 	indices     Span
 	vertexCount int
@@ -155,7 +175,7 @@ type meshInput struct {
 	uv SceneMesh
 }
 
-// mintMesh validates one caller's geometry, describes it, and writes its bytes
+// MintMesh validates one caller's geometry, describes it, and writes its bytes
 // into arena, whichever surface is minting it.
 //
 // A standard-layout mesh is packed into the arena rather than reinterpreted and
@@ -174,19 +194,19 @@ type meshInput struct {
 // changing layout, so a rejected update leaves its bytes in the arena with
 // nothing pointing at them. The arena is discarded whole at the next drain, so
 // that is a frame's worth of unread staging rather than a leak.
-func mintMesh[TVertex VertexLayout](
-	cache *layoutCache, arena *[]byte, vertices []TVertex, indices []uint32,
+func MintMesh[TVertex VertexLayout](
+	cache *LayoutCache, arena *[]byte, vertices []TVertex, indices []uint32,
 	topology gfx.PrimitiveTopology, durable bool,
-) (meshInput, error) {
+) (MeshInput, error) {
 	if err := validateMesh(len(vertices), indices, topology); err != nil {
-		return meshInput{}, err
+		return MeshInput{}, err
 	}
 	layoutID, layout, standard := cache.resolve[TVertex]()
 	width := gfx.IndexUint32
 	if durable {
 		width = indexWidthFor(len(vertices))
 	}
-	input := meshInput{
+	input := MeshInput{
 		vertexCount: len(vertices),
 		indexCount:  len(indices),
 		topology:    topology,
@@ -247,10 +267,10 @@ func uploadBytes[TVertex VertexLayout](vertices []TVertex) []byte {
 	return unsafe.Slice((*byte)(unsafe.Pointer(&vertices[0])), len(vertices)*int(unsafe.Sizeof(vertices[0])))
 }
 
-// mesh resolves a ref to the mesh it names. A released or stale ref resolves to
+// Mesh resolves a durable ref to the mesh it names. A released or stale ref resolves to
 // nothing, which is what makes drawing one a reportable skip rather than a draw
 // of whatever now occupies that slot.
-func (l *Lookup) mesh(ref MeshRef) (MeshRecord, bool) {
+func (l *Lookup) Mesh(ref MeshRef) (MeshRecord, bool) {
 	if ref.source != MeshDurable || ref.id == 0 || int(ref.id) > len(l.meshes) {
 		return MeshRecord{}, false
 	}
@@ -267,9 +287,9 @@ func (l *Lookup) mesh(ref MeshRef) (MeshRecord, bool) {
 // one place that already knows the backend is ready.
 type BakeFunc func(data []byte) gfx.BufferDescr
 
-// bakeTextureFunc uploads one texture's texels and returns the durable
+// BakeTextureFunc uploads one texture's texels and returns the durable
 // descriptor for them, the texture twin of BakeFunc.
-type bakeTextureFunc func(width, height int, format gfx.TextureFormat, pixels []byte) gfx.TextureDescr
+type BakeTextureFunc func(width, height int, format gfx.TextureFormat, pixels []byte) gfx.TextureDescr
 
 // claimMesh puts one record in the mesh table and returns the ref for it,
 // reusing a released slot when there is one. A reused slot keeps the generation
@@ -295,7 +315,7 @@ func (l *Lookup) claimMesh(record MeshRecord) MeshRef {
 // The index buffer is baked only when there is one: a zero-length bake still
 // mints a buffer id, and a mesh carrying one would be recorded as indexed with
 // no indices in it.
-func (l *Lookup) bakeMeshNow(input meshInput, arena []byte, bake BakeFunc) MeshRef {
+func (l *Lookup) bakeMeshNow(input MeshInput, arena []byte, bake BakeFunc) MeshRef {
 	record := MeshRecord{
 		Vertices: bake(input.vertices.Of(arena)), indexCount: input.indexCount,
 		VertexCount: input.vertexCount, Topology: input.topology, IndexWidth: input.indexWidth,
@@ -351,4 +371,25 @@ func indexBytes(indices []uint32, width gfx.IndexWidth) []byte {
 		binary.NativeEndian.PutUint16(narrow[i*2:], uint16(index))
 	}
 	return narrow
+}
+
+// InlineRecord builds the mesh record a frame-local mesh draws from, over the
+// bytes the mint wrote into arena. Its buffers are inline bytes rather than
+// baked ones, which is what makes gfx re-bake them into its own pooled
+// per-frame buffers; the bytes are snapshotted there, so the minting renderer
+// is free to reuse its arena on the next frame.
+//
+// It names no index width, and the zero value is the uint32 a frame-local mesh
+// stages its indices at. Nor does it carry bounds: a frame-local mesh is never
+// culled by a sphere of its own.
+func (in MeshInput) InlineRecord(arena []byte) MeshRecord {
+	record := MeshRecord{
+		Vertices:    gfx.BufferWithBytes(in.vertices.Of(arena), true),
+		VertexCount: in.vertexCount, indexCount: in.indexCount,
+		Topology: in.topology, Layout: in.layout, Standard: in.standard, UV: in.uv,
+	}
+	if in.indexCount > 0 {
+		record.Indices, record.Indexed = gfx.BufferWithBytes(in.indices.Of(arena), true), true
+	}
+	return record
 }

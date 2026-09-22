@@ -4,7 +4,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
@@ -40,7 +39,7 @@ func convertPrimitive(doc *gltf.Document, primitive *gltf.Primitive, needTangent
 	doc.Meshes = append(doc.Meshes, &gltf.Mesh{Primitives: []*gltf.Primitive{primitive}})
 	doc.Nodes = append(doc.Nodes, &gltf.Node{Mesh: gltf.Index(len(doc.Meshes) - 1)})
 	doc.Scenes = append(doc.Scenes, &gltf.Scene{Nodes: []int{len(doc.Nodes) - 1}})
-	decoded, err := model.DecodeDocument(doc, "m.glb")
+	decoded, err := DecodeDocument(doc, "m.glb")
 	if err != nil {
 		return gltfGeometry{}, err
 	}

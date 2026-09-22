@@ -4,6 +4,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -105,10 +106,10 @@ func TestArenaReusesItsBackingAcrossFrames(t *testing.T) {
 // sits between the two halves: scene packs bytes, the shader reads them, and a
 // mismatch renders a plausible wrong picture.
 func TestPbrRecordMatchesItsShaderSideOffsets(t *testing.T) {
-	if size := unsafe.Sizeof(types.ScenePbrRecord{}); size != 160 {
+	if size := unsafe.Sizeof(model.ScenePbrRecord{}); size != 160 {
 		t.Fatalf("scenePbrRecord is %d bytes, want 160", size)
 	}
-	var record types.ScenePbrRecord
+	var record model.ScenePbrRecord
 	for _, test := range []struct {
 		name   string
 		offset uintptr

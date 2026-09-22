@@ -3,8 +3,8 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/qmuntal/gltf"
 )
 
@@ -19,21 +19,21 @@ func TestAModelPrimitiveStoresTheStrideItsLayoutNames(t *testing.T) {
 		attrs  int
 		stride int
 	}{
-		{"a static primitive", indexedTriangleModel(t), types.StandardVertexAttrs, types.StorageStride},
-		{"a skinned primitive", skinnedDoc(), 8, types.StorageSkinnedStride},
+		{"a static primitive", indexedTriangleModel(t), model.StandardVertexAttrs, model.StorageStride},
+		{"a skinned primitive", skinnedDoc(), 8, model.StorageSkinnedStride},
 	} {
 		h := residentModel(t, c.doc)
 		var attrs, bytes, vertices int
 		found := 0
 		h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
-			for i := range types.LookupMeshes(lookup) {
-				if types.LookupMeshes(lookup)[i].VertexCount == 0 {
+			for _, mesh := range durableMeshes(lookup) {
+				if mesh.VertexCount == 0 {
 					continue
 				}
 				found++
-				attrs = len(types.LookupMeshes(lookup)[i].Layout)
-				bytes = types.LookupMeshes(lookup)[i].Vertices.Size()
-				vertices = types.LookupMeshes(lookup)[i].VertexCount
+				attrs = len(mesh.Layout)
+				bytes = mesh.Vertices.Size()
+				vertices = mesh.VertexCount
 			}
 		}})
 		if found != 1 {

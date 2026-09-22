@@ -3,6 +3,7 @@ package internal
 import (
 	"io/fs"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/kernel"
@@ -55,14 +56,14 @@ func (p *plugin) expandModels(
 	p.modelViews = grow(p.modelViews, len(models))
 	worlds := 0
 	for i := range models {
-		p.modelViews[i] = types.ModelView{}
-		model, ok := types.LookupModel(lookup, k, fsys, resources, models[i].Path)
+		p.modelViews[i] = model.ModelView{}
+		view, err, ok := lookup.ModelView(
+			k, fsys, resources, models[i].Path, models[i].Scene, models[i].Node)
 		if !ok {
 			continue
 		}
-		view, err := model.View(models[i].Path, models[i].Scene, models[i].Node)
 		if err != nil {
-			k.ReportErrorOnce(types.SelectorReportKey(err), err)
+			k.ReportErrorOnce(err.ReportKey(), err)
 			continue
 		}
 		p.modelViews[i] = view
@@ -76,12 +77,12 @@ func (p *plugin) expandModels(
 	p.modelWorlds = grow(p.modelWorlds, worlds)
 	at := 0
 	for i := range models {
-		model := &models[i]
+		call := &models[i]
 		view := &p.modelViews[i]
 		if !view.Resolved {
 			continue
 		}
-		instances := model.Instances(&single)
+		instances := call.Instances(&single)
 		for j := range view.Primitives {
 			primitive := &view.Primitives[j]
 			// A replacement material unbinds the file's record along with its
@@ -101,10 +102,12 @@ func (p *plugin) expandModels(
 				primitive.Skinned, primitive.Joint, primitive.Plain
 			anim.Skin.Bound = anim.Skin.Bound && primitive.Skinned
 			anim.Skin.Morphed = anim.Skin.Morphed && primitive.Morph.Morphed()
-			material, record := owned.Variants[types.VariantFor(anim.Skin.Bound, anim.Skin.Morphed)], &owned.Record
-			key := types.MaterialKey(0)
-			if model.Material != nil {
-				material, record, key = model.Material, nil, model.MaterialKey
+			material, record, key := call.Material, (*model.ScenePbrRecord)(nil), call.MaterialKey
+			if material == nil {
+				// The file's own material names no pass, so it is wrapped as
+				// the forward one here, and keyed by the flush like any other.
+				material = p.forwardMaterial(owned.Forward[model.VariantFor(anim.Skin.Bound, anim.Skin.Morphed)])
+				record, key = &owned.Record, 0
 			}
 			// A morphed model packs a block per primitive rather than per
 			// call, because the four morph words and the sparse weight list
@@ -128,7 +131,7 @@ func (p *plugin) expandModels(
 				}
 				p.modelWorlds[at] = world.Mul(primitive.Local)
 				types.OpQueueAppendDraw(write, types.DrawRecord{
-					Layers:      model.Layers,
+					Layers:      call.Layers,
 					Matrix:      &p.modelWorlds[at],
 					Material:    material,
 					MaterialKey: key,
@@ -138,8 +141,8 @@ func (p *plugin) expandModels(
 					// is where every name the entry's shader declares is
 					// resolved, and are marked as also addressing the record,
 					// which gfx cannot see.
-					Params:          model.Overrides,
-					OverridesRecord: len(model.Overrides) > 0,
+					Params:          call.Overrides,
+					OverridesRecord: len(call.Overrides) > 0,
 					Bounds:          primitive.Bounds,
 					// A skinned placement is never culled. Its bind-pose sphere
 					// is the only bound the load has, and where the joints put
@@ -180,7 +183,7 @@ func (p *plugin) resolveModelAnimation(k kernel.Kernel, models []types.ModelDraw
 		}
 		anim := view.Animation
 		p.modelAnims[i].Skin = anim.Skin()
-		p.modelPlays, p.modelWeightFrames = types.ResolvePlays(
+		p.modelPlays, p.modelWeightFrames = model.ResolvePlays(
 			anim, models[i].Path, models[i].Plays,
 			p.modelPlays[:0], p.modelWeightFrames[:0], once,
 		)
@@ -198,7 +201,7 @@ func (p *plugin) resolveModelAnimation(k kernel.Kernel, models []types.ModelDraw
 		// them - and the wrong one for a subtree hanging off a bone a clip
 		// steers, whose true place this frame is only in the pose rows.
 		if view.Rerooted && view.RerootJoint >= 0 {
-			if pose, ok := types.BlendJoint(anim, p.modelPlays, view.RerootJoint); ok {
+			if pose, ok := model.BlendJoint(anim, p.modelPlays, view.RerootJoint); ok {
 				if inverse, ok := pose.InverseAffine(); ok {
 					view.Reroot = view.Reroot.Mul(view.RerootRest).Mul(inverse)
 				}
@@ -219,12 +222,12 @@ func (p *plugin) resolveModelAnimation(k kernel.Kernel, models []types.ModelDraw
 // A model with no shapes leaves morphAt at -1 and keeps the one block per call
 // the skinned path packs, which is what makes morph targets cost a rig nothing.
 func (p *plugin) packModelMorphs(
-	binding *types.AnimBinding, anim *types.ResidentAnimation, view *types.ModelView,
-	model *types.ModelDrawRecord, report types.ReportOnce,
+	binding *types.AnimBinding, anim *model.ResidentAnimation, view *model.ModelView,
+	call *types.ModelDrawRecord, report model.ReportOnce,
 ) {
-	p.modelWeights = types.BlendMorphWeights(
-		anim, model.Path, p.modelPlays, p.modelWeightFrames,
-		model.MorphWeights, model.Overridden, p.modelWeights, report,
+	p.modelWeights = model.BlendMorphWeights(
+		anim, call.Path, p.modelPlays, p.modelWeightFrames,
+		call.MorphWeights, call.Overridden, p.modelWeights, report,
 	)
 	binding.MorphAt = len(p.modelMorphOffsets)
 	for j := range view.Primitives {
@@ -232,7 +235,7 @@ func (p *plugin) packModelMorphs(
 		block := morphBlock{binding: morph}
 		if morph.Morphed() {
 			slots := p.modelWeights[morph.SlotBase : morph.SlotBase+morph.Targets]
-			block.targets = types.SelectMorphTargets(slots, p.modelTargets[:0], model.Path, report)
+			block.targets = model.SelectMorphTargets(slots, p.modelTargets[:0], call.Path, report)
 			p.modelTargets = block.targets
 		}
 		p.modelMorphOffsets = append(

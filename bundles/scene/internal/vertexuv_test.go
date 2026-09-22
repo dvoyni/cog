@@ -5,8 +5,8 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -39,12 +39,12 @@ func boundRecords(t *testing.T, h *harness, name string) []byte {
 	return data[bound[0].offset : bound[0].offset+bound[0].size]
 }
 
-func readMeshRecord(data []byte, index int) types.SceneMesh {
+func readMeshRecord(data []byte, index int) model.SceneMesh {
 	at := data[index*meshRecordSize:]
 	read := func(offset int) m.Vec2 {
 		return m.Vec2{X: readFloat32(at[offset:]), Y: readFloat32(at[offset+4:])}
 	}
-	return types.SceneMesh{UV0Scale: read(0), UV0Bias: read(8), UV1Scale: read(16), UV1Bias: read(24)}
+	return model.SceneMesh{UV0Scale: read(0), UV0Bias: read(8), UV1Scale: read(16), UV1Bias: read(24)}
 }
 
 func readInstanceMesh(data []byte, index int) uint32 {
@@ -67,10 +67,10 @@ func TestAMeshWithAUVRangeNamesItsOwnSlotAfterTheIdentity(t *testing.T) {
 		t.Fatalf("the per-mesh buffer holds %d bytes, want the identity and one record at %d each",
 			len(meshes), meshRecordSize)
 	}
-	if slot0 := readMeshRecord(meshes, 0); slot0 != types.IdentityMesh {
-		t.Fatalf("slot 0 is %+v, want the identity %+v", slot0, types.IdentityMesh)
+	if slot0 := readMeshRecord(meshes, 0); slot0 != model.IdentityMesh {
+		t.Fatalf("slot 0 is %+v, want the identity %+v", slot0, model.IdentityMesh)
 	}
-	_, _, want := types.PackVertices(new([]byte), uvTriangle())
+	_, _, want := model.PackVertices(new([]byte), uvTriangle())
 	if got := readMeshRecord(meshes, 1); got != want {
 		t.Fatalf("slot 1 is %+v, want the range the pack derived %+v", got, want)
 	}
@@ -95,8 +95,8 @@ func TestACustomLayoutMeshNamesTheIdentitySlot(t *testing.T) {
 	if len(meshes) != meshRecordSize {
 		t.Fatalf("the per-mesh buffer holds %d bytes, want the identity alone", len(meshes))
 	}
-	if slot0 := readMeshRecord(meshes, 0); slot0 != types.IdentityMesh {
-		t.Fatalf("slot 0 is %+v, want the identity %+v", slot0, types.IdentityMesh)
+	if slot0 := readMeshRecord(meshes, 0); slot0 != model.IdentityMesh {
+		t.Fatalf("slot 0 is %+v, want the identity %+v", slot0, model.IdentityMesh)
 	}
 	if named := readInstanceMesh(boundRecords(t, h, "sceneInstances"), 0); named != 0 {
 		t.Fatalf("the custom-layout draw names slot %d, want the identity at 0", named)

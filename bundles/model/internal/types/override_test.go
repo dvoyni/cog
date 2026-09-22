@@ -12,7 +12,7 @@ import (
 // gfx.ColorParam("baseColorFactor", c) is what a caller writes to tint a model
 // and the glTF specification is the documentation of what it means.
 func TestAnOverrideParamMergesIntoTheRecordByName(t *testing.T) {
-	record := defaultPbrRecord()
+	record := DefaultPbrRecord()
 	overrideRecord(&record, []gfx.ParameterDescr{
 		gfx.ColorParam("baseColorFactor", m.Color{R: 0.25, G: 0.5, B: 0.75, A: 0.5}),
 		gfx.ColorParam("emissiveFactor", m.Color{R: 1, G: 2, B: 3}),
@@ -47,7 +47,7 @@ func TestAnOverrideParamMergesIntoTheRecordByName(t *testing.T) {
 // foreclosed permanently.
 func TestEverySlotsTransformAndRotationAreReachableByName(t *testing.T) {
 	for slot, names := range PbrSlots {
-		record := defaultPbrRecord()
+		record := DefaultPbrRecord()
 		overrideRecord(&record, []gfx.ParameterDescr{
 			gfx.VecParam(names.Transform, m.Vec4{X: 0.1, Y: 0.2, Z: 2, W: 3}),
 			gfx.FloatParam(names.Rotation, 1.5),
@@ -76,7 +76,7 @@ func TestEverySlotsTransformAndRotationAreReachableByName(t *testing.T) {
 // an OPAQUE one declares neither, and one draw's parameter list is matched
 // against both.
 func TestAnOverrideParamTheRecordHasNoMemberForLeavesItUntouched(t *testing.T) {
-	record := defaultPbrRecord()
+	record := DefaultPbrRecord()
 	before := record
 	overrideRecord(&record, []gfx.ParameterDescr{
 		gfx.ColorParam("teamColor", m.Color{R: 1}),
@@ -95,7 +95,7 @@ func TestAnOverrideParamTheRecordHasNoMemberForLeavesItUntouched(t *testing.T) {
 // list is matched against several materials, so "does not fit here" is not on
 // its own evidence of a caller bug.
 func TestAnOverrideParamOfAKindTheMemberCannotTakeIsIgnored(t *testing.T) {
-	record := defaultPbrRecord()
+	record := DefaultPbrRecord()
 	before := record
 	overrideRecord(&record, []gfx.ParameterDescr{
 		gfx.FloatParam("baseColorFactor", 0.5),
@@ -111,7 +111,7 @@ func TestAnOverrideParamOfAKindTheMemberCannotTakeIsIgnored(t *testing.T) {
 // a fade overrides baseColorFactor and leaves the file's roughness where the
 // artist put it.
 func TestAnOverrideParamLeavesEveryMemberItDoesNotNameAlone(t *testing.T) {
-	record := defaultPbrRecord()
+	record := DefaultPbrRecord()
 	record.RoughnessFactor = 0.3
 	record.BaseColorFactor = m.Vec4{X: 1, Y: 0, Z: 0, W: 1}
 	overrideRecord(&record, []gfx.ParameterDescr{

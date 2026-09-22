@@ -386,8 +386,8 @@ func TestAStaleRefDoesNotDrawTheMeshThatReusedItsSlot(t *testing.T) {
 	h.frame()
 	h.lookup(func(la scene.LookupAccess) { la.ReleaseMesh(stale) })
 	reused = h.bake(triangle(), nil, gfx.TopologyTriangleList)
-	if types.MeshRefIndex(reused) != types.MeshRefIndex(stale) {
-		t.Fatalf("the released slot %d was not reissued, got %d", types.MeshRefIndex(stale), types.MeshRefIndex(reused))
+	if reused.Index() != stale.Index() {
+		t.Fatalf("the released slot %d was not reissued, got %d", stale.Index(), reused.Index())
 	}
 	*h.reported = (*h.reported)[:0]
 	h.frame()
@@ -423,8 +423,8 @@ func TestATemporaryRefFromAnEarlierFrameIsReportedAndSkipped(t *testing.T) {
 	*h.reported = (*h.reported)[:0]
 	h.frame()
 
-	if types.MeshRefIndex(kept) != 1 {
-		t.Fatalf("the kept ref has id %d, so the later frame's mesh did not reuse its slot", types.MeshRefIndex(kept))
+	if kept.Index() != 1 {
+		t.Fatalf("the kept ref has id %d, so the later frame's mesh did not reuse its slot", kept.Index())
 	}
 	if pass := h.passes()[0]; pass.Instances != 0 {
 		t.Fatalf("a later frame packed %d instances of a temporary ref", pass.Instances)
@@ -442,13 +442,12 @@ func TestTopologyPassesThroughAndOnlyTriangleListsDivideByThree(t *testing.T) {
 	if ref.ID() == 0 {
 		t.Fatalf("a two-vertex line list was rejected: %v", *h.reported)
 	}
-	h.lookup(func(la scene.LookupAccess) {
-		var record types.MeshRecord
-		record = types.LookupMeshes(types.LookupAccessLookup(la))[types.MeshRefIndex(ref)-1]
+	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
+		record, _ := lookup.Mesh(ref)
 		if record.Topology != gfx.TopologyLineList {
 			t.Errorf("recorded topology %v, want the line list", record.Topology)
 		}
-	})
+	}})
 }
 
 // Transforms places one instance per entry, overriding the single Transform.

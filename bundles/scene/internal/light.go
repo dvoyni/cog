@@ -3,6 +3,7 @@ package internal
 import (
 	"math"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -131,8 +132,8 @@ func prepareLights(report func(error), dst []preparedLight, lights []types.Light
 // allocation. The buffer's order is therefore not a ranking, which the shader
 // does not need: it sums.
 type lightSelection struct {
-	lights [types.MaxLights]sceneLight
-	scores [types.MaxLights]float32
+	lights [model.MaxLights]sceneLight
+	scores [model.MaxLights]float32
 	count  int
 }
 
@@ -162,13 +163,13 @@ func (s *lightSelection) selectLights(
 // offer inserts one light, replacing the weakest kept light once the array is
 // full and only if this one beats it.
 func (s *lightSelection) offer(light *sceneLight, score float32) {
-	if s.count < types.MaxLights {
+	if s.count < model.MaxLights {
 		s.lights[s.count], s.scores[s.count] = *light, score
 		s.count++
 		return
 	}
 	weakest := 0
-	for i := 1; i < types.MaxLights; i++ {
+	for i := 1; i < model.MaxLights; i++ {
 		if s.scores[i] < s.scores[weakest] {
 			weakest = i
 		}

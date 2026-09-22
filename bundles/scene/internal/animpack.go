@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/dvoyni/cog/bundles/scene/internal/types"
+import (
+	"github.com/dvoyni/cog/bundles/model"
+	"github.com/dvoyni/cog/bundles/scene/internal/types"
+)
 
 // packAnim writes one draw's sceneAnim block and returns the animOffset an
 // instance carries, or SceneNoAnim when the draw animates nothing.
@@ -15,12 +18,12 @@ import "github.com/dvoyni/cog/bundles/scene/internal/types"
 // them in the per-batch material record would remove that duplication exactly,
 // and was rejected: it would put scene geometry constants into a record gfx
 // packs on the render thread while scene records on the update thread.
-func (b *frameBuild) packAnim(plays []types.ScenePlayRecord, morph morphBlock) uint32 {
+func (b *frameBuild) packAnim(plays []model.ScenePlayRecord, morph morphBlock) uint32 {
 	if len(plays) == 0 && len(morph.targets) == 0 {
 		return types.SceneNoAnim
 	}
 	offset := len(b.anims.bytes()) / 16
-	header := types.SceneAnimHeader{
+	header := model.SceneAnimHeader{
 		PlayCount:   uint32(len(plays)),
 		TargetCount: uint32(len(morph.targets)),
 		MorphBase:   morph.binding.Base,
@@ -43,6 +46,6 @@ func (b *frameBuild) packAnim(plays []types.ScenePlayRecord, morph morphBlock) u
 // morphBlock is the morph half of one draw's sceneAnim block: the primitive's
 // addressing constants and the sparse list of targets that survived the cull.
 type morphBlock struct {
-	binding types.MorphBinding
-	targets []types.SceneMorphWeight
+	binding model.MorphBinding
+	targets []model.SceneMorphWeight
 }

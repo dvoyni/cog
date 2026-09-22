@@ -3,12 +3,13 @@ package internal
 import (
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecsscene"
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
 
-// plugin is cog's ecs↔scene binding. Register ecs and scene beside it.
+// plugin is cog's ecs↔scene binding. Register ecs, model and scene beside it.
 type plugin struct{}
 
 // New makes the binding. Its Components and System belong to the ecs plugin's
@@ -16,7 +17,7 @@ type plugin struct{}
 //
 //	kernel.New(config).WithPlugins(
 //	    storageplugin.New(), diskstorageplugin.New(),
-//	    gfxplugin.New(), sceneplugin.New(),
+//	    gfxplugin.New(), modelplugin.New(), sceneplugin.New(),
 //	    ecsplugin.New(), ecssceneplugin.New(), game.New())
 //
 // ecsscene has no configuration, so there is no Config.
@@ -25,10 +26,11 @@ func New() kernel.Plugin { return plugin{} }
 // Name reports the plugin name.
 func (plugin) Name() kernel.PluginName { return ecsscene.Name }
 
-// Dependencies reports both halves of the binding: the System reads the ECS's
-// Stores and writes scene's queue.
+// Dependencies reports both halves of the binding - the System reads the ECS's
+// Stores and writes scene's queue - and model, whose Lookup every model and
+// mesh the binding names resolves against.
 func (plugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, scene.Name}
+	return []kernel.PluginName{ecs.Name, model.Name, scene.Name}
 }
 
 // The populations the Stores reserve for. They are hints, not caps: a Store

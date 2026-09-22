@@ -9,6 +9,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
 	"github.com/dvoyni/cog/bundles/ecsscene"
+	"github.com/dvoyni/cog/bundles/model/modelplugin"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/sceneplugin"
 	"github.com/dvoyni/cog/kernel"
@@ -240,7 +241,7 @@ func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gfx.Ba
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) error { sink.add(err); return nil }).
-		WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: fs.FS(files)}}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, sceneplugin.New(),
+		WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: fs.FS(files)}}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, modelplugin.New(), sceneplugin.New(),
 			ecsplugin.New(), New(), &gamePlugin{})
 	// The cleanup waits for Run to return rather than only cancelling it: a
 	// dying engine allocates while it winds down, and the allocation claims here

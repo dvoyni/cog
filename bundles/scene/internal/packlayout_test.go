@@ -4,7 +4,7 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/wgsl"
@@ -36,8 +36,8 @@ func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
 	var frame sceneFrameBlock
 	var light sceneLight
 	var instance sceneInstance
-	var mesh types.SceneMesh
-	var pbr types.ScenePbrRecord
+	var mesh model.SceneMesh
+	var pbr model.ScenePbrRecord
 	records := []shaderRecord{
 		{"SceneFrame", unsafe.Sizeof(frame), []shaderMember{
 			{"view", unsafe.Offsetof(frame.View)},
@@ -114,7 +114,7 @@ func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
 // per-slot names from PbrSlots itself - the same table the packer and
 // OverrideParams resolve through, so a rename there reaches here rather than
 // leaving a stale literal behind that still matches nothing.
-func pbrMembers(pbr *types.ScenePbrRecord) []shaderMember {
+func pbrMembers(pbr *model.ScenePbrRecord) []shaderMember {
 	members := []shaderMember{
 		{"baseColorFactor", unsafe.Offsetof(pbr.BaseColorFactor)},
 		{"emissiveFactor", unsafe.Offsetof(pbr.EmissiveFactor)},
@@ -127,7 +127,7 @@ func pbrMembers(pbr *types.ScenePbrRecord) []shaderMember {
 	}
 	transforms, transformStride := unsafe.Offsetof(pbr.Transforms), unsafe.Sizeof(pbr.Transforms[0])
 	rotations, rotationStride := unsafe.Offsetof(pbr.Rotations), unsafe.Sizeof(pbr.Rotations[0])
-	for slot, descr := range types.PbrSlots {
+	for slot, descr := range model.PbrSlots {
 		members = append(members,
 			shaderMember{descr.Transform, transforms + uintptr(slot)*transformStride},
 			shaderMember{descr.Rotation, rotations + uintptr(slot)*rotationStride},

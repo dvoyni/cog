@@ -39,6 +39,10 @@ func overrideRecord(record *ScenePbrRecord, params []gfx.ParameterDescr) {
 	}
 }
 
+// Override merges params into the record by name, the way a draw's
+// OverrideParams reach the record gfx cannot see; see overrideRecord.
+func (r *ScenePbrRecord) Override(params []gfx.ParameterDescr) { overrideRecord(r, params) }
+
 // Member locates the record member one parameter name addresses, as either a
 // vec4 or a scalar destination. Both are nil for a name the record has no
 // member for.

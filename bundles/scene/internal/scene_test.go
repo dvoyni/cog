@@ -8,6 +8,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/dvoyni/cog/bundles/model"
+	"github.com/dvoyni/cog/bundles/model/modelplugin"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
@@ -493,11 +495,11 @@ func newHarnessOver(
 	backend := &testBackend{}
 	sink := &errorSink{}
 	configs := map[kernel.PluginName]any{
-		scene.Name: scene.Config{},
+		model.Name: model.Config{},
 	}
 	engine := kernel.New(configs).
 		Handler(func(err error) error { sink.add(err); *reported = append(*reported, err); return nil }).
-		WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: files}}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, New(), recordPlugin{record: record})
+		WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: files}}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, modelplugin.New(), New(), recordPlugin{record: record})
 	go engine.Run()
 	<-engine.Ready()
 	k := engine.Executioner()
@@ -564,4 +566,61 @@ func (h *harness) readFile(t testing.TB, path string) []byte {
 		t.Fatalf("read %q: %v", path, err)
 	}
 	return data
+}
+
+// bundledMaterials wraps the bundled PBR's four forward materials as the scene
+// materials the flush interns them as.
+func bundledMaterials(defaults model.PbrDefaults) [model.VariantCount]scene.Material {
+	var wrapped [model.VariantCount]scene.Material
+	for variant, descr := range model.BundledPbr(defaults) {
+		wrapped[variant] = scene.Material{{Tag: scene.TagForward, Descr: descr}}
+	}
+	return wrapped
+}
+
+// lookupDefaults reads the two default textures the first frame baked, off the
+// bundled PBR they are bound into. It is called after a frame, so the bake it
+// hands EnsureBundled is never reached.
+func lookupDefaults(lookup *scene.Lookup) model.PbrDefaults {
+	bundled := lookup.EnsureBundled(func(int, int, gfx.TextureFormat, []byte) gfx.TextureDescr {
+		panic("the defaults were not baked by the first frame")
+	})
+	var defaults model.PbrDefaults
+	for _, param := range bundled[model.VariantStatic].Params() {
+		texture, ok := param.TextureValue()
+		switch {
+		case !ok:
+		case param.Name() == model.PbrSlots[0].Texture:
+			defaults.White = texture
+		case param.Name() == model.PbrSlots[model.NormalSlot].Texture:
+			defaults.FlatNormal = texture
+		}
+	}
+	return defaults
+}
+
+// durableMeshes lists the Lookup's resident meshes in table order. A test that
+// releases nothing leaves every slot at its first generation, so the walk asks
+// for each id at generation 1 and stops at the first that does not resolve.
+func durableMeshes(lookup *scene.Lookup) []model.MeshRecord {
+	var meshes []model.MeshRecord
+	for id := uint32(1); ; id++ {
+		mesh, ok := lookup.Mesh(model.NewMeshRef(model.MeshDurable, id, 1))
+		if !ok {
+			return meshes
+		}
+		meshes = append(meshes, mesh)
+	}
+}
+
+// wrapsForward reports whether material is the one-entry forward material the
+// flush wraps a model's forward gfx material in, sharing that material's
+// parameters rather than a copy of them.
+func wrapsForward(material scene.Material, forward gfx.MaterialDescr) bool {
+	if len(material) != 1 || material[0].Tag != scene.TagForward {
+		return false
+	}
+	got, want := material[0].Descr.Params(), forward.Params()
+	return len(got) == len(want) && len(got) > 0 && &got[0] == &want[0] &&
+		material[0].Descr.Fingerprint() == forward.Fingerprint()
 }

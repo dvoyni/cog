@@ -7,7 +7,7 @@ const shaderMountID = "builtin:scene"
 
 // shaderFS is what Start mounts at math.MaxInt priority: the root source and
 // the ten sources it includes. The paths inside it are the ones
-// types.SceneShaderPath and scene.VertexDecodePath spell.
+// model.SceneShaderPath and scene.VertexDecodePath spell.
 //
 //go:embed builtin/scene/*.wgsl
 var shaderFS embed.FS

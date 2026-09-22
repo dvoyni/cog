@@ -57,8 +57,8 @@ scratch.
 
 ## Dependencies
 
-- Go packages: `app`, `ecs`, `gfx`, `kernel`, `m`, `scene`
-- Plugin dependencies: `ecs`, `scene`
+- Go packages: `app`, `ecs`, `gfx`, `kernel`, `m`, `model`, `scene`
+- Plugin dependencies: `ecs`, `model`, `scene`
 - Configuration: none — every Store reserves an internal default population,
   which is a hint and not a cap
 - Events declared or published: none
@@ -68,7 +68,7 @@ scratch.
 ```go
 kernel.New(config).WithPlugins(
     storageplugin.New(), diskstorageplugin.New(),
-    inputplugin.New(), appplugin.New(), gfxplugin.New(), sceneplugin.New(), gogpuplugin.New(),
+    inputplugin.New(), appplugin.New(), gfxplugin.New(), modelplugin.New(), sceneplugin.New(), gogpuplugin.New(),
     ecsplugin.New(), ecssceneplugin.New(), game.New())
 ```
 
