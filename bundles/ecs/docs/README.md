@@ -13,7 +13,8 @@ builders are here.**
 [`specs/ecs.md`](specs/ecs.md) is the specification the whole plugin is
 judged against.
 
-ecs is a **Bundle**: it requires no Adapter and contributes none. The
+ecs is a **Bundle**: it requires no Adapter, and contributes one to mcp's
+collected Port. The
 vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
 [ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
@@ -27,7 +28,8 @@ ecs has the declaration-root shape of
   `Store` resources, `Query`, `With` and `Without`, `Spawn` and
   `WriteableEntities`, the `Get`, `Set` and `Remove` accessors, `Read`
   and `Write`, `In` and `Feeder`, `Resp`, `ShrinkCmd` with `ShrinkRequest` and
-  `ShrinkResponse`, `Config` and `Name`. Its functions,
+  `ShrinkResponse`, `Config` and `Name`, and, in `adapters.go`, the Adapter
+  identity `McpProvider`, a `kernel.Adapter[mcp.ProviderPort]`. Its functions,
   `RegisterComponent`, `NewStore`, `Storable`, `PointerFree`, `ToHandler`,
   `ToExecute` and `Feed`, are forwarders in `utils.go`. It declares no plugin,
   and it is what every other package imports. The List a Component holds is
@@ -49,7 +51,9 @@ ecs has the declaration-root shape of
   `ShrinkCmd` and the three unexported [read
   Commands](#reading-the-world-by-name), and registers the Store of
   `m.Transform`, where an Entity stands: the one Component the ECS registers
-  itself.
+  itself. It also contributes the `mcp.Provider` that offers the read Commands
+  to an Agent, as `ecs.McpProvider` ([Offered To An
+  Agent](#offered-to-an-agent)).
 - **`bundles/ecs/ecsplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
 
@@ -67,7 +71,8 @@ an `internal` package under its enclosing package.
 
 ## Dependencies
 
-- Go packages: the standard library, `kernel`, and `assets` for `assets.Blob`
+- Go packages: the standard library, `kernel`, `assets` for `assets.Blob`, and
+  the `mcp` root for the Provider's Adapter identity and capability constructors
 - Plugin dependencies: none
 - Configuration: `ecs.Config`, whose `PrewarmEntities` is how many Entities
   the authority reserves room for up front — a hint, not a limit; a zero field
@@ -1147,8 +1152,8 @@ registers three unexported read-only Commands that take that string:
 | `queryCmd` | `components` (at least one name), `limit` (0 is 50, at most 500) | `total`, `truncated`, and `entities` in ascending index order, each with only the named Components |
 
 Nothing outside ecs dispatches them, so the root declares none of them; the mcp
-provider that will offer them to an Agent is ecs's own
-([#289](https://github.com/dvoyni/cog/issues/289)). A name is resolved over the
+provider that offers them to an Agent is ecs's own ([Offered To An
+Agent](#offered-to-an-agent)). A name is resolved over the
 `classes` map registration already fills, and two types rendering one name are
 refused together and accepted by their package-qualified form,
 `PkgPath.Name`.
@@ -1170,6 +1175,31 @@ what would have worked; a dead Entity's refusal names the Entity holding its
 index now, where one does. A handle to a free index, including the one that
 index will carry next, is refused as not alive. The design record is the spec's
 [Reading the world by name](specs/ecs.md#reading-the-world-by-name).
+
+## Offered To An Agent
+
+The plugin contributes an `mcp.Provider` from `Register`, as `ecs.McpProvider`,
+and offers the three read Commands as capabilities, rendered as three tools. The
+Provider and the capability bodies live in `bundles/ecs/internal`. All three are
+`mcp.ReadOnly()`, so a client may auto-approve them.
+
+- **`ecs_world`**: every registered Component name with its population, live
+  Entities, free indices and the index space. The one to call first.
+- **`ecs_entity`**: one Entity, given as `7v2`, `Entity(7v2)` or its decimal
+  handle, with every Component it carries and its value.
+- **`ecs_query`**: the Entities carrying every named Component, with those
+  values, up to a limit (50 by default, at most 500), with `total` and
+  `truncated`.
+
+Each is an `mcp.Func` that dispatches its Command and answers a refusal as
+`mcp.Unavailable`, the ordinary tool error an Agent reads and acts on. The
+Provider holds nothing, subscribes nothing and adds no resource, so a game
+nobody is debugging pays nothing for it, and an app that composes no broker
+binds it to nothing. Every call carries the price above, and the three Commands
+appear in `mcpserver_architecture`'s contention report as writers of
+`*ecs.Entities`; the prompt text tells an Agent those pairs are the tools'. The
+description prose the Agent reads is reproduced in full in
+[`specs/mcp.md`](specs/mcp.md), so it is reviewed as prompt text.
 
 ## Binding: how another plugin attaches
 
@@ -1204,7 +1234,7 @@ System's lock set beside the Query's Stores, at registration, **as visible in th
 signature as a Component is**. No binding type, no adapter, no registration call
 of the ECS's own.
 
-**The binding is necessarily a third plugin.** `ecs` imports only `kernel`, `libs/m` and `libs/assets`, and
+**The binding is necessarily a third plugin.** `ecs` imports only `kernel`, `libs/m`, `libs/assets` and the `bundles/mcp` root, and
 a plugin like `model` or `gfx` imports nothing of `ecs`, so neither can know about the
 other. That is what "no binding mechanism" means in practice — and a project not
 using the ECS simply does not register that plugin and schedules no Systems.
@@ -1924,6 +1954,15 @@ captured local, and their execution allocates the answer it builds; neither is
 on a frame's path. Executing the Command allocates
 only what the shrink itself makes: `shrinkIndices` builds a bitmap of the free
 indices on every shrink that has some, and its size is known only at run time.
+
+The [mcp Provider](#offered-to-an-agent) adds no `moved to heap` in ecs's own
+source. Its bodies instantiate `kernel.ExecuteCommand` and `mcp.Func` in
+`bundles/ecs/internal`, so `-gcflags=-m` on that package also prints the two
+those generics carry wherever they are instantiated, as it does for input's
+Provider: `stopped` at `kernel/command.go:93`, on the path of a dispatch the
+stopped scheduler refused, and `settings` at
+`bundles/mcp/internal/types/capability.go:70`, when a capability is
+constructed. Both are on an Agent's call, and neither is on a frame's path.
 
 ### What naming an engine-side thing cost
 

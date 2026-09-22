@@ -76,7 +76,7 @@ type ComponentPopulation struct {
 // EntityRequest names one Entity, as "7v2", "Entity(7v2)" or its decimal
 // handle.
 type EntityRequest struct {
-	Entity string `json:"entity"`
+	Entity string `json:"entity" jsonschema:"the Entity as 7v2 or Entity(7v2) or its decimal handle: any form a log or an earlier answer gave"`
 }
 
 // EntityResponse is one Entity and every Component it carries, by name.
@@ -97,25 +97,25 @@ type EntityResponse struct {
 // encoded, Error says why and Value is nil.
 type ComponentValue struct {
 	Name  string `json:"name"`
-	Value any    `json:"value"`
-	Error string `json:"error,omitempty"`
+	Value any    `json:"value" jsonschema:"the Component's exported fields as JSON; unexported fields are not shown, and it is null when error is set"`
+	Error string `json:"error,omitempty" jsonschema:"present when the value could not be encoded as JSON, saying why"`
 }
 
 // QueryRequest names the Components an Entity must carry every one of, and
 // how many matches to encode: 0 is defaultReadLimit, and more than
 // maxReadLimit is refused.
 type QueryRequest struct {
-	Components []string `json:"components"`
-	Limit      int      `json:"limit"`
+	Components []string `json:"components" jsonschema:"Component names spelled as kernel.TypeName renders them and as ecs_world lists them; an Entity must carry every one"`
+	Limit      int      `json:"limit,omitempty" jsonschema:"how many matching Entities to return: omit or 0 for 50; at most 500"`
 }
 
 // QueryResponse is the Entities carrying every named Component, in ascending
 // index order, each with only the named Components' values.
 type QueryResponse struct {
 	// Total is how many Entities matched, encoded or not.
-	Total int `json:"total"`
+	Total int `json:"total" jsonschema:"how many Entities matched in all, including those not returned"`
 	// Truncated is true when Total is more than the Entities encoded.
-	Truncated bool `json:"truncated"`
+	Truncated bool `json:"truncated" jsonschema:"true when fewer Entities were returned than matched: the list is not the whole answer"`
 	// Entities is the first limit matches.
 	Entities []EntityComponents `json:"entities"`
 	// Refusal is non-empty exactly when the request was refused, and every

@@ -856,6 +856,9 @@ is the order the agent reads them in.
 | `ui_layout` | `ui` | `Func` | tick | yes |
 | `input_send` | `input` | `Func` | no | no |
 | `input_state` | `input` | `Command` | no | yes |
+| `ecs_world` | `ecs` | `Func` | no | yes |
+| `ecs_entity` | `ecs` | `Func` | no | yes |
+| `ecs_query` | `ecs` | `Func` | no | yes |
 | `app_time` | `app` | `Func` | `step` only | no |
 | `mcpserver_architecture` | `mcpserver` | `Func` | no | yes |
 
@@ -875,6 +878,13 @@ it would need vocabulary here and in the broker, which
 > `mcp.ReadOnly()` or it is not, `hold` and `release` change nothing about
 > that, and the table still has eight tools in it. **The broker learned
 > nothing**, which was the constraint the fix had to respect.
+
+> **Amended by [#289](https://github.com/dvoyni/cog/issues/289).** `ecs`
+> contributes a Provider, and the three `ecs` rows join the table: each an
+> `mcp.Func` over one of ecs's read Commands, turning a refusal into
+> `mcp.Unavailable`, bound to no frame and read-only. They are specified in
+> [bundles/ecs/docs/specs/mcp.md](../../../ecs/docs/specs/mcp.md). The count
+> below is as it was before they joined; the broker learned nothing for them.
 
 Eight tools, seven of them one per question an agent actually asks. The set is
 small on purpose:
