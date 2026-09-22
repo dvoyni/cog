@@ -51,7 +51,8 @@ func PointerFree(t reflect.Type) error { return types.PointerFree(t) }
 // *Remove, *Read, *Write and *In; the kernel.Kernel value; and at most once the
 // event value. It returns nothing. Its lock set is the union of what its
 // parameters declare, computed once here. A signature outside that contract
-// panics at registration, naming the System.
+// panics at registration, naming the System, and is reported as
+// kernel.ErrPluginPanic naming the plugin.
 func ToHandler[E any](
 	registrar *kernel.Registrar, system any, feeds ...Feeder[E],
 ) func() (kernel.Lock, kernel.Observe[E]) {

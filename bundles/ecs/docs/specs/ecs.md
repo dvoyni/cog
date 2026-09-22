@@ -791,10 +791,12 @@ and made the app build a piece of the engine before the engine.
 **Settled since:** the kernel gained `Registrar.Dependency[T]`, which returns
 the value of a resource owned by a declared dependency, and the handler builders
 take the registrar so they can call it. That is sound because dependencies
-register first and nothing runs concurrently with registration, and it fails
-composition with
-`ErrUnavailableDependency` for a resource with no value yet or an undeclared
-owner. The ecs plugin now creates the authority from its config itself, its
+register first and nothing runs concurrently with registration, and it
+returns `ErrUnavailableDependency` for a resource with no value yet or an
+undeclared owner. The ecs builders re-panic that error: a registration-time
+panic, which the plugin boundary reports as `kernel.ErrPluginPanic` naming the
+plugin, with `ErrUnavailableDependency` as the recovered value, and composition
+fails. The ecs plugin now creates the authority from its config itself, its
 constructor is unreachable from outside the plugin, and composition takes no
 world at all:
 
@@ -1392,7 +1394,10 @@ This is contract, not convention. A System takes any number of:
 
 **Anything else is a composition-time failure naming the System's type.** This
 is a mistake every new user makes once, so the diagnostic matters more than the
-mechanism.
+mechanism. The failure is a registration-time panic, which the plugin boundary
+reports as `kernel.ErrPluginPanic` naming the plugin; the ecs README's
+§What a signature may contain records why a reported composition error was
+withdrawn.
 
 **Arity is arbitrary**, via `reflect.Value.Call`, measured at **0 allocs/op from
 arity 0 to 12** (58.5 → 197 ns). Since the call happens once per tick that time
