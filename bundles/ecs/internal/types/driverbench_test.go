@@ -23,19 +23,30 @@ type badCaseQuery struct {
 	Collider collider
 }
 
-// remedyQuery is the same Query with the Tag named. The Tag's Store is a
-// hundred long, so the scan picks it and the walk is a hundred steps: the Tag
-// is named as an ordinary field rather than as a With, because a filter can
-// never drive.
+// remedyQuery is the same Query with the Tag named as an ordinary field. The
+// Tag's Store is a hundred long, so the scan picks it and the walk is a hundred
+// steps. It still works and still drives; the README recommends the With
+// spelling below instead, which reads as presence matched and not read.
 type remedyQuery struct {
 	Body     *body
 	Collider collider
 	Solid    solid
 }
 
+// withRemedyQuery is the remedy in its recommended spelling. A With's Store
+// holds a superset of the match set, so it is a Driver candidate like any field
+// matched on presence, and the walk is the same hundred steps.
+type withRemedyQuery struct {
+	Body     *body
+	Collider collider
+	_        With[solid]
+}
+
 type badCaseSystem kernel.Subscription[app.UpdateEvent]
 
 type remedySystem kernel.Subscription[app.UpdateEvent]
+
+type withRemedySystem kernel.Subscription[app.UpdateEvent]
 
 // disjointStores builds the shape the spec records: n with Body, n with
 // Collider, both with an intersection of overlap, and the Tag on exactly that
@@ -122,16 +133,37 @@ func BenchmarkDriverTagRemedy(b *testing.B) {
 		})
 }
 
-// TestTheRemedyTagYieldsTheSameEntities is what makes the two benchmarks
-// comparable rather than merely different: the Tag is a Driver, not a filter,
+// BenchmarkDriverWithRemedy drives off the same hundred-entity Tag, named as
+// `_ With[solid]`. It should cost what the named-Tag spelling costs: the With
+// fills nothing, and the Tag field fills zero bytes.
+func BenchmarkDriverWithRemedy(b *testing.B) {
+	var query *Query[withRemedyQuery]
+	benchmarkDriver(b, 5000, 100,
+		func(registrar *kernel.Registrar) {
+			registrar.Subscribe[withRemedySystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[withRemedyQuery]) { query = q }))
+		},
+		func() int {
+			visited := 0
+			for _, it := range query.All() {
+				it.Body.X += it.Collider.Radius
+				visited++
+			}
+			return visited
+		})
+}
+
+// TestTheRemedyTagYieldsTheSameEntities is what makes the three benchmarks
+// comparable rather than merely different: the Tag drives in both spellings,
 // so it must change what the Query costs and nothing about what it matches.
 func TestTheRemedyTagYieldsTheSameEntities(t *testing.T) {
 	const n, overlap = 500, 20
 	var bad *Query[badCaseQuery]
 	var remedy *Query[remedyQuery]
+	var withRemedy *Query[withRemedyQuery]
 	_, _, engine := disjointStores(t, n, overlap, func(registrar *kernel.Registrar) {
 		registrar.Subscribe[badCaseSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[badCaseQuery]) { bad = q }))
 		registrar.Subscribe[remedySystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[remedyQuery]) { remedy = q }))
+		registrar.Subscribe[withRemedySystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[withRemedyQuery]) { withRemedy = q }))
 	})
 	frame(t, engine, 1)
 
@@ -142,18 +174,35 @@ func TestTheRemedyTagYieldsTheSameEntities(t *testing.T) {
 	if len(seen) != overlap {
 		t.Fatalf("the unaided Query matched %d entities, want %d", len(seen), overlap)
 	}
-	matched := 0
+	if len(bad.walk) != n {
+		t.Fatalf("the unaided walk is %d long, want %d", len(bad.walk), n)
+	}
+
+	var tagYield, withYield []Entity
 	for e := range remedy.All() {
-		if !seen[e] {
-			t.Fatalf("%v matched with the Tag and not without it", e)
+		tagYield = append(tagYield, e)
+	}
+	for e := range withRemedy.All() {
+		withYield = append(withYield, e)
+	}
+	for _, arm := range []struct {
+		spelling string
+		yielded  []Entity
+		walked   int
+	}{
+		{"named-Tag", tagYield, len(remedy.walk)},
+		{"With", withYield, len(withRemedy.walk)},
+	} {
+		for _, e := range arm.yielded {
+			if !seen[e] {
+				t.Fatalf("%v matched with the %s spelling and not without it", e, arm.spelling)
+			}
 		}
-		matched++
-	}
-	if matched != overlap {
-		t.Fatalf("the Tag-driven Query matched %d entities, want %d", matched, overlap)
-	}
-	if len(bad.walk) != n || len(remedy.walk) != overlap {
-		t.Fatalf("the walks are %d and %d long, want %d and %d",
-			len(bad.walk), len(remedy.walk), n, overlap)
+		if len(arm.yielded) != overlap {
+			t.Fatalf("the %s-driven Query matched %d entities, want %d", arm.spelling, len(arm.yielded), overlap)
+		}
+		if arm.walked != overlap {
+			t.Fatalf("the %s-driven walk is %d long, want the %d of the intersection", arm.spelling, arm.walked, overlap)
+		}
 	}
 }

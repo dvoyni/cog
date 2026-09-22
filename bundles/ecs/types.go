@@ -49,14 +49,16 @@ type Query[Q any] = types.Query[Q]
 //	}
 //
 // It still contributes read{T} to the System's lock set, because the probe
-// reads that Store's sparse array. A filter can never drive a Query, so a
-// Query needs at least one present-typed Component or Tag besides its filters.
+// reads that Store's sparse array. A Without can never drive a Query: its
+// Store lists the Entities to exclude, and nothing enumerates the rest. So a
+// Query needs at least one Component, Tag or With besides its Withouts.
 type Without[T any] = types.Without[T]
 
 // With narrows a Query to the Entities that do have T, without yielding T into
-// the struct: the spelling for presence matched on but not read. It contributes
-// read{T}, as Without does. Where T is a Tag, name it as an ordinary field
-// instead, which costs no copy and can drive.
+// the struct: the recommended spelling for presence matched on but not read,
+// whether T is a Tag or not. It contributes read{T}, as Without does, and it
+// can drive: its Store holds a superset of the match set, so a Query walks it
+// when it is the shortest Store.
 type With[T any] = types.With[T]
 
 // Spawn creates Entities carrying a complete Component set, named as a struct

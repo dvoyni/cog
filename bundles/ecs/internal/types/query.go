@@ -14,10 +14,13 @@ type queryField struct {
 	// get resolves the Store from the handle the Lock bound. It is called once
 	// per field per run, never per Entity.
 	get func() *storeHeader
-	// filter says the field is a Without or a With, and it exists for exactly
-	// one reader: the driver scan, which must not pick one. It is a field of the
-	// plan rather than of the cursor because it is consulted once per field per
-	// run, and the cursor is what the fillers copy into registers per Entity.
+	// filter says the field is a Without or a With. Its one production reader
+	// is validation mode's stampRow, which skips every filter: a filter's row is
+	// zero wide and never read, so it names no List the row reaches. It is not
+	// what the driver scan asks — a With can drive and a Without cannot, and
+	// that is the cursor's wanted, not this. It is a field of the plan rather
+	// than of the cursor because the cursor is what the fillers copy into
+	// registers per Entity.
 	filter bool
 	// lists and owner are validation mode's, and are on the field rather than on
 	// the cursor deliberately: the cursor is what the fillers copy into
@@ -249,8 +252,9 @@ type Query[Q any] struct {
 //
 // It panics when a field names a Component no plugin registered, naming the
 // Component and the Query rather than the store type the user never wrote, and
-// when nothing in the Query can drive it — a Query of filters alone, or of no
-// fields at all. The plugin boundary turns either into a composition failure
+// when nothing in the Query can drive it — a Query of Withouts alone, or of no
+// fields at all. A field can drive when it matches on presence: a Component, a
+// Tag or a With. The plugin boundary turns either into a composition failure
 // naming the plugin.
 func (q *Query[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
 	queryType := reflect.TypeFor[Q]()
@@ -291,7 +295,11 @@ func (q *Query[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
 		width := class.size
 		if isFilter {
 			width = 0
-		} else {
+		}
+		// Whether a field can drive depends on how it matches, not on whether
+		// it is a filter: a Store holding a superset of the match set can be
+		// walked, and a Without's holds exactly the excluded set.
+		if wanted != absentGeneration {
 			driving++
 		}
 		planned := queryField{
@@ -316,7 +324,7 @@ func (q *Query[Q]) prepare(en *Entities, access kernel.ResourceAccess) {
 	}
 	if driving == 0 {
 		panic(fmt.Sprintf(
-			"ecs: Query %s names no present-typed Component, so nothing can drive it: a filter names the Entities to exclude and nothing enumerates the rest, so a Query needs at least one Component or Tag it matches on presence",
+			"ecs: Query %s names nothing it matches on presence, so nothing can drive it: a Without filter names the Entities to exclude and nothing enumerates the rest, so a Query needs at least one Component, Tag or With",
 			kernel.TypeName(queryType)))
 	}
 	// Unrolled by field count, chosen here and never again — unless some field
@@ -473,10 +481,11 @@ func (q *Query[Q]) bind() {
 		store := field.get()
 		field.cursor.sparse = store.sparse
 		field.cursor.rows = store.dense.data
-		// A filter is never a driver candidate, however short its Store is.
-		// prepare has already refused a Query that leaves no candidate at all,
-		// so the scan below always finds one.
-		if field.filter {
+		// A Without is never a driver candidate, however short its Store is:
+		// its owners are exactly the Entities to exclude. A With is one, like
+		// any field that matches on presence. prepare has already refused a
+		// Query that leaves no candidate at all, so the scan always finds one.
+		if field.cursor.wanted == absentGeneration {
 			continue
 		}
 		if n := len(store.owners); shortest < 0 || n < shortest {

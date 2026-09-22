@@ -530,8 +530,10 @@ Query differs only by the Tag field.
 
 **The remedy is an app-maintained Tag.** The app puts a `Solid` Tag on exactly
 the entities that have both, maintains it itself, and names it in the Query as
-an ordinary field — a Tag is just another Store, it costs no memory however many
-entities it holds, and it is a very good driver because the scan picks it.
+`_ ecs.With[Solid]` — a Tag is just another Store, it costs no memory however
+many entities it holds, and it is a very good driver because the scan picks it.
+A `With` is a driver candidate like any field the Query matches on presence;
+see [Filters](#filters).
 
 There is deliberately **no ECS mechanism** for this. That road is EnTT's groups,
 shipyard's packs and bevy's sparse-set markers, and **exclusivity is what killed
@@ -584,23 +586,56 @@ probe's answer against a per-field bool — costs three instructions instead of
 one and measured **3% of a ten-thousand-Entity frame**, paid by every Query
 whether it has a filter or not.
 
-**A filter can never be the driver, and a Query must name at least one
-present-typed Component or Tag.** `Without[T]`'s `owners` lists exactly the
-Entities to *exclude* and nothing enumerates the complement, so a Query of
-filters alone has nothing to walk and fails at registration:
+**A `With` can drive; a `Without` cannot.** The driver is the shortest Store
+among every field the Query matches on *presence*: Component fields, Tag fields
+and `With` filters. The reason is what each Store holds. A `With[T]`'s `owners`
+is a superset of the match set, exactly as a Component field's is, so walking it
+and probing the rest finds every match. A `Without[T]`'s `owners` lists exactly
+the Entities to *exclude*, and nothing enumerates the complement, so walking it
+would visit precisely the Entities the Query drops. The asymmetry is the rule;
+it is not an accident of the implementation, so neither "a filter never drives"
+nor "a `Without` should drive" is worth re-proposing. In the code the test is
+the probe's own encoding of "matches on absence" — a field whose cursor looks
+for the absent generation is skipped by the scan — checked once per field per
+run and never per Entity.
+
+So **`_ ecs.With[T]` is the one recommended spelling for presence a System
+matches on but does not read**, whether `T` is a Tag or not. Naming a Tag as an
+ordinary field (`Solid Solid`) still works and still drives, but it reads as
+though the value were wanted; and for a non-Tag `T`, naming it costs a copy per
+Entity that the `With` spelling does not, while still being considered as the
+driver. Measured on the bad case above — 5 000 with `Body`, 5 000 with
+`Collider`, 100 with both and `Solid` on those — interleaved over ten rounds from
+two test binaries, medians:
+
+| Query | ns/op | allocs |
+| --- | --- | --- |
+| `{Body *Body; Collider Collider}` — drives off 5 000 | 3 645 | 0 |
+| `{Body *Body; Collider Collider; Solid Solid}` | 478 | 0 |
+| **`{Body *Body; Collider Collider; _ ecs.With[Solid]}`** | **481** | **0** |
+
+The two remedy spellings are within noise of each other (0.8%) and both 7.6×
+faster than the bad case; neither existing arm moved against the parent build
+beyond run-order noise (bad case 3 820 → 3 645, Tag remedy 483 → 478).
+
+**A Query must name at least one field it matches on presence.** A Query of
+filters alone is legal if one of them is a `With`, and it yields the Entity and
+an empty struct — "visit every Entity that has X" needs no field the System
+never reads. A Query of `Without`s alone, or of no fields at all, has nothing to
+walk and fails at registration:
 
 ```
-plugin "systems" panicked in Register: ecs: Query game.FiltersOnlyQuery names
-no present-typed Component, so nothing can drive it: a filter names the
-Entities to exclude and nothing enumerates the rest, so a Query needs at least
-one Component or Tag it matches on presence
+plugin "systems" panicked in Register: ecs: Query game.WithoutsOnlyQuery names
+nothing it matches on presence, so nothing can drive it: a Without filter names
+the Entities to exclude and nothing enumerates the rest, so a Query needs at
+least one Component, Tag or With
 ```
 
-`With[T]` does not drive either, although its `owners` would serve. **If you
-want a Tag to drive, name it as an ordinary field** — a Tag yields nothing into
-the struct anyway, so `Solid Solid` costs exactly what `_ ecs.With[Solid]` costs
-and can be chosen as the driver. `With[T]` is for presence you want matched but
-not copied, where `T` is not a Tag.
+Letting a `With` drive changes nothing else. A filter is still planned zero
+wide, so a `With` driver's fill copies nothing, in the unrolled fillers, the
+per-field loop and `All()`'s inline two-field walk alike. Every filter still
+contributes a read of its Store whether or not it drives, and validation mode
+still skips every filter when it stamps a row.
 
 
 ## System
