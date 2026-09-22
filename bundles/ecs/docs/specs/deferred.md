@@ -118,12 +118,13 @@ What asks is the shape of the lock, and it is not hypothetical:
   the cheapest one; deferral is what to reach for when splitting is not
   available, not a replacement for it.
 
-**Gap.** The crossover — where deferral starts to pay — is around **89 despawns
-a tick**, from [#240](https://github.com/dvoyni/cog/issues/240)'s synthetic
-workload on a prototype, not from this design on a real engine and not from any
-game. The crossover benchmark in [Required work](#required-work) is what settles
-it, and until it runs, *"deferral pays above ~89"* is an estimate carried
-forward, not a measurement of what is built.
+**Settled here.** The crossover — where deferring stops paying — was estimated at
+*around 89 despawns a tick* from
+[#240](https://github.com/dvoyni/cog/issues/240)'s synthetic workload on a
+prototype. Measured on this design built, it is about **3 700 changes a tick**,
+roughly forty times that, and the estimate is superseded. Nothing in the range
+this design was built for — the 500-change storm case included — comes near the
+crossing. See [What it costs](#what-it-costs).
 
 ---
 
@@ -763,11 +764,23 @@ nothing more, which is the whole point of the narrow lock.
 
 ## What it costs
 
+Measured on this design built, on the arms
+[#565](https://github.com/dvoyni/cog/issues/565) added beside the barrier
+benchmarks in `bundles/ecs/internal/types`. The package README's [*What
+structural change costs*](../README.md#what-structural-change-costs) carries
+them in full, with the compositions and how they were taken, and **those figures
+supersede this table** the way `hooks.md`'s README pointer does; this is the
+summary and the record of what the design was held to.
+
 | | measured | source |
 | --- | --- | --- |
-| a typed queue, against immediate | **+4.6%** — 4 147 ns against 3 963 ns, zero allocations | [#240](https://github.com/dvoyni/cog/issues/240) |
+| **the crossover** — where deferring stops paying | **about 3 700 changes a tick** | `BenchmarkCrossover*`, README |
+| a deferred change, against an immediate one | **+2.5 ns**, zero allocations | `BenchmarkDrainCycle500` − `BenchmarkImmediateCycle500` |
+| declaring `write{*Entities}`, in the crossover composition | **~4.5 µs** a frame | `BenchmarkCrossoverImmediate1` − `BenchmarkCrossoverDeferring1` |
+| a drain over empty buffers, two enrolled handles | 7.2 ns | `BenchmarkDrainIdle` |
+| one reservation | 1.5 ns alone, 6.0 ns at four contenders | `BenchmarkReserve`, `BenchmarkReserveParallel` |
+| four parallel deferring Systems, the cursor's share | **5.4 ns a change**, 6% of the frame | `BenchmarkContended*` |
 | a type-erased (`[]any`) queue | **4 920 ns**, 50 allocs and 1 600 B a tick | [#240](https://github.com/dvoyni/cog/issues/240) |
-| declaring `write{*Entities}` | **~8.2 µs** a frame | `BenchmarkBarrierDeclared` − `BenchmarkBarrierReading` |
 | spawning four fields | 27.6 ns | `BenchmarkSpawnFourFields` |
 | despawning across six Stores | 18.5 ns, ~3 ns a Store | `BenchmarkDespawnOnly` |
 
@@ -777,19 +790,27 @@ nothing more, which is the whole point of the narrow lock.
 allocation*](ecs.md#there-is-no-command-buffer-and-the-reason-is-allocation)
 keeps that measurement and gains a pointer here: **the typed arm of that
 benchmark is what this document builds.** No general command buffer is built,
-and `Set[T].UpdateFor` / `Remove[T].From` stay immediate.
+and `Set[T].UpdateFor` / `Remove[T].From` stay immediate. It is the one row above
+still taken on the prototype, because it is the shape this design refused to
+build and so has nothing here to measure.
 
 **What a deferring System pays**, per change: one atomic add for a deferred
 `New`, one append to a typed slice, and nothing else. **What it saves**: the
 whole `write{*Entities}` barrier for its run, so every other System in the frame
-that would have been excluded runs.
+that would have been excluded runs. Those are 2.5 ns and 4.5 µs respectively,
+which is why the crossover is in the thousands: it takes that many changes for a
+per-change tax three orders of magnitude smaller than a scheduling round to
+catch one.
 
-**Gap.** Every figure above is from a prototype
-([#240](https://github.com/dvoyni/cog/issues/240)) or from the barrier
-benchmarks, not from this design built. The crossover benchmark in
-[Required work](#required-work) is what turns them into measurements of what
-ships, and the README's §*What structural change costs* supersedes this table
-when it does.
+**The crossover the prototype estimated was wrong, and wrong in the direction
+that matters.** [#240](https://github.com/dvoyni/cog/issues/240)'s synthetic
+workload put it at *around 89 despawns a tick*, which would have left the storm
+case — 500 changes a tick — past it. Measured on the build it is about forty
+times that, and at 500 changes a tick the deferring arm is still 12% ahead.
+**Nothing in the range this design was built for is near the crossing**, so the
+guidance is the simple one: a System that changes the world defers unless it is
+making thousands of changes a tick, and the reason to reach for the immediate
+pair is that a change must be visible within the run, never that it is cheaper.
 
 ---
 

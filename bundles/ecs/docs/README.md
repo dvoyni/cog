@@ -1551,6 +1551,132 @@ bad-case walk, where nearly every probe is a rejection and nothing else happens.
 Making it free would mean a second set of unrolled fillers for Queries that
 carry a filter, which is where monomorphised fillers would put it.
 
+**Deferring the change, and when it pays.** The two deferring handles trade one
+thing for another. A `*DeferredSpawn[S]` or a `*DeferredDespawn` declares
+`read{*Entities}` where the immediate pair declares the write, so nothing in the
+frame is excluded for that System's run; what it pays instead, per change, is
+one atomic add on the reservation cursor, one append to a typed buffer, and a
+second traversal of that buffer at the drain. The crossover is where the second
+outgrows the first, and it is a measurement rather than an estimate.
+
+Whole frame, the composition the barrier arms above use: two workers writing
+different Components, the System under test iterating **its own** Component in
+both arms and retiring what it created last tick, over 2 000 Entities. **The
+general drainer is in both arms** — `ecs.DrainOnUpdate` is subscribed `Last`
+unconditionally, so the drain node is in every composition whether anything
+defers or not, and leaving it out of the immediate arm would charge the
+deferring one for a barrier both pay. The created Entities carry a Component set
+nothing else in the frame touches, so every walk is the same length at 1 changes
+a tick and at 5 000, and only the change work varies. The immediate arm is
+`*Spawn[S]` with `*WriteableEntities`, the deferring one `*DeferredSpawn[S]`
+with `*DeferredDespawn`; a change is one spawn and one despawn.
+
+Ryzen 9 7950X3D, go1.27.1, 2026-09-23, `BenchmarkCrossover*` at
+`-benchtime=2000x`. Each arm ran in a process of its own and the two swapped
+places between rounds, because `-count` reruns a benchmark in place rather than
+interleaving and run order swings a whole-frame figure by ±10%; 24 rounds at 1
+to 500 changes, 64 at 2 000 to 4 000, 13 at 5 000, minima.
+
+| changes a tick | immediate, ns/frame | deferring, ns/frame | deferring saves |
+| --- | --- | --- | --- |
+| 1 | 22 572 | **18 104** | 4 468 — **19.8%** |
+| 10 | 23 260 | **18 154** | 5 106 — **22.0%** |
+| 100 | 27 778 | **21 225** | 6 553 — **23.6%** |
+| 500 | 40 314 | **35 300** | 5 014 — **12.4%** |
+| 2 000 | 86 013 | **83 870** | 2 143 — 2.5% |
+| 3 000 | 117 395 | **115 119** | 2 276 — 1.9% |
+| 4 000 | **148 393** | 149 173 | −780 — −0.5% |
+| 5 000 | **179 158** | 185 207 | −6 049 — −3.4% |
+
+**The crossover is about 3 700 changes a tick**, where the 3 000 arm's 1.9% lead
+runs out and the 4 000 arm is level to half a percent. It is not 89, which is
+what [#240](https://github.com/dvoyni/cog/issues/240)'s synthetic workload
+estimated and what `deferred.md` carried until this was measured; the estimate
+was low by about forty times. **Everywhere a game actually lives the deferring
+handle is faster** — a fifth of a frame faster at 1 to 100 changes a tick, an
+eighth at 500, which is the storm case — and nothing in the sweep the design was
+built for is anywhere near the crossing. This composition prices that storm
+case, 500 changes a tick, at 40.3 µs for the whole immediate frame.
+
+Why it wins by so much for so long: the barrier the immediate arm declares is a
+scheduling round the deferring arm never pays, and it is a fixed 4.5 µs whatever
+the change count, while the per-change premium the deferring arm pays is 2.5 ns.
+It takes thousands of changes for a 2.5 ns tax to catch a 4.5 µs one.
+
+**The per-change premium, off the frame** — the same changes made through each
+pair of handles with no scheduler between them, so what the barrier costs and
+what a change costs are two numbers rather than one. `BenchmarkImmediateCycle*`
+against `BenchmarkDrainCycle*`, minima of 11 interleaved rounds at
+`-benchtime=200000x`: a cycle queues *n* Spawns, queues *n* Despawns of the last
+cycle's Entities, and drains.
+
+| changes a cycle | immediate, ns | queued and drained, ns | premium a change |
+| --- | --- | --- | --- |
+| 1 | 28.9 | 38.9 | +10.0 |
+| 10 | 302.7 | 331.5 | +2.9 |
+| 100 | 3 158 | 3 348 | **+1.9** |
+| 500 | 15 610 | 16 840 | **+2.5** |
+
+**A steady-state drain allocates nothing, and the benchmarks show it rather than
+asserting it**: every row above is 0 B/op and 0 allocs/op under `-benchmem`,
+because a drain cuts each buffer to zero length and keeps its capacity. The
+premium at one change a cycle is ten nanoseconds rather than two and a half
+because the drain's fixed cost — 7.2 ns for a world with two enrolled handles
+and nothing queued, `BenchmarkDrainIdle` — is spread over one change instead of
+five hundred. That fixed cost is the absent empty-drain skip, priced: a length
+check per enrolled buffer, every drain, whether anything queued or not.
+
+**What the reservation atomic costs.** The cursor is the one word the design
+contends on, and it is the only atomic in it. `BenchmarkReserve` is the
+uncontended call; `BenchmarkReserveParallel` is `RunParallel` at a sweep of
+`GOMAXPROCS`, which is more pressure than a frame can put on it — a frame has as
+many contenders as it has deferring Systems, not as many as the machine has
+cores. Minima of seven rounds at `-benchtime=3000000x`:
+
+| contenders on the cursor | ns a reservation |
+| --- | --- |
+| a serial loop | **1.51** |
+| `RunParallel`, 1 | 3.10 |
+| 2 | 3.68 |
+| 4 | **6.04** |
+| 8 | 9.96 |
+| 16 | 17.92 |
+| 32 | 20.83 |
+
+At frame scale it is smaller than that, because a deferring System does more per
+change than reserve. Four deferring Systems, each queuing into its own buffer and
+declaring reads alone so the scheduler runs them together, against one System
+making the same 400 changes by itself — each read against an idle twin with the
+same signatures and the same number of nodes, since the engine charges a frame
+for every node whatever it does (`BenchmarkContended*`, minima of 11 interleaved
+rounds):
+
+| | ns/frame | over its idle twin | a change |
+| --- | --- | --- | --- |
+| 1 System, idle | 10 210 | | |
+| 1 System × 100 changes | 13 740 | 3 530 | 35.3 |
+| 1 System × 400 changes | 23 568 | 13 358 | **33.4** |
+| 2 Systems, idle | 14 904 | | |
+| 2 Systems × 100 changes | 21 916 | 7 012 | 35.1 |
+| 4 Systems, idle | 18 294 | | |
+| 4 Systems × 400 changes total | 33 811 | 15 517 | **38.8** |
+
+**Four parallel deferring Systems pay 5.4 ns a change for the cursor** — 2 159 ns
+over the 400 changes, 16% of the change work and 6% of the frame — and none of
+them is serialised and no lock set is widened to get it. That is the whole of
+what the single word costs.
+
+A deferring frame stays on the engine's line: **4.002 objects a frame at 1 000
+Entities and 4.002 at 10 000**, against 4.001 for the same cycle made
+immediately, over a 10 000-frame steady state with the deferring handles in the
+signature (`TestADeferredSpawnSitsOnTheEnginesAllocationLine` and
+`TestADeferredDespawnSitsOnTheEnginesAllocationLine`; the engine's line is 6).
+Identical counts an order of magnitude apart are the claim, because a buffer that
+grew or a drain that rebuilt one would allocate whatever the population.
+`-gcflags=-m` adds no `moved to heap` for either handle, in either build mode
+and with both in a System signature: the package's only two are still the
+registration-time `entities` cells in `friends.go` and `shrink.go`.
+
 ### What reaching another Entity costs
 
 This is the one figure in this package the spec did not have. `Get`, `Set` and
