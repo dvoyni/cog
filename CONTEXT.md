@@ -235,6 +235,18 @@ _Avoid_: Callback, observer, listener, trigger, `OnAdd`/`OnRemove`, Entered/Exit
 Creating an Entity with a given Component set and its values, as one Structural change. Despawn is its inverse and is total: it removes the Entity from every Store, so nothing anywhere still holds it.
 _Avoid_: Instantiate, Instance, create
 
+**Drain**:
+Applying queued Spawns and Despawns, done by a System holding Entities for write. Queuing one is not a Structural change and changes nothing anyone can see — not even the System that queued it: a queued Despawn leaves its Entity alive and iterated, and a queued Spawn does not exist. The Drain is the Structural change, made by the System that drains, so who sees it follows from which Systems ran after that one, exactly as for an immediate Spawn or Despawn. Nothing reports what is queued.
+_Avoid_: Flush, commit, apply, sync, and command buffer, which names the type-erased general queue that was rejected
+
+**Reserved Entity**:
+What a queued Spawn hands back: an Entity whose handle is fixed when the Spawn is queued and which exists from the Drain on. Until then it is not alive, it can be stored as a Reference that resolves to nothing, and any Spawn, immediate or queued, is never given the same handle. A queued Despawn of it is applied after it is spawned.
+_Avoid_: Placeholder, pending Entity, proxy, promise
+
+**Deferred Spawn**, **Deferred Despawn**:
+The two handles that queue a Structural change instead of making one. Each is a System parameter beside the immediate Spawn and Writeable Entities, holds its own buffer of what it has queued, and keeps the immediate handle's method name, so making a System's spawns deferred is a change to its signature and to nothing else. A Deferred Spawn names a Component set and hands back a Reserved Entity; a Deferred Despawn names nothing and reports nothing, because the Drain rather than the call decides what a queued Despawn does. Holding either declares the read of the authority and never the write, which is the whole point, and a Deferred Spawn declares a read of each of its Component set's Stores besides — not because it writes them, but because declaring is what names the plugin whose Components it spawns. What they hold is queued; what they are is deferred, and the two words do not swap.
+_Avoid_: Command buffer, pending list, spawn queue as a name for the handle rather than for what it holds
+
 **Reference**:
 An Entity kept inside a Component — a missile's target, a light's owner. Following one is the ordinary way to relate two Entities, and it stays safe when the far Entity is gone: a Reference to a despawned Entity resolves to nothing, because a Despawn empties every Store and a generation cannot match twice. It points one way only. The far Entity does not know it is referenced and nothing anywhere lists what points at a given Entity, so a relation with a many side keeps that side as several References on the one side — the count fixed by whoever declares the Component, never by the engine.
 _Avoid_: Link, pointer, handle. Also Parent, Child and Hierarchy, which are a game's words for its own Components and mean nothing to the engine. Relation is held in reserve for a Store holding many rows per Entity keyed by the Entity each names, which is the only shape that would make the far side answerable without an index every Structural change has to maintain.
