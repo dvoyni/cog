@@ -60,7 +60,7 @@ func TestAModelEntityRecordsWhereItStandsOnItsLayers(t *testing.T) {
 	h.noErrors(t)
 }
 
-// TestAModelsSceneAndNodeSelectorsReachTheDraw is the rest of scene.ModelRef:
+// TestAModelsSceneAndNodeSelectorsReachTheDraw is the rest of model.ModelRef:
 // the Component holds scene's own reference, so a draw of one node inside a
 // file is the same Component with two more strings set. The file's default
 // scene is the barrel alone and its "props" scene the crate and the barrel, so

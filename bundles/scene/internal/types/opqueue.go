@@ -42,7 +42,7 @@ type OpQueue struct {
 	// plays backs every model draw's ClipPlay slice, so a record never aliases
 	// the caller's array and a caller may reuse its own the moment the call
 	// returns.
-	plays []ClipPlay
+	plays []model.ClipPlay
 	// morphWeights backs every model draw's MorphWeights slice, for the same
 	// reason plays does.
 	morphWeights []float32
@@ -59,7 +59,7 @@ type OpQueue struct {
 	publishedCalls   []Op
 	publishedMeshes  MeshRecording
 	publishedModels  []ModelDrawRecord
-	publishedPlays   []ClipPlay
+	publishedPlays   []model.ClipPlay
 	publishedWeights []float32
 	publishedFrame   uint32
 	// cameraOps is the published frame's camera registrations as Ops, in id
@@ -233,7 +233,7 @@ type DrawRecord struct {
 	// Pbr is the bundled-PBR record a model primitive brought with it, owned
 	// by the resident model entry and shared by every draw of it. It is nil
 	// for everything else, which synthesises its record from the draw.
-	Pbr *ScenePbrRecord
+	Pbr *model.ScenePbrRecord
 	// Material is the scene material the draw named, or nil for the bundled
 	// PBR. Every debug shape leaves it nil, which is what makes a draw literal
 	// that omits the field untouched by the field existing.
@@ -246,7 +246,7 @@ type DrawRecord struct {
 	// vocabulary leaves it zero and names a shape instead: scene's unit meshes
 	// are baked lazily on first use, so their refs cannot be known at record
 	// time.
-	Mesh MeshRef
+	Mesh model.MeshRef
 	// Params are the extra gfx parameters a MeshDraw asked to bind, or a model
 	// draw's OverrideParams, both aliasing the recording's parameter arena.
 	// Either way gfx resolves them over the entry's own material parameters by
@@ -313,7 +313,7 @@ func (r DrawRecord) World() m.Mat4 {
 // A self-lit shape is black paint that glows: the colour goes into
 // emissiveFactor, which the shader adds after shading, and the base colour is
 // black so the lights contribute nothing to it.
-func (r DrawRecord) PbrRecord() ScenePbrRecord {
+func (r DrawRecord) PbrRecord() model.ScenePbrRecord {
 	record := r.basePbrRecord()
 	if r.OverridesRecord {
 		record.Override(r.Params)
@@ -324,7 +324,7 @@ func (r DrawRecord) PbrRecord() ScenePbrRecord {
 // basePbrRecord is the record before a draw's own overrides merge into it: the
 // file's own for a model primitive, and paint synthesised from the draw for
 // everything else.
-func (r DrawRecord) basePbrRecord() ScenePbrRecord {
+func (r DrawRecord) basePbrRecord() model.ScenePbrRecord {
 	if r.Pbr != nil {
 		return *r.Pbr
 	}

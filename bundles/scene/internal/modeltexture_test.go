@@ -168,7 +168,7 @@ func TestABrokenImageIsOneReportAcrossItsColourSpaces(t *testing.T) {
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
-	var broken scene.ErrModelTextureUnavailable
+	var broken model.ErrModelTextureUnavailable
 	if !anyErrorAs(h.errors(), &broken) {
 		t.Fatalf("errors = %v, want the decode failure reported as scene's own", h.errors())
 	}
@@ -196,12 +196,12 @@ func TestUnloadTextureFreesEveryVariantAndUnmutesThePath(t *testing.T) {
 	}}
 	doc.Meshes[0].Primitives[0].Material = gltf.Index(0)
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*scene.OpQueue) {})
-	h.device(func(la scene.LookupDeviceAccess) { la.Preload(modelPath) })
+	h.device(func(la model.LookupDeviceAccess) { la.Preload(modelPath) })
 	if len(h.errors()) != 1 {
 		t.Fatalf("reports = %v, want the broken image reported once", h.errors())
 	}
-	h.lookup(func(la scene.LookupAccess) { la.UnloadModel(modelPath) })
-	h.device(func(la scene.LookupDeviceAccess) {
+	h.lookup(func(la model.LookupAccess) { la.UnloadModel(modelPath) })
+	h.device(func(la model.LookupDeviceAccess) {
 		la.UnloadTexture(modelPath)
 		la.Preload(modelPath)
 	})
@@ -235,20 +235,20 @@ func TestUnloadTextureFreesEveryColourSpaceOnePathBaked(t *testing.T) {
 	}}
 	doc.Meshes[0].Primitives[0].Material = gltf.Index(0)
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*scene.OpQueue) {})
-	h.device(func(la scene.LookupDeviceAccess) { la.Preload(modelPath) })
+	h.device(func(la model.LookupDeviceAccess) { la.Preload(modelPath) })
 	h.frame()
 	baked := h.backend.filePictures()
 	if len(baked) != 2 {
 		t.Fatalf("one image bound as a picture and as data baked %d textures, want two", len(baked))
 	}
 
-	h.lookup(func(la scene.LookupAccess) { la.UnloadModel(modelPath) })
+	h.lookup(func(la model.LookupAccess) { la.UnloadModel(modelPath) })
 	h.frame()
 	if got := len(h.backend.releasedTextures); got != 0 {
 		t.Fatalf("UnloadModel released %d textures, want none: it must not cascade", got)
 	}
 
-	h.device(func(la scene.LookupDeviceAccess) { la.UnloadTexture(modelPath) })
+	h.device(func(la model.LookupDeviceAccess) { la.UnloadTexture(modelPath) })
 	h.frame()
 	released := map[gfx.TextureID]bool{}
 	for _, id := range h.backend.releasedTextures {
@@ -323,7 +323,7 @@ func TestTwoModelsNamingOneBrokenImageReportItOnce(t *testing.T) {
 	h.frameUntil(t, "both models to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 2
 	})
-	var broken scene.ErrModelTextureUnavailable
+	var broken model.ErrModelTextureUnavailable
 	if !anyErrorAs(h.errors(), &broken) {
 		t.Fatalf("errors = %v, want the decode failure reported", h.errors())
 	}

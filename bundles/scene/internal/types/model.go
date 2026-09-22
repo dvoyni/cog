@@ -1,6 +1,7 @@
 package types
 
 import (
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -55,7 +56,7 @@ type ModelDraw struct {
 	// its backing the moment the call returns. A draw's instances share its
 	// plays - a hundred crates is one call, and a hundred independently
 	// animated characters is a hundred calls.
-	Plays []ClipPlay
+	Plays []model.ClipPlay
 
 	// MorphWeights are this draw's morph target weights, positional over the
 	// model's whole flattened target list - which MorphTargets(path) names, in
@@ -134,7 +135,7 @@ type ModelDrawRecord struct {
 	// morphWeights the recording's weight arena. A nil morphWeights is the
 	// draw taking the animated result; an empty non-nil one is the caller
 	// asking for every target at zero, which are different answers.
-	Plays        []ClipPlay
+	Plays        []model.ClipPlay
 	MorphWeights []float32
 	Overridden   bool
 	// Material is the caller's replacement for the file's own, nil when the

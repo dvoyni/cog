@@ -140,7 +140,7 @@ func TestANodeIsResolvedWithinTheSelectedScene(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)),
 		drawModel(modelPath, scene.ModelDraw{Scene: "second", Node: "crate"}))
 	h.frameUntil(t, "the unmatched node to be reported", func() bool {
-		var missing scene.ErrModelNodeMissing
+		var missing model.ErrModelNodeMissing
 		return anyErrorAs(h.errors(), &missing)
 	})
 	if passes := h.passes(); len(passes) != 1 || passes[0].Instances != 0 {
@@ -154,7 +154,7 @@ func TestAnUnmatchedNodeSkipsTheDrawAndReportsOnce(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, propsFile(t))),
 		drawModel(modelPath, scene.ModelDraw{Node: "crat"}))
 	h.frameUntil(t, "the unmatched node to be reported", func() bool {
-		var missing scene.ErrModelNodeMissing
+		var missing model.ErrModelNodeMissing
 		return anyErrorAs(h.errors(), &missing)
 	})
 	for i := 0; i < 20; i++ {
@@ -163,7 +163,7 @@ func TestAnUnmatchedNodeSkipsTheDrawAndReportsOnce(t *testing.T) {
 	if passes := h.passes(); len(passes) != 1 || passes[0].Instances != 0 {
 		t.Fatalf("packed %v, want nothing at all for a typo'd node", passes)
 	}
-	if got := countAs[scene.ErrModelNodeMissing](h.errors()); got != 1 {
+	if got := countAs[model.ErrModelNodeMissing](h.errors()); got != 1 {
 		t.Errorf("a typo'd node reported %d times over 20-odd frames, want once", got)
 	}
 }
@@ -174,7 +174,7 @@ func TestAnUnmatchedSceneSkipsTheDrawAndReportsOnce(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, propsFile(t))),
 		drawModel(modelPath, scene.ModelDraw{Scene: "outdoors"}))
 	h.frameUntil(t, "the unmatched scene to be reported", func() bool {
-		var missing scene.ErrModelSceneMissing
+		var missing model.ErrModelSceneMissing
 		return anyErrorAs(h.errors(), &missing)
 	})
 	for i := 0; i < 20; i++ {
@@ -183,7 +183,7 @@ func TestAnUnmatchedSceneSkipsTheDrawAndReportsOnce(t *testing.T) {
 	if passes := h.passes(); len(passes) != 1 || passes[0].Instances != 0 {
 		t.Fatalf("packed %v, want nothing at all for a typo'd scene", passes)
 	}
-	if got := countAs[scene.ErrModelSceneMissing](h.errors()); got != 1 {
+	if got := countAs[model.ErrModelSceneMissing](h.errors()); got != 1 {
 		t.Errorf("a typo'd scene reported %d times over 20-odd frames, want once", got)
 	}
 }
@@ -197,12 +197,12 @@ func TestTwoUnmatchedNodesOfOneFileBothReport(t *testing.T) {
 		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Node: "barrl"})
 	})
 	h.frameUntil(t, "both unmatched nodes to be reported", func() bool {
-		return countAs[scene.ErrModelNodeMissing](h.errors()) == 2
+		return countAs[model.ErrModelNodeMissing](h.errors()) == 2
 	})
 	for i := 0; i < 20; i++ {
 		h.frame()
 	}
-	if got := countAs[scene.ErrModelNodeMissing](h.errors()); got != 2 {
+	if got := countAs[model.ErrModelNodeMissing](h.errors()); got != 2 {
 		t.Errorf("two typo'd nodes reported %d times, want one report each", got)
 	}
 }
@@ -215,23 +215,23 @@ func TestUnloadingAModelClearsItsSelectorReports(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, propsFile(t))),
 		drawModel(modelPath, scene.ModelDraw{Node: "crat"}))
 	h.frameUntil(t, "the unmatched node to be reported", func() bool {
-		return countAs[scene.ErrModelNodeMissing](h.errors()) == 1
+		return countAs[model.ErrModelNodeMissing](h.errors()) == 1
 	})
 	for range 5 {
 		h.frame()
 	}
-	if got := countAs[scene.ErrModelNodeMissing](h.errors()); got != 1 {
+	if got := countAs[model.ErrModelNodeMissing](h.errors()); got != 1 {
 		t.Fatalf("a typo'd node reported %d times before the unload, want once", got)
 	}
 
-	h.lookup(func(la scene.LookupAccess) { la.UnloadModel(modelPath) })
+	h.lookup(func(la model.LookupAccess) { la.UnloadModel(modelPath) })
 	h.frameUntil(t, "the same typo to be reported again after the unload", func() bool {
-		return countAs[scene.ErrModelNodeMissing](h.errors()) == 2
+		return countAs[model.ErrModelNodeMissing](h.errors()) == 2
 	})
 	for range 5 {
 		h.frame()
 	}
-	if got := countAs[scene.ErrModelNodeMissing](h.errors()); got != 2 {
+	if got := countAs[model.ErrModelNodeMissing](h.errors()); got != 2 {
 		t.Errorf("reported %d times, want one per episode either side of the unload", got)
 	}
 }
@@ -248,7 +248,7 @@ func TestADrawOfACollapsedNodeSkipsAndReports(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)),
 		drawModel(modelPath, scene.ModelDraw{Node: "flat"}))
 	h.frameUntil(t, "the collapsed node to be reported", func() bool {
-		var degenerate scene.ErrModelNodeDegenerate
+		var degenerate model.ErrModelNodeDegenerate
 		return anyErrorAs(h.errors(), &degenerate)
 	})
 	if passes := h.passes(); len(passes) != 1 || passes[0].Instances != 0 {

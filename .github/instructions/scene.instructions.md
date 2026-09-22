@@ -41,18 +41,22 @@ plugins := []kernel.Plugin{
 ```
 
 Only the composition root imports `sceneplugin` and `modelplugin`. Recording code imports the
-root, `scene`, and nothing else: `*scene.OpQueue`, `*scene.Lookup`,
-`scene.NewLookupAccess`, `scene.NewLookupDeviceAccess` and every descriptor are
-there. A recorder that must run
+two roots, `scene` and `model`, and nothing else. `scene` holds the renderer:
+`*scene.OpQueue`, the cameras, passes, layers, materials and every draw
+descriptor. `model` holds everything a model file can contain: `*model.Lookup`,
+`model.NewLookupAccess`, `model.NewLookupDeviceAccess`, `model.ModelRef`,
+`model.MeshRef`, `model.ClipPlay`, `model.LightDescr`, `model.Vertex` and the
+`ErrModel…` and `ErrMesh…` reports. scene's root aliases none of them.
+A recorder that must run
 before scene's flush in the same tick orders itself
 `Before[scene.FlushOnUpdate]()`; one that asks for no order already runs before
 it, because the flush is registered `Last()`. scene takes no configuration:
 the pose sample rate is model's, `model.Config` keyed by `model.Name`, and a
-zero field takes its default. A `scene.Config` keyed by `scene.Name` is ignored.
+zero field takes its default. A configuration keyed by `scene.Name` is ignored.
 
-**A plugin that locks `*scene.Lookup` depends on `model.Name`.** The Lookup is
-model's resource, and `scene.Lookup` only aliases it, so the kernel refuses a
-lock on it from a plugin whose `Dependencies` name scene and not model.
+**A plugin that locks `*model.Lookup` depends on `model.Name`.** The Lookup is
+model's resource, so the kernel refuses a lock on it from a plugin whose
+`Dependencies` name scene and not model.
 
 Scene reads storage buffers from the vertex stage, so it needs a **WebGPU core
 adapter**. Compatibility mode defaults that limit to zero and the binding cannot
@@ -169,11 +173,11 @@ watching `ok` alone can never say why. `State(path)` returns an `error` — `nil
 when the model loaded, and the load's own failure otherwise — and it is the only
 call that can print a reason.
 
-**The facade is two facades.** `scene.NewLookupAccess(k, lookup)` carries
+**The facade is two facades.** `model.NewLookupAccess(k, lookup)` carries
 `BakeMesh`, `UpdateMesh`, `ReleaseMesh`, `UnloadModel` and the two memory
 totals, and costs its caller one resource. Everything that loads — `Preload`,
 `State` and every query — plus `UnloadTexture` and `UnloadAll` is on
-`scene.NewLookupDeviceAccess(k, lookup, fsys, resources)`, which needs
+`model.NewLookupDeviceAccess(k, lookup, fsys, resources)`, which needs
 `storage.FileSystem` read and `*gfx.ResourceQueue` write beside the Lookup. **An
 ECS System that only bakes a mesh must use the first**: declaring a gfx write to
 bake a cube serialises that System against canvas's flush, scene's flush and
@@ -247,7 +251,7 @@ already counted against a budget that is now fully spent at eight of eight. Put
 per-object data in the vertices.
 
 A **custom vertex layout requires a custom `Material`**: the bundled PBR knows
-two layouts and no others — the **standard** one `scene.Vertex` reports, six
+two layouts and no others — the **standard** one `model.Vertex` reports, six
 attributes at 32 bytes, and the **skinned** one the glTF loader gives a geometry
 some placement skins, the same six plus `JOINTS_0` and `WEIGHTS_0` at 40. The
 skinned layout is unreachable from the public API; nothing an app builds can
@@ -256,7 +260,7 @@ with a custom material — is fine.
 
 A custom material over the **standard** layout must **decode the normal and the
 tangent**. They are stored octahedrally, four bytes each, so `@location(1)` is a
-`vec2<f32>` and `@location(2)` is a `u32`; include `scene.VertexDecodePath` and
+`vec2<f32>` and `@location(2)` is a `u32`; include `model.VertexDecodePath` and
 call `sceneDecodeNormal` and `sceneDecodeTangent` at the top of the vertex
 stage, before any morph or skin. Declaring the `vec3<f32>` and `vec4<f32>` those
 used to be is refused at pipeline time — which is the only reason it is not a

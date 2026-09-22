@@ -13,7 +13,7 @@ import (
 // metallic default has no diffuse at all and scene has no environment to
 // reflect, so a mesh with nothing said about it would render black.
 func TestAMeshDrawTakesWhiteNonMetallicPaintFromTheBundledPbr(t *testing.T) {
-	record := DrawRecord{Mesh: model.NewMeshRef(MeshDurable, 1, 1)}.PbrRecord()
+	record := DrawRecord{Mesh: model.NewMeshRef(model.MeshDurable, 1, 1)}.PbrRecord()
 	if record.BaseColorFactor != (m.Vec4{X: 1, Y: 1, Z: 1, W: 1}) {
 		t.Errorf("baseColorFactor is %v, want white", record.BaseColorFactor)
 	}
@@ -35,7 +35,7 @@ func TestAMeshDrawTakesWhiteNonMetallicPaintFromTheBundledPbr(t *testing.T) {
 // the model draw's field and the record is the model's own; a mesh that wants a
 // colour names a Material.
 func TestAMeshDrawsParamsDoNotReachTheBundledRecord(t *testing.T) {
-	ref := model.NewMeshRef(MeshDurable, 1, 1)
+	ref := model.NewMeshRef(model.MeshDurable, 1, 1)
 	record := DrawRecord{
 		Mesh:   ref,
 		Params: []gfx.ParameterDescr{gfx.ColorParam("baseColorFactor", m.Color{R: 1})},

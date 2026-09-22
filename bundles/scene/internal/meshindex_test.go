@@ -3,6 +3,7 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -14,12 +15,12 @@ import (
 // indexWidthOf reads back the width and the uploaded byte length of one
 // durable mesh, which is the only place either is observable: everything
 // downstream of the record is a buffer id and a size.
-func indexWidthOf(t testing.TB, h *harness, ref scene.MeshRef) (gfx.IndexWidth, int) {
+func indexWidthOf(t testing.TB, h *harness, ref model.MeshRef) (gfx.IndexWidth, int) {
 	t.Helper()
 	var width gfx.IndexWidth
 	var size int
 	found := false
-	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
+	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *model.Lookup) {
 		record, ok := lookup.Mesh(ref)
 		found = ok
 		width, size = record.IndexWidth, record.Indices.Size()
@@ -84,8 +85,8 @@ func TestUpdateMeshRederivesTheIndexWidth(t *testing.T) {
 		t.Fatalf("the baked mesh indexes at %v, want uint16", width)
 	}
 
-	wide := make([]scene.Vertex, 65536)
-	h.lookup(func(la scene.LookupAccess) {
+	wide := make([]model.Vertex, 65536)
+	h.lookup(func(la model.LookupAccess) {
 		if !la.UpdateMesh(ref, wide, []uint32{0, 1, 2}) {
 			t.Fatal("the widening update was refused")
 		}
@@ -95,7 +96,7 @@ func TestUpdateMeshRederivesTheIndexWidth(t *testing.T) {
 		t.Fatalf("after growing to 65536 vertices the mesh indexes at %v in %d bytes, want uint32 in 12", width, size)
 	}
 
-	h.lookup(func(la scene.LookupAccess) {
+	h.lookup(func(la model.LookupAccess) {
 		if !la.UpdateMesh(ref, wide[:65535], []uint32{0, 1, 2}) {
 			t.Fatal("the narrowing update was refused")
 		}
@@ -139,7 +140,7 @@ func TestAModelPrimitiveNarrowsItsIndices(t *testing.T) {
 
 	var widths []gfx.IndexWidth
 	var sizes []int
-	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
+	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *model.Lookup) {
 		for _, mesh := range durableMeshes(lookup) {
 			if mesh.Indexed {
 				widths = append(widths, mesh.IndexWidth)
@@ -168,7 +169,7 @@ func TestAUnitMeshNarrowsItsIndices(t *testing.T) {
 	var width gfx.IndexWidth
 	var size int
 	found := 0
-	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
+	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *model.Lookup) {
 		for _, mesh := range durableMeshes(lookup) {
 			if mesh.Indexed {
 				width, size = mesh.IndexWidth, mesh.Indices.Size()
@@ -187,7 +188,7 @@ func TestAUnitMeshNarrowsItsIndices(t *testing.T) {
 // The width the mesh record carries is what the render pass binds the buffer
 // at, all the way through gfx.
 func TestTheNarrowedWidthReachesTheRenderPass(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, ref, scene.MeshDraw{})

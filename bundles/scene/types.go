@@ -1,9 +1,6 @@
 package scene
 
-import (
-	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
-)
+import "github.com/dvoyni/cog/bundles/scene/internal/types"
 
 // CameraID orders a camera among every other pass in the frame, and is the
 // default gfx.Order for the passes it emits. It is a defined type over
@@ -87,28 +84,6 @@ type LayerMask = types.LayerMask
 // LayersAll is every layer, which is also what a mask nobody wrote means.
 const LayersAll = types.LayersAll
 
-// LightKind is which of the two punctual lights a LightDescr describes.
-// PointLight and SpotLight set it themselves; it is exposed so an Op can be
-// read back.
-type LightKind = model.LightKind
-
-const (
-	LightPoint = model.LightPoint
-	LightSpot  = model.LightSpot
-)
-
-// LightDescr is one punctual light, point or spot, over the one struct: call
-// sites stay explicit through PointLight and SpotLight, a hand-written point
-// light leaves the cone fields zero, and the per-camera light buffer is
-// homogeneous without scene converting between two structs.
-//
-// Every zero is a default. Intensity zero means 1. Range zero means infinite,
-// glTF's own default - a forgotten Range yields a light that reaches too far,
-// which you see immediately, rather than a silently skipped light. OuterCone
-// zero means pi/4, glTF's default; InnerCone zero is a real value, falloff
-// from the axis.
-type LightDescr = model.LightDescr
-
 // Material is a scene material: the gfx materials it serves, one per pass tag.
 // A pass whose tag has no entry skips every draw using this material, so tag
 // participation is purely a material property — a draw gets no say in which
@@ -132,133 +107,17 @@ type Material = types.Material
 // neither.
 type MaterialTag = types.MaterialTag
 
-// Vertex is the authoring vertex: the struct an app fills in for a scene mesh,
-// carrying the six attributes of the standard layout at locations 0..5.
-//
-// It is not the bytes scene uploads. Scene packs every standard-layout vertex
-// into the storage layout at bake (scene/internal/types/vertexpack.go), so what a shader reads
-// is that layout's offsets and formats rather than this struct's: 72 bytes of
-// float are authored here and 32 are stored, because four of the six rows
-// narrow - the normal, the tangent and both UV sets to four bytes each - and
-// the colour quantises to a unorm byte a channel. An app writes directions in
-// the m.Vec3 and m.Vec4 it would write anyway and never sees the encoding.
-// Nothing in scene ever hands a Vertex back, so there is exactly one
-// authoritative form, the authored one, and it flows one way.
-//
-// There is no joint and no weight here, and that is contract rather than an
-// omission. No public path ever wrote them: a skin binding is set only from a
-// loaded model's animation, so a buffer-built mesh never skins and the eight
-// bytes would be dead in every mesh an app can build. The skinned layout - the
-// same six attributes plus JOINTS_0 and WEIGHTS_0, 40 bytes at eight locations
-// - belongs to the glTF loader and is unreachable from here.
-//
-// Normal and Tangent.XYZ are directions. Their length is divided out by the
-// octahedral encode and is unrecoverable after bake - silently, as contract,
-// because a check would fire on correct code: a normal computed from a cross
-// product is one float of rounding from length 1.0001 and draws correctly.
-// Tangent.W is handedness, and only its sign is stored.
-//
-// UV0 and UV1 store as positions inside the range the whole mesh spans, which
-// scene derives at bake and re-derives on every update. A coordinate comes back
-// within half a code of that range rather than exactly, and the range is what
-// makes that half-code small: over the vendored corpus the worst is under half
-// a texel of a 4096 texture, where a half float at the same coordinate is 32.
-//
-// Color is included on failure mode rather than on evidence: it is glTF core,
-// costs four bytes as Unorm8x4, and leaving it out renders a vertex-coloured
-// model silently white instead of erroring. It is an m.Color rather than four
-// raw bytes because this is the one attribute whose authored and stored forms
-// would otherwise have coincided, and a caller should not have to know which
-// fields scene packs and which it copies; m.Color also says which space a
-// component is in, where a byte cannot - glTF's COLOR_0 is linear, which is
-// m.NewColorLinear. Its zero value is transparent black, so anything scene
-// builds itself writes m.White.
-type Vertex = model.Vertex
-
-// VertexLayout is implemented by the plain-data vertex types scene accepts.
-// The returned attributes describe the *buffer* scene uploads: they map byte
-// offsets within one stored vertex to shader locations, in order, and must
-// match the vertex inputs of the material the mesh is drawn with.
-//
-// For a custom layout the buffer is the caller's slice reinterpreted, so the
-// offsets are also the Go struct's field offsets and the two readings coincide.
-// scene.Vertex is the one exception a caller can see: scene packs it, so its
-// method reports the storage layout and its Go fields are the authoring ones.
-// The two differ - the stored normal, tangent and two UV sets are four bytes
-// each against the struct's twelve, sixteen, eight and eight, and the stored
-// colour is four against sixteen - so nothing may read a scene.Vertex layout as
-// a description of the Go struct.
-//
-// There are exactly two layouts scene blesses: the standard one scene.Vertex
-// reports, and the skinned one - the same six attributes plus JOINTS_0 and
-// WEIGHTS_0 - which the glTF loader alone produces and which no exported type
-// reports. Everything else is a custom layout and needs a custom Material.
-//
-// The one direction that fails is a shader input no attribute supplies. A
-// layout supplying an attribute the shader never declares is legal and common,
-// and gfx checks the pairing at pipeline time either way.
-type VertexLayout = model.VertexLayout
-
-// MeshRef names one mesh scene can draw. It is an opaque value: a source, a
-// dense scene id that doubles as the sort key's meshID, and a generation that
-// makes a recycled id detectable. Its zero value is no mesh.
-type MeshRef = model.MeshRef
-
 // MeshDraw is everything one Mesh call says beyond which mesh it draws.
 //
 // A zero MeshDraw is a valid draw at the origin with the bundled PBR, culled by
 // the mesh's own baked sphere.
 type MeshDraw = types.MeshDraw
 
-const VertexDecodePath = model.VertexDecodePath
-
 // ModelDraw is everything one Model call says beyond which file it draws.
 //
 // A zero ModelDraw is a valid draw of the file's default scene at the origin,
 // culled by the bounds the file declares.
 type ModelDraw = types.ModelDraw
-
-// ModelLight is one KHR_lights_punctual light a model file declares, in the
-// model's own space, with its node's flattened transform already applied.
-//
-// Lights are exposed as data and nothing converts one automatically. A file's
-// lights are authored for the file, not for the scene it is dropped into: a
-// lamp prop placed forty times would silently blow the sixteen-light per-pass
-// cap, and which of a level's lights matter is the app's judgement, not the
-// loader's. So an app reads these and declares the ones it wants through
-// PointLight and SpotLight, at whatever world transform it drew the model at.
-type ModelLight = model.ModelLight
-
-// ModelRef names what a scene- or node-scoped query is asking about, mirroring
-// ModelDraw's own selectors field for field.
-//
-// It is a struct rather than three bare strings because the bare form has a
-// transposition bug that compiles: Bounds(path, "crate", "") and
-// Bounds(path, "", "crate") are both valid calls and mean different things.
-//
-// Only Nodes, Bounds and AABB take one. Everything else on the facade is per
-// path, because path is the whole cache key: a model has one joint index space,
-// and MorphTargets is one flattened list that Node re-rooting does not renumber.
-type ModelRef = model.ModelRef
-
-// ClipPlay is one animation clip playing on one model draw.
-//
-// Animation is stateless: nothing in scene advances Time, and no play survives
-// the frame that recorded it. Gameplay - or the anim plugin - owns the clock
-// and hands the result to the draw, which is what makes scrubbing, reversing
-// and pausing the caller's business rather than an API scene has to grow.
-//
-// Clips are addressed by name, first match. An unknown name is reported once
-// per model and the play dropped, so a typo costs the one play rather than the
-// whole character.
-type ClipPlay = model.ClipPlay
-
-// ClipInfo is one clip a model file declares, as Clips reports it.
-//
-// Duration is here because a caller needs it to know when a one-shot play has
-// ended, which is a question only the clip's own length answers and the one
-// piece of clip state gameplay cannot compute for itself.
-type ClipInfo = model.ClipInfo
 
 // OpKind identifies which recording call produced an Op.
 type OpKind = types.OpKind
@@ -315,18 +174,3 @@ type PassView = types.PassView
 // optimisation, and not a blended instanced draw, which stays one batch per
 // instance so its entries keep their own depths.
 type BatchView = types.BatchView
-
-// LookupAccess is the scoped facade for everything about a Lookup that neither
-// loads a model nor frees a GPU texture: the mesh verbs, UnloadModel and the
-// two memory totals. Acquire a *Lookup write dependency in a handler, build one
-// with NewLookupAccess, and pass it to consumers for the duration of that
-// handler. Never store the result: the handles behind it are valid only while
-// the handler holds its lock.
-type LookupAccess = model.LookupAccess
-
-// LookupDeviceAccess is the scoped facade for everything about a Lookup that
-// needs the device: Preload, State and the model queries, all of which load,
-// and the two unload verbs that free a GPU texture at the call. Acquire
-// *Lookup write, storage.FileSystem read and *gfx.ResourceQueue write in a
-// handler, build one with NewLookupDeviceAccess, and never store the result.
-type LookupDeviceAccess = model.LookupDeviceAccess

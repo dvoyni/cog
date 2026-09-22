@@ -67,14 +67,14 @@ func (Vertex) VertexLayout() []gfx.VertexAttr { return standardVertexLayout }
 //
 // For a custom layout the buffer is the caller's slice reinterpreted, so the
 // offsets are also the Go struct's field offsets and the two readings coincide.
-// scene.Vertex is the one exception a caller can see: scene packs it, so its
+// model.Vertex is the one exception a caller can see: scene packs it, so its
 // method reports the storage layout and its Go fields are the authoring ones.
 // The two differ - the stored normal, tangent and two UV sets are four bytes
 // each against the struct's twelve, sixteen, eight and eight, and the stored
-// colour is four against sixteen - so nothing may read a scene.Vertex layout as
+// colour is four against sixteen - so nothing may read a model.Vertex layout as
 // a description of the Go struct.
 //
-// There are exactly two layouts scene blesses: the standard one scene.Vertex
+// There are exactly two layouts scene blesses: the standard one model.Vertex
 // reports, and the skinned one - the same six attributes plus JOINTS_0 and
 // WEIGHTS_0 - which the glTF loader alone produces and which no exported type
 // reports. Everything else is a custom layout and needs a custom Material.

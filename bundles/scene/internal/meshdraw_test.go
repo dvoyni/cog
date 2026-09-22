@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/kernel"
@@ -13,7 +14,7 @@ import (
 )
 
 // customVertex is a caller's own layout: position only, at location 0. It is
-// deliberately not a prefix of scene.Vertex in size, so a mesh built from it
+// deliberately not a prefix of model.Vertex in size, so a mesh built from it
 // cannot be mistaken for a standard one by byte count either.
 type customVertex struct{ Position m.Vec3 }
 
@@ -23,8 +24,8 @@ func (customVertex) VertexLayout() []gfx.VertexAttr {
 
 // triangle is the smallest valid standard-layout mesh: one counter-clockwise
 // face large enough that a camera at the default distance keeps it.
-func triangle() []scene.Vertex {
-	return []scene.Vertex{
+func triangle() []model.Vertex {
+	return []model.Vertex{
 		{Position: m.Vec3{X: -1, Y: -1}, Normal: m.Vec3{Z: 1}, Color: m.White},
 		{Position: m.Vec3{X: 1, Y: -1}, Normal: m.Vec3{Z: 1}, Color: m.White},
 		{Position: m.Vec3{Y: 1}, Normal: m.Vec3{Z: 1}, Color: m.White},
@@ -33,27 +34,27 @@ func triangle() []scene.Vertex {
 
 // bake runs one BakeMesh through a scoped LookupAccess, the way a real caller
 // would from a handler holding the Lookup write lock.
-func (h *harness) bake(vertices []scene.Vertex, indices []uint32, topology gfx.PrimitiveTopology) scene.MeshRef {
-	var ref scene.MeshRef
-	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{run: func(la scene.LookupAccess) {
+func (h *harness) bake(vertices []model.Vertex, indices []uint32, topology gfx.PrimitiveTopology) model.MeshRef {
+	var ref model.MeshRef
+	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{run: func(la model.LookupAccess) {
 		ref = la.BakeMesh(vertices, indices, topology)
 	}})
 	return ref
 }
 
-func (h *harness) lookup(run func(scene.LookupAccess)) {
+func (h *harness) lookup(run func(model.LookupAccess)) {
 	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{run: run})
 }
 
 // device is lookup for the loading half of the facade, which is what Preload,
 // State and every model query moved onto.
-func (h *harness) device(run func(scene.LookupDeviceAccess)) {
+func (h *harness) device(run func(model.LookupDeviceAccess)) {
 	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{device: run})
 }
 
 // model hands a test the cache's own value for one path, which is what an
 // assertion about binding the file's records rather than a copy of them needs.
-func (h *harness) model(run func(*scene.Lookup, kernel.Kernel, fs.FS, *gfx.ResourceQueue)) {
+func (h *harness) model(run func(*model.Lookup, kernel.Kernel, fs.FS, *gfx.ResourceQueue)) {
 	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{model: run})
 }
 
@@ -72,7 +73,7 @@ func reportedAs[E error](reported []error) (E, bool) {
 // The ref is minted and returned immediately, and the mesh baked in the same
 // handler still uploads and draws in that frame.
 func TestABakedMeshDrawsInTheFrameItWasBakedIn(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, ref, scene.MeshDraw{})
@@ -122,8 +123,8 @@ func TestATemporaryMeshDrawsWithoutBaking(t *testing.T) {
 // uint32 of meshID; without a bit to tell them apart the first durable and the
 // first temporary mesh would batch as though they were one geometry.
 func TestDurableAndTemporaryIdsDoNotCollide(t *testing.T) {
-	var durable scene.MeshRef
-	var temporary scene.MeshRef
+	var durable model.MeshRef
+	var temporary model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		temporary = q.TemporaryMesh(triangle(), nil, gfx.TopologyTriangleList)
@@ -146,7 +147,7 @@ func TestDurableAndTemporaryIdsDoNotCollide(t *testing.T) {
 // by the mesh's own baked sphere. That sphere is computed once, at bake time,
 // from the standard layout's positions.
 func TestABakedStandardMeshCullsByItsOwnSphere(t *testing.T) {
-	var near, far scene.MeshRef
+	var near, far model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Mesh(0, near, scene.MeshDraw{Transform: m.At(0, 0, -5)})
@@ -193,7 +194,7 @@ func TestATemporaryMeshIsNeverCulledUnlessItSaysSo(t *testing.T) {
 func TestInvalidGeometryIsReportedAndYieldsNoRef(t *testing.T) {
 	cases := []struct {
 		name     string
-		vertices []scene.Vertex
+		vertices []model.Vertex
 		indices  []uint32
 		topology gfx.PrimitiveTopology
 	}{
@@ -209,7 +210,7 @@ func TestInvalidGeometryIsReportedAndYieldsNoRef(t *testing.T) {
 			if ref.ID() != 0 {
 				t.Fatalf("minted ref %d for invalid geometry", ref.ID())
 			}
-			if _, ok := reportedAs[scene.ErrMeshGeometryInvalid](*h.reported); !ok {
+			if _, ok := reportedAs[model.ErrMeshGeometryInvalid](*h.reported); !ok {
 				t.Fatalf("reported %v, want an ErrMeshGeometryInvalid", *h.reported)
 			}
 		})
@@ -220,7 +221,7 @@ func TestInvalidGeometryIsReportedAndYieldsNoRef(t *testing.T) {
 // produced it already reported, so reporting again would be one report per
 // frame for a mistake made once.
 func TestDrawingARejectedMintIsSilent(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, ref, scene.MeshDraw{})
@@ -239,7 +240,7 @@ func TestDrawingARejectedMintIsSilent(t *testing.T) {
 
 // A custom vertex layout requires a custom material: the bundled PBR is one
 // shader module with one vertex stage and no entry-point selection, so its
-// inputs are scene.Vertex's eight attributes and nothing else.
+// inputs are model.Vertex's eight attributes and nothing else.
 func TestACustomLayoutWithTheBundledMaterialIsReportedAndSkipped(t *testing.T) {
 	custom := []customVertex{{Position: m.Vec3{X: -1, Y: -1}}, {Position: m.Vec3{X: 1, Y: -1}}, {}}
 	h := newHarness(t, func(q *scene.OpQueue) {
@@ -285,7 +286,7 @@ func TestACustomLayoutDrawsWithACustomMaterial(t *testing.T) {
 // recomputes the bounding sphere - so a mesh that grows past its old bounds
 // still culls correctly.
 func TestUpdateMeshRebakesAtAnySizeAndRecomputesTheSphere(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Mesh(0, ref, scene.MeshDraw{Transform: m.At(0, 0, -110)})
@@ -297,8 +298,8 @@ func TestUpdateMeshRebakesAtAnySizeAndRecomputesTheSphere(t *testing.T) {
 	}
 
 	// Six vertices reaching far enough that the sphere now crosses Far.
-	huge := append(triangle(), scene.Vertex{Position: m.Vec3{X: 30}}, scene.Vertex{Position: m.Vec3{Y: 30}}, scene.Vertex{Position: m.Vec3{Z: 30}})
-	h.lookup(func(la scene.LookupAccess) {
+	huge := append(triangle(), model.Vertex{Position: m.Vec3{X: 30}}, model.Vertex{Position: m.Vec3{Y: 30}}, model.Vertex{Position: m.Vec3{Z: 30}})
+	h.lookup(func(la model.LookupAccess) {
 		if !la.UpdateMesh(ref, huge, nil) {
 			t.Error("UpdateMesh refused a same-layout, same-topology update")
 		}
@@ -319,14 +320,14 @@ func TestUpdateMeshRebakesAtAnySizeAndRecomputesTheSphere(t *testing.T) {
 // The pipeline key and the meshID both assume the layout is fixed for a ref's
 // life, so an update that changes it is refused rather than applied.
 func TestUpdateMeshRefusesALayoutChangeAndATemporaryRef(t *testing.T) {
-	var temporary scene.MeshRef
+	var temporary model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		temporary = q.TemporaryMesh(triangle(), nil, gfx.TopologyTriangleList)
 	})
 	h.frame()
 	ref := h.bake(triangle(), nil, gfx.TopologyTriangleList)
 
-	h.lookup(func(la scene.LookupAccess) {
+	h.lookup(func(la model.LookupAccess) {
 		custom := []customVertex{{Position: m.Vec3{X: -1}}, {Position: m.Vec3{X: 1}}, {}}
 		if la.UpdateMesh(ref, custom, nil) {
 			t.Error("UpdateMesh accepted a layout change")
@@ -338,7 +339,7 @@ func TestUpdateMeshRefusesALayoutChangeAndATemporaryRef(t *testing.T) {
 
 	rejections := 0
 	for _, err := range *h.reported {
-		var rejected scene.ErrMeshUpdateRejected
+		var rejected model.ErrMeshUpdateRejected
 		if errors.As(err, &rejected) {
 			rejections++
 		}
@@ -351,7 +352,7 @@ func TestUpdateMeshRefusesALayoutChangeAndATemporaryRef(t *testing.T) {
 // ReleaseMesh is explicit and generation-counted. The ref goes stale at once,
 // and drawing it is reported once per ref rather than once per draw.
 func TestDrawingAReleasedMeshIsReportedOnceAndSkipped(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, ref, scene.MeshDraw{NeverCull: true})
@@ -359,7 +360,7 @@ func TestDrawingAReleasedMeshIsReportedOnceAndSkipped(t *testing.T) {
 	})
 	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
 	h.frame()
-	h.lookup(func(la scene.LookupAccess) { la.ReleaseMesh(ref) })
+	h.lookup(func(la model.LookupAccess) { la.ReleaseMesh(ref) })
 	*h.reported = (*h.reported)[:0]
 	h.frame()
 
@@ -369,7 +370,7 @@ func TestDrawingAReleasedMeshIsReportedOnceAndSkipped(t *testing.T) {
 	if len(*h.reported) != 1 {
 		t.Fatalf("reported %v, want one report for the two draws of one ref", *h.reported)
 	}
-	if _, ok := reportedAs[scene.ErrMeshUnavailable](*h.reported); !ok {
+	if _, ok := reportedAs[model.ErrMeshUnavailable](*h.reported); !ok {
 		t.Fatalf("reported %v, want an ErrMeshUnavailable", *h.reported)
 	}
 }
@@ -377,14 +378,14 @@ func TestDrawingAReleasedMeshIsReportedOnceAndSkipped(t *testing.T) {
 // The generation counter is what makes a recycled id detectable rather than a
 // draw of whatever now occupies that slot.
 func TestAStaleRefDoesNotDrawTheMeshThatReusedItsSlot(t *testing.T) {
-	var stale, reused scene.MeshRef
+	var stale, reused model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Mesh(0, stale, scene.MeshDraw{NeverCull: true})
 	})
 	stale = h.bake(triangle(), nil, gfx.TopologyTriangleList)
 	h.frame()
-	h.lookup(func(la scene.LookupAccess) { la.ReleaseMesh(stale) })
+	h.lookup(func(la model.LookupAccess) { la.ReleaseMesh(stale) })
 	reused = h.bake(triangle(), nil, gfx.TopologyTriangleList)
 	if reused.Index() != stale.Index() {
 		t.Fatalf("the released slot %d was not reissued, got %d", stale.Index(), reused.Index())
@@ -395,7 +396,7 @@ func TestAStaleRefDoesNotDrawTheMeshThatReusedItsSlot(t *testing.T) {
 	if pass := h.passes()[0]; pass.Instances != 0 {
 		t.Fatalf("packed %d instances, want the stale ref skipped", pass.Instances)
 	}
-	if _, ok := reportedAs[scene.ErrMeshUnavailable](*h.reported); !ok {
+	if _, ok := reportedAs[model.ErrMeshUnavailable](*h.reported); !ok {
 		t.Fatalf("reported %v, want an ErrMeshUnavailable", *h.reported)
 	}
 }
@@ -403,7 +404,7 @@ func TestAStaleRefDoesNotDrawTheMeshThatReusedItsSlot(t *testing.T) {
 // source is what makes a temporary ref used in a later frame detectable rather
 // than silently wrong: id and slot alike survive, only the frame stamp does not.
 func TestATemporaryRefFromAnEarlierFrameIsReportedAndSkipped(t *testing.T) {
-	var kept scene.MeshRef
+	var kept model.MeshRef
 	frames := 0
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
@@ -429,7 +430,7 @@ func TestATemporaryRefFromAnEarlierFrameIsReportedAndSkipped(t *testing.T) {
 	if pass := h.passes()[0]; pass.Instances != 0 {
 		t.Fatalf("a later frame packed %d instances of a temporary ref", pass.Instances)
 	}
-	if _, ok := reportedAs[scene.ErrMeshUnavailable](*h.reported); !ok {
+	if _, ok := reportedAs[model.ErrMeshUnavailable](*h.reported); !ok {
 		t.Fatalf("reported %v, want an ErrMeshUnavailable", *h.reported)
 	}
 }
@@ -442,7 +443,7 @@ func TestTopologyPassesThroughAndOnlyTriangleListsDivideByThree(t *testing.T) {
 	if ref.ID() == 0 {
 		t.Fatalf("a two-vertex line list was rejected: %v", *h.reported)
 	}
-	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *scene.Lookup) {
+	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{lookup: func(lookup *model.Lookup) {
 		record, _ := lookup.Mesh(ref)
 		if record.Topology != gfx.TopologyLineList {
 			t.Errorf("recorded topology %v, want the line list", record.Topology)
@@ -453,7 +454,7 @@ func TestTopologyPassesThroughAndOnlyTriangleListsDivideByThree(t *testing.T) {
 // Transforms places one instance per entry, overriding the single Transform.
 // Culling is per instance, and Ops still reports the one call the recorder made.
 func TestTransformsPlaceOneInstanceEachAndCullIndependently(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Mesh(0, ref, scene.MeshDraw{
@@ -503,7 +504,7 @@ func TestMeshDrawParamsReachTheBackend(t *testing.T) {
 // draw call, one material record, and the survivors packed contiguously from
 // the batch's own firstInstance.
 func TestAnInstancedOpaqueDrawIsOneBatchOfItsSurvivors(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Mesh(0, ref, scene.MeshDraw{Transforms: []m.Transform{
@@ -541,7 +542,7 @@ func TestAnInstancedOpaqueDrawIsOneBatchOfItsSurvivors(t *testing.T) {
 // instance: sorting the set by its nearest instance would composite visibly
 // wrong, so the split survives the collapse the opaque class gets.
 func TestAnInstancedBlendDrawStaysOneBatchPerInstance(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Mesh(0, ref, scene.MeshDraw{
@@ -571,7 +572,7 @@ func TestAnInstancedBlendDrawStaysOneBatchPerInstance(t *testing.T) {
 // flush collapses is the instances of one call; collapsing consecutive equal
 // draws that were recorded separately is deferred.
 func TestTwoInstancedCallsStayTwoBatches(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Mesh(0, ref, scene.MeshDraw{Transforms: []m.Transform{m.At(0, 0, -5), m.At(1, 0, -5)}})
@@ -594,7 +595,7 @@ func TestTwoInstancedCallsStayTwoBatches(t *testing.T) {
 // per pass - two batches of N rather than one shared batch. That is the cost of
 // the sort, and it is not worked around.
 func TestAnInstancedDrawIsPackedOncePerPass(t *testing.T) {
-	var ref scene.MeshRef
+	var ref model.MeshRef
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Camera(testCamera+1, forwardCamera())

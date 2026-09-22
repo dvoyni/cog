@@ -248,7 +248,7 @@ func TestARequiredExtensionFailsTheModelWholesale(t *testing.T) {
 	doc.ExtensionsRequired = []string{"KHR_draco_mesh_compression"}
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, scene.ModelDraw{}))
 	h.frameUntil(t, "the failure to be reported", func() bool {
-		var unavailable scene.ErrModelUnavailable
+		var unavailable model.ErrModelUnavailable
 		return anyErrorAs(h.errors(), &unavailable)
 	})
 	if passes := h.passes(); passes[0].Instances != 0 {
@@ -298,9 +298,9 @@ func TestModelLightsLoadTheFileAndReturnItsLights(t *testing.T) {
 	doc.Nodes[0].Extensions = gltf.Extensions{"KHR_lights_punctual": map[string]any{"light": 0}}
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*scene.OpQueue) {})
 
-	var lights []scene.ModelLight
+	var lights []model.ModelLight
 	var ok bool
-	h.device(func(la scene.LookupDeviceAccess) { lights, ok = la.ModelLights(modelPath, nil) })
+	h.device(func(la model.LookupDeviceAccess) { lights, ok = la.ModelLights(modelPath, nil) })
 	if !ok {
 		t.Fatal("the first query loads the model and answers about it")
 	}
@@ -392,7 +392,7 @@ func TestAnUnboundedModelIsNeverCulled(t *testing.T) {
 	if culled := h.passes()[0].Culled; culled != 0 {
 		t.Fatalf("culled = %d, want a never-cull model kept", culled)
 	}
-	var missing scene.ErrModelBoundsMissing
+	var missing model.ErrModelBoundsMissing
 	if !anyErrorAs(h.errors(), &missing) {
 		t.Fatalf("errors = %v, want a missing-bounds report", h.errors())
 	}

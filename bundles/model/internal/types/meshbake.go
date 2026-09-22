@@ -48,7 +48,7 @@ type MeshBaker struct {
 // flush.
 //
 // TVertex must be a pointer-free plain-data struct whose VertexLayout matches
-// its memory layout. Anything but scene.Vertex is a custom layout, and a custom
+// its memory layout. Anything but model.Vertex is a custom layout, and a custom
 // layout requires a custom Material: the bundled PBR is one shader module with
 // one vertex stage and no entry-point selection, so a draw that pairs a custom
 // layout with the bundled material is reported and skipped.

@@ -3,6 +3,7 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/qmuntal/gltf"
@@ -40,7 +41,7 @@ func residentBoundsModel(t testing.TB) *harness {
 func residentModel(t testing.TB, doc *gltf.Document) *harness {
 	t.Helper()
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*scene.OpQueue) {})
-	h.device(func(la scene.LookupDeviceAccess) {
+	h.device(func(la model.LookupDeviceAccess) {
 		la.Preload(modelPath)
 		if err := la.State(modelPath); err != nil {
 			t.Fatalf("Preload left %q unloaded: %v", modelPath, err)
@@ -59,7 +60,7 @@ func residentModel(t testing.TB, doc *gltf.Document) *harness {
 func TestStateLoadsTheFileAndAnswersNil(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
 	var first error
-	h.device(func(la scene.LookupDeviceAccess) { first = la.State(modelPath) })
+	h.device(func(la model.LookupDeviceAccess) { first = la.State(modelPath) })
 	if first != nil {
 		t.Fatalf("the first State = %v, want nil: the query loads the file", first)
 	}
@@ -72,7 +73,7 @@ func TestStateNamesTheReasonAModelIsNotThere(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
 	const missing = "models/absent.glb"
 	var err error
-	h.device(func(la scene.LookupDeviceAccess) { err = la.State(missing) })
+	h.device(func(la model.LookupDeviceAccess) { err = la.State(missing) })
 	if err == nil {
 		t.Fatal("State on a file that is not there must not answer nil")
 	}
@@ -81,7 +82,7 @@ func TestStateNamesTheReasonAModelIsNotThere(t *testing.T) {
 	}
 	// Terminal means terminal: a second query neither reloads nor reports
 	// again, because the entry the failure left is the record that it ran.
-	h.device(func(la scene.LookupDeviceAccess) { err = la.State(missing) })
+	h.device(func(la model.LookupDeviceAccess) { err = la.State(missing) })
 	if err == nil || len(h.errors()) != 1 {
 		t.Fatalf("second query: err %v, reports %v; want one report and still failed", err, h.errors())
 	}
@@ -93,16 +94,16 @@ func TestStateNamesTheReasonAModelIsNotThere(t *testing.T) {
 func TestAnInvalidPathIsRefusedBeforeTheCache(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
 	var err error
-	h.device(func(la scene.LookupDeviceAccess) { err = la.State("../escape.glb") })
-	if _, ok := err.(scene.ErrModelPathInvalid); !ok {
+	h.device(func(la model.LookupDeviceAccess) { err = la.State("../escape.glb") })
+	if _, ok := err.(model.ErrModelPathInvalid); !ok {
 		t.Fatalf("State(%q) = %v, want the invalid path refused at once", "../escape.glb", err)
 	}
-	if _, ok := reportedAs[scene.ErrModelPathInvalid](h.errors()); !ok {
+	if _, ok := reportedAs[model.ErrModelPathInvalid](h.errors()); !ok {
 		t.Fatalf("reported %v, want the invalid path reported at once", h.errors())
 	}
 	// Terminal means terminal: a second query neither reports again nor
 	// loads anything.
-	h.device(func(la scene.LookupDeviceAccess) { err = la.State("../escape.glb") })
+	h.device(func(la model.LookupDeviceAccess) { err = la.State("../escape.glb") })
 	if err == nil || len(h.errors()) != 1 {
 		t.Fatalf("second query: err %v, reports %v; want one report and still refused", err, h.errors())
 	}
@@ -115,7 +116,7 @@ func TestNodesListsTheSceneDepthFirst(t *testing.T) {
 	h := residentBoundsModel(t)
 	var names []string
 	var ok bool
-	h.device(func(la scene.LookupDeviceAccess) { names, ok = la.Nodes(scene.ModelRef{Path: modelPath}, nil) })
+	h.device(func(la model.LookupDeviceAccess) { names, ok = la.Nodes(model.ModelRef{Path: modelPath}, nil) })
 	if !ok {
 		t.Fatal("a resident model's node list is real")
 	}
@@ -129,9 +130,9 @@ func TestNodesListsTheSceneDepthFirst(t *testing.T) {
 func TestNodesListsOneSubtree(t *testing.T) {
 	h := residentBoundsModel(t)
 	var whole, leaf []string
-	h.device(func(la scene.LookupDeviceAccess) {
-		whole, _ = la.Nodes(scene.ModelRef{Path: modelPath, Node: "root"}, nil)
-		leaf, _ = la.Nodes(scene.ModelRef{Path: modelPath, Node: "crate"}, nil)
+	h.device(func(la model.LookupDeviceAccess) {
+		whole, _ = la.Nodes(model.ModelRef{Path: modelPath, Node: "root"}, nil)
+		leaf, _ = la.Nodes(model.ModelRef{Path: modelPath, Node: "crate"}, nil)
 	})
 	if len(whole) != 3 {
 		t.Errorf("root's subtree = %v, want all three", whole)
@@ -147,11 +148,11 @@ func TestBoundsAndAABBAreLocalSpacePostRerooting(t *testing.T) {
 	h := residentBoundsModel(t)
 	var whole, node m.Vec4
 	var sceneMin, sceneMax, nodeMin, nodeMax m.Vec3
-	h.device(func(la scene.LookupDeviceAccess) {
-		whole, _ = la.Bounds(scene.ModelRef{Path: modelPath})
-		sceneMin, sceneMax, _ = la.AABB(scene.ModelRef{Path: modelPath})
-		node, _ = la.Bounds(scene.ModelRef{Path: modelPath, Node: "crate"})
-		nodeMin, nodeMax, _ = la.AABB(scene.ModelRef{Path: modelPath, Node: "crate"})
+	h.device(func(la model.LookupDeviceAccess) {
+		whole, _ = la.Bounds(model.ModelRef{Path: modelPath})
+		sceneMin, sceneMax, _ = la.AABB(model.ModelRef{Path: modelPath})
+		node, _ = la.Bounds(model.ModelRef{Path: modelPath, Node: "crate"})
+		nodeMin, nodeMax, _ = la.AABB(model.ModelRef{Path: modelPath, Node: "crate"})
 	})
 	// The whole scene keeps its root transforms, so the box is where the file
 	// put it: X in [10,11], Y from the sibling's 0 to the crate's 6, Z from the
@@ -190,7 +191,7 @@ func TestAnimatingANodeDoesNotMoveItsBounds(t *testing.T) {
 	rotationClip(doc, "spin", 1, []float32{0, 1}, [][4]float32{{0, 0, 0, 1}, {0, 0, 1, 0}})
 	moving := residentModel(t, doc)
 
-	for _, ref := range []scene.ModelRef{
+	for _, ref := range []model.ModelRef{
 		{Path: modelPath},
 		{Path: modelPath, Node: "root"},
 		{Path: modelPath, Node: "crate"},
@@ -198,8 +199,8 @@ func TestAnimatingANodeDoesNotMoveItsBounds(t *testing.T) {
 	} {
 		var stillMin, stillMax, movingMin, movingMax m.Vec3
 		var stillOK, movingOK bool
-		still.device(func(la scene.LookupDeviceAccess) { stillMin, stillMax, stillOK = la.AABB(ref) })
-		moving.device(func(la scene.LookupDeviceAccess) { movingMin, movingMax, movingOK = la.AABB(ref) })
+		still.device(func(la model.LookupDeviceAccess) { stillMin, stillMax, stillOK = la.AABB(ref) })
+		moving.device(func(la model.LookupDeviceAccess) { movingMin, movingMax, movingOK = la.AABB(ref) })
 		if !stillOK || !movingOK {
 			t.Fatalf("AABB(%+v) answered %v still and %v animated", ref, stillOK, movingOK)
 		}
@@ -219,12 +220,12 @@ func TestBoundsIsFalseWhenThePrimitiveDeclaredNone(t *testing.T) {
 	position := doc.Meshes[0].Primitives[0].Attributes[gltf.POSITION]
 	doc.Accessors[position].Min, doc.Accessors[position].Max = nil, nil
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*scene.OpQueue) {})
-	h.device(func(la scene.LookupDeviceAccess) {
+	h.device(func(la model.LookupDeviceAccess) {
 		la.Preload(modelPath)
-		if _, ok := la.Bounds(scene.ModelRef{Path: modelPath}); ok {
+		if _, ok := la.Bounds(model.ModelRef{Path: modelPath}); ok {
 			t.Error("a model whose POSITION declared no min/max has no bound to report")
 		}
-		if _, _, ok := la.AABB(scene.ModelRef{Path: modelPath}); ok {
+		if _, _, ok := la.AABB(model.ModelRef{Path: modelPath}); ok {
 			t.Error("and no box either")
 		}
 	})
@@ -237,9 +238,9 @@ func TestAnUnmatchedNodeIsFalseAndReportsOnce(t *testing.T) {
 	h := residentBoundsModel(t)
 	var names []string
 	var ok bool
-	h.device(func(la scene.LookupDeviceAccess) {
-		names, ok = la.Nodes(scene.ModelRef{Path: modelPath, Node: "typo"}, []string{"kept"})
-		_, _ = la.Bounds(scene.ModelRef{Path: modelPath, Node: "typo"})
+	h.device(func(la model.LookupDeviceAccess) {
+		names, ok = la.Nodes(model.ModelRef{Path: modelPath, Node: "typo"}, []string{"kept"})
+		_, _ = la.Bounds(model.ModelRef{Path: modelPath, Node: "typo"})
 	})
 	if ok {
 		t.Error("an unmatched node is not a real answer")
@@ -249,7 +250,7 @@ func TestAnUnmatchedNodeIsFalseAndReportsOnce(t *testing.T) {
 	}
 	missing := 0
 	for _, err := range h.errors() {
-		if _, is := err.(scene.ErrModelNodeMissing); is {
+		if _, is := err.(model.ErrModelNodeMissing); is {
 			missing++
 		}
 	}
@@ -262,12 +263,12 @@ func TestAnUnmatchedNodeIsFalseAndReportsOnce(t *testing.T) {
 // both rather than the first swallowing the second.
 func TestAnUnmatchedSceneIsFalse(t *testing.T) {
 	h := residentBoundsModel(t)
-	h.device(func(la scene.LookupDeviceAccess) {
-		if _, ok := la.Nodes(scene.ModelRef{Path: modelPath, Scene: "nope"}, nil); ok {
+	h.device(func(la model.LookupDeviceAccess) {
+		if _, ok := la.Nodes(model.ModelRef{Path: modelPath, Scene: "nope"}, nil); ok {
 			t.Error("an unmatched scene is not a real answer")
 		}
 	})
-	if _, ok := reportedAs[scene.ErrModelSceneMissing](h.errors()); !ok {
+	if _, ok := reportedAs[model.ErrModelSceneMissing](h.errors()); !ok {
 		t.Errorf("reported %v, want the missing scene", h.errors())
 	}
 }
@@ -278,7 +279,7 @@ func TestAQueryOnAnUnloadedPathLoadsIt(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
 	var names []string
 	var ok bool
-	h.device(func(la scene.LookupDeviceAccess) { names, ok = la.Nodes(scene.ModelRef{Path: modelPath}, nil) })
+	h.device(func(la model.LookupDeviceAccess) { names, ok = la.Nodes(model.ModelRef{Path: modelPath}, nil) })
 	if !ok {
 		t.Fatal("the query alone must bring the model in")
 	}

@@ -6,8 +6,8 @@
 //
 // Everything that outlives a frame is model's: the Lookup and its facades, the
 // model and texture caches, the mesh table, the vertex, morph and animation
-// packing, and the bundled PBR material. residency.go names them under the
-// names scene has always used, until the sweep rewrites scene's callers.
+// packing, and the bundled PBR material. This package names them from model's
+// root, as model.Lookup, model.MeshRef and so on, and aliases none of them.
 //
 // A type whose unexported state the plugin reads (OpQueue, Pass, MaterialTag,
 // LayerMask) is declared here with its fields unexported and aliased in the

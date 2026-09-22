@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 )
 
 // morphAnim is a resident animation with a weight grid a test can address
@@ -47,7 +46,7 @@ func TestBlendMorphWeightsFallsBackToTheRestRow(t *testing.T) {
 func TestBlendMorphWeightsOverridesWholesale(t *testing.T) {
 	report, keys := collectReports()
 	anim := morphAnim()
-	plays, frames := model.ResolvePlays(anim, "m.glb", []scene.ClipPlay{
+	plays, frames := model.ResolvePlays(anim, "m.glb", []model.ClipPlay{
 		{Clip: "smile", Weight: 1},
 	}, nil, nil, report)
 	got := model.BlendMorphWeights(anim, "m.glb", plays, frames, []float32{0.75}, true, nil, report)

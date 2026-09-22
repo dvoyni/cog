@@ -13,7 +13,7 @@ import (
 
 // read runs fn over the read facade, built over the Lookup the harness holds.
 func (h *harness) read(fn func(model.LookupReadAccess)) {
-	h.model(func(lookup *scene.Lookup, _ kernel.Kernel, _ fs.FS, _ *gfx.ResourceQueue) {
+	h.model(func(lookup *model.Lookup, _ kernel.Kernel, _ fs.FS, _ *gfx.ResourceQueue) {
 		fn(model.NewLookupReadAccess(lookup))
 	})
 }
@@ -52,7 +52,7 @@ func TestAModelRefResolvesToAHandleOnceAndReadsByHandleReturnTheSameView(t *test
 	ref := model.ModelRef{Path: modelPath}
 	var handle model.ModelHandle
 	var loaded model.ModelView
-	h.model(func(lookup *scene.Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue) {
+	h.model(func(lookup *model.Lookup, k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue) {
 		var ok bool
 		if handle, ok = lookup.Resolve(k, fsys, resources, ref); !ok || handle == 0 {
 			t.Fatalf("Resolve = %d, %v, want the model loaded and a handle", handle, ok)
@@ -63,7 +63,7 @@ func TestAModelRefResolvesToAHandleOnceAndReadsByHandleReturnTheSameView(t *test
 			t.Fatalf("ModelView = %v, %v, want the resident model", err, ok)
 		}
 	})
-	h.device(func(la scene.LookupDeviceAccess) {
+	h.device(func(la model.LookupDeviceAccess) {
 		if again, ok := la.Resolve(ref); !ok || again != handle {
 			t.Errorf("a second Resolve = %d, %v, want the same handle %d", again, ok, handle)
 		}
@@ -101,8 +101,8 @@ func TestAnUnloadedModelsHandleReadsAbsent(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, onePrimitiveModel(t))), func(*scene.OpQueue) {})
 	ref := model.ModelRef{Path: modelPath}
 	var handle model.ModelHandle
-	h.device(func(la scene.LookupDeviceAccess) { handle, _ = la.Resolve(ref) })
-	h.lookup(func(la scene.LookupAccess) { la.UnloadModel(modelPath) })
+	h.device(func(la model.LookupDeviceAccess) { handle, _ = la.Resolve(ref) })
+	h.lookup(func(la model.LookupAccess) { la.UnloadModel(modelPath) })
 	h.read(func(ra model.LookupReadAccess) {
 		if ra.Resident(handle) {
 			t.Error("the handle still names a resident model after its unload")
@@ -118,7 +118,7 @@ func TestAnUnloadedModelsHandleReadsAbsent(t *testing.T) {
 func TestAFailedModelHasNoHandle(t *testing.T) {
 	h := newHarnessWithFiles(t, fstest.MapFS{modelPath: {Data: []byte("not a model")}}, func(*scene.OpQueue) {})
 	ref := model.ModelRef{Path: modelPath}
-	h.device(func(la scene.LookupDeviceAccess) {
+	h.device(func(la model.LookupDeviceAccess) {
 		if handle, ok := la.Resolve(ref); ok {
 			t.Errorf("Resolve = %d, want a failed load to resolve to no handle", handle)
 		}

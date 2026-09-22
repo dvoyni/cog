@@ -144,7 +144,7 @@ func TestEveryUnskinnedDrawTakesTheSameVariant(t *testing.T) {
 // pose path.
 func TestASkinnedModelBindsItsOwnPosesAndSkins(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))),
-		drawModel(modelPath, scene.ModelDraw{Plays: []scene.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
+		drawModel(modelPath, scene.ModelDraw{Plays: []model.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
@@ -187,7 +187,7 @@ func mixedModel(t testing.TB) *gltf.Document {
 // SCENE_NOSKIN by construction: a plain-bound placement is a skinned draw.
 func TestAPlainBoundPlacementCarriesItsJointOnTheInstance(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, mixedModel(t))),
-		drawModel(modelPath, scene.ModelDraw{Plays: []scene.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
+		drawModel(modelPath, scene.ModelDraw{Plays: []model.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 2
 	})
@@ -232,7 +232,7 @@ func TestAPlainBoundPlacementCarriesItsJointOnTheInstance(t *testing.T) {
 // one shared mesh take two variants, which is two material ids.
 func TestTheVariantFollowsThePrimitiveNotTheModel(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, mixedModel(t))),
-		drawModel(modelPath, scene.ModelDraw{Plays: []scene.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
+		drawModel(modelPath, scene.ModelDraw{Plays: []model.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 2
 	})
@@ -321,11 +321,11 @@ func TestASkinnedDrawIsNeverCulled(t *testing.T) {
 // at all, and both trigger the load the way every other query does.
 func TestTheLookupReportsClipsJointsAndPoseBytes(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(*scene.OpQueue) {})
-	var clips []scene.ClipInfo
+	var clips []model.ClipInfo
 	var joints []string
 	var bytes int
 	h.frameUntil(t, "the model to become resident", func() bool {
-		h.device(func(access scene.LookupDeviceAccess) {
+		h.device(func(access model.LookupDeviceAccess) {
 			clips, _ = access.Clips(modelPath, clips[:0])
 			joints, _ = access.Joints(modelPath, joints[:0])
 			bytes, _ = access.PoseBytes(modelPath)
@@ -346,7 +346,7 @@ func TestTheLookupReportsClipsJointsAndPoseBytes(t *testing.T) {
 	if want := 62 * model.PoseSize; bytes != want {
 		t.Errorf("PoseBytes = %d, want %d", bytes, want)
 	}
-	h.lookup(func(access scene.LookupAccess) {
+	h.lookup(func(access model.LookupAccess) {
 		if got := access.TotalPoseBytes(); got != bytes {
 			t.Errorf("TotalPoseBytes = %d, want the one resident model's %d", got, bytes)
 		}
@@ -361,7 +361,7 @@ func TestAStaticModelBakesNoPosesAndBindsNone(t *testing.T) {
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
-	h.device(func(access scene.LookupDeviceAccess) {
+	h.device(func(access model.LookupDeviceAccess) {
 		if got, _ := access.PoseBytes(modelPath); got != 0 {
 			t.Errorf("PoseBytes = %d, want none for a file with no animation", got)
 		}
@@ -379,7 +379,7 @@ func TestAStaticModelBakesNoPosesAndBindsNone(t *testing.T) {
 // forever.
 func TestAnUnknownClipReportsOnce(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))),
-		drawModel(modelPath, scene.ModelDraw{Plays: []scene.ClipPlay{{Clip: "gallop", Weight: 1}}}))
+		drawModel(modelPath, scene.ModelDraw{Plays: []model.ClipPlay{{Clip: "gallop", Weight: 1}}}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
@@ -388,7 +388,7 @@ func TestAnUnknownClipReportsOnce(t *testing.T) {
 	}
 	missing := 0
 	for _, err := range h.errors() {
-		if _, ok := err.(scene.ErrModelClipMissing); ok {
+		if _, ok := err.(model.ErrModelClipMissing); ok {
 			missing++
 		}
 	}

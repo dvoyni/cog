@@ -116,7 +116,7 @@ distinctions that ordinary usage collapses — three different things in this
 document could all be called "the vertex", and two different mechanisms in
 different buffers were both already called "sparse".
 
-- **Authoring vertex** — `scene.Vertex`, the Go struct an app writes. Float
+- **Authoring vertex** — `model.Vertex`, the Go struct an app writes. Float
   fields, 72 bytes, write-only: nothing in scene ever hands one back.
 - **Storage vertex** — the bytes scene actually uploads, 32 bytes at six
   `@location`s. Derived from the authoring vertex at bake; it is what a shader
@@ -219,7 +219,7 @@ free.
 > [#261](https://github.com/dvoyni/cog/issues/261) measured it rather than
 > settling for it — see [The per-mesh record](#the-per-mesh-record).
 
-**Authoring vertex — `scene.Vertex`, 72 bytes. Its size no longer matters.**
+**Authoring vertex — `model.Vertex`, 72 bytes. Its size no longer matters.**
 
 | field | type | bytes |
 | --- | --- | ---: |
@@ -289,7 +289,7 @@ and [#195](https://github.com/dvoyni/cog/issues/195).
 Every narrow format used here is already wired end to end: `Unorm1010102`,
 `Float16x2`, `Unorm16x2` and the rest map to `gputypes` at
 `extensions/gogpu/internal/gfxbackend.go:1018-1071`, and `gfx.VertexType.Size()` knows their widths
-(`extensions/gfx/mesh.go:56-66`). `scene.Vertex` uses **none** of them today except
+(`extensions/gfx/mesh.go:56-66`). `model.Vertex` uses **none** of them today except
 `Unorm8x4` for `Color`. **Nothing has to be built in the backend for this axis.**
 
 ### `Position` — `Float32x3`, unchanged. 12 bytes.
@@ -846,10 +846,10 @@ model load — and draws the line where the cost changes character.
 > differ in kind: narrowing indices **adds** an `O(n)` pass that does not exist
 > today, while packing vertices **replaces** an `O(n)` memcpy that already runs
 > (`appendStaging`, `bundles/scene/meshbake.go:168`). A vertex carve-out is also not free
-> the way an index one is — a second stride for the same `scene.Vertex` means two
+> the way an index one is — a second stride for the same `model.Vertex` means two
 > vertex layouts, two `pipelineKey` entries and two shader variants, which is
 > precisely the multiplication this axis exists to avoid. There is no
-> `TemporaryMesh` in either repo using `scene.Vertex`; the one call site,
+> `TemporaryMesh` in either repo using `model.Vertex`; the one call site,
 > `cmd/scene/procedural/main.go:515`, ships a custom 36-byte layout.
 
 ### Two mechanics worth stating
@@ -1060,7 +1060,7 @@ and adding three weighted zeros, and become one compare.
 From [#174](https://github.com/dvoyni/cog/issues/174). **One exported layout, one
 generic entry point, no raw path, no new parameter on any signature.**
 
-An app writes `scene.Vertex` in the same `m.Vec3`/`m.Vec4`/`m.Vec2` types it
+An app writes `model.Vertex` in the same `m.Vec3`/`m.Vec4`/`m.Vec2` types it
 writes today, and gets 32 bytes instead of 84. **Scene owns every stored byte and
 packs at bake.**
 
@@ -1072,7 +1072,7 @@ structural reasons:
   nowhere in `BakeMesh(vertices, indices, topology)` to put it. The converting
   API needs no such parameter.
 - **Every authoring call site writes a partial vertex.** `obeliskMesh` writes
-  `scene.Vertex{Position: corner, Normal: normal}` and leaves the rest zero
+  `model.Vertex{Position: corner, Normal: normal}` and leaves the rest zero
   (`cameras/obelisk.go:220`); `unitmesh.go:86,153` writes five fields of six.
   Under a packed API each becomes an encoder call.
 
@@ -1093,7 +1093,7 @@ authored one, and it flows one way.
 `VertexLayout`'s contract says the returned attributes *"must match both the
 struct's memory layout and the vertex inputs of the material"*
 (`bundles/scene/mesh.go:68-74`). That stays true for every custom layout and becomes
-**false for `scene.Vertex` alone**, whose method reports the 32-byte storage
+**false for `model.Vertex` alone**, whose method reports the 32-byte storage
 layout while its Go struct is 72.
 
 The dispatch is `standard`, which `layoutCache.resolve` already computes by type
@@ -1122,12 +1122,12 @@ of documentation.
 the stride as the largest attribute end offset while scene uploads
 `unsafe.Sizeof`, so a layout whose last attribute does not end exactly on the
 struct's size is **read at a different stride than it was written at, silently.**
-Under the divergence scene never reinterprets `scene.Vertex`: scene computes the
+Under the divergence scene never reinterprets `model.Vertex`: scene computes the
 stride and writes the bytes, and they agree by construction. **The standard
 vertex leaves that hazard class entirely.** It remains live, and still unchecked,
 for every custom layout — see below.
 
-### `TemporaryMesh` with `scene.Vertex` pays an O(n) pack per frame
+### `TemporaryMesh` with `model.Vertex` pays an O(n) pack per frame
 
 Named as a cost to state rather than to design around. There is still no such
 call site: the one `TemporaryMesh` caller uses a custom layout.
@@ -1142,7 +1142,7 @@ custom layout requires a custom material.
 `ErrMeshCustomLayoutNeedsMaterial` (`bundles/scene/err.go:146`) keeps its mechanism — a
 type comparison on the `standard` flag, so nothing about it gets harder — and
 **loses its prose**. Its text claims the bundled material *"has one vertex stage
-and no entry-point selection, so its inputs are a subset of `scene.Vertex`'s
+and no entry-point selection, so its inputs are a subset of `model.Vertex`'s
 eight attributes and nothing else"*. Three things in that sentence are now wrong:
 there are variants rather than one stage, there are two blessed layouts, and
 neither has eight attributes. It restates in terms of **a layout the bundled PBR
@@ -1377,7 +1377,7 @@ scene compiled against them.
 - `standardVertexLayout` becomes hand-written offset constants, not
   `unsafe.Offsetof` over the struct.
 - Restate `VertexLayout`'s interface doc to describe the **buffer** layout,
-  naming `scene.Vertex` as the one type whose Go fields differ from what it
+  naming `model.Vertex` as the one type whose Go fields differ from what it
   reports.
 - Add the skinned layout, unexported.
 - `indexBytes` narrows for durable meshes and stays a reinterpret for
@@ -1430,7 +1430,7 @@ scene compiled against them.
 **`bundles/scene/err.go`**
 
 - Restate `ErrMeshCustomLayoutNeedsMaterial` (`146-155`) in terms of a layout the
-  bundled PBR does not know, rather than *"scene.Vertex's eight attributes"*.
+  bundled PBR does not know, rather than *"model.Vertex's eight attributes"*.
   Mechanism unchanged.
 
 **`bundles/scene/unitmesh.go`**

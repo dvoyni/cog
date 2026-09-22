@@ -128,14 +128,14 @@ func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 // and gfx's render already hold it as a read.
 func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var writeQueue kernel.Write[*scene.OpQueue]
-	var lookupResource kernel.Write[*scene.Lookup]
+	var lookupResource kernel.Write[*model.Lookup]
 	var gfxQueue kernel.Write[*gfx.OpQueue]
 	var gfxResourceQueue kernel.Write[*gfx.ResourceQueue]
 	var viewport kernel.Read[*gfx.Viewport]
 	var filesystem kernel.Read[storage.FileSystem]
 	return func(access kernel.ResourceAccess) {
 			writeQueue = access.GetWrite[*scene.OpQueue]()
-			lookupResource = access.GetWrite[*scene.Lookup]()
+			lookupResource = access.GetWrite[*model.Lookup]()
 			gfxQueue = access.GetWrite[*gfx.OpQueue]()
 			gfxResourceQueue = access.GetWrite[*gfx.ResourceQueue]()
 			viewport = access.GetRead[*gfx.Viewport]()
@@ -147,7 +147,7 @@ func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 }
 
 func (p *plugin) flushFrame(
-	k kernel.Kernel, write *scene.OpQueue, lookup *scene.Lookup,
+	k kernel.Kernel, write *scene.OpQueue, lookup *model.Lookup,
 	gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue, view *gfx.Viewport,
 	filesystem storage.FileSystem,
 ) {
@@ -216,7 +216,7 @@ func (p *plugin) flushFrame(
 // interned index, its world matrix and its world-space bounding sphere. A draw's
 // per-camera cost is then one sphere test, and its per-pass cost one array read.
 func (p *plugin) prepareDraws(
-	report func(error), lookup *scene.Lookup, write *scene.OpQueue,
+	report func(error), lookup *model.Lookup, write *scene.OpQueue,
 	bake model.BakeFunc, draws []types.DrawRecord,
 ) {
 	p.prepared = grow(p.prepared, len(draws))
@@ -235,12 +235,12 @@ func (p *plugin) prepareDraws(
 			// ref. A ref that never named one was already reported at the mint
 			// that rejected it, so it skips in silence.
 			if ref.Source() != model.MeshNone {
-				p.reportMeshOnce(report, ref, scene.ErrMeshUnavailable{Mesh: ref.ID()})
+				p.reportMeshOnce(report, ref, model.ErrMeshUnavailable{Mesh: ref.ID()})
 			}
-			ref = scene.MeshRef{}
+			ref = model.MeshRef{}
 		case !mesh.Standard && record.Material == nil:
 			p.reportMeshOnce(report, ref, scene.ErrMeshCustomLayoutNeedsMaterial{Mesh: ref.ID()})
-			ref, mesh = scene.MeshRef{}, model.MeshRecord{}
+			ref, mesh = model.MeshRef{}, model.MeshRecord{}
 		}
 		p.prepared[i] = prepareDraw(*record, mesh)
 		p.prepared[i].mesh = ref
@@ -269,7 +269,7 @@ func (p *plugin) prepareDraws(
 // checked against the frame it was minted in, which is what stops a ref kept
 // across a frame boundary from drawing whatever now holds its slot.
 func (p *plugin) resolveMesh(
-	lookup *scene.Lookup, write *scene.OpQueue, ref scene.MeshRef,
+	lookup *model.Lookup, write *scene.OpQueue, ref model.MeshRef,
 ) (model.MeshRecord, bool) {
 	if ref.Source() == types.MeshTemporary {
 		id := ref.Index()
@@ -304,7 +304,7 @@ func (p *plugin) buildTemporaries(report func(error), write *scene.OpQueue) {
 // top of every flush, and asking the kernel to forget a family per frame would
 // scan the engine's whole table per frame for a condition that is already one
 // map lookup here.
-func (p *plugin) reportMeshOnce(report func(error), ref scene.MeshRef, err error) {
+func (p *plugin) reportMeshOnce(report func(error), ref model.MeshRef, err error) {
 	if _, seen := p.meshReported[ref.ID()]; seen {
 		return
 	}
@@ -316,7 +316,7 @@ func (p *plugin) reportMeshOnce(report func(error), ref scene.MeshRef, err error
 // skipped whole: the projection it would get instead is degenerate, and every
 // pass built from it would cull against a volume nobody asked for.
 func (p *plugin) flushCamera(
-	k kernel.Kernel, write *scene.OpQueue, lookup *scene.Lookup, view *gfx.Viewport, camera types.CameraRecord,
+	k kernel.Kernel, write *scene.OpQueue, lookup *model.Lookup, view *gfx.Viewport, camera types.CameraRecord,
 ) {
 	if camera.Descr.Near == 0 || camera.Descr.Far == 0 {
 		k.ReportError(scene.ErrCameraClipPlanesMissing{
@@ -346,7 +346,7 @@ func (p *plugin) flushCamera(
 // in what order, and packs them. Within a pass, recording order is not
 // preserved - that is the trade the sort makes, and Passes documents it.
 func (p *plugin) flushPass(
-	k kernel.Kernel, write *scene.OpQueue, lookup *scene.Lookup, view *gfx.Viewport,
+	k kernel.Kernel, write *scene.OpQueue, lookup *model.Lookup, view *gfx.Viewport,
 	camera types.CameraRecord, viewMatrix m.Mat4, pass scene.Pass,
 ) {
 	aspect, err := passAspect(camera.ID, pass, view)

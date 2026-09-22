@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/canvas"
-	"github.com/dvoyni/cog/bundles/scene"
+	"github.com/dvoyni/cog/bundles/model"
 	cgfx "github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/storage"
 )
@@ -84,7 +84,7 @@ func TestEveryBundledShaderAndLayoutPairPassesTheVertexInterfaceCheck(t *testing
 		source string
 		attrs  []cgfx.VertexAttr
 	}{
-		{"scene", bundledSceneShader(t), scene.Vertex{}.VertexLayout()},
+		{"scene", bundledSceneShader(t), model.Vertex{}.VertexLayout()},
 		{"scene skinned", bundledSceneShader(t, everyFeature()...), sceneSkinnedLayout(t)},
 		// A skinned-layout mesh under the variant that declares six is the
 		// pairing a plain-bound geometry's static sibling makes, and it is the
@@ -120,7 +120,7 @@ func TestEveryBundledShaderAndLayoutPairPassesTheVertexInterfaceCheck(t *testing
 // it pins the same two offsets and formats against the same constants.
 func sceneSkinnedLayout(t *testing.T) []cgfx.VertexAttr {
 	t.Helper()
-	standard := scene.Vertex{}.VertexLayout()
+	standard := model.Vertex{}.VertexLayout()
 	if len(standard) != 6 {
 		t.Fatalf("the standard layout has %d attributes, want the six it shares", len(standard))
 	}

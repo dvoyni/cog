@@ -14,9 +14,9 @@ import (
 // uvTriangle is the smallest standard-layout mesh carrying a UV range worth a
 // record: one face whose TEXCOORD_0 tiles well outside 0..1, which is the case
 // a half float loses four texels of.
-func uvTriangle() []scene.Vertex {
+func uvTriangle() []model.Vertex {
 	white := m.White
-	return []scene.Vertex{
+	return []model.Vertex{
 		{Position: m.Vec3{X: -1, Y: -1}, Normal: m.Vec3{Z: 1}, UV0: m.Vec2{X: 2.5, Y: -13.5}, Color: white},
 		{Position: m.Vec3{X: 1, Y: -1}, Normal: m.Vec3{Z: 1}, UV0: m.Vec2{X: 18.5, Y: 0.5}, Color: white},
 		{Position: m.Vec3{Y: 1}, Normal: m.Vec3{Z: 1}, UV0: m.Vec2{X: 10, Y: -6}, Color: white},

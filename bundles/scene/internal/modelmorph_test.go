@@ -187,7 +187,7 @@ func TestAModelWithNoShapesPacksNoMorphList(t *testing.T) {
 	if bound := h.backend.buffersBoundTo("sceneMorphDeltas"); len(bound) != 0 {
 		t.Errorf("a static model bound deltas %d times, want never", len(bound))
 	}
-	h.device(func(access scene.LookupDeviceAccess) {
+	h.device(func(access model.LookupDeviceAccess) {
 		if got, _ := access.MorphBytes(modelPath); got != 0 {
 			t.Errorf("MorphBytes = %d, want none for a file with no targets", got)
 		}
@@ -202,7 +202,7 @@ func TestTheLookupReportsMorphTargetsAndBytes(t *testing.T) {
 	var names []string
 	var bytes int
 	h.frameUntil(t, "the model to become resident", func() bool {
-		h.device(func(access scene.LookupDeviceAccess) {
+		h.device(func(access model.LookupDeviceAccess) {
 			names, _ = access.MorphTargets(modelPath, names[:0])
 			bytes, _ = access.MorphBytes(modelPath)
 		})
@@ -214,7 +214,7 @@ func TestTheLookupReportsMorphTargetsAndBytes(t *testing.T) {
 	if want := morphModelWords * model.MorphWordSize; bytes != want {
 		t.Errorf("MorphBytes = %d, want %d", bytes, want)
 	}
-	h.lookup(func(access scene.LookupAccess) {
+	h.lookup(func(access model.LookupAccess) {
 		if got := access.TotalMorphBytes(); got != bytes {
 			t.Errorf("TotalMorphBytes = %d, want the one resident model's %d", got, bytes)
 		}
@@ -237,7 +237,7 @@ func TestASkinnedAndMorphedModelBindsBothOfItsOwnBuffers(t *testing.T) {
 	// how glTF authors a moving part - so the file is rigged and shaped at once.
 	rotationClip(doc, "spin", 0, []float32{0, 1}, [][4]float32{{0, 0, 0, 1}, {0, 0, 1, 0}})
 	h := residentMorphModel(t, doc, scene.ModelDraw{
-		Plays: []scene.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}},
+		Plays: []model.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}},
 	})
 	instance := firstInstance(t, h)
 	if instance.Flags&model.SceneNoSkin != 0 {
