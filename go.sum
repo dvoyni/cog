@@ -6,6 +6,8 @@ github.com/dvoyni/oggvorbis v1.0.6-0.20260921150857-546236badfd4 h1:RTOwvoccqx04
 github.com/dvoyni/oggvorbis v1.0.6-0.20260921150857-546236badfd4/go.mod h1:MEig/1Sbh2CUGcPHBehQY/m5VNjtkUe/y+u6mmf6mmM=
 github.com/dvoyni/vorbis v1.0.3-0.20260921150454-ab3e6ce988a8 h1:fqJbeqdCXYaQphvLTkxI4CTQUKjt+b30KLE00xzQuaA=
 github.com/dvoyni/vorbis v1.0.3-0.20260921150454-ab3e6ce988a8/go.mod h1:DoftRo4AznKnShRl1GxiTFCseHr4zR9BN3TWXyuzrqQ=
+github.com/dvoyni/wgpu v0.34.6-0.20260922155231-6ce612817da4 h1:M4sUOEge2x/a4cNXjvV/nIF198cg2MCHjfesRLquhUg=
+github.com/dvoyni/wgpu v0.34.6-0.20260922155231-6ce612817da4/go.mod h1:erhaIjD9psJKjHqAhn5MWdJETcACR1NGoqLhkTAHkFM=
 github.com/ebitengine/oto/v3 v3.5.0 h1:8ZDhKP3Hhslyb9NL3g4HWvhRQqwI+hKOHAXAqD6GPXs=
 github.com/ebitengine/oto/v3 v3.5.0/go.mod h1:Elkm7yzTRns3w2efvibzVOoQ65YOwmec9a76dCiK10o=
 github.com/ebitengine/purego v0.11.0 h1:jhp/D+Nyv7UUW8HAcmcjt2N2rYrYi9m3SL21k0Ua/NI=
@@ -20,8 +22,6 @@ github.com/gogpu/gpucontext v0.31.3 h1:SMnYOQgr+s5issi1R/Oezbo8lV5Lb6HWUZ4HujFgr
 github.com/gogpu/gpucontext v0.31.3/go.mod h1:pnyWQA9lpvESPAKoqzKlsg3pDMFSkxdjonu4gWvnNtA=
 github.com/gogpu/gputypes v0.8.0 h1:Iw4g9lqydTcAFKKQWfgbUpdY6WxObGtjf9SuRkzYMJw=
 github.com/gogpu/gputypes v0.8.0/go.mod h1:cnXrDMwTpWTvJLW1Vreop3PcT6a2YP/i3s91rPaOavw=
-github.com/gogpu/wgpu v0.34.5 h1:fgfyyhHjhD1mSkScWbeeKXZ2MLDxzC9bemKWPTneyUs=
-github.com/gogpu/wgpu v0.34.5/go.mod h1:erhaIjD9psJKjHqAhn5MWdJETcACR1NGoqLhkTAHkFM=
 github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=
 github.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
