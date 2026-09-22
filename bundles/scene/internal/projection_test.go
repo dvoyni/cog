@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -328,7 +329,7 @@ func TestViewDirectionIsUnitLengthUnderAScaledCamera(t *testing.T) {
 // per-fragment difference against the packed constant by w - so this is the
 // seam where the packer's encoding and the shader's reading of it are held to
 // the same answer. Nothing else checks it: no test runs a fragment.
-func shaderViewDirection(block sceneFrameBlock, position m.Vec3) m.Vec3 {
+func shaderViewDirection(block model.FrameBlock, position m.Vec3) m.Vec3 {
 	toEye := block.CameraPosition.Vec3().Sub(position)
 	constant := block.ViewDirection.Vec3()
 	selector := block.ViewDirection.W
@@ -342,7 +343,7 @@ func TestTheViewDirectionSelectorPicksRadialOrConstant(t *testing.T) {
 
 	// A perspective camera has a real eye, so every surface sees a different
 	// view vector, and the selector must leave the difference alone.
-	perspective := sceneFrameBlock{
+	perspective := model.FrameBlock{
 		CameraPosition: cameraPosition(transform),
 		ViewDirection:  types.ViewDirection(scene.CameraDescr{Transform: transform, FovY: 1, Near: 1, Far: 100}),
 	}
@@ -357,7 +358,7 @@ func TestTheViewDirectionSelectorPicksRadialOrConstant(t *testing.T) {
 	// constant - and emphatically not something that varies with the eye it
 	// does not have.
 	descr := scene.CameraDescr{Transform: transform, Projection: scene.Oblique, Height: 10, Shear: 1, Near: -50, Far: 50}
-	oblique := sceneFrameBlock{CameraPosition: cameraPosition(transform), ViewDirection: types.ViewDirection(descr)}
+	oblique := model.FrameBlock{CameraPosition: cameraPosition(transform), ViewDirection: types.ViewDirection(descr)}
 	want := types.ViewDirection(descr).Vec3()
 	for _, surface := range surfaces {
 		if got := shaderViewDirection(oblique, surface); !near(got.X, want.X) || !near(got.Y, want.Y) || !near(got.Z, want.Z) {

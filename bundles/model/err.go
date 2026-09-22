@@ -131,3 +131,14 @@ type ErrMeshUnavailable = types.ErrMeshUnavailable
 // ErrMeshUpdateRejected reports an UpdateMesh that would change something fixed
 // for a ref's life. The mesh keeps the geometry it had.
 type ErrMeshUpdateRejected = types.ErrMeshUpdateRejected
+
+// ErrSpotConeInverted reports a spot light whose InnerCone is at or past its
+// OuterCone, which leaves no cone to smooth across. PackLight returns it and the
+// light is skipped for the frame. OuterCone is the resolved value, so a zero
+// one reads as pi/4.
+type ErrSpotConeInverted = types.ErrSpotConeInverted
+
+// ErrSpotDirectionMissing reports a spot light with a zero Direction. Its cone
+// would evaluate to zero everywhere and the light would silently render black,
+// so PackLight returns it and the light is skipped instead.
+type ErrSpotDirectionMissing = types.ErrSpotDirectionMissing

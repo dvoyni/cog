@@ -7,7 +7,6 @@ import (
 
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/qmuntal/gltf"
 )
@@ -118,10 +117,10 @@ func TestAMorphedModelBindsItsOwnDeltasAndABoxBindsNone(t *testing.T) {
 func TestAMorphOnlyModelKeepsItsAnimBlock(t *testing.T) {
 	h := residentMorphModel(t, morphModel(t), scene.ModelDraw{})
 	instance := firstInstance(t, h)
-	if instance.Flags&sceneNoSkin == 0 {
+	if instance.Flags&model.SceneNoSkin == 0 {
 		t.Error("a model with no joints carries SCENE_NOSKIN, morphed or not")
 	}
-	if instance.AnimOffset == types.SceneNoAnim {
+	if instance.AnimOffset == model.SceneNoAnim {
 		t.Fatal("AnimOffset = sceneNoAnim; a morphed draw reads a block whatever its skin does")
 	}
 	block := decodeAnimBlock(t, boundBytes(t, h, "sceneAnim"), instance.AnimOffset)
@@ -169,7 +168,7 @@ func TestMorphWeightsOverrideReachesThePackedList(t *testing.T) {
 // the draw carries no block at all.
 func TestAnEmptyMorphWeightsIsAnOverrideRatherThanAnAbsence(t *testing.T) {
 	h := residentMorphModel(t, morphModel(t), scene.ModelDraw{MorphWeights: []float32{}})
-	if got := firstInstance(t, h).AnimOffset; got != types.SceneNoAnim {
+	if got := firstInstance(t, h).AnimOffset; got != model.SceneNoAnim {
 		t.Errorf("AnimOffset = %d, want sceneNoAnim: every target was asked for at zero", got)
 	}
 }
@@ -182,7 +181,7 @@ func TestAModelWithNoShapesPacksNoMorphList(t *testing.T) {
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
-	if got := firstInstance(t, h).AnimOffset; got != types.SceneNoAnim {
+	if got := firstInstance(t, h).AnimOffset; got != model.SceneNoAnim {
 		t.Errorf("AnimOffset = %d, want sceneNoAnim for a model with no animation at all", got)
 	}
 	if bound := h.backend.buffersBoundTo("sceneMorphDeltas"); len(bound) != 0 {
@@ -241,7 +240,7 @@ func TestASkinnedAndMorphedModelBindsBothOfItsOwnBuffers(t *testing.T) {
 		Plays: []scene.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}},
 	})
 	instance := firstInstance(t, h)
-	if instance.Flags&sceneNoSkin != 0 {
+	if instance.Flags&model.SceneNoSkin != 0 {
 		t.Error("a skinned draw must not carry SCENE_NOSKIN, morphed or not")
 	}
 	// One joint over 61 frames plus the rest frame, not a single row.

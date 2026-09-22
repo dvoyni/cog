@@ -1,6 +1,8 @@
 package types
 
 import (
+	"math"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -81,4 +83,84 @@ type ModelLight struct {
 	// one is PointLight(layers, light.Descr) with the position and direction
 	// carried into world space.
 	Descr LightDescr
+}
+
+// Light is the 48-byte packed light the shader loops over, with no kind
+// field. A point light is a spot whose cone is always fully on: direction an
+// actual zero vector, spotScale 0, spotOffset 1, so the cone term is
+// saturate(0 + 1). The direction must be a real zero and never left
+// uninitialised, because that trick relies on x * 0 == 0, which is false for
+// NaN.
+//
+// invRange4 is 1/range^4 rather than range, so that the shader's
+// saturate(1 - d^4 * invRange4) evaluates to exactly 1 when it is 0: no branch,
+// no select, no special case for infinity. The residual cost is that an
+// infinite-range light is unculled by construction and always survives to the
+// cap.
+//
+// Field order and size must match SceneLight in builtin/scene/frame.wgsl.
+type Light struct {
+	Position  m.Vec3
+	InvRange4 float32
+	Direction m.Vec3
+	SpotScale float32
+	// Color is linear radiance with Intensity already premultiplied.
+	Color      m.Vec3
+	SpotOffset float32
+}
+
+// PackLight resolves one light's defaults into its packed record. The cone is
+// precomputed here - spotScale = 1 / (cos inner - cos outer), spotOffset =
+// -cos outer * spotScale - so the shader is one dot, one MAD and one saturate.
+// An inner cone at or past the outer one, or a spot with no direction, is
+// returned as the error a renderer reports; the light is skipped.
+func PackLight(descr LightDescr) (Light, error) {
+	color := radiance(descr.Color, descr.Intensity)
+	light := Light{
+		Position:   descr.Position,
+		Color:      m.Vec3{X: color.X, Y: color.Y, Z: color.Z},
+		SpotOffset: 1,
+	}
+	if descr.Range > 0 {
+		light.InvRange4 = 1 / (descr.Range * descr.Range * descr.Range * descr.Range)
+	}
+	if descr.Kind != LightSpot {
+		return light, nil
+	}
+	direction := descr.Direction.Normalize()
+	if direction == (m.Vec3{}) {
+		return Light{}, ErrSpotDirectionMissing{}
+	}
+	outer := descr.OuterCone
+	if outer == 0 {
+		outer = math.Pi / 4
+	}
+	if descr.InnerCone >= outer {
+		return Light{}, ErrSpotConeInverted{InnerCone: descr.InnerCone, OuterCone: outer}
+	}
+	cosInner := float32(math.Cos(float64(descr.InnerCone)))
+	cosOuter := float32(math.Cos(float64(outer)))
+	light.Direction = direction
+	light.SpotScale = 1 / max(cosInner-cosOuter, 1e-4)
+	light.SpotOffset = -cosOuter * light.SpotScale
+	return light, nil
+}
+
+// ContributionAt is what one light is worth at a point: its own falloff
+// evaluated there - the same range window, cone and inverse-square the shader
+// applies - times its colour's luminance. It is the cap's ranking, evaluated at
+// the eye, so the lights dropped past MaxLights are exactly the ones
+// contributing least where the camera stands.
+//
+// The max(d2, 1e-6) is a robustness guard for a light sitting on the surface
+// being shaded, not a falloff parameter; it is mirrored from the shader so the
+// two agree.
+func ContributionAt(light *Light, point m.Vec3) float32 {
+	toLight := light.Position.Sub(point)
+	d2 := toLight.LengthSquared()
+	direction := toLight.MulS(1 / float32(math.Sqrt(float64(max(d2, 1e-12)))))
+	window := m.Clamp01(1 - d2*d2*light.InvRange4)
+	cone := m.Clamp01(-direction.Dot(light.Direction)*light.SpotScale + light.SpotOffset)
+	luminance := 0.2126*light.Color.X + 0.7152*light.Color.Y + 0.0722*light.Color.Z
+	return luminance * window * cone / max(d2, 1e-6)
 }

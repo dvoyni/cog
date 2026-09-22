@@ -40,7 +40,7 @@ func boundRecords(t *testing.T, h *harness, name string) []byte {
 }
 
 func readMeshRecord(data []byte, index int) model.SceneMesh {
-	at := data[index*meshRecordSize:]
+	at := data[index*model.SceneMeshSize:]
 	read := func(offset int) m.Vec2 {
 		return m.Vec2{X: readFloat32(at[offset:]), Y: readFloat32(at[offset+4:])}
 	}
@@ -48,8 +48,8 @@ func readMeshRecord(data []byte, index int) model.SceneMesh {
 }
 
 func readInstanceMesh(data []byte, index int) uint32 {
-	var instance sceneInstance
-	return binary.NativeEndian.Uint32(data[index*instanceSize+int(unsafe.Offsetof(instance.Mesh)):])
+	var instance model.Instance
+	return binary.NativeEndian.Uint32(data[index*model.InstanceSize+int(unsafe.Offsetof(instance.Mesh)):])
 }
 
 // The per-mesh buffer is bound on every draw, slot 0 holds the identity, and a
@@ -63,9 +63,9 @@ func TestAMeshWithAUVRangeNamesItsOwnSlotAfterTheIdentity(t *testing.T) {
 	h.frame()
 
 	meshes := boundRecords(t, h, "sceneMeshes")
-	if len(meshes) != 2*meshRecordSize {
+	if len(meshes) != 2*model.SceneMeshSize {
 		t.Fatalf("the per-mesh buffer holds %d bytes, want the identity and one record at %d each",
-			len(meshes), meshRecordSize)
+			len(meshes), model.SceneMeshSize)
 	}
 	if slot0 := readMeshRecord(meshes, 0); slot0 != model.IdentityMesh {
 		t.Fatalf("slot 0 is %+v, want the identity %+v", slot0, model.IdentityMesh)
@@ -92,7 +92,7 @@ func TestACustomLayoutMeshNamesTheIdentitySlot(t *testing.T) {
 	h.frame()
 
 	meshes := boundRecords(t, h, "sceneMeshes")
-	if len(meshes) != meshRecordSize {
+	if len(meshes) != model.SceneMeshSize {
 		t.Fatalf("the per-mesh buffer holds %d bytes, want the identity alone", len(meshes))
 	}
 	if slot0 := readMeshRecord(meshes, 0); slot0 != model.IdentityMesh {

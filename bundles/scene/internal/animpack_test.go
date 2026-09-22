@@ -6,8 +6,6 @@ import (
 
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
-	"github.com/dvoyni/cog/libs/m"
 )
 
 // testAnim is a two-joint model with two clips a second long, which at the
@@ -103,47 +101,6 @@ func TestResolvePlaysIsEmptyForAModelWithNoJoints(t *testing.T) {
 	}
 	if len(*keys) != 0 {
 		t.Errorf("reported %v; a model with no clips at all is not a typo", *keys)
-	}
-}
-
-// The block is a two-vec4 header and one vec4 per play, and animOffset counts
-// vec4s from the start of the whole arena - not from a per-pass range, because
-// sceneInstances is bound per pass and sceneAnim is not.
-func TestPackAnimLaysTheBlockOutInVec4s(t *testing.T) {
-	var build frameBuild
-	if got := build.packAnim(nil, morphBlock{}); got != types.SceneNoAnim {
-		t.Errorf("an empty block is at %d, want sceneNoAnim", got)
-	}
-	first := build.packAnim([]model.ScenePlayRecord{{BaseRow0: 4, BaseRow1: 6, W0: 0.5, W1: 0.5}}, morphBlock{})
-	if first != 0 {
-		t.Errorf("the first block is at %d, want the start of the arena", first)
-	}
-	second := build.packAnim([]model.ScenePlayRecord{{}, {}}, morphBlock{})
-	if want := uint32(model.AnimHeaderVec4s + model.PlayRecordVec4s); second != want {
-		t.Errorf("the second block is at %d, want %d", second, want)
-	}
-	if got, want := len(build.anims.bytes()), (2+1+2+2)*16; got != want {
-		t.Errorf("the arena is %d bytes, want %d", got, want)
-	}
-}
-
-// An instance that animates nothing carries SCENE_NOSKIN and SCENE_NO_ANIM,
-// which is what skips the whole pose path for a debug line or a procedural
-// terrain mesh rather than charging it a per-vertex fetch of an identity.
-func TestPackInstanceMarksAnUnskinnedDraw(t *testing.T) {
-	instance := packInstance(m.NewMat4(), types.AnimBinding{Offset: types.SceneNoAnim}, 0)
-	if instance.Flags&sceneNoSkin == 0 {
-		t.Error("a draw with no skin of its own carries SCENE_NOSKIN")
-	}
-	if instance.AnimOffset != types.SceneNoAnim {
-		t.Errorf("AnimOffset = %d, want sceneNoAnim", instance.AnimOffset)
-	}
-	skinned := packInstance(m.NewMat4(), types.AnimBinding{Offset: 7, Skinned: true}, 0)
-	if skinned.Flags&sceneNoSkin != 0 {
-		t.Error("a skinned draw must not carry SCENE_NOSKIN")
-	}
-	if skinned.AnimOffset != 7 {
-		t.Errorf("AnimOffset = %d, want the block's offset", skinned.AnimOffset)
 	}
 }
 

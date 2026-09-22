@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -81,7 +82,7 @@ func TestANonUniformlyScaledDrawTakesTheInverseTransposeNormalPath(t *testing.T)
 	if got := [3]m.Vec4{instance.World0, instance.World1, instance.World2}; got != want {
 		t.Errorf("packed world rows %v, want %v", got, want)
 	}
-	if instance.Flags&sceneNonUniform == 0 {
+	if instance.Flags&model.SceneNonUniform == 0 {
 		t.Errorf("flags %#b lack SCENE_NONUNIFORM; the normals would shear with the scale", instance.Flags)
 	}
 }
@@ -95,7 +96,7 @@ func TestAUniformlyScaledDrawKeepsThePlainNormalPath(t *testing.T) {
 	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 	h.frame()
 
-	if flags := firstInstance(t, h).Flags; flags&sceneNonUniform != 0 {
+	if flags := firstInstance(t, h).Flags; flags&model.SceneNonUniform != 0 {
 		t.Errorf("flags %#b carry SCENE_NONUNIFORM for a uniform scale", flags)
 	}
 }

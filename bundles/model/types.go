@@ -263,15 +263,11 @@ type (
 	ReportOnce = types.ReportOnce
 )
 
-// The bundled PBR shader and the records it reads, which the model cache fills
-// at load and a renderer packs every frame.
+// The bundled PBR shader: its variants, its material slots and its alpha
+// modes. The records it reads are in records.go.
 type (
-	// ScenePbrRecord is the bundled PBR's per-batch record.
-	ScenePbrRecord = types.ScenePbrRecord
 	// PbrDefaults are the 1x1 textures every absent texture slot binds.
 	PbrDefaults = types.PbrDefaults
-	// SceneMesh is the 32-byte per-mesh record the stored UVs decode against.
-	SceneMesh = types.SceneMesh
 	// ShaderVariant is which of the bundled module's four variants a draw
 	// needs.
 	ShaderVariant = types.ShaderVariant
@@ -281,12 +277,6 @@ type (
 	// AlphaMode is glTF's alphaMode, which selects fixed-function state and,
 	// for alphaMask, a shader discard.
 	AlphaMode = types.AlphaMode
-	// ScenePlayRecord is one play as the shader reads it.
-	ScenePlayRecord = types.ScenePlayRecord
-	// SceneAnimHeader is the sceneAnim block's two-vec4 header.
-	SceneAnimHeader = types.SceneAnimHeader
-	// SceneMorphWeight is one active morph target as the shader reads it.
-	SceneMorphWeight = types.SceneMorphWeight
 )
 
 const (
@@ -314,9 +304,6 @@ const (
 	VertexDecodePath = types.VertexDecodePath
 )
 
-// IdentityMesh is the per-mesh record of a mesh with no UV range of its own.
-var IdentityMesh = types.IdentityMesh
-
 // PbrSlots are the bundled material's five texture slots, in record order, and
 // PbrSampler the sampler every default slot binds.
 var (
@@ -324,11 +311,110 @@ var (
 	PbrSampler = types.PbrSampler
 )
 
-// The sizes of the animation records: a baked pose, a skin joint, and the
-// sceneAnim header and play record in vec4s.
-var (
-	PoseSize        = types.PoseSize
-	SkinJointSize   = types.SkinJointSize
-	AnimHeaderVec4s = types.AnimHeaderVec4s
-	PlayRecordVec4s = types.PlayRecordVec4s
+// The shader's records, below, and their packers in utils.go.
+//
+// Every byte the bundled shader reads is written by model's packers, so two
+// renderers drawing through it write the same bytes, and a shader change that
+// compiles against one cannot draw garbage in the other. A renderer owns
+// everything around the bytes - its arenas, culling, sorting and emission -
+// and appends what the packers return into its own arenas.
+//
+// Fixed-size records come back by value: PackInstance, PackLight and
+// PackFrameLighting. The variable-length animation block is appended by
+// AppendAnim, because its layout is the order of its parts and its padding.
+
+// The bundled shader's storage bindings, by the names its WGSL declares them
+// under.
+const (
+	// BindingSceneFrame is one pass's FrameBlock, bound as a range of
+	// FrameBlockSize.
+	BindingSceneFrame = types.BindingSceneFrame
+	// BindingSceneInstances is one pass's slice of Instance records, bound as
+	// a range so that instance_index stays pass-relative.
+	BindingSceneInstances = types.BindingSceneInstances
+	// BindingSceneAnim is the frame's whole animation arena, which AppendAnim
+	// writes and an instance's AnimOffset indexes in vec4s. It is bound on
+	// every draw, so a frame that animates nothing still binds one vec4.
+	BindingSceneAnim = types.BindingSceneAnim
+	// BindingSceneMeshes is the frame's whole SceneMesh arena, which an
+	// instance's Mesh indexes in records. Slot 0 is IdentityMesh.
+	BindingSceneMeshes = types.BindingSceneMeshes
+	// BindingScenePbrMaterial is one batch's ScenePbrRecord, bound as a range
+	// of ScenePbrRecordSize.
+	BindingScenePbrMaterial = types.BindingScenePbrMaterial
+	// BindingScenePoses and BindingSceneSkinJoints are a model's two durable
+	// pose buffers and BindingSceneMorphDeltas its delta buffer, from
+	// SkinBuffers: group 2, bound only where the draw's variant declares them.
+	BindingScenePoses       = types.BindingScenePoses
+	BindingSceneSkinJoints  = types.BindingSceneSkinJoints
+	BindingSceneMorphDeltas = types.BindingSceneMorphDeltas
 )
+
+// The sizes of the records the shader reads, in bytes, which binding ranges
+// and record indices are built from. PoseSize and SkinJointSize are the
+// records of the two durable pose buffers; AnimHeaderVec4s and
+// PlayRecordVec4s are the header and a play in the vec4s AnimOffset counts.
+const (
+	InstanceSize         = types.InstanceSize
+	FrameBlockSize       = types.FrameBlockSize
+	LightSize            = types.LightSize
+	ScenePbrRecordSize   = types.ScenePbrRecordSize
+	SceneMeshSize        = types.SceneMeshSize
+	SceneAnimHeaderSize  = types.SceneAnimHeaderSize
+	ScenePlayRecordSize  = types.ScenePlayRecordSize
+	SceneMorphWeightSize = types.SceneMorphWeightSize
+	PoseSize             = types.PoseSize
+	SkinJointSize        = types.SkinJointSize
+	AnimHeaderVec4s      = types.AnimHeaderVec4s
+	PlayRecordVec4s      = types.PlayRecordVec4s
+)
+
+type (
+	// Instance is the 64-byte per-instance record sceneInstances holds: the
+	// 4x3 world matrix as three rows, the animation offset, the flags, the
+	// plain-bound joint and the per-mesh record index.
+	Instance = types.Instance
+	// InstanceAnim is what an instance record says about animation, shared by
+	// every instance of one batch.
+	InstanceAnim = types.InstanceAnim
+	// FrameBlock is one pass's sceneFrame block. A renderer fills View,
+	// Projection, ViewProjection, CameraPosition and ViewDirection from its
+	// own camera, and PackFrameLighting fills the rest.
+	FrameBlock = types.FrameBlock
+	// FrameLighting is a camera's sun and hemispheric ambient under the names
+	// a camera declares them by, which a renderer copies from its camera.
+	FrameLighting = types.FrameLighting
+	// Light is the 48-byte packed punctual light the frame block's array
+	// holds.
+	Light = types.Light
+	// LightSelection is one pass's light array, capped at MaxLights, filled
+	// by Offer and packed by PackFrameLighting.
+	LightSelection = types.LightSelection
+	// ScenePbrRecord is the bundled PBR's per-batch record.
+	ScenePbrRecord = types.ScenePbrRecord
+	// SceneMesh is the 32-byte per-mesh record the stored UVs decode against.
+	SceneMesh = types.SceneMesh
+	// ScenePlayRecord is one play as the shader reads it.
+	ScenePlayRecord = types.ScenePlayRecord
+	// SceneAnimHeader is the sceneAnim block's two-vec4 header.
+	SceneAnimHeader = types.SceneAnimHeader
+	// SceneMorphWeight is one active morph target as the shader reads it.
+	SceneMorphWeight = types.SceneMorphWeight
+	// AnimMorph is the morph half of one draw's sceneAnim block.
+	AnimMorph = types.AnimMorph
+)
+
+// SceneNoAnim is the AnimOffset of an instance that animates nothing.
+const SceneNoAnim = types.SceneNoAnim
+
+// The instance flags, named after the WGSL constants the shader tests.
+// SceneNoSkin and ScenePlainJoint are mutually exclusive by construction.
+const (
+	SceneNonUniform = types.SceneNonUniform
+	SceneNoSkin     = types.SceneNoSkin
+	ScenePlainJoint = types.ScenePlainJoint
+)
+
+// IdentityMesh is the per-mesh record of a mesh with no UV range of its own,
+// and slot 0 of every frame's sceneMeshes arena.
+var IdentityMesh = types.IdentityMesh

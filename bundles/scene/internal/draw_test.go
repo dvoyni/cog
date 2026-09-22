@@ -136,7 +136,7 @@ func TestEveryPassBindsItsOwnInstanceSliceAndCountsFromZero(t *testing.T) {
 		if binding.offset%gfx.StorageAlignment != 0 {
 			t.Fatalf("a storage range starts at %d, which is not %d-aligned", binding.offset, gfx.StorageAlignment)
 		}
-		if binding.size != 2*int(unsafe.Sizeof(sceneInstance{})) {
+		if binding.size != 2*int(unsafe.Sizeof(model.Instance{})) {
 			t.Fatalf("a pass bound %d bytes of instances, want its own two records", binding.size)
 		}
 	}
@@ -157,9 +157,9 @@ func TestEveryDrawBindsTheFrameAndItsMaterialRecord(t *testing.T) {
 	if frames[0] != frames[1] {
 		t.Fatalf("the two draws in one pass bound different frame blocks: %+v and %+v", frames[0], frames[1])
 	}
-	if frames[0].size != int(unsafe.Sizeof(sceneFrameBlock{})) {
+	if frames[0].size != int(unsafe.Sizeof(model.FrameBlock{})) {
 		t.Fatalf("sceneFrame is bound as %d bytes, want the %d-byte block",
-			frames[0].size, unsafe.Sizeof(sceneFrameBlock{}))
+			frames[0].size, unsafe.Sizeof(model.FrameBlock{}))
 	}
 
 	materials := h.backend.buffersBoundTo("scenePbrMaterial")
@@ -323,8 +323,8 @@ func TestACamerasSunAndAmbientReachItsFrameBlock(t *testing.T) {
 	if len(frames) != 1 {
 		t.Fatalf("sceneFrame was bound %d times, want once per draw", len(frames))
 	}
-	if frames[0].size != int(unsafe.Sizeof(sceneFrameBlock{})) {
+	if frames[0].size != int(unsafe.Sizeof(model.FrameBlock{})) {
 		t.Fatalf("sceneFrame is bound as %d bytes, want the %d-byte block including its lighting",
-			frames[0].size, unsafe.Sizeof(sceneFrameBlock{}))
+			frames[0].size, unsafe.Sizeof(model.FrameBlock{}))
 	}
 }

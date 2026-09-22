@@ -328,18 +328,10 @@ func (r DrawRecord) basePbrRecord() ScenePbrRecord {
 	if r.Pbr != nil {
 		return *r.Pbr
 	}
-	record := model.DefaultPbrRecord()
-	record.MetallicFactor = 0
 	if r.Shape == ShapeNone {
-		return record
+		return model.PaintPbrRecord(m.NewColorLinear(1, 1, 1, 1), false)
 	}
-	if r.SelfLit {
-		record.BaseColorFactor = m.Vec4{W: r.Color.A}
-		record.EmissiveFactor = m.Vec4{X: r.Color.R, Y: r.Color.G, Z: r.Color.B}
-		return record
-	}
-	record.BaseColorFactor = m.Vec4{X: r.Color.R, Y: r.Color.G, Z: r.Color.B, W: r.Color.A}
-	return record
+	return model.PaintPbrRecord(r.Color, r.SelfLit)
 }
 
 // draw records one draw of any kind. Every recording call is sugar over it.

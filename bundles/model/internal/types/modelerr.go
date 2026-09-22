@@ -2,7 +2,6 @@ package types
 
 import (
 	"fmt"
-
 )
 
 // ErrModelUnavailable reports a model the decode refused: it does not parse, it
@@ -168,4 +167,24 @@ func (e ErrModelMorphTargetsOverLimit) Error() string {
 	return fmt.Sprintf(
 		"scene: a draw of model %q has %d active morph targets against a limit of %d, so the lightest were dropped",
 		e.Model, e.Targets, e.Limit)
+}
+
+// ErrSpotConeInverted reports a spot light whose InnerCone is at or past its
+// OuterCone, which leaves no cone to smooth across. The light is skipped for
+// the frame. OuterCone is the resolved value, so a zero one reads as pi/4.
+type ErrSpotConeInverted struct {
+	InnerCone, OuterCone float32
+}
+
+func (e ErrSpotConeInverted) Error() string {
+	return fmt.Sprintf("scene: spot light inner cone %g is not inside its outer cone %g", e.InnerCone, e.OuterCone)
+}
+
+// ErrSpotDirectionMissing reports a spot light with a zero Direction. Its cone
+// would evaluate to zero everywhere and the light would silently render
+// black, so it is reported and skipped instead.
+type ErrSpotDirectionMissing struct{}
+
+func (ErrSpotDirectionMissing) Error() string {
+	return "scene: spot light has no direction"
 }

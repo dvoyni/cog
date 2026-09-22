@@ -151,7 +151,7 @@ type SceneAnimHeader struct {
 
 // The sizes of the animation records: bytes for the two durable buffers, and
 // the vec4 units animOffset counts for the two the per-frame arena holds.
-var (
+const (
 	PoseSize        = int(unsafe.Sizeof(scenePose{}))
 	SkinJointSize   = int(unsafe.Sizeof(sceneSkinJoint{}))
 	AnimHeaderVec4s = int(unsafe.Sizeof(SceneAnimHeader{})) / 16

@@ -93,22 +93,12 @@ type ErrTextureUVSetUnsupported = model.ErrTextureUVSetUnsupported
 // ErrSpotConeInverted reports a spot light whose InnerCone is at or past its
 // OuterCone, which leaves no cone to smooth across. The light is skipped for
 // the frame. OuterCone is the resolved value, so a zero one reads as pi/4.
-type ErrSpotConeInverted struct {
-	InnerCone, OuterCone float32
-}
-
-func (e ErrSpotConeInverted) Error() string {
-	return fmt.Sprintf("scene: spot light inner cone %g is not inside its outer cone %g", e.InnerCone, e.OuterCone)
-}
+type ErrSpotConeInverted = model.ErrSpotConeInverted
 
 // ErrSpotDirectionMissing reports a spot light with a zero Direction. Its cone
 // would evaluate to zero everywhere and the light would silently render
 // black, so it is reported and skipped instead.
-type ErrSpotDirectionMissing struct{}
-
-func (ErrSpotDirectionMissing) Error() string {
-	return "scene: spot light has no direction"
-}
+type ErrSpotDirectionMissing = model.ErrSpotDirectionMissing
 
 // ErrMeshGeometryInvalid reports geometry that could only draw garbage: no
 // vertices at all, an index past the last vertex, or an index count that is not

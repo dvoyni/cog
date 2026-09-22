@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
@@ -170,7 +171,7 @@ func TestALineIsAStretchedBoxFromStartToEnd(t *testing.T) {
 					t.Fatalf("the box's half-extent %v maps to %v, want 0.1 across the line", across, offset)
 				}
 			}
-			if packInstance(world, types.AnimBinding{Offset: types.SceneNoAnim}, 0).Flags&sceneNonUniform == 0 {
+			if model.PackInstance(world, model.InstanceAnim{Offset: model.SceneNoAnim}, 0).Flags&model.SceneNonUniform == 0 {
 				t.Fatal("a line's instance lacks SCENE_NONUNIFORM")
 			}
 		})
@@ -235,13 +236,13 @@ func TestOnlyStretchedShapesFlagNonUniform(t *testing.T) {
 	q.Plane(0, m.Vec3{}, m.Vec2{X: 4, Y: 2}, testBoxColor)
 	sphere, plane := types.OpQueueRecordedDraws(&q)[0], types.OpQueueRecordedDraws(&q)[1]
 
-	if flags := packInstance(sphere.World(), types.AnimBinding{Offset: types.SceneNoAnim}, 0).Flags; flags&sceneNonUniform != 0 {
+	if flags := model.PackInstance(sphere.World(), model.InstanceAnim{Offset: model.SceneNoAnim}, 0).Flags; flags&model.SceneNonUniform != 0 {
 		t.Fatalf("a sphere's instance carries SCENE_NONUNIFORM (%#b)", flags)
 	}
 	if got := sphere.World().TransformPoint(m.Vec3{Y: 1}); !nearVec3(got, m.Vec3{X: 1, Y: 3}) {
 		t.Fatalf("the unit sphere's pole lands at %v, want (1,3,0) for radius 3 at x = 1", got)
 	}
-	if flags := packInstance(plane.World(), types.AnimBinding{Offset: types.SceneNoAnim}, 0).Flags; flags&sceneNonUniform == 0 {
+	if flags := model.PackInstance(plane.World(), model.InstanceAnim{Offset: model.SceneNoAnim}, 0).Flags; flags&model.SceneNonUniform == 0 {
 		t.Fatalf("a 4 x 2 plane's instance lacks SCENE_NONUNIFORM (%#b)", flags)
 	}
 	if got := plane.World().TransformPoint(m.Vec3{X: 0.5, Z: 0.5}); !nearVec3(got, m.Vec3{X: 2, Z: 1}) {
@@ -265,7 +266,7 @@ func TestWireBoxEdgesCloseAtTheCorners(t *testing.T) {
 			point := world.TransformPoint(corner)
 			extent.Min, extent.Max = extent.Min.Min(point), extent.Max.Max(point)
 		}
-		if packInstance(world, types.AnimBinding{Offset: types.SceneNoAnim}, 0).Flags&sceneNonUniform == 0 {
+		if model.PackInstance(world, model.InstanceAnim{Offset: model.SceneNoAnim}, 0).Flags&model.SceneNonUniform == 0 {
 			t.Fatal("an edge's instance lacks SCENE_NONUNIFORM")
 		}
 	}

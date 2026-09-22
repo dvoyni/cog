@@ -82,39 +82,3 @@ func TestSelectMorphTargetsCullsByMagnitude(t *testing.T) {
 		t.Errorf("reported %v; culling zeros is the ordinary path", *keys)
 	}
 }
-
-// The block is a two-vec4 header, one vec4 per play, then the sparse list two
-// entries to a vec4 - and the arena stays whole vec4s, because animOffset
-// counts them and an odd target count would leave the next block at an offset
-// no instance can name.
-func TestPackAnimLaysTheMorphListOutInWholeVec4s(t *testing.T) {
-	var build frameBuild
-	block := morphBlock{
-		binding: model.MorphBinding{Base: 7, Stride: 2, Targets: 3},
-		targets: []model.SceneMorphWeight{{Target: 0, Weight: 1}, {Target: 2, Weight: 0.5}},
-	}
-	// A morphed draw with no plays still packs a block: playCount and
-	// targetCount are independently zero-checkable, with no flags bitfield.
-	first := build.packAnim(nil, block)
-	if first != 0 {
-		t.Fatalf("the first block is at %d, want the start of the arena", first)
-	}
-	// Two entries fill one vec4 exactly, so the second block follows the
-	// header plus one.
-	if want := uint32(model.AnimHeaderVec4s + 1); build.packAnim(nil, block) != want {
-		t.Errorf("the second block is not at %d", want)
-	}
-	// An odd count pads: three entries are two vec4s, the last half empty.
-	odd := morphBlock{
-		binding: block.binding,
-		targets: append(block.targets, model.SceneMorphWeight{Target: 1, Weight: 0.25}),
-	}
-	third := build.packAnim(nil, odd)
-	if want := uint32(2 * (model.AnimHeaderVec4s + 1)); third != want {
-		t.Errorf("the third block is at %d, want %d", third, want)
-	}
-	// Two blocks of header plus one vec4, then one of header plus two.
-	if got, want := len(build.anims.bytes()), (2*(model.AnimHeaderVec4s+1)+model.AnimHeaderVec4s+2)*16; got != want {
-		t.Errorf("the arena is %d bytes, want %d", got, want)
-	}
-}

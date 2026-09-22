@@ -7,8 +7,11 @@
 // conversion of the decoded glTF into vertices, baked poses, morph blocks and
 // PBR records behind them; the mesh table with its minting, staging and
 // deferred bakes, and the unit meshes; the bundled PBR material, which names
-// no pass; and the per-frame animation and morph resolution a renderer packs
-// from.
+// no pass; the per-frame animation and morph resolution a renderer packs
+// from; and every record the bundled shader reads, with its packer - the
+// frame block and its lighting, the instance, the light and the pass's light
+// selection, and the sceneAnim block - so that two renderers write the same
+// bytes.
 //
 // A renderer reaches the Lookup's residency through the Lookup's own exported
 // methods - ModelView, Mesh, EnsureUnit, EnsureBundled and DrainMeshes - and a
