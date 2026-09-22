@@ -2403,48 +2403,88 @@ let r = scenePbrSurface(uv0, uv1, normal, tangent, color, worldPos, frontFacing)
 return vec4(sceneShadeSurface(r.surface) + r.emissive, r.alpha);
 ```
 
-### Custom shaders are not supported in v1
+### Custom shaders
 
-([Custom shader contract and prelude](https://github.com/dvoyni/cog/issues/19),
-closed out of scope)
-
-**gfx does no shader preprocessing of any kind** — `ShaderDescr` is inline text
-or a storage path handed straight to the backend, with no include, macro or
-injection point. So publishing the functions above means either **copy-paste**,
-with every consumer carrying its own copy of the BRDF — the exact failure that
-shader variants were rejected over — or new gfx surface. v1 ships the bundled PBR
-and publishes no contract; the function bodies live inside the two bundled
-shaders. Publication is purely additive, so nothing is foreclosed
 ([scene: custom shader contract and prelude](https://github.com/dvoyni/cog/issues/48),
-blocked by
-[gfx: shader preprocessing and vertex variants](https://github.com/dvoyni/cog/issues/45)).
+over [gfx: implement the WGSL shader preprocessor](https://github.com/dvoyni/cog/issues/144))
 
-A caller may still supply a whole `gfx.MaterialDescr` with its own WGSL, as the
-`procedural` demo does — it simply gets no scene helper functions and must
-declare only bindings scene binds on every draw that uses it.
+A caller may supply a whole `gfx.MaterialDescr` with its own WGSL, under scene
+as a `scene.Material` and under ecsscene as an `ecsscene.MaterialTag`. gfx
+preprocesses it, so it `//#include`s what model publishes by absolute storage
+name and lights with the engine's own functions instead of re-typing them.
+Include-once is by resolved path and the flattened module is line-preserving,
+as [preprocessor.md](../../../../slots/gfx/docs/specs/preprocessor.md)
+specifies, so a WGSL error still lands on a real line of the source that has it.
 
-Those bindings are `sceneFrame`, `sceneInstances` and `scenePbrMaterial`, and a
-caller material may declare any subset of them: gfx binds what reflection
-reports and silently drops a parameter no shader declares, so declaring fewer is
-free while declaring one more is frame-fatal. `scenePbrMaterial` is bound but
-inert for a caller material - a `MeshDraw` has no colour to put in the record,
-so it always reads the bundled white paint until `OverrideParams` lands - which
-leaves the frame block and the instance array as the whole usable contract. The
-`procedural` demo declares exactly those two, carries no parameters at all, and
-puts its per-object colour in its own vertices, which is what makes the
-constraint livable rather than merely legal.
+**Three of the bundled shader's sources are published.** Each is a constant in
+model, and each constant's doc and the source's own `DECLARES:` header list
+every name it declares, which an includer must not declare again. A test holds
+the three lists and the sources together.
+
+| constant | source | declares | bindings |
+| --- | --- | --- | --- |
+| `model.VertexDecodePath` | `builtin/scene/vertexdecode.wgsl` | `sceneOctDecode`, `sceneDecodeNormal`, `sceneDecodeTangent`, `sceneDecodeUV`; three `SCENE_` constants | none |
+| `model.FramePath` | `builtin/scene/frame.wgsl` | `SceneFrame`, `SceneLight`, `SceneLightSample`; `sceneCameraPosition`, `sceneViewDirection`, `sceneAmbient`, `sceneSun`, `sceneLightCount`, `sceneLightSample`; `//#const SCENE_MAX_LIGHTS` | `sceneFrame`, storage, `@group(0) @binding(0)` |
+| `model.PbrPath` | `builtin/scene/pbr.wgsl` | `SceneSurface`, `ScenePbrSurface`; `SCENE_PI`, `SCENE_DIELECTRIC_F0`; the BRDF terms, `sceneEnvBRDFApprox`, `scenePunctualContribution`, `sceneShadeSurface` | none of its own; it includes `frame.wgsl` |
+
+A material fills a `SceneSurface` however it likes, from its own vertices, its
+own textures or a procedure, and writes `sceneShadeSurface(s) + emissive`. That
+is the sun, every punctual light in the pass and the hemispheric ambient,
+exactly as the bundled material is lit, so a custom surface beside a bundled
+one agrees with it about where the light is.
+
+The other eight sources stay private: `instance`, `material`, `skin`, `morph`,
+`anim`, `deform`, `vertex` and the root `scene.wgsl`. What they declare changes
+with the bundled shader and the records model packs, and nothing outside model
+may name it. A material that needs the instance record declares its own copy of
+`sceneInstances`, as the `procedural` demo does.
+
+**The prelude is split, not monolithic, because a declared binding must be
+bound.** Including `PbrPath` declares exactly one binding, `sceneFrame`, and
+both scene and ecsscene bind it on every draw, so the prelude costs a material
+nothing it could fail to fill. A monolithic prelude would declare the instance,
+material and animation buffers too, and oblige every consumer to fill group 2
+for a debug line with no model. Getting it wrong is no longer invisible: since
+[gfx: an unsupplied storage buffer binding fails silently](https://github.com/dvoyni/cog/issues/133),
+a declared storage binding nothing fills drops that draw and reports
+`gfx.ErrStorageBufferUnsupplied`, naming the shader, the parameter and its group
+and binding, once per shader and parameter. The draw is lost; the frame is not.
+
+**`SCENE_MAX_LIGHTS` needs no supply from an includer.** `frame.wgsl` declares
+it as `//#const SCENE_MAX_LIGHTS=16`, which is `model.MaxLights`, and the
+renderers pack exactly that many light records whatever material a draw uses.
+The bundled shader supplies `MaxLights` over the default through
+`gfx.ShaderConst`; a caller material supplies nothing and gets the same number.
+Supplying any other value reads a light array the frame does not hold. A test
+builds an includer with no supply and pins the reflected array at `MaxLights`.
+
+**The storage-buffer rules bind caller materials too.** The fully animated
+variant holds eight of the eight storage buffers the browser floor allows, so:
+
+- a caller material may declare **no storage buffer of its own**;
+- it may declare any of the ones the renderer already binds on every draw:
+  `sceneFrame` (through `FramePath`, or `PbrPath`), `sceneInstances` and
+  `scenePbrMaterial`. `scenePbrMaterial` is bound but inert for a mesh draw,
+  which has no colour to put in the record, so it always reads the bundled
+  white paint.
+
+A test builds a material that includes `PbrPath` under each renderer and
+reflects the module gfx handed the backend: one binding, `sceneFrame`, storage at
+0/0, with a `MaxLights` light array. The `procedural` demo is the proving
+consumer: it shades through `sceneShadeSurface` and declares only
+`sceneInstances` beside what the prelude brings.
 
 **Two findings that bind the bundled shaders themselves:**
 
-- **A declared-but-unused binding is frame-fatal.** Reflection is naga, which
+- **Every declared binding must be bound.** Reflection is naga, which
   deliberately does not compact unused globals, so every declared
-  `@group/@binding` lands in the explicit `BindGroupLayout` and must be bound at
-  draw time. Miss one and `CreateBindGroup` fails the entry-count rule, the error
-  is swallowed, `encoder.Finish()`'s error is dropped, and **the whole frame's
-  command buffer vanishes silently**. This is why the null skin and the 1×1
-  default textures exist.
+  `@group/@binding` lands in the explicit `BindGroupLayout`. A storage binding
+  nothing fills drops the draw with `gfx.ErrStorageBufferUnsupplied`, and a bind
+  group the device refuses is reported as `gogpu.ErrBindGroupRefused`. This is
+  why the null skin and the 1×1 default textures exist, and why each variant
+  declares only what it reads.
 - **Every reflected binding is emitted `Vertex|Fragment`**, so a vertex-only
-  buffer consumes a fragment-stage slot too — see the budget gap above.
+  buffer consumes a fragment-stage slot too; see the budget gap above.
 
 ### Binding cost
 

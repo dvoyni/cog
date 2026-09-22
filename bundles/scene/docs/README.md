@@ -750,11 +750,16 @@ a fragment-stage slot too. Three rules follow, and they are contract:
   `ErrShaderExceedsWebLimits`. A desktop adapter reports hardware limits, so
   checking the real device would pass a build no browser can run.
 
-There is no custom shader contract in v1. gfx now preprocesses, so scene's WGSL
-helpers *could* be published as includable sources, but what scene publishes and
-how it splits is a decision of its own that has not been taken. A caller may
-still supply a whole `gfx.MaterialDescr` with its own WGSL — it simply gets no
-scene helper functions.
+The shading sources are published. A caller supplies a whole
+`gfx.MaterialDescr` with its own WGSL and `//#include`s what model publishes by
+absolute storage name: `model.VertexDecodePath` to read the storage vertex,
+`model.FramePath` for the pass's camera, sun, ambient and lights, and
+`model.PbrPath` for `sceneShadeSurface`, which lights a `SceneSurface` exactly as
+the bundled material is lit. `PbrPath` includes `FramePath`, and between them
+they declare one binding, `sceneFrame`, which scene binds on every draw. Each
+constant's doc lists the names its source declares; do not declare those names
+again. The rest of the bundled shader stays private, and the contract is in
+[model.md](../../model/docs/specs/model.md#custom-shaders).
 
 ## Errors
 

@@ -1,5 +1,17 @@
 // The per-pass view of the world: the camera, the sun, the hemispheric
 // ambient and the punctual lights, plus the accessors that read them.
+//
+// DECLARES: struct SceneFrame, SceneLight, SceneLightSample; @group(0)
+// @binding(0) var<storage, read> sceneFrame; fn sceneCameraPosition,
+// sceneViewDirection, sceneAmbient, sceneSun, sceneLightCount,
+// sceneLightSample; //#const SCENE_MAX_LIGHTS, default 16.
+//
+// It is mounted at builtin/scene/frame.wgsl and published as model.FramePath,
+// so a custom material includes it by that absolute storage name and lights
+// with the frame scene and ecsscene pack rather than a hand-copied prefix of
+// it. sceneFrame is the one binding it costs, and both renderers bind it on
+// every draw. The SCENE_MAX_LIGHTS default is model.MaxLights, so an includer
+// supplies nothing.
 
 // SCENE_MAX_LIGHTS is how many punctual lights one pass may carry. It is
 // declared here, in the source that owns the array, as this module's default;

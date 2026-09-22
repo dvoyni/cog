@@ -10,7 +10,7 @@
 // instance.wgsl at @group(0) @binding(3) and reached through sceneMeshOf.
 //
 // It is mounted at builtin/scene/vertexdecode.wgsl and published as
-// scene.VertexDecodePath, so a custom scene material includes it by that
+// model.VertexDecodePath, so a custom scene material includes it by that
 // absolute storage name and reads the directions the bundled shader reads
 // rather than a re-typed approximation. A shader that declares
 // @location(1) as vec3<f32> or @location(2) as vec4<f32> - which is what the
