@@ -9,7 +9,6 @@ import (
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
 	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model/modelplugin"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/bundles/scene/sceneplugin"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -47,7 +46,7 @@ func (p *moverPlugin) Dependencies() []kernel.PluginName { return p.deps }
 func (p *moverPlugin) Register(registrar *kernel.Registrar, _ any) error {
 	system := ecs.ToHandler[app.UpdateEvent](registrar, func(q *ecs.Query[retuneQuery]) {
 		for _, it := range q.All() {
-			it.Model.Layers = it.Model.Layers | scene.Layer(1)
+			it.Model.Layers = it.Model.Layers | ecsscene.Layer(1)
 		}
 	})
 	if p.places {
@@ -101,5 +100,24 @@ func TestTheCouplingCheckStillHoldsOnTheBindingsComponents(t *testing.T) {
 func TestASystemPlacingEntitiesNeedsOnlyEcs(t *testing.T) {
 	if err := compose(&moverPlugin{deps: []kernel.PluginName{ecs.Name}, places: true}); err != nil {
 		t.Fatalf("a System writing m.Transform with only an ecs dependency did not compose: %v", err)
+	}
+}
+
+// TestEveryComponentIsStorable checks each Component against the ECS's own
+// gate. Registration runs the same check, but a refusal there surfaces as a
+// failed composition; this names the type that broke it.
+func TestEveryComponentIsStorable(t *testing.T) {
+	for _, component := range []reflect.Type{
+		reflect.TypeFor[ecsscene.Model](),
+		reflect.TypeFor[ecsscene.Mesh](),
+		reflect.TypeFor[ecsscene.Animation](),
+		reflect.TypeFor[ecsscene.Params](),
+		reflect.TypeFor[ecsscene.Material](),
+		reflect.TypeFor[ecsscene.Light](),
+		reflect.TypeFor[ecsscene.Camera](),
+	} {
+		if err := ecs.Storable(component); err != nil {
+			t.Errorf("%s is not storable: %v", component, err)
+		}
 	}
 }

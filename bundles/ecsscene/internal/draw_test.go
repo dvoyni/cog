@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/bundles/ecsscene"
-	"github.com/dvoyni/cog/bundles/scene"
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
@@ -112,7 +112,7 @@ func animatedGLB(t testing.TB) []byte {
 
 // crateModelComponent is a Model naming the crate file's whole default scene.
 func crateModelComponent() *ecsscene.Model {
-	return &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}}
+	return &ecsscene.Model{Ref: model.ModelRef{Path: crateModel}}
 }
 
 // defaultEye is where the harness camera stands, looking at the origin.

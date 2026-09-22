@@ -9,6 +9,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecsscene"
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -28,7 +29,7 @@ import (
 func TestAModelEntityRecordsWhereItStandsOnItsLayers(t *testing.T) {
 	h := newCameralessHarness(t, 256)
 	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{
-		FovY: 1.0472, Near: 0.1, Far: 200, CullMask: scene.Layer(3),
+		FovY: 1.0472, Near: 0.1, Far: 200, CullMask: ecsscene.Layer(3),
 	}})
 	place := m.Transform{
 		Position: m.Vec3{X: 1, Y: 2, Z: 3},
@@ -36,10 +37,10 @@ func TestAModelEntityRecordsWhereItStandsOnItsLayers(t *testing.T) {
 		Scale:    m.Vec3{X: 2, Y: 1, Z: 0.5},
 	}
 	h.spawn(t, spawnRequest{Place: place, Model: &ecsscene.Model{
-		Ref: scene.ModelRef{Path: crateModel}, Layers: scene.Layer(3),
+		Ref: model.ModelRef{Path: crateModel}, Layers: ecsscene.Layer(3),
 	}})
 	h.spawn(t, spawnRequest{Place: m.At(-5, 0, 0), Model: &ecsscene.Model{
-		Ref: scene.ModelRef{Path: crateModel}, Layers: scene.Layer(5),
+		Ref: model.ModelRef{Path: crateModel}, Layers: ecsscene.Layer(5),
 	}})
 
 	h.frameUntil(t, "the crate to become resident", func() bool {
@@ -69,9 +70,9 @@ func TestAModelsSceneAndNodeSelectorsReachTheDraw(t *testing.T) {
 	h := newDrawingHarness(t, 256)
 	selected, whole := m.At(3, 0, 0), m.At(-5, 0, 0)
 	h.spawn(t, spawnRequest{Place: selected, Model: &ecsscene.Model{
-		Ref: scene.ModelRef{Path: propsModel, Scene: "props", Node: "crate"},
+		Ref: model.ModelRef{Path: propsModel, Scene: "props", Node: "crate"},
 	}})
-	h.spawn(t, spawnRequest{Place: whole, Model: &ecsscene.Model{Ref: scene.ModelRef{Path: propsModel}}})
+	h.spawn(t, spawnRequest{Place: whole, Model: &ecsscene.Model{Ref: model.ModelRef{Path: propsModel}}})
 
 	h.frameUntil(t, "the props to become resident", func() bool {
 		return len(where(h.drawn(), at(selected.Position))) > 0
@@ -135,16 +136,16 @@ func playsOf(t *testing.T, instance drawnInstance) []playRecord {
 // the weight as the play's share of the normalised total.
 func TestAnimationSkipsEmptySlots(t *testing.T) {
 	h := newDrawingHarness(t, 256)
-	animated := &ecsscene.Model{Ref: scene.ModelRef{Path: animatedModel}}
+	animated := &ecsscene.Model{Ref: model.ModelRef{Path: animatedModel}}
 	// Walk loops, so 1.25 seconds into a one-second clip is a quarter in;
 	// Idle does not, so two seconds in holds its last frame.
-	gapped := [ecsscene.MaxPlays]scene.ClipPlay{
+	gapped := [model.MaxClipPlays]model.ClipPlay{
 		{Clip: "Walk", Time: 1.25, Loop: true, Weight: 1},
 		{},
 		{Clip: "Idle", Time: 2, Weight: 0.5},
 	}
-	dense := [ecsscene.MaxPlays]scene.ClipPlay{gapped[0], gapped[2]}
-	atZero := [ecsscene.MaxPlays]scene.ClipPlay{{Clip: "Walk", Weight: 1}, {Clip: "Idle", Weight: 1}}
+	dense := [model.MaxClipPlays]model.ClipPlay{gapped[0], gapped[2]}
+	atZero := [model.MaxClipPlays]model.ClipPlay{{Clip: "Walk", Weight: 1}, {Clip: "Idle", Weight: 1}}
 	h.spawn(t, spawnRequest{Place: m.At(0, 0, 0), Model: animated, Animation: &ecsscene.Animation{Plays: gapped}})
 	h.spawn(t, spawnRequest{Place: m.At(3, 0, 0), Model: animated, Animation: &ecsscene.Animation{Plays: dense}})
 	h.spawn(t, spawnRequest{Place: m.At(6, 0, 0), Model: animated, Animation: &ecsscene.Animation{Plays: atZero}})
@@ -203,7 +204,7 @@ func TestParamsReachAMeshsParamsAndAModelsOverrides(t *testing.T) {
 	})
 	h.spawn(t, spawnRequest{
 		Place:  m.At(3, 0, 0),
-		Model:  &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}},
+		Model:  &ecsscene.Model{Ref: model.ModelRef{Path: crateModel}},
 		Params: &ecsscene.Params{Values: m.NewList(tint)},
 	})
 
@@ -265,9 +266,9 @@ func TestAMaterialsTagsEachKeepTheirOwnParams(t *testing.T) {
 	h := newCameralessHarness(t, 256)
 	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{
 		FovY: 1.0472, Near: 0.1, Far: 200, Passes: m.NewList(
-			scene.Pass{ClearDepth: m.Some[float32](1)},
-			scene.Pass{Tag: "shadow", Order: 1},
-			scene.Pass{Tag: "outline", Order: 2},
+			ecsscene.Pass{ClearDepth: m.Some[float32](1)},
+			ecsscene.Pass{Tag: "shadow", Order: 1},
+			ecsscene.Pass{Tag: "outline", Order: 2},
 		),
 	}})
 	ref := h.bake(t)
@@ -280,7 +281,7 @@ func TestAMaterialsTagsEachKeepTheirOwnParams(t *testing.T) {
 			gfx.FloatParam("c", 3))},
 		ecsscene.MaterialTag{Tag: "outline", Shader: forward},
 	)}})
-	h.spawn(t, spawnRequest{Place: m.At(3, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(1)}, Material: &ecsscene.Material{Tags: m.NewList(
+	h.spawn(t, spawnRequest{Place: m.At(3, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, Layers: ecsscene.Layer(1)}, Material: &ecsscene.Material{Tags: m.NewList(
 		ecsscene.MaterialTag{Shader: shadow, Params: m.NewList(gfx.FloatParam("d", 4))},
 	)}})
 
@@ -319,7 +320,7 @@ func TestAnAbsentMaterialIsNoMaterial(t *testing.T) {
 	h := newDrawingHarness(t, 256)
 	ref := h.bake(t)
 	material := &ecsscene.Material{Tags: m.NewList(ecsscene.MaterialTag{Shader: gfx.ShaderWithText("flat")})}
-	h.spawn(t, spawnRequest{Place: m.At(-3, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(1)}, Material: material})
+	h.spawn(t, spawnRequest{Place: m.At(-3, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, Layers: ecsscene.Layer(1)}, Material: material})
 	h.spawn(t, spawnRequest{Place: m.At(-1, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref}})
 	h.spawn(t, spawnRequest{Place: m.At(1, 0, 0), Model: crateModelComponent(), Material: material})
 	h.spawn(t, spawnRequest{Place: m.At(3, 0, 0), Model: crateModelComponent()})
@@ -384,12 +385,12 @@ func lightsOf(t *testing.T, frame []byte) []light {
 func TestALightIsPlacedAndAimedByItsTransform(t *testing.T) {
 	h := newCameralessHarness(t, 256)
 	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{
-		FovY: 1.0472, Near: 0.1, Far: 200, CullMask: scene.Layer(2),
+		FovY: 1.0472, Near: 0.1, Far: 200, CullMask: ecsscene.Layer(2),
 	}})
 	// A second camera draws layer 3 alone, which is what tells a light the
 	// binding left on layer 2 from one it dropped to zero, which is every layer.
 	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{
-		ID: 1, FovY: 1.0472, Near: 0.1, Far: 200, CullMask: scene.Layer(3),
+		ID: 1, FovY: 1.0472, Near: 0.1, Far: 200, CullMask: ecsscene.Layer(3),
 	}})
 	ref := h.bake(t)
 	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}})
@@ -397,13 +398,16 @@ func TestALightIsPlacedAndAimedByItsTransform(t *testing.T) {
 	h.spawn(t, spawnRequest{
 		Place: m.LookAt(eye, target, m.Vec3{Y: 1}),
 		Light: &ecsscene.Light{
-			Kind: scene.LightSpot, Color: m.Color{R: 1, G: 0.5, A: 1}, Intensity: 2, Range: 10,
-			InnerCone: 0.1, OuterCone: 0.4, Layers: scene.Layer(2),
+			Descr: model.LightDescr{
+				Kind: model.LightSpot, Color: m.Color{R: 1, G: 0.5, A: 1}, Intensity: 2, Range: 10,
+				InnerCone: 0.1, OuterCone: 0.4,
+			},
+			Layers: ecsscene.Layer(2),
 		},
 	})
-	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{Z: 7}}, Light: &ecsscene.Light{Kind: scene.LightSpot}})
-	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{X: -2}}, Light: &ecsscene.Light{Range: 3}})
-	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{X: 2}}, Light: &ecsscene.Light{Layers: scene.Layer(3)}})
+	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{Z: 7}}, Light: &ecsscene.Light{Descr: model.LightDescr{Kind: model.LightSpot}}})
+	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{X: -2}}, Light: &ecsscene.Light{Descr: model.LightDescr{Range: 3}}})
+	h.spawn(t, spawnRequest{Place: m.Transform{Position: m.Vec3{X: 2}}, Light: &ecsscene.Light{Layers: ecsscene.Layer(3)}})
 
 	h.frameUntil(t, "the frame to draw", func() bool { return len(h.drawn()) > 0 })
 
@@ -499,17 +503,17 @@ func TestACameraRecordsItsPassesWithTheirClears(t *testing.T) {
 	h := newCameralessHarness(t, 256)
 	place := m.LookAt(m.Vec3{Y: 3, Z: 10}, m.Vec3{}, m.Vec3{Y: 1})
 	h.spawn(t, spawnRequest{Place: place, Camera: &ecsscene.Camera{
-		ID: -2, Projection: scene.Perspective, FovY: 1, Near: 0.1, Far: 100,
-		CullMask: scene.Layer(4), SunDirection: m.Vec3{Y: -1}, SunColor: m.White, SunIntensity: 3,
+		ID: -2, Projection: ecsscene.Perspective, FovY: 1, Near: 0.1, Far: 100,
+		CullMask: ecsscene.Layer(4), SunDirection: m.Vec3{Y: -1}, SunColor: m.White, SunIntensity: 3,
 		AmbientSky: m.Color{B: 1, A: 1}, AmbientGround: m.Color{G: 1, A: 1}, AmbientIntensity: 0.5,
 		Passes: m.NewList(
-			scene.Pass{ClearColor: m.Some(m.Color{B: 0.25, A: 1}), ClearDepth: m.Some[float32](1)},
-			scene.Pass{Tag: "overlay", Order: 1},
+			ecsscene.Pass{ClearColor: m.Some(m.Color{B: 0.25, A: 1}), ClearDepth: m.Some[float32](1)},
+			ecsscene.Pass{Tag: "overlay", Order: 1},
 		),
 	}})
 	obliquePlace := m.At(0, 0, 20)
 	h.spawn(t, spawnRequest{Place: obliquePlace, Camera: &ecsscene.Camera{
-		ID: 5, Projection: scene.Oblique, Height: 20, Shear: 0.5, Near: -50, Far: 50,
+		ID: 5, Projection: ecsscene.Oblique, Height: 20, Shear: 0.5, Near: -50, Far: 50,
 	}})
 	// Two meshes every pass has a tag for, one on the layer the first camera
 	// draws and one off it.
@@ -518,8 +522,8 @@ func TestACameraRecordsItsPassesWithTheirClears(t *testing.T) {
 		ecsscene.MaterialTag{Shader: gfx.ShaderWithText("flat")},
 		ecsscene.MaterialTag{Tag: "overlay", Shader: gfx.ShaderWithText("flat")},
 	)}
-	h.spawn(t, spawnRequest{Place: m.At(-1, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(4), NeverCull: true}, Material: material})
-	h.spawn(t, spawnRequest{Place: m.At(1, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, Layers: scene.Layer(1), NeverCull: true}, Material: material})
+	h.spawn(t, spawnRequest{Place: m.At(-1, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, Layers: ecsscene.Layer(4), NeverCull: true}, Material: material})
+	h.spawn(t, spawnRequest{Place: m.At(1, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, Layers: ecsscene.Layer(1), NeverCull: true}, Material: material})
 
 	h.frameUntil(t, "the frame to draw", func() bool { return len(h.drawn()) > 0 })
 

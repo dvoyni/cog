@@ -3,6 +3,7 @@ package internal
 import (
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecsscene"
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -47,7 +48,7 @@ type (
 // descriptor is built around, and one tag must not overwrite another's before
 // scene has copied them.
 type scratch struct {
-	plays     []scene.ClipPlay
+	plays     []model.ClipPlay
 	params    []gfx.ParameterDescr
 	tags      scene.Material
 	tagParams []gfx.ParameterDescr
@@ -59,7 +60,7 @@ type scratch struct {
 // rather than as nil, which scene reads as no material at all.
 func newScratch() *scratch {
 	return &scratch{
-		plays: make([]scene.ClipPlay, 0, ecsscene.MaxPlays),
+		plays: make([]model.ClipPlay, 0, model.MaxClipPlays),
 		tags:  make(scene.Material, 0, 4),
 	}
 }
@@ -101,7 +102,7 @@ func record(
 		if material, ok := materials.Of(e); ok {
 			draw.Material = s.material(&material)
 		}
-		queue.Model(it.Model.Layers, it.Model.Ref.Path, draw)
+		queue.Model(scene.LayerMask(it.Model.Layers), it.Model.Ref.Path, draw)
 	}
 	for e, it := range meshes.All() {
 		draw := scene.MeshDraw{
@@ -115,36 +116,33 @@ func record(
 		if material, ok := materials.Of(e); ok {
 			draw.Material = s.material(&material)
 		}
-		queue.Mesh(it.Mesh.Layers, it.Mesh.Ref, draw)
+		queue.Mesh(scene.LayerMask(it.Mesh.Layers), it.Mesh.Ref, draw)
 	}
 	for _, it := range lights.All() {
-		light := scene.LightDescr{
-			Position:  it.Place.Position,
-			Color:     it.Light.Color,
-			Intensity: it.Light.Intensity,
-			Range:     it.Light.Range,
-			InnerCone: it.Light.InnerCone,
-			OuterCone: it.Light.OuterCone,
-		}
-		if it.Light.Kind == scene.LightSpot {
+		// The Component's Position and Direction are documented as ignored:
+		// the Transform places the light.
+		light := it.Light.Descr
+		light.Position, light.Direction = it.Place.Position, m.Vec3{}
+		layers := scene.LayerMask(it.Light.Layers)
+		if light.Kind == model.LightSpot {
 			// m.Quat.Rotate reads the zero Quat as no rotation, exactly as
 			// scene reads a Transform's, so an unrotated spot shines down -Z.
 			light.Direction = it.Place.Rotation.Rotate(facing)
-			queue.SpotLight(it.Light.Layers, light)
+			queue.SpotLight(layers, light)
 			continue
 		}
-		queue.PointLight(it.Light.Layers, light)
+		queue.PointLight(layers, light)
 	}
 	for _, it := range cameras.All() {
-		queue.Camera(it.Camera.ID, scene.CameraDescr{
+		queue.Camera(scene.CameraID(it.Camera.ID), scene.CameraDescr{
 			Transform:        it.Place,
-			Projection:       it.Camera.Projection,
+			Projection:       scene.ProjectionKind(it.Camera.Projection),
 			FovY:             it.Camera.FovY,
 			Height:           it.Camera.Height,
 			Shear:            it.Camera.Shear,
 			Near:             it.Camera.Near,
 			Far:              it.Camera.Far,
-			CullMask:         it.Camera.CullMask,
+			CullMask:         scene.LayerMask(it.Camera.CullMask),
 			SunDirection:     it.Camera.SunDirection,
 			SunColor:         it.Camera.SunColor,
 			SunIntensity:     it.Camera.SunIntensity,
@@ -162,7 +160,7 @@ func record(
 var facing = m.Vec3{Z: -1}
 
 // clipPlays flattens an Animation's used slots into scratch.
-func (s *scratch) clipPlays(animation *ecsscene.Animation) []scene.ClipPlay {
+func (s *scratch) clipPlays(animation *ecsscene.Animation) []model.ClipPlay {
 	plays := s.plays[:0]
 	for i := range animation.Plays {
 		if animation.Plays[i].Clip != "" {
@@ -197,7 +195,7 @@ func (s *scratch) material(material *ecsscene.Material) scene.Material {
 		}
 		own := params[start:len(params):len(params)]
 		tags = append(tags, scene.MaterialTag{
-			Tag:   tag.Tag,
+			Tag:   scene.PassTag(tag.Tag),
 			Descr: gfx.MaterialWithState(tag.Shader, tag.State, own...),
 		})
 	}
@@ -205,12 +203,19 @@ func (s *scratch) material(material *ecsscene.Material) scene.Material {
 	return tags
 }
 
-// cameraPasses copies a Camera's passes out into scratch. An empty List is an
+// cameraPasses copies a Camera's passes out into scratch as scene's. An empty List is an
 // empty slice, which scene reads as its one default pass.
 func (s *scratch) cameraPasses(camera *ecsscene.Camera) []scene.Pass {
 	passes := s.passes[:0]
 	for _, pass := range camera.Passes.All() {
-		passes = append(passes, pass)
+		passes = append(passes, scene.Pass{
+			Tag:        scene.PassTag(pass.Tag),
+			Target:     pass.Target,
+			Depth:      pass.Depth,
+			ClearColor: pass.ClearColor,
+			ClearDepth: pass.ClearDepth,
+			Order:      pass.Order,
+		})
 	}
 	s.passes = passes
 	return passes

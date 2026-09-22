@@ -27,13 +27,15 @@ vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
 
 ecsscene has the declaration-root shape of
 [`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
-Its Components are plain data with no methods, so it has no `internal/types`.
+Its Components are plain data with no methods. `internal/types` declares only
+the camera, layer and pass vocabulary the root aliases, because `Layer` forwards
+there.
 
 - **`bundles/ecsscene`** is the root, and holds declarations only: the eight
   Components a game spawns (`Transform`, `Model`, `Mesh`, `Animation`,
-  `Params`, `Material`, `Light`, `Camera`), `MaterialTag`, `MaxPlays`, `Name`
-  and the ordering identity `RecordOnUpdate`. It declares no plugin, and it is
-  what a game's Systems import.
+  `Params`, `Material`, `Light`, `Camera`), `MaterialTag`, the camera, layer
+  and pass vocabulary, `Name` and the ordering identity `RecordOnUpdate`. It
+  declares no plugin, and it is what a game's Systems import.
 - **`bundles/ecsscene/internal`** is the plugin: its `New`, the registration of
   every Component, the recording scratch and the one recording System behind
   `RecordOnUpdate`.
@@ -50,8 +52,9 @@ as a dependency, and the ECS's coupling check keeps holding on Component data.
 ## Files
 
 In the root, `doc.go` holds the package documentation, `id.go` `Name` and
-`RecordOnUpdate`, and `types.go` every Component with `MaxPlays` and
-`MaterialTag`. In `internal`, `plugin.go` holds the plugin and its
+`RecordOnUpdate`, `types.go` every Component with `MaterialTag` and the
+vocabulary's aliases, and `utils.go` `Layer`. `internal/types/camera.go`
+declares the vocabulary. In `internal`, `plugin.go` holds the plugin and its
 registration, and `systems.go` the recording System, its Queries and its
 scratch.
 
@@ -82,51 +85,51 @@ both register first, and its Components and System reach the ecs plugin's
 ## Components
 
 ```go
-type Transform scene.Transform                 // required
-
 type Model struct {
-    Ref    scene.ModelRef                      // Path, Scene, Node
-    Layers scene.LayerMask
+    Ref    model.ModelRef                      // Path, Scene, Node
+    Layers LayerMask
 }
 
 type Mesh struct {                             // pointer-free
-    Ref       scene.MeshRef
+    Ref       model.MeshRef
     Bounds    m.Vec4
-    Layers    scene.LayerMask
+    Layers    LayerMask
     NeverCull bool
 }
 
-type Animation struct{ Plays [MaxPlays]scene.ClipPlay } // MaxPlays is 4
+type Animation struct{ Plays [model.MaxClipPlays]model.ClipPlay } // model.MaxClipPlays is 4
 type Params    struct{ Values m.List[gfx.ParameterDescr] }
 type Material  struct{ Tags m.List[MaterialTag] }
 
 type MaterialTag struct {
-    Tag    scene.PassTag
+    Tag    PassTag
     Shader gfx.ShaderDescr
     State  gfx.MaterialState
     Params m.List[gfx.ParameterDescr]
 }
 
 type Light struct {                            // pointer-free
-    Kind                                  scene.LightKind
-    Color                                 m.Color
-    Intensity, Range, InnerCone, OuterCone float32
-    Layers                                scene.LayerMask
+    Descr  model.LightDescr                    // Position and Direction ignored
+    Layers LayerMask
 }
 
 type Camera struct {
-    ID                                      scene.CameraID
-    Projection                              scene.ProjectionKind
+    ID                                      CameraID
+    Projection                              ProjectionKind
     FovY, Height, Shear, Near, Far          float32
-    CullMask                                scene.LayerMask
+    CullMask                                LayerMask
     SunDirection                            m.Vec3
     SunColor                                m.Color
     SunIntensity                            float32
     AmbientSky, AmbientGround               m.Color
     AmbientIntensity                        float32
-    Passes                                  m.List[scene.Pass]
+    Passes                                  m.List[Pass]
 }
 ```
+
+`CameraID`, `ProjectionKind`, `PassTag`, `Pass` and `LayerMask` (with
+`LayersAll` and `Layer`) are ecsscene's own copies of scene's, with scene's
+names, shapes and zero values. The root imports nothing of scene.
 
 All eight are registered by this Bundle's plugin, in `internal`, because a
 Component is registered by the plugin that defines its Go type — which is what

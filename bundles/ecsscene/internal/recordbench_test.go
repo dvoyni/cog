@@ -7,7 +7,7 @@ import (
 	"testing/fstest"
 
 	"github.com/dvoyni/cog/bundles/ecsscene"
-	"github.com/dvoyni/cog/bundles/scene"
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -51,7 +51,7 @@ var (
 
 	// benchAnimation blends two clips, which is the common walk-into-idle
 	// case. They are the animated model's two, so the drawn arm samples both.
-	benchAnimation = ecsscene.Animation{Plays: [ecsscene.MaxPlays]scene.ClipPlay{
+	benchAnimation = ecsscene.Animation{Plays: [model.MaxClipPlays]model.ClipPlay{
 		{Clip: "Walk", Weight: 1, Loop: true}, {Clip: "Idle", Weight: 0.25, Loop: true},
 	}}
 	// benchParams is one tint, which is the per-Entity variation case.
@@ -75,7 +75,7 @@ func newRecordingHarness(tb testing.TB, arm population) *harness {
 	if arm.n > 0 {
 		request := spawnRequest{
 			Count: arm.n, Step: 0.5,
-			Model: &ecsscene.Model{Ref: scene.ModelRef{Path: crateModel}},
+			Model: &ecsscene.Model{Ref: model.ModelRef{Path: crateModel}},
 		}
 		if arm.animated {
 			request.Animation = &benchAnimation
@@ -222,10 +222,10 @@ func newFrameHarness(b *testing.B, arm population) *harness {
 		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
 	})
 	h.spawn(b, spawnRequest{Place: benchEye, Camera: &ecsscene.Camera{FovY: 1.0472, Near: 0.1, Far: 200}})
-	model := &ecsscene.Model{Ref: scene.ModelRef{Path: path}}
+	crate := &ecsscene.Model{Ref: model.ModelRef{Path: path}}
 	want := int64(arm.n)
 	if arm.n == 0 {
-		resident := h.spawn(b, spawnRequest{Model: model})
+		resident := h.spawn(b, spawnRequest{Model: crate})
 		h.frameUntil(b, "the model to become resident", func() bool { return backend.drew.Load() == 1 })
 		h.despawn(b, resident)
 	}
@@ -233,7 +233,7 @@ func newFrameHarness(b *testing.B, arm population) *harness {
 	for row := range rows {
 		request := spawnRequest{
 			Count: min(benchColumns, arm.n-row*benchColumns), Step: benchStep,
-			Place: benchPlace(row, rows), Model: model,
+			Place: benchPlace(row, rows), Model: crate,
 		}
 		if arm.animated {
 			request.Animation = &benchAnimation
