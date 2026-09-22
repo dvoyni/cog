@@ -56,6 +56,10 @@ correct without them.
 > built-in WGSL is embedded from `bundles/scene/internal/builtin/scene/`. It is
 > constructed with `sceneplugin.New()` and configured with `scene.Config`, whose
 > zero value is the default.
+>
+> **Amended by [#532](https://github.com/dvoyni/cog/issues/532).** The built-in
+> WGSL moved to `bundles/model/internal/builtin/scene/`, and the model plugin
+> mounts it; its storage paths are unchanged.
 
 ---
 
@@ -92,9 +96,10 @@ kernel.New(map[kernel.PluginName]any{
 plugin; `scene.Config` aliases it and scene takes none of its own. #361 had it
 as `scene.Config`, #339 moved it to `sceneimpl.Config`, and before that it was
 `scene.Config` with `scene.DefaultConfig()`). The plugin
-implements `Name`, `Dependencies`, and `Register` for the kernel lifecycle. During `Register` scene
-contributes its embedded shaders to storage as a read mount through
-`storage.ReadMountPort`, as canvas does.
+implements `Name`, `Dependencies`, and `Register` for the kernel lifecycle. The
+bundled shader's sources are model's, which contributes them to storage as a
+read mount through `storage.ReadMountPort` (amended by #532; scene contributed
+them itself before).
 Register `storage` and `model` before `scene`. A typical order is `storage`,
 `input`, `gfx`, `canvas`, `model`, `scene`, then the system driver.
 

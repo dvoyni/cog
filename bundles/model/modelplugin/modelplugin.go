@@ -8,5 +8,5 @@ import (
 )
 
 // New creates the model plugin. Configure it with a model.Config under
-// model.Name; it requires no Adapter.
+// model.Name; it requires no Adapter, and storage registered before it.
 func New() kernel.Plugin { return internal.New() }

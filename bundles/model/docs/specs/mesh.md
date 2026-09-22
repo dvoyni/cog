@@ -78,7 +78,9 @@ ran from, and is kept as the record of what changed rather than as an open list.
 > `model.X`, which scene's root still aliases. A frame-local mesh is scene's:
 > `OpQueue.TemporaryMesh`, `MeshTemporary` and `TemporaryMeshID` stay in
 > `bundles/scene/internal/types`, and mint through `model.MintMesh`. The WGSL
-> sources are still under `bundles/scene/internal/builtin/scene/`.
+> sources moved to `bundles/model/internal/builtin/scene/` in
+> [#532](https://github.com/dvoyni/cog/issues/532), mounted by the model plugin
+> under the same storage paths.
 
 **What remains open is the by-eye confirmation**
 ([#223](https://github.com/dvoyni/cog/issues/223)). The size figures in

@@ -8,6 +8,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
 // frameEvent is the event the test Systems subscribe to.
@@ -82,7 +83,7 @@ func composeFacade(t *testing.T, p *facadePlugin) *kernel.Engine {
 	var failure error
 	engine := kernel.New(nil).
 		Handler(func(err error) error { failure = errors.Join(failure, err); return nil }).
-		WithPlugins(New(), p)
+		WithPlugins(storageplugin.New(), permanentAdapter{}, New(), p)
 	if failure != nil {
 		t.Fatalf("composing model beside the facade Systems failed: %v", failure)
 	}

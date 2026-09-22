@@ -306,9 +306,13 @@ cache holds `modelMaterial{Forward [VariantCount]gfx.MaterialDescr; Record
 ScenePbrRecord}`, and the bundled PBR comes back from `Lookup.EnsureBundled` as
 `[VariantCount]gfx.MaterialDescr`. scene wraps each forward descr it draws as
 `MaterialTag{TagForward, descr}` in an arena its flush keeps across frames, so a
-steady frame wraps without allocating. `MaterialKeyOf` still runs over a file
-material per draw; the load-time key below, and the rest of this section, are
-still the plan.
+steady frame wraps without allocating. [#532](https://github.com/dvoyni/cog/issues/532)
+added the key: the load takes each forward descr's gfx fingerprint once, as
+`modelMaterial.Key`, and scene's `ForwardMaterialKey` turns it into the key
+`MaterialKeyOf` would have given the wrapped material, so a draw of a file's
+own material is keyed without fingerprinting anything. The same step moved the
+bundled shader's WGSL sources and their storage mount into `model`, under the
+storage paths they already had.
 
 **The model material holds, for each shader variant:**
 
@@ -853,7 +857,9 @@ what it does.
       to GPU layouts, the per-frame animation resolution and the model
       material's forward-descr shape with it. The two facades and `ModelHandle`
       landed in [#531](https://github.com/dvoyni/cog/issues/531);
-   3. the model material and the shader;
+   3. the model material and the shader. Landed in
+      [#532](https://github.com/dvoyni/cog/issues/532): the load-time key,
+      `MaxClipPlays`, the override merges, and the WGSL with its mount;
    4. the shader's records and packers, the light-array filler, `FrameLighting`,
       `AppendAnim`, and the size and binding-name constants. Projection maths goes
       to `libs/m`.

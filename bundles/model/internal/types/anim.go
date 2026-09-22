@@ -47,10 +47,10 @@ type ClipInfo struct {
 	Duration float32
 }
 
-// maxClipPlays is how many clips one draw may blend. A fifth play is dropped
+// MaxClipPlays is how many clips one draw may blend. A fifth play is dropped
 // by lowest weight and reported once per model rather than failing the draw:
 // the four heaviest are what the character mostly looks like anyway.
-const maxClipPlays = 4
+const MaxClipPlays = 4
 
 // scenePose is the 48-byte baked pose record - three aligned vec4 loads -
 // holding globalJoint alone, unpremultiplied by the inverse bind.

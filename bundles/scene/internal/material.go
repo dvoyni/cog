@@ -112,9 +112,10 @@ func (t *materialTable) entry(interned int32, tag tagID) (materialEntry, bool) {
 // recorded draw per frame, before any pass walks them, which is what keeps the
 // fingerprint and the map probe out of the per-pass path.
 //
-// key is the material's content key when the recording already took it, and
-// zero when nothing did - a model's own materials - in which case it is taken
-// here. A draw naming a material pays the fingerprint once either way.
+// key is the material's content key when something already took it, and zero
+// when nothing did, in which case it is taken here. A draw naming a material
+// was keyed as it recorded, and a model's own material arrives keyed from the
+// fingerprint its load took, so the fallback is left to what neither keyed.
 func (t *materialTable) intern(
 	report func(error), material scene.Material, key types.MaterialKey, variant model.ShaderVariant,
 ) int32 {

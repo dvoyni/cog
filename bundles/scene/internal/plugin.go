@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"math"
 	"strconv"
 
 	"github.com/dvoyni/cog/bundles/model"
@@ -98,8 +97,9 @@ func New() kernel.Plugin {
 func (p *plugin) Name() kernel.PluginName { return scene.Name }
 
 // Dependencies reports the plugins scene requires: gfx, which it emits passes
-// and draws into, storage, which hosts its shader filesystem mount, and model,
-// which registers the *model.Lookup every draw resolves against.
+// and draws into, storage, whose filesystem a model draw loads from, and model,
+// which registers the *model.Lookup every draw resolves against and mounts the
+// bundled shader every draw compiles.
 func (p *plugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{gfx.Name, storage.Name, model.Name}
 }
@@ -111,11 +111,6 @@ func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.InitResource(&scene.OpQueue{})
 	registrar.Subscribe[scene.FlushOnUpdate](p.flush).
 		Last().Before[gfx.PresentOnUpdate]()
-	// storage installs the bundled shader mount at its Start, ahead of every
-	// plugin that depends on it, so the shader is in place for the first frame.
-	registrar.ProvideAdapter[scene.StorageReadMount](storage.ReadMount{
-		Id: shaderMountID, Priority: math.MaxInt, FS: shaderFS,
-	})
 	return nil
 }
 

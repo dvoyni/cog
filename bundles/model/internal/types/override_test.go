@@ -13,7 +13,7 @@ import (
 // and the glTF specification is the documentation of what it means.
 func TestAnOverrideParamMergesIntoTheRecordByName(t *testing.T) {
 	record := DefaultPbrRecord()
-	overrideRecord(&record, []gfx.ParameterDescr{
+	record.Override([]gfx.ParameterDescr{
 		gfx.ColorParam("baseColorFactor", m.Color{R: 0.25, G: 0.5, B: 0.75, A: 0.5}),
 		gfx.ColorParam("emissiveFactor", m.Color{R: 1, G: 2, B: 3}),
 		gfx.FloatParam("metallicFactor", 0.25),
@@ -48,7 +48,7 @@ func TestAnOverrideParamMergesIntoTheRecordByName(t *testing.T) {
 func TestEverySlotsTransformAndRotationAreReachableByName(t *testing.T) {
 	for slot, names := range PbrSlots {
 		record := DefaultPbrRecord()
-		overrideRecord(&record, []gfx.ParameterDescr{
+		record.Override([]gfx.ParameterDescr{
 			gfx.VecParam(names.Transform, m.Vec4{X: 0.1, Y: 0.2, Z: 2, W: 3}),
 			gfx.FloatParam(names.Rotation, 1.5),
 		})
@@ -78,7 +78,7 @@ func TestEverySlotsTransformAndRotationAreReachableByName(t *testing.T) {
 func TestAnOverrideParamTheRecordHasNoMemberForLeavesItUntouched(t *testing.T) {
 	record := DefaultPbrRecord()
 	before := record
-	overrideRecord(&record, []gfx.ParameterDescr{
+	record.Override([]gfx.ParameterDescr{
 		gfx.ColorParam("teamColor", m.Color{R: 1}),
 		gfx.FloatParam("dissolve", 0.5),
 		gfx.FloatParam("uvSets", 1),
@@ -97,7 +97,7 @@ func TestAnOverrideParamTheRecordHasNoMemberForLeavesItUntouched(t *testing.T) {
 func TestAnOverrideParamOfAKindTheMemberCannotTakeIsIgnored(t *testing.T) {
 	record := DefaultPbrRecord()
 	before := record
-	overrideRecord(&record, []gfx.ParameterDescr{
+	record.Override([]gfx.ParameterDescr{
 		gfx.FloatParam("baseColorFactor", 0.5),
 		gfx.ColorParam("metallicFactor", m.Color{R: 0.5}),
 		gfx.TextureParam("baseColorTransform", gfx.TextureDescr{}),
@@ -114,7 +114,7 @@ func TestAnOverrideParamLeavesEveryMemberItDoesNotNameAlone(t *testing.T) {
 	record := DefaultPbrRecord()
 	record.RoughnessFactor = 0.3
 	record.BaseColorFactor = m.Vec4{X: 1, Y: 0, Z: 0, W: 1}
-	overrideRecord(&record, []gfx.ParameterDescr{
+	record.Override([]gfx.ParameterDescr{
 		gfx.ColorParam("baseColorFactor", m.Color{R: 1, G: 1, B: 1, A: 0.25}),
 	})
 	if record.RoughnessFactor != 0.3 {
@@ -122,5 +122,21 @@ func TestAnOverrideParamLeavesEveryMemberItDoesNotNameAlone(t *testing.T) {
 	}
 	if want := (m.Vec4{X: 1, Y: 1, Z: 1, W: 0.25}); record.BaseColorFactor != want {
 		t.Errorf("baseColorFactor = %v, want %v", record.BaseColorFactor, want)
+	}
+}
+
+// The single-parameter merge is the slice merge's step, so a renderer holding
+// its overrides one at a time merges them without building a slice first.
+func TestOneOverrideParamMergesAloneAndIgnoresAMismatchedKind(t *testing.T) {
+	record := DefaultPbrRecord()
+	record.OverrideParam(gfx.ColorParam("baseColorFactor", m.Color{R: 0.5, G: 0.25, B: 1, A: 1}))
+	record.OverrideParam(gfx.ColorParam("roughnessFactor", m.Color{R: 0.1}))
+	record.OverrideParam(gfx.FloatParam("notAMember", 3))
+	if want := (m.Vec4{X: 0.5, Y: 0.25, Z: 1, W: 1}); record.BaseColorFactor != want {
+		t.Errorf("baseColorFactor = %v, want %v", record.BaseColorFactor, want)
+	}
+	if want := DefaultPbrRecord().RoughnessFactor; record.RoughnessFactor != want {
+		t.Errorf("a color into a scalar member changed roughnessFactor to %v, want %v",
+			record.RoughnessFactor, want)
 	}
 }

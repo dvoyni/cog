@@ -590,7 +590,7 @@ or `VertexScalarSint`, so every normalized format is a float however many bits
 it occupies. Presence-only and base-type-compatible were both rejected because
 both let the real mismatch through: a two-component unorm decodes to `f32`, and
 `vec3<f32>` is `f32`. WebGPU's legal widening and narrowing are forbidden as a
-result, and that costs nothing — every `@location` in `bundles/scene/internal/builtin` and
+result, and that costs nothing — every `@location` in `bundles/model/internal/builtin` and
 `bundles/canvas/internal/builtin` is already an exact match.
 
 **The check is one-directional.** A layout supplying an attribute the shader

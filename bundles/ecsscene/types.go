@@ -1,6 +1,7 @@
 package ecsscene
 
 import (
+	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -106,10 +107,10 @@ type Camera struct {
 	Passes m.List[scene.Pass]
 }
 
-// MaxPlays is how many clips one Animation blends. It is scene's own cap:
-// scene drops a fifth play by lowest weight and reports it, so a larger array
-// here would buy a report and no animation.
-const MaxPlays = 4
+// MaxPlays is how many clips one Animation blends. It is model's cap: a fifth
+// play is dropped by lowest weight and reported, so a larger array here would
+// buy a report and no animation.
+const MaxPlays = model.MaxClipPlays
 
 // MaterialTag is one pass tag of a Material Component: scene.MaterialTag with
 // its gfx.MaterialDescr spelled out as the three things it is made of.
