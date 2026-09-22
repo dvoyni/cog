@@ -150,3 +150,70 @@ func TestFirstInstanceReachesTheDraw(t *testing.T) {
 		t.Errorf("draw = %+v, want 3 instances starting at 7", got)
 	}
 }
+
+func TestUniformBlockOverTheSlotIsReportedOnceAndDropped(t *testing.T) {
+	p := newPlugin()
+	var reported []error
+	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
+	layout := gfx.ShaderLayout{
+		UniformSize: uniformMax + 1, UniformGroup: 0, UniformBinding: 0,
+		Uniforms: []gfx.UniformMember{{Name: "mvp", Offset: 0}},
+	}
+	backend := &fakeBackend{layout: &layout}
+	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
+
+	for range 2 {
+		w := recordList(t, k)
+		w.Draw(triangle(), testMaterial(), gfx.MatParam("mvp", m.NewMat4()))
+		k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+		k.PublishEvent(app.RenderEvent{}).Wait()
+	}
+
+	// Rendering the block cut to the slot is the silent wrong output this
+	// check exists to remove, so the shader is refused rather than warned about.
+	if backend.passDraws[0] != 0 {
+		t.Errorf("draws = %d, want the draw dropped", backend.passDraws[0])
+	}
+	if len(backend.freedShaders) != 1 {
+		t.Errorf("freed shaders = %d, want the refused module freed", len(backend.freedShaders))
+	}
+	var tooLarge gfx.ErrUniformBlockTooLarge
+	found := 0
+	for _, err := range reported {
+		if errors.As(err, &tooLarge) {
+			found++
+		}
+	}
+	if found != 1 {
+		t.Fatalf("reports = %d over two frames, want exactly 1: %v", found, reported)
+	}
+	if tooLarge.Declared != 257 || tooLarge.Max != 256 {
+		t.Errorf("report = %+v, want 257 declared against 256", tooLarge)
+	}
+}
+
+func TestUniformBlockThatFillsTheSlotRenders(t *testing.T) {
+	p := newPlugin()
+	var reported []error
+	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
+	backend := &fakeBackend{layout: &gfx.ShaderLayout{
+		UniformSize: uniformMax, UniformGroup: 0, UniformBinding: 0,
+		Uniforms: []gfx.UniformMember{{Name: "mvp", Offset: 0}},
+	}}
+	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
+
+	w := recordList(t, k)
+	w.Draw(triangle(), testMaterial(), gfx.MatParam("mvp", m.NewMat4()))
+	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	k.PublishEvent(app.RenderEvent{}).Wait()
+
+	if backend.passDraws[0] != 1 {
+		t.Errorf("draws = %d, want a 256-byte block rendered", backend.passDraws[0])
+	}
+	var tooLarge gfx.ErrUniformBlockTooLarge
+	for _, err := range reported {
+		if errors.As(err, &tooLarge) {
+			t.Errorf("a 256-byte block was reported: %v", err)
+		}
+	}
+}

@@ -123,12 +123,22 @@ func (shaderLoader) Load(
 		value.err = types.CompileError(label, err, flattened.SourceMap)
 		return value
 	}
-	value.id = id
 	// Every shader gfx reflects is measured, not only an engine's bundled ones:
 	// a caller-supplied material is what actually gets bound at draw time. The
 	// shader is cached, so this reports once rather than once a frame.
+	layout := userData.t.shaderLayout(userData.backend, id)
+	if err := checkUniformBlock(label, layout); err != nil {
+		// Fatal, unlike the web-floor report below: the module is freed and the
+		// entry keeps the zero id, so every draw through it is dropped rather
+		// than rendered with its block cut to the slot.
+		delete(userData.t.layouts, id)
+		userData.backend.FreeShader(id)
+		value.err = err
+		return value
+	}
+	value.id = id
 	limits := userData.backend.Limits()
-	if diagnostic := checkWebLimits(label, userData.t.shaderLayout(userData.backend, id), limits); diagnostic != nil && userData.t.diagnostic == nil {
+	if diagnostic := checkWebLimits(label, layout, limits); diagnostic != nil && userData.t.diagnostic == nil {
 		userData.t.diagnostic = diagnostic
 	}
 	return value
