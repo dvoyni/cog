@@ -537,15 +537,16 @@ func TestTheReadsHoldTheAuthorityAloneAndWidenNoSystem(t *testing.T) {
 		}
 	}
 
-	// Every System has exactly the lock set its signature names: none takes
-	// write{*ecs.Entities}, which none spawns, and the ecs plugin subscribes
-	// nothing.
+	// Every System has exactly the lock set its signature names: none of the
+	// app's takes write{*ecs.Entities}, which none spawns, and the drainer is
+	// the one subscription the ecs plugin owns.
 	want := map[reflect.Type][2][]reflect.Type{
-		reflect.TypeFor[rerouteSystem](): {{entities}, {reflect.TypeFor[*ecs.Store[route]]()}},
-		reflect.TypeFor[stallSystem]():   {sortedTypes(entities, reflect.TypeFor[*ecs.Store[spot]]()), {}},
+		reflect.TypeFor[rerouteSystem]():     {{entities}, {reflect.TypeFor[*ecs.Store[route]]()}},
+		reflect.TypeFor[stallSystem]():       {sortedTypes(entities, reflect.TypeFor[*ecs.Store[spot]]()), {}},
+		reflect.TypeFor[ecs.DrainOnUpdate](): {{}, {entities}},
 	}
 	for _, subscription := range description.Subscriptions {
-		if subscription.Owner == ecs.Name {
+		if subscription.Owner == ecs.Name && subscription.Type != reflect.TypeFor[ecs.DrainOnUpdate]() {
 			t.Errorf("the ecs plugin subscribes %s", kernel.TypeName(subscription.Type))
 		}
 		expected, ok := want[subscription.Type]

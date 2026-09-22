@@ -2289,9 +2289,9 @@ it; the write barrier alone measured
 
 **No frame pays for it, and no lock set widens.** They are Commands, not
 Systems: a frame nobody reads from runs exactly the handlers and lock sets it
-ran before, and the ecs plugin still subscribes nothing. What does change is
-visible where it should be: `Describe().Contention` lists the three Commands as
-writers of `*ecs.Entities` conflicting with every System.
+ran before, and the ecs plugin subscribes nothing on their account. What does
+change is visible where it should be: `Describe().Contention` lists the three
+Commands as writers of `*ecs.Entities` conflicting with every System.
 
 **Values are encoded under the lock and leave it detached.** A copied `m.List`
 shares its backing array, and a System holding a write lock may call `List.Set`

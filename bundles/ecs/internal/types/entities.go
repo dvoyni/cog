@@ -55,6 +55,21 @@ type Entities struct {
 	// System runs, and a world nobody reads has none and takes the despawn path
 	// it always took. See hooks.go.
 	captures []func(e Entity)
+	// drainSpawns is one call per deferring spawn handle, which a drain's spawn
+	// pass makes in enrolment order: each applies its own typed buffer, in the
+	// order that handle queued. The handle enrols it in its own prepare, so the
+	// list is fixed before any System runs, exactly as stores and captures are,
+	// and a world that defers nothing has none.
+	//
+	// It is a func rather than an interface with two methods because the two
+	// passes are two separate walks: a drain costs one indirect call per handle
+	// per pass, never per queued change, and a handle that only despawns puts
+	// nothing here. See bundles/ecs/docs/specs/deferred.md § Two func
+	// registries, one per pass.
+	drainSpawns []func()
+	// drainDespawns is drainSpawns' twin for the despawn pass, walked after the
+	// free list settles, in the same enrolment order.
+	drainDespawns []func()
 	// classes is what component registration baked, keyed by the Component's Go
 	// type. It is written during registration and read during registration —
 	// once, while a Query is planned. It is what lets a Query declare a lock on
@@ -176,6 +191,58 @@ func (en *Entities) enrol(remove func(e Entity) bool, shrink func() uintptr) {
 	en.stores = append(en.stores, remove)
 	en.shrinkables().stores = append(en.shrinkables().stores, shrink)
 }
+
+// enrolDrainSpawn adds a deferring spawn handle's apply to the set a drain's
+// spawn pass walks. It happens in the handle's own prepare, which runs once at
+// registration, so the registry is append-only and fixed before any System
+// runs.
+func (en *Entities) enrolDrainSpawn(apply func()) {
+	en.drainSpawns = append(en.drainSpawns, apply)
+}
+
+// enrolDrainDespawn adds a deferring despawn handle's apply to the set a
+// drain's despawn pass walks. See enrolDrainSpawn.
+func (en *Entities) enrolDrainDespawn(apply func()) {
+	en.drainDespawns = append(en.drainDespawns, apply)
+}
+
+// drain applies everything queued in this Engine, whatever System and whatever
+// event queued it, and nothing else: one drain is the spawn pass, the free list
+// settling, and the despawn pass, in that order.
+//
+// The order is the whole of the rule. Every handle's spawns are applied before
+// any handle's despawns, so a queued Despawn can never reach an Entity a later
+// handle has not spawned yet; and the settle sits between the passes so that
+// the despawn pass is literally today's despawn, with no special case for an
+// outstanding reservation.
+//
+// There is no empty-drain skip. A drain over empty buffers is a length check
+// per enrolled buffer, and a skip would be a branch guarding a branch.
+//
+// It is reached only through WriteableEntities.Drain, so a drain always holds
+// write{*Entities} and can never overlap a System queuing into a buffer: every
+// System declares read{*Entities}, and the scheduler is the exclusion. See
+// bundles/ecs/docs/specs/deferred.md § The drain.
+func (en *Entities) drain() {
+	for _, apply := range en.drainSpawns {
+		apply()
+	}
+	en.settle()
+	for _, apply := range en.drainDespawns {
+		apply()
+	}
+}
+
+// settle returns the free list to an ordinary free list between the two passes:
+// it is where the reservation cursor is cut back and reset and the released
+// list is moved onto the free list.
+//
+// It is empty while nothing reserves. The cursor, the free generation bit and
+// the released list arrive with the deferring handles; the step is named here
+// because the order of a drain is the contract — the despawn pass must run
+// after the free list is ordinary again, not before — and a step that is
+// discovered later is a step that lands in the wrong place.
+func (en *Entities) settle() {}
 
 // alloc hands out an id, recycling a freed index where there is one so that the
 // flat sparse index of every Store stays bounded by peak concurrent entities

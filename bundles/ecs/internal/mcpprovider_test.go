@@ -256,11 +256,14 @@ func TestTheToolsRefuseAsUnavailable(t *testing.T) {
 
 // The Provider costs a game nobody is debugging nothing: it subscribes nothing,
 // and the kernel binds it to the collected Port as ecs.McpProvider from ecs.
+//
+// The drainer is the one subscription the ecs plugin owns, and it is not the
+// Provider's: an Agent attached to a running game adds no node to any frame.
 func TestTheProviderIsBoundAndSubscribesNothing(t *testing.T) {
 	engine, _ := startAgentRig(t)
 	description := engine.Describe()
 	for _, subscription := range description.Subscriptions {
-		if subscription.Owner == ecs.Name {
+		if subscription.Owner == ecs.Name && subscription.Type != reflect.TypeFor[ecs.DrainOnUpdate]() {
 			t.Errorf("the ecs plugin subscribes %s", kernel.TypeName(subscription.Type))
 		}
 	}

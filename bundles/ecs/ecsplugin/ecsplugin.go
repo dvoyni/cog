@@ -9,8 +9,9 @@ import (
 
 // New creates the ecs plugin, which publishes the id authority, *ecs.Entities,
 // sized by ecs.Config, registers ecs.ShrinkCmd and three unexported read-only
-// Commands that read the world by Component name, and registers the
-// m.Transform Store every binding reads an Entity's placement from. Each
-// Command holds write{*ecs.Entities} alone, so a call waits on every running
-// ECS System; no frame's lock set widens for them. It requires no Adapter.
+// Commands that read the world by Component name, registers the
+// m.Transform Store every binding reads an Entity's placement from, and
+// subscribes the general drainer, ecs.DrainOnUpdate. Each Command holds
+// write{*ecs.Entities} alone, so a call waits on every running ECS System; no
+// frame's lock set widens for them. It requires no Adapter.
 func New() kernel.Plugin { return internal.New() }

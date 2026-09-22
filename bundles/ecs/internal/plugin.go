@@ -6,15 +6,17 @@ import (
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/app"
 )
 
 // plugin publishes the id authority as a kernel resource, registers the one
 // Command an app executes, ShrinkCmd, and the three read Commands that read the
-// world by Component name (censusCmd, entityCmd, queryCmd), and registers the
-// one Component the ECS owns, m.Transform. That is everything the ECS
+// world by Component name (censusCmd, entityCmd, queryCmd), registers the
+// one Component the ECS owns, m.Transform, and subscribes the one System it
+// owns, the general drainer (drainsystem.go). That is everything the ECS
 // registers: every other Component is registered by the plugin that defines
-// its Go type, and Systems are ordinary subscriptions. It registers no
-// subscription of its own.
+// its Go type, and every other System is an ordinary subscription an app
+// makes.
 type plugin struct{}
 
 // New makes the world's id authority available to the engine as the resource
@@ -40,7 +42,8 @@ func (plugin) Dependencies() []kernel.PluginName { return nil }
 
 // Register publishes the authority, registers ShrinkCmd and the three read
 // Commands, each of which holds that authority for write and nothing besides,
-// and registers the m.Transform Store. One spelling per resource, everywhere:
+// registers the m.Transform Store, and subscribes the general drainer. One
+// spelling per resource, everywhere:
 // it is *ecs.Entities in every declaration, because resource cells are keyed
 // by exact Go type and nothing normalises pointer-ness, so a second spelling
 // would be a second cell that excludes nothing.
@@ -70,5 +73,14 @@ func (plugin) Register(registrar *kernel.Registrar, value any) error {
 	// separate copies. It is registered unconditionally, because a game that
 	// places nothing pays one empty Store.
 	types.RegisterComponent[m.Transform](registrar, config.PrewarmEntities)
+	// The general drainer, and the ECS's first dependency on the app slot. It is
+	// subscribed unconditionally, with no flag to turn it off, because a queue
+	// that is never drained is not a configuration: every deferring handle's
+	// queue settles within the Update it was made in, or earlier, under an app's
+	// own drain System. Last, so gameplay has run before it applies. The plugin
+	// stays zero-dependency: it names app.UpdateEvent, which is an event type
+	// and not a resource, so nothing here waits on the app plugin.
+	registrar.Subscribe[ecs.DrainOnUpdate](
+		types.ToHandler[app.UpdateEvent](registrar, drainSystem)).Last()
 	return nil
 }
