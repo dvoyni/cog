@@ -24,7 +24,7 @@ func TestTheBundledShaderIsMountedByModel(t *testing.T) {
 		t.Fatalf("glob the embedded sources: %v, %v", names, err)
 	}
 	engine.Executioner().ExecuteCommand[mountProbeCmd](mountProbeRequest{read: func(files storage.FileSystem) {
-		for _, name := range append(names, model.SceneShaderPath, model.VertexDecodePath) {
+		for _, name := range append(names, model.SceneShaderPath, model.VertexDecodePath, model.FramePath, model.PbrPath) {
 			embedded, err := shaderFS.ReadFile(name)
 			if err != nil {
 				t.Errorf("read the embedded %s: %v", name, err)

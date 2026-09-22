@@ -27,11 +27,14 @@ type testBackend struct {
 	// shaderLayouts is each compiled shader's narrowed stand-in layout, kept
 	// per id because the scene variants declare different bindings.
 	shaderLayouts map[gfx.ShaderID]gfx.ShaderLayout
-	nextTexture   gfx.TextureID
-	nextBuffer    gfx.BufferID
-	nextID        uint32
-	passes        []gfx.PassDesc
-	presents      int
+	// sources is every module the backend compiled, flattened, in order, which
+	// is what a test reflects to see what a custom material declared.
+	sources     []string
+	nextTexture gfx.TextureID
+	nextBuffer  gfx.BufferID
+	nextID      uint32
+	passes      []gfx.PassDesc
+	presents    int
 	// draws, bindings and bakes are what the frame actually asked the GPU to
 	// do, which is where the pass-relative instance slices and the one upload
 	// per arena become assertable.
@@ -196,6 +199,7 @@ func (b *testBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 		b.shaderLayouts = map[gfx.ShaderID]gfx.ShaderLayout{}
 	}
 	b.shaderLayouts[id] = layoutOf(desc)
+	b.sources = append(b.sources, string(desc.Code))
 	return id, nil
 }
 func (b *testBackend) FreeShader(gfx.ShaderID) {}

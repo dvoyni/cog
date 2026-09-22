@@ -1,6 +1,16 @@
 // The BRDF and the lighting loop: everything between a shaded surface and the
 // radiance leaving it. Nothing here names anything scene-specific beyond the
 // frame it reads its lights from.
+//
+// DECLARES: struct SceneSurface, ScenePbrSurface; const SCENE_PI,
+// SCENE_DIELECTRIC_F0; fn sceneD_GGX, sceneV_SmithGGXCorrelated,
+// sceneF_Schlick, sceneEnvBRDFApprox, scenePunctualContribution,
+// sceneShadeSurface. No binding of its own: it includes frame.wgsl, so an
+// includer gets everything that declares too, sceneFrame among it, once.
+//
+// It is mounted at builtin/scene/pbr.wgsl and published as model.PbrPath, so a
+// custom material fills a SceneSurface its own way and lights it with
+// sceneShadeSurface, exactly as the bundled material is lit.
 //#include ./frame.wgsl
 
 const SCENE_PI: f32 = 3.14159265359;

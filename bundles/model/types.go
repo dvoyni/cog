@@ -227,11 +227,35 @@ const (
 	MorphTargetHeaderWords = types.MorphTargetHeaderWords
 	MorphWordSize          = types.MorphWordSize
 
-	// SceneShaderPath is the bundled PBR module's storage path, and
-	// VertexDecodePath the storage path of the module a custom material imports
-	// to read the storage vertex.
-	SceneShaderPath  = types.SceneShaderPath
+	// SceneShaderPath is the bundled PBR module's storage path.
+	SceneShaderPath = types.SceneShaderPath
+
+	// VertexDecodePath is the storage path of the source a custom material
+	// includes to read the storage vertex. It declares the functions
+	// sceneOctDecode, sceneDecodeNormal, sceneDecodeTangent and sceneDecodeUV
+	// and the constants SCENE_OCT_TANGENT_MAX, SCENE_TANGENT_Y_SHIFT and
+	// SCENE_TANGENT_HANDEDNESS, and no binding and no struct; do not declare
+	// those names again.
 	VertexDecodePath = types.VertexDecodePath
+
+	// FramePath is the storage path of the pass's view of the world. It
+	// declares the structs SceneFrame, SceneLight and SceneLightSample; the
+	// binding sceneFrame, read-only storage at @group(0) @binding(0), which
+	// scene and ecsscene bind on every draw; the functions sceneCameraPosition,
+	// sceneViewDirection, sceneAmbient, sceneSun, sceneLightCount and
+	// sceneLightSample; and the //#const SCENE_MAX_LIGHTS, whose default is
+	// MaxLights, so an includer supplies nothing. Do not declare those names
+	// again.
+	FramePath = types.FramePath
+
+	// PbrPath is the storage path of the bundled material's BRDF and lighting
+	// loop. It declares the structs SceneSurface and ScenePbrSurface, the
+	// constants SCENE_PI and SCENE_DIELECTRIC_F0, and the functions sceneD_GGX,
+	// sceneV_SmithGGXCorrelated, sceneF_Schlick, sceneEnvBRDFApprox,
+	// scenePunctualContribution and sceneShadeSurface, and no binding of its
+	// own. It includes FramePath, so everything FramePath declares comes with
+	// it, once. Do not declare those names again.
+	PbrPath = types.PbrPath
 )
 
 // PbrSlots are the bundled material's five texture slots, in record order, and

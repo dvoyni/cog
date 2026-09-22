@@ -9,7 +9,8 @@ const shaderMountID = "builtin:scene"
 
 // shaderFS is what storage mounts at math.MaxInt priority: the root source and
 // the ten sources it includes. The paths inside it are the ones
-// model.SceneShaderPath and model.VertexDecodePath spell.
+// model.SceneShaderPath and the three published sources, model.VertexDecodePath,
+// model.FramePath and model.PbrPath, spell.
 //
 // The shader is model's because it reads model's records - ScenePbrRecord, the
 // mesh record, the poses and the deltas - so the two change together, and

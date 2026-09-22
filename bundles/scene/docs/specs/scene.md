@@ -1847,8 +1847,9 @@ What a later effort adds, all additive:
 
 1. A link from the lit camera to its shadow source, so scene knows whose
    view-projection to pack.
-2. `sceneFrame` grows the light-space matrix and bias parameters — free, since no
-   prelude is published, so no external contract constrains the struct.
+2. `sceneFrame` grows the light-space matrix and bias parameters, for free: the
+   prelude is published by inclusion (`model.FramePath`), so an includer picks
+   the grown struct up with the source and no external copy constrains it.
 3. Group 0 grows `texture_depth_2d` and `sampler_comparison` bindings. Because a
    declared binding must be bound on every draw or the frame silently vanishes,
    scene owns a **1×1 default shadow map** and binds it when there is no shadow —
@@ -2218,7 +2219,7 @@ under [Scene follow-ups](https://github.com/dvoyni/cog/issues/29).
 | --- | --- | --- |
 | Implementing this spec — README, `scene.instructions.md`, plugin code | belongs to the implementation effort that follows | — |
 | Shadow maps, post-processing, IBL **implementation** | documented as extension points only; the multi-tag material shape they need **does** ship | [52](https://github.com/dvoyni/cog/issues/52), [53](https://github.com/dvoyni/cog/issues/53), [44](https://github.com/dvoyni/cog/issues/44) |
-| Custom shader contract and prelude | needs a preprocessor; publishing by copy-paste is the failure variants were rejected over | [48](https://github.com/dvoyni/cog/issues/48) (blocked by [45](https://github.com/dvoyni/cog/issues/45)) |
+| Custom shader contract and prelude | no longer out of scope: the preprocessor shipped and model publishes `FramePath` and `PbrPath` beside `VertexDecodePath` ([model.md](../../../model/docs/specs/model.md#custom-shaders)) | [48](https://github.com/dvoyni/cog/issues/48) |
 | Compute shaders and any no-compute fallback | not required by this scope | — |
 | Offline asset baking / an engine-native model format | glTF at runtime through `storage` is the whole story | — |
 | Object picking / id passes | scene retains no draw list to raycast; the caller's own entity loop is ten lines | — |
