@@ -22,6 +22,10 @@ type Set[T any] struct {
 	// insertion names still exists. See UpdateFor for why that question has to be
 	// asked here and cannot be left to the System.
 	entities kernel.Read[*Entities]
+	// resolved and alive are store's and entities' values for the current
+	// invocation. See resolver.
+	resolved *Store[T]
+	alive    *Entities
 	// hooks is whether this run's additions are recorded: on when a Hooks
 	// reader watches the Store for additions or changes.
 	hooks hookGate
@@ -41,6 +45,10 @@ func (s *Set[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 
 func (s *Set[T]) gate() *hookGate { return &s.hooks }
 
+// resolve reads the Store and the authority out of their cells for this
+// invocation.
+func (s *Set[T]) resolve() { s.resolved, s.alive = s.store.Get(), s.entities.Get() }
+
 func (s *Set[T]) rowCopies(each func(slot **rowCopy)) { each(&s.changes) }
 
 // Of reports e's Component, and whether e has one — the same copy Get yields,
@@ -51,7 +59,7 @@ func (s *Set[T]) rowCopies(each func(slot **rowCopy)) { each(&s.changes) }
 // the stored Component's bytes; validation mode panics on one and names Ref,
 // which is the handle to write through.
 func (s *Set[T]) Of(e Entity) (T, bool) {
-	store := s.store.Get()
+	store := s.resolved
 	if validate {
 		store.stampFor(e, modeSetOf)
 	}
@@ -71,7 +79,7 @@ func (s *Set[T]) Of(e Entity) (T, bool) {
 // On a Store watched for Changed, the row is copied before the pointer is handed
 // out, once per run, and compared when the System's run ends.
 func (s *Set[T]) Ref(e Entity) (*T, bool) {
-	store := s.store.Get()
+	store := s.resolved
 	if validate {
 		store.stampFor(e, modeWrite)
 	}
@@ -141,7 +149,7 @@ func (s *Set[T]) MarkChanged(e Entity) {
 // copied before it is replaced, once per run, and records Changed only if its
 // bytes differ when the System's run ends.
 func (s *Set[T]) UpdateFor(e Entity, value T) {
-	store := s.store.Get()
+	store := s.resolved
 	if s.changes.gate.on {
 		if row, ok := store.probe(e); ok {
 			s.changes.take(e, row)
@@ -150,7 +158,7 @@ func (s *Set[T]) UpdateFor(e Entity, value T) {
 	if store.update(e, value) {
 		return
 	}
-	if !s.entities.Get().Alive(e) {
+	if !s.alive.Alive(e) {
 		return
 	}
 	store.add(e, value)

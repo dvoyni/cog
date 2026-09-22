@@ -66,7 +66,9 @@ type componentClass struct {
 	declareRead  func(access kernel.ResourceAccess) func() *storeHeader
 	declareWrite func(access kernel.ResourceAccess) func() *storeHeader
 	// declareSet is what a Spawn binds per Component set field: the same write
-	// declaration declareWrite makes, and the typed setter baked beside it.
+	// declaration declareWrite makes and the same getter it returns, and the
+	// typed setters baked beside them, which take the Store the getter resolved
+	// rather than reading the cell themselves.
 	//
 	// The write it declares is redundant for locking and is kept anyway. A Spawn
 	// already holds write{*Entities}, which excludes every System in the frame,
@@ -79,7 +81,7 @@ type componentClass struct {
 	//
 	// The field it returns carries a second setter that also records the Spawn
 	// in the Store's Hook log, and the gate that chooses between them when a run
-	// starts. The offset is the Spawn's to fill.
+	// starts. The offset and the resolved Store are the Spawn's to fill.
 	declareSet func(access kernel.ResourceAccess) spawnField
 	// population, has, owners and encode are what the read Commands ask of a
 	// Store they reach by name rather than by type: its Len, its Has, its live
@@ -166,15 +168,18 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 		// buffer rather than as a C, because the caller holds the Component set
 		// only as bytes at an offset: the deref here is where the Component's type
 		// comes back, and it is sound because the offset was taken from the same
-		// reflect.Type this class was baked for.
+		// reflect.Type this class was baked for. The Store arrives erased, as the
+		// Spawn resolved it through get this invocation, and converting it back
+		// is erase undone.
 		declareSet: func(access kernel.ResourceAccess) spawnField {
 			handle := access.GetWrite[*Store[C]]()
 			return spawnField{
-				set: func(e Entity, value unsafe.Pointer) {
-					handle.Get().Set(e, *(*C)(value))
+				get: func() *storeHeader { return handle.Get().erase() },
+				set: func(store *storeHeader, e Entity, value unsafe.Pointer) {
+					(*Store[C])(unsafe.Pointer(store)).Set(e, *(*C)(value))
 				},
-				recorded: func(e Entity, value unsafe.Pointer) {
-					handle.Get().setRecorded(e, *(*C)(value))
+				recorded: func(store *storeHeader, e Entity, value unsafe.Pointer) {
+					(*Store[C])(unsafe.Pointer(store)).setRecorded(e, *(*C)(value))
 				},
 				hooks: hookGate{watch: &store.watch, mask: recordsSpawn},
 			}

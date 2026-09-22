@@ -421,11 +421,11 @@ func handles[S any](tb testing.TB, ids uint32) (*Spawn[S], *WriteableEntities, *
 // value escape: the address of a parameter reaching a func value the compiler cannot
 // see into is heap-allocated, once per spawn.
 func (s *Spawn[S]) newEscaping(components S) Entity {
-	e := s.entities.Get().alloc()
+	e := s.resolved.alloc()
 	buffer := unsafe.Pointer(&components)
 	for i := range s.fields {
 		field := &s.fields[i]
-		field.set(e, unsafe.Add(buffer, field.offset))
+		field.set(field.store, e, unsafe.Add(buffer, field.offset))
 	}
 	return e
 }

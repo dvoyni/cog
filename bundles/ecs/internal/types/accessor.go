@@ -16,15 +16,14 @@ import (
 // probe the Driver already pays per candidate, and the random access costs what
 // the Driver's own probe costs.
 //
-// The handle around it is not free, and the number is worth carrying because it
-// is the one thing here the spec inferred rather than measured. Reaching the
-// Store is a type assertion out of the kernel's any-typed resource cell, about
-// 1.9 ns, and an accessor pays it per call where a Query pays it once per run
-// when it binds. So a probe that is 0.68 ns reached directly is 2.63 ns reached
-// through Of. It costs no allocation, it is nowhere near a Query's path, and
-// the remedy if it ever matters is to resolve the Store once per tick in the
-// handler builder rather than once per call — which is a change to the
-// parameter seam and not to anything here.
+// Reaching the Store is a type assertion out of the kernel's any-typed resource
+// cell, and the accessor pays it once per invocation of its System rather than
+// once per call: resolve reads the Store into a plain field just before the
+// System's func runs, which is the resolver seam in systemcall.go, and Of uses
+// that field. Measured interleaved, a probe that is 0.75 ns reached directly was
+// 2.83 ns through Of when the assertion was per call and is 2.01 ns now, and the
+// homing frame's per-Entity slope fell from 5.18 ns to 4.46 against a
+// hand-written 2.11. It costs no allocation and is nowhere near a Query's path.
 //
 // Get is the read half and has no Ref, which is what stops a read handle being
 // a write in disguise: a read yields a copy because a read yielding a pointer
@@ -44,6 +43,8 @@ import (
 // It declares read{*Store[T]} and read{*Entities}.
 type Get[T any] struct {
 	store kernel.Read[*Store[T]]
+	// resolved is store's value for the current invocation. See resolver.
+	resolved *Store[T]
 }
 
 // prepare declares the locks and binds the Store. It runs once, at registration.
@@ -51,6 +52,9 @@ func (g *Get[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 	_ = declareComponent[T](en, access, "Get")
 	g.store = access.GetRead[*Store[T]]()
 }
+
+// resolve reads the Store out of its cell for this invocation.
+func (g *Get[T]) resolve() { g.resolved = g.store.Get() }
 
 // Of reports e's Component, and whether e has one.
 //
@@ -62,7 +66,7 @@ func (g *Get[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 // under a lock the System already holds — which is almost always the question
 // wanted, where Entities.Alive asks the rarer one and needs a wider lock.
 func (g *Get[T]) Of(e Entity) (T, bool) {
-	store := g.store.Get()
+	store := g.resolved
 	if validate {
 		store.stampFor(e, modeRead)
 	}
@@ -76,6 +80,8 @@ func (g *Get[T]) Of(e Entity) (T, bool) {
 // It declares write{*Store[T]} and read{*Entities}.
 type Remove[T any] struct {
 	store kernel.Write[*Store[T]]
+	// resolved is store's value for the current invocation. See resolver.
+	resolved *Store[T]
 	// hooks is whether this run's removals are recorded: on when a Hooks reader
 	// watches the Store for any kind but Despawned.
 	hooks hookGate
@@ -89,6 +95,9 @@ func (r *Remove[T]) prepare(en *Entities, access kernel.ResourceAccess) {
 }
 
 func (r *Remove[T]) gate() *hookGate { return &r.hooks }
+
+// resolve reads the Store out of its cell for this invocation.
+func (r *Remove[T]) resolve() { r.resolved = r.store.Get() }
 
 func (r *Remove[T]) removes(en *Entities) *storeHeader {
 	return en.classOf(reflect.TypeFor[T]()).header
@@ -104,7 +113,7 @@ func (r *Remove[T]) removes(en *Entities) *storeHeader {
 // On a Store a Hooks reader watches, the removal is recorded with T's value as
 // it stood.
 func (r *Remove[T]) From(e Entity) bool {
-	store := r.store.Get()
+	store := r.resolved
 	if validate && len(store.lists) > 0 {
 		releaseLists(store.erase(), e)
 	}

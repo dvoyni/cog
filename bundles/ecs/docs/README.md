@@ -788,13 +788,21 @@ lock set says read and the code writes. The accessors take the right lock,
 declare `read{*Entities}` with it, and check the Component was registered at
 all.
 
+A signature may name one resource twice — two `ecs.Write[T]`, or an
+`ecs.Read[T]` beside an `ecs.Write[T]` — and each parameter's `Get` returns what
+it resolved at the start of the invocation. A `Set` on one is read back by that
+parameter's own `Get`, and the other does not see it until the next invocation.
+
 ### A System is not re-entrant
 
 Every System keeps its per-invocation state in one struct built at registration:
 the `reflect.Value` arguments it calls through, the cell its event or request is
-written into, and, for `ToExecute`, the single `Resp` its answer leaves by. That
-is what makes a System cost nothing a tick, and it means two invocations of one
-System must never overlap.
+written into, for `ToExecute`, the single `Resp` its answer leaves by, and the
+handles each parameter resolves once an invocation — the Store behind a `Get`,
+`Set` or `Remove`, the authority and the Stores behind a `Spawn` or a
+`WriteableEntities`, the value behind a `Read` or `Write`. That is what makes a
+System cost nothing a tick, and it means two invocations of one System must
+never overlap.
 
 **The kernel guarantees that; the caller does not have to.** Every System
 declares `ResourceAccess.Exclusive()` in its `Lock`, so a second invocation
@@ -1210,11 +1218,13 @@ them run concurrently and nothing reports that they disagree; copy one way, in
 one System. See ecsscene's [What a binding may not
 do](../../ecsscene/docs/README.md#what-a-binding-may-not-do).
 
-**Neither handle is a place to keep anything.** `Get` goes to the cell the lock
-covers on every call, so the value is refreshed per tick and valid only for the
-body of the System, under the kernel's standing rule that a value read from a
-handle lives only as long as the handler holds its lock. `Set` is for the few
-resources reassigned wholesale rather than mutated in place.
+**Neither handle is a place to keep anything.** `Get` returns the value resolved
+from the cell the lock covers at the start of the invocation — never one taken at
+registration — so the value is refreshed per tick and valid only for the body of
+the System, under the kernel's standing rule that a value read from a handle
+lives only as long as the handler holds its lock. `Set` is for the few resources
+reassigned wholesale rather than mutated in place, and a `Get` on the same
+parameter reads it back.
 
 **The wide lock lands in the bound plugin, not in the ECS.** A `*gfx.OpQueue`
 is one resource, so every recording System serialises against every other
@@ -1418,21 +1428,25 @@ Explaining or shrinking the per-field loop is
 The spawn itself, on the handles a System holds, in the steady state a game runs
 in — the free list has ids and the Stores have rows, so nothing here is
 measuring growth. Six Component types are enrolled with the authority, and the
-despawn line is linear in that number, at about 3 ns a Store:
+despawn line is linear in that number, at about 3 ns a Store. Measured as an interleaved A/B on a Ryzen 9 7950X3D with go1.27.1: `go test -c`
+binaries from before and after [#282](https://github.com/dvoyni/cog/issues/282)
+resolved each System's handles once a tick, ten rounds alternating which ran
+first, medians. The
+handle column is the per-call type assertion that resolve took away:
 
-| | ns/op | allocs/op | B/op |
-| --- | --- | --- | --- |
-| the two Stores written directly, by hand | 8.53 | **0** | 0 |
-| **`Spawn[S].New`, a two-field Component set** | **14.50 — 1.70×** | **0** | 0 |
-| `Spawn[S].New`, a four-field Component set | 27.59 | **0** | 0 |
-| …the same two-field spawn, its value staged through the **parameter's address** | 21.21 | **1** | **16** |
-| `WriteableEntities.Despawn`, asking all six Stores | 18.50 | **0** | 0 |
+| | handle per call, ns/op | resolved once a tick, ns/op | allocs/op | B/op |
+| --- | --- | --- | --- | --- |
+| the two Stores written directly, by hand | 8.91 | 9.23 | **0** | 0 |
+| **`Spawn[S].New`, a two-field Component set** | 16.67 | **14.62 — 1.58×** | **0** | 0 |
+| `Spawn[S].New`, a four-field Component set | 29.68 | 28.27 | **0** | 0 |
+| …the same two-field spawn, its value staged through the **parameter's address** | 23.36 | 22.35 | **1** | **16** |
+| `WriteableEntities.Despawn`, asking all six Stores | 22.16 | 20.41 | **0** | 0 |
 
 **`Spawn` stages the Component set's value through a field of the `Spawn`**,
 and that is the fourth thing on the list above rather than a detail: the obvious
 spelling — taking `&components` of the parameter and handing it to the cached
 per-field closures — hands the address of a parameter to an opaque func value,
-so the value escapes. One allocation the width of the struct, **per spawn**, and 46%
+so the value escapes. One allocation the width of the struct, **per spawn**, and 53%
 slower with it. A test holds both spellings side by side so the trap stays
 closed.
 
@@ -1498,54 +1512,68 @@ measured, and the inference was right.
 Whole frame, the homing shape — a two-Component Query over the near Entity and
 one scattered probe per Entity through the Reference it carries, the target
 chosen by a stride coprime with the population so the probed rows are hit in an
-order unrelated to the walk:
+order unrelated to the walk. Measured as an interleaved A/B on a Ryzen 9 7950X3D with go1.27.1: `go test -c`
+binaries from before and after [#282](https://github.com/dvoyni/cog/issues/282)
+resolved each System's handles once a tick, ten rounds alternating which ran
+first, medians.
 
-| whole frame | ns/op | allocs/op |
-| --- | --- | --- |
-| hand-written walk and probe, 1 000 | 5 424 | **6** |
-| **Query + `Get` through a Reference, 1 000** | **9 834** | **6** |
-| hand-written walk and probe, 10 000 | 23 230 | **6** |
-| **Query + `Get` through a Reference, 10 000** | **60 485** | **6** |
-| Query + `UpdateFor` and `From` per Entity, 1 000 | 16 920 | **6** |
-| Query + `UpdateFor` and `From` per Entity, 10 000 | 120 229 | **6** |
+| whole frame | handle per call, ns/op | resolved once a tick, ns/op | allocs/op |
+| --- | --- | --- | --- |
+| hand-written walk and probe, 1 000 | 6 473 | 6 247 | **4** |
+| **Query + `Get` through a Reference, 1 000** | 11 198 | **9 399** | **4** |
+| hand-written walk and probe, 10 000 | 25 150 | 25 240 | **4** |
+| **Query + `Get` through a Reference, 10 000** | 57 825 | **49 549** | **4** |
+| Query + `UpdateFor` and `From` per Entity, 1 000 | 17 354 | 14 684 | **4** |
+| Query + `UpdateFor` and `From` per Entity, 10 000 | 128 171 | 99 534 | **4** |
+| *control:* a plain Query, 1 000 | 8 793 | 8 236 | **4** |
+| *control:* a plain Query, 10 000 | 31 462 | 31 324 | **4** |
 
-**Six allocations a frame, identical at 1 000 and 10 000 Entities** — the
-engine's own 2-per-publication-plus-4-per-subscriber line, the same one `Query`
-and `Spawn` sit on. The second pair is the sharper test: it adds and removes a
+**Four allocations a frame, identical at 1 000 and 10 000 Entities** — the
+engine's own line, the same one `Query` and `Spawn` sit on, before the resolve
+and after it. The second pair is the sharper test: it adds and removes a
 Component **per Entity per tick**, so ten thousand structural changes a frame,
 and it charges nothing for them. Over a ten-thousand-frame steady state:
-**6.004 objects a frame at 1k and 6.003 at 10k** following a Reference, **6.003
-and 6.001** adding and removing a Component per Entity, against the hand-written
-**6.010**. `testing.AllocsPerRun` over the calls themselves reports **0** for
+**4.001 objects a frame at 1k and 4.002 at 10k** following a Reference, **4.001
+and 4.002** adding and removing a Component per Entity, against the hand-written
+**4.005**. `testing.AllocsPerRun` over the calls themselves reports **0** for
 `Of`, `Ref`, `UpdateFor` and `From`. **The Gap is closed and the spec's
 inference held.**
 
 Per call, on the handles outside a frame, against the same probe with the
-resource cell dereferenced once outside the loop:
+resource cell dereferenced once outside the loop, same A/B:
 
-| | ns/op | allocs/op |
-| --- | --- | --- |
-| the Store probed directly, the cell hoisted | **0.69** | 0 |
-| **`Get[T].Of`** | **2.65** | 0 |
-| `Set[T].Ref` | 3.17 | 0 |
-| `Set[T].UpdateFor`, replacing a value | 3.66 | 0 |
-| `Set[T].UpdateFor` inserting and `Remove[T].From` taking away | 7.21 | 0 |
+| | handle per call, ns/op | resolved once a tick, ns/op | allocs/op |
+| --- | --- | --- | --- |
+| the Store probed directly, the cell hoisted | 0.75 | **0.75** | 0 |
+| **`Get[T].Of`** | 2.83 | **2.01** | 0 |
+| `Set[T].Ref` | 3.65 | 2.70 | 0 |
+| `Set[T].UpdateFor`, replacing a value | 4.33 | 3.53 | 0 |
+| `Set[T].UpdateFor` inserting and `Remove[T].From` taking away | 8.84 | 6.56 | 0 |
 
-**And there is a finding in that first pair.** The probe is the cheap part and
-the spec is right that following a Reference is the same one-load probe the
-Driver already pays — but the *handle* is not free: `Read[*Store[T]].Get()` is a
-type assertion out of the `any`-typed resource cell, it costs **~2.0 ns**, and
-an accessor pays it **per call** where a Query pays it once per run inside
-`bind`. That is 3.9× the bare probe and it is the whole of the difference. From
-the 1k→10k slope it shows up as **5.63 ns an Entity for the accessor shape
-against the hand-written 1.98**, where the plain Query is 3.32 against 1.56 —
-so the accessor arm is 2.8× its baseline where the Query is 2.1×.
+**The finding in that first pair, and what was done about it.** The probe is the
+cheap part and the spec is right that following a Reference is the same one-load
+probe the Driver already pays — but the *handle* was not free:
+`Read[*Store[T]].Get()` is a type assertion out of the `any`-typed resource
+cell, and an accessor paid it **per call** where a Query pays it once per run
+inside `bind`. From the 1k→10k slope it showed up as **5.18 ns an Entity for the
+accessor shape against the hand-written 2.08**, 2.5× its baseline, where the
+plain Query is 2.52.
 
-It costs no allocation and it is not on the Query's path, so nothing here fails
-the bar this design is held to. The remedy, if the number ever matters, is to
-resolve the Store **once per tick** rather than once per call, which the handler
-builder is the only thing positioned to do — and which is a change to the
-parameter seam rather than to an accessor, so it is not made here.
+So every parameter that reached a handle per call now resolves it **once per
+invocation**: an unexported `resolver` capability, collected in the System's
+`Lock` beside the Hook gates and called by the handler builder immediately
+before the System's func, reads each handle into a plain field the per-call
+methods use. `Get`, `Set`, `Remove`, `Spawn`, `WriteableEntities`, `Read` and
+`Write` implement it; `Query` and `Hooks` already bound once a run and do not.
+The accessor slope is now **4.46 ns an Entity against the hand-written 2.11**,
+2.1× — the Query's own ratio — and the churning shape's fell from 12.31 to 9.43.
+`Get.Of` is 0.8 ns off its per-call cost, and what is left over the bare probe
+is the load of the cached field and the call, not the assertion. A plain
+Query System names no resolver and pays a length check: its slope is 2.52
+before and 2.57 after, and its 10k frame 31 462 against 31 324, both within
+noise. Nothing is read at registration and nothing is cleared after the run;
+the values cached are covered by [the same `Exclusive`
+declaration](#a-system-is-not-re-entrant) as the System's arguments.
 
 ### What the binding and the projection cost
 

@@ -38,6 +38,31 @@ type ownedReader interface {
 	ownedBy(writer uint32, system string)
 }
 
+// resolver is a parameter holding a handle its methods reach on every call. Its
+// one method reads each bound kernel handle into a plain cached field, so the
+// type assertion out of the kernel's any-typed resource cell is paid once an
+// invocation rather than once a call.
+//
+// It runs once per invocation of the System, from systemCall.call, immediately
+// before the System's func and while the handler holds every lock the signature
+// declared: the cached value is the locked cell's value for the whole of that
+// invocation, and for no longer. It never runs at registration, and prepare
+// never reads a handle's value, because a value read from a handle is valid only
+// while the handler holds its lock.
+//
+// Each invocation overwrites the cached fields and nothing clears them after.
+// Clearing would be a second pass a tick for nothing: Exclusive already keeps a
+// second invocation of the System from reaching them, so the only way to read a
+// stale one is to use the parameter outside the invocation that resolved it,
+// which is the same contract violation as keeping any value read from a handle.
+//
+// A parameter with no per-call handle does not implement it. A Query binds its
+// Stores once a run in All, and Hooks its Store once a run in beginRun, so
+// neither does.
+type resolver interface {
+	resolve()
+}
+
 // systemCall is one System as registration left it: the reflection is spent
 // here, and a tick pays a store into each stable cell and the Call. E is the
 // event a subscription is driven by or the request a command is invoked with;
@@ -69,6 +94,10 @@ type systemCall[E any] struct {
 	// spawns are the Spawn parameters' checks, one per Spawn, each covering
 	// every Store its Component set carries.
 	spawns []*spawnGate
+	// resolvers are the parameters that read their handles into cached fields
+	// once an invocation, just before the func. Empty for a System that names
+	// none, such as one of pure Queries, which pays a length check for them.
+	resolvers []resolver
 	// armed says the gates and the Spawn gates have been checked. A Store's
 	// watched kinds are written in one place, Hooks.prepare, and every reader
 	// registers before any System runs, so what a check computes is fixed by
@@ -106,15 +135,17 @@ func (c *systemCall[E]) lock(access kernel.ResourceAccess) {
 	access.GetRead[*Entities]()
 	// A System is not re-entrant, and the kernel is what makes that true rather
 	// than the caller. Everything below this line is per-invocation state held in
-	// one registration-time struct — args, driven, handle, and ToExecute's single
-	// Resp cell — so a second invocation entering while the first is inside would
-	// overwrite the first one's arguments and answer. It is declared for every
-	// System, not only the read-only ones a write lock would not already
-	// serialise: it excludes a System against itself alone, so it costs no
-	// parallelism against any other System, and an unconditional line cannot
-	// drift as parameter kinds change.
+	// one registration-time struct — args, driven, handle, ToExecute's single
+	// Resp cell, and the handles each resolver reads into its cached fields — so
+	// a second invocation entering while the first is inside would overwrite the
+	// first one's arguments, the Stores and resources its accessors reach, and
+	// its answer. It is declared for every System, not only the read-only ones a
+	// write lock would not already serialise: it excludes a System against itself
+	// alone, so it costs no parallelism against any other System, and an
+	// unconditional line cannot drift as parameter kinds change.
 	access.Exclusive()
 	c.gates, c.readers, c.spawns, c.copies = c.gates[:0], c.readers[:0], c.spawns[:0], c.copies[:0]
+	c.resolvers = c.resolvers[:0]
 	c.armed = false
 	// writer names this System on the Changed records its run end appends, and
 	// is what its own Hooks readers skip.
@@ -140,6 +171,9 @@ func (c *systemCall[E]) lock(access kernel.ResourceAccess) {
 		}
 		if owned, ok := param.(ownedReader); ok {
 			owned.ownedBy(writer, system)
+		}
+		if resolving, ok := param.(resolver); ok {
+			c.resolvers = append(c.resolvers, resolving)
 		}
 		if validate {
 			c.enrolPace(param)
@@ -182,6 +216,11 @@ func (c *systemCall[E]) shareRowCopy(own *rowCopy, writer uint32) *rowCopy {
 // call runs the System once. The event lands in its cell before the projections
 // read it, so a Feed sees exactly what a named event parameter would have seen,
 // through the same address and with no boxing anywhere.
+//
+// The resolvers run last before the func, after the readers' run starts and
+// Validation mode's pace, none of which reads a resolved field. Each overwrites
+// what the previous invocation cached and nothing clears it afterwards; see
+// resolver.
 func (c *systemCall[E]) call(handle kernel.Kernel, driven E) {
 	if c.driven != nil {
 		*c.driven = driven
@@ -205,6 +244,9 @@ func (c *systemCall[E]) call(handle kernel.Kernel, driven E) {
 	}
 	if validate {
 		c.pace.begin(c.entities)
+	}
+	for _, resolving := range c.resolvers {
+		resolving.resolve()
 	}
 	c.fn.Call(c.args)
 	// A change is recorded at the writer's run end, after every write the run

@@ -106,12 +106,16 @@ type Remove[T any] = types.Remove[T]
 // Read is the System parameter that names another plugin's kernel resource for
 // read, and with Write the whole of the binding mechanism: a System that draws
 // reaches that plugin through the frame-local resource it already publishes.
-// Get returns the resource for the body of this System call, and for no longer.
-// Neither names the ECS's own cells: *Entities and *Store[T] are refused.
+// Get returns the resource for the body of this System call, and for no longer:
+// the value resolved at the start of the invocation, never one taken at
+// registration. Another parameter's Set on the same resource is not seen until
+// the next invocation. Neither names the ECS's own cells: *Entities and
+// *Store[T] are refused.
 type Read[T any] = types.Read[T]
 
 // Write is Read's writing form, and the one a recording System takes. Get
-// returns the resource for this System call; Set replaces it wholesale.
+// returns the resource resolved at the start of this System call; Set replaces
+// it wholesale, and this parameter's own Get reads it back.
 type Write[T any] = types.Write[T]
 
 // In carries a per-tick value into a System without the System naming where it
