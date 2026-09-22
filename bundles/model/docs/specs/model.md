@@ -11,9 +11,10 @@ what each renderer keeps, and the order the split lands in.
 **It is a split, not an improvement.** `model` is carved out of
 `bundles/scene/internal/types` (14.7k lines) and scene's per-frame code, and
 ecsscene repeats the path scene already takes. Anything that would make either
-renderer do more than it does today is a separate issue. Two of them are open:
-[per-instance properties](https://github.com/dvoyni/cog/issues/520) and [scene
-merging separate calls](https://github.com/dvoyni/cog/issues/49).
+renderer do more than it does today is a separate issue. Two were filed:
+[per-instance properties](https://github.com/dvoyni/cog/issues/520), which is
+open, and [scene merging separate calls](https://github.com/dvoyni/cog/issues/49),
+which has since landed.
 
 The design is bound by four requirements, in this order:
 
@@ -656,8 +657,9 @@ be new API.
 - **Against `internal/fountain`'s expected figures:** the passes, their whole
   labels and the instances in each pass must be equal. Draws may differ, and
   ecsscene's may be lower than scene's, never higher: two motes spawned on one
-  step fade to the same tint, and ecsscene batches them while scene never
-  merges calls.
+  step fade to the same tint, and ecsscene batches them. scene merges them too
+  since [#49](https://github.com/dvoyni/cog/issues/49), so the two now draw the
+  same.
 
 **Both comparisons assert, since [#538](https://github.com/dvoyni/cog/issues/538).**
 `internal/fountain` holds `ReferencePasses`, each pass's whole label
@@ -682,9 +684,6 @@ on an engine from `NewECS`. The fountains do not call them. `Lookup` and
 - **A decoded glTF camera**, as a `ModelCamera` data record beside `ModelLight`.
 - **Per-instance properties** ([#520](https://github.com/dvoyni/cog/issues/520)),
   which would make a tinted crowd one draw in both renderers.
-- **scene merging separate calls** ([#49](https://github.com/dvoyni/cog/issues/49)).
-  The model material's load-time key already removes the per-draw fingerprint
-  that merge would otherwise pay.
 - **scene caching `ModelHandle`s** to skip the path clean.
 - **Shadow descrs** in the model material, one for each variant.
 - **Merging the four test backends** (scene's, ecsscene's, gfx's `fakeBackend`,
@@ -862,7 +861,8 @@ what it does.
   that would only serve one.
 - **An offline asset pipeline**, or any consumer outside the cog module.
 - **Per-instance properties** ([#520](https://github.com/dvoyni/cog/issues/520)).
-- **scene merging separate calls** ([#49](https://github.com/dvoyni/cog/issues/49)).
+- **scene merging separate calls** ([#49](https://github.com/dvoyni/cog/issues/49)),
+  as part of the split. It landed afterwards as its own change.
 - **Running scene and ecsscene together**, and detecting a stale `ModelHandle`.
   Both are undefined behaviour by the standing rules.
 - **Merging the four test backends.**
@@ -2189,8 +2189,9 @@ a cap — a 400-byte PBR record pads to 512 instead of being truncated.
 
 **One record per batch, no dedupe.** Two meshes sharing a material produce two
 byte-identical records; collapsing them would cost a hash of every record every
-frame on the render thread to save an upload nobody has measured. While the
-automatic collapse is deferred this degenerates to one record per draw.
+frame on the render thread to save an upload nobody has measured. scene's batch
+is a run of equal draws ([#49](https://github.com/dvoyni/cog/issues/49)), so its
+table is one record per run.
 
 **Scene bindings do not bypass name matching.** Scene injects
 `BufferParam("sceneFrame", …)` and friends as ordinary per-draw parameters and

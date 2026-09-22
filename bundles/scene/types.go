@@ -168,9 +168,9 @@ type PassView = types.PassView
 // gfx draw call, one material record, and InstanceCount contiguous instances of
 // the pass's own instance slice starting at FirstInstance.
 //
-// InstanceCount is 1 for everything but an explicit instanced draw. What the
-// flush batches is the surviving instances of one instanced call - not
-// consecutive equal draws recorded separately, which is a deferred
-// optimisation, and not a blended instanced draw, which stays one batch per
-// instance so its entries keep their own depths.
+// What the flush batches is a run of equal opaque draws: the surviving
+// instances of one instanced call, and any draws recorded separately that
+// share its mesh, material, per-draw parameters and animation. A blended draw
+// is never batched, instanced or not; it stays one batch per instance so its
+// entries keep their own depths.
 type BatchView = types.BatchView

@@ -132,7 +132,8 @@ func pbrTestParams(key float32) []gfx.ParameterDescr {
 // Opaque draws sort by material key regardless of recording order, so every
 // draw of one material runs together and a hundred crates are one pipeline
 // switch rather than a hundred. Within a pass, recording order is not
-// preserved.
+// preserved: the five interleaved boxes come out as two runs, and each run of
+// equal boxes packs as one batch.
 func TestOpaqueDrawsGroupByMaterialNotRecordingOrder(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
@@ -144,20 +145,16 @@ func TestOpaqueDrawsGroupByMaterialNotRecordingOrder(t *testing.T) {
 	h.frame()
 
 	batches := h.passes()[0].Batches
-	if len(batches) != 5 {
-		t.Fatalf("published %d batches, want 5", len(batches))
+	if len(batches) != 2 {
+		t.Fatalf("published %v, want one batch per material", batches)
 	}
-	for i := 1; i < len(batches); i++ {
-		if batches[i].MaterialID < batches[i-1].MaterialID {
-			t.Fatalf("batch %d has material %d after material %d; opaque draws are not grouped by material",
-				i, batches[i].MaterialID, batches[i-1].MaterialID)
-		}
+	if batches[0].MaterialID >= batches[1].MaterialID {
+		t.Fatalf("batches %v are not in ascending material order, or the two materials were not told apart", batches)
 	}
-	if batches[0].MaterialID == batches[4].MaterialID {
-		t.Fatal("every batch has one material id; the two materials were not told apart")
-	}
-	if batches[1].MaterialID != batches[0].MaterialID || batches[3].MaterialID != batches[4].MaterialID {
-		t.Fatalf("materials interleave: %v", batches)
+	// Material ids are assigned in intern order, which is recording order, so
+	// the three boxes of b come first and the two of a after.
+	if batches[0].InstanceCount != 3 || batches[1].InstanceCount != 2 {
+		t.Fatalf("batches %v, want the three boxes of b and then the two of a", batches)
 	}
 }
 

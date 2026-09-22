@@ -111,7 +111,7 @@ func TestAnUnskinnedDrawBindsNoGroupTwo(t *testing.T) {
 
 // Unskinned draws still batch together, and now for a better reason than
 // sharing one identity pose: they resolve to one bundled variant, so they take
-// one material id and sort into one instanced call.
+// one material id, sort side by side and merge into one batch.
 func TestEveryUnskinnedDrawTakesTheSameVariant(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(cameraMain, testCameraDescr())
@@ -128,14 +128,8 @@ func TestEveryUnskinnedDrawTakesTheSameVariant(t *testing.T) {
 		t.Fatalf("the frame emitted %d passes, want 1", len(passes))
 	}
 	batches := passes[0].Batches
-	if len(batches) != 4 {
-		t.Fatalf("four boxes packed %d batches, want one each", len(batches))
-	}
-	for i, batch := range batches {
-		if batch.MaterialID != batches[0].MaterialID {
-			t.Errorf("box %d took material id %d, want the one static variant's %d",
-				i, batch.MaterialID, batches[0].MaterialID)
-		}
+	if len(batches) != 1 || batches[0].InstanceCount != 4 {
+		t.Fatalf("four boxes packed %v, want one batch of four under the one static variant", batches)
 	}
 }
 

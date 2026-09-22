@@ -135,11 +135,10 @@ func TestAModelCallIsOneOp(t *testing.T) {
 // primitive keeps its own flattened place in the file.
 func TestAResidentModelDrawsOneBatchPerPrimitive(t *testing.T) {
 	doc := testDoc()
-	mesh := triangleMesh(doc, nil)
 	doc.Nodes = []*gltf.Node{
-		{Mesh: gltf.Index(mesh)},
-		{Mesh: gltf.Index(mesh), Translation: [3]float64{0, 1, 0}},
-		{Mesh: gltf.Index(mesh), Translation: [3]float64{0, 2, 0}},
+		{Mesh: gltf.Index(triangleMesh(doc, nil))},
+		{Mesh: gltf.Index(triangleMesh(doc, nil)), Translation: [3]float64{0, 1, 0}},
+		{Mesh: gltf.Index(triangleMesh(doc, nil)), Translation: [3]float64{0, 2, 0}},
 	}
 	sceneOf(doc, 0, 1, 2)
 	doc.Scene = gltf.Index(0)
@@ -151,10 +150,9 @@ func TestAResidentModelDrawsOneBatchPerPrimitive(t *testing.T) {
 	if len(batches) != 3 {
 		t.Fatalf("batches = %v, want one per primitive", batches)
 	}
-	// Three nodes sharing one mesh and one material share a sort key, so they
-	// are three separate single-instance batches rather than one run: only an
-	// instanced call collapses, and collapsing consecutive equal draws is the
-	// deferred automatic optimisation.
+	// Three nodes of three meshes are three sort keys, and so three
+	// single-instance batches. Nodes sharing one mesh would merge into one; see
+	// TestNodesSharingAMeshShareOneMeshID.
 	for i, batch := range batches {
 		if batch.InstanceCount != 1 {
 			t.Errorf("batch %d holds %d instances, want one", i, batch.InstanceCount)
@@ -166,8 +164,10 @@ func TestAResidentModelDrawsOneBatchPerPrimitive(t *testing.T) {
 // batches of three, not six draw calls.
 func TestModelInstancingPacksEachPrimitiveAsOneBatch(t *testing.T) {
 	doc := testDoc()
-	mesh := triangleMesh(doc, nil)
-	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(mesh)}, {Mesh: gltf.Index(mesh), Translation: [3]float64{0, 1, 0}}}
+	doc.Nodes = []*gltf.Node{
+		{Mesh: gltf.Index(triangleMesh(doc, nil))},
+		{Mesh: gltf.Index(triangleMesh(doc, nil)), Translation: [3]float64{0, 1, 0}},
+	}
 	sceneOf(doc, 0, 1)
 	doc.Scene = gltf.Index(0)
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, scene.ModelDraw{
@@ -324,7 +324,8 @@ func onePixelPNG(t testing.TB) []byte {
 
 // A mesh several nodes reference is converted, uploaded and given a mesh id
 // exactly once. glTF authors repeated parts that way - two wheels on one truck -
-// and a per-node conversion would silently double the geometry.
+// and a per-node conversion would silently double the geometry. Sharing one
+// mesh id is also what lets the two placements merge into one batch.
 func TestNodesSharingAMeshShareOneMeshID(t *testing.T) {
 	doc := testDoc()
 	mesh := triangleMesh(doc, nil)
@@ -339,12 +340,8 @@ func TestNodesSharingAMeshShareOneMeshID(t *testing.T) {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 2
 	})
 	batches := h.passes()[0].Batches
-	if len(batches) != 2 {
-		t.Fatalf("batches = %v, want one per placement", batches)
-	}
-	if batches[0].MeshID != batches[1].MeshID {
-		t.Errorf("mesh ids = %d and %d, want one upload shared by both nodes",
-			batches[0].MeshID, batches[1].MeshID)
+	if len(batches) != 1 || batches[0].InstanceCount != 2 {
+		t.Fatalf("batches = %v, want both placements in one batch of one shared mesh id", batches)
 	}
 }
 

@@ -158,9 +158,8 @@ func (b *frameBuild) beginPass(descr gfx.PassDescr, block model.FrameBlock) *pen
 //
 // One record per batch, no dedupe: two meshes sharing a material produce two
 // byte-identical records, and collapsing them would cost a hash of every record
-// every frame to save an upload nobody has measured. A batch is one instanced
-// call's survivors, so while the automatic collapse of consecutive equal draws
-// is deferred the table degenerates to one record per draw for everything else.
+// every frame to save an upload nobody has measured. A batch is a run of equal
+// draws, so the table is one record per run rather than one per draw.
 func (b *frameBuild) addDraw(
 	pass *pendingPass, mesh model.MeshRecord, id uint32, entry materialEntry,
 	worlds []m.Mat4, record model.ScenePbrRecord, params []gfx.ParameterDescr, anim types.AnimBinding,
