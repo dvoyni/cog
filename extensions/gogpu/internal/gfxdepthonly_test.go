@@ -82,6 +82,37 @@ func TestOnlyABackendKnownToEncodeADepthOnlyPassIsAllowedOne(t *testing.T) {
 	}
 }
 
+func TestADepthOnlyPassBeginsWithoutAColourAttachment(t *testing.T) {
+	// The refusal was lifted for Vulkan, but a second guard behind it still
+	// skipped every pass that resolved no colour view - and a depth-only pass
+	// never resolves one. So on a backend allowed the pass it was dropped
+	// without a report: no clear, no depth written, and a later pass loading
+	// that texture rendered against whatever was in it. Only a missing colour
+	// view on a pass that declared colour is a pass with nothing to render
+	// into; a pass that declared none needs only its depth.
+	cases := []struct {
+		name          string
+		desc          gfx.PassDesc
+		colour, depth bool
+		want          bool
+	}{
+		{"a colour pass", gfx.PassDesc{Target: 7, DepthAuto: true}, true, true, true},
+		{"a colour pass with no depth", gfx.PassDesc{Target: 7}, true, false, true},
+		{"a depth-only pass", gfx.PassDesc{NoColor: true, Depth: 9}, false, true, true},
+		// A temporary depth texture has no view on its first frame either.
+		{"a depth-only pass whose depth view is not created yet", gfx.PassDesc{NoColor: true, Depth: 9}, false, false, false},
+		// Pooled depth takes its size from the colour target, and there is none.
+		{"a depth-only pass on the pooled texture", gfx.PassDesc{NoColor: true, DepthAuto: true}, false, false, false},
+		{"a colour target whose view is not created yet", gfx.PassDesc{DepthAuto: true}, false, true, false},
+		{"no attachments at all", gfx.PassDesc{NoColor: true}, false, false, false},
+	}
+	for _, c := range cases {
+		if got := passBegins(c.desc, c.colour, c.depth); got != c.want {
+			t.Errorf("%s: passBegins = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func contains(haystack, needle string) bool {
 	for i := 0; i+len(needle) <= len(haystack); i++ {
 		if haystack[i:i+len(needle)] == needle {
