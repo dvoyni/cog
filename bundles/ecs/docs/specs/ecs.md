@@ -586,8 +586,12 @@ scheduler's reader-count/writer-set table is fixed-width.
 Three limits are real and are named rather than claiming "unlimited":
 
 1. **How many Components one System names.** Arity inference scales to 8 with no
-   explicit type arguments, and cost is not linear in width — see
-   [The Query](#the-query).
+   explicit type arguments. Cost is linear in width across the unrolled fillers,
+   widths 1 to 4, at about 1–2 ns a field an Entity; it steps up at width 5,
+   where the per-field loop takes over, by about 7.5 ns an Entity. Through
+   `All()` width 2 is cheaper than its neighbours for as long as it alone takes
+   the inlined literal. See
+   [Time, and one number worth another look](#time-and-one-number-worth-another-look).
 2. **Sparse-index memory per Component type.** 8 bytes × peak concurrent index
    space, per type — 32 KB per type at nox's low thousands, **2.8 MB across 85
    types**.
@@ -2284,22 +2288,37 @@ implementation.
 
 ### Time, and one number worth another look
 
-Per Entity, from the 1k→10k slope so the per-frame floor drops out:
+The prototype measured a three-Component Query at 10.8 ns an Entity against 3.21
+for two, and recorded a **Gap**: a third probe seemed to cost about 7 ns an
+Entity more, whether a third Component or a filter. **It does not reproduce on
+the shipped Query**
+([#280](https://github.com/dvoyni/cog/issues/280)). `BenchmarkQueryWidth`
+times the walk alone at every width, through `All()` and through `q.iterate`
+directly, beside a hand-written walk over the same Stores; per Entity at 10 000
+Entities, medians of ten interleaved rounds, AMD Ryzen 9 7950X3D, go1.27.1:
 
-| | ns/entity | × hand-written |
-| --- | --- | --- |
-| hand-written loop, 2 Components | 2.07 | 1.00 |
-| **Query, 2 Components** | **3.21** | **1.55** |
-| Query, 3 Components | 10.8 | 5.2 |
+| width | `All()` | delegated (`iterate`) | hand-written | delegated × hand-written |
+| --- | --- | --- | --- | --- |
+| 1 | 2.61 | 1.86 | 0.54 | 3.5 |
+| 2 | **2.52** | 3.50 | 1.43 | 2.5 |
+| 3 | 5.17 | 4.41 | 2.37 | 1.9 |
+| 4 | 7.28 | 6.26 | 3.40 | 1.8 |
 
-Consistent with the 1.37× measured against a looser baseline. But **a third
-probe costs ~7 ns an Entity more, whether it is a third Component or a filter**,
-and that is *not* the loop shape — both attempts to fix it as a loop-shape
-problem made it worse and were reverted. **Gap:** the third-probe cost is
-unexplained. It matters because a spec that names ~8 Components per System as a
-limit is implying a curve that this says is not linear. What would settle it: a
-width sweep from one to eight probes at fixed entity count, with cache-miss
-counters, before any guidance recommends a Query width.
+On the delegated rows, where every width takes the same path, each field adds
+**1.64, 0.90 and 1.86 ns** an Entity for the second, third and fourth: the third
+is the cheapest, not a step. The sweep's rule, set before it ran — the gap
+reproduces if the third field's step is at least 3 ns and at least twice either
+neighbour's — fails on both counts, at 1 000 Entities as at 10 000, and for a
+present Tag or a `Without` that rejects nothing in the third slot too (0.82 and
+0.84 ns). The 10.8 ns figure was the prototype's. Through `All()`, width 2 is
+cheaper than width 1 and width 3 looks like a 2.65 ns step, because only width 2
+takes the walk `All()` carries inside its literal and the others delegate and
+pay an indirect `yield` an Entity; that is a path, not a probe. Width 5 and up
+run the per-field loop and step up by about 7.5 ns an Entity, the same whether
+the Stores fit in L2 or not. The README's
+[What a wider Query costs](../README.md#what-a-wider-query-costs) has both
+Entity counts, the Tag and `Without` rows, widths 5 to 8 and the Store
+footprints.
 
 ### Concurrency
 
