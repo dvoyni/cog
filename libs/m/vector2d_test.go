@@ -93,6 +93,42 @@ func TestVec2dAddsCpsMethodsWithNoVec2Counterpart(t *testing.T) {
 	}
 }
 
+// ForAngle takes its cosine and sine from one math.Sincos, which is cheaper
+// than a math.Cos and a math.Sin and, in pure Go on every target cog ships,
+// the same range reduction and kernels. This pins the result to the separate
+// calls bit for bit, so a toolchain whose Sincos drifts from them fails here
+// rather than moving every rotation in the physics by an ulp.
+func TestVec2dForAngleIsBitEqualToASeparateCosAndSin(t *testing.T) {
+	angles := []float64{
+		0, math.Copysign(0, -1),
+		math.Pi / 2, -math.Pi / 2, math.Pi, -math.Pi, 2 * math.Pi, -2 * math.Pi,
+		math.Pi / 4, 3 * math.Pi / 4, 0.7, -0.9, 1, -1,
+		1e-6, -1e-6, 1e-300, -1e-300, math.SmallestNonzeroFloat64,
+		1e4, -1e4, 1e9, -1e9, 1<<29 - 0.5, 1e15, -1e15, 1e300, -1e300, math.MaxFloat64, -math.MaxFloat64,
+		math.NaN(), math.Inf(1), math.Inf(-1),
+	}
+	// A spread over the ranges the probe on issue 569 drew from, stepped by an
+	// irrational fraction so the angles do not land on a lattice.
+	for _, magnitude := range []float64{2 * math.Pi, 1e4, 1e-6, 1e9} {
+		for i := range 1000 {
+			angles = append(angles, magnitude*(2*math.Mod(float64(i)*math.Phi, 1)-1))
+		}
+	}
+
+	same := func(got, want float64) bool {
+		if math.IsNaN(want) {
+			return math.IsNaN(got)
+		}
+		return math.Float64bits(got) == math.Float64bits(want)
+	}
+	for _, angle := range angles {
+		got := ForAngle(angle)
+		if wantX, wantY := math.Cos(angle), math.Sin(angle); !same(got.X, wantX) || !same(got.Y, wantY) {
+			t.Fatalf("ForAngle(%v) = %v, want {%v %v} bit for bit", angle, got, wantX, wantY)
+		}
+	}
+}
+
 func TestVec2dRotatesByAVectorAndUnrotatesBack(t *testing.T) {
 	quarterTurn := ForAngle(math.Pi / 2)
 

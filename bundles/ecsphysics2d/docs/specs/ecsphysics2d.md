@@ -166,7 +166,9 @@ Numbers fall into four classes and the difference matters:
 - **cog's, measured** — the index costs, **re-taken in float64** on the hardware
   above: a short Probe at **103 ns**, `BodyIndex` upkeep at **70 µs** per 1 024
   Bodies — **67 µs** since [#441](https://github.com/dvoyni/cog/issues/441) took
-  the Entity-to-slot map out of it — one static Entity replaced at **97–102 ns**.
+  the Entity-to-slot map out of it, and **53 µs** at `Angle` 0 since
+  [#570](https://github.com/dvoyni/cog/issues/570) took its rotation from one
+  `math.Sincos` — one static Entity replaced at **97–102 ns**.
   The float32 prototype [issue 345](https://github.com/dvoyni/cog/issues/345) had
   the same three at 30–50 ns, 9 µs and 17–24 ns, and **those numbers are
   superseded, not adjusted**: its Components were half the size and nothing
@@ -220,9 +222,43 @@ N = 1 024 and **101.8 µs to 100.8 µs** at N = 256 (12 runs each). A short Prob
 and `ProbeAll` are unchanged. **The 13 µs the map cost measured on its own did not
 all come back**: removing it saves 3–4 µs of the rebuild benchmark and about
 8 µs of the step, which is a decomposition priced part by part not adding up in
-place, and is recorded rather than explained. The rotations, 17 µs, are now the
-largest single part, and reusing a Body's transform when its `Angle` did not
-change is [physics: follow-up 2](https://github.com/dvoyni/cog/issues/523)'s.
+place, and is recorded rather than explained. The rotations, 17 µs, were then the
+largest single part.
+
+**Reusing a Body's rotation when its `Angle` did not change was put and decided
+*no*** on [#569](https://github.com/dvoyni/cog/issues/569): the rebuild stays
+stateless. What that ticket found instead is that `m.ForAngle`'s `math.Cos` and
+`math.Sin` give the same bits as one `math.Sincos` in about 60% of the time, and
+[#570](https://github.com/dvoyni/cog/issues/570) made the change, pinned bit for
+bit against the separate calls on amd64 and on wasm. Measured interleaved A/B,
+both binaries built and alternated round by round with the order of the pair
+swapped every round, 16 runs each, on the hardware above and with another
+benchmark running on the machine at the same time: the rotations went from a
+median **16.1 ns to 13.4 ns a Body**, which is **16.5 µs to 13.7 µs** per 1 024
+Bodies, and are still the rebuild's largest part. The rebuild of 1 024 Bodies went
+from a median **67.4 µs to 52.9 µs** (minimums 66.7 and 52.3), and the whole step
+from **422.9 µs to 417.3 µs** at N = 1 024 and **127.9 µs to 126.2 µs** at
+N = 256 (minimums 406.9 to 398.0 and 120.5 to 117.9), which is inside a
+whole-frame benchmark's noise.
+
+**The rebuild's 14.5 µs is not the rotation's saving; it is the saving at
+`Angle` 0.** Every Body `BenchmarkBodyIndexRebuild` inserts stands at `Angle` 0,
+and `math.Sincos` returns at once for a zero angle where `math.Cos` runs its
+whole kernel, so at 0 the rotation all but vanishes. At angles that differ per
+Body, which is `BenchmarkTheRebuildsRotations`, the saving is 2.7 ns a Body,
+about 2.8 µs per 1 024. A rotating scene should read the latter.
+
+**`BenchmarkTheStep`'s reference scene never rotates**, and its step figures here
+and everywhere else in this specification are taken over Bodies that never turn.
+Its circles carry a Friction of 0.7, but every pair is pressed straight along
+the line between its centres — each Dynamic circle is pushed along +X into a
+Static one 0.75 m further along +X — so the tangent stays at zero, no impulse has
+a lever arm, and every Body keeps a bit-equal `Angle` of 0 on every tick. That was
+checked over 3 000 ticks at N = 256 and N = 1 024. It is a known property of the
+scene, recorded and not changed, because changing the scene would break the
+comparison with every A/B already recorded against it; **its numbers are not
+representative of a scene that rotates**, and no decision about rotation should
+be read from them.
 
 **The porting index's own measurements are not reproducible.** They were taken
 *"in throwaway modules outside cog's tree"* with no branch, directory or
