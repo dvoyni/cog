@@ -46,8 +46,13 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reflect the bundled scene shader: %v", err)
 	}
-	if layout.UniformSize != 0 {
-		t.Fatalf("the scene shader declares a %d-byte uniform block; all scene data is storage", layout.UniformSize)
+	// The material's numbers are the one uniform block, in the per-material
+	// group: gfx packs it per draw from the draw's params by name, so no
+	// renderer knows its layout. Everything the renderer binds itself is
+	// storage.
+	if layout.UniformSize == 0 || layout.UniformSize > 256 || layout.UniformGroup != 1 || layout.UniformBinding != 0 {
+		t.Fatalf("the scene shader's uniform block is %d bytes at %d/%d, want the material's, at most 256 bytes, at 1/0",
+			layout.UniformSize, layout.UniformGroup, layout.UniformBinding)
 	}
 	resources := map[string]cgfx.ShaderResource{}
 	for _, resource := range layout.Resources {
@@ -65,7 +70,6 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 		// carries the scale and bias each mesh's two UV sets decode against,
 		// and the instance's mesh word indexes it.
 		{name: "sceneMeshes", group: 0, binding: 3},
-		{name: "scenePbrMaterial", group: 1, binding: 0},
 		// Group 2 is per model, and this is the everything variant, so all
 		// three are declared. A draw that reads none of them declares none of
 		// them - see TestBundledSceneShaderVariantsDeclareOnlyWhatTheyRead.
@@ -106,8 +110,8 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 			t.Errorf("%sSampler is %+v, want a group 1 filtering sampler", slot, sampler)
 		}
 	}
-	if len(layout.Resources) != 18 {
-		t.Fatalf("the scene shader declares %d bindings, want the 18 asserted above: %+v",
+	if len(layout.Resources) != 17 {
+		t.Fatalf("the scene shader declares %d bindings, want the 17 asserted above: %+v",
 			len(layout.Resources), layout.Resources)
 	}
 }
@@ -131,6 +135,12 @@ func TestBundledSceneShaderRecordsMatchTheirPackedOffsets(t *testing.T) {
 		}
 		offsets[resource.Name] = members
 	}
+	// The material block is the uniform, whose members gfx packs by name.
+	uniform := map[string]int{}
+	for _, member := range layout.Uniforms {
+		uniform[member.Name] = member.Offset
+	}
+	offsets["scenePbrMaterial"] = uniform
 	for binding, want := range map[string]map[string]int{
 		"sceneFrame": {
 			"view": 0, "projection": 64, "viewProjection": 128,
@@ -139,9 +149,9 @@ func TestBundledSceneShaderRecordsMatchTheirPackedOffsets(t *testing.T) {
 			"lightCount": 288, "lights": 304,
 		},
 		// The per-slot metadata is flat named members rather than an array,
-		// because array members are not name-addressable through
-		// OverrideParams - and animating baseColorTransform per frame is UV
-		// scrolling, which the array form forecloses permanently.
+		// because gfx packs a uniform member by name and an array element has
+		// none - and animating baseColorTransform per frame is UV scrolling,
+		// which the array form forecloses permanently.
 		"scenePbrMaterial": {
 			"baseColorFactor": 0, "emissiveFactor": 16,
 			"baseColorTransform": 32, "metallicRoughnessTransform": 48,
@@ -231,12 +241,11 @@ func TestBundledSceneShaderFitsTheWebStorageBudget(t *testing.T) {
 }
 
 // A draw declares only the bindings it actually uses, and the numbers below are
-// the whole argument for the split: a static draw drops from eight storage
-// buffers to four. The everything variant now sits exactly on the browser core
-// adapter's floor of eight per stage - the per-mesh record spent the slot
-// interleaving the two per-skin arrays had recovered - so the split is what
-// keeps a debug line that reads none of them from paying for all eight, and
-// there is no ninth for anything to spend.
+// the whole argument for the split: a static draw drops from seven storage
+// buffers to three. The everything variant sits one under the browser core
+// adapter's floor of eight per stage, the slot the material record gave back
+// when it became the uniform block, so a custom shader over the bundled stages
+// has one storage buffer of its own to spend.
 func TestBundledSceneShaderVariantsDeclareOnlyWhatTheyRead(t *testing.T) {
 	for _, want := range []struct {
 		name     string
@@ -244,10 +253,10 @@ func TestBundledSceneShaderVariantsDeclareOnlyWhatTheyRead(t *testing.T) {
 		bindings int
 		storage  int
 	}{
-		{name: "debug line or static prop", defines: nil, bindings: 14, storage: 4},
-		{name: "morph only, a face", defines: []string{"SCENE_MORPH"}, bindings: 16, storage: 6},
-		{name: "skinned, no morph", defines: []string{"SCENE_SKIN"}, bindings: 17, storage: 7},
-		{name: "everything", defines: []string{"SCENE_SKIN", "SCENE_MORPH"}, bindings: 18, storage: 8},
+		{name: "debug line or static prop", defines: nil, bindings: 13, storage: 3},
+		{name: "morph only, a face", defines: []string{"SCENE_MORPH"}, bindings: 15, storage: 5},
+		{name: "skinned, no morph", defines: []string{"SCENE_SKIN"}, bindings: 16, storage: 6},
+		{name: "everything", defines: []string{"SCENE_SKIN", "SCENE_MORPH"}, bindings: 17, storage: 7},
 	} {
 		layout, err := reflectShaderLayout(bundledSceneShader(t, sceneVariant(want.defines...)...))
 		if err != nil {
