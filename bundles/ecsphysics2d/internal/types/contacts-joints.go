@@ -34,6 +34,7 @@ func (c *Contacts) gatherJoints(
 	places *ecs.Set[Position],
 	velocities *ecs.Set[Velocity],
 	sleeping *ecs.Get[Sleeping],
+	nobodySleeps bool,
 ) {
 	s := &c.solver
 	j := &s.joints
@@ -49,7 +50,8 @@ func (c *Contacts) gatherJoints(
 		// its Impulse for the warm start the tick it wakes. The sleep System
 		// wakes a Joint's sleeper whenever its other party moves, so a Joint
 		// skipped here holds two sleepers, or a sleeper and a Static.
-		if sleepingParty(sleeping, joint.A) || sleepingParty(sleeping, joint.B) {
+		// Nothing is probed on a tick when nothing sleeps.
+		if !nobodySleeps && (sleepingParty(sleeping, joint.A) || sleepingParty(sleeping, joint.B)) {
 			continue
 		}
 

@@ -5,9 +5,15 @@ import (
 	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 )
 
-// The three Query structs the plugin's Systems name. Each one is the lock set
-// of the walk it drives, said as a struct: a field per Component, read or
-// written by whether it is a pointer, and a Without where a Tag is a filter.
+// The Query structs the plugin's Systems name. Each one is the lock set of the
+// walk it drives, said as a struct: a field per Component, read or written by
+// whether it is a pointer, and a Without where a Tag is a filter.
+//
+// Integrate and Index each name their walk twice, with the Sleeping filter and
+// without it, and take the unfiltered one on a tick when nothing sleeps; why is
+// on types.NobodySleeps. The unfiltered twin names a subset of what the
+// filtered one does, so the pair locks exactly what the filtered walk alone
+// would.
 
 // positionQuery drives Integrate: every Body with a Velocity, Kinematic ones
 // included, exactly as cp integrates positions for everything that is not
@@ -20,6 +26,13 @@ type positionQuery struct {
 	Place    *ecsphysics2d.Position
 	Velocity ecsphysics2d.Velocity
 	_        ecs.Without[ecsphysics2d.Sleeping]
+}
+
+// everyPositionQuery is positionQuery without the Sleeping filter: Integrate's
+// walk on a tick when nothing sleeps.
+type everyPositionQuery struct {
+	Place    *ecsphysics2d.Position
+	Velocity ecsphysics2d.Velocity
 }
 
 // bodyIndexQuery drives the Body index rebuild: every Entity with a Shape that
@@ -39,6 +52,14 @@ type bodyIndexQuery struct {
 	Place ecsphysics2d.Position
 	_     ecs.Without[ecsphysics2d.Static]
 	_     ecs.Without[ecsphysics2d.Sleeping]
+}
+
+// everyBodyIndexQuery is bodyIndexQuery without the Sleeping filter: the
+// rebuild's walk on a tick when nothing sleeps.
+type everyBodyIndexQuery struct {
+	Shape ecsphysics2d.Shape
+	Place ecsphysics2d.Position
+	_     ecs.Without[ecsphysics2d.Static]
 }
 
 // jointIndexQuery drives the JointedPairs rebuild: every Joint, read. cp walks

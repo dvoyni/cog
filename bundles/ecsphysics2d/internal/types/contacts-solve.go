@@ -36,6 +36,8 @@ import (
 func Solve(
 	contacts *Contacts,
 	bodies *ecs.Query[VelocityQuery],
+	every *ecs.Query[EveryVelocityQuery],
+	sleepers *ecs.Query[SleeperQuery],
 	joints *ecs.Query[JointQuery],
 	dynamics *ecs.Get[Dynamic],
 	velocities *ecs.Set[Velocity],
@@ -48,7 +50,8 @@ func Solve(
 	// Step 2 and its half of step 3: a jointed Body may touch nothing at all,
 	// so the gather set is the Bodies in solved Contacts together with the
 	// Bodies in Joints, and both are given rows before either is gathered.
-	contacts.gatherJoints(joints, places, velocities, sleeping)
+	nobodySleeps := NobodySleeps(sleepers)
+	contacts.gatherJoints(joints, places, velocities, sleeping, nobodySleeps)
 
 	// The gather reads the velocity as it stands before integration, which is
 	// the only thing PreStep's bounce can be taken from.
@@ -65,8 +68,16 @@ func Solve(
 	contacts.preStep(h, slop, bias)
 	contacts.preStepJoints(h, velocities)
 
-	for _, it := range bodies.All() {
-		IntegrateVelocity(&it.Body, it.Velocity, it.Force, gravity, h)
+	// The walk is named twice, with the Sleeping filter and without, and the
+	// unfiltered one is taken when nothing sleeps: NobodySleeps says why.
+	if nobodySleeps {
+		for _, it := range every.All() {
+			IntegrateVelocity(&it.Body, it.Velocity, it.Force, gravity, h)
+		}
+	} else {
+		for _, it := range bodies.All() {
+			IntegrateVelocity(&it.Body, it.Velocity, it.Force, gravity, h)
+		}
 	}
 	for i := 1; i < len(contacts.solver.rows); i++ {
 		row := &contacts.solver.rows[i]

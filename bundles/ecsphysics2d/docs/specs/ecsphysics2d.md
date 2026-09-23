@@ -1440,7 +1440,10 @@ type Sleep struct {
 **A sleeping Body carries the `Sleeping` Tag**, which the plugin adds and removes
 and nothing else may. Integrate, the Body index rebuild and the velocity
 integration skip it with `Without[Sleeping]`, and an app's Queries can do the
-same. A Tag was once suspect because adding one was thought to take the
+same. Each of the three names its walk a second time without the filter and
+takes that one on a tick when no Body sleeps, for what the filter costs a walk
+(*What it costs, and where it pays*); the two walks lock what the filtered one
+alone does. A Tag was once suspect because adding one was thought to take the
 frame-wide `write{*Entities}`; it takes `write{*Store[Sleeping]}` and nothing
 else (`ecs.md`'s *Structural change*), and
 only the sleep System writes that Store.
@@ -1597,15 +1600,85 @@ fixed 76 µs, on about 0.06 µs a crate over 58 µs, and the two lines cross nea
 N = 13. Past that, a settled pile is cheaper asleep; a scene where nothing
 settles pays the Island build, a few per cent.
 
-**Sleeping off is not free.** Against `main` before sleeping, both binaries
-built and alternated the same way, `BenchmarkTheStep` went from 110.9 µs to
-123.5 µs at N = 256 and from 382.6 µs to 410.3 µs at N = 1 024, and
-`BenchmarkThePolygonStep` from 405.9 µs to 417.4 µs at N = 256 and 1 570.0 µs to
-1 553.8 µs at N = 1 024 — within its noise. What sleeping off costs is the fifth
-System's scheduling, the `Without[Sleeping]` probe in three Queries, and the
-harness's filter now ordered before the sleep System, one more link in its
-chain. It is recorded as a finding, not argued away: 7–11% of the reference step
-at these sizes, against an order of magnitude on a pile that sleeps.
+**Sleeping off costs the fifth System's dispatch, and after
+[physics: sleeping off costs the step 7–11%](https://github.com/dvoyni/cog/issues/541)
+nothing else that measures.** It was first recorded against `main` before
+sleeping at 110.9 → 123.5 µs for `BenchmarkTheStep` at N = 256 and 382.6 →
+410.3 µs at N = 1 024. Profiled before anything changed, against the physics from
+before sleeping compiled over the same ECS, the cost sat in three places, and the
+sleep System's own work was none of them: its off path returns before it builds
+anything and does not show in a profile, and neither do Detect's two recorded
+facts nor the `Rest` Store.
+
+- **The `Without[Sleeping]` filter.** A filter is a field of the Query like any
+  other, and `Query.All` picks its walk by field count: it folds the range body
+  into the walk at two fields whatever the body's size, at three only while the
+  body is small, and past three not at all. The filter took Integrate's walk from
+  two fields to three and the Body index rebuild's and the velocity integration's
+  from three to four, and every Entity paid an indirect call: at N = 1 024
+  Integrate went from about 10 µs a tick to 18 µs and Index from 63 µs to
+  75 µs. Each of the three now names its walk twice, with the filter and
+  without, and takes the unfiltered one while `NobodySleeps` — a
+  `With[Sleeping]` Query that stops at its first Entity — says the filter would
+  drop nothing. The pair
+  names no Store the filtered walk did not, so the lock sets are unchanged and
+  `TestSleepingCostsNoSystemParallelism` passes as it was. The same answer lets
+  the Joint gather skip its two `Sleeping` probes a Joint.
+- **The swept Sensors' Probe of the Body index**, which went through the index's
+  two-grid `probeAllSlots`. Asking the awake grid directly while nothing sleeps
+  measured 3% of the reference step at N = 1 024; the profile puts less than that
+  in the sweep itself, so the number is quoted and the cause is not.
+- **The fifth System's dispatch**, about 6–8 µs a tick and flat in the Body
+  count. Built with the sleep System unsubscribed, the step matched the physics
+  from before sleeping within 0.5% at both sizes, and a sleep System locking one
+  Resource cost what the real one does, so the lock set does not enter into it:
+  it is the kernel's dispatch of one more link in the chain. It is not removable
+  from physics without widening a lock set — the sleep System folded into Solve
+  would give Solve both indices to read and `Sleeping`, `Rest` and the
+  `WakeCmd`'s queue to write, and an app's Probe of the Body index could no
+  longer run beside it — and registering the System only when sleeping is
+  configured on would break turning sleeping on between ticks.
+
+Measured after, interleaved: ten rounds, each running every binary once, the
+order reversed every other round, the median quoted with the minimum beside it;
+`go1.27.1 windows/amd64`, AMD Ryzen 9 7950X3D, GOMAXPROCS=32, with another build
+benchmarking on the machine at the same time. *Before* is `main` before sleeping
+(82b84dc). *Reference* is that physics compiled over today's ECS, which is what
+the step would cost without sleeping now: it differs from *before* by the ECS
+work merged since, which a world pays whether or not physics sleeps. *Was* is
+`main` at 1f96299, and *now* is the step after this change.
+
+| | before | reference | was | now | now against reference |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `BenchmarkTheStep`, N = 256 | 103.6 µs | 109.1 µs | 122.0 µs | 116.7 µs (min 115.0) | +7.6 µs, +7.0% |
+| `BenchmarkTheStep`, N = 1 024 | 361.9 µs | 369.0 µs | 404.6 µs | 376.7 µs (min 372.6) | +7.7 µs, +2.1% |
+| `BenchmarkThePolygonStep`, N = 256 | 386.4 µs | 393.2 µs | 405.2 µs | 401.5 µs | +8.3 µs, +2.1% |
+| `BenchmarkThePolygonStep`, N = 1 024 | 1 437.1 µs | 1 438.7 µs | 1 475.2 µs | 1 457.2 µs | +18.5 µs, +1.3% |
+| `BenchmarkTheJointedStep`, N = 256 | 130.1 µs | 135.3 µs | 149.0 µs | 141.8 µs | +6.5 µs, +4.8% |
+| `BenchmarkTheJointedStep`, N = 1 024 | 469.1 µs | 470.7 µs | 515.6 µs | 479.6 µs | +8.9 µs, +1.9% |
+
+What is left is the fifth System's dispatch, and it is recorded as a finding
+rather than argued away: about 7 µs a tick, 2% of the reference step at
+N = 1 024 and 7% at N = 256, against an order of magnitude on a pile that
+sleeps. The polygon scene's 18.5 µs at N = 1 024 is 1.3%, inside that
+benchmark's noise as it was when first recorded. Taking the dispatch out is a
+decision this finding does not make: it needs either a cheaper dispatch per link
+from the kernel or a lock set wider than the rule allows.
+
+Sleeping on costs what it did before this change, measured the same way against
+the build that brought it (29ab6f0) and against `main`. The Island build on a
+tick where nothing sleeps takes the unfiltered walks too, so it got cheaper:
+
+| | 29ab6f0 | was | now |
+| --- | ---: | ---: | ---: |
+| a settled pile asleep, N = 256 | 62.0 µs | 66.9 µs | 67.0 µs |
+| a settled pile asleep, N = 1 024 | 110.1 µs | 113.7 µs | 114.3 µs |
+| the Island build, nothing sleeping, N = 256 | 117.6 µs | 125.6 µs | 120.2 µs |
+| the Island build, nothing sleeping, N = 1 024 | 408.8 µs | 421.3 µs | 392.5 µs |
+
+The settled pile sits where `main` had it. The 4–5 µs both sit above 29ab6f0 is
+not physics, whose code between the two differs only by the Systems' names, but
+the ECS work merged since; it was not profiled here.
 
 ---
 
@@ -2349,6 +2422,9 @@ shrink.
 | Ignoring the Shape a Probe starts inside | a projectile would leave a wall it spawned in, and spawn validation would pass silently |
 | A statistical comparison of a settled scene against cp | no partial credit, and FMA fusion makes it flake on a compiler flag |
 | Importing cp test-only into `main` | a corpus regenerated each run flakes on legitimately bistable cases |
+| Folding the sleep System into Solve, to save its dispatch while sleeping is off | Solve would gain both indices to read and `Sleeping`, `Rest` and the `WakeCmd`'s queue to write, and an app's Probe of the Body index could no longer run beside it |
+| Registering the sleep System only when `Sleep` is configured on | turning sleeping on between ticks would stop working |
+| A population count on an ECS accessor, to ask whether anything sleeps | public ECS API for what a one-field `With[Sleeping]` Query answers under the read the filter takes already |
 
 ---
 
