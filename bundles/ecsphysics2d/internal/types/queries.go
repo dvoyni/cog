@@ -2,7 +2,7 @@ package types
 
 import "github.com/dvoyni/cog/bundles/ecs"
 
-// The two Query structs the Systems a package out name. Each is POD — a field
+// The Query structs the Systems a package out name. Each is POD — a field
 // per Component, read or written by whether it is a pointer — and each is the
 // lock set of the walk it drives, said as a struct.
 
@@ -26,6 +26,15 @@ type VelocityQuery struct {
 	Force    *Force
 	Body     Dynamic
 	_        ecs.Without[Sleeping]
+}
+
+// EveryVelocityQuery is VelocityQuery without the Sleeping filter: the
+// velocity integration's walk on a tick when nothing sleeps, which is
+// NobodySleeps's to say.
+type EveryVelocityQuery struct {
+	Velocity *Velocity
+	Force    *Force
+	Body     Dynamic
 }
 
 // JointQuery drives the Joint half of Solve. The Joint is written, because the
@@ -69,4 +78,40 @@ type AsleepQuery struct {
 // read: Solve is the one that writes it.
 type IslandJointQuery struct {
 	Joint Joint
+}
+
+// SleeperQuery walks the Sleeping bodies and yields nothing but the Entity. It
+// drives NobodySleeps and nothing else.
+type SleeperQuery struct {
+	_ ecs.With[Sleeping]
+}
+
+// NobodySleeps reports that no Entity carries the Sleeping Tag, which is every
+// tick of a world with sleeping off and every tick of one with it on until the
+// first Island falls asleep.
+//
+// It is what lets a System walk without the Sleeping filter when the filter
+// would drop nothing. A Without is a field of the Query like any other, and
+// Query.All picks its walk by field count: it folds the range body into the
+// walk at two fields whatever the body's size, at three only while the body is
+// small, and past three not at all, so every Entity costs an indirect call to
+// the body. The filter takes Integrate's walk from two fields to three, and the
+// Body index rebuild's and the velocity integration's from three to four.
+// Profiled with sleeping off, it was the largest part of what sleeping cost the
+// step. A System that names the walk twice, with the filter and without, and
+// takes the unfiltered one here, pays for the filter only while something
+// sleeps.
+//
+// The lock set does not change. The unfiltered walk names a subset of the
+// filtered one's Stores, and SleeperQuery's read of the Sleeping Store is the
+// read the Without already takes, so a System naming all three locks exactly
+// what the filtered walk alone locks.
+//
+// The answer is exact rather than a hint: the Sleeping Store is read-locked for
+// the whole System, so nothing can tag a Body between this and the walk.
+func NobodySleeps(sleepers *ecs.Query[SleeperQuery]) bool {
+	for range sleepers.All() {
+		return false
+	}
+	return true
 }

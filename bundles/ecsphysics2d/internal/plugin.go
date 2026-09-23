@@ -201,6 +201,8 @@ func (p *plugin) indexSystem(
 	statics *ecs.Get[ecsphysics2d.Static],
 	polygons *ecs.Get[ecsphysics2d.Polygon],
 	bodies *ecs.Query[bodyIndexQuery],
+	every *ecs.Query[everyBodyIndexQuery],
+	tagged *ecs.Query[types.SleeperQuery],
 	joints *ecs.Query[jointIndexQuery],
 	staticIndex *ecs.Write[*ecsphysics2d.StaticIndex],
 	bodyIndex *ecs.Write[*ecsphysics2d.BodyIndex],
@@ -278,18 +280,31 @@ func (p *plugin) indexSystem(
 		}
 	}
 
+	// InsertMoving rather than Insert, so that a moving circle Sensor carries
+	// the path Detect Probes it along. The previous pose comes off the Position
+	// this walk already reads, which is what keeps the swept Sensor from
+	// costing any System a lock it did not already hold: Detect names no
+	// Component Store at all and still does not.
+	//
+	// The walk is named twice, with the Sleeping filter and without, for the
+	// reason integrateSystem's is.
 	body.Clear()
-	for entity, it := range bodies.All() {
-		// InsertMoving rather than Insert, so that a moving circle Sensor
-		// carries the path Detect Probes it along. The previous pose comes off
-		// the Position this walk already reads, which is what keeps the swept
-		// Sensor from costing any System a lock it did not already hold: Detect
-		// names no Component Store at all and still does not.
-		body.InsertMoving(
-			entity, it.Shape,
-			it.Place.Current, it.Place.Previous, it.Place.Angle, it.Place.PreviousAngle,
-			p.polygonVerts(polygons, entity, it.Shape),
-		)
+	if types.NobodySleeps(tagged) {
+		for entity, it := range every.All() {
+			body.InsertMoving(
+				entity, it.Shape,
+				it.Place.Current, it.Place.Previous, it.Place.Angle, it.Place.PreviousAngle,
+				p.polygonVerts(polygons, entity, it.Shape),
+			)
+		}
+	} else {
+		for entity, it := range bodies.All() {
+			body.InsertMoving(
+				entity, it.Shape,
+				it.Place.Current, it.Place.Previous, it.Place.Angle, it.Place.PreviousAngle,
+				p.polygonVerts(polygons, entity, it.Shape),
+			)
+		}
 	}
 
 	// A Joint whose two Bodies still collide contributes nothing, so the set
@@ -371,6 +386,8 @@ func (p *plugin) detectSystem(
 // took ecs.Write[*Constants], which is the price that app chose.
 func (p *plugin) solveSystem(
 	bodies *ecs.Query[types.VelocityQuery],
+	every *ecs.Query[types.EveryVelocityQuery],
+	sleepers *ecs.Query[types.SleeperQuery],
 	joints *ecs.Query[types.JointQuery],
 	dynamics *ecs.Get[ecsphysics2d.Dynamic],
 	velocities *ecs.Set[ecsphysics2d.Velocity],
@@ -381,7 +398,7 @@ func (p *plugin) solveSystem(
 	step *ecs.In[float64],
 ) {
 	types.Solve(
-		contacts.Get(), bodies, joints, dynamics, velocities, places, sleeping,
+		contacts.Get(), bodies, every, sleepers, joints, dynamics, velocities, places, sleeping,
 		constants.Get().Gravity,
 		step.Get(), p.settings.iterations, p.settings.slop, p.settings.bias,
 	)
@@ -441,10 +458,25 @@ func (p *plugin) sleepSystem(
 // It is one System and not two. Both of the halves anyone would split it into
 // use Velocity, one writing and one reading, so a split serialises anyway and
 // costs about 6 µs of scheduling to buy nothing.
-func integrateSystem(bodies *ecs.Query[positionQuery], step *ecs.In[float64]) {
+//
+// It names its walk twice, with the Sleeping filter and without, and walks
+// every Body on a tick when nothing sleeps: types.NobodySleeps says why, and
+// why the lock set is the filtered walk's alone.
+func integrateSystem(
+	bodies *ecs.Query[positionQuery],
+	every *ecs.Query[everyPositionQuery],
+	sleepers *ecs.Query[types.SleeperQuery],
+	step *ecs.In[float64],
+) {
 	// Read once, outside the loop: In is a cell the adapter writes, so a Get
 	// inside the loop is a load the compiler cannot hoist.
 	h := step.Get()
+	if types.NobodySleeps(sleepers) {
+		for _, it := range every.All() {
+			types.IntegratePosition(it.Place, &it.Velocity, h)
+		}
+		return
+	}
 	for _, it := range bodies.All() {
 		types.IntegratePosition(it.Place, &it.Velocity, h)
 	}

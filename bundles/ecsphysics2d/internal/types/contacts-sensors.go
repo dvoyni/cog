@@ -72,9 +72,21 @@ func (c *Contacts) sweepSensors(bodies *BodyIndex, statics *StaticIndex) {
 		// to its own Probe too, and nothing here skips a Sensor: Overlap has to
 		// be able to find one, which is where the port departs from cp's point
 		// and segment queries.
+		//
+		// The awake grid is asked directly while nothing sleeps, which keeps
+		// the sweep the code it was before sleeping. The Body index's own
+		// probeAllSlots asks both grids and does not inline, and going through
+		// it measured 3% slower on the reference step at N = 1 024 with
+		// sleeping off, interleaved; the profile puts less than that in the
+		// sweep itself, so the number is quoted and the cause is not.
 		c.probeSlots = c.probeSlots[:0]
-		c.probes = bodies.probeAllSlots(c.probes[:0], &c.probeSlots,
-			from, to, radius, bits, collidesWith, sensor.entity)
+		if bodies.sleeping == 0 {
+			c.probes = moving.probeAllSlots(c.probes[:0], &c.probeSlots,
+				from, to, radius, bits, collidesWith, sensor.entity)
+		} else {
+			c.probes = bodies.probeAllSlots(c.probes[:0], &c.probeSlots,
+				from, to, radius, bits, collidesWith, sensor.entity)
+		}
 		split := len(c.probes)
 		c.probes = statics.ProbeAll(c.probes, from, to, radius, bits, collidesWith, sensor.entity)
 
