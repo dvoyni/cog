@@ -33,12 +33,13 @@ func (t *translator) textureUserData(f *frame) textureUserData {
 }
 
 // ensureShader resolves one material's shader to the module id its draw is
-// encoded against, and to the error that module has to say for itself.
-func (t *translator) ensureShader(f *frame, descr gfx.ShaderDescr) (gfx.ShaderID, error) {
+// encoded against, to the label its reports name it by, and to the error that
+// module has to say for itself.
+func (t *translator) ensureShader(f *frame, descr gfx.ShaderDescr) (gfx.ShaderID, string, error) {
 	cached := t.shaders.Get(
 		f.k, assets.Descr[types.ShaderDescrParams](descr), f.fsys, t.shaderUserData(f, descr.Path()),
 	)
-	return cached.id, cached.report()
+	return cached.id, cached.label, cached.report()
 }
 
 // shaderUserData is what the shader loader is handed on every call. root is the

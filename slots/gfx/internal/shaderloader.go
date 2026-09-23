@@ -14,7 +14,8 @@ import (
 // longer a translator field and "cached" was describing where it lived.
 //
 // It holds the backend id when the module compiled, the error when it did not,
-// and the sources it was built from, which is what eviction reads.
+// the sources it was built from, which is what eviction reads, and the label
+// every report about the module names it by.
 //
 // A failed shader is cached as failed, on the same key. Without that, the next
 // frame re-reads every source, re-flattens, re-fails and re-reports - at the
@@ -25,9 +26,13 @@ import (
 // nothing mutates a texture after its load, while report() sets reported on
 // every hit, and a value stored in a map cannot be mutated in place.
 type shader struct {
-	id       gfx.ShaderID
-	err      error
-	sources  []string
+	id      gfx.ShaderID
+	err     error
+	sources []string
+	// label is types.ShaderLabel of the descriptor, spelled once here because
+	// a supplied shader's label is a new string: built per draw, it was the
+	// frame's one allocation on every draw through a supply.
+	label    string
 	reported bool
 }
 
@@ -110,7 +115,7 @@ func (shaderLoader) Load(
 	// failed entry must evict like any other: without it a release naming one of
 	// the sources would clear every module that compiled and leave the one that
 	// did not behind.
-	value := &shader{sources: flattened.Sources}
+	value := &shader{sources: flattened.Sources, label: label}
 	if err != nil {
 		value.err = err
 		return value
@@ -151,7 +156,7 @@ func (shaderLoader) Load(
 // The root path is still recorded as the entry's one source, so a failed module
 // evicts by path exactly as a compiled one does.
 func (shaderLoader) Default(d assets.Descr[types.ShaderDescrParams], _ shaderUserData) *shader {
-	return &shader{sources: []string{d.Name}}
+	return &shader{sources: []string{d.Name}, label: types.ShaderLabel(types.ShaderDescr(d))}
 }
 
 // Free releases the module and everything the translator derived from it. This

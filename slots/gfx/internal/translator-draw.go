@@ -21,7 +21,7 @@ func (t *translator) translateDraw(f *frame, op *types.Op, pass gfx.PassDescr, u
 	// one thing gfx can say about an index buffer without walking it, and
 	// MeshIndexed is a pure value constructor with nowhere to say it.
 	if m.Indexed() && indices.ID() != 0 && indices.Size()%m.IndexWidth().Bytes() != 0 {
-		if err := t.reportIndexLength(m, types.ShaderLabel(op.Material.Shader())); err != nil && *firstErr == nil {
+		if err := t.reportIndexLength(m, op.Material.Shader()); err != nil && *firstErr == nil {
 			*firstErr = err
 		}
 		return
@@ -30,14 +30,13 @@ func (t *translator) translateDraw(f *frame, op *types.Op, pass gfx.PassDescr, u
 	// one that reports it: the error surfaces once, the draw is dropped every
 	// time. ErrShaderExceedsWebLimits stays the only report in gfx that drops
 	// nothing at all.
-	shaderID, err := t.ensureShader(f, op.Material.Shader())
+	shaderID, label, err := t.ensureShader(f, op.Material.Shader())
 	if err != nil && *firstErr == nil {
 		*firstErr = err
 	}
 	if shaderID == 0 {
 		return
 	}
-	label := types.ShaderLabel(op.Material.Shader())
 	// A vertex layout that does not supply what the shader reads is fatal to
 	// the draw on the same terms a shader failure is: it reports on the frame
 	// that built the pipeline and drops the draw on every frame after it.
@@ -104,13 +103,14 @@ func (t *translator) translateDraw(f *frame, op *types.Op, pass gfx.PassDescr, u
 // time that shape is seen, and nothing on the frames after it. The draw is
 // dropped either way: the caller returns before emitting anything, so
 // report-once-drop-always holds here the way it does for a failed pipeline.
-func (t *translator) reportIndexLength(m *gfx.MeshDescr, label string) error {
+// The shader's label is spelled only for a report, never on the frames after it.
+func (t *translator) reportIndexLength(m *gfx.MeshDescr, shader gfx.ShaderDescr) error {
 	key := indexLengthKey{length: types.MeshIndices(m).Size(), width: m.IndexWidth()}
 	if _, seen := t.badIndexLengths[key]; seen {
 		return nil
 	}
 	t.badIndexLengths[key] = struct{}{}
-	return gfx.ErrIndexBufferLength{Shader: label, Length: key.length, Width: key.width.Bytes()}
+	return gfx.ErrIndexBufferLength{Shader: types.ShaderLabel(shader), Length: key.length, Width: key.width.Bytes()}
 }
 
 // unsuppliedBuffer returns the first declared storage binding the draw does not

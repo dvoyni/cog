@@ -560,6 +560,8 @@ func BenchmarkTranslateSteadyState(b *testing.B) {
 	backend := &fakeBackend{layout: &layout}
 	translator := newTranslator()
 	queue := testOpQueue(backend)
+	// Without a pass every draw is a stray and the bench translates none of them.
+	queue.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto()})
 	mesh := gfx.Mesh(
 		types.BakedBuffer(1, 3*28),
 		gfx.TopologyTriangleList,
