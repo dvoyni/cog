@@ -144,7 +144,10 @@ func TestEveryPassBindsItsOwnInstanceSliceAndCountsFromZero(t *testing.T) {
 	}
 }
 
-func TestEveryDrawBindsTheFrameAndItsMaterialRecord(t *testing.T) {
+// Every draw binds its pass's frame block, the same range for every draw in the
+// pass. It binds no material storage: a material's numbers are its params,
+// which gfx packs into whatever the shader in effect declares.
+func TestEveryDrawBindsItsPasssFrame(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Box(0, m.At(0, 0, 0), testBoxColor)
@@ -164,18 +167,6 @@ func TestEveryDrawBindsTheFrameAndItsMaterialRecord(t *testing.T) {
 			frames[0].size, unsafe.Sizeof(model.FrameBlock{}))
 	}
 
-	materials := h.backend.buffersBoundTo("scenePbrMaterial")
-	if len(materials) != 2 {
-		t.Fatalf("scenePbrMaterial was bound %d times, want once per draw", len(materials))
-	}
-	if materials[0].offset == materials[1].offset {
-		t.Fatal("two differently coloured boxes bound one material record")
-	}
-	for _, binding := range materials {
-		if binding.offset%gfx.StorageAlignment != 0 {
-			t.Fatalf("a material record is at %d, which is not %d-aligned", binding.offset, gfx.StorageAlignment)
-		}
-	}
 }
 
 // One arena per binding, one upload each, whatever the frame draws.
@@ -191,14 +182,14 @@ func TestTheFrameUploadsOneBufferPerArena(t *testing.T) {
 	h.backend.bakes = 0
 	h.frame()
 
-	if h.backend.bakes != 5 {
-		t.Fatalf("a steady frame uploaded %d buffers, want the five arenas", h.backend.bakes)
+	if h.backend.bakes != 4 {
+		t.Fatalf("a steady frame uploaded %d buffers, want the four arenas", h.backend.bakes)
 	}
 	// The first frame also bakes the unit box's two durable buffers, once. It
 	// bakes nothing else: a debug box declares no group 2, so there is no
 	// identity pose, identity joint or zero delta for it to bind.
-	if first != 7 {
-		t.Fatalf("the first frame uploaded %d buffers, want the five arenas and the unit box", first)
+	if first != 6 {
+		t.Fatalf("the first frame uploaded %d buffers, want the four arenas and the unit box", first)
 	}
 }
 
@@ -286,25 +277,6 @@ func TestTheDefaultTexturesAreBakedOnce(t *testing.T) {
 	}
 	if second[1] != first[0] {
 		t.Fatalf("the second frame bound texture %d, want the first frame's %d", second[1], first[0])
-	}
-}
-
-// A material record is one per batch and 160 bytes of content, bound as a range
-// padded up to the storage alignment.
-func TestTheMaterialRecordIsBoundAsItsOwnRange(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
-		q.Camera(testCamera, testCameraDescr())
-		q.Box(0, m.At(0, 0, 0), testBoxColor)
-	})
-	h.frame()
-
-	materials := h.backend.buffersBoundTo("scenePbrMaterial")
-	if len(materials) != 1 {
-		t.Fatalf("scenePbrMaterial was bound %d times, want once per draw", len(materials))
-	}
-	if materials[0].size != int(unsafe.Sizeof(model.ScenePbrRecord{})) {
-		t.Fatalf("the material range is %d bytes, want the %d-byte record",
-			materials[0].size, unsafe.Sizeof(model.ScenePbrRecord{}))
 	}
 }
 

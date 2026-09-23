@@ -49,7 +49,7 @@ func (t *translator) translateDraw(f *frame, op *types.Op, pass gfx.PassDescr, u
 	}
 
 	layout := t.shaderLayout(f.backend, shaderID)
-	plan := t.prepareParameterPlan(shaderID, label, layout, op.Material.Params(), op.Params)
+	plan := t.preparePlanFor(shaderID, label, layout, &op.Material, op.Params)
 	if plan.mismatch != nil {
 		if *firstErr == nil {
 			*firstErr = plan.mismatch
@@ -288,8 +288,29 @@ func (t *translator) emitResources(f *frame, drawParams, materialParams []gfx.Pa
 	}
 }
 
+// preparePlanFor is prepareParameterPlan for one draw's material, taking the
+// material half of the shape hash from a material recorded for the frame
+// rather than hashing its names again.
+func (t *translator) preparePlanFor(
+	shader gfx.ShaderID, label string, layout gfx.ShaderLayout, material *gfx.MaterialDescr, draw []gfx.ParameterDescr,
+) *parameterPlan {
+	state, recorded := types.MaterialShapeState(material)
+	if !recorded {
+		state = types.ParameterShapeState(material.Params())
+	}
+	return t.planForShape(shader, label, layout, material.Params(), draw, types.ContinueParameterShape(state, draw))
+}
+
 func (t *translator) prepareParameterPlan(shader gfx.ShaderID, label string, layout gfx.ShaderLayout, material, draw []gfx.ParameterDescr) *parameterPlan {
-	key := parameterPlanBucketKey{shader: shader, hash: parameterShapeHash(material, draw)}
+	return t.planForShape(shader, label, layout, material, draw, parameterShapeHash(material, draw))
+}
+
+// planForShape finds or builds the plan for one parameter shape, given its
+// hash.
+func (t *translator) planForShape(
+	shader gfx.ShaderID, label string, layout gfx.ShaderLayout, material, draw []gfx.ParameterDescr, hash uint64,
+) *parameterPlan {
+	key := parameterPlanBucketKey{shader: shader, hash: hash}
 	bucket := t.parameterPlans[key]
 	for i := range bucket {
 		if parameterShapeEqual(&bucket[i], material, draw) {

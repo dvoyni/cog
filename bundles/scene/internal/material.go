@@ -49,12 +49,23 @@ type materialTable struct {
 	keys     map[types.MaterialKey]int32
 	interned []internedMaterial
 	nextID   uint32
+	// queue is gfx's queue the frame is recorded into. Every material the
+	// frame interns is recorded for it once, so every draw of the material
+	// names the queue's copy of its params rather than gfx copying them per
+	// draw.
+	queue *gfx.OpQueue
+	// bundledRecorded is which bundled variants this frame has recorded. A
+	// variant is recorded the first time a draw resolves to it rather than at
+	// reset, because recording bakes its ten textures and a frame drawing no
+	// bundled PBR would pay that for nothing.
+	bundledRecorded [model.VariantCount]bool
 }
 
 // reset starts a frame, interning the bundled PBR's four variants first and in
 // variant order, so that a draw naming no material of its own resolves to its
 // variant with no map probe at all.
-func (t *materialTable) reset(bundled [model.VariantCount]scene.Material) {
+func (t *materialTable) reset(bundled [model.VariantCount]scene.Material, queue *gfx.OpQueue) {
+	t.queue = queue
 	if t.keys == nil {
 		t.keys = map[types.MaterialKey]int32{}
 		t.tags = map[scene.PassTag]tagID{}
@@ -62,8 +73,9 @@ func (t *materialTable) reset(bundled [model.VariantCount]scene.Material) {
 	clear(t.keys)
 	t.interned = t.interned[:0]
 	t.nextID = 0
+	t.bundledRecorded = [model.VariantCount]bool{}
 	for _, material := range bundled {
-		t.add(discardBundledReports, material)
+		t.addUnrecorded(discardBundledReports, material)
 	}
 }
 
@@ -120,6 +132,10 @@ func (t *materialTable) intern(
 	report func(error), material scene.Material, key types.MaterialKey, variant model.ShaderVariant,
 ) int32 {
 	if material == nil {
+		if !t.bundledRecorded[variant] {
+			t.record(t.interned[variant].material)
+			t.bundledRecorded[variant] = true
+		}
 		return int32(variant)
 	}
 	if key == 0 {
@@ -141,6 +157,25 @@ func (t *materialTable) intern(
 // The duplicate check runs here, once per material per frame, over a slice of
 // one or two entries; it is not a per-draw cost.
 func (t *materialTable) add(report func(error), material scene.Material) int32 {
+	t.record(material)
+	return t.addUnrecorded(report, material)
+}
+
+// record records every tag of one material for the frame's queue, in place.
+// The material is the frame's own copy - a recorded draw's, or a model
+// material wrapped in the frame's arena - so recording it in place changes
+// nothing a caller holds, and the table's entries, which share its backing,
+// name the recorded descriptors. A table with no queue - a unit test's -
+// records nothing.
+func (t *materialTable) record(material scene.Material) {
+	for i := 0; t.queue != nil && i < len(material); i++ {
+		material[i].Descr = t.queue.FrameMaterial(material[i].Descr)
+	}
+}
+
+// addUnrecorded is add for a material recorded later or never: the bundled
+// variants, which are recorded on first use.
+func (t *materialTable) addUnrecorded(report func(error), material scene.Material) int32 {
 	record := t.allocate()
 	record.material = material
 	for i := range material {

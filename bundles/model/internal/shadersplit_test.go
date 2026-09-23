@@ -36,9 +36,11 @@ func TestTheSplitFlattensToExactlyItsSourcesLineCount(t *testing.T) {
 	}
 	// Ten from the split, plus vertexdecode.wgsl, which the storage vertex's
 	// narrowed normal and tangent added and which is published rather than
-	// internal - an app writing its own scene material includes it.
-	if len(names) != 11 {
-		t.Fatalf("the split ships %d sources, want eleven: %v", len(names), names)
+	// internal - an app writing its own scene material includes it - and the
+	// two stages scene.wgsl is now made of, published so an app shader is the
+	// bundled one with its own fs_main.
+	if len(names) != 13 {
+		t.Fatalf("the split ships %d sources, want thirteen: %v", len(names), names)
 	}
 	total := 0
 	for _, name := range names {

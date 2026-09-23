@@ -95,8 +95,8 @@ type PassView struct {
 }
 
 // BatchView is one run of instances drawn from one mesh with one material: one
-// gfx draw call, one material record, and InstanceCount contiguous instances of
-// the pass's own instance slice starting at FirstInstance.
+// gfx draw call and InstanceCount contiguous instances of the pass's own
+// instance slice starting at FirstInstance.
 //
 // What the flush batches is a run of equal opaque draws: the surviving
 // instances of one instanced call, and any draws recorded separately that

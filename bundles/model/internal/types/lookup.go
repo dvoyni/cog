@@ -74,6 +74,9 @@ type Lookup struct {
 	// texture baked then would either panic or silently not exist.
 	bundled    [VariantCount]gfx.MaterialDescr
 	hasBundled bool
+	// defaultShader is the default scene shader, zero for the bundled PBR.
+	// See SetDefaultSceneShader.
+	defaultShader SceneShaderDescr
 }
 
 // NewLookup builds an empty Lookup at model's default configuration; see
@@ -178,6 +181,20 @@ func (l *Lookup) EnsureBundled(bake BakeTextureFunc) [VariantCount]gfx.MaterialD
 	if l.hasBundled {
 		return l.bundled
 	}
+	l.bundled, l.hasBundled = BundledPbr(l.ensureBakedDefaults(bake)), true
+	return l.bundled
+}
+
+// EnsureBundledIngredients is EnsureBundled for a renderer that resolves its
+// own materials: the bundled PBR's ingredients, around the same two default
+// textures, baked the first time either is asked for.
+func (l *Lookup) EnsureBundledIngredients(bake BakeTextureFunc) MaterialIngredients {
+	return BundledIngredients(l.ensureBakedDefaults(bake))
+}
+
+// ensureBakedDefaults bakes the two 1x1 default textures through bake the
+// first time, and returns the same two forever after.
+func (l *Lookup) ensureBakedDefaults(bake BakeTextureFunc) PbrDefaults {
 	if !l.hasDefaults {
 		l.defaults = PbrDefaults{
 			White:      bake(1, 1, gfx.FormatRGBA8, []byte{0xff, 0xff, 0xff, 0xff}),
@@ -185,6 +202,5 @@ func (l *Lookup) EnsureBundled(bake BakeTextureFunc) [VariantCount]gfx.MaterialD
 		}
 		l.hasDefaults = true
 	}
-	l.bundled, l.hasBundled = BundledPbr(l.defaults), true
-	return l.bundled
+	return l.defaults
 }

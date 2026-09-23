@@ -120,18 +120,19 @@ func (t *materialTable) entry(interned int32, tag tagID) (materialEntry, bool) {
 	}, true
 }
 
-// intern returns the frame-local index of one Batch's material, interning it
-// the first time the frame sees its key. A Batch with no material of its own
-// takes the bundled PBR's variant. It is called once per Batch per frame.
-func (t *materialTable) intern(
-	report errorReporter, own bool, material material, key uint64, variant model.ShaderVariant,
-) int32 {
-	if !own {
-		return int32(variant)
-	}
-	if index, ok := t.keys[key]; ok {
-		return index
-	}
+// lookup reports the frame-local index of the material a key names, if the
+// frame has resolved it already. A Batch asks before resolving its material,
+// so a key the frame has seen resolves nothing twice.
+func (t *materialTable) lookup(key uint64) (int32, bool) {
+	index, ok := t.keys[key]
+	return index, ok
+}
+
+// intern interns one Batch's resolved material under its key and returns its
+// frame-local index. It is called at most once per key per frame; a Batch with
+// no material of its own takes the bundled PBR's variant, which is interned
+// first and in variant order, and never calls it.
+func (t *materialTable) intern(report errorReporter, material material, key uint64) int32 {
 	index := t.add(report, material)
 	t.keys[key] = index
 	return index

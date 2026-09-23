@@ -78,9 +78,9 @@ type ModelDraw struct {
 	MorphWeights []float32
 
 	// Material replaces the file's own materials wholesale, and nil is the
-	// file's. A non-nil value is bound instead of every record the load built,
-	// and the file's PBR records are not bound at all - its base colours,
-	// factors and texture transforms do not survive. That is the dissolve, the
+	// file's. A non-nil value is bound instead of every material the load
+	// built, and the file's params are not bound at all - its textures, base
+	// colours, factors and texture transforms do not survive. That is the dissolve, the
 	// silhouette and the depth-only case, where binding the artist's numbers
 	// under a shader that never heard of them would be a wrong picture with
 	// nothing in the frame to explain it.

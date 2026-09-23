@@ -1,17 +1,20 @@
-// The bundled PBR material: its per-batch record, its five texture slots, and
-// the fetch that turns them into shading inputs.
+// The bundled PBR material: its numbers, its five texture slots, and the fetch
+// that turns them into shading inputs.
 //#include ./pbr.wgsl
 
-// ScenePbrMaterial is the bundled material's per-batch record, bound as a range
-// of the frame's material arena. The binding is the addressing: no index has to
-// agree across the update/render thread boundary.
+// ScenePbrMaterial is the bundled material's numbers, the shader's one uniform
+// block. gfx packs it per draw from the draw's params by member name, like any
+// shader's uniforms, so the renderer that draws it knows none of these names:
+// model hands every member over as a named param with the material, and a
+// caller's param of the same name overrides it on the draw.
 //
-// Its numbers are glTF's, by verbatim name, because they are user-facing:
-// OverrideParams merges by name and the glTF specification is their
-// documentation. The per-slot metadata is flat named members rather than
-// `transforms: array<TexTransform, 5>`, because array members are not
-// name-addressable - and animating baseColorTransform per frame is UV
-// scrolling, which the array form forecloses permanently.
+// Its numbers are glTF's, by verbatim name, because they are user-facing: the
+// glTF specification is their documentation. The per-slot metadata is flat
+// named members rather than `transforms: array<TexTransform, 5>`, because
+// array members are not name-addressable - and animating baseColorTransform per
+// frame is UV scrolling, which the array form forecloses permanently. Being
+// the one uniform block gfx allows a shader, it is also why a shader including
+// this file carries its own numbers in textures rather than a block of its own.
 struct ScenePbrMaterial {
     baseColorFactor: vec4<f32>,
     emissiveFactor: vec4<f32>,
@@ -38,10 +41,9 @@ struct ScenePbrMaterial {
     // uvSets selects TEXCOORD_0 or TEXCOORD_1 per slot, one bit each. Two sets
     // is glTF core's minimum and the cap scene keeps.
     uvSets: u32,
-    pad: u32,
 };
 
-@group(1) @binding(0) var<storage, read> scenePbrMaterial: ScenePbrMaterial;
+@group(1) @binding(0) var<uniform> scenePbrMaterial: ScenePbrMaterial;
 // Five textures and five samplers, one pair per slot. glTF references a sampler
 // per texture and two slots of one material can legitimately differ - a tiling
 // ground beside a clamped decal - so a single shared sampler would silently

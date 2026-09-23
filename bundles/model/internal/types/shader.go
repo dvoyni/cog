@@ -63,10 +63,10 @@ const (
 	//     light array the frame does not hold.
 	//
 	// sceneFrame is the one storage binding the prelude costs, and it is one
-	// the renderer already counts: a caller material may declare no storage
-	// buffer of its own, because the bundled shader's fully animated variant
-	// holds all eight the browser floor allows. Do not declare those names
-	// again.
+	// the renderer already counts. The bundled shader's fully animated
+	// variant holds seven of the eight storage buffers the browser floor
+	// allows, so a caller material over the bundled stages has one of its own
+	// to spend. Do not declare those names again.
 	FramePath = "builtin/scene/frame.wgsl"
 
 	// PbrPath is the bundled material's BRDF and lighting loop: everything
@@ -90,6 +90,47 @@ const (
 	// resolved path, so a material that includes both gets one copy. Do not
 	// declare those names again.
 	PbrPath = "builtin/scene/pbr.wgsl"
+
+	// VertexStagePath is the bundled vertex stage whole: vs_main, which
+	// decodes, deforms and places a vertex exactly as the bundled shader does
+	// and hands the fragment stage a SceneVertexOut. A custom scene shader
+	// includes it and FragmentStagePath and writes only its own fs_main,
+	// which is how it becomes the bundled PBR plus one step rather than a
+	// copy of it that drifts.
+	//
+	// It declares:
+	//   - the entry point vs_main, so an includer declares no vertex stage;
+	//   - through the private sources it includes, every name the stage
+	//     reads: the structs SceneVertexIn, SceneVertexOut and SceneVertex,
+	//     the group 0 bindings sceneInstances, sceneAnim and sceneMeshes
+	//     beside FramePath's sceneFrame, and under SCENE_SKIN and SCENE_MORPH
+	//     the group 2 ones. Each of those begins scene, Scene or SCENE_, and
+	//     none is contract beyond that prefix.
+	//
+	// The variant is the renderer's: it supplies SCENE_SKIN and SCENE_MORPH
+	// for the draw's geometry whatever shader is in effect, so an includer
+	// declares neither. Do not declare those names again.
+	VertexStagePath = "builtin/scene/vertexstage.wgsl"
+
+	// FragmentStagePath is the bundled fragment stage as a function a custom
+	// fs_main calls: scenePbrFragment(in, frontFacing) is the surface the
+	// file's material describes, its MASK discard and its shading, as linear
+	// radiance in rgb and coverage in a.
+	//
+	// It declares:
+	//   - the function scenePbrFragment, which discards and so is callable
+	//     only from a fragment stage;
+	//   - through what it includes, SceneVertexOut, PbrPath and FramePath
+	//     whole, and the material's bindings: scenePbrMaterial, the uniform
+	//     block at @group(1) @binding(0), and the five textures and five
+	//     samplers PbrSlots names at @group(1) @binding(1) to (10), every one
+	//     filled on every draw from the file or the bundled defaults.
+	//
+	// scenePbrMaterial is the one uniform block gfx allows a shader, so an
+	// includer's own numbers ride in textures. Group 3 is left for the
+	// includer's own bindings, which ride as params on the Material or on the
+	// default scene shader. Do not declare those names again.
+	FragmentStagePath = "builtin/scene/fragmentstage.wgsl"
 )
 
 // SceneShader describes one variant of the bundled shader.

@@ -85,10 +85,8 @@ func (p *plugin) expandModels(
 		instances := call.Instances(&single)
 		for j := range view.Primitives {
 			primitive := &view.Primitives[j]
-			// A replacement material unbinds the file's record along with its
-			// bindings: "the file's parameters do not survive" is as much the
-			// numbers as the textures, and a nil record is what makes the draw
-			// take glTF's own defaults instead.
+			// A replacement material unbinds the file's params, numbers and
+			// textures alike: "the file's parameters do not survive".
 			// The variant is what this primitive deforms, not what its model
 			// does: a static prop bolted to an animated model reads neither
 			// the poses nor the deltas, and asking the model would charge it
@@ -102,14 +100,14 @@ func (p *plugin) expandModels(
 				primitive.Skinned, primitive.Joint, primitive.Plain
 			anim.Skin.Bound = anim.Skin.Bound && primitive.Skinned
 			anim.Skin.Morphed = anim.Skin.Morphed && primitive.Morph.Morphed()
-			material, record, key := call.Material, (*model.ScenePbrRecord)(nil), call.MaterialKey
+			material, key := call.Material, call.MaterialKey
 			if material == nil {
 				// The file's own material names no pass, so it is wrapped as
 				// the forward one here. Its key derives from the one the load
 				// took, so the flush never fingerprints a file material.
 				variant := model.VariantFor(anim.Skin.Bound, anim.Skin.Morphed)
 				material = p.forwardMaterial(owned.Forward[variant])
-				record, key = &owned.Record, types.ForwardMaterialKey(owned.Key[variant])
+				key = types.ForwardMaterialKey(owned.Key[variant])
 			}
 			// A morphed model packs a block per primitive rather than per
 			// call, because the four morph words and the sparse weight list
@@ -138,14 +136,11 @@ func (p *plugin) expandModels(
 					Material:    material,
 					MaterialKey: key,
 					Mesh:        primitive.Mesh,
-					Pbr:         record,
 					// The overrides ride on the draw's gfx parameters, which
 					// is where every name the entry's shader declares is
-					// resolved, and are marked as also addressing the record,
-					// which gfx cannot see.
-					Params:          call.Overrides,
-					OverridesRecord: len(call.Overrides) > 0,
-					Bounds:          primitive.Bounds,
+					// resolved, the material's numbers among them.
+					Params: call.Overrides,
+					Bounds: primitive.Bounds,
 					// A skinned placement is never culled. Its bind-pose sphere
 					// is the only bound the load has, and where the joints put
 					// it this frame is not knowable without replaying the blend

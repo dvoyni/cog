@@ -34,9 +34,6 @@ func TestSeparatelyRecordedEqualDrawsPackAsOneBatch(t *testing.T) {
 	if len(h.backend.draws) != 1 {
 		t.Fatalf("the backend saw %d draw calls, want one", len(h.backend.draws))
 	}
-	if materials := h.backend.buffersBoundTo("scenePbrMaterial"); len(materials) != 1 {
-		t.Fatalf("scenePbrMaterial was bound %d times, want one record for the batch", len(materials))
-	}
 }
 
 // A different key is a different batch: the draws do not even sort together
@@ -87,9 +84,9 @@ func TestDrawsWithDifferentParamsStaySeparate(t *testing.T) {
 }
 
 // Equal keys with a different bundled-PBR record stay separate: a batch writes
-// one record. Two debug boxes of different colours are the plainest case, since
-// the colour is the record and nothing else about them differs.
-func TestDrawsWithDifferentRecordsStaySeparate(t *testing.T) {
+// one paint. Two debug boxes of different colours are the plainest case, since
+// the colour is their paint and nothing else about them differs.
+func TestDrawsWithDifferentPaintStaySeparate(t *testing.T) {
 	h := newHarness(t, func(q *scene.OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Box(0, m.At(0, 0, -5), testBoxColor)
@@ -102,13 +99,13 @@ func TestDrawsWithDifferentRecordsStaySeparate(t *testing.T) {
 	if len(batches) != 2 {
 		t.Fatalf("published %d batches, want the equal pair and the odd one: %+v", len(batches), batches)
 	}
-	if materials := h.backend.buffersBoundTo("scenePbrMaterial"); len(materials) != 2 {
-		t.Fatalf("scenePbrMaterial was bound %d times, want one record per colour", len(materials))
+	if len(h.backend.draws) != 2 {
+		t.Fatalf("the backend saw %d draw calls, want one per colour", len(h.backend.draws))
 	}
 }
 
 // Two model calls with equal overrides merge and a third with its own stays
-// apart: the overrides land in the record as well as the gfx parameters.
+// apart: the overrides are the draws' gfx parameters, and a batch binds one set.
 func TestModelDrawsWithDifferentOverridesStaySeparate(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(q *scene.OpQueue) {
 		q.Camera(cameraMain, modelCamera())

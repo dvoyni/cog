@@ -10,9 +10,13 @@ takes is [`ecs.md` §Binding](../../../ecs/docs/specs/ecs.md#binding-how-another
 
 **It repeats scene's path, and is not an improvement on it.** ecsscene draws
 what scene would draw for the same frame: the same passes, the same labels, the
-same instances. It does not do anything scene does not do. The one thing it
-does differently is the call shape: it groups Entities into **Batches**, where
-scene draws every call on its own. That difference is what the redesign was for.
+same instances. It does differently two things. The first is the call shape: it
+groups Entities into **Batches**, where scene draws every call on its own. That
+difference is what the redesign was for. The second came after it
+([#568](https://github.com/dvoyni/cog/issues/568)): **a `Material` overlays what
+the file provides** rather than replacing it, and a draw naming no shader takes
+model's default scene shader. scene still replaces, and ignores the default;
+see [Materials overlay the file](#materials-overlay-the-file).
 
 Two standing rules come from [the model spec](../../../model/docs/specs/model.md),
 and nothing below reopens them:
@@ -43,6 +47,7 @@ Before it, ecsscene was a binding into `scene.OpQueue`: one `OpQueue.Model` or
 - [The load System](#the-load-system)
 - [The recording System](#the-recording-system)
 - [Batches](#batches)
+- [Materials overlay the file](#materials-overlay-the-file)
 - [What it is tested against](#what-it-is-tested-against)
 - [What it costs](#what-it-costs)
 - [Shapes that were rejected](#shapes-that-were-rejected)
@@ -177,17 +182,21 @@ it is the one ecsscene System that loads. For each Entity it:
 in a selector's view is not its index in the model, and `model` does not export
 the view's start.
 
-**The material key** is the model material's load-time key for its variant, or,
-with a `Material` override, a content key over each tag and its gfx fingerprint.
-Zero is the bundled PBR a `Mesh` with no `Material` draws with. **The `Params`
+**The material key** is the model material's load-time key for its variant.
+Under a `Material` it is that key and the `Material`'s content key (each tag and
+its gfx fingerprint) hashed together, because the `Material` is laid over the
+file material and one `Material` over two file materials resolves to two
+materials. A `Mesh`'s "file" is one for every `Mesh`, so its key is the
+`Material`'s alone. Zero is the bundled PBR a `Mesh` with no `Material` draws
+with. **The `Params`
 hash** is `gfx.FingerprintParams`, and absent or empty `Params` hash to zero.
 
 It also:
 
 - **drives `model`'s bake and release queues** every frame. Nothing else drains
   them in an ecsscene app, since scene's flush is not composed;
-- **ensures the bundled PBR** once the backend is up, and passes its materials
-  and the backend's readiness to the recording System through the key scratch,
+- **ensures the bundled PBR's ingredients** once the backend is up, and passes
+  them and the backend's readiness to the recording System through the key scratch,
   because the recording System holds the Lookup only for reading;
 - **walks no Entity in a steady frame.** No Hook names anything, so a steady
   frame hashes no material and no parameter.
@@ -215,16 +224,16 @@ and `*gfx.OpQueue` written. It reaches the Lookup only through
 `model.NewLookupReadAccess`, so it never loads. Each tick it:
 
 1. buckets every placed `Model` primitive and `Mesh` into the Batch its key
-   names. A Batch resolves its mesh, material, properties record and `Params`
-   once, from the first Entity bucketed into it, and each instance keeps its own
+   names. A Batch resolves its mesh, material and `Params` once, from the
+   first Entity bucketed into it, and each instance keeps its own
    world matrix, bounds, layers and animation offset;
 2. packs every light through `model.PackLight`, and every camera's passes;
 3. for each camera and pass, culls every instance by the camera's layer mask and
    the pass's frustum, then filters each Batch's survivors by whether its
    material serves the pass's tag;
 4. sorts: opaque by material and Batch, blended back to front;
-5. packs one properties record and one instanced draw per opaque Batch, and one
-   draw per blended instance, through `model`'s packers, and emits the arenas
+5. packs one instanced draw per opaque Batch, and one draw per blended
+   instance, through `model`'s packers, and emits the arenas
    and the passes into `*gfx.OpQueue` under `model`'s binding names.
 
 A frame before the backend is up, or with no window, is skipped whole, as
@@ -236,9 +245,9 @@ fountains be compared pass by pass, and a HUD reading `ArmFrameCmd` read both.
 A pass no material serves is still emitted, with its clear.
 
 **Batches also split by shader variant.** It changes nothing for a file's own
-material, whose key is per variant already. It stops an override `Material`
-over a skinned and an unskinned use of one mesh from sharing group-2 bindings
-that only one of them declares.
+material, whose key is per variant already. It stops a `Material` over a skinned
+and an unskinned use of one mesh from sharing group-2 bindings that only one of
+them declares.
 
 **An Entity whose model has no skin or morph packs no animation block.** scene
 appended one nobody referenced; the instance output is the same.
@@ -293,6 +302,89 @@ Batches, as in scene. An alpha-tested cutout is `BlendOpaque`, so it batches.
 it would opt into, and the only thing it changes that a game could observe is
 the order of opaque draws, which is already unspecified. It is not a heuristic,
 because equal keys batch deterministically.
+
+---
+
+## Materials overlay the file
+
+From [#568](https://github.com/dvoyni/cog/issues/568), which the consuming
+game's fade-to-black asked for: one step after shading, on every draw, glTF
+models included.
+
+**A `Material` used to mean *my shader and my bindings*.** On a `Model` that
+threw away the file's record (reset to white paint), its textures, and every
+material but one, since one `Material` served every primitive; and the variant
+was the caller's, so a shader without `SCENE_SKIN` drew a skinned model in its
+bind pose, and one with it over a static model lost the frame. **It now means
+*my shader, over what the file says*.** For each primitive and each tag:
+
+| Part | Resolved from |
+| --- | --- |
+| shader | the tag's, else the default scene shader; either way `model.VariantShader` adds the primitive's `SCENE_SKIN` / `SCENE_MORPH` |
+| params | the primitive's `model.MaterialIngredients.Params` — textures, samplers and numbers — ⊕ the default scene shader's `Params` ⊕ the tag's, by name; the `Params` Component rides on the draw, which gfx lays over them |
+| state | the tag's, else the file's |
+
+**model keeps each material's ingredients** — params and state — beside the
+four forward materials the bundled shader makes of them, which scene still
+draws. A `Mesh`'s are `model.BundledIngredients`.
+
+**The renderer knows no shader.** The bundled material's numbers were a
+storage struct the renderer packed per Batch, because gfx cannot fill a storage
+struct by name: every renderer carried the bundled PBR's record, merged
+overrides into it by hand, and bound it for every draw whatever shader was in
+effect. A shader of the caller's own could not have numbers of its own through
+that path, and one declaring `scenePbrMaterial` differently read PBR bytes as
+its own. So the numbers are the shader's one uniform block now, and each is a
+param of the material: gfx packs whatever block the shader in effect declares,
+by member name, with a draw's params over its material's. ecsscene and scene
+bind only what describes the scene, and the overlay above is the whole of how
+a number reaches a draw. It freed the eighth storage buffer, too.
+
+**Every material a frame interns is recorded once into gfx's queue.** A
+material now carries 27 params where it carried 10, and gfx copied and baked a
+material's params, and hashed every name to find its parameter plan, on every
+draw. A frame of 5 000 crates tinted 5 000 ways is 5 000 draws of one material,
+and measured 55% slower than before the change. `gfx.OpQueue.FrameMaterial`
+copies a material's params and takes the hash of their names once per frame;
+every draw naming the recorded material copies nothing of it and hashes only
+its own params. ecsscene records each material when it interns it, and a
+bundled variant the first time a bare `Mesh` draws it, because recording bakes
+its ten textures and a frame with no bare `Mesh` would pay that for nothing.
+scene does the same.
+
+Measured against `main` before the change, interleaved, eight rounds a side:
+the 5 000-tint frame (`BenchmarkFrameDistinct5000`) is 13.1 ms before and
+8.5 ms after, 35% less; the one-Batch arms are within 3%, and the empty frame
+pays about 1 µs for resolving the four bundled variants; scene's
+`BenchmarkFrame` is 12-17% faster, since merging draws no longer builds and
+compares a record for each. Allocations are unchanged: 19 objects a frame in
+every ecsscene arm, and scene one fewer, 22, for the materials arena it no
+longer uploads.
+
+**The default scene shader is model's**, on the Lookup
+(`LookupAccess.SetDefaultSceneShader`), read by the recording System once a
+frame through the read facade. **Resolution is per frame**, from the
+ingredients, into the frame's arenas, interned once per material key a frame
+sees, so the default can change at any time and nothing is rebuilt. The only
+state outside a frame is a map from (shader, variant) to the shader under the
+variant's defines, because a descriptor's supply is a string built at the call
+and building one per Batch per frame would be the steady frame's only
+allocation. The allocation test has an arm under a default shader to hold that.
+
+**A missing binding is gfx's to report, and it already does.** gfx fills an
+unfilled texture with white and an unfilled sampler with its default, and
+drops a draw whose declared storage buffer nothing supplies with
+`gfx.ErrStorageBufferUnsupplied`, once per shader and binding. The whole-frame
+loss #568 describes predates that. With the variant cog's, the skin and morph
+buffers can no longer be that binding.
+
+**The bundled shader is published in two stages** so an app shader calls the
+bundled fragment rather than copying it: `model.VertexStagePath` (`vs_main`)
+and `model.FragmentStagePath` (`scenePbrFragment`). `scene.wgsl` is the two plus
+a one-line `fs_main`. **Group 3 is the app's.** Groups 0 to 2 stay what cog
+binds. The material's block is the one uniform block gfx allows, so an app's own
+data rides in textures and samplers, or in the one storage buffer of the eight
+the bundled shader leaves.
 
 ---
 
@@ -407,6 +499,36 @@ Each was ruled out by the ticket named, most with the sequence that breaks it.
 - **`ArmFrameCmd` as the oracle.** Binding the wrong model's mesh with the right
   instance count passes.
 
+**Materials** ([#568](https://github.com/dvoyni/cog/issues/568)):
+
+- **A second mode beside replacement.** gfx binds by name and drops what no
+  binding declares, so an outline shader declaring only its own bindings
+  already replaces. A mode flag would be two spellings of one behaviour.
+- **`m.Maybe` for a tag's `Shader` and `State`.** The zero `gfx.ShaderDescr`
+  names no shader, so a zero `Shader` is unambiguous. A zero `State` is not:
+  it is `StateOverlay2D`, and zero-as-unset means a tag cannot ask for it.
+  That cost was taken over wrapping every tag's state, and it is recorded
+  here because it is a real hole.
+- **Baking the default scene shader into model's materials at load.** Its
+  params are typically baked textures, which exist only once the backend
+  does, so it is set after startup: the first model loaded before the call
+  would keep the old shader until rebuilt, or the call would have to be
+  refused. Resolving per frame from ingredients has neither case.
+- **Checking the shader's reflected bindings in ecsscene.** Reflection lives
+  in gfx's translator, on the render side of the queue; the recording System
+  never sees it, and gfx already refuses and reports the draw.
+- **Keeping the numbers a storage record the renderer packs.** The renderer
+  then knows the bundled shader: it merges a tag's params into a PBR struct by
+  hand, one record per tag, and binds it under every shader, and a shader of
+  the caller's own has no way to receive numbers through the same overlay.
+  The storage form was chosen when gfx's uniform path gave every draw a buffer
+  of its own; since it stages every draw's block in one arena at the same
+  256-byte stride the record padded to, it costs nothing the record did not.
+- **Applying the default shader's params only where the default shader is in
+  effect.** A tag's own shader then has to carry the scene-wide texture again
+  per Entity, which is what the default was for; a shader not declaring the
+  names never reads them.
+
 The rejected shapes of residency ([#497](https://github.com/dvoyni/cog/issues/497)),
 of the split of the frame code ([#521](https://github.com/dvoyni/cog/issues/521)),
 of the fountains ([#510](https://github.com/dvoyni/cog/issues/510)) and of the
@@ -424,5 +546,9 @@ ecsscene as much as scene, stay with the rest of `model`'s record in
   which landed afterwards in scene alone.
 - **Running scene and ecsscene together**, and detecting a stale `ModelHandle`.
   Both are undefined behaviour by the standing rules.
+- **scene overlaying Materials and taking the default scene shader.** scene
+  replaces as it did and ignores the default; ecsscene alone resolves over
+  ingredients ([#568](https://github.com/dvoyni/cog/issues/568)). Bringing
+  scene along is a separate issue.
 - **Merging the four test backends** (scene's, ecsscene's, gfx's `fakeBackend`,
   cog-examples' `headless.Backend`).

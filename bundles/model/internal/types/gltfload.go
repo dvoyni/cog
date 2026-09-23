@@ -16,7 +16,7 @@ import (
 // model's decoder produces the plain data and this conversion lays it out for
 // the GPU: it fills the conversion vertices the pack reads, generates flat
 // normals and tangents, remaps joints, packs the morph blocks, bakes the clips
-// onto the pose grid and fills the PBR records. None of that is the decoder's.
+// onto the pose grid and fills the PBR numbers. None of that is the decoder's.
 type LoadedModel struct {
 	// geometries are the converted primitives, one per distinct glTF primitive
 	// rather than one per node that references it. Two wheel nodes sharing a
@@ -107,7 +107,7 @@ type loadedScene = DecodedScene
 // scene binds per batch, the pipeline state it draws under, and the texture and
 // sampler each of the five slots binds.
 type loadedMaterial struct {
-	record ScenePbrRecord
+	values pbrValues
 	state  gfx.MaterialState
 	// slots index LoadedModel.textures, or missingTexture for a slot the file
 	// left empty or named no readable image for. Both fall back to the slot's
@@ -272,41 +272,41 @@ func (c *modelConverter) convertPrimitive(decoded *DecodedPrimitive) loadedPrimi
 	return placed
 }
 
-// convertMaterial fills one decoded material's bundled-PBR record and pipeline
+// convertMaterial fills one decoded material's bundled-PBR numbers and pipeline
 // state.
 //
-// The record's numbers are glTF's by verbatim name, which is what makes the
-// glTF specification the parameter documentation and what lets OverrideParams
-// merge by name with no translation table to drift out of date.
+// The numbers are glTF's by verbatim name, which is what makes the glTF
+// specification the parameter documentation and what lets a caller's param
+// override one by name with no translation table to drift out of date.
 func (c *modelConverter) convertMaterial(decoded *DecodedMaterial) loadedMaterial {
 	converted := loadedMaterial{
-		record: DefaultPbrRecord(),
+		values: defaultPbrValues(),
 		state:  PbrState(alphaModeOf(decoded.AlphaMode), decoded.DoubleSided),
 	}
 	if decoded.FrontCW {
 		converted.state.FrontFace = gfx.FrontCW
 	}
-	record := &converted.record
-	record.AlphaCutoff = decoded.AlphaCutoff
-	record.BaseColorFactor = decoded.BaseColorFactor
-	record.MetallicFactor = decoded.MetallicFactor
-	record.RoughnessFactor = decoded.RoughnessFactor
-	record.NormalScale = decoded.NormalScale
-	record.OcclusionStrength = decoded.OcclusionStrength
-	record.EmissiveFactor = decoded.EmissiveFactor
+	values := &converted.values
+	values.alphaCutoff = decoded.AlphaCutoff
+	values.baseColorFactor = decoded.BaseColorFactor
+	values.metallicFactor = decoded.MetallicFactor
+	values.roughnessFactor = decoded.RoughnessFactor
+	values.normalScale = decoded.NormalScale
+	values.occlusionStrength = decoded.OcclusionStrength
+	values.emissiveFactor = decoded.EmissiveFactor
 	for from, slot := range pbrSlotOf {
 		bound := &decoded.Slots[from]
 		converted.slots[slot], converted.samplers[slot] = missingTexture, bound.Sampler
 		if bound.Image != DecodedNoImage {
 			converted.slots[slot] = bound.Image
 		}
-		record.Transforms[slot], record.Rotations[slot] = bound.Transform, bound.Rotation
+		values.transforms[slot], values.rotations[slot] = bound.Transform, bound.Rotation
 		// An absent slot keeps the 1x1 default and the identity transform, so
 		// the shader's unconditional five samples cost the same either way. A
 		// bound one selects its UV set, which reports a set past the two scene
 		// carries.
 		if bound.Bound {
-			record.selectUVSet(func(err error) {
+			values.selectUVSet(func(err error) {
 				c.model.reports = append(c.model.reports, err)
 			}, slot, bound.TexCoord)
 		}

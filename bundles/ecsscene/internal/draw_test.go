@@ -20,6 +20,7 @@ import (
 const (
 	propsModel    = "models/props.glb"
 	animatedModel = "models/animated.glb"
+	paintedModel  = "models/painted.glb"
 )
 
 // triangle is the crate's one triangle, and quad the barrel's two: the vertex
@@ -110,6 +111,28 @@ func animatedGLB(t testing.TB) []byte {
 	return encodeGLB(t, doc)
 }
 
+// paintedGLB is one node holding two primitives under two materials: the
+// triangle red and blended, the quad green and double-sided. What a draw of
+// either keeps of its own material is what tells the two apart.
+func paintedGLB(t testing.TB) []byte {
+	t.Helper()
+	doc := &gltf.Document{Asset: gltf.Asset{Version: "2.0"}}
+	doc.Materials = []*gltf.Material{
+		{Name: "red", AlphaMode: gltf.AlphaBlend,
+			PBRMetallicRoughness: &gltf.PBRMetallicRoughness{BaseColorFactor: &[4]float64{1, 0, 0, 1}}},
+		{Name: "green", DoubleSided: true,
+			PBRMetallicRoughness: &gltf.PBRMetallicRoughness{BaseColorFactor: &[4]float64{0, 1, 0, 1}}},
+	}
+	doc.Meshes = []*gltf.Mesh{{Name: "painted", Primitives: []*gltf.Primitive{
+		{Attributes: gltf.PrimitiveAttributes{gltf.POSITION: modeler.WritePosition(doc, triangle)}, Material: gltf.Index(0)},
+		{Attributes: gltf.PrimitiveAttributes{gltf.POSITION: modeler.WritePosition(doc, quad)}, Material: gltf.Index(1)},
+	}}}
+	doc.Nodes = []*gltf.Node{{Name: "painted", Mesh: gltf.Index(0)}}
+	doc.Scenes = []*gltf.Scene{{Name: "scene", Nodes: []int{0}}}
+	doc.Scene = gltf.Index(0)
+	return encodeGLB(t, doc)
+}
+
 // crateModelComponent is a Model naming the crate file's whole default scene.
 func crateModelComponent() *ecsscene.Model {
 	return &ecsscene.Model{Ref: model.ModelRef{Path: crateModel}}
@@ -136,6 +159,7 @@ func newCameralessHarness(t testing.TB, ids uint32) *harness {
 		crateModel:    &fstest.MapFile{Data: crateGLB(t)},
 		propsModel:    &fstest.MapFile{Data: propsGLB(t)},
 		animatedModel: &fstest.MapFile{Data: animatedGLB(t)},
+		paintedModel:  &fstest.MapFile{Data: paintedGLB(t)},
 	}
 	h := newHarnessWith(t, files, ids, &testBackend{})
 	h.kernel.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{

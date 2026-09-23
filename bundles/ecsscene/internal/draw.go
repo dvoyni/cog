@@ -31,10 +31,9 @@ type pendingDraw struct {
 	// with. It is carried per draw because resolution is a pass-relative
 	// answer: the same material serves a different gfx material in a shadow
 	// pass.
-	material       *gfx.MaterialDescr
-	materialOffset int
-	firstInstance  int
-	instances      int
+	material      *gfx.MaterialDescr
+	firstInstance int
+	instances     int
 	// params are the Batch's Params, bound after the ranges the recording
 	// binds itself, so a Params value cannot displace them by naming one of
 	// their names.
@@ -47,7 +46,6 @@ type pendingDraw struct {
 type frameBuild struct {
 	instances arena
 	frames    arena
-	materials arena
 	// anims is the frame's sceneAnim arena. It is indexed absolutely rather
 	// than bound per pass: an instance's AnimOffset counts vec4s from the
 	// start of the whole buffer, so every draw binds it entire.
@@ -70,7 +68,6 @@ type frameBuild struct {
 func (b *frameBuild) reset() {
 	b.instances.reset()
 	b.frames.reset()
-	b.materials.reset()
 	b.anims.reset()
 	b.meshes.reset()
 	// Slot 0 first, before any draw can claim an index: the identity record is
@@ -91,7 +88,6 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 	}
 	instances := gfxWrite.TemporaryBuffer(b.instances.bytes(), true)
 	frames := gfxWrite.TemporaryBuffer(b.frames.bytes(), true)
-	materials := gfxWrite.TemporaryBuffer(b.materials.bytes(), true)
 	// sceneAnim is declared whether or not anything animates, so a frame that
 	// packed no block still uploads one empty record: an unbound declared
 	// binding is the silent whole-frame loss, not a degraded frame.
@@ -106,7 +102,6 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 				gfx.BufferRangeParam(model.BindingSceneInstances, instances, pass.instanceOffset, pass.instanceBytes),
 				gfx.BufferParam(model.BindingSceneAnim, anims),
 				gfx.BufferParam(model.BindingSceneMeshes, meshes),
-				gfx.BufferRangeParam(model.BindingScenePbrMaterial, materials, draw.materialOffset, model.ScenePbrRecordSize),
 			)
 			// Group 2 is bound only where the draw's variant declares it. The
 			// two halves go separately because the variants split them: a
@@ -141,9 +136,8 @@ func (b *frameBuild) beginPass(descr gfx.PassDescr, block model.FrameBlock) *pen
 
 // addDraw packs one Batch's surviving instances in one pass as one instanced
 // draw: one instance record per entry, packed contiguously through model's
-// packer, and one properties record. firstInstance is relative to the pass's
-// own slice, so the shader is the same whether the draw holds one instance or
-// five thousand.
+// packer. firstInstance is relative to the pass's own slice, so the shader is
+// the same whether the draw holds one instance or five thousand.
 func (b *frameBuild) addDraw(
 	pass *pendingPass, batch *batch, material materialEntry,
 	sorted []sortEntry, survivors []survivor, entries []entry,
@@ -156,13 +150,12 @@ func (b *frameBuild) addDraw(
 		b.instances.appendElement(&instance)
 	}
 	b.draws = append(b.draws, pendingDraw{
-		mesh:           batch.mesh.Descr(),
-		skin:           batch.skin,
-		material:       material.descr,
-		materialOffset: b.materials.appendRecord(&batch.pbr),
-		firstInstance:  first,
-		instances:      len(sorted),
-		params:         batch.params,
+		mesh:          batch.mesh.Descr(),
+		skin:          batch.skin,
+		material:      material.descr,
+		firstInstance: first,
+		instances:     len(sorted),
+		params:        batch.params,
 	})
 }
 

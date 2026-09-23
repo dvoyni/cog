@@ -230,10 +230,6 @@ type DrawRecord struct {
 	// zero mesh there is a draw of nothing, which is what a rejected mint
 	// yields.
 	Shape unitShape
-	// Pbr is the bundled-PBR record a model primitive brought with it, owned
-	// by the resident model entry and shared by every draw of it. It is nil
-	// for everything else, which synthesises its record from the draw.
-	Pbr *model.ScenePbrRecord
 	// Material is the scene material the draw named, or nil for the bundled
 	// PBR. Every debug shape leaves it nil, which is what makes a draw literal
 	// that omits the field untouched by the field existing.
@@ -252,15 +248,6 @@ type DrawRecord struct {
 	// Either way gfx resolves them over the entry's own material parameters by
 	// name, against its reflected layout, and drops what it does not declare.
 	Params []gfx.ParameterDescr
-	// OverridesRecord marks params as a model draw's OverrideParams, which
-	// carry a second destination gfx cannot serve: the members of the bundled
-	// PBR record, which is a bound range of an arena scene packs itself rather
-	// than a set of reflected uniforms, so gfx never sees a name for them.
-	//
-	// A MeshDraw's Params are for what a custom material declares and scene
-	// knows nothing about, so they stop at gfx; a mesh that wants a colour
-	// names a Material.
-	OverridesRecord bool
 	// Bounds is the draw's explicit local-space sphere, and neverCull exempts
 	// it from culling outright. Both are zero for a debug shape, which culls
 	// by its mesh's baked sphere.
@@ -296,42 +283,22 @@ func (r DrawRecord) World() m.Mat4 {
 	return r.Transform.ScaledMat4(r.Stretch)
 }
 
-// PbrRecord builds the bundled PBR record one recorded draw binds.
+// AppendPaint appends what a debug shape's colour is to the bundled material:
+// the params that turn its white paint into paint of the draw's colour, lit or
+// self-lit, as model spells them. Every other draw appends nothing: a model
+// primitive's numbers are its material's own params, and a mesh draw is white
+// paint unless its params say otherwise.
 //
-// Everything that takes the bundled PBR is paint, not metal: it takes glTF's
-// defaults except for metallic, because glTF defaults to a fully metallic
-// surface and a metal has no diffuse at all - it would render as a dark mirror
-// of an environment that does not exist, and scene has no image-based lighting
-// to reflect. That is the opposite of visible, which is the one thing a draw
-// with no material of its own has to be.
-//
-// A mesh draw stops there, at white paint. It carries no colour of its own
-// because colour is a material's business, and a mesh that wants one names a
-// Material; what white buys is that a mesh whose shading looks wrong is a
-// lighting question rather than an invisible one.
-//
-// A self-lit shape is black paint that glows: the colour goes into
-// emissiveFactor, which the shader adds after shading, and the base colour is
-// black so the lights contribute nothing to it.
-func (r DrawRecord) PbrRecord() model.ScenePbrRecord {
-	record := r.basePbrRecord()
-	if r.OverridesRecord {
-		record.Override(r.Params)
-	}
-	return record
-}
-
-// basePbrRecord is the record before a draw's own overrides merge into it: the
-// file's own for a model primitive, and paint synthesised from the draw for
-// everything else.
-func (r DrawRecord) basePbrRecord() model.ScenePbrRecord {
-	if r.Pbr != nil {
-		return *r.Pbr
-	}
+// Everything that takes the bundled PBR is paint, not metal: glTF defaults to
+// a fully metallic surface, and a metal with no image-based lighting to reflect
+// is a dark mirror, the opposite of visible - which is the one thing a draw
+// with no material of its own has to be. A self-lit shape is black paint that
+// glows.
+func (r DrawRecord) AppendPaint(dst []gfx.ParameterDescr) []gfx.ParameterDescr {
 	if r.Shape == ShapeNone {
-		return model.PaintPbrRecord(m.NewColorLinear(1, 1, 1, 1), false)
+		return dst
 	}
-	return model.PaintPbrRecord(r.Color, r.SelfLit)
+	return model.PaintParams(dst, r.Color, r.SelfLit)
 }
 
 // draw records one draw of any kind. Every recording call is sugar over it.

@@ -23,9 +23,13 @@ import (
 //   - A Mesh is (mesh, material, params), with model zero.
 //
 // material is the model material's load-time key for a file's own material,
-// taken through forwardMaterialKey, or the key of the Entity's Material
-// override. Zero is the bundled PBR a Mesh with no Material draws with, and no
-// real key is zero. params is the Params hash, zero for no parameters.
+// taken through forwardMaterialKey. An Entity's Material overlays that file
+// material rather than replacing it, so under one the key is the pair,
+// overlaidMaterialKey of the Material's key and the file material's; a Mesh's
+// "file" is the bundled PBR's ingredients, which are one for every Mesh, so
+// its key is the Material's alone. Zero is the bundled PBR a Mesh with no
+// Material draws with, and no real key is zero. params is the Params hash, zero
+// for no parameters.
 //
 // Layers, culling and the camera are not in it: they filter a Batch's
 // instances per pass.
@@ -72,12 +76,12 @@ type keyScratch struct {
 	// none.
 	walked int
 	// ready is whether this tick's backend is up, and bundled the bundled
-	// PBR's four forward materials, which the load System ensures once the
-	// backend is: the recording System holds the Lookup only for reading, so
-	// it takes both from here rather than baking anything itself.
+	// PBR's ingredients - a Mesh's "file" - which the load System ensures once
+	// the backend is: the recording System holds the Lookup only for reading,
+	// so it takes both from here rather than baking anything itself.
 	ready      bool
 	hasBundled bool
-	bundled    [model.VariantCount]gfx.MaterialDescr
+	bundled    model.MaterialIngredients
 }
 
 func newKeyScratch() *keyScratch {
@@ -163,9 +167,9 @@ func loadSystem(
 	}
 	lookup := lookupResource.Get()
 	// The bundled PBR bakes its two default textures the first time, and
-	// the Lookup returns the same four materials forever after.
+	// the Lookup binds the same two forever after.
 	if !s.hasBundled {
-		s.bundled = lookup.EnsureBundled(func(width, height int, format gfx.TextureFormat, pixels []byte) gfx.TextureDescr {
+		s.bundled = lookup.EnsureBundledIngredients(func(width, height int, format gfx.TextureFormat, pixels []byte) gfx.TextureDescr {
 			return resources.BakeTexture(width, height, format, pixels, true, false)
 		})
 		s.hasBundled = true
@@ -279,14 +283,15 @@ func (r *keyer) primitiveKeys(
 	skin := view.Animation.Skin()
 	for j := range view.Primitives {
 		primitive := &view.Primitives[j]
-		material := override
-		if !hasOverride {
-			// The file's own material, keyed at load for each shader
-			// variant; the variant is what this primitive deforms, exactly as
-			// the draw picks it.
-			variant := model.VariantFor(
-				skin.Bound && primitive.Skinned, skin.Morphed && primitive.Morph.Morphed())
-			material = forwardMaterialKey(view.Materials[primitive.Material].Key[variant])
+		// The file's own material, keyed at load for each shader variant; the
+		// variant is what this primitive deforms, exactly as the draw picks
+		// it. An override is laid over it, so the pair is the key.
+		variant := model.VariantFor(
+			skin.Bound && primitive.Skinned, skin.Morphed && primitive.Morph.Morphed())
+		file := view.Materials[primitive.Material].Key[variant]
+		material := forwardMaterialKey(file)
+		if hasOverride {
+			material = overlaidMaterialKey(override, file)
 		}
 		keys = append(keys, batchKey{
 			model: handle, mesh: primitive.Mesh, material: material, params: params,
@@ -370,6 +375,20 @@ func forwardMaterialKey(fingerprint uint64) uint64 {
 	var h maphash.Hash
 	h.SetSeed(materialSeed)
 	writeMaterialEntry(&h, ecsscene.TagForward, fingerprint)
+	return nonZero(h.Sum64())
+}
+
+// overlaidMaterialKey keys a Material laid over one file material: the
+// Material's key and the file material's fingerprint together, because the
+// same Material over two file materials resolves to two materials, each with
+// its own textures and state.
+func overlaidMaterialKey(override, fingerprint uint64) uint64 {
+	var h maphash.Hash
+	h.SetSeed(materialSeed)
+	var buf [16]byte
+	binary.LittleEndian.PutUint64(buf[:8], override)
+	binary.LittleEndian.PutUint64(buf[8:], fingerprint)
+	h.Write(buf[:])
 	return nonZero(h.Sum64())
 }
 

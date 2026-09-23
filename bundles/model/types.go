@@ -247,6 +247,17 @@ type (
 	// AlphaMode is glTF's alphaMode, which selects fixed-function state and,
 	// for alphaMask, a shader discard.
 	AlphaMode = types.AlphaMode
+	// MaterialIngredients are what a draw's material is resolved from apart
+	// from its shader: the params gfx binds by name - the textures, the
+	// samplers and the members of the scenePbrMaterial uniform block - and the
+	// pipeline state. A file's material keeps its own, and a baked mesh has
+	// BundledIngredients.
+	MaterialIngredients = types.MaterialIngredients
+	// SceneShaderDescr is the default scene shader: the shader a draw uses
+	// when nothing it names sets one, and params of its own overlaid under
+	// the draw's. Its zero value is the bundled PBR. See
+	// LookupAccess.SetDefaultSceneShader.
+	SceneShaderDescr = types.SceneShaderDescr
 )
 
 const (
@@ -296,6 +307,23 @@ const (
 	// own. It includes FramePath, so everything FramePath declares comes with
 	// it, once. Do not declare those names again.
 	PbrPath = types.PbrPath
+
+	// VertexStagePath is the storage path of the bundled vertex stage whole.
+	// It declares vs_main, and through the private sources it includes the
+	// structs SceneVertexIn, SceneVertexOut and SceneVertex and the group 0
+	// and group 2 bindings the stage reads, each named scene, Scene or SCENE_.
+	// The renderer supplies SCENE_SKIN and SCENE_MORPH for the draw's
+	// geometry, so an includer declares neither. Do not declare those names
+	// again.
+	VertexStagePath = types.VertexStagePath
+
+	// FragmentStagePath is the storage path of the bundled fragment stage as
+	// a function. It declares scenePbrFragment, which a custom fs_main calls
+	// for the shaded colour, and through what it includes SceneVertexOut,
+	// PbrPath, FramePath and the material's group 1 bindings, which the
+	// renderer fills on every draw. Group 3 is the includer's own. Do not
+	// declare those names again.
+	FragmentStagePath = types.FragmentStagePath
 )
 
 // PbrSlots are the bundled material's five texture slots, in record order, and
@@ -333,9 +361,6 @@ const (
 	// BindingSceneMeshes is the frame's whole SceneMesh arena, which an
 	// instance's Mesh indexes in records. Slot 0 is IdentityMesh.
 	BindingSceneMeshes = types.BindingSceneMeshes
-	// BindingScenePbrMaterial is one batch's ScenePbrRecord, bound as a range
-	// of ScenePbrRecordSize.
-	BindingScenePbrMaterial = types.BindingScenePbrMaterial
 	// BindingScenePoses and BindingSceneSkinJoints are a model's two durable
 	// pose buffers and BindingSceneMorphDeltas its delta buffer, from
 	// SkinBuffers: group 2, bound only where the draw's variant declares them.
@@ -352,7 +377,6 @@ const (
 	InstanceSize         = types.InstanceSize
 	FrameBlockSize       = types.FrameBlockSize
 	LightSize            = types.LightSize
-	ScenePbrRecordSize   = types.ScenePbrRecordSize
 	SceneMeshSize        = types.SceneMeshSize
 	SceneAnimHeaderSize  = types.SceneAnimHeaderSize
 	ScenePlayRecordSize  = types.ScenePlayRecordSize
@@ -384,8 +408,6 @@ type (
 	// LightSelection is one pass's light array, capped at MaxLights, filled
 	// by Offer and packed by PackFrameLighting.
 	LightSelection = types.LightSelection
-	// ScenePbrRecord is the bundled PBR's per-batch record.
-	ScenePbrRecord = types.ScenePbrRecord
 	// SceneMesh is the 32-byte per-mesh record the stored UVs decode against.
 	SceneMesh = types.SceneMesh
 	// ScenePlayRecord is one play as the shader reads it.

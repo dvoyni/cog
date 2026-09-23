@@ -21,8 +21,6 @@ const (
 	// BindingSceneMeshes is the frame's whole SceneMesh arena, which an
 	// instance's Mesh indexes in records.
 	BindingSceneMeshes = "sceneMeshes"
-	// BindingScenePbrMaterial is one batch's ScenePbrRecord, bound as a range.
-	BindingScenePbrMaterial = "scenePbrMaterial"
 	// BindingScenePoses and BindingSceneSkinJoints are a model's two durable
 	// pose buffers, and BindingSceneMorphDeltas its delta buffer: group 2,
 	// bound only where the draw's variant declares them.
@@ -293,8 +291,8 @@ type AnimMorph struct {
 //
 // A skinned draw appends one block per call and a morphed one a block per
 // primitive, because the three morph words are per-primitive constants. Putting
-// them in the per-batch material record would remove that duplication exactly,
-// and was rejected: it would put geometry constants into a record gfx packs on
+// them in the material's uniform block would remove that duplication exactly,
+// and was rejected: it would put geometry constants into a block gfx packs on
 // the render thread while a renderer records on the update thread.
 func AppendAnim(dst []byte, plays []ScenePlayRecord, morph AnimMorph) ([]byte, uint32) {
 	if len(plays) == 0 && len(morph.Targets) == 0 {
@@ -331,7 +329,6 @@ const (
 	InstanceSize         = int(unsafe.Sizeof(Instance{}))
 	FrameBlockSize       = int(unsafe.Sizeof(FrameBlock{}))
 	LightSize            = int(unsafe.Sizeof(Light{}))
-	ScenePbrRecordSize   = int(unsafe.Sizeof(ScenePbrRecord{}))
 	SceneMeshSize        = int(unsafe.Sizeof(SceneMesh{}))
 	SceneAnimHeaderSize  = int(unsafe.Sizeof(SceneAnimHeader{}))
 	ScenePlayRecordSize  = int(unsafe.Sizeof(ScenePlayRecord{}))

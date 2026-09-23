@@ -7,7 +7,7 @@ import (
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
-// UnloadModel gives up one path's geometry, baked poses and material records.
+// UnloadModel gives up one path's geometry, baked poses and materials.
 // Unloading an absent path is a no-op, and a later draw or query of an unloaded
 // path loads it again.
 //

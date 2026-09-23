@@ -21,7 +21,6 @@ func TestEveryRecordSizeIsTheOneTheShaderDeclares(t *testing.T) {
 		{"Instance", InstanceSize, 64},
 		{"Light", LightSize, 48},
 		{"FrameBlock", FrameBlockSize, 304 + MaxLights*48},
-		{"ScenePbrRecord", ScenePbrRecordSize, 160},
 		{"SceneMesh", SceneMeshSize, 32},
 		{"SceneAnimHeader", SceneAnimHeaderSize, 32},
 		{"ScenePlayRecord", ScenePlayRecordSize, 16},
@@ -151,53 +150,42 @@ func TestPackInstanceFlagsNonUniformScaleOnly(t *testing.T) {
 	}
 }
 
-// The record's offsets are one half of a contract with the WGSL struct, which
-// is asserted against the same numbers where the shader is reflected. Nothing
-// sits between the two halves: a renderer appends bytes, the shader reads them,
-// and a mismatch renders a plausible wrong picture.
-func TestPbrRecordMatchesItsShaderSideOffsets(t *testing.T) {
-	if size := unsafe.Sizeof(ScenePbrRecord{}); size != 160 {
-		t.Fatalf("ScenePbrRecord is %d bytes, want 160", size)
-	}
-	var record ScenePbrRecord
-	for _, test := range []struct {
-		name   string
-		offset uintptr
-		want   uintptr
-	}{
-		{name: "baseColorFactor", offset: unsafe.Offsetof(record.BaseColorFactor), want: 0},
-		{name: "emissiveFactor", offset: unsafe.Offsetof(record.EmissiveFactor), want: 16},
-		{name: "baseColorTransform", offset: unsafe.Offsetof(record.Transforms), want: 32},
-		{name: "baseColorRotation", offset: unsafe.Offsetof(record.Rotations), want: 112},
-		{name: "metallicFactor", offset: unsafe.Offsetof(record.MetallicFactor), want: 132},
-		{name: "roughnessFactor", offset: unsafe.Offsetof(record.RoughnessFactor), want: 136},
-		{name: "normalScale", offset: unsafe.Offsetof(record.NormalScale), want: 140},
-		{name: "occlusionStrength", offset: unsafe.Offsetof(record.OcclusionStrength), want: 144},
-		{name: "alphaCutoff", offset: unsafe.Offsetof(record.AlphaCutoff), want: 148},
-		{name: "uvSets", offset: unsafe.Offsetof(record.UVSets), want: 152},
-	} {
-		if test.offset != test.want {
-			t.Errorf("%s is at offset %d, want %d", test.name, test.offset, test.want)
-		}
-	}
-}
-
 // A surface with no material is paint, not metal: glTF's defaults with
 // metallic 0 and the colour as base. Self-lit paint is black and glows.
 func TestPaintIsNonMetallicAndSelfLitPaintGlows(t *testing.T) {
 	color := m.NewColorLinear(0.25, 0.5, 0.75, 0.5)
-	paint := PaintPbrRecord(color, false)
-	want := DefaultPbrRecord()
-	want.MetallicFactor = 0
-	want.BaseColorFactor = m.Vec4{X: 0.25, Y: 0.5, Z: 0.75, W: 0.5}
+	paint := paintPbrValues(color, false)
+	want := defaultPbrValues()
+	want.metallicFactor = 0
+	want.baseColorFactor = m.Vec4{X: 0.25, Y: 0.5, Z: 0.75, W: 0.5}
 	if paint != want {
 		t.Errorf("paint is %+v, want %+v", paint, want)
 	}
-	glow := PaintPbrRecord(color, true)
-	want.BaseColorFactor = m.Vec4{W: 0.5}
-	want.EmissiveFactor = m.Vec4{X: 0.25, Y: 0.5, Z: 0.75}
+	glow := paintPbrValues(color, true)
+	want.baseColorFactor = m.Vec4{W: 0.5}
+	want.emissiveFactor = m.Vec4{X: 0.25, Y: 0.5, Z: 0.75}
 	if glow != want {
 		t.Errorf("self-lit paint is %+v, want %+v", glow, want)
+	}
+}
+
+// PaintParams is paint as a renderer lays it over white paint on the draw:
+// exactly the two factors that differ, by the shader's names.
+func TestPaintParamsAreTheTwoFactorsPaintChanges(t *testing.T) {
+	color := m.NewColorLinear(0.25, 0.5, 0.75, 0.5)
+	for _, selfLit := range []bool{false, true} {
+		params := PaintParams(nil, color, selfLit)
+		values := paintPbrValues(color, selfLit)
+		want := map[string]m.Vec4{"baseColorFactor": values.baseColorFactor, "emissiveFactor": values.emissiveFactor}
+		if len(params) != len(want) {
+			t.Fatalf("self-lit %v: %d params, want %d", selfLit, len(params), len(want))
+		}
+		for _, param := range params {
+			got, ok := param.VecValue()
+			if !ok || got != want[param.Name()] {
+				t.Errorf("self-lit %v: %s is %v, want %v", selfLit, param.Name(), got, want[param.Name()])
+			}
+		}
 	}
 }
 

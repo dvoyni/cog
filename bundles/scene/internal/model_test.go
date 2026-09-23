@@ -395,14 +395,13 @@ func TestAnUnboundedModelIsNeverCulled(t *testing.T) {
 	}
 }
 
-// A model's own materials reach the record scene binds per batch.
+// A model's own materials reach the draw as params, its numbers among them.
 //
-// Two glTF materials that differ only in their factors are deliberately one gfx
-// material: the factors live in the ScenePbrRecord, which is a bound range of
-// the frame's arena, so the pipeline and the bindings are identical and the two
-// share a material id. That is what "the binding is the addressing" buys - one
-// pipeline, two records, no index anyone has to agree on.
-func TestAModelBindsItsOwnMaterialRecords(t *testing.T) {
+// Two glTF materials that differ only in their factors are two gfx materials:
+// the factors are params of the material, which gfx packs into the shader's
+// uniform block by name, so scene binds no number of its own and the two
+// report two material ids.
+func TestAModelBindsItsOwnMaterialNumbers(t *testing.T) {
 	doc := testDoc()
 	doc.Materials = []*gltf.Material{
 		{PBRMetallicRoughness: &gltf.PBRMetallicRoughness{
@@ -424,9 +423,9 @@ func TestAModelBindsItsOwnMaterialRecords(t *testing.T) {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 2
 	})
 	batches := h.passes()[0].Batches
-	if batches[0].MaterialID != batches[1].MaterialID {
-		t.Errorf("material ids = %d and %d; two materials differing only in their factors "+
-			"are one pipeline and two records", batches[0].MaterialID, batches[1].MaterialID)
+	if batches[0].MaterialID == batches[1].MaterialID {
+		t.Errorf("material ids = %d and %d; two materials differing in their factors "+
+			"are two materials", batches[0].MaterialID, batches[1].MaterialID)
 	}
 	if batches[0].MeshID == batches[1].MeshID {
 		t.Errorf("both primitives report mesh %d, want two", batches[0].MeshID)
@@ -434,7 +433,8 @@ func TestAModelBindsItsOwnMaterialRecords(t *testing.T) {
 	var records []m.Vec4
 	h.inspect(func(q *scene.OpQueue) {
 		for _, draw := range types.OpQueueFlushDraws(q) {
-			records = append(records, draw.PbrRecord().BaseColorFactor)
+			base, _ := numberOf(draw, "baseColorFactor")
+			records = append(records, base)
 		}
 	})
 	want := map[m.Vec4]bool{{X: 1, W: 1}: true, {Y: 1, W: 1}: true}

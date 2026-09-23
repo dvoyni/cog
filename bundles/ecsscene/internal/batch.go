@@ -75,8 +75,11 @@ func (s *scratch) addModel(frame *frameInputs, e ecs.Entity, it *modelQuery) {
 }
 
 // newModelBatch resolves everything a Model primitive's Batch shares, from the
-// first Entity bucketed into it: its mesh, its material, its properties record
-// and its Params. It returns -1 for a Batch that cannot draw.
+// first Entity bucketed into it: its mesh, its material and its Params. It
+// returns -1 for a Batch that cannot draw.
+//
+// The primitive's own material is the base whatever the Entity says: an
+// Entity's Material is laid over it, tag by tag, rather than put in its place.
 func (s *scratch) newModelBatch(
 	frame *frameInputs, e ecs.Entity, view *model.ModelView, j int,
 	variant model.ShaderVariant, skin model.SkinBuffers, bound, morphed bool, materialKey uint64,
@@ -91,29 +94,26 @@ func (s *scratch) newModelBatch(
 	}
 	skin.Bound, skin.Morphed = bound, morphed
 	b := batch{mesh: mesh, skin: skin}
-	var own material
-	if override, ok := frame.materials.Of(e); ok {
-		// A replacement material unbinds the file's record along with its
-		// bindings: the draw takes glTF's own defaults instead.
-		own = s.copyMaterial(&override)
-		b.pbr = model.PaintPbrRecord(m.NewColorLinear(1, 1, 1, 1), false)
-	} else {
-		// The file's own material names no pass, so it is wrapped as the
-		// forward one, and its key is the one the load took.
-		owned := &view.Materials[primitive.Material]
-		own = s.forwardMaterial(owned.Forward[variant])
-		b.pbr = owned.Record
-	}
 	if p, ok := frame.params.Of(e); ok {
 		b.params = s.copyParams(&p)
 	}
-	// A Model's Params merge by name over the properties record as well as
-	// riding on the draw's gfx parameters, because the record is a range the
-	// recording packs itself and gfx never sees a name in it.
-	if len(b.params) > 0 {
-		b.pbr.Override(b.params)
+	owned := &view.Materials[primitive.Material]
+	override, hasMaterial := frame.materials.Of(e)
+	if b.interned, ok = s.materials.lookup(materialKey); !ok {
+		var own material
+		switch {
+		case hasMaterial:
+			own = s.resolveMaterial(&override, &owned.MaterialIngredients, variant)
+		case s.bundledDefault:
+			// The file's own material under the bundled shader is what the
+			// load already built, so it is drawn untouched.
+			own = s.forwardMaterial(owned.Forward[variant])
+		default:
+			own = s.forwardMaterial(s.resolveDescr(
+				&owned.MaterialIngredients, gfx.ShaderDescr{}, gfx.MaterialState{}, nil, variant))
+		}
+		b.interned = s.materials.intern(s.k, s.recorded(own), materialKey)
 	}
-	b.interned = s.materials.intern(s.k, true, own, materialKey, variant)
 	s.batches = append(s.batches, b)
 	return int32(len(s.batches) - 1)
 }
@@ -143,9 +143,11 @@ func (s *scratch) addMesh(frame *frameInputs, e ecs.Entity, it *meshQuery) {
 	})
 }
 
-// newMeshBatch resolves a Mesh Batch from its first Entity. A Mesh draws with
-// the bundled PBR as white paint unless it names a Material, and its Params
-// stop at gfx: they are for what a custom material declares.
+// newMeshBatch resolves a Mesh Batch from its first Entity. A Mesh's "file" is
+// the bundled PBR's ingredients - white and flat in every slot, opaque, white
+// paint - and it takes the same path a Model primitive does: with no Material
+// it draws the default scene shader over them, and a Material is laid over
+// them tag by tag.
 func (s *scratch) newMeshBatch(frame *frameInputs, e ecs.Entity, ref model.MeshRef, materialKey uint64) int32 {
 	mesh, ok := frame.read.Mesh(ref)
 	if !ok {
@@ -156,20 +158,28 @@ func (s *scratch) newMeshBatch(frame *frameInputs, e ecs.Entity, ref model.MeshR
 		}
 		return -1
 	}
-	b := batch{mesh: mesh, pbr: model.PaintPbrRecord(m.NewColorLinear(1, 1, 1, 1), false)}
 	override, hasMaterial := frame.materials.Of(e)
 	if !mesh.Standard && !hasMaterial {
 		s.reportMeshOnce(ref, ecsscene.ErrMeshCustomLayoutNeedsMaterial{Mesh: ref.ID()})
 		return -1
 	}
-	var own material
-	if hasMaterial {
-		own = s.copyMaterial(&override)
-	}
+	b := batch{mesh: mesh}
 	if p, ok := frame.params.Of(e); ok {
 		b.params = s.copyParams(&p)
 	}
-	b.interned = s.materials.intern(s.k, hasMaterial, own, materialKey, model.VariantStatic)
+	bundled := &frame.keys.bundled
+	b.interned = int32(model.VariantStatic)
+	if !hasMaterial && !s.bundledRecorded[model.VariantStatic] {
+		// The table interned this material at begin, and the window it holds
+		// is the one recorded here, in place.
+		s.recorded(s.bundled[model.VariantStatic])
+		s.bundledRecorded[model.VariantStatic] = true
+	}
+	if hasMaterial {
+		if b.interned, ok = s.materials.lookup(materialKey); !ok {
+			b.interned = s.materials.intern(s.k, s.recorded(s.resolveMaterial(&override, bundled, model.VariantStatic)), materialKey)
+		}
+	}
 	s.batches = append(s.batches, b)
 	return int32(len(s.batches) - 1)
 }
@@ -265,22 +275,105 @@ func (s *scratch) copyParams(params *ecsscene.Params) []gfx.ParameterDescr {
 	return s.params[start:len(s.params):len(s.params)]
 }
 
-// copyMaterial rebuilds a Material Component as the material it describes, in
-// the frame's arenas. Each tag's params are a full-slice window of tagParams,
-// so no tag can append into the next one's. A Material with no tags is an
-// empty material, which serves no pass.
-func (s *scratch) copyMaterial(component *ecsscene.Material) material {
+// recorded records every tag of a material the frame interns into gfx's queue,
+// once, so that every draw of it names the queue's copy: gfx copies a
+// material's params into its queue on every draw it is not recorded for, and a
+// Batch's material is drawn once per Batch per pass.
+func (s *scratch) recorded(material material) material {
+	for i := range material {
+		material[i].descr = s.queue.FrameMaterial(material[i].descr)
+	}
+	return material
+}
+
+// resolveMaterial resolves a Material Component over one file material's
+// ingredients, one gfx material per tag, in the frame's arenas. Each tag's
+// params are a full-slice window of tagParams, so no tag can append into the
+// next one's. A Material with no tags is an empty material, which serves no
+// pass.
+func (s *scratch) resolveMaterial(
+	component *ecsscene.Material, file *model.MaterialIngredients, variant model.ShaderVariant,
+) material {
 	start := len(s.tags)
 	for _, tag := range component.Tags.All() {
-		first := len(s.tagParams)
-		for _, param := range tag.Params.All() {
-			s.tagParams = append(s.tagParams, param)
-		}
-		own := s.tagParams[first:len(s.tagParams):len(s.tagParams)]
 		s.tags = append(s.tags, materialTag{
 			tag:   tag.Tag,
-			descr: gfx.MaterialWithState(tag.Shader, tag.State, own...),
+			descr: s.resolveDescr(file, tag.Shader, tag.State, &tag.Params, variant),
 		})
 	}
 	return s.tags[start:len(s.tags):len(s.tags)]
+}
+
+// resolveDescr is the one resolution every draw's material goes through, for
+// one tag or for none:
+//
+//   - the shader is the tag's, or the default scene shader where it names
+//     none, under the variant's defines whichever it is;
+//   - the params are the file's - its textures and samplers, and its numbers,
+//     which the shader in effect reads as uniform members if it declares
+//     them - overlaid by name with the default scene shader's and then the
+//     tag's;
+//   - the state is the tag's, or the file's where it names none.
+//
+// The Params Component is not merged here: it rides on the draw, and gfx lays
+// a draw's params over its material's by name. Nothing here knows what any
+// param means - a Batch binds whatever the shader in effect declares.
+func (s *scratch) resolveDescr(
+	file *model.MaterialIngredients, shader gfx.ShaderDescr, state gfx.MaterialState,
+	own *m.List[gfx.ParameterDescr], variant model.ShaderVariant,
+) gfx.MaterialDescr {
+	if shader == (gfx.ShaderDescr{}) {
+		shader = s.defaultShader.Source
+	}
+	if state == (gfx.MaterialState{}) {
+		state = file.State
+	}
+	start := len(s.tagParams)
+	s.tagParams = append(s.tagParams, file.Params...)
+	s.tagParams = overlayParams(s.tagParams, start, s.defaultShader.Params)
+	if own != nil {
+		for _, param := range own.All() {
+			s.tagParams = overlayParam(s.tagParams, start, param)
+		}
+	}
+	params := s.tagParams[start:len(s.tagParams):len(s.tagParams)]
+	return gfx.MaterialWithState(s.variantShader(shader, variant), state, params...)
+}
+
+// variantShader is model.VariantShader, kept across frames: see
+// scratch.variants.
+func (s *scratch) variantShader(shader gfx.ShaderDescr, variant model.ShaderVariant) gfx.ShaderDescr {
+	if variant == model.VariantStatic && shader != (gfx.ShaderDescr{}) {
+		return shader
+	}
+	key := variantShaderKey{shader: shader, variant: variant}
+	if resolved, ok := s.variants[key]; ok {
+		return resolved
+	}
+	resolved := model.VariantShader(shader, variant)
+	s.variants[key] = resolved
+	return resolved
+}
+
+// overlayParams lays params over the window arena[start:] by name, in order:
+// a param whose name the window holds replaces that one in place, and any
+// other is appended. The window's order is kept, so the file's params stay
+// where they were and nothing is bound twice.
+func overlayParams(arena []gfx.ParameterDescr, start int, params []gfx.ParameterDescr) []gfx.ParameterDescr {
+	for _, param := range params {
+		arena = overlayParam(arena, start, param)
+	}
+	return arena
+}
+
+// overlayParam is overlayParams for one param.
+func overlayParam(arena []gfx.ParameterDescr, start int, param gfx.ParameterDescr) []gfx.ParameterDescr {
+	name := param.Name()
+	for i := start; i < len(arena); i++ {
+		if arena[i].Name() == name {
+			arena[i] = param
+			return arena
+		}
+	}
+	return append(arena, param)
 }

@@ -1112,9 +1112,9 @@ them, the run takes any draw recorded separately that is equal to the run's head
 on all of:
 
 - the opaque key, `materialID<<32 | meshID`;
-- the per-draw gfx `Params`, and whether they override the bundled-PBR record,
-  and so the record `PbrRecord()` builds. Params compare by gfx's own
-  `FingerprintParams`, the one ecsscene keys its batches on;
+- the per-draw gfx `Params`, compared by gfx's own `FingerprintParams`, the one
+  ecsscene keys its batches on, and a debug shape's colour, which becomes paint
+  params at the draw;
 - the animation binding. A batch packs one binding for all its instances, so
   separately animated draws stay separate: each animated call packs its own
   `sceneAnim` block and carries its own offset.

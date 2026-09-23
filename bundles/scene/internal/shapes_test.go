@@ -104,24 +104,24 @@ func TestTheUnitSphereAndPlaneBakeLazilyAndOnce(t *testing.T) {
 		}
 	})
 	h.frame()
-	// Five arenas and the unit box's two buffers. A box declares no group 2, so
+	// Four arenas and the unit box's two buffers. A box declares no group 2, so
 	// there is nothing else for it to bake.
-	if h.backend.bakes != 7 {
-		t.Fatalf("a boxes-only first frame uploaded %d buffers, want 7", h.backend.bakes)
+	if h.backend.bakes != 6 {
+		t.Fatalf("a boxes-only first frame uploaded %d buffers, want 6", h.backend.bakes)
 	}
 
 	shapes = 3
 	h.backend.bakes = 0
 	h.frame()
-	// Five arenas, plus two buffers each for the sphere and the plane, once,
+	// Four arenas, plus two buffers each for the sphere and the plane, once,
 	// however many of them the frame draws.
-	if h.backend.bakes != 9 {
-		t.Fatalf("the first frame with spheres and planes uploaded %d buffers, want 9", h.backend.bakes)
+	if h.backend.bakes != 8 {
+		t.Fatalf("the first frame with spheres and planes uploaded %d buffers, want 8", h.backend.bakes)
 	}
 	h.backend.bakes = 0
 	h.frame()
-	if h.backend.bakes != 5 {
-		t.Fatalf("a steady frame uploaded %d buffers, want the five arenas", h.backend.bakes)
+	if h.backend.bakes != 4 {
+		t.Fatalf("a steady frame uploaded %d buffers, want the four arenas", h.backend.bakes)
 	}
 
 	pass := h.passes()[0]
@@ -191,18 +191,16 @@ func TestLinesAreSelfLitAndSolidsAreLit(t *testing.T) {
 	paint := m.Vec4{X: testBoxColor.R, Y: testBoxColor.G, Z: testBoxColor.B, W: testBoxColor.A}
 	glow := m.Vec4{X: testLineColor.R, Y: testLineColor.G, Z: testLineColor.B}
 	for i, record := range types.OpQueueRecordedDraws(&q) {
-		pbr := record.PbrRecord()
-		if pbr.MetallicFactor != 0 {
-			t.Fatalf("draw %d is metallic %v, want paint", i, pbr.MetallicFactor)
-		}
+		base, _ := numberOf(record, "baseColorFactor")
+		emissive, _ := numberOf(record, "emissiveFactor")
 		if i < 3 {
-			if pbr.BaseColorFactor != paint || pbr.EmissiveFactor != (m.Vec4{}) {
-				t.Fatalf("lit draw %d has base %v and emissive %v, want the colour and none", i, pbr.BaseColorFactor, pbr.EmissiveFactor)
+			if base != paint || emissive != (m.Vec4{}) {
+				t.Fatalf("lit draw %d has base %v and emissive %v, want the colour and none", i, base, emissive)
 			}
 			continue
 		}
-		if pbr.BaseColorFactor != (m.Vec4{W: 1}) || pbr.EmissiveFactor != glow {
-			t.Fatalf("self-lit draw %d has base %v and emissive %v, want black and the colour", i, pbr.BaseColorFactor, pbr.EmissiveFactor)
+		if base != (m.Vec4{W: 1}) || emissive != glow {
+			t.Fatalf("self-lit draw %d has base %v and emissive %v, want black and the colour", i, base, emissive)
 		}
 	}
 }
@@ -299,8 +297,8 @@ func TestEveryDebugShapeBindsTheBundledMaterial(t *testing.T) {
 	if textures := h.backend.texturesBoundTo("baseColorTexture"); len(textures) != 3 {
 		t.Fatalf("baseColorTexture was bound %d times, want once per shape", len(textures))
 	}
-	if materials := h.backend.buffersBoundTo("scenePbrMaterial"); len(materials) != 3 {
-		t.Fatalf("scenePbrMaterial was bound %d times, want once per shape", len(materials))
+	if len(h.backend.draws) != 3 {
+		t.Fatalf("the backend saw %d draw calls, want one per shape", len(h.backend.draws))
 	}
 }
 
@@ -323,7 +321,7 @@ func TestAWireBoxPacksAsOneBatch(t *testing.T) {
 	if len(batches) != 1 || batches[0].FirstInstance != 0 || batches[0].InstanceCount != 12 {
 		t.Fatalf("published %+v, want the twelve edges as one batch", batches)
 	}
-	if materials := h.backend.buffersBoundTo("scenePbrMaterial"); len(materials) != 1 {
-		t.Fatalf("scenePbrMaterial was bound %d times, want one record for the box", len(materials))
+	if len(h.backend.draws) != 1 {
+		t.Fatalf("the backend saw %d draw calls, want one for the box", len(h.backend.draws))
 	}
 }

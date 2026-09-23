@@ -533,9 +533,6 @@ func TestAnInstancedOpaqueDrawIsOneBatchOfItsSurvivors(t *testing.T) {
 	if draw := h.backend.draws[0]; draw.firstInstance != 0 || draw.instances != 3 {
 		t.Fatalf("drew %d instances from %d, want 3 from 0", draw.instances, draw.firstInstance)
 	}
-	if materials := h.backend.buffersBoundTo("scenePbrMaterial"); len(materials) != 1 {
-		t.Fatalf("scenePbrMaterial was bound %d times, want once per batch", len(materials))
-	}
 }
 
 // A blend-class instanced draw stays one sort entry, and so one batch, per

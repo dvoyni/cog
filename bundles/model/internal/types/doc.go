@@ -5,7 +5,7 @@
 // names; the Lookup with its two scoped facades, Config, which the Lookup
 // holds, the model and texture caches with their loaders and unloads, and the
 // conversion of the decoded glTF into vertices, baked poses, morph blocks and
-// PBR records behind them; the mesh table with its minting, staging and
+// PBR numbers behind them; the mesh table with its minting, staging and
 // deferred bakes, and the unit meshes; the bundled PBR material, which names
 // no pass; the per-frame animation and morph resolution a renderer packs
 // from; and every record the bundled shader reads, with its packer - the

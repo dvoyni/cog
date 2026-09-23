@@ -108,6 +108,19 @@ func BundledPbr(defaults PbrDefaults) [VariantCount]gfx.MaterialDescr {
 	return types.BundledPbr(defaults)
 }
 
+// BundledIngredients are a baked mesh's ingredients around the given default
+// textures: white and flat in every slot, opaque, single-sided and painted
+// white.
+func BundledIngredients(defaults PbrDefaults) MaterialIngredients {
+	return types.BundledIngredients(defaults)
+}
+
+// VariantShader is shader under variant's SCENE_SKIN and SCENE_MORPH defines,
+// added to its own supply. The zero shader reads as the bundled PBR.
+func VariantShader(shader gfx.ShaderDescr, variant ShaderVariant) gfx.ShaderDescr {
+	return types.VariantShader(shader, variant)
+}
+
 // SceneShader describes the bundled PBR module under the given options.
 func SceneShader(opts ...gfx.ShaderOption) gfx.ShaderDescr { return types.SceneShader(opts...) }
 
@@ -155,9 +168,9 @@ func AppendAnim(dst []byte, plays []ScenePlayRecord, morph AnimMorph) ([]byte, u
 	return types.AppendAnim(dst, plays, morph)
 }
 
-// PaintPbrRecord is the record of a surface with no material of its own:
-// glTF's defaults with metallic 0, and color as the base colour. A self-lit
-// surface is black paint that glows, with color in the emissive factor.
-func PaintPbrRecord(color m.Color, selfLit bool) ScenePbrRecord {
-	return types.PaintPbrRecord(color, selfLit)
+// PaintParams appends the params that turn the bundled PBR's white paint into
+// paint of one colour, lit or self-lit, for a renderer to lay over it on the
+// draw.
+func PaintParams(dst []gfx.ParameterDescr, color m.Color, selfLit bool) []gfx.ParameterDescr {
+	return types.PaintParams(dst, color, selfLit)
 }

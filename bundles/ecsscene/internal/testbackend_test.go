@@ -69,10 +69,29 @@ type bufferRange struct {
 	offset, size int
 }
 
-// testUniforms is the uniform block every shader here declares, one vec4 slot
-// per name. Any name a test binds as a parameter is here, so gfx packs it; a
-// member the draw does not supply is packed as zero.
-var testUniforms = []string{"baseColorFactor", "fade", "a", "b", "c", "d"}
+// testUniforms is the uniform block every shader here declares: the bundled
+// material's scenePbrMaterial block at the offsets gogpu reflects, so gfx packs
+// as many members per draw as it does for the real shader, and then one vec4
+// slot for each name a test binds of its own. A member the draw does not
+// supply is packed as zero. A test reads what a draw's material numbers
+// resolved to the way the shader would: packed by gfx, by name.
+var testUniforms = []gfx.UniformMember{
+	{Name: "baseColorFactor", Offset: 0}, {Name: "emissiveFactor", Offset: 16},
+	{Name: "baseColorTransform", Offset: 32}, {Name: "metallicRoughnessTransform", Offset: 48},
+	{Name: "normalTransform", Offset: 64}, {Name: "occlusionTransform", Offset: 80},
+	{Name: "emissiveTransform", Offset: 96},
+	{Name: "baseColorRotation", Offset: 112}, {Name: "metallicRoughnessRotation", Offset: 116},
+	{Name: "normalRotation", Offset: 120}, {Name: "occlusionRotation", Offset: 124},
+	{Name: "emissiveRotation", Offset: 128},
+	{Name: "metallicFactor", Offset: 132}, {Name: "roughnessFactor", Offset: 136},
+	{Name: "normalScale", Offset: 140}, {Name: "occlusionStrength", Offset: 144},
+	{Name: "alphaCutoff", Offset: 148}, {Name: "uvSets", Offset: 152},
+	{Name: "fade", Offset: 160}, {Name: "a", Offset: 176}, {Name: "b", Offset: 192},
+	{Name: "c", Offset: 208}, {Name: "d", Offset: 224},
+}
+
+// testUniformSize is testUniforms' span, which fits gfx's 256-byte cap.
+const testUniformSize = 240
 
 // sceneResources is what reflection reports for scene's bindings. The real
 // source is reflected in the gogpu package; here it stands in so that scene's
@@ -85,7 +104,6 @@ var sceneResources = []gfx.ShaderResource{
 	{Name: "sceneInstances", StorageBuffer: true, Group: 0, Binding: 1},
 	{Name: "sceneAnim", StorageBuffer: true, Group: 0, Binding: 2},
 	{Name: "sceneMeshes", StorageBuffer: true, Group: 0, Binding: 3},
-	{Name: "scenePbrMaterial", StorageBuffer: true, Group: 1, Binding: 0},
 	{Name: "baseColorTexture", Group: 1, Binding: 1},
 	{Name: "baseColorSampler", Sampler: true, Group: 1, Binding: 2},
 	{Name: "metallicRoughnessTexture", Group: 1, Binding: 3},
@@ -103,7 +121,7 @@ var sceneResources = []gfx.ShaderResource{
 
 // customResources are the bindings a custom material's module declares.
 var customResources = map[string]bool{
-	"sceneFrame": true, "sceneInstances": true, "sceneAnim": true, "sceneMeshes": true, "scenePbrMaterial": true,
+	"sceneFrame": true, "sceneInstances": true, "sceneAnim": true, "sceneMeshes": true,
 }
 
 // layoutOf is the stand-in reflection for one module. The bundled source
@@ -111,10 +129,7 @@ var customResources = map[string]bool{
 // differ in exactly which of group 2 they declare, and declaring one a draw
 // does not fill drops the draw. Any other source is a custom material's.
 func layoutOf(code string) gfx.ShaderLayout {
-	layout := gfx.ShaderLayout{UniformSize: 16 * len(testUniforms), UniformGroup: 3}
-	for i, name := range testUniforms {
-		layout.Uniforms = append(layout.Uniforms, gfx.UniformMember{Name: name, Offset: 16 * i})
-	}
+	layout := gfx.ShaderLayout{UniformSize: testUniformSize, UniformGroup: 1, Uniforms: testUniforms}
 	bundled := strings.Contains(code, "sceneInstances")
 	for _, resource := range sceneResources {
 		if (bundled && strings.Contains(code, resource.Name)) || (!bundled && customResources[resource.Name]) {
@@ -277,7 +292,7 @@ func (b *testBackend) ReleaseBuffer(gfx.BufferID)   {}
 func (b *testBackend) ReleaseTexture(gfx.TextureID) {}
 
 // The record layouts the bundled shader reads. They mirror the records model packs -
-// model.Instance, model.FrameBlock, model.Light, model.ScenePbrRecord and the
+// model.Instance, model.FrameBlock, model.Light and the
 // sceneAnim block - field for field, and are spelled out here rather than read
 // from model because the bytes are the contract a shader reads: a decode
 // through the writer's own types would agree with itself whatever they are.
@@ -306,10 +321,11 @@ type drawnInstance struct {
 	// packed rows, and animOffset the vec4 its sceneAnim block starts at.
 	world      m.Mat4
 	animOffset uint32
-	// material is the draw's bundled PBR record, and anim its sceneAnim block
-	// when it has one.
-	material []byte
-	anim     []byte
+	// buffers is every storage binding the draw's shader declared and gfx
+	// bound, by name: which of group 2 is here is the variant it drew with.
+	buffers map[string]bufferRange
+	// anim is the instance's sceneAnim block when it has one.
+	anim []byte
 	// frame is the pass's sceneFrame block.
 	frame []byte
 }
@@ -321,9 +337,9 @@ func (d drawnInstance) position() m.Vec3 {
 
 // param reads one member of the uniform block the draw packed.
 func (d drawnInstance) param(name string) m.Vec4 {
-	for i, member := range testUniforms {
-		if member == name && len(d.params) >= 16*(i+1) {
-			return vec4At(d.params, 16*i)
+	for _, member := range testUniforms {
+		if member.Name == name && len(d.params) >= member.Offset+16 {
+			return vec4At(d.params, member.Offset)
 		}
 	}
 	return m.Vec4{}
@@ -348,8 +364,8 @@ func (b *testBackend) instances() []drawnInstance {
 			base := drawnInstance{
 				pass: pass.desc, shader: b.shaders[pipeline.Shader], state: pipeline.State,
 				params: draw.params, vertices: draw.vertices, count: draw.count, indexed: draw.indexed,
-				material: b.rangeBytes(draw.buffers["scenePbrMaterial"]),
-				frame:    b.rangeBytes(draw.buffers["sceneFrame"]),
+				buffers: draw.buffers,
+				frame:   b.rangeBytes(draw.buffers["sceneFrame"]),
 			}
 			records := b.rangeBytes(draw.buffers["sceneInstances"])
 			anims := b.rangeBytes(draw.buffers["sceneAnim"])

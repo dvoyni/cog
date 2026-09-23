@@ -54,13 +54,13 @@ func residentModelDraw(t testing.TB, doc *gltf.Document, draw scene.ModelDraw) (
 	return h, records
 }
 
-// A plain draw binds the file's own records directly: the forward material the
-// load built and the PBR record beside it, both owned by the resident entry and
+// A plain draw binds the file's own material directly: the forward material the
+// load built, its numbers among its params, owned by the resident entry and
 // shared by every draw of the path. The draw's Material is only a forward tag
 // wrapped around that gfx material in the frame's arena, and its parameters are
-// the entry's own, so there is no per-draw copy of either, which is what makes
-// the common path cost what the same geometry recorded by hand would.
-func TestAPlainModelDrawBindsTheFilesRecordsWithNoCopy(t *testing.T) {
+// the entry's own, so there is no per-draw copy, which is what makes the common
+// path cost what the same geometry recorded by hand would.
+func TestAPlainModelDrawBindsTheFilesMaterialWithNoCopy(t *testing.T) {
 	h, records := residentModelDraw(t, twoMaterialModel(t), scene.ModelDraw{})
 	if len(records) != 2 {
 		t.Fatalf("expanded to %d draws, want one per primitive", len(records))
@@ -72,9 +72,6 @@ func TestAPlainModelDrawBindsTheFilesRecordsWithNoCopy(t *testing.T) {
 		}
 		for i := range records {
 			owned := &entry.Materials[i]
-			if records[i].Pbr != &owned.Record {
-				t.Errorf("draw %d binds a copied record, want the entry's own", i)
-			}
 			if !wrapsForward(records[i].Material, owned.Forward[model.VariantStatic]) {
 				t.Errorf("draw %d binds %v, want the entry's own forward material", i, records[i].Material)
 			}
@@ -125,12 +122,11 @@ func TestAFrameDrawingOneModelManyTimesFingerprintsNoFileMaterial(t *testing.T) 
 	})
 }
 
-// OverrideParams merges by name over each primitive's own record, and it
+// OverrideParams merges by name over each primitive's own params, and it
 // broadcasts: one call's parameter list reaches every material the draw binds,
 // which is what the common per-draw override - team colour, hit flash, fade -
-// actually wants. The file's textures and every member the override does not
-// name survive, because the merge is over the file's record rather than over
-// glTF's defaults.
+// actually wants. The file's textures and every number the override does not
+// name survive, because gfx lays the draw's params over the file's material.
 func TestOverrideParamsBroadcastToEveryMaterialTheDrawBinds(t *testing.T) {
 	tint := m.Color{R: 0.5, G: 0.5, B: 0.5, A: 0.5}
 	h, records := residentModelDraw(t, twoMaterialModel(t), scene.ModelDraw{
@@ -143,16 +139,14 @@ func TestOverrideParamsBroadcastToEveryMaterialTheDrawBinds(t *testing.T) {
 	want := m.Vec4{X: 0.5, Y: 0.5, Z: 0.5, W: 0.5}
 	roughness := map[float32]bool{0.25: true, 0.75: true}
 	for i := range records {
-		record := records[i].PbrRecord()
-		if record.BaseColorFactor != want {
-			t.Errorf("draw %d has baseColorFactor %v, want the broadcast %v",
-				i, record.BaseColorFactor, want)
+		if base, _ := numberOf(records[i], "baseColorFactor"); base != want {
+			t.Errorf("draw %d has baseColorFactor %v, want the broadcast %v", i, base, want)
 		}
-		if !roughness[record.RoughnessFactor] {
-			t.Errorf("draw %d has roughness %v, want one of the file's two",
-				i, record.RoughnessFactor)
+		rough, _ := numberOf(records[i], "roughnessFactor")
+		if !roughness[rough.X] {
+			t.Errorf("draw %d has roughness %v, want one of the file's two", i, rough.X)
 		}
-		delete(roughness, record.RoughnessFactor)
+		delete(roughness, rough.X)
 	}
 	if len(roughness) != 0 {
 		t.Errorf("the two draws did not keep both of the file's roughnesses")
@@ -208,8 +202,8 @@ func TestOverrideParamsAreCopiedIntoTheFramesArena(t *testing.T) {
 	}
 }
 
-// A non-nil Material replaces the file's wholesale. The file's PBR records are
-// not bound and their parameters do not survive: this is the dissolve, the
+// A non-nil Material replaces the file's wholesale. The file's params are not
+// bound, its numbers among them: this is the dissolve, the
 // silhouette and the depth-only case, where binding the artist's base colour
 // under a shader that never heard of it is the wrong picture with nothing in
 // the frame to explain it.
@@ -228,26 +222,19 @@ func TestAModelDrawWithAMaterialReplacesTheFilesWholesale(t *testing.T) {
 		if len(records[i].Material) != 1 || types.MaterialKeyOf(records[i].Material) != types.MaterialKeyOf(replacement) {
 			t.Errorf("draw %d binds a material other than the caller's", i)
 		}
-		if records[i].Pbr != nil {
-			t.Errorf("draw %d still points at the file's record, want it unbound", i)
-		}
-		record := records[i].PbrRecord()
-		if record.BaseColorFactor != (m.Vec4{X: 1, Y: 1, Z: 1, W: 1}) {
-			t.Errorf("draw %d has baseColorFactor %v, want the file's colour gone",
-				i, record.BaseColorFactor)
-		}
-		if record.RoughnessFactor != 1 {
-			t.Errorf("draw %d has roughness %v, want the file's roughness gone",
-				i, record.RoughnessFactor)
+		for _, name := range []string{"baseColorFactor", "roughnessFactor"} {
+			if value, ok := numberOf(records[i], name); ok {
+				t.Errorf("draw %d binds %s %v, want the file's numbers gone", i, name, value)
+			}
 		}
 	}
 }
 
-// The two knobs do not overlap, but they compose: a replacement material takes
-// the record glTF's own defaults would give it, and the overrides then merge
-// over that. What does not survive is the file's numbers, which is the whole of
-// "replaces wholesale".
-func TestOverrideParamsMergeOverAReplacementMaterialsOwnDefaults(t *testing.T) {
+// The two knobs do not overlap, but they compose: the overrides reach a
+// replacement material exactly as they reach the file's, by name. What does
+// not survive is the file's numbers, which is the whole of "replaces
+// wholesale".
+func TestOverrideParamsReachAReplacementMaterial(t *testing.T) {
 	replacement := scene.Material{{Descr: gfx.MaterialWithState(
 		gfx.ShaderWithResource(model.SceneShaderPath), model.PbrState(model.AlphaOpaque, false))}}
 	h, records := residentModelDraw(t, twoMaterialModel(t), scene.ModelDraw{
@@ -256,14 +243,11 @@ func TestOverrideParamsMergeOverAReplacementMaterialsOwnDefaults(t *testing.T) {
 	})
 	defer h.frame()
 	for i := range records {
-		record := records[i].PbrRecord()
-		if record.RoughnessFactor != 0.5 {
-			t.Errorf("draw %d has roughness %v, want the override's 0.5",
-				i, record.RoughnessFactor)
+		if rough, _ := numberOf(records[i], "roughnessFactor"); rough.X != 0.5 {
+			t.Errorf("draw %d has roughness %v, want the override's 0.5", i, rough.X)
 		}
-		if record.BaseColorFactor != (m.Vec4{X: 1, Y: 1, Z: 1, W: 1}) {
-			t.Errorf("draw %d has baseColorFactor %v, want the file's colour gone",
-				i, record.BaseColorFactor)
+		if base, ok := numberOf(records[i], "baseColorFactor"); ok {
+			t.Errorf("draw %d binds baseColorFactor %v, want the file's colour gone", i, base)
 		}
 	}
 }

@@ -57,19 +57,30 @@ type Animation struct {
 // Params are gfx parameters bound on top of whatever the draw's material binds.
 // It is optional.
 //
-// On a Mesh they are the draw's own params. On a Model they are the override
-// params, which merge by name over the file's materials — so
-// gfx.ColorParam("baseColorFactor", c) tints a glTF model.
+// They ride on the draw, so gfx lays them by name over every tag's params, the
+// material's numbers among them, a Model's and a Mesh's alike — so
+// gfx.ColorParam("baseColorFactor", c) tints either.
 type Params struct {
 	Values m.List[gfx.ParameterDescr]
 }
 
-// Material replaces what a draw is shaded with, one entry per pass tag. It is
-// optional, and there is no cap on its tags.
+// Material changes what a draw is shaded with, one entry per pass tag, laid
+// over what the file provides rather than put in its place. It is optional, and
+// there is no cap on its tags.
 //
-// An absent Material is no material: the bundled PBR for a Mesh, and the file's
-// own materials for a Model. Presence is what says otherwise: a Material whose
-// Tags are empty is a material serving no pass, so its Entity draws in none.
+// For each primitive of a Model, each tag resolves to: its Shader, or model's
+// default scene shader where it names none, under the defines the primitive's
+// geometry needs; the primitive's own params - its textures, samplers and
+// numbers - overlaid by name with the default scene shader's params and then
+// its own; and its State, or the file's where it names none. A Mesh's "file" is the bundled PBR's: white and
+// flat in every slot, opaque, single-sided, white paint. gfx binds params by
+// name and ignores one no binding declares, so a shader that reads none of the
+// file's simply replaces it.
+//
+// An absent Material is no material: the default scene shader over the file's
+// own materials for a Model, and over the bundled PBR's for a Mesh. Presence is
+// what says otherwise: a Material whose Tags are empty is a material serving no
+// pass, so its Entity draws in none.
 type Material struct {
 	Tags m.List[MaterialTag]
 }
@@ -162,15 +173,23 @@ type LayerMask = types.LayerMask
 const LayersAll = types.LayersAll
 
 // MaterialTag is one pass tag of a Material Component: a gfx material spelled
-// out as the three things it is made of.
+// out as the three things it is made of, each laid over what the draw's file
+// provides. A zero Shader and a zero State are unset, not values: the draw
+// keeps the default scene shader and the file's state. So a tag cannot name the
+// zero state, gfx.StateOverlay2D.
 //
 // It cannot hold a gfx.MaterialDescr, because a descriptor keeps its params as
 // a bare slice, which a Component may not hold. The recording System rebuilds
 // the descriptor from these fields, in scratch.
 type MaterialTag struct {
 	// Tag is the pass this entry serves; zero reads as TagForward.
-	Tag    PassTag
+	Tag PassTag
+	// Shader is resolved under the draw's SCENE_SKIN and SCENE_MORPH, which
+	// the draw's geometry decides; zero is the default scene shader.
 	Shader gfx.ShaderDescr
-	State  gfx.MaterialState
+	// State is the pipeline state; zero is the file's.
+	State gfx.MaterialState
+	// Params are overlaid by name on the file's and the default scene
+	// shader's.
 	Params m.List[gfx.ParameterDescr]
 }

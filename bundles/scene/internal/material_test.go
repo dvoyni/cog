@@ -28,7 +28,7 @@ func testMaterial(tags ...scene.PassTag) scene.Material {
 
 func TestANilMaterialResolvesToTheBundledPbrOnTheForwardTag(t *testing.T) {
 	var table materialTable
-	table.reset(bundledMaterials(model.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}), nil)
 	forward := table.internTag(scene.TagForward)
 
 	entry, ok := resolve(&table, discardErrors, nil, forward)
@@ -45,7 +45,7 @@ func TestANilMaterialResolvesToTheBundledPbrOnTheForwardTag(t *testing.T) {
 // rather than a change to every existing draw.
 func TestTheBundledPbrServesTheForwardTagAndNothingElse(t *testing.T) {
 	var table materialTable
-	table.reset(bundledMaterials(model.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}), nil)
 	shadow := table.internTag("shadow")
 
 	if _, ok := resolve(&table, discardErrors, nil, shadow); ok {
@@ -55,7 +55,7 @@ func TestTheBundledPbrServesTheForwardTagAndNothingElse(t *testing.T) {
 
 func TestAMaterialWithoutAnEntryForAPassTagIsSkipped(t *testing.T) {
 	var table materialTable
-	table.reset(bundledMaterials(model.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}), nil)
 	material := testMaterial(scene.TagForward)
 	shadow := table.internTag("shadow")
 
@@ -72,7 +72,7 @@ func TestAMaterialWithoutAnEntryForAPassTagIsSkipped(t *testing.T) {
 // tag at all.
 func TestAnEmptyTagEntryServesTheForwardPass(t *testing.T) {
 	var table materialTable
-	table.reset(bundledMaterials(model.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}), nil)
 	material := scene.Material{{Descr: gfx.Material(gfx.ShaderWithResource(model.SceneShaderPath))}}
 
 	if _, ok := resolve(&table, discardErrors, material, table.internTag(scene.TagForward)); !ok {
@@ -82,7 +82,7 @@ func TestAnEmptyTagEntryServesTheForwardPass(t *testing.T) {
 
 func TestADuplicateTagIsReportedOnceAndTheFirstEntryWins(t *testing.T) {
 	var table materialTable
-	table.reset(bundledMaterials(model.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}), nil)
 	material := testMaterial(scene.TagForward, scene.TagForward)
 	var reported []error
 	report := func(err error) { reported = append(reported, err) }
@@ -114,7 +114,7 @@ func TestADuplicateTagIsReportedOnceAndTheFirstEntryWins(t *testing.T) {
 // pipelines actually bound in a pass.
 func TestMaterialIdsAreOnePerMaterialAndTag(t *testing.T) {
 	var table materialTable
-	table.reset(bundledMaterials(model.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}), nil)
 	forward, shadow := table.internTag(scene.TagForward), table.internTag("shadow")
 	material := testMaterial(scene.TagForward, "shadow")
 	other := testMaterial(scene.TagForward)
@@ -142,7 +142,7 @@ func TestResolvingAnInternedMaterialAllocatesNothing(t *testing.T) {
 		t.Skip("allocation counts are not meaningful under -race")
 	}
 	var table materialTable
-	table.reset(bundledMaterials(model.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}), nil)
 	forward := table.internTag(scene.TagForward)
 	material := testMaterial(scene.TagForward)
 	resolve(&table, discardErrors, material, forward)
@@ -164,13 +164,13 @@ func TestTheMaterialTableKeepsItsBackingAcrossFrames(t *testing.T) {
 	var table materialTable
 	bundled := bundledMaterials(model.PbrDefaults{})
 	material := testMaterial(scene.TagForward)
-	table.reset(bundled)
+	table.reset(bundled, nil)
 	forward := table.internTag(scene.TagForward)
 	resolve(&table, discardErrors, material, forward)
 	resolve(&table, discardErrors, nil, forward)
 
 	allocations := testing.AllocsPerRun(100, func() {
-		table.reset(bundled)
+		table.reset(bundled, nil)
 		resolve(&table, discardErrors, material, forward)
 		resolve(&table, discardErrors, nil, forward)
 	})
@@ -181,7 +181,7 @@ func TestTheMaterialTableKeepsItsBackingAcrossFrames(t *testing.T) {
 
 func TestPassTagsInternToStableDenseIds(t *testing.T) {
 	var table materialTable
-	table.reset(bundledMaterials(model.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}), nil)
 	forward, shadow := table.internTag(scene.TagForward), table.internTag("shadow")
 
 	if forward == shadow {
@@ -212,7 +212,7 @@ func resolve(table *materialTable, report func(error), material scene.Material, 
 // shader, state and parameters take one id and sort together.
 func TestMaterialsInternByContentNotByBacking(t *testing.T) {
 	var table materialTable
-	table.reset(bundledMaterials(model.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}), nil)
 	forward := table.internTag(scene.TagForward)
 	build := func() scene.Material {
 		return scene.Material{{Descr: gfx.MaterialWithState(
@@ -244,7 +244,7 @@ func TestMaterialsInternByContentNotByBacking(t *testing.T) {
 // through its state alone.
 func TestTheBlendClassFollowsTheEntrysBlendMode(t *testing.T) {
 	var table materialTable
-	table.reset(bundledMaterials(model.PbrDefaults{}))
+	table.reset(bundledMaterials(model.PbrDefaults{}), nil)
 	forward := table.internTag(scene.TagForward)
 	shader := gfx.ShaderWithResource(model.SceneShaderPath)
 	cases := []struct {

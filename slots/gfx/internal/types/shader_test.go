@@ -160,3 +160,31 @@ func TestFingerprintDistinguishesTheSupply(t *testing.T) {
 		seen[fingerprint] = name
 	}
 }
+
+// With is construction continued: extending a descriptor's supply lands on the
+// same descriptor as naming every option up front, text and path alike, so a
+// renderer adding its variant defines to a caller's shader shares a cache entry
+// with the caller naming them itself.
+func TestWithExtendsTheSupplyAsConstructionWould(t *testing.T) {
+	path := ShaderWithResource("s.wgsl", ShaderConst("N", "4")).With(ShaderDefine("SKIN"), ShaderConst("N", "16"))
+	if want := ShaderWithResource("s.wgsl", ShaderDefine("SKIN"), ShaderConst("N", "16")); path != want {
+		t.Fatalf("path supply = %q, want %q", path.Params.supply, want.Params.supply)
+	}
+	const text = "fn f() {}"
+	inline := ShaderWithText(text).With(ShaderDefine("MORPH"))
+	if want := ShaderWithText(text, ShaderDefine("MORPH")); inline != want {
+		t.Fatalf("text supply = %q, want %q", inline.Params.supply, want.Params.supply)
+	}
+	if bare := ShaderWithText(text); bare.With() != bare {
+		t.Fatalf("With() changed the descriptor")
+	}
+}
+
+// A supply that was malformed stays malformed whatever is added to it: the
+// report names the first bad entry, and adding a good one cannot launder it.
+func TestWithKeepsAMalformedSupplyMalformed(t *testing.T) {
+	descr := ShaderWithResource("s.wgsl", ShaderDefine("")).With(ShaderDefine("SKIN"))
+	if descr.Params.supplyMalformed == "" {
+		t.Fatalf("a malformed supply came back clean: %q", descr.Params.supply)
+	}
+}

@@ -49,7 +49,7 @@ var supportedRequired = map[string]bool{
 // what a model costs.
 //
 // It is what crosses from the decoder to model, which packs vertices, bakes
-// clips onto its pose grid, packs morph blocks and fills material records from
+// clips onto its pose grid, packs morph blocks and fills material numbers from
 // it.
 type Model struct {
 	// Geometries are the decoded primitives, one per distinct glTF primitive

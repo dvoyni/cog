@@ -37,7 +37,6 @@ func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
 	var light model.Light
 	var instance model.Instance
 	var mesh model.SceneMesh
-	var pbr model.ScenePbrRecord
 	records := []shaderRecord{
 		{"SceneFrame", unsafe.Sizeof(frame), []shaderMember{
 			{"view", unsafe.Offsetof(frame.View)},
@@ -80,7 +79,6 @@ func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
 		// an array member is not name-addressable and animating
 		// baseColorTransform per frame is UV scrolling, while Go indexes the
 		// same bytes by slot. This is where that correspondence is checked.
-		{"ScenePbrMaterial", unsafe.Sizeof(pbr), pbrMembers(&pbr)},
 	}
 
 	types := shaderStructs(t)
@@ -108,32 +106,6 @@ func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
 			}
 		}
 	}
-}
-
-// pbrMembers pairs the PBR record's Go fields with the shader's, taking the
-// per-slot names from PbrSlots itself - the same table the packer and
-// OverrideParams resolve through, so a rename there reaches here rather than
-// leaving a stale literal behind that still matches nothing.
-func pbrMembers(pbr *model.ScenePbrRecord) []shaderMember {
-	members := []shaderMember{
-		{"baseColorFactor", unsafe.Offsetof(pbr.BaseColorFactor)},
-		{"emissiveFactor", unsafe.Offsetof(pbr.EmissiveFactor)},
-		{"metallicFactor", unsafe.Offsetof(pbr.MetallicFactor)},
-		{"roughnessFactor", unsafe.Offsetof(pbr.RoughnessFactor)},
-		{"normalScale", unsafe.Offsetof(pbr.NormalScale)},
-		{"occlusionStrength", unsafe.Offsetof(pbr.OcclusionStrength)},
-		{"alphaCutoff", unsafe.Offsetof(pbr.AlphaCutoff)},
-		{"uvSets", unsafe.Offsetof(pbr.UVSets)},
-	}
-	transforms, transformStride := unsafe.Offsetof(pbr.Transforms), unsafe.Sizeof(pbr.Transforms[0])
-	rotations, rotationStride := unsafe.Offsetof(pbr.Rotations), unsafe.Sizeof(pbr.Rotations[0])
-	for slot, descr := range model.PbrSlots {
-		members = append(members,
-			shaderMember{descr.Transform, transforms + uintptr(slot)*transformStride},
-			shaderMember{descr.Rotation, rotations + uintptr(slot)*rotationStride},
-		)
-	}
-	return members
 }
 
 // shaderStructs lowers the bundled shader and indexes its struct types by name.

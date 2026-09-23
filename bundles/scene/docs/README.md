@@ -410,12 +410,14 @@ Two ways to change what a model looks like, and they do not overlap:
   `gfx.ColorParam("baseColorFactor", c)` is what tints a model. It broadcasts to
   every material the draw binds, and a name the resolved tag entry's shader does
   not declare is ignored rather than reported.
-- `Material` **replaces** the file's materials wholesale. The file's PBR records
-  are not bound at all, so its base colours, factors and texture transforms do
-  not survive. That is the dissolve, the silhouette and the depth-only case.
+- `Material` **replaces** the file's materials wholesale. The file's params
+  are not bound at all, so its textures, base colours, factors and texture
+  transforms do not survive. That is the dissolve, the silhouette and the
+  depth-only case.
 
-A draw may use both: the replacement takes glTF's own defaults and the overrides
-merge over those.
+A draw may use both: the overrides reach the replacement by name, as they reach
+the file's material. A number neither names is packed as zero, so a replacement
+that reads the bundled material's block supplies what it reads.
 
 `Transforms []m.Transform` instances the draw. Instancing is per primitive, so a
 six-primitive model at a hundred transforms is six batches of a hundred, not six
@@ -725,26 +727,31 @@ bound range of one.
 | `sceneInstances` | 0 | `array<SceneInstance>`, bound by range per pass |
 | `sceneAnim` | 0 | `array<vec4<f32>>` arena, indexed by `sceneInstance.animOffset` |
 | `sceneMeshes` | 0 | `array<SceneMesh>`, 32-byte UV scale/bias records, indexed by `sceneInstance.mesh`; slot 0 is the identity |
-| `scenePbrMaterial` | 1 | the bundled PBR record, a bound range |
 | `scenePoses` | 2 | baked 48-byte pose records |
 | `sceneSkinJoints` | 2 | per-skin, per-joint 112-byte record |
 | `sceneMorphDeltas` | 2 | `array<u32>`, one block per morphed primitive: per-slot ranges, a base/first/count per target, then the records |
 
-Plus the bundled PBR's five textures and five samplers in group 1. The `scene`
-name prefix is reserved for engine-supplied bindings.
+Plus the bundled material's own bindings in group 1: its five textures and
+five samplers, and `scenePbrMaterial`, the uniform block its numbers are in.
+scene binds none of those itself. They are params of the draw's material, the
+numbers among them, and gfx packs the block from them by member name, with the
+draw's params over its material's — so scene knows no shader's layout, and a
+debug shape's colour is two params laid over white paint. The `scene` name
+prefix is reserved for engine-supplied bindings.
 
-**The storage-buffer budget is eight of eight, and it is now fully spent.**
-Reflection walks module globals without consulting entry points, so every
-reflected binding is emitted `Vertex|Fragment` and a vertex-only buffer consumes
-a fragment-stage slot too. Three rules follow, and they are contract:
+**The storage-buffer budget is seven of eight.** Reflection walks module
+globals without consulting entry points, so every reflected binding is emitted
+`Vertex|Fragment` and a vertex-only buffer consumes a fragment-stage slot too.
+Three rules follow, and they are contract:
 
-- No scene shader may declare a ninth storage buffer. The eighth, which
-  interleaving the two per-skin arrays had recovered and which was reserved,
-  went to the per-mesh record at `@group(0) @binding(3)`.
-- **A caller-supplied material may declare none of its own.** It may freely use
-  the bindings scene binds on every draw — `sceneFrame`, `sceneInstances` and
-  `scenePbrMaterial`, any subset — because those are scene's and already counted.
-  That is what the `procedural` demo does.
+- No scene shader may declare a ninth storage buffer. The fully animated
+  variant holds seven: the material's numbers left storage for the uniform
+  block, which gave one back.
+- **A caller-supplied material over the bundled stages may declare one of its
+  own.** It may freely use the bindings scene binds on every draw —
+  `sceneFrame`, `sceneInstances`, `sceneAnim` and `sceneMeshes`, any subset —
+  because those are scene's and already counted. That is what the `procedural`
+  demo does.
 - gfx checks every reflected shader against `gfx.DefaultLimits()`, the browser
   floor, never against the device's reported limits, and reports
   `ErrShaderExceedsWebLimits`. A desktop adapter reports hardware limits, so
@@ -853,11 +860,11 @@ absorbed quietly. The ones a caller can observe:
 - **A morph target that moves nothing keeps its slot.** It stores no records and
   costs 12 bytes of header. Dropping it would renumber every slot after it, and
   `MorphWeights` is positional over that list.
-- **The storage-buffer budget is eight of eight**, not the "six with two spare"
-  the early tickets record. Interleaving the two per-skin arrays into one
-  `sceneSkinJoints` buffer recovered the eighth slot; the per-mesh UV record
-  then spent it, so the fully animated variant now sits exactly on the browser
-  floor and there is no ninth.
+- **The storage-buffer budget is seven of eight**, not the "six with two
+  spare" the early tickets record. Interleaving the two per-skin arrays into one
+  `sceneSkinJoints` buffer recovered the eighth slot and the per-mesh UV record
+  spent it; the material's numbers moving to the uniform block
+  ([#568](https://github.com/dvoyni/cog/issues/568)) gave one back.
 - **`Bounds` and `AABB` answer about a primitive's rest placement**, not the
   local matrix the load first used. That matrix is the identity for anything
   drawn through the pose buffer — a glTF skin, and equally a node with an

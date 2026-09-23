@@ -8,12 +8,12 @@ import "embed"
 const shaderMountID = "builtin:scene"
 
 // shaderFS is what storage mounts at math.MaxInt priority: the root source and
-// the ten sources it includes. The paths inside it are the ones
-// model.SceneShaderPath and the three published sources, model.VertexDecodePath,
-// model.FramePath and model.PbrPath, spell.
+// the twelve sources it includes. The paths inside it are the ones
+// model.SceneShaderPath and the five published sources spell.
 //
-// The shader is model's because it reads model's records - ScenePbrRecord, the
-// mesh record, the poses and the deltas - so the two change together, and
+// The shader is model's because it reads model's records and params - the
+// material's numbers, the mesh record, the poses and the deltas - so the two
+// change together, and
 // every renderer that draws a model draws with it rather than mounting its own.
 //
 //go:embed builtin/scene/*.wgsl

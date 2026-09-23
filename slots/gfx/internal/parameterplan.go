@@ -183,25 +183,9 @@ func parameterShapeEqual(cached *cachedParameterPlan, material, draw []gfx.Param
 	return true
 }
 
+// parameterShapeHash hashes a draw's parameter shape: its material's names,
+// then its own. The material half is split out so a material OpQueue recorded
+// for the frame brings it already taken; see types.ParameterShapeState.
 func parameterShapeHash(material, draw []gfx.ParameterDescr) uint64 {
-	const prime uint64 = 1099511628211
-	hash := uint64(1469598103934665603)
-	mix := func(value byte) {
-		hash ^= uint64(value)
-		hash *= prime
-	}
-	mixName := func(name string) {
-		for i := range name {
-			mix(name[i])
-		}
-		mix(0)
-	}
-	for i := range material {
-		mixName(material[i].Name())
-	}
-	mix(0xff)
-	for i := range draw {
-		mixName(draw[i].Name())
-	}
-	return hash
+	return types.ContinueParameterShape(types.ParameterShapeState(material), draw)
 }

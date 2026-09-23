@@ -100,10 +100,10 @@ from scene.md](#the-model-contract-moved-from-scenemd).
 The glossary is [`CONTEXT.md`](../../../../CONTEXT.md). The terms this document leans on:
 
 - **Model material.** What one material in a model file becomes once loaded: a
-  forward graphics material for each shader variant, the PBR record, and a
-  content key fixed at load. It names no Pass tag. It is not a **Scene
+  forward graphics material for each shader variant, the params and state it
+  is made of, and a content key fixed at load. It names no Pass tag. It is not a **Scene
   material**, which is a renderer's and carries tags.
-- **Batch.** One instanced draw with one properties record. It is scene's word
+- **Batch.** One instanced draw. It is scene's word
   and ecsscene's. "Group" is the word to avoid.
 - **Read facade / load facade.** The two ways to reach the one `*model.Lookup`:
   under `kernel.Read`, which never loads, and under `kernel.Write`, which loads,
@@ -185,7 +185,7 @@ on the renderer's. The rows that needed a decision:
 | --- | --- | --- |
 | the model material (today `modelMaterial`, `loadedMaterial`) | `model` | see [The model material](#the-model-material) |
 | `ShaderVariant`, `VariantStatic`, `variantSkin`, `variantMorph`, `variantSkinMorph`, `VariantCount`, `VariantFor` | `model` | chosen from skin and morph, which are model facts |
-| the bundled PBR shader (`SceneShaderPath`, `SceneShader`) | `model` | it reads `ScenePbrRecord`'s layout, so the shader and the record move together |
+| the bundled PBR shader (`SceneShaderPath`, `SceneShader`) | `model` | it reads the params model's materials carry by name, so the shader and the materials move together |
 | `Material`, `MaterialTag`, `MaterialKey`, `MaterialKeyOf`, `PassTag`, `TagForward` | each renderer, its own | a renderer wraps the model material's forward descr under its own tag |
 | `CameraDescr`, `CameraID`, `ProjectionKind` and its three values, `Pass`, `DefaultPass`, `DepthClearFar` | each renderer, its own | `model` declares **no** camera, since none is decoded. A decoded glTF camera would arrive as a `ModelCamera` data record |
 | `Projection`, `ViewDirection`, `WorldToScreen`, `ScreenToWorld`, `ScreenToRay` and helpers | `libs/m`, over plain parameters | each renderer's camera calls them |
@@ -265,12 +265,11 @@ answers that decide a storage layout arrive as plain booleans: a geometry's
 
 **The GPU layout is applied after the decoder returns.** Filling the conversion
 vertices, generating flat normals and tangents, remapping JOINTS_0 into the
-model's numbering, `packMorphBlock`, `bakeClip` and the `ScenePbrRecord` fill each
+model's numbering, `packMorphBlock`, `bakeClip` and the material numbers' fill each
 run as their own pass over the decoded data. None of them is in the decoder
 package. They run in `bundles/model/internal/types` (`gltfload.go`,
 `gltfmesh.go`, `gltfmorph.go`, `gltfanim.go`), beside the model cache that
-installs their result and the record types they fill: `ScenePbrRecord`,
-`scenePose`, `skinJointRecord`, the morph block layout and the pack helpers are
+installs their result and the record types they fill: `scenePose`, `skinJointRecord`, the morph block layout and the pack helpers are
 `model`'s. They ran in scene until the cache moved with them in
 [#530](https://github.com/dvoyni/cog/issues/530). The joint cap, 256 joints
 because a storage vertex names a joint in one byte, is
@@ -343,16 +342,35 @@ own material is keyed without fingerprinting anything. The same step moved the
 bundled shader's WGSL sources and their storage mount into `model`, under the
 storage paths they already had.
 
-**The model material holds, for each shader variant:**
+**The model material holds its ingredients and, for each shader variant:**
 
 - a ready forward `gfx.MaterialDescr`;
-- its `ScenePbrRecord`;
 - a content key computed once at load.
+
+The ingredients are `MaterialIngredients{Params, State}`: the ten texture and
+sampler params with defaults in empty slots, then the material's numbers as one
+param per member of the shader's `scenePbrMaterial` uniform block, and the
+pipeline state. Each forward descr is the bundled variant over them.
+They came with [#568](https://github.com/dvoyni/cog/issues/568), so a renderer
+can resolve a caller's shader over what the file says instead of in place of
+it; ecsscene does, and scene still draws the forward descrs. A baked mesh's
+ingredients are `BundledIngredients`, which `Lookup.EnsureBundledIngredients`
+returns around the same two default textures `EnsureBundled` binds.
 
 It names no `PassTag`. A renderer wraps the forward descr in its own material
 under its own tag. A file material's renderer key derives from the model key, so
 nothing fingerprints the material per draw. When shadows land, `model` adds a
 shadow descr for each variant beside the forward one.
+
+**The default scene shader is the Lookup's.** `LookupAccess.SetDefaultSceneShader`
+takes a `SceneShaderDescr{Source, Params}`, the zero one being the bundled PBR,
+and `LookupReadAccess.DefaultSceneShader` reads it back. It is a call rather
+than `Config` because its params are typically baked textures, which exist only
+once the backend does. model bakes nothing from it: a renderer that honours it
+resolves its materials every frame, so it can change at any time. ecsscene
+honours it; scene does not. `VariantShader` puts any shader under a draw's
+`SCENE_SKIN` and `SCENE_MORPH`, through `gfx.ShaderDescr.With`, so the variant
+stays the renderer's whichever shader is in effect.
 
 ---
 
@@ -370,14 +388,14 @@ compile against one renderer and draw garbage in the other.
 - **The records:** `FrameBlock`, `Instance` with its flags (`SceneNonUniform`,
   `SceneNoSkin`, `ScenePlainJoint`) and `SceneNoAnim`, `Light`, and
   `SceneAnimHeader`, `ScenePlayRecord` and `SceneMorphWeight`, beside
-  `ScenePbrRecord`, `SceneMesh` and `IdentityMesh`. They are aliased in
+  `SceneMesh` and `IdentityMesh`. The material's numbers were a record here too,
+  `ScenePbrRecord`, until [#568](https://github.com/dvoyni/cog/issues/568) made them params of the material. They are aliased in
   `model`'s root, and their packers are forwarders into `model/internal/types`.
   The flags keep the WGSL constants' names; the three records the renderer
   used to declare take the names this section gave them.
 - **The binding names are constants**, `BindingScene` followed by the WGSL
   name: `BindingSceneFrame` (`sceneFrame`), `BindingSceneInstances`,
-  `BindingSceneAnim`, `BindingSceneMeshes`, `BindingScenePbrMaterial`,
-  `BindingScenePoses`, `BindingSceneSkinJoints` and `BindingSceneMorphDeltas`.
+  `BindingSceneAnim`, `BindingSceneMeshes`, `BindingScenePoses`, `BindingSceneSkinJoints` and `BindingSceneMorphDeltas`.
 - **Each record has a `Size` constant**, `<Record>Size`, replacing the
   `unsafe.Sizeof` block in scene's `draw.go`, because binding ranges need them.
   `PoseSize`, `SkinJointSize`, `AnimHeaderVec4s` and `PlayRecordVec4s` became
@@ -418,10 +436,12 @@ capped at `MaxLights`, with `Reset`, `Offer`, `Count` and `Lights`. Each rendere
 keeps `prepareLights`, the layer test and the frustum test, and offers `model`
 only the lights that pass.
 
-**Paint is `model`'s too.** A draw with no material of its own binds
-`PaintPbrRecord(color, selfLit)`: glTF's defaults with metallic 0. scene's debug
-shapes and bare meshes used to set the record's fields themselves; a second
-renderer drawing a mesh with no material needs the same record.
+**Paint is `model`'s too.** A draw with no material of its own draws
+`BundledIngredients`, white paint: glTF's defaults with metallic 0. A debug
+shape lays `PaintParams(dst, color, selfLit)` over it on the draw. scene's debug
+shapes and bare meshes used to set a record's fields themselves; a second
+renderer drawing a mesh with no material needs the same numbers, and now
+neither renderer names one.
 
 **Settled, verified while handing over:** the shader reads `animOffset` from each
 instance's own record (`instance.wgsl`, read by `skin.wgsl` and `morph.wgsl`),
@@ -593,7 +613,7 @@ and nothing kept names them in a signature. Each is still declared in
   decoded data would be the second format that is out of scope;
 - the unit geometry, `UnitBoxGeometry`, `UnitPlaneGeometry` and
   `UnitSphereGeometry`, which only `Lookup.EnsureUnit` calls;
-- `DefaultPbrRecord`, which only the conversion and `PaintPbrRecord` call;
+- the default material numbers, which only the conversion and paint use;
 - `SkinnedVertexLayout` and the eight per-attribute storage offsets
   (`StoragePosition` to `StorageWeights`). scene named the offsets through
   aliases that nothing read, and a custom material reads the stored vertex
@@ -1070,58 +1090,65 @@ meantime: there is as yet no clip to make the two differ.
 
 ### Materials and overrides
 
-Each glTF material converts at load into one bundled-PBR record plus its texture
-bindings, owned by the model entry and shared by every draw of it. The two
+Each glTF material converts at load into its params - its texture bindings and
+its numbers - owned by the model entry and shared by every draw of it. The two
 override knobs do not overlap:
 
 | knob | behaviour | case |
 | --- | --- | --- |
-| `Material != nil` | **replaces wholesale**; the file's PBR records are not bound and their parameters do not survive | dissolve, silhouette, depth-only |
-| `OverrideParams` | **merges by name** over each primitive's own record into a per-draw copy in the frame arena, keeping the file's textures | team colour, hit flash, fade |
+| `Material != nil` | **replaces wholesale**; the file's params are not bound and do not survive | dissolve, silhouette, depth-only |
+| `OverrideParams` | **merges by name** over each primitive's own params, as the draw's params, keeping everything it does not name | team colour, hit flash, fade |
 
-A nil `Material` with no overrides binds the file's records directly, with no
+A nil `Material` with no overrides binds the file's material directly, with no
 copy. `OverrideParams` **broadcasts** to every material the draw binds — all six
 of a multi-material model's — which is what the common per-draw override wants.
 It is matched against the *resolved tag entry*, and a name that entry's shader
 does not declare is **ignored rather than reported**: that is what keeps the
 broadcast safe across tags.
 
-**An override has two destinations, and scene resolves only one of them.** The
-gfx parameters the entry declares — the five textures and five samplers — need no
-code at all: an override rides on the draw's own parameter list, and gfx already
-resolves a draw parameter over a material one of the same name against the
-reflected layout of that entry's shader, dropping what the shader does not
-declare. That *is* the matching rule, enforced by the same reflection every
-other binding goes through. What gfx cannot serve is the record: `scenePbrMaterial`
-is a bound range of an arena scene packs itself, so its members
-— `baseColorFactor`, `metallicFactor`, the five transforms and rotations — are
-not reflected uniforms and no name of theirs ever reaches gfx. Scene merges
-those into the draw's own copy of the record.
+**An override has one destination, and scene resolves none of it.** Every
+member of the material - the five textures, the five samplers and every number
+of the `scenePbrMaterial` uniform block, `baseColorFactor`, `metallicFactor`,
+the five transforms and rotations among them - is a param gfx matches by name
+against the reflected layout of the entry's shader. An override rides on the
+draw's own parameter list, gfx resolves a draw parameter over a material one of
+the same name, and it drops what the shader does not declare. That *is* the
+matching rule, enforced by the same reflection every other binding goes
+through. Until [#568](https://github.com/dvoyni/cog/issues/568) the numbers were a storage record scene packed
+and merged overrides into itself; see
+[The material's numbers are a uniform block](#the-materials-numbers-are-a-uniform-block).
 
-So "a per-draw copy in the frame arena" is the record and nothing else: the
-`Material` is never copied, overrides or not, and the record was already copied
-into the frame's material arena on every path. The no-copy guarantee holds for a
-stronger reason than it was written for.
+So nothing is copied per draw: the `Material` is the entry's own, overrides or
+not, and the overrides are the draw's params.
 
-**`uvSets` and `pad` are deliberately not addressable.** `pad` is not a member
-anyone means, and `uvSets` is a packed five-bit selector no parameter kind
-expresses — which TEXCOORD set a slot samples is the file's statement about its
-own mesh, not a per-draw knob. Every other member the shader declares is
-reachable, and a test reads the WGSL struct and fails on one that is not.
+**Every member is a param, `uvSets` included.** `uvSets` is a packed five-bit
+selector carried as a raw `u32` - which TEXCOORD set a slot samples is the
+file's statement about its own mesh, so overriding it is a caller's business
+and rarely a good one. A test reads the WGSL struct and fails on a member the
+material carries no param for, because gfx packs one nothing supplies as zero.
 
-**A parameter whose kind does not fit the member it names is ignored**, on the
-same footing as a name the record does not carry. The merge runs per batch per
-pass with no reporter on the path, and the broadcast means one parameter list is
-matched against several materials, so "does not fit here" is not on its own
-evidence of a caller bug. A vec4 member takes either `ColorParam` or `VecParam`.
+**A parameter whose kind does not fit the member it names is refused by gfx**,
+which reports the mismatch and drops the draw, on the footing it takes for any
+shader's params. A vec4 member takes either `ColorParam` or `VecParam`.
 
-**The two knobs compose rather than conflict.** A draw naming both takes glTF's
-own defaults for the replacement material's record — the file's numbers are gone
-with its bindings — and the overrides then merge over those.
+**The two knobs compose rather than conflict.** The overrides reach a
+replacement material by name, as they reach the file's. The file's numbers are
+gone with its bindings, and a number neither names is packed as zero, so a
+replacement that reads the bundled block supplies what it reads.
 
-**`MeshDraw.Params` stay out of the record.** They are for what a custom
-material declares and scene knows nothing about; the bundled PBR record is the
-model's own, and a mesh that wants a colour names a `Material`.
+**`MeshDraw.Params` reach the material by name too.** A mesh draw is white
+paint, and a param naming one of its numbers changes it, as a model's
+overrides do.
+
+**This is scene's contract. ecsscene overlays instead**
+([#568](https://github.com/dvoyni/cog/issues/568)): its `Material` is laid over
+each primitive's ingredients — the tag's shader or the default scene shader
+under the primitive's variant, the file's params overlaid by name with the
+default shader's and the tag's, the file's record with the same params merged
+over it, and the file's state unless the tag names one — and a `Mesh` takes the
+same path over `BundledIngredients`, its `Params` merged into the record too.
+Wholesale replacement is then a shader declaring none of the file's bindings.
+See [ecsscene.md §Materials overlay the file](../../../ecsscene/docs/specs/ecsscene.md#materials-overlay-the-file).
 
 ### Loading
 
@@ -1154,7 +1181,7 @@ lock this design added, and it serialises against nothing a frame does:
 `storage.FileSystem` is write-locked only by storage's own three mount commands.
 
 **Residency is atomic and per path.** A model is drawable only when geometry,
-baked poses, material records **and every one of its textures** are uploaded,
+baked poses, materials **and every one of its textures** are uploaded,
 all of which happen before the call that asked for it returns — there is no
 half-drawn model. **A failure never retries**: a typo'd path must not re-read the
 file every frame forever, so whatever the load produced is cached, a failure
@@ -1876,13 +1903,14 @@ with **one `forward` entry and nothing else**. `MeshDraw.Material` /
 `metallicRoughnessTexture`, `normalTexture`, `normalScale`, `occlusionTexture`,
 `occlusionStrength`, `emissiveFactor`, `emissiveTexture`, `alphaCutoff`.
 
-These are **user-facing**: `OverrideParams` merges by name, so
-`gfx.ColorParam("baseColorFactor", c)` is what a caller writes to tint a model.
+These are **user-facing**: each is a param of the material, overridden by a
+caller's param of the same name, so `gfx.ColorParam("baseColorFactor", c)` is
+what a caller writes to tint a model.
 Verbatim naming means the loader maps 1:1 with no translation table to drift, and
 **the glTF specification becomes the parameter documentation** — including the
 exact semantics of `occlusionStrength` and `normalScale`, which are easy to get
-subtly wrong from memory. The storage binding itself is `scenePbrMaterial`,
-reserved-prefixed, because no caller ever addresses the whole record.
+subtly wrong from memory. The uniform block itself is `scenePbrMaterial`,
+reserved-prefixed, because no caller ever addresses the whole block.
 
 **Five samplers**, one per slot (`baseColorSampler`, `metallicRoughnessSampler`,
 `normalSampler`, `occlusionSampler`, `emissiveSampler`). glTF references a
@@ -2272,52 +2300,54 @@ shaders only**; canvas keeps its own numbering untouched.
 | group | frequency | contents |
 | --- | --- | --- |
 | 0 | per pass | `sceneFrame`, `sceneInstances`, `sceneAnim` — bound once per pass |
-| 1 | per material | the material record as a bound range, plus material textures and samplers |
+| 1 | per material | the material's numbers as the uniform block, plus its textures and samplers |
 | 2 | per model | baked poses, inverse binds, normal matrices, morph deltas |
-| 3 | — | unassigned, reserved |
+| 3 | — | a custom shader's own bindings ([#568](https://github.com/dvoyni/cog/issues/568)) |
 
 Ascending frequency, lowest group changing least. Web's floor is 4 bind groups,
 so three fit with one spare for shadows or post-processing to claim without
 renumbering.
 
-### Scene declares no uniform block
-
-All numeric data lives in **storage buffers** from the per-frame arena. gfx's
-uniform path is per draw only: every draw that declares a block gets its own
-256-strided slot in one arena buffer (`extensions/gogpu/internal/gfxuniformarena.go`),
-and `uniformMax` (`slots/gfx/internal/translator.go:29`) caps the block at 256
-bytes. A shader declaring more is refused when it is reflected, as
-`gfx.ErrUniformBlockTooLarge`, and every draw through it is dropped
-([#101](https://github.com/dvoyni/cog/issues/101)). Scene abandons the path
-entirely: there is no cap and no per-draw slot. The honest cost is that a
-uniform read is scalar-uniform across a wave while a storage read indexed by
-`instance_index` is not. That cost is small, and not worth two shader paths.
-Canvas uses the uniform path; scene never reaches it.
-
-### Material records are bound ranges, not indices
+### The material's numbers are a uniform block
 
 ```wgsl
-@group(1) @binding(0) var<storage, read> material: PbrMaterial;
+@group(1) @binding(0) var<uniform> scenePbrMaterial: ScenePbrMaterial;
 ```
 
-read directly, with no subscript. A `u32` material index in the instance record
-**does not work**: gfx packs at translate time on the render thread, because
-offsets come from `Backend.ShaderLayout`, while scene writes instance records at
-record time on the update thread — scene would have to write an index for a
-record gfx has not laid out yet. Two writers, one field, opposite sides of the
-thread boundary. **The binding *is* the addressing**, so nothing has to agree
-across it, reflection needs only a one-level walk, and group 1 rebinds per
-material exactly as intended.
+Every other numeric input is a **storage buffer** from the per-frame arena, the
+renderer's own. The material's numbers are the one exception, and the reason is
+who owns them: they are the shader's, not the renderer's. gfx packs a uniform
+block per draw from the draw's params by reflected member name, with the draw's
+params over its material's, so a renderer hands a material's params over and
+never learns its layout. A shader of the caller's own gets its same-named
+members filled the same way.
 
-The cost, named plainly: storage binding offsets must be 256-aligned, so each
-record pads to a 256 multiple. That is per **batch**, and it is a pad rather than
-a cap — a 400-byte PBR record pads to 512 instead of being truncated.
+**It was a storage record the renderer packed, and that was the coupling.**
+gfx cannot fill a storage struct by name, so each renderer carried the bundled
+PBR's record, merged every override into it by hand and bound it for every draw
+whatever shader was in effect. A caller's shader could not receive numbers of
+its own through that path, and one declaring `scenePbrMaterial` differently read
+PBR bytes as its own. [#568](https://github.com/dvoyni/cog/issues/568) moved the numbers into the block and deleted
+the record, its packer, its merge and its binding from both renderers.
 
-**One record per batch, no dedupe.** Two meshes sharing a material produce two
-byte-identical records; collapsing them would cost a hash of every record every
-frame on the render thread to save an upload nobody has measured. scene's batch
-is a run of equal draws ([#49](https://github.com/dvoyni/cog/issues/49)), so its
-table is one record per run.
+The storage form was chosen when gfx's uniform path gave every draw a buffer
+object of its own. It no longer does: every draw that declares a block gets a
+256-strided slot in one arena buffer (`extensions/gogpu/internal/gfxuniformarena.go`),
+the same stride the storage record padded to, per draw rather than per batch -
+and a batch is one draw. `uniformMax` (`slots/gfx/internal/translator.go:29`)
+caps a block at 256 bytes, and a shader declaring more is refused when it is
+reflected, as `gfx.ErrUniformBlockTooLarge` ([#101](https://github.com/dvoyni/cog/issues/101));
+the block is 160, and a test pins it under the cap. gfx allows a shader one
+uniform block, so a shader over the bundled stages carries its own numbers in
+textures, or in the one storage buffer the bundled shader leaves.
+
+**Still no index.** A `u32` material index in the instance record **does not
+work**: gfx packs at translate time on the render thread, because offsets come
+from `Backend.ShaderLayout`, while a renderer writes instance records at record
+time on the update thread — it would have to write an index for a block gfx has
+not laid out yet. Two writers, one field, opposite sides of the thread
+boundary. **The binding is the addressing**, and group 1 rebinds per material
+exactly as intended.
 
 **Scene bindings do not bypass name matching.** Scene injects
 `BufferParam("sceneFrame", …)` and friends as ordinary per-draw parameters and
@@ -2337,15 +2367,15 @@ mirroring canvas's `canvasTexture`/`canvasSampler`. A material parameter named
 | `sceneFrame` | 0 | view, projection, viewProj, camera position, view direction, sun direction and colour, ambient sky/ground, `lightCount`, `lights: array<SceneLight, 16>` |
 | `sceneInstances` | 0 | `array<SceneInstance>`, bound by range per pass |
 | `sceneAnim` | 0 | `array<vec4<f32>>` arena, indexed by `sceneInstance.animOffset` |
-| `scenePbrMaterial` | 1 | the bundled PBR record, a bound range |
 | `scenePoses` | 2 | baked 48 B pose records |
 | `sceneSkinJoints` | 2 | per-skin, per-joint 112 B record: inverse bind and normal matrix interleaved |
 | `sceneMorphDeltas` | 2 | `array<u32>`, one block per morphed primitive: per-slot ranges, a base/first/count per target, then the records ([mesh.md](mesh.md#morph-delta-storage)) |
 
-Plus the PBR's five textures and five samplers in group 1
+Plus the material's own group 1 bindings, which its params fill: the
+`scenePbrMaterial` uniform block and the five textures and five samplers
 (see [Bundled PBR material](#bundled-pbr-material)).
 
-**The storage-buffer budget is eight of eight, and there is no spare left.**
+**The storage-buffer budget is seven of eight.**
 Every reflected binding is emitted with visibility `Vertex|Fragment`
 unconditionally, because reflection walks module globals without consulting entry
 points, so a buffer only the vertex stage reads still consumes a fragment-stage
@@ -2360,14 +2390,16 @@ correcting the "six with two spare" figure the closed tickets record). That
 recovered slot was the one permitted growth, and
 [scene: UV0 and UV1 narrow against a per-mesh range](https://github.com/dvoyni/cog/issues/219)
 spent it on `sceneMeshes`, the per-mesh UV range every narrowed UV decodes
-against. The fully animated variant now sits exactly on the browser core floor.
+against. The fully animated variant then sat exactly on the browser core floor,
+until the material's numbers left storage for the uniform block
+([#568](https://github.com/dvoyni/cog/issues/568)) and gave one back.
 
 Three rules follow, and they are contract rather than guidance:
 
-- **No scene shader may declare a ninth storage buffer**, and there is no longer
-  a spare to spend: the one growth the spare existed for has been taken. Any
-  further per-draw datum must go into a buffer that already exists.
-- **A caller-supplied material may declare none of its own.** It may freely use
+- **No scene shader may declare a ninth storage buffer.** The spare the uniform
+  block freed is the caller's, not the bundled shader's: any further per-draw
+  datum of cog's must go into a buffer that already exists.
+- **A caller-supplied material may declare one of its own.** It may freely use
   the bindings scene binds on every draw — those are scene's and already counted
   — which is what the `procedural` demo does.
 - **The debug check compares against `gfx.DefaultLimits()`, never against the
@@ -2433,11 +2465,11 @@ flags bitfield — two counts the shader reads anyway already carry the
 information.
 
 The three morph words are per-*primitive* constants duplicated per instance, 12 B
-of the 32 B header. Putting them in the per-batch material record would remove
+of the 32 B header. Putting them in the material's uniform block would remove
 the duplication exactly, and was rejected: it would put scene geometry constants
-into a record gfx packs on the render thread while scene records on the update
-thread — the two-writers-across-a-boundary problem the bound-range design exists
-to avoid.
+into a block gfx packs on the render thread while scene records on the update
+thread — the two-writers-across-a-boundary problem the binding-as-addressing
+design exists to avoid.
 
 ### WGSL functions
 
@@ -2552,16 +2584,27 @@ Include-once is by resolved path and the flattened module is line-preserving,
 as [preprocessor.md](../../../../slots/gfx/docs/specs/preprocessor.md)
 specifies, so a WGSL error still lands on a real line of the source that has it.
 
-**Three of the bundled shader's sources are published.** Each is a constant in
+**Five of the bundled shader's sources are published.** Each is a constant in
 model, and each constant's doc and the source's own `DECLARES:` header list
 every name it declares, which an includer must not declare again. A test holds
-the three lists and the sources together.
+the five lists and the sources together.
 
 | constant | source | declares | bindings |
 | --- | --- | --- | --- |
 | `model.VertexDecodePath` | `builtin/scene/vertexdecode.wgsl` | `sceneOctDecode`, `sceneDecodeNormal`, `sceneDecodeTangent`, `sceneDecodeUV`; three `SCENE_` constants | none |
 | `model.FramePath` | `builtin/scene/frame.wgsl` | `SceneFrame`, `SceneLight`, `SceneLightSample`; `sceneCameraPosition`, `sceneViewDirection`, `sceneAmbient`, `sceneSun`, `sceneLightCount`, `sceneLightSample`; `//#const SCENE_MAX_LIGHTS` | `sceneFrame`, storage, `@group(0) @binding(0)` |
 | `model.PbrPath` | `builtin/scene/pbr.wgsl` | `SceneSurface`, `ScenePbrSurface`; `SCENE_PI`, `SCENE_DIELECTRIC_F0`; the BRDF terms, `sceneEnvBRDFApprox`, `scenePunctualContribution`, `sceneShadeSurface` | none of its own; it includes `frame.wgsl` |
+| `model.VertexStagePath` | `builtin/scene/vertexstage.wgsl` | `vs_main`; through its includes the vertex structs and everything the stage reads, each named `scene`, `Scene` or `SCENE_` | groups 0 and, under the variant's defines, 2, exactly as the bundled shader |
+| `model.FragmentStagePath` | `builtin/scene/fragmentstage.wgsl` | `scenePbrFragment`; through its includes `SceneVertexOut`, `PbrPath` and `FramePath` | `scenePbrMaterial` and the five textures and samplers, group 1 |
+
+**The two stages make an app shader the bundled PBR plus a step**
+([#568](https://github.com/dvoyni/cog/issues/568)). `scene.wgsl` is now
+`VertexStagePath`, `FragmentStagePath` and a one-line `fs_main` calling
+`scenePbrFragment`; an app shader is the same two includes, its own bindings in
+group 3 and its own `fs_main`, so a shading fix reaches it with nothing copied.
+Group 3 is the one bind group the scene layout leaves free. A test flattens and
+lowers such a shader under all four variants and checks it declares the bundled
+module's bindings and its own, nothing else.
 
 A material fills a `SceneSurface` however it likes, from its own vertices, its
 own textures or a procedure, and writes `sceneShadeSurface(s) + emissive`. That
@@ -2570,7 +2613,8 @@ exactly as the bundled material is lit, so a custom surface beside a bundled
 one agrees with it about where the light is.
 
 The other eight sources stay private: `instance`, `material`, `skin`, `morph`,
-`anim`, `deform`, `vertex` and the root `scene.wgsl`. What they declare changes
+`anim`, `deform`, `vertex` and the root `scene.wgsl`, though the two stages
+bring what they declare in whole. What they declare changes
 with the bundled shader and the records model packs, and nothing outside model
 may name it. A material that needs the instance record declares its own copy of
 `sceneInstances`, as the `procedural` demo does.
@@ -2595,14 +2639,15 @@ Supplying any other value reads a light array the frame does not hold. A test
 builds an includer with no supply and pins the reflected array at `MaxLights`.
 
 **The storage-buffer rules bind caller materials too.** The fully animated
-variant holds eight of the eight storage buffers the browser floor allows, so:
+variant holds seven of the eight storage buffers the browser floor allows, so:
 
-- a caller material may declare **no storage buffer of its own**;
+- a caller material may declare **one storage buffer of its own**;
 - it may declare any of the ones the renderer already binds on every draw:
-  `sceneFrame` (through `FramePath`, or `PbrPath`), `sceneInstances` and
-  `scenePbrMaterial`. `scenePbrMaterial` is bound but inert for a mesh draw,
-  which has no colour to put in the record, so it always reads the bundled
-  white paint.
+  `sceneFrame` (through `FramePath`, or `PbrPath`), `sceneInstances`,
+  `sceneAnim` and `sceneMeshes`;
+- through `FragmentStagePath` it gets `scenePbrMaterial`, the uniform block the
+  draw's material params fill: for a mesh draw, white paint with its own params
+  laid over it by name. It is the one uniform block gfx allows a shader.
 
 A test builds a material that includes `PbrPath` under each renderer and
 reflects the module gfx handed the backend: one binding, `sceneFrame`, storage at

@@ -111,6 +111,10 @@ type OpQueue struct {
 	temporarySorted      int
 	temporaryTextures    []temporaryTexture
 	temporaryTextureFree map[temporaryTextureKey][]int
+	// frame counts the queue's frames, advanced by every Reset. A material
+	// FrameMaterial recorded is the queue's for the frame it names, and an
+	// ordinary material in any other.
+	frame uint64
 }
 
 // NewOpQueue builds an empty queue that reserves ids through ids.
@@ -123,6 +127,7 @@ func (q *OpQueue) Len() int { return len(q.ops) }
 
 // Reset drops all ops and makes temporary buffers available for reuse.
 func (q *OpQueue) Reset() {
+	q.frame++
 	clear(q.ops)
 	q.ops = q.ops[:0]
 	clear(q.passes)
@@ -229,8 +234,52 @@ func (q *OpQueue) draw(mesh MeshDescr, material MaterialDescr, firstInstance, in
 	q.ops = append(q.ops, o)
 }
 
+// FrameMaterial records a material's params into the queue once, for the rest
+// of this frame, and returns a material every draw of it can name without the
+// queue copying and baking them again.
+//
+// Draw copies a material's params on every draw, because gfx owns nothing a
+// caller passes and the caller may reuse its slice when Draw returns. A caller
+// drawing one material many times in a frame - a renderer's Batches, which
+// share a material and differ in their own params - pays that copy, and the
+// translator's hash of every name, once a draw. Recording pays both once: the
+// params are copied here, and the shape state of their names is taken here, so
+// the translator hashes only a draw's own params to find its plan.
+//
+// The returned material is this queue's for this frame. The caller may reuse
+// its own slice at once, as after Draw. In a later frame, or on another queue,
+// it draws as the material it was recorded from - copied from the params the
+// caller passed here, as every material is - so a recording held too long costs
+// the copy again and nothing else.
+func (q *OpQueue) FrameMaterial(material MaterialDescr) MaterialDescr {
+	if q.recordedHere(&material) {
+		return material
+	}
+	start := len(q.parameterArena)
+	baked := q.bakeParametersIfNeeded(material.params)
+	material.recorded = frameRecording{queue: q, frame: q.frame, start: start, shape: ParameterShapeState(baked)}
+	return material
+}
+
+// recordedHere reports whether a material was recorded by this queue in this
+// frame, so its params are a window of this frame's arena.
+func (q *OpQueue) recordedHere(material *MaterialDescr) bool {
+	return material.recorded.queue == q && material.recorded.frame == q.frame
+}
+
 func (q *OpQueue) bakeMaterialIfNeeded(material MaterialDescr) MaterialDescr {
+	if q.recordedHere(&material) {
+		// The window is found by its start rather than kept as a slice,
+		// because the arena may have grown into a new backing since, and the
+		// params belong in the op as the arena the frame hands over holds them.
+		start := material.recorded.start
+		material.params = q.parameterArena[start : start+len(material.params) : start+len(material.params)]
+		return material
+	}
+	// Unrecorded, stale or another queue's: its params are the caller's, and
+	// the draw copies them as it copies every material's.
 	material.params = q.bakeParametersIfNeeded(material.params)
+	material.recorded = frameRecording{}
 	return material
 }
 

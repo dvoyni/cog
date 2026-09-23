@@ -14,6 +14,23 @@ type MaterialDescr struct {
 	shader ShaderDescr
 	params []ParameterDescr
 	state  MaterialState
+	// recorded is set by OpQueue.FrameMaterial and zero otherwise; see there.
+	recorded frameRecording
+}
+
+// frameRecording is what OpQueue.FrameMaterial attaches to the material it
+// returns: the queue and the queue frame its params were copied into, where in
+// that queue's parameter arena the copy starts, and the shape state of their
+// names. The material's own params stay the caller's, so a recording that is
+// stale or another queue's draws as the material it was recorded from.
+//
+// It is held by value: recording happens every frame, and a pointer would be
+// an allocation every frame for every material a renderer records.
+type frameRecording struct {
+	queue *OpQueue
+	frame uint64
+	start int
+	shape uint64
 }
 
 // Material describes a material from a shader and its named parameters. It
@@ -33,6 +50,7 @@ func MaterialWithState(shader ShaderDescr, state MaterialState, params ...Parame
 // to follow each descriptor's copyData policy when the material is recorded.
 func (m MaterialDescr) Clone() MaterialDescr {
 	m.params = append([]ParameterDescr(nil), m.params...)
+	m.recorded = frameRecording{}
 	return m
 }
 
@@ -42,6 +60,7 @@ func (m MaterialDescr) CloneTo(arena []ParameterDescr) (MaterialDescr, []Paramet
 	start := len(arena)
 	arena = append(arena, m.params...)
 	m.params = arena[start:]
+	m.recorded = frameRecording{}
 	return m, arena
 }
 
@@ -109,4 +128,44 @@ func FingerprintParams(params []ParameterDescr) uint64 {
 		params[i].fingerprint(&h)
 	}
 	return h.Sum64()
+}
+
+// shapePrime and shapeOffset are FNV-1a's 64-bit constants.
+const (
+	shapePrime  uint64 = 1099511628211
+	shapeOffset uint64 = 1469598103934665603
+)
+
+// ParameterShapeState is the first half of a draw's parameter-shape hash: the
+// FNV-1a state after its material's param names, each NUL-terminated, and a
+// 0xff separator. ContinueParameterShape finishes it over the draw's own names.
+// It is split so that OpQueue.FrameMaterial can take a recorded material's half
+// once, and the translator hash only what a draw adds.
+func ParameterShapeState(material []ParameterDescr) uint64 {
+	hash := shapeOffset
+	for i := range material {
+		hash = mixShapeName(hash, material[i].name)
+	}
+	return mixShapeByte(hash, 0xff)
+}
+
+// ContinueParameterShape finishes a parameter-shape hash over a draw's own
+// param names, from the state ParameterShapeState took of its material's.
+func ContinueParameterShape(state uint64, draw []ParameterDescr) uint64 {
+	for i := range draw {
+		state = mixShapeName(state, draw[i].name)
+	}
+	return state
+}
+
+func mixShapeName(hash uint64, name string) uint64 {
+	for i := range len(name) {
+		hash = mixShapeByte(hash, name[i])
+	}
+	return mixShapeByte(hash, 0)
+}
+
+func mixShapeByte(hash uint64, value byte) uint64 {
+	hash ^= uint64(value)
+	return hash * shapePrime
 }

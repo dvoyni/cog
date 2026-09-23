@@ -34,10 +34,13 @@ import (
 // population is one arm of the cost table: n Model Entities, each carrying the
 // optional Components the arm names.
 type population struct {
-	n         int
-	animated  bool
-	params    bool
-	material  bool
+	n        int
+	animated bool
+	params   bool
+	material bool
+	// sight sets a default scene shader with a param of its own, so every
+	// file material is resolved under it rather than drawn as loaded.
+	sight     bool
 	nameInLog string
 }
 
@@ -48,6 +51,7 @@ var (
 		{n: 5_000, animated: true, nameInLog: "5 000 animated"},
 		{n: 5_000, params: true, nameInLog: "5 000 with Params"},
 		{n: 5_000, material: true, nameInLog: "5 000 with Material"},
+		{n: 5_000, sight: true, nameInLog: "5 000 under a default shader"},
 	}
 
 	// benchAnimation blends two clips, which is the common walk-into-idle
@@ -55,6 +59,12 @@ var (
 	benchAnimation = ecsscene.Animation{Plays: [model.MaxClipPlays]model.ClipPlay{
 		{Clip: "Walk", Weight: 1, Loop: true}, {Clip: "Idle", Weight: 0.25, Loop: true},
 	}}
+	// sightShader is the sight arm's default scene shader: a source of its own
+	// and one param every draw carries under the Entity's.
+	sightShader = model.SceneShaderDescr{
+		Source: gfx.ShaderWithText("sight"),
+		Params: []gfx.ParameterDescr{gfx.FloatParam("fade", 0.5)},
+	}
 	// benchParams is one tint, which is the per-Entity variation case.
 	benchParams = ecsscene.Params{Values: m.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}))}
 	// benchMaterial is two pass tags with one parameter each, so the per-tag
@@ -73,6 +83,9 @@ var (
 func newRecordingHarness(tb testing.TB, arm population) *harness {
 	tb.Helper()
 	h := newHarnessOver(tb, fstest.MapFS{}, uint32(arm.n)+8)
+	if arm.sight {
+		h.kernel.ExecuteCommand[defaultShaderCmd](sightShader)
+	}
 	if arm.n > 0 {
 		request := spawnRequest{
 			Count: arm.n, Step: 0.5,
@@ -226,6 +239,9 @@ func newFrameHarness(b *testing.B, arm population) *harness {
 		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
 	})
 	h.spawn(b, spawnRequest{Place: benchEye, Camera: &ecsscene.Camera{FovY: 1.0472, Near: 0.1, Far: 200}})
+	if arm.sight {
+		h.kernel.ExecuteCommand[defaultShaderCmd](sightShader)
+	}
 	crate := &ecsscene.Model{Ref: model.ModelRef{Path: path}}
 	want := int64(arm.n)
 	if arm.n == 0 {
@@ -277,3 +293,31 @@ func BenchmarkFrame5000(b *testing.B)         { benchmarkFrame(b, arms[1]) }
 func BenchmarkFrameAnimated5000(b *testing.B) { benchmarkFrame(b, arms[2]) }
 func BenchmarkFrameParams5000(b *testing.B)   { benchmarkFrame(b, arms[3]) }
 func BenchmarkFrameMaterial5000(b *testing.B) { benchmarkFrame(b, arms[4]) }
+func BenchmarkFrameSight5000(b *testing.B)    { benchmarkFrame(b, arms[5]) }
+
+// BenchmarkFrameDistinct5000 is 5 000 crates tinted 5 000 ways: 5 000 Batches,
+// so 5 000 draws reach gfx, and gfx's per-draw work - the draw's parameter
+// plan and its uniform block - is paid 5 000 times a frame rather than once.
+// Every other arm collapses into one Batch and cannot see that cost.
+func BenchmarkFrameDistinct5000(b *testing.B) {
+	h := newFrameHarness(b, arms[0])
+	const rows = 50
+	for row := range rows {
+		h.spawn(b, spawnRequest{
+			Count: benchColumns, Step: benchStep, Place: benchPlace(row, rows),
+			Model: &ecsscene.Model{Ref: model.ModelRef{Path: crateModel}},
+			ParamsEach: func(i int) ecsscene.Params {
+				tint := float32(row*benchColumns+i) / (rows * benchColumns)
+				return ecsscene.Params{Values: m.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: tint, A: 1}))}
+			},
+		})
+	}
+	for range 200 {
+		h.frame(b)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		h.frame(b)
+	}
+}

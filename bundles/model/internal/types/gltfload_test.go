@@ -206,26 +206,26 @@ func TestConvertDocumentReadsTheMetallicRoughnessSet(t *testing.T) {
 		t.Fatalf("convert: %v", err)
 	}
 	material := model.materials[0]
-	if material.record.BaseColorFactor != (m.Vec4{X: 0.2, Y: 0.4, Z: 0.6, W: 0.8}) {
-		t.Errorf("baseColorFactor = %v", material.record.BaseColorFactor)
+	if material.values.baseColorFactor != (m.Vec4{X: 0.2, Y: 0.4, Z: 0.6, W: 0.8}) {
+		t.Errorf("baseColorFactor = %v", material.values.baseColorFactor)
 	}
-	if material.record.MetallicFactor != 0.25 || material.record.RoughnessFactor != 0.75 {
+	if material.values.metallicFactor != 0.25 || material.values.roughnessFactor != 0.75 {
 		t.Errorf("metallic/roughness = %v/%v, want 0.25/0.75",
-			material.record.MetallicFactor, material.record.RoughnessFactor)
+			material.values.metallicFactor, material.values.roughnessFactor)
 	}
 	// MASK is fixed-function-identical to OPAQUE - the cutoff is entirely a
 	// fragment-shader concern - so it must land in the opaque sort class.
 	if material.state.Blend != gfx.BlendOpaque {
 		t.Errorf("alphaMode MASK blends %v, want opaque state plus a shader discard", material.state.Blend)
 	}
-	if material.record.AlphaCutoff != 0.25 {
-		t.Errorf("alphaCutoff = %v, want 0.25", material.record.AlphaCutoff)
+	if material.values.alphaCutoff != 0.25 {
+		t.Errorf("alphaCutoff = %v, want 0.25", material.values.alphaCutoff)
 	}
 	if material.state.Cull != gfx.CullNone {
 		t.Errorf("doubleSided culls %v, want CullNone", material.state.Cull)
 	}
-	if material.record.EmissiveFactor.Z != 0.3 {
-		t.Errorf("emissiveFactor = %v", material.record.EmissiveFactor)
+	if material.values.emissiveFactor.Z != 0.3 {
+		t.Errorf("emissiveFactor = %v", material.values.emissiveFactor)
 	}
 }
 
@@ -241,8 +241,8 @@ func TestConvertDocumentLeavesAnOpaqueCutoffAtZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
-	if model.materials[0].record.AlphaCutoff != 0 {
-		t.Errorf("cutoff = %v; only MASK carries one", model.materials[0].record.AlphaCutoff)
+	if model.materials[0].values.alphaCutoff != 0 {
+		t.Errorf("cutoff = %v; only MASK carries one", model.materials[0].values.alphaCutoff)
 	}
 }
 
@@ -278,7 +278,7 @@ func TestConvertDocumentFoldsAndClampsEmissiveStrength(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
-	emissive := model.materials[0].record.EmissiveFactor
+	emissive := model.materials[0].values.emissiveFactor
 	if emissive.X != 0.4 {
 		t.Errorf("emissive.x = %v, want 0.1 * 4", emissive.X)
 	}
@@ -306,17 +306,17 @@ func TestConvertDocumentReadsTextureTransformAndUVSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
-	record := model.materials[0].record
-	if got := record.Transforms[baseColorSlot]; got != (m.Vec4{X: 0.25, Y: 0.5, Z: 2, W: 4}) {
+	record := model.materials[0].values
+	if got := record.transforms[baseColorSlot]; got != (m.Vec4{X: 0.25, Y: 0.5, Z: 2, W: 4}) {
 		t.Errorf("baseColorTransform = %v, want offset.xy then scale.xy", got)
 	}
-	if record.Rotations[baseColorSlot] != 1.5 {
-		t.Errorf("baseColorRotation = %v", record.Rotations[baseColorSlot])
+	if record.rotations[baseColorSlot] != 1.5 {
+		t.Errorf("baseColorRotation = %v", record.rotations[baseColorSlot])
 	}
 	// The transform's own texCoord overrides the textureInfo's, and set 1 is
 	// one bit in the packed selector.
-	if record.UVSets&(1<<baseColorSlot) == 0 {
-		t.Errorf("uvSets = %b, want baseColor on TEXCOORD_1", record.UVSets)
+	if record.uvSets&(1<<baseColorSlot) == 0 {
+		t.Errorf("uvSets = %b, want baseColor on TEXCOORD_1", record.uvSets)
 	}
 }
 
@@ -346,7 +346,7 @@ func TestConvertDocumentReportsAThirdUVSet(t *testing.T) {
 	if !found {
 		t.Fatalf("reports = %v, want an unsupported-UV-set report", model.reports)
 	}
-	if model.materials[0].record.UVSets&(1<<baseColorSlot) != 0 {
+	if model.materials[0].values.uvSets&(1<<baseColorSlot) != 0 {
 		t.Error("the slot must fall back to TEXCOORD_0")
 	}
 }

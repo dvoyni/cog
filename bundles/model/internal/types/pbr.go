@@ -1,6 +1,7 @@
 package types
 
 import (
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
@@ -74,22 +75,55 @@ const NormalSlot = 2
 // shader variant. Every draw that names no material of its own uses it, under
 // whatever pass tag its renderer wraps it in: model names no pass.
 //
-// It carries no numeric parameters. The factors, the texture transforms and the
-// alpha cutoff all live in the scenePbrMaterial record, which is a range of a
-// per-frame arena the renderer packs itself and binds per batch — the binding
-// is the addressing, so no index has to agree across the update/render thread
-// boundary. What is left here is what gfx binds by name: the five textures and
-// the five samplers.
+// Its params are BundledIngredients': the five textures and five samplers,
+// and white paint's numbers as the members of the scenePbrMaterial uniform
+// block. gfx binds and packs all of them by name, so a renderer drawing it
+// never names one.
 //
 // The scene-prefixed parameter name space is reserved for engine-supplied
 // bindings, mirroring canvas's canvasTexture and canvasSampler. There is no
 // separate system-bindings channel to keep in sync: sceneFrame, sceneInstances
-// and scenePbrMaterial are injected as ordinary per-draw parameters and the
-// existing matcher binds them exactly like a material texture. A caller
+// and the rest are injected as ordinary per-draw parameters and the existing
+// matcher binds them exactly like a material texture. A caller
 // material that names a scene* parameter is an app bug; gfx does not police it,
 // and the material simply loses.
 func BundledPbr(defaults PbrDefaults) [VariantCount]gfx.MaterialDescr {
-	params := make([]gfx.ParameterDescr, 0, 2*len(PbrSlots))
+	ingredients := BundledIngredients(defaults)
+	var bundled [VariantCount]gfx.MaterialDescr
+	for variant := range bundled {
+		// One params slice serves all four: only the shader differs, and gfx
+		// copies parameters into its own arena as it records.
+		bundled[variant] = gfx.MaterialWithState(
+			ShaderVariant(variant).shader(), ingredients.State, ingredients.Params...)
+	}
+	return bundled
+}
+
+// MaterialIngredients are what a draw's material is resolved from, apart from
+// its shader: the params gfx binds by name and the pipeline state. A glTF
+// material keeps its own, and a baked mesh has BundledIngredients, which is
+// the "file" a mesh draws from.
+//
+// A renderer resolves a caller's shader over them rather than over nothing, so
+// a shader that replaces the bundled one keeps every texture, sampler, state
+// and number the file gave its primitive. gfx matches params to bindings by
+// name and drops a param no binding declares, so a shader that reads none of
+// them costs nothing for their being there.
+type MaterialIngredients struct {
+	// Params are the five texture slots and their samplers, a default texel
+	// in each slot the file left empty - all ten, always, because WGSL
+	// requires every declared binding bound - and then one param per member
+	// of the scenePbrMaterial uniform block, glTF's defaults included, because
+	// gfx packs a member nothing supplies as zero.
+	Params []gfx.ParameterDescr
+	State  gfx.MaterialState
+}
+
+// BundledIngredients are a baked mesh's ingredients: the white texel in every
+// picture slot and the flat normal in the normal one, each under glTF's
+// default sampler, drawn opaque and single-sided with white paint.
+func BundledIngredients(defaults PbrDefaults) MaterialIngredients {
+	params := make([]gfx.ParameterDescr, 0, 2*len(PbrSlots)+pbrValueCount)
 	for i, slot := range PbrSlots {
 		texture := defaults.White
 		if i == NormalSlot {
@@ -100,14 +134,11 @@ func BundledPbr(defaults PbrDefaults) [VariantCount]gfx.MaterialDescr {
 			gfx.SamplerParam(slot.Sampler, PbrSampler),
 		)
 	}
-	var bundled [VariantCount]gfx.MaterialDescr
-	for variant := range bundled {
-		// One params slice serves all four: only the shader differs, and gfx
-		// copies parameters into its own arena as it records.
-		bundled[variant] = gfx.MaterialWithState(
-			ShaderVariant(variant).shader(), PbrState(AlphaOpaque, false), params...)
+	paint := paintPbrValues(m.NewColorLinear(1, 1, 1, 1), false)
+	return MaterialIngredients{
+		Params: paint.appendParams(params),
+		State:  PbrState(AlphaOpaque, false),
 	}
-	return bundled
 }
 
 // ShaderVariant is which of the bundled module's four variants a draw needs. It
@@ -150,6 +181,29 @@ func (v ShaderVariant) shader() gfx.ShaderDescr {
 		opts = append(opts, gfx.ShaderDefine("SCENE_MORPH"))
 	}
 	return SceneShader(opts...)
+}
+
+// VariantShader is shader under variant's defines: SCENE_SKIN and SCENE_MORPH
+// for what the draw's geometry deforms, added to whatever supply the shader
+// already carries. The zero shader is no shader, and reads as the bundled one.
+//
+// The variant is the geometry's and never the caller's, whichever shader is in
+// effect: the group 2 buffers a draw binds are the ones its geometry needs, so
+// a shader without SCENE_SKIN would draw a skinned model in its bind pose, and
+// one with it over a static model would declare a binding nothing fills.
+func VariantShader(shader gfx.ShaderDescr, variant ShaderVariant) gfx.ShaderDescr {
+	if shader == (gfx.ShaderDescr{}) {
+		return variant.shader()
+	}
+	switch variant {
+	case variantSkin:
+		return shader.With(gfx.ShaderDefine("SCENE_SKIN"))
+	case variantMorph:
+		return shader.With(gfx.ShaderDefine("SCENE_MORPH"))
+	case variantSkinMorph:
+		return shader.With(gfx.ShaderDefine("SCENE_SKIN"), gfx.ShaderDefine("SCENE_MORPH"))
+	}
+	return shader
 }
 
 // AlphaMode is glTF's alphaMode, which selects fixed-function state and, for

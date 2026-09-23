@@ -11,7 +11,9 @@ import (
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/model/modelplugin"
 	"github.com/dvoyni/cog/bundles/scene"
+	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/app/appplugin"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -98,12 +100,26 @@ type samplerBinding struct {
 // real source is reflected and asserted in the gogpu package, the only tree
 // with a WGSL front end; here it stands in so that scene's bindings reach the
 // backend and can be read back by name.
-var testShaderLayout = gfx.ShaderLayout{Resources: []gfx.ShaderResource{
+//
+// The uniform block is the bundled material's numbers, at the offsets gogpu
+// reflects, so gfx packs as many members per draw as it does for the real
+// shader.
+var testShaderLayout = gfx.ShaderLayout{UniformSize: 160, UniformGroup: 1, Uniforms: []gfx.UniformMember{
+	{Name: "baseColorFactor", Offset: 0}, {Name: "emissiveFactor", Offset: 16},
+	{Name: "baseColorTransform", Offset: 32}, {Name: "metallicRoughnessTransform", Offset: 48},
+	{Name: "normalTransform", Offset: 64}, {Name: "occlusionTransform", Offset: 80},
+	{Name: "emissiveTransform", Offset: 96},
+	{Name: "baseColorRotation", Offset: 112}, {Name: "metallicRoughnessRotation", Offset: 116},
+	{Name: "normalRotation", Offset: 120}, {Name: "occlusionRotation", Offset: 124},
+	{Name: "emissiveRotation", Offset: 128},
+	{Name: "metallicFactor", Offset: 132}, {Name: "roughnessFactor", Offset: 136},
+	{Name: "normalScale", Offset: 140}, {Name: "occlusionStrength", Offset: 144},
+	{Name: "alphaCutoff", Offset: 148}, {Name: "uvSets", Offset: 152},
+}, Resources: []gfx.ShaderResource{
 	{Name: "sceneFrame", StorageBuffer: true, Group: 0, Binding: 0},
 	{Name: "sceneInstances", StorageBuffer: true, Group: 0, Binding: 1},
 	{Name: "sceneAnim", StorageBuffer: true, Group: 0, Binding: 2},
 	{Name: "sceneMeshes", StorageBuffer: true, Group: 0, Binding: 3},
-	{Name: "scenePbrMaterial", StorageBuffer: true, Group: 1, Binding: 0},
 	{Name: "baseColorTexture", Group: 1, Binding: 1},
 	{Name: "baseColorSampler", Sampler: true, Group: 1, Binding: 2},
 	{Name: "metallicRoughnessTexture", Group: 1, Binding: 3},
@@ -620,6 +636,41 @@ func durableMeshes(lookup *model.Lookup) []model.MeshRecord {
 // wrapsForward reports whether material is the one-entry forward material the
 // flush wraps a model's forward gfx material in, sharing that material's
 // parameters rather than a copy of them.
+// numberOf resolves one of the bundled material's numbers the way gfx packs
+// it for a draw: the draw's own params first, then its paint, then its
+// material's forward params. ok is false when nothing names it, which gfx packs
+// as zero.
+func numberOf(draw types.DrawRecord, name string) (m.Vec4, bool) {
+	value := func(p gfx.ParameterDescr) m.Vec4 {
+		if c, ok := p.ColorValue(); ok {
+			return m.Vec4{X: c.R, Y: c.G, Z: c.B, W: c.A}
+		}
+		if v, ok := p.VecValue(); ok {
+			return v
+		}
+		f, _ := p.FloatValue()
+		return m.Vec4{X: f}
+	}
+	for _, params := range [][]gfx.ParameterDescr{draw.Params, draw.AppendPaint(nil)} {
+		for _, p := range params {
+			if p.Name() == name {
+				return value(p), true
+			}
+		}
+	}
+	for _, tag := range draw.Material {
+		if tag.Tag != scene.TagForward {
+			continue
+		}
+		for _, p := range tag.Descr.Params() {
+			if p.Name() == name {
+				return value(p), true
+			}
+		}
+	}
+	return m.Vec4{}, false
+}
+
 func wrapsForward(material scene.Material, forward gfx.MaterialDescr) bool {
 	if len(material) != 1 || material[0].Tag != scene.TagForward {
 		return false

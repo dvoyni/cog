@@ -68,14 +68,31 @@ type scratch struct {
 	passes        []ecsscene.Pass
 	defaultPasses [1]ecsscene.Pass
 
-	// bundled is the bundled PBR's four variants wrapped as forward
-	// materials, and forward the arena they and a model's own materials are
-	// wrapped in.
+	// bundled is the bundled PBR's four variants as this frame resolves
+	// them - the default scene shader over the bundled ingredients - wrapped
+	// as forward materials, and forward the arena they and a model's own
+	// materials are wrapped in.
 	bundled [model.VariantCount]material
 	forward []materialTag
-	// tags and tagParams are the arenas a Material Component is copied out
-	// into, once per Batch, and params the arena a Params Component is. Each
-	// copy is a full-slice window, so no later copy can grow into it.
+	// bundledRecorded is which bundled variants this frame has recorded into
+	// gfx's queue. A variant is recorded the first time a Batch draws it
+	// rather than at begin, because recording bakes its ten textures and a
+	// frame drawing no bare Mesh would pay that for nothing.
+	bundledRecorded [model.VariantCount]bool
+	// defaultShader is the frame's default scene shader, read once, and
+	// bundledDefault whether it is the bundled PBR with no params, which lets
+	// a file's own material draw its load-time forward material untouched.
+	defaultShader  model.SceneShaderDescr
+	bundledDefault bool
+	// variants holds each shader a frame has put under a variant's defines,
+	// by shader and variant. It outlives the frame: a descriptor's supply is
+	// a string built at the call, and building one per Batch per frame would
+	// be the steady frame's only allocation.
+	variants map[variantShaderKey]gfx.ShaderDescr
+	// tags and tagParams are the arenas a resolved material is built in, once
+	// per material a frame interns, and params the arena a Params Component
+	// is copied into. Each copy is a full-slice window, so no later copy can
+	// grow into it.
 	tags      []materialTag
 	tagParams []gfx.ParameterDescr
 	params    []gfx.ParameterDescr
@@ -90,6 +107,9 @@ type scratch struct {
 	modelTargets      []model.SceneMorphWeight
 	modelMorphOffsets []uint32
 
+	// queue is gfx's queue the frame is recorded into, which every material
+	// the frame interns is recorded for; see scratch.recorded.
+	queue *gfx.OpQueue
 	// meshReported is the set of mesh ids already reported this frame.
 	meshReported map[uint32]struct{}
 	// k is the kernel of the frame being recorded, and once the report-once
@@ -113,9 +133,8 @@ type bucketKey struct {
 type batch struct {
 	mesh model.MeshRecord
 	skin model.SkinBuffers
-	// pbr is the Batch's bundled-PBR record: the file's own, or white paint,
-	// with a Model's Params merged over it.
-	pbr    model.ScenePbrRecord
+	// params are the Entity's Params, which gfx lays by name over whatever
+	// the Batch's material binds in each pass.
 	params []gfx.ParameterDescr
 	// interned is the Batch's material's index in the frame's material table.
 	interned int32
@@ -129,8 +148,15 @@ type cameraRecord struct {
 	first, count int
 }
 
+// variantShaderKey is one shader under one variant's defines.
+type variantShaderKey struct {
+	shader  gfx.ShaderDescr
+	variant model.ShaderVariant
+}
+
 func newScratch() *scratch {
 	s := &scratch{
+		variants:     map[variantShaderKey]gfx.ShaderDescr{},
 		labels:       map[passLabel]string{},
 		bucket:       map[bucketKey]int32{},
 		meshReported: map[uint32]struct{}{},
@@ -177,9 +203,10 @@ func recordSystem(
 	if !keyed.ready || view == nil || view.WindowWidth <= 0 || view.WindowHeight <= 0 {
 		return
 	}
-	s.begin(k, keyed)
+	read := model.NewLookupReadAccess(lookup.Get())
+	s.begin(k, keyed, read.DefaultSceneShader(), out.Get())
 	frame := frameInputs{
-		read: model.NewLookupReadAccess(lookup.Get()), keys: keyed,
+		read: read, keys: keyed,
 		animations: animations, params: params, materials: materials,
 	}
 	for e, it := range models.All() {
@@ -224,15 +251,21 @@ type frameInputs struct {
 	materials  *ecs.Get[ecsscene.Material]
 }
 
-// begin starts a frame: the arenas truncate, the bundled PBR is wrapped as the
-// frame's first four materials, and the lists and tables empty.
-func (s *scratch) begin(k kernel.Kernel, keyed *keyScratch) {
-	s.k = k
+// begin starts a frame: the arenas truncate, the default scene shader is read,
+// the bundled PBR is resolved under it as the frame's first four materials,
+// and the lists and tables empty.
+func (s *scratch) begin(k kernel.Kernel, keyed *keyScratch, defaultShader model.SceneShaderDescr, queue *gfx.OpQueue) {
+	s.k, s.queue = k, queue
 	s.build.reset()
 	s.forward = s.forward[:0]
-	for variant := range keyed.bundled {
-		s.bundled[variant] = s.forwardMaterial(keyed.bundled[variant])
+	s.tags, s.tagParams, s.params = s.tags[:0], s.tagParams[:0], s.params[:0]
+	s.defaultShader = defaultShader
+	s.bundledDefault = defaultShader.Source == (gfx.ShaderDescr{}) && len(defaultShader.Params) == 0
+	for variant := range s.bundled {
+		s.bundled[variant] = s.forwardMaterial(s.resolveDescr(
+			&keyed.bundled, gfx.ShaderDescr{}, gfx.MaterialState{}, nil, model.ShaderVariant(variant)))
 	}
+	s.bundledRecorded = [model.VariantCount]bool{}
 	s.materials.reset(&s.bundled)
 	s.entries = s.entries[:0]
 	s.batches = s.batches[:0]
@@ -240,7 +273,6 @@ func (s *scratch) begin(k kernel.Kernel, keyed *keyScratch) {
 	s.preparedLights = s.preparedLights[:0]
 	s.cameras = s.cameras[:0]
 	s.passes = s.passes[:0]
-	s.tags, s.tagParams, s.params = s.tags[:0], s.tagParams[:0], s.params[:0]
 	s.modelMorphOffsets = s.modelMorphOffsets[:0]
 	clear(s.meshReported)
 }
@@ -395,6 +427,7 @@ func (s *scratch) release() {
 	clear(s.tags)
 	clear(s.tagParams)
 	clear(s.params)
+	s.defaultShader = model.SceneShaderDescr{}
 	clear(s.plays[:cap(s.plays)])
 	for i := range s.bundled {
 		s.bundled[i] = nil
@@ -402,5 +435,5 @@ func (s *scratch) release() {
 	for i := range s.materials.interned {
 		s.materials.interned[i].material = nil
 	}
-	s.k = kernel.Kernel{}
+	s.k, s.queue = kernel.Kernel{}, nil
 }

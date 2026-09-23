@@ -228,13 +228,14 @@ wrong picture:
 - `OverrideParams` **merges** by glTF's own parameter names over each
   primitive's material and keeps the file's textures. That is the team colour,
   the hit flash and the fade.
-- `Material` **replaces** wholesale. The file's PBR records are not bound at
-  all, so its base colours, factors and texture transforms go with it. That is
-  the dissolve, the silhouette and the depth-only case.
+- `Material` **replaces** wholesale. The file's params are not bound at all, so
+  its textures, base colours, factors and texture transforms go with it. That
+  is the dissolve, the silhouette and the depth-only case. Under ecsscene a
+  `Material` overlays the file instead; see ecsscene's README.
 
 A replacement `Material` is **always the caller's own shader**. It sets the draw
-off the bundled PBR path, and the bundled shader declares a material record plus
-five texture/sampler pairs that nothing would then bind — which fails
+off the bundled PBR path, and the bundled shader declares a uniform block of
+numbers plus five texture/sampler pairs that nothing would then bind — which fails
 `CreateBindGroup`, and a failed bind group takes the **whole frame's command
 buffer** with it, silently. Apply one only to a subtree that declares whatever
 group 2 needs.
@@ -244,11 +245,13 @@ frame-fatal**. Reflection keeps every module global, so every `@group/@binding`
 a shader declares must be bound at draw time. Declare exactly what the shader
 reads.
 
-A caller-supplied material declares **no storage buffers of its own**. Use the
-bindings scene binds on every draw — `sceneFrame`, `sceneInstances`,
-`sceneMeshes`, `scenePbrMaterial`, any subset — because those are scene's and
-already counted against a budget that is now fully spent at eight of eight. Put
-per-object data in the vertices.
+A caller-supplied material declares **at most one storage buffer of its own**.
+Use the bindings scene binds on every draw — `sceneFrame`, `sceneInstances`,
+`sceneAnim`, `sceneMeshes`, any subset — because those are scene's and already
+counted against a budget of eight that the bundled shader holds seven of. A
+material's numbers are never scene's to bind: they are params, packed by gfx
+into whatever uniform block the shader declares. Put per-object data in the
+vertices.
 
 A **custom vertex layout requires a custom `Material`**: the bundled PBR knows
 two layouts and no others — the **standard** one `model.Vertex` reports, six

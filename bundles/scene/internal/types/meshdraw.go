@@ -93,7 +93,7 @@ func (q *OpQueue) Mesh(layers LayerMask, ref model.MeshRef, draw MeshDraw) {
 	// One record per instance, tied together by a group. Culling is per
 	// instance and a blended draw sorts per instance, both of which fall out of
 	// that; the flush then packs an opaque group's survivors back into one
-	// batch, so the N records cost one draw call and one material record.
+	// batch, so the N records cost one draw call.
 	record.Group = uint32(len(q.draws)) + 1
 	for _, transform := range transforms {
 		record.Transform = transform

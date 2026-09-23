@@ -167,6 +167,26 @@ func malformedSupplyEntry(entry ShaderOption) string {
 	return ""
 }
 
+// With describes the same source under its supply extended by opts. It is
+// construction continued: an option naming an entry the supply already holds
+// replaces it, last-wins, so the result is the descriptor that naming every
+// option up front would have built - one cache entry, not two. It is how a
+// renderer adds the defines a draw's geometry needs to a shader it was handed.
+//
+// A supply that was malformed stays malformed, under its first bad entry's
+// message: adding a good entry does not launder a bad one.
+func (d ShaderDescr) With(opts ...ShaderOption) ShaderDescr {
+	if len(opts) == 0 {
+		return d
+	}
+	supply, malformed := canonicalSupply(append(d.supplyEntries(), opts...))
+	if d.Params.supplyMalformed != "" {
+		malformed = d.Params.supplyMalformed
+	}
+	d.Params = ShaderDescrParams{supply: supply, supplyMalformed: malformed}
+	return d
+}
+
 // Path reports the storage path a ShaderWithResource descriptor names, and is
 // empty for one built from inline text. The text itself is not offered back:
 // a whole shader source is not an identity, and nothing outside gfx can do

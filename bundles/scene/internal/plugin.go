@@ -197,7 +197,7 @@ func (p *plugin) flushFrame(
 	for variant := range bundled {
 		wrapped[variant] = p.forwardMaterial(bundled[variant])
 	}
-	p.materials.reset(wrapped)
+	p.materials.reset(wrapped, gfxWrite)
 	// Model draws expand into ordinary draw records before anything looks at
 	// one, so culling, sorting and packing are blind to where a draw came from.
 	// Anything a draw names and the cache does not hold is read, parsed and
@@ -433,7 +433,7 @@ func (p *plugin) flushPass(
 			material, _ := p.materials.entry(prepared.interned, tag)
 			mesh, _ := p.resolveMesh(lookup, write, prepared.mesh)
 			p.build.addDraw(pending, mesh, prepared.mesh.ID(), material,
-				p.build.worlds, draws[index].PbrRecord(), draws[index].Params, prepared.anim)
+				p.build.worlds, &draws[index], prepared.anim)
 			result.Instances += run
 			i += run
 		}
@@ -455,8 +455,8 @@ type sortClass struct {
 // single batch: the survivors of one instanced call, and after them any draw
 // recorded separately that is equal to the head on everything a batch holds
 // once for all of its instances. The key is already equal for the whole run -
-// the sort put it there - so that leaves the draw's gfx parameters, its
-// bundled-PBR record and its animation binding. A draw that differs in any of
+// the sort put it there - so that leaves the draw's gfx parameters, its paint
+// and its animation binding. A draw that differs in any of
 // them ends the run, and costs a batch rather than drawing the wrong picture.
 //
 // Equal draws reach here contiguous because the key is material then mesh and
@@ -483,26 +483,27 @@ func groupRun(entries []sortEntry, survivors []survivor, draws []types.DrawRecor
 
 // runHead is the first draw of a run, with what comparing against it costs
 // computed once for the run rather than once per draw: its parameters'
-// fingerprint and its bundled-PBR record.
+// fingerprint.
 type runHead struct {
 	draw *types.DrawRecord
 	anim *types.AnimBinding
 
-	fingerprint      uint64
-	record           model.ScenePbrRecord
-	hashed, recorded bool
+	fingerprint uint64
+	hashed      bool
 }
 
 // matches reports whether a draw is equal to the head on everything a batch
-// holds once for all of its instances: its animation binding, its gfx
-// parameters and its bundled-PBR record. The cheap comparisons go first.
+// holds once for all of its instances: its animation binding, its paint and its
+// gfx parameters. The cheap comparisons go first.
 //
 // Parameters held in the head's own backing - every instance of a call aliases
 // one arena range - are equal without a hash. Anything else compares gfx's own
 // fingerprint, the one ecsscene keys its batches on, which is the only
 // comparison that cannot silently forget a kind.
 func (h *runHead) matches(draw *types.DrawRecord, anim *types.AnimBinding) bool {
-	if draw.OverridesRecord != h.draw.OverridesRecord || !sameAnim(h.anim, anim) {
+	// A shape's colour becomes params at the draw, so two shapes of one
+	// colour are equal here and two of different colours are not.
+	if draw.Color != h.draw.Color || draw.SelfLit != h.draw.SelfLit || !sameAnim(h.anim, anim) {
 		return false
 	}
 	a, b := h.draw.Params, draw.Params
@@ -517,10 +518,7 @@ func (h *runHead) matches(draw *types.DrawRecord, anim *types.AnimBinding) bool 
 			return false
 		}
 	}
-	if !h.recorded {
-		h.record, h.recorded = h.draw.PbrRecord(), true
-	}
-	return draw.PbrRecord() == h.record
+	return true
 }
 
 // sameAnim reports whether two draws say the same thing about animation. A

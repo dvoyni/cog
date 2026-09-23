@@ -21,6 +21,15 @@ func DepthKindOf(v *DepthDescr) DepthKind { return v.kind }
 // DepthTexture reads DepthDescr.texture for gfx's internal/.
 func DepthTexture(v *DepthDescr) TextureID { return v.texture }
 
+// MaterialShapeState reads the shape state OpQueue.FrameMaterial took of a
+// recorded material's param names, and whether it has one.
+func MaterialShapeState(v *MaterialDescr) (uint64, bool) {
+	if v.recorded.queue == nil {
+		return 0, false
+	}
+	return v.recorded.shape, true
+}
+
 // MeshIndices reads MeshDescr.indices for gfx's internal/.
 func MeshIndices(v *MeshDescr) BufferDescr { return v.indices }
 

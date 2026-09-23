@@ -128,10 +128,12 @@ type modelPrimitive struct {
 	Morph MorphBinding
 }
 
-// modelMaterial is one converted glTF material: the forward gfx material a draw
-// binds, once per shader variant, the content key of each, and the per-batch
-// record that carries its numbers. It names no pass: a renderer wraps the
-// forward material under its own tag.
+// modelMaterial is one converted glTF material: its ingredients - the params,
+// its numbers among them, and the state - and the forward
+// gfx material the bundled shader makes of them, once per shader variant, with
+// the content key of each. It names no pass: a renderer wraps the forward
+// material under its own tag, or resolves a shader of its own over the
+// ingredients, which is how a caller's shader keeps what the file says.
 //
 // One glTF material serves whatever primitives reference it, and what a
 // primitive deforms is not the material's business - so the variant is picked
@@ -143,9 +145,9 @@ type modelPrimitive struct {
 // derives its own material key from it rather than fingerprinting the descr
 // on every draw of every frame.
 type modelMaterial struct {
+	MaterialIngredients
 	Forward [VariantCount]gfx.MaterialDescr
 	Key     [VariantCount]uint64
-	Record  ScenePbrRecord
 }
 
 // modelReportKey and textureReportKey are the keys the load's report-once calls
@@ -241,7 +243,7 @@ func (l *Lookup) ModelView(
 // ended it. The Library has already read the bytes, so data is the file whole
 // and no second open happens here.
 //
-// Residency is atomic: geometry, material records, every one of the model's
+// Residency is atomic: geometry, materials, every one of the model's
 // textures and both animation buffers are uploaded before this returns, so
 // there is no frame in which half a model is drawn.
 //
@@ -409,9 +411,10 @@ func (l *Lookup) reportLoad(k kernel.Kernel, path string, reports []error) {
 	k.ReportErrorOnce(modelReportKey(path), model...)
 }
 
-// bindModelMaterial builds the forward materials one converted glTF material
-// draws with: the bundled shader, the pipeline state its alphaMode, doubleSided and
-// winding produced, and all ten of the shader's texture and sampler bindings.
+// bindModelMaterial builds one converted glTF material's ingredients - the
+// pipeline state its alphaMode, doubleSided and winding produced, all ten of the
+// shader's texture and sampler bindings, and its numbers as named params - and
+// the forward materials the bundled shader draws them with.
 //
 // All ten, always: WGSL requires every declared binding bound and gfx does no
 // preprocessing, so an empty slot binds a default rather than being omitted.
@@ -420,7 +423,7 @@ func (l *Lookup) reportLoad(k kernel.Kernel, path string, reports []error) {
 func bindModelMaterial(
 	loaded *loadedMaterial, textures []gfx.TextureDescr, defaults PbrDefaults,
 ) modelMaterial {
-	params := make([]gfx.ParameterDescr, 0, 2*pbrSlotCount)
+	params := make([]gfx.ParameterDescr, 0, 2*pbrSlotCount+pbrValueCount)
 	for slot, name := range PbrSlots {
 		texture := defaults.White
 		if slot == NormalSlot {
@@ -439,9 +442,11 @@ func bindModelMaterial(
 			gfx.SamplerParam(name.Sampler, loaded.samplers[slot]),
 		)
 	}
-	built := modelMaterial{Record: loaded.record}
+	params = loaded.values.appendParams(params)
+	built := modelMaterial{MaterialIngredients: MaterialIngredients{Params: params, State: loaded.state}}
 	for variant := range built.Forward {
-		// One params slice serves all four: only the shader differs.
+		// One params slice serves all four, and the ingredients too: only
+		// the shader differs.
 		built.Forward[variant] = gfx.MaterialWithState(
 			ShaderVariant(variant).shader(), loaded.state, params...)
 		built.Key[variant] = built.Forward[variant].Fingerprint()

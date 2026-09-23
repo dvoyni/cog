@@ -225,11 +225,8 @@ func TestParamsReachAMeshsParamsAndAModelsOverrides(t *testing.T) {
 	if len(models) != 1 {
 		t.Fatalf("the model drew %d instances, want 1", len(models))
 	}
-	if len(models[0].material) < 16 {
-		t.Fatalf("the model draw bound a %d-byte material record", len(models[0].material))
-	}
-	if got := vec4At(models[0].material, 0); got != (m.Vec4{X: 1, W: 1}) {
-		t.Errorf("the model's material record has baseColorFactor %v, want the tint over the file's white", got)
+	if got := models[0].param("baseColorFactor"); got != (m.Vec4{X: 1, W: 1}) {
+		t.Errorf("the model drew with baseColorFactor %v, want the tint over the file's white", got)
 	}
 	if got := models[0].param("fade"); got != (m.Vec4{}) {
 		t.Errorf("the model draw bound fade %v, which only the mesh's Params named", got)
@@ -293,18 +290,19 @@ func TestAMaterialsTagsEachKeepTheirOwnParams(t *testing.T) {
 		}
 		return out
 	}
-	// The tag with no state names none, which reaches gfx as the zero state:
-	// what the pipeline was built with is what the second Entity's only tag
-	// reads back as too.
+	// The tag with no state names none, so it draws with the state of what
+	// it overlays - a Mesh's bundled ingredients, opaque and single-sided -
+	// and so does the second Entity's only tag.
+	meshState := model.PbrState(model.AlphaOpaque, false)
 	want := map[string]passView{
 		"scene.camera0.forward": {Shader: "forward", State: gfx.StateOpaque3D(), A: 1, B: 2},
 		"scene.camera0.shadow":  {Shader: "shadow", State: gfx.StateTransparent3D(), C: 3},
-		"scene.camera0.outline": {Shader: "forward", State: gfx.MaterialState{}},
+		"scene.camera0.outline": {Shader: "forward", State: meshState},
 	}
 	if got := views(-3); !reflect.DeepEqual(got, want) {
 		t.Errorf("the three-tag material drew as\n%+v\nwant\n%+v", got, want)
 	}
-	wantOther := map[string]passView{"scene.camera0.forward": {Shader: "shadow", State: gfx.MaterialState{}, D: 4}}
+	wantOther := map[string]passView{"scene.camera0.forward": {Shader: "shadow", State: meshState, D: 4}}
 	if got := views(3); !reflect.DeepEqual(got, wantOther) {
 		t.Errorf("the second Entity's material drew as %+v, want %+v", got, wantOther)
 	}

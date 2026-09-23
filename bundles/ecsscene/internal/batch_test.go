@@ -119,7 +119,7 @@ func TestDistinctTintsAreOneBatchEach(t *testing.T) {
 			t.Fatalf("the crate at index %d drew %d instances, want 1", i, len(found))
 		}
 		want := float32(i) / crowd
-		if got := vec4At(found[0].material, 0); !nearFloat(got.X, want) {
+		if got := found[0].param("baseColorFactor"); !nearFloat(got.X, want) {
 			t.Errorf("the crate at index %d drew with baseColorFactor %v, want red %v", i, got, want)
 		}
 	}

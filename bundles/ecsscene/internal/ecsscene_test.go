@@ -182,6 +182,20 @@ func bakeCmdImpl() (kernel.Lock, kernel.Execute[bakeRequest, bakeResponse]) {
 		}
 }
 
+// defaultShaderCmd sets model's default scene shader, which is the call a game
+// makes once its scene-wide bindings are baked.
+type defaultShaderCmd kernel.Command[model.SceneShaderDescr, struct{}]
+
+func defaultShaderCmdImpl() (kernel.Lock, kernel.Execute[model.SceneShaderDescr, struct{}]) {
+	var lookup kernel.Write[*model.Lookup]
+	return func(access kernel.ResourceAccess) {
+			lookup = access.GetWrite[*model.Lookup]()
+		}, func(k kernel.Kernel, descr model.SceneShaderDescr) struct{} {
+			model.NewLookupAccess(k, lookup.Get()).SetDefaultSceneShader(descr)
+			return struct{}{}
+		}
+}
+
 // gamePlugin stands in for the game: it spawns the world's Entities and reads
 // back what the frame recorded. It declares the binding because it names the
 // binding's Components, and model because it locks model's Lookup.
@@ -205,6 +219,7 @@ func (p *gamePlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[bakeCmd](bakeCmdImpl)
 	registrar.HandleCommand[keysCmd](keysCmdImpl)
 	registrar.HandleCommand[setParamsCmd](setParamsCmdImpl(registrar))
+	registrar.HandleCommand[defaultShaderCmd](defaultShaderCmdImpl)
 	return nil
 }
 

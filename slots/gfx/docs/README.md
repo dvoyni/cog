@@ -106,11 +106,27 @@ engine walked away from.
   are retained until the render thread consumes them.
 - `*Viewport`: logical, window, and framebuffer dimensions.
 
-`OpQueue` methods are `Pass`, `SetPass`, `TemporaryTarget`, `Draw`,
-`DrawInstanced`, `DrawInstancedFrom`, `Len`, and `Reset`. Draw parameters
-override same-named material parameters. `DrawInstancedFrom` starts at a given
-`firstInstance`: WebGPU's `instance_index` starts there, so a batch reads its
-own slice of a shared instance arena without plumbing an offset of its own.
+`OpQueue` methods are `Pass`, `SetPass`, `TemporaryTarget`, `FrameMaterial`,
+`Draw`, `DrawInstanced`, `DrawInstancedFrom`, `Len`, and `Reset`. Draw
+parameters override same-named material parameters. `DrawInstancedFrom` starts
+at a given `firstInstance`: WebGPU's `instance_index` starts there, so a batch
+reads its own slice of a shared instance arena without plumbing an offset of its
+own.
+
+**A draw copies its material's params**, because gfx owns nothing a caller
+passes and the caller may reuse its slice when `Draw` returns - and the
+translator hashes every param name to find the draw's parameter plan. Both are
+per draw. A recorder drawing one material many times in a frame records it once
+with `q.FrameMaterial(material)`, which copies the params and takes the names'
+hash then, and names the returned material in every draw: those draws copy
+nothing of the material and hash only their own params. The returned material is
+the queue's for the frame it was recorded in. The caller may reuse its own slice
+at once, as after `Draw`, and in a later frame or on another queue the material
+draws as the one it was recorded from, copied as usual. scene and ecsscene
+record every material they intern
+([#568](https://github.com/dvoyni/cog/issues/568)), where a material carries its
+numbers as params and 5 000 draws of one material otherwise copied 27 params
+each.
 
 ## Passes
 

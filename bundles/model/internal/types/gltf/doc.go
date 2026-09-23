@@ -6,7 +6,7 @@
 // parameters as plain values, image references, lights, and the flattened
 // scene walk. It does no GPU-layout work: packing vertices into the storage
 // layout, baking clips onto the pose grid, packing morph blocks and filling the
-// PBR record all happen in model, after the decoder returns. Vertex data
+// PBR numbers all happen in model, after the decoder returns. Vertex data
 // crosses as the glTF library's own typed slices, structure of arrays, handed
 // over untouched wherever the file already stored floats.
 //

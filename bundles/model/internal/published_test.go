@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -20,9 +21,11 @@ import (
 // they declare can change with the bundled shader and nothing outside model
 // may name it.
 var published = map[string]string{
-	"VertexDecodePath": model.VertexDecodePath,
-	"FramePath":        model.FramePath,
-	"PbrPath":          model.PbrPath,
+	"VertexDecodePath":  model.VertexDecodePath,
+	"FramePath":         model.FramePath,
+	"PbrPath":           model.PbrPath,
+	"VertexStagePath":   model.VertexStagePath,
+	"FragmentStagePath": model.FragmentStagePath,
 }
 
 // topLevelDeclaration matches a module-scope name a source declares: a struct,
@@ -188,6 +191,57 @@ func TestAnIncluderOfThePreludeGetsOneBindingAndMaxLights(t *testing.T) {
 				lights, model.MaxLights)
 		}
 	}
+}
+
+// An app shader is the bundled PBR plus one step: it includes the two published
+// stages, declares its own binding in group 3 and writes a fs_main around
+// scenePbrFragment. It flattens and lowers under every variant the renderer
+// may add, which is what "the variant is cog's job" needs of a shader cog did
+// not write, and it declares exactly the bundled module's bindings plus its
+// own - nothing copied, nothing extra.
+func TestAnAppShaderOverTheTwoStagesBuildsUnderEveryVariant(t *testing.T) {
+	for variant := range model.VariantCount {
+		shader := model.VariantShader(gfx.ShaderWithText(stageIncluder), model.ShaderVariant(variant))
+		text, err := flattenShader(t, shaderMountID, shaderFS, shader)
+		if err != nil {
+			t.Fatalf("variant %d: flatten the app shader: %v", variant, err)
+		}
+		bundled, err := flattenShader(t, shaderMountID, shaderFS,
+			model.VariantShader(gfx.ShaderDescr{}, model.ShaderVariant(variant)))
+		if err != nil {
+			t.Fatalf("variant %d: flatten the bundled shader: %v", variant, err)
+		}
+		want := append(bindingsOf(lowerForTest(t, bundled)), "3/0 sightDepths")
+		if got := bindingsOf(lowerForTest(t, text)); strings.Join(got, ", ") != strings.Join(want, ", ") {
+			t.Errorf("variant %d: the app shader declares\n%v\nwant the bundled module's and its own\n%v",
+				variant, got, want)
+		}
+	}
+}
+
+// stageIncluder is the consuming game's fade, written as the ticket spells it.
+const stageIncluder = `//#include builtin/scene/vertexstage.wgsl
+//#include builtin/scene/fragmentstage.wgsl
+@group(3) @binding(0) var sightDepths: texture_2d<f32>;
+
+@fragment
+fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {
+    let lit = scenePbrFragment(in, ff);
+    let visibility = textureLoad(sightDepths, vec2<i32>(in.worldPosition.xz), 0).r;
+    return vec4<f32>(mix(vec3<f32>(0.0), lit.rgb, visibility), lit.a);
+}
+`
+
+// bindingsOf lists a module's bindings as group/binding name, in declaration
+// order.
+func bindingsOf(module *ir.Module) []string {
+	var out []string
+	for _, global := range module.GlobalVariables {
+		if global.Binding != nil {
+			out = append(out, fmt.Sprintf("%d/%d %s", global.Binding.Group, global.Binding.Binding, global.Name))
+		}
+	}
+	return out
 }
 
 // preludeIncluder is the least material that reads the prelude: a vertex stage
