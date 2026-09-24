@@ -2,48 +2,14 @@
 // that turns them into shading inputs.
 //#include ./pbr.wgsl
 
-// ScenePbrMaterial is the bundled material's numbers, the shader's one uniform
-// block. gfx packs it per draw from the draw's params by member name, like any
-// shader's uniforms, so the renderer that draws it knows none of these names:
-// model hands every member over as a named param with the material, and a
-// caller's param of the same name overrides it on the draw.
-//
-// Its numbers are glTF's, by verbatim name, because they are user-facing: the
-// glTF specification is their documentation. The per-slot metadata is flat
-// named members rather than `transforms: array<TexTransform, 5>`, because
-// array members are not name-addressable - and animating baseColorTransform per
-// frame is UV scrolling, which the array form forecloses permanently. Being
-// the one uniform block gfx allows a shader, it is also why a shader including
-// this file carries its own numbers in textures rather than a block of its own.
-struct ScenePbrMaterial {
-    baseColorFactor: vec4<f32>,
-    emissiveFactor: vec4<f32>,
-    // Each transform is offset.xy, scale.xy, with its rotation below:
-    // KHR_texture_transform, applied unconditionally.
-    baseColorTransform: vec4<f32>,
-    metallicRoughnessTransform: vec4<f32>,
-    normalTransform: vec4<f32>,
-    occlusionTransform: vec4<f32>,
-    emissiveTransform: vec4<f32>,
-    baseColorRotation: f32,
-    metallicRoughnessRotation: f32,
-    normalRotation: f32,
-    occlusionRotation: f32,
-    emissiveRotation: f32,
-    metallicFactor: f32,
-    roughnessFactor: f32,
-    normalScale: f32,
-    occlusionStrength: f32,
-    // alphaCutoff is zero for an OPAQUE material, which makes the discard below
-    // a no-op there: alpha is never below zero. MASK is otherwise
-    // fixed-function-identical to OPAQUE.
-    alphaCutoff: f32,
-    // uvSets selects TEXCOORD_0 or TEXCOORD_1 per slot, one bit each. Two sets
-    // is glTF core's minimum and the cap scene keeps.
-    uvSets: u32,
-};
+// The material's numbers are its uniform block, composed from three sources
+// so that a custom shader can add numbers of its own: see
+// materialprologue.wgsl. An extending shader includes its own composition
+// first, and these three are then skipped as already included.
+//#include ./materialprologue.wgsl
+//#include ./materialfields.wgsl
+//#include ./materialepilogue.wgsl
 
-@group(1) @binding(0) var<uniform> scenePbrMaterial: ScenePbrMaterial;
 // Five textures and five samplers, one pair per slot. glTF references a sampler
 // per texture and two slots of one material can legitimately differ - a tiling
 // ground beside a clamped decal - so a single shared sampler would silently

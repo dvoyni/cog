@@ -2338,8 +2338,22 @@ and a batch is one draw. `uniformMax` (`slots/gfx/internal/translator.go:29`)
 caps a block at 256 bytes, and a shader declaring more is refused when it is
 reflected, as `gfx.ErrUniformBlockTooLarge` ([#101](https://github.com/dvoyni/cog/issues/101));
 the block is 160, and a test pins it under the cap. gfx allows a shader one
-uniform block, so a shader over the bundled stages carries its own numbers in
-textures, or in the one storage buffer the bundled shader leaves.
+uniform block, and the block is **composed from three sources** so a shader over
+the bundled stages can add per-draw numbers of its own to it:
+`materialprologue.wgsl` opens `struct ScenePbrMaterial {`, `materialfields.wgsl`
+lists the PBR members, and `materialepilogue.wgsl` closes it and binds it.
+`material.wgsl` includes the three. An app shader includes the prologue, a
+fields source of its own that includes the published fields and lists its
+members after them, and the epilogue, *before* it includes the stages; includes
+are once per path, so the material's own three are then skipped and the block is
+declared once, with every member. The other order does not compile: the
+extension's members land outside any struct. An extension of an extension
+includes that one's fields source in its own, so they stack. They share the 96
+bytes the PBR members leave, and each names its members with a prefix of its
+own. Larger or non-numeric data still rides in textures, or in the one storage
+buffer the bundled shader leaves. All three sources are published, as
+`model.MaterialProloguePath`, `model.MaterialFieldsPath` and
+`model.MaterialEpiloguePath`.
 
 **Still no index.** A `u32` material index in the instance record **does not
 work**: gfx packs at translate time on the render thread, because offsets come
@@ -2647,7 +2661,9 @@ variant holds seven of the eight storage buffers the browser floor allows, so:
   `sceneAnim` and `sceneMeshes`;
 - through `FragmentStagePath` it gets `scenePbrMaterial`, the uniform block the
   draw's material params fill: for a mesh draw, white paint with its own params
-  laid over it by name. It is the one uniform block gfx allows a shader.
+  laid over it by name. It is the one uniform block gfx allows a shader, and
+  the app adds its own members to it by composing it first from the three
+  published `Material…Path` sources.
 
 A test builds a material that includes `PbrPath` under each renderer and
 reflects the module gfx handed the backend: one binding, `sceneFrame`, storage at

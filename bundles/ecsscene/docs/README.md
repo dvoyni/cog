@@ -392,9 +392,12 @@ frame, so setting it after models load takes effect on the next frame.
 `model.VertexStagePath` and `model.FragmentStagePath`, declares its own
 bindings in group 3 — the one bind group the scene layout leaves free — and
 writes an `fs_main` around `scenePbrFragment`. The material's numbers are the
-one uniform block gfx allows a shader, so its own data rides in textures and
-samplers, or in the one storage buffer the bundled shader's animated variant
-leaves of the web floor's eight:
+one uniform block gfx allows a shader, and its own per-draw numbers are members
+it adds to that block, composing the block from `model.MaterialProloguePath`,
+its own fields over `model.MaterialFieldsPath` and `model.MaterialEpiloguePath`
+before it includes the stages. Larger data rides in textures and samplers, or
+in the one storage buffer the bundled shader's animated variant leaves of the
+web floor's eight:
 
 ```wgsl
 //#include builtin/scene/vertexstage.wgsl

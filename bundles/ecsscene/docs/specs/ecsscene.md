@@ -383,8 +383,11 @@ bundled fragment rather than copying it: `model.VertexStagePath` (`vs_main`)
 and `model.FragmentStagePath` (`scenePbrFragment`). `scene.wgsl` is the two plus
 a one-line `fs_main`. **Group 3 is the app's.** Groups 0 to 2 stay what cog
 binds. The material's block is the one uniform block gfx allows, so an app's own
-data rides in textures and samplers, or in the one storage buffer of the eight
-the bundled shader leaves.
+per-draw numbers are members it adds to that block, composing it from
+`model.MaterialProloguePath`, its own fields over `model.MaterialFieldsPath`,
+and `model.MaterialEpiloguePath` before it includes the stages. Larger data rides
+in textures and samplers, or in the one storage buffer of the eight the bundled
+shader leaves.
 
 ---
 

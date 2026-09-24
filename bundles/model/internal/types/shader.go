@@ -126,11 +126,48 @@ const (
 	//     samplers PbrSlots names at @group(1) @binding(1) to (10), every one
 	//     filled on every draw from the file or the bundled defaults.
 	//
-	// scenePbrMaterial is the one uniform block gfx allows a shader, so an
-	// includer's own numbers ride in textures. Group 3 is left for the
-	// includer's own bindings, which ride as params on the Material or on the
-	// default scene shader. Do not declare those names again.
+	// scenePbrMaterial is the one uniform block gfx allows a shader. An
+	// includer with per-draw numbers of its own adds them to it, by composing
+	// the block itself from MaterialProloguePath, a fields source of its own
+	// over MaterialFieldsPath, and MaterialEpiloguePath, before it includes
+	// this. Group 3 is left for the includer's own bindings, which ride as
+	// params on the Material or on the default scene shader. Do not declare
+	// those names again.
 	FragmentStagePath = "builtin/scene/fragmentstage.wgsl"
+
+	// MaterialProloguePath opens the material's uniform block: it declares
+	// the struct ScenePbrMaterial, and nothing after its opening brace.
+	//
+	// The block is three sources because gfx fills one uniform block per
+	// shader, by member name per draw, so a custom shader's own per-draw
+	// numbers belong in this block, and a struct cannot be reopened. The
+	// bundled material includes the three in order. An extending shader
+	// includes this, then a fields source of its own that includes
+	// MaterialFieldsPath and lists its members after it, then
+	// MaterialEpiloguePath - all before FragmentStagePath or anything else
+	// that reaches the material. Includes are once per resolved path, so the
+	// material's own three are then skipped and the block holds every member,
+	// once. Included the other way round it does not compile: the extension's
+	// members fall outside any struct. A shader extending an extension
+	// includes that extension's fields source in its own, so extensions stack.
+	// Do not declare those names again.
+	MaterialProloguePath = "builtin/scene/materialprologue.wgsl"
+
+	// MaterialFieldsPath is the inside of the material's uniform block: the
+	// members baseColorFactor, emissiveFactor, baseColorTransform,
+	// metallicRoughnessTransform, normalTransform, occlusionTransform,
+	// emissiveTransform, baseColorRotation, metallicRoughnessRotation,
+	// normalRotation, occlusionRotation, emissiveRotation, metallicFactor,
+	// roughnessFactor, normalScale, occlusionStrength, alphaCutoff and uvSets,
+	// 160 bytes of the 256 gfx allows a block. It is not WGSL on its own; an
+	// extension's fields source includes it first and names its own members
+	// with a prefix of its own after it. Do not declare those names again.
+	MaterialFieldsPath = "builtin/scene/materialfields.wgsl"
+
+	// MaterialEpiloguePath closes the material's uniform block and declares
+	// its binding, scenePbrMaterial, the uniform block at @group(1)
+	// @binding(0). Do not declare those names again.
+	MaterialEpiloguePath = "builtin/scene/materialepilogue.wgsl"
 )
 
 // SceneShader describes one variant of the bundled shader.

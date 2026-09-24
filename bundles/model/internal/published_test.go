@@ -5,9 +5,12 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -17,7 +20,7 @@ import (
 )
 
 // published is every source a custom material may include, by the name of the
-// constant that spells its storage path. The other eight stay private: what
+// constant that spells its storage path. The rest stay private: what
 // they declare can change with the bundled shader and nothing outside model
 // may name it.
 var published = map[string]string{
@@ -26,7 +29,16 @@ var published = map[string]string{
 	"PbrPath":           model.PbrPath,
 	"VertexStagePath":   model.VertexStagePath,
 	"FragmentStagePath": model.FragmentStagePath,
+
+	"MaterialProloguePath": model.MaterialProloguePath,
+	"MaterialFieldsPath":   model.MaterialFieldsPath,
+	"MaterialEpiloguePath": model.MaterialEpiloguePath,
 }
+
+// fieldDeclaration matches a member of the material's uniform block in its
+// fields source, which is the inside of a struct and so declares at no column
+// zero: an indented name and a colon.
+var fieldDeclaration = regexp.MustCompile(`^\s+(\w+)\s*:`)
 
 // topLevelDeclaration matches a module-scope name a source declares: a struct,
 // a function, a constant, a binding, or a //#const default. A line indented at
@@ -42,9 +54,17 @@ func declaredBy(t *testing.T, name string) []string {
 	if err != nil {
 		t.Fatalf("read %s: %v", name, err)
 	}
+	pattern := topLevelDeclaration
+	if name == model.MaterialFieldsPath {
+		// The members are the names an extension must not declare again.
+		pattern = fieldDeclaration
+	}
 	var names []string
 	for _, line := range strings.Split(string(source), "\n") {
-		match := topLevelDeclaration.FindStringSubmatch(strings.TrimRight(line, "\r"))
+		if strings.HasPrefix(strings.TrimSpace(line), "//") {
+			continue
+		}
+		match := pattern.FindStringSubmatch(strings.TrimRight(line, "\r"))
 		if match == nil {
 			continue
 		}
@@ -272,3 +292,162 @@ func lowerForTest(t *testing.T, text string) *ir.Module {
 	}
 	return module
 }
+
+// A shader with per-draw numbers of its own adds them to the material's one
+// uniform block: it composes the block from the published prologue, a fields
+// source of its own over the published fields, and the published epilogue,
+// then includes the two stages. The material's own three includes are then
+// skipped as already seen, so the module declares exactly the bundled
+// module's bindings, and the block holds every bundled member at the offset
+// the bundled block holds it, then the extension's. A second extension over
+// the first stacks the same way.
+func TestAShaderExtendsTheMaterialBlockWithNumbersOfItsOwn(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		files map[string]string
+		root  string
+		extra []string
+	}{
+		{"one extension", map[string]string{"game/fadefields.wgsl": fadeFields}, fadeShader,
+			[]string{"fadeRun", "fadeBias"}},
+		{"an extension over it", map[string]string{
+			"game/fadefields.wgsl": fadeFields, "game/tintfields.wgsl": tintFields,
+		}, tintShader, []string{"fadeRun", "fadeBias", "tintColor"}},
+	} {
+		for variant := range model.VariantCount {
+			files := fstest.MapFS{}
+			for name, text := range c.files {
+				files[name] = &fstest.MapFile{Data: []byte(text)}
+			}
+			text, err := flattenShader(t, shaderMountID, overlayFS{shaderFS, files},
+				model.VariantShader(gfx.ShaderWithText(c.root), model.ShaderVariant(variant)))
+			if err != nil {
+				t.Fatalf("%s, variant %d: flatten: %v", c.name, variant, err)
+			}
+			bundled, err := flattenShader(t, shaderMountID, shaderFS,
+				model.VariantShader(gfx.ShaderDescr{}, model.ShaderVariant(variant)))
+			if err != nil {
+				t.Fatalf("%s, variant %d: flatten the bundled shader: %v", c.name, variant, err)
+			}
+			module, reference := lowerForTest(t, text), lowerForTest(t, bundled)
+			// The block is declared first, since it is composed first; which
+			// bindings there are is the contract, not the order they come in.
+			if got, want := strings.Join(slices.Sorted(slices.Values(bindingsOf(module))), ", "),
+				strings.Join(slices.Sorted(slices.Values(bindingsOf(reference))), ", "); got != want {
+				t.Errorf("%s, variant %d: declares\n%v\nwant the bundled module's\n%v", c.name, variant, got, want)
+			}
+			got, want := blockOf(t, module), blockOf(t, reference)
+			for i, member := range want {
+				if i >= len(got) || got[i] != member {
+					t.Fatalf("%s, variant %d: the block is\n%v\nwant it to open with the bundled\n%v", c.name, variant, got, want)
+				}
+			}
+			var added []string
+			for _, member := range got[len(want):] {
+				added = append(added, strings.Fields(member)[0])
+			}
+			if strings.Join(added, " ") != strings.Join(c.extra, " ") {
+				t.Errorf("%s, variant %d: the block adds %v, want %v", c.name, variant, added, c.extra)
+			}
+		}
+	}
+}
+
+// Composed after the material instead of before, an extension does not
+// compile: the block is already declared and closed, and the extension's
+// members land outside any struct. The mistake is loud.
+func TestAnExtensionComposedTooLateDoesNotCompile(t *testing.T) {
+	files := fstest.MapFS{"game/fadefields.wgsl": &fstest.MapFile{Data: []byte(fadeFields)}}
+	text, err := flattenShader(t, shaderMountID, overlayFS{shaderFS, files},
+		gfx.ShaderWithText(lateFadeShader))
+	if err != nil {
+		return
+	}
+	if parsed, err := naga.Parse(text); err == nil {
+		if _, err := wgsl.Lower(parsed); err == nil {
+			t.Error("an extension composed after the material compiled")
+		}
+	}
+}
+
+// blockOf lists the members of a module's scenePbrMaterial block as
+// "name offset", in order.
+func blockOf(t *testing.T, module *ir.Module) []string {
+	t.Helper()
+	for _, global := range module.GlobalVariables {
+		if global.Name != "scenePbrMaterial" {
+			continue
+		}
+		block, ok := module.Types[global.Type].Inner.(ir.StructType)
+		if !ok || global.Space != ir.SpaceUniform {
+			t.Fatalf("scenePbrMaterial is not a uniform struct")
+		}
+		var out []string
+		for _, member := range block.Members {
+			out = append(out, fmt.Sprintf("%s %d", member.Name, member.Offset))
+		}
+		return out
+	}
+	t.Fatal("no scenePbrMaterial")
+	return nil
+}
+
+// overlayFS reads a game's own sources beside the embedded ones, as the storage
+// mounts do at runtime.
+type overlayFS struct {
+	base, over fs.FS
+}
+
+func (o overlayFS) Open(name string) (fs.File, error) {
+	if f, err := o.over.Open(name); err == nil {
+		return f, nil
+	}
+	return o.base.Open(name)
+}
+
+const fadeFields = `//#include builtin/scene/materialfields.wgsl
+    fadeRun: vec4<f32>,
+    fadeBias: f32,
+`
+
+const tintFields = `//#include game/fadefields.wgsl
+    tintColor: vec4<f32>,
+`
+
+const fadeShader = `//#include builtin/scene/materialprologue.wgsl
+//#include game/fadefields.wgsl
+//#include builtin/scene/materialepilogue.wgsl
+//#include builtin/scene/vertexstage.wgsl
+//#include builtin/scene/fragmentstage.wgsl
+
+@fragment
+fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {
+    let lit = scenePbrFragment(in, ff);
+    return vec4<f32>(lit.rgb * scenePbrMaterial.fadeRun.x + scenePbrMaterial.fadeBias, lit.a);
+}
+`
+
+const tintShader = `//#include builtin/scene/materialprologue.wgsl
+//#include game/tintfields.wgsl
+//#include builtin/scene/materialepilogue.wgsl
+//#include builtin/scene/vertexstage.wgsl
+//#include builtin/scene/fragmentstage.wgsl
+
+@fragment
+fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {
+    let lit = scenePbrFragment(in, ff);
+    return vec4<f32>(lit.rgb * scenePbrMaterial.tintColor.rgb * scenePbrMaterial.fadeBias, lit.a);
+}
+`
+
+const lateFadeShader = `//#include builtin/scene/vertexstage.wgsl
+//#include builtin/scene/fragmentstage.wgsl
+//#include builtin/scene/materialprologue.wgsl
+//#include game/fadefields.wgsl
+//#include builtin/scene/materialepilogue.wgsl
+
+@fragment
+fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {
+    return scenePbrFragment(in, ff);
+}
+`
