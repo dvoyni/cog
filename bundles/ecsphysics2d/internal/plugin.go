@@ -2,8 +2,7 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d/internal/types"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -56,7 +55,7 @@ type plugin struct {
 func New() kernel.Plugin { return &plugin{} }
 
 // Name reports the plugin name.
-func (p *plugin) Name() kernel.PluginName { return ecsphysics2d.Name }
+func (p *plugin) Name() kernel.PluginName { return Name }
 
 // Dependencies reports the plugins physics requires: ecs, because registering a
 // Component and building a System both reach the id authority, and app, because
@@ -90,83 +89,83 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	}
 	p.settings = resolved
 
-	ecs.RegisterComponent[ecsphysics2d.Position](registrar, bodyReserve)
-	ecs.RegisterComponent[ecsphysics2d.Velocity](registrar, bodyReserve)
-	ecs.RegisterComponent[ecsphysics2d.Force](registrar, bodyReserve)
-	ecs.RegisterComponent[ecsphysics2d.Dynamic](registrar, bodyReserve)
-	ecs.RegisterComponent[ecsphysics2d.Static](registrar, staticReserve)
+	ecs.RegisterComponent[Position](registrar, bodyReserve)
+	ecs.RegisterComponent[Velocity](registrar, bodyReserve)
+	ecs.RegisterComponent[Force](registrar, bodyReserve)
+	ecs.RegisterComponent[Dynamic](registrar, bodyReserve)
+	ecs.RegisterComponent[Static](registrar, staticReserve)
 	// Sleeping is a Tag only the sleep System adds and removes, and Rest is
 	// what that System keeps for each Dynamic body, which no app can name.
 	// Both are the moving Bodies' population, and neither is a Component until
 	// sleeping is turned on.
-	ecs.RegisterComponent[ecsphysics2d.Sleeping](registrar, bodyReserve)
-	ecs.RegisterComponent[types.Rest](registrar, bodyReserve)
+	ecs.RegisterComponent[Sleeping](registrar, bodyReserve)
+	ecs.RegisterComponent[Rest](registrar, bodyReserve)
 	// Shape takes the larger of the two reserves, because it is the one
 	// Component both kinds of Body carry: its population is the statics plus
 	// the shaped movers, and static geometry is the bigger half of that in
 	// every scene anyone has measured. A reserve is a hint, not a cap.
-	ecs.RegisterComponent[ecsphysics2d.Shape](registrar, staticReserve)
+	ecs.RegisterComponent[Shape](registrar, staticReserve)
 	// Polygon takes the smaller reserve: it is the second Component only a
 	// Shape of more than four vertices needs, and a scene whose every Shape is
 	// one is not a scene anyone has measured.
-	ecs.RegisterComponent[ecsphysics2d.Polygon](registrar, bodyReserve)
+	ecs.RegisterComponent[Polygon](registrar, bodyReserve)
 	// The Joint is the one Component that is not a Body's: it is carried by an
 	// Entity of its own, holding two Bodies by Reference, because a Body may be
 	// held by several Joints and a Component is one per Entity.
-	ecs.RegisterComponent[ecsphysics2d.Joint](registrar, jointReserve)
+	ecs.RegisterComponent[Joint](registrar, jointReserve)
 
 	// The two indices, at the cell sizes the settings resolved — two named types
 	// so that their locks stay apart: rebuilding the Bodies write-locks only the
 	// Bodies, and a line-of-sight Probe on the statics never waits for it.
-	registrar.InitResource(ecsphysics2d.NewStaticIndex(resolved.staticCellSize))
-	registrar.InitResource(ecsphysics2d.NewBodyIndex(resolved.bodyCellSize))
+	registrar.InitResource(NewStaticIndex(resolved.staticCellSize))
+	registrar.InitResource(NewBodyIndex(resolved.bodyCellSize))
 
 	// The Contact list, seeded with the one source of randomness in the
 	// package: the direction two exactly coincident Shapes are parted along.
-	registrar.InitResource(types.NewContacts(resolved.seed))
+	registrar.InitResource(NewContacts(resolved.seed))
 
 	// The Constants, at the plugin's defaults: no gravity, which is a top-down
 	// plane. An app that wants others writes them from a System of its own,
 	// through ecs.Write[*Constants], and Solve reads them every tick.
-	registrar.InitResource(&ecsphysics2d.Constants{})
+	registrar.InitResource(&Constants{})
 
 	// Sleeping, off: an app turns it on by writing Sleep, and until then the
 	// sleep System builds nothing.
-	registrar.InitResource(&ecsphysics2d.Sleep{})
+	registrar.InitResource(&Sleep{})
 
 	// The WakeCmd's queue, a Resource of its own so that the command's lock is
 	// a write on it and on nothing the step reads.
-	registrar.InitResource(types.NewWakes())
+	registrar.InitResource(NewWakes())
 
 	// The pairs a Joint holds apart, rebuilt by Index and read by Detect. It is
 	// a Resource of its own so that the Joint walk's write does not have to be
 	// held through detection.
-	registrar.InitResource(types.NewJointedPairs())
+	registrar.InitResource(NewJointedPairs())
 
 	// The one Command physics has: giving the buffers back after a spike. It is
 	// registered here rather than reached through a Resource because releasing
 	// memory must exclude the Systems that hold those buffers, and a Command's
 	// lock is the only thing that does.
-	registrar.HandleCommand[ecsphysics2d.ShrinkCmd](types.ShrinkCommand)
+	registrar.HandleCommand[ShrinkCmd](ShrinkCommand)
 
 	// Waking an Island from outside a touch or a write, queued for the sleep
 	// System, which is the one that wakes it.
-	registrar.HandleCommand[ecsphysics2d.WakeCmd](types.WakeCommand)
+	registrar.HandleCommand[WakeCmd](WakeCommand)
 
-	registrar.Subscribe[ecsphysics2d.IntegrateOnUpdate](
+	registrar.Subscribe[IntegrateOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, integrateSystem, step()))
-	registrar.Subscribe[ecsphysics2d.IndexOnUpdate](
+	registrar.Subscribe[IndexOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, p.indexSystem)).
-		After[ecsphysics2d.IntegrateOnUpdate]()
-	registrar.Subscribe[ecsphysics2d.DetectOnUpdate](
+		After[IntegrateOnUpdate]()
+	registrar.Subscribe[DetectOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, p.detectSystem, step())).
-		After[ecsphysics2d.IndexOnUpdate]()
-	registrar.Subscribe[ecsphysics2d.SleepOnUpdate](
+		After[IndexOnUpdate]()
+	registrar.Subscribe[SleepOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, p.sleepSystem, step())).
-		After[ecsphysics2d.DetectOnUpdate]()
-	registrar.Subscribe[ecsphysics2d.SolveOnUpdate](
+		After[DetectOnUpdate]()
+	registrar.Subscribe[SolveOnUpdate](
 		ecs.ToHandler[app.UpdateEvent](registrar, p.solveSystem, step())).
-		After[ecsphysics2d.SleepOnUpdate]()
+		After[SleepOnUpdate]()
 	return nil
 }
 
@@ -193,20 +192,20 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 // this frame so that the run it has grown survives the tick — a local would be
 // nil again at every call and would allocate every tick.
 func (p *plugin) indexSystem(
-	shapes *ecs.Hooks[ecsphysics2d.Shape, ecs.HookAddedRemoved],
-	sleepers *ecs.Hooks[ecsphysics2d.Sleeping, ecs.HookAddedRemoved],
-	shaped *ecs.Get[ecsphysics2d.Shape],
-	asleep *ecs.Get[ecsphysics2d.Sleeping],
-	places *ecs.Get[ecsphysics2d.Position],
-	statics *ecs.Get[ecsphysics2d.Static],
-	polygons *ecs.Get[ecsphysics2d.Polygon],
+	shapes *ecs.Hooks[Shape, ecs.HookAddedRemoved],
+	sleepers *ecs.Hooks[Sleeping, ecs.HookAddedRemoved],
+	shaped *ecs.Get[Shape],
+	asleep *ecs.Get[Sleeping],
+	places *ecs.Get[Position],
+	statics *ecs.Get[Static],
+	polygons *ecs.Get[Polygon],
 	bodies *ecs.Query[bodyIndexQuery],
 	every *ecs.Query[everyBodyIndexQuery],
-	tagged *ecs.Query[types.SleeperQuery],
+	tagged *ecs.Query[SleeperQuery],
 	joints *ecs.Query[jointIndexQuery],
-	staticIndex *ecs.Write[*ecsphysics2d.StaticIndex],
-	bodyIndex *ecs.Write[*ecsphysics2d.BodyIndex],
-	jointed *ecs.Write[*ecsphysics2d.JointedPairs],
+	staticIndex *ecs.Write[*StaticIndex],
+	bodyIndex *ecs.Write[*BodyIndex],
+	jointed *ecs.Write[*JointedPairs],
 ) {
 	static := staticIndex.Get()
 	for entity, hook := range shapes.All() {
@@ -263,7 +262,7 @@ func (p *plugin) indexSystem(
 			p.woken = append(p.woken, entity)
 		}
 	}
-	types.RemoveSleepers(body, p.woken)
+	RemoveSleepers(body, p.woken)
 	p.woken = p.woken[:0]
 	for entity, hook := range sleepers.All() {
 		if !hook.IsAdded() {
@@ -275,7 +274,7 @@ func (p *plugin) indexSystem(
 		shape, okShape := shaped.Of(entity)
 		place, okPlace := places.Of(entity)
 		if okShape && okPlace {
-			types.InsertSleeper(body, entity, shape, place.Current, place.Angle,
+			InsertSleeper(body, entity, shape, place.Current, place.Angle,
 				p.polygonVerts(polygons, entity, shape))
 		}
 	}
@@ -289,7 +288,7 @@ func (p *plugin) indexSystem(
 	// The walk is named twice, with the Sleeping filter and without, for the
 	// reason integrateSystem's is.
 	body.Clear()
-	if types.NobodySleeps(tagged) {
+	if NobodySleeps(tagged) {
 		for entity, it := range every.All() {
 			body.InsertMoving(
 				entity, it.Shape,
@@ -326,16 +325,16 @@ func (p *plugin) indexSystem(
 // in no cell, which is this package's stated-not-checked stance — the way to
 // avoid it is to spawn the Shape and the Polygon the constructor built together.
 func (p *plugin) polygonVerts(
-	polygons *ecs.Get[ecsphysics2d.Polygon], entity ecs.Entity, shape ecsphysics2d.Shape,
+	polygons *ecs.Get[Polygon], entity ecs.Entity, shape Shape,
 ) []m.Vec2d {
-	if shape.Kind != ecsphysics2d.ShapePoly {
+	if shape.Kind != ShapePoly {
 		return nil
 	}
 	polygon, ok := polygons.Of(entity)
 	if !ok {
 		return nil
 	}
-	p.polygon = types.PolygonVerts(p.polygon[:0], shape, polygon)
+	p.polygon = PolygonVerts(p.polygon[:0], shape, polygon)
 	return p.polygon
 }
 
@@ -352,13 +351,13 @@ func (p *plugin) polygonVerts(
 // After[DetectOnUpdate]().Before[SolveOnUpdate]() and take
 // *ecs.Write[*Contacts].
 func (p *plugin) detectSystem(
-	staticIndex *ecs.Read[*ecsphysics2d.StaticIndex],
-	bodyIndex *ecs.Read[*ecsphysics2d.BodyIndex],
-	jointed *ecs.Read[*ecsphysics2d.JointedPairs],
-	contacts *ecs.Write[*ecsphysics2d.Contacts],
+	staticIndex *ecs.Read[*StaticIndex],
+	bodyIndex *ecs.Read[*BodyIndex],
+	jointed *ecs.Read[*JointedPairs],
+	contacts *ecs.Write[*Contacts],
 	step *ecs.In[float64],
 ) {
-	types.Collide(
+	Collide(
 		contacts.Get(), bodyIndex.Get(), staticIndex.Get(), jointed.Get(),
 		p.settings.persistenceTicks(step.Get()),
 	)
@@ -385,19 +384,19 @@ func (p *plugin) detectSystem(
 // Constants, and the only System that waits on this read is an app's own that
 // took ecs.Write[*Constants], which is the price that app chose.
 func (p *plugin) solveSystem(
-	bodies *ecs.Query[types.VelocityQuery],
-	every *ecs.Query[types.EveryVelocityQuery],
-	sleepers *ecs.Query[types.SleeperQuery],
-	joints *ecs.Query[types.JointQuery],
-	dynamics *ecs.Get[ecsphysics2d.Dynamic],
-	velocities *ecs.Set[ecsphysics2d.Velocity],
-	places *ecs.Set[ecsphysics2d.Position],
-	contacts *ecs.Write[*ecsphysics2d.Contacts],
-	constants *ecs.Read[*ecsphysics2d.Constants],
-	sleeping *ecs.Get[ecsphysics2d.Sleeping],
+	bodies *ecs.Query[VelocityQuery],
+	every *ecs.Query[EveryVelocityQuery],
+	sleepers *ecs.Query[SleeperQuery],
+	joints *ecs.Query[JointQuery],
+	dynamics *ecs.Get[Dynamic],
+	velocities *ecs.Set[Velocity],
+	places *ecs.Set[Position],
+	contacts *ecs.Write[*Contacts],
+	constants *ecs.Read[*Constants],
+	sleeping *ecs.Get[Sleeping],
 	step *ecs.In[float64],
 ) {
-	types.Solve(
+	Solve(
 		contacts.Get(), bodies, every, sleepers, joints, dynamics, velocities, places, sleeping,
 		constants.Get().Gravity,
 		step.Get(), p.settings.iterations, p.settings.slop, p.settings.bias,
@@ -423,63 +422,27 @@ func (p *plugin) solveSystem(
 // again is Index's, on the next tick, off the Sleeping Tag's own hook; a query
 // asks both grids, so nothing it answers changes in between.
 func (p *plugin) sleepSystem(
-	settings *ecs.Read[*ecsphysics2d.Sleep],
-	constants *ecs.Read[*ecsphysics2d.Constants],
-	awake *ecs.Query[types.AwakeQuery],
-	asleep *ecs.Query[types.AsleepQuery],
-	joints *ecs.Query[types.IslandJointQuery],
-	rests *ecs.Set[types.Rest],
-	forces *ecs.Set[ecsphysics2d.Force],
-	velocities *ecs.Get[ecsphysics2d.Velocity],
-	places *ecs.Get[ecsphysics2d.Position],
-	tag *ecs.Set[ecsphysics2d.Sleeping],
-	untag *ecs.Remove[ecsphysics2d.Sleeping],
-	contacts *ecs.Write[*ecsphysics2d.Contacts],
-	wakes *ecs.Write[*types.Wakes],
+	settings *ecs.Read[*Sleep],
+	constants *ecs.Read[*Constants],
+	awake *ecs.Query[AwakeQuery],
+	asleep *ecs.Query[AsleepQuery],
+	joints *ecs.Query[IslandJointQuery],
+	rests *ecs.Set[Rest],
+	forces *ecs.Set[Force],
+	velocities *ecs.Get[Velocity],
+	places *ecs.Get[Position],
+	tag *ecs.Set[Sleeping],
+	untag *ecs.Remove[Sleeping],
+	contacts *ecs.Write[*Contacts],
+	wakes *ecs.Write[*Wakes],
 	step *ecs.In[float64],
 ) {
 	sleep := settings.Get()
-	types.ProcessIslands(
+	ProcessIslands(
 		contacts.Get(), awake, asleep, joints, rests, forces, velocities, places, tag, untag,
 		wakes.Get(),
 		sleep.IdleSpeed, sleep.Time, constants.Get().Gravity, step.Get(),
 	)
-}
-
-// integrateSystem moves every Body with a Velocity by that Velocity over one
-// step, and records where it was when the tick began.
-//
-// It runs first, which is cp's order and not Box2D's, and is the whole reason a
-// Force written this tick moves the Body next tick: the Force this tick's
-// gameplay wrote is turned into velocity by Solve, at the end of the same tick,
-// and that velocity is spent by the next tick's Integrate. A Velocity written
-// directly is not delayed; only Force pays this.
-//
-// It is one System and not two. Both of the halves anyone would split it into
-// use Velocity, one writing and one reading, so a split serialises anyway and
-// costs about 6 µs of scheduling to buy nothing.
-//
-// It names its walk twice, with the Sleeping filter and without, and walks
-// every Body on a tick when nothing sleeps: types.NobodySleeps says why, and
-// why the lock set is the filtered walk's alone.
-func integrateSystem(
-	bodies *ecs.Query[positionQuery],
-	every *ecs.Query[everyPositionQuery],
-	sleepers *ecs.Query[types.SleeperQuery],
-	step *ecs.In[float64],
-) {
-	// Read once, outside the loop: In is a cell the adapter writes, so a Get
-	// inside the loop is a load the compiler cannot hoist.
-	h := step.Get()
-	if types.NobodySleeps(sleepers) {
-		for _, it := range every.All() {
-			types.IntegratePosition(it.Place, &it.Velocity, h)
-		}
-		return
-	}
-	for _, it := range bodies.All() {
-		types.IntegratePosition(it.Place, &it.Velocity, h)
-	}
 }
 
 // step is the projection of one tick's fixed timestep, in seconds, out of the

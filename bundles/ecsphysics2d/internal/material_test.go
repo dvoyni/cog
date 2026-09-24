@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -42,9 +42,9 @@ var blockMoment = math.Inf(1)
 
 // ramp is the static slope: a segment through the origin at that angle, ten
 // metres of it, which is longer than any scene here slides along.
-func ramp(angle float64) ecsphysics2d.Shape {
+func ramp(angle float64) Shape {
 	along := m.Vec2d{X: math.Cos(angle), Y: math.Sin(angle)}
-	return ecsphysics2d.NewSegmentShape(along.MulS(-5), along.MulS(5), 0)
+	return NewSegmentShape(along.MulS(-5), along.MulS(5), 0)
 }
 
 // rampFrame is the slope's own two directions: down the slope, and out of it.
@@ -55,8 +55,8 @@ func rampFrame(angle float64) (down, out m.Vec2d) {
 
 // withMaterial is a circle carrying one Friction and one Restitution, which is
 // how an app writes a material: plain fields on the Shape, no constructor.
-func withMaterial(radius, friction, restitution float64) ecsphysics2d.Shape {
-	shape := ecsphysics2d.NewCircleShape(radius, m.Vec2d{})
+func withMaterial(radius, friction, restitution float64) Shape {
+	shape := NewCircleShape(radius, m.Vec2d{})
 	shape.Friction, shape.Restitution = friction, restitution
 	return shape
 }
@@ -70,7 +70,7 @@ func onRamp(t testing.TB, angle, slopeFriction, blockFriction float64) (*harness
 	slope.Friction = slopeFriction
 	h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
+		Place: Position{Current: m.Vec2d{}},
 		Shape: slope,
 	})
 
@@ -79,7 +79,7 @@ func onRamp(t testing.TB, angle, slopeFriction, blockFriction float64) (*harness
 	at := out.MulS(radius - restingDepth)
 	body := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: at},
+		Place: Position{Current: at},
 		Body:  dynamic(t, mass, blockMoment, 0, 0),
 		Shape: withMaterial(radius, blockFriction, 0),
 	})
@@ -176,11 +176,11 @@ func wantBounceHeightRatio(t *testing.T, ballRestitution, wantE float64) {
 	const mass, radius, approach = 2, 0.5, 2.0
 
 	h := newHarnessWith(t, nil, 64)
-	wall := ecsphysics2d.NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0)
+	wall := NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0)
 	wall.Restitution = 0.8
 	h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
+		Place: Position{Current: m.Vec2d{}},
 		Shape: wall,
 	})
 	// One tick of the approach above the resting depth, so the first tick's
@@ -188,8 +188,8 @@ func wantBounceHeightRatio(t *testing.T, ballRestitution, wantE float64) {
 	start := radius + approach*tick - restingDepth
 	placed := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{Y: start}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{Y: -approach}},
+		Place:    Position{Current: m.Vec2d{Y: start}},
+		Velocity: Velocity{Linear: m.Vec2d{Y: -approach}},
 		Body:     dynamic(t, mass, 8, 0, 0),
 		Shape:    withMaterial(radius, 0, ballRestitution),
 	})
@@ -255,16 +255,16 @@ func TestAFilterWritesTheMaterialForExactlyOneTick(t *testing.T) {
 	h := newHarnessWith(t, nil, 64)
 	h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
-		Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{X: -50}, m.Vec2d{X: 50}, 0),
+		Place: Position{Current: m.Vec2d{}},
+		Shape: NewSegmentShape(m.Vec2d{X: -50}, m.Vec2d{X: 50}, 0),
 	})
 	// Both Shapes ship frictionless, so every grip below is the filter's alone.
 	placed := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{Y: radius - restingDepth}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: along}},
+		Place:    Position{Current: m.Vec2d{Y: radius - restingDepth}},
+		Velocity: Velocity{Linear: m.Vec2d{X: along}},
 		Body:     dynamic(t, mass, blockMoment, 0, 0),
-		Shape:    ecsphysics2d.NewCircleShape(radius, m.Vec2d{}),
+		Shape:    NewCircleShape(radius, m.Vec2d{}),
 	})
 	h.game.push = m.Vec2d{Y: -gravity * mass}
 
@@ -276,7 +276,7 @@ func TestAFilterWritesTheMaterialForExactlyOneTick(t *testing.T) {
 	// One tick of grip. The Coulomb clamp binds at u·jn, and jn is the m·g·h that
 	// holds the block up, so the tick takes exactly u·g·h off the slide.
 	const filtered = 1.0
-	h.game.filter = func(entry *ecsphysics2d.Contact) { entry.Friction = filtered }
+	h.game.filter = func(entry *Contact) { entry.Friction = filtered }
 	h.frames(t, 1)
 	h.game.filter = nil
 
@@ -333,14 +333,14 @@ func TestAFilterWritesASurfaceVelocityAndTheContactCarriesTheBodyAlongIt(t *test
 	h := newHarnessWith(t, nil, 64)
 	belt := h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
-		Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{X: -50}, m.Vec2d{X: 50}, 0),
+		Place: Position{Current: m.Vec2d{}},
+		Shape: NewSegmentShape(m.Vec2d{X: -50}, m.Vec2d{X: 50}, 0),
 	})
 	placed := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{Y: radius - restingDepth}},
+		Place: Position{Current: m.Vec2d{Y: radius - restingDepth}},
 		Body:  dynamic(t, mass, blockMoment, 0, 0),
-		Shape: ecsphysics2d.NewCircleShape(radius, m.Vec2d{}),
+		Shape: NewCircleShape(radius, m.Vec2d{}),
 	})
 	h.game.push = m.Vec2d{Y: -gravity * mass}
 
@@ -351,7 +351,7 @@ func TestAFilterWritesASurfaceVelocityAndTheContactCarriesTheBodyAlongIt(t *test
 		}
 		return m.Vec2d{}
 	}
-	conveyor := func(entry *ecsphysics2d.Contact) {
+	conveyor := func(entry *Contact) {
 		if entry.A != belt && entry.B != belt {
 			return
 		}
@@ -361,7 +361,7 @@ func TestAFilterWritesASurfaceVelocityAndTheContactCarriesTheBodyAlongIt(t *test
 
 	// Both Shapes ship at Friction 0, so the entry's product is 0 and the filter
 	// has to write one: the drag stays bounded by the Coulomb clamp.
-	h.game.filter = func(entry *ecsphysics2d.Contact) {
+	h.game.filter = func(entry *Contact) {
 		conveyor(entry)
 		entry.Friction = 1
 	}
@@ -389,17 +389,17 @@ func TestACircleSlidingOnAWallWithMaterialSolvesExactlyAsChipmunkDoes(t *testing
 	// into 0.4 m/s and the Coulomb clamp takes the slide from 3 m/s and spins the
 	// ball up — which is the whole of this ticket in one trajectory.
 	h := layerB(t)
-	wall := ecsphysics2d.NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0)
+	wall := NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0)
 	wall.Friction, wall.Restitution = 0.8, 0.25
 	h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
+		Place: Position{Current: m.Vec2d{}},
 		Shape: wall,
 	})
 	placed := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{Y: 0.48}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 3, Y: -2}},
+		Place:    Position{Current: m.Vec2d{Y: 0.48}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 3, Y: -2}},
 		Body:     dynamic(t, 2, 8, 0, 0),
 		Shape:    withMaterial(0.5, 0.5, 0.8),
 	})

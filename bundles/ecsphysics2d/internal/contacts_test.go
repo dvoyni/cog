@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -25,7 +25,7 @@ var cpBias = -60 * math.Log(0.9)
 
 func layerB(t testing.TB) *harness {
 	t.Helper()
-	return newHarnessWith(t, ecsphysics2d.Config{Bias: cpBias}, 64)
+	return newHarnessWith(t, Config{Bias: cpBias}, 64)
 }
 
 // A step of cp's trajectory: where cp's Body stood and how fast it was going
@@ -80,15 +80,15 @@ func TestTwoPressedCirclesSolveExactlyAsChipmunkDoes(t *testing.T) {
 	h := layerB(t)
 	first := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 1, Y: 0.3}, Angular: 0.2},
+		Place:    Position{Current: m.Vec2d{}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 1, Y: 0.3}, Angular: 0.2},
 		Body:     dynamic(t, 2, 8, 0, 0),
 		Shape:    circle(0.5),
 	})
 	second := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{X: 0.9}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: -0.5, Y: 0.1}, Angular: -0.4},
+		Place:    Position{Current: m.Vec2d{X: 0.9}},
+		Velocity: Velocity{Linear: m.Vec2d{X: -0.5, Y: 0.1}, Angular: -0.4},
 		Body:     dynamic(t, 3, 9, 0, 0),
 		Shape:    circle(0.5),
 	})
@@ -151,12 +151,12 @@ func TestACircleHeldAgainstAWallByAForceSolvesExactlyAsChipmunkDoes(t *testing.T
 	h := layerB(t)
 	h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
-		Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0),
+		Place: Position{Current: m.Vec2d{}},
+		Shape: NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0),
 	})
 	body := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{Y: 0.48}},
+		Place: Position{Current: m.Vec2d{Y: 0.48}},
 		Body:  dynamic(t, 2, 8, 0, 0),
 		Shape: circle(0.5),
 	})
@@ -180,12 +180,12 @@ func TestABodyPressedIntoAWallRestsWithinTheSlopAndDoesNotBuzz(t *testing.T) {
 	h := newHarness(t)
 	h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
-		Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0),
+		Place: Position{Current: m.Vec2d{}},
+		Shape: NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0),
 	})
 	body := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{Y: 1.5}},
+		Place: Position{Current: m.Vec2d{Y: 1.5}},
 		Body:  dynamic(t, 2, 8, 0, 0),
 		Shape: circle(0.5),
 	})
@@ -210,7 +210,7 @@ func TestABodyPressedIntoAWallRestsWithinTheSlopAndDoesNotBuzz(t *testing.T) {
 	}
 
 	list := h.contacts(t)
-	if len(list) != 1 || list[0].Phase != ecsphysics2d.PhaseContinuing {
+	if len(list) != 1 || list[0].Phase != PhaseContinuing {
 		t.Fatalf("a Body resting on a wall reports %d Contacts, want one Continuing", len(list))
 	}
 }
@@ -223,15 +223,15 @@ func TestAPileOfCirclesSettlesWithinTheSlopAndDoesNotBuzz(t *testing.T) {
 	h := newHarnessWith(t, nil, 64)
 	h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
-		Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0),
+		Place: Position{Current: m.Vec2d{}},
+		Shape: NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0),
 	})
 	var pile []ecs.Entity
 	for column := range 4 {
 		for height := range 3 {
 			pile = append(pile, h.spawn(t, spawnRequest{
 				Kind: kindShapedBody,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{
+				Place: Position{Current: m.Vec2d{
 					X: -1.5 + float64(column),
 					Y: 0.5 + 0.7*float64(height),
 				}},
@@ -249,7 +249,7 @@ func TestAPileOfCirclesSettlesWithinTheSlopAndDoesNotBuzz(t *testing.T) {
 	}
 
 	for _, entry := range h.contacts(t) {
-		if entry.Phase != ecsphysics2d.PhaseContinuing {
+		if entry.Phase != PhaseContinuing {
 			t.Errorf("a settled pile still has a %v Contact between %v and %v",
 				entry.Phase, entry.A, entry.B)
 		}
@@ -282,13 +282,13 @@ func TestSlidingAlongAWallIsTheVelocityLessItsNormalComponent(t *testing.T) {
 	h := newHarness(t)
 	h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
-		Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0),
+		Place: Position{Current: m.Vec2d{}},
+		Shape: NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0),
 	})
 	body := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{Y: 0.5}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 3, Y: -2}},
+		Place:    Position{Current: m.Vec2d{Y: 0.5}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 3, Y: -2}},
 		Body:     dynamic(t, 2, 8, 0, 0),
 		Shape:    circle(0.5),
 	})
@@ -307,12 +307,12 @@ func TestASensorEntryIsReportedAndNeverSolved(t *testing.T) {
 	sensor.Sensor = true
 	h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
+		Place: Position{Current: m.Vec2d{}},
 		Shape: sensor,
 	})
 	body := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 0.6}},
+		Place: Position{Current: m.Vec2d{X: 0.6}},
 		Body:  dynamic(t, 2, 8, 0, 0),
 		Shape: circle(0.5),
 	})
@@ -343,14 +343,14 @@ func TestAPairWithNoMassBetweenItIsReportedAndNeverSolved(t *testing.T) {
 	h := newHarness(t)
 	still := h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
+		Place: Position{Current: m.Vec2d{}},
 		Shape: circle(0.5),
 	})
 	// A shaped Body with no Dynamic at all, spawned through the Kinematic set
 	// and then given a Shape, which is the only way the harness reaches one.
 	kinematic := h.spawn(t, spawnRequest{
 		Kind:  kindKinematic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 0.6}},
+		Place: Position{Current: m.Vec2d{X: 0.6}},
 	})
 	h.setShape(t, kinematic, circle(0.5))
 
@@ -367,7 +367,7 @@ func TestAPairWithNoMassBetweenItIsReportedAndNeverSolved(t *testing.T) {
 		t.Errorf("a pair with no mass between it was solved: it carries %v",
 			list[0].Points[0].NormalImpulse)
 	}
-	if list[0].Phase != ecsphysics2d.PhaseContinuing {
+	if list[0].Phase != PhaseContinuing {
 		t.Errorf("an excluded pair that keeps touching is %v, want Continuing", list[0].Phase)
 	}
 	if got := h.read(t, kinematic); got.Velocity.Linear != (m.Vec2d{}) ||
@@ -379,8 +379,8 @@ func TestAPairWithNoMassBetweenItIsReportedAndNeverSolved(t *testing.T) {
 	// exclusion is the mass and not the overlap.
 	body := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{X: -0.6}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 1}},
+		Place:    Position{Current: m.Vec2d{X: -0.6}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 1}},
 		Body:     dynamic(t, 2, 8, 0, 0),
 		Shape:    circle(0.5),
 	})
@@ -397,12 +397,12 @@ func TestADroppedContinuingEntryEndsAndItsImpulsesAreZeroed(t *testing.T) {
 	h := newHarness(t)
 	h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
-		Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0),
+		Place: Position{Current: m.Vec2d{}},
+		Shape: NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0),
 	})
 	body := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{Y: 0.48}},
+		Place: Position{Current: m.Vec2d{Y: 0.48}},
 		Body:  dynamic(t, 2, 8, 0, 0),
 		Shape: circle(0.5),
 	})
@@ -410,18 +410,18 @@ func TestADroppedContinuingEntryEndsAndItsImpulsesAreZeroed(t *testing.T) {
 
 	h.frames(t, 3)
 	held := h.contacts(t)
-	if len(held) != 1 || held[0].Phase != ecsphysics2d.PhaseContinuing ||
+	if len(held) != 1 || held[0].Phase != PhaseContinuing ||
 		held[0].Points[0].NormalImpulse == 0 {
 		t.Fatalf("the Contact holding the Body up is %+v", held)
 	}
 
-	h.game.filter = func(entry *ecsphysics2d.Contact) { entry.Drop() }
+	h.game.filter = func(entry *Contact) { entry.Drop() }
 	h.frames(t, 1)
 	dropped := h.contacts(t)
 	if len(dropped) != 1 {
 		t.Fatalf("dropping the entry changed the list to %d entries; nothing is deleted or moved", len(dropped))
 	}
-	if dropped[0].Phase != ecsphysics2d.PhaseEnded {
+	if dropped[0].Phase != PhaseEnded {
 		t.Errorf("a dropped Continuing entry is %v, want Ended so that reacting Systems see the end",
 			dropped[0].Phase)
 	}
@@ -440,7 +440,7 @@ func TestADroppedContinuingEntryEndsAndItsImpulsesAreZeroed(t *testing.T) {
 	h.game.filter = nil
 	h.frames(t, 1)
 	again := h.contacts(t)
-	if len(again) != 1 || again[0].Phase != ecsphysics2d.PhaseBegan {
+	if len(again) != 1 || again[0].Phase != PhaseBegan {
 		t.Fatalf("after the drop the pair came back as %+v, want one Began entry", again)
 	}
 	if again[0].Points[0].NormalImpulse == 0 {
@@ -455,12 +455,12 @@ func TestAnIgnoredPairStaysIgnoredUntilItComesApart(t *testing.T) {
 	h := newHarness(t)
 	h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
-		Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0),
+		Place: Position{Current: m.Vec2d{}},
+		Shape: NewSegmentShape(m.Vec2d{X: -5}, m.Vec2d{X: 5}, 0),
 	})
 	body := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{Y: 0.48}},
+		Place: Position{Current: m.Vec2d{Y: 0.48}},
 		Body:  dynamic(t, 2, 8, 0, 0),
 		Shape: circle(0.5),
 	})
@@ -468,7 +468,7 @@ func TestAnIgnoredPairStaysIgnoredUntilItComesApart(t *testing.T) {
 
 	// The filter marks once and is then taken away; the mark is what crosses the
 	// ticks, not the filter.
-	h.game.filter = func(entry *ecsphysics2d.Contact) { entry.Ignore() }
+	h.game.filter = func(entry *Contact) { entry.Ignore() }
 	h.frames(t, 1)
 	h.game.filter = nil
 
@@ -486,7 +486,7 @@ func TestAnIgnoredPairStaysIgnoredUntilItComesApart(t *testing.T) {
 		if len(list) != 1 || !list[0].Ignored() {
 			t.Fatalf("the pair arrived as %+v, want one entry already marked ignored", list)
 		}
-		if list[0].Phase != ecsphysics2d.PhaseContinuing {
+		if list[0].Phase != PhaseContinuing {
 			t.Fatalf("an ignored pair that never stopped touching is %v, want Continuing", list[0].Phase)
 		}
 		if list[0].Points[0].NormalImpulse != 0 {
@@ -525,13 +525,13 @@ func TestAKinematicBodyPushesADynamicOneAndIsNotPushedBack(t *testing.T) {
 	h := newHarness(t)
 	pusher := h.spawn(t, spawnRequest{
 		Kind:     kindKinematic,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 2}},
+		Place:    Position{Current: m.Vec2d{}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 2}},
 	})
 	h.setShape(t, pusher, circle(0.5))
 	pushed := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 0.9}},
+		Place: Position{Current: m.Vec2d{X: 0.9}},
 		Body:  dynamic(t, 2, 8, 0, 0),
 		Shape: circle(0.5),
 	})
@@ -555,7 +555,7 @@ func TestTwoExactlyCoincidentBodiesLeaveEveryComponentFinite(t *testing.T) {
 	for range 2 {
 		pair = append(pair, h.spawn(t, spawnRequest{
 			Kind:  kindShapedBody,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{X: 2, Y: -3}},
+			Place: Position{Current: m.Vec2d{X: 2, Y: -3}},
 			Body:  dynamic(t, 2, 8, 0, 0),
 			Shape: circle(0.5),
 		}))
@@ -596,26 +596,26 @@ func TestAnEndedEntryMayNameADespawnedEntity(t *testing.T) {
 	h := newHarness(t)
 	first := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
+		Place: Position{Current: m.Vec2d{}},
 		Body:  dynamic(t, 2, 8, 0, 0),
 		Shape: circle(0.5),
 	})
 	second := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 0.9}},
+		Place: Position{Current: m.Vec2d{X: 0.9}},
 		Body:  dynamic(t, 2, 8, 0, 0),
 		Shape: circle(0.5),
 	})
 
 	h.frames(t, 1)
-	if got := h.contacts(t); len(got) != 1 || got[0].Phase != ecsphysics2d.PhaseBegan {
+	if got := h.contacts(t); len(got) != 1 || got[0].Phase != PhaseBegan {
 		t.Fatalf("the two circles gave %+v, want one Began entry", got)
 	}
 
 	h.despawn(t, second)
 	h.frames(t, 1)
 	list := h.contacts(t)
-	if len(list) != 1 || list[0].Phase != ecsphysics2d.PhaseEnded {
+	if len(list) != 1 || list[0].Phase != PhaseEnded {
 		t.Fatalf("despawning one party gave %+v, want one Ended entry", list)
 	}
 	if list[0].Other(first) != second {
@@ -651,15 +651,15 @@ func TestACircleSpawnedConcentricWithABoxIsPartedAlongTheTicksSeededDirection(t 
 
 	parted := map[m.Vec2d]uint64{}
 	for _, seed := range []uint64{1, 2, 3, 4} {
-		h := newHarnessWith(t, ecsphysics2d.Config{Seed: seed}, 64)
+		h := newHarnessWith(t, Config{Seed: seed}, 64)
 		h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{}},
-			Shape: ecsphysics2d.NewBoxShape(1, 1, 0),
+			Place: Position{Current: m.Vec2d{}},
+			Shape: NewBoxShape(1, 1, 0),
 		})
 		h.spawn(t, spawnRequest{
 			Kind:  kindShapedBody,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{}},
+			Place: Position{Current: m.Vec2d{}},
 			Shape: circle(0.5),
 		})
 

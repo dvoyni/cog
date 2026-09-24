@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -25,12 +25,12 @@ func TestNoProjectilePassesAFortyCentimetreWallAtFortyMetresASecond(t *testing.T
 	h := newHarness(t)
 	wall := h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 1}},
-		Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0.2),
+		Place: Position{Current: m.Vec2d{X: 1}},
+		Shape: NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0.2),
 	})
 	arrow := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 40.4}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 40.4}},
 		Body:     dynamic(t, 1, 1, 0, 0),
 		Shape:    sensorCircle(0),
 	})
@@ -58,7 +58,7 @@ func TestNoProjectilePassesAFortyCentimetreWallAtFortyMetresASecond(t *testing.T
 	if entry.A != arrow || entry.B != wall {
 		t.Errorf("the entry names %v and %v, want the projectile and the wall", entry.A, entry.B)
 	}
-	if !entry.Sensor || entry.Phase != ecsphysics2d.PhaseBegan {
+	if !entry.Sensor || entry.Phase != PhaseBegan {
 		t.Errorf("the entry is Sensor %v and %v, want a Sensor's that Began", entry.Sensor, entry.Phase)
 	}
 	if !(entry.T > 0 && entry.T < 1) {
@@ -83,13 +83,13 @@ func TestASensorReportsWhatItTouchedOnTheWayThroughNotOnlyWhereItEnded(t *testin
 	for _, at := range []float64{0.2, 0.4, 0.6} {
 		pebbles = append(pebbles, h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{X: at}},
+			Place: Position{Current: m.Vec2d{X: at}},
 			Shape: circle(0.05),
 		}))
 	}
 	arrow := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 60}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 60}},
 		Body:     dynamic(t, 1, 1, 0, 0),
 		Shape:    sensorCircle(0),
 	})
@@ -120,12 +120,12 @@ func TestThePluginNeverMovesASensorBackAndNeverStopsOne(t *testing.T) {
 	h := newHarness(t)
 	h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 1}},
-		Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0.2),
+		Place: Position{Current: m.Vec2d{X: 1}},
+		Shape: NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0.2),
 	})
 	arrow := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 40.4}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 40.4}},
 		Body:     dynamic(t, 1, 1, 0, 0),
 		Shape:    sensorCircle(0),
 	})
@@ -147,7 +147,7 @@ func TestThePluginNeverMovesASensorBackAndNeverStopsOne(t *testing.T) {
 				step, got, want)
 		}
 		for _, entry := range h.contacts(t) {
-			if entry.Sensor && entry.Phase != ecsphysics2d.PhaseEnded {
+			if entry.Sensor && entry.Phase != PhaseEnded {
 				reported++
 			}
 		}
@@ -178,7 +178,7 @@ func TestABodyChangesWhatItCollidesWithByWritingItsOwnShape(t *testing.T) {
 	crate.CollisionBits, crate.CollidesWith = crates, plates
 	box := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 0.5}},
+		Place: Position{Current: m.Vec2d{X: 0.5}},
 		Body:  dynamic(t, 1, 1, 0, 0),
 		Shape: crate,
 	})
@@ -191,12 +191,12 @@ func TestABodyChangesWhatItCollidesWithByWritingItsOwnShape(t *testing.T) {
 	// The plugin has no collision configuration at all: there is no matrix and
 	// no rule list, and a Body changes what it collides with by writing its own
 	// Shape, which Index picks up on the next tick.
-	crate.CollidesWith = ecsphysics2d.CollisionBitsNone
+	crate.CollidesWith = CollisionBitsNone
 	h.setShape(t, box, crate)
 
 	h.frame(t)
 	for _, entry := range h.contacts(t) {
-		if entry.Phase != ecsphysics2d.PhaseEnded {
+		if entry.Phase != PhaseEnded {
 			t.Errorf("the crate still reports %v after it stopped looking for the plate", entry.Phase)
 		}
 	}
@@ -209,8 +209,8 @@ func TestABodyChangesWhatItCollidesWithByWritingItsOwnShape(t *testing.T) {
 // sensorCircle is a circle Shape marked a Sensor, which is the whole of what a
 // projectile is: the package has no projectile concept of its own, and drag,
 // homing Force and inherited velocity all come from the integrator.
-func sensorCircle(radius float64) ecsphysics2d.Shape {
-	shape := ecsphysics2d.NewCircleShape(radius, m.Vec2d{})
+func sensorCircle(radius float64) Shape {
+	shape := NewCircleShape(radius, m.Vec2d{})
 	shape.Sensor = true
 	return shape
 }

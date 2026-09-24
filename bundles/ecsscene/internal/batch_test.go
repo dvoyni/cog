@@ -3,7 +3,6 @@ package internal
 import (
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -31,7 +30,7 @@ var (
 func newCrowdHarness(t *testing.T) *harness {
 	t.Helper()
 	h := newCameralessHarness(t, crowd+16)
-	h.spawn(t, spawnRequest{Place: crowdEye, Camera: &ecsscene.Camera{FovY: 1.0472, Near: 1, Far: 10_000}})
+	h.spawn(t, spawnRequest{Place: crowdEye, Camera: &Camera{FovY: 1.0472, Near: 1, Far: 10_000}})
 	return h
 }
 
@@ -64,7 +63,7 @@ func instancesOf(draws []recordedDraw) int {
 func TestIdenticalCratesAreOneBatch(t *testing.T) {
 	for _, arm := range []struct {
 		name   string
-		params *ecsscene.Params
+		params *Params
 	}{
 		{"untinted", nil},
 		{"all tinted red", tint(red)},
@@ -98,7 +97,7 @@ func TestDistinctTintsAreOneBatchEach(t *testing.T) {
 	h := newCrowdHarness(t)
 	h.spawn(t, spawnRequest{
 		Count: crowd, Step: 0.5, Place: crowdStart, Model: crateModelComponent(),
-		ParamsEach: func(i int) ecsscene.Params { return *tint(m.Color{R: float32(i) / crowd, A: 1}) },
+		ParamsEach: func(i int) Params { return *tint(m.Color{R: float32(i) / crowd, A: 1}) },
 	})
 	h.frameUntil(t, "the crowd to draw", func() bool { return len(h.drawn()) == crowd })
 
@@ -135,14 +134,14 @@ func TestDistinctTintsAreOneBatchEach(t *testing.T) {
 func TestBlendedPanesDrawBackToFrontAroundTheSmoke(t *testing.T) {
 	h := newDrawingHarness(t, 256)
 	ref := h.bake(t)
-	glass := &ecsscene.Material{Tags: m.NewList(
-		ecsscene.MaterialTag{Shader: gfx.ShaderWithText("glass"), State: gfx.StateTransparent3D()})}
-	smoke := &ecsscene.Material{Tags: m.NewList(
-		ecsscene.MaterialTag{Shader: gfx.ShaderWithText("smoke"), State: gfx.StateTransparent3D()})}
+	glass := &Material{Tags: m.NewList(
+		MaterialTag{Shader: gfx.ShaderWithText("glass"), State: gfx.StateTransparent3D()})}
+	smoke := &Material{Tags: m.NewList(
+		MaterialTag{Shader: gfx.ShaderWithText("smoke"), State: gfx.StateTransparent3D()})}
 	// The camera stands at Z=30 looking down -Z, so Z=-5 is the farthest.
 	farthest, far, middle, near := m.Vec3{X: -2, Z: -5}, m.Vec3{X: -1, Z: -3}, m.Vec3{Z: 0}, m.Vec3{X: 1, Z: 5}
-	pane := func(at m.Vec3, material *ecsscene.Material) {
-		h.spawn(t, spawnRequest{Place: m.Transform{Position: at}, Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}, Material: material})
+	pane := func(at m.Vec3, material *Material) {
+		h.spawn(t, spawnRequest{Place: m.Transform{Position: at}, Mesh: &Mesh{Ref: ref, NeverCull: true}, Material: material})
 	}
 	pane(near, glass)
 	pane(far, glass)
@@ -179,12 +178,12 @@ func TestBlendedPanesDrawBackToFrontAroundTheSmoke(t *testing.T) {
 // sceneAnim block with its own plays.
 func TestAnimatedEntitiesShareABatch(t *testing.T) {
 	h := newDrawingHarness(t, 256)
-	animated := &ecsscene.Model{Ref: model.ModelRef{Path: animatedModel}}
+	animated := &Model{Ref: model.ModelRef{Path: animatedModel}}
 	times := []float32{0, 0.25, 0.5}
 	h.spawn(t, spawnRequest{
 		Count: len(times), Step: 3, Model: animated,
-		AnimationEach: func(i int) ecsscene.Animation {
-			return ecsscene.Animation{Plays: [model.MaxClipPlays]model.ClipPlay{
+		AnimationEach: func(i int) Animation {
+			return Animation{Plays: [model.MaxClipPlays]model.ClipPlay{
 				{Clip: "Walk", Time: times[i], Weight: 1},
 			}}
 		},

@@ -1,0 +1,38 @@
+package internal
+
+import (
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/app"
+)
+
+// Name is the binding plugin's kernel name, the owner of every Component Store
+// it registers, and the name a plugin whose Systems read those Components
+// declares a dependency on.
+const Name kernel.PluginName = "ecsscene"
+
+// RecordOnUpdate is the subscription type of the binding's recording System on
+// app.UpdateEvent: it buckets every drawable Entity into its Batch and draws
+// the frame into gfx's op queue. A game System that moves Transforms orders
+// itself Before it.
+//
+// It declares no ordering beyond the load System's Before:
+// gfx.PresentOnUpdate is subscribed Last, so anything that does not ask to be
+// last already runs before it.
+type RecordOnUpdate kernel.Subscription[app.UpdateEvent]
+
+// LoadOnUpdate is the subscription type of the binding's load System on
+// app.UpdateEvent. It runs on the Model, Mesh, Material and Params Components
+// that changed since its last run, resolves each changed Entity's model and
+// keys its draws, and drives model's bake and release queues. It is ordered
+// Before RecordOnUpdate. A game System that spawns drawables or writes those
+// Components orders itself Before it, so the change is keyed in the same tick.
+type LoadOnUpdate kernel.Subscription[app.UpdateEvent]
+
+// DebugOnUpdate is the subscription type of the first of the debug shapes'
+// Systems on app.UpdateEvent. There are two per shape: one rebakes, repaints
+// and releases on what changed, and one bakes the mesh of a shape that has
+// none. The other nine are ordered after this one and every one Before
+// LoadOnUpdate, so a shape baked this tick is keyed this tick. A game System
+// that spawns or edits debug shapes orders itself Before it, so the change
+// draws in the same tick.
+type DebugOnUpdate kernel.Subscription[app.UpdateEvent]

@@ -8,8 +8,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d/internal/types"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app/appplugin"
@@ -29,12 +28,12 @@ type napper struct{}
 func (*napper) Name() kernel.PluginName { return "physicstestnapper" }
 
 func (*napper) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, ecsphysics2d.Name}
+	return []kernel.PluginName{ecs.Name, Name}
 }
 
 type sleepCmd kernel.Command[sleepRequest, sleepResponse]
 
-type sleepRequest struct{ Sleep ecsphysics2d.Sleep }
+type sleepRequest struct{ Sleep Sleep }
 
 type sleepResponse struct{}
 
@@ -48,7 +47,7 @@ type velocityCmd kernel.Command[velocityRequest, velocityResponse]
 
 type velocityRequest struct {
 	Entity   ecs.Entity
-	Velocity ecsphysics2d.Velocity
+	Velocity Velocity
 }
 
 type velocityResponse struct{}
@@ -57,7 +56,7 @@ type forceCmd kernel.Command[forceRequest, forceResponse]
 
 type forceRequest struct {
 	Entity ecs.Entity
-	Force  ecsphysics2d.Force
+	Force  Force
 }
 
 type forceResponse struct{}
@@ -65,7 +64,7 @@ type forceResponse struct{}
 func (*napper) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[sleepCmd](ecs.ToExecute[sleepRequest, sleepResponse](registrar, func(
 		request sleepRequest,
-		sleep *ecs.Write[*ecsphysics2d.Sleep],
+		sleep *ecs.Write[*Sleep],
 		answer *ecs.Resp[sleepResponse],
 	) {
 		*sleep.Get() = request.Sleep
@@ -73,7 +72,7 @@ func (*napper) Register(registrar *kernel.Registrar, _ any) error {
 	}))
 	registrar.HandleCommand[sleepingCmd](ecs.ToExecute[sleepingRequest, sleepingResponse](registrar, func(
 		request sleepingRequest,
-		sleeping *ecs.Get[ecsphysics2d.Sleeping],
+		sleeping *ecs.Get[Sleeping],
 		answer *ecs.Resp[sleepingResponse],
 	) {
 		_, asleep := sleeping.Of(request.Entity)
@@ -81,7 +80,7 @@ func (*napper) Register(registrar *kernel.Registrar, _ any) error {
 	}))
 	registrar.HandleCommand[velocityCmd](ecs.ToExecute[velocityRequest, velocityResponse](registrar, func(
 		request velocityRequest,
-		velocities *ecs.Set[ecsphysics2d.Velocity],
+		velocities *ecs.Set[Velocity],
 		answer *ecs.Resp[velocityResponse],
 	) {
 		velocities.UpdateFor(request.Entity, request.Velocity)
@@ -89,7 +88,7 @@ func (*napper) Register(registrar *kernel.Registrar, _ any) error {
 	}))
 	registrar.HandleCommand[forceCmd](ecs.ToExecute[forceRequest, forceResponse](registrar, func(
 		request forceRequest,
-		forces *ecs.Set[ecsphysics2d.Force],
+		forces *ecs.Set[Force],
 		answer *ecs.Resp[forceResponse],
 	) {
 		if force, ok := forces.Ref(request.Entity); ok {
@@ -103,7 +102,7 @@ func (*napper) Register(registrar *kernel.Registrar, _ any) error {
 
 // newSleepHarness is the harness with sleeping reachable and gravity g
 // written into Constants every tick; sleep is written before the first tick.
-func newSleepHarness(t testing.TB, g m.Vec2d, sleep ecsphysics2d.Sleep) (*harness, *weigher) {
+func newSleepHarness(t testing.TB, g m.Vec2d, sleep Sleep) (*harness, *weigher) {
 	t.Helper()
 	w := &weigher{gravity: g}
 	h := newHarnessWithPlugins(t, nil, 1024, w, &napper{})
@@ -111,7 +110,7 @@ func newSleepHarness(t testing.TB, g m.Vec2d, sleep ecsphysics2d.Sleep) (*harnes
 	return h, w
 }
 
-func (h *harness) setSleep(t testing.TB, sleep ecsphysics2d.Sleep) {
+func (h *harness) setSleep(t testing.TB, sleep Sleep) {
 	t.Helper()
 	h.kernel.ExecuteCommand[sleepCmd](sleepRequest{Sleep: sleep})
 }
@@ -121,19 +120,19 @@ func (h *harness) asleep(t testing.TB, e ecs.Entity) bool {
 	return h.kernel.ExecuteCommand[sleepingCmd](sleepingRequest{Entity: e}).Asleep
 }
 
-func (h *harness) setVelocity(t testing.TB, e ecs.Entity, velocity ecsphysics2d.Velocity) {
+func (h *harness) setVelocity(t testing.TB, e ecs.Entity, velocity Velocity) {
 	t.Helper()
 	h.kernel.ExecuteCommand[velocityCmd](velocityRequest{Entity: e, Velocity: velocity})
 }
 
-func (h *harness) addForce(t testing.TB, e ecs.Entity, force ecsphysics2d.Force) {
+func (h *harness) addForce(t testing.TB, e ecs.Entity, force Force) {
 	t.Helper()
 	h.kernel.ExecuteCommand[forceCmd](forceRequest{Entity: e, Force: force})
 }
 
 func (h *harness) wake(t testing.TB, e ecs.Entity) {
 	t.Helper()
-	h.kernel.ExecuteCommand[ecsphysics2d.WakeCmd](ecsphysics2d.WakeRequest{Entity: e})
+	h.kernel.ExecuteCommand[WakeCmd](WakeRequest{Entity: e})
 }
 
 // The scenes' gravity, the Sleep they turn on, and the box a pile is made of.
@@ -145,13 +144,13 @@ const napTime = 0.5
 
 // pileBox is the half-metre crate a pile is stacked from, 1 kg with a real
 // box's moment and a Friction, so that a stack comes to rest without sliding.
-func pileBox() ecsphysics2d.Shape {
-	box := ecsphysics2d.NewBoxShape(0.5, 0.5, 0)
+func pileBox() Shape {
+	box := NewBoxShape(0.5, 0.5, 0)
 	box.Friction = 0.7
 	return box
 }
 
-func pileFloor() ecsphysics2d.Shape {
+func pileFloor() Shape {
 	floor := ground()
 	floor.Friction = 0.7
 	return floor
@@ -162,7 +161,7 @@ func pileFloor() ecsphysics2d.Shape {
 func spawnStack(t testing.TB, h *harness, x float64, count int) (ecs.Entity, []ecs.Entity) {
 	t.Helper()
 	floor := h.spawn(t, spawnRequest{
-		Kind: kindShapedStatic, Place: ecsphysics2d.Position{Current: m.Vec2d{X: x}}, Shape: pileFloor(),
+		Kind: kindShapedStatic, Place: Position{Current: m.Vec2d{X: x}}, Shape: pileFloor(),
 	})
 	return floor, spawnCrates(t, h, x, 0, count)
 }
@@ -175,8 +174,8 @@ func spawnCrates(t testing.TB, h *harness, x, y float64, count int) []ecs.Entity
 		at := m.Vec2d{X: x, Y: y + 0.25 + 0.5*float64(i)}
 		crates = append(crates, h.spawn(t, spawnRequest{
 			Kind:  kindShapedBody,
-			Place: ecsphysics2d.Position{Current: at, Previous: at},
-			Body:  dynamic(t, 1, ecsphysics2d.MomentForBox(1, 0.5, 0.5), 0, 0),
+			Place: Position{Current: at, Previous: at},
+			Body:  dynamic(t, 1, MomentForBox(1, 0.5, 0.5), 0, 0),
 			Shape: pileBox(),
 		}))
 	}
@@ -210,13 +209,13 @@ func settle(t testing.TB, h *harness, crates []ecs.Entity, limit int) int {
 // detected and solved every tick, and the bias correction alone moves it in the
 // last bits.
 func TestAPileUnderGravityFallsAsleepAndStaysBitForBitWhereItSlept(t *testing.T) {
-	h, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+	h, _ := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 	_, crates := spawnStack(t, h, 0, 4)
 
 	if ticks := settle(t, h, crates, 300); ticks < int(napTime/tick) {
 		t.Fatalf("the pile fell asleep after %d ticks, before it could have been idle for %v s", ticks, napTime)
 	}
-	slept := make([]ecsphysics2d.Position, len(crates))
+	slept := make([]Position, len(crates))
 	for i, e := range crates {
 		slept[i] = h.read(t, e).Place
 	}
@@ -257,11 +256,11 @@ func awakeCount(t testing.TB, h *harness, crates []ecs.Entity) int {
 // every tick disturbs nothing. Were a sleeper's Force compared without being
 // cleared, the app's additions would pile up and wake it on the first tick.
 func TestAPileUnderGravityWrittenIntoForceSleepsExactlyAsUnderConstantsGravity(t *testing.T) {
-	constant, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+	constant, _ := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 	_, underConstant := spawnStack(t, constant, 0, 4)
 
 	forced, _ := newSleepHarness(t, m.Vec2d{},
-		ecsphysics2d.Sleep{IdleSpeed: napGravity.Length() * tick, Time: napTime})
+		Sleep{IdleSpeed: napGravity.Length() * tick, Time: napTime})
 	_, underForce := spawnStack(t, forced, 0, 4)
 	forced.game.push = napGravity.MulS(1)
 
@@ -299,12 +298,12 @@ func TestAPileUnderGravityWrittenIntoForceSleepsExactlyAsUnderConstantsGravity(t
 // sleeps. Were it still integrated behind its Tag, 600 ticks of gravity would
 // land on it at once.
 func TestAPileWokenAfterSixHundredTicksReceivesExactlyOneTickOfGravity(t *testing.T) {
-	h, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+	h, _ := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 	floor, crates := spawnStack(t, h, 0, 3)
 	settle(t, h, crates, 300)
 	h.frames(t, 600)
 
-	before := make([]ecsphysics2d.Velocity, len(crates))
+	before := make([]Velocity, len(crates))
 	for i, e := range crates {
 		if !h.asleep(t, e) {
 			t.Fatalf("crate %d woke during the 600 ticks", i)
@@ -341,7 +340,7 @@ func TestAPileWokenAfterSixHundredTicksReceivesExactlyOneTickOfGravity(t *testin
 // tick, which is what the app's System does, wakes nothing. With nothing to
 // hook, the sleep System compares the gravity it last saw.
 func TestANewGravityWakesASleepingPileAndTheSameOneDoesNot(t *testing.T) {
-	h, w := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+	h, w := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 	_, crates := spawnStack(t, h, 0, 3)
 	settle(t, h, crates, 300)
 
@@ -373,13 +372,13 @@ func TestAWriteOrAWakeCmdWakesTheWholeIsland(t *testing.T) {
 		disturb func(h *harness, top ecs.Entity)
 	}{
 		{"a Velocity write", func(h *harness, top ecs.Entity) {
-			h.setVelocity(t, top, ecsphysics2d.Velocity{Linear: m.Vec2d{X: 0.5}})
+			h.setVelocity(t, top, Velocity{Linear: m.Vec2d{X: 0.5}})
 		}},
 		{"a Position write", func(h *harness, top ecs.Entity) {
 			h.place(t, top, h.read(t, top).Place.Current.Add(m.Vec2d{Y: 0.001}))
 		}},
 		{"a changed Force", func(h *harness, top ecs.Entity) {
-			h.addForce(t, top, ecsphysics2d.Force{Force: m.Vec2d{X: 3}})
+			h.addForce(t, top, Force{Force: m.Vec2d{X: 3}})
 		}},
 		{"a WakeCmd", func(h *harness, top ecs.Entity) {
 			h.wake(t, top)
@@ -387,7 +386,7 @@ func TestAWriteOrAWakeCmdWakesTheWholeIsland(t *testing.T) {
 	}
 	for _, d := range disturbances {
 		t.Run(d.name, func(t *testing.T) {
-			h, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+			h, _ := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 			_, crates := spawnStack(t, h, 0, 3)
 			settle(t, h, crates, 300)
 
@@ -407,11 +406,11 @@ func TestAWriteOrAWakeCmdWakesTheWholeIsland(t *testing.T) {
 // test of the Force and not of the wall.
 func TestABodyLeaningOnAWallUnderAChangingForceNeverFallsAsleep(t *testing.T) {
 	lean := func(t *testing.T, changing bool) bool {
-		h, _ := newSleepHarness(t, m.Vec2d{}, ecsphysics2d.Sleep{IdleSpeed: 0.05, Time: napTime})
+		h, _ := newSleepHarness(t, m.Vec2d{}, Sleep{IdleSpeed: 0.05, Time: napTime})
 		h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{X: 1}},
-			Shape: ecsphysics2d.NewBoxShapeFor(ecsphysics2d.NewBB(0, -2, 1, 2), 0),
+			Place: Position{Current: m.Vec2d{X: 1}},
+			Shape: NewBoxShapeFor(NewBB(0, -2, 1, 2), 0),
 		})
 		crate := spawnCrates(t, h, 0.75, -0.25, 1)[0]
 		for k := range 240 {
@@ -439,7 +438,7 @@ func TestABodyLeaningOnAWallUnderAChangingForceNeverFallsAsleep(t *testing.T) {
 // arbiter loop. Left asleep, the pile would not hold the crate up — it would
 // never be solved against it.
 func TestABodyDroppedOnASleepingPileWakesIt(t *testing.T) {
-	h, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+	h, _ := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 	_, crates := spawnStack(t, h, 0, 3)
 	settle(t, h, crates, 300)
 
@@ -475,7 +474,7 @@ func TestABodyDroppedOnASleepingPileWakesIt(t *testing.T) {
 // The pile here rests on a Kinematic floor standing still, where on a Static
 // one it falls asleep.
 func TestAKinematicBodyTouchingAPileKeepsItAwake(t *testing.T) {
-	h, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+	h, _ := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 	floor := h.spawn(t, spawnRequest{Kind: kindKinematic})
 	h.setShape(t, floor, pileFloor())
 	crates := spawnCrates(t, h, 0, 0, 3)
@@ -492,13 +491,13 @@ func TestAKinematicBodyTouchingAPileKeepsItAwake(t *testing.T) {
 // overlap: a Sensor Contact joins no Island and wakes none, and the sleeper is
 // still in the Body index for the Sensor to find.
 func TestASensorOverlappingASleeperDoesNotWakeItAndStillReportsIt(t *testing.T) {
-	h, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+	h, _ := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 	_, crates := spawnStack(t, h, 0, 3)
 	settle(t, h, crates, 300)
 
 	sensor := h.spawn(t, spawnRequest{
 		Kind:  kindKinematic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{Y: 1.25}, Previous: m.Vec2d{Y: 1.25}},
+		Place: Position{Current: m.Vec2d{Y: 1.25}, Previous: m.Vec2d{Y: 1.25}},
 	})
 	h.setShape(t, sensor, sensorCircle(0.1))
 
@@ -509,7 +508,7 @@ func TestASensorOverlappingASleeperDoesNotWakeItAndStillReportsIt(t *testing.T) 
 		}
 		found := false
 		for _, entry := range h.contacts(t) {
-			if entry.Sensor && entry.Other(sensor) == crates[2] && entry.Phase != ecsphysics2d.PhaseEnded {
+			if entry.Sensor && entry.Other(sensor) == crates[2] && entry.Phase != PhaseEnded {
 				found = true
 			}
 		}
@@ -525,7 +524,7 @@ func TestASensorOverlappingASleeperDoesNotWakeItAndStillReportsIt(t *testing.T) 
 // rule both would hang in the air.
 func TestRemovingASupportWakesWhatRestsOnIt(t *testing.T) {
 	t.Run("the bottom crate", func(t *testing.T) {
-		h, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+		h, _ := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 		_, crates := spawnStack(t, h, 0, 3)
 		settle(t, h, crates, 300)
 		before := h.read(t, crates[2]).Place.Current.Y
@@ -537,7 +536,7 @@ func TestRemovingASupportWakesWhatRestsOnIt(t *testing.T) {
 		}
 	})
 	t.Run("the floor", func(t *testing.T) {
-		h, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+		h, _ := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 		floor, crates := spawnStack(t, h, 0, 3)
 		settle(t, h, crates, 300)
 		before := h.read(t, crates[0]).Place.Current.Y
@@ -554,7 +553,7 @@ func TestRemovingASupportWakesWhatRestsOnIt(t *testing.T) {
 // the Body index finds it, and one on the static index does not — cp moves a
 // sleeper into its static tree, which the port's public indices cannot.
 func TestAnOverlapOnTheBodyIndexFindsASleepingCrateAndTheStaticIndexDoesNot(t *testing.T) {
-	h, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+	h, _ := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 	_, crates := spawnStack(t, h, 0, 3)
 	settle(t, h, crates, 300)
 	h.frames(t, 5)
@@ -579,7 +578,7 @@ func TestAnOverlapOnTheBodyIndexFindsASleepingCrateAndTheStaticIndexDoesNot(t *t
 // carried: were they left to the list, they would end the tick after the pile
 // fell asleep and begin again, cold, the tick it woke.
 func TestAWakingIslandsContactsComeBackContinuingWithTheirImpulses(t *testing.T) {
-	h, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+	h, _ := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 	_, crates := spawnStack(t, h, 0, 3)
 	settle(t, h, crates, 300)
 	h.frames(t, 10)
@@ -594,7 +593,7 @@ func TestAWakingIslandsContactsComeBackContinuingWithTheirImpulses(t *testing.T)
 		t.Fatalf("the woken pile reports %d Contacts, want the %d it slept with", len(list), len(crates))
 	}
 	for _, entry := range list {
-		if entry.Phase != ecsphysics2d.PhaseContinuing {
+		if entry.Phase != PhaseContinuing {
 			t.Errorf("a Contact the pile slept with came back in phase %v, want Continuing", entry.Phase)
 		}
 		if entry.TotalImpulse().Length() < 0.5*tick*9.81 {
@@ -608,7 +607,7 @@ func TestAWakingIslandsContactsComeBackContinuingWithTheirImpulses(t *testing.T)
 // come back Ended rather than Continuing: they name a place it has left. The
 // rest of the Island's Contacts come back Continuing.
 func TestATeleportedSleepersContactsComeBackEnded(t *testing.T) {
-	h, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+	h, _ := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 	_, crates := spawnStack(t, h, 0, 3)
 	settle(t, h, crates, 300)
 
@@ -618,9 +617,9 @@ func TestATeleportedSleepersContactsComeBackEnded(t *testing.T) {
 	for _, entry := range h.contacts(t) {
 		touchesTop := entry.A == crates[2] || entry.B == crates[2]
 		switch {
-		case touchesTop && entry.Phase == ecsphysics2d.PhaseEnded:
+		case touchesTop && entry.Phase == PhaseEnded:
 			ended++
-		case !touchesTop && entry.Phase == ecsphysics2d.PhaseContinuing:
+		case !touchesTop && entry.Phase == PhaseContinuing:
 			continuing++
 		default:
 			t.Errorf("after the teleport a Contact of %v and %v is in phase %v", entry.A, entry.B, entry.Phase)
@@ -634,13 +633,13 @@ func TestATeleportedSleepersContactsComeBackEnded(t *testing.T) {
 // Two crates held by a Joint are one Island: they fall asleep together and a
 // kick to one wakes both, though nothing touches between them.
 func TestAJointMakesTwoBodiesOneIsland(t *testing.T) {
-	h, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+	h, _ := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 	h.spawn(t, spawnRequest{Kind: kindShapedStatic, Shape: pileFloor()})
 	left := spawnCrates(t, h, -1, 0, 1)[0]
 	right := spawnCrates(t, h, 1, 0, 1)[0]
 	h.spawn(t, spawnRequest{
 		Kind:  kindJoint,
-		Joint: ecsphysics2d.NewPinJoint(left, right, m.Vec2d{}, m.Vec2d{}, 2),
+		Joint: NewPinJoint(left, right, m.Vec2d{}, m.Vec2d{}, 2),
 	})
 	pair := []ecs.Entity{left, right}
 	settle(t, h, pair, 300)
@@ -653,7 +652,7 @@ func TestAJointMakesTwoBodiesOneIsland(t *testing.T) {
 		}
 	}
 
-	h.setVelocity(t, left, ecsphysics2d.Velocity{Linear: m.Vec2d{Y: 0.5}})
+	h.setVelocity(t, left, Velocity{Linear: m.Vec2d{Y: 0.5}})
 	h.frame(t)
 	if n := awakeCount(t, h, pair); n != 2 {
 		t.Errorf("%d of the two jointed crates woke when one was kicked, want both", n)
@@ -663,11 +662,11 @@ func TestAJointMakesTwoBodiesOneIsland(t *testing.T) {
 // Turning sleeping off wakes every Island, rather than leaving it asleep with
 // nothing left to wake it, and then nothing falls asleep again.
 func TestTurningSleepingOffWakesEveryIsland(t *testing.T) {
-	h, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{Time: napTime})
+	h, _ := newSleepHarness(t, napGravity, Sleep{Time: napTime})
 	_, crates := spawnStack(t, h, 0, 3)
 	settle(t, h, crates, 300)
 
-	h.setSleep(t, ecsphysics2d.Sleep{})
+	h.setSleep(t, Sleep{})
 	for k := range 120 {
 		h.frame(t)
 		if n := awakeCount(t, h, crates); n != len(crates) {
@@ -679,7 +678,7 @@ func TestTurningSleepingOffWakesEveryIsland(t *testing.T) {
 // Off is the default: a pile that would sleep under Sleep{Time} never does
 // under the Resource the plugin registers.
 func TestSleepingIsOffByDefault(t *testing.T) {
-	h, _ := newSleepHarness(t, napGravity, ecsphysics2d.Sleep{})
+	h, _ := newSleepHarness(t, napGravity, Sleep{})
 	_, crates := spawnStack(t, h, 0, 3)
 	for k := range 240 {
 		h.frame(t)
@@ -725,58 +724,58 @@ func TestSleepingCostsNoSystemParallelism(t *testing.T) {
 	}
 
 	entities := reflect.TypeFor[*ecs.Entities]()
-	sleeping := reflect.TypeFor[*ecs.Store[ecsphysics2d.Sleeping]]()
-	rest := reflect.TypeFor[*ecs.Store[types.Rest]]()
-	wakes := reflect.TypeFor[*types.Wakes]()
-	settings := reflect.TypeFor[*ecsphysics2d.Sleep]()
+	sleeping := reflect.TypeFor[*ecs.Store[Sleeping]]()
+	rest := reflect.TypeFor[*ecs.Store[Rest]]()
+	wakes := reflect.TypeFor[*Wakes]()
+	settings := reflect.TypeFor[*Sleep]()
 
 	for _, owned := range []reflect.Type{sleeping, rest} {
-		if got := writers[owned]; len(got) != 1 || got[0] != reflect.TypeFor[ecsphysics2d.SleepOnUpdate]() {
+		if got := writers[owned]; len(got) != 1 || got[0] != reflect.TypeFor[SleepOnUpdate]() {
 			t.Errorf("%v is written by %v, want the sleep System alone", owned, got)
 		}
 	}
 
 	want := map[reflect.Type]lockSet{
-		reflect.TypeFor[ecsphysics2d.IntegrateOnUpdate](): {
-			reads:  of([]reflect.Type{entities, reflect.TypeFor[*ecs.Store[ecsphysics2d.Velocity]](), sleeping}),
-			writes: of([]reflect.Type{reflect.TypeFor[*ecs.Store[ecsphysics2d.Position]]()}),
+		reflect.TypeFor[IntegrateOnUpdate](): {
+			reads:  of([]reflect.Type{entities, reflect.TypeFor[*ecs.Store[Velocity]](), sleeping}),
+			writes: of([]reflect.Type{reflect.TypeFor[*ecs.Store[Position]]()}),
 		},
-		reflect.TypeFor[ecsphysics2d.IndexOnUpdate](): {
+		reflect.TypeFor[IndexOnUpdate](): {
 			reads: of([]reflect.Type{
 				entities, sleeping,
-				reflect.TypeFor[*ecs.Store[ecsphysics2d.Joint]](),
-				reflect.TypeFor[*ecs.Store[ecsphysics2d.Polygon]](),
-				reflect.TypeFor[*ecs.Store[ecsphysics2d.Position]](),
-				reflect.TypeFor[*ecs.Store[ecsphysics2d.Shape]](),
-				reflect.TypeFor[*ecs.Store[ecsphysics2d.Static]](),
+				reflect.TypeFor[*ecs.Store[Joint]](),
+				reflect.TypeFor[*ecs.Store[Polygon]](),
+				reflect.TypeFor[*ecs.Store[Position]](),
+				reflect.TypeFor[*ecs.Store[Shape]](),
+				reflect.TypeFor[*ecs.Store[Static]](),
 			}),
 			writes: of([]reflect.Type{
-				reflect.TypeFor[*ecsphysics2d.BodyIndex](),
-				reflect.TypeFor[*ecsphysics2d.StaticIndex](),
-				reflect.TypeFor[*ecsphysics2d.JointedPairs](),
+				reflect.TypeFor[*BodyIndex](),
+				reflect.TypeFor[*StaticIndex](),
+				reflect.TypeFor[*JointedPairs](),
 			}),
 		},
-		reflect.TypeFor[ecsphysics2d.DetectOnUpdate](): {
+		reflect.TypeFor[DetectOnUpdate](): {
 			reads: of([]reflect.Type{
 				entities,
-				reflect.TypeFor[*ecsphysics2d.BodyIndex](),
-				reflect.TypeFor[*ecsphysics2d.StaticIndex](),
-				reflect.TypeFor[*ecsphysics2d.JointedPairs](),
+				reflect.TypeFor[*BodyIndex](),
+				reflect.TypeFor[*StaticIndex](),
+				reflect.TypeFor[*JointedPairs](),
 			}),
-			writes: of([]reflect.Type{reflect.TypeFor[*ecsphysics2d.Contacts]()}),
+			writes: of([]reflect.Type{reflect.TypeFor[*Contacts]()}),
 		},
-		reflect.TypeFor[ecsphysics2d.SolveOnUpdate](): {
+		reflect.TypeFor[SolveOnUpdate](): {
 			reads: of([]reflect.Type{
 				entities, sleeping,
-				reflect.TypeFor[*ecsphysics2d.Constants](),
-				reflect.TypeFor[*ecs.Store[ecsphysics2d.Dynamic]](),
+				reflect.TypeFor[*Constants](),
+				reflect.TypeFor[*ecs.Store[Dynamic]](),
 			}),
 			writes: of([]reflect.Type{
-				reflect.TypeFor[*ecsphysics2d.Contacts](),
-				reflect.TypeFor[*ecs.Store[ecsphysics2d.Force]](),
-				reflect.TypeFor[*ecs.Store[ecsphysics2d.Joint]](),
-				reflect.TypeFor[*ecs.Store[ecsphysics2d.Position]](),
-				reflect.TypeFor[*ecs.Store[ecsphysics2d.Velocity]](),
+				reflect.TypeFor[*Contacts](),
+				reflect.TypeFor[*ecs.Store[Force]](),
+				reflect.TypeFor[*ecs.Store[Joint]](),
+				reflect.TypeFor[*ecs.Store[Position]](),
+				reflect.TypeFor[*ecs.Store[Velocity]](),
 			}),
 		},
 	}
@@ -788,8 +787,8 @@ func TestSleepingCostsNoSystemParallelism(t *testing.T) {
 		}
 	}
 
-	solve := sets[reflect.TypeFor[ecsphysics2d.SolveOnUpdate]()]
-	sleep := sets[reflect.TypeFor[ecsphysics2d.SleepOnUpdate]()]
+	solve := sets[reflect.TypeFor[SolveOnUpdate]()]
+	sleep := sets[reflect.TypeFor[SleepOnUpdate]()]
 	sleepings := map[reflect.Type]bool{sleeping: true, rest: true, wakes: true, settings: true}
 	for read := range sleep.reads {
 		if !solve.reads[read] && !solve.writes[read] && !sleepings[read] {

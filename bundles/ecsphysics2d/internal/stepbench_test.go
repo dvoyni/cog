@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -177,10 +177,10 @@ func populatePolygons(t testing.TB, h *harness, n int) {
 
 	hexagon, hexagonVerts := regularPolygon(t, 6, 0.3)
 	triangle, _ := regularPolygon(t, 3, 0.35)
-	box := ecsphysics2d.NewBoxShape(0.5, 0.5, 0)
+	box := NewBoxShape(0.5, 0.5, 0)
 
 	for i := range n {
-		shape, polygon := box, ecsphysics2d.Polygon{}
+		shape, polygon := box, Polygon{}
 		switch i % 4 {
 		case 1:
 			shape = triangle
@@ -189,7 +189,7 @@ func populatePolygons(t testing.TB, h *harness, n int) {
 		}
 		h.spawn(t, spawnRequest{
 			Kind:    kindPolygonBody,
-			Place:   ecsphysics2d.Position{Current: gridAt(i).Add(m.Vec2d{Y: 0.45})},
+			Place:   Position{Current: gridAt(i).Add(m.Vec2d{Y: 0.45})},
 			Body:    dynamic(t, 1, 0.1, 0, 0),
 			Shape:   shape,
 			Polygon: polygon,
@@ -200,20 +200,20 @@ func populatePolygons(t testing.TB, h *harness, n int) {
 	for i := range n {
 		h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: gridAt(i)},
-			Shape: ecsphysics2d.NewBoxShapeFor(ecsphysics2d.NewBB(-0.8, -0.4, 0.8, 0.2), 0),
+			Place: Position{Current: gridAt(i)},
+			Shape: NewBoxShapeFor(NewBB(-0.8, -0.4, 0.8, 0.2), 0),
 		})
 	}
 }
 
 // regularPolygon is the n-gon of that circumradius, built the one way in.
-func regularPolygon(t testing.TB, count int, radius float64) (ecsphysics2d.Shape, ecsphysics2d.Polygon) {
+func regularPolygon(t testing.TB, count int, radius float64) (Shape, Polygon) {
 	t.Helper()
 	corners := make([]m.Vec2d, count)
 	for i := range count {
 		corners[i] = m.ForAngle(-2 * math.Pi * float64(i) / float64(count)).MulS(radius)
 	}
-	shape, polygon, err := ecsphysics2d.NewPolygonShape(corners, 0)
+	shape, polygon, err := NewPolygonShape(corners, 0)
 	if err != nil {
 		t.Fatalf("hulling a %d-gon: %v", count, err)
 	}
@@ -287,7 +287,7 @@ func populate(t testing.TB, h *harness, n int) {
 	for i := range n / 2 {
 		h.spawn(t, spawnRequest{
 			Kind:  kindShapedBody,
-			Place: ecsphysics2d.Position{Current: gridAt(i)},
+			Place: Position{Current: gridAt(i)},
 			Body:  dynamic(t, 2, 8, 15, 0.3),
 			Shape: measured(0.4),
 		})
@@ -295,12 +295,12 @@ func populate(t testing.TB, h *harness, n int) {
 	h.spawn(t, spawnRequest{
 		Kind:     kindKinematic,
 		Count:    n / 2,
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 1}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 1}},
 	})
 	for i := range n / 4 {
 		h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: gridAt(i).Add(m.Vec2d{X: 0.75})},
+			Place: Position{Current: gridAt(i).Add(m.Vec2d{X: 0.75})},
 			Shape: measured(0.4),
 		})
 	}
@@ -323,8 +323,8 @@ func populate(t testing.TB, h *harness, n int) {
 	for i := range n / 16 {
 		h.spawn(t, spawnRequest{
 			Kind:     kindShapedBody,
-			Place:    ecsphysics2d.Position{Current: gridAt(i % 8).Add(m.Vec2d{X: 0.75, Y: 0.02 * float64(i/8)})},
-			Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 0.1}},
+			Place:    Position{Current: gridAt(i % 8).Add(m.Vec2d{X: 0.75, Y: 0.02 * float64(i/8)})},
+			Velocity: Velocity{Linear: m.Vec2d{X: 0.1}},
 			Body:     dynamic(t, 1e6, 1e6, 0, 0),
 			Shape:    sensorCircle(0.4),
 		})
@@ -337,7 +337,7 @@ func populate(t testing.TB, h *harness, n int) {
 // are pressed straight along their normals, so the tangent stays at zero and a
 // settled pair has no approach left to give back — which is what keeps the
 // Contacts the measurement needs from going away.
-func measured(radius float64) ecsphysics2d.Shape {
+func measured(radius float64) Shape {
 	shape := circle(radius)
 	shape.Friction, shape.Restitution = 0.7, 0.3
 	return shape
@@ -458,15 +458,15 @@ func populateJointed(t testing.TB, h *harness, n int) (int, ecs.Entity) {
 		at := gridAt(i)
 		a := h.spawn(t, spawnRequest{
 			Kind:  kindDynamic,
-			Place: ecsphysics2d.Position{Current: at},
+			Place: Position{Current: at},
 			Body:  dynamic(t, 2, 8, 15, 0.3),
 		})
 		b := h.spawn(t, spawnRequest{
 			Kind:  kindDynamic,
-			Place: ecsphysics2d.Position{Current: at.Add(m.Vec2d{Y: 0.6})},
+			Place: Position{Current: at.Add(m.Vec2d{Y: 0.6})},
 			Body:  dynamic(t, 5, 3, 15, 0.3),
 		})
-		joint := ecsphysics2d.NewPinJoint(a, b, m.Vec2d{}, m.Vec2d{}, 0.6)
+		joint := NewPinJoint(a, b, m.Vec2d{}, m.Vec2d{}, 0.6)
 		joint.CollideBodies = false
 		e := h.spawn(t, spawnRequest{Kind: kindJoint, Joint: joint})
 		if count == 0 {

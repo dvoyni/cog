@@ -89,7 +89,7 @@ plugin's. ecsaudio declares no Transform of its own, and `Scale` is ignored.
 
 ### Why `Emitter` and `m.Transform` are separate Components
 
-Not tidiness. `bundles/ecsphysics2d/types.go:44-49` gives the reason in its own
+Not tidiness. `bundles/ecsphysics2d/components.go:25-30` gives the reason in its own
 words — `Force` is its own Component *"so that a System adding Force does not
 block the render copy reading Position"*. Here it is a System copying transforms
 every tick against a System that changes a Clip once an hour. One Component would

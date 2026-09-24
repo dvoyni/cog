@@ -3,7 +3,6 @@ package internal
 import (
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -51,24 +50,24 @@ func expectXs(t *testing.T, what string, got []drawnInstance, want ...float32) {
 // layer.
 func TestLayersRouteABatchsInstancesToEachCamera(t *testing.T) {
 	h := newCameralessHarness(t, 256)
-	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{
-		FovY: 1.0472, Near: 0.1, Far: 200, CullMask: ecsscene.Layer(1),
+	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &Camera{
+		FovY: 1.0472, Near: 0.1, Far: 200, CullMask: Layer(1),
 	}})
-	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{
-		ID: 1, FovY: 1.0472, Near: 0.1, Far: 200, CullMask: ecsscene.Layer(2),
+	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &Camera{
+		ID: 1, FovY: 1.0472, Near: 0.1, Far: 200, CullMask: Layer(2),
 	}})
-	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{
+	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &Camera{
 		ID: 2, FovY: 1.0472, Near: 0.1, Far: 200,
 	}})
-	crate := func(layers ecsscene.LayerMask) *ecsscene.Model {
-		return &ecsscene.Model{Ref: model.ModelRef{Path: crateModel}, Layers: layers}
+	crate := func(layers LayerMask) *Model {
+		return &Model{Ref: model.ModelRef{Path: crateModel}, Layers: layers}
 	}
-	h.spawn(t, spawnRequest{Place: m.At(-4, 0, 0), Model: crate(ecsscene.Layer(1))})
-	h.spawn(t, spawnRequest{Place: m.At(-2, 0, 0), Model: crate(ecsscene.Layer(1))})
-	h.spawn(t, spawnRequest{Place: m.At(2, 0, 0), Model: crate(ecsscene.Layer(2))})
-	h.spawn(t, spawnRequest{Place: m.At(4, 0, 0), Model: crate(ecsscene.Layer(1) | ecsscene.Layer(2))})
+	h.spawn(t, spawnRequest{Place: m.At(-4, 0, 0), Model: crate(Layer(1))})
+	h.spawn(t, spawnRequest{Place: m.At(-2, 0, 0), Model: crate(Layer(1))})
+	h.spawn(t, spawnRequest{Place: m.At(2, 0, 0), Model: crate(Layer(2))})
+	h.spawn(t, spawnRequest{Place: m.At(4, 0, 0), Model: crate(Layer(1) | Layer(2))})
 	h.spawn(t, spawnRequest{Place: m.At(6, 0, 0), Model: crate(0)})
-	h.spawn(t, spawnRequest{Place: m.At(8, 0, 0), Model: crate(ecsscene.Layer(7))})
+	h.spawn(t, spawnRequest{Place: m.At(8, 0, 0), Model: crate(Layer(7))})
 
 	h.frameUntil(t, "the crates to draw", func() bool {
 		return len(where(h.drawn(), inPass("scene.camera2.forward"))) == 6
@@ -87,25 +86,25 @@ func TestLayersRouteABatchsInstancesToEachCamera(t *testing.T) {
 // draws nothing.
 func TestPassesRouteByTheMaterialsTags(t *testing.T) {
 	h := newCameralessHarness(t, 256)
-	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{
+	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &Camera{
 		FovY: 1.0472, Near: 0.1, Far: 200, Passes: m.NewList(
-			ecsscene.Pass{ClearDepth: m.Some[float32](1)},
-			ecsscene.Pass{Tag: "shadow", Order: 1},
-			ecsscene.Pass{Tag: "overlay", Order: 2},
-			ecsscene.Pass{Tag: "unused", Order: 3, ClearColor: m.Some(m.Color{A: 1})},
+			Pass{ClearDepth: m.Some[float32](1)},
+			Pass{Tag: "shadow", Order: 1},
+			Pass{Tag: "overlay", Order: 2},
+			Pass{Tag: "unused", Order: 3, ClearColor: m.Some(m.Color{A: 1})},
 		),
 	}})
 	ref := h.bake(t)
-	shadowOnly := &ecsscene.Material{Tags: m.NewList(
-		ecsscene.MaterialTag{Tag: "shadow", Shader: gfx.ShaderWithText("shadow")})}
-	forwardAndOverlay := &ecsscene.Material{Tags: m.NewList(
-		ecsscene.MaterialTag{Shader: gfx.ShaderWithText("flat")},
-		ecsscene.MaterialTag{Tag: "overlay", Shader: gfx.ShaderWithText("outline")})}
+	shadowOnly := &Material{Tags: m.NewList(
+		MaterialTag{Tag: "shadow", Shader: gfx.ShaderWithText("shadow")})}
+	forwardAndOverlay := &Material{Tags: m.NewList(
+		MaterialTag{Shader: gfx.ShaderWithText("flat")},
+		MaterialTag{Tag: "overlay", Shader: gfx.ShaderWithText("outline")})}
 	h.spawn(t, spawnRequest{Place: m.At(-2, 0, 0), Model: crateModelComponent()})
 	h.spawn(t, spawnRequest{Count: 2, Step: 1, Place: m.At(0, 0, 0),
-		Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}, Material: shadowOnly})
+		Mesh: &Mesh{Ref: ref, NeverCull: true}, Material: shadowOnly})
 	h.spawn(t, spawnRequest{Count: 2, Step: 1, Place: m.At(3, 0, 0),
-		Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}, Material: forwardAndOverlay})
+		Mesh: &Mesh{Ref: ref, NeverCull: true}, Material: forwardAndOverlay})
 
 	h.frameUntil(t, "the crate to draw", func() bool {
 		return len(where(h.drawn(), at(m.Vec3{X: -2}))) > 0
@@ -146,7 +145,7 @@ func TestAnInstanceOutsideTheFrustumLeavesItsBatch(t *testing.T) {
 	ref := h.bake(t)
 	h.spawn(t, spawnRequest{Place: m.At(0, 0, 0), Model: crateModelComponent()})
 	h.spawn(t, spawnRequest{Place: m.At(500, 0, 0), Model: crateModelComponent()})
-	h.spawn(t, spawnRequest{Place: m.At(-500, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}})
+	h.spawn(t, spawnRequest{Place: m.At(-500, 0, 0), Mesh: &Mesh{Ref: ref, NeverCull: true}})
 
 	h.frameUntil(t, "the crate to draw", func() bool {
 		return len(where(h.drawn(), ofTriangle)) >= 2

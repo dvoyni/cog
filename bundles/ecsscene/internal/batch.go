@@ -2,7 +2,6 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -160,7 +159,7 @@ func (s *scratch) newMeshBatch(frame *frameInputs, e ecs.Entity, ref model.MeshR
 	}
 	override, hasMaterial := frame.materials.Of(e)
 	if !mesh.Standard && !hasMaterial {
-		s.reportMeshOnce(ref, ecsscene.ErrMeshCustomLayoutNeedsMaterial{Mesh: ref.ID()})
+		s.reportMeshOnce(ref, ErrMeshCustomLayoutNeedsMaterial{Mesh: ref.ID()})
 		return -1
 	}
 	b := batch{mesh: mesh}
@@ -267,7 +266,7 @@ func (s *scratch) packMorphs(anim *model.ResidentAnimation, view *model.ModelVie
 
 // copyParams copies a Params List out into the frame's arena, which is the
 // only route out of a List and costs no allocation into a reused backing.
-func (s *scratch) copyParams(params *ecsscene.Params) []gfx.ParameterDescr {
+func (s *scratch) copyParams(params *Params) []gfx.ParameterDescr {
 	start := len(s.params)
 	for _, param := range params.Values.All() {
 		s.params = append(s.params, param)
@@ -292,7 +291,7 @@ func (s *scratch) recorded(material material) material {
 // next one's. A Material with no tags is an empty material, which serves no
 // pass.
 func (s *scratch) resolveMaterial(
-	component *ecsscene.Material, file *model.MaterialIngredients, variant model.ShaderVariant,
+	component *Material, file *model.MaterialIngredients, variant model.ShaderVariant,
 ) material {
 	start := len(s.tags)
 	for _, tag := range component.Tags.All() {

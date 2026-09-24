@@ -96,8 +96,10 @@
 //
 // ecsaudio is a Bundle. Its plugin, built by ecsaudioplugin.New, requires no
 // Adapter and contributes none; register ecs and sound beside it. The Component
-// registrations, the table and the one System are in internal/. The Components
-// are plain data with no methods, so there is no internal/types.
+// registrations, the table and the one System are in internal/, which also
+// declares everything this package offers; this package aliases it. The
+// Components are plain data with every field exported, and there is no
+// internal/types.
 //
 // bundles/ecsaudio/docs/specs/ecsaudio.md is the specification this package is
 // judged against.

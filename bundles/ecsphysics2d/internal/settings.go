@@ -2,8 +2,6 @@ package internal
 
 import (
 	"math"
-
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 )
 
 // The defaults a zero Config field takes. Every one of them is documented on
@@ -60,9 +58,9 @@ func resolveConfig(value any) (settings, error) {
 	if value == nil {
 		return resolved, nil
 	}
-	given, ok := value.(ecsphysics2d.Config)
+	given, ok := value.(Config)
 	if !ok {
-		return settings{}, ecsphysics2d.ErrInvalidConfig{Got: value}
+		return settings{}, ErrInvalidConfig{Got: value}
 	}
 	if given.Iterations != 0 {
 		resolved.iterations = given.Iterations

@@ -287,7 +287,7 @@ From [The Component vocabulary](https://github.com/dvoyni/cog/issues/287),
 | `Position` | `Current, Previous m.Vec2d`; `Angle, PreviousAngle float64` | Integrate, Solve (the bias correction), gameplay | Index, Detect, gameplay, the app's render copy |
 | `Velocity` | `Linear m.Vec2d`; `Angular float64` | Integrate, Solve, gameplay | Integrate, Solve, gameplay |
 | `Force` | `Force m.Vec2d`; `Torque float64` | gameplay adds; Solve clears | Solve |
-| `Dynamic` | unexported `invMass, invInertia, damping, angularDamping` | constructors and setters | Solve |
+| `Dynamic` | `InvMass, InvInertia, Damping, AngularDamping`, exported for serialisation and written only by the constructors and setters | constructors and setters | Solve |
 | `Shape` | see [The Shape](#the-shape) | the app | Index, Detect, queries |
 | `Polygon` | `Verts m.List[m.Vec2d]` | the app | Index |
 | `Joint` | see [Joints](#joints) | the app; Solve writes the Impulse and ratchet's `Angle` | Index, Solve |

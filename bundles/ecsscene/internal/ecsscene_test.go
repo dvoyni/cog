@@ -8,7 +8,6 @@ import (
 
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
-	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/model/modelplugin"
 	"github.com/dvoyni/cog/kernel"
@@ -45,19 +44,19 @@ type spawnRequest struct {
 	// Unplaced spawns the Entities with no Transform at all.
 	Unplaced bool
 
-	Model     *ecsscene.Model
-	Mesh      *ecsscene.Mesh
-	Animation *ecsscene.Animation
-	Params    *ecsscene.Params
-	Material  *ecsscene.Material
-	Light     *ecsscene.Light
-	Camera    *ecsscene.Camera
+	Model     *Model
+	Mesh      *Mesh
+	Animation *Animation
+	Params    *Params
+	Material  *Material
+	Light     *Light
+	Camera    *Camera
 	// ParamsEach, when set, gives the i-th Entity its own Params in place of
 	// Params, which is how a test spawns thousands of distinct values in one
 	// command.
-	ParamsEach func(i int) ecsscene.Params
+	ParamsEach func(i int) Params
 	// AnimationEach is the same for Animation.
-	AnimationEach func(i int) ecsscene.Animation
+	AnimationEach func(i int) Animation
 }
 
 type spawnResponse struct {
@@ -84,13 +83,13 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 		request spawnRequest,
 		withPlace *ecs.Spawn[placed],
 		withoutPlace *ecs.Spawn[unplaced],
-		models *ecs.Set[ecsscene.Model],
-		meshes *ecs.Set[ecsscene.Mesh],
-		animations *ecs.Set[ecsscene.Animation],
-		params *ecs.Set[ecsscene.Params],
-		materials *ecs.Set[ecsscene.Material],
-		lights *ecs.Set[ecsscene.Light],
-		cameras *ecs.Set[ecsscene.Camera],
+		models *ecs.Set[Model],
+		meshes *ecs.Set[Mesh],
+		animations *ecs.Set[Animation],
+		params *ecs.Set[Params],
+		materials *ecs.Set[Material],
+		lights *ecs.Set[Light],
+		cameras *ecs.Set[Camera],
 		answer *ecs.Resp[spawnResponse],
 	) {
 		var first ecs.Entity
@@ -209,7 +208,7 @@ type gamePlugin struct{}
 func (p *gamePlugin) Name() kernel.PluginName { return "game" }
 
 func (p *gamePlugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, model.Name, ecsscene.Name}
+	return []kernel.PluginName{ecs.Name, model.Name, Name}
 }
 
 func (p *gamePlugin) Register(registrar *kernel.Registrar, _ any) error {
@@ -220,6 +219,7 @@ func (p *gamePlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[keysCmd](keysCmdImpl)
 	registrar.HandleCommand[setParamsCmd](setParamsCmdImpl(registrar))
 	registrar.HandleCommand[defaultShaderCmd](defaultShaderCmdImpl)
+	registerDebugTestCommands(registrar)
 	return nil
 }
 

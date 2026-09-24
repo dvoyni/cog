@@ -8,7 +8,6 @@ import (
 
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
-	"github.com/dvoyni/cog/bundles/ecsaudio"
 	"github.com/dvoyni/cog/extensions/nosound/nosoundplugin"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -27,7 +26,7 @@ type driftQuery struct {
 
 // retuneQuery writes one of the binding's own Components.
 type retuneQuery struct {
-	Emitter *ecsaudio.Emitter
+	Emitter *Emitter
 }
 
 type driftSystem kernel.Subscription[app.UpdateEvent]
@@ -56,7 +55,7 @@ func (p *moverPlugin) Register(registrar *kernel.Registrar, _ any) error {
 			}
 		})
 	}
-	registrar.Subscribe[driftSystem](system).Before[ecsaudio.RecordOnUpdate]()
+	registrar.Subscribe[driftSystem](system).Before[RecordOnUpdate]()
 	return nil
 }
 
@@ -83,13 +82,13 @@ func TestTheCouplingCheckStillHoldsOnTheBindingsComponents(t *testing.T) {
 	if !errors.As(err, &undeclared) {
 		t.Fatalf("a System locking the binding's Stores without declaring ecsaudio composed with %v", err)
 	}
-	if undeclared.Plugin != "mover" || undeclared.Owner != ecsaudio.Name ||
-		undeclared.Resource != reflect.TypeFor[*ecs.Store[ecsaudio.Emitter]]() {
+	if undeclared.Plugin != "mover" || undeclared.Owner != Name ||
+		undeclared.Resource != reflect.TypeFor[*ecs.Store[Emitter]]() {
 		t.Errorf("the refusal is %+v, want mover locking *ecs.Store[ecsaudio.Emitter] owned by %q",
-			undeclared, ecsaudio.Name)
+			undeclared, Name)
 	}
 
-	if err := compose(&moverPlugin{deps: []kernel.PluginName{ecs.Name, ecsaudio.Name}}); err != nil {
+	if err := compose(&moverPlugin{deps: []kernel.PluginName{ecs.Name, Name}}); err != nil {
 		t.Fatalf("a System declaring ecsaudio did not compose: %v", err)
 	}
 }
@@ -124,7 +123,7 @@ func TestTheRecordingSystemTakesNoStructuralLockAndReadsNoVoiceView(t *testing.T
 
 	var found, writesQueue bool
 	for _, subscription := range engine.Describe().Subscriptions {
-		if subscription.Type != reflect.TypeFor[ecsaudio.RecordOnUpdate]() {
+		if subscription.Type != reflect.TypeFor[RecordOnUpdate]() {
 			continue
 		}
 		found = true

@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 )
@@ -22,7 +21,7 @@ type entry struct {
 	// sort still needs a point to measure depth to.
 	sphere   m.Sphere
 	cullable bool
-	layers   ecsscene.LayerMask
+	layers   LayerMask
 	// batch is the entry's index in the frame's Batches.
 	batch int32
 	// anim is the instance record's animation half. Its Offset is the
@@ -103,7 +102,7 @@ func (c *culler) beginCamera() {
 // filters first, then the frustum: every survivor's sphere was tested against
 // all six planes, far included, which is why a camera's Far is required.
 func (c *culler) cull(
-	aspect float32, viewProjection, view m.Mat4, cullMask ecsscene.LayerMask, entries []entry,
+	aspect float32, viewProjection, view m.Mat4, cullMask LayerMask, entries []entry,
 ) int {
 	for i := range c.results {
 		if c.results[i].aspect == aspect {
@@ -136,13 +135,13 @@ func (c *culler) cull(
 // drawnBy reports whether something on layers is drawn by a camera whose
 // cull mask is cull. A zero mask on either side reads as every layer, which is
 // what makes the zero Component draw and the zero Camera see.
-func drawnBy(layers, cull ecsscene.LayerMask) bool {
+func drawnBy(layers, cull LayerMask) bool {
 	return orAll(layers)&orAll(cull) != 0
 }
 
-func orAll(l ecsscene.LayerMask) ecsscene.LayerMask {
+func orAll(l LayerMask) LayerMask {
 	if l == 0 {
-		return ecsscene.LayersAll
+		return LayersAll
 	}
 	return l
 }

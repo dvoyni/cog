@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -34,20 +34,20 @@ var chipmunkErrorBias = -60 * math.Log(0.9)
 // Neither carries a Shape, so no scene here has a Contact in it at all.
 type jointParty struct {
 	mass, moment float64
-	place        ecsphysics2d.Position
-	velocity     ecsphysics2d.Velocity
+	place        Position
+	velocity     Velocity
 }
 
 var (
 	jointPartyA = jointParty{
 		mass: 2, moment: 8,
-		place:    ecsphysics2d.Position{Current: m.Vec2d{X: 0.3, Y: 1.2}, Angle: 0.4},
-		velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 1.5, Y: -0.7}, Angular: 0.9},
+		place:    Position{Current: m.Vec2d{X: 0.3, Y: 1.2}, Angle: 0.4},
+		velocity: Velocity{Linear: m.Vec2d{X: 1.5, Y: -0.7}, Angular: 0.9},
 	}
 	jointPartyB = jointParty{
 		mass: 3, moment: 5,
-		place:    ecsphysics2d.Position{Current: m.Vec2d{X: -0.6, Y: 0.5}, Angle: -0.25},
-		velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: -0.8, Y: 0.4}, Angular: -1.3},
+		place:    Position{Current: m.Vec2d{X: -0.6, Y: 0.5}, Angle: -0.25},
+		velocity: Velocity{Linear: m.Vec2d{X: -0.8, Y: 0.4}, Angular: -1.3},
 	}
 	jointAnchorA = m.Vec2d{X: 0.2, Y: -0.35}
 	jointAnchorB = m.Vec2d{X: -0.15, Y: 0.45}
@@ -68,7 +68,7 @@ func (p jointParty) spawn(t testing.TB, h *harness) ecs.Entity {
 
 // withBias is every Joint this file spawns, re-spelled onto cp's own error
 // bias so that the comparison measures the algorithm and not a setting.
-func withBias(joint ecsphysics2d.Joint) ecsphysics2d.Joint {
+func withBias(joint Joint) Joint {
 	joint.ErrorBias = chipmunkErrorBias
 	return joint
 }
@@ -86,59 +86,59 @@ func withBias(joint ecsphysics2d.Joint) ecsphysics2d.Joint {
 func TestEveryJointKindMatchesChipmunkOverAShortHorizon(t *testing.T) {
 	cases := []struct {
 		name string
-		make func(a, b ecs.Entity) ecsphysics2d.Joint
+		make func(a, b ecs.Entity) Joint
 	}{
-		{"pin", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			distance := ecsphysics2d.PinDistance(
+		{"pin", func(a, b ecs.Entity) Joint {
+			distance := PinDistance(
 				jointPartyA.place.Current, jointPartyA.place.Angle, jointAnchorA,
 				jointPartyB.place.Current, jointPartyB.place.Angle, jointAnchorB)
-			return ecsphysics2d.NewPinJoint(a, b, jointAnchorA, jointAnchorB, distance)
+			return NewPinJoint(a, b, jointAnchorA, jointAnchorB, distance)
 		}},
-		{"pinLimited", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			distance := ecsphysics2d.PinDistance(
+		{"pinLimited", func(a, b ecs.Entity) Joint {
+			distance := PinDistance(
 				jointPartyA.place.Current, jointPartyA.place.Angle, jointAnchorA,
 				jointPartyB.place.Current, jointPartyB.place.Angle, jointAnchorB)
-			joint := ecsphysics2d.NewPinJoint(a, b, jointAnchorA, jointAnchorB, distance)
+			joint := NewPinJoint(a, b, jointAnchorA, jointAnchorB, distance)
 			joint.MaxForce = 4.5
 			return joint
 		}},
-		{"slide", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewSlideJoint(a, b, jointAnchorA, jointAnchorB, 0.4, 0.9)
+		{"slide", func(a, b ecs.Entity) Joint {
+			return NewSlideJoint(a, b, jointAnchorA, jointAnchorB, 0.4, 0.9)
 		}},
-		{"pivot", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewPivotJoint(a, b, jointAnchorA, jointAnchorB)
+		{"pivot", func(a, b ecs.Entity) Joint {
+			return NewPivotJoint(a, b, jointAnchorA, jointAnchorB)
 		}},
-		{"pivotSoft", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			joint := ecsphysics2d.NewPivotJoint(a, b, jointAnchorA, jointAnchorB)
+		{"pivotSoft", func(a, b ecs.Entity) Joint {
+			joint := NewPivotJoint(a, b, jointAnchorA, jointAnchorB)
 			joint.MaxBias = 0.75
 			joint.MaxForce = 6.0
 			return joint
 		}},
-		{"groove", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewGrooveJoint(a, b, jointAnchorA,
+		{"groove", func(a, b ecs.Entity) Joint {
+			return NewGrooveJoint(a, b, jointAnchorA,
 				m.Vec2d{X: -0.5, Y: 0.1}, m.Vec2d{X: 0.7, Y: 0.25})
 		}},
-		{"spring", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewSpringJoint(a, b, jointAnchorA, jointAnchorB, 0.8, 14.0, 1.7)
+		{"spring", func(a, b ecs.Entity) Joint {
+			return NewSpringJoint(a, b, jointAnchorA, jointAnchorB, 0.8, 14.0, 1.7)
 		}},
-		{"rotarySpring", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewRotarySpringJoint(a, b, 0.35, 9.0, 1.1)
+		{"rotarySpring", func(a, b ecs.Entity) Joint {
+			return NewRotarySpringJoint(a, b, 0.35, 9.0, 1.1)
 		}},
-		{"rotaryLimit", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewRotaryLimitJoint(a, b, -0.2, 0.3)
+		{"rotaryLimit", func(a, b ecs.Entity) Joint {
+			return NewRotaryLimitJoint(a, b, -0.2, 0.3)
 		}},
-		{"ratchet", func(a, b ecs.Entity) ecsphysics2d.Joint {
+		{"ratchet", func(a, b ecs.Entity) Joint {
 			// cp reads the starting Angle off the two Bodies as b.a − a.a,
 			// which is A's Angle less B's; a cog constructor reads no Store, so
 			// the app passes exactly that.
 			angle := jointPartyA.place.Angle - jointPartyB.place.Angle
-			return ecsphysics2d.NewRatchetJoint(a, b, angle, 0.05, 0.4)
+			return NewRatchetJoint(a, b, angle, 0.05, 0.4)
 		}},
-		{"gear", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewGearJoint(a, b, 0.12, 2.5)
+		{"gear", func(a, b ecs.Entity) Joint {
+			return NewGearJoint(a, b, 0.12, 2.5)
 		}},
-		{"motor", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewMotorJoint(a, b, 3.2)
+		{"motor", func(a, b ecs.Entity) Joint {
+			return NewMotorJoint(a, b, 3.2)
 		}},
 	}
 
@@ -195,22 +195,22 @@ var jointNumberNames = [13]string{
 func TestARotarySpringBetweenTwoBodiesThatDoNotTurnIsFiniteWhereChipmunkIsNaN(t *testing.T) {
 	for _, it := range []struct {
 		name string
-		make func(a, b ecs.Entity) ecsphysics2d.Joint
+		make func(a, b ecs.Entity) Joint
 	}{
-		{"rotary spring", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewRotarySpringJoint(a, b, 0.35, 9.0, 1.1)
+		{"rotary spring", func(a, b ecs.Entity) Joint {
+			return NewRotarySpringJoint(a, b, 0.35, 9.0, 1.1)
 		}},
-		{"rotary limit", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewRotaryLimitJoint(a, b, -0.2, 0.3)
+		{"rotary limit", func(a, b ecs.Entity) Joint {
+			return NewRotaryLimitJoint(a, b, -0.2, 0.3)
 		}},
-		{"ratchet", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewRatchetJoint(a, b, 0.65, 0.05, 0.4)
+		{"ratchet", func(a, b ecs.Entity) Joint {
+			return NewRatchetJoint(a, b, 0.65, 0.05, 0.4)
 		}},
-		{"gear", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewGearJoint(a, b, 0.12, 2.5)
+		{"gear", func(a, b ecs.Entity) Joint {
+			return NewGearJoint(a, b, 0.12, 2.5)
 		}},
-		{"motor", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewMotorJoint(a, b, 3.2)
+		{"motor", func(a, b ecs.Entity) Joint {
+			return NewMotorJoint(a, b, 3.2)
 		}},
 	} {
 		t.Run(it.name, func(t *testing.T) {
@@ -257,12 +257,12 @@ func TestAJointToADespawnedBodyIsSkippedAndItsImpulseReadsZero(t *testing.T) {
 	h := newHarness(t)
 	a := jointPartyA.spawn(t, h)
 	b := jointPartyB.spawn(t, h)
-	distance := ecsphysics2d.PinDistance(
+	distance := PinDistance(
 		jointPartyA.place.Current, jointPartyA.place.Angle, jointAnchorA,
 		jointPartyB.place.Current, jointPartyB.place.Angle, jointAnchorB)
 	joint := h.spawn(t, spawnRequest{
 		Kind:  kindJoint,
-		Joint: withBias(ecsphysics2d.NewPinJoint(a, b, jointAnchorA, jointAnchorB, distance)),
+		Joint: withBias(NewPinJoint(a, b, jointAnchorA, jointAnchorB, distance)),
 	})
 
 	h.frames(t, 3)
@@ -299,18 +299,18 @@ func TestAJointAnchorsToTheWorldThroughAStaticBody(t *testing.T) {
 	h := newHarness(t)
 	wall := h.spawn(t, spawnRequest{
 		Kind:  kindStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 0, Y: 2}},
+		Place: Position{Current: m.Vec2d{X: 0, Y: 2}},
 	})
 	body := h.spawn(t, spawnRequest{
 		Kind:     kindDynamic,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{X: 0, Y: 1}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 2}},
+		Place:    Position{Current: m.Vec2d{X: 0, Y: 1}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 2}},
 		Body:     dynamic(t, 1, 4, 0, 0),
 	})
 	// The Static Body is B, which is the party a pendulum hangs from.
 	h.spawn(t, spawnRequest{
 		Kind: kindJoint,
-		Joint: withBias(ecsphysics2d.NewPinJoint(
+		Joint: withBias(NewPinJoint(
 			body, wall, m.Vec2d{}, m.Vec2d{}, 1)),
 	})
 
@@ -359,18 +359,18 @@ func TestAPendulumOfPinJointsKeepsTheSmallAnglePeriod(t *testing.T) {
 	h := newHarness(t)
 	pivot := h.spawn(t, spawnRequest{
 		Kind:  kindStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
+		Place: Position{Current: m.Vec2d{}},
 	})
 	bob := h.spawn(t, spawnRequest{
 		Kind: kindDynamic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{
+		Place: Position{Current: m.Vec2d{
 			X: length * math.Sin(swing), Y: -length * math.Cos(swing),
 		}},
 		Body: dynamic(t, mass, 0.01, 0, 0),
 	})
 	h.spawn(t, spawnRequest{
 		Kind: kindJoint,
-		Joint: withBias(ecsphysics2d.NewPinJoint(
+		Joint: withBias(NewPinJoint(
 			bob, pivot, m.Vec2d{}, m.Vec2d{}, length)),
 	})
 	h.game.push = m.Vec2d{Y: -mass * gravity}
@@ -414,13 +414,13 @@ func TestAJointThatSaysSoKeepsItsTwoBodiesFromColliding(t *testing.T) {
 	h := newHarness(t)
 	a := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 0, Y: 0}},
+		Place: Position{Current: m.Vec2d{X: 0, Y: 0}},
 		Body:  dynamic(t, 1, 4, 0, 0),
 		Shape: circle(0.5),
 	})
 	b := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 0.4, Y: 0}},
+		Place: Position{Current: m.Vec2d{X: 0.4, Y: 0}},
 		Body:  dynamic(t, 1, 4, 0, 0),
 		Shape: circle(0.5),
 	})
@@ -434,7 +434,7 @@ func TestAJointThatSaysSoKeepsItsTwoBodiesFromColliding(t *testing.T) {
 		t.Fatalf("the set of pairs a Joint holds apart is %d before any Joint exists", pairs.Len)
 	}
 
-	joint := ecsphysics2d.NewPivotJoint(a, b, m.Vec2d{}, m.Vec2d{})
+	joint := NewPivotJoint(a, b, m.Vec2d{}, m.Vec2d{})
 	joint.CollideBodies = false
 	h.spawn(t, spawnRequest{Kind: kindJoint, Joint: withBias(joint)})
 
@@ -446,7 +446,7 @@ func TestAJointThatSaysSoKeepsItsTwoBodiesFromColliding(t *testing.T) {
 	// Never created and never reported: the previous tick's entry does not even
 	// come back as Ended, because Detect never saw the pair.
 	for _, entry := range h.contacts(t) {
-		if entry.Phase != ecsphysics2d.PhaseEnded {
+		if entry.Phase != PhaseEnded {
 			t.Errorf("the pair is still reported as %v", entry.Phase)
 		}
 	}
@@ -463,19 +463,19 @@ func TestAJointThatStillCollidesLeavesTheContactAlone(t *testing.T) {
 	h := newHarness(t)
 	a := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 0, Y: 0}},
+		Place: Position{Current: m.Vec2d{X: 0, Y: 0}},
 		Body:  dynamic(t, 1, 4, 0, 0),
 		Shape: circle(0.5),
 	})
 	b := h.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 0.4, Y: 0}},
+		Place: Position{Current: m.Vec2d{X: 0.4, Y: 0}},
 		Body:  dynamic(t, 1, 4, 0, 0),
 		Shape: circle(0.5),
 	})
 	h.spawn(t, spawnRequest{
 		Kind:  kindJoint,
-		Joint: withBias(ecsphysics2d.NewPivotJoint(a, b, m.Vec2d{}, m.Vec2d{})),
+		Joint: withBias(NewPivotJoint(a, b, m.Vec2d{}, m.Vec2d{})),
 	})
 
 	h.frames(t, 2)
@@ -497,7 +497,7 @@ func TestTheRatchetWritesItsAngleBackAndNothingElseCrossesATick(t *testing.T) {
 	start := jointPartyA.place.Angle - jointPartyB.place.Angle
 	joint := h.spawn(t, spawnRequest{
 		Kind:  kindJoint,
-		Joint: withBias(ecsphysics2d.NewRatchetJoint(a, b, start, 0.05, 0.4)),
+		Joint: withBias(NewRatchetJoint(a, b, start, 0.05, 0.4)),
 	})
 
 	h.frames(t, 20)
@@ -532,17 +532,17 @@ func TestTheTwoSpringsRebuildTheirImpulseAndNeverWarmStart(t *testing.T) {
 	// leaves the Spring's own force the only thing the Impulse can be.
 	a := h.spawn(t, spawnRequest{
 		Kind:  kindDynamic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 1.3}},
+		Place: Position{Current: m.Vec2d{X: 1.3}},
 		Body:  dynamic(t, 1e12, 1e12, 0, 0),
 	})
 	b := h.spawn(t, spawnRequest{
 		Kind:  kindDynamic,
-		Place: ecsphysics2d.Position{},
+		Place: Position{},
 		Body:  dynamic(t, 1e12, 1e12, 0, 0),
 	})
 	joint := h.spawn(t, spawnRequest{
 		Kind: kindJoint,
-		Joint: withBias(ecsphysics2d.NewSpringJoint(
+		Joint: withBias(NewSpringJoint(
 			a, b, m.Vec2d{}, m.Vec2d{}, restLength, stiffness, 0)),
 	})
 
@@ -568,15 +568,15 @@ func TestASpringLosesPartOfItsImpulseToDampingInTheTickItIsApplied(t *testing.T)
 		stretched = 1.3
 	)
 	h := newHarness(t)
-	anchor := h.spawn(t, spawnRequest{Kind: kindStatic, Place: ecsphysics2d.Position{}})
+	anchor := h.spawn(t, spawnRequest{Kind: kindStatic, Place: Position{}})
 	body := h.spawn(t, spawnRequest{
 		Kind:  kindDynamic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: stretched}},
+		Place: Position{Current: m.Vec2d{X: stretched}},
 		Body:  dynamic(t, mass, 4, damping, 0),
 	})
 	h.spawn(t, spawnRequest{
 		Kind: kindJoint,
-		Joint: withBias(ecsphysics2d.NewSpringJoint(
+		Joint: withBias(NewSpringJoint(
 			body, anchor, m.Vec2d{}, m.Vec2d{}, 0.8, 14.0, 0)),
 	})
 
@@ -602,20 +602,20 @@ func TestASpringLosesPartOfItsImpulseToDampingInTheTickItIsApplied(t *testing.T)
 func TestADegenerateJointParameterIsSkippedRatherThanTurnedIntoANaN(t *testing.T) {
 	for _, it := range []struct {
 		name string
-		make func(a, b ecs.Entity) ecsphysics2d.Joint
+		make func(a, b ecs.Entity) Joint
 	}{
-		{"a gear of ratio zero", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewGearJoint(a, b, 0.12, 0)
+		{"a gear of ratio zero", func(a, b ecs.Entity) Joint {
+			return NewGearJoint(a, b, 0.12, 0)
 		}},
-		{"a ratchet of step zero", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewRatchetJoint(a, b, 0.65, 0.05, 0)
+		{"a ratchet of step zero", func(a, b ecs.Entity) Joint {
+			return NewRatchetJoint(a, b, 0.65, 0.05, 0)
 		}},
-		{"a groove with no length", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewGrooveJoint(a, b, jointAnchorA,
+		{"a groove with no length", func(a, b ecs.Entity) Joint {
+			return NewGrooveJoint(a, b, jointAnchorA,
 				m.Vec2d{X: 0.2, Y: 0.1}, m.Vec2d{X: 0.2, Y: 0.1})
 		}},
-		{"a Joint anchored at both centres of gravity", func(a, b ecs.Entity) ecsphysics2d.Joint {
-			return ecsphysics2d.NewPivotJoint(a, b, m.Vec2d{}, m.Vec2d{})
+		{"a Joint anchored at both centres of gravity", func(a, b ecs.Entity) Joint {
+			return NewPivotJoint(a, b, m.Vec2d{}, m.Vec2d{})
 		}},
 	} {
 		t.Run(it.name, func(t *testing.T) {
@@ -646,17 +646,17 @@ func TestAJointBetweenTwoBodiesWithNoMassIsSkipped(t *testing.T) {
 	// so nothing pushes either of them.
 	a := h.spawn(t, spawnRequest{
 		Kind:     kindKinematic,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{X: 1}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 1}},
+		Place:    Position{Current: m.Vec2d{X: 1}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 1}},
 	})
 	b := h.spawn(t, spawnRequest{
 		Kind:     kindKinematic,
-		Place:    ecsphysics2d.Position{},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: -1}},
+		Place:    Position{},
+		Velocity: Velocity{Linear: m.Vec2d{X: -1}},
 	})
 	joint := h.spawn(t, spawnRequest{
 		Kind:  kindJoint,
-		Joint: withBias(ecsphysics2d.NewPinJoint(a, b, m.Vec2d{}, m.Vec2d{}, 1)),
+		Joint: withBias(NewPinJoint(a, b, m.Vec2d{}, m.Vec2d{}, 1)),
 	})
 
 	h.frames(t, 10)
@@ -679,25 +679,25 @@ func TestSeveralJointsMayHoldOneBody(t *testing.T) {
 	h := newHarness(t)
 	left := h.spawn(t, spawnRequest{
 		Kind:  kindStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: -1, Y: 1}},
+		Place: Position{Current: m.Vec2d{X: -1, Y: 1}},
 	})
 	right := h.spawn(t, spawnRequest{
 		Kind:  kindStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 1, Y: 1}},
+		Place: Position{Current: m.Vec2d{X: 1, Y: 1}},
 	})
 	hung := h.spawn(t, spawnRequest{
 		Kind:  kindDynamic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{}},
+		Place: Position{Current: m.Vec2d{}},
 		Body:  dynamic(t, 1, 4, 0, 0),
 	})
 	distance := math.Sqrt(2)
 	h.spawn(t, spawnRequest{
 		Kind:  kindJoint,
-		Joint: withBias(ecsphysics2d.NewPinJoint(hung, left, m.Vec2d{}, m.Vec2d{}, distance)),
+		Joint: withBias(NewPinJoint(hung, left, m.Vec2d{}, m.Vec2d{}, distance)),
 	})
 	h.spawn(t, spawnRequest{
 		Kind:  kindJoint,
-		Joint: withBias(ecsphysics2d.NewPinJoint(hung, right, m.Vec2d{}, m.Vec2d{}, distance)),
+		Joint: withBias(NewPinJoint(hung, right, m.Vec2d{}, m.Vec2d{}, distance)),
 	})
 	h.game.push = m.Vec2d{Y: -9.81}
 
@@ -719,11 +719,11 @@ func TestSeveralJointsMayHoldOneBody(t *testing.T) {
 	}
 }
 
-func finitePlace(place ecsphysics2d.Position) bool {
+func finitePlace(place Position) bool {
 	return finite(place.Current.X) && finite(place.Current.Y) && finite(place.Angle)
 }
 
-func finiteVelocity(velocity ecsphysics2d.Velocity) bool {
+func finiteVelocity(velocity Velocity) bool {
 	return finite(velocity.Linear.X) && finite(velocity.Linear.Y) && finite(velocity.Angular)
 }
 

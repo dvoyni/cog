@@ -6,7 +6,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -56,7 +55,7 @@ var (
 
 	// benchAnimation blends two clips, which is the common walk-into-idle
 	// case. They are the animated model's two, so the drawn arm samples both.
-	benchAnimation = ecsscene.Animation{Plays: [model.MaxClipPlays]model.ClipPlay{
+	benchAnimation = Animation{Plays: [model.MaxClipPlays]model.ClipPlay{
 		{Clip: "Walk", Weight: 1, Loop: true}, {Clip: "Idle", Weight: 0.25, Loop: true},
 	}}
 	// sightShader is the sight arm's default scene shader: a source of its own
@@ -66,13 +65,13 @@ var (
 		Params: []gfx.ParameterDescr{gfx.FloatParam("fade", 0.5)},
 	}
 	// benchParams is one tint, which is the per-Entity variation case.
-	benchParams = ecsscene.Params{Values: m.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}))}
+	benchParams = Params{Values: m.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}))}
 	// benchMaterial is two pass tags with one parameter each, so the per-tag
 	// scratch rule is exercised on every draw.
-	benchMaterial = ecsscene.Material{Tags: m.NewList(
-		ecsscene.MaterialTag{Shader: gfx.ShaderWithText("forward"), State: gfx.StateOpaque3D(),
+	benchMaterial = Material{Tags: m.NewList(
+		MaterialTag{Shader: gfx.ShaderWithText("forward"), State: gfx.StateOpaque3D(),
 			Params: m.NewList(gfx.FloatParam("fade", 1))},
-		ecsscene.MaterialTag{Tag: "shadow", Shader: gfx.ShaderWithText("shadow"), State: gfx.StateOpaque3D(),
+		MaterialTag{Tag: "shadow", Shader: gfx.ShaderWithText("shadow"), State: gfx.StateOpaque3D(),
 			Params: m.NewList(gfx.FloatParam("bias", 0.01))},
 	)}
 )
@@ -89,7 +88,7 @@ func newRecordingHarness(tb testing.TB, arm population) *harness {
 	if arm.n > 0 {
 		request := spawnRequest{
 			Count: arm.n, Step: 0.5,
-			Model: &ecsscene.Model{Ref: model.ModelRef{Path: crateModel}},
+			Model: &Model{Ref: model.ModelRef{Path: crateModel}},
 		}
 		if arm.animated {
 			request.Animation = &benchAnimation
@@ -238,11 +237,11 @@ func newFrameHarness(b *testing.B, arm population) *harness {
 	h.kernel.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
 		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
 	})
-	h.spawn(b, spawnRequest{Place: benchEye, Camera: &ecsscene.Camera{FovY: 1.0472, Near: 0.1, Far: 200}})
+	h.spawn(b, spawnRequest{Place: benchEye, Camera: &Camera{FovY: 1.0472, Near: 0.1, Far: 200}})
 	if arm.sight {
 		h.kernel.ExecuteCommand[defaultShaderCmd](sightShader)
 	}
-	crate := &ecsscene.Model{Ref: model.ModelRef{Path: path}}
+	crate := &Model{Ref: model.ModelRef{Path: path}}
 	want := int64(arm.n)
 	if arm.n == 0 {
 		resident := h.spawn(b, spawnRequest{Model: crate})
@@ -305,10 +304,10 @@ func BenchmarkFrameDistinct5000(b *testing.B) {
 	for row := range rows {
 		h.spawn(b, spawnRequest{
 			Count: benchColumns, Step: benchStep, Place: benchPlace(row, rows),
-			Model: &ecsscene.Model{Ref: model.ModelRef{Path: crateModel}},
-			ParamsEach: func(i int) ecsscene.Params {
+			Model: &Model{Ref: model.ModelRef{Path: crateModel}},
+			ParamsEach: func(i int) Params {
 				tint := float32(row*benchColumns+i) / (rows * benchColumns)
-				return ecsscene.Params{Values: m.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: tint, A: 1}))}
+				return Params{Values: m.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: tint, A: 1}))}
 			},
 		})
 	}

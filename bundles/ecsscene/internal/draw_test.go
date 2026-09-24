@@ -6,7 +6,6 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -134,8 +133,8 @@ func paintedGLB(t testing.TB) []byte {
 }
 
 // crateModelComponent is a Model naming the crate file's whole default scene.
-func crateModelComponent() *ecsscene.Model {
-	return &ecsscene.Model{Ref: model.ModelRef{Path: crateModel}}
+func crateModelComponent() *Model {
+	return &Model{Ref: model.ModelRef{Path: crateModel}}
 }
 
 // defaultEye is where the harness camera stands, looking at the origin.
@@ -147,7 +146,7 @@ var defaultEye = m.LookAt(m.Vec3{Z: 30}, m.Vec3{}, m.Vec3{Y: 1})
 func newDrawingHarness(t testing.TB, ids uint32) *harness {
 	t.Helper()
 	h := newCameralessHarness(t, ids)
-	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{FovY: 1.0472, Near: 0.1, Far: 200}})
+	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &Camera{FovY: 1.0472, Near: 0.1, Far: 200}})
 	return h
 }
 
@@ -284,10 +283,10 @@ func TestADespawnedDrawableStopsDrawing(t *testing.T) {
 func TestAPresentMaterialWithNoTagsDrawsNothing(t *testing.T) {
 	h := newDrawingHarness(t, 256)
 	ref := h.bake(t)
-	h.spawn(t, spawnRequest{Place: m.At(-2, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}})
-	h.spawn(t, spawnRequest{Place: m.At(-4, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}, Material: &ecsscene.Material{}})
+	h.spawn(t, spawnRequest{Place: m.At(-2, 0, 0), Mesh: &Mesh{Ref: ref, NeverCull: true}})
+	h.spawn(t, spawnRequest{Place: m.At(-4, 0, 0), Mesh: &Mesh{Ref: ref, NeverCull: true}, Material: &Material{}})
 	h.spawn(t, spawnRequest{Place: m.At(2, 0, 0), Model: crateModelComponent()})
-	h.spawn(t, spawnRequest{Place: m.At(4, 0, 0), Model: crateModelComponent(), Material: &ecsscene.Material{}})
+	h.spawn(t, spawnRequest{Place: m.At(4, 0, 0), Model: crateModelComponent(), Material: &Material{}})
 
 	h.frameUntil(t, "the crate to become resident", func() bool {
 		return len(where(h.drawn(), at(m.Vec3{X: 2}))) > 0

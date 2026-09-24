@@ -44,9 +44,26 @@ const (
 	ruleExtensionAPI       = "an Extension root declares only Name, Config, its Adapters and Err… errors"
 	ruleExtensionAdapter   = "an Extension root declares an Adapter for at least one required Port"
 	ruleSlotForwarder      = "a Slot's forwarders name only its own types, predeclared types, the standard library, Libraries and the kernel"
+
+	// The alias-index shape of ADR 0003, held by the plugins aliasIndexRoots
+	// names; every other plugin is still held to ADR 0002's rules above.
+	ruleAliasRootImports  = "an alias-index root imports only libs, kernel, other plugins' roots, its own internal/ and its own internal/types"
+	ruleAliasInternal     = "an alias-index plugin's internal/ and internal/types never import its own root"
+	ruleAliasDeclarations = "an alias-index root declares only aliases: type aliases of its own internal/ and internal/types keeping the target's name, and consts and vars each re-exporting one of the same name, besides its forwarders and inline anchors"
+	ruleTypesData         = "an alias-index plugin's internal/types, when it has one, holds data only: types, consts and vars, with no function and no method but Error and String"
 )
 
 // kind is a plugin's kind, which its top directory says.
+// aliasIndexRoots are the plugins moved to ADR 0003's alias-index root: the
+// root declares nothing of its own and aliases everything from its internal/,
+// which never imports it. The migration moves plugins here one at a time; when
+// every plugin is here, the ADR 0002 rules and this list go.
+var aliasIndexRoots = map[string]bool{
+	"bundles/ecsaudio":     true,
+	"bundles/ecsscene":     true,
+	"bundles/ecsphysics2d": true,
+}
+
 type kind int
 
 const (
@@ -134,6 +151,16 @@ func allowed(from, to place, testFile bool) (bool, string) {
 		return false, ruleReach
 	}
 	otherRoot := to.tier == tierRoot && to.plugin != from.plugin
+	if aliasIndexRoots[from.plugin] {
+		switch from.tier {
+		case tierRoot:
+			return base || otherRoot || inside, ruleAliasRootImports
+		case tierTypes, tierInternal:
+			if to.tier == tierRoot && to.plugin == from.plugin {
+				return false, ruleAliasInternal
+			}
+		}
+	}
 	switch from.tier {
 	case tierRoot:
 		return base || otherRoot || to.tier == tierTypes, ruleRootImports
@@ -269,8 +296,14 @@ func violationsIn(dir string) ([]violation, error) {
 			}
 			violations = append(violations, files...)
 			violations = append(violations, forwarderViolations(pkg, from, m)...)
+			if aliasIndexRoots[from.plugin] {
+				violations = append(violations, aliasViolations(pkg, from, m)...)
+			}
 			violations = append(violations, portViolations(pkg, from, m)...)
 			violations = append(violations, pluginViolations(pkg, rel, m)...)
+		}
+		if from.tier == tierTypes && aliasIndexRoots[from.plugin] {
+			violations = append(violations, logicViolations(pkg, rel, m)...)
 		}
 		if from.tier == tierConstructor {
 			violations = append(violations, constructorExportViolations(pkg, rel, m)...)

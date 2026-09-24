@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -58,14 +57,14 @@ type setParamsCmd kernel.Command[setParamsRequest, setParamsResponse]
 
 type setParamsRequest struct {
 	Entity ecs.Entity
-	Params ecsscene.Params
+	Params Params
 }
 
 type setParamsResponse struct{}
 
 func setParamsCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[setParamsRequest, setParamsResponse]) {
 	return ecs.ToExecute[setParamsRequest, setParamsResponse](registrar, func(
-		request setParamsRequest, params *ecs.Set[ecsscene.Params],
+		request setParamsRequest, params *ecs.Set[Params],
 	) {
 		params.UpdateFor(request.Entity, request.Params)
 	})
@@ -76,15 +75,15 @@ func (h *harness) keys(t testing.TB) keysResponse {
 	return h.kernel.ExecuteCommand[keysCmd](keysRequest{})
 }
 
-func (h *harness) setParams(t testing.TB, e ecs.Entity, params ecsscene.Params) {
+func (h *harness) setParams(t testing.TB, e ecs.Entity, params Params) {
 	t.Helper()
 	h.kernel.ExecuteCommand[setParamsCmd](setParamsRequest{Entity: e, Params: params})
 }
 
 // tint is a Params holding one base colour, built afresh each call so no two
 // Entities share a List's backing.
-func tint(c m.Color) *ecsscene.Params {
-	return &ecsscene.Params{Values: m.ListOf([]gfx.ParameterDescr{gfx.ColorParam("baseColorFactor", c)})}
+func tint(c m.Color) *Params {
+	return &Params{Values: m.ListOf([]gfx.ParameterDescr{gfx.ColorParam("baseColorFactor", c)})}
 }
 
 var (
@@ -122,7 +121,7 @@ func TestASteadyFrameTouchesNoEntityInTheLoadSystem(t *testing.T) {
 			Place: m.At(float32(i)*2, 0, 0), Model: crateModelComponent(), Params: tint(red),
 		}))
 	}
-	mesh := h.spawn(t, spawnRequest{Place: m.At(-2, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}})
+	mesh := h.spawn(t, spawnRequest{Place: m.At(-2, 0, 0), Mesh: &Mesh{Ref: ref, NeverCull: true}})
 	keyed := h.keyedModels(t, entities...)
 	if _, ok := keyed.meshes[mesh]; !ok {
 		t.Fatal("the Mesh Entity was never keyed")
@@ -205,10 +204,10 @@ func TestEqualParamsGiveEqualKeys(t *testing.T) {
 	redB := h.spawn(t, spawnRequest{Place: m.At(2, 0, 0), Model: crateModelComponent(), Params: tint(red)})
 	blueC := h.spawn(t, spawnRequest{Place: m.At(4, 0, 0), Model: crateModelComponent(), Params: tint(blue)})
 	plain := h.spawn(t, spawnRequest{Place: m.At(6, 0, 0), Model: crateModelComponent()})
-	empty := h.spawn(t, spawnRequest{Place: m.At(8, 0, 0), Model: crateModelComponent(), Params: &ecsscene.Params{}})
-	meshRed := h.spawn(t, spawnRequest{Place: m.At(-2, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}, Params: tint(red)})
-	meshRedToo := h.spawn(t, spawnRequest{Place: m.At(-4, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}, Params: tint(red)})
-	meshBlue := h.spawn(t, spawnRequest{Place: m.At(-6, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref, NeverCull: true}, Params: tint(blue)})
+	empty := h.spawn(t, spawnRequest{Place: m.At(8, 0, 0), Model: crateModelComponent(), Params: &Params{}})
+	meshRed := h.spawn(t, spawnRequest{Place: m.At(-2, 0, 0), Mesh: &Mesh{Ref: ref, NeverCull: true}, Params: tint(red)})
+	meshRedToo := h.spawn(t, spawnRequest{Place: m.At(-4, 0, 0), Mesh: &Mesh{Ref: ref, NeverCull: true}, Params: tint(red)})
+	meshBlue := h.spawn(t, spawnRequest{Place: m.At(-6, 0, 0), Mesh: &Mesh{Ref: ref, NeverCull: true}, Params: tint(blue)})
 	keys := h.keyedModels(t, redA, redB, blueC, plain, empty)
 
 	only := func(e ecs.Entity) batchKey {
@@ -250,8 +249,8 @@ func TestEqualParamsGiveEqualKeys(t *testing.T) {
 // whose overrides are equal.
 func TestTheMaterialKeyIsTheFilesOrTheOverrides(t *testing.T) {
 	h := newDrawingHarness(t, 256)
-	override := func() *ecsscene.Material {
-		return &ecsscene.Material{Tags: m.ListOf([]ecsscene.MaterialTag{{
+	override := func() *Material {
+		return &Material{Tags: m.ListOf([]MaterialTag{{
 			Shader: gfx.ShaderWithResource("shaders/flat.wgsl"),
 			Params: m.ListOf([]gfx.ParameterDescr{gfx.ColorParam("tint", red)}),
 		}})}
@@ -274,9 +273,10 @@ func TestTheMaterialKeyIsTheFilesOrTheOverrides(t *testing.T) {
 }
 
 // TestTheLoadSystemIsTheOnlyOneWritingTheLookup is the lock-set claim: of
-// everything ecsscene subscribes or handles, the load System alone holds
-// *model.Lookup for writing. It is ordered before the recording System, reads
-// every Store it keys from, and writes none of them.
+// everything ecsscene subscribes or handles, the load System and the debug
+// shapes' ten Systems, which bake the shapes' meshes and run before it, alone
+// hold *model.Lookup for writing. The load System is ordered before the
+// recording System, reads every Store it keys from, and writes none of them.
 func TestTheLoadSystemIsTheOnlyOneWritingTheLookup(t *testing.T) {
 	h := newHarness(t)
 	description := h.engine.Describe()
@@ -285,38 +285,48 @@ func TestTheLoadSystemIsTheOnlyOneWritingTheLookup(t *testing.T) {
 	var loader, recorder *kernel.SubscriptionDescription
 	for i := range description.Subscriptions {
 		sub := &description.Subscriptions[i]
-		if sub.Owner != ecsscene.Name {
+		if sub.Owner != Name {
 			continue
 		}
 		if containsType(sub.Writes, lookup) {
 			writers = append(writers, sub.Type)
 		}
 		switch sub.Type {
-		case reflect.TypeFor[ecsscene.LoadOnUpdate]():
+		case reflect.TypeFor[LoadOnUpdate]():
 			loader = sub
-		case reflect.TypeFor[ecsscene.RecordOnUpdate]():
+		case reflect.TypeFor[RecordOnUpdate]():
 			recorder = sub
 		}
 	}
 	for _, command := range description.Commands {
-		if command.Owner == ecsscene.Name && containsType(command.Writes, lookup) {
+		if command.Owner == Name && containsType(command.Writes, lookup) {
 			writers = append(writers, command.Type)
 		}
 	}
 	if loader == nil || recorder == nil {
 		t.Fatal("the description does not list both of ecsscene's Systems")
 	}
-	if len(writers) != 1 || writers[0] != loader.Type {
-		t.Errorf("ecsscene's handlers writing *model.Lookup are %v, want the load System alone", writers)
+	var debug []reflect.Type
+	for _, writer := range writers {
+		if writer == loader.Type {
+			continue
+		}
+		debug = append(debug, writer)
+		if !containsType(loader.DependsOn, writer) {
+			t.Errorf("the load System does not wait for %v, which writes the Lookup", writer)
+		}
+	}
+	if len(debug) != len(writers)-1 || len(debug) != 10 {
+		t.Errorf("ecsscene's handlers writing *model.Lookup are %v, want the load System and the ten debug Systems", writers)
 	}
 	if !containsType(recorder.DependsOn, loader.Type) {
 		t.Errorf("the recording System does not wait for the load System; it depends on %v", recorder.DependsOn)
 	}
 	for _, component := range []reflect.Type{
-		reflect.TypeFor[*ecs.Store[ecsscene.Model]](),
-		reflect.TypeFor[*ecs.Store[ecsscene.Mesh]](),
-		reflect.TypeFor[*ecs.Store[ecsscene.Material]](),
-		reflect.TypeFor[*ecs.Store[ecsscene.Params]](),
+		reflect.TypeFor[*ecs.Store[Model]](),
+		reflect.TypeFor[*ecs.Store[Mesh]](),
+		reflect.TypeFor[*ecs.Store[Material]](),
+		reflect.TypeFor[*ecs.Store[Params]](),
 	} {
 		if !containsType(loader.Reads, component) {
 			t.Errorf("the load System's read set %v does not name %v", loader.Reads, component)

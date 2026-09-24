@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -11,16 +10,16 @@ import (
 // tag it serves; an empty one serves no pass and draws nowhere.
 type (
 	materialTag struct {
-		tag   ecsscene.PassTag
+		tag   PassTag
 		descr gfx.MaterialDescr
 	}
 	material []materialTag
 )
 
 // tagOf reads an empty tag as the forward one.
-func tagOf(tag ecsscene.PassTag) ecsscene.PassTag {
+func tagOf(tag PassTag) PassTag {
 	if tag == "" {
-		return ecsscene.TagForward
+		return TagForward
 	}
 	return tag
 }
@@ -59,8 +58,8 @@ type internedMaterial struct {
 // A material is interned by the material half of its Batch key, which the
 // load System took on change, so a frame never fingerprints a material.
 type materialTable struct {
-	tags     map[ecsscene.PassTag]tagID
-	tagNames []ecsscene.PassTag
+	tags     map[PassTag]tagID
+	tagNames []PassTag
 	keys     map[uint64]int32
 	interned []internedMaterial
 	nextID   uint32
@@ -72,7 +71,7 @@ type materialTable struct {
 func (t *materialTable) reset(bundled *[model.VariantCount]material) {
 	if t.keys == nil {
 		t.keys = map[uint64]int32{}
-		t.tags = map[ecsscene.PassTag]tagID{}
+		t.tags = map[PassTag]tagID{}
 	}
 	clear(t.keys)
 	for i := range t.interned {
@@ -87,10 +86,10 @@ func (t *materialTable) reset(bundled *[model.VariantCount]material) {
 
 // internTag interns one pass tag. It is called once per pass, and an empty tag
 // is the forward tag rather than a second name for it.
-func (t *materialTable) internTag(tag ecsscene.PassTag) tagID {
+func (t *materialTable) internTag(tag PassTag) tagID {
 	tag = tagOf(tag)
 	if t.tags == nil {
-		t.tags = map[ecsscene.PassTag]tagID{}
+		t.tags = map[PassTag]tagID{}
 	}
 	if id, ok := t.tags[tag]; ok {
 		return id
@@ -155,7 +154,7 @@ func (t *materialTable) add(report errorReporter, material material) int32 {
 	for i := range material {
 		tag := t.internTag(material[i].tag)
 		if record.entries[tag] != noEntry {
-			report.ReportError(ecsscene.ErrMaterialTagAlreadyServed{Tag: tagOf(material[i].tag)})
+			report.ReportError(ErrMaterialTagAlreadyServed{Tag: tagOf(material[i].tag)})
 			continue
 		}
 		record.entries[tag] = int32(i)

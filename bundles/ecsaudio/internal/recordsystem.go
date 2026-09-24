@@ -2,7 +2,6 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsaudio"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/sound"
@@ -21,10 +20,10 @@ import (
 // of the walk means.
 type (
 	emitterQuery struct {
-		Emitter ecsaudio.Emitter
+		Emitter Emitter
 	}
 	listenerQuery struct {
-		Listener ecsaudio.Listener
+		Listener Listener
 		Place    m.Transform
 	}
 )
@@ -87,7 +86,7 @@ func recordSystem(
 // because that is what decides whether a Transform may move this Voice later.
 func play(
 	queue *sound.Queue, voices *table,
-	e ecs.Entity, emitter ecsaudio.Emitter, place m.Transform, placed bool,
+	e ecs.Entity, emitter Emitter, place m.Transform, placed bool,
 ) {
 	started := params(emitter, place, placed)
 	// The offset is zero because a Seek is not the binding's: an Emitter says
@@ -108,7 +107,7 @@ func play(
 // spatializing a Voice that was played without one: sound's positional rule is
 // one-way, so a Position arriving by SetVoice would make that Voice positional
 // for the rest of its life.
-func params(emitter ecsaudio.Emitter, place m.Transform, fold bool) sound.Params {
+func params(emitter Emitter, place m.Transform, fold bool) sound.Params {
 	out := emitter.Params
 	if !fold {
 		return out
@@ -141,7 +140,7 @@ func setListener(queue *sound.Queue, listeners *ecs.Query[listenerQuery], k kern
 		return
 	}
 	if count > 1 {
-		k.ReportErrorOnce(manyListenersKey{}, ecsaudio.ErrManyListeners{Count: count})
+		k.ReportErrorOnce(manyListenersKey{}, ErrManyListeners{Count: count})
 	}
 	queue.SetListener(sound.ListenerParams{
 		Position:    m.Some(place.Position),

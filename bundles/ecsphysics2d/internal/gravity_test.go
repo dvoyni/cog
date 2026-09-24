@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -24,7 +24,7 @@ type constantsCmd kernel.Command[constantsRequest, constantsResponse]
 
 type constantsRequest struct{}
 
-type constantsResponse struct{ Constants ecsphysics2d.Constants }
+type constantsResponse struct{ Constants Constants }
 
 // weigher is an app that owns gravity: its System writes Gravity at the top of
 // every tick. It is composed only into the tests that need it, so every other
@@ -37,16 +37,16 @@ type weigher struct{ gravity m.Vec2d }
 func (*weigher) Name() kernel.PluginName { return "physicstestweigher" }
 
 func (*weigher) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, ecsphysics2d.Name}
+	return []kernel.PluginName{ecs.Name, Name}
 }
 
 func (w *weigher) Register(registrar *kernel.Registrar, _ any) error {
 	registerConstantsCmd(registrar)
 	registrar.Subscribe[gravityOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, func(
-		constants *ecs.Write[*ecsphysics2d.Constants],
+		constants *ecs.Write[*Constants],
 	) {
 		constants.Get().Gravity = w.gravity
-	})).Before[ecsphysics2d.IntegrateOnUpdate]()
+	})).Before[IntegrateOnUpdate]()
 	return nil
 }
 
@@ -65,7 +65,7 @@ func TestTheConstantsAreRegisteredWithNoGravity(t *testing.T) {
 
 	got := h.kernel.ExecuteCommand[constantsCmd](constantsRequest{})
 
-	if got.Constants != (ecsphysics2d.Constants{}) {
+	if got.Constants != (Constants{}) {
 		t.Errorf("the Constants start at %+v, want gravity 0", got.Constants)
 	}
 }
@@ -77,7 +77,7 @@ type readsConstants struct{}
 func (*readsConstants) Name() kernel.PluginName { return "physicstestreadsconstants" }
 
 func (*readsConstants) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, ecsphysics2d.Name}
+	return []kernel.PluginName{ecs.Name, Name}
 }
 
 func (*readsConstants) Register(registrar *kernel.Registrar, _ any) error {
@@ -88,7 +88,7 @@ func (*readsConstants) Register(registrar *kernel.Registrar, _ any) error {
 func registerConstantsCmd(registrar *kernel.Registrar) {
 	registrar.HandleCommand[constantsCmd](ecs.ToExecute[constantsRequest, constantsResponse](registrar, func(
 		_ constantsRequest,
-		constants *ecs.Read[*ecsphysics2d.Constants],
+		constants *ecs.Read[*Constants],
 		answer *ecs.Resp[constantsResponse],
 	) {
 		answer.Set(constantsResponse{Constants: *constants.Get()})
@@ -102,8 +102,8 @@ func registerConstantsCmd(registrar *kernel.Registrar) {
 // decides the answer, and the Body is 94% of the way to its terminal speed.
 var (
 	fallGravity = m.Vec2d{X: 0.4, Y: -9.81}
-	fallStart   = ecsphysics2d.Position{Current: m.Vec2d{X: 1, Y: 2}}
-	fallThrow   = ecsphysics2d.Velocity{Linear: m.Vec2d{X: 1.5, Y: 3}, Angular: 0.7}
+	fallStart   = Position{Current: m.Vec2d{X: 1, Y: 2}}
+	fallThrow   = Velocity{Linear: m.Vec2d{X: 1.5, Y: 3}, Angular: 0.7}
 )
 
 const (
@@ -209,12 +209,12 @@ func TestGravityMovesNeitherAKinematicNorAStaticBody(t *testing.T) {
 	h, _ := newGravityHarness(t, nil, fallGravity)
 	kinematic := h.spawn(t, spawnRequest{
 		Kind:     kindKinematic,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{X: 3}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 2}},
+		Place:    Position{Current: m.Vec2d{X: 3}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 2}},
 	})
 	static := h.spawn(t, spawnRequest{
 		Kind:  kindStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: -3, Y: 1}},
+		Place: Position{Current: m.Vec2d{X: -3, Y: 1}},
 	})
 
 	h.frames(t, 30)

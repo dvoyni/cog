@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -35,9 +34,9 @@ func paintedDraws(t *testing.T, h *harness, x float32) (red, green drawnInstance
 // lost to one white paint shared by both.
 func TestAMaterialOverlaysEachPrimitivesOwnMaterial(t *testing.T) {
 	h := newDrawingHarness(t, 256)
-	painted := &ecsscene.Model{Ref: model.ModelRef{Path: paintedModel}}
-	h.spawn(t, spawnRequest{Place: m.At(-3, 0, 0), Model: painted, Material: &ecsscene.Material{Tags: m.NewList(
-		ecsscene.MaterialTag{Shader: gfx.ShaderWithText("fade"), Params: m.NewList(gfx.FloatParam("a", 7))},
+	painted := &Model{Ref: model.ModelRef{Path: paintedModel}}
+	h.spawn(t, spawnRequest{Place: m.At(-3, 0, 0), Model: painted, Material: &Material{Tags: m.NewList(
+		MaterialTag{Shader: gfx.ShaderWithText("fade"), Params: m.NewList(gfx.FloatParam("a", 7))},
 	)}})
 	h.spawn(t, spawnRequest{Place: m.At(3, 0, 0), Model: painted})
 
@@ -79,20 +78,20 @@ func TestAMaterialOverlaysEachPrimitivesOwnMaterial(t *testing.T) {
 // pass's.
 func TestATagsStateAndParamsWinOverTheFile(t *testing.T) {
 	h := newCameralessHarness(t, 256)
-	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &ecsscene.Camera{
+	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &Camera{
 		FovY: 1.0472, Near: 0.1, Far: 200, Passes: m.NewList(
-			ecsscene.Pass{ClearDepth: m.Some[float32](1)},
-			ecsscene.Pass{Tag: "shadow", Order: 1},
+			Pass{ClearDepth: m.Some[float32](1)},
+			Pass{Tag: "shadow", Order: 1},
 		),
 	}})
 	blue := gfx.ColorParam("baseColorFactor", m.Color{B: 1, A: 1})
 	h.spawn(t, spawnRequest{
-		Place: m.At(0, 0, 0), Model: &ecsscene.Model{Ref: model.ModelRef{Path: paintedModel}},
-		Material: &ecsscene.Material{Tags: m.NewList(
-			ecsscene.MaterialTag{Shader: gfx.ShaderWithText("fade"), State: gfx.StateOpaque3D(), Params: m.NewList(blue)},
-			ecsscene.MaterialTag{Tag: "shadow", Shader: gfx.ShaderWithText("shadow")},
+		Place: m.At(0, 0, 0), Model: &Model{Ref: model.ModelRef{Path: paintedModel}},
+		Material: &Material{Tags: m.NewList(
+			MaterialTag{Shader: gfx.ShaderWithText("fade"), State: gfx.StateOpaque3D(), Params: m.NewList(blue)},
+			MaterialTag{Tag: "shadow", Shader: gfx.ShaderWithText("shadow")},
 		)},
-		Params: &ecsscene.Params{Values: m.NewList(gfx.FloatParam("metallicFactor", 0.25))},
+		Params: &Params{Values: m.NewList(gfx.FloatParam("metallicFactor", 0.25))},
 	})
 
 	h.frameUntil(t, "the painted model to become resident", func() bool { return len(h.drawn()) == 4 })
@@ -138,9 +137,9 @@ const skinAware = "sceneFrame sceneInstances sceneAnim sceneMeshes\n" +
 // and declares nothing it would not be given.
 func TestTheVariantIsAddedToACallersShader(t *testing.T) {
 	h := newDrawingHarness(t, 256)
-	material := &ecsscene.Material{Tags: m.NewList(ecsscene.MaterialTag{Shader: gfx.ShaderWithText(skinAware)})}
-	h.spawn(t, spawnRequest{Place: m.At(-3, 0, 0), Model: &ecsscene.Model{Ref: model.ModelRef{Path: animatedModel}},
-		Material: material, Animation: &ecsscene.Animation{Plays: [model.MaxClipPlays]model.ClipPlay{{Clip: "Walk", Weight: 1}}}})
+	material := &Material{Tags: m.NewList(MaterialTag{Shader: gfx.ShaderWithText(skinAware)})}
+	h.spawn(t, spawnRequest{Place: m.At(-3, 0, 0), Model: &Model{Ref: model.ModelRef{Path: animatedModel}},
+		Material: material, Animation: &Animation{Plays: [model.MaxClipPlays]model.ClipPlay{{Clip: "Walk", Weight: 1}}}})
 	h.spawn(t, spawnRequest{Place: m.At(3, 0, 0), Model: crateModelComponent(), Material: material})
 
 	h.frameUntil(t, "both crates to become resident", func() bool { return len(h.drawn()) == 2 })
@@ -172,14 +171,14 @@ func TestTheDefaultSceneShaderFeedsEveryDrawThatNamesNone(t *testing.T) {
 		Params: []gfx.ParameterDescr{gfx.FloatParam("fade", 0.5)},
 	})
 	ref := h.bake(t)
-	h.spawn(t, spawnRequest{Place: m.At(-6, 0, 0), Mesh: &ecsscene.Mesh{Ref: ref}})
+	h.spawn(t, spawnRequest{Place: m.At(-6, 0, 0), Mesh: &Mesh{Ref: ref}})
 	h.spawn(t, spawnRequest{Place: m.At(-3, 0, 0), Model: crateModelComponent()})
 	h.spawn(t, spawnRequest{Place: m.At(0, 0, 0), Model: crateModelComponent(),
-		Material: &ecsscene.Material{Tags: m.NewList(ecsscene.MaterialTag{Params: m.NewList(gfx.FloatParam("a", 2))})}})
+		Material: &Material{Tags: m.NewList(MaterialTag{Params: m.NewList(gfx.FloatParam("a", 2))})}})
 	h.spawn(t, spawnRequest{Place: m.At(3, 0, 0), Model: crateModelComponent(),
-		Params: &ecsscene.Params{Values: m.NewList(gfx.FloatParam("fade", 0.25))}})
+		Params: &Params{Values: m.NewList(gfx.FloatParam("fade", 0.25))}})
 	h.spawn(t, spawnRequest{Place: m.At(6, 0, 0), Model: crateModelComponent(),
-		Material: &ecsscene.Material{Tags: m.NewList(ecsscene.MaterialTag{Shader: gfx.ShaderWithText("outline")})}})
+		Material: &Material{Tags: m.NewList(MaterialTag{Shader: gfx.ShaderWithText("outline")})}})
 
 	h.frameUntil(t, "the crates to become resident", func() bool { return len(h.drawn()) == 5 })
 

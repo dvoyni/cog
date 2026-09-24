@@ -26,51 +26,66 @@ is the shape every binding of the ECS takes. **[What a binding may not
 do](#what-a-binding-may-not-do) is the part to read before writing a second
 one.**
 
-ecsscene is a **Bundle**: it requires no Adapter and contributes none. The
+ecsscene is a **Bundle**: it requires no Adapter, and contributes one,
+`StorageReadMount`, which mounts its own shader - the debug shapes' - in
+storage, the way model mounts the bundled PBR. The
 vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
 [ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
-ecsscene has the declaration-root shape of
-[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
-Its Components are plain data with no methods. `internal/types` declares only
-the camera, layer and pass vocabulary the root aliases, because `Layer` forwards
-there.
+ecsscene has the alias-index root of
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md)
+and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md). Its
+Components are plain data with no methods, every field exported.
 
-- **`bundles/ecsscene`** is the root, and holds declarations only: the seven
-  Components a game spawns (`Model`, `Mesh`, `Animation`, `Params`,
-  `Material`, `Light`, `Camera`), `MaterialTag`, the camera, layer and pass
-  vocabulary, the errors the recording System reports, `Name` and the
-  ordering identities `LoadOnUpdate` and `RecordOnUpdate`. It declares no
-  plugin, and it is what a game's Systems import.
-- **`bundles/ecsscene/internal`** is the plugin: its `New`, the registration of
-  every Component, the load System behind `LoadOnUpdate` with the key scratch
-  it writes, and the recording System behind `RecordOnUpdate` with its
-  scratch and its copy of scene's frame code.
+- **`bundles/ecsscene`** is the root, and declares nothing: it aliases what
+  `internal/` declares — the Components a game spawns
+  (`Model`, `Mesh`, `Animation`, `Params`, `Material`, `Light`, `Camera` and
+  the five debug shapes), `MaterialTag`, the camera, layer and pass
+  vocabulary, the errors the recording System reports, `StorageReadMount`,
+  `Name` and the ordering identities `LoadOnUpdate`, `RecordOnUpdate` and
+  `DebugOnUpdate`. It is what a game's Systems import.
+- **`bundles/ecsscene/internal`** is the plugin: everything the root aliases,
+  its `New`, the registration of every Component, the load System behind
+  `LoadOnUpdate` with the key scratch it writes, the recording System behind
+  `RecordOnUpdate` with its scratch and its copy of scene's frame code, and
+  the debug shapes' Systems. It never imports the root.
 - **`bundles/ecsscene/ecssceneplugin`** exports only `New() kernel.Plugin`.
   ecsscene has no configuration, so there is no `Config`. Only composition
   roots and tests import it.
 
-**The Components are still registered by the plugin that defines their Go
-type.** Their types are declared in the root, and the plugin that registers
-them ships inside the same Bundle, under `ecsscene.Name`. Every Store is owned
+**The Components are registered by the plugin that defines their Go type.**
+Their types are declared in `internal/`, which registers them under
+`ecsscene.Name`. Every Store is owned
 by `ecsscene`, so a game System that names one still has to declare `ecsscene`
 as a dependency, and the ECS's coupling check keeps holding on Component data.
 
 ## Files
 
-In the root, `doc.go` holds the package documentation, `id.go` `Name`,
-`LoadOnUpdate` and `RecordOnUpdate`, `types.go` every Component with
-`MaterialTag` and the vocabulary's aliases, `err.go` the errors, and `utils.go`
-`Layer`. `internal/types/camera.go` declares the vocabulary. In `internal`:
+In the root, `doc.go` holds the package documentation, and the rest are
+aliases: `id.go` of `Name`, `LoadOnUpdate`, `RecordOnUpdate` and
+`DebugOnUpdate`, `components.go` of every Component, `types.go` of
+`MaterialTag` and the vocabulary, `err.go` of the errors, `adapters.go` of
+`StorageReadMount`, and `utils.go` forwards `Layer`. `internal/` declares them
+in files of the same names, and `camera.go` the vocabulary. In `internal`, one System per file, named for it, beside the types
+they share:
 
 - `plugin.go` holds the plugin and its registration;
-- `load.go` the load System, the Batch key and the key scratch;
-- `systems.go` the recording System, its Queries, its scratch and the per-pass
-  flush;
+- `loadsystem.go` the load System, and `keyer.go` the one run's keying it
+  drives;
+- `keyscratch.go` the key scratch both Systems share, the Batch key and the
+  material keys;
+- `recordsystem.go` the recording System, and `scratch.go` its scratch, the
+  Queries it and the bucketing name, and the per-pass flush;
 - `batch.go` the bucketing of Entities into Batches and their animation
   blocks;
+- `debugkind.go` `debugKind`, whose two methods are each shape's bake and
+  change Systems, with their scratch and two Materials, and
+  `debuggeometry.go` the shapes' geometry;
+- `shaderfs.go` the embedded mount, and `builtin/ecsscene/debug.wgsl` the
+  debug shapes' shader, which includes model's published sources by their
+  storage paths;
 - `cull.go`, `sort.go`, `arena.go`, `draw.go`, `material.go`, `light.go` and
   `projection.go` its copy of scene's culling, sort keys, arena, emission,
   material table, light selection and pass resolution.
@@ -235,8 +250,10 @@ func load(
   key scratch, since the recording System holds the Lookup only for reading.
 - **In a steady frame it walks no Entity and hashes nothing.** No Hook names
   anything, so what is left is draining two empty queues.
-- **It is the only ecsscene System holding `Write[*model.Lookup]`**, and it
-  reads every Store it keys from. Loading is exclusive; nothing else is.
+- **It is the only ecsscene System that loads**, and it reads every Store it
+  keys from. Beside it only the [debug shapes'](#debug-shapes) ten Systems hold
+  `Write[*model.Lookup]`, to bake the shapes' meshes, and all ten run before
+  it. Loading is exclusive; nothing else is.
 - **A model that does not load stays unkeyed** until its Component changes
   again, because every load failure but a missing backend is cached. Entities
   touched before the backend is up wait for the first frame that has one.
@@ -416,6 +433,55 @@ texture with white and an unfilled sampler with its default, and refuses a
 draw whose declared storage buffer nothing supplies, reporting
 `gfx.ErrStorageBufferUnsupplied` once under the shader's label and the
 binding's name. That draw is skipped, and the rest of the frame draws.
+
+## Debug shapes
+
+A box, a sphere, a plane, a line and a wire box, each a Component of its own:
+
+```go
+type DebugBox     struct{ Size m.Vec3; Color m.Color; Layers LayerMask }
+type DebugSphere  struct{ Radius float32; Color m.Color; Layers LayerMask }
+type DebugPlane   struct{ Normal m.Vec3; D float32; Size m.Vec2; Color m.Color; Layers LayerMask }
+type DebugLine    struct{ From, To m.Vec3; Width float32; Color m.Color; Layers LayerMask }
+type DebugWireBox struct{ Size m.Vec3; Width float32; Color m.Color; Layers LayerMask }
+```
+
+A shape is described in its Entity's local space and stands at the Entity's
+`m.Transform`, whose scale multiplies on top. A plane is the points with
+`Normal·p + D = 0`: its quad is centred at `-D` along the unit normal, one-sided,
+and `Size.X` runs along world +X projected onto the plane, or +Z where the
+normal is along X. A line is a box of `Width` by `Width` from `From` to `To`; a
+wire box's twelve edges run half a `Width` past each corner so the corners
+close.
+
+**A shape is drawn as an ordinary Mesh, not by a path of its own.** Each kind
+has two Systems, chained from `DebugOnUpdate` and all before `LoadOnUpdate`:
+
+- **the bake System** walks the shapes with no `Mesh`, builds the geometry,
+  bakes it through `model.LookupAccess.BakeMesh` and adds the `Mesh`, the
+  `Params` holding `Color` as `baseColorFactor`, and the `Material`. The shape
+  owns all three: a caller does not add or write them;
+- **the change System** reads the shape's Hooks. A geometry edit rebakes the
+  mesh in place with `UpdateMesh`, keeping the ref and freeing the buffers it
+  replaces; a `Color` or `Layers` edit rewrites the `Params`, `Material` and the
+  `Mesh`'s layers; removing the shape or despawning its Entity releases the
+  mesh, and on a living Entity takes the three Components away. The refs live in
+  the kind's scratch, because a despawn record has no `Mesh` left to read.
+
+Both write `model.Lookup`, as the load System does, so the chain costs no
+parallelism: none of the ten could overlap each other or it anyway. A game
+System that spawns or edits shapes orders itself `Before[DebugOnUpdate]`.
+
+**Every shape is self-lit.** The debug shader, `builtin/ecsscene/debug.wgsl`
+in ecsscene's own mount, is the bundled vertex stage and a fragment stage
+returning `baseColorFactor` untouched, so no light, sun or ambient reaches a
+shape. An alpha below 1 draws through a blended `Material`;
+at 1 the shape is opaque and batches.
+
+**A shape with nothing to draw draws nothing and reports nothing**: a size or
+radius not above zero, a zero `Width`, a line of no length, a plane with no
+normal. It gets no `Mesh`, and the bake System checks it again each tick; a
+drawable shape edited into one gives its mesh back.
 
 ## What a binding may not do
 

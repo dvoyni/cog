@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 )
@@ -20,7 +19,7 @@ func lightBounds(descr *model.LightDescr) (m.Sphere, bool) {
 // one layer test, one sphere test and one contribution per light.
 type preparedLight struct {
 	record   model.Light
-	layers   ecsscene.LayerMask
+	layers   LayerMask
 	sphere   m.Sphere
 	cullable bool
 }
@@ -28,7 +27,7 @@ type preparedLight struct {
 // prepareLight packs one light through model's packer. A degenerate light is
 // reported here, once per frame rather than once per pass, and left out.
 func prepareLight(
-	report errorReporter, dst []preparedLight, descr *model.LightDescr, layers ecsscene.LayerMask,
+	report errorReporter, dst []preparedLight, descr *model.LightDescr, layers LayerMask,
 ) []preparedLight {
 	record, err := model.PackLight(*descr)
 	if err != nil {
@@ -44,7 +43,7 @@ func prepareLight(
 // Culling is per pass because it is against the pass's own frustum.
 func selectLights(
 	selection *model.LightSelection,
-	frustum m.Frustum, eye m.Vec3, cullMask ecsscene.LayerMask, lights []preparedLight,
+	frustum m.Frustum, eye m.Vec3, cullMask LayerMask, lights []preparedLight,
 ) {
 	selection.Reset()
 	for i := range lights {
@@ -61,7 +60,7 @@ func selectLights(
 
 // frameLighting copies a Camera's sun and ambient into the shape model's frame
 // packer takes, field for field under the same names.
-func frameLighting(camera *ecsscene.Camera) model.FrameLighting {
+func frameLighting(camera *Camera) model.FrameLighting {
 	return model.FrameLighting{
 		SunDirection:     camera.SunDirection,
 		SunColor:         camera.SunColor,

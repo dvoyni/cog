@@ -22,17 +22,20 @@
 // Components are the source of truth because there is no other candidate.
 //
 // ecsscene is a Bundle. Its plugin, built by ecssceneplugin.New, requires no
-// Adapter and contributes none. This package declares what it offers: the
+// Adapter and contributes one, StorageReadMount, which mounts the debug
+// shapes' shader in storage. This package is an index of what it offers, every
+// name an alias of what its internal/ declares: the
 // Components a game spawns (Model, Mesh, Animation, Params, Material, Light,
-// Camera), MaterialTag, the camera, layer and pass vocabulary, Name, and the
-// ordering identities LoadOnUpdate and RecordOnUpdate. The Component
-// registrations, the two scratches and the two Systems are in ecsscene's
-// internal/: the load System, which keys changed Entities into Batches and is
-// the only one that loads, and the recording System. The Components are still
-// registered by the plugin that defines their Go type, because that plugin
-// ships in this same Bundle under this package's Name. The Components are plain
-// data with no methods; internal/types declares only the vocabulary the root
-// aliases, because Layer forwards there.
+// Camera, and the debug shapes DebugBox, DebugSphere, DebugPlane, DebugLine
+// and DebugWireBox), MaterialTag, the camera, layer and pass vocabulary, Name,
+// and the ordering identities LoadOnUpdate, RecordOnUpdate and DebugOnUpdate.
+// The Component registrations, the scratches and the Systems are in
+// ecsscene's internal/: the load System, which keys changed Entities into
+// Batches and is the only one that loads, the recording System, and the debug
+// shapes' two Systems per shape, which bake each shape into a Mesh. internal/
+// declares the Components and registers them under this package's Name; they
+// are plain data with no methods and every field exported. internal/ also
+// declares the vocabulary, which Layer forwards into.
 //
 // Where an Entity stands is not one of them. It is an m.Transform, whose one
 // Store the ecs plugin registers, so that ecsaudio and a game's own Systems
@@ -45,6 +48,7 @@
 // its prohibitions are what a second binding has to keep true;
 // docs/specs/ecsscene.md is the design record.
 //
-// The Components and the vocabulary's aliases are in types.go, the errors the
-// recording System reports in err.go, and Layer in utils.go.
+// The Components' aliases are in components.go, the vocabulary's and
+// MaterialTag's in types.go, StorageReadMount's in adapters.go, the errors' in
+// err.go, and Layer's forwarder in utils.go.
 package ecsscene

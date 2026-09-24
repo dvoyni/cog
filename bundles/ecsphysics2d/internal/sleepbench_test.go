@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -31,7 +31,7 @@ func populatePiles(t testing.TB, h *harness, n int) []ecs.Entity {
 		return nil
 	}
 	stacks := (n + pileStack - 1) / pileStack
-	floor := ecsphysics2d.NewBoxShapeFor(ecsphysics2d.NewBB(-1, -1, float64(stacks)*pileSpacing+1, 0), 0)
+	floor := NewBoxShapeFor(NewBB(-1, -1, float64(stacks)*pileSpacing+1, 0), 0)
 	floor.Friction = 0.7
 	h.spawn(t, spawnRequest{Kind: kindShapedStatic, Shape: floor})
 	var crates []ecs.Entity
@@ -53,9 +53,9 @@ type kicker struct {
 }
 
 type kickQuery struct {
-	Place    ecsphysics2d.Position
-	Velocity *ecsphysics2d.Velocity
-	_        ecs.With[ecsphysics2d.Sleeping]
+	Place    Position
+	Velocity *Velocity
+	_        ecs.With[Sleeping]
 }
 
 type kickOnUpdate kernel.Subscription[app.UpdateEvent]
@@ -63,7 +63,7 @@ type kickOnUpdate kernel.Subscription[app.UpdateEvent]
 func (*kicker) Name() kernel.PluginName { return "physicstestkicker" }
 
 func (*kicker) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, ecsphysics2d.Name}
+	return []kernel.PluginName{ecs.Name, Name}
 }
 
 func (k *kicker) Register(registrar *kernel.Registrar, _ any) error {
@@ -79,13 +79,13 @@ func (k *kicker) Register(registrar *kernel.Registrar, _ any) error {
 				k.kicks++
 			}
 		}
-	})).Before[ecsphysics2d.IntegrateOnUpdate]()
+	})).Before[IntegrateOnUpdate]()
 	return nil
 }
 
 // newPileHarness is a harness under the plugin's gravity with sleeping set to
 // sleep, and with kicker composed beside it when one is given.
-func newPileHarness(t testing.TB, n int, sleep ecsphysics2d.Sleep, kick *kicker) *harness {
+func newPileHarness(t testing.TB, n int, sleep Sleep, kick *kicker) *harness {
 	t.Helper()
 	plugins := []kernel.Plugin{&weigher{gravity: napGravity}, &napper{}}
 	if kick != nil {
@@ -121,7 +121,7 @@ func TestTheSleepingStepSitsOnTheEnginesAllocationLine(t *testing.T) {
 		if churn {
 			kick = &kicker{}
 		}
-		h := newPileHarness(t, n, ecsphysics2d.Sleep{Time: napTime}, kick)
+		h := newPileHarness(t, n, Sleep{Time: napTime}, kick)
 		crates := populatePiles(t, h, n)
 		// Settled first, and then — churning — kicked for long enough that
 		// every buffer the churn fills has grown to what it needs.
@@ -187,10 +187,10 @@ func BenchmarkTheSettledPile(b *testing.B) {
 	for _, n := range []int{256, 1024} {
 		for _, on := range []bool{false, true} {
 			name := fmt.Sprintf("N=%d/sleeping=off", n)
-			sleep := ecsphysics2d.Sleep{}
+			sleep := Sleep{}
 			if on {
 				name = fmt.Sprintf("N=%d/sleeping=on", n)
-				sleep = ecsphysics2d.Sleep{Time: napTime}
+				sleep = Sleep{Time: napTime}
 			}
 			b.Run(name, func(b *testing.B) {
 				h := newPileHarness(b, n, sleep, nil)
@@ -218,10 +218,10 @@ func BenchmarkTheIslandBuild(b *testing.B) {
 	for _, n := range []int{256, 1024} {
 		for _, on := range []bool{false, true} {
 			name := fmt.Sprintf("N=%d/sleeping=off", n)
-			sleep := ecsphysics2d.Sleep{}
+			sleep := Sleep{}
 			if on {
 				name = fmt.Sprintf("N=%d/sleeping=on", n)
-				sleep = ecsphysics2d.Sleep{Time: 1e9}
+				sleep = Sleep{Time: 1e9}
 			}
 			b.Run(name, func(b *testing.B) {
 				h := newHarnessWithPlugins(b, nil, uint32(2*n), &napper{})

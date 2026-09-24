@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/ecsscene"
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -56,10 +55,10 @@ fn fs_main(in: PreludeVaryings) -> @location(0) vec4<f32> {
 func TestACustomMaterialIncludingThePreludeDrawsUnderECSScene(t *testing.T) {
 	h := newDrawingHarness(t, 256)
 	ref := h.bake(t)
-	material := &ecsscene.Material{Tags: m.NewList(ecsscene.MaterialTag{
+	material := &Material{Tags: m.NewList(MaterialTag{
 		Shader: gfx.ShaderWithText(preludeMaterialSource), State: gfx.StateOpaque3D(),
 	})}
-	h.spawn(t, spawnRequest{Mesh: &ecsscene.Mesh{Ref: ref}, Material: material})
+	h.spawn(t, spawnRequest{Mesh: &Mesh{Ref: ref}, Material: material})
 
 	isPrelude := func(d drawnInstance) bool { return strings.Contains(d.shader, "fn preludeMaterialAlbedo") }
 	h.frameUntil(t, "the custom material to draw", func() bool { return len(where(h.drawn(), isPrelude)) > 0 })
