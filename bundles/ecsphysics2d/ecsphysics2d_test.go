@@ -132,6 +132,14 @@ func TestTheShapeAndQueryForwardersPassTheirArgumentsThrough(t *testing.T) {
 		t.Fatalf("ProbeShape = %+v, %v, want a Hit at T 0.4 facing (-1, 0)", hit, ok)
 	}
 
+	// The mover first, from, to and its angle, then the target and where it is:
+	// a unit box leads by 0.5, so it meets the circle 0.35 of the way along.
+	hit, ok = ProbeShapeWith(NewBoxShape(1, 1, 0), m.Vec2d{}, m.Vec2d{X: 10}, 0, nil,
+		NewCircleShape(1, m.Vec2d{}), m.Vec2d{X: 5}, 0, nil)
+	if !ok || !nearD(hit.T, 0.35) || !vecNear(hit.Normal, m.Vec2d{X: -1}) {
+		t.Fatalf("ProbeShapeWith = %+v, %v, want a Hit at T 0.35 facing (-1, 0)", hit, ok)
+	}
+
 	normal, depth, ok := Penetration(
 		NewCircleShape(1, m.Vec2d{}), m.Vec2d{}, 0, nil,
 		NewCircleShape(1, m.Vec2d{}), m.Vec2d{X: 1.5}, 0, nil)
@@ -166,6 +174,17 @@ func TestTheIndexForwardersBuildAnIndexTheQueriesReach(t *testing.T) {
 	hits := static.ProbeAll(nil, m.Vec2d{}, m.Vec2d{X: 10}, 0, CollisionBitsAll, CollisionBitsAll, ecs.NoEntity)
 	if len(hits) != 1 || hits[0].Entity != wall {
 		t.Fatalf("ProbeAll = %+v, want the wall alone", hits)
+	}
+
+	crate := NewBoxShape(1, 1, 0)
+	hit, ok = body.ProbeWith(crate, m.Vec2d{}, m.Vec2d{X: 10}, 0, nil, CollisionBitsAll, CollisionBitsAll, ecs.NoEntity)
+	if !ok || hit.Entity != mover {
+		t.Fatalf("the Body index Probed a crate to %+v, %v, want the mover", hit, ok)
+	}
+	hits = static.ProbeAllWith(hits[:0], crate, m.Vec2d{}, m.Vec2d{X: 10}, 0, nil,
+		CollisionBitsAll, CollisionBitsAll, ecs.NoEntity)
+	if len(hits) != 1 || hits[0].Entity != wall {
+		t.Fatalf("ProbeAllWith = %+v, want the wall alone", hits)
 	}
 
 	touching := body.Overlap(nil, NewCircleShape(1, m.Vec2d{}), m.Vec2d{X: 3.2}, 0, nil,

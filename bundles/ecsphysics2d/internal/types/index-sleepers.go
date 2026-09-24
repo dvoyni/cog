@@ -34,11 +34,61 @@ func (idx *BodyIndex) ProbeAll(
 	bits, collidesWith uint32, exclude ecs.Entity,
 ) []Hit {
 	start := len(dst)
-	dst, _, _ = idx.probeWalk(dst, start, nil, 0, false, from, to, radius, bits, collidesWith, exclude)
+	dst, _, _ = idx.probeWalk(dst, start, nil, 0, false, from, to, radius, bits, collidesWith, exclude, nil)
 	if idx.sleeping == 0 {
 		return dst
 	}
-	dst, _, _ = idx.sleepers.probeWalk(dst, start, nil, 0, false, from, to, radius, bits, collidesWith, exclude)
+	dst, _, _ = idx.sleepers.probeWalk(dst, start, nil, 0, false, from, to, radius, bits, collidesWith, exclude, nil)
+	return dst
+}
+
+// ProbeWith is the nearest Hit of a moving Shape over both grids, so its
+// answer does not depend on what sleeps.
+func (idx *BodyIndex) ProbeWith(
+	shape Shape, from, to m.Vec2d, angle float64, verts []m.Vec2d,
+	bits, collidesWith uint32, exclude ecs.Entity,
+) (Hit, bool) {
+	if shape.Kind == ShapeCircle {
+		from, to := circlePath(shape, from, to, angle)
+		return idx.Probe(from, to, shape.Radius, bits, collidesWith, exclude)
+	}
+	var runs moverRuns
+	mover, ok := newShapeProbe(&runs, shape, from, to, angle, verts)
+	if !ok {
+		return Hit{}, false
+	}
+	_, hit, ok := idx.shapeWalk(nil, 0, true, &mover, bits, collidesWith, exclude)
+	if idx.sleeping == 0 {
+		return hit, ok
+	}
+	_, sleeper, found := idx.sleepers.shapeWalk(nil, 0, true, &mover, bits, collidesWith, exclude)
+	if found && (!ok || sleeper.T < hit.T) {
+		return sleeper, true
+	}
+	return hit, ok
+}
+
+// ProbeAllWith appends every Hit of a moving Shape to dst, ordered by T, over
+// both grids as one ordered run.
+func (idx *BodyIndex) ProbeAllWith(
+	dst []Hit, shape Shape, from, to m.Vec2d, angle float64, verts []m.Vec2d,
+	bits, collidesWith uint32, exclude ecs.Entity,
+) []Hit {
+	if shape.Kind == ShapeCircle {
+		from, to := circlePath(shape, from, to, angle)
+		return idx.ProbeAll(dst, from, to, shape.Radius, bits, collidesWith, exclude)
+	}
+	var runs moverRuns
+	mover, ok := newShapeProbe(&runs, shape, from, to, angle, verts)
+	if !ok {
+		return dst
+	}
+	start := len(dst)
+	dst, _, _ = idx.shapeWalk(dst, start, false, &mover, bits, collidesWith, exclude)
+	if idx.sleeping == 0 {
+		return dst
+	}
+	dst, _, _ = idx.sleepers.shapeWalk(dst, start, false, &mover, bits, collidesWith, exclude)
 	return dst
 }
 
@@ -63,12 +113,12 @@ func (idx *BodyIndex) probeAllSlots(
 	bits, collidesWith uint32, exclude ecs.Entity,
 ) []Hit {
 	start := len(dst)
-	dst, _, _ = idx.probeWalk(dst, start, slots, 0, false, from, to, radius, bits, collidesWith, exclude)
+	dst, _, _ = idx.probeWalk(dst, start, slots, 0, false, from, to, radius, bits, collidesWith, exclude, nil)
 	if idx.sleeping == 0 {
 		return dst
 	}
 	dst, _, _ = idx.sleepers.probeWalk(dst, start, slots, idx.awakeSlots(), false,
-		from, to, radius, bits, collidesWith, exclude)
+		from, to, radius, bits, collidesWith, exclude, nil)
 	return dst
 }
 

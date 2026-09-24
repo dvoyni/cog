@@ -370,7 +370,7 @@ func (idx *index) Probe(
 	from, to m.Vec2d, radius float64,
 	bits, collidesWith uint32, exclude ecs.Entity,
 ) (Hit, bool) {
-	_, hit, ok := idx.probeWalk(nil, 0, nil, 0, true, from, to, radius, bits, collidesWith, exclude)
+	_, hit, ok := idx.probeWalk(nil, 0, nil, 0, true, from, to, radius, bits, collidesWith, exclude, nil)
 	return hit, ok
 }
 
@@ -385,8 +385,79 @@ func (idx *index) ProbeAll(
 	dst []Hit, from, to m.Vec2d, radius float64,
 	bits, collidesWith uint32, exclude ecs.Entity,
 ) []Hit {
-	dst, _, _ = idx.probeWalk(dst, len(dst), nil, 0, false, from, to, radius, bits, collidesWith, exclude)
+	dst, _, _ = idx.probeWalk(dst, len(dst), nil, 0, false, from, to, radius, bits, collidesWith, exclude, nil)
 	return dst
+}
+
+// ProbeWith moves a Shape at a fixed angle from one Position to another and
+// reports the nearest Hit, or false when it meets nothing: Probe for a Shape
+// that is not a circle, and whether a crate fits through a gap is its bool.
+//
+// from and to are the Shape's Position at each end, and angle is held the whole
+// way, so the Shape does not turn. A circle Shape is Probe of its own radius
+// about its placed centre. bits, collidesWith and exclude are Probe's, and the
+// Hit means what Probe's does: T a fraction of from towards to, Point on the
+// hit Shape's surface, Normal facing the mover, T = 0 for a Shape that starts
+// overlapping, and a zero-length Probe legal.
+//
+// verts is the Polygon Component's vertices and is nil for every kind but Poly.
+func (idx *index) ProbeWith(
+	shape Shape, from, to m.Vec2d, angle float64, verts []m.Vec2d,
+	bits, collidesWith uint32, exclude ecs.Entity,
+) (Hit, bool) {
+	if shape.Kind == ShapeCircle {
+		from, to := circlePath(shape, from, to, angle)
+		return idx.Probe(from, to, shape.Radius, bits, collidesWith, exclude)
+	}
+	var runs moverRuns
+	mover, ok := newShapeProbe(&runs, shape, from, to, angle, verts)
+	if !ok {
+		return Hit{}, false
+	}
+	_, hit, ok := idx.shapeWalk(nil, 0, true, &mover, bits, collidesWith, exclude)
+	return hit, ok
+}
+
+// ProbeAllWith appends every Hit of a Shape moved as ProbeWith moves it to
+// dst, ordered by T, and returns it, as ProbeAll does for a circle.
+func (idx *index) ProbeAllWith(
+	dst []Hit, shape Shape, from, to m.Vec2d, angle float64, verts []m.Vec2d,
+	bits, collidesWith uint32, exclude ecs.Entity,
+) []Hit {
+	if shape.Kind == ShapeCircle {
+		from, to := circlePath(shape, from, to, angle)
+		return idx.ProbeAll(dst, from, to, shape.Radius, bits, collidesWith, exclude)
+	}
+	var runs moverRuns
+	mover, ok := newShapeProbe(&runs, shape, from, to, angle, verts)
+	if !ok {
+		return dst
+	}
+	dst, _, _ = idx.shapeWalk(dst, len(dst), false, &mover, bits, collidesWith, exclude)
+	return dst
+}
+
+// shapeWalk is probeWalk for a moving Shape. The grid is walked along the path
+// of the centre of the mover's box, with the band beside it as wide as that
+// box's half-diagonal, which reaches everything the box does wherever it is
+// along its path: so a Shape is found in the same cells, and the nearest Probe
+// stops as early, as a circle about the box would be. The leaf rejection is
+// against the box the mover sweeps, which is tighter than that circle's.
+func (idx *index) shapeWalk(
+	dst []Hit, start int, first bool, mover *shapeProbe,
+	bits, collidesWith uint32, exclude ecs.Entity,
+) ([]Hit, Hit, bool) {
+	box := mover.box
+	return idx.probeWalk(dst, start, nil, 0, first,
+		mover.centre, mover.centre.Add(mover.delta), 0.5*math.Hypot(box.R-box.L, box.T-box.B),
+		bits, collidesWith, exclude, mover)
+}
+
+// circlePath is where a circle Shape's centre runs when its Position runs from
+// from to to at a fixed angle: its offset turned by the angle, ahead of both.
+func circlePath(shape Shape, from, to m.Vec2d, angle float64) (m.Vec2d, m.Vec2d) {
+	centre := NewTransformRigid(from, angle).Point(shape.verts[0])
+	return centre, centre.Add(to.Sub(from))
 }
 
 // Overlap appends every Entity the placed Shape touches to dst, unordered, and
@@ -445,7 +516,7 @@ func (idx *index) probeAllSlots(
 	dst []Hit, slots *[]int32, from, to m.Vec2d, radius float64,
 	bits, collidesWith uint32, exclude ecs.Entity,
 ) []Hit {
-	dst, _, _ = idx.probeWalk(dst, len(dst), slots, 0, false, from, to, radius, bits, collidesWith, exclude)
+	dst, _, _ = idx.probeWalk(dst, len(dst), slots, 0, false, from, to, radius, bits, collidesWith, exclude, nil)
 	return dst
 }
 
@@ -467,9 +538,16 @@ func (idx *index) world(e *entry) []m.Vec2d { return idx.slab[e.world : e.world+
 // into the run the first one began, so the two grids answer as one ordered run.
 // slots is nil but for a sweep's Probe, whose run it keeps beside dst, each
 // slot offset by slotBase.
+//
+// mover is nil but for a ProbeWith, whose moving Shape every candidate is then
+// tested against in place of the circle, and whose swept box is the leaf
+// rejection. It is a parameter of its own and not a field of the walk because
+// the walk's Hits outlive it, which escape analysis cannot tell from the
+// mover's own stack runs: held in the walk, they would go to the heap with
+// every query.
 func (idx *index) probeWalk(
 	dst []Hit, start int, slots *[]int32, slotBase int32, first bool, from, to m.Vec2d, radius float64,
-	bits, collidesWith uint32, exclude ecs.Entity,
+	bits, collidesWith uint32, exclude ecs.Entity, mover *shapeProbe,
 ) ([]Hit, Hit, bool) {
 	walk := probing{
 		dst:          dst,
@@ -488,6 +566,9 @@ func (idx *index) probeWalk(
 			math.Max(from.X, to.X)+radius, math.Max(from.Y, to.Y)+radius,
 		),
 		exit: 1,
+	}
+	if mover != nil {
+		walk.box = mover.box.Merge(mover.box.Offset(mover.delta))
 	}
 
 	// The broadphase inflates by the query radius before descending, which is
@@ -550,7 +631,11 @@ func (idx *index) probeWalk(
 	var t float64
 	for i := cellX - reach; i <= cellX+reach; i++ {
 		for j := cellY - reach; j <= cellY+reach; j++ {
-			idx.probeCell(&walk, i, j)
+			if mover == nil {
+				idx.probeCell(&walk, i, j)
+			} else {
+				idx.shapeCell(&walk, mover, i, j)
+			}
 		}
 	}
 
@@ -572,12 +657,20 @@ func (idx *index) probeWalk(
 		if steppedInY {
 			j := cellY + yInc*reach
 			for i := cellX - reach; i <= cellX+reach; i++ {
-				idx.probeCell(&walk, i, j)
+				if mover == nil {
+					idx.probeCell(&walk, i, j)
+				} else {
+					idx.shapeCell(&walk, mover, i, j)
+				}
 			}
 		} else {
 			i := cellX + xInc*reach
 			for j := cellY - reach; j <= cellY+reach; j++ {
-				idx.probeCell(&walk, i, j)
+				if mover == nil {
+					idx.probeCell(&walk, i, j)
+				} else {
+					idx.shapeCell(&walk, mover, i, j)
+				}
 			}
 		}
 	}
@@ -630,6 +723,52 @@ func (idx *index) probeCell(walk *probing, i, j int32) {
 		if walk.slots != nil {
 			walk.dst, *walk.slots = insertHitSlot(walk.dst, *walk.slots, walk.start, hit,
 				walk.slotBase+idx.links[cursor].entry)
+			continue
+		}
+		walk.dst = insertHit(walk.dst, walk.start, hit)
+	}
+}
+
+// shapeCell is probeCell for a moving Shape: the same band, filters and
+// ordering, with each candidate tested by the swept convex test. A shape walk
+// keeps no slots, so there is no slot run to keep beside its Hits.
+//
+// It is a loop of its own rather than a branch in probeCell's, so that the
+// circle's loop, which is every Probe's and the swept Sensor's, is as it was:
+// the branch taken once a candidate cost ProbeAll 2 to 3%, read on the
+// minimums of an interleaved A/B, and taken once a cell it costs nothing.
+func (idx *index) shapeCell(walk *probing, mover *shapeProbe, i, j int32) {
+	if walk.band {
+		left, bottom := float64(i)*idx.cellSize, float64(j)*idx.cellSize
+		grown := NewBB(
+			left-walk.radius, bottom-walk.radius,
+			left+idx.cellSize+walk.radius, bottom+idx.cellSize+walk.radius,
+		)
+		if !grown.IntersectsSegment(walk.from, walk.to) {
+			return
+		}
+	}
+
+	for cursor := idx.buckets[idx.bucket(i, j)]; cursor >= 0; cursor = idx.links[cursor].next {
+		e := &idx.entries[idx.links[cursor].entry]
+		if e.entity == walk.exclude ||
+			!collides(walk.bits, walk.collidesWith, e.shape.CollisionBits, e.shape.CollidesWith) {
+			continue
+		}
+		if !walk.box.Intersects(e.box) {
+			continue
+		}
+		hit, ok := mover.against(e.shape, e.box, idx.slab[e.world:e.world+e.worldLen])
+		if !ok {
+			continue
+		}
+		hit.Entity = e.entity
+
+		if walk.first {
+			if !walk.found || hit.T < walk.best.T {
+				walk.best, walk.found = hit, true
+				walk.exit = hit.T
+			}
 			continue
 		}
 		walk.dst = insertHit(walk.dst, walk.start, hit)
