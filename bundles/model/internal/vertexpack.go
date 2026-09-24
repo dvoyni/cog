@@ -183,7 +183,7 @@ func packInto(dst []byte, vertices []Vertex, mesh SceneMesh) {
 //
 // The normal, the tangent and both UV sets are encoded here rather than stored:
 // four bytes each, decoded in the vertex stage from
-// builtin/scene/vertexdecode.wgsl. Every 16-bit unorm pair is written as two
+// builtin/model/vertexdecode.wgsl. Every 16-bit unorm pair is written as two
 // words rather than one, because a Unorm16x2 attribute's components are
 // consecutive in the buffer and a single native-endian uint32 would order them
 // by the host's endianness.

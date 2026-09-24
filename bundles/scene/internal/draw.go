@@ -2,15 +2,13 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/model"
-
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
-// pendingPass is one pass the flush has decided but not yet emitted, and
-// pendingDraw one draw inside it. Nothing is emitted while the arenas are still
-// growing: a draw binds a range of an arena, and the arena has no buffer until
-// it is complete.
+// pendingPass is one pass the recording System has decided but not yet
+// emitted, and pendingDraw one draw inside it. Nothing is emitted while the
+// arenas are still growing: a draw binds a range of an arena, and the arena
+// has no buffer until it is complete.
 type pendingPass struct {
 	descr gfx.PassDescr
 	// frameOffset locates this pass's sceneFrame block, and instanceOffset and
@@ -29,56 +27,42 @@ type pendingDraw struct {
 	// what picked the draw's shader variant: a half it does not have is a half
 	// the module does not declare, so there is nothing left unbound.
 	skin model.SkinBuffers
-	// material is the gfx material the draw's resolved tag entry named. It is
-	// carried per draw rather than looked up again at emit time because
-	// resolution is a pass-relative answer: the same scene material serves a
-	// different gfx material in a shadow pass.
+	// material is the gfx material the Batch's material serves this pass
+	// with. It is carried per draw because resolution is a pass-relative
+	// answer: the same material serves a different gfx material in a shadow
+	// pass.
 	material      *gfx.MaterialDescr
 	firstInstance int
 	instances     int
-	// params are the extra parameters the draw asked to bind, aliasing the
-	// recording's arena. They are bound after the ranges scene binds itself,
-	// so a caller cannot displace them by naming one of their names. paint is
-	// a debug shape's colour as params, a window of frameBuild.paints, bound
-	// after them: gfx takes the first of two same-named params.
+	// params are the Batch's Params, bound after the ranges the recording
+	// binds itself, so a Params value cannot displace them by naming one of
+	// their names.
 	params []gfx.ParameterDescr
-	paint  []gfx.ParameterDescr
 }
 
-// frameBuild is everything one flush accumulates before it emits: the arenas
-// each draw binds a range of, and the passes and draws waiting on them.
-// Every slice in it keeps its backing across frames.
+// frameBuild is everything one frame accumulates before it emits: the arenas
+// each draw binds a range of, and the passes and draws waiting on them. Every
+// slice in it keeps its backing across frames.
 type frameBuild struct {
 	instances arena
 	frames    arena
 	// anims is the frame's sceneAnim arena. It is indexed absolutely rather
-	// than bound per pass: an instance's animOffset counts vec4s from the
+	// than bound per pass: an instance's AnimOffset counts vec4s from the
 	// start of the whole buffer, so every draw binds it entire.
 	anims arena
 	// meshes is the frame's per-mesh record arena, bound entire like anims
 	// because an instance's Mesh counts records from the start of the whole
-	// buffer rather than from a pass's own slice. Slot 0 is the reserved
-	// identity, written at every reset, so the arena is never empty and the
-	// meshes that need no record of their own cost nothing.
+	// buffer. Slot 0 is the reserved identity, written at every reset.
 	meshes arena
 	passes []pendingPass
 	draws  []pendingDraw
-	// batches is the scratch one pass fills before publishing it, reused by
-	// every pass in the frame.
-	batches []BatchView
-	// opaque and blend are the two sort classes of the pass being built, reused
-	// by every pass in the frame so the sort allocates nothing.
+	// opaque and blend are the two sort classes of the pass being built,
+	// reused by every pass in the frame so the sort allocates nothing.
 	opaque, blend []sortEntry
-	// paints is the arena each debug shape's paint params are appended to,
-	// windowed per draw so they live until the frame is emitted.
-	paints []gfx.ParameterDescr
 	// params is the scratch one draw's full parameter list is assembled in.
 	// gfx copies parameters into its own arena as it records, so one slice
 	// serves every draw in the frame.
 	params []gfx.ParameterDescr
-	// worlds is the scratch one batch's instance matrices are gathered into
-	// before they are packed, reused by every batch in the frame.
-	worlds []m.Mat4
 }
 
 func (b *frameBuild) reset() {
@@ -86,28 +70,28 @@ func (b *frameBuild) reset() {
 	b.frames.reset()
 	b.anims.reset()
 	b.meshes.reset()
-	b.paints = b.paints[:0]
 	// Slot 0 first, before any draw can claim an index: the identity record is
-	// what a custom-layout mesh and a UV-less standard mesh name, and it has to
-	// be there whether or not any mesh this frame carries a range of its own.
+	// what a custom-layout mesh and a UV-less standard mesh name.
 	b.meshes.appendElement(&model.IdentityMesh)
 	b.passes = b.passes[:0]
 	b.draws = b.draws[:0]
-	b.batches = b.batches[:0]
 }
 
 // emit hands the frame to gfx: one upload per arena, then every pass with its
-// draws behind it. Passes run in Order, not in emission order, so a pass may be
-// declared here whenever its draws are known.
+// draws behind it. Passes run in Order, not in emission order, so a pass may
+// be declared here whenever its draws are known.
+//
+// The binding names are model's, because the shader that reads them is.
 func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
+	if len(b.passes) == 0 {
+		return
+	}
 	instances := gfxWrite.TemporaryBuffer(b.instances.bytes(), true)
 	frames := gfxWrite.TemporaryBuffer(b.frames.bytes(), true)
 	// sceneAnim is declared whether or not anything animates, so a frame that
 	// packed no block still uploads one empty record: an unbound declared
 	// binding is the silent whole-frame loss, not a degraded frame.
 	anims := gfxWrite.TemporaryBuffer(b.animBytes(), true)
-	// The per-mesh arena needs no placeholder of its own: the identity record
-	// at slot 0 is written at every reset, so it always has one record in it.
 	meshes := gfxWrite.TemporaryBuffer(b.meshes.bytes(), true)
 	for i := range b.passes {
 		pass := &b.passes[i]
@@ -131,11 +115,11 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 				b.params = append(b.params, gfx.BufferParam(model.BindingSceneMorphDeltas, draw.skin.Morphs))
 			}
 			b.params = append(b.params, draw.params...)
-			b.params = append(b.params, draw.paint...)
 			gfxWrite.DrawInstancedFrom(draw.mesh, *draw.material,
 				draw.firstInstance, draw.instances, b.params...)
 		}
 	}
+	clear(b.params)
 }
 
 // beginPass starts accumulating one pass, taking its sceneFrame block and the
@@ -147,56 +131,37 @@ func (b *frameBuild) beginPass(descr gfx.PassDescr, block model.FrameBlock) *pen
 		instanceOffset: b.instances.beginRange(),
 		firstDraw:      len(b.draws),
 	})
-	b.batches = b.batches[:0]
 	return &b.passes[len(b.passes)-1]
 }
 
-// addDraw packs one batch into the pass being accumulated: one instance per
-// world matrix, packed contiguously, and one entry in the pass's batch list.
-// firstInstance is relative to the pass's own slice, which is what lets the
-// batch read its instances with no offset plumbing of its own - WebGPU's
-// instance_index starts at firstInstance, so the shader is the same whether
-// the batch holds one instance or a thousand.
-//
-// The batch's material numbers are no business of scene's: they are params of
-// its material, or of the draw, which gfx packs into whatever the shader in
-// effect declares.
+// addDraw packs one Batch's surviving instances in one pass as one instanced
+// draw: one instance record per entry, packed contiguously through model's
+// packer. firstInstance is relative to the pass's own slice, so the shader is
+// the same whether the draw holds one instance or five thousand.
 func (b *frameBuild) addDraw(
-	pass *pendingPass, mesh model.MeshRecord, id uint32, entry materialEntry,
-	worlds []m.Mat4, draw *DrawRecord, anim AnimBinding,
+	pass *pendingPass, batch *batch, material materialEntry,
+	sorted []sortEntry, survivors []survivor, entries []entry,
 ) {
 	first := (len(b.instances.bytes()) - pass.instanceOffset) / model.InstanceSize
-	// One mesh record per batch, no dedupe: two batches of one mesh write two
-	// identical records rather than paying a hash of every record every frame
-	// to find that out.
-	meshIndex := b.meshIndex(mesh.UV)
-	for _, world := range worlds {
-		instance := model.PackInstance(world, anim.InstanceAnim, meshIndex)
+	meshIndex := b.meshIndex(batch.mesh.UV)
+	for _, sorted := range sorted {
+		e := &entries[survivors[sorted.draw].draw]
+		instance := model.PackInstance(e.world, e.anim, meshIndex)
 		b.instances.appendElement(&instance)
 	}
-	start := len(b.paints)
-	b.paints = draw.AppendPaint(b.paints)
 	b.draws = append(b.draws, pendingDraw{
-		mesh:          mesh.Descr(),
-		skin:          anim.Skin,
-		material:      entry.descr,
+		mesh:          batch.mesh.Descr(),
+		skin:          batch.skin,
+		material:      material.descr,
 		firstInstance: first,
-		instances:     len(worlds),
-		params:        draw.Params,
-		paint:         b.paints[start:len(b.paints):len(b.paints)],
-	})
-	b.batches = append(b.batches, BatchView{
-		MeshID: id, MaterialID: entry.materialID,
-		FirstInstance: first, InstanceCount: len(worlds),
+		instances:     len(sorted),
+		params:        batch.params,
 	})
 }
 
 // meshIndex is the slot a draw's instances name in the per-mesh record buffer.
-//
-// A mesh with no range of its own - a custom layout, which scene never packed,
-// or a standard mesh whose every UV is zero - names slot 0, the reserved
-// identity, and appends nothing. That is the whole of the "no UVs" case: there
-// is no validity flag, no branch in the shader and no second path to test.
+// A mesh with no range of its own names slot 0, the reserved identity, and
+// appends nothing.
 func (b *frameBuild) meshIndex(record model.SceneMesh) uint32 {
 	if record == (model.SceneMesh{}) {
 		return 0
@@ -210,9 +175,8 @@ func (b *frameBuild) endPass(pass *pendingPass) {
 	pass.instanceBytes = len(b.instances.bytes()) - pass.instanceOffset
 }
 
-// appendAnim appends one draw's sceneAnim block to the frame's arena through
-// model's packer and returns the animOffset an instance carries, or SceneNoAnim
-// when the draw animates nothing.
+// appendAnim appends one Entity's sceneAnim block to the frame's arena through
+// model's packer and returns the AnimOffset its instances carry.
 func (b *frameBuild) appendAnim(plays []model.ScenePlayRecord, morph model.AnimMorph) uint32 {
 	var offset uint32
 	b.anims.data, offset = model.AppendAnim(b.anims.data, plays, morph)
@@ -220,13 +184,8 @@ func (b *frameBuild) appendAnim(plays []model.ScenePlayRecord, morph model.AnimM
 }
 
 // animBytes is the sceneAnim arena's upload. An empty arena still uploads one
-// vec4: TemporaryBuffer returns no buffer at all for no bytes, and the binding
-// is declared on every draw whether or not the frame animated anything - so an
-// empty one would be the unbound binding that takes the frame down silently.
-//
-// The placeholder is a package-level array rather than a fresh allocation,
-// because a frame that animates nothing is the common frame and the arenas'
-// whole discipline is that a steady frame allocates nothing.
+// vec4, because TemporaryBuffer returns no buffer at all for no bytes and the
+// binding is declared on every draw.
 func (b *frameBuild) animBytes() []byte {
 	if len(b.anims.bytes()) == 0 {
 		return emptyAnimBlock[:]

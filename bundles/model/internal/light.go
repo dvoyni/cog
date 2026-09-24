@@ -13,7 +13,7 @@ import (
 // survivable - a level with 40 lights of which 6 are on screen works perfectly.
 //
 // The array holds point and spot lights only. The sun and hemispheric ambient
-// are per-camera fields on CameraDescr, which is what keeps the record
+// are per-camera fields on scene's Camera, which is what keeps the record
 // branchless and 48 bytes with no kind field: packing the sun as a directional
 // entry would cost an explicit discriminator, since infinite range is already
 // taken, and the unification is unachievable anyway, because hemispheric
@@ -98,7 +98,7 @@ type ModelLight struct {
 // infinite-range light is unculled by construction and always survives to the
 // cap.
 //
-// Field order and size must match SceneLight in builtin/scene/frame.wgsl.
+// Field order and size must match SceneLight in builtin/model/frame.wgsl.
 type Light struct {
 	Position  m.Vec3
 	InvRange4 float32

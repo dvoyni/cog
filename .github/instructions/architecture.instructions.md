@@ -22,7 +22,7 @@ Everything here is the rule for every plugin, new ones included.
 | **Library** | `libs/<name>` | Code that is not a Plugin and defines none (`libs/m`). |
 | **Slot** | `slots/<name>` | A Plugin whose root declares at least one required Port (app, gfx, storage). Composition fails until an Adapter fills it. |
 | **Extension** | `extensions/<name>` | A Plugin that provides Adapters, at least one of them for a Slot's required Port, and declares no API (gogpu, diskstorage, jsstorage). It may also contribute to a collected Port. |
-| **Bundle** | `bundles/<name>` | Every other Plugin (input, anim, canvas, scene, ui, ecs, ecsscene, mcp). Its root declares no required Port, and it may collect Adapters or contribute them. |
+| **Bundle** | `bundles/<name>` | Every other Plugin (input, anim, canvas, scene, ui, ecs, mcp). Its root declares no required Port, and it may collect Adapters or contribute them. |
 
 A plugin that would need both a Slot's Adapters and an API of its own is two
 plugins: an Extension and a Bundle.

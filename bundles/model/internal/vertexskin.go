@@ -15,7 +15,7 @@ package internal
 // says a producer SHOULD normalise.
 //
 // So the contract is: the bake stores whatever codes it stores, and
-// builtin/scene/deform.wgsl divides the deformed position by the total it
+// builtin/model/deform.wgsl divides the deformed position by the total it
 // accumulated. Neither half is allowed to assume the other made the sum one.
 // bundles/model/internal/vertexskin_test.go holds the transcription that
 // measures it.

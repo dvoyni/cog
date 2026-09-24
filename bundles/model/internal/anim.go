@@ -67,7 +67,7 @@ const MaxClipPlays = 4
 // this design - but squash-and-stretch is animated non-uniform scale, a
 // mainstream idiom, and a pose has no other place to express it.
 //
-// Field order and size must match ScenePose in builtin/scene/scene.wgsl.
+// Field order and size must match ScenePose in builtin/model/scene.wgsl.
 type scenePose struct {
 	// Rotation is a unit quaternion as xyzw. Translation and Scale use xyz and
 	// leave w spare, which is the price of the three-aligned-loads layout.
@@ -90,7 +90,7 @@ type scenePose struct {
 // bytes matrix syntax cannot address, and Normal0.W spends four of them on the
 // precomputed tangent handedness.
 //
-// Field order and size must match SceneSkinJoint in builtin/scene/scene.wgsl.
+// Field order and size must match SceneSkinJoint in builtin/model/scene.wgsl.
 type sceneSkinJoint struct {
 	// InverseBind0..3 are the columns of the 4x4 inverse bind, in the same
 	// column-major order m.Mat4 stores.
@@ -114,7 +114,7 @@ type sceneSkinJoint struct {
 // and adds. BaseRow0 and BaseRow1 are rows, not frames: the shader adds the
 // joint index and is done, which is what makes the address one MAD.
 //
-// Field order and size must match ScenePlay in builtin/scene/scene.wgsl.
+// Field order and size must match ScenePlay in builtin/model/scene.wgsl.
 type ScenePlayRecord struct {
 	BaseRow0, BaseRow1 uint32
 	W0, W1             float32
@@ -129,7 +129,7 @@ type ScenePlayRecord struct {
 // flags bitfield here: two counts the shader reads anyway already carry it.
 //
 // Field order and size must match the header SceneAnim reads in
-// builtin/scene/scene.wgsl, where the block is a raw vec4 arena.
+// builtin/model/scene.wgsl, where the block is a raw vec4 arena.
 type SceneAnimHeader struct {
 	PlayCount   uint32
 	TargetCount uint32

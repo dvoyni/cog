@@ -7,7 +7,7 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 )
 
-// decodeUV is the transcription of sceneDecodeUV in builtin/scene/vertexdecode.wgsl,
+// decodeUV is the transcription of sceneDecodeUV in builtin/model/vertexdecode.wgsl,
 // with the fetch unit's divide in front of it. Every assertion below reads a
 // stored UV through this, so what is measured is the coordinate a fragment
 // stage samples with rather than the code the packer wrote.

@@ -39,7 +39,7 @@ const (
 // SCENE_NONUNIFORM instead and the shader takes the inverse-transpose for those
 // instances alone, branch-uniform across the whole instance.
 //
-// Field order and size must match SceneInstance in builtin/scene/instance.wgsl.
+// Field order and size must match SceneInstance in builtin/model/instance.wgsl.
 type Instance struct {
 	// World0..World2 are the rows of the 4x3 world matrix: row i of the packed
 	// matrix, translation in w. Three rows rather than a mat4x4 because the
@@ -188,7 +188,7 @@ func uniformScale(matrix m.Mat4) bool {
 // A renderer fills the five view fields itself, from its own camera, and
 // PackFrameLighting fills the rest.
 //
-// Field order and size must match SceneFrame in builtin/scene/frame.wgsl.
+// Field order and size must match SceneFrame in builtin/model/frame.wgsl.
 type FrameBlock struct {
 	View           m.Mat4
 	Projection     m.Mat4

@@ -19,11 +19,11 @@ import (
 // The range is derived and never surfaced. A mesh's UV precision depends on the
 // spread of the UVs in that same bake, which is a property of the mesh rather
 // than of the API: letting an author supply one would add a parameter to
-// BakeMesh, UpdateMesh and TemporaryMesh alike, and every path here re-derives
+// BakeMesh and UpdateMesh alike, and every path here re-derives
 // it whenever the vertices are replaced.
 //
 // The decode is the GPU's, published as sceneDecodeUV in
-// builtin/scene/vertexdecode.wgsl; what is here is the half that runs at bake.
+// builtin/model/vertexdecode.wgsl; what is here is the half that runs at bake.
 
 // uvCodeMax is the largest code of one UV component's 16-bit unorm, and the
 // divisor the fetch unit has already applied by the time the decode sees it. The
@@ -35,7 +35,7 @@ const uvCodeMax = 0xFFFF
 // stored in the buffer bound at @group(0) @binding(3) and indexed by the
 // instance's mesh word.
 //
-// Field order and size must match SceneMesh in builtin/scene/instance.wgsl.
+// Field order and size must match SceneMesh in builtin/model/instance.wgsl.
 //
 // Its zero value is the record of a mesh that has no range of its own - a
 // custom layout, which scene never packed and cannot find a UV inside, or a

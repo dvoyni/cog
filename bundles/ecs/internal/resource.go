@@ -16,7 +16,7 @@ var storeCoreType = reflect.TypeFor[storeCore]()
 // type, no adapter and no registration call of the ECS's own. A System that
 // draws, plays a sound or steps physics reaches that plugin through the
 // frame-local resource the plugin already publishes — gfx's *gfx.OpQueue, for
-// ecsscene — and the ECS contributes nothing else.
+// scene — and the ECS contributes nothing else.
 //
 //	func record(
 //	    models *ecs.Query[modelQuery],             // the Components

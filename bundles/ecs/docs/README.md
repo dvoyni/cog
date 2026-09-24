@@ -443,7 +443,7 @@ assigned index is not, so it survives a save file or a wire; and producing one
 needs nothing, so a System renames what an Entity points at holding only the
 lock it already had. Neither needs the *ECS* to own it.
 
-`ecsscene` was built on `ModelHash`, `ClipHash`, `ecs.Names` and `ecs.NoHash`,
+`scene` was built on `ModelHash`, `ClipHash`, `ecs.Names` and `ecs.NoHash`,
 and was rebuilt without them: its `Model` Component holds the glTF path as a
 string.
 
@@ -1248,7 +1248,7 @@ description prose the Agent reads is reproduced in full in
 
 ## Binding: how another plugin attaches
 
-ecsscene's recording System:
+scene's recording System:
 
 ```go
 func record(
@@ -1257,9 +1257,9 @@ func record(
     meshes  *ecs.Query[meshQuery],
     lights  *ecs.Query[lightQuery],
     cameras *ecs.Query[cameraQuery],
-    animations *ecs.Get[ecsscene.Animation],   // optional Components, probed
-    params     *ecs.Get[ecsscene.Params],
-    materials  *ecs.Get[ecsscene.Material],
+    animations *ecs.Get[scene.Animation],   // optional Components, probed
+    params     *ecs.Get[scene.Params],
+    materials  *ecs.Get[scene.Material],
     keys     *ecs.Read[*keyScratch],           // the load System's keys
     lookup   *ecs.Read[*model.Lookup],         // model's residency, read only
     viewport *ecs.Read[*gfx.Viewport],
@@ -1283,15 +1283,15 @@ of the ECS's own.
 a plugin like `model` or `gfx` imports nothing of `ecs`, so neither can know about the
 other. That is what "no binding mechanism" means in practice — and a project not
 using the ECS simply does not register that plugin and schedules no Systems.
-cog ships the drawing one as [`ecsscene`](../../ecsscene/docs/README.md), the ECS's
+cog ships the drawing one as [`scene`](../../scene/docs/README.md), the ECS's
 renderer over `model`, which records to `gfx` itself and carries the prohibitions
 a second binding has to keep true.
 
 **Where an Entity stands is `m.Transform`, and nothing else.** Two Components
 describing one position are unrelated to the scheduler, so two Systems writing
 them run concurrently and nothing reports that they disagree; copy one way, in
-one System. See ecsscene's [What a binding may not
-do](../../ecsscene/docs/README.md#what-a-binding-may-not-do).
+one System. See scene's [What a binding may not
+do](../../scene/docs/README.md#what-a-binding-may-not-do).
 
 **Neither handle is a place to keep anything.** `Get` returns the value resolved
 from the cell the lock covers at the start of the invocation — never one taken at

@@ -126,7 +126,7 @@ const (
 // variant that never reads them.
 //
 // Four of the six shared rows are narrowed, and what reads them is
-// builtin/scene/vertexdecode.wgsl: a two-component 16-bit unorm holding oct32,
+// builtin/model/vertexdecode.wgsl: a two-component 16-bit unorm holding oct32,
 // one 32-bit word holding oct 15/15 plus handedness plus a reserved bit, and
 // two more 16-bit unorm pairs holding UVs against the range in the mesh's own
 // record. gfx requires a shader's declared (kind, count) at a location to equal

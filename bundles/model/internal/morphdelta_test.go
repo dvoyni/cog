@@ -9,7 +9,7 @@ import (
 )
 
 // unpack2x16snorm and unpack4x8snorm are WGSL's own builtins written in Go, and
-// they exist because nothing in this tree can run WGSL: builtin/scene/morph.wgsl
+// they exist because nothing in this tree can run WGSL: builtin/model/morph.wgsl
 // is the shipping decoder and what follows is a transcription of it, kept beside
 // the encoder it has to invert.
 //

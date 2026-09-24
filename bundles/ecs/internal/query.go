@@ -408,7 +408,7 @@ func (q *Query[Q]) rowCopies(each func(slot **rowCopy)) {
 // body past 160 still collapses at width 2 and is an indirect call an Entity at
 // widths 1 and 3, as it was before they had literals. Moved into a literal
 // beside the others, width 2 would lose its collapse for such a body too:
-// ecsscene's record-range3 is one.
+// scene's record-range3 is one.
 //
 // Width 4 fits too, at 624 on its own, and was measured beside these; it did
 // not pass #546's rule, and ecs.md records why before anyone adds it back.

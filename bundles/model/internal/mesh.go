@@ -26,7 +26,7 @@ const (
 // MeshDurable carries. The sources allocate independent dense ranges, and a
 // sort key is one uint32 of meshID, so without a bit to tell them apart a
 // renderer's own mesh and a durable one would collide in it and batch as though
-// they were the same geometry. scene names it TemporaryMeshID.
+// they were the same geometry.
 const rendererMeshID uint32 = 1 << 31
 
 // MeshRef names one mesh a renderer can draw. It is an opaque value: a source,
@@ -52,7 +52,7 @@ func NewMeshRef(source MeshSource, id, generation uint32) MeshRef {
 
 // ID reports the mesh's dense id, or 0 when the ref names no mesh. A mesh from
 // a renderer's own source carries rendererMeshID, so the sources never collide
-// in a sort key or a BatchView.
+// in a sort key.
 func (r MeshRef) ID() uint32 {
 	switch r.source {
 	case MeshNone:

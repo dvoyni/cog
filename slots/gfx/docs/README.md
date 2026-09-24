@@ -31,7 +31,7 @@ and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md):
   backend contract: `Backend` and `BackendPort` in `ports.go`, `Queue` and its
   sinks, `RenderPass`, `Capture`, the shader, pipeline, texture, sampler and
   buffer descriptors, `Limits`, and every ID, format and enum in `types.go`.
-  Recorders (canvas, scene, ui, ecsscene and games) import it to draw, and an
+  Recorders (canvas, scene, ui and games) import it to draw, and an
   Adapter's backend (gogpu's `gfx*.go` files, cog-examples' headless `Backend`)
   imports it and nothing else of gfx.
 - **`slots/gfx/internal`** is the plugin, and declares everything the root
@@ -121,8 +121,8 @@ hash then, and names the returned material in every draw: those draws copy
 nothing of the material and hash only their own params. The returned material is
 the queue's for the frame it was recorded in. The caller may reuse its own slice
 at once, as after `Draw`, and in a later frame or on another queue the material
-draws as the one it was recorded from, copied as usual. scene and ecsscene
-record every material they intern
+draws as the one it was recorded from, copied as usual. scene records every
+material it interns
 ([#568](https://github.com/dvoyni/cog/issues/568)), where a material carries its
 numbers as params and 5 000 draws of one material otherwise copied 27 params
 each.

@@ -552,7 +552,8 @@ see
   `PkgPath()+"."+Name()` is unambiguous but unsearchable. Amended by
   [#349](https://github.com/dvoyni/cog/issues/349): this was `Type.String()`
   until the Bundle and Port splits declared contract types in `internal/`
-  packages, when gfx's, canvas's and scene's OpQueue all rendered as
+  packages, when gfx's, canvas's and the recording scene's OpQueue (removed in
+  #573) all rendered as
   `*internal.OpQueue`. `TypeName` renders a type declared in an `internal`
   package under its enclosing package (`*canvas.OpQueue`), inside composite and
   generic types too, and a test composing every cog plugin keeps every rendered

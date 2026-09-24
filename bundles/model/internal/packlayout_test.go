@@ -10,7 +10,7 @@ import (
 )
 
 // Every record the shader reads is declared twice - once as a Go struct in
-// this package, once as a WGSL struct in builtin/scene - and nothing but a
+// this package, once as a WGSL struct in builtin/model - and nothing but a
 // comment saying "must match" held the two together. A mismatch is silent in
 // the worst way: the shader reads one field out of the bytes another one landed
 // in and renders something plausible. Adding a member to the frame block is

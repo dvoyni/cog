@@ -239,8 +239,8 @@ func TestAnAppShaderOverTheTwoStagesBuildsUnderEveryVariant(t *testing.T) {
 }
 
 // stageIncluder is the consuming game's fade, written as the ticket spells it.
-const stageIncluder = `//#include builtin/scene/vertexstage.wgsl
-//#include builtin/scene/fragmentstage.wgsl
+const stageIncluder = `//#include builtin/model/vertexstage.wgsl
+//#include builtin/model/fragmentstage.wgsl
 @group(3) @binding(0) var sightDepths: texture_2d<f32>;
 
 @fragment
@@ -404,7 +404,7 @@ func (o overlayFS) Open(name string) (fs.File, error) {
 	return o.base.Open(name)
 }
 
-const fadeFields = `//#include builtin/scene/materialfields.wgsl
+const fadeFields = `//#include builtin/model/materialfields.wgsl
     fadeRun: vec4<f32>,
     fadeBias: f32,
 `
@@ -413,11 +413,11 @@ const tintFields = `//#include game/fadefields.wgsl
     tintColor: vec4<f32>,
 `
 
-const fadeShader = `//#include builtin/scene/materialprologue.wgsl
+const fadeShader = `//#include builtin/model/materialprologue.wgsl
 //#include game/fadefields.wgsl
-//#include builtin/scene/materialepilogue.wgsl
-//#include builtin/scene/vertexstage.wgsl
-//#include builtin/scene/fragmentstage.wgsl
+//#include builtin/model/materialepilogue.wgsl
+//#include builtin/model/vertexstage.wgsl
+//#include builtin/model/fragmentstage.wgsl
 
 @fragment
 fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {
@@ -426,11 +426,11 @@ fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) 
 }
 `
 
-const tintShader = `//#include builtin/scene/materialprologue.wgsl
+const tintShader = `//#include builtin/model/materialprologue.wgsl
 //#include game/tintfields.wgsl
-//#include builtin/scene/materialepilogue.wgsl
-//#include builtin/scene/vertexstage.wgsl
-//#include builtin/scene/fragmentstage.wgsl
+//#include builtin/model/materialepilogue.wgsl
+//#include builtin/model/vertexstage.wgsl
+//#include builtin/model/fragmentstage.wgsl
 
 @fragment
 fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {
@@ -439,11 +439,11 @@ fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) 
 }
 `
 
-const lateFadeShader = `//#include builtin/scene/vertexstage.wgsl
-//#include builtin/scene/fragmentstage.wgsl
-//#include builtin/scene/materialprologue.wgsl
+const lateFadeShader = `//#include builtin/model/vertexstage.wgsl
+//#include builtin/model/fragmentstage.wgsl
+//#include builtin/model/materialprologue.wgsl
 //#include game/fadefields.wgsl
-//#include builtin/scene/materialepilogue.wgsl
+//#include builtin/model/materialepilogue.wgsl
 
 @fragment
 fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {

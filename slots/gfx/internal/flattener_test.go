@@ -217,11 +217,11 @@ func TestMalformedSupplyIsReportedAtFlattenWithNoLocation(t *testing.T) {
 
 func TestIncludeResolvesBothPathForms(t *testing.T) {
 	files := map[string]string{
-		"builtin/scene/scene.wgsl": "//#include ./pbr.wgsl\n//#include builtin/lib/frame.wgsl\nfn main() {}\n",
-		"builtin/scene/pbr.wgsl":   "fn pbr() {}\n",
+		"builtin/model/scene.wgsl": "//#include ./pbr.wgsl\n//#include builtin/lib/frame.wgsl\nfn main() {}\n",
+		"builtin/model/pbr.wgsl":   "fn pbr() {}\n",
 		"builtin/lib/frame.wgsl":   "fn frame() {}\n",
 	}
-	text, sourceMap := flatten(t, files, ShaderWithResource("builtin/scene/scene.wgsl"))
+	text, sourceMap := flatten(t, files, ShaderWithResource("builtin/model/scene.wgsl"))
 	for _, want := range []string{"fn pbr()", "fn frame()", "fn main()"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("flattened text is missing %q:\n%s", want, text)
@@ -234,13 +234,13 @@ func TestIncludeResolvesBothPathForms(t *testing.T) {
 		t.Errorf("flattened to %d lines, want %d", got, want)
 	}
 	wantSegments := []ShaderSegment{
-		{OutputStart: 1, Length: 1, Source: "builtin/scene/scene.wgsl", SourceStart: 1},
-		{OutputStart: 2, Length: 1, Source: "builtin/scene/pbr.wgsl", SourceStart: 1,
-			IncludedFrom: ShaderLocation{Source: "builtin/scene/scene.wgsl", Line: 1}},
-		{OutputStart: 3, Length: 1, Source: "builtin/scene/scene.wgsl", SourceStart: 2},
+		{OutputStart: 1, Length: 1, Source: "builtin/model/scene.wgsl", SourceStart: 1},
+		{OutputStart: 2, Length: 1, Source: "builtin/model/pbr.wgsl", SourceStart: 1,
+			IncludedFrom: ShaderLocation{Source: "builtin/model/scene.wgsl", Line: 1}},
+		{OutputStart: 3, Length: 1, Source: "builtin/model/scene.wgsl", SourceStart: 2},
 		{OutputStart: 4, Length: 1, Source: "builtin/lib/frame.wgsl", SourceStart: 1,
-			IncludedFrom: ShaderLocation{Source: "builtin/scene/scene.wgsl", Line: 2}},
-		{OutputStart: 5, Length: 1, Source: "builtin/scene/scene.wgsl", SourceStart: 3},
+			IncludedFrom: ShaderLocation{Source: "builtin/model/scene.wgsl", Line: 2}},
+		{OutputStart: 5, Length: 1, Source: "builtin/model/scene.wgsl", SourceStart: 3},
 	}
 	if len(sourceMap.Segments) != len(wantSegments) {
 		t.Fatalf("segments = %+v, want %+v", sourceMap.Segments, wantSegments)

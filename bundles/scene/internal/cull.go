@@ -2,40 +2,43 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/model"
-
 	"github.com/dvoyni/cog/libs/m"
 )
 
-// preparedDraw is what the flush works out about one recorded draw once per
-// frame, before any camera looks at it: its world matrix, its world-space
-// bounding sphere, and whether that sphere is one to cull against at all. Every
-// camera then pays one sphere test per draw and nothing else.
-type preparedDraw struct {
+// entry is one instance the recording System will draw, worked out once per
+// frame before any camera looks at it: the Batch it belongs to, its world
+// matrix, its world-space bounding sphere and whether that sphere is one to
+// cull against at all, the layers a camera's mask is tested against, and what
+// its instance record says about animation. A Model Entity is one entry per
+// primitive of its view, and a Mesh Entity one entry.
+//
+// Every camera then pays one layer test and one sphere test per entry and
+// nothing else.
+type entry struct {
 	world m.Mat4
-	// sphere is the draw's bounds in world space. For a draw that is never
-	// culled it is a zero-radius sphere at the draw's origin, kept because the
-	// blend sort still needs a point to measure depth to.
+	// sphere is the entry's bounds in world space. For an entry that is never
+	// culled it is a zero-radius sphere at its origin, kept because the blend
+	// sort still needs a point to measure depth to.
 	sphere   m.Sphere
 	cullable bool
-	mesh     model.MeshRef
-	// interned is the draw's material's index in the frame's material table.
-	interned int32
-	// anim is the draw's animation binding, carried through so the packer
-	// reads one array rather than reaching back into the record.
-	anim AnimBinding
+	layers   LayerMask
+	// batch is the entry's index in the frame's Batches.
+	batch int32
+	// anim is the instance record's animation half. Its Offset is the
+	// Entity's own sceneAnim block, which is what lets animated Entities
+	// sharing a mesh and a material share a Batch.
+	anim model.InstanceAnim
 }
 
-// resolveBounds picks the local-space sphere a draw is culled by, in a fixed
+// resolveBounds picks the local-space sphere an entry is culled by, in a fixed
 // order: NeverCull short-circuits, then an explicit non-zero sphere, then the
-// mesh's baked one, and a draw with none of those is never culled.
+// mesh's baked one, and an entry with none of those is never culled.
 //
 // A zero explicit sphere means never-cull rather than a zero-radius sphere at
 // the origin, because a large mesh whose origin leaves the frustum would
 // otherwise vanish - a silent, camera-angle-dependent bug, the worst kind.
-// Drawing too much is a performance problem you can see and profile. Never-cull
-// is never reported for the same reason: it is the documented default, not an
-// error.
-func resolveBounds(neverCull bool, explicit m.Sphere, mesh model.MeshRecord) (m.Sphere, bool) {
+// Drawing too much is a performance problem you can see and profile.
+func resolveBounds(neverCull bool, explicit m.Sphere, mesh *model.MeshRecord) (m.Sphere, bool) {
 	switch {
 	case neverCull:
 		return m.Sphere{}, false
@@ -47,50 +50,42 @@ func resolveBounds(neverCull bool, explicit m.Sphere, mesh model.MeshRecord) (m.
 	return m.Sphere{}, false
 }
 
-// prepareDraw resolves one recorded draw's world matrix and world sphere. The
-// world radius is the local radius times the largest axis scale of the matrix -
-// exact under a uniform scale, conservative under a non-uniform one - a per-axis
-// Scale, a shape's stretch, or a model primitive's flattened node world - since
-// a sphere under non-uniform scale is not a sphere.
-func prepareDraw(record DrawRecord, mesh model.MeshRecord) preparedDraw {
-	world := record.World()
-	prepared := preparedDraw{world: world, anim: record.Anim}
-	if local, cull := resolveBounds(record.NeverCull, record.Bounds, mesh); cull {
-		prepared.sphere = local.Transform(world)
-		prepared.cullable = true
-	} else {
-		prepared.sphere.Center = world.Translation()
+// prepareDraw resolves one entry's world sphere from its world matrix. The
+// world radius is the local radius times the largest axis scale of the matrix
+// - exact under a uniform scale, conservative under a non-uniform one, since a
+// sphere under non-uniform scale is not a sphere.
+func prepareDraw(
+	world m.Mat4, neverCull bool, explicit m.Sphere, mesh *model.MeshRecord,
+) (sphere m.Sphere, cullable bool) {
+	if local, cull := resolveBounds(neverCull, explicit, mesh); cull {
+		return local.Transform(world), true
 	}
-	return prepared
+	return m.Sphere{Center: world.Translation()}, false
 }
 
-// survivor is one draw a camera kept, with the view-space depth of its sphere's
-// centre already measured, because the view is per camera and the blend sort
-// wants the number per pass.
+// survivor is one entry a camera kept, with the view-space depth of its
+// sphere's centre already measured, because the view is per camera and the
+// blend sort wants the number per pass.
 type survivor struct {
 	draw  uint32
 	depth float32
 }
 
 // cullResult is one camera's cull against one frustum: the frustum itself,
-// published so a test can assert a specific sphere was rejected by it, the
-// survivors' span in the culler's arena, and the counts a PassView reports.
+// and the survivors' span in the culler's arena.
 type cullResult struct {
 	aspect  float32
 	frustum m.Frustum
-	// first and count are the span of survivors this cull kept, in recording
+	// first and count are the span of survivors this cull kept, in walk
 	// order.
 	first, count int
-	// recorded is how many draws the camera's layer mask selected, and culled
-	// how many of those the frustum rejected.
-	recorded, culled int
 }
 
-// culler culls one camera's draws once per distinct frustum. A camera with
+// culler culls one camera's entries once per distinct frustum. A camera with
 // several passes usually has one frustum, because a frustum depends on the
-// target's aspect rather than its pixel size; each pass then filters the shared
-// survivor list by its own tag. Both slices keep their backing across cameras
-// and frames.
+// target's aspect rather than its pixel size; each pass then filters the
+// shared survivor list by its own tag. Both slices keep their backing across
+// cameras and frames.
 type culler struct {
 	results   []cullResult
 	survivors []survivor
@@ -103,12 +98,11 @@ func (c *culler) beginCamera() {
 }
 
 // cull returns the index of the camera's result for one aspect, culling only
-// if no earlier pass of this camera used the same aspect. Every survivor's
-// sphere was tested against all six planes of the frustum, far included, which
-// is why a camera's Far is required.
+// if no earlier pass of this camera used the same aspect. The layer mask
+// filters first, then the frustum: every survivor's sphere was tested against
+// all six planes, far included, which is why a camera's Far is required.
 func (c *culler) cull(
-	aspect float32, viewProjection, view m.Mat4, cullMask LayerMask,
-	draws []DrawRecord, prepared []preparedDraw,
+	aspect float32, viewProjection, view m.Mat4, cullMask LayerMask, entries []entry,
 ) int {
 	for i := range c.results {
 		if c.results[i].aspect == aspect {
@@ -120,22 +114,34 @@ func (c *culler) cull(
 		frustum: m.FrustumFromMat4(viewProjection),
 		first:   len(c.survivors),
 	}
-	for i := range draws {
-		if !LayerMaskDrawnBy(draws[i].Layers, cullMask) {
+	for i := range entries {
+		e := &entries[i]
+		if !drawnBy(e.layers, cullMask) {
 			continue
 		}
-		result.recorded++
-		sphere := &prepared[i].sphere
-		if prepared[i].cullable && !result.frustum.ContainsSphere(sphere.Center, sphere.Radius) {
-			result.culled++
+		if e.cullable && !result.frustum.ContainsSphere(e.sphere.Center, e.sphere.Radius) {
 			continue
 		}
 		c.survivors = append(c.survivors, survivor{
 			draw:  uint32(i),
-			depth: -view.TransformPoint(sphere.Center).Z,
+			depth: -view.TransformPoint(e.sphere.Center).Z,
 		})
 	}
 	result.count = len(c.survivors) - result.first
 	c.results = append(c.results, result)
 	return len(c.results) - 1
+}
+
+// drawnBy reports whether something on layers is drawn by a camera whose
+// cull mask is cull. A zero mask on either side reads as every layer, which is
+// what makes the zero Component draw and the zero Camera see.
+func drawnBy(layers, cull LayerMask) bool {
+	return orAll(layers)&orAll(cull) != 0
+}
+
+func orAll(l LayerMask) LayerMask {
+	if l == 0 {
+		return LayersAll
+	}
+	return l
 }

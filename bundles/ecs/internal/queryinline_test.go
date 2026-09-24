@@ -521,7 +521,7 @@ func heavyWidthTwoWalk(q *Query[width2]) (sum float32) {
 //
 // Moved into a literal of its own beside the others, the width-2 walk's call
 // is resolved in the same batch as theirs, and a body like this one's, or
-// ecsscene's record-range3, stops collapsing at width 2 as well.
+// scene's record-range3, stops collapsing at width 2 as well.
 func TestAWidthTwoBodyPastTheCallBudgetStillCollapses(t *testing.T) {
 	const body = "heavyWidthTwoWalk-range1"
 	cost, collapsed := -1, false

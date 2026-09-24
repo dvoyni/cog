@@ -224,7 +224,7 @@ No `.wgsl.in`. A different extension buys honesty in the filename and nothing
 else — an editor that does not recognise it gives *no* highlighting rather than
 partial, and mapping it back to WGSL to regain highlighting regains the errors
 with it. With `//#` available, the problem a rename addressed is solvable in the
-source itself. `//go:embed builtin/scene/*.wgsl` and every storage path are
+source itself. `//go:embed builtin/model/*.wgsl` and every storage path are
 untouched.
 
 ---
@@ -291,7 +291,7 @@ frame's command buffer vanishing without a word, the default here is loud.
 
 An included path resolves through the **full mount overlay**, exactly like the
 root source (`FileSystem.Open` in `slots/storage/internal/types/filesystem.go` searches mounts by descending
-priority, per file). A game that mounts its own `builtin/scene/pbr.wgsl` at
+priority, per file). A game that mounts its own `builtin/model/pbr.wgsl` at
 higher priority replaces that one source inside cog's module and keeps the rest.
 
 That is cog's customization mechanism working as designed, and one-file override
@@ -797,7 +797,7 @@ exists.
 `shaderLabel` carries the supply:
 
 ```
-bundles/scene/builtin/scene/scene.wgsl [SCENE_MORPH SCENE_SKIN]
+bundles/model/internal/builtin/model/scene.wgsl [SCENE_MORPH SCENE_SKIN]
 ```
 
 with the brackets omitted when the supply is empty. Without it, four modules
@@ -900,7 +900,7 @@ case.
 gfx **appends the rendered segment table** and lets the reader subtract:
 
 ```
-gfx: shader "bundles/scene/builtin/scene/scene.wgsl [SCENE_MORPH SCENE_SKIN]" failed to compile:
+gfx: shader "bundles/model/internal/builtin/model/scene.wgsl [SCENE_MORPH SCENE_SKIN]" failed to compile:
 gogpu: shader reflection failed: parse error: line 340, column 12: expected ';'
   flattened: 1-40 scene.wgsl; 41-120 ./frame.wgsl (scene.wgsl:3); 121-380 ./pbr.wgsl (scene.wgsl:4); …
 ```
@@ -1055,7 +1055,7 @@ throwaway implementation of this language and lowering through `naga.Parse` →
 
 ### Ten sources, two defines
 
-`bundles/scene/builtin/scene/scene.wgsl` (862 lines: PBR, lighting, skinning and morph
+`bundles/model/internal/builtin/model/scene.wgsl` (862 lines: PBR, lighting, skinning and morph
 behind one `vs_main` / `fs_main`) splits into:
 
 `scene.wgsl` (entry points) → `instance.wgsl`, `deform.wgsl`, `material.wgsl`,

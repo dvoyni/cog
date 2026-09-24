@@ -29,7 +29,7 @@ func flattenedSceneShader(t testing.TB, opts ...gfx.ShaderOption) string {
 // table rather than a per-line array: the eleven sources' lines total exactly the
 // flattened module's, with a zero-line §4 prologue.
 func TestTheSplitFlattensToExactlyItsSourcesLineCount(t *testing.T) {
-	names, err := fs.Glob(shaderFS, "builtin/scene/*.wgsl")
+	names, err := fs.Glob(shaderFS, "builtin/model/*.wgsl")
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestEveryVariantFlattensToTheSameLineCount(t *testing.T) {
 // included, which is what keeps the include graph a pure function of the root:
 // the set of sources a module is built from does not vary by define set.
 func TestEveryFeatureSourceGuardsItsOwnBody(t *testing.T) {
-	names, err := fs.Glob(shaderFS, "builtin/scene/*.wgsl")
+	names, err := fs.Glob(shaderFS, "builtin/model/*.wgsl")
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
@@ -119,11 +119,11 @@ func TestEveryFeatureSourceGuardsItsOwnBody(t *testing.T) {
 		}
 	}
 	for _, name := range names {
-		if name != "builtin/scene/scene.wgsl" && !included[name] {
+		if name != "builtin/model/scene.wgsl" && !included[name] {
 			t.Errorf("%s is shipped but nothing includes it", name)
 		}
 	}
-	if !included["builtin/scene/skin.wgsl"] || !included["builtin/scene/morph.wgsl"] {
+	if !included["builtin/model/skin.wgsl"] || !included["builtin/model/morph.wgsl"] {
 		t.Error("the feature sources are not included unconditionally")
 	}
 }
@@ -132,7 +132,7 @@ func TestEveryFeatureSourceGuardsItsOwnBody(t *testing.T) {
 // rather than by a define of its own. That is the only place `|` earns its keep
 // in the whole split, and it earns it by removing a define.
 func TestTheSplitUsesTwoDefinesAndOneConst(t *testing.T) {
-	names, err := fs.Glob(shaderFS, "builtin/scene/*.wgsl")
+	names, err := fs.Glob(shaderFS, "builtin/model/*.wgsl")
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}

@@ -3,18 +3,27 @@
 `github.com/dvoyni/cog/bundles/model` is the plugin that owns everything a model
 file can contain: glTF decode, geometry generation, vertex and morph packing,
 GPU upload, the model and texture caches, and the PBR shader with the records it
-reads. Two renderers are built on it. `bundles/scene` stays the declarative
-renderer and keeps its `OpQueue` API. `bundles/ecsscene` stops proxying into
-`scene.OpQueue` and records to `gfx` itself. This document specifies `model`,
-what each renderer keeps, and the order the split lands in.
+reads. `bundles/scene`, cog's one renderer, is built on it. This document
+specifies `model`, what a renderer keeps, and the order the split landed in.
+
+**A note on names.** The split was designed and landed with two renderers on
+`model`: a declarative one called `scene`, whose frame-local `OpQueue` recorded
+`CameraDescr`s, `ModelDraw`s, `MeshDraw`s and `Op*` debug shapes and whose
+flush culled, sorted and packed them, and the ECS binding beside it. Ticket
+[#573](https://github.com/dvoyni/cog/issues/573) removed the declarative one and
+gave the ECS binding its name. This document is the record of the split, so it
+still speaks of both: **the recording scene** is the removed renderer, and
+`scene` alone is the one that ships. File paths, line numbers and branch names
+are as they were when each part was written.
 
 **It is a split, not an improvement.** `model` is carved out of
-`bundles/scene/internal/types` (14.7k lines) and scene's per-frame code, and
-ecsscene repeats the path scene already takes. Anything that would make either
-renderer do more than it does today is a separate issue. Two were filed:
+`bundles/scene/internal/types` (14.7k lines, the recording scene's) and the
+recording scene's per-frame code, and `scene` repeats the path the recording
+scene took. Anything that would make either renderer do more than it did then
+is a separate issue. Two were filed:
 [per-instance properties](https://github.com/dvoyni/cog/issues/520), which is
-open, and [scene merging separate calls](https://github.com/dvoyni/cog/issues/49),
-which has since landed.
+open, and [the recording scene merging separate calls](https://github.com/dvoyni/cog/issues/49),
+which landed before it was removed.
 
 The design is bound by four requirements, in this order:
 
@@ -24,16 +33,16 @@ The design is bound by four requirements, in this order:
    reaches into another's `internal/`.
 2. **One upload per model.** One cache, one mesh table, and every renderer reads
    them.
-3. **ecsscene imports nothing of scene.** What both renderers need is `model`'s
-   (assets and the shader's layout) or `libs/m`'s (maths). There is no third,
-   shared renderer bundle.
-4. **Never cost System parallelism.** ecsscene's readers of model residency run
+3. **`scene` imported nothing of the recording scene.** What both renderers
+   needed was `model`'s (assets and the shader's layout) or `libs/m`'s (maths).
+   There is no third, shared renderer bundle.
+4. **Never cost System parallelism.** scene's readers of model residency run
    side by side. Only loading and unloading are exclusive.
 
-Two standing rules come with it, and no section below reopens them:
+One standing rule comes with it, and no section below reopens it. (A second,
+that an app ran one renderer or the other and never both, lapsed with the
+recording scene in #573.)
 
-- **An app runs `scene` or `ecsscene`, never both.** Running both is undefined
-  behaviour. Nothing is designed to make it work, and nothing guards against it.
 - **Unloading is cleanup between scenes.** An app unloads a model only once
   nothing draws it. Drawing an unloaded model is undefined behaviour. There are
   no generations and no invalidation.
@@ -52,20 +61,20 @@ the `*model.Lookup` resource. It holds the glTF decoder, the unit geometry,
 `Vertex` with the storage layout it reports, the conversion to GPU layouts, the
 model and texture caches, the mesh table, the Lookup with its two facades, the
 model material, the bundled shader, and the records it reads with their
-packers, and scene imports all of it from model's root. ecsscene records to
-`gfx` itself over the same `model`, and imports nothing of scene; it landed on
-main in one merge ([#538](https://github.com/dvoyni/cog/issues/538)). **Its
-part of this design moved to its own spec**,
-[`ecsscene.md`](../../../ecsscene/docs/specs/ecsscene.md): its Components and
+packers, and the recording scene imported all of it from model's root.
+`scene` records to `gfx` itself over the same `model`; it landed on main in one
+merge ([#538](https://github.com/dvoyni/cog/issues/538)). **Its part of this
+design moved to its own spec**,
+[`scene.md`](../../../scene/docs/specs/scene.md): its Components and
 vocabulary, its copy of the frame code, its two Systems, Batches and what it is
-tested against. [ecsscene after the split](#ecsscene-after-the-split) keeps the
-summary. The sweep, stage 5 ([#539](https://github.com/dvoyni/cog/issues/539)),
-rewrote every caller to name `model.X`, deleted scene's temporary aliases, and
-settled what stays on `model`'s root ([model's root after the
+tested against. [The ECS scene after the split](#the-ecs-scene-after-the-split)
+keeps the summary. The sweep, stage 5 ([#539](https://github.com/dvoyni/cog/issues/539)),
+rewrote every caller to name `model.X`, deleted the recording scene's temporary
+aliases, and settled what stays on `model`'s root ([model's root after the
 sweep](#models-root-after-the-sweep)). [`mesh.md`](mesh.md) moved here with the
-cache, and `scene.md` is cut down to the renderer: its sections on what is now
-`model`'s moved to the end of this document, under [The model contract, moved
-from scene.md](#the-model-contract-moved-from-scenemd).
+cache, and the recording scene's spec was cut down to the renderer: its
+sections on what is now `model`'s moved to the end of this document, under
+[The model contract, moved from scene.md](#the-model-contract-moved-from-scenemd).
 
 ---
 
@@ -79,9 +88,9 @@ from scene.md](#the-model-contract-moved-from-scenemd).
 - [The shader's records and their packers](#the-shaders-records-and-their-packers)
 - [Residency: one Lookup, two facades](#residency-one-lookup-two-facades)
 - [Storability, and `m.List`](#storability-and-mlist)
-- [scene after the split](#scene-after-the-split)
+- [The recording scene after the split](#the-recording-scene-after-the-split)
 - [model's root after the sweep](#models-root-after-the-sweep)
-- [ecsscene after the split](#ecsscene-after-the-split)
+- [The ECS scene after the split](#the-ecs-scene-after-the-split)
 - [The fountains](#the-fountains)
 - [What is not foreclosed](#what-is-not-foreclosed)
 - [Shapes that were rejected](#shapes-that-were-rejected)
@@ -103,16 +112,17 @@ The glossary is [`CONTEXT.md`](../../../../CONTEXT.md). The terms this document 
   forward graphics material for each shader variant, the params and state it
   is made of, and a content key fixed at load. It names no Pass tag. It is not a **Scene
   material**, which is a renderer's and carries tags.
-- **Batch.** One instanced draw. It is scene's word
-  and ecsscene's. "Group" is the word to avoid.
+- **Batch.** One instanced draw. It was the recording scene's word and is
+  scene's. "Group" is the word to avoid.
 - **Read facade / load facade.** The two ways to reach the one `*model.Lookup`:
   under `kernel.Read`, which never loads, and under `kernel.Write`, which loads,
   preloads and unloads.
 - **`ModelHandle`.** A plain slot index into `model`'s dense model table. A
   `ModelRef` resolves to it once. It has no generation.
-- **Carve.** Moving code out of scene into `model` without changing what it does.
+- **Carve.** Moving code out of the recording scene into `model` without
+  changing what it does.
 - **Sweep.** The one landing that rewrites callers from `scene.X` to `model.X`
-  and deletes scene's temporary aliases.
+  and deletes the recording scene's temporary aliases.
 - **Clip machine.** `model.ClipMachine`: a clip state machine the caller keeps
   and steps, which hands back a frame's `ClipPlay`s and the events of the step.
   It is one value, definition and runtime state together. "Animation graph" and
@@ -130,14 +140,14 @@ The glossary is [`CONTEXT.md`](../../../../CONTEXT.md). The terms this document 
 
 ## What was measured
 
-From [where ecsscene's frame time goes today](https://github.com/dvoyni/cog/issues/493)
+From [where the ECS frame's time goes](https://github.com/dvoyni/cog/issues/493)
 ([results](https://github.com/dvoyni/cog/blob/research/ecsscene-baseline/bundles/ecsscene/docs/research/ecsscene-baseline.md)),
 for 5 000 crates in view on a Ryzen 9 7950X3D at `6a5254d`:
 
 | where | share of an 8.3 ms frame |
 | --- | ---: |
 | the ECS walk, the copy out, and `OpQueue.Model` | 4.6% |
-| scene's queue flush bookkeeping | 2.6% |
+| the recording scene's queue flush bookkeeping | 2.6% |
 | `expandModels` | 14.2% |
 | `prepareDraws`, of which re-keying the file material each draw | 24.5% (19.6%) |
 | cull and layer test | 0.24% |
@@ -145,14 +155,14 @@ for 5 000 crates in view on a Ryzen 9 7950X3D at `6a5254d`:
 | `emit`, per batch into gfx | 42.4% |
 
 - **Sort, cull and layering are not the cost.** Together they are under 0.4%.
-- **Proxying into scene is about 7%.**
+- **Proxying into the recording scene is about 7%.**
 - **The call shape is the cost.** One call per Entity makes 5 000 Batches. The
   same crates as one call are 2.7 ms against 8.2 ms.
 - **Re-keying a model's own material each draw** is 20% of the per-Entity frame
   and 55% of the instanced one. The key belongs to the loaded material, which is
   `model`'s.
 
-These figures are why ecsscene's redesign is about Batches and not about a faster
+These figures are why the ECS binding's redesign is about Batches and not about a faster
 sort, and why the model material carries its key.
 
 From [the decoder seam](https://github.com/dvoyni/cog/issues/496)
@@ -170,7 +180,7 @@ From [the decoder seam](https://github.com/dvoyni/cog/issues/496)
 From [the inventory](https://github.com/dvoyni/cog/issues/492)
 ([table](https://github.com/dvoyni/cog/blob/research/scene-inventory/bundles/scene/docs/research/scene-inventory.md)),
 [what model declares, and what a renderer keeps](https://github.com/dvoyni/cog/issues/494),
-and [where scene's per-frame drawing code goes](https://github.com/dvoyni/cog/issues/521).
+and [where the per-frame drawing code goes](https://github.com/dvoyni/cog/issues/521).
 
 **The line: `model` owns everything a model file can contain, and a renderer owns
 drawing.** Drawing means the queue, passes, layers, culling, sorting, and the
@@ -178,7 +188,7 @@ renderer's own way of saying "draw this".
 
 Every name the inventory classified as `model/decode`, `model/pack`,
 `model/cache`, `model/geom` or `model` goes to `bundles/model`. Every `scene` row
-stays in `bundles/scene`. Of 405 declarations, 269 land on the model side and 66
+stayed in the recording scene's `bundles/scene`. Of 405 declarations, 269 land on the model side and 66
 on the renderer's. The rows that needed a decision:
 
 | name(s) | lands in | reading |
@@ -194,16 +204,16 @@ on the renderer's. The rows that needed a decision:
 | `MaxLights` | `model` | the length of the shader's `Lights` array. [#521](https://github.com/dvoyni/cog/issues/521) replaced #494's row here |
 | `Vertex`, `VertexLayout`, `MeshRef`, `MeshRecord`, `BakeFunc`, `Span`, `MeshBaker`, `pendingMesh`, `rebakeIndices`, durable minting and baking | `model` | `model` owns all mesh residency: file primitives, unit shapes and app-built meshes alike. There is one mesh table |
 | `MeshSource`, `MeshNone`, `MeshDurable` | `model`, reduced | `model` knows only durable meshes |
-| `MeshTemporary`, `TemporaryMeshID` | `scene` | the declarative queue's per-frame mesh |
+| `MeshTemporary`, `TemporaryMeshID` | the recording scene | the declarative queue's per-frame mesh |
 | unit geometry and unit meshes | `model` | |
-| `unitShape`, `ShapeNone`, `ShapeBox`, `shapeSphere`, `shapePlane`, `shapeCount` | `scene` | the shape enum is how scene's queue records |
+| `unitShape`, `ShapeNone`, `ShapeBox`, `shapeSphere`, `shapePlane`, `shapeCount` | the recording scene | the shape enum is how its queue records |
 | `overrideRecord` | `model`, exported | as a slice merge and a single-parameter merge |
 | `SkinBuffers` | `model` | |
 | `AnimBinding` | each renderer | per-Batch assembly is frame bookkeeping |
-| `maxClipPlays` | `model`, exported as `MaxClipPlays` | ecsscene's `MaxPlays` goes |
+| `maxClipPlays` | `model`, exported as `MaxClipPlays` | the ECS binding's `MaxPlays` goes |
 | `Config`, `WithDefaults` | `model` | the pose sample rate. A renderer that needs configuration declares its own |
 | `Lookup` and its access types | `model` | everything it holds is `model`'s. See [Residency](#residency-one-lookup-two-facades) |
-| `OpQueue`, `ModelDraw`, `MeshDraw`, `DrawRecord`, `ModelDrawRecord`, `LayerMask`, `RecordOnUpdate`, the Op inspection surface | `scene` | |
+| `OpQueue`, `ModelDraw`, `MeshDraw`, `DrawRecord`, `ModelDrawRecord`, `LayerMask`, `RecordOnUpdate`, the Op inspection surface | the recording scene | all removed with it in #573 |
 
 **Placement is `m.Transform`, named directly; no renderer re-exports it**
 ([#468](https://github.com/dvoyni/cog/issues/468)). `m.LookAt` builds a camera's
@@ -218,16 +228,17 @@ seam](#the-decoder-seam).
 
 **`model` is a plugin that composition roots register, before any renderer.** It
 registers the `*model.Lookup` resource, and nothing else does, and it takes
-`model.Config` under `model.Name`. scene and ecsscene each declare a dependency
-on it, and so does any plugin that locks the Lookup itself, because the kernel
+`model.Config` under `model.Name`. scene declares a dependency on it, as the
+recording scene did, and so does any plugin that locks the Lookup itself, because the kernel
 requires a dependency on a resource's owner. **Settled here:** the Lookup is a
 kernel resource and it is `model`'s, so the plugin that registers it is
-`model`'s. The `PoseSampleRate` key moved from `scene.Name` to `model.Name` with
-the Lookup ([#530](https://github.com/dvoyni/cog/issues/530)). scene takes no
-configuration now, and a setting left under `scene.Name` is ignored silently,
-but no composition root in cog-examples or feuds-26 set `scene.Config` (counted
-2026-09-21). Every composition root that registers scene registers
-`modelplugin.New()` before it.
+`model`'s. The `PoseSampleRate` key moved from the recording scene's
+`scene.Name` to `model.Name` with the Lookup
+([#530](https://github.com/dvoyni/cog/issues/530)). scene takes no
+configuration, and a setting left under `scene.Name` is ignored silently, but no
+composition root in cog-examples or feuds-26 set the recording scene's
+`scene.Config` (counted 2026-09-21). Every composition root that registers scene
+registers `modelplugin.New()` before it.
 
 ---
 
@@ -270,7 +281,7 @@ run as their own pass over the decoded data. None of them is in the decoder
 package. They run in `bundles/model/internal/types` (`gltfload.go`,
 `gltfmesh.go`, `gltfmorph.go`, `gltfanim.go`), beside the model cache that
 installs their result and the record types they fill: `scenePose`, `skinJointRecord`, the morph block layout and the pack helpers are
-`model`'s. They ran in scene until the cache moved with them in
+`model`'s. They ran in the recording scene until the cache moved with them in
 [#530](https://github.com/dvoyni/cog/issues/530). The joint cap, 256 joints
 because a storage vertex names a joint in one byte, is
 checked there too: it is the storage layout's limit, not the file's.
@@ -305,8 +316,8 @@ or a primitive with no POSITION), `ErrModelBoundsMissing`,
 `ErrModelNodeDuplicated` and `ErrModelSkinUnbound`. An unsupported required
 extension fails the decode with a plain error, which the model cache wraps in
 `ErrModelUnavailable` as before. `model` re-exports the five under their current
-public names, so no error is wrapped twice and no settled name moves. scene
-aliased them until the sweep; callers now name `model.ErrModel…`.
+public names, so no error is wrapped twice and no settled name moves. The
+recording scene aliased them until the sweep; callers now name `model.ErrModel…`.
 
 **The unit geometry and `Vertex` are `model`'s.** `UnitBoxGeometry`,
 `UnitPlaneGeometry` and `UnitSphereGeometry` (and the unexported `appendQuad`)
@@ -323,20 +334,20 @@ only ones writing that layout, and the root keeps only its two strides.
 ## The model material
 
 From [what model declares](https://github.com/dvoyni/cog/issues/494) and [how
-ecsscene groups Entities into instanced draws](https://github.com/dvoyni/cog/issues/509).
+the ECS binding groups Entities into instanced draws](https://github.com/dvoyni/cog/issues/509).
 
 **The cache no longer holds a renderer type.** Until the cache moved, the model
-material was `[VariantCount]Material`, scene's pass-tagged `Material`: the one
+material was `[VariantCount]Material`, the recording scene's pass-tagged `Material`: the one
 place the cache reached into renderer vocabulary, and the reason a file material
 is re-keyed on every draw record, every frame. [#530](https://github.com/dvoyni/cog/issues/530)
 brought the data shape forward so that `model` never named a `PassTag`: the
 cache holds `modelMaterial{Forward [VariantCount]gfx.MaterialDescr; Record
 ScenePbrRecord}`, and the bundled PBR comes back from `Lookup.EnsureBundled` as
-`[VariantCount]gfx.MaterialDescr`. scene wraps each forward descr it draws as
-`MaterialTag{TagForward, descr}` in an arena its flush keeps across frames, so a
-steady frame wraps without allocating. [#532](https://github.com/dvoyni/cog/issues/532)
+`[VariantCount]gfx.MaterialDescr`. The recording scene wrapped each forward
+descr it drew as `MaterialTag{TagForward, descr}` in an arena its flush kept
+across frames, so a steady frame wrapped without allocating. [#532](https://github.com/dvoyni/cog/issues/532)
 added the key: the load takes each forward descr's gfx fingerprint once, as
-`modelMaterial.Key`, and scene's `ForwardMaterialKey` turns it into the key
+`modelMaterial.Key`, and the recording scene's `ForwardMaterialKey` turned it into the key
 `MaterialKeyOf` would have given the wrapped material, so a draw of a file's
 own material is keyed without fingerprinting anything. The same step moved the
 bundled shader's WGSL sources and their storage mount into `model`, under the
@@ -353,7 +364,7 @@ param per member of the shader's `scenePbrMaterial` uniform block, and the
 pipeline state. Each forward descr is the bundled variant over them.
 They came with [#568](https://github.com/dvoyni/cog/issues/568), so a renderer
 can resolve a caller's shader over what the file says instead of in place of
-it; ecsscene does, and scene still draws the forward descrs. A baked mesh's
+it; scene does, and the recording scene drew the forward descrs until #573. A baked mesh's
 ingredients are `BundledIngredients`, which `Lookup.EnsureBundledIngredients`
 returns around the same two default textures `EnsureBundled` binds.
 
@@ -367,8 +378,8 @@ takes a `SceneShaderDescr{Source, Params}`, the zero one being the bundled PBR,
 and `LookupReadAccess.DefaultSceneShader` reads it back. It is a call rather
 than `Config` because its params are typically baked textures, which exist only
 once the backend does. model bakes nothing from it: a renderer that honours it
-resolves its materials every frame, so it can change at any time. ecsscene
-honours it; scene does not. `VariantShader` puts any shader under a draw's
+resolves its materials every frame, so it can change at any time. scene
+honours it; the recording scene never did. `VariantShader` puts any shader under a draw's
 `SCENE_SKIN` and `SCENE_MORPH`, through `gfx.ShaderDescr.With`, so the variant
 stays the renderer's whichever shader is in effect.
 
@@ -376,14 +387,14 @@ stays the renderer's whichever shader is in effect.
 
 ## The shader's records and their packers
 
-From [where scene's per-frame drawing code goes](https://github.com/dvoyni/cog/issues/521).
+From [where the per-frame drawing code goes](https://github.com/dvoyni/cog/issues/521).
 Landed in [#533](https://github.com/dvoyni/cog/issues/533): the records and
 packers are in `internal/types/records.go`, `light.go` and `lightselection.go`,
 aliased in the root's `types.go` and forwarded from its `utils.go`.
 
-**`model` exports every record the shader reads, with its packer.** Both
-renderers write the same bytes through the same code, so a shader change cannot
-compile against one renderer and draw garbage in the other.
+**`model` exports every record the shader reads, with its packer.** While two
+renderers stood, both wrote the same bytes through the same code, so a shader
+change could not compile against one renderer and draw garbage in the other.
 
 - **The records:** `FrameBlock`, `Instance` with its flags (`SceneNonUniform`,
   `SceneNoSkin`, `ScenePlainJoint`) and `SceneNoAnim`, `Light`, and
@@ -397,7 +408,7 @@ compile against one renderer and draw garbage in the other.
   name: `BindingSceneFrame` (`sceneFrame`), `BindingSceneInstances`,
   `BindingSceneAnim`, `BindingSceneMeshes`, `BindingScenePoses`, `BindingSceneSkinJoints` and `BindingSceneMorphDeltas`.
 - **Each record has a `Size` constant**, `<Record>Size`, replacing the
-  `unsafe.Sizeof` block in scene's `draw.go`, because binding ranges need them.
+  `unsafe.Sizeof` block in the recording scene's `draw.go`, because binding ranges need them.
   `PoseSize`, `SkinJointSize`, `AnimHeaderVec4s` and `PlayRecordVec4s` became
   constants too.
 
@@ -424,7 +435,7 @@ and keeps the result. A draw with nothing to animate appends nothing and gets
 2. `model.PackFrameLighting(block, lighting model.FrameLighting, &selection)`
    writes the sun, the ambient, the lights and `LightCount`.
 
-`model.FrameLighting` holds the camera's six lighting fields under scene's names:
+`model.FrameLighting` holds the camera's six lighting fields under the camera's names:
 `SunDirection`, `SunColor`, `SunIntensity`, `AmbientSky`, `AmbientGround` and
 `AmbientIntensity`. Each renderer copies them from its camera at the call site,
 so neither camera changes shape. The defaults (normalising the sun, an intensity
@@ -438,15 +449,15 @@ only the lights that pass.
 
 **Paint is `model`'s too.** A draw with no material of its own draws
 `BundledIngredients`, white paint: glTF's defaults with metallic 0. A debug
-shape lays `PaintParams(dst, color, selfLit)` over it on the draw. scene's debug
-shapes and bare meshes used to set a record's fields themselves; a second
-renderer drawing a mesh with no material needs the same numbers, and now
-neither renderer names one.
+shape lays `PaintParams(dst, color, selfLit)` over it on the draw. The
+recording scene's debug shapes and bare meshes used to set a record's fields
+themselves; a second renderer drawing a mesh with no material needed the same
+numbers, and then neither renderer named one.
 
 **Settled, verified while handing over:** the shader reads `animOffset` from each
 instance's own record (`instance.wgsl`, read by `skin.wgsl` and `morph.wgsl`),
-never as a value fixed for the draw. That is the condition ecsscene's
-[Batches](../../../ecsscene/docs/specs/ecsscene.md#batches) rest on for skinned
+never as a value fixed for the draw. That is the condition scene's
+[Batches](../../../scene/docs/specs/scene.md#batches) rest on for skinned
 and morphed Entities.
 
 ---
@@ -459,16 +470,19 @@ From [the cache read path](https://github.com/dvoyni/cog/issues/497).
 `modelunload.go` moved into it in [#530](https://github.com/dvoyni/cog/issues/530).
 There is one `*model.Lookup`, holding the model cache, the texture cache, the
 mesh table every `MeshRef` indexes, the staging arena, the unit meshes, and the
-deferred bake and release queues. Only scene's per-frame temporary mesh stays
-behind: `MeshSource` is reduced to `MeshNone` and `MeshDurable`, scene declares
-`MeshTemporary` past them and `TemporaryMeshID` beside it, and mints its
+deferred bake and release queues. Only the recording scene's per-frame
+temporary mesh stayed behind: `MeshSource` is reduced to `MeshNone` and
+`MeshDurable`, the recording scene declared `MeshTemporary` past them and
+`TemporaryMeshID` beside it, and minted its
 temporaries through `model.MintMesh` into a `model.LayoutCache` and an arena of
-its own, building their refs with `model.NewMeshRef`.
+its own, building their refs with `model.NewMeshRef`. All of that went with it
+in #573.
 
 **A renderer holding the Lookup for writing calls its own methods**, which
-replaced scene's friend accessors: `ModelView` resolves one draw's selectors,
-loading the model if needed; `Mesh` resolves a durable ref; `EnsureUnit` bakes a
-`model.UnitMesh`, which scene maps its shape enum onto; `EnsureBundled` returns
+replaced the recording scene's friend accessors: `ModelView` resolves one
+draw's selectors, loading the model if needed; `Mesh` resolves a durable ref;
+`EnsureUnit` bakes a `model.UnitMesh`, which the recording scene mapped its
+shape enum onto; `EnsureBundled` returns
 the bundled PBR's forward descrs; and `DrainMeshes` applies the staged bakes and
 releases. The two facades and `ModelHandle` below landed in
 [#531](https://github.com/dvoyni/cog/issues/531): the read facade is
@@ -505,11 +519,11 @@ hash. There is no generation, because a stale handle can only come from drawing
 an unloaded model.
 
 **Settled here: whoever holds the load facade also drives the bake and release
-queues.** Today scene's flush holds `Write` on the Lookup and runs the staged
-bakes and deferred releases against gfx's resource queue. After the split each
-renderer does exactly that, at the point scene does it today: scene in its flush,
-and ecsscene in its load System. This follows from the facades and from the two
-renderers never running together.
+queues.** The recording scene's flush held `Write` on the Lookup and ran the
+staged bakes and deferred releases against gfx's resource queue. After the split
+each renderer did exactly that: the recording scene in its flush, and scene in
+its load System, which is where it happens now. This followed from the facades
+and from the two renderers never running together.
 
 ---
 
@@ -536,14 +550,15 @@ import the ECS, and nothing needs to guard that.
   live in `m`.
 - **No alias is kept.** Every caller is in cog, so all of them are rewritten in
   the same landing. This follows [#468](https://github.com/dvoyni/cog/issues/468),
-  which removed scene's alias of `m.Transform`.
+  which removed the recording scene's alias of `m.Transform`.
 
 ---
 
-## scene after the split
+## The recording scene after the split
 
-**scene keeps its name, its `OpQueue` API and its behaviour.** It loses the code
-that moves to `model` and imports `model` instead. It keeps:
+**The recording scene kept its name, its `OpQueue` API and its behaviour**
+through the split, until #573 removed it. It lost the code that moved to
+`model` and imported `model` instead. It kept:
 
 - the queue: `OpQueue`, `ModelDraw`, `MeshDraw` and the recorded records;
 - its `Material`, `MaterialTag`, `PassTag` and material table, with a file
@@ -554,30 +569,29 @@ that moves to `model` and imports `model` instead. It keeps:
 - the per-frame temporary mesh and the shape enum;
 - the Op inspection surface (`Ops`, `Passes`, `PassView`, `BatchView`).
 
-**What scene pays: nothing new.** Its flush already holds write access, and it
-keeps loading on first draw through the load facade. Caching a handle for each
-`ModelRef` to skip the path clean is an optional gain, not a requirement.
+**What the recording scene paid: nothing new.** Its flush already held write
+access, and it kept loading on first draw through the load facade.
 
-**During the carve, scene's root re-exported `model`'s types as temporary
-aliases**, such as `type ModelRef = model.ModelRef`, so cog-examples and ecsscene
-compiled unchanged. The Destination's "keeping its OpQueue API" is about the ops,
-not about these re-exports. **The sweep deleted them**
-([#539](https://github.com/dvoyni/cog/issues/539)): scene's root declares only
-the renderer, and every caller in cog and cog-examples names `model.ModelRef`,
+**During the carve, the recording scene's root re-exported `model`'s types as
+temporary aliases**, such as `type ModelRef = model.ModelRef`, so cog-examples
+and the ECS binding compiled unchanged. The Destination's "keeping its OpQueue
+API" is about the ops, not about these re-exports. **The sweep deleted them**
+([#539](https://github.com/dvoyni/cog/issues/539)): the recording scene's root
+declared only the renderer, and every caller in cog and cog-examples names `model.ModelRef`,
 `model.MeshRef`, `model.ClipPlay`, `model.LightDescr`, `*model.Lookup`,
 `model.NewLookupAccess`, `model.Vertex`, `model.Config`, the `ErrModel…`,
-`ErrMesh…` and spot-light reports and the rest. The aliases scene's own
-`internal/types` kept for the same purpose went too.
+`ErrMesh…` and spot-light reports and the rest. The aliases the recording
+scene's own `internal/types` kept for the same purpose went too.
 
 ---
 
 ## model's root after the sweep
 
 Settled by [#539](https://github.com/dvoyni/cog/issues/539). The carve exported
-about a hundred names from `model`'s root so that scene could name them, and
-left which stay public to the sweep. **A name stays when:**
+about a hundred names from `model`'s root so that the recording scene could
+name them, and left which stay public to the sweep. **A name stays when:**
 
-- scene's or ecsscene's shipping code names it, or an app does (cog-examples);
+- either renderer's shipping code named it, or an app does (cog-examples);
 - it is a report an app type-switches on, which is every `Err…` type;
 - a name that stays names it in a signature or a field, so nothing public is
   unnameable: `MeshSource` (`NewMeshRef`), `BakeTextureFunc` (`EnsureBundled`),
@@ -589,20 +603,21 @@ left which stay public to the sweep. **A name stays when:**
   whole surface, whether or not a renderer reads each one today;
 - it is the plugin's own: `Name`, `Config`, `Lookup`, `StorageReadMount`.
 
-**Kept for scene's tests, which stay where they are.** These are named only by
-tests, and the tests stay in scene because they assert what scene's flush binds
-and uploads, which only scene's harness can drive:
+**Kept for the recording scene's tests, which stayed where they were.** These
+were named only by tests, and the tests stayed in the recording scene because
+they asserted what its flush bound and uploaded, which only its harness could
+drive. The tests went with it in #573; the names stay on the root:
 
 - the bundled material's construction, `PbrDefaults`, `PbrSlots`, `PbrSampler`,
   `NormalSlot`, `PbrState` with the `Alpha…` modes, `BundledPbr`, `SceneShader`
-  and `SceneShaderPath`, from which scene's material and flush tests build the
-  material they expect to see bound (`model`'s own shader tests use the last
-  three as well);
-- `PackVertices`, which scene's vertex tests compare an upload against;
+  and `SceneShaderPath`, from which the recording scene's material and flush
+  tests built the material they expected to see bound (`model`'s own shader
+  tests use the last three as well);
+- `PackVertices`, which its vertex tests compared an upload against;
 - the morph block's word counts (`MorphRangeWords`, `MorphTargetHeaderWords`,
-  `MorphWordSize`), which scene's morph test reads a delta buffer back by;
-- `StorageStride`, `StorageSkinnedStride` and `StandardVertexAttrs`, which
-  scene's end-to-end stride test asserts a resident primitive against.
+  `MorphWordSize`), which its morph test read a delta buffer back by;
+- `StorageStride`, `StorageSkinnedStride` and `StandardVertexAttrs`, which its
+  end-to-end stride test asserted a resident primitive against.
 
 **Taken off the root, 48 names**, because nothing outside `model` names them
 and nothing kept names them in a signature. Each is still declared in
@@ -615,13 +630,13 @@ and nothing kept names them in a signature. Each is still declared in
   `UnitSphereGeometry`, which only `Lookup.EnsureUnit` calls;
 - the default material numbers, which only the conversion and paint use;
 - `SkinnedVertexLayout` and the eight per-attribute storage offsets
-  (`StoragePosition` to `StorageWeights`). scene named the offsets through
+  (`StoragePosition` to `StorageWeights`). The recording scene named the offsets through
   aliases that nothing read, and a custom material reads the stored vertex
   through `VertexDecodePath`, not through offsets.
 
 ---
 
-## ecsscene after the split
+## The ECS scene after the split
 
 From [#495](https://github.com/dvoyni/cog/issues/495), [#497](https://github.com/dvoyni/cog/issues/497),
 [#501](https://github.com/dvoyni/cog/issues/501), [#509](https://github.com/dvoyni/cog/issues/509)
@@ -630,44 +645,46 @@ and [#521](https://github.com/dvoyni/cog/issues/521). Landed in
 and [#537](https://github.com/dvoyni/cog/issues/537), and on main in one merge
 with [#538](https://github.com/dvoyni/cog/issues/538).
 
-**ecsscene repeats scene's path, recording to `gfx` itself, and imports nothing
-of scene.** It is not redesigned to do anything scene does not, except draw
-Batches. Its design record is now its own:
-[`ecsscene.md`](../../../ecsscene/docs/specs/ecsscene.md). In summary:
+**scene repeated the recording scene's path, recording to `gfx` itself, and
+imported nothing of it.** It was not redesigned to do anything the recording
+scene did not, except draw Batches. Its design record is now its own:
+[`scene.md`](../../../scene/docs/specs/scene.md). In summary:
 
 - **Its Components wrap `model`'s values**, `model.ModelRef`, `model.MeshRef`,
   `model.ClipPlay` and `model.LightDescr`, and it does not register `model`'s
   types.
-- **It declares its own copy of scene's camera, layer and pass vocabulary**,
-  with scene's names, shapes and zero values, and its own copy of the frame
+- **It declares its own copy of the recording scene's camera, layer and pass
+  vocabulary**, with its names, shapes and zero values, and its own copy of the frame
   code that does not depend on the shader. What does depend on the shader is
   `model`'s.
-- **Its load System** is the only ecsscene System holding
+- **Its load System** is the only scene System holding
   `kernel.Write[*model.Lookup]`. It keys each changed Entity into a Batch, and
   drives `model`'s bake and release queues.
 - **Its recording System** holds the Lookup only for reading, through the read
-  facade, buckets Entities into [Batches](../../../ecsscene/docs/specs/ecsscene.md#batches)
+  facade, buckets Entities into [Batches](../../../scene/docs/specs/scene.md#batches)
   by those keys, and draws one instanced draw per opaque Batch into
   `*gfx.OpQueue`, through `model`'s packers and binding names.
 - **Its oracle is a recording `gfx.Backend`**, and it publishes no inspection
-  API ([What it is tested against](../../../ecsscene/docs/specs/ecsscene.md#what-it-is-tested-against)).
+  API ([What it is tested against](../../../scene/docs/specs/scene.md#what-it-is-tested-against)).
 
 ---
 
 ## The fountains
 
-From [which examples the redesigned ecsscene ships with](https://github.com/dvoyni/cog/issues/510).
-These live in cog-examples.
+From [which examples the redesigned ECS binding ships with](https://github.com/dvoyni/cog/issues/510).
+These live in cog-examples, and describe them as they stood before #573 removed
+the recording scene.
 
 - **`cmd/ecs/fountain` is rewritten in place**, with the same frame and the same
-  Components doing the same jobs, on `model`'s refs and ecsscene's own types.
-  It composes ecsscene and not scene, and cog-examples' headless harness starts
-  it with `headless.NewECS`, which composes ecs and ecsscene in scene's place.
+  Components doing the same jobs, on `model`'s refs and scene's own types.
+  It composes scene and not the recording scene, and cog-examples' headless
+  harness starts it with `headless.NewECS`, which composes ecs and scene in the
+  recording scene's place.
   Its `reference.png` was recaptured once, on the GPU, after the redesign
   ([#538](https://github.com/dvoyni/cog/issues/538)).
-- **`cmd/scene/fountain` is new: the same frame through `scene.OpQueue`**, with
-  the same seed and `referenceStep`. Its motes are a plain slice, one scene call
-  each with its own tint.
+- **`cmd/scene/fountain` is new: the same frame through the recording scene's
+  `OpQueue`**, with the same seed and `referenceStep`. Its motes are a plain
+  slice, one recording call each with its own tint.
 - **`internal/fountain` holds what they share:** the spray simulation, the clock,
   the xorshift stream, the layout constants, the HUD text, `spray_test.go`, and
   the expected figures for `referenceStep`. Each `cmd` keeps only its recording.
@@ -676,8 +693,8 @@ These live in cog-examples.
 sums the passes labelled with its camera's passes (`ground` and `forward`), which
 leaves out canvas's HUD pass. Passes are passes, batches are draws, and drawn is
 instances. The line reads `passes N  drawn N  batches N`. **The culled figure is
-dropped from both**: fountain culls nothing, and exposing it from ecsscene would
-be new API.
+dropped from both**: fountain culls nothing, and exposing it from the ECS
+binding would be new API.
 
 **What each fountain's tests assert:**
 
@@ -688,23 +705,25 @@ be new API.
 - `TestTheHUDReadsAsInReferencePNG` stays whole, batches figure included.
 - **Against `internal/fountain`'s expected figures:** the passes, their whole
   labels and the instances in each pass must be equal. Draws may differ, and
-  ecsscene's may be lower than scene's, never higher: two motes spawned on one
-  step fade to the same tint, and ecsscene batches them. scene merges them too
-  since [#49](https://github.com/dvoyni/cog/issues/49), so the two now draw the
-  same.
+  the ECS fountain's may be lower than the recording fountain's, never higher:
+  two motes spawned on one step fade to the same tint, and scene batches them.
+  The recording scene merged them too after
+  [#49](https://github.com/dvoyni/cog/issues/49), so the two drew the same.
 
 **Both comparisons assert, since [#538](https://github.com/dvoyni/cog/issues/538).**
 `internal/fountain` holds `ReferencePasses`, each pass's whole label
 (`scene.camera-100.ground`, `scene.camera-100.forward`) and its instances, and
-`ReferenceSceneDraws`, the scene fountain's draws in each pass. The scene
-fountain must equal both. The ecs fountain must equal `ReferencePasses` and stay
+`ReferenceSceneDraws`, the recording fountain's draws in each pass. The
+recording fountain must equal both. The ecs fountain must equal `ReferencePasses` and stay
 at or under `ReferenceSceneDraws` pass by pass. At step 600 the forward pass is
-117 instances in both, drawn in 117 draws by scene and 116 by ecsscene. The
-labels can be compared whole because ecsscene keeps scene's spelling.
+117 instances in both, drawn in 117 draws by the recording scene and 116 by
+scene. The labels can be compared whole because scene keeps the recording
+scene's spelling.
 
-`headless.Engine.Passes` and `Ops` stay for scene's examples, and fail a test
-on an engine from `NewECS`. The fountains do not call them. `Lookup` and
-`LookupDevice` answer through `model`'s facades under either renderer.
+`headless.Engine.Passes` and `Ops` stayed for the recording scene's examples,
+and fail a test on an engine from `NewECS`. The fountains do not call them.
+`Lookup` and `LookupDevice` answer through `model`'s facades under either
+renderer.
 
 ---
 
@@ -715,10 +734,9 @@ on an engine from `NewECS`. The fountains do not call them. `Lookup` and
   format arrives.
 - **A decoded glTF camera**, as a `ModelCamera` data record beside `ModelLight`.
 - **Per-instance properties** ([#520](https://github.com/dvoyni/cog/issues/520)),
-  which would make a tinted crowd one draw in both renderers.
-- **scene caching `ModelHandle`s** to skip the path clean.
+  which would make a tinted crowd one draw.
 - **Shadow descrs** in the model material, one for each variant.
-- **Merging the four test backends** (scene's, ecsscene's, gfx's `fakeBackend`,
+- **Merging the test backends** (scene's, gfx's `fakeBackend`,
   cog-examples' `headless.Backend`).
 
 ---
@@ -733,14 +751,14 @@ Each was ruled out by the ticket named, and most with the sequence that breaks i
   `gfx.VertexAttr` ×10, `gfx.MeshDescr` and more), and a Library may not import
   `slots/gfx`.
 - **`bundles/scene/internal/types/gltf/`.** Right shape, wrong place: two plugins
-  cannot share an `internal/` package, so ecsscene could never import it.
+  cannot share an `internal/` package, so the ECS binding could never import it.
 - **`libs/geometry`.** The generators are gfx-free, but 187 lines do not justify
   a Library's `doc.go`, `id.go`, `internal/` and constructor package.
 
 **The vocabulary** ([#494](https://github.com/dvoyni/cog/issues/494)):
 
-- **A shared renderer bundle** for what both renderers need. It would bring back
-  the coupling the split removes.
+- **A shared renderer bundle** for what both renderers needed. It would have
+  brought back the coupling the split removed.
 - **`model` declaring a camera.** No camera is decoded.
 
 **The decoder seam** ([#496](https://github.com/dvoyni/cog/issues/496)):
@@ -755,9 +773,9 @@ Each was ruled out by the ticket named, and most with the sequence that breaks i
 
 - **`model` importing `bundles/ecs`** to name `ecs.List`. An asset plugin would
   depend on an ECS that a non-ECS game never composes.
-- **ecsscene registering `model`'s types directly.** It claims the one Store each
+- **scene registering `model`'s types directly.** It claims the one Store each
   Go type can have, so a second ECS plugin gets `ErrDuplicateRegistration`. It
-  is recorded in [`ecsscene.md`](../../../ecsscene/docs/specs/ecsscene.md#shapes-that-were-rejected)
+  is recorded in [`scene.md`](../../../scene/docs/specs/scene.md#shapes-that-were-rejected)
   as well.
 
 **Residency** ([#497](https://github.com/dvoyni/cog/issues/497)):
@@ -767,7 +785,7 @@ Each was ruled out by the ticket named, and most with the sequence that breaks i
   the freed entry, so the next draw binds released buffers.
 - **A read lock on today's loading `Lookup`.** Readers A and B both miss
   `fox.glb` and both load it, so it uploads twice. Making both writers
-  serialises ecsscene's Systems, which is a blocker.
+  serialises scene's Systems, which is a blocker.
 - **A per-frame snapshot.** It is still taken under one of those two locks, and
   it copies every resident model every frame.
 - **The app preloads everything, and a miss draws nothing.** An Entity naming a
@@ -775,8 +793,8 @@ Each was ruled out by the ticket named, and most with the sequence that breaks i
 
 **The shader's records** ([#521](https://github.com/dvoyni/cog/issues/521)):
 
-- **ecsscene copies the records.** A shader change that one copy misses still
-  compiles, and that renderer draws garbage.
+- **The ECS binding copies the records.** A shader change that one copy misses
+  still compiles, and that renderer draws garbage.
 - **All of light selection in `model`.** `model` would take a cull mask, and
   layers are the renderer's.
 - **The arena and sort keys in `libs/m`.** They are frame-building tools, not
@@ -788,31 +806,31 @@ Each was ruled out by the ticket named, and most with the sequence that breaks i
   defaults would be written twice and could come to disagree.
 - **Each renderer writes its own animation append loop.** That copies part of the
   layout.
-- **Reshaping ecsscene's copied vocabulary**, such as nesting sun and ambient or
+- **Reshaping the copied vocabulary**, such as nesting sun and ambient or
   renaming a type. That is improving, not splitting.
 
 **Batches and the test oracle** ([#509](https://github.com/dvoyni/cog/issues/509),
-[#501](https://github.com/dvoyni/cog/issues/501)) moved with ecsscene's design
-to [`ecsscene.md` §Shapes that were
-rejected](../../../ecsscene/docs/specs/ecsscene.md#shapes-that-were-rejected).
+[#501](https://github.com/dvoyni/cog/issues/501)) moved with scene's design
+to [`scene.md` §Shapes that were
+rejected](../../../scene/docs/specs/scene.md#shapes-that-were-rejected).
 
 **The examples** ([#510](https://github.com/dvoyni/cog/issues/510)):
 
 - **A 5 000-crate example.** The benches already measure it.
-- **ecsscene versions of scene's other examples.**
+- **ECS versions of the recording scene's other examples.**
 - **Two full copies of the fountain.** A difference in simulation would pass for
   a difference between renderers.
-- **A stats resource published by ecsscene.** It is the inspection surface #501
+- **A stats resource published by the ECS binding.** It is the inspection surface #501
   rejected.
 
 **The order** ([#522](https://github.com/dvoyni/cog/issues/522)):
 
-- **`model` starts as a new bundle beside scene**, with both renderers moving onto
+- **`model` starts as a new bundle beside the recording scene**, with both renderers moving onto
   it later. For a while there would be two caches and two copies of 14.7k lines.
-- **The ecsscene redesign in several landings.** Two recording paths side by side
-  would need a switch.
-- **ecsscene's tests move between the carve and the redesign.** That leaves the
-  carve unguarded for ecsscene.
+- **The ECS binding's redesign in several landings.** Two recording paths side
+  by side would need a switch.
+- **The ECS binding's tests move between the carve and the redesign.** That
+  leaves the carve unguarded for it.
 - **No aliases, with each carve step rewriting its callers.** Every step then
   mixes moving code with renaming.
 - **Permanent aliases.** They give every model type two names.
@@ -834,24 +852,25 @@ has to measure performance, because a carve changes where code lives and not
 what it does.
 
 1. **`ecs.List` becomes `m.List`**, with every caller rewritten and no alias.
-2. **ecsscene's tests move onto the recording backend, and the fountains land.**
-   All of it runs on today's ecsscene, so a carve that breaks ecsscene's drawing
-   shows up at the frame level.
-   - ecsscene's `testBackend` and `RenderEvent` in the harness. The nine op-field
-     tests and three `PassView` tests are rewritten as backend assertions, and
-     the `scene.Op` reads are deleted.
+2. **The ECS binding's tests move onto the recording backend, and the
+   fountains land.** All of it runs on the recording scene as it then was, so a
+   carve that breaks its drawing shows up at the frame level.
+   - The binding's `testBackend` and `RenderEvent` in the harness. The nine
+     op-field tests and three `PassView` tests are rewritten as backend
+     assertions, and the recording scene's `Op` reads are deleted.
    - The five benches gain their drawing bottom half.
    - `internal/fountain`, `cmd/scene/fountain`, and `cmd/ecs/fountain` rewritten
      onto it, with the HUD on `ArmFrameCmd`. The comparison of the two against
      the expected figures does not assert yet.
-3. **The carve: scene moves onto `model`.** Code moves out of scene into
-   `bundles/model`, and scene imports it. Each step repoints scene's root aliases
-   at `model`'s root. ecsscene keeps proxying into `scene.OpQueue` throughout.
+3. **The carve: the recording scene moves onto `model`.** Code moves out of it
+   into `bundles/model`, and it imports it. Each step repoints its root aliases
+   at `model`'s root. The ECS binding keeps proxying into its `OpQueue`
+   throughout.
    `friends.go`'s test accessors move with the code they reach. In this order:
    1. the decoder and geometry. **This spec's first flip lands here**. Landed in
       [#529](https://github.com/dvoyni/cog/issues/529), with `Vertex` and its
       storage layout moved early and the conversion to GPU layouts left in
-      scene until step 2;
+      the recording scene until step 2;
    2. the caches and `Lookup` and the model plugin, which registers the
       resource and takes `Config`. `mesh.md` moves here. Landed in
       [#530](https://github.com/dvoyni/cog/issues/530), bringing the conversion
@@ -866,23 +885,25 @@ what it does.
       [#533](https://github.com/dvoyni/cog/issues/533), with `PaintPbrRecord`.
       Projection maths went to `libs/m` in
       [#534](https://github.com/dvoyni/cog/issues/534).
-4. **The ecsscene redesign, in one landing.** It moves from proxying to recording
-   to gfx, with its own copies of the arena, culling, sorting and vocabulary, the
-   load System, and Batches. ecsscene stops importing scene. The fountain
-   comparison starts asserting. ecsscene's section of this spec moves into its own
+4. **The ECS binding's redesign, in one landing.** It moves from proxying to
+   recording to gfx, with its own copies of the arena, culling, sorting and
+   vocabulary, the load System, and Batches. It stops importing the recording
+   scene. The fountain comparison starts asserting. Its section of this spec
+   moves into its own
    docs, and `ecs.md` §Binding is brought up to date. Built on the integration
    branch `model/ecsscene-redesign` as [#535](https://github.com/dvoyni/cog/issues/535)
    (the Components and the vocabulary), [#536](https://github.com/dvoyni/cog/issues/536)
    (the load System) and [#537](https://github.com/dvoyni/cog/issues/537) (the
    recording System), and landed on main in one merge with
    [#538](https://github.com/dvoyni/cog/issues/538), which moved the fountain
-   onto ecsscene alone and made its comparison assert. ecsscene's design is
-   now [`ecsscene.md`](../../../ecsscene/docs/specs/ecsscene.md).
-5. **The sweep.** Every caller in cog and cog-examples names `model.X`, scene's
-   temporary aliases are deleted, and `scene.md` is cut down to the renderer.
+   onto the ECS binding alone and made its comparison assert. Its design is
+   now [`scene.md`](../../../scene/docs/specs/scene.md).
+5. **The sweep.** Every caller in cog and cog-examples names `model.X`, the
+   recording scene's temporary aliases are deleted, and its spec is cut down to
+   the renderer.
    Landed in [#539](https://github.com/dvoyni/cog/issues/539), which also took
    48 names nobody outside `model` used off `model`'s root ([model's root after
-   the sweep](#models-root-after-the-sweep)), and moved scene.md's sections on
+   the sweep](#models-root-after-the-sweep)), and moved that spec's sections on
    what is `model`'s to the end of this document.
 
 ---
@@ -893,27 +914,31 @@ what it does.
   that would only serve one.
 - **An offline asset pipeline**, or any consumer outside the cog module.
 - **Per-instance properties** ([#520](https://github.com/dvoyni/cog/issues/520)).
-- **scene merging separate calls** ([#49](https://github.com/dvoyni/cog/issues/49)),
+- **The recording scene merging separate calls** ([#49](https://github.com/dvoyni/cog/issues/49)),
   as part of the split. It landed afterwards as its own change.
-- **Running scene and ecsscene together**, and detecting a stale `ModelHandle`.
-  Both are undefined behaviour by the standing rules.
-- **Merging the four test backends.**
+- **Detecting a stale `ModelHandle`.** It is undefined behaviour by the
+  standing rule.
+- **Merging the test backends.**
 
 ---
 
 ## The model contract, moved from scene.md
 
-> **Moved from [`scene.md`](../../../scene/docs/specs/scene.md) by
+> **Moved from the recording scene's `scene.md` by
 > [#539](https://github.com/dvoyni/cog/issues/539).** The sections from here
-> to the end were scene's specification of what is now `model`'s: the glTF
-> loader and residency, mesh baking, animation, the lights' packing and cap,
-> the bundled PBR material, the Lookup facade and the shader-side contract.
-> They keep their text, their ticket citations and their amendments, so
-> "scene" in them often names the code that is now `model`'s, and file
-> paths and line numbers are as they were when each was written. Names were
-> rewritten: a `scene.X` that is `model`'s now reads `model.X`. What is still
-> scene's in each area - the draw calls, the light culling and layer test, and
-> the flush that drives the Lookup - stays in `scene.md`, which links here.
+> to the end were the recording scene's specification of what is now
+> `model`'s: the glTF loader and residency, mesh baking, animation, the lights'
+> packing and cap, the bundled PBR material, the Lookup facade and the
+> shader-side contract. They keep their text, their ticket citations and their
+> amendments, so "scene" in them often names the code that is now `model`'s,
+> or the recording scene that [#573](https://github.com/dvoyni/cog/issues/573)
+> removed - its `ModelDraw`, `MeshDraw`, `TemporaryMesh`, cameras and flush -
+> and file paths and line numbers are as they were when each was written.
+> Names were rewritten: a `scene.X` that is `model`'s now reads `model.X`. What
+> was the recording scene's in each area - the draw calls, the light culling and
+> layer test, and the flush that drove the Lookup - went with it; the renderer
+> that ships, and its own design record, is
+> [`scene.md`](../../../scene/docs/specs/scene.md).
 
 ---
 
@@ -922,8 +947,9 @@ what it does.
 ([glTF model draw semantics and loading](https://github.com/dvoyni/cog/issues/14),
 [glTF 2.0 feature inventory and loader choice](https://github.com/dvoyni/cog/issues/5))
 
-`ModelDraw` is scene's recording call, and is specified in
-[scene.md](../../../scene/docs/specs/scene.md#gltf-models).
+`ModelDraw` was the recording scene's call, removed with it in #573. A model
+is drawn today by scene's `Model` Component; see
+[scene.md](../../../scene/docs/specs/scene.md).
 
 ### Loader
 
@@ -1140,7 +1166,7 @@ replacement that reads the bundled block supplies what it reads.
 paint, and a param naming one of its numbers changes it, as a model's
 overrides do.
 
-**This is scene's contract. ecsscene overlays instead**
+**This was the recording scene's contract. scene overlays instead**
 ([#568](https://github.com/dvoyni/cog/issues/568)): its `Material` is laid over
 each primitive's ingredients — the tag's shader or the default scene shader
 under the primitive's variant, the file's params overlaid by name with the
@@ -1148,7 +1174,7 @@ default shader's and the tag's, the file's record with the same params merged
 over it, and the file's state unless the tag names one — and a `Mesh` takes the
 same path over `BundledIngredients`, its `Params` merged into the record too.
 Wholesale replacement is then a shader declaring none of the file's bindings.
-See [ecsscene.md §Materials overlay the file](../../../ecsscene/docs/specs/ecsscene.md#materials-overlay-the-file).
+See [scene.md §Materials overlay the file](../../../scene/docs/specs/scene.md#materials-overlay-the-file).
 
 ### Loading
 
@@ -1258,8 +1284,9 @@ makes the **whole model never-cull, reported once**.
 ([Buffer-built models: static and dynamic](https://github.com/dvoyni/cog/issues/22),
 [Buffer update strategy: static, per-frame, and dynamic](https://github.com/dvoyni/cog/issues/3))
 
-The recording half, `TemporaryMesh` and `MeshDraw`, is scene's and is specified in
-[scene.md](../../../scene/docs/specs/scene.md#buffer-built-meshes).
+The recording half, `TemporaryMesh` and `MeshDraw`, was the recording scene's,
+and went with it in #573; a baked mesh is drawn today by scene's `Mesh`
+Component.
 
 ### Vertices
 
@@ -1585,14 +1612,13 @@ machine, err := model.NewClipMachine(clips, []model.ClipState{
 
 machine.Fire("run")                        // gameplay decides
 events = machine.Step(dt, events[:0])      // gameplay owns time
-draw.Plays = machine.Plays(plays[:0])      // scene
-machine.PlaysInto(&animation.Plays)        // ecsscene
+machine.PlaysInto(&animation.Plays)        // scene's Animation Component
 ```
 
-**A clip machine is a plain value the caller keeps.** A scene game holds one in
-a field or a map, and an ecsscene game holds one as a Component. It is not a
-resource, not a System, and nothing about it lives in `anim`. Animation stays
-stateless as far as either renderer is concerned: the machine is gameplay's own
+**A clip machine is a plain value the caller keeps.** A game holds one in a
+field, a map or a Component. It is not a resource, not a System, and nothing
+about it lives in `anim`. Animation stays stateless as far as the renderer is
+concerned: the machine is gameplay's own
 bookkeeping, and what reaches a draw is the same `[]ClipPlay` a hand-written
 crossfade would build. Before it, every consumer did build that by hand, the
 animated demo's fox and both fountains' foxes each scheduling weights of its
@@ -1761,7 +1787,7 @@ every shaded pixel in the pass, which is what makes the cap load-bearing rather
 than decorative.
 
 The sun and hemispheric ambient are per-camera fields
-(see [Cameras and passes](../../../scene/docs/specs/scene.md#cameras-and-passes)); the array holds point and spot
+(see scene's `Camera` Component); the array holds point and spot
 lights only, which is what makes the record branchless and 48 bytes with **no
 `kind` field**.
 
@@ -1884,8 +1910,8 @@ would type the sampler wrongly anyway, so the reservation would not even be
 usable as reserved.
 
 Which lights a pass offers - culling against the pass's frustum and the
-layer test - is scene's, and stays in
-[scene.md §Lights](../../../scene/docs/specs/scene.md#lights).
+layer test - is scene's, and is described in its
+[README](../../../scene/docs/README.md).
 
 ---
 
@@ -2590,8 +2616,8 @@ return vec4(sceneShadeSurface(r.surface) + r.emissive, r.alpha);
 ([scene: custom shader contract and prelude](https://github.com/dvoyni/cog/issues/48),
 over [gfx: implement the WGSL shader preprocessor](https://github.com/dvoyni/cog/issues/144))
 
-A caller may supply a whole `gfx.MaterialDescr` with its own WGSL, under scene
-as a `scene.Material` and under ecsscene as an `ecsscene.MaterialTag`. gfx
+A caller may supply its own WGSL, as the `Shader` of a `scene.MaterialTag`
+in a `scene.Material`, beside the tag's `State` and `Params`. gfx
 preprocesses it, so it `//#include`s what model publishes by absolute storage
 name and lights with the engine's own functions instead of re-typing them.
 Include-once is by resolved path and the flattened module is line-preserving,
@@ -2605,11 +2631,11 @@ the five lists and the sources together.
 
 | constant | source | declares | bindings |
 | --- | --- | --- | --- |
-| `model.VertexDecodePath` | `builtin/scene/vertexdecode.wgsl` | `sceneOctDecode`, `sceneDecodeNormal`, `sceneDecodeTangent`, `sceneDecodeUV`; three `SCENE_` constants | none |
-| `model.FramePath` | `builtin/scene/frame.wgsl` | `SceneFrame`, `SceneLight`, `SceneLightSample`; `sceneCameraPosition`, `sceneViewDirection`, `sceneAmbient`, `sceneSun`, `sceneLightCount`, `sceneLightSample`; `//#const SCENE_MAX_LIGHTS` | `sceneFrame`, storage, `@group(0) @binding(0)` |
-| `model.PbrPath` | `builtin/scene/pbr.wgsl` | `SceneSurface`, `ScenePbrSurface`; `SCENE_PI`, `SCENE_DIELECTRIC_F0`; the BRDF terms, `sceneEnvBRDFApprox`, `scenePunctualContribution`, `sceneShadeSurface` | none of its own; it includes `frame.wgsl` |
-| `model.VertexStagePath` | `builtin/scene/vertexstage.wgsl` | `vs_main`; through its includes the vertex structs and everything the stage reads, each named `scene`, `Scene` or `SCENE_` | groups 0 and, under the variant's defines, 2, exactly as the bundled shader |
-| `model.FragmentStagePath` | `builtin/scene/fragmentstage.wgsl` | `scenePbrFragment`; through its includes `SceneVertexOut`, `PbrPath` and `FramePath` | `scenePbrMaterial` and the five textures and samplers, group 1 |
+| `model.VertexDecodePath` | `builtin/model/vertexdecode.wgsl` | `sceneOctDecode`, `sceneDecodeNormal`, `sceneDecodeTangent`, `sceneDecodeUV`; three `SCENE_` constants | none |
+| `model.FramePath` | `builtin/model/frame.wgsl` | `SceneFrame`, `SceneLight`, `SceneLightSample`; `sceneCameraPosition`, `sceneViewDirection`, `sceneAmbient`, `sceneSun`, `sceneLightCount`, `sceneLightSample`; `//#const SCENE_MAX_LIGHTS` | `sceneFrame`, storage, `@group(0) @binding(0)` |
+| `model.PbrPath` | `builtin/model/pbr.wgsl` | `SceneSurface`, `ScenePbrSurface`; `SCENE_PI`, `SCENE_DIELECTRIC_F0`; the BRDF terms, `sceneEnvBRDFApprox`, `scenePunctualContribution`, `sceneShadeSurface` | none of its own; it includes `frame.wgsl` |
+| `model.VertexStagePath` | `builtin/model/vertexstage.wgsl` | `vs_main`; through its includes the vertex structs and everything the stage reads, each named `scene`, `Scene` or `SCENE_` | groups 0 and, under the variant's defines, 2, exactly as the bundled shader |
+| `model.FragmentStagePath` | `builtin/model/fragmentstage.wgsl` | `scenePbrFragment`; through its includes `SceneVertexOut`, `PbrPath` and `FramePath` | `scenePbrMaterial` and the five textures and samplers, group 1 |
 
 **The two stages make an app shader the bundled PBR plus a step**
 ([#568](https://github.com/dvoyni/cog/issues/568)). `scene.wgsl` is now
@@ -2635,7 +2661,7 @@ may name it. A material that needs the instance record declares its own copy of
 
 **The prelude is split, not monolithic, because a declared binding must be
 bound.** Including `PbrPath` declares exactly one binding, `sceneFrame`, and
-both scene and ecsscene bind it on every draw, so the prelude costs a material
+scene binds it on every draw, so the prelude costs a material
 nothing it could fail to fill. A monolithic prelude would declare the instance,
 material and animation buffers too, and oblige every consumer to fill group 2
 for a debug line with no model. Getting it wrong is no longer invisible: since
@@ -2646,7 +2672,7 @@ and binding, once per shader and parameter. The draw is lost; the frame is not.
 
 **`SCENE_MAX_LIGHTS` needs no supply from an includer.** `frame.wgsl` declares
 it as `//#const SCENE_MAX_LIGHTS=16`, which is `model.MaxLights`, and the
-renderers pack exactly that many light records whatever material a draw uses.
+renderer packs exactly that many light records whatever material a draw uses.
 The bundled shader supplies `MaxLights` over the default through
 `gfx.ShaderConst`; a caller material supplies nothing and gets the same number.
 Supplying any other value reads a light array the frame does not hold. A test
@@ -2665,7 +2691,7 @@ variant holds seven of the eight storage buffers the browser floor allows, so:
   the app adds its own members to it by composing it first from the three
   published `Material…Path` sources.
 
-A test builds a material that includes `PbrPath` under each renderer and
+A test builds a material that includes `PbrPath` under scene and
 reflects the module gfx handed the backend: one binding, `sceneFrame`, storage at
 0/0, with a `MaxLights` light array. The `procedural` demo is the proving
 consumer: it shades through `sceneShadeSurface` and declares only

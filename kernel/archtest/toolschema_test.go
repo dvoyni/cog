@@ -15,7 +15,6 @@ import (
 	"github.com/dvoyni/cog/bundles/anim/animplugin"
 	"github.com/dvoyni/cog/bundles/canvas/canvasplugin"
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
-	"github.com/dvoyni/cog/bundles/ecsscene/ecssceneplugin"
 	"github.com/dvoyni/cog/bundles/input/inputplugin"
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/bundles/mcp/mcpplugin"
@@ -48,8 +47,8 @@ func TestToolSchemas_WhatAnAgentReadsIsPinned(t *testing.T) {
 		return err
 	}).WithPlugins(
 		storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{&detachedBackend{}},
-		inputplugin.New(), animplugin.New(), canvasplugin.New(), modelplugin.New(), sceneplugin.New(), uiplugin.New(),
-		ecsplugin.New(), ecssceneplugin.New(), mcpplugin.New(),
+		inputplugin.New(), animplugin.New(), canvasplugin.New(), modelplugin.New(), uiplugin.New(),
+		ecsplugin.New(), sceneplugin.New(), mcpplugin.New(),
 	)
 	stopped := make(chan struct{})
 	go func() { engine.Run(); close(stopped) }()

@@ -26,7 +26,7 @@ import (
 // the same eight bytes, f16 is 50x worse than 16-bit fixed point against a
 // per-primitive range.
 //
-// The decode is the GPU's, in builtin/scene/morph.wgsl; what is here is the
+// The decode is the GPU's, in builtin/model/morph.wgsl; what is here is the
 // half that runs at load.
 
 // The block one morphed primitive occupies in the model's word array, starting

@@ -74,10 +74,9 @@ error handling.
     backend contract, frame capture, and per-tick snapshots.
 - [`canvas`](bundles/canvas/docs/README.md): layered 2D sprites, text, primitives, and custom
     triangles over gfx, with a snapshot of what a tick recorded.
-- [`scene`](bundles/scene/docs/README.md): declarative 3D cameras, glTF models, buffer-built
-    meshes, punctual lights, and debug shapes over gfx.
-- [`ecsscene`](bundles/ecsscene/docs/README.md): the ECS's renderer over model — components
-    holding model's refs, batched and recorded into gfx; an app composes it instead of scene.
+- [`scene`](bundles/scene/docs/README.md): the 3D renderer, the ECS's binding of model —
+    camera, glTF model, baked mesh, light and debug-shape Components, batched and
+    recorded into gfx.
 - [`ui`](bundles/ui/docs/README.md): immediate-mode layout, interaction, canvas-backed visual
     processing, and a snapshot of what layout resolved.
 - [`gogpu`](extensions/gogpu/docs/README.md): window, input, frame timing and WebGPU system

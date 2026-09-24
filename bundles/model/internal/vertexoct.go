@@ -18,7 +18,7 @@ import (
 // arithmetic on the stored word alone.
 //
 // The decode is not here. It runs on the GPU, published as WGSL at
-// builtin/scene/vertexdecode.wgsl (VertexDecodePath) so an app writing its own
+// builtin/model/vertexdecode.wgsl (VertexDecodePath) so an app writing its own
 // scene material reads the same directions the bundled one does rather than a
 // re-typed approximation. What is here is only the half that runs at bake, and
 // bundles/model/internal/vertexoct_test.go holds the transcription that proves

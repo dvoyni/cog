@@ -37,7 +37,7 @@ type entry struct {
 // bookkeeping nobody outside the binding reads.
 //
 // It is a resource the plugin owns rather than something the System's closure
-// captured, for the reason ecsscene's scratch is: anything a System keeps
+// captured, for the reason scene's scratch is: anything a System keeps
 // between calls belongs in its lock set, so the kernel, not a comment, is what
 // keeps two holders apart.
 type table struct {

@@ -97,8 +97,8 @@ type ClipEvent struct {
 
 // ClipMachine is a clip state machine: the caller keeps it, fires triggers
 // into it and steps it each tick, and it hands back the frame's clip plays and
-// what happened on the way. It is a plain value, so a scene game keeps one in
-// a field and an ecsscene game keeps one as a Component.
+// what happened on the way. It is a plain value, so a game keeps one in a
+// field, a map or a Component.
 //
 // One type is both the definition and the runtime state. Its tables are
 // m.Lists, which a copy shares read-only, so copying a machine to many
@@ -297,8 +297,8 @@ func (c *ClipMachine) Step(dt float32, events []ClipEvent) []ClipEvent {
 	return events
 }
 
-// Plays appends the live plays to dst, the current state first, for scene's
-// ModelDraw.Plays. The weights sum to one, though nothing needs them to.
+// Plays appends the live plays to dst, the current state first, for a caller
+// that keeps its plays in a slice. The weights sum to one, though nothing needs them to.
 func (c *ClipMachine) Plays(dst []ClipPlay) []ClipPlay {
 	if c.states.Len() == 0 {
 		return dst
@@ -311,7 +311,7 @@ func (c *ClipMachine) Plays(dst []ClipPlay) []ClipPlay {
 	return dst
 }
 
-// PlaysInto fills a fixed array with the live plays, for ecsscene's
+// PlaysInto fills a fixed array with the live plays, for scene's
 // Animation. Unused slots get the empty play, whose empty Clip draws nothing.
 func (c *ClipMachine) PlaysInto(dst *[MaxClipPlays]ClipPlay) {
 	*dst = [MaxClipPlays]ClipPlay{}

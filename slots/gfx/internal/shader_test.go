@@ -121,14 +121,14 @@ func TestShaderLabelCarriesTheSupply(t *testing.T) {
 		descr ShaderDescr
 		want  string
 	}{
-		"no supply": {ShaderWithResource("builtin/scene/scene.wgsl"), "builtin/scene/scene.wgsl"},
+		"no supply": {ShaderWithResource("builtin/model/scene.wgsl"), "builtin/model/scene.wgsl"},
 		"defines": {
-			ShaderWithResource("builtin/scene/scene.wgsl", ShaderDefine("SCENE_SKIN"), ShaderDefine("SCENE_MORPH")),
-			"builtin/scene/scene.wgsl [SCENE_MORPH SCENE_SKIN]",
+			ShaderWithResource("builtin/model/scene.wgsl", ShaderDefine("SCENE_SKIN"), ShaderDefine("SCENE_MORPH")),
+			"builtin/model/scene.wgsl [SCENE_MORPH SCENE_SKIN]",
 		},
 		"const": {
-			ShaderWithResource("builtin/scene/scene.wgsl", ShaderConst("SCENE_MAX_LIGHTS", "4")),
-			"builtin/scene/scene.wgsl [SCENE_MAX_LIGHTS=4]",
+			ShaderWithResource("builtin/model/scene.wgsl", ShaderConst("SCENE_MAX_LIGHTS", "4")),
+			"builtin/model/scene.wgsl [SCENE_MAX_LIGHTS=4]",
 		},
 		"inline text": {ShaderWithText("fn main() {}", ShaderDefine("HQ")), "gfx.shader [HQ]"},
 	}

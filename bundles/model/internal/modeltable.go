@@ -458,8 +458,7 @@ func bindModelMaterial(
 // slot for it.
 //
 // Model geometry lives in the same mesh table as BakeMesh's, rather than in a
-// table of its own, because the sort key is a dense meshID and BatchView
-// reports one: a second id space would either collide in the key or need a
+// table of its own, because the sort key is a dense meshID: a second id space would either collide in the key or need a
 // third source bit. It also means freeing a model releases its meshes through
 // the machinery that already exists.
 //

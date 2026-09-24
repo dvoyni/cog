@@ -7,8 +7,8 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 )
 
-// ModelRef names what a scene- or node-scoped query is asking about, mirroring
-// ModelDraw's own selectors field for field.
+// ModelRef names what a scene- or node-scoped query is asking about: a glTF
+// path and, optionally, a scene and a node inside it.
 //
 // It is a struct rather than three bare strings because the bare form has a
 // transposition bug that compiles: Bounds(path, "crate", "") and
@@ -141,8 +141,8 @@ func (la LookupDeviceAccess) Nodes(ref ModelRef, dst []string) ([]string, bool) 
 }
 
 // Bounds returns a ref's bounding sphere as xyz centre and w radius - the same
-// m.Vec4 convention MeshDraw.Bounds uses, so the name means one thing across
-// the plugin - and reports whether it is real.
+// m.Vec4 convention scene's Mesh.Bounds uses, so the name means one thing
+// across the engine - and reports whether it is real.
 //
 // It is local space post-re-rooting: a Node ref answers in the space a draw of
 // that node would place it in, with the node's authored world transform already

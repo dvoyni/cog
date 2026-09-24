@@ -8,7 +8,7 @@ import (
 )
 
 // octDecode is the WGSL decode written in Go, and it exists because nothing in
-// this tree can run WGSL: builtin/scene/vertexdecode.wgsl is the shipping
+// this tree can run WGSL: builtin/model/vertexdecode.wgsl is the shipping
 // decoder and this is a transcription of it, line for line, kept beside the
 // encoder it has to invert.
 //

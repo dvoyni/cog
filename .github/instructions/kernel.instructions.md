@@ -114,7 +114,7 @@ that type's file, like any other method, because gostyle places a method with
 its type. That is an edge case, not a way around the rule — a System is a plain
 function unless it genuinely needs its receiver's state, as ecsphysics2d's
 Index, Detect, Solve and Sleep need the plugin's scratch and settings, and
-ecsscene's debug Systems their shape kind's table.
+scene's debug Systems their shape kind's table.
 
 ### The Factory Closure Is Shared
 
@@ -461,8 +461,8 @@ registrar.ProvideAdapter[canvas.McpProvider](mcp.Provider(provider{}))
   `McpProvider` unconditionally.
 - **A test composing a plugin that requires a Port composes an Adapter too**: a
   small fixture plugin whose `Register` provides it under a test-local Adapter
-  type (the `backendAdapter` providing `testGfxBackend` in the canvas, scene,
-  ecsscene and ui tests). A `_test.go` file is outside the `adapters.go` check.
+  type (the `backendAdapter` providing `testGfxBackend` in the canvas, scene
+  and ui tests). A `_test.go` file is outside the `adapters.go` check.
 
 A plugin's mcp capabilities are an unexported `provider{}` in its `internal/`,
 contributed from its `Register`.
@@ -535,7 +535,7 @@ In a **root**:
   [`gostyle.instructions.md`](gostyle.instructions.md) rule; never in
   `internal/types`, which holds no methods. The root's `components.go` aliases
   every one (`type Mesh = internal.Mesh`). A type that only a Component's field names,
-  such as ecsscene's `MaterialTag`, is a value type and goes by `types.go`.
+  such as scene's `MaterialTag`, is a value type and goes by `types.go`.
 
   **A Component is data, and every field it has is exported**, so any
   Component serialises whole. A field that carries an invariant — Shape's

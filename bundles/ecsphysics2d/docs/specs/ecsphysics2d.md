@@ -893,7 +893,7 @@ assert on this path at all — its `"Unsolvable constraint"` assert is in
 ### The app orders everything else
 
 The plugin chains its own five Systems and exports their identity types; it names
-neither `input` nor `ecsscene` and adds no ordering against them, sitting in the
+neither `input` nor `scene` and adds no ordering against them, sitting in the
 ordinary group, already after input's `First`.
 
 - Gameplay that adds `Force` or moves Bodies: `Before[Integrate]`.
@@ -904,7 +904,7 @@ ordinary group, already after input's `First`.
 - Reaction Systems: after the filters. They may run alongside Solve and each
   other, except those reading this tick's Impulses, which must be after Solve.
 - The render copy from `Position` into the app's own Transform: after physics and
-  `Before[ecsscene.RecordOnUpdate]`.
+  `Before[scene.RecordOnUpdate]`.
 
 Ordering needs **no new vocabulary**: `Registrar.Subscribe`'s
 `Before`/`After`/`First`/`Last` carry over, and "physics after input, before
@@ -1885,8 +1885,9 @@ replaced costs 17–24 ns.
 that.** The kernel scheduler keeps a `readers` count beside `writers` and rejects
 only a write request or a resource already held for write, so any number of `Read`
 holders run together. Queries are reads. The earlier finding that *"one
-frame-local Resource is one write lock"* overgeneralised from `scene`'s
-`*scene.OpQueue`, which serialises because it is declared `Write`.
+frame-local Resource is one write lock"* overgeneralised from the ECS scene
+binding's write on the `*scene.OpQueue` of the recording renderer #573 removed,
+which serialises because it is declared `Write`.
 
 ### Filtering, two-sided
 

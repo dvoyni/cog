@@ -70,8 +70,8 @@ type MeshRef = internal.MeshRef
 // PointLight and SpotLight, at whatever world transform it drew the model at.
 type ModelLight = internal.ModelLight
 
-// ModelRef names what a scene- or node-scoped query is asking about, mirroring
-// ModelDraw's own selectors field for field.
+// ModelRef names what a scene- or node-scoped query is asking about: a glTF
+// path and, optionally, a scene and a node inside it.
 //
 // It is a struct rather than three bare strings because the bare form has a
 // transposition bug that compiles: Bounds(path, "crate", "") and
@@ -103,8 +103,8 @@ type ClipInfo = internal.ClipInfo
 
 // ClipMachine is a clip state machine: the caller keeps it, fires triggers into
 // it and steps it each tick, and it hands back the frame's clip plays and what
-// happened on the way. It is a plain storable value, so a scene game keeps one
-// in a field and an ecsscene game keeps one as a Component. Its tables are
+// happened on the way. It is a plain storable value, so a game keeps one in a
+// field, a map or a Component. Its tables are
 // m.Lists, so a copy shares them read-only and then steps on its own.
 type ClipMachine = internal.ClipMachine
 
@@ -286,7 +286,7 @@ const (
 	// FramePath is the storage path of the pass's view of the world. It
 	// declares the structs SceneFrame, SceneLight and SceneLightSample; the
 	// binding sceneFrame, read-only storage at @group(0) @binding(0), which
-	// scene and ecsscene bind on every draw; the functions sceneCameraPosition,
+	// scene binds on every draw; the functions sceneCameraPosition,
 	// sceneViewDirection, sceneAmbient, sceneSun, sceneLightCount and
 	// sceneLightSample; and the //#const SCENE_MAX_LIGHTS, whose default is
 	// MaxLights, so an includer supplies nothing. Do not declare those names

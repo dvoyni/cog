@@ -18,7 +18,7 @@ func TestTheBundledShaderIsMountedByModel(t *testing.T) {
 		WithPlugins(storageplugin.New(), permanentAdapter{}, New(), mountProbe{})
 	go engine.Run()
 	<-engine.Ready()
-	names, err := fs.Glob(shaderFS, "builtin/scene/*.wgsl")
+	names, err := fs.Glob(shaderFS, "builtin/model/*.wgsl")
 	if err != nil || len(names) == 0 {
 		t.Fatalf("glob the embedded sources: %v, %v", names, err)
 	}

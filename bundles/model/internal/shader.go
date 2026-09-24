@@ -11,7 +11,7 @@ const (
 	// points, composed by #include from the ten sources beside it. One vertex
 	// stage and one fragment stage, because the backend hardcodes vs_main and
 	// fs_main; the variants differ only in which declarations survive.
-	SceneShaderPath = "builtin/scene/scene.wgsl"
+	SceneShaderPath = "builtin/model/scene.wgsl"
 
 	// VertexDecodePath is the one published source of the ten: the decode for
 	// the four attributes a storage vertex holds encoded, the normal as oct32
@@ -41,25 +41,25 @@ const (
 	// It declares no binding and no struct, so including it is safe from an
 	// extending material and a non-extending one alike. Its header says the
 	// same; do not declare those names again.
-	VertexDecodePath = "builtin/scene/vertexdecode.wgsl"
+	VertexDecodePath = "builtin/model/vertexdecode.wgsl"
 
 	// FramePath is the per-pass view of the world: the camera, the sun, the
 	// hemispheric ambient and the punctual lights, and the accessors that read
 	// them. A custom material includes it by this absolute storage name to
-	// light with the frame both renderers pack rather than a hand-copied
+	// light with the frame the renderer packs rather than a hand-copied
 	// prefix of it, which drifts the first time a field is added in front of
 	// the ones it reads.
 	//
 	// It declares:
 	//   - the structs SceneFrame, SceneLight and SceneLightSample;
 	//   - one binding, sceneFrame, a read-only storage buffer at @group(0)
-	//     @binding(0), which scene and ecsscene both bind on every draw, so
+	//     @binding(0), which scene binds on every draw, so
 	//     declaring it costs a material nothing and leaves nothing unfilled;
 	//   - the functions sceneCameraPosition, sceneViewDirection, sceneAmbient,
 	//     sceneSun, sceneLightCount and sceneLightSample;
 	//   - the //#const SCENE_MAX_LIGHTS, whose default of 16 is MaxLights. An
-	//     includer supplies nothing: the default is the size both renderers
-	//     pack, and a gfx.ShaderConst naming any other number would read a
+	//     includer supplies nothing: the default is the size the renderer
+	//     packs, and a gfx.ShaderConst naming any other number would read a
 	//     light array the frame does not hold.
 	//
 	// sceneFrame is the one storage binding the prelude costs, and it is one
@@ -67,7 +67,7 @@ const (
 	// variant holds seven of the eight storage buffers the browser floor
 	// allows, so a caller material over the bundled stages has one of its own
 	// to spend. Do not declare those names again.
-	FramePath = "builtin/scene/frame.wgsl"
+	FramePath = "builtin/model/frame.wgsl"
 
 	// PbrPath is the bundled material's BRDF and lighting loop: everything
 	// between a shaded surface and the radiance leaving it. A custom material
@@ -89,7 +89,7 @@ const (
 	// FramePath declares, sceneFrame among it, once: include-once is by
 	// resolved path, so a material that includes both gets one copy. Do not
 	// declare those names again.
-	PbrPath = "builtin/scene/pbr.wgsl"
+	PbrPath = "builtin/model/pbr.wgsl"
 
 	// VertexStagePath is the bundled vertex stage whole: vs_main, which
 	// decodes, deforms and places a vertex exactly as the bundled shader does
@@ -110,7 +110,7 @@ const (
 	// The variant is the renderer's: it supplies SCENE_SKIN and SCENE_MORPH
 	// for the draw's geometry whatever shader is in effect, so an includer
 	// declares neither. Do not declare those names again.
-	VertexStagePath = "builtin/scene/vertexstage.wgsl"
+	VertexStagePath = "builtin/model/vertexstage.wgsl"
 
 	// FragmentStagePath is the bundled fragment stage as a function a custom
 	// fs_main calls: scenePbrFragment(in, frontFacing) is the surface the
@@ -133,7 +133,7 @@ const (
 	// this. Group 3 is left for the includer's own bindings, which ride as
 	// params on the Material or on the default scene shader. Do not declare
 	// those names again.
-	FragmentStagePath = "builtin/scene/fragmentstage.wgsl"
+	FragmentStagePath = "builtin/model/fragmentstage.wgsl"
 
 	// MaterialProloguePath opens the material's uniform block: it declares
 	// the struct ScenePbrMaterial, and nothing after its opening brace.
@@ -151,7 +151,7 @@ const (
 	// members fall outside any struct. A shader extending an extension
 	// includes that extension's fields source in its own, so extensions stack.
 	// Do not declare those names again.
-	MaterialProloguePath = "builtin/scene/materialprologue.wgsl"
+	MaterialProloguePath = "builtin/model/materialprologue.wgsl"
 
 	// MaterialFieldsPath is the inside of the material's uniform block: the
 	// members baseColorFactor, emissiveFactor, baseColorTransform,
@@ -162,12 +162,12 @@ const (
 	// 160 bytes of the 256 gfx allows a block. It is not WGSL on its own; an
 	// extension's fields source includes it first and names its own members
 	// with a prefix of its own after it. Do not declare those names again.
-	MaterialFieldsPath = "builtin/scene/materialfields.wgsl"
+	MaterialFieldsPath = "builtin/model/materialfields.wgsl"
 
 	// MaterialEpiloguePath closes the material's uniform block and declares
 	// its binding, scenePbrMaterial, the uniform block at @group(1)
 	// @binding(0). Do not declare those names again.
-	MaterialEpiloguePath = "builtin/scene/materialepilogue.wgsl"
+	MaterialEpiloguePath = "builtin/model/materialepilogue.wgsl"
 )
 
 // SceneShader describes one variant of the bundled shader.

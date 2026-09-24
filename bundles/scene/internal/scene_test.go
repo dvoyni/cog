@@ -2,15 +2,14 @@ package internal
 
 import (
 	"io/fs"
-	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
-	"time"
 
+	"github.com/dvoyni/cog/bundles/ecs"
+	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/model/modelplugin"
-
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -21,424 +20,217 @@ import (
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
-// testBackend is a Backend that mints ids and records the passes it was asked
-// to encode. Everything scene decides is decided before this is reached, which
-// is what makes the whole ticket assertable with no GPU.
-type testBackend struct {
-	// shaderLayouts is each compiled shader's narrowed stand-in layout, kept
-	// per id because the scene variants declare different bindings.
-	shaderLayouts map[gfx.ShaderID]gfx.ShaderLayout
-	// sources is every module the backend compiled, flattened, in order, which
-	// is what a test reflects to see what a custom material declared.
-	sources     []string
-	nextTexture gfx.TextureID
-	nextBuffer  gfx.BufferID
-	nextID      uint32
-	passes      []gfx.PassDesc
-	presents    int
-	// draws, bindings and bakes are what the frame actually asked the GPU to
-	// do, which is where the pass-relative instance slices and the one upload
-	// per arena become assertable.
-	draws []drawCall
-	// indexBinds is the width each of the frame's index buffers was bound at.
-	// A draw call carries a count and not a format, so this is the only place
-	// the width scene derived is observable from outside the package.
-	indexBinds []gfx.IndexWidth
-	bindings   []bufferBinding
-	textures   []textureBinding
-	samplers   []samplerBinding
-	bakes      int
-	// baked keeps every uploaded buffer's bytes, so a test can read back the
-	// records scene packed rather than only their offsets.
-	baked map[gfx.BufferID][]byte
-	// bakedTextures and releasedTextures are what the frame asked the GPU to do
-	// with durable textures. They are the only place a test can see how many
-	// times one image reached the GPU, which is what makes the texture cache's
-	// dedup and its unload assertable with no GPU.
-	bakedTextures    []textureBake
-	releasedTextures []gfx.TextureID
+// Everything here runs against a real kernel.Engine with the real ecs, the real
+// model plugin and the real gfx composed beside the binding, and reads back what
+// gfx handed a recording backend. The binding is judged by what reaches the
+// GPU, not by what its Systems look like.
+
+const crateModel = "models/crate.glb"
+
+// spawnCmd creates Entities. It is a System registered as a command, which is
+// how a test reaches a structural change from outside a tick.
+type spawnCmd kernel.Command[spawnRequest, spawnResponse]
+
+// spawnRequest describes Count Entities, each carrying the Components whose
+// fields are set. A nil field is a Component the Entity does not have, which is
+// the difference the binding has to see: absent is not zero.
+type spawnRequest struct {
+	Count int
+	// Place is every Entity's Transform, and Step how far apart along X they
+	// stand, so a test can tell one recorded draw from another.
+	Place m.Transform
+	Step  float32
+	// Unplaced spawns the Entities with no Transform at all.
+	Unplaced bool
+
+	Model     *Model
+	Mesh      *Mesh
+	Animation *Animation
+	Params    *Params
+	Material  *Material
+	Light     *Light
+	Camera    *Camera
+	// ParamsEach, when set, gives the i-th Entity its own Params in place of
+	// Params, which is how a test spawns thousands of distinct values in one
+	// command.
+	ParamsEach func(i int) Params
+	// AnimationEach is the same for Animation.
+	AnimationEach func(i int) Animation
 }
 
-// textureBake is one durable texture upload, kept whole so a test can read the
-// placeholder's own pixels back rather than only its id.
-type textureBake struct {
-	id            gfx.TextureID
-	width, height int
-	format        gfx.TextureFormat
-	mipmaps       bool
-	pixels        []byte
+type spawnResponse struct {
+	First ecs.Entity
 }
 
-// drawCall is one recorded draw, so a test can assert the arguments that reach
-// the backend rather than an op encoding.
-type drawCall struct {
-	first, count, instances, firstInstance int
-	indexed                                bool
+// placed and unplaced are the two Component sets the spawn starts from; every
+// other Component is added after, through its accessor, so one command covers
+// every combination a test names.
+type placed struct {
+	Place m.Transform
 }
 
-// bufferBinding is one storage range bound into a bind group.
-type bufferBinding struct {
-	group, binding int
-	buffer         gfx.BufferID
-	offset, size   int
+// unmarked is a Tag the game owns, so an Entity can be spawned with nothing of
+// the binding's on it.
+type unmarked struct{}
+
+type unplaced struct {
+	Marker unmarked
 }
 
-// textureBinding and samplerBinding are the material-group resources one draw
-// bound, which is what makes "all five slots, always" assertable with no GPU.
-type textureBinding struct {
-	group, binding int
-	texture        gfx.TextureID
-}
-
-type samplerBinding struct {
-	group, binding int
-	sampler        gfx.SamplerID
-}
-
-// testShaderLayout is what reflection reports for the bundled scene shader. The
-// real source is reflected and asserted in the gogpu package, the only tree
-// with a WGSL front end; here it stands in so that scene's bindings reach the
-// backend and can be read back by name.
-//
-// The uniform block is the bundled material's numbers, at the offsets gogpu
-// reflects, so gfx packs as many members per draw as it does for the real
-// shader.
-var testShaderLayout = gfx.ShaderLayout{UniformSize: 160, UniformGroup: 1, Uniforms: []gfx.UniformMember{
-	{Name: "baseColorFactor", Offset: 0}, {Name: "emissiveFactor", Offset: 16},
-	{Name: "baseColorTransform", Offset: 32}, {Name: "metallicRoughnessTransform", Offset: 48},
-	{Name: "normalTransform", Offset: 64}, {Name: "occlusionTransform", Offset: 80},
-	{Name: "emissiveTransform", Offset: 96},
-	{Name: "baseColorRotation", Offset: 112}, {Name: "metallicRoughnessRotation", Offset: 116},
-	{Name: "normalRotation", Offset: 120}, {Name: "occlusionRotation", Offset: 124},
-	{Name: "emissiveRotation", Offset: 128},
-	{Name: "metallicFactor", Offset: 132}, {Name: "roughnessFactor", Offset: 136},
-	{Name: "normalScale", Offset: 140}, {Name: "occlusionStrength", Offset: 144},
-	{Name: "alphaCutoff", Offset: 148}, {Name: "uvSets", Offset: 152},
-}, Resources: []gfx.ShaderResource{
-	{Name: "sceneFrame", StorageBuffer: true, Group: 0, Binding: 0},
-	{Name: "sceneInstances", StorageBuffer: true, Group: 0, Binding: 1},
-	{Name: "sceneAnim", StorageBuffer: true, Group: 0, Binding: 2},
-	{Name: "sceneMeshes", StorageBuffer: true, Group: 0, Binding: 3},
-	{Name: "baseColorTexture", Group: 1, Binding: 1},
-	{Name: "baseColorSampler", Sampler: true, Group: 1, Binding: 2},
-	{Name: "metallicRoughnessTexture", Group: 1, Binding: 3},
-	{Name: "metallicRoughnessSampler", Sampler: true, Group: 1, Binding: 4},
-	{Name: "normalTexture", Group: 1, Binding: 5},
-	{Name: "normalSampler", Sampler: true, Group: 1, Binding: 6},
-	{Name: "occlusionTexture", Group: 1, Binding: 7},
-	{Name: "occlusionSampler", Sampler: true, Group: 1, Binding: 8},
-	{Name: "emissiveTexture", Group: 1, Binding: 9},
-	{Name: "emissiveSampler", Sampler: true, Group: 1, Binding: 10},
-	{Name: "scenePoses", StorageBuffer: true, Group: 2, Binding: 0},
-	{Name: "sceneSkinJoints", StorageBuffer: true, Group: 2, Binding: 1},
-	{Name: "sceneMorphDeltas", StorageBuffer: true, Group: 2, Binding: 2},
-}}
-
-// texturesBoundTo reports the texture bound to one reflected binding on each
-// draw, in the order the frame bound them. A slot nobody bound reports nothing,
-// which is the failure that takes the whole frame's command buffer down.
-// bakeOf reports the durable upload one texture id received, which is how a
-// test reads a placeholder's own pixels back rather than only its id.
-func (b *testBackend) bakeOf(id gfx.TextureID) (textureBake, bool) {
-	for i := len(b.bakedTextures) - 1; i >= 0; i-- {
-		if b.bakedTextures[i].id == id {
-			return b.bakedTextures[i], true
-		}
-	}
-	return textureBake{}, false
-}
-
-func (b *testBackend) texturesBoundTo(name string) []gfx.TextureID {
-	group, binding := bindingOf(name)
-	var found []gfx.TextureID
-	for _, bound := range b.textures {
-		if bound.group == group && bound.binding == binding {
-			found = append(found, bound.texture)
-		}
-	}
-	return found
-}
-
-// samplersBoundTo reports the sampler bound to one reflected binding per draw.
-func (b *testBackend) samplersBoundTo(name string) []gfx.SamplerID {
-	group, binding := bindingOf(name)
-	var found []gfx.SamplerID
-	for _, bound := range b.samplers {
-		if bound.group == group && bound.binding == binding {
-			found = append(found, bound.sampler)
-		}
-	}
-	return found
-}
-
-func bindingOf(name string) (group, binding int) {
-	for _, resource := range testShaderLayout.Resources {
-		if resource.Name == name {
-			return resource.Group, resource.Binding
-		}
-	}
-	return -1, -1
-}
-
-// buffersBoundTo reports every range bound to one reflected binding, in the
-// order the frame bound them.
-func (b *testBackend) buffersBoundTo(name string) []bufferBinding {
-	group, binding := -1, -1
-	for _, resource := range testShaderLayout.Resources {
-		if resource.Name == name {
-			group, binding = resource.Group, resource.Binding
-		}
-	}
-	var found []bufferBinding
-	for _, bound := range b.bindings {
-		if bound.group == group && bound.binding == binding {
-			found = append(found, bound)
-		}
-	}
-	return found
-}
-
-func (b *testBackend) Ready() bool { return true }
-
-func (b *testBackend) NewTexture() gfx.TextureID { b.nextTexture++; return b.nextTexture }
-func (b *testBackend) NewBuffer() gfx.BufferID   { b.nextBuffer++; return b.nextBuffer }
-func (b *testBackend) NewSampler(gfx.SamplerDesc) (gfx.SamplerID, error) {
-	b.nextID++
-	return gfx.SamplerID(b.nextID), nil
-}
-func (b *testBackend) FreeSampler(gfx.SamplerID) {}
-func (b *testBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
-	b.nextID++
-	id := gfx.ShaderID(b.nextID)
-	if b.shaderLayouts == nil {
-		b.shaderLayouts = map[gfx.ShaderID]gfx.ShaderLayout{}
-	}
-	b.shaderLayouts[id] = layoutOf(desc)
-	b.sources = append(b.sources, string(desc.Code))
-	return id, nil
-}
-func (b *testBackend) FreeShader(gfx.ShaderID) {}
-func (b *testBackend) ShaderLayout(id gfx.ShaderID) gfx.ShaderLayout {
-	if layout, ok := b.shaderLayouts[id]; ok {
-		return layout
-	}
-	return testShaderLayout
-}
-
-// layoutOf narrows the stand-in layout to the bindings this variant's flattened
-// source actually declares, which is what reflection would report. It matters
-// because the variants differ in exactly that: scene.wgsl declares the skinning
-// and morph bindings only under SCENE_SKIN and SCENE_MORPH, and binds group 2
-// only on the draws whose variant has it. A stand-in that declared all three on
-// every shader would have every unskinned draw dropped for an unfilled storage
-// binding, which is what gfx now reports rather than swallows.
-func layoutOf(desc gfx.ShaderDesc) gfx.ShaderLayout {
-	if len(desc.Code) == 0 {
-		return testShaderLayout
-	}
-	code := string(desc.Code)
-	layout := testShaderLayout
-	layout.Resources = nil
-	for _, resource := range testShaderLayout.Resources {
-		if strings.Contains(code, resource.Name) {
-			layout.Resources = append(layout.Resources, resource)
-		}
-	}
-	return layout
-}
-func (b *testBackend) NewPipeline(gfx.PipelineDesc) (gfx.PipelineID, error) {
-	b.nextID++
-	return gfx.PipelineID(b.nextID), nil
-}
-func (b *testBackend) FreePipeline(gfx.PipelineID) {}
-func (b *testBackend) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
-	return 1, 1600, 1200
-}
-func (b *testBackend) Limits() gfx.Limits { return gfx.DefaultLimits() }
-
-// TextureFormat answers for no texture: this double keeps no descriptors, and
-// gfx falls back to the frame buffer's format for a target it cannot place -
-// which is what every pipeline in this fixture was keyed to anyway.
-func (b *testBackend) TextureFormat(gfx.TextureID) (gfx.TextureFormat, bool) {
-	return 0, false
-}
-
-func (b *testBackend) TextureView(gfx.TextureID, int, int) gfx.TextureViewID {
-	b.nextID++
-	return gfx.TextureViewID(b.nextID)
-}
-func (b *testBackend) Execute(queue *gfx.Queue) {
-	queue.ReplayBakes(b)
-	queue.ReplayPasses(b)
-	queue.ReplayReleases(b)
-}
-func (b *testBackend) BeginPass(desc gfx.PassDesc) gfx.RenderPass {
-	b.passes = append(b.passes, desc)
-	return b
-}
-func (b *testBackend) EndPass(gfx.RenderPass) {}
-func (b *testBackend) Present()               { b.presents++ }
-
-// Capture is the readback seam; nothing here reads a frame back.
-func (b *testBackend) Capture(gfx.CaptureDesc) {}
-
-func (b *testBackend) TakeCapture() (gfx.Capture, bool) { return gfx.Capture{}, false }
-
-func (b *testBackend) TransitionTextures([]gfx.TextureTransition) {}
-
-// BakeBuffer keeps the bytes as well as counting the upload, because the
-// records scene packs are only readable here: everything downstream of the
-// arena is an offset and a size, and a flag written into the wrong instance is
-// exactly the failure that reads as a plausible wrong picture.
-func (b *testBackend) BakeBuffer(id gfx.BufferID, _ gfx.BufferKind, _ int, data []byte) {
-	b.bakes++
-	if b.baked == nil {
-		b.baked = map[gfx.BufferID][]byte{}
-	}
-	b.baked[id] = append([]byte(nil), data...)
-}
-func (b *testBackend) BakeTexture(
-	id gfx.TextureID, width, height int, format gfx.TextureFormat, pixels []byte, mipmaps bool,
-) {
-	b.bakedTextures = append(b.bakedTextures, textureBake{
-		id: id, width: width, height: height, format: format, mipmaps: mipmaps,
-		pixels: append([]byte(nil), pixels...),
-	})
-}
-func (b *testBackend) AllocateTexture(gfx.TextureID, gfx.TextureDesc)       {}
-func (b *testBackend) UpdateTexture(gfx.TextureID, int, gfx.Region, []byte) {}
-func (b *testBackend) SetPipeline(gfx.PipelineID)                           {}
-func (b *testBackend) SetParams([]byte)                                     {}
-func (b *testBackend) SetTexture(texture gfx.TextureID, group, binding int) {
-	b.textures = append(b.textures, textureBinding{group: group, binding: binding, texture: texture})
-}
-
-func (b *testBackend) SetSampler(sampler gfx.SamplerID, group, binding int) {
-	b.samplers = append(b.samplers, samplerBinding{group: group, binding: binding, sampler: sampler})
-}
-func (b *testBackend) SetVertexBuffer(gfx.BufferID, int) {}
-func (b *testBackend) SetIndexBuffer(_ gfx.BufferID, _ int, width gfx.IndexWidth) {
-	b.indexBinds = append(b.indexBinds, width)
-}
-func (b *testBackend) SetBuffer(group, binding int, buffer gfx.BufferID, offset, size int) {
-	b.bindings = append(b.bindings, bufferBinding{
-		group: group, binding: binding, buffer: buffer, offset: offset, size: size,
-	})
-}
-
-func (b *testBackend) Draw(first, count, instances, firstInstance int, indexed bool) {
-	b.draws = append(b.draws, drawCall{
-		first: first, count: count, instances: instances, firstInstance: firstInstance, indexed: indexed,
-	})
-}
-func (b *testBackend) ReleaseBuffer(gfx.BufferID) {}
-func (b *testBackend) ReleaseTexture(id gfx.TextureID) {
-	b.releasedTextures = append(b.releasedTextures, id)
-}
-
-// recordPlugin is the gameplay side of the harness: a separate plugin that
-// locks scene's OpQueue, exactly as a real recorder does. It holds the gfx
-// queue as well, ordered ahead of scene's flush, so a recorder that allocates a
-// temporary target allocates it in the frame the pass using it is emitted into.
-type recordPlugin struct {
-	record func(*OpQueue, *gfx.OpQueue)
-}
-type recordHandler kernel.Subscription[app.UpdateEvent]
-
-// inspectCmd runs a callback inside a handler holding scene's OpQueue, so a
-// test reads Ops and Passes the way a real caller would.
-type inspectCmd kernel.Command[inspectRequest, inspectResponse]
-type inspectRequest struct{ run func(*OpQueue) }
-type inspectResponse struct{}
-
-// lookupProbeCmd runs a callback with a valid scoped facade, either half.
-type lookupProbeCmd kernel.Command[lookupProbeRequest, lookupProbeResponse]
-type lookupProbeRequest struct {
-	run func(model.LookupAccess)
-	// device is the loading half. Preload, State and every query moved onto it
-	// when the load moved inside the call that asks for it, so a test that
-	// drives one asks for this facade rather than the other.
-	device func(model.LookupDeviceAccess)
-	// files is the separate probe readFile needs. Neither facade hands its
-	// filesystem back, so a test that wants to read a mounted file asks for one
-	// here.
-	files func(storage.FileSystem)
-	// lookup hands over the resource itself, which is how a test asserts on
-	// state no facade exposes.
-	lookup func(*model.Lookup)
-	// model hands over the resource together with what it takes to reach one
-	// loaded model, which is how a test asserts that a draw record points at
-	// the cache's own value rather than at a copy of it. Nothing outside this
-	// package can ask that question, and it is the whole of "binds the file's
-	// records directly".
-	model func(*model.Lookup, kernel.Kernel, fs.FS, *gfx.ResourceQueue)
-}
-type lookupProbeResponse struct{}
-
-func (p recordPlugin) Name() kernel.PluginName { return "scene-test-recorder" }
-func (p recordPlugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{Name, storage.Name}
-}
-
-func (p recordPlugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.Subscribe[recordHandler](func() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-		var queue kernel.Write[*OpQueue]
-		var gfxQueue kernel.Write[*gfx.OpQueue]
-		return func(access kernel.ResourceAccess) {
-				queue = access.GetWrite[*OpQueue]()
-				gfxQueue = access.GetWrite[*gfx.OpQueue]()
-			}, func(kernel.Kernel, app.UpdateEvent) {
-				p.record(queue.Get(), gfxQueue.Get())
+func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[spawnRequest, spawnResponse]) {
+	return ecs.ToExecute[spawnRequest, spawnResponse](registrar, func(
+		request spawnRequest,
+		withPlace *ecs.Spawn[placed],
+		withoutPlace *ecs.Spawn[unplaced],
+		models *ecs.Set[Model],
+		meshes *ecs.Set[Mesh],
+		animations *ecs.Set[Animation],
+		params *ecs.Set[Params],
+		materials *ecs.Set[Material],
+		lights *ecs.Set[Light],
+		cameras *ecs.Set[Camera],
+		answer *ecs.Resp[spawnResponse],
+	) {
+		var first ecs.Entity
+		for i := range request.Count {
+			var e ecs.Entity
+			if request.Unplaced {
+				e = withoutPlace.New(unplaced{})
+			} else {
+				place := request.Place
+				place.Position.X += float32(i) * request.Step
+				e = withPlace.New(placed{Place: place})
 			}
-	}).Before[FlushOnUpdate]()
-	registrar.HandleCommand[inspectCmd](inspectCmdImpl)
-	registrar.HandleCommand[lookupProbeCmd](lookupProbeCmdImpl)
+			if request.Model != nil {
+				models.UpdateFor(e, *request.Model)
+			}
+			if request.Mesh != nil {
+				meshes.UpdateFor(e, *request.Mesh)
+			}
+			if request.Animation != nil {
+				animations.UpdateFor(e, *request.Animation)
+			}
+			if request.AnimationEach != nil {
+				animations.UpdateFor(e, request.AnimationEach(i))
+			}
+			if request.Params != nil {
+				params.UpdateFor(e, *request.Params)
+			}
+			if request.ParamsEach != nil {
+				params.UpdateFor(e, request.ParamsEach(i))
+			}
+			if request.Material != nil {
+				materials.UpdateFor(e, *request.Material)
+			}
+			if request.Light != nil {
+				lights.UpdateFor(e, *request.Light)
+			}
+			if request.Camera != nil {
+				cameras.UpdateFor(e, *request.Camera)
+			}
+			if i == 0 {
+				first = e
+			}
+		}
+		answer.Set(spawnResponse{First: first})
+	})
+}
+
+// despawnCmd retires one Entity, which is the only way a drawable stops
+// drawing: the frame is rebuilt from the Stores each tick, so nothing else has
+// to be told.
+type despawnCmd kernel.Command[despawnRequest, despawnResponse]
+
+type despawnRequest struct {
+	Entity ecs.Entity
+}
+
+type despawnResponse struct{}
+
+func despawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[despawnRequest, despawnResponse]) {
+	return ecs.ToExecute[despawnRequest, despawnResponse](registrar, func(
+		request despawnRequest, world *ecs.WriteableEntities,
+	) {
+		world.Despawn(request.Entity)
+	})
+}
+
+// bakeCmd bakes a mesh through model's Lookup, which is where a MeshRef a game
+// stores in a Mesh Component comes from.
+type bakeCmd kernel.Command[bakeRequest, bakeResponse]
+
+type bakeRequest struct{}
+
+type bakeResponse struct {
+	Ref model.MeshRef
+}
+
+func bakeCmdImpl() (kernel.Lock, kernel.Execute[bakeRequest, bakeResponse]) {
+	var lookup kernel.Write[*model.Lookup]
+	return func(access kernel.ResourceAccess) {
+			lookup = access.GetWrite[*model.Lookup]()
+		}, func(k kernel.Kernel, _ bakeRequest) bakeResponse {
+			vertices := []model.Vertex{
+				{Position: m.Vec3{X: -1, Y: -1}, Normal: m.Vec3{Z: 1}},
+				{Position: m.Vec3{X: 1, Y: -1}, Normal: m.Vec3{Z: 1}},
+				{Position: m.Vec3{Y: 1}, Normal: m.Vec3{Z: 1}},
+			}
+			la := model.NewLookupAccess(k, lookup.Get())
+			return bakeResponse{Ref: la.BakeMesh(vertices, []uint32{0, 1, 2}, gfx.TopologyTriangleList)}
+		}
+}
+
+// defaultShaderCmd sets model's default scene shader, which is the call a game
+// makes once its scene-wide bindings are baked.
+type defaultShaderCmd kernel.Command[model.SceneShaderDescr, struct{}]
+
+func defaultShaderCmdImpl() (kernel.Lock, kernel.Execute[model.SceneShaderDescr, struct{}]) {
+	var lookup kernel.Write[*model.Lookup]
+	return func(access kernel.ResourceAccess) {
+			lookup = access.GetWrite[*model.Lookup]()
+		}, func(k kernel.Kernel, descr model.SceneShaderDescr) struct{} {
+			model.NewLookupAccess(k, lookup.Get()).SetDefaultSceneShader(descr)
+			return struct{}{}
+		}
+}
+
+// gamePlugin stands in for the game: it spawns the world's Entities and reads
+// back what the frame recorded. It declares the binding because it names the
+// binding's Components, and model because it locks model's Lookup.
+//
+// It subscribes nothing to the tick. A second recorder beside the binding's
+// would serialise against it on gfx's queue, and the kernel's bookkeeping for
+// a blocked request would show up in the allocation figures as noise that
+// scales with frame length.
+type gamePlugin struct{}
+
+func (p *gamePlugin) Name() kernel.PluginName { return "game" }
+
+func (p *gamePlugin) Dependencies() []kernel.PluginName {
+	return []kernel.PluginName{ecs.Name, model.Name, Name}
+}
+
+func (p *gamePlugin) Register(registrar *kernel.Registrar, _ any) error {
+	ecs.RegisterComponent[unmarked](registrar, 8)
+	registrar.HandleCommand[spawnCmd](spawnCmdImpl(registrar))
+	registrar.HandleCommand[despawnCmd](despawnCmdImpl(registrar))
+	registrar.HandleCommand[bakeCmd](bakeCmdImpl)
+	registrar.HandleCommand[keysCmd](keysCmdImpl)
+	registrar.HandleCommand[setParamsCmd](setParamsCmdImpl(registrar))
+	registrar.HandleCommand[defaultShaderCmd](defaultShaderCmdImpl)
+	registerDebugTestCommands(registrar)
 	return nil
 }
 
-func inspectCmdImpl() (kernel.Lock, kernel.Execute[inspectRequest, inspectResponse]) {
-	var queue kernel.Write[*OpQueue]
-	return func(access kernel.ResourceAccess) {
-			queue = access.GetWrite[*OpQueue]()
-		}, func(_ kernel.Kernel, req inspectRequest) inspectResponse {
-			req.run(queue.Get())
-			return inspectResponse{}
-		}
+type harness struct {
+	kernel kernel.Executioner
+	engine *kernel.Engine
+	errs   *errorSink
+	// backend is the recording backend a drawing harness renders through, and
+	// nil for one whose device never arrives.
+	backend *testBackend
 }
 
-func lookupProbeCmdImpl() (kernel.Lock, kernel.Execute[lookupProbeRequest, lookupProbeResponse]) {
-	var lookup kernel.Write[*model.Lookup]
-	var filesystem kernel.Read[storage.FileSystem]
-	var resources kernel.Write[*gfx.ResourceQueue]
-	return func(access kernel.ResourceAccess) {
-			lookup = access.GetWrite[*model.Lookup]()
-			filesystem = access.GetRead[storage.FileSystem]()
-			resources = access.GetWrite[*gfx.ResourceQueue]()
-		}, func(k kernel.Kernel, req lookupProbeRequest) lookupProbeResponse {
-			if req.files != nil {
-				req.files(filesystem.Get())
-			}
-			if req.run != nil {
-				req.run(model.NewLookupAccess(k, lookup.Get()))
-			}
-			if req.device != nil {
-				req.device(model.NewLookupDeviceAccess(
-					k, lookup.Get(), fs.FS(filesystem.Get()), resources.Get()))
-			}
-			if req.lookup != nil {
-				req.lookup(lookup.Get())
-			}
-			if req.model != nil {
-				req.model(lookup.Get(), k, fs.FS(filesystem.Get()), resources.Get())
-			}
-			return lookupProbeResponse{}
-		}
-}
-
-// errorSink collects reports under a mutex. A model load reports from its own
-// goroutine rather than from the flush the test drives, which is the whole
-// point of "an error can outlive the draw call that caused it" - so the sink
-// that reads them has to be safe to read from a different one.
 type errorSink struct {
 	mu   sync.Mutex
 	errs []error
@@ -456,225 +248,78 @@ func (s *errorSink) snapshot() []error {
 	return append([]error(nil), s.errs...)
 }
 
-type harness struct {
-	kernel   kernel.Executioner
-	backend  *testBackend
-	reported *[]error
-	sink     *errorSink
-}
-
-// errors reports what the engine has reported so far, safely to read while a
-// load goroutine may still be running.
-func (h *harness) errors() []error { return h.sink.snapshot() }
-
-func newHarness(t testing.TB, record func(*OpQueue)) *harness {
+func newHarness(t testing.TB) *harness {
 	t.Helper()
-	var reported []error
-	return newHarnessWithErrors(t, record, &reported)
+	return newHarnessOver(t, fstest.MapFS{}, 256)
 }
 
-// newHarnessWithGfx is newHarness for a recorder that also allocates from the
-// gfx queue, the way an app rendering a camera into a temporary target does.
-func newHarnessWithGfx(t testing.TB, record func(*OpQueue, *gfx.OpQueue)) *harness {
+// newHarnessOver composes the whole engine: storage and gfx because the binding
+// loads and draws through them, model because it holds what is drawn, ecs
+// because it is what is being bound from, the binding, and a game plugin
+// standing in for the app.
+func newHarnessOver(t testing.TB, files fstest.MapFS, ids uint32) *harness {
 	t.Helper()
-	var reported []error
-	return newHarnessRecording(t, record, &reported)
+	return newHarnessWith(t, files, ids, &detachedBackend{})
 }
 
-func newHarnessWithErrors(t testing.TB, record func(*OpQueue), reported *[]error) *harness {
+// newHarnessWith is newHarnessOver rendering through backend.
+func newHarnessWith(t testing.TB, files fstest.MapFS, ids uint32, backend gfx.Backend) *harness {
 	t.Helper()
-	return newHarnessRecording(t, func(q *OpQueue, _ *gfx.OpQueue) { record(q) }, reported)
-}
-
-// newHarnessWithFiles is newHarness over a filesystem holding the given
-// files, which is how a model test hands scene a glTF file to load without
-// this package growing a testdata directory.
-func newHarnessWithFiles(t testing.TB, files fstest.MapFS, record func(*OpQueue)) *harness {
-	t.Helper()
-	return newHarnessWithFS(t, files, record)
-}
-
-// newHarnessWithFS is newHarnessWithFiles over any filesystem, so a test that
-// wants to watch the reads themselves can wrap the map in one of its own.
-func newHarnessWithFS(t testing.TB, files fs.FS, record func(*OpQueue)) *harness {
-	t.Helper()
-	var reported []error
-	return newHarnessOver(t, files, func(q *OpQueue, _ *gfx.OpQueue) { record(q) }, &reported)
-}
-
-func newHarnessRecording(t testing.TB, record func(*OpQueue, *gfx.OpQueue), reported *[]error) *harness {
-	return newHarnessOver(t, fstest.MapFS{}, record, reported)
-}
-
-func newHarnessOver(
-	t testing.TB, files fs.FS,
-	record func(*OpQueue, *gfx.OpQueue), reported *[]error,
-) *harness {
-	t.Helper()
-	backend := &testBackend{}
 	sink := &errorSink{}
 	configs := map[kernel.PluginName]any{
-		model.Name: model.Config{},
+		ecs.Name: ecs.Config{PrewarmEntities: ids},
 	}
 	engine := kernel.New(configs).
-		Handler(func(err error) error { sink.add(err); *reported = append(*reported, err); return nil }).
-		WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: files}}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, modelplugin.New(), New(), recordPlugin{record: record})
-	go engine.Run()
+		Handler(func(err error) error { sink.add(err); return nil }).
+		WithPlugins(storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "test", Priority: 10, FS: fs.FS(files)}}, appplugin.New(), mainLoopAdapter{}, gfxplugin.New(), backendAdapter{backend}, modelplugin.New(),
+			ecsplugin.New(), New(), &gamePlugin{})
+	// The cleanup waits for Run to return rather than only cancelling it: a
+	// dying engine allocates while it winds down, and the allocation claims here
+	// count every goroutine's mallocs.
+	stopped := make(chan struct{})
+	t.Cleanup(func() {
+		engine.Quit()
+		<-stopped
+	})
+	go func() {
+		defer close(stopped)
+		engine.Run()
+	}()
 	<-engine.Ready()
 	k := engine.Executioner()
 	k.PublishEvent(app.InitEvent{}).Wait()
-	k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
-		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
-	})
-	return &harness{kernel: k, backend: backend, reported: reported, sink: sink}
+	recording, _ := backend.(*testBackend)
+	return &harness{kernel: k, engine: engine, errs: sink, backend: recording}
 }
 
-func (h *harness) frame() {
+// frame publishes one real app.UpdateEvent and then one app.RenderEvent, and
+// waits for each: publish, acquire every declared lock, run every System and
+// every flush, wait - and then hand the frame gfx recorded to the backend.
+func (h *harness) frame(t testing.TB) {
+	t.Helper()
 	h.kernel.PublishEvent(app.UpdateEvent{Dt: 1.0 / 60}).Wait()
 	h.kernel.PublishEvent(app.RenderEvent{}).Wait()
 }
 
-// frameUntil runs frames until ready. A load is synchronous now, so a model
-// draw is resident in the frame that named it; what still takes frames is
-// everything that lands at the frame boundary - the deferred bakes and the
-// buffer releases - and the very first frames, before the viewport and the
-// backend are up.
-func (h *harness) frameUntil(t testing.TB, what string, ready func() bool) {
+func (h *harness) spawn(t testing.TB, request spawnRequest) ecs.Entity {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		h.frame()
-		if ready() {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(time.Millisecond)
+	if request.Count == 0 {
+		request.Count = 1
 	}
+	response := h.kernel.ExecuteCommand[spawnCmd](request)
+	return response.First
 }
 
-// inspect runs fn inside a handler holding scene's OpQueue write lock.
-func (h *harness) inspect(fn func(*OpQueue)) {
-	h.kernel.ExecuteCommand[inspectCmd](inspectRequest{run: fn})
-}
-
-// passes reads the flush result back out of scene's queue.
-func (h *harness) passes() []PassView {
-	var out []PassView
-	h.inspect(func(q *OpQueue) { out = q.Passes(nil) })
-	return out
-}
-
-func (h *harness) ops() []Op {
-	var out []Op
-	h.inspect(func(q *OpQueue) { out = q.Ops(nil) })
-	return out
-}
-
-// readFile reads one path out of the engine's storage, which is how a test
-// checks that a plugin's builtin mount is in place.
-func (h *harness) readFile(t testing.TB, path string) []byte {
+func (h *harness) despawn(t testing.TB, e ecs.Entity) {
 	t.Helper()
-	var data []byte
-	var err error
-	h.kernel.ExecuteCommand[lookupProbeCmd](lookupProbeRequest{files: func(files storage.FileSystem) {
-		data, err = fs.ReadFile(files, path)
-	}})
-	if err != nil {
-		t.Fatalf("read %q: %v", path, err)
-	}
-	return data
+	h.kernel.ExecuteCommand[despawnCmd](despawnRequest{Entity: e})
 }
 
-// bundledMaterials wraps the bundled PBR's four forward materials as the scene
-// materials the flush interns them as.
-func bundledMaterials(defaults model.PbrDefaults) [model.VariantCount]Material {
-	var wrapped [model.VariantCount]Material
-	for variant, descr := range model.BundledPbr(defaults) {
-		wrapped[variant] = Material{{Tag: TagForward, Descr: descr}}
+func (h *harness) bake(t testing.TB) model.MeshRef {
+	t.Helper()
+	response := h.kernel.ExecuteCommand[bakeCmd](bakeRequest{})
+	if response.Ref.ID() == 0 {
+		t.Fatalf("baking a mesh: ref %v", response.Ref)
 	}
-	return wrapped
-}
-
-// lookupDefaults reads the two default textures the first frame baked, off the
-// bundled PBR they are bound into. It is called after a frame, so the bake it
-// hands EnsureBundled is never reached.
-func lookupDefaults(lookup *model.Lookup) model.PbrDefaults {
-	bundled := lookup.EnsureBundled(func(int, int, gfx.TextureFormat, []byte) gfx.TextureDescr {
-		panic("the defaults were not baked by the first frame")
-	})
-	var defaults model.PbrDefaults
-	for _, param := range bundled[model.VariantStatic].Params() {
-		texture, ok := param.TextureValue()
-		switch {
-		case !ok:
-		case param.Name() == model.PbrSlots[0].Texture:
-			defaults.White = texture
-		case param.Name() == model.PbrSlots[model.NormalSlot].Texture:
-			defaults.FlatNormal = texture
-		}
-	}
-	return defaults
-}
-
-// durableMeshes lists the Lookup's resident meshes in table order. A test that
-// releases nothing leaves every slot at its first generation, so the walk asks
-// for each id at generation 1 and stops at the first that does not resolve.
-func durableMeshes(lookup *model.Lookup) []model.MeshRecord {
-	var meshes []model.MeshRecord
-	for id := uint32(1); ; id++ {
-		mesh, ok := lookup.Mesh(model.NewMeshRef(model.MeshDurable, id, 1))
-		if !ok {
-			return meshes
-		}
-		meshes = append(meshes, mesh)
-	}
-}
-
-// wrapsForward reports whether material is the one-entry forward material the
-// flush wraps a model's forward gfx material in, sharing that material's
-// parameters rather than a copy of them.
-// numberOf resolves one of the bundled material's numbers the way gfx packs
-// it for a draw: the draw's own params first, then its paint, then its
-// material's forward params. ok is false when nothing names it, which gfx packs
-// as zero.
-func numberOf(draw DrawRecord, name string) (m.Vec4, bool) {
-	value := func(p gfx.ParameterDescr) m.Vec4 {
-		if c, ok := p.ColorValue(); ok {
-			return m.Vec4{X: c.R, Y: c.G, Z: c.B, W: c.A}
-		}
-		if v, ok := p.VecValue(); ok {
-			return v
-		}
-		f, _ := p.FloatValue()
-		return m.Vec4{X: f}
-	}
-	for _, params := range [][]gfx.ParameterDescr{draw.Params, draw.AppendPaint(nil)} {
-		for _, p := range params {
-			if p.Name() == name {
-				return value(p), true
-			}
-		}
-	}
-	for _, tag := range draw.Material {
-		if tag.Tag != TagForward {
-			continue
-		}
-		for _, p := range tag.Descr.Params() {
-			if p.Name() == name {
-				return value(p), true
-			}
-		}
-	}
-	return m.Vec4{}, false
-}
-
-func wrapsForward(material Material, forward gfx.MaterialDescr) bool {
-	if len(material) != 1 || material[0].Tag != TagForward {
-		return false
-	}
-	got, want := material[0].Descr.Params(), forward.Params()
-	return len(got) == len(want) && len(got) > 0 && &got[0] == &want[0] &&
-		material[0].Descr.Fingerprint() == forward.Fingerprint()
+	return response.Ref
 }
